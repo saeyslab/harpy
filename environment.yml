@@ -44,3 +44,4 @@ dependencies:
     - nbmake==1.3.4
     - pytest-xdist==2.5.0
     - napari-spatialdata==0.1.0
+    - napari-matplotlib==0.2.1

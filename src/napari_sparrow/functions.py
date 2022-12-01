@@ -867,7 +867,7 @@ def clustercleanliness(
     adata.uns["maxScores_colors"] = colors
 
     if gene_indexes:
-        adata.obs["maxScoresSave"] = adata.obs.maxScores
+        adata.obs["maxScoresSave"] = adata.obs.maxScores  # CHECKME: does not seem to get used elsewhere, needed?
         gene_celltypes = {}
 
         for key, value in gene_indexes.items():

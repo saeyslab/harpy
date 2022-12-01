@@ -113,10 +113,10 @@ def wizard_widget() -> None:
     Napari widget for managing the other widgets and giving a general overview of the workflow.
     """
 
-    # Set DaMBi Icon
-    icon = Label(name="icon", value="Made by DaMBi")
-    pixmap = QPixmap("./src/napari_sparrow/widgets/dambi-white.png")
-    icon.native.setPixmap(pixmap)
+    # Set DaMBi Icon   -- CHECKME: this icon takes up a lot of screen real estate in the user interface, leave it out?
+    # icon = Label(name="icon", value="Made by DaMBi")
+    # pixmap = QPixmap("./src/napari_sparrow/widgets/dambi-white.png")
+    # icon.native.setPixmap(pixmap)
 
     # Step selector
     step = ComboBox(label="Step:", choices=get_choices(), name="step")
@@ -125,7 +125,7 @@ def wizard_widget() -> None:
     container = Container(
         name="global",
         widgets=[
-            icon,
+            # icon,
             step,
             get_choices()[0][1].get_description(),  # Set first step on startup
             get_choices()[0][1].get_widget(),
