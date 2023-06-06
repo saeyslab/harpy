@@ -60,7 +60,7 @@ def read_in_zarr(path_to_zarr_file,zyx_order=[0,1,2],subset=None):
         da=da.max(dim='z')
     if subset:    
         da=da[subset[0]:subset[1],subset[2]:subset[3]]    
-    ic = sq.im.ImageContainer(da)    
+    ic = sq.im.ImageContainer(da,layer='raw_image')    
 
     return ic
 
@@ -1385,14 +1385,13 @@ def read_in_RESOLVE(path_coordinates,sdata=None,xcol=0,ycol=1,genecol=3,filterGe
             
     return sdata
 
-def read_in_Vizgen(path_genes,xcol='global_x',ycol='global_y',genecol='gene',skiprows=None,offset=None, bbox=None,pixelSize=None,filterGenes=None):
+def read_in_Vizgen(path_genes,sdata=None,xcol='global_x',ycol='global_y',genecol='gene',skiprows=None,offset=None, bbox=None,pixelSize=None,filterGenes=None):
     """This function read in Vizgen input data to a dask datafrmae with predefined column names. """
-    
-    in_df=dd.read_csv(path_genes,skiprows=skiprows)
-    in_df=in_df.loc[:,[xcol,ycol,genecol]]
-
+    if sdata==None:
+        sdata=spatialdata.SpatialData()
+    in_df=dd.read_csv(path_genes,skiprows=skiprows,usecols=[xcol,ycol,genecol]) #speedu
+    #in_df=in_df.loc[:,[xcol,ycol,genecol]]
     in_df=in_df.rename(columns={xcol:'x',ycol:'y',genecol:'gene'})
-
     if bbox:
         in_df['x']-=bbox[0]
         in_df['y']-=bbox[1]
@@ -1408,7 +1407,8 @@ def read_in_Vizgen(path_genes,xcol='global_x',ycol='global_y',genecol='gene',ski
     if filterGenes:
         for i in filterGenes:
             in_df=in_df[in_df['gene'].str.contains(i)==False]
-    return in_df
+    sdata.add_points(name='transcripts',points=spatialdata.models.PointsModel.parse(in_df,coordinates={'x':'x','y':'y'}))        
+    return sdata
 
 
     
