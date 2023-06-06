@@ -240,7 +240,7 @@ def preprocessImage(
 def preprocessImagePlot(
     img: np.ndarray,
     img_orig: np.ndarray,
-    small_size_vis: List[int] = None,
+    crd: List[int] = None,
     output: str = None,
 ) -> None:
     """Creates the plots based on the original and preprocessed image."""
@@ -262,20 +262,20 @@ def preprocessImagePlot(
         fig1.savefig(output + "0.png")
 
     # Plot small part of the images
-    if small_size_vis is not None:
+    if crd is not None:
         fig2, ax2 = plt.subplots(1, 2, figsize=(20, 10))
         ax2[0].imshow(
             img[
-                small_size_vis[0] : small_size_vis[1],
-                small_size_vis[2] : small_size_vis[3],
+                crd[0] : crd[1],
+                crd[2] : crd[3],
             ],
             cmap="gray",
         )
         ax2[0].set_title("Corrected image")
         ax2[1].imshow(
             img_orig[
-                small_size_vis[0] : small_size_vis[1],
-                small_size_vis[2] : small_size_vis[3],
+                crd[0] : crd[1],
+                crd[2] : crd[3],
             ],
             cmap="gray",
         )
