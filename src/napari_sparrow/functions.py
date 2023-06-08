@@ -124,10 +124,10 @@ def tilingCorrection(
     
 
     mask = sq.im.ImageContainer(i_mask.astype(np.uint8), layer="mask_black_lines")
-    #img.add_img(
-     #   i_mask.astype(np.uint8),
-     #   layer="mask",
-    #)
+    img.add_img(
+        i_new,
+        layer="temp",
+    )
 
     if size is not None and left_corner is not None:
         img = img.crop_corner(*left_corner, size)
@@ -135,7 +135,7 @@ def tilingCorrection(
     # Perform inpainting
     img.apply(
         {"0": cv2.inpaint},
-        layer="raw_image",
+        layer="temp",
         drop=False,
         channel=0,
         new_layer='corrected',
@@ -147,6 +147,7 @@ def tilingCorrection(
             "flags": cv2.INPAINT_NS,
         },
     )
+    del img['temp']
 
     print(img)
     return img, flatfield
