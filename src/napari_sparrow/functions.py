@@ -325,7 +325,7 @@ def tilingCorrectionPlot(
     # Tile correction overlay
     if flatfield is not None:
         fig1, ax1 = plt.subplots(1, 1, figsize=(20, 10))
-        ax1.imshow(flatfield, cmap="gray")
+        ax1.imshow(flatfield[0], cmap="gray")# TODO: fix for multiple ones 
         ax1.set_title("Correction performed per tile")
 
         # Save the plot to ouput
