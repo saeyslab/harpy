@@ -200,27 +200,29 @@ def tilingCorrection(
     tile_size: int = 2144,
     crop_param: Optional[Tuple[int, int, int]] = None,
     output_layer: str = "tiling_correction",
+    input_layer=None,
+    coordinate_system=None
 ) -> Tuple[SpatialData, List[np.ndarray]]:
     """Returns the corrected image and the flatfield array
 
     This function corrects for the tiling effect that occurs in some image data for example the resolve dataset.
     The illumination within the tiles is adjusted, afterwards the tiles are connected as a whole image by inpainting the lines between the tiles.
     """
-
-    layer = [*sdata.images][-1]
-
+    if input_layer is None:
+        input_layer = [*sdata.images][-1]
+    
     result_list=[]
     flatfields=[]
 
-    for channel in sdata[ layer ].c.data:
+    for channel in sdata[ input_layer ].c.data:
 
-        ic = sq.im.ImageContainer(sdata[layer].isel(c=channel), layer=layer)
+        ic = sq.im.ImageContainer(sdata[input_layer].isel(c=channel), layer=input_layer)
 
         x_coords = ic.data.x.data
         y_coords = ic.data.y.data
 
         # Create the tiles
-        tiles = ic.generate_equal_crops(size=tile_size, as_array=layer)
+        tiles = ic.generate_equal_crops(size=tile_size, as_array=input_layer)
         tiles = np.array([tile + 1 if ~np.any(tile) else tile for tile in tiles])
         black = np.array([1 if ~np.any(tile - 1) else 0 for tile in tiles])  # determine if
 
@@ -261,13 +263,13 @@ def tilingCorrection(
             ]
         ).astype(np.uint16)
 
-        ic = sq.im.ImageContainer(i_new, layer=layer)
+        ic = sq.im.ImageContainer(i_new, layer=input_layer)
         ic.add_img(
             i_mask.astype(np.uint8),
             layer="mask_black_lines",
         )
 
-        ic[layer] = ic[layer].assign_coords({"y": y_coords, "x": x_coords})
+        ic[input_layer] = ic[input_layer].assign_coords({"y": y_coords, "x": x_coords})
 
         if crop_param:
             ic = ic.crop_corner(y=crop_param[1], x=crop_param[0], size=crop_param[2])
@@ -278,7 +280,7 @@ def tilingCorrection(
         # Perform inpainting
         ic.apply(
             {"0": cv2.inpaint},
-            layer=layer,
+            layer=input_layer,
             drop=False,
             channel=0,
             new_layer=output_layer,
@@ -296,9 +298,10 @@ def tilingCorrection(
 
     # make one dask array of shape (c,y,x)
     result = da.concatenate(result_list, axis=-1).transpose(3, 0, 1, 2).squeeze(-1)
-
-    spatial_image = spatialdata.models.Image2DModel.parse(result, dims=("c", "y", "x"))
-
+    if coordinate_system is None:
+        spatial_image = spatialdata.models.Image2DModel.parse(result, dims=("c", "y", "x"))
+    else:
+        spatial_image = spatialdata.models.Image2DModel.parse(result, dims=("c", "y", "x"),transformations={coordinate_system:spatialdata.transformations.Identity()})
     # if bug is fixed in spatialdata, you should set coordinates here, not after adding image to sdata
     spatial_image = spatial_image.assign_coords({"y": y_coords, "x": x_coords})
 
@@ -358,11 +361,13 @@ def tophat_filtering(
     sdata: SpatialData,
     output_layer="tophat_filtered",
     size_tophat: int = 85,
+    layer=None,
 ) -> SpatialData:
     # this is function to do tophat filtering using dask
 
     # take the last image as layer to do next step in pipeline
-    layer = [*sdata.images][-1]
+    if layer is None: 
+        layer = [*sdata.images][-1]
 
     # TODO size_tophat maybe different for different channels, probably fix this with size_tophat as a list.
     # Initialize list to store results
@@ -391,7 +396,7 @@ def tophat_filtering(
     spatial_image = spatial_image.assign_coords({"y": y_coords, "x": x_coords})
 
     # during adding of image it is written to zarr store
-    sdata.add_image(name=output_layer, image=spatial_image)
+    sdata.add_image(name=output_layer, image=spatial_image,overwrite=True)
 
     # add coordinates, due to bug these are lost when writing to zarr store
     sdata.images[output_layer] = sdata[output_layer].assign_coords(
@@ -406,10 +411,11 @@ def clahe_processing(
     output_layer: str = "clahe",
     contrast_clip: int = 3.5,
     chunksize_clahe: int = 10000,
+    layer=None,
 ) -> SpatialData:
     # TODO take whole image as chunksize + overlap tuning
-
-    layer = [*sdata.images][-1]
+    if layer is None:
+        layer = [*sdata.images][-1]
 
     x_coords = sdata[layer].x.data
     y_coords = sdata[layer].y.data
@@ -431,12 +437,12 @@ def clahe_processing(
             copy=True,
             chunks=chunksize_clahe,
             lazy=True,
-            depth=3000,
+            depth=2000,
             boundary='reflect'
         )
 
         # squeeze channel dim and z-dimension
-        result_list.append(ic_clahe["clahe"].data.squeeze(axis=(2, 3)))
+        result_list.append(ic_clahe[output_layer].data.squeeze(axis=(2, 3)))
 
     result = da.stack(result_list, axis=0)
 
@@ -446,7 +452,7 @@ def clahe_processing(
     spatial_image = spatial_image.assign_coords({"y": y_coords, "x": x_coords})
 
     # during adding of image it is written to zarr store
-    sdata.add_image(name=output_layer, image=spatial_image)
+    sdata.add_image(name=output_layer, image=spatial_image,overwrite=True)
 
     # add coordinates, due to bug these are lost when writing to zarr store
     sdata.images[output_layer] = sdata[output_layer].assign_coords(
@@ -547,6 +553,7 @@ def segmentation_cellpose(
     sdata.add_shapes(
         name=shapes_name,
         shapes=spatialdata.models.ShapesModel.parse(polygons),
+        overwrite=True
     )
 
     return sdata
@@ -572,7 +579,7 @@ def imageContainerToSData(
             temp[i].squeeze(dim="z").transpose("c", "y", "x")
         )
         spatial_image = spatial_image.assign_coords({"y": y_coords, "x": x_coords})
-        sdata.add_image(name=i, image=spatial_image)
+        sdata.add_image(name=i, image=spatial_image,overwrite=True)
         # Due to bug in spatialdata, coordinates are lost after saving to .zarr, which happens automatically if sdata is backed by zarr store,
         # therefore assign coordinates again
         sdata.images[i] = sdata[i].assign_coords({"y": y_coords, "x": x_coords})
@@ -1211,20 +1218,22 @@ def plot_control_transcripts(blurred, sdata, layer: Optional[str] = None, crd=No
     if layer is None:
         layer = [*sdata.images][-1]
     if crd:
-        fig, ax = plt.subplots(1, 2, figsize=(20, 20))
+        fig, ax = plt.subplots(1, 2, figsize=(20, 10))
 
-        ax[0].imshow(blurred.T[crd[0] : crd[1], crd[2] : crd[3]], cmap="magma", vmax=5)
+        ax[0].imshow(blurred.T[crd[2] : crd[3], crd[0] : crd[1]], cmap="magma", vmax=5)
         sdata[layer].squeeze().sel(
             x=slice(crd[0], crd[1]), y=slice(crd[2], crd[3])
-        ).plot.imshow(cmap="gray", robust=True, ax=ax[1], add_colorbar=False)
+        ).plot.imshow(cmap="gray", ax=ax[1], add_colorbar=False)
         ax[0].set_title("Transcript density")
         ax[1].set_title("Corrected image")
-    fig, ax = plt.subplots(1, 2, figsize=(20, 20))
 
-    ax[0].imshow(blurred.T, cmap="magma", vmax=5)
-    sdata[layer].squeeze().plot.imshow(
-        cmap="gray", robust=True, ax=ax[1], add_colorbar=False
-    )
+    else:
+        fig, ax = plt.subplots(1, 2, figsize=(20, 20))
+
+        ax[0].imshow(blurred.T, cmap="magma", vmax=5)
+        sdata[layer].squeeze().plot.imshow(
+            cmap="gray", robust=True, ax=ax[1], add_colorbar=False
+        )
     ax[1].axes.set_aspect("equal")
     ax[1].invert_yaxis()
 
