@@ -1,0 +1,12 @@
+{
+    "encoding-type": "anndata",
+    "encoding-version": "0.1.0",
+    "instance_key": "cell_ID",
+    "region": [
+        "masks_whole",
+        "masks_nuclear_aligned"
+    ],
+    "region_key": "fov_labels",
+    "spatialdata-encoding-type": "ngff:regions_table",
+    "version": "0.1"
+}
