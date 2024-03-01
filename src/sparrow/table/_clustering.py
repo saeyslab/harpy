@@ -2,6 +2,7 @@ import inspect
 from types import MappingProxyType
 from typing import Any, Callable, Mapping
 
+import pandas as pd
 import scanpy as sc
 import spatialdata
 from anndata import AnnData
@@ -80,7 +81,7 @@ def _kmeans(
     **kwargs,
 ) -> AnnData:
     kmeans = KMeans(**kwargs).fit(adata.X)
-    adata.obs[key_added] = kmeans.labels_
+    adata.obs[key_added] = pd.Categorical(kmeans.labels_)
     return adata
 
 
