@@ -15,7 +15,7 @@ from numpy.typing import NDArray
 from spatialdata import SpatialData
 
 from sparrow.image._image import _get_spatial_element, _get_translation
-from sparrow.table._keys import _CELL_INDEX, _INSTANCE_KEY, _REGION_KEY
+from sparrow.utils._keys import _CELL_INDEX, _INSTANCE_KEY, _REGION_KEY
 from sparrow.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)

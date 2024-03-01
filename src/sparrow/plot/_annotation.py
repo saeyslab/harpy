@@ -9,7 +9,7 @@ from spatialdata import SpatialData
 
 from sparrow.image._image import _get_boundary, _get_spatial_element
 from sparrow.plot._plot import plot_shapes
-from sparrow.table._keys import _ANNOTATION_KEY, _CLEANLINESS_KEY
+from sparrow.utils._keys import _ANNOTATION_KEY, _CLEANLINESS_KEY
 
 
 def score_genes(

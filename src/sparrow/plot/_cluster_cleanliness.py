@@ -5,7 +5,7 @@ import scanpy as sc
 from spatialdata import SpatialData
 
 from sparrow.plot._plot import plot_shapes
-from sparrow.table._keys import _ANNOTATION_KEY
+from sparrow.utils._keys import _ANNOTATION_KEY
 
 
 def cluster_cleanliness(

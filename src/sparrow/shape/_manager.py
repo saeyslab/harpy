@@ -18,6 +18,7 @@ from spatialdata._io import write_shapes
 from spatialdata.transformations import Identity, Translation
 
 from sparrow.image._image import _get_translation_values
+from sparrow.utils._keys import _INSTANCE_KEY
 from sparrow.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
@@ -301,11 +302,11 @@ def _mask_image_to_polygons(mask: Array, z_slice: int = None) -> GeoDataFrame:
         all_values.extend(values)
 
     # Create a GeoDataFrame from the extracted polygons and values
-    gdf = geopandas.GeoDataFrame({"geometry": all_polygons, "cells": all_values})
+    gdf = geopandas.GeoDataFrame({"geometry": all_polygons, _INSTANCE_KEY: all_values})
 
     # Combine polygons that are actually pieces of the same cell back together.
     # (These pieces of same cell got written to different chunks by dask, needed for parallel processing.)
-    gdf = gdf.dissolve(by="cells")
+    gdf = gdf.dissolve(by=_INSTANCE_KEY)
 
     gdf.index = gdf.index.astype("str")
 

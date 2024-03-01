@@ -8,8 +8,8 @@ import pandas as pd
 import scanpy as sc
 from spatialdata import SpatialData
 
-from sparrow.table._keys import _ANNOTATION_KEY, _CLEANLINESS_KEY, _UNKNOWN_CELLTYPE_KEY
 from sparrow.table._table import _back_sdata_table_to_zarr
+from sparrow.utils._keys import _ANNOTATION_KEY, _CLEANLINESS_KEY, _UNKNOWN_CELLTYPE_KEY
 from sparrow.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)

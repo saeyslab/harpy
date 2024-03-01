@@ -9,8 +9,8 @@ from skimage.measure._regionprops import RegionProperties
 from spatialdata import SpatialData
 
 from sparrow.image._image import _get_spatial_element
-from sparrow.table._keys import _CELL_INDEX, _INSTANCE_KEY, _REGION_KEY
 from sparrow.table._table import _back_sdata_table_to_zarr
+from sparrow.utils._keys import _CELL_INDEX, _INSTANCE_KEY, _REGION_KEY
 from sparrow.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)

@@ -394,11 +394,16 @@ class SparrowPipeline:
 
         log.info("Start clustering")
 
-        sdata = sp.tb.cluster(
+        sdata = sp.tb.leiden(
             sdata,
-            pcs=self.cfg.allocate.pcs,
-            neighbors=self.cfg.allocate.neighbors,
-            cluster_resolution=self.cfg.allocate.cluster_resolution,
+            labels_layer=self.cfg.segmentation.output_labels_layer,
+            calculate_umap=True,
+            calculate_neighbors=True,
+            n_pcs=self.cfg.allocate.pcs,
+            n_neighbors=self.cfg.allocate.neighbors,
+            resolution=self.cfg.allocate.cluster_resolution,
+            rank_genes=True,
+            key_added="leiden",
         )
 
         log.info("Clustering finished")

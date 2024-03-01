@@ -16,7 +16,7 @@ from spatialdata import SpatialData
 
 from sparrow.image._image import _get_spatial_element, _get_translation
 from sparrow.shape._shape import _filter_shapes_layer
-from sparrow.table._keys import _CELL_INDEX, _INSTANCE_KEY, _REGION_KEY
+from sparrow.utils._keys import _CELL_INDEX, _INSTANCE_KEY, _REGION_KEY
 from sparrow.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
@@ -219,7 +219,7 @@ def allocate(
         adata, region_key=_REGION_KEY, region=[labels_layer], instance_key=_INSTANCE_KEY
     )
 
-    indexes_to_keep = sdata.table.obs.index.values.astype(int)
+    indexes_to_keep = sdata.table.obs[_INSTANCE_KEY].values.astype(int)
     sdata = _filter_shapes_layer(
         sdata,
         indexes_to_keep=indexes_to_keep,
