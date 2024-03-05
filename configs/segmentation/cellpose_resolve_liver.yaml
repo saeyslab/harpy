@@ -10,4 +10,4 @@ chunks: 2048
 
 #crop_param: [ 5000, 9000, 3000, 7000 ]
 small_size_vis: [5000, 9000, 3000, 6000]
-voronoi_radius: null
+expand_radius: null

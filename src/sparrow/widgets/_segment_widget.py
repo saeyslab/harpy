@@ -60,7 +60,7 @@ def segment_widget(
     cellprob_threshold: int = -2,
     model_type: ModelOption = ModelOption.nuclei,
     channels: List[int] = [1, 0],  # noqa: B006 # magicgui does not accept None
-    voronoi_radius: int = 0,
+    expand_radius: int = 0,
     chunks: int = 2048,
     depth: int = 100,
 ):
@@ -126,7 +126,7 @@ def segment_widget(
     pipeline.cfg.segmentation.channels = channels
     pipeline.cfg.segmentation.chunks = chunks
     pipeline.cfg.segmentation.depth = depth
-    pipeline.cfg.segmentation.voronoi_radius = voronoi_radius
+    pipeline.cfg.segmentation.expand_radius = expand_radius
 
     # Bug in spatialdata. We can not pass overwrite==True if the labels layer is not yet available.
     if [*sdata.labels]:
@@ -150,8 +150,8 @@ def segment_widget(
             # otherwise add it to the viewer
             log.info(f"Adding {layer_name}")
 
-        if pipeline.cfg.segmentation.voronoi_radius:
-            shapes_layer = f"expanded_cells{ pipeline.cfg.segmentation.voronoi_radius}"
+        if pipeline.cfg.segmentation.expand_radius:
+            shapes_layer = f"expanded_cells_shapes_{pipeline.cfg.segmentation.expand_radius}"
         else:
             shapes_layer = pipeline.cfg.segmentation.output_shapes_layer
 

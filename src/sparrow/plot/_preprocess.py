@@ -5,8 +5,10 @@ import scanpy as sc
 import seaborn as sns
 from spatialdata import SpatialData
 
+from sparrow.utils._keys import _CELLSIZE_KEY
 
-def preprocess_anndata(sdata: SpatialData, output: Optional[str] = None) -> None:
+
+def preprocess_transcriptomics(sdata: SpatialData, output: Optional[str] = None) -> None:
     """Function plots the size of the nucleus/cell related to the counts."""
     sc.pl.pca(
         sdata.table,
@@ -22,12 +24,12 @@ def preprocess_anndata(sdata: SpatialData, output: Optional[str] = None) -> None
     plt.close()
     sc.pl.pca(
         sdata.table,
-        color="shapeSize",
+        color=_CELLSIZE_KEY,
         show=False,
         title="PC plot colored by object size",
     )
     if output:
-        plt.savefig(output + "_shapeSize_pca.png")
+        plt.savefig(output + f"_{_CELLSIZE_KEY}_pca.png")
         plt.close()
     else:
         plt.show()
@@ -43,9 +45,9 @@ def preprocess_anndata(sdata: SpatialData, output: Optional[str] = None) -> None
     plt.close()
 
     fig, ax = plt.subplots()
-    plt.scatter(sdata.table.obs["shapeSize"], sdata.table.obs["total_counts"])
-    ax.set_title("shapeSize vs Transcripts Count")
-    ax.set_xlabel("shapeSize")
+    plt.scatter(sdata.table.obs[_CELLSIZE_KEY], sdata.table.obs["total_counts"])
+    ax.set_title(f"{_CELLSIZE_KEY} vs Transcripts Count")
+    ax.set_xlabel(_CELLSIZE_KEY)
     ax.set_ylabel("Total Counts")
     if output:
         plt.savefig(output + "_size_count.png")

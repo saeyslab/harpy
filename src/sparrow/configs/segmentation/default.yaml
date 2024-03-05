@@ -4,7 +4,7 @@ trim: False # True==squidpy algo for chunking, False==sparrow algo
 
 small_size_vis: null
 crop_param: null
-voronoi_radius: null
+expand_radius: null
 
 output_labels_layer: "segmentation_mask"
 output_shapes_layer: "segmentation_mask_boundaries"

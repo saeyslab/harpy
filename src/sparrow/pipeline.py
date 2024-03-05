@@ -6,6 +6,7 @@ from omegaconf import DictConfig, ListConfig
 from spatialdata import SpatialData, read_zarr
 
 import sparrow as sp
+from sparrow.utils._keys import _CELLSIZE_KEY
 
 log = sp.utils.get_pylogger(__name__)
 
@@ -237,12 +238,13 @@ class SparrowPipeline:
             depth = 2 * self.cfg.segmentation.diameter
 
         self.shapes_layer_name = self.cfg.segmentation.output_shapes_layer
+        self.labels_layer_name = self.cfg.segmentation.output_labels_layer
 
         # Perform segmentation
         sdata = sp.im.segment(
             sdata=sdata,
             img_layer=self.cleaned_image_name,
-            output_labels_layer=self.cfg.segmentation.output_labels_layer,
+            output_labels_layer=self.labels_layer_name,
             output_shapes_layer=self.shapes_layer_name,
             depth=depth,
             chunks=self.cfg.segmentation.chunks,
@@ -271,28 +273,34 @@ class SparrowPipeline:
             if self.cfg.segmentation.small_size_vis is not None
             else self.cfg.clean.small_size_vis,
             img_layer=self.cleaned_image_name,
-            shapes_layer=self.cfg.segmentation.output_shapes_layer,
+            shapes_layer=self.shapes_layer_name,
             output=self.cfg.paths.segmentation,
         )
 
-        if self.cfg.segmentation.voronoi_radius:
-            sdata = sp.sh.create_voronoi_boundaries(
+        if self.cfg.segmentation.expand_radius:
+            sdata = sp.im.expand_labels_layer(
                 sdata,
-                radius=self.cfg.segmentation.voronoi_radius,
-                shapes_layer=self.cfg.segmentation.output_shapes_layer,
+                labels_layer=self.labels_layer_name,
+                distance=self.cfg.segmentation.expand_radius,
+                chunks=self.cfg.segmentation.chunks,
+                output_labels_layer=f"expanded_cells_labels_{self.cfg.segmentation.expand_radius}",
+                output_shapes_layer=f"expanded_cells_shapes_{self.cfg.segmentation.expand_radius}",
+                overwrite=True,
             )
+
+            # update current shapes layer name
+            self.shapes_layer_name = f"expanded_cells_shapes_{self.cfg.segmentation.expand_radius}"
+            self.labels_layer_name = f"expanded_cells_labels_{self.cfg.segmentation.expand_radius}"
+
             sp.pl.segment(
                 sdata=sdata,
                 crd=self.cfg.segmentation.small_size_vis
                 if self.cfg.segmentation.small_size_vis is not None
                 else self.cfg.clean.small_size_vis,
                 img_layer=self.cleaned_image_name,
-                shapes_layer="expanded_cells" + str(self.cfg.segmentation.voronoi_radius),
-                output=f"{self.cfg.paths.segmentation}_expanded_cells_{self.cfg.segmentation.voronoi_radius}",
+                shapes_layer=self.shapes_layer_name,
+                output=f"{self.cfg.paths.segmentation}_expanded_cells_{self.cfg.segmentation.expand_radius}",
             )
-
-            # update current shapes layer name
-            self.shapes_layer_name = "expanded_cells" + str(self.cfg.segmentation.voronoi_radius)
 
         return sdata
 
@@ -318,7 +326,7 @@ class SparrowPipeline:
 
         sdata = sp.tb.allocate(
             sdata=sdata,
-            labels_layer=self.cfg.segmentation.output_labels_layer,
+            labels_layer=self.labels_layer_name,
             shapes_layer=self.shapes_layer_name,
         )
 
@@ -336,25 +344,25 @@ class SparrowPipeline:
 
         sp.pl.analyse_genes_left_out(
             sdata,
-            labels_layer=self.cfg.segmentation.output_labels_layer,
+            labels_layer=self.labels_layer_name,
             output=self.cfg.paths.analyse_genes_left_out,
         )
 
         log.info("Preprocess AnnData.")
 
         # Perform normalization based on size + all cells with less than 10 genes and all genes with less than 5 cells are removed.
-        sdata = sp.tb.preprocess_anndata(
+        sdata = sp.tb.preprocess_transcriptomics(
             sdata,
+            labels_layer=self.labels_layer_name,
             min_counts=self.cfg.allocate.min_counts,
             min_cells=self.cfg.allocate.min_cells,
             size_norm=self.cfg.allocate.size_norm,
             n_comps=self.cfg.allocate.n_comps,
-            shapes_layer=self.shapes_layer_name,
         )
 
         log.info("Preprocessing AnnData finished.")
 
-        sp.pl.preprocess_anndata(
+        sp.pl.preprocess_transcriptomics(
             sdata,
             output=self.cfg.paths.preprocess_adata,
         )
@@ -386,7 +394,7 @@ class SparrowPipeline:
             crd=self.cfg.segmentation.small_size_vis
             if self.cfg.segmentation.small_size_vis is not None
             else self.cfg.clean.small_size_vis,
-            column=self.cfg.allocate.shape_size_column,
+            column=_CELLSIZE_KEY,
             cmap=self.cfg.allocate.shape_size_cmap,
             alpha=self.cfg.allocate.shape_size_alpha,
             output=self.cfg.paths.shape_size,
@@ -396,7 +404,7 @@ class SparrowPipeline:
 
         sdata = sp.tb.leiden(
             sdata,
-            labels_layer=self.cfg.segmentation.output_labels_layer,
+            labels_layer=self.labels_layer_name,
             calculate_umap=True,
             calculate_neighbors=True,
             n_pcs=self.cfg.allocate.pcs,

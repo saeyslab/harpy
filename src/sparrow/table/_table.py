@@ -2,12 +2,58 @@ from typing import Dict, Tuple
 
 import numpy as np
 import spatialdata
+from anndata import AnnData
 from spatialdata import SpatialData
 
 from sparrow.shape._shape import _filter_shapes_layer
+from sparrow.utils._keys import _CELLSIZE_KEY, _REGION_KEY
 from sparrow.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
+
+
+class ProcessTable:
+    def __init__(
+        self,
+        sdata: SpatialData,
+        labels_layer: str,
+    ):
+        """
+        Base class for implementation of processing on tables.
+
+        Parameters
+        ----------
+        - spatial_data: SpatialData
+            The SpatialData object containing spatial data.
+        - labels_layer: str
+            The label layer to use.
+        """
+        if not hasattr(sdata, "table"):
+            raise ValueError(
+                "Provided SpatialData object 'sdata' does not have 'table' attribute. "
+                "Please create table attribute via e.g. 'sp.tb.allocation' or 'sp.tb.allocation_intensity' functions."
+            )
+        if not hasattr(sdata, "labels"):
+            raise ValueError(
+                "Provided SpatialData object 'sdata' does not have 'labels' attribute. "
+                "Please create labels attribute via e.g. 'sp.im.segment'."
+            )
+        self.sdata = sdata
+        self.labels_layer = labels_layer
+        self._validate_labels_layer()
+
+    def _validate_labels_layer(self):
+        """Validate if the specified labels layer exists in the SpatialData object."""
+        if self.labels_layer not in [*self.sdata.labels]:
+            raise ValueError("labels layer not in 'sdata.labels'")
+        if self.labels_layer not in self.sdata.table.obs[_REGION_KEY].cat.categories:
+            raise ValueError("labels layer not in 'sdata.table.obs[_REGION_KEY].cat.categories'")
+
+    def _get_adata(self) -> AnnData:
+        """Preprocess the data by filtering based on the labels layer and setting attributes."""
+        adata = self.sdata.table[self.sdata.table.obs[_REGION_KEY] == self.labels_layer].copy()
+        adata.uns["spatialdata_attrs"]["region"] = [self.labels_layer]
+        return adata
 
 
 def correct_marker_genes(
@@ -45,8 +91,8 @@ def filter_on_size(sdata: SpatialData, min_size: int = 100, max_size: int = 1000
     start = sdata.table.shape[0]
 
     # Filter cells based on size and distance
-    table = sdata.table[sdata.table.obs["shapeSize"] < max_size, :]
-    table = table[table.obs["shapeSize"] > min_size, :]
+    table = sdata.table[sdata.table.obs[_CELLSIZE_KEY] < max_size, :]
+    table = table[table.obs[_CELLSIZE_KEY] > min_size, :]
     del sdata.table
     ## TODO: Look for a better way of doing this!
     sdata.table = spatialdata.models.TableModel.parse(table)

@@ -3,7 +3,7 @@ from ._cluster_cleanliness import cluster_cleanliness
 from ._clustering import cluster
 from ._enrichment import nhood_enrichment
 from ._plot import plot_image, plot_labels, plot_shapes
-from ._preprocessed_anndata import preprocess_anndata
+from ._preprocess import preprocess_transcriptomics
 from ._sanity import sanity_plot_transcripts_matrix
 from ._segmentation import segment
 from ._tiling_correction import flatfield, tiling_correction

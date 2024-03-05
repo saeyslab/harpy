@@ -9,7 +9,7 @@ from anndata import AnnData
 from sklearn.cluster import KMeans
 from spatialdata import SpatialData
 
-from sparrow.utils._keys import _REGION_KEY
+from sparrow.table._table import ProcessTable
 from sparrow.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
@@ -27,7 +27,55 @@ def kmeans(
     random_state: int = 100,
     **kwargs,  # keyword arguments for _kmeans
 ):
-    """Implementation of kmeans clustering."""
+    """
+    Applies KMeans clustering on the SpatialData object with optional UMAP calculation and gene ranking.
+
+    This function executes the KMeans clustering algorithm (via `sklearn.cluster.KMeans`) on spatial data encapsulated by a SpatialData object.
+    It optionally computes a UMAP (Uniform Manifold Approximation and Projection) for dimensionality reduction
+    and ranks genes based on their contributions to the clustering. The clustering results, along with optional
+    UMAP and gene ranking, are added to the `sdata.table` for downstream analysis.
+
+    Parameters
+    ----------
+    sdata : SpatialData
+        The input SpatialData object.
+    labels_layer : str
+        The labels layer of `sdata` used to select the cells via the _REGION_KEY.
+        Note that cells in `sdata.table` linked to other labels_layer (via the _REGION_KEY), will be removed from `sdata.table`.
+    calculate_umap : bool, default=True
+        If True, calculates a UMAP via `scanpy.tl.umap` for visualization of computed clusters.
+    rank_genes : bool, default=True
+        If True, ranks genes based on their contributions to the clusters via `scanpy.tl.rank_genes_groups`. TODO: To be moved to a separate function.
+    n_neighbors : int, default=35
+        The number of neighbors to consider when calculating neighbors via `scanpy.pp.neighbors`. Ignored if `calculate_umap` is False.
+    n_pcs : int, default=17
+        The number of principal components to use when calculating neighbors via `scanpy.pp.neighbors`. Ignored if `calculate_umap` is False.
+    n_clusters : int, default=5
+        The number of clusters to form.
+    key_added : str, default="kmeans"
+        The key under which the clustering results are added to the SpatialData object (in `sdata.table.obs`).
+    random_state : int, default=100
+        A random state for reproducibility of the clustering.
+    **kwargs
+        Additional keyword arguments passed to the KMeans algorithm.
+
+    Returns
+    -------
+    SpatialData
+        The input `sdata` with the clustering results added.
+
+    Notes
+    -----
+    - The function updates the SpatialData object in-place, adding clustering labels, and optionally UMAP coordinates
+      and gene rankings, facilitating downstream analyses and visualization.
+    - Gene ranking based on cluster contributions is intended for identifying marker genes that characterize each cluster.
+
+    Warnings
+    --------
+    - The function is intended for use with spatial omics data. Input data should be appropriately preprocessed
+      (e.g. via `sp.tb.preprocess_transcriptomics` or `sp.tb.preprocess_proteomics`) to ensure meaningful clustering results.
+    - The `rank_genes` functionality is marked for relocation to enhance modularity and clarity of the codebase.
+    """
     cluster = Cluster(sdata, labels_layer=labels_layer)
     cluster.cluster(
         _kmeans,
@@ -58,7 +106,57 @@ def leiden(
     random_state: int = 100,
     **kwargs,
 ):
-    """Implementation of leiden clustering."""
+    """
+    Applies leiden clustering on the SpatialData object with optional UMAP calculation and gene ranking.
+
+    This function executes the leiden clustering algorithm (via `sc.tl.leiden`) on spatial data encapsulated by a SpatialData object.
+    It optionally computes a UMAP (Uniform Manifold Approximation and Projection) for dimensionality reduction
+    and ranks genes based on their contributions to the clustering. The clustering results, along with optional
+    UMAP and gene ranking, are added to the `sdata.table` for downstream analysis.
+
+    Parameters
+    ----------
+    sdata : SpatialData
+        The input SpatialData object.
+    labels_layer : str
+        The labels layer of `sdata` used to select the cells via the _REGION_KEY.
+        Note that cells in `sdata.table` linked to other labels_layer (via the _REGION_KEY), will be removed from `sdata.table`.
+    calculate_umap : bool, default=True
+        If True, calculates a UMAP via `scanpy.tl.umap` for visualization of computed clusters.
+    calculate_neighbors : bool, default=True
+        If True, calculates neighbors via `scanpy.pp.neighbors` required for leiden clustering. Set to False if neighbors are already calculated for `sdata.table`.
+    rank_genes : bool, default=True
+        If True, ranks genes based on their contributions to the clusters via `scanpy.tl.rank_genes_groups`. TODO: To be moved to a separate function.
+    n_neighbors : int, default=35
+        The number of neighbors to consider when calculating neighbors via `scanpy.pp.neighbors`. Ignored if `calculate_umap` is False.
+    n_pcs : int, default=17
+        The number of principal components to use when calculating neighbors via `scanpy.pp.neighbors`. Ignored if `calculate_umap` is False.
+    resolution : float, default=0.8
+        Cluster resolution passed to `scanpy.tl.leiden`.
+    key_added : str, default="leiden"
+        The key under which the clustering results are added to the SpatialData object (in `sdata.table.obs`).
+    random_state : int, default=100
+        A random state for reproducibility of the clustering.
+    **kwargs
+        Additional keyword arguments passed to the leiden clusteting algorithm.
+
+    Returns
+    -------
+    SpatialData
+        The input `sdata` with the clustering results added.
+
+    Notes
+    -----
+    - The function updates the SpatialData object in-place, adding clustering labels, and optionally UMAP coordinates
+      and gene rankings, facilitating downstream analyses and visualization.
+    - Gene ranking based on cluster contributions is intended for identifying marker genes that characterize each cluster.
+
+    Warnings
+    --------
+    - The function is intended for use with spatial omics data. Input data should be appropriately preprocessed
+      (e.g. via `sp.tb.preprocess_transcriptomics` or `sp.tb.preprocess_proteomics`) to ensure meaningful clustering results.
+    - The `rank_genes` functionality is marked for relocation to enhance modularity and clarity of the codebase.
+    """
     cluster = Cluster(sdata, labels_layer=labels_layer)
     cluster.cluster(
         _leiden,
@@ -101,37 +199,7 @@ def _leiden(
     return adata
 
 
-class Cluster:
-    def __init__(
-        self,
-        sdata: SpatialData,
-        labels_layer: str,
-    ):
-        """
-        Initialize the Cluster object with SpatialData, labels layer.
-
-        Parameters
-        ----------
-        - spatial_data: SpatialData
-            The SpatialData object containing spatial data and annotations.
-        - labels_layer: str
-            The label layer to use for clustering.
-        """
-        self.sdata = sdata
-        self.labels_layer = labels_layer
-        self._validate_labels_layer()
-
-    def _validate_labels_layer(self):
-        """Validate if the specified labels layer exists in the SpatialData object."""
-        if self.labels_layer not in self.sdata.table.obs[_REGION_KEY].cat.categories:
-            raise ValueError("labels layer not in table")
-
-    def _preprocess(self):
-        """Preprocess the data by filtering based on the labels layer and setting attributes."""
-        adata = self.sdata.table[self.sdata.table.obs[_REGION_KEY] == self.labels_layer].copy()
-        adata.uns["spatialdata_attrs"]["region"] = [self.labels_layer]
-        return adata
-
+class Cluster(ProcessTable):
     def _perform_clustering(self, adata: AnnData, cluster_callable: Callable, key_added: str, **kwargs):
         """Perform the specified clustering on the AnnData object."""
         cluster_callable(adata, key_added=key_added, **kwargs)
@@ -148,7 +216,7 @@ class Cluster:
         **kwargs,
     ):
         """Run the preprocessing, optional neighborhood graph computation, optional UMAP computation, and clustering on 'sdata.table'."""
-        adata = self._preprocess()
+        adata = self._get_adata()
 
         if calculate_neighbors:
             if "neighbors" in adata.uns.keys():

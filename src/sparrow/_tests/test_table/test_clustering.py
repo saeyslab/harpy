@@ -3,6 +3,7 @@ import importlib.util
 import pytest
 
 from sparrow.table._clustering import kmeans, leiden
+from sparrow.table._preprocess import preprocess_proteomics
 
 
 @pytest.mark.skipif(not importlib.util.find_spec("sklearn"), reason="requires the scikit-learn library")
@@ -24,6 +25,13 @@ def test_kmeans(sdata_multi_c):
     assert "kmeans" not in sdata_multi_c.table.obs.columns
     sdata_multi_c = kmeans(sdata_multi_c, labels_layer="masks_whole", key_added="kmeans", random_state=100)
     assert "kmeans" in sdata_multi_c.table.obs.columns
+
+
+def test_integration_clustering(sdata_multi_c):
+    assert "leiden" not in sdata_multi_c.table.obs.columns
+    sdata_multi_c = preprocess_proteomics(sdata_multi_c, labels_layer="masks_whole")
+    sdata_multi_c = leiden(sdata_multi_c, labels_layer="masks_whole", key_added="leiden", random_state=100)
+    assert "leiden" in sdata_multi_c.table.obs.columns
 
 
 @pytest.mark.skipif(not importlib.util.find_spec("flowsom"), reason="requires the flowSOM library")
