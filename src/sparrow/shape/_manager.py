@@ -14,7 +14,6 @@ from geopandas import GeoDataFrame
 from numpy.typing import NDArray
 from shapely.affinity import translate
 from spatialdata import SpatialData, read_zarr
-from spatialdata._io import write_shapes
 from spatialdata.transformations import Identity, Translation
 
 from sparrow.image._image import _get_translation_values
@@ -188,14 +187,23 @@ class ShapesLayerManager:
         spatial_element: GeoDataFrame,
         overwrite: bool = False,
     ) -> SpatialData:
+        if output_layer in [*sdata.shapes]:
+            if overwrite:
+                log.warning(f"Shapes layer with name '{output_layer}' already exists. Overwriting...")
+                element_type = sdata._element_type_from_element_name(output_layer)
+                del getattr(sdata, element_type)[output_layer]
+                if sdata.is_backed():
+                    sdata.delete_element_from_disk(output_layer)
+            else:
+                if sdata.is_backed():
+                    raise ValueError(
+                        f"Attempting to overwrite sdata.shapes[{output_layer}], but overwrite is set to False. Set overwrite to True to overwrite the .zarr store."
+                    )
+
         sdata.shapes[output_layer] = spatial_element
+
         if sdata.is_backed():
-            elem_group = sdata._init_add_element(name=output_layer, element_type="shapes", overwrite=overwrite)
-            write_shapes(
-                shapes=sdata.shapes[output_layer],
-                group=elem_group,
-                name=output_layer,
-            )
+            sdata.write_element(output_layer, overwrite=overwrite)
             sdata = read_zarr(sdata.path)
 
         return sdata
@@ -204,7 +212,8 @@ class ShapesLayerManager:
         return sdata.shapes[name]
 
     def remove_from_sdata(self, sdata: SpatialData, name: str) -> SpatialData:
-        del sdata.shapes[name]
+        element_type = sdata._element_type_from_element_name(name)
+        del getattr(sdata, element_type)[name]
         return sdata
 
 

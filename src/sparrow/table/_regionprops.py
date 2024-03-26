@@ -9,7 +9,7 @@ from skimage.measure._regionprops import RegionProperties
 from spatialdata import SpatialData
 
 from sparrow.image._image import _get_spatial_element
-from sparrow.table._table import _back_sdata_table_to_zarr
+from sparrow.table._table import _add_table_layer
 from sparrow.utils._keys import _CELL_INDEX, _INSTANCE_KEY, _REGION_KEY
 from sparrow.utils.pylogger import get_pylogger
 
@@ -19,6 +19,7 @@ log = get_pylogger(__name__)
 def add_regionprop_features(
     sdata: SpatialData,
     labels_layer: str | None = None,
+    table_layer: str | None = None,
 ):
     """
     Enhances a SpatialData object with region property features calculated from the specified labels layer, updating its table attribute with these computed cellular properties.
@@ -27,7 +28,7 @@ def add_regionprop_features(
     found in the specified layer of the SpatialData object. These properties include measures such as area,
     eccentricity, axis lengths, perimeter, and several custom ratios and metrics providing insights into
     each cell's shape and structure. The calculated properties are appended to the observations in the SpatialData
-    object's underlying table.
+    object's underlying table (`sdata.tables[table_layer]`).
 
     Parameters
     ----------
@@ -38,19 +39,21 @@ def add_regionprop_features(
         The name of the layer in `sdata` that contains the labeled regions, typically derived from a segmentation
         process. Each distinct label corresponds to a different cell, and properties will be calculated for these
         labeled regions. If not provided, the function will infer or require a default layer.
+    output_layer: str, optional
+        The table layer in `sdata.tables` to which the features will be added.
 
     Returns
     -------
     SpatialData
         The original SpatialData object, updated to include a range of new region-specific property measurements
-        in its `sdata.table.obs` attribute.
+        in its `sdata.tables[table_layer].obs` attribute.
 
     Notes
     -----
     - The function operates by pulling the required data (masks) into memory for processing, as the underlying 'regionprops'
       functionality does not support lazy loading. Consequently, sufficient memory must be available for large datasets.
-    - Computed properties are merged (using keys `_INSTANCE_KEY` and `_REGION_KEY` in `sdata.table.obs`)
-    with the existing observations within the SpatialData's table (`sdata.table.obs`).
+    - Computed properties are merged (using keys `_INSTANCE_KEY` and `_REGION_KEY` in `sdata.tables[table_layer].obs`)
+    with the existing observations within the SpatialData's table (`sdata.tables[table_layer].obs`).
 
     Example
     -------
@@ -66,19 +69,19 @@ def add_regionprop_features(
     ... )
     >>>
     >>> sdata = sp.tb.allocate_intensity(
-    ...     sdata, img_layer="raw_image", labels_layer="masks_whole", chunks=100
+    ...     sdata, img_layer="raw_image", labels_layer="masks_whole", output_layer="table_intensities", chunks=100
     ... )
     >>>
     >>> sdata = sp.tb.allocate_intensity(
-    ...     sdata, img_layer="raw_image", labels_layer="masks_nuclear_aligned", chunks=100, append=True
+    ...     sdata, img_layer="raw_image", labels_layer="masks_nuclear_aligned", output_layer="table_intensities", chunks=100, append=True
     ... )
     >>>
     >>> sdata = sp.tb.add_regionprop_features(
-    ...     sdata, labels_layer="masks_whole"
+    ...     sdata, labels_layer="masks_whole", table_layer="table_intensities",
     ... )
     >>>
     >>> sdata = sp.tb.add_regionprop_features(
-    ...     sdata, labels_layer="masks_nuclear_aligned"
+    ...     sdata, labels_layer="masks_nuclear_aligned", table_layer="table_intensities",
     ... )
     """
     if labels_layer is None:
@@ -87,6 +90,9 @@ def add_regionprop_features(
             f"No labels layer specified. "
             f"Using mask from labels layer '{labels_layer}' of the provided SpatialData object."
         )
+
+    if table_layer is None:
+        raise ValueError("Please specify a `table_layer`.")
 
     se = _get_spatial_element(sdata, layer=labels_layer)
 
@@ -98,44 +104,51 @@ def add_regionprop_features(
     assert _INSTANCE_KEY in cell_props.columns, f"'cell_props' should contain '{_INSTANCE_KEY}' column"
     assert _REGION_KEY not in cell_props.columns, f"'cell_props' should not contain '{_REGION_KEY}' columns."
     assert (
-        _REGION_KEY in sdata.table.obs
-    ), f"Please link observation to a labels_layer using the '{_REGION_KEY}' column in 'sdata.table.obs'"
+        _REGION_KEY in sdata.tables[table_layer].obs
+    ), f"Please link observation to a labels_layer using the '{_REGION_KEY}' column in 'sdata.table[{table_layer}].obs'"
     assert (
-        _INSTANCE_KEY in sdata.table.obs
-    ), f"Please add unique {_INSTANCE_KEY} (uint) for every observation in 'sdata.table', e.g. see 'sp.table.allocate_intensity'."
+        _INSTANCE_KEY in sdata.tables[table_layer].obs
+    ), f"Please add unique {_INSTANCE_KEY} (uint) for every observation in 'sdata.table[{table_layer}]', e.g. see 'sp.table.allocate_intensity'."
 
     cell_props[_REGION_KEY] = pd.Categorical([labels_layer] * len(cell_props))
 
-    extra_cells = sum(~cell_props[_INSTANCE_KEY].isin(sdata.table.obs[_INSTANCE_KEY].values))
+    extra_cells = sum(~cell_props[_INSTANCE_KEY].isin(sdata.tables[table_layer].obs[_INSTANCE_KEY].values))
     if extra_cells:
         log.warning(
             f"Calculated properties of {  extra_cells  } cells/nuclei obtained from labels layer '{labels_layer}' "
-            f"will not be added to 'sdata.table.obs', because their '{_INSTANCE_KEY}' are not in 'sdata.table.obs.{_INSTANCE_KEY}'. "
+            f"will not be added to 'sdata.tables[{table_layer}].obs', because their '{_INSTANCE_KEY}' are not in 'sdata.table[{table_layer}].obs.{_INSTANCE_KEY}'. "
             "Please first append their intensities with the 'allocate_intensity' function "
             "if they should be included."
         )
 
-    # sanity check (check that _INSTANCE_KEEY unique for given labels_layer, otherwise unexpected behaviour when merging)
-    for _df in [sdata.table.obs, cell_props]:
+    # sanity check (check that _INSTANCE_KEY unique for given labels_layer, otherwise unexpected behaviour when merging)
+    for _df in [sdata.tables[table_layer].obs, cell_props]:
         assert (
             not _df[_df[_REGION_KEY] == labels_layer][_INSTANCE_KEY].duplicated().any()
         ), f"{_INSTANCE_KEY} should be unique for given '{_REGION_KEY}'"
 
-    sdata.table.obs.reset_index(inplace=True)
-    sdata.table.obs = sdata.table.obs.merge(
-        cell_props, on=[_REGION_KEY, _INSTANCE_KEY], how="left", suffixes=("", "_y")
-    )
+    # make copy, otherwise we would update inplace, which could give issues if we are not allowed to overwrite next.
+    adata = sdata.tables[table_layer].copy()
+    # TODO: check what happens if you do calculation of region props twice on same table layer and labels layer.
+    adata.obs.reset_index(inplace=True)
+    adata.obs = adata.obs.merge(cell_props, on=[_REGION_KEY, _INSTANCE_KEY], how="left", suffixes=("", "_y"))
 
-    for _column_name in sdata.table.obs.columns:
+    for _column_name in adata.obs.columns:
         if _column_name in [_REGION_KEY, _INSTANCE_KEY, _CELL_INDEX]:
             continue
-        if f"{_column_name}_y" in sdata.table.obs.columns:
-            sdata.table.obs[_column_name] = sdata.table.obs[f"{_column_name}_y"].fillna(sdata.table.obs[_column_name])
-            sdata.table.obs.drop(columns=f"{_column_name}_y", inplace=True)
+        if f"{_column_name}_y" in adata.obs.columns:
+            adata.obs[_column_name] = adata.obs[f"{_column_name}_y"].fillna(adata.obs[_column_name])
+            adata.obs.drop(columns=f"{_column_name}_y", inplace=True)
 
-    sdata.table.obs.set_index(_CELL_INDEX, inplace=True, drop=True)
+    adata.obs.set_index(_CELL_INDEX, inplace=True, drop=True)
 
-    _back_sdata_table_to_zarr(sdata=sdata)
+    sdata = _add_table_layer(
+        sdata,
+        adata=adata,
+        output_layer=table_layer,
+        region=adata.obs[_REGION_KEY].cat.categories.to_list(),
+        overwrite=True,  # always overwrite, because we only add a .obs features.
+    )
 
     return sdata
 

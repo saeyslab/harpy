@@ -7,7 +7,6 @@ import numpy as np
 import spatialdata
 from dask.dataframe.core import DataFrame as DaskDataFrame
 from spatialdata import SpatialData, read_zarr
-from spatialdata._io import write_points
 
 from sparrow.utils.pylogger import get_pylogger
 
@@ -30,7 +29,7 @@ def read_resolve_transcripts(
         Path to the file containing the transcripts information specific to Resolve.
         Expected to contain x, y coordinates and a gene name.
     overwrite: bool, default=False
-        If True overwrites the element (points layer) if it already exists.
+        If True overwrites the `output_layer` (a points layer) if it already exists.
 
     Returns
     -------
@@ -70,7 +69,7 @@ def read_vizgen_transcripts(
     path_transform_matrix : str | Path
         Path to the transformation matrix for the affine transformation.
     overwrite: bool, default=False
-        If True overwrites the element (points layer) if it already exists.
+        If True overwrites the `output_layer` (a points layer) if it already exists.
 
     Returns
     -------
@@ -108,7 +107,7 @@ def read_stereoseq_transcripts(
         Path to the file containing the transcripts information specific to Stereoseq.
         Expected to contain x, y coordinates, gene name, and a midcount column.
     overwrite: bool, default=False
-        If True overwrites the element (points layer) if it already exists.
+        If True overwrites the `output_layer` (a points layer) if it already exists.
 
     Returns
     -------
@@ -134,7 +133,7 @@ def read_transcripts(
     sdata: SpatialData,
     path_count_matrix: str | Path,
     path_transform_matrix: str | Path | None = None,
-    points_layer: str = "transcripts",
+    output_layer: str = "transcripts",
     overwrite: bool = False,
     debug: bool = False,
     column_x: int = 0,
@@ -166,10 +165,10 @@ def read_transcripts(
         This file should contain a 3x3 transformation matrix for the affine transformation.
         The matrix defines the linear transformation to be applied to the coordinates of the transcripts.
         If no transform matrix is specified, the identity matrix will be used.
-    points_layer: str, default='transcripts'.
+    output_layer: str, default='transcripts'.
         Name of the points layer of the SpatialData object to which the transcripts will be added.
     overwrite: bool, default=False
-        If True overwrites the element (points layer) if it already exists.
+        If True overwrites the `output_layer` (a points layer) if it already exists.
     debug : bool, default=False
         If True, a sample of the data is processed for debugging purposes.
     column_x : int, default=0
@@ -288,14 +287,10 @@ def read_transcripts(
     if crd is not None:
         transformed_ddf = transformed_ddf.query(f"{crd[0]} <= pixel_x < {crd[1]} and {crd[2]} <= pixel_y < {crd[3]}")
 
-    if sdata.points:
-        for points_layer in [*sdata.points]:
-            del sdata.points[points_layer]
-
     sdata = _add_transcripts_to_sdata(
         sdata,
         ddf=transformed_ddf,
-        points_layer=points_layer,
+        points_layer=output_layer,
         coordinates=coordinates,
         overwrite=overwrite,
     )
@@ -308,20 +303,31 @@ def _add_transcripts_to_sdata(
     ddf: DaskDataFrame,
     points_layer: str,
     coordinates: dict[str, str],
-    overwrite: bool = False,
+    overwrite: bool = True,
 ):
     points = spatialdata.models.PointsModel.parse(
         ddf,
         coordinates=coordinates,
     )
-    sdata.points[points_layer] = points
+
+    if points_layer in [*sdata.points]:
+        if overwrite:
+            log.warning(f"Points layer with name '{points_layer}' already exists. Overwriting...")
+            element_type = sdata._element_type_from_element_name(points_layer)
+            del getattr(sdata, element_type)[points_layer]
+            if sdata.is_backed():
+                sdata.delete_element_from_disk(points_layer)
+        else:
+            if sdata.is_backed():
+                raise ValueError(
+                    f"Attempting to overwrite sdata.points[{points_layer}], but overwrite is set to False. Set overwrite to True to overwrite the .zarr store."
+                )
+
     if sdata.is_backed():
-        elem_group = sdata._init_add_element(name=points_layer, element_type="points", overwrite=overwrite)
-        write_points(
-            points=sdata.points[points_layer],
-            group=elem_group,
-            name=points_layer,
-        )
+        sdata.points[points_layer] = points
+        sdata.write_element(points_layer, overwrite=overwrite)
         sdata = read_zarr(sdata.path)
+    else:
+        sdata.points[points_layer] = points.persist()
 
     return sdata

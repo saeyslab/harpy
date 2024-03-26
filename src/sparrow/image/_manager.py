@@ -11,7 +11,6 @@ from dask.array import Array
 from multiscale_spatial_image.multiscale_spatial_image import MultiscaleSpatialImage
 from spatial_image import SpatialImage
 from spatialdata import SpatialData, read_zarr
-from spatialdata._io import write_image, write_labels
 from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import BaseTransformation, set_transformation
 
@@ -188,22 +187,33 @@ class ImageLayerManager(LayerManager):
         spatial_element: SpatialImage | MultiscaleSpatialImage,
         overwrite: bool = False,
     ) -> SpatialData:
+        if output_layer in [*sdata.images]:
+            if overwrite:
+                log.warning(f"Image layer with name '{output_layer}' already exists. Overwriting...")
+                element_type = sdata._element_type_from_element_name(output_layer)
+                del getattr(sdata, element_type)[output_layer]
+                if sdata.is_backed():
+                    sdata.delete_element_from_disk(output_layer)
+            else:
+                if sdata.is_backed():
+                    raise ValueError(
+                        f"Attempting to overwrite sdata.images[{output_layer}], but overwrite is set to False. Set overwrite to True to overwrite the .zarr store."
+                    )
+
         sdata.images[output_layer] = spatial_element
+
         if sdata.is_backed():
-            elem_group = sdata._init_add_element(name=output_layer, element_type="images", overwrite=overwrite)
-            write_image(
-                image=sdata.images[output_layer],
-                group=elem_group,
-                name=output_layer,
-            )
+            sdata.write_element(output_layer, overwrite=overwrite)
             sdata = read_zarr(sdata.path)
+
         return sdata
 
     def retrieve_data_from_sdata(self, sdata: SpatialData, name: str) -> Array:
         return sdata.images[name].data
 
     def remove_from_sdata(self, sdata: SpatialData, name: str) -> SpatialData:
-        del sdata.images[name]
+        element_type = sdata._element_type_from_element_name(name)
+        del getattr(sdata, element_type)[name]
         return sdata
 
 
@@ -250,20 +260,31 @@ class LabelLayerManager(LayerManager):
         spatial_element: SpatialImage | MultiscaleSpatialImage,
         overwrite: bool = False,
     ) -> SpatialData:
+        if output_layer in [*sdata.labels]:
+            if overwrite:
+                log.warning(f"Labels layer with name '{output_layer}' already exists. Overwriting...")
+                element_type = sdata._element_type_from_element_name(output_layer)
+                del getattr(sdata, element_type)[output_layer]
+                if sdata.is_backed():
+                    sdata.delete_element_from_disk(output_layer)
+            else:
+                if sdata.is_backed():
+                    raise ValueError(
+                        f"Attempting to overwrite sdata.labels[{output_layer}], but overwrite is set to False. Set overwrite to True to overwrite the .zarr store."
+                    )
+
         sdata.labels[output_layer] = spatial_element
+
         if sdata.is_backed():
-            elem_group = sdata._init_add_element(name=output_layer, element_type="labels", overwrite=overwrite)
-            write_labels(
-                labels=sdata.labels[output_layer],
-                group=elem_group,
-                name=output_layer,
-            )
+            sdata.write_element(output_layer, overwrite=overwrite)
             sdata = read_zarr(sdata.path)
+
         return sdata
 
     def retrieve_data_from_sdata(self, sdata: SpatialData, name: str) -> Array:
         return sdata.labels[name].data
 
     def remove_from_sdata(self, sdata: SpatialData, name: str) -> SpatialData:
-        del sdata.labels[name]
+        element_type = sdata._element_type_from_element_name(name)
+        del getattr(sdata, element_type)[name]
         return sdata

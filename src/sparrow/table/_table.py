@@ -6,6 +6,7 @@ from anndata import AnnData
 from spatialdata import SpatialData
 
 from sparrow.shape._shape import _filter_shapes_layer
+from sparrow.table._manager import TableLayerManager
 from sparrow.utils._keys import _CELLSIZE_KEY, _REGION_KEY
 from sparrow.utils.pylogger import get_pylogger
 
@@ -17,6 +18,7 @@ class ProcessTable:
         self,
         sdata: SpatialData,
         labels_layer: str,
+        table_layer: str,
     ):
         """
         Base class for implementation of processing on tables.
@@ -27,31 +29,44 @@ class ProcessTable:
             The SpatialData object containing spatial data.
         - labels_layer: str
             The label layer to use.
+        - table_layer: str
+            The table layer to use.
         """
-        if not hasattr(sdata, "table"):
+        if sdata.tables == {}:
             raise ValueError(
-                "Provided SpatialData object 'sdata' does not have 'table' attribute. "
-                "Please create table attribute via e.g. 'sp.tb.allocation' or 'sp.tb.allocation_intensity' functions."
+                "Provided SpatialData object 'sdata' does not contain any 'tables'. "
+                "Please create tables via e.g. 'sp.tb.allocation' or 'sp.tb.allocation_intensity' functions."
             )
-        if not hasattr(sdata, "labels"):
+        if sdata.labels == {}:
             raise ValueError(
-                "Provided SpatialData object 'sdata' does not have 'labels' attribute. "
-                "Please create labels attribute via e.g. 'sp.im.segment'."
+                "Provided SpatialData object 'sdata' does not contain 'labels'. "
+                "Please create a labels layer via e.g. 'sp.im.segment'."
             )
         self.sdata = sdata
         self.labels_layer = labels_layer
+        self.table_layer = table_layer
+        self._validated_table_layer()
         self._validate_labels_layer()
 
     def _validate_labels_layer(self):
         """Validate if the specified labels layer exists in the SpatialData object."""
         if self.labels_layer not in [*self.sdata.labels]:
             raise ValueError("labels layer not in 'sdata.labels'")
-        if self.labels_layer not in self.sdata.table.obs[_REGION_KEY].cat.categories:
-            raise ValueError("labels layer not in 'sdata.table.obs[_REGION_KEY].cat.categories'")
+        if self.labels_layer not in self.sdata.tables[self.table_layer].obs[_REGION_KEY].cat.categories:
+            raise ValueError(
+                f"labels layer '{self.labels_layer}' not in 'sdata.tables[self.table_layer].obs[_REGION_KEY].cat.categories'"
+            )
+
+    def _validated_table_layer(self):
+        """Validate if the specified table layer exists in the SpatialData object."""
+        if self.table_layer not in [*self.sdata.tables]:
+            raise ValueError(f"table layer '{self.table_layer}' not in 'sdata.tables'.")
 
     def _get_adata(self) -> AnnData:
         """Preprocess the data by filtering based on the labels layer and setting attributes."""
-        adata = self.sdata.table[self.sdata.table.obs[_REGION_KEY] == self.labels_layer].copy()
+        adata = self.sdata.tables[self.table_layer][
+            self.sdata.tables[self.table_layer].obs[_REGION_KEY] == self.labels_layer
+        ].copy()
         adata.uns["spatialdata_attrs"]["region"] = [self.labels_layer]
         return adata
 
@@ -106,6 +121,25 @@ def filter_on_size(sdata: SpatialData, min_size: int = 100, max_size: int = 1000
 
     filtered = start - table.shape[0]
     log.info(f"{filtered} cells were filtered out based on size.")
+
+    return sdata
+
+
+def _add_table_layer(
+    sdata: SpatialData,
+    adata: AnnData,
+    output_layer: str,
+    region: list[str],  # list of labels_layers , TODO, check what to do with shapes layers
+    overwrite: bool = False,
+):
+    manager = TableLayerManager()
+    manager.add_table(
+        sdata,
+        adata=adata,
+        output_layer=output_layer,
+        region=region,
+        overwrite=overwrite,
+    )
 
     return sdata
 

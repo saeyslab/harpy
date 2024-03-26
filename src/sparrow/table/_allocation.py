@@ -9,13 +9,13 @@ import dask.dataframe as dd
 import pandas as pd
 import rasterio
 import rasterio.features
-import spatialdata
 from affine import Affine
 from anndata import AnnData
 from spatialdata import SpatialData
 
 from sparrow.image._image import _get_spatial_element, _get_translation
 from sparrow.shape._shape import _filter_shapes_layer
+from sparrow.table._table import _add_table_layer
 from sparrow.utils._keys import _CELL_INDEX, _INSTANCE_KEY, _REGION_KEY
 from sparrow.utils.pylogger import get_pylogger
 
@@ -27,11 +27,13 @@ def allocate(
     labels_layer: str = "segmentation_mask",
     shapes_layer: str | None = "segmentation_mask_boundaries",
     points_layer: str = "transcripts",
+    output_layer: str = "table_transcriptomics",
     allocate_from_shapes_layer: bool = True,
     chunks: str | tuple[int, ...] | int | None = 10000,
+    overwrite: bool = True,
 ) -> SpatialData:
     """
-    Allocates transcripts to cells via provided shapes_layer and points_layer and returns updated SpatialData augmented with a table attribute holding the AnnData object with cell counts.
+    Allocates transcripts to cells via provided shapes_layer and points_layer and returns updated SpatialData augmented with a table layer (`sdata.tables[output_layer]`) holding the AnnData object with cell counts.
 
     Parameters
     ----------
@@ -45,7 +47,9 @@ def allocate(
         The layer in `sdata` that contains the boundaries of the segmentation mask, by default "segmentation_mask_boundaries".
         Required if `allocate_from_shapes_layer` is True.
     points_layer: str, optional
-        The layer in `sdata` that contains the transcripts.
+        The points layer in `sdata` that contains the transcripts.
+    output_layer: str, optional
+        The table layer in `sdata` in which to save the AnnData object with the transcripts counts per cell.
     allocate_from_shapes_layer: bool, optional
         Whether to allocate transcripts using `shapes_layer` or `labels_layer`.
         Only supported if `shapes_layer` contains 2D polygons.
@@ -54,6 +58,8 @@ def allocate(
         Consider setting the chunks to a relatively high value to speed up processing
         (>10000, or only chunk in z-dimension if data is 3D, and one z-slice fits in memory),
         taking into account the available memory of your system.
+    overwrite : bool, default=False
+        If True, overwrites the `output_layer` if it already exists in `sdata`.
 
     Returns
     -------
@@ -212,14 +218,15 @@ def allocate(
     # currently only support adding only one field of view
     adata.obs[_REGION_KEY] = pd.Categorical([labels_layer] * len(adata.obs))
 
-    if sdata.table:
-        del sdata.table
-
-    sdata.table = spatialdata.models.TableModel.parse(
-        adata, region_key=_REGION_KEY, region=[labels_layer], instance_key=_INSTANCE_KEY
+    sdata = _add_table_layer(
+        sdata,
+        adata=adata,
+        output_layer=output_layer,
+        region=[labels_layer],
+        overwrite=overwrite,
     )
 
-    indexes_to_keep = sdata.table.obs[_INSTANCE_KEY].values.astype(int)
+    indexes_to_keep = sdata.tables[output_layer].obs[_INSTANCE_KEY].values.astype(int)
     sdata = _filter_shapes_layer(
         sdata,
         indexes_to_keep=indexes_to_keep,

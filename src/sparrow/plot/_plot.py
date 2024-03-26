@@ -105,6 +105,7 @@ def plot_shapes(
     img_layer: str | Iterable[str] | None = None,
     labels_layer: str | Iterable[str] | None = None,
     shapes_layer: str | Iterable[str] | None = None,
+    table_layer: str | None = None,
     column: str | None = None,
     cmap: str | None = "magma",
     channel: int | str | Iterable[int] | Iterable[str] | None = None,
@@ -170,10 +171,12 @@ def plot_shapes(
     shapes_layer : str or Iterable[str], optional
         Specifies which shapes to plot. If set to None, no shapes_layer is plotted.
         Displayed as columns in the plot, if multiple are provided.
+    table_layer : str, optional
+        Table layer(s) to be plotted (i.e. to base cell colors on) if `column` is specified.
     column : str or None, optional
-        Column in `sdata.table.obs` or name in `sdata.table.var.index` to base cell colors on. If none provided, default color is used.
+        Column in `sdata.tables[table_layer].obs` or name in `sdata.tables[table_layer].var.index` to base cell colors on. If none provided, default color is used.
     cmap : str, default='magma'
-        Colormap for column. Ignored if column is None, or if column + "_colors" is in `sdata.table.uns`.
+        Colormap for column. Ignored if column is None, or if column + "_colors" is in `sdata.tables[table_layer].uns`.
     channel : int or str or Iterable[int] or Iterable[str], optional
         Channel(s) to be displayed from the image. Displayed as rows in the plot.
         If channel is None, get the number of channels from the first img_layer given as input.
@@ -216,6 +219,8 @@ def plot_shapes(
     ValueError
         - If both `img_layer` and `labels_layer` are specified.
         - If z_slice is specified, and it is not a z_slice in specified `img_layer` or `labels_layer`.
+        - If a `column` is specified, but no `table_layer`.
+        - If `table_layer` is specified, but `table_layer` is not a table in `sdata.tables`.
 
 
     Notes
@@ -227,6 +232,9 @@ def plot_shapes(
         raise ValueError(
             "Both img_layer and labels_layer is not None. " "Please specify either img_layer or labels_layer, not both."
         )
+
+    if column is not None and table_layer is None:
+        raise ValueError("Please specify a 'table_layer' if a 'column' is specified.")
 
     # Choose the appropriate layer or default to the last image layer if none is specified.
     if img_layer is not None:
@@ -242,6 +250,10 @@ def plot_shapes(
             f"No image layer or labels layer specified. "
             f"Plotting last image layer '{layer}' of the provided SpatialData object."
         )
+
+    if table_layer is not None:
+        if table_layer not in [*sdata.tables]:
+            raise ValueError(f"table layer '{table_layer}' not found in 'sdata.tables'")
 
     # Make code also work if user would provide another iterable than List
     layer = list(layer) if isinstance(layer, Iterable) and not isinstance(layer, str) else [layer]
@@ -302,6 +314,7 @@ def plot_shapes(
                 img_layer=_layer if img_layer_type else None,
                 labels_layer=_layer if not img_layer_type else None,
                 shapes_layer=_shapes_layer,
+                table_layer=table_layer,
                 column=column,
                 cmap=cmap,
                 channel=_channel,
@@ -335,6 +348,7 @@ def _plot(
     img_layer: str | None = None,
     labels_layer: str | None = None,
     shapes_layer: str | None = "segmentation_mask_boundaries",
+    table_layer: str | None = None,
     column: str | None = None,
     cmap: str | None = "magma",
     channel: int | str | None = None,
@@ -366,10 +380,12 @@ def _plot(
         Labels layer to be plotted.
     shapes_layer : str or None, optional
         Specifies which shapes to plot. Default is 'segmentation_mask_boundaries'. If set to None, no shapes_layer is plot.
+    table_layer : str, optional
+        Table layer(s) to be plotted (i.e. to base cell colors on) if `column` is specified.
     column : str or None, optional
-        Column in `sdata.table.obs` or name in `sdata.table.var.index` to base cell colors on. If none provided, default color is used.
+        Column in `sdata.tables[table_layer].obs` or name in `sdata.tables[table_layer].var.index` to base cell colors on. If none provided, default color is used.
     cmap : str, default='magma'
-        Colormap for column. Ignored if column is None, or if column + "_colors" is in `sdata.table.uns`.
+        Colormap for column. Ignored if column is None, or if column + "_colors" is in `sdata.tables[table_layer].uns`.
     channel : int or str or None, optional
         Channel to display from the image. If none provided, or if provided channel could not be found, first channel is plot.
         Ignored if img_layer is None and labels_layer is specified.
@@ -411,6 +427,8 @@ def _plot(
     ValueError
         - If both `img_layer` and `labels_layer` are specified.
         - If z_slice is specified, and it is not a z_slice in specified `img_layer` or `labels_layer`.
+        - If a `column` is specified, but no `table_layer`.
+        - If `table_layer` is specified, but `table_layer` is not a table in `sdata.tables`.
 
     Notes
     -----
@@ -420,6 +438,9 @@ def _plot(
         raise ValueError(
             "Both img_layer and labels_layer is not None. " "Please specify either img_layer or labels_layer, not both."
         )
+
+    if column is not None and table_layer is None:
+        raise ValueError("Please specify a 'table_layer' if a 'column' is specified.")
 
     # Choose the appropriate layer or default to the last image layer if none is specified.
     if img_layer is not None:
@@ -435,6 +456,10 @@ def _plot(
             f"No image layer or labels layer specified. "
             f"Plotting last image layer '{layer}' of the provided SpatialData object."
         )
+
+    if table_layer is not None:
+        if table_layer not in [*sdata.tables]:
+            raise ValueError(f"table layer '{table_layer}' not found in 'sdata.tables'")
 
     if shapes_layer_filtered is not None:
         shapes_layer_filtered = (
@@ -483,20 +508,24 @@ def _plot(
 
     if polygons is not None and column is not None:
         if not polygons.empty:
-            if column + "_colors" in sdata.table.uns:
+            if column + "_colors" in sdata.tables[table_layer].uns:
                 cmap = matplotlib.colors.LinearSegmentedColormap.from_list(
                     "new_map",
-                    sdata.table.uns[column + "_colors"],
-                    N=len(sdata.table.uns[column + "_colors"]),
+                    sdata.tables[table_layer].uns[column + "_colors"],
+                    N=len(sdata.tables[table_layer].uns[column + "_colors"]),
                 )
-            if column in sdata.table.obs.columns:
-                column = sdata.table[polygons.index, :].obs[column]
-            elif column in sdata.table.var.index:
-                column = sdata.table[polygons.index, :].X[:, np.where(sdata.table.var.index == column)[0][0]]
+            if column in sdata.tables[table_layer].obs.columns:
+                column = sdata.tables[table_layer][polygons.index, :].obs[
+                    column
+                ]  # TODO update this. Work on the _INSTANCE_KEY.
+            elif column in sdata.tables[table_layer].var.index:
+                column = sdata.tables[table_layer][polygons.index, :].X[
+                    :, np.where(sdata.tables[table_layer].var.index == column)[0][0]
+                ]
             else:
                 log.info(
-                    f"The column '{column}' is not a column in the dataframe sdata.table.obs, "
-                    "nor is it a gene name (sdata.table.var.index). The plot is made without taking into account this value."
+                    f"The column '{column}' is not a column in the dataframe 'sdata.tables[{table_layer}].obs', "
+                    f"nor is it a gene name (sdata.tables[{table_layer}].var.index). The plot is made without taking into account this value."
                 )
                 column = None
                 cmap = None

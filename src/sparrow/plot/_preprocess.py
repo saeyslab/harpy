@@ -8,10 +8,12 @@ from spatialdata import SpatialData
 from sparrow.utils._keys import _CELLSIZE_KEY
 
 
-def preprocess_transcriptomics(sdata: SpatialData, output: Optional[str] = None) -> None:
+def preprocess_transcriptomics(
+    sdata: SpatialData, table_layer: str = "table_transcriptomics", output: Optional[str] = None
+) -> None:
     """Function plots the size of the nucleus/cell related to the counts."""
     sc.pl.pca(
-        sdata.table,
+        sdata.tables[table_layer],
         color="total_counts",
         show=False,
         title="PC plot colored by total counts",
@@ -23,7 +25,7 @@ def preprocess_transcriptomics(sdata: SpatialData, output: Optional[str] = None)
         plt.show()
     plt.close()
     sc.pl.pca(
-        sdata.table,
+        sdata.tables[table_layer],
         color=_CELLSIZE_KEY,
         show=False,
         title="PC plot colored by object size",
@@ -36,8 +38,8 @@ def preprocess_transcriptomics(sdata: SpatialData, output: Optional[str] = None)
     plt.close()
 
     fig, axs = plt.subplots(1, 2, figsize=(15, 4))
-    sns.histplot(sdata.table.obs["total_counts"], kde=False, ax=axs[0])
-    sns.histplot(sdata.table.obs["n_genes_by_counts"], kde=False, bins=55, ax=axs[1])
+    sns.histplot(sdata.tables[table_layer].obs["total_counts"], kde=False, ax=axs[0])
+    sns.histplot(sdata.tables[table_layer].obs["n_genes_by_counts"], kde=False, bins=55, ax=axs[1])
     if output:
         plt.savefig(output + "_histogram.png")
     else:
@@ -45,7 +47,7 @@ def preprocess_transcriptomics(sdata: SpatialData, output: Optional[str] = None)
     plt.close()
 
     fig, ax = plt.subplots()
-    plt.scatter(sdata.table.obs[_CELLSIZE_KEY], sdata.table.obs["total_counts"])
+    plt.scatter(sdata.tables[table_layer].obs[_CELLSIZE_KEY], sdata.tables[table_layer].obs["total_counts"])
     ax.set_title(f"{_CELLSIZE_KEY} vs Transcripts Count")
     ax.set_xlabel(_CELLSIZE_KEY)
     ax.set_ylabel("Total Counts")

@@ -685,7 +685,7 @@ class SegmentationModelPoints(SegmentationModel):
             # we write to points layer,
             # otherwise we would need to do this query again for every chunk we process later on
             # TODO should we do a persist here for the _ddf if sdata is not backed by .zarr store? Probably yes
-            _crd_points_layer = f"{points_layer}_{'_'.join(str(item) for item in _crd_points)}"
+            _crd_points_layer = f"{points_layer}_{'_'.join(str(int( item )) for item in _crd_points)}"
 
             sdata = _add_transcripts_to_sdata(
                 sdata,

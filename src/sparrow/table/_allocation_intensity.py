@@ -7,7 +7,6 @@ import anndata as ad
 import dask.array as da
 import numpy as np
 import pandas as pd
-import spatialdata
 from anndata import AnnData
 from dask import delayed
 from dask.array import Array, unique
@@ -15,6 +14,7 @@ from numpy.typing import NDArray
 from spatialdata import SpatialData
 
 from sparrow.image._image import _get_spatial_element, _get_translation
+from sparrow.table._table import _add_table_layer
 from sparrow.utils._keys import _CELL_INDEX, _INSTANCE_KEY, _REGION_KEY
 from sparrow.utils.pylogger import get_pylogger
 
@@ -25,13 +25,15 @@ def allocate_intensity(
     sdata: SpatialData,
     img_layer: str | None = None,
     labels_layer: str | None = None,
+    output_layer: str = "table_intensities",
     channels: int | str | Iterable[int] | Iterable[str] | None = None,
     chunks: str | int | tuple[int, ...] | None = 10000,
     append: bool = False,
     remove_background_intensity: bool = True,
+    overwrite: bool = True,
 ) -> SpatialData:
     """
-    Allocates intensity values from a specified image layer to corresponding cells in a SpatialData object and returns an updated SpatialData object with an attached table attribute containing the AnnData object with intensity values for each cell and each (specified) channel.
+    Allocates intensity values from a specified image layer to corresponding cells in a SpatialData object and returns an updated SpatialData object augmented with a table layer (`sdata.tables[output_layer]`) AnnData object with intensity values for each cell and each (specified) channel.
 
     It requires that the image layer and the labels layer have the same shape and alignment.
 
@@ -46,6 +48,8 @@ def allocate_intensity(
     labels_layer : str, optional
         The name of the layer in `sdata` containing the labels (segmentation) used to define the boundaries of cells.
         These labels correspond with regions in the `img_layer`. If not provided, will use last labels_layer.
+    output_layer: str, optional
+        The table layer in `sdata` in which to save the AnnData object with the intensity values per cell.
     channels : int or str or Iterable[int] or Iterable[str], optional
         Specifies the channels to be considered when extracting intensity information from the `img_layer`.
         This parameter can take a single integer or string or an iterable of integers or strings representing specific channels.
@@ -53,17 +57,18 @@ def allocate_intensity(
     chunks : str | int | tuple[int, ...], optional
         The chunk size for processing the image data.
     append: bool, optional.
-        If set to True, and the `labels_layer` does not yet exist as an `_INSTANCE_KEY` in `sdata.table.obs`,
+        If set to True, and the `labels_layer` does not yet exist as a `_REGION_KEY` in `sdata.tables[output_layer].obs`,
         the intensity values extracted during the current function call will be appended (along axis=0) to any existing intensity data
-        within the SpatialData object's table attribute. If False, any existing data in `sdata.table` will be overwritten by the newly extracted intensity values.
+        within the SpatialData object's table attribute. If False, and overwrite is set to True any existing data in `sdata.tables[output_layer]` will be overwritten by the newly extracted intensity values.
     remove_background_intensity: bool, optional.
-        If set to True, the calculated intensity for the background (INSTANCE_KEY==0) will not be added to `sdata.table`.
+        If set to True, the calculated intensity for the background (INSTANCE_KEY==0) will not be added to `sdata.tables[output_layer]`.
+    overwrite : bool, default=False
+        If True, overwrites the `output_layer` if it already exists in `sdata`.
 
     Returns
     -------
     SpatialData
-        An updated version of the input SpatialData object. The updated object includes a 'table' attribute
-        containing an AnnData object with intensity values for each cell across the channels in the `img_layer`.
+        An updated version of the input SpatialData object augmented with a table layer (`sdata.tables[output_layer]`) AnnData object.
 
     Notes
     -----
@@ -89,11 +94,19 @@ def allocate_intensity(
     ... )
     >>>
     >>> sdata = sp.tb.allocate_intensity(
-    ...     sdata, img_layer="raw_image", labels_layer="masks_whole", chunks=100
+    ...     sdata, img_layer="raw_image", labels_layer="masks_whole", output_layer="table_intensities", chunks=100
     ... )
     >>>
     >>> sdata = sp.tb.allocate_intensity(
-    ...     sdata, img_layer="raw_image", labels_layer="masks_nuclear_aligned", chunks=100, append=True
+    ...     sdata, img_layer="raw_image", labels_layer="masks_nuclear_aligned", output_later="table_intensities", chunks=100, append=True
+    ... )
+    >>> # alternatively, save to different tables
+    >>> sdata = sp.tb.allocate_intensity(
+    ...     sdata, img_layer="raw_image", labels_layer="masks_whole", output_layer="table_intensities_masks_whole", chunks=100
+    ... )
+    >>>
+    >>> sdata = sp.tb.allocate_intensity(
+    ...     sdata, img_layer="raw_image", labels_layer="masks_nuclear_aligned", output_later="table_intensities_masks_nuclear_aligned", chunks=100, append=True
     ... )
     """
     if img_layer is None:
@@ -160,28 +173,27 @@ def allocate_intensity(
     if remove_background_intensity:
         adata = adata[adata.obs[_INSTANCE_KEY] != 0]
 
-    if sdata.table is None:
-        sdata.table = spatialdata.models.TableModel.parse(
-            adata,
-            region_key=_REGION_KEY,
-            region=[labels_layer],
-            instance_key=_INSTANCE_KEY,
-        )
-        return sdata
-
     if append:
-        if labels_layer in sdata.table.obs[_REGION_KEY]:
-            raise ValueError(f"labels_layer '{labels_layer}' already exists as region in the `sdata` object.")
-        adata = ad.concat([sdata.table, adata], axis=0)
-        # get the regions already in sdata, and append the new one
-        region = sdata.table.obs[_REGION_KEY].cat.categories.to_list()
+        region = []
+        if output_layer in [*sdata.tables]:
+            if labels_layer in sdata.tables[output_layer].obs[_REGION_KEY].cat.categories:
+                raise ValueError(
+                    f"'{labels_layer}' already exists as a region in the 'sdata.tables[{output_layer}]' object. Please choose a different labels layer, choose a different 'output_layer' or set append to False and overwrite to True to overwrite the existing table."
+                )
+            adata = ad.concat([sdata.tables[output_layer], adata], axis=0)
+            # get the regions already in sdata, and append the new one
+            region = sdata.tables[output_layer].obs[_REGION_KEY].cat.categories.to_list()
         region.append(labels_layer)
+
     else:
         region = [labels_layer]
 
-    del sdata.table
-    sdata.table = spatialdata.models.TableModel.parse(
-        adata, region_key=_REGION_KEY, region=region, instance_key=_INSTANCE_KEY
+    sdata = _add_table_layer(
+        sdata,
+        adata=adata,
+        output_layer=output_layer,
+        region=region,
+        overwrite=overwrite,
     )
 
     return sdata

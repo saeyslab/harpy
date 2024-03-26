@@ -310,7 +310,7 @@ class SparrowPipeline:
             sdata,
             path_count_matrix=self.cfg.dataset.coords,
             path_transform_matrix=self.cfg.dataset.transform_matrix,
-            points_layer=self.cfg.allocate.points_layer_name,
+            output_layer=self.cfg.allocate.points_layer_name,
             overwrite=self.cfg.allocate.overwrite,
             delimiter=self.cfg.allocate.delimiter,
             header=self.cfg.allocate.header,
