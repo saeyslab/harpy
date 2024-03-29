@@ -59,6 +59,8 @@ def test_integration_allocate_intensity(sdata_multi_c: SpatialData):
 
     assert isinstance(sdata_multi_c.tables["table_intensities"], AnnData)
 
+    assert sdata_multi_c.tables["table_intensities"].shape == (1299, 22)
+
 
 def test_allocate_intensity(sdata_multi_c: SpatialData):
     sdata_multi_c = allocate_intensity(
