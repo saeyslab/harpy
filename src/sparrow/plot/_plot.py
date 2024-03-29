@@ -519,6 +519,7 @@ def _plot(
 
     if polygons is not None and column is not None:
         if not polygons.empty:
+            # TODO: could be that polygons contains more elements thant adata_view. So probably need to filter in that direction, but with raising a warning
             mask = sdata.tables[table_layer].obs[_INSTANCE_KEY].isin(set(polygons.index.astype(int)))
             adata_view = sdata.tables[table_layer][mask]
             # sort both adata and polygons on _INSTANCE_KEY

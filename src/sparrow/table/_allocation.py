@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import itertools
+import uuid
 from collections import namedtuple
 
+import anndata as ad
 import dask
 import dask.array as da
 import dask.dataframe as dd
@@ -30,6 +32,7 @@ def allocate(
     output_layer: str = "table_transcriptomics",
     allocate_from_shapes_layer: bool = True,
     chunks: str | tuple[int, ...] | int | None = 10000,
+    append: bool = False,
     overwrite: bool = True,
 ) -> SpatialData:
     """
@@ -58,6 +61,10 @@ def allocate(
         Consider setting the chunks to a relatively high value to speed up processing
         (>10000, or only chunk in z-dimension if data is 3D, and one z-slice fits in memory),
         taking into account the available memory of your system.
+    append: bool, optional.
+        If set to True, and the `labels_layer` does not yet exist as a `_REGION_KEY` in `sdata.tables[output_layer].obs`,
+        the transcripts counts obtained during the current function call will be appended (along axis=0) to any existing transcript count values.
+        within the SpatialData object's table attribute. If False, and overwrite is set to True any existing data in `sdata.tables[output_layer]` will be overwritten by the newly extracted transcripts counts.
     overwrite : bool, default=False
         If True, overwrites the `output_layer` if it already exists in `sdata`.
 
@@ -209,20 +216,38 @@ def allocate(
     log.info("Creating AnnData object.")
 
     # Create the anndata object
-    cell_counts.index = cell_counts.index.map(str)
-    adata = AnnData(cell_counts[cell_counts.index != "0"])
-    coordinates.index = coordinates.index.map(str)
-    adata.obsm["spatial"] = coordinates[coordinates.index != "0"].values
-    adata.obs[_INSTANCE_KEY] = adata.obs.index.astype(int)
+    _cells_id = cell_counts.index.astype(int)  # index of cell_counts should already be an int
+    _uuid_value = str(uuid.uuid4())[:8]
+    cell_counts.index = cell_counts.index.map(lambda x: f"{x}_{labels_layer}_{_uuid_value}")
+    cell_counts.index.name = _CELL_INDEX
 
-    # currently only support adding only one field of view
+    adata = AnnData(cell_counts)
+    adata.obs[_INSTANCE_KEY] = _cells_id
     adata.obs[_REGION_KEY] = pd.Categorical([labels_layer] * len(adata.obs))
+    adata = adata[adata.obs[_INSTANCE_KEY] != 0]
+
+    adata.obsm["spatial"] = coordinates[coordinates.index != 0].values
+
+    if append:
+        region = []
+        if output_layer in [*sdata.tables]:
+            if labels_layer in sdata.tables[output_layer].obs[_REGION_KEY].cat.categories:
+                raise ValueError(
+                    f"'{labels_layer}' already exists as a region in the 'sdata.tables[{output_layer}]' object. Please choose a different labels layer, choose a different 'output_layer' or set append to False and overwrite to True to overwrite the existing table."
+                )
+            adata = ad.concat([sdata.tables[output_layer], adata], axis=0)
+            # get the regions already in sdata, and append the new one
+            region = sdata.tables[output_layer].obs[_REGION_KEY].cat.categories.to_list()
+        region.append(labels_layer)
+
+    else:
+        region = [labels_layer]
 
     sdata = _add_table_layer(
         sdata,
         adata=adata,
         output_layer=output_layer,
-        region=[labels_layer],
+        region=region,
         overwrite=overwrite,
     )
 

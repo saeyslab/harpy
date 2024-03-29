@@ -690,7 +690,7 @@ class SegmentationModelPoints(SegmentationModel):
             sdata = _add_transcripts_to_sdata(
                 sdata,
                 ddf=_ddf,
-                points_layer=_crd_points_layer,
+                output_layer=_crd_points_layer,
                 coordinates=coordinates,
                 overwrite=True,
             )

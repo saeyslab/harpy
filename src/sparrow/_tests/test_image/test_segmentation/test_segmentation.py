@@ -74,7 +74,7 @@ def test_segment_points(sdata_multi_c: SpatialData):
     sdata_multi_c = _add_transcripts_to_sdata(
         sdata_multi_c,
         ddf=ddf,
-        points_layer="transcripts",
+        output_layer="transcripts",
         coordinates=coordinates,
         overwrite=False,
     )

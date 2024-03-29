@@ -12,11 +12,11 @@ from multiscale_spatial_image.multiscale_spatial_image import MultiscaleSpatialI
 from spatial_image import SpatialImage
 from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
-from spatialdata.transformations import BaseTransformation, Identity, Translation
 from spatialdata.transformations._utils import (
     _get_transformations,
     _get_transformations_xarray,
 )
+from spatialdata.transformations.transformations import BaseTransformation, Identity, Translation
 from xarray import DataArray
 
 from sparrow.image._manager import ImageLayerManager, LabelLayerManager

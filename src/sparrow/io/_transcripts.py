@@ -8,6 +8,7 @@ import spatialdata
 from dask.dataframe.core import DataFrame as DaskDataFrame
 from spatialdata import SpatialData, read_zarr
 
+from sparrow.utils._io import _incremental_io_on_disk
 from sparrow.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
@@ -290,7 +291,7 @@ def read_transcripts(
     sdata = _add_transcripts_to_sdata(
         sdata,
         ddf=transformed_ddf,
-        points_layer=output_layer,
+        output_layer=output_layer,
         coordinates=coordinates,
         overwrite=overwrite,
     )
@@ -301,7 +302,7 @@ def read_transcripts(
 def _add_transcripts_to_sdata(
     sdata: SpatialData,
     ddf: DaskDataFrame,
-    points_layer: str,
+    output_layer: str,
     coordinates: dict[str, str],
     overwrite: bool = True,
 ):
@@ -310,24 +311,25 @@ def _add_transcripts_to_sdata(
         coordinates=coordinates,
     )
 
-    if points_layer in [*sdata.points]:
-        if overwrite:
-            log.warning(f"Points layer with name '{points_layer}' already exists. Overwriting...")
-            element_type = sdata._element_type_from_element_name(points_layer)
-            del getattr(sdata, element_type)[points_layer]
-            if sdata.is_backed():
-                sdata.delete_element_from_disk(points_layer)
-        else:
-            if sdata.is_backed():
-                raise ValueError(
-                    f"Attempting to overwrite sdata.points[{points_layer}], but overwrite is set to False. Set overwrite to True to overwrite the .zarr store."
-                )
+    # we persist points if sdata is not backed.
+    if not sdata.is_backed():
+        points = points.persist()
 
-    if sdata.is_backed():
-        sdata.points[points_layer] = points
-        sdata.write_element(points_layer, overwrite=overwrite)
-        sdata = read_zarr(sdata.path)
+    if output_layer in [*sdata.points]:
+        if sdata.is_backed():
+            if overwrite:
+                sdata = _incremental_io_on_disk(sdata, output_layer=output_layer, element=points)
+            else:
+                raise ValueError(
+                    f"Attempting to overwrite sdata.points[{output_layer}], but overwrite is set to False. Set overwrite to True to overwrite the .zarr store."
+                )
+        else:
+            sdata[output_layer] = points
+
     else:
-        sdata.points[points_layer] = points.persist()
+        sdata[output_layer] = points
+        if sdata.is_backed():
+            sdata.write_element(output_layer)
+            sdata = read_zarr(sdata.path)
 
     return sdata

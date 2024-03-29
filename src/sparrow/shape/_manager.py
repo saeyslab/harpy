@@ -17,6 +17,7 @@ from spatialdata import SpatialData, read_zarr
 from spatialdata.transformations import Identity, Translation
 
 from sparrow.image._image import _get_translation_values
+from sparrow.utils._io import _incremental_io_on_disk
 from sparrow.utils._keys import _INSTANCE_KEY
 from sparrow.utils.pylogger import get_pylogger
 
@@ -134,7 +135,6 @@ class ShapesLayerManager:
             return polygons
         elif dimension == 2:
             polygons = _mask_image_to_polygons(input)
-            print(polygons.shape)
             return _mask_image_to_polygons(input)
 
     @get_polygons_from_input.register(GeoDataFrame)
@@ -187,24 +187,22 @@ class ShapesLayerManager:
         spatial_element: GeoDataFrame,
         overwrite: bool = False,
     ) -> SpatialData:
+        # given a spatial_element
         if output_layer in [*sdata.shapes]:
-            if overwrite:
-                log.warning(f"Shapes layer with name '{output_layer}' already exists. Overwriting...")
-                element_type = sdata._element_type_from_element_name(output_layer)
-                del getattr(sdata, element_type)[output_layer]
-                if sdata.is_backed():
-                    sdata.delete_element_from_disk(output_layer)
-            else:
-                if sdata.is_backed():
+            if sdata.is_backed():
+                if overwrite:
+                    sdata = _incremental_io_on_disk(sdata, output_layer=output_layer, element=spatial_element)
+                else:
                     raise ValueError(
                         f"Attempting to overwrite sdata.shapes[{output_layer}], but overwrite is set to False. Set overwrite to True to overwrite the .zarr store."
                     )
-
-        sdata.shapes[output_layer] = spatial_element
-
-        if sdata.is_backed():
-            sdata.write_element(output_layer, overwrite=overwrite)
-            sdata = read_zarr(sdata.path)
+            else:
+                sdata[output_layer] = spatial_element
+        else:
+            sdata[output_layer] = spatial_element
+            if sdata.is_backed():
+                sdata.write_element(output_layer)
+                sdata = read_zarr(sdata.path)
 
         return sdata
 
