@@ -251,7 +251,9 @@ def allocate(
         overwrite=overwrite,
     )
 
-    indexes_to_keep = sdata.tables[output_layer].obs[_INSTANCE_KEY].values.astype(int)
+    mask = sdata.tables[output_layer].obs[_REGION_KEY].isin(region)
+    indexes_to_keep = sdata.tables[output_layer].obs[mask][_INSTANCE_KEY].values.astype(int)
+
     sdata = _filter_shapes_layer(
         sdata,
         indexes_to_keep=indexes_to_keep,

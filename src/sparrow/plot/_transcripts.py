@@ -12,6 +12,7 @@ from spatialdata import SpatialData
 
 from sparrow.image._image import _get_boundary, _get_spatial_element
 from sparrow.plot import plot_shapes
+from sparrow.utils._keys import _REGION_KEY
 from sparrow.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
@@ -42,6 +43,7 @@ def analyse_genes_left_out(
         This layer is used to calculate the crd (region of interest) that was used in the segmentation step,
         otherwise transcript counts in `points_layer` of `sdata` (containing all transcripts)
         and the counts obtained via `sdata.tables[ table_layer ]` are not comparable.
+        It is also used to select the cells in `sdata.tables[table_layer]` that are linked to this `labels_layer` via the _REGION_KEY.
     name_x : str, optional
         The column name representing the x-coordinate in `points_layer`, by default "x".
     name_y : str, optional
@@ -99,13 +101,15 @@ def analyse_genes_left_out(
     se = _get_spatial_element(sdata, layer=labels_layer)
     crd = _get_boundary(se)
 
+    adata = sdata.tables[table_layer][sdata.tables[table_layer].obs[_REGION_KEY] == labels_layer]
+
     ddf = sdata.points[points_layer]
 
     ddf = ddf.query(f"{crd[0]} <= {name_x} < {crd[1]} and {crd[2]} <= {name_y} < {crd[3]}")
 
-    raw_counts = ddf.groupby(name_gene_column).size().compute()[sdata.tables[table_layer].var.index]
+    raw_counts = ddf.groupby(name_gene_column).size().compute()[adata.var.index]
 
-    filtered = pd.DataFrame(sdata.tables[table_layer].X.sum(axis=0) / raw_counts)
+    filtered = pd.DataFrame(adata.X.sum(axis=0) / raw_counts)
 
     filtered = filtered.rename(columns={0: "proportion_kept"})
     filtered["raw_counts"] = raw_counts

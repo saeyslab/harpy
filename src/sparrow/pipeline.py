@@ -328,6 +328,8 @@ class SparrowPipeline:
             sdata=sdata,
             labels_layer=self.labels_layer_name,
             shapes_layer=self.shapes_layer_name,
+            allocate_from_shapes_layer=True,
+            output_layer=self.cfg.allocate.table_layer_name,
         )
 
         log.info("Allocation finished.")
@@ -345,25 +347,30 @@ class SparrowPipeline:
         sp.pl.analyse_genes_left_out(
             sdata,
             labels_layer=self.labels_layer_name,
+            table_layer=self.cfg.allocate.table_layer_name,
             output=self.cfg.paths.analyse_genes_left_out,
         )
 
         log.info("Preprocess AnnData.")
 
-        # Perform normalization based on size + all cells with less than 10 genes and all genes with less than 5 cells are removed.
+        # Perform preprocessing.
         sdata = sp.tb.preprocess_transcriptomics(
             sdata,
             labels_layer=self.labels_layer_name,
+            table_layer=self.cfg.allocate.table_layer_name,
+            output_layer=self.cfg.allocate.table_layer_name,
             min_counts=self.cfg.allocate.min_counts,
             min_cells=self.cfg.allocate.min_cells,
             size_norm=self.cfg.allocate.size_norm,
             n_comps=self.cfg.allocate.n_comps,
+            overwrite=True,
         )
 
         log.info("Preprocessing AnnData finished.")
 
         sp.pl.preprocess_transcriptomics(
             sdata,
+            table_layer=self.cfg.allocate.table_layer_name,
             output=self.cfg.paths.preprocess_adata,
         )
 
@@ -371,6 +378,7 @@ class SparrowPipeline:
             sdata,
             img_layer=self.cleaned_image_name,
             shapes_layer=self.shapes_layer_name,
+            table_layer=self.cfg.allocate.table_layer_name,
             crd=self.cfg.segmentation.small_size_vis
             if self.cfg.segmentation.small_size_vis is not None
             else self.cfg.clean.small_size_vis,
@@ -383,14 +391,19 @@ class SparrowPipeline:
         # Filter all cells based on size and distance
         sdata = sp.tb.filter_on_size(
             sdata,
+            labels_layer=self.labels_layer_name,
+            table_layer=self.cfg.allocate.table_layer_name,
+            output_layer=self.cfg.allocate.table_layer_name,
             min_size=self.cfg.allocate.min_size,
             max_size=self.cfg.allocate.max_size,
+            overwrite=True,
         )
 
         sp.pl.plot_shapes(
             sdata,
             img_layer=self.cleaned_image_name,
             shapes_layer=self.shapes_layer_name,
+            table_layer=self.cfg.allocate.table_layer_name,
             crd=self.cfg.segmentation.small_size_vis
             if self.cfg.segmentation.small_size_vis is not None
             else self.cfg.clean.small_size_vis,

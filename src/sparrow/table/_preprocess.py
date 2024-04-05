@@ -1,6 +1,6 @@
 from collections import defaultdict
 from types import MappingProxyType
-from typing import Any, Mapping, Optional
+from typing import Any, Iterable, Mapping, Optional
 
 import dask
 import numpy as np
@@ -12,7 +12,7 @@ from spatialdata import SpatialData
 from sparrow.image._image import _get_spatial_element
 from sparrow.shape._shape import _filter_shapes_layer
 from sparrow.table._table import ProcessTable, _add_table_layer
-from sparrow.utils._keys import _CELL_INDEX, _CELLSIZE_KEY, _INSTANCE_KEY
+from sparrow.utils._keys import _CELL_INDEX, _CELLSIZE_KEY, _INSTANCE_KEY, _REGION_KEY
 from sparrow.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
@@ -20,7 +20,7 @@ log = get_pylogger(__name__)
 
 def preprocess_transcriptomics(
     sdata: SpatialData,
-    labels_layer: str,
+    labels_layer: str | Iterable[str],
     table_layer: str,
     output_layer: str,
     min_counts: int = 10,
@@ -28,10 +28,11 @@ def preprocess_transcriptomics(
     size_norm: bool = True,
     max_value_scale: int = 10,
     n_comps: int = 50,
-    overwrite: bool = True,
+    overwrite: bool = False,
+    # TODO: add update_shapes_layer as parameter
 ) -> SpatialData:
     """
-    Preprocess the table (AnnData) attribute of a SpatialData object for transcriptomics data.
+    Preprocess a table (AnnData) attribute of a SpatialData object for transcriptomics data.
 
     Performs filtering (via `scanpy.pp.filter_cells` and `scanpy.pp.filter_genes` ) and optional normalization (on size or via `scanpy.sc.pp.normalize_total`), log transformation, scaling, and PCA calculation for transcriptomics data
     contained in the `sdata`. qc metrics are added to `sdata.tables[output_layer].obs` using `scanpy.pp.calculate_qc_metrics`.
@@ -40,8 +41,8 @@ def preprocess_transcriptomics(
     ----------
     sdata : SpatialData
         The input SpatialData object.
-    labels_layer : str
-        The labels layer of `sdata` used to select the cells via the _REGION_KEY.
+    labels_layer : str or Iterable[str]
+        The labels layer(s) of `sdata` used to select the cells via the _REGION_KEY.
         Note that if `output_layer` is equal to `table_layer` and overwrite is True,
         cells in `sdata.tables[table_layer]` linked to other `labels_layer` (via the _REGION_KEY), will be removed from `sdata.tables[table_layer]`
         (also from the backing zarr store if it is backed).
@@ -72,7 +73,7 @@ def preprocess_transcriptomics(
     ValueError
         - If `sdata` does not have labels attribute.
         - If `sdata` does not have tables attribute.
-        - If `labels_layer` is not a labels layer in `sdata`.
+        - If `labels_layer`, or one of the element of `labels_layer` is not a labels layer in `sdata`.
         - If `table_layer` is not a table layer in `sdata`.
 
 
@@ -105,7 +106,7 @@ def preprocess_transcriptomics(
 
 def preprocess_proteomics(
     sdata: SpatialData,
-    labels_layer: str,
+    labels_layer: str | Iterable[str],
     table_layer: str,
     output_layer: str,
     size_norm: bool = True,
@@ -114,10 +115,10 @@ def preprocess_proteomics(
     max_value_scale: float = 10,
     calculate_pca: bool = False,
     n_comps: int = 50,
-    overwrite: bool = True,
+    overwrite: bool = False,
 ) -> SpatialData:
     """
-    Preprocess the table (AnnData) attribute of a SpatialData object for proteomics data.
+    Preprocess a table (AnnData) attribute of a SpatialData object for proteomics data.
 
     Performs optional normalization (on size or via `scanpy.sc.pp.normalize_total`), log transformation, scaling, and PCA calculation for proteomics data
     contained in the `sdata`.
@@ -127,9 +128,11 @@ def preprocess_proteomics(
     ----------
     sdata : SpatialData
         The input SpatialData object.
-    labels_layer : str
-        The labels layer of `sdata` used to select the cells via the _REGION_KEY.
-        Note that if `output_layer` is equal to `table_layer` and overwrite is True, cells in `sdata.tables[table_layer]` linked to other `labels_layer` (via the _REGION_KEY), will be removed from `sdata.tables[table_layer]`.
+    labels_layer : str or Iterable[str]
+        The labels layer(s) of `sdata` used to select the cells via the _REGION_KEY.
+        Note that if `output_layer` is equal to `table_layer` and overwrite is True,
+        cells in `sdata.tables[table_layer]` linked to other `labels_layer` (via the _REGION_KEY), will be removed from `sdata.tables[table_layer]`.
+        If a list of labels layers is provided, they will therefore be preprocessed together (e.g. multiple samples).
     table_layer: str, optional
         The table layer in `sdata` on which to perform preprocessing on.
     output_layer: str, optional
@@ -159,7 +162,7 @@ def preprocess_proteomics(
     ValueError
         - If `sdata` does not contains any labels layers.
         - If `sdata` does not contain any table layers.
-        - If `labels_layer` is not a labels layer in `sdata`.
+        - If `labels_layer`, or one of the element of `labels_layer` is not a labels layer in `sdata`.
         - If `table_layer` is not a table layer in `sdata`.
 
     Warnings
@@ -221,15 +224,22 @@ class Preprocess(ProcessTable):
             sc.pp.filter_genes(adata, **filter_genes_kwargs)
 
         if calculate_cell_size:
-            log.info(f"Calculating cell size from provided labels_layer '{self.labels_layer}'")
-            se = _get_spatial_element(self.sdata, layer=self.labels_layer)
-            shapesize = _get_mask_area(se.data)
             # we do not want to loose the index (_CELL_INDEX)
+            old_index = adata.obs.index
             if _CELLSIZE_KEY in adata.obs.columns:
                 log.warning(f"Column with name '{_CELLSIZE_KEY}' already exists. Removing column '{_CELLSIZE_KEY}'.")
                 adata.obs = adata.obs.drop(columns=_CELLSIZE_KEY)
-            old_index = adata.obs.index
-            adata.obs = pd.merge(adata.obs.reset_index(), shapesize, on=_INSTANCE_KEY, how="left")
+            for i, _labels_layer in enumerate(self.labels_layer):
+                log.info(f"Calculating cell size from provided labels_layer '{_labels_layer}'")
+                se = _get_spatial_element(self.sdata, layer=_labels_layer)
+                _shapesize = _get_mask_area(se.data)
+                _shapesize[_REGION_KEY] = _labels_layer
+                if i == 0:
+                    shapesize = _shapesize
+                else:
+                    shapesize = pd.concat([shapesize, _shapesize], ignore_index=True)
+            # note that we checked that adata.obs[ _INSTANCE_KEY ] is unique for given region (see self._get_adata())
+            adata.obs = pd.merge(adata.obs.reset_index(), shapesize, on=[_INSTANCE_KEY, _REGION_KEY], how="left")
             adata.obs.index = old_index
             adata.obs = adata.obs.drop(columns=[_CELL_INDEX])
 
@@ -265,13 +275,13 @@ class Preprocess(ProcessTable):
             self.sdata,
             adata=adata,
             output_layer=output_layer,
-            region=[self.labels_layer],  # we only keep one region after preprocessing
+            region=self.labels_layer,
             overwrite=overwrite,
         )
 
-        indexes_to_keep = self.sdata.tables[output_layer].obs[_INSTANCE_KEY].values.astype(int)
-
         if update_shapes_layers:
+            mask = self.sdata.tables[output_layer].obs[_REGION_KEY].isin(self.labels_layer)
+            indexes_to_keep = self.sdata.tables[output_layer].obs[mask][_INSTANCE_KEY].values.astype(int)
             self.sdata = _filter_shapes_layer(
                 self.sdata,
                 indexes_to_keep=indexes_to_keep,
