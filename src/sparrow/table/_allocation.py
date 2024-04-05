@@ -36,26 +36,26 @@ def allocate(
     overwrite: bool = True,
 ) -> SpatialData:
     """
-    Allocates transcripts to cells via provided shapes_layer and points_layer and returns updated SpatialData augmented with a table layer (`sdata.tables[output_layer]`) holding the AnnData object with cell counts.
+    Allocates transcripts to cells via provided shapes_layer/labels_layer and points_layer and returns updated SpatialData augmented with a table layer (`sdata.tables[output_layer]`) holding the AnnData object with cell counts.
 
     Parameters
     ----------
     sdata : SpatialData
         The SpatialData object.
     labels_layer : str, optional
-        The layer in `sdata` that contains the masks corresponding to the shapes layer
-        (possibly before performing operation on the shapes layer, such as calculating voronoi expansion).
-        Only used for determining offset if `allocate_from_shapes_layer` is True.
+        The labels layer (i.e. segmentation mask) in `sdata` to be used to allocate the transcripts to cells.
+        If `allocate_from_shapes_layer` is True, it should have same offset as the provided `shapes_layer`,
+        and it will only be used for determining this offset.
     shapes_layer : str, optional
         The layer in `sdata` that contains the boundaries of the segmentation mask, by default "segmentation_mask_boundaries".
-        Required if `allocate_from_shapes_layer` is True.
+        Required if `allocate_from_shapes_layer` is True, else it will be ignored.
     points_layer: str, optional
         The points layer in `sdata` that contains the transcripts.
     output_layer: str, optional
         The table layer in `sdata` in which to save the AnnData object with the transcripts counts per cell.
     allocate_from_shapes_layer: bool, optional
         Whether to allocate transcripts using `shapes_layer` or `labels_layer`.
-        Only supported if `shapes_layer` contains 2D polygons.
+        Only supported for `shapes_layer` that contain 2D polygons.
     chunks : Optional[str | int | tuple[int, ...]], default=10000
         Chunk sizes for processing. Can be a string, integer or tuple of integers.
         Consider setting the chunks to a relatively high value to speed up processing

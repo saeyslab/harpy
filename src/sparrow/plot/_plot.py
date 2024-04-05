@@ -519,7 +519,6 @@ def _plot(
 
     if polygons is not None and column is not None:
         if not polygons.empty:
-            # TODO: could be that polygons contains more elements thant adata_view. So probably need to filter in that direction, but with raising a warning
             mask = sdata.tables[table_layer].obs[_INSTANCE_KEY].isin(set(polygons.index.astype(int)))
             adata_view = sdata.tables[table_layer][mask]
             # sort both adata and polygons on _INSTANCE_KEY
@@ -544,6 +543,14 @@ def _plot(
             # sort polygons (their index corresponds to the _INSTANCE_KEY):
             polygons.index = polygons.index.astype(int)
             polygons = polygons.sort_index()
+
+            # could be that polygons contains more elements than adata_view. So we also filter in that direction, but with raising a warning
+            mask_polygons = polygons.index.isin(adata_view.obs[_INSTANCE_KEY])
+            if mask_polygons.any():
+                log.warning(
+                    f"There are '{sum( ~mask_polygons )}' cells in provided shapes_layer '{shapes_layer}' not found in 'sdata.tables[{table_layer}]' (linked through '{_INSTANCE_KEY}'), these cells will not be plotted."
+                )
+                polygons = polygons[mask_polygons]
 
             if column + "_colors" in adata_view.uns:
                 cmap = matplotlib.colors.LinearSegmentedColormap.from_list(

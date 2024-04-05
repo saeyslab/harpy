@@ -311,7 +311,7 @@ def _mask_image_to_polygons(mask: Array, z_slice: int = None) -> GeoDataFrame:
     # Create a GeoDataFrame from the extracted polygons and values
     gdf = geopandas.GeoDataFrame({"geometry": all_polygons, _INSTANCE_KEY: all_values})
 
-    # TODO. If extra column supported in a shapes layer of a SpatialData object, we should add _INSTANCE_KEY as a column to the shapes.
+    # TODO. If extra column supported in a shapes layer of a SpatialData object, we could think about adding _INSTANCE_KEY as a column to the shapes.
     # Combine polygons that are actually pieces of the same cell back together.
     # (These pieces of same cell got written to different chunks by dask, needed for parallel processing.)
     gdf = gdf.dissolve(by=_INSTANCE_KEY)

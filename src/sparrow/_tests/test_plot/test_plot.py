@@ -74,3 +74,31 @@ def test_plot_shapes(sdata_multi_c, tmp_path):
             region=None,
             output=os.path.join(tmp_path, "shapes_masks_whole"),
         )
+
+
+def test_plot_shapes_transcriptomics(sdata_transcripts, tmp_path):
+    sdata_transcripts = _add_shapes_layer(
+        sdata_transcripts,
+        input=sdata_transcripts.labels["segmentation_mask"].data,
+        output_layer="segmentation_mask_boundaries",
+        overwrite=True,
+    )
+
+    plot_shapes(
+        sdata_transcripts,
+        img_layer="raw_image",
+        shapes_layer="segmentation_mask_boundaries",
+        table_layer="table_transcriptomics",
+        region="segmentation_mask",
+        output=os.path.join(tmp_path, "shapes_segmentation_mask"),
+    )
+
+    plot_shapes(
+        sdata_transcripts,
+        img_layer="raw_image",
+        shapes_layer="segmentation_mask_boundaries",
+        column="cell_ID",
+        table_layer="table_transcriptomics",
+        region="segmentation_mask",
+        output=os.path.join(tmp_path, "shapes_segmentation_mask_cell_ID"),
+    )
