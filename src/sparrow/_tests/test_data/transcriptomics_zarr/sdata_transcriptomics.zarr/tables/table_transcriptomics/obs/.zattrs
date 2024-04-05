@@ -1,0 +1,9 @@
+{
+    "_index": "cells",
+    "column-order": [
+        "cell_ID",
+        "fov_labels"
+    ],
+    "encoding-type": "dataframe",
+    "encoding-version": "0.2.0"
+}
