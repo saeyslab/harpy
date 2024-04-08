@@ -418,6 +418,8 @@ class SparrowPipeline:
         sdata = sp.tb.leiden(
             sdata,
             labels_layer=self.labels_layer_name,
+            table_layer=self.cfg.allocate.table_layer_name,
+            output_layer=self.cfg.allocate.table_layer_name,
             calculate_umap=True,
             calculate_neighbors=True,
             n_pcs=self.cfg.allocate.pcs,
@@ -425,12 +427,14 @@ class SparrowPipeline:
             resolution=self.cfg.allocate.cluster_resolution,
             rank_genes=True,
             key_added="leiden",
+            overwrite=True,
         )
 
         log.info("Clustering finished")
 
         sp.pl.cluster(
             sdata,
+            table_layer=self.cfg.allocate.table_layer_name,
             output=self.cfg.paths.cluster,
         )
 
@@ -438,6 +442,7 @@ class SparrowPipeline:
             sdata,
             img_layer=self.cleaned_image_name,
             shapes_layer=self.shapes_layer_name,
+            table_layer=self.cfg.allocate.table_layer_name,
             column=self.cfg.allocate.leiden_column,
             cmap=self.cfg.allocate.leiden_cmap,
             alpha=self.cfg.allocate.leiden_alpha,

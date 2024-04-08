@@ -31,13 +31,6 @@ def test_plot_image(sdata_multi_c, tmp_path):
 
 
 def test_plot_shapes(sdata_multi_c, tmp_path):
-    sdata_multi_c = _add_shapes_layer(
-        sdata_multi_c,
-        input=sdata_multi_c.labels["masks_whole"].data,
-        output_layer="masks_whole_boundaries",
-        overwrite=True,
-    )
-
     # plot an obs column
     plot_shapes(
         sdata_multi_c,

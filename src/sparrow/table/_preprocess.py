@@ -211,7 +211,7 @@ class Preprocess(ProcessTable):
             {}
         ),  # keyword arguments passed to sc.pp.normalize_total, ignored if size_norm is True.
         pca_kwargs: Mapping[str, Any] = MappingProxyType({}),  # keyword arguments passed to sc.tl.pca
-        overwrite: bool = True,
+        overwrite: bool = False,
     ) -> SpatialData:
         adata = self._get_adata()
         # Calculate QC Metrics

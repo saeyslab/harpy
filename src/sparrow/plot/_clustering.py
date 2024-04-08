@@ -5,14 +5,19 @@ import scanpy as sc
 from spatialdata import SpatialData
 
 
-def cluster(sdata: SpatialData, output: Optional[str] = None) -> None:
+def cluster(sdata: SpatialData, table_layer: str, output: Optional[str] = None) -> None:
     """
-    Plot the Leiden clusters on a UMAP, and show the most differentially expressed genes for each cluster on a second plot.
+    Visualize clusters.
+
+    Plot the Leiden clusters on a UMAP (using `scanpy.pl.umap`),
+    and show the most differentially expressed genes/channels for each cluster on a second plot (using `scanpy.pl.rank_genes_group`), if "rank_genes_groups" is in `sdata.tables[table_layer].uns.keys()`.
 
     Parameters
     ----------
     sdata : SpatialData
         The SpatialData object containing the analyzed data.
+    table_layer: str, optional
+        The table layer in `sdata` to visualize.
     output : str or None, optional
         The file path prefix for the plots (default is None).
         If provided, the plots will be saved to the specified output file path with "_umap.png"
@@ -23,14 +28,15 @@ def cluster(sdata: SpatialData, output: Optional[str] = None) -> None:
     -------
     None
     """
-    # Plot Leiden clusters on a UMAP
-    sc.pl.umap(sdata.table, color=["leiden"], show=not output)
+    # Plot clusters on a UMAP
+    sc.pl.umap(sdata.tables[table_layer], color=["leiden"], show=not output)
     if output:
         plt.savefig(output + "_umap.png", bbox_inches="tight")
         plt.close()
 
     # Plot the highly differential genes for each cluster
-    sc.pl.rank_genes_groups(sdata.table, n_genes=8, sharey=False, show=False)
-    if output:
-        plt.savefig(output + "_rank_genes_groups.png", bbox_inches="tight")
-        plt.close()
+    if "rank_genes_groups" in sdata.tables[table_layer].uns.keys():
+        sc.pl.rank_genes_groups(sdata.tables[table_layer], n_genes=8, sharey=False, show=False)
+        if output:
+            plt.savefig(output + "_rank_genes_groups.png", bbox_inches="tight")
+            plt.close()
