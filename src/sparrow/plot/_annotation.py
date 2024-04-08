@@ -3,18 +3,18 @@ from typing import Optional
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 import scanpy as sc
 from spatialdata import SpatialData
 
 from sparrow.image._image import _get_boundary, _get_spatial_element
 from sparrow.plot._plot import plot_shapes
-from sparrow.utils._keys import _ANNOTATION_KEY, _CLEANLINESS_KEY
+from sparrow.utils._keys import _ANNOTATION_KEY, _CLEANLINESS_KEY, _UNKNOWN_CELLTYPE_KEY
 
 
 def score_genes(
     sdata: SpatialData,
-    scoresper_cluster: pd.DataFrame,
+    table_layer: str,
+    celltypes: list[str],
     img_layer: Optional[str] = None,
     shapes_layer: str = "segmentation_mask_boundaries",
     crd=None,
@@ -34,13 +34,10 @@ def score_genes(
     ----------
     sdata : SpatialData
         Data containing spatial information for plotting.
-    scoresper_cluster : pd.DataFrame
-        Index:
-            cells: The index corresponds to indivdual cells ID's.
-        Columns:
-            celltypes (as provided via the markers file).
-        Values:
-            Score obtained using the scanpy's score_genes function for each celltype and for each cell.
+    table_layer: str, optional
+        The table layer in `sdata` to visualize.
+    celltypes: list[str]
+        list of celltypes to plot.
     img_layer : str, optional
         Image layer to be plotted. If not provided, the last image layer in `sdata` will be used.
     shapes_layer : str, optional
@@ -60,6 +57,8 @@ def score_genes(
     -----
     This function uses `scanpy` for plotting and may save multiple plots based on the output parameter.
     """
+    celltypes = [element for element in celltypes if element != _UNKNOWN_CELLTYPE_KEY]
+
     if img_layer is None:
         img_layer = [*sdata.images][-1]
 
@@ -72,7 +71,7 @@ def score_genes(
     colors = [mpl.colors.rgb2hex(colors[j * 4 + i]) for i in range(4) for j in range(10)]
 
     # Plot cleanliness and leiden next to annotation
-    sc.pl.umap(sdata.table, color=[_CLEANLINESS_KEY, _ANNOTATION_KEY], show=False)
+    sc.pl.umap(sdata.tables[table_layer], color=[_CLEANLINESS_KEY, _ANNOTATION_KEY], show=False)
 
     if output:
         plt.savefig(output + f"_{_CLEANLINESS_KEY}_{_ANNOTATION_KEY}", bbox_inches="tight")
@@ -80,7 +79,7 @@ def score_genes(
         plt.show()
     plt.close()
 
-    sc.pl.umap(sdata.table, color=["leiden", _ANNOTATION_KEY], show=False)
+    sc.pl.umap(sdata.tables[table_layer], color=["leiden", _ANNOTATION_KEY], show=False)
 
     if output:
         plt.savefig(output + f"_leiden_{_ANNOTATION_KEY}", bbox_inches="tight")
@@ -88,21 +87,22 @@ def score_genes(
         plt.show()
     plt.close()
 
-    # Plot annotation and cleanliness columns of sdata.table (AnnData) object
-    sdata.table.uns[f"{_ANNOTATION_KEY}_colors"] = colors
+    # Plot annotation and cleanliness columns of sdata.tables[table_layer] (AnnData) object
+    sdata.tables[table_layer].uns[f"{_ANNOTATION_KEY}_colors"] = colors
     plot_shapes(
         sdata=sdata,
-        column=_ANNOTATION_KEY,
-        crd=crd,
         img_layer=img_layer,
         shapes_layer=shapes_layer,
+        table_layer=table_layer,
+        column=_ANNOTATION_KEY,
+        crd=crd,
         output=output + f"_{_ANNOTATION_KEY}" if output else None,
     )
 
     # Plot heatmap of celltypes and filtered celltypes based on filter index
     sc.pl.heatmap(
-        sdata.table,
-        var_names=scoresper_cluster.columns.values,
+        sdata.tables[table_layer],
+        var_names=celltypes,
         groupby="leiden",
         show=False,
     )
@@ -115,10 +115,12 @@ def score_genes(
 
     if filter_index:
         sc.pl.heatmap(
-            sdata.table[
-                sdata.table.obs.leiden.isin([str(index) for index in range(filter_index, len(sdata.table.obs.leiden))])
+            sdata.tables[table_layer][
+                sdata.tables[table_layer].obs.leiden.isin(
+                    [str(index) for index in range(filter_index, len(sdata.tables[table_layer].obs.leiden))]
+                )
             ],
-            var_names=scoresper_cluster.columns.values,
+            var_names=celltypes,
             groupby="leiden",
             show=False,
         )

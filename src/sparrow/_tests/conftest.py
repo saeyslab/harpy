@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 import pyrootutils
 import pytest
@@ -73,3 +74,10 @@ def sdata_transcripts(tmpdir):
     sdata.write(os.path.join(tmpdir, "sdata_transcriptomics.zarr"))
     sdata = read_zarr(os.path.join(tmpdir, "sdata_transcriptomics.zarr"))
     yield sdata
+
+
+@pytest.fixture
+def path_dataset_markers(tmpdir):
+    root = str(pyrootutils.setup_root(os.getcwd(), dotenv=True, pythonpath=True))
+    path = f"{root}/src/sparrow/_tests/test_data/dummy_markers.csv"
+    return Path(path)

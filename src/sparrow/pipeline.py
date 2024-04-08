@@ -487,22 +487,27 @@ class SparrowPipeline:
 
         log.info("Start scoring genes")
 
-        mg_dict, scoresper_cluster = sp.tb.score_genes(
+        sdata, celltypes_scored, celltypes_all = sp.tb.score_genes(
             sdata=sdata,
+            labels_layer=self.labels_layer_name,
+            table_layer=self.cfg.allocate.table_layer_name,
+            output_layer=self.cfg.allocate.table_layer_name,
             path_marker_genes=self.cfg.dataset.markers,
             delimiter=self.cfg.annotate.delimiter,
             row_norm=self.cfg.annotate.row_norm,
             repl_columns=repl_columns,
             del_celltypes=del_celltypes,
+            overwrite=True,
         )
 
-        self._celltypes = list(mg_dict.keys())
+        self._celltypes = celltypes_all
 
         log.info("Scoring genes finished")
 
         sp.pl.score_genes(
             sdata=sdata,
-            scoresper_cluster=scoresper_cluster,
+            table_layer=self.cfg.allocate.table_layer_name,
+            celltypes=celltypes_scored,  # celltypes_scored, is a list of all celltypes that are scored.
             shapes_layer=self.shapes_layer_name,
             img_layer=self.cleaned_image_name,
             output=self.cfg.paths.score_genes,
@@ -519,7 +524,11 @@ class SparrowPipeline:
         if "correct_marker_genes_dict" in self.cfg.visualize:
             sdata = sp.tb.correct_marker_genes(
                 sdata,
+                labels_layer=self.labels_layer_name,
+                table_layer=self.cfg.allocate.table_layer_name,
+                output_layer=self.cfg.allocate.table_layer_name,
                 celltype_correction_dict=self.cfg.visualize.correct_marker_genes_dict,
+                overwrite=True,
             )
 
         # Get arguments from cfg else None objects
@@ -529,13 +538,18 @@ class SparrowPipeline:
         # Check cluster cleanliness
         sdata, color_dict = sp.tb.cluster_cleanliness(
             sdata,
+            labels_layer=self.labels_layer_name,
+            table_layer=self.cfg.allocate.table_layer_name,
+            output_layer=self.cfg.allocate.table_layer_name,
             celltypes=self._celltypes,
             celltype_indexes=celltype_indexes,
             colors=colors,
+            overwrite=True,
         )
 
         sp.pl.cluster_cleanliness(
             sdata=sdata,
+            table_layer=self.cfg.allocate.table_layer_name,
             img_layer=self.cleaned_image_name,
             shapes_layer=self.shapes_layer_name,
             crd=self.cfg.segmentation.small_size_vis
@@ -548,9 +562,16 @@ class SparrowPipeline:
         # squidpy sometimes fails calculating/plotting nhood enrichement if a too small region is selected, therefore try add a try except.
         try:
             # calculate nhood enrichment
-            sdata = sp.tb.nhood_enrichment(sdata)
+            sdata = sp.tb.nhood_enrichment(
+                sdata,
+                labels_layer=self.labels_layer_name,
+                table_layer=self.cfg.allocate.table_layer_name,
+                output_layer=self.cfg.allocate.table_layer_name,
+                overwrite=True,
+            )
             sp.pl.nhood_enrichment(
                 sdata,
+                table_layer=self.cfg.allocate.table_layer_name,
                 output=self.cfg.paths.nhood,
             )
         except ValueError as e:

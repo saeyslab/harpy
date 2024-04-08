@@ -10,6 +10,7 @@ from sparrow.utils._keys import _ANNOTATION_KEY
 
 def cluster_cleanliness(
     sdata: SpatialData,
+    table_layer: str,
     img_layer: Optional[str] = None,
     shapes_layer: str = "segmentation_mask_boundaries",
     crd: Optional[List[int]] = None,
@@ -28,10 +29,12 @@ def cluster_cleanliness(
     ----------
     sdata : SpatialData
         SpatialData object containing the spatial data and annotations.
+    table_layer: str, optional
+        The table layer in `sdata` to visualize.
     img_layer: str, optional
-        Name of the imgage layer in the SpatialData object (default is None).
+        Name of the imgage layer in `sdata` (default is None).
     shapes_layer : str, optional
-        Name of the shapes layer in the SpatialData object (default is "segmentation_mask_boundaries").
+        Name of the shapes layer in `sdata` object (default is "segmentation_mask_boundaries").
     crd : List[int], optional
         An optional rectangle [xmin, xmax, ymin, ymax] (default is None).
         If specified, the tissue image will be cropped to this rectangle,
@@ -39,7 +42,7 @@ def cluster_cleanliness(
     color_dict : dict, optional
         Custom colormap dictionary for coloring cell types in the barplot.
     celltype_column : str, optional
-        Name of the column in sdata.table containing cell type annotations (default is `_ANNOTATION_KEY`).
+        Name of the column in `sdata.tables[table_layer]` containing cell type annotations (default is `_ANNOTATION_KEY`).
     output : str, optional
         The file path prefix for the plots (default is None).
         If provided, the plots will be saved to the specified output file path with "_barplot.png",
@@ -52,13 +55,14 @@ def cluster_cleanliness(
     """
     # Barplot with cell type composition of the clusters.
     stacked = (
-        sdata.table.obs.groupby(["leiden", celltype_column], as_index=False)
+        sdata.tables[table_layer]
+        .obs.groupby(["leiden", celltype_column], as_index=False)
         .size()
         .pivot(index="leiden", columns=celltype_column)
         .fillna(0)
     )
     stacked_norm = stacked.div(stacked.sum(axis=1), axis=0)
-    stacked_norm.columns = list(sdata.table.obs[_ANNOTATION_KEY].cat.categories)
+    stacked_norm.columns = list(sdata.tables[table_layer].obs[_ANNOTATION_KEY].cat.categories)
     fig, ax = plt.subplots(1, 1, figsize=(10, 5))
 
     if color_dict:
@@ -82,6 +86,7 @@ def cluster_cleanliness(
     # Tissue image with cells colored by cell type.
     plot_shapes(
         sdata=sdata,
+        table_layer=table_layer,
         img_layer=img_layer,
         column=celltype_column,
         alpha=0.8,
@@ -91,6 +96,7 @@ def cluster_cleanliness(
 
     plot_shapes(
         sdata=sdata,
+        table_layer=table_layer,
         img_layer=img_layer,
         column=celltype_column,
         crd=crd,
@@ -102,11 +108,11 @@ def cluster_cleanliness(
     # UMAP plot with cells colored by cell type.
     fig, ax = plt.subplots(1, 1, figsize=(15, 10))
     sc.pl.umap(
-        sdata.table,
+        sdata.tables[table_layer],
         color=[celltype_column],
         ax=ax,
         show=not output,
-        size=300000 / sdata.table.shape[0],
+        size=300000 / sdata.tables[table_layer].shape[0],
     )
     ax.axis("off")
 

@@ -85,27 +85,39 @@ class ProcessTable:
 
 def correct_marker_genes(
     sdata: SpatialData,
+    labels_layer: list[str],
+    table_layer: str,
+    output_layer: str,
     celltype_correction_dict: Dict[str, Tuple[float, float]],
-):
+    overwrite: bool = False,
+) -> SpatialData:
     """Returns the updated SpatialData object.
 
     Corrects celltypes that are higher expessed by dividing them by a value if they exceed a certain threshold.
     The celltype_correction_dict has as keys the celltypes that should be corrected and as values the threshold and the divider.
     """
+    process_table_instance = ProcessTable(sdata, labels_layer=labels_layer, table_layer=table_layer)
+    adata = process_table_instance._get_adata()
     # Correct for all the genes
     for celltype, values in celltype_correction_dict.items():
-        if celltype not in sdata.table.obs.columns:
+        if celltype not in adata.obs.columns:
             log.info(
                 f"Cell type '{celltype}' not in obs of AnnData object. Skipping. Please first calculate gene expression for this cell type."
             )
             continue
-        sdata.table.obs[celltype] = np.where(
-            sdata.table.obs[celltype] < values[0],
-            sdata.table.obs[celltype] / values[1],
-            sdata.table.obs[celltype],
+        adata.obs[celltype] = np.where(
+            adata.obs[celltype] < values[0],
+            adata.obs[celltype] / values[1],
+            adata.obs[celltype],
         )
 
-    _back_sdata_table_to_zarr(sdata=sdata)
+    sdata = _add_table_layer(
+        sdata,
+        adata=adata,
+        output_layer=output_layer,
+        region=process_table_instance.labels_layer,
+        overwrite=overwrite,
+    )
 
     return sdata
 

@@ -5,12 +5,12 @@ import numpy as np
 import squidpy as sq
 from spatialdata import SpatialData
 
-from sparrow.table._table import _back_sdata_table_to_zarr
 from sparrow.utils._keys import _ANNOTATION_KEY
 
 
 def nhood_enrichment(
     sdata: SpatialData,
+    table_layer: str,
     celltype_column: str = _ANNOTATION_KEY,
     output: Optional[str] = None,
 ) -> None:
@@ -25,6 +25,8 @@ def nhood_enrichment(
     ----------
     sdata : SpatialData
         The SpatialData object containing the data for analysis.
+    table_layer: str, optional
+        The table layer in `sdata` to visualize.
     celltype_column : str, optional
         The column name in the SpatialData object's table that specifies the cell type annotations.
         The default value is `_ANNOTATION_KEY`.
@@ -46,11 +48,11 @@ def nhood_enrichment(
     - tb.nhood_enrichment : Calculate neighborhood enrichment.
     """
     # remove 'nan' values from "adata.uns['annotation_nhood_enrichment']['zscore']"
-    tmp = sdata.table.uns[f"{celltype_column}_nhood_enrichment"]["zscore"]
-    sdata.table.uns[f"{celltype_column}_nhood_enrichment"]["zscore"] = np.nan_to_num(tmp)
-    _back_sdata_table_to_zarr(sdata=sdata)
+    # TODO: move this to enrichment function?
+    tmp = sdata.tables[table_layer].uns[f"{celltype_column}_nhood_enrichment"]["zscore"]
+    sdata.tables[table_layer].uns[f"{celltype_column}_nhood_enrichment"]["zscore"] = np.nan_to_num(tmp)
 
-    sq.pl.nhood_enrichment(sdata.table, cluster_key=celltype_column, method="ward")
+    sq.pl.nhood_enrichment(sdata.tables[table_layer], cluster_key=celltype_column, method="ward")
 
     # Save the plot to ouput
     if output:
