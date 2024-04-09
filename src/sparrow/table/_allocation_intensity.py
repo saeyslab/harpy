@@ -10,6 +10,7 @@ import pandas as pd
 from anndata import AnnData
 from dask import delayed
 from dask.array import Array, unique
+from dask_image.ndmeasure import center_of_mass
 from numpy.typing import NDArray
 from spatialdata import SpatialData
 
@@ -173,6 +174,14 @@ def allocate_intensity(
     if remove_background_intensity:
         adata = adata[adata.obs[_INSTANCE_KEY] != 0]
 
+    # add center of cells here (via the masks).
+    coordinates = center_of_mass(
+        image=se_labels.data,
+        label_image=se_labels.data,
+        index=_cells_id[1:] if remove_background_intensity else _cells_id,
+    )
+    adata.obsm["spatial"] = coordinates.compute()
+
     if append:
         region = []
         if output_layer in [*sdata.tables]:
@@ -207,7 +216,7 @@ def _calculate_intensity(
     # lazy computation of pixel intensities on one channel for each label in mask_dask_array
     # result is an array of shape (len(unique(mask_dask_array).compute(), 1 ), so be aware that if
     # some labels are missing, e.g. unique(mask_dask_array).compute()=np.array([ 0,1,3,4 ]), resulting
-    # array will hold at postiion 2 the intensity for cell with index 3.
+    # array will hold at postion 2 the intensity for cell with index 3.
 
     assert float_dask_array.shape == mask_dask_array.shape
 
