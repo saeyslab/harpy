@@ -546,7 +546,7 @@ def _plot(
 
             # could be that polygons contains more elements than adata_view. So we also filter in that direction, but with raising a warning
             mask_polygons = polygons.index.isin(adata_view.obs[_INSTANCE_KEY])
-            if mask_polygons.any():
+            if (~mask_polygons).any():
                 log.warning(
                     f"There are '{sum( ~mask_polygons )}' cells in provided shapes_layer '{shapes_layer}' not found in 'sdata.tables[{table_layer}]' (linked through '{_INSTANCE_KEY}'), these cells will not be plotted."
                 )

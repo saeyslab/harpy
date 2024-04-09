@@ -72,8 +72,7 @@ def score_genes(
     list[str]
         list of strings, with all celltypes that are scored (but are not in the del_celltypes list).
     list[str]
-        list of strings, with all celltypes, some of which may not be scored, because they do not appear in the region. _UNKNOWN_CELLTYPE_KEY, is also added if it is detected.
-    # TODO: only return the first list, the latter list is only returned for use in cluster_cleanliness function; this function is overly complicated.
+        list of strings, with all celltypes, some of which may not be scored, because their corresponding transcripts do not appear in the region of interest. _UNKNOWN_CELLTYPE_KEY, is also added if it is detected.
 
     Notes
     -----

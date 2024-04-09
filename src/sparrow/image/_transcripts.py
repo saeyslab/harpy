@@ -41,7 +41,7 @@ def transcript_density(
         Data containing spatial information.
     img_layer : Optional[str], default="raw_image"
         The layer of the SpatialData object used for determining image boundary.
-        Defaults to the last layer if set to None.
+        Defaults to the 'last' image layer in `sdata` if set to None.
     points_layer : str, optional
         The layer name that contains the transcript data points, by default "transcripts".
     n_sample : Optional[int], default=15000000

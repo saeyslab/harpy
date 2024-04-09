@@ -435,6 +435,7 @@ class SparrowPipeline:
         sp.pl.cluster(
             sdata,
             table_layer=self.cfg.allocate.table_layer_name,
+            key_added="leiden",
             output=self.cfg.paths.cluster,
         )
 

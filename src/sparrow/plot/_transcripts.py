@@ -20,9 +20,9 @@ log = get_pylogger(__name__)
 
 def analyse_genes_left_out(
     sdata: SpatialData,
+    labels_layer: str,
+    table_layer: str,
     points_layer: str = "transcripts",
-    labels_layer: str | None = "segmentation_mask",
-    table_layer: str = "table_transcriptomics",
     name_x: str = "x",
     name_y: str = "y",
     name_gene_column: str = "gene",
@@ -35,15 +35,16 @@ def analyse_genes_left_out(
     ----------
     sdata : SpatialData
         Data containing spatial information for plotting.
-    points_layer : str, optional
-        The layer in `sdata` containing transcript information, by default "transcripts".
-    labels_layer : str, optional
+    labels_layer : str
         The layer in `sdata` that contains the segmentation masks, by default "segmentation_mask".
-        If None, the last layer in the `labels` attribute of `sdata` will be used.
         This layer is used to calculate the crd (region of interest) that was used in the segmentation step,
         otherwise transcript counts in `points_layer` of `sdata` (containing all transcripts)
         and the counts obtained via `sdata.tables[ table_layer ]` are not comparable.
         It is also used to select the cells in `sdata.tables[table_layer]` that are linked to this `labels_layer` via the _REGION_KEY.
+    table_layer: str
+        The table layer in `sdata` on which to perform analysis.
+    points_layer : str, optional
+        The layer in `sdata` containing transcript information, by default "transcripts".
     name_x : str, optional
         The column name representing the x-coordinate in `points_layer`, by default "x".
     name_y : str, optional

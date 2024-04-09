@@ -33,7 +33,7 @@ def allocate(
     allocate_from_shapes_layer: bool = True,
     chunks: str | tuple[int, ...] | int | None = 10000,
     append: bool = False,
-    overwrite: bool = True,
+    overwrite: bool = False,
 ) -> SpatialData:
     """
     Allocates transcripts to cells via provided shapes_layer/labels_layer and points_layer and returns updated SpatialData augmented with a table layer (`sdata.tables[output_layer]`) holding the AnnData object with cell counts.

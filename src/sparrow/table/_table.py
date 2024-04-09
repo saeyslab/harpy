@@ -106,7 +106,7 @@ def correct_marker_genes(
             )
             continue
         adata.obs[celltype] = np.where(
-            adata.obs[celltype] < values[0],
+            adata.obs[celltype] > values[0],
             adata.obs[celltype] / values[1],
             adata.obs[celltype],
         )

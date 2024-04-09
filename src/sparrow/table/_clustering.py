@@ -138,9 +138,9 @@ def leiden(
         Note that if `output_layer` is equal to `table_layer` and overwrite is True,
         cells in `sdata.tables[table_layer]` linked to other `labels_layer` (via the _REGION_KEY), will be removed from `sdata.tables[table_layer]`.
         If a list of labels layers is provided, they will therefore be clustered together (e.g. multiple samples).
-    table_layer: str, optional
+    table_layer: str
         The table layer in `sdata` on which to perform clustering on.
-    output_layer: str, optional
+    output_layer: str
         The output table layer in `sdata` to which table layer with results of clustering will be written.
     calculate_umap : bool, default=True
         If True, calculates a UMAP via `scanpy.tl.umap` for visualization of computed clusters.

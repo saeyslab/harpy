@@ -5,7 +5,7 @@ import scanpy as sc
 from spatialdata import SpatialData
 
 
-def cluster(sdata: SpatialData, table_layer: str, output: Optional[str] = None) -> None:
+def cluster(sdata: SpatialData, table_layer: str, key_added: str = "leiden", output: Optional[str] = None) -> None:
     """
     Visualize clusters.
 
@@ -16,8 +16,10 @@ def cluster(sdata: SpatialData, table_layer: str, output: Optional[str] = None) 
     ----------
     sdata : SpatialData
         The SpatialData object containing the analyzed data.
-    table_layer: str, optional
+    table_layer: str
         The table layer in `sdata` to visualize.
+    key_added: str, optional
+        name of the column in `sdata.tables[table_layer].obs` that contains the cluster id.
     output : str or None, optional
         The file path prefix for the plots (default is None).
         If provided, the plots will be saved to the specified output file path with "_umap.png"
@@ -29,7 +31,7 @@ def cluster(sdata: SpatialData, table_layer: str, output: Optional[str] = None) 
     None
     """
     # Plot clusters on a UMAP
-    sc.pl.umap(sdata.tables[table_layer], color=["leiden"], show=not output)
+    sc.pl.umap(sdata.tables[table_layer], color=[key_added], show=not output)
     if output:
         plt.savefig(output + "_umap.png", bbox_inches="tight")
         plt.close()
