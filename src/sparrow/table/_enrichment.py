@@ -21,11 +21,6 @@ def nhood_enrichment(
     """
     process_table_instance = ProcessTable(sdata, labels_layer=labels_layer, table_layer=table_layer)
     adata = process_table_instance._get_adata()
-    # Adaptations for saving
-    adata.raw.var.index.names = ["genes"]
-    adata.var.index.names = ["genes"]
-    # TODO: not used since napari spatialdata
-    # adata.obsm["spatial"] = adata.obsm["spatial"].rename({0: "X", 1: "Y"}, axis=1)
 
     # Calculate nhood enrichment
     sq.gr.spatial_neighbors(adata, coord_type="generic")
