@@ -8,6 +8,8 @@ def get_pylogger(name=__name__) -> logging.Logger:
     LOGLEVEL = os.environ.get("LOGLEVEL", "INFO").upper()
     logger.setLevel(LOGLEVEL)
 
+    logger.propagate = False
+
     # Create a stream handler to output to console
     ch = logging.StreamHandler()
     ch.setLevel(LOGLEVEL)
