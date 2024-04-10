@@ -11,9 +11,7 @@ def test_allocation(sdata_transcripts: SpatialData):
     sdata_transcripts = allocate(
         sdata_transcripts,
         labels_layer="segmentation_mask",
-        shapes_layer=None,
         output_layer="table_transcriptomics_recompute",
-        allocate_from_shapes_layer=False,
         chunks=20000,
         append=False,
         overwrite=True,
@@ -31,9 +29,7 @@ def test_allocation_append(sdata_transcripts: SpatialData):
     sdata_transcripts = allocate(
         sdata_transcripts,
         labels_layer="segmentation_mask",
-        shapes_layer=None,
         output_layer="table_transcriptomics",
-        allocate_from_shapes_layer=False,
         chunks=20000,
         append=False,
         overwrite=True,
@@ -45,9 +41,7 @@ def test_allocation_append(sdata_transcripts: SpatialData):
     sdata_transcripts = allocate(
         sdata_transcripts,
         labels_layer="segmentation_mask_expanded",
-        shapes_layer=None,
         output_layer="table_transcriptomics",
-        allocate_from_shapes_layer=False,
         chunks=20000,
         append=True,  # append to existing table
         overwrite=True,
@@ -66,9 +60,7 @@ def test_allocation_overwrite(sdata_transcripts: SpatialData):
         sdata_transcripts = allocate(
             sdata_transcripts,
             labels_layer="segmentation_mask",
-            shapes_layer=None,
             output_layer="table_transcriptomics",
-            allocate_from_shapes_layer=False,
             chunks=20000,
             append=False,
             overwrite=False,

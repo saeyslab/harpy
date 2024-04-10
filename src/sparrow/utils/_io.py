@@ -16,7 +16,7 @@ def _incremental_io_on_disk(
     sdata: SpatialData,
     output_layer: str,
     element: SpatialImage | MultiscaleSpatialImage | DataFrame | GeoDataFrame | AnnData,
-):
+) -> SpatialData:
     new_output_layer = f"{output_layer}_{uuid.uuid4()}"
     # a. write a backup copy of the data
     sdata[new_output_layer] = element

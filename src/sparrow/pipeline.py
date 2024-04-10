@@ -327,8 +327,6 @@ class SparrowPipeline:
         sdata = sp.tb.allocate(
             sdata=sdata,
             labels_layer=self.labels_layer_name,
-            shapes_layer=self.shapes_layer_name,
-            allocate_from_shapes_layer=True,
             output_layer=self.cfg.allocate.table_layer_name,
         )
 

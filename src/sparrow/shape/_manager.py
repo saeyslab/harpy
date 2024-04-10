@@ -6,12 +6,13 @@ import dask
 import geopandas
 import numpy as np
 import pandas as pd
-import rasterio
 import shapely
 import spatialdata
 from dask.array import Array
 from geopandas import GeoDataFrame
 from numpy.typing import NDArray
+from rasterio import Affine
+from rasterio.features import shapes
 from shapely.affinity import translate
 from spatialdata import SpatialData, read_zarr
 from spatialdata.transformations import Identity, Translation
@@ -274,10 +275,10 @@ def _mask_image_to_polygons(mask: Array, z_slice: int = None) -> GeoDataFrame:
         # Get chunk's top-left corner coordinates
         x_offset, y_offset = chunk_coords
 
-        for shape, value in rasterio.features.shapes(
+        for shape, value in shapes(
             mask_chunk.astype(np.int32),
             mask=bool_mask,
-            transform=rasterio.Affine(1.0, 0, y_offset, 0, 1.0, x_offset),
+            transform=Affine(1.0, 0, y_offset, 0, 1.0, x_offset),
         ):
             if z_slice is not None:
                 coordinates = shape["coordinates"]

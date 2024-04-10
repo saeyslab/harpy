@@ -112,7 +112,7 @@ def _filter_labels_block(
         # set depth for every dimension
         depth2 = {0: 0, 1: _depth[0], 2: _depth[1]}
         _depth = depth2
-    # get the labels that are (at least parially) inside the chunk
+    # get the labels that are (at least partially) inside the chunk
     labels_inside_original_chunk = np.unique(x_label[:, _depth[1] : -_depth[1], _depth[2] : -_depth[2]])
     for label in labels_inside_original_chunk:
         if label == 0:

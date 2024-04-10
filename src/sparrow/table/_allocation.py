@@ -6,12 +6,8 @@ from collections import namedtuple
 
 import anndata as ad
 import dask
-import dask.array as da
 import dask.dataframe as dd
 import pandas as pd
-import rasterio
-import rasterio.features
-from affine import Affine
 from anndata import AnnData
 from spatialdata import SpatialData
 
@@ -26,17 +22,15 @@ log = get_pylogger(__name__)
 
 def allocate(
     sdata: SpatialData,
-    labels_layer: str = "segmentation_mask",
-    shapes_layer: str | None = "segmentation_mask_boundaries",
+    labels_layer: str,
     points_layer: str = "transcripts",
     output_layer: str = "table_transcriptomics",
-    allocate_from_shapes_layer: bool = True,
     chunks: str | tuple[int, ...] | int | None = 10000,
     append: bool = False,
     overwrite: bool = False,
 ) -> SpatialData:
     """
-    Allocates transcripts to cells via provided shapes_layer/labels_layer and points_layer and returns updated SpatialData augmented with a table layer (`sdata.tables[output_layer]`) holding the AnnData object with cell counts.
+    Allocates transcripts to cells via provided `labels_layer` and `points_layer` and returns updated SpatialData augmented with a table layer (`sdata.tables[output_layer]`) holding the AnnData object with cell counts.
 
     Parameters
     ----------
@@ -44,18 +38,10 @@ def allocate(
         The SpatialData object.
     labels_layer : str, optional
         The labels layer (i.e. segmentation mask) in `sdata` to be used to allocate the transcripts to cells.
-        If `allocate_from_shapes_layer` is True, it should have same offset as the provided `shapes_layer`,
-        and it will only be used for determining this offset.
-    shapes_layer : str, optional
-        The layer in `sdata` that contains the boundaries of the segmentation mask, by default "segmentation_mask_boundaries".
-        Required if `allocate_from_shapes_layer` is True, else it will be ignored.
     points_layer: str, optional
         The points layer in `sdata` that contains the transcripts.
     output_layer: str, optional
         The table layer in `sdata` in which to save the AnnData object with the transcripts counts per cell.
-    allocate_from_shapes_layer: bool, optional
-        Whether to allocate transcripts using `shapes_layer` or `labels_layer`.
-        Only supported for `shapes_layer` that contain 2D polygons.
     chunks : Optional[str | int | tuple[int, ...]], default=10000
         Chunk sizes for processing. Can be a string, integer or tuple of integers.
         Consider setting the chunks to a relatively high value to speed up processing
@@ -70,57 +56,18 @@ def allocate(
 
     Returns
     -------
-        An updated SpatialData object with the added table attribute (AnnData object).
+        An updated SpatialData object with an AnnData table added to `sdata.tables` at slot `output_layer`.
     """
-    if shapes_layer is not None:
-        sdata[shapes_layer].index = sdata[shapes_layer].index.astype("str")
-
     if labels_layer not in [*sdata.labels]:
         raise ValueError(
             f"Provided labels layer '{labels_layer}' not in 'sdata', please specify a labels layer from '{[*sdata.labels]}'"
         )
 
-    # need to do this transformation,
-    # because the polygons have same offset coords.x0 and coords.y0 as in segmentation_mask
     Coords = namedtuple("Coords", ["x0", "y0"])
     s_mask = _get_spatial_element(sdata, layer=labels_layer)
     coords = Coords(*_get_translation(s_mask))
 
-    if allocate_from_shapes_layer:
-        has_z = sdata.shapes[shapes_layer]["geometry"].apply(lambda geom: geom.has_z)
-        if any(has_z):
-            raise ValueError(
-                "Allocating transcripts from a shapes layer is not supported "
-                "for shapes layers containing 3D polygons. "
-                "Please consider setting 'allocate_from_shapes_layer' to False, "
-                "and passing the labels_layer corresponding to the shapes_layer."
-            )
-
-        if s_mask.ndim != 2:
-            raise ValueError(
-                "Allocating transcripts from a shapes layer is not supported "
-                f"if corresponding labels_layer {labels_layer} is not 2D."
-            )
-
-        transform = Affine.translation(coords.x0, coords.y0)
-
-        log.info("Creating masks from polygons.")
-        masks = rasterio.features.rasterize(
-            zip(
-                sdata[shapes_layer].geometry,
-                sdata[shapes_layer].index.values.astype(float),
-            ),
-            out_shape=[s_mask.shape[0], s_mask.shape[1]],
-            dtype="uint32",
-            fill=0,
-            transform=transform,
-        )
-        log.info(f"Created masks with shape {masks.shape}.")
-
-        masks = da.from_array(masks)
-
-    else:
-        masks = s_mask.data
+    masks = s_mask.data
 
     if chunks is not None:
         masks = masks.rechunk(chunks)
@@ -130,7 +77,7 @@ def allocate(
     if masks.ndim == 2:
         masks = masks[None, ...]
 
-    ddf = sdata[points_layer]
+    ddf = sdata.points[points_layer]
 
     log.info("Calculating cell counts.")
 
