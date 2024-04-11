@@ -1,6 +1,6 @@
 import inspect
 from types import MappingProxyType
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 
 import pandas as pd
 import scanpy as sc
@@ -25,6 +25,8 @@ def kmeans(
     n_pcs: int = 17,  # ignored if calculate_umap=False
     n_clusters: int = 5,
     key_added="kmeans",
+    index_names_var: Iterable[str] | None = None,
+    index_positions_var: Iterable[int] | None = None,
     random_state: int = 100,
     overwrite: bool = False,
     **kwargs,  # keyword arguments for _kmeans
@@ -61,7 +63,11 @@ def kmeans(
     n_clusters : int, default=5
         The number of clusters to form.
     key_added : str, default="kmeans"
-        The key under which the clustering results are added to the SpatialData object (in `sdata.table.obs`).
+        The key under which the clustering results are added to the SpatialData object (in `sdata.tables[table_layer].obs`).
+    index_names_var:
+        List of index names to subset in `sdata.tables[table_layer].var`. If None, `index_positions_var` will be used if not None.
+    index_positions_var:
+        List of integer positions to subset in `sdata.tables[table_layer].var`. Used if `index_names_var` is None.
     random_state : int, default=100
         A random state for reproducibility of the clustering.
     overwrite : bool, default=False
@@ -91,6 +97,8 @@ def kmeans(
         output_layer=output_layer,
         cluster_callable=_kmeans,
         key_added=key_added,
+        index_names_var=index_names_var,
+        index_positions_var=index_positions_var,
         calculate_umap=calculate_umap,
         calculate_neighbors=False,
         rank_genes=rank_genes,
@@ -117,6 +125,8 @@ def leiden(
     n_pcs: int = 17,
     resolution: float = 0.8,
     key_added: str = "leiden",
+    index_names_var: Iterable[str] | None = None,
+    index_positions_var: Iterable[int] | None = None,
     random_state: int = 100,
     overwrite: bool = False,
     **kwargs,
@@ -155,7 +165,11 @@ def leiden(
     resolution : float, default=0.8
         Cluster resolution passed to `scanpy.tl.leiden`.
     key_added : str, default="leiden"
-        The key under which the clustering results are added to the SpatialData object (in `sdata.table.obs`).
+        The key under which the clustering results are added to the SpatialData object (in `sdata.tables[table_layer].obs`).
+    index_names_var:
+        List of index names to subset in `sdata.tables[table_layer].var`. If None, `index_positions_var` will be used if not None.
+    index_positions_var:
+        List of integer positions to subset in `sdata.tables[table_layer].var`. Used if `index_names_var` is None.
     random_state : int, default=100
         A random state for reproducibility of the clustering.
     overwrite : bool, default=False
@@ -185,6 +199,8 @@ def leiden(
         output_layer=output_layer,
         cluster_callable=_leiden,
         key_added=key_added,
+        index_names_var=index_names_var,
+        index_positions_var=index_positions_var,
         calculate_umap=calculate_umap,
         calculate_neighbors=calculate_neighbors,
         rank_genes=rank_genes,
@@ -234,6 +250,8 @@ class Cluster(ProcessTable):
         output_layer: str,
         cluster_callable: Callable = _leiden,  # callable that takes in adata and returns adata with adata.obs[ "key_added" ] column added.
         key_added: str = "leiden",
+        index_names_var: Iterable[str] | None = None,
+        index_positions_var: Iterable[int] | None = None,
         calculate_umap: bool = True,
         calculate_neighbors: bool = True,
         rank_genes: bool = True,
@@ -243,7 +261,7 @@ class Cluster(ProcessTable):
         **kwargs,
     ):
         """Run the preprocessing, optional neighborhood graph computation, optional UMAP computation, and clustering on 'sdata.table'."""
-        adata = self._get_adata()
+        adata = self._get_adata(index_names_var=index_names_var, index_positions_var=index_positions_var)
 
         if calculate_neighbors:
             if "neighbors" in adata.uns.keys():
@@ -264,6 +282,7 @@ class Cluster(ProcessTable):
             "key_added" in inspect.signature(cluster_callable).parameters
         ), f"Callable '{cluster_callable.__name__}' must include the parameter 'key_added'."
         self._perform_clustering(adata, cluster_callable=cluster_callable, key_added=key_added, **kwargs)
+        assert key_added in adata.obs.columns
 
         # TODO move this ranking of genes to somewhere else
         if rank_genes:

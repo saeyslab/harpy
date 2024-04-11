@@ -74,12 +74,57 @@ class ProcessTable:
         if self.table_layer not in [*self.sdata.tables]:
             raise ValueError(f"table layer '{self.table_layer}' not in 'sdata.tables'.")
 
-    def _get_adata(self) -> AnnData:
+    def _get_adata(
+        self, index_names_var: Iterable[str] | None = None, index_positions_var: Iterable[int] | None = None
+    ) -> AnnData:
         """Preprocess the data by filtering based on the labels layer(s) and setting spatialdata attributes."""
         adata = self.sdata.tables[self.table_layer][
             self.sdata.tables[self.table_layer].obs[_REGION_KEY].isin(self.labels_layer)
-        ].copy()
+        ]
+        if index_names_var is not None or index_positions_var is not None:
+            adata = self._subset_adata_var(
+                adata, index_names_var=index_names_var, index_positions_var=index_positions_var
+            )
+        adata = adata.copy()
         adata.uns["spatialdata_attrs"]["region"] = self.labels_layer
+        return adata
+
+    @staticmethod
+    def _subset_adata_var(
+        adata: AnnData, index_names_var: Iterable[str] | None = None, index_positions_var: Iterable[int] | None = None
+    ) -> AnnData:
+        """
+        Subsets AnnData object by index names or index positions of `adata.var`.
+
+        Parameters
+        ----------
+        adata: AnnData object.
+        index_names_var: List of index names to subset. If None, the function will use index_positions.
+        index_positions_var: List of integer positions to subset. Used if index_names_var is None.
+
+        Returns
+        -------
+        - Subsetted AnnData object.
+        """
+        if index_names_var is not None:
+            index_names_var = (
+                list(index_names_var)
+                if isinstance(index_names_var, Iterable) and not isinstance(index_names_var, str)
+                else [index_names_var]
+            )
+            selected_var = adata.var.loc[index_names_var]
+        elif index_positions_var is not None:
+            index_names_var = (
+                list(index_positions_var) if isinstance(index_positions_var, Iterable) else [index_positions_var]
+            )
+            selected_var = adata.var.iloc[index_positions_var]
+        else:
+            raise ValueError("Either index_names or index_positions must be provided.")
+
+        selected_columns = adata.var_names.intersection(selected_var.index)
+
+        adata = adata[:, selected_columns]
+
         return adata
 
 

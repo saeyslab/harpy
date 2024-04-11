@@ -23,10 +23,27 @@ def test_leiden(sdata_multi_c):
         table_layer="table_intensities",
         output_layer="table_intensities_clustered",
         key_added="leiden",
+        index_names_var=["0", "2", "5", "20"],
         random_state=100,
         overwrite=True,
     )
     assert "leiden" in sdata_multi_c.tables["table_intensities_clustered"].obs.columns
+    assert sdata_multi_c["table_intensities_clustered"].shape == (674, 4)
+    assert sdata_multi_c["table_intensities_clustered"].var.index.to_list() == ["0", "2", "5", "20"]
+
+    sdata_multi_c = leiden(
+        sdata_multi_c,
+        labels_layer="masks_whole",
+        table_layer="table_intensities",
+        output_layer="table_intensities_clustered",
+        key_added="leiden",
+        index_positions_var=[0, 2, 5],
+        random_state=100,
+        overwrite=True,
+    )
+    assert "leiden" in sdata_multi_c.tables["table_intensities_clustered"].obs.columns
+    assert sdata_multi_c["table_intensities_clustered"].shape == (674, 3)
+    assert sdata_multi_c["table_intensities_clustered"].var.index.to_list() == ["0", "2", "5"]
 
 
 def test_kmeans(sdata_multi_c):

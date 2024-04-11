@@ -21,4 +21,6 @@ def test_add_label_layer_from_shapes_layer(sdata_multi_c):
 
     assert "masks_whole_unit_test" in [*sdata_multi_c.labels]
 
-    np.array_equal(sdata_multi_c["masks_whole"].data.compute(), sdata_multi_c["masks_whole_unit_test"].data.compute())
+    assert np.array_equal(
+        sdata_multi_c["masks_whole"].data.compute(), sdata_multi_c["masks_whole_unit_test"].data.compute()
+    )
