@@ -111,12 +111,19 @@ def score_genes(
         _UNKNOWN_CELLTYPE_KEY not in genes_dict.keys()
     ), f"Cell type {_UNKNOWN_CELLTYPE_KEY} is reserved for cells that could not be assigned a specific cell type"
 
+    # sanity check
+    unique_genes = {item for sublist in genes_dict.values() for item in sublist}
+    if not set(adata.var.index).intersection(unique_genes):
+        raise ValueError(
+            f"No genes in provided marker genes file at '{path_marker_genes}' where found in .var of table layer '{table_layer}'."
+        )
+
     # Score all cells for all celltypes
     for key, value in genes_dict.items():
         try:
             sc.tl.score_genes(adata, value, score_name=key)
         except ValueError:
-            log.warning(f"Markergenes {value} not present in region, celltype {key} not found")
+            log.warning(f"Markergenes '{value}' not present in region, celltype '{key}' not found.")
 
     # Delete genes from marker genes and genes dict
     if del_celltypes:

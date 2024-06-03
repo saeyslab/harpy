@@ -90,7 +90,7 @@ def analyse_genes_left_out(
 
     if sdata.tables[table_layer].raw is not None:
         log.warning(
-            "It seems that analysis is being run on AnnData object (sdata.tables[ table_layer ]) containing normalized counts, "
+            f"'sdata.tables[{table_layer}].raw' is not None. It seems that analysis is being run on an AnnData object containing normalized counts, "
             "please consider running this analysis before the counts in the AnnData object "
             "are normalized (i.e. on the raw counts)."
         )
@@ -109,7 +109,16 @@ def analyse_genes_left_out(
 
     ddf = ddf.query(f"{crd[0]} <= {name_x} < {crd[1]} and {crd[2]} <= {name_y} < {crd[3]}")
 
-    raw_counts = ddf.groupby(name_gene_column).size().compute()[adata.var.index]
+    _raw_counts = ddf.groupby(name_gene_column).size().compute()
+
+    missing_indices = adata.var.index.difference(_raw_counts.index)
+
+    if not missing_indices.empty:
+        raise ValueError(
+            f"There are genes found in '.var' of table layer '{table_layer}' that are not found in the points layer '{points_layer}'. Please verify that allocation '(sp.tb.allocation)' is performed using the correct points layer."
+        )
+
+    raw_counts = _raw_counts[adata.var.index]
 
     filtered = pd.DataFrame(adata.X.sum(axis=0) / raw_counts)
 
