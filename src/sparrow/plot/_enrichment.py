@@ -25,9 +25,9 @@ def nhood_enrichment(
     ----------
     sdata
         The SpatialData object containing the data for analysis.
-    table_layer: str, optional
+    table_layer
         The table layer in `sdata` to visualize.
-    celltype_column : str, optional
+    celltype_column
         The column name in the SpatialData object's table that specifies the cell type annotations.
         The default value is `_ANNOTATION_KEY`.
     output

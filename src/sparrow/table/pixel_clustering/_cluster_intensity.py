@@ -40,32 +40,35 @@ def cluster_intensity(
 
     Parameters
     ----------
-    sdata : SpatialData
+    sdata
         The input SpatialData object.
-    mapping : pd.Series
+    mapping
         A pandas Series mapping SOM cluster IDs (index) to metacluster IDs (values).
-    img_layer : str | Iterable[str]
+    img_layer
         The image layer of `sdata` from which the intensity is calculated.
-    labels_layer : str | Iterable[str]
+    labels_layer
         The labels layer in `sdata` that contains the SOM cluster IDs. I.e. the `output_layer_clusters` labels layer obtained through `sp.im.flowsom`.
-    output_layer : str
+    output_layer
         The output table layer in `sdata` where results are stored.
-    channels : int | str | Iterable[int] | Iterable[str] | None, optional
+    channels
         Specifies the channels to be included in the intensity calculation.
-    chunks : str | int | tuple[int, ...] | None, optional
+    chunks
         Chunk sizes for processing. If provided as a tuple, it should contain chunk sizes for `c`, `(z)`, `y`, `x`.
-    overwrite : bool, default=False
+    overwrite
         If True, overwrites the `output_layer` if it already exists in `sdata`.
 
     Returns
     -------
-    SpatialData
-        The input `sdata` with the new table layer added.
+    The input `sdata` with the new table layer added.
 
     Raises
     ------
     AssertionError
         If some labels in `labels_layer` are not found in the provided mapping pandas Series.
+
+    See Also
+    --------
+    sparrow.im.flowsom : flowsom pixel clustering.
     """
     img_layer = list(img_layer) if isinstance(img_layer, Iterable) and not isinstance(img_layer, str) else [img_layer]
     labels_layer = (

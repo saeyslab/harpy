@@ -33,25 +33,29 @@ def weighted_channel_expression(
 
     Parameters
     ----------
-    sdata : SpatialData
+    sdata
         The input SpatialData object containing the necessary data tables.
-    table_layer_cell_clustering : str
-        The name of the table layer in `sdata` where FlowSOM cell clustering results are stored.
+    table_layer_cell_clustering
+        The name of the table layer in `sdata` where FlowSOM cell clustering results are stored (obtained via ``).
         This layer should contain the cell cluster labels derived from the FlowSOM clustering algorithm and the non-normalized pixel cluster counts in `.layers[ _RAW_COUNTS_KEY ]`, as obtained after running `sp.tb.flowsom`.
-    table_layer_pixel_cluster_intensity : str
+    table_layer_pixel_cluster_intensity
         The name of the table layer in `sdata` containing pixel cluster intensity values as obtained by running `sp.tb.cluster_intensity`.
         These intensities are used to calculate the weighted expression of each channel for the cell clusters.
-    output_layer : str
+    output_layer
         The name of the output table layer in `sdata` where the results of the weighted channel expression computation will be stored.
-    clustering_key : ClusteringKey, default=ClusteringKey._METACLUSTERING_KEY
-        Specifies the key used for pixel clustering, indicating whether metaclustering or SOM clustering labels were used as input for flowsom cell clustering.
-    overwrite : bool, default=False
+    clustering_key
+        Specifies the key that was used for pixel clustering, indicating whether metaclustering or SOM clustering labels were used as input for flowsom cell clustering (`sp.tb.flowsom`).
+    overwrite
         If True, overwrites any existing data in the `output_layer` if it already exists.
 
     Returns
     -------
-    SpatialData
-        The updated `sdata` object with the results of the weighted channel expression added to the specified `output_layer`.
+    The updated `sdata` object with the results of the weighted channel expression added to the specified `output_layer`.
+
+    See Also
+    --------
+    sparrow.tb.flowsom : flowsom cell clustering
+    sparrow.tb.cluster_intensity : calculates average intensity SOM/meta cluster (pixel clusters).
     """
     # subset over all _labels_layer in 'table_layer_cell_clustering'
     _labels_layer = [*sdata[table_layer_cell_clustering].uns["spatialdata_attrs"]["region"]]

@@ -55,8 +55,7 @@ def filter_labels_layer(
 
     Returns
     -------
-    The modified spatial data object with the aligned labels layers and potentially new layers
-    based on the alignment.
+    The modified spatial data object with the filtered labels layers.
 
     Notes
     -----

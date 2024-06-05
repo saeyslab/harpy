@@ -181,15 +181,15 @@ def plot_shapes(
     shapes_layer
         Specifies which shapes to plot. If set to None, no shapes_layer is plotted.
         Displayed as columns in the plot, if multiple are provided.
-    table_layer : str, optional
+    table_layer
         Table layer to be plotted (i.e. to base cell colors on) if `column` is specified.
-    column : str or None, optional
+    column
         Column in `sdata.tables[table_layer].obs` or name in `sdata.tables[table_layer].var.index` to base cell colors on. If none provided, default color is used.
-    region : str, optional
+    region
         If `table_layer` and `column` is specified, this specifies the region in `sdata.tables[table_layer]` to be plotted (via `sdata.tables[table_layer].obs[_REGION_KEY]`).
-    cmap : str, default='magma'
+    cmap
         Colormap for column. Ignored if column is None, or if column + "_colors" is in `sdata.tables[table_layer].uns`.
-    channel : int or str or Iterable[int] or Iterable[str], optional
+    channel
         Channel(s) to be displayed from the image. Displayed as rows in the plot.
         If channel is None, get the number of channels from the first img_layer given as input.
         Ignored if img_layer is None and labels_layer is specified.
@@ -226,12 +226,17 @@ def plot_shapes(
     Raises
     ------
     ValueError
-        - If both `img_layer` and `labels_layer` are specified.
-        - If z_slice is specified, and it is not a z_slice in specified `img_layer` or `labels_layer`.
-        - If a `column` is specified, but no `table_layer`.
-        - If `table_layer` is specified, but `table_layer` is not a table in `sdata.tables`.
-        - If `sdata.tables[table_layer].obs[_REGION_KEY].cat.categories` contains more than on element, but `region` is not specified.
-        - If both `table_layer`, `column` and `region` are specified, but `region` is not in `sdata.tables[table_layer].obs[_REGION_KEY].cat.categories`.
+        If both `img_layer` and `labels_layer` are specified.
+    ValueError
+        If z_slice is specified, and it is not a z_slice in specified `img_layer` or `labels_layer`.
+    ValueError
+        If a `column` is specified, but no `table_layer`.
+    ValueError
+        If `table_layer` is specified, but `table_layer` is not a table in `sdata.tables`.
+    ValueError
+        If `sdata.tables[table_layer].obs[_REGION_KEY].cat.categories` contains more than on element, but `region` is not specified.
+    ValueError
+        If both `table_layer`, `column` and `region` are specified, but `region` is not in `sdata.tables[table_layer].obs[_REGION_KEY].cat.categories`.
 
     Notes
     -----
@@ -392,15 +397,15 @@ def _plot(
         Labels layer to be plotted.
     shapes_layer
         Specifies which shapes to plot. Default is 'segmentation_mask_boundaries'. If set to None, no shapes_layer is plot.
-    table_layer : str, optional
+    table_layer
         Table layer to be plotted (i.e. to base cell colors on) if `column` is specified.
-    column : str or None, optional
+    column
         Column in `sdata.tables[table_layer].obs` or name in `sdata.tables[table_layer].var.index` to base cell colors on. If none provided, default color is used for plotting shapes.
-    region : str, optional
+    region
         If `table_layer` and `column` is specified, this specifies the region in `sdata.tables[table_layer]` to be plotted (via `sdata.tables[table_layer].obs[_REGION_KEY]`).
-    cmap : str, default='magma'
+    cmap
         Colormap for column. Ignored if column is None, or if column + "_colors" is in `sdata.tables[table_layer].uns`.
-    channel : int or str or None, optional
+    channel
         Channel to display from the image. If none provided, or if provided channel could not be found, first channel is plot.
         Ignored if img_layer is None and labels_layer is specified.
     z_slice
@@ -438,12 +443,17 @@ def _plot(
     Raises
     ------
     ValueError
-        - If both `img_layer` and `labels_layer` are specified.
-        - If z_slice is specified, and it is not a z_slice in specified `img_layer` or `labels_layer`.
-        - If a `column` is specified, but no `table_layer`.
-        - If `table_layer` is specified, but `table_layer` is not a table in `sdata.tables`.
-        - If `sdata.tables[table_layer].obs[_REGION_KEY].cat.categories` contains more than on element, but `region` is not specified.
-        - If both `table_layer`, `column` and `region` are specified, but `region` is not in `sdata.tables[table_layer].obs[_REGION_KEY].cat.categories`.
+        If both `img_layer` and `labels_layer` are specified.
+    ValueError
+        If z_slice is specified, and it is not a z_slice in specified `img_layer` or `labels_layer`.
+    ValueError
+        If a `column` is specified, but no `table_layer`.
+    ValueError
+        If `table_layer` is specified, but `table_layer` is not a table in `sdata.tables`.
+    ValueError
+        If `sdata.tables[table_layer].obs[_REGION_KEY].cat.categories` contains more than on element, but `region` is not specified.
+    ValueError
+        If both `table_layer`, `column` and `region` are specified, but `region` is not in `sdata.tables[table_layer].obs[_REGION_KEY].cat.categories`.
 
     Notes
     -----

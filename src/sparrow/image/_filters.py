@@ -168,16 +168,16 @@ def gaussian_filtering(
 
     Parameters
     ----------
-    sdata : SpatialData
+    sdata
         Spatial data object containing the images to be processed.
-    img_layer : Optional[str], default=None
+    img_layer
         The image layer in `sdata` to run min_max_filtering on. If not provided, the last image layer in `sdata` is used.
-    sigma : Union[int, List[int]], optional
+    sigma
         Standard deviation for Gaussian kernel. If provided as a list, the length
-        must match the number of channels. Defaults to 85.
-    output_layer : str, optional
+        must match the number of channels.
+    output_layer
         The name of the output layer. Defaults to "gaussian_filtered".
-    crd : Optional[Tuple[int, int, int, int]], default=None
+    crd
         The coordinates specifying the region of the image to be processed. Defines the bounds (x_min, x_max, y_min, y_max).
     scale_factors
         Scale factors to apply for multiscale.

@@ -51,25 +51,24 @@ def allocate_intensity(
         These labels correspond with regions in the `img_layer`. If not provided, will use last labels_layer.
     output_layer: str, optional
         The table layer in `sdata` in which to save the AnnData object with the intensity values per cell.
-    channels : int or str or Iterable[int] or Iterable[str], optional
+    channels
         Specifies the channels to be considered when extracting intensity information from the `img_layer`.
         This parameter can take a single integer or string or an iterable of integers or strings representing specific channels.
         If set to None (the default), intensity data will be aggregated from all available channels within the image layer.
-    chunks : str | int | tuple[int, ...], optional
+    chunks
         The chunk size for processing the image data. If provided as a tuple, desired chunksize for (z), y, x should be provided.
-    append: bool, optional.
+    append
         If set to True, and the `labels_layer` does not yet exist as a `_REGION_KEY` in `sdata.tables[output_layer].obs`,
         the intensity values extracted during the current function call will be appended (along axis=0) to any existing intensity data
         within the SpatialData object's table attribute. If False, and overwrite is set to True any existing data in `sdata.tables[output_layer]` will be overwritten by the newly extracted intensity values.
-    remove_background_intensity: bool, optional.
+    remove_background_intensity
         If set to True, the calculated intensity for the background (INSTANCE_KEY==0) will not be added to `sdata.tables[output_layer]`.
-    overwrite : bool, default=False
+    overwrite
         If True, overwrites the `output_layer` if it already exists in `sdata`.
 
     Returns
     -------
-    SpatialData
-        An updated version of the input SpatialData object augmented with a table layer (`sdata.tables[output_layer]`) AnnData object.
+    An updated version of the input SpatialData object augmented with a table layer (`sdata.tables[output_layer]`) AnnData object.
 
     Notes
     -----

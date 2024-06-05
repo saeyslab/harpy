@@ -35,25 +35,29 @@ def cell_clustering_preprocess(
 
     Parameters
     ----------
-    sdata : SpatialData
+    sdata
         The input SpatialData object containing the spatial proteomics data.
-    labels_layer_cells : str or Iterable[str]
+    labels_layer_cells
         The labels layer(s) in `sdata` that contain cell segmentation masks. These masks should be previously generated using `sp.im.segment`.
-    labels_layer_clusters : str or Iterable[str]
+    labels_layer_clusters
         The labels layer(s) in `sdata` that contain metacluster or cluster masks. These should be derived from `sp.im.flowsom`.
-    output_layer : str
+    output_layer
         The name of the table layer within `sdata` where the preprocessed data will be stored.
-    q: float | None = None,
+    q
         Quantile used for normalization. If specified, each pixel SOM/meta cluster column in `output_layer` is normalized by this quantile. Values are multiplied by 100 after normalization.
-    chunks : str | int | tuple[int, ...] | None, optional
+    chunks
         Chunk sizes for processing the data. If provided as a tuple, it should detail chunk sizes for each dimension `(z)`, `y`, `x`.
-    overwrite : bool, default=False
+    overwrite
         If True, overwrites the existing data in the specified `output_layer` if it already exists.
 
     Returns
     -------
-    - SpatialData
-        The input `sdata` with a table layer added (`output_layer`).
+    The input `sdata` with a table layer added (`output_layer`).
+
+    See Also
+    --------
+    sparrow.im.flowsom : flowsom pixel clustering.
+    sparrow.tb.flowsom : flowsom cell clustering.
     """
     labels_layer_cells = (
         list(labels_layer_cells)

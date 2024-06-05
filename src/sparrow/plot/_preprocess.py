@@ -11,7 +11,22 @@ from sparrow.utils._keys import _CELLSIZE_KEY
 def preprocess_transcriptomics(
     sdata: SpatialData, table_layer: str = "table_transcriptomics", output: str | None = None
 ) -> None:
-    """Function plots the size of the nucleus/cell related to the counts."""
+    """
+    Function plots the size of the nucleus/cell related to the counts.
+
+    Parameters
+    ----------
+    sdata
+        SpatialData object containing the spatial data and annotations.
+    table_layer
+        The table layer in `sdata`.
+    output
+        The file path prefix for the plots (default is None).
+
+    See Also
+    --------
+    sparrow.tb.preprocess_transcriptomics: preprocess.
+    """
     sc.pl.pca(
         sdata.tables[table_layer],
         color="total_counts",

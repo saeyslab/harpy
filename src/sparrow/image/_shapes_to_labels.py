@@ -21,17 +21,17 @@ def add_label_layer_from_shapes_layer(
 
     Parameters
     ----------
-    sdata : SpatialData
+    sdata
         The SpatialData object.
-    shapes_layer : str
+    shapes_layer
         The shapes layer to be converted to a labels layer.
-    output_layer: str, optional
+    output_layer
         Name of the resulting labels layer that will be added to `sdata`.
-    chunks : Optional[str | int | tuple[int, ...]], default=None
+    chunks
         If provided, the resulting dask array that contains the masks will be rechunked according to the specified chunk size.
-    scale_factors : Optional[ScaleFactors_t], optional
+    scale_factors
         Scale factors to apply for multiscale.
-    overwrite : bool, default=False
+    overwrite
         If True, overwrites the `output_layer` if it already exists in `sdata`.
 
     Returns

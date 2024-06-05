@@ -14,10 +14,32 @@ def nhood_enrichment(
     seed: int = 0,
     overwrite: bool = False,
 ) -> SpatialData:
-    """Returns the AnnData object.
+    """
+    Calculate the nhood enrichment using squidpy via `sq.gr.spatial_neighbors` and `sq.gr.nhood_enrichment`.
 
-    Performs some adaptations to save the data.
-    Calculate the nhood enrichment"
+    Parameters
+    ----------
+    sdata
+        Input SpatialData object containing spatial data.
+    labels_layer
+        The labels layer(s) of `sdata` used to select the cells via the _REGION_KEY  in `sdata.tables[table_layer].obs`.
+        Note that if `output_layer` is equal to `table_layer` and overwrite is True,
+        cells in `sdata.tables[table_layer]` linked to other `labels_layer` (via the _REGION_KEY), will be removed from `sdata.tables[table_layer]`
+        (also from the backing zarr store if it is backed).
+    table_layer
+        The table layer in `sdata`.
+    output_layer
+        The output table layer in `sdata`.
+    celltype_column
+        This will be passed to `cluster_key` of `squidpy.gr.nhood_enrichment`.
+    seed
+        seed
+    overwrite
+        If True, overwrites the `output_layer` if it already exists in `sdata`.
+
+    Returns
+    -------
+    The updated SpatialData object.
     """
     process_table_instance = ProcessTable(sdata, labels_layer=labels_layer, table_layer=table_layer)
     adata = process_table_instance._get_adata()

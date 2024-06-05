@@ -36,22 +36,22 @@ def allocate(
     ----------
     sdata
         The SpatialData object.
-    labels_layer : str, optional
+    labels_layer
         The labels layer (i.e. segmentation mask) in `sdata` to be used to allocate the transcripts to cells.
-    points_layer: str, optional
+    points_layer
         The points layer in `sdata` that contains the transcripts.
-    output_layer: str, optional
+    output_layer
         The table layer in `sdata` in which to save the AnnData object with the transcripts counts per cell.
-    chunks : Optional[str | int | tuple[int, ...]], default=10000
+    chunks
         Chunk sizes for processing. Can be a string, integer or tuple of integers.
         Consider setting the chunks to a relatively high value to speed up processing
         (>10000, or only chunk in z-dimension if data is 3D, and one z-slice fits in memory),
         taking into account the available memory of your system.
-    append: bool, optional.
+    append
         If set to True, and the `labels_layer` does not yet exist as a `_REGION_KEY` in `sdata.tables[output_layer].obs`,
         the transcripts counts obtained during the current function call will be appended (along axis=0) to any existing transcript count values.
         within the SpatialData object's table attribute. If False, and overwrite is set to True any existing data in `sdata.tables[output_layer]` will be overwritten by the newly extracted transcripts counts.
-    overwrite : bool, default=False
+    overwrite
         If True, overwrites the `output_layer` if it already exists in `sdata`.
 
     Returns

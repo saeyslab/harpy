@@ -1,7 +1,6 @@
 from typing import Dict, Iterable, Tuple
 
 import numpy as np
-import spatialdata
 from anndata import AnnData
 from spatialdata import SpatialData
 
@@ -152,10 +151,31 @@ def correct_marker_genes(
     celltype_correction_dict: Dict[str, Tuple[float, float]],
     overwrite: bool = False,
 ) -> SpatialData:
-    """Returns the updated SpatialData object.
+    """
+    Correct celltype expression in `sdata.tables[table_layer]` using `celltype_correction_dict`.
 
     Corrects celltypes that are higher expessed by dividing them by a value if they exceed a certain threshold.
-    The celltype_correction_dict has as keys the celltypes that should be corrected and as values the threshold and the divider.
+    The `celltype_correction_dict` has as keys the celltypes that should be corrected and as values the threshold and the divider.
+
+    Parameters
+    ----------
+    sdata
+        The SpatialData object.
+    labels_layer
+        The labels layer(s) of `sdata` used to select the cells via the _REGION_KEY  in `sdata.tables[table_layer].obs`.
+        Note that if `output_layer` is equal to `table_layer` and overwrite is True,
+        cells in `sdata.tables[table_layer]` linked to other `labels_layer` (via the _REGION_KEY), will be removed from `sdata.tables[table_layer]`
+        (also from the backing zarr store if it is backed).
+    table_layer
+        The table layer in `sdata`.
+    output_layer
+        The output table layer in `sdata`.
+    celltype_correction_dict
+        The `celltype_correction_dict` has as keys the celltypes that should be corrected and as values the threshold and the divider.
+
+    Returns
+    -------
+    The updated SpatialData object.
     """
     process_table_instance = ProcessTable(sdata, labels_layer=labels_layer, table_layer=table_layer)
     adata = process_table_instance._get_adata()
@@ -191,11 +211,40 @@ def filter_on_size(
     min_size: int = 100,
     max_size: int = 100000,
     update_shapes_layers=True,
+    cellsize_key=_CELLSIZE_KEY,
     overwrite: bool = False,
 ) -> SpatialData:
     """Returns the updated SpatialData object.
 
-    All cells with a size outside of the min and max size range are removed.
+    All cells with a size outside of the min and max size range are removed using the `cellsize_key` in `.obs`. Run e.g. `sp.tb.preprocess_transcriptomics` or `sp.tb.preprocess_proteomics` to obtain cell sizes.
+
+    Parameters
+    ----------
+    sdata
+        The SpatialData object.
+    labels_layer
+        The labels layer(s) of `sdata` used to select the cells via the _REGION_KEY  in `sdata.tables[table_layer].obs`.
+        Note that if `output_layer` is equal to `table_layer` and overwrite is True,
+        cells in `sdata.tables[table_layer]` linked to other `labels_layer` (via the _REGION_KEY), will be removed from `sdata.tables[table_layer]`
+        (also from the backing zarr store if it is backed).
+    table_layer
+        The table layer in `sdata`.
+    output_layer
+        The output table layer in `sdata`.
+    min_size
+        minimum size in pixels.
+    max_size
+        maximum size in pixels.
+    update_shapes_layer
+        Whether to filter the shapes layers.
+    cellsize_key
+        Column in `sdata.tables[table_layer].obs` containing cell sizes.
+    overwrite
+        If True, overwrites the `output_layer` if it already exists in `sdata`.
+
+    Returns
+    -------
+    The updated SpatialData object.
     """
     process_table_instance = ProcessTable(sdata, labels_layer=labels_layer, table_layer=table_layer)
     adata = process_table_instance._get_adata()
@@ -203,8 +252,8 @@ def filter_on_size(
 
     # Filter cells based on size and distance
     # need to do the copy because we pop the spatialdata_attrs in _add_table_layer, otherwise it would not be updated inplace
-    adata = adata[adata.obs[_CELLSIZE_KEY] < max_size, :].copy()
-    adata = adata[adata.obs[_CELLSIZE_KEY] > min_size, :].copy()
+    adata = adata[adata.obs[cellsize_key] < max_size, :].copy()
+    adata = adata[adata.obs[cellsize_key] > min_size, :].copy()
 
     sdata = _add_table_layer(
         sdata,
@@ -246,9 +295,3 @@ def _add_table_layer(
     )
 
     return sdata
-
-
-def _back_sdata_table_to_zarr(sdata: SpatialData):
-    adata = sdata.table.copy()
-    del sdata.table
-    sdata.table = spatialdata.models.TableModel.parse(adata)

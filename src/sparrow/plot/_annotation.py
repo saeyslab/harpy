@@ -34,11 +34,11 @@ def score_genes(
     ----------
     sdata
         Data containing spatial information for plotting.
-    table_layer: str, optional
+    table_layer
         The table layer in `sdata` to visualize.
     celltypes: list[str]
         list of celltypes to plot.
-    img_layer : str, optional
+    img_layer
         Image layer to be plotted. If not provided, the last image layer in `sdata` will be used.
     shapes_layer
         Name of the layer containing segmentation mask boundaries, by default "segmentation_mask_boundaries".

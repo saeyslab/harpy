@@ -29,21 +29,21 @@ def cluster_cleanliness(
     ----------
     sdata
         SpatialData object containing the spatial data and annotations.
-    table_layer: str, optional
+    table_layer
         The table layer in `sdata` to visualize.
-    img_layer: str, optional
+    img_layer
         Name of the imgage layer in `sdata` (default is None).
-    shapes_layer : str, optional
+    shapes_layer
         Name of the shapes layer in `sdata` object (default is "segmentation_mask_boundaries").
-    crd : List[int], optional
+    crd
         An optional rectangle [xmin, xmax, ymin, ymax] (default is None).
         If specified, the tissue image will be cropped to this rectangle,
         otherwise the full image will be displayed.
     color_dict
         Custom colormap dictionary for coloring cell types in the barplot.
-    celltype_column : str, optional
+    celltype_column
         Name of the column in `sdata.tables[table_layer]` containing cell type annotations (default is `_ANNOTATION_KEY`).
-    output : str, optional
+    output
         The file path prefix for the plots (default is None).
         If provided, the plots will be saved to the specified output file path with "_barplot.png",
         "_{celltype_column}.png", "_{celltype_column}_crop.png" and "_{celltype_column}_umap.png" as suffixes.

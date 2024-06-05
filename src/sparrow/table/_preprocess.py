@@ -41,40 +41,42 @@ def preprocess_transcriptomics(
     ----------
     sdata
         The input SpatialData object.
-    labels_layer : str or Iterable[str]
+    labels_layer
         The labels layer(s) of `sdata` used to select the cells via the _REGION_KEY  in `sdata.tables[table_layer].obs`.
         Note that if `output_layer` is equal to `table_layer` and overwrite is True,
         cells in `sdata.tables[table_layer]` linked to other `labels_layer` (via the _REGION_KEY), will be removed from `sdata.tables[table_layer]`
         (also from the backing zarr store if it is backed).
-    table_layer: str, optional
+    table_layer
         The table layer in `sdata` on which to perform preprocessing on.
-    output_layer: str, optional
+    output_layer
         The output table layer in `sdata` to which preprocessed table layer will be written.
-    min_counts : int, default=10
+    min_counts
         Minimum number of genes a cell should contain to be kept (passed to `scanpy.pp.filter_cells`).
-    min_cells : int, default=5
+    min_cells
         Minimum number of cells a gene should be in to be kept (passed to `scanpy.pp.filter_genes`).
-    size_norm : bool, default=True
+    size_norm
         If True, normalization is based on the size of the nucleus/cell. If False, `scanpy.sc.pp.normalize_total` is used for normalization.
-    max_value_scale : float, default=10
+    max_value_scale
         The maximum value to which data will be scaled.
-    n_comps : int, default=50
+    n_comps
         Number of principal components to calculate.
-    overwrite : bool, default=False
+    overwrite
         If True, overwrites the `output_layer` if it already exists in `sdata`.
 
     Returns
     -------
-    SpatialData
-        The `sdata` containing the preprocessed AnnData object as an attribute (`sdata.tables[output_layer]`).
+    The `sdata` containing the preprocessed AnnData object as an attribute (`sdata.tables[output_layer]`).
 
     Raises
     ------
     ValueError
-        - If `sdata` does not have labels attribute.
-        - If `sdata` does not have tables attribute.
-        - If `labels_layer`, or one of the element of `labels_layer` is not a labels layer in `sdata`.
-        - If `table_layer` is not a table layer in `sdata`.
+        If `sdata` does not have labels attribute.
+    ValueError
+        If `sdata` does not have tables attribute.
+    ValueError
+        If `labels_layer`, or one of the element of `labels_layer` is not a labels layer in `sdata`.
+    ValueError
+        If `table_layer` is not a table layer in `sdata`.
 
 
     Warnings
@@ -82,6 +84,10 @@ def preprocess_transcriptomics(
     - If `max_value_scale` is set too low, it may overly constrain the variability of the data,
       potentially impacting downstream analyses.
     - If the dimensionality of `sdata.tables[table_layer]` is smaller than the desired number of principal components, `n_comps` is set to the minimum dimensionality, and a message is printed.
+
+    See Also
+    --------
+    sparrow.tb.allocate : create an AnnData table in `sdata` using a `points_layer` and a `labels_layer`.
     """
     preprocess_instance = Preprocess(sdata, labels_layer=labels_layer, table_layer=table_layer)
     sdata = preprocess_instance.preprocess(
@@ -127,38 +133,37 @@ def preprocess_proteomics(
 
     Parameters
     ----------
-    sdata : SpatialData
+    sdata
         The input SpatialData object.
-    labels_layer : str or Iterable[str]
+    labels_layer
         The labels layer(s) of `sdata` used to select the cells via the _REGION_KEY  in `sdata.tables[table_layer].obs`.
         Note that if `output_layer` is equal to `table_layer` and overwrite is True,
         cells in `sdata.tables[table_layer]` linked to other `labels_layer` (via the _REGION_KEY), will be removed from `sdata.tables[table_layer]`.
         If a list of labels layers is provided, they will therefore be preprocessed together (e.g. multiple samples).
-    table_layer: str, optional
+    table_layer
         The table layer in `sdata` on which to perform preprocessing on.
-    output_layer: str, optional
+    output_layer
         The output table layer in `sdata` to which preprocessed table layer will be written.
-    size_norm : bool, default=True
+    size_norm
         If True, normalization is based on the size of the nucleus/cell. If False, `scanpy.sc.pp.normalize_total` is used for normalization.
-    log1p : bool, default=True
+    log1p
         If True, applies log1p transformation to the data.
-    scale : bool, default=False
+    scale
         If True, scales the data to have zero mean and a variance of one. The scaling is capped at `max_value_scale`.
-    max_value_scale : float, default=10
+    max_value_scale
         The maximum value to which data will be scaled. Ignored if `scale` is False.
-    q: float | None = None,
+    q
         Quantile used for normalization. If specified, values are normalized by this quantile calculated for each `adata.var`. Values are multiplied by 100 after normalization. Typical value used is 0.999,
-    calculate_pca : bool, default=False
+    calculate_pca
         If True, calculates principal component analysis (PCA) on the data.
-    n_comps : int, default=50
+    n_comps
         Number of principal components to calculate. Ignored if `calculate_pca` is False.
-    overwrite : bool, default=False
+    overwrite
         If True, overwrites the `output_layer` if it already exists in `sdata`.
 
     Returns
     -------
-    SpatialData
-        The `sdata` containing the preprocessed AnnData object as an attribute (`sdata.tables[output_layer]`).
+    The `sdata` containing the preprocessed AnnData object as an attribute (`sdata.tables[output_layer]`).
 
     Raises
     ------
@@ -175,6 +180,10 @@ def preprocess_proteomics(
       potentially impacting downstream analyses.
     - If the dimensionality of `sdata.tables[table_layer]` is smaller than the desired number of principal components
       when `calculate_pca` is True, `n_comps` is set to the minimum dimensionality, and a message is printed.
+
+    See Also
+    --------
+    sparrow.tb.allocate_intensity : create an AnnData table in `sdata` using an `image_layer` and a `labels_layer`.
     """
     preprocess_instance = Preprocess(sdata, labels_layer=labels_layer, table_layer=table_layer)
     sdata = preprocess_instance.preprocess(

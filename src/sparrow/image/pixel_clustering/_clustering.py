@@ -46,39 +46,44 @@ def flowsom(
 
     Parameters
     ----------
-    sdata : SpatialData
+    sdata
         The input SpatialData object.
-    image_layer : str or Iterable[str]
+    img_layer
         The image layer(s) of `sdata` on which flowsom is run. It is recommended to preprocess the data with `sp.im.pixel_clustering_preprocess`.
-    output_layer_clusters: str or Iterable[str]
+    output_layer_clusters
         The output labels layer in `sdata` to which labels layer with predicted flowsom SOM clusters are saved.
-    output_layer_metaclusters: str or Iterable[str]
+    output_layer_metaclusters
         The output labels layer in `sdata` to which labels layer with predicted flowsom metaclusters are saved.
-    channels : int | str | Iterable[int] | Iterable[str] | None, optional
+    channels
         Specifies the channels to be included in the pixel clustering.
-    fraction : float, optional
+    fraction
         Fraction of the data to sample for training flowsom. Inference will be done on all pixels in `image_layer`.
-    n_clusters : int, default=5
+    n_clusters
         The number of meta clusters to form.
-    random_state : int, default=100
+    random_state
         A random state for reproducibility of the clustering and sampling.
-    chunks : str | int | tuple[int, ...] | None, optional
+    chunks
         Chunk sizes for processing. If provided as a tuple, it should contain chunk sizes for `c`, `(z)`, `y`, `x`.
     scale_factors
         Scale factors to apply for multiscale
-    overwrite : bool, default=False
+    overwrite
         If True, overwrites the `output_layer_cluster` and/or `output_layer_metacluster` if it already exists in `sdata`.
     **kwargs
         Additional keyword arguments passed to `fs.FlowSOM`.
 
     Returns
     -------
-    - SpatialData
-        The input `sdata` with the clustering results added.
-    - fs.FlowSOM
-        FlowSOM object containing a `MuData` object and a trained `fs.models.FlowSOMEstimator`. `MuData` object will only contain the fraction (via the `fraction` parameter) of the data sampled from the `img_layer` on which the FlowSOM model is trained.
-    - pd.Series
-        pandas Series object containing a mapping between the clusters and the metaclusters.
+    tuple:
+
+        - The input `sdata` with the clustering results added.
+
+        - FlowSOM object containing a `MuData` object and a trained `fs.models.FlowSOMEstimator`. `MuData` object will only contain the fraction (via the `fraction` parameter) of the data sampled from the `img_layer` on which the FlowSOM model is trained.
+
+        - A pandas Series object containing a mapping between the clusters and the metaclusters.
+
+    See Also
+    --------
+    sparrow.im.pixel_clustering_preprocess : preprocess image layers before applying flowsom clustering.
 
     Warnings
     --------

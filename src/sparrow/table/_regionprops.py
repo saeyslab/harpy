@@ -39,21 +39,19 @@ def add_regionprop_features(
         The name of the layer in `sdata` that contains the labeled regions, typically derived from a segmentation
         process. Each distinct label corresponds to a different cell, and properties will be calculated for these
         labeled regions. If not provided, the function will default to the 'last' labels layer in `sdata`.
-    table_layer: str, optional
+    table_layer
         The table layer in `sdata.tables` to which the features will be added.
 
     Returns
     -------
-    SpatialData
-        The original SpatialData object, updated to include a range of new region-specific property measurements
-        in its `sdata.tables[table_layer].obs` attribute.
+    The original SpatialData object, updated to include a range of new region-specific property measurements
+    in its `sdata.tables[table_layer].obs` attribute.
 
     Notes
     -----
     - The function operates by pulling the required data (masks) into memory for processing, as the underlying 'skimage.measure.regionprops'
       functionality does not support lazy loading. Consequently, sufficient memory must be available for large datasets.
-    - Computed properties are merged (using keys `_INSTANCE_KEY` and `_REGION_KEY` in `sdata.tables[table_layer].obs`)
-    with the existing observations within the SpatialData's table (`sdata.tables[table_layer].obs`).
+    - Computed properties are merged (using keys `_INSTANCE_KEY` and `_REGION_KEY` in `sdata.tables[table_layer].obs`) with the existing observations within the SpatialData's table (`sdata.tables[table_layer].obs`).
 
     Example
     -------

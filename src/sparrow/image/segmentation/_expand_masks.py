@@ -25,7 +25,7 @@ def expand_labels_layer(
     iou_threshold: float = 0.7,
 ) -> SpatialData:
     """
-    Expaned cells in labels layer `labels_layer` of Spatialdata object with `distance`, using `skimage.segmentation.expand_labels`.
+    Expand cells in labels layer `labels_layer` of Spatialdata object with `distance`, using `skimage.segmentation.expand_labels`.
 
     Parameters
     ----------
@@ -58,8 +58,7 @@ def expand_labels_layer(
 
     Returns
     -------
-    The modified spatial data object with the aligned labels layers and potentially new layers
-    based on the alignment.
+    The modified spatial data object with the expanded labels layer.
 
     Notes
     -----

@@ -45,6 +45,7 @@ Operations on image and labels layers.
     im.tiling_correction
     im.enhance_contrast
     im.min_max_filtering
+    im.gaussian_filtering
     im.transcript_density
     im.combine
     im.segment
@@ -53,9 +54,12 @@ Operations on image and labels layers.
     im.align_labels_layers
     im.apply_labels_layers
     im.filter_labels_layer
-    im.mask_to_original
     im.merge_labels_layers
     im.merge_labels_layers_nuclei
+    im.add_label_layer_from_shapes_layer
+    im.mask_to_original
+    im.pixel_clustering_preprocess
+    im.flowsom
 ```
 
 ## Shape
@@ -86,15 +90,21 @@ Operations on table (`AnnData` object) layers.
     :toctree: generated
 
     tb.allocate
-    tb.preprocess_anndata
+    tb.allocate_intensity
+    tb.preprocess_transcriptomics
+    tb.preprocess_proteomics
     tb.filter_on_size
-    tb.cluster
+    tb.leiden
+    tb.kmeans
     tb.score_genes
     tb.correct_marker_genes
     tb.cluster_cleanliness
     tb.nhood_enrichment
-    tb.allocate_intensity
     tb.add_regionprop_features
+    tb.cluster_intensity
+    tb.cell_clustering_preprocess
+    tb.flowsom
+    tb.weighted_channel_expression
 ```
 
 ## Plotting
@@ -118,7 +128,7 @@ Plotting functions.
     pl.sanity_plot_transcripts_matrix
     pl.analyse_genes_left_out
     pl.transcript_density
-    pl.preprocess_anndata
+    pl.preprocess_transcriptomics
     pl.cluster
     pl.score_genes
     pl.cluster_cleanliness

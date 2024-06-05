@@ -47,37 +47,42 @@ def flowsom(
 
     Parameters
     ----------
-    sdata : SpatialData
+    sdata
         The input SpatialData object.
-    labels_layer_cells : str | list[str] | None
+    labels_layer_cells
         The labels layer(s) in `sdata` that contain cell segmentation masks. These masks should be previously generated using `sp.im.segment`.
         If a list of labels layers is provided, they will be clustered together (e.g. multiple samples).
-    labels_layer_clusters : str or Iterable[str]
+    labels_layer_clusters
         The labels layer(s) in `sdata` that contain metacluster or SOM cluster masks. These should be obtained via `sp.im.flowsom`.
-    output_layer : str
+    output_layer
         The output table layer in `sdata` where results of the clustering and metaclustering will be stored.
-    q: float | None = None,
+    q
         Quantile used for normalization. If specified, each pixel SOM/meta cluster column in `output_layer` is normalized by this quantile prior to flowsom clustering. Values are multiplied by 100 after normalization.
-    chunks : str | int | tuple[int, ...] | None, optional
+    chunks
         Chunk sizes for processing the data. If provided as a tuple, it should detail chunk sizes for each dimension `(z)`, `y`, `x`.
-    n_clusters : int, default=20
+    n_clusters
         The number of metaclusters to form from the self-organizing maps.
-    index_names_var : Iterable[str] | None, optional
+    index_names_var
         Specifies the variable names to be used from `sdata.tables[table_layer].var` for clustering. If None, `index_positions_var` will be used if not None.
-    index_positions_var : Iterable[int] | None, optional
+    index_positions_var
         Specifies the positions of variables to be used from `sdata.tables[table_layer].var` for clustering. Used if `index_names_var` is None.
-    random_state : int, default=100
+    random_state
         A random state for reproducibility of the clustering.
-    overwrite : bool, default=False
+    overwrite
         If True, overwrites the existing data in `output_layer` if it already exists.
     **kwargs
         Additional keyword arguments passed to the `fs.FlowSOM` clustering algorithm.
 
     Returns
     -------
-    tuple[SpatialData, fs.FlowSOM]
+    tuple
         - The updated `sdata` with the clustering results added.
         - An instance of `fs.FlowSOM` containing the trained FlowSOM model.
+
+    See Also
+    --------
+    sparrow.im.flowsom : flowsom pixel clustering
+    sparrow.tb.cell_clustering_preprocess : prepares data for cell clustering.
     """
     # first do preprocessing
     sdata = cell_clustering_preprocess(

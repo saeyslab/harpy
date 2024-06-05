@@ -9,18 +9,18 @@ def cluster(sdata: SpatialData, table_layer: str, key_added: str = "leiden", out
     """
     Visualize clusters.
 
-    Plot the Leiden clusters on a UMAP (using `scanpy.pl.umap`),
+    Plot the clusters on a UMAP (using `scanpy.pl.umap`),
     and show the most differentially expressed genes/channels for each cluster on a second plot (using `scanpy.pl.rank_genes_group`), if "rank_genes_groups" is in `sdata.tables[table_layer].uns.keys()`.
 
     Parameters
     ----------
     sdata
         The SpatialData object containing the analyzed data.
-    table_layer: str
+    table_layer
         The table layer in `sdata` to visualize.
-    key_added: str, optional
+    key_added
         name of the column in `sdata.tables[table_layer].obs` that contains the cluster id.
-    output : str or None, optional
+    output
         The file path prefix for the plots (default is None).
         If provided, the plots will be saved to the specified output file path with "_umap.png"
         and "_rank_genes_groups.png" as suffixes.
@@ -32,7 +32,8 @@ def cluster(sdata: SpatialData, table_layer: str, key_added: str = "leiden", out
 
     See Also
     --------
-    sparrow.tb.cluster
+    sparrow.tb.leiden
+    sparrow.tb.kmeans
     """
     # Plot clusters on a UMAP
     sc.pl.umap(sdata.tables[table_layer], color=[key_added], show=not output)

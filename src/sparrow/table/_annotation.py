@@ -40,16 +40,16 @@ def score_genes(
     ----------
     sdata
         Data containing spatial information.
-    labels_layer : str or Iterable[str]
+    labels_layer
         The labels layer(s) of `sdata` used to select the cells via the _REGION_KEY in `sdata.tables[table_layer].obs`.
         Note that if `output_layer` is equal to `table_layer` and overwrite is True,
         cells in `sdata.tables[table_layer]` linked to other `labels_layer` (via the _REGION_KEY), will be removed from `sdata.tables[table_layer]`.
         If a list of labels layers is provided, they will therefore be scored together (e.g. multiple samples).
-    table_layer: str, optional
+    table_layer
         The table layer in `sdata` on which to perform annotation on.
-    output_layer: str, optional
+    output_layer
         The output table layer in `sdata` to which table layer with results of annotation will be written.
-    path_marker_genes : str
+    path_marker_genes
         Path to the CSV file containing the marker genes.
         CSV file should be a one-hot encoded matrix with cell types listed in the first row, and marker genes in the first column.
     delimiter
@@ -65,17 +65,18 @@ def score_genes(
     input_dict
         If True, the marker gene list from the CSV file is treated as a dictionary with the first column being
         the cell type names and the subsequent columns being the marker genes for those cell types. Default is False.
-    overwrite : bool, default=False
+    overwrite
         If True, overwrites the `output_layer` if it already exists in `sdata`.
 
     Returns
     -------
-    SpatialData
-        Updated `sdata`.
-    list[str]
-        list of strings, with all celltypes that are scored (but are not in the del_celltypes list).
-    list[str]
-        list of strings, with all celltypes, some of which may not be scored, because their corresponding transcripts do not appear in the region of interest. _UNKNOWN_CELLTYPE_KEY, is also added if it is detected.
+    tuple:
+
+        - Updated `sdata`.
+
+        - list of strings, with all celltypes that are scored (but are not in the del_celltypes list).
+
+        - list of strings, with all celltypes, some of which may not be scored, because their corresponding transcripts do not appear in the region of interest. _UNKNOWN_CELLTYPE_KEY, is also added if it is detected.
 
     Notes
     -----
@@ -177,18 +178,18 @@ def cluster_cleanliness(
     ----------
     sdata
         Data containing spatial information.
-    labels_layer : str or Iterable[str]
+    labels_layer
         The labels layer(s) of `sdata` used to select the cells via the _REGION_KEY in `sdata.tables[table_layer].obs`.
         Note that if `output_layer` is equal to `table_layer` and overwrite is True,
         cells in `sdata.tables[table_layer]` linked to other `labels_layer` (via the _REGION_KEY), will be removed from `sdata.tables[table_layer]`.
         If a list of labels layers is provided, they will therefore be scored together (e.g. multiple samples).
-    table_layer: str, optional
+    table_layer
         The table layer in `sdata` on which to perform cleaning on.
-    output_layer: str, optional
+    output_layer
         The output table layer in `sdata` to which table layer with results of cleaned annotations will be written.
-    celltypes : List[str]
+    celltypes
         List of celltypes that you want to use for annotation, can be a subset of what is available in .obs of corresponding table.
-    celltype_indexes : dict, optional
+    celltype_indexes
         Dictionary with cell type as keys and indexes as values.
         Cell types with provided indexes will be grouped together under new cell type provided as key.
         E.g.:
@@ -197,14 +198,16 @@ def cluster_cleanliness(
     colors
         List of colors to be used for visualizing different cell types. If not provided,
         a default colormap will be generated.
-    overwrite : bool, default=False
+    overwrite
         If True, overwrites the `output_layer` if it already exists in `sdata`.
 
     Returns
     -------
-    Updated spatial data after the cleanliness analysis.
+    tuple:
 
-    Dictionary with cell types as keys and their corresponding colors as values.
+        - Updated spatial data after the cleanliness analysis.
+
+        - Dictionary with cell types as keys and their corresponding colors as values.
     """
     process_table_instance = ProcessTable(sdata, labels_layer=labels_layer, table_layer=table_layer)
     adata = process_table_instance._get_adata()

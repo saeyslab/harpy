@@ -34,43 +34,47 @@ def pixel_clustering_preprocess(
 
     Parameters
     ----------
-    sdata : SpatialData
+    sdata
         The SpatialData object containing the image data.
-    img_layer : str | Iterable[str]
+    img_layer
         The image layer(s) from `sdata` to process. This can be a single layer or a list of layers, e.g., when multiple fields of view are available.
-    output_layer : str | Iterable[str]
+    output_layer
         The preprocessed images are saved under this layer in `sdata`.
-    channels : int | str | Iterable[int] | Iterable[str] | None, optional
+    channels
         Specifies the channels to be included in the processing.
-    q : float | None, optional
+    q
         Quantile used for normalization. If specified, pixel values are normalized by this quantile across the specified channels.
         Each channel is normalized by its own calculated quantile.
-    q_sum : float | None, optional
+    q_sum
         If the sum of the channel values at a pixel is below this quantile, the pixel values across all channels are set to NaN.
-    q_post : float, optional
+    q_post
         Quantile used for normalization after other preprocessing steps (`q`, `q_sum`, `norm_sum` normalization and Gaussian blurring) are performed. If specified, pixel values are normalized by this quantile across the specified channels.
         Each channel is normalized by its own calculated quantile.
-    sigma : float | Iterable[float] | None, optional
+    sigma
         Gaussian blur parameter for each channel. Use `0` to omit blurring for specific channels or `None` to skip blurring altogether.
-    norm_sum : bool, optional
+    norm_sum
         If `True`, each channel is normalized by the sum of all channels at each pixel.
-    chunks : str | int | tuple[int, ...] | None, optional
+    chunks
         Chunk sizes for processing. If provided as a tuple, it should contain chunk sizes for `c`, `(z)`, `y`, `x`.
     scale_factors
         Scale factors to apply for multiscale
-    overwrite : bool, optional
+    overwrite
         If `True`, overwrites existing data in `output_layer`.
 
     Notes
     -----
     To avoid data leakage:
-     - in the single fov case, to prevent data leakage between channels, one should set `q_sum`==None and `norm_sum`==False, the only normalization that will be performed will then be a division by the `q` and `q_post` quantile values per channel.
-     - in the multiple fov case, both `q_sum`, `norm_sum`, `q` and `q_post` should be set to None to prevent data leakage both between channels and between images.
+     - in the single fov case (one image layer provided), to prevent data leakage between channels, one should set `q_sum=None` and `norm_sum=False`, the only normalization that will be performed will then be a division by the `q` and `q_post` quantile values per channel.
+     - in the multiple fov case (multiple image layers provided), both `q_sum`, `norm_sum`, `q` and `q_post` should be set to None to prevent data leakage both between channels and between images.
 
     Returns
     -------
-    SpatialData
-        An updated SpatialData object with the preprocessed image data stored in specified layers.
+    An updated SpatialData object with the preprocessed image data stored in specified `output_layers`.
+
+    See Also
+    --------
+    sparrow.im.flowsom : flowsom pixel clustering on image layers.
+
     """
     # setting q_sum =None, and norm_sum=False -> then there will be no data leakage in single fov case.
     img_layer = list(img_layer) if isinstance(img_layer, Iterable) and not isinstance(img_layer, str) else [img_layer]
