@@ -278,12 +278,12 @@ class Cluster(ProcessTable):
                 log.warning(
                     "'neighbors' already in 'adata.uns', recalculating neighbors. Consider passing 'calculate_neigbors=False'."
                 )
-            sc.pp.neighbors(adata, **neigbors_kwargs)
+            sc.pp.neighbors(adata, copy=False, **neigbors_kwargs)
         if calculate_umap:
             if "neighbors" not in adata.uns.keys():
                 log.info("'neighbors not in 'adata.uns', computing neighborhood graph before calculating umap.")
-                sc.pp.neighbors(adata, **neigbors_kwargs)
-            sc.tl.umap(adata, **umap_kwargs)
+                sc.pp.neighbors(adata, copy=False, **neigbors_kwargs)
+            sc.tl.umap(adata, copy=False, **umap_kwargs)
 
         if key_added in adata.obs.columns:
             log.warning(f"The column '{key_added}' already exists in the Anndata object. Proceeding to overwrite it.")
