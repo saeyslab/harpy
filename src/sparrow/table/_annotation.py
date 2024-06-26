@@ -360,7 +360,8 @@ def _annotate_celltype_iter(
     for _iteration in range(n_iter):
         log.info(f"Iteration {_iteration}.")
         cell_types = np.unique(adata.obs["annotation_own_score_genes"]).tolist()
-        cell_types.remove(_UNKNOWN_CELLTYPE_KEY)
+        if _UNKNOWN_CELLTYPE_KEY in cell_types:
+            cell_types.remove(_UNKNOWN_CELLTYPE_KEY)
         mean_per_ct = []
         for ct in cell_types:
             l = pd.DataFrame(adata.obs["annotation_own_score_genes"] == ct)
@@ -498,18 +499,13 @@ def _annotate_celltype_weighted(
     # min score to obtain for a cell type, otherwise 'unknown'
 
     if min_score == "Zero":
-        scores_cell_celltype_ok = scores_cell_celltype.copy(deep=True)
-        # TODO rewrite, and use boolean arrays
-        scores_cell_celltype_ok[scores_cell_celltype_ok > 0] = True
-        # scores_cell_celltype_ok=scores_celltype_ok>0, just use the vbooleans
-        scores_cell_celltype_ok[scores_cell_celltype_ok != True] = False  # noqa: E712 TODO
+        scores_cell_celltype_ok = scores_cell_celltype > 0
     if min_score == "Quantile":
-        scores_cell_celltype_ok = scores_cell_celltype.copy(deep=True)
-        scores_cell_celltype_ok[scores_cell_celltype_ok > scores_cell_celltype_ok.quantile(min_score_q / 100)] = True
-        scores_cell_celltype_ok[scores_cell_celltype_ok != True] = False  # noqa: E712 TODO
+        scores_cell_celltype_ok = scores_cell_celltype > scores_cell_celltype.quantile(min_score_q / 100)
     if min_score is None:
-        scores_cell_celltype_ok = scores_cell_celltype.copy(deep=True)
-        scores_cell_celltype_ok[scores_cell_celltype_ok.round(6) == scores_cell_celltype_ok.round(6)] = True
+        scores_cell_celltype_ok = pd.DataFrame(
+            True, index=scores_cell_celltype.index, columns=scores_cell_celltype.columns
+        )
 
     # scale scores per cell type to make them more comparable between cell types (because some cell types have more markers etc.)
     # this scaling happens per celtype over the different cells
@@ -524,7 +520,9 @@ def _annotate_celltype_weighted(
 
     if scaling == "Nmarkers":
         Nmarkers = marker_genes.sum(axis=0).to_list()
-        scores_cell_celltype = scores_cell_celltype.div(Nmarkers)
+        scores_cell_celltype = scores_cell_celltype.div(
+            Nmarkers
+        )  # TODO!! this could result in divide by 0. i.e. NaN will be introduced. Check.
         log.info("scaling based on number of markers per cell type")
     if scaling == "Robust":
         for cell_type in cell_types:
