@@ -105,6 +105,16 @@ class ProcessTable:
         return adata
 
     @staticmethod
+    def _type_check_before_pca(adata: AnnData):
+        # type check because pca raises error when adata.X is sparse and of dtype int.
+        if np.issubdtype(adata.X.dtype, np.integer):
+            raise ValueError(
+                f"Data matrix of AnnData table is of type '{adata.X.dtype}', "
+                "which indicates no preprocessing is performed. "
+                "Please consider preprocessing the data first before calculating pca ('scanpy.tl.pca'), e.g. with 'scanpy.pp.scale'."
+            )
+
+    @staticmethod
     def _subset_adata_var(
         adata: AnnData, index_names_var: Iterable[str] | None = None, index_positions_var: Iterable[int] | None = None
     ) -> AnnData:

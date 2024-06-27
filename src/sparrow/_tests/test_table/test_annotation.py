@@ -1,18 +1,8 @@
-from sparrow.table import leiden, score_genes
+from sparrow.table import score_genes
 from sparrow.utils._keys import _ANNOTATION_KEY
 
 
 def test_score_genes(sdata_transcripts, path_dataset_markers):
-    sdata_transcripts = leiden(
-        sdata_transcripts,
-        labels_layer="segmentation_mask",
-        table_layer="table_transcriptomics",
-        output_layer="table_transcriptomics_cluster",
-        key_added="leiden",
-        random_state=100,
-        overwrite=True,
-    )
-
     sdata_transcripts, celltypes_scored, celltypes_all = score_genes(
         sdata=sdata_transcripts,
         labels_layer="segmentation_mask",

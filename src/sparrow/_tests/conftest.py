@@ -85,6 +85,24 @@ def sdata_transcripts(tmpdir):
         output_layer="table_transcriptomics",
         overwrite=True,
     )
+
+    sdata = sp.tb.preprocess_transcriptomics(
+        sdata,
+        labels_layer="segmentation_mask",
+        table_layer="table_transcriptomics",
+        output_layer="table_transcriptomics_preprocessed",
+        overwrite=True,
+    )
+
+    sdata = sp.tb.leiden(
+        sdata,
+        labels_layer="segmentation_mask",
+        table_layer="table_transcriptomics_preprocessed",
+        output_layer="table_transcriptomics_cluster",
+        key_added="leiden",
+        random_state=100,
+        overwrite=True,
+    )
     yield sdata
 
 

@@ -295,7 +295,10 @@ class Preprocess(ProcessTable):
                         f"amount of pc's was set to {min( adata.shape)-1} because of the dimensionality of 'sdata.tables[table_layer]'."
                     )
             if not scale:
-                log.warning("Please consider scaling the data by passing scale=True, before calculating pca.")
+                log.warning(
+                    "Please consider scaling the data by passing 'scale=True', when passing 'calculate_pca=True'."
+                )
+            self._type_check_before_pca(adata)
             sc.tl.pca(adata, n_comps=n_comps, **pca_kwargs)
 
         self.sdata = _add_table_layer(

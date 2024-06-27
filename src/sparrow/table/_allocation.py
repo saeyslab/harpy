@@ -31,6 +31,7 @@ def allocate(
     append: bool = False,
     overwrite: bool = False,
 ) -> SpatialData:
+    # TODO: add update_shapes_layer as a parameter
     """
     Allocates transcripts to cells via provided `labels_layer` and `points_layer` and returns updated SpatialData augmented with a table layer (`sdata.tables[output_layer]`) holding the AnnData object with cell counts.
 
@@ -153,31 +154,54 @@ def allocate(
 
     coordinates, cell_counts = dask.compute(coordinates, cell_counts)
 
-    cell_counts = cell_counts.unstack(fill_value=0)
-    # convert dtype of columns to "object", otherwise error writing to zarr.
-    cell_counts.columns = cell_counts.columns.astype(str)
+    cell_counts = cell_counts.to_frame(name="values")
+    cell_counts = cell_counts.reset_index()
 
-    log.info("Finished calculating cell counts.")
+    cell_counts["gene"] = cell_counts["gene"].astype("object")
+    cell_counts["gene"] = pd.Categorical(cell_counts["gene"])
 
-    # make sure coordinates are sorted in same order as cell_counts
-    index_order = cell_counts.index.argsort()
-    coordinates = coordinates.loc[cell_counts.index[index_order]]
-    cell_counts = cell_counts.sort_index()
+    columns_categories = cell_counts["gene"].cat.categories.to_list()
+    columns_nodes = pd.Categorical(cell_counts["gene"], categories=columns_categories, ordered=True)
 
-    log.info("Creating AnnData object.")
+    indices_of_aggregated_rows = np.array(cell_counts[_CELL_INDEX])
+    rows_categories = np.unique(indices_of_aggregated_rows)
 
-    # Create the anndata object
-    _cells_id = cell_counts.index.astype(int)  # index of cell_counts should already be an int
-    _uuid_value = str(uuid.uuid4())[:8]
-    cell_counts.index = cell_counts.index.map(lambda x: f"{x}_{labels_layer}_{_uuid_value}")
-    cell_counts.index.name = _CELL_INDEX
+    rows_nodes = pd.Categorical(indices_of_aggregated_rows, categories=rows_categories, ordered=True)
 
-    adata = AnnData(cell_counts)
-    adata.obs[_INSTANCE_KEY] = _cells_id
+    X = sparse.coo_matrix(
+        (
+            cell_counts["values"].values.ravel(),
+            (rows_nodes.codes, columns_nodes.codes),
+        ),
+        shape=(len(rows_categories), len(columns_categories)),
+    ).tocsr()
+
+    adata = AnnData(
+        X,
+        obs=pd.DataFrame(index=rows_categories),
+        var=pd.DataFrame(index=columns_categories),
+        dtype=X.dtype,
+    )
+
+    coordinates.index = coordinates.index.map(str)
+
+    # sanity check
+    assert np.array_equal(np.unique(coordinates.index), np.unique(adata.obs.index))
+
+    # make sure coordinates is in same order as adata
+    coordinates = coordinates.reindex(adata.obs.index)
+
+    adata = adata[adata.obs.index != "0"]
+
+    adata.obsm["spatial"] = coordinates[coordinates.index != "0"].values
+    adata.obs[_INSTANCE_KEY] = adata.obs.index.astype(int)
+
     adata.obs[_REGION_KEY] = pd.Categorical([labels_layer] * len(adata.obs))
-    adata = adata[adata.obs[_INSTANCE_KEY] != 0]
 
-    adata.obsm["spatial"] = coordinates[coordinates.index != 0].values
+    _uuid_value = str(uuid.uuid4())[:8]
+    adata.obs.index = adata.obs.index.map(lambda x: f"{x}_{labels_layer}_{_uuid_value}")
+
+    adata.obs.index.name = _CELL_INDEX
 
     if append:
         region = []

@@ -278,10 +278,12 @@ class Cluster(ProcessTable):
                 log.warning(
                     "'neighbors' already in 'adata.uns', recalculating neighbors. Consider passing 'calculate_neigbors=False'."
                 )
+            self._type_check_before_pca(adata)
             sc.pp.neighbors(adata, **neigbors_kwargs)
         if calculate_umap:
             if "neighbors" not in adata.uns.keys():
                 log.info("'neighbors not in 'adata.uns', computing neighborhood graph before calculating umap.")
+                self._type_check_before_pca(adata)
                 sc.pp.neighbors(adata, **neigbors_kwargs)
             sc.tl.umap(adata, **umap_kwargs)
 
