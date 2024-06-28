@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import itertools
 import uuid
 from collections import namedtuple
 
@@ -67,81 +66,80 @@ def allocate(
         )
 
     Coords = namedtuple("Coords", ["x0", "y0"])
-    s_mask = _get_spatial_element(sdata, layer=labels_layer)
-    coords = Coords(*_get_translation(s_mask))
+    se = _get_spatial_element(sdata, layer=labels_layer)
+    coords = Coords(*_get_translation(se))
 
-    masks = s_mask.data
+    arr = se.data
 
     if chunks is not None:
-        masks = masks.rechunk(chunks)
+        arr = arr.rechunk(chunks)
     else:
-        masks = masks.rechunk(masks.chunksize)
+        arr = arr.rechunk(arr.chunksize)
 
-    if masks.ndim == 2:
-        masks = masks[None, ...]
+    if arr.ndim == 2:
+        arr = arr[None, ...]
 
     ddf = sdata.points[points_layer]
 
+    delayed_chunks = arr.to_delayed().flatten()
+
+    # chunk info needed for querying
+    chunk_info = []
+    _chunks = arr.chunks
+
+    # Iterate over each chunk and compute its coordinates and size, needed for query
+    for i in range(delayed_chunks.shape[0]):
+        z, y, x = np.unravel_index(i, [len(_chunks[0]), len(_chunks[1]), len(_chunks[2])])
+        size = (_chunks[0][z], _chunks[1][y], _chunks[2][x])
+        start_coords = (sum(_chunks[0][:z]), sum(_chunks[1][:y]), sum(_chunks[2][:x]))
+        chunk_info.append((start_coords, size))
+
     log.info("Calculating cell counts.")
 
-    def process_partition(index, chunk, chunk_coord):
-        partition = ddf.get_partition(index).compute()
+    @dask.delayed
+    def _process_partition(_chunk, _chunk_info, ddf_partition):
+        ddf_partition = ddf_partition.copy()
 
-        z_start, y_start, x_start = chunk_coord
+        z_start, y_start, x_start = _chunk_info[0]
 
-        if "z" in partition.columns:
-            filtered_partition = partition[
-                (coords.y0 + y_start <= partition["y"])
-                & (partition["y"] < chunk.shape[1] + coords.y0 + y_start)
-                & (coords.x0 + x_start <= partition["x"])
-                & (partition["x"] < chunk.shape[2] + coords.x0 + x_start)
-                & (z_start <= partition["z"])
-                & (partition["z"] < chunk.shape[0] + z_start)
-            ]
-
-        else:
-            filtered_partition = partition[
-                (coords.y0 + y_start <= partition["y"])
-                & (partition["y"] < chunk.shape[1] + coords.y0 + y_start)
-                & (coords.x0 + x_start <= partition["x"])
-                & (partition["x"] < chunk.shape[2] + coords.x0 + x_start)
-            ]
-
-        filtered_partition = filtered_partition.copy()
-
-        if "z" in partition.columns:
-            z_coords = filtered_partition["z"].values.astype(int) - z_start
+        if "z" in ddf_partition.columns:
+            z_coords = ddf_partition["z"].values.astype(int) - z_start
         else:
             z_coords = 0
 
-        y_coords = filtered_partition["y"].values.astype(int) - (int(coords.y0) + y_start)
-        x_coords = filtered_partition["x"].values.astype(int) - (int(coords.x0) + x_start)
+        y_coords = ddf_partition["y"].values.astype(int) - (int(coords.y0) + y_start)
+        x_coords = ddf_partition["x"].values.astype(int) - (int(coords.x0) + x_start)
 
-        filtered_partition.loc[:, _CELL_INDEX] = chunk[
+        ddf_partition.loc[:, _CELL_INDEX] = _chunk[
             z_coords,
             y_coords,
             x_coords,
         ]
 
-        return filtered_partition
+        return ddf_partition
 
-    # Get the number of partitions in the Dask DataFrame
-    num_partitions = ddf.npartitions
+    # Create a list to store delayed operations
+    delayed_objects = []
 
-    chunk_coords = list(itertools.product(*[range(0, s, cs) for s, cs in zip(masks.shape, masks.chunksize)]))
+    for _chunk, _chunk_info in zip(delayed_chunks, chunk_info):
+        # Query the partition lazily without computing it
+        z_start, y_start, x_start = _chunk_info[0]
+        _chunk_shape = _chunk_info[1]
 
-    chunks = masks.to_delayed().flatten()
+        y_query = f"{y_start + coords.y0 } <= y < {y_start + coords.y0 + _chunk_shape[1]}"
+        x_query = f"{x_start + coords.x0 } <= x < {x_start + coords.x0 + _chunk_shape[2]}"
+        query = f"{y_query} and {x_query}"
 
-    # Process each partition using its index
-    processed_partitions = []
+        if "z" in ddf.columns:
+            z_query = f"{z_start} <= z < {z_start + _chunk_shape[0]}"
+            query = f"{z_query} and {query}"
 
-    for _chunk, _chunk_coord in zip(chunks, chunk_coords):
-        processed_partitions = processed_partitions + [
-            dask.delayed(process_partition)(i, _chunk, _chunk_coord) for i in range(num_partitions)
-        ]
+        ddf_partition = ddf.query(query)
+        delayed_partition = _process_partition(_chunk, _chunk_info, ddf_partition)
+        delayed_objects.append(delayed_partition)
 
-    # Combine the processed partitions into a single DataFrame
-    combined_partitions = dd.from_delayed(processed_partitions)
+    # Combine the delayed partitions into a single Dask DataFrame
+    combined_partitions = dd.from_delayed(delayed_objects)
 
     if "z" in combined_partitions:
         coordinates = combined_partitions.groupby(_CELL_INDEX)["x", "y", "z"].mean()
@@ -150,7 +148,7 @@ def allocate(
 
     cell_counts = combined_partitions.groupby([_CELL_INDEX, "gene"]).size()
 
-    cell_counts = cell_counts.map_partitions(lambda x: x.astype(np.int32))
+    cell_counts = cell_counts.map_partitions(lambda x: x.astype(np.uint32))
 
     coordinates, cell_counts = dask.compute(coordinates, cell_counts)
 
@@ -208,7 +206,8 @@ def allocate(
         if output_layer in [*sdata.tables]:
             if labels_layer in sdata.tables[output_layer].obs[_REGION_KEY].cat.categories:
                 raise ValueError(
-                    f"'{labels_layer}' already exists as a region in the 'sdata.tables[{output_layer}]' object. Please choose a different labels layer, choose a different 'output_layer' or set append to False and overwrite to True to overwrite the existing table."
+                    f"'{labels_layer}' already exists as a region in the 'sdata.tables[{output_layer}]' object. "
+                    "Please choose a different labels layer, choose a different 'output_layer' or set append to False and overwrite to True to overwrite the existing table."
                 )
             adata = ad.concat([sdata.tables[output_layer], adata], axis=0)
             # get the regions already in sdata, and append the new one

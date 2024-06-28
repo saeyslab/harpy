@@ -79,7 +79,6 @@ def read_vizgen_transcripts(
     kwargs = {
         "column_x": 2,
         "column_y": 3,
-        "column_z": 4,
         "column_gene": 8,
         "delimiter": ",",
         "header": 0,
