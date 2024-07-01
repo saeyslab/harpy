@@ -9,6 +9,7 @@ from dask.dataframe.core import DataFrame as DaskDataFrame
 from spatialdata import SpatialData, read_zarr
 
 from sparrow.utils._io import _incremental_io_on_disk
+from sparrow.utils._keys import _GENES_KEY
 from sparrow.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
@@ -79,7 +80,6 @@ def read_vizgen_transcripts(
     kwargs = {
         "column_x": 2,
         "column_y": 3,
-        "column_z": 4,
         "column_gene": 8,
         "delimiter": ",",
         "header": 0,
@@ -268,9 +268,9 @@ def read_transcripts(
     transformed_ddf = ddf.map_partitions(transform_coordinates)
 
     # Rename the columns
-    transformed_ddf.columns = ["gene", "pixel_x", "pixel_y"]
+    transformed_ddf.columns = [_GENES_KEY, "pixel_x", "pixel_y"]
 
-    columns = ["pixel_x", "pixel_y", "gene"]
+    columns = ["pixel_x", "pixel_y", _GENES_KEY]
     coordinates = {"x": "pixel_x", "y": "pixel_y"}
 
     if column_z is not None:

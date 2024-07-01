@@ -7,6 +7,7 @@ from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import Translation
 
 from sparrow.image._image import _add_image_layer, _get_boundary, _get_spatial_element
+from sparrow.utils._keys import _GENES_KEY
 from sparrow.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
@@ -20,7 +21,7 @@ def transcript_density(
     name_x: str = "x",
     name_y: str = "y",
     name_z: Optional[str] = None,
-    name_gene_column: str = "gene",
+    name_gene_column: str = _GENES_KEY,
     z_index: Optional[int] = None,
     scaling_factor: float = 100,
     chunks: int = 1024,
@@ -53,7 +54,7 @@ def transcript_density(
     name_z
         Column name for z-coordinates of the transcripts in the points layer, by default None.
     name_gene_column
-        Column name in the points_layer representing gene information, by default "gene".
+        Column name in the points_layer representing gene information.
     z_index
         The z index in the points layer for which to calculate transcript density. If set to None for a 3D points layer
         (and `name_z` is not equal to None), an y-x transcript density projection will be calculated.

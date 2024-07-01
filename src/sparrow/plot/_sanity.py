@@ -16,6 +16,7 @@ from sparrow.image._image import (
 from sparrow.plot._plot import _get_z_slice_polygons
 from sparrow.shape import intersect_rectangles
 from sparrow.shape._shape import _extract_boundaries_from_geometry_collection
+from sparrow.utils._keys import _GENES_KEY
 from sparrow.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
@@ -34,7 +35,7 @@ def sanity_plot_transcripts_matrix(
     name_x: str = "x",
     name_y: str = "y",
     name_z: str = "z",
-    name_gene_column: str = "gene",
+    name_gene_column: str = _GENES_KEY,
     gene: str | None = None,
     crd: tuple[int, int, int, int] | None = None,
     output: Path | str | None = None,

@@ -11,7 +11,7 @@ from spatialdata import SpatialData
 
 from sparrow.image._image import _get_boundary, _get_spatial_element
 from sparrow.plot import plot_shapes
-from sparrow.utils._keys import _RAW_COUNTS_KEY, _REGION_KEY
+from sparrow.utils._keys import _GENES_KEY, _RAW_COUNTS_KEY, _REGION_KEY
 from sparrow.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
@@ -24,7 +24,7 @@ def analyse_genes_left_out(
     points_layer: str = "transcripts",
     name_x: str = "x",
     name_y: str = "y",
-    name_gene_column: str = "gene",
+    name_gene_column: str = _GENES_KEY,
     output: str | Path | None = None,
 ) -> pd.DataFrame:
     """
@@ -120,7 +120,7 @@ def analyse_genes_left_out(
 
     raw_counts = _raw_counts[adata.var.index]
 
-    filtered = pd.DataFrame(adata.X.sum(axis=0) / raw_counts)
+    filtered = pd.DataFrame(np.array(adata.X.sum(axis=0)).flatten() / raw_counts)
 
     filtered = filtered.rename(columns={0: "proportion_kept"})
     filtered[_RAW_COUNTS_KEY] = raw_counts

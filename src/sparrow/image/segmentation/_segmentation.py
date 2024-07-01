@@ -42,6 +42,7 @@ from sparrow.image.segmentation.segmentation_models._baysor import (
 from sparrow.image.segmentation.segmentation_models._cellpose import _cellpose as _model
 from sparrow.io._transcripts import _add_transcripts_to_sdata
 from sparrow.shape._shape import _add_shapes_layer
+from sparrow.utils._keys import _GENES_KEY
 from sparrow.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
@@ -156,7 +157,7 @@ def segment_points(
     points_layer: str | None = None,
     name_x: str = "x",
     name_y: str = "y",
-    name_gene: str = "gene",
+    name_gene: str = _GENES_KEY,
     model: Callable[..., NDArray] = _model_points,
     output_labels_layer: str = "segmentation_mask",
     output_shapes_layer: str | None = "segmentation_mask_boundaries",
@@ -191,7 +192,7 @@ def segment_points(
     name_y
         Column name for y-coordinates of the transcripts in the points layer, by default "y".
     name_gene
-        Column name in the points_layer representing gene information, by default "gene".
+        Column name in the points_layer representing gene information.
     model
         The segmentation model function used to process the images.
         Callable should take as input numpy arrays of dimension (z,y,x,c), a pandas dataframe with the transcripts,
@@ -681,7 +682,7 @@ class SegmentationModelPoints(SegmentationModel):
         points_layer: str | None = None,
         name_x: str = "x",
         name_y: str = "y",
-        name_gene: str = "gene",
+        name_gene: str = _GENES_KEY,
         output_labels_layer: str = "segmentation_mask",
         output_shapes_layer: str | None = "segmentation_mask_boundaries",
         crd: tuple[int, int, int, int] | None = None,
@@ -801,7 +802,7 @@ class SegmentationModelPoints(SegmentationModel):
     ) -> NDArray[Shape[Any, Any, Any, Any]]:
         name_x = fn_kwargs.setdefault("name_x", "x")
         name_y = fn_kwargs.setdefault("name_y", "y")
-        _ = fn_kwargs.setdefault("name_gene", "gene")
+        _ = fn_kwargs.setdefault("name_gene", _GENES_KEY)
 
         # first calculate original chunks position (i.e. without the overlap)
         original_chunks = _substract_depth_from_chunks_size(_output_chunks, _depth)

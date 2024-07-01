@@ -2,20 +2,10 @@ import os
 
 from sparrow.plot import score_genes as score_genes_plot
 from sparrow.shape import _add_shapes_layer
-from sparrow.table import leiden, score_genes
+from sparrow.table import score_genes
 
 
 def test_score_genes(sdata_transcripts, path_dataset_markers, tmp_path):
-    sdata_transcripts = leiden(
-        sdata_transcripts,
-        labels_layer="segmentation_mask",
-        table_layer="table_transcriptomics",
-        output_layer="table_transcriptomics_cluster",
-        key_added="leiden",
-        random_state=100,
-        overwrite=True,
-    )
-
     sdata_transcripts, celltypes_scored, celltypes_all = score_genes(
         sdata_transcripts,
         labels_layer="segmentation_mask",
