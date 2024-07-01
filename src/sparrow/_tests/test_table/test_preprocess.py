@@ -1,13 +1,17 @@
+import pytest
+
 from sparrow.table._preprocess import preprocess_proteomics, preprocess_transcriptomics
 from sparrow.utils._keys import _CELLSIZE_KEY, _REGION_KEY
 
 
-def test_preprocess_proteomics(sdata_multi_c):
+@pytest.mark.parametrize("q", [None, 0.999])
+def test_preprocess_proteomics(sdata_multi_c, q):
     sdata_multi_c = preprocess_proteomics(
         sdata_multi_c,
         labels_layer="masks_whole",
         table_layer="table_intensities",
         output_layer="table_intensities_preprocessed",
+        q=q,
         overwrite=True,
     )
 
@@ -15,6 +19,7 @@ def test_preprocess_proteomics(sdata_multi_c):
     assert sdata_multi_c["table_intensities_preprocessed"].shape == (674, 22)
 
     adata = sdata_multi_c.tables["table_intensities_preprocessed"]
+    assert (adata.raw is None) if q is None else (adata.raw is not None)
     assert len(adata.obs[_REGION_KEY].cat.categories) == 1
     assert "masks_whole" in adata.obs[_REGION_KEY].cat.categories
     assert _CELLSIZE_KEY in adata.obs.columns
@@ -61,16 +66,25 @@ def test_preprocess_proteomics_overwrite(sdata_multi_c):
     assert "log1p" in adata.uns.keys()
 
 
-def test_preprocess_transcriptomics(sdata_transcripts):
+@pytest.mark.parametrize("highly_variable_genes", [False, True])
+def test_preprocess_transcriptomics(sdata_transcripts, highly_variable_genes):
     sdata_transcripts = preprocess_transcriptomics(
         sdata_transcripts,
         labels_layer="segmentation_mask",
         table_layer="table_transcriptomics",
         output_layer="table_transcriptomics",
+        highly_variable_genes=highly_variable_genes,
         overwrite=True,
     )
-
     adata = sdata_transcripts.tables["table_transcriptomics"]
+    if highly_variable_genes:
+        assert adata.shape == (616, 17)
+        assert adata.raw.to_adata().shape == (616, 87)
+        assert adata.layers["raw_counts"].shape == (616, 17)
+    else:
+        assert adata.shape == (616, 87)
+        assert adata.raw.to_adata().shape == (616, 87)
+        assert adata.layers["raw_counts"].shape == (616, 87)
     assert len(adata.obs[_REGION_KEY].cat.categories) == 1
     assert "segmentation_mask" in adata.obs[_REGION_KEY].cat.categories
     assert _CELLSIZE_KEY in adata.obs.columns

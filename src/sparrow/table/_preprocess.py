@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import scanpy as sc
 from dask.array import Array
+from scipy.sparse import issparse
 from spatialdata import SpatialData
 
 from sparrow.image._image import _get_spatial_element
@@ -26,6 +27,8 @@ def preprocess_transcriptomics(
     min_counts: int = 10,
     min_cells: int = 5,
     size_norm: bool = True,
+    highly_variable_genes: bool = False,
+    highly_variable_genes_kwargs: Mapping[str, Any] = MappingProxyType({}),
     max_value_scale: int = 10,
     n_comps: int = 50,
     overwrite: bool = False,
@@ -35,8 +38,9 @@ def preprocess_transcriptomics(
     Preprocess a table (AnnData) attribute of a SpatialData object for transcriptomics data.
 
     Performs filtering (via `scanpy.pp.filter_cells` and `scanpy.pp.filter_genes` ) and optional normalization (on size or via `scanpy.sc.pp.normalize_total`),
-    log transformation (`scanpy.pp.log1p`), scaling (`scanpy.pp.scale`), and PCA calculation (`scanpy.tl.pca`) for transcriptomics data
-    contained in the `sdata`. qc metrics are added to `sdata.tables[output_layer].obs` using `scanpy.pp.calculate_qc_metrics`.
+    log transformation (`scanpy.pp.log1p`), highly variable genes selection (`scanpy.pp.highly_variable_genes`),
+    scaling (`scanpy.pp.scale`), and PCA calculation (`scanpy.tl.pca`) for transcriptomics data
+    contained in the `sdata`. QC metrics are added to `sdata.tables[output_layer].obs` using `scanpy.pp.calculate_qc_metrics`.
 
     Parameters
     ----------
@@ -56,7 +60,11 @@ def preprocess_transcriptomics(
     min_cells
         Minimum number of cells a gene should be in to be kept (passed to `scanpy.pp.filter_genes`).
     size_norm
-        If True, normalization is based on the size of the nucleus/cell. If False, `scanpy.sc.pp.normalize_total` is used for normalization.
+        If `True`, normalization is based on the size of the nucleus/cell. If `False`, `scanpy.sc.pp.normalize_total` is used for normalization.
+    highly_variable_genes
+        If `True`, will only retain highly variable genes, as calculated by `scanpy.pp.highly_variable_genes`.
+    highly_variable_genes_kwargs
+        Keyword arguments passed to `scanpy.pp.highly_variable_genes`. Ignored if `highly_variable_genes` is `False`.
     max_value_scale
         The maximum value to which data will be scaled, using `scanpy.pp.scale`.
     n_comps
@@ -99,6 +107,8 @@ def preprocess_transcriptomics(
         calculate_cell_size=True,
         size_norm=size_norm,
         log1p=True,
+        highly_variable_genes=highly_variable_genes,
+        highly_variable_genes_kwargs=highly_variable_genes_kwargs,
         scale=True,
         max_value_scale=max_value_scale,
         calculate_pca=True,
@@ -147,21 +157,21 @@ def preprocess_proteomics(
     output_layer
         The output table layer in `sdata` to which preprocessed table layer will be written.
     size_norm
-        If True, normalization is based on the size of the nucleus/cell. If False, `scanpy.sc.pp.normalize_total` is used for normalization.
+        If `True`, normalization is based on the size of the nucleus/cell. If False, `scanpy.sc.pp.normalize_total` is used for normalization.
     log1p
-        If True, applies log1p transformation to the data.
+        If `True`, applies log1p transformation to the data.
     scale
-        If True, scales the data to have zero mean and a variance of one. The scaling is capped at `max_value_scale`.
+        If `True`, scales the data to have zero mean and a variance of one. The scaling is capped at `max_value_scale`.
     max_value_scale
-        The maximum value to which data will be scaled. Ignored if `scale` is False.
+        The maximum value to which data will be scaled. Ignored if `scale` is `False`.
     q
         Quantile used for normalization. If specified, values are normalized by this quantile calculated for each `adata.var`. Values are multiplied by 100 after normalization. Typical value used is 0.999,
     calculate_pca
-        If True, calculates principal component analysis (PCA) on the data.
+        If `True`, calculates principal component analysis (PCA) on the data.
     n_comps
         Number of principal components to calculate. Ignored if `calculate_pca` is False.
     overwrite
-        If True, overwrites the `output_layer` if it already exists in `sdata`.
+        If `True`, overwrites the `output_layer` if it already exists in `sdata`.
 
     Returns
     -------
@@ -199,6 +209,7 @@ def preprocess_proteomics(
         scale=scale,
         q=q,
         max_value_scale=max_value_scale,
+        highly_variable_genes=False,
         calculate_pca=calculate_pca,
         update_shapes_layers=False,
         pca_kwargs={"n_comps": n_comps},
@@ -220,6 +231,7 @@ class Preprocess(ProcessTable):
         scale: bool = True,
         max_value_scale: Optional[float] = 10,  # ignored if scale is False,
         q: float | None = None,  # quantile for normalization, typically 0.999
+        highly_variable_genes: bool = False,
         calculate_pca: bool = True,
         update_shapes_layers: bool = True,  # whether to update the shapes layer based on the items filtered out in sdata.tables[self.table_layer].
         qc_kwargs: Mapping[str, Any] = MappingProxyType({}),  # keyword arguments passed to sc.pp.calculate_qc_metrics
@@ -228,6 +240,9 @@ class Preprocess(ProcessTable):
         norm_kwargs: Mapping[str, Any] = MappingProxyType(
             {}
         ),  # keyword arguments passed to sc.pp.normalize_total, ignored if size_norm is True.
+        highly_variable_genes_kwargs: Mapping[str, Any] = MappingProxyType(
+            {}
+        ),  # keyword arguments passed to sc.pp.highly_variable_genes
         pca_kwargs: Mapping[str, Any] = MappingProxyType({}),  # keyword arguments passed to sc.tl.pca
         overwrite: bool = False,
     ) -> SpatialData:
@@ -266,11 +281,18 @@ class Preprocess(ProcessTable):
 
         if size_norm:
             adata.X = (adata.X.T * 100 / adata.obs[_CELLSIZE_KEY].values).T
+            if issparse(adata.X):
+                adata.X = adata.X.tocsr()
         else:
             sc.pp.normalize_total(adata, **norm_kwargs)
 
         if log1p:
-            sc.pp.log1p(adata)
+            sc.pp.log1p(adata, base=None, copy=False, layer=None, obsm=None)
+
+        if highly_variable_genes:
+            sc.pp.highly_variable_genes(adata, layer=None, inplace=True, subset=False, **highly_variable_genes_kwargs)
+            adata.raw = adata.copy()
+            adata = adata[:, adata.var.highly_variable]
 
         if scale and q is not None:
             raise ValueError(
@@ -278,14 +300,19 @@ class Preprocess(ProcessTable):
             )
 
         if scale:
-            adata.raw = adata.copy()
-            sc.pp.scale(adata, max_value=max_value_scale)
+            if adata.raw is None:
+                adata.raw = adata.copy()
+            sc.pp.scale(adata, copy=False, layer=None, obsm=None, zero_center=True, max_value=max_value_scale)
 
         if q is not None:
-            adata.raw = adata.copy()
-            array = np.where(adata.X == 0, np.nan, adata.X)
-            arr_quantile = np.nanquantile(array, q, axis=0)
+            if adata.raw is None:
+                adata.raw = adata.copy()
+            arr = adata.X.toarray() if issparse(adata.X) else adata.X  # np.where not defined on sparse matrix
+            arr = np.where(arr == 0, np.nan, arr)
+            arr_quantile = np.nanquantile(arr, q, axis=0)
             adata.X = (adata.X.T * 100 / arr_quantile.reshape(-1, 1)).T
+            if issparse(adata.X):
+                adata.X = adata.X.tocsr()
 
         if calculate_pca:
             # calculate the max amount of pc's possible
