@@ -10,8 +10,8 @@ from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import Translation
 
-from sparrow.image._image import (
-    _add_image_layer,
+from sparrow.image._image import _add_image_layer
+from sparrow.image._utils import (
     _get_spatial_element,
     _get_translation,
     _substract_translation_crd,

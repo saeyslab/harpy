@@ -18,8 +18,8 @@ from spatialdata.transformations import Identity, Translation
 from upath import UPath
 from xarray import DataArray
 
-from sparrow.image._image import (
-    _add_label_layer,
+from sparrow.image._image import _add_label_layer
+from sparrow.image._utils import (
     _fix_dimensions,
     _get_spatial_element,
     _get_translation,
