@@ -1,5 +1,4 @@
 from anndata import AnnData
-from pandas import DataFrame
 
 from sparrow.table import score_genes, score_genes_iter
 from sparrow.utils._keys import _ANNOTATION_KEY
@@ -34,7 +33,7 @@ def test_score_genes(sdata_transcripts, path_dataset_markers):
 
 
 def test_score_genes_iter(sdata_transcripts, path_dataset_markers, tmpdir):
-    sdata_transcripts, df = score_genes_iter(
+    sdata_transcripts, celltypes_scored, celltypes_all = score_genes_iter(
         sdata=sdata_transcripts,
         labels_layer="segmentation_mask",
         table_layer="table_transcriptomics_cluster",
@@ -46,5 +45,6 @@ def test_score_genes_iter(sdata_transcripts, path_dataset_markers, tmpdir):
         n_iter=5,
     )
 
+    assert "dummy_33" not in celltypes_scored  # because this celltypes has no matches in the tissue
+    assert "dummy_33" in celltypes_all
     assert isinstance(sdata_transcripts["table_transcriptomics_score_genes"], AnnData)
-    assert isinstance(df, DataFrame)
