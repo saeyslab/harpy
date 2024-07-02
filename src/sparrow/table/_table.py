@@ -111,7 +111,9 @@ class ProcessTable:
             raise ValueError(
                 f"Data matrix of AnnData table is of type '{adata.X.dtype}', "
                 "which indicates no preprocessing is performed. "
-                "Please consider preprocessing the data first before calculating pca ('scanpy.tl.pca'), e.g. with 'scanpy.pp.scale'."
+                "Please consider preprocessing the data first before calculating pca ('scanpy.tl.pca') or calculating neighborhood grap (`scanpy.pp.neighbors`), "
+                "e.g. with 'scanpy.pp.scale'."
+                ""
             )
 
     @staticmethod

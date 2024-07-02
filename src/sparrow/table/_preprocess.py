@@ -249,13 +249,13 @@ class Preprocess(ProcessTable):
         adata = self._get_adata()
         # Calculate QC Metrics
         if calculate_qc_metrics:
-            sc.pp.calculate_qc_metrics(adata, inplace=True, **qc_kwargs)
+            sc.pp.calculate_qc_metrics(adata, layer=None, inplace=True, **qc_kwargs)
 
             # Filter cells and genes
             if filter_cells:
-                sc.pp.filter_cells(adata, **filter_cells_kwargs)
+                sc.pp.filter_cells(adata, inplace=True, copy=False, **filter_cells_kwargs)
             if filter_genes:
-                sc.pp.filter_genes(adata, **filter_genes_kwargs)
+                sc.pp.filter_genes(adata, inplace=True, copy=False, **filter_genes_kwargs)
 
         if calculate_cell_size:
             # we do not want to loose the index (_CELL_INDEX)
@@ -284,7 +284,7 @@ class Preprocess(ProcessTable):
             if issparse(adata.X):
                 adata.X = adata.X.tocsr()
         else:
-            sc.pp.normalize_total(adata, **norm_kwargs)
+            sc.pp.normalize_total(adata, layer=None, layers=None, copy=False, inplace=True, **norm_kwargs)
 
         if log1p:
             sc.pp.log1p(adata, base=None, copy=False, layer=None, obsm=None)
@@ -328,7 +328,7 @@ class Preprocess(ProcessTable):
                     "Please consider scaling the data by passing 'scale=True', when passing 'calculate_pca=True'."
                 )
             self._type_check_before_pca(adata)
-            sc.tl.pca(adata, n_comps=n_comps, **pca_kwargs)
+            sc.tl.pca(adata, copy=False, n_comps=n_comps, **pca_kwargs)
 
         self.sdata = _add_table_layer(
             self.sdata,

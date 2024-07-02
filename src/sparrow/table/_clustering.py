@@ -75,7 +75,7 @@ def kmeans(
     overwrite
         If True, overwrites the `output_layer` if it already exists in `sdata`.
     **kwargs
-        Additional keyword arguments passed to the KMeans algorithm.
+        Additional keyword arguments passed to the KMeans algorithm (`sklearn.cluster.KMeans`).
 
     Returns
     -------
@@ -181,7 +181,7 @@ def leiden(
     overwrite
         If True, overwrites the `output_layer` if it already exists in `sdata`.
     **kwargs
-        Additional keyword arguments passed to the leiden clusteting algorithm.
+        Additional keyword arguments passed to the leiden clustering algorithm (`sc.tl.leiden`).
 
     Returns
     -------
@@ -245,7 +245,7 @@ def _leiden(
             "Please first compute neighbors before calculating leiden cluster, by passing 'calculate_neighbors=True' to 'sp.tb.leiden'"
         )
 
-    sc.tl.leiden(adata, resolution=resolution, key_added=key_added, **kwargs)
+    sc.tl.leiden(adata, copy=False, resolution=resolution, key_added=key_added, **kwargs)
 
     return adata
 
@@ -279,13 +279,13 @@ class Cluster(ProcessTable):
                     "'neighbors' already in 'adata.uns', recalculating neighbors. Consider passing 'calculate_neigbors=False'."
                 )
             self._type_check_before_pca(adata)
-            sc.pp.neighbors(adata, **neigbors_kwargs)
+            sc.pp.neighbors(adata, copy=False, **neigbors_kwargs)
         if calculate_umap:
             if "neighbors" not in adata.uns.keys():
                 log.info("'neighbors not in 'adata.uns', computing neighborhood graph before calculating umap.")
                 self._type_check_before_pca(adata)
-                sc.pp.neighbors(adata, **neigbors_kwargs)
-            sc.tl.umap(adata, **umap_kwargs)
+                sc.pp.neighbors(adata, copy=False, **neigbors_kwargs)
+            sc.tl.umap(adata, copy=False, **umap_kwargs)
 
         if key_added in adata.obs.columns:
             log.warning(f"The column '{key_added}' already exists in the Anndata object. Proceeding to overwrite it.")
@@ -296,7 +296,7 @@ class Cluster(ProcessTable):
 
         # TODO move this ranking of genes to somewhere else
         if rank_genes:
-            sc.tl.rank_genes_groups(adata, groupby=key_added, method="wilcoxon")
+            sc.tl.rank_genes_groups(adata, copy=False, layer=None, groupby=key_added, method="wilcoxon")
 
         self.sdata = _add_table_layer(
             self.sdata,
