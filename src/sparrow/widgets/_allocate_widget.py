@@ -1,4 +1,5 @@
 """Allocation widget for creating and preprocesing the adata object, filtering the cells and performing clustering."""
+
 import os
 import pathlib
 from typing import Any, Callable, Dict, Optional
@@ -88,7 +89,7 @@ def allocate_widget(
     # need to add original unfiltered shapes to sdata object at the beginning of the allocation step.
     # otherwise polygons that were filtered out would not be available any more if you do a rerun of the allocation step.
     for shapes_name in [*shapes]:
-        _add_shapes_layer(sdata, input=shapes[shapes_name], output_layer=shapes_name, overwrite=True)
+        sdata = _add_shapes_layer(sdata, input=shapes[shapes_name], output_layer=shapes_name, overwrite=True)
         # sdata.add_shapes(
         #    name=shapes_name,
         #    shapes=spatialdata.models.ShapesModel.parse(shapes[shapes_name]),
@@ -162,7 +163,9 @@ def allocate_widget(
         )
 
         viewer.layers[layer_name].metadata["pipeline"] = pipeline
-        viewer.layers[layer_name].metadata["adata"] = sdata.table  # spatialdata plugin uses this
+        viewer.layers[layer_name].metadata["adata"] = sdata.tables[
+            pipeline.cfg.allocate.table_layer_name
+        ]  # spatialdata plugin uses this
 
         log.info(f"Added '{utils.ALLOCATION}' layer")
 

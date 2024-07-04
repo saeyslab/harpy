@@ -328,6 +328,7 @@ class SparrowPipeline:
             sdata=sdata,
             labels_layer=self.labels_layer_name,
             output_layer=self.cfg.allocate.table_layer_name,
+            overwrite=self.cfg.allocate.overwrite,
         )
 
         log.info("Allocation finished.")

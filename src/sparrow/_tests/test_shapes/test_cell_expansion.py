@@ -1,3 +1,5 @@
+from geopandas import GeoDataFrame
+
 from sparrow.shape import create_voronoi_boundaries
 
 
@@ -11,3 +13,4 @@ def test_cell_expansion(sdata_multi_c):
     )
 
     assert "masks_cellpose_boundaries_voronoi" in [*sdata_multi_c.shapes]
+    assert isinstance(sdata_multi_c.shapes["masks_cellpose_boundaries_voronoi"], GeoDataFrame)

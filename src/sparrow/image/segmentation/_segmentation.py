@@ -11,7 +11,6 @@ import dask.array as da
 import numpy as np
 from dask.array import Array
 from nptyping import NDArray, Shape
-from spatial_image import SpatialImage
 from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import Identity, Translation
@@ -299,7 +298,7 @@ class SegmentationModel(ABC):
     ) -> SpatialData:
         pass
 
-    def _precondition(self, se: SpatialImage | DataArray, kwargs: dict[Any, Any]) -> tuple[Array, dict[Any, Any]]:
+    def _precondition(self, se: DataArray, kwargs: dict[Any, Any]) -> tuple[Array, dict[Any, Any]]:
         # take dask array and put channel dimension last,
         # so we have ( z, y, x, c ), also do some checks on depth and chunks
 

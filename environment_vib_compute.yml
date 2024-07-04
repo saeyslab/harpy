@@ -7,7 +7,6 @@ channels:
   - defaults
 dependencies:
   - python=3.10.8
-  - geopandas=0.12.2
   - leidenalg
   - napari=0.4.18
   - pyqt

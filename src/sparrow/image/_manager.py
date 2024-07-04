@@ -6,11 +6,11 @@ from typing import Any
 
 import spatialdata
 from dask.array import Array
-from multiscale_spatial_image.multiscale_spatial_image import MultiscaleSpatialImage
-from spatial_image import SpatialImage
+from datatree import DataTree
 from spatialdata import SpatialData, read_zarr
 from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import BaseTransformation, set_transformation
+from xarray import DataArray
 
 from sparrow.utils._io import _incremental_io_on_disk
 from sparrow.utils.pylogger import get_pylogger
@@ -104,7 +104,7 @@ class LayerManager(ABC):
         scale_factors: ScaleFactors_t | None = None,
         chunks: str | tuple[int, ...] | int | None = None,
         **kwargs: Any,
-    ) -> SpatialImage | MultiscaleSpatialImage:
+    ) -> DataArray | DataTree:
         pass
 
     @abstractmethod
@@ -116,7 +116,7 @@ class LayerManager(ABC):
         self,
         sdata: SpatialData,
         output_layer: str,
-        spatial_element: SpatialImage | MultiscaleSpatialImage,
+        spatial_element: DataArray | DataTree,
         overwrite: bool = False,
     ) -> SpatialData:
         pass
@@ -134,7 +134,7 @@ class ImageLayerManager(LayerManager):
         scale_factors: ScaleFactors_t | None = None,
         chunks: str | tuple[int, int, int] | int | None = None,
         c_coords: list[str] | None = None,
-    ) -> SpatialImage | MultiscaleSpatialImage:
+    ) -> DataArray | DataTree:
         if len(dims) == 3:
             return spatialdata.models.Image2DModel.parse(
                 arr,
@@ -169,7 +169,7 @@ class ImageLayerManager(LayerManager):
         self,
         sdata: SpatialData,
         output_layer: str,
-        spatial_element: SpatialImage | MultiscaleSpatialImage,
+        spatial_element: DataArray | DataTree,
         overwrite: bool = False,
     ) -> SpatialData:
         # given a spatial_element with some graph defined on it.
@@ -203,7 +203,7 @@ class LabelLayerManager(LayerManager):
         dims: tuple[str, str],
         scale_factors: ScaleFactors_t | None = None,
         chunks: str | tuple[int, int] | int | None = None,
-    ) -> SpatialImage | MultiscaleSpatialImage:
+    ) -> DataArray | DataTree:
         if len(dims) == 2:
             return spatialdata.models.Labels2DModel.parse(
                 arr,
@@ -236,7 +236,7 @@ class LabelLayerManager(LayerManager):
         self,
         sdata: SpatialData,
         output_layer: str,
-        spatial_element: SpatialImage | MultiscaleSpatialImage,
+        spatial_element: DataArray | DataTree,
         overwrite: bool = False,
     ) -> SpatialData:
         # given a spatial_element with some graph defined on it.

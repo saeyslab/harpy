@@ -8,8 +8,9 @@ from dask.array import Array
 from dask_image.ndfilters import gaussian_filter
 from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
+from spatialdata.transformations import get_transformation
 
-from sparrow.image._image import _add_image_layer, _get_spatial_element, _get_transformation
+from sparrow.image._image import _add_image_layer, _get_spatial_element
 from sparrow.image.pixel_clustering._utils import _nonzero_nonnan_percentile, _nonzero_nonnan_percentile_axis_0
 
 
@@ -99,7 +100,7 @@ def pixel_clustering_preprocess(
     _transformations = []
     for i, _img_layer in enumerate(img_layer):
         se_image = _get_spatial_element(sdata, layer=_img_layer)
-        _transformations.append(_get_transformation(se_image))
+        _transformations.append(get_transformation(se_image))
         arr = se_image.sel(c=channels).data
         if i == 0:
             _array_dim = arr.ndim

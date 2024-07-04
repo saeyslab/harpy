@@ -1,4 +1,5 @@
 """Annotation widget for scoring the genes, returns markergenes and adata objects."""
+
 import os
 import pathlib
 from typing import Any, Callable, Dict, List
@@ -94,7 +95,9 @@ def annotate_widget(
         # Store data in previous layer
 
         viewer.layers[layer_name].metadata["pipeline"] = pipeline
-        viewer.layers[layer_name].metadata["adata"] = sdata.table  # spatialdata plugin uses this
+        viewer.layers[layer_name].metadata["adata"] = sdata.tables[
+            pipeline.cfg.allocate.table_layer_name
+        ]  # spatialdata plugin uses this
 
         utils._export_config(
             pipeline.cfg.annotate,

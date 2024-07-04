@@ -42,6 +42,7 @@ Operations on image and labels layers.
     :toctree: generated
 
     im.apply
+    im.tiling_correction
     im.enhance_contrast
     im.min_max_filtering
     im.gaussian_filtering
@@ -121,6 +122,7 @@ Plotting functions.
     pl.plot_image
     pl.plot_shapes
     pl.plot_labels
+    pl.tiling_correction
     pl.flatfield
     pl.segment
     pl.sanity_plot_transcripts_matrix

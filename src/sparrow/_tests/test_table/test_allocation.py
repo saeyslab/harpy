@@ -20,7 +20,10 @@ def test_allocation(sdata_transcripts: SpatialData):
     assert "table_transcriptomics_recompute" in [*sdata_transcripts.tables]
     assert sdata_transcripts["table_transcriptomics_recompute"].shape == (649, 98)
 
-    np.array_equal(sdata_transcripts["table_transcriptomics_recompute"].X, sdata_transcripts["table_transcriptomics"].X)
+    np.array_equal(
+        sdata_transcripts["table_transcriptomics_recompute"].X.toarray(),
+        sdata_transcripts["table_transcriptomics"].X.toarray(),
+    )
 
 
 def test_allocation_append(sdata_transcripts: SpatialData):

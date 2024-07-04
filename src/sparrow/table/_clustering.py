@@ -270,7 +270,7 @@ class Cluster(ProcessTable):
         overwrite: bool = False,
         **kwargs,
     ) -> SpatialData:
-        """Run the preprocessing, optional neighborhood graph computation, optional UMAP computation, and clustering on 'sdata.table'."""
+        """Run the preprocessing, optional neighborhood graph computation, optional UMAP computation, and clustering on 'sdata.tables[table_layer]'."""
         adata = self._get_adata(index_names_var=index_names_var, index_positions_var=index_positions_var)
 
         if calculate_neighbors:

@@ -587,13 +587,13 @@ def _plot(
             if column is not None or cmap is not None:
                 # sanity checks
                 assert adata_view.shape[0] == polygons.shape[0], (
-                    f"The number of observations in 'sdata.table[{table_layer}]' (for which 'sdata.tables[{table_layer}].obs[ {_REGION_KEY} ] == {region}') "
+                    f"The number of observations in 'sdata.tables[{table_layer}]' (for which 'sdata.tables[{table_layer}].obs[ {_REGION_KEY} ] == {region}') "
                     f"is different than number of observation in 'sdata.shapes[{shapes_layer}]'."
                 )
 
                 assert np.array_equal(adata_view.obs[_INSTANCE_KEY].values, polygons.index.values), (
                     f"'{_INSTANCE_KEY}'s of shapes layer 'sdata.shapes[{shapes_layer}]' are not the same as "
-                    f"the '{_INSTANCE_KEY}'s in 'sdata.table[{table_layer}].obs' (for which 'sdata.tables[{table_layer}].obs[ {_REGION_KEY} ] == {region}')."
+                    f"the '{_INSTANCE_KEY}'s in 'sdata.tables[{table_layer}].obs' (for which 'sdata.tables[{table_layer}].obs[ {_REGION_KEY} ] == {region}')."
                 )
 
         else:

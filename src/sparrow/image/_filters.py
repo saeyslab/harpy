@@ -186,8 +186,7 @@ def gaussian_filtering(
 
     Returns
     -------
-    SpatialData
-        The `sdata` object with the Gaussian filtered image added.
+    The `sdata` object with the Gaussian filtered image added.
 
     Raises
     ------

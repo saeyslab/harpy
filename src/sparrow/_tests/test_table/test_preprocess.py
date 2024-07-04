@@ -57,7 +57,7 @@ def test_preprocess_proteomics_overwrite(sdata_multi_c):
         output_layer="table_intensities",
         overwrite=True,
     )
-    # running preprocess takes cells corresponding to certain labels_layer from sdata.table.
+    # running preprocess takes cells corresponding to certain labels_layer from sdata.tables[table_layer].
     adata = sdata_multi_c.tables["table_intensities"]
     assert adata.shape == (674, 22)
     assert len(adata.obs[_REGION_KEY].cat.categories) == 1

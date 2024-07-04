@@ -10,8 +10,9 @@ from anndata import AnnData
 from dask import delayed
 from numpy.typing import NDArray
 from spatialdata import SpatialData
+from spatialdata.transformations import get_transformation
 
-from sparrow.image._image import _get_spatial_element, _get_transformation
+from sparrow.image._image import _get_spatial_element
 from sparrow.table._preprocess import preprocess_proteomics
 from sparrow.table._table import _add_table_layer
 from sparrow.utils._keys import _CELL_INDEX, _INSTANCE_KEY, _REGION_KEY
@@ -86,7 +87,7 @@ def cell_clustering_preprocess(
         ), f"Provided labels layers '{_labels_layer_cells}' and '{_labels_layer_clusters}' do not have the same shape."
 
         assert (
-            _get_transformation(se_labels) == _get_transformation(se_clusters)
+            get_transformation(se_labels) == get_transformation(se_clusters)
         ), f"Transformation on provided labels layers '{_labels_layer_cells}' and '{_labels_layer_clusters}' are not equal. This is currently not supported."
 
         if i == 0:

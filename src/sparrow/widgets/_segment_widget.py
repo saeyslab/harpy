@@ -169,7 +169,10 @@ def segment_widget(
         )
 
         # we need the original shapes, in order for next step (allocation) to be able to run allocation step multiple times
-        viewer.layers[layer_name].metadata["shapes"] = sdata.shapes.copy()
+        shapes = {}
+        for shapes_name, polygons in sdata.shapes.items():
+            shapes[shapes_name] = polygons.copy()
+        viewer.layers[layer_name].metadata["shapes"] = shapes
         viewer.layers[layer_name].metadata["pipeline"] = pipeline
 
         log.info(f"Added {utils.SEGMENT} layer")

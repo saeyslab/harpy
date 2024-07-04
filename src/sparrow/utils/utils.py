@@ -7,8 +7,8 @@ from typing import Any
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
+from datatree import DataTree
 from geopandas import GeoDataFrame
-from multiscale_spatial_image.multiscale_spatial_image import MultiscaleSpatialImage
 from omegaconf import OmegaConf
 from omegaconf.dictconfig import DictConfig
 from shapely.geometry import LineString, MultiLineString
@@ -62,8 +62,8 @@ def _swap_coordinates(data: list[Any]) -> list[Any]:
     return [[(y, x) for x, y in sublist] for sublist in data]
 
 
-def _get_raster_multiscale(element: MultiscaleSpatialImage) -> list[DataArray]:
-    if not isinstance(element, MultiscaleSpatialImage):
+def _get_raster_multiscale(element: DataTree) -> list[DataArray]:
+    if not isinstance(element, DataTree):
         raise TypeError(f"Unsupported type for images or labels: {type(element)}")
 
     axes = get_axes_names(element)

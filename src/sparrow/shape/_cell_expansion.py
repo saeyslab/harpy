@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import geopandas
+import numpy as np
+from geopandas import GeoDataFrame
 from longsgis import voronoiDiagram4plg
 from shapely.geometry import Polygon
 from spatialdata import SpatialData
@@ -88,18 +90,23 @@ def create_voronoi_boundaries(
     return sdata
 
 
-def _delete_overlap(voronoi, polygons):
-    I1, I2 = voronoi.sindex.query_bulk(voronoi["geometry"], predicate="overlaps")
+def _delete_overlap(voronoi: GeoDataFrame, polygons: GeoDataFrame) -> GeoDataFrame:
+    I1, I2 = voronoi.sindex.query(voronoi["geometry"], predicate="overlaps")
     voronoi2 = voronoi.copy()
 
+    geometry_loc = voronoi.columns.get_loc("geometry")
+
     for cell1, cell2 in zip(I1, I2):
-        # if cell1!=cell2:
-        voronoi.geometry.iloc[cell1] = voronoi.iloc[cell1].geometry.intersection(
+        voronoi.iloc[cell1, geometry_loc] = voronoi.iloc[cell1].geometry.intersection(
             voronoi2.iloc[cell1].geometry.difference(voronoi2.iloc[cell2].geometry)
         )
-        voronoi.geometry.iloc[cell2] = voronoi.iloc[cell2].geometry.intersection(
+        voronoi.iloc[cell2, geometry_loc] = voronoi.iloc[cell2].geometry.intersection(
             voronoi2.iloc[cell2].geometry.difference(voronoi2.iloc[cell1].geometry)
         )
+    assert np.array_equal(
+        np.sort(voronoi.index), np.sort(polygons.index)
+    ), "Indices of voronoi and polygons do not match"
+    polygons = polygons.reindex(voronoi.index)
     voronoi["geometry"] = voronoi.geometry.union(polygons.geometry)
     polygons = polygons.buffer(distance=0)
     voronoi = voronoi.buffer(distance=0)

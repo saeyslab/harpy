@@ -162,7 +162,7 @@ def create_sdata(
             overwrite=False,
         )
 
-        # TODO: unexpected behaviour from spatialdata, why do we need to read the zarr store again.
+        # TODO: unexpected behaviour from spatialdata, why do we need to read the zarr store again. check if still needed
         if sdata.is_backed():
             sdata = read_zarr(output_path)
 

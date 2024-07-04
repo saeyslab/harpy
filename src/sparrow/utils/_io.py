@@ -2,10 +2,10 @@ import uuid
 
 from anndata import AnnData
 from dask.dataframe import DataFrame
+from datatree import DataTree
 from geopandas import GeoDataFrame
-from multiscale_spatial_image.multiscale_spatial_image import MultiscaleSpatialImage
-from spatial_image import SpatialImage
 from spatialdata import SpatialData, read_zarr
+from xarray import DataArray
 
 from sparrow.utils.pylogger import get_pylogger
 
@@ -15,7 +15,7 @@ log = get_pylogger(__name__)
 def _incremental_io_on_disk(
     sdata: SpatialData,
     output_layer: str,
-    element: SpatialImage | MultiscaleSpatialImage | DataFrame | GeoDataFrame | AnnData,
+    element: DataArray | DataTree | DataFrame | GeoDataFrame | AnnData,
 ) -> SpatialData:
     new_output_layer = f"{output_layer}_{uuid.uuid4()}"
     # a. write a backup copy of the data

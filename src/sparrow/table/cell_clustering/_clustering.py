@@ -77,8 +77,10 @@ def flowsom(
 
     Returns
     -------
-    tuple
+    tuple:
+
         - The updated `sdata` with the clustering results added.
+
         - An instance of `fs.FlowSOM` containing the trained FlowSOM model.
 
     See Also

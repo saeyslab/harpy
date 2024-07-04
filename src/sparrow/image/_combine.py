@@ -4,7 +4,6 @@ from typing import Iterable
 
 import dask.array as da
 from dask.array import Array
-from spatial_image import SpatialImage
 from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import Translation
@@ -100,7 +99,7 @@ def combine(
 
     def _process_channels(
         channels: int | Iterable[int] | None,
-        se: SpatialImage | DataArray,
+        se: DataArray,
         crd: tuple[int, int, int, int] | None,
     ) -> Array:
         channels = list(channels) if isinstance(channels, Iterable) and not isinstance(channels, str) else [channels]

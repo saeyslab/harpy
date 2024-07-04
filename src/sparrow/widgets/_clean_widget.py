@@ -12,8 +12,8 @@ import napari.layers
 import napari.types
 import napari.utils
 import numpy as np
+from datatree import DataTree
 from magicgui import magic_factory
-from multiscale_spatial_image.multiscale_spatial_image import MultiscaleSpatialImage
 from napari.qt.threading import thread_worker
 from napari.utils.notifications import show_info
 from spatialdata import SpatialData, read_zarr
@@ -130,7 +130,7 @@ def clean_widget(
 
         offset_x, offset_y = _get_translation(sdata[pipeline.cleaned_image_name])
 
-        if isinstance(sdata[pipeline.cleaned_image_name], MultiscaleSpatialImage):
+        if isinstance(sdata[pipeline.cleaned_image_name], DataTree):
             raster = utils._get_raster_multiscale(sdata[pipeline.cleaned_image_name])
         else:
             raster = sdata[pipeline.cleaned_image_name]

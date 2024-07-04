@@ -10,8 +10,9 @@ from dask.array import Array
 from numpy.typing import NDArray
 from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
+from spatialdata.transformations import get_transformation
 
-from sparrow.image._image import _add_label_layer, _get_spatial_element, _get_transformation
+from sparrow.image._image import _add_label_layer, _get_spatial_element
 from sparrow.utils._keys import _INSTANCE_KEY, _REGION_KEY, ClusteringKey
 from sparrow.utils.pylogger import get_pylogger
 
@@ -120,7 +121,7 @@ def flowsom(
     _region_keys = []
     for i, _img_layer in enumerate(img_layer):
         se_image = _get_spatial_element(sdata, layer=_img_layer)
-        _transformations.append(_get_transformation(se_image))
+        _transformations.append(get_transformation(se_image))
         arr = se_image.sel(c=channels).data
         if i == 0:
             _array_dim = arr.ndim
