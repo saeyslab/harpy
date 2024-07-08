@@ -10,7 +10,7 @@ from datatree import DataTree
 from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import get_transformation
-from spatialdata.transformations.transformations import BaseTransformation, Identity, Translation
+from spatialdata.transformations.transformations import BaseTransformation, Identity, Sequence, Translation
 from xarray import DataArray
 
 from sparrow.image._manager import ImageLayerManager, LabelLayerManager
@@ -54,7 +54,7 @@ def _get_boundary(spatial_image: DataArray) -> tuple[int, int, int, int]:
 def _get_translation(spatial_image: DataArray) -> tuple[float, float]:
     translation = get_transformation(spatial_image)
 
-    if not isinstance(translation, (Translation, Identity)):
+    if not isinstance(translation, (Sequence | Translation, Identity)):
         raise ValueError(
             f"Currently only transformations of type Translation are supported, "
             f"while transformation associated with {spatial_image} is of type {type(translation)}."
@@ -63,21 +63,25 @@ def _get_translation(spatial_image: DataArray) -> tuple[float, float]:
     return _get_translation_values(translation)
 
 
-def _get_translation_values(translation: Translation | Identity):
-    transform_matrix = translation.to_affine_matrix(input_axes=("x", "y"), output_axes=("x", "y"))
+def _get_translation_values(translation: Sequence | Translation | Identity) -> tuple[float | int, float | int]:
+    transform_matrix = translation.to_affine_matrix(
+        input_axes=(
+            "c",
+            "z",
+            "x",
+            "y",
+        ),
+        output_axes=("c", "z", "x", "y"),
+    )
 
-    if (
-        transform_matrix[0, 0] == 1.0
-        and transform_matrix[0, 1] == 0.0
-        and transform_matrix[1, 0] == 0.0
-        and transform_matrix[1, 1] == 1.0
-        and transform_matrix[2, 0] == 0.0
-        and transform_matrix[2, 1] == 0.0
-        and transform_matrix[2, 2] == 1.0
-    ):
-        return transform_matrix[0, 2], transform_matrix[1, 2]
-    else:
-        raise ValueError(f"The provided transform matrix {transform_matrix} represents more than just a translation.")
+    assert (
+        transform_matrix.shape == (5, 5)
+        and np.array_equal(transform_matrix[:-1, :-1], np.eye(4))  # no scaling or rotation
+        and np.array_equal(transform_matrix[-1], np.array([0, 0, 0, 0, 1]))  # maintaining homogeneity
+        and np.array_equal(transform_matrix[:2, -1], np.array([0, 0]))  # no translation allowed in z and c
+    ), f"The provided transform matrix {transform_matrix} represents more than just a translation in 'y' and 'x'."
+
+    return tuple(transform_matrix[2:4:, -1])
 
 
 def _apply_transform(se: DataArray) -> tuple[DataArray, np.ndarray, np.ndarray]:

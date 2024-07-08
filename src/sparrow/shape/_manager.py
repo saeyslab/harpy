@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 import itertools
 from functools import singledispatchmethod
-from typing import Any, Union
+from typing import Any
 
 import dask
 import geopandas
@@ -15,7 +17,7 @@ from rasterio import Affine
 from rasterio.features import shapes
 from shapely.affinity import translate
 from spatialdata import SpatialData, read_zarr
-from spatialdata.transformations import Identity, Translation
+from spatialdata.transformations import Identity, Sequence, Translation
 
 from sparrow.image._image import _get_translation_values
 from sparrow.utils._io import _incremental_io_on_disk
@@ -29,12 +31,12 @@ class ShapesLayerManager:
     def add_shapes(
         self,
         sdata: SpatialData,
-        input: Union[Array, GeoDataFrame],
+        input: Array | GeoDataFrame,
         output_layer: str,
-        transformation: Union[Translation, Identity] = None,
+        transformation: Sequence | Translation | Identity = None,
         overwrite: bool = False,
     ) -> SpatialData:
-        if transformation is not None and not isinstance(transformation, (Translation, Identity)):
+        if transformation is not None and not isinstance(transformation, (Sequence, Translation, Identity)):
             raise ValueError(
                 f"Currently only transformations of type Translation are supported, "
                 f"while provided transformation is of type {type(transformation)}"
@@ -172,7 +174,9 @@ class ShapesLayerManager:
         else:
             raise ValueError("All geometries should either be 2D or 3D. Mixed dimensions found.")
 
-    def set_transformation(self, polygons: GeoDataFrame, transformation: Union[Translation, Identity]) -> GeoDataFrame:
+    def set_transformation(
+        self, polygons: GeoDataFrame, transformation: Sequence | Translation | Identity
+    ) -> GeoDataFrame:
         x_translation, y_translation = _get_translation_values(transformation)
 
         polygons["geometry"] = polygons["geometry"].apply(

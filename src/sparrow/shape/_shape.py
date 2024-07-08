@@ -5,7 +5,7 @@ from geopandas import GeoDataFrame
 from numpy.typing import NDArray
 from shapely.geometry import GeometryCollection, MultiPolygon, Polygon
 from spatialdata import SpatialData
-from spatialdata.transformations import Identity, Translation
+from spatialdata.transformations import Identity, Sequence, Translation
 
 from sparrow.shape._manager import ShapesLayerManager
 
@@ -14,7 +14,7 @@ def _add_shapes_layer(
     sdata: SpatialData,
     input: Array | GeoDataFrame,
     output_layer: str,
-    transformation: Translation | Identity = None,
+    transformation: Sequence | Translation | Identity = None,
     overwrite: bool = False,
 ) -> SpatialData:
     manager = ShapesLayerManager()
