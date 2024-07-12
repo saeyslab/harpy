@@ -15,6 +15,7 @@ from spatialdata import SpatialData, read_zarr
 
 import sparrow.utils as utils
 from sparrow.pipeline import SparrowPipeline
+from sparrow.plot._plot import _translate_polygons
 
 log = utils.get_pylogger(__name__)
 
@@ -155,7 +156,9 @@ def segment_widget(
         else:
             shapes_layer = pipeline.cfg.segmentation.output_shapes_layer
 
-        polygons = utils._get_polygons_in_napari_format(df=sdata.shapes[shapes_layer])
+        polygons = _translate_polygons(sdata.shapes[shapes_layer].copy(), to_coordinate_system="global")
+
+        polygons = utils._get_polygons_in_napari_format(df=polygons)
 
         show_info("Adding segmentation shapes, this can be slow on large images...")
         viewer.add_shapes(
