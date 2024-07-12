@@ -193,7 +193,7 @@ def tiling_correction(
         arr=result,
         output_layer=output_layer,
         chunks=result.chunksize,
-        transformation=translation,
+        transformations={"global": translation} if translation is not None else None,
         scale_factors=scale_factors,
         c_coords=se.c.data,
         overwrite=overwrite,

@@ -1,8 +1,11 @@
 import os
 
+import dask.array as da
 import pytest
 
+from sparrow.image._image import _add_image_layer, _add_label_layer
 from sparrow.plot._plot import plot_image, plot_labels, plot_shapes
+from sparrow.plot._sanity import sanity_plot_transcripts_matrix
 from sparrow.shape._shape import _add_shapes_layer
 
 
@@ -94,4 +97,62 @@ def test_plot_shapes_transcriptomics(sdata_transcripts, tmp_path):
         table_layer="table_transcriptomics",
         region="segmentation_mask",
         output=os.path.join(tmp_path, "shapes_segmentation_mask_cell_ID"),
+    )
+
+
+def test_plot_shapes_3D(sdata_transcripts, tmp_path):
+    arr_image = da.stack([sdata_transcripts["raw_image"].data, sdata_transcripts["raw_image"].data], axis=1)
+
+    sdata_transcripts = _add_image_layer(
+        sdata_transcripts,
+        arr=arr_image,
+        output_layer="raw_image_z",
+        overwrite=True,
+    )
+
+    arr_labels = da.stack(
+        [sdata_transcripts["segmentation_mask"].data, sdata_transcripts["segmentation_mask"].data], axis=0
+    )
+
+    sdata_transcripts = _add_label_layer(
+        sdata_transcripts,
+        arr=arr_labels,
+        output_layer="segmentation_mask_z",
+        overwrite=True,
+    )
+
+    sdata_transcripts = _add_shapes_layer(
+        sdata_transcripts,
+        input=sdata_transcripts.labels["segmentation_mask_z"].data,
+        output_layer="segmentation_mask_boundaries_z",
+        overwrite=True,
+    )
+
+    plot_shapes(
+        sdata_transcripts,
+        img_layer="raw_image_z",
+        shapes_layer="segmentation_mask_boundaries_z",
+        z_slice=0.5,
+        crd=[400, 1500, 1500, 2500],
+        output=os.path.join(tmp_path, "shapes_segmentation_mask_z_slice"),
+    )
+
+
+def test_sanity_plot_transcripts_matrix(sdata_transcripts, tmp_path):
+    sdata_transcripts = _add_shapes_layer(
+        sdata_transcripts,
+        input=sdata_transcripts.labels["segmentation_mask"].data,
+        output_layer="segmentation_mask_boundaries",
+        overwrite=True,
+    )
+
+    sanity_plot_transcripts_matrix(
+        sdata_transcripts,
+        img_layer="raw_image",
+        points_layer="transcripts",
+        shapes_layer="segmentation_mask_boundaries",
+        crd=[500, 1500, 1500, 2500],
+        plot_cell_number=True,
+        n_sample=10000,
+        output=os.path.join(tmp_path, "sanity_plot"),
     )

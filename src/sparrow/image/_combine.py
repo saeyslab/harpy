@@ -4,16 +4,14 @@ from typing import Iterable
 
 import dask.array as da
 from dask.array import Array
-from spatialdata import SpatialData
+from spatialdata import SpatialData, bounding_box_query
 from spatialdata.models.models import ScaleFactors_t
-from spatialdata.transformations import Translation
+from spatialdata.transformations import get_transformation
 from xarray import DataArray
 
 from sparrow.image._image import (
     _add_image_layer,
     _get_spatial_element,
-    _get_translation,
-    _substract_translation_crd,
 )
 from sparrow.utils.pylogger import get_pylogger
 
@@ -22,8 +20,8 @@ log = get_pylogger(__name__)
 
 def combine(
     sdata: SpatialData,
-    img_layer: str | None = None,
-    output_layer: str | None = None,
+    img_layer: str,
+    output_layer: str,
     nuc_channels: int | str | Iterable[int | str] | None = None,
     mem_channels: int | str | Iterable[int | str] | None = None,
     crd: tuple[int, int, int, int] | None = None,
@@ -40,9 +38,9 @@ def combine(
     sdata
         Spatial data object containing the image to be combined.
     img_layer
-        The image layer in `sdata` to process. If not provided, the last image layer in `sdata` is used.
+        The image layer in `sdata` to process.
     output_layer
-        The name of the output layer where results will be stored. This must be specified.
+        The name of the output layer where results will be stored.
     nuc_channels
         Specifies which channel(s) to consider as nuclear channels.
     mem_channels
@@ -84,23 +82,26 @@ def combine(
 
     >>> sdata = combine(sdata, img_layer="raw_image", output_layer="nuc_combined", nuc_channels=[0,1])
     """
-    if img_layer is None:
-        img_layer = [*sdata.images][-1]
-        log.warning(
-            f"No image layer specified. "
-            f"Applying image processing on the last image layer '{img_layer}' of the provided SpatialData object."
-        )
-
-    if output_layer is None:
-        raise ValueError("Please specify a name for the output layer.")
-
-    # get spatial element
     se = _get_spatial_element(sdata, layer=img_layer)
+
+    if crd is not None:
+        se_crop = bounding_box_query(
+            se,
+            axes=["x", "y"],
+            min_coordinate=[crd[0], crd[2]],
+            max_coordinate=[crd[1], crd[3]],
+            target_coordinate_system="global",
+        )
+        if se_crop is not None:
+            se = se_crop
+        else:
+            log.warning(
+                f"Cropped spatial element using crd '{crd}' is None. Falling back to processing on full dataset."
+            )
 
     def _process_channels(
         channels: int | Iterable[int] | None,
         se: DataArray,
-        crd: tuple[int, int, int, int] | None,
     ) -> Array:
         channels = list(channels) if isinstance(channels, Iterable) and not isinstance(channels, str) else [channels]
 
@@ -117,27 +118,18 @@ def combine(
             raise ValueError(
                 f"Array is of dimension {arr.shape}, currently only images with 2 or 3 spatial dimensions are supported."
             )
-        if crd is not None:
-            if arr.ndim == 2:
-                arr = arr[:, crd[2] : crd[3], crd[0] : crd[1]]
-            elif arr.ndim == 3:
-                arr = arr[:, : crd[2] : crd[3], crd[0] : crd[1]]
-            arr = arr.rechunk(arr.chunksize)
         arr = arr.sum(axis=0)
         arr = arr[None, ...]
         return arr
 
-    if crd is not None:
-        crd = _substract_translation_crd(se, crd)
-
     results = []
 
     if nuc_channels is not None:
-        nuc_arr = _process_channels(nuc_channels, se, crd)
+        nuc_arr = _process_channels(nuc_channels, se)
         results.append(nuc_arr)
 
     if mem_channels is not None:
-        mem_arr = _process_channels(mem_channels, se, crd)
+        mem_arr = _process_channels(mem_channels, se)
         results.append(mem_arr)
 
     if len(results) == 2:
@@ -150,20 +142,12 @@ def combine(
             f"(currently set to: {nuc_channels}) or mem_channels (currently set to {mem_channels})."
         )
 
-    tx, ty = _get_translation(se)
-
-    if crd is not None:
-        tx = tx + crd[0]
-        ty = ty + crd[2]
-
-    translation = Translation([tx, ty], axes=("x", "y"))
-
     sdata = _add_image_layer(
         sdata,
         arr=arr,
         output_layer=output_layer,
         chunks=arr.chunksize,
-        transformation=translation,
+        transformations=get_transformation(se, get_all=True),
         scale_factors=scale_factors,
         overwrite=overwrite,
     )

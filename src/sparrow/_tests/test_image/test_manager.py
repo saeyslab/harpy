@@ -57,11 +57,8 @@ def test_add_image_layer_no_backed(sdata_multi_c):
     # check if if contains non zero elements
     assert sdata_no_backed[new_name].any().compute()
 
-    for name, layer in sdata_no_backed[new_name].data.__dask_graph__().layers.items():
-        if name.startswith("from-zarr"):
-            assert not layer.is_materialized()
-        else:
-            assert layer.is_materialized()
+    for _, layer in sdata_no_backed[new_name].data.__dask_graph__().layers.items():
+        assert layer.is_materialized()
 
 
 # labels
@@ -117,8 +114,5 @@ def test_add_labels_layer_no_backed(sdata_multi_c):
 
     assert sdata_no_backed[new_name].any().compute()
 
-    for name, layer in sdata_no_backed[new_name].data.__dask_graph__().layers.items():
-        if name.startswith("from-zarr"):
-            assert not layer.is_materialized()
-        else:
-            assert layer.is_materialized()
+    for _, layer in sdata_no_backed[new_name].data.__dask_graph__().layers.items():
+        assert layer.is_materialized()

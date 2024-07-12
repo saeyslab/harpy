@@ -41,7 +41,7 @@ Operations on image and labels layers.
 .. autosummary::
     :toctree: generated
 
-    im.apply
+    im.map_channels_zstacks
     im.tiling_correction
     im.enhance_contrast
     im.min_max_filtering

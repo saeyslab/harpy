@@ -197,7 +197,7 @@ def transcript_density(
         arr=arr,
         output_layer=output_layer,
         chunks=arr.chunksize,
-        transformation=translation,
+        transformations={"global": translation} if translation is not None else None,
         scale_factors=scale_factors,
         overwrite=overwrite,
     )

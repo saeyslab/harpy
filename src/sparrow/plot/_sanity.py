@@ -13,7 +13,7 @@ from sparrow.image._image import (
     _get_spatial_element,
     _unapply_transform,
 )
-from sparrow.plot._plot import _get_z_slice_polygons
+from sparrow.plot._plot import _get_z_slice_polygons, _translate_polygons
 from sparrow.shape import intersect_rectangles
 from sparrow.shape._shape import _extract_boundaries_from_geometry_collection
 from sparrow.utils._keys import _GENES_KEY
@@ -70,7 +70,7 @@ def sanity_plot_transcripts_matrix(
     plot_cell_number
         Whether to annotate cells with their numbers on the plot.
     n_sample
-        The number of transcripts to sample for plotting. Useful for large datasets.
+        The number of transcripts to sample for plotting. Useful for large datasets. Ignored if `gene` is specified.
     name_x
         Column name in the points_layer representing x-coordinates of transcripts.
     name_y
@@ -95,6 +95,8 @@ def sanity_plot_transcripts_matrix(
     ------
     ValueError
         If both `img_layer` and `labels_layer` are specified.
+    ValueError
+        If `img_layer` or `labels_layer` is specified, and they are not found in `sdata.images` respectively `sdata.labels`.
     AttributeError
         If `sdata` does not contain a `points_layer`.
     Warning
@@ -116,9 +118,13 @@ def sanity_plot_transcripts_matrix(
     # Choose the appropriate layer or default to the last image layer if none is specified.
     if img_layer is not None:
         layer = img_layer
+        if layer not in sdata.images:
+            raise ValueError(f"Provided layer '{layer}' is not an image layer in 'sdata'.")
         img_layer_type = True
     elif labels_layer is not None:
         layer = labels_layer
+        if layer not in sdata.labels:
+            raise ValueError(f"Provided layer '{layer}' is not a labels layer in 'sdata'.")
         img_layer_type = False
     else:
         layer = [*sdata.images][-1]
@@ -140,10 +146,9 @@ def sanity_plot_transcripts_matrix(
         if crd is None:
             log.warning(
                 f"Provided crd '{_crd}' and image_boundary '{image_boundary}' do not have any overlap. "
-                f"Please provide a crd that has some overlap with the image. "
-                f"Setting crd to image_boundary '{image_boundary}'."
+                f"Please provide a crd that has some overlap with the image. Skipping."
             )
-            crd = image_boundary
+            return
     # if crd is None, set crd equal to image_boundary
     else:
         crd = image_boundary
@@ -249,10 +254,12 @@ def sanity_plot_transcripts_matrix(
     if polygons is not None:
         log.info("Selecting boundaries")
 
-        polygons = polygons.cx[crd[0] : crd[1], crd[2] : crd[3]]
-
-        if z_index is not None:
-            polygons = _get_z_slice_polygons(polygons, z_index=z_index)
+        if not polygons.empty:
+            # copy is necessary, otherwise, in memory shapes layer altered by performing a plot.
+            polygons = _translate_polygons(sdata.shapes[shapes_layer].copy(), to_coordinate_system="global")
+            polygons = polygons.cx[crd[0] : crd[1], crd[2] : crd[3]]
+            if z_index is not None:
+                polygons = _get_z_slice_polygons(polygons, z_index=z_index)
 
         if not polygons.empty:
             polygons["boundaries"] = polygons["geometry"].apply(_extract_boundaries_from_geometry_collection)

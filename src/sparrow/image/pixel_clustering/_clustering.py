@@ -121,7 +121,7 @@ def flowsom(
     _region_keys = []
     for i, _img_layer in enumerate(img_layer):
         se_image = _get_spatial_element(sdata, layer=_img_layer)
-        _transformations.append(get_transformation(se_image))
+        _transformations.append(get_transformation(se_image, get_all=True))
         arr = se_image.sel(c=channels).data
         if i == 0:
             _array_dim = arr.ndim
@@ -192,7 +192,7 @@ def flowsom(
             sdata,
             arr=_labels_flowsom_clusters.squeeze(0) if to_squeeze else _labels_flowsom_clusters,
             output_layer=output_layer_clusters[i],
-            transformation=_transformations[i],
+            transformations=_transformations[i],
             scale_factors=scale_factors,
             overwrite=overwrite,
         )
@@ -201,7 +201,7 @@ def flowsom(
             sdata,
             arr=_labels_flowsom_metaclusters.squeeze(0) if to_squeeze else _labels_flowsom_metaclusters,
             output_layer=output_layer_metaclusters[i],
-            transformation=_transformations[i],
+            transformations=_transformations[i],
             scale_factors=scale_factors,
             overwrite=overwrite,
         )

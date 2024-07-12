@@ -1,6 +1,6 @@
 from sparrow.utils.pylogger import get_pylogger
 
-from ._apply import apply
+from ._apply import map_channels_zstacks
 from ._combine import combine
 from ._contrast import enhance_contrast
 from ._filters import gaussian_filtering, min_max_filtering

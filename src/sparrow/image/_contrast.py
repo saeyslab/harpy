@@ -8,7 +8,7 @@ from numpy.typing import NDArray
 from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 
-from sparrow.image._apply import apply
+from sparrow.image._apply import map_channels_zstacks
 from sparrow.image._image import _get_spatial_element
 from sparrow.utils.pylogger import get_pylogger
 
@@ -25,7 +25,7 @@ def enhance_contrast(
     crd: tuple[int, int, int, int] | None = None,
     scale_factors: ScaleFactors_t | None = None,
     overwrite: bool = False,
-) -> SpatialData:
+):
     """
     Enhance the contrast of an image in a SpatialData object.
 
@@ -44,13 +44,11 @@ def enhance_contrast(
         but also stronger noise amplification.
         If provided as a list, the length must match the number of channels,
         as the parameter will be used to process the different channels.
-        The default value is 3.5.
     chunks
-        The size of the chunks used during dask image processing.
-        The default value is 10000.
+        Specification for rechunking the data before applying the function.
     depth
-        The overlapping depth used in dask array map_overlap operation.
-        The default value is 3000.
+        The overlapping depth used in `dask.array.map_overlap`.
+        If specified as a tuple or dict, it contains the depth used in 'y' and 'x' dimension.
     output_layer
         The name of the image layer where the enhanced image will be stored.
         The default value is "clahe".
@@ -76,11 +74,12 @@ def enhance_contrast(
     """
 
     def _apply_clahe(image: NDArray, contrast_clip: float = 3.5) -> NDArray:
-        # input c, (z) , y, x
-        # output c, (z), y, x
+        # input c, z , y, x
+        # output c, z, y, x
         # squeeze dimension, and then put it back
 
         image_dim = image.ndim
+
         if image_dim == 3:
             if image.shape[0] == 1:
                 image = np.squeeze(image, axis=0)
@@ -95,6 +94,10 @@ def enhance_contrast(
             raise ValueError("Please provide numpy array containing c,(z),y and x dimension.")
 
         clahe = cv2.createCLAHE(clipLimit=contrast_clip, tileGridSize=(8, 8))
+
+        # if image.dtype != np.uint16:
+        #    image = cv2.normalize(image, None, 0, np.iinfo(np.uint16).max, cv2.NORM_MINMAX).astype(np.uint16)
+
         image = clahe.apply(image)
 
         if image_dim == 3:
@@ -113,6 +116,13 @@ def enhance_contrast(
 
     se = _get_spatial_element(sdata, img_layer)
 
+    supported_dtypes = ["uint8", "uint16"]
+    if se.dtype not in supported_dtypes:
+        raise ValueError(
+            f"Contrast enhancing via 'cv2.createCLAHE' is only supported for arrays of dtype '{supported_dtypes}', "
+            f"while array is of dtype '{se.dtype}'. Please consider converting to one of these data types first."
+        )
+
     if isinstance(contrast_clip, Iterable):
         assert (
             len(contrast_clip) == len(se.c.data)
@@ -121,28 +131,18 @@ def enhance_contrast(
     else:
         fn_kwargs = {"contrast_clip": contrast_clip}
 
-    if se.dims == ("c", "z", "y", "x"):
-        if isinstance(depth, int):
-            depth = (0, 0, depth, depth)
-    elif se.dims == ("c", "y", "x"):
-        if isinstance(depth, int):
-            depth = (0, depth, depth)
-    else:
-        raise ValueError(f"Dimensions for provided img_layer are {se.dims}. We only support (c, (z), y, x).")
-
-    sdata = apply(
+    sdata = map_channels_zstacks(
         sdata,
-        _apply_clahe,
-        fn_kwargs=fn_kwargs,
         img_layer=img_layer,
         output_layer=output_layer,
-        combine_c=False,  # you want to process all channels independently.
-        combine_z=False,  # you want to process all z-stacks independently.
-        chunks=chunks,  # provide it for c,z,y,x,
-        depth=depth,  # provide it for c,z,y,x; depth > 0 for c and z will be ignored
+        func=_apply_clahe,
+        fn_kwargs=fn_kwargs,
+        chunks=chunks,
+        blockwise=True,
         crd=crd,
         scale_factors=scale_factors,
         overwrite=overwrite,
+        depth=depth,
     )
 
     return sdata

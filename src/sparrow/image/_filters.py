@@ -9,7 +9,7 @@ from dask_image.ndfilters import gaussian_filter, maximum_filter, minimum_filter
 from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 
-from sparrow.image._apply import _get_spatial_element, apply
+from sparrow.image._apply import _get_spatial_element, map_channels_zstacks
 from sparrow.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
@@ -19,7 +19,8 @@ def min_max_filtering(
     sdata: SpatialData,
     img_layer: str | None = None,
     size_min_max_filter: int | list[int] = 85,
-    output_layer="min_max_filtered",
+    chunks: str | tuple[int, ...] | int | None = None,
+    output_layer: str = "min_max_filtered",
     crd: tuple[int, int, int, int] | None = None,
     scale_factors: ScaleFactors_t | None = None,
     overwrite: bool = False,
@@ -39,7 +40,9 @@ def min_max_filtering(
         The image layer in `sdata` to run min_max_filtering on. If not provided, the last image layer in `sdata` is used.
     size_min_max_filter
         Size of the min_max filter. If provided as a list, the length
-        must match the number of channels. Defaults to 85.
+        must match the number of channels.
+    chunks
+        Specification for rechunking the data before applying the function.
     output_layer
         The name of the output layer. Defaults to "min_max_filtered".
     crd
@@ -69,7 +72,7 @@ def min_max_filtering(
     >>> sdata = min_max_filtering(sdata, size_min_max_filtering=[30, 50, 70])
     """
 
-    def _apply_min_max_filtering(image: Array, size_min_max_filter: int = 85) -> Array:
+    def _apply_min_max_filter(image: Array, size_min_max_filter: int = 85) -> Array:
         def _to_odd(size_min_max_filter):
             if not isinstance(size_min_max_filter, int):
                 log.warning(
@@ -99,7 +102,7 @@ def min_max_filtering(
             else:
                 raise ValueError("_apply_min_max_filtering only accepts c and z dimension equal to 1.")
         else:
-            raise ValueError("Please provide numpy array containing c,(z),y and x dimension.")
+            raise ValueError("Please provide dask array containing c,(z),y and x dimension.")
 
         # Apply the minimum filter
         minimum_t = minimum_filter(image, size_min_max_filter)
@@ -133,15 +136,14 @@ def min_max_filtering(
     else:
         fn_kwargs = {"size_min_max_filter": size_min_max_filter}
 
-    sdata = apply(
+    sdata = map_channels_zstacks(
         sdata,
-        _apply_min_max_filtering,
-        fn_kwargs=fn_kwargs,
         img_layer=img_layer,
         output_layer=output_layer,
-        combine_c=False,  # you want to process all channels independently.
-        combine_z=False,  # you want to process all z-stacks independently.
-        chunks=None,
+        func=_apply_min_max_filter,
+        fn_kwargs=fn_kwargs,
+        chunks=chunks,
+        blockwise=False,
         crd=crd,
         scale_factors=scale_factors,
         overwrite=overwrite,
@@ -154,7 +156,8 @@ def gaussian_filtering(
     sdata: SpatialData,
     img_layer: str | None = None,
     sigma: int | list[int] = 6,
-    output_layer="gaussian_filtered",
+    chunks: str | tuple[int, ...] | int | None = None,
+    output_layer: str = "gaussian_filtered",
     crd: tuple[int, int, int, int] | None = None,
     scale_factors: ScaleFactors_t | None = None,
     overwrite: bool = False,
@@ -175,6 +178,8 @@ def gaussian_filtering(
     sigma
         Standard deviation for Gaussian kernel. If provided as a list, the length
         must match the number of channels.
+    chunks
+        Specification for rechunking the data before applying the function.
     output_layer
         The name of the output layer. Defaults to "gaussian_filtered".
     crd
@@ -247,15 +252,14 @@ def gaussian_filtering(
     else:
         fn_kwargs = {"sigma": sigma}
 
-    sdata = apply(
+    sdata = map_channels_zstacks(
         sdata,
-        _apply_gaussian_filter,
-        fn_kwargs=fn_kwargs,
         img_layer=img_layer,
         output_layer=output_layer,
-        combine_c=False,  # you want to process all channels independently.
-        combine_z=False,  # you want to process all z-stacks independently.
-        chunks=None,
+        func=_apply_gaussian_filter,
+        fn_kwargs=fn_kwargs,
+        chunks=chunks,
+        blockwise=False,
         crd=crd,
         scale_factors=scale_factors,
         overwrite=overwrite,

@@ -15,11 +15,10 @@ from geopandas import GeoDataFrame
 from numpy.typing import NDArray
 from rasterio import Affine
 from rasterio.features import shapes
-from shapely.affinity import translate
 from spatialdata import SpatialData, read_zarr
-from spatialdata.transformations import Identity, Sequence, Translation
+from spatialdata.models._utils import MappingToCoordinateSystem_t
+from spatialdata.transformations import get_transformation
 
-from sparrow.image._image import _get_translation_values
 from sparrow.utils._io import _incremental_io_on_disk
 from sparrow.utils._keys import _INSTANCE_KEY
 from sparrow.utils.pylogger import get_pylogger
@@ -33,15 +32,9 @@ class ShapesLayerManager:
         sdata: SpatialData,
         input: Array | GeoDataFrame,
         output_layer: str,
-        transformation: Sequence | Translation | Identity = None,
+        transformations: MappingToCoordinateSystem_t = None,
         overwrite: bool = False,
     ) -> SpatialData:
-        if transformation is not None and not isinstance(transformation, (Sequence, Translation, Identity)):
-            raise ValueError(
-                f"Currently only transformations of type Translation are supported, "
-                f"while provided transformation is of type {type(transformation)}"
-            )
-
         polygons = self.get_polygons_from_input(input)
 
         if polygons.empty:
@@ -50,10 +43,7 @@ class ShapesLayerManager:
             )
             return sdata
 
-        if transformation is not None:
-            polygons = self.set_transformation(polygons, transformation)
-
-        polygons = self.create_spatial_element(polygons)
+        polygons = spatialdata.models.ShapesModel.parse(polygons, transformations=transformations)
 
         sdata = self.add_to_sdata(
             sdata,
@@ -110,19 +100,22 @@ class ShapesLayerManager:
                 f"Adding new shapes layer '{output_filtered_shapes_layer}' containing these filtered out polygons."
             )
 
+            # if this assert would break in future spatialdata, then pass transformations of polygons to .parse
+            assert get_transformation(filtered_polygons, get_all=True) == get_transformation(polygons, get_all=True)
             sdata = self.add_to_sdata(
                 sdata,
                 output_layer=output_filtered_shapes_layer,
-                spatial_element=self.create_spatial_element(filtered_polygons),
+                spatial_element=spatialdata.models.ShapesModel.parse(filtered_polygons),
                 overwrite=True,
             )
 
             updated_polygons = self.retrieve_data_from_sdata(sdata, name=_shapes_layer)[bool_to_keep]
 
+            assert get_transformation(updated_polygons, get_all=True) == get_transformation(polygons, get_all=True)
             sdata = self.add_to_sdata(
                 sdata,
                 output_layer=_shapes_layer,
-                spatial_element=self.create_spatial_element(updated_polygons),
+                spatial_element=spatialdata.models.ShapesModel.parse(updated_polygons),
                 overwrite=True,
             )
 
@@ -173,23 +166,6 @@ class ShapesLayerManager:
             return 2
         else:
             raise ValueError("All geometries should either be 2D or 3D. Mixed dimensions found.")
-
-    def set_transformation(
-        self, polygons: GeoDataFrame, transformation: Sequence | Translation | Identity
-    ) -> GeoDataFrame:
-        x_translation, y_translation = _get_translation_values(transformation)
-
-        polygons["geometry"] = polygons["geometry"].apply(
-            lambda geom: translate(geom, xoff=x_translation, yoff=y_translation)
-        )
-
-        return polygons
-
-    def create_spatial_element(
-        self,
-        polygons: GeoDataFrame,
-    ) -> GeoDataFrame:
-        return spatialdata.models.ShapesModel.parse(polygons)
 
     def add_to_sdata(
         self,

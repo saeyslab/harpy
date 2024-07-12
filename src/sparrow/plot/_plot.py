@@ -8,7 +8,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 from geopandas.geodataframe import GeoDataFrame
 from geopandas.geoseries import GeoSeries
+from shapely.affinity import translate
 from spatialdata import SpatialData
+from spatialdata.transformations import get_transformation
 
 from sparrow.image._image import (
     _apply_transform,
@@ -18,6 +20,7 @@ from sparrow.image._image import (
 )
 from sparrow.shape import intersect_rectangles
 from sparrow.utils._keys import _INSTANCE_KEY, _REGION_KEY
+from sparrow.utils._transformations import _get_translation_values
 from sparrow.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
@@ -227,6 +230,8 @@ def plot_shapes(
     ------
     ValueError
         If both `img_layer` and `labels_layer` are specified.
+    ValueError
+        If `img_layer` or `labels_layer` is specified, and they are not found in `sdata.images` respectively `sdata.labels`.
     ValueError
         If z_slice is specified, and it is not a z_slice in specified `img_layer` or `labels_layer`.
     ValueError
@@ -445,6 +450,8 @@ def _plot(
     ValueError
         If both `img_layer` and `labels_layer` are specified.
     ValueError
+        If `img_layer` or `labels_layer` is specified, and they are not found in `sdata.images` respectively `sdata.labels`.
+    ValueError
         If z_slice is specified, and it is not a z_slice in specified `img_layer` or `labels_layer`.
     ValueError
         If a `column` is specified, but no `table_layer`.
@@ -470,10 +477,14 @@ def _plot(
     # Choose the appropriate layer or default to the last image layer if none is specified.
     if img_layer is not None:
         layer = img_layer
+        if layer not in sdata.images:
+            raise ValueError(f"Provided layer '{layer}' is not an image layer in 'sdata'.")
         img_layer_type = True
     elif labels_layer is not None:
         layer = labels_layer
         img_layer_type = False
+        if layer not in sdata.labels:
+            raise ValueError(f"Provided layer '{layer}' is not a labels layer in 'sdata'.")
     else:
         layer = [*sdata.images][-1]
         img_layer_type = True
@@ -506,11 +517,9 @@ def _plot(
         if crd is None:
             log.warning(
                 f"Provided crd '{_crd}' and image_boundary '{image_boundary}' do not have any overlap. "
-                f"Please provide a crd that has some overlap with the image. "
-                f"Setting crd to image_boundary '{image_boundary}'."
+                f"Please provide a crd that has some overlap with the image. Skipping."
             )
-            crd = image_boundary
-    # if crd is None, set crd equal to image_boundary
+            return
     else:
         crd = image_boundary
     size_im = (crd[1] - crd[0]) * (crd[3] - crd[2])
@@ -526,8 +535,10 @@ def _plot(
             z_index = np.where(se.z.data == z_slice)[0][0]
 
     polygons = None
-    if shapes_layer is not None:
-        polygons = sdata.shapes[shapes_layer].cx[crd[0] : crd[1], crd[2] : crd[3]]
+    if shapes_layer is not None and not sdata.shapes[shapes_layer].empty:
+        # copy is necessary, otherwise, in memory shapes layer altered by performing a plot.
+        polygons = _translate_polygons(sdata.shapes[shapes_layer].copy(), to_coordinate_system="global")
+        polygons = polygons.cx[crd[0] : crd[1], crd[2] : crd[3]]
         if z_index is not None:
             polygons = _get_z_slice_polygons(polygons, z_index=z_index)
 
@@ -733,4 +744,20 @@ def _get_z_slice_polygons(polygons: GeoDataFrame, z_index: int) -> GeoDataFrame:
 
         return False
 
+    if polygons.empty:
+        return polygons
+
     return polygons[polygons["geometry"].apply(_get_z_slice, args=(z_index,))]
+
+
+def _translate_polygons(polygons: GeoDataFrame, to_coordinate_system: str = "global") -> GeoDataFrame:
+    # get the transformation defined on "global"
+    transformation = get_transformation(
+        polygons, to_coordinate_system=to_coordinate_system
+    )  # TODO, should work on any coordinate system passed to plot
+    x_translation, y_translation = _get_translation_values(transformation)
+    polygons["geometry"] = polygons["geometry"].apply(
+        lambda geom: translate(geom, xoff=x_translation, yoff=y_translation)
+    )
+
+    return polygons

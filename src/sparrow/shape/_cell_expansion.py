@@ -6,8 +6,12 @@ from geopandas import GeoDataFrame
 from longsgis import voronoiDiagram4plg
 from shapely.geometry import Polygon
 from spatialdata import SpatialData
+from spatialdata.transformations import get_transformation
 
 from sparrow.shape._shape import _add_shapes_layer
+from sparrow.utils.pylogger import get_pylogger
+
+log = get_pylogger(__name__)
 
 
 def create_voronoi_boundaries(
@@ -54,6 +58,7 @@ def create_voronoi_boundaries(
 
     if output_layer is None:
         output_layer = f"expanded_cells{radius}"
+        log.info(f"Name of the output layer is not provided. Setting to '{output_layer}'.")
 
     x_min, y_min, x_max, y_max = sdata[shapes_layer].geometry.total_bounds
 
@@ -67,7 +72,7 @@ def create_voronoi_boundaries(
     )
 
     gdf = sdata[shapes_layer].copy()
-    gdf["geometry"] = sdata[shapes_layer].simplify(2)
+    gdf["geometry"] = gdf.simplify(2)
 
     vd = voronoiDiagram4plg(gdf, boundary)
     voronoi = geopandas.sjoin(vd, gdf, predicate="contains", how="left")
@@ -80,10 +85,14 @@ def create_voronoi_boundaries(
 
     gdf.geometry = intersected
 
+    # sanity check. If this sanity check would fail in spatialdata at some point, then pass transformation to transformations parameter of _add_shapes_layer.
+    assert get_transformation(gdf, get_all=True) == get_transformation(sdata[shapes_layer], get_all=True)
+
     sdata = _add_shapes_layer(
         sdata,
         input=gdf,
         output_layer=output_layer,
+        transformations=None,
         overwrite=overwrite,
     )
 

@@ -100,7 +100,7 @@ def pixel_clustering_preprocess(
     _transformations = []
     for i, _img_layer in enumerate(img_layer):
         se_image = _get_spatial_element(sdata, layer=_img_layer)
-        _transformations.append(get_transformation(se_image))
+        _transformations.append(get_transformation(se_image, get_all=True))
         arr = se_image.sel(c=channels).data
         if i == 0:
             _array_dim = arr.ndim
@@ -201,7 +201,7 @@ def pixel_clustering_preprocess(
             sdata,
             arr=_arr_list[i].squeeze(1) if to_squeeze else _arr_list[i],
             output_layer=output_layer[i],
-            transformation=_transformations[i],
+            transformations=_transformations[i],
             scale_factors=scale_factors,
             c_coords=channels,
             overwrite=overwrite,

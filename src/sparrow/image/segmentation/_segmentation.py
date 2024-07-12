@@ -35,9 +35,7 @@ from sparrow.image.segmentation._utils import (
     _rechunk_overlap,
     _substract_depth_from_chunks_size,
 )
-from sparrow.image.segmentation.segmentation_models._baysor import (
-    _baysor as _model_points,
-)
+from sparrow.image.segmentation.segmentation_models._baysor import _baysor as _model_points
 from sparrow.image.segmentation.segmentation_models._cellpose import _cellpose as _model
 from sparrow.io._transcripts import _add_transcripts_to_sdata
 from sparrow.shape._shape import _add_shapes_layer
@@ -369,7 +367,9 @@ class SegmentationModel(ABC):
             arr=x_labels,
             output_layer=output_labels_layer,
             chunks=x_labels.chunksize,
-            transformation=translation,
+            transformations={"global": translation}
+            if translation is not None
+            else None,  # TODO support for any transformation, and any coordinate system (via use of bounding box query).
             scale_factors=scale_factors,
             overwrite=overwrite,
         )
@@ -383,7 +383,9 @@ class SegmentationModel(ABC):
                 sdata,
                 input=se_labels.data,
                 output_layer=output_shapes_layer,
-                transformation=translation,
+                transformations={"global": translation}
+                if translation is not None
+                else None,  # TODO support for any transformation, and any coordinate system (via use of bounding box query).
                 overwrite=overwrite,
             )
 

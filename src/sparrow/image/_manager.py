@@ -8,8 +8,8 @@ import spatialdata
 from dask.array import Array
 from datatree import DataTree
 from spatialdata import SpatialData, read_zarr
+from spatialdata.models._utils import MappingToCoordinateSystem_t
 from spatialdata.models.models import ScaleFactors_t
-from spatialdata.transformations import BaseTransformation, set_transformation
 from xarray import DataArray
 
 from sparrow.utils._io import _incremental_io_on_disk
@@ -26,14 +26,16 @@ class LayerManager(ABC):
         output_layer: str,
         dims: tuple[str, ...] | None = None,
         chunks: str | tuple[int, ...] | int | None = None,
-        transformation: BaseTransformation | dict[str, BaseTransformation] = None,
+        transformations: MappingToCoordinateSystem_t | None = None,
         scale_factors: ScaleFactors_t | None = None,
         overwrite: bool = False,
         **kwargs: Any,  # kwargs passed to create_spatial_element
     ) -> SpatialData:
         chunks = chunks or arr.chunksize
         if dims is None:
-            log.warning("No dims parameter specified. Assuming order of dimension of provided array is (c, (z), y, x)")
+            log.warning(
+                "No dims parameter specified. Assuming order of dimension of provided array is ((c), (z), y, x)"
+            )
             dims = self.get_dims(arr)
 
         intermediate_output_layer = None
@@ -44,10 +46,9 @@ class LayerManager(ABC):
                     dims=dims,
                     scale_factors=None,
                     chunks=chunks,
+                    transformations=transformations,
                     **kwargs,
                 )
-                if transformation is not None:
-                    set_transformation(spatial_element, transformation)
 
                 intermediate_output_layer = f"{uuid.uuid4()}_{output_layer}"
                 log.info(f"Writing intermediate non-multiscale results to layer '{intermediate_output_layer}'")
@@ -71,11 +72,9 @@ class LayerManager(ABC):
             dims=dims,
             scale_factors=scale_factors,
             chunks=chunks,
+            transformations=transformations,
             **kwargs,
         )
-
-        if transformation is not None:
-            set_transformation(spatial_element, transformation)
 
         log.info(f"Writing results to layer '{output_layer}'")
 
@@ -130,9 +129,10 @@ class ImageLayerManager(LayerManager):
     def create_spatial_element(
         self,
         arr: Array,
-        dims: tuple[str, str, str],
+        dims: tuple[str, ...],
         scale_factors: ScaleFactors_t | None = None,
         chunks: str | tuple[int, int, int] | int | None = None,
+        transformations: MappingToCoordinateSystem_t | None = None,
         c_coords: list[str] | None = None,
     ) -> DataArray | DataTree:
         if len(dims) == 3:
@@ -142,6 +142,7 @@ class ImageLayerManager(LayerManager):
                 scale_factors=scale_factors,
                 chunks=chunks,
                 c_coords=c_coords,
+                transformations=transformations,
             )
         elif len(dims) == 4:
             return spatialdata.models.Image3DModel.parse(
@@ -150,6 +151,7 @@ class ImageLayerManager(LayerManager):
                 scale_factors=scale_factors,
                 chunks=chunks,
                 c_coords=c_coords,
+                transformations=transformations,
             )
         else:
             raise ValueError(
@@ -203,6 +205,7 @@ class LabelLayerManager(LayerManager):
         dims: tuple[str, str],
         scale_factors: ScaleFactors_t | None = None,
         chunks: str | tuple[int, int] | int | None = None,
+        transformations: MappingToCoordinateSystem_t | None = None,
     ) -> DataArray | DataTree:
         if len(dims) == 2:
             return spatialdata.models.Labels2DModel.parse(
@@ -210,13 +213,11 @@ class LabelLayerManager(LayerManager):
                 dims=dims,
                 scale_factors=scale_factors,
                 chunks=chunks,
+                transformations=transformations,
             )
         elif len(dims) == 3:
             return spatialdata.models.Labels3DModel.parse(
-                arr,
-                dims=dims,
-                scale_factors=scale_factors,
-                chunks=chunks,
+                arr, dims=dims, scale_factors=scale_factors, chunks=chunks, transformations=transformations
             )
         else:
             raise ValueError(

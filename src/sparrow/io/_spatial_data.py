@@ -156,7 +156,9 @@ def create_sdata(
             arr=dask_array,
             output_layer=img_layer,
             chunks=chunks,
-            transformation=translation,
+            transformations={"global": translation}
+            if translation is not None
+            else None,  # TODO support for any transformation, and any coordinate system.
             scale_factors=scale_factors,
             c_coords=c_coords,
             overwrite=False,

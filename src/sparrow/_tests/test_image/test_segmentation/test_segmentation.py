@@ -84,7 +84,7 @@ def test_segment_points(sdata_multi_c: SpatialData):
         overwrite=False,
     )
 
-    assert type(sdata_multi_c.points["transcripts"]) == DataFrame
+    assert isinstance((sdata_multi_c.points["transcripts"]), DataFrame)
 
     sdata_multi_c = segment_points(
         sdata_multi_c,

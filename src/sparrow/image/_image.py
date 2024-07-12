@@ -8,12 +8,14 @@ import xarray as xr
 from dask.array import Array
 from datatree import DataTree
 from spatialdata import SpatialData
+from spatialdata.models._utils import MappingToCoordinateSystem_t
 from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import get_transformation
-from spatialdata.transformations.transformations import BaseTransformation, Identity, Sequence, Translation
+from spatialdata.transformations.transformations import Identity, Sequence, Translation
 from xarray import DataArray
 
 from sparrow.image._manager import ImageLayerManager, LabelLayerManager
+from sparrow.utils._transformations import _get_translation_values
 from sparrow.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
@@ -61,27 +63,6 @@ def _get_translation(spatial_image: DataArray) -> tuple[float, float]:
         )
 
     return _get_translation_values(translation)
-
-
-def _get_translation_values(translation: Sequence | Translation | Identity) -> tuple[float | int, float | int]:
-    transform_matrix = translation.to_affine_matrix(
-        input_axes=(
-            "c",
-            "z",
-            "x",
-            "y",
-        ),
-        output_axes=("c", "z", "x", "y"),
-    )
-
-    assert (
-        transform_matrix.shape == (5, 5)
-        and np.array_equal(transform_matrix[:-1, :-1], np.eye(4))  # no scaling or rotation
-        and np.array_equal(transform_matrix[-1], np.array([0, 0, 0, 0, 1]))  # maintaining homogeneity
-        and np.array_equal(transform_matrix[:2, -1], np.array([0, 0]))  # no translation allowed in z and c
-    ), f"The provided transform matrix {transform_matrix} represents more than just a translation in 'y' and 'x'."
-
-    return tuple(transform_matrix[2:4:, -1])
 
 
 def _apply_transform(se: DataArray) -> tuple[DataArray, np.ndarray, np.ndarray]:
@@ -182,7 +163,7 @@ def _add_image_layer(
     output_layer: str,
     dims: tuple[str, ...] | None = None,
     chunks: str | tuple[int, int, int] | int | None = None,
-    transformation: BaseTransformation | dict[str, BaseTransformation] = None,
+    transformations: MappingToCoordinateSystem_t | None = None,
     scale_factors: ScaleFactors_t | None = None,
     c_coords: list[str] | None = None,
     overwrite: bool = False,
@@ -194,7 +175,7 @@ def _add_image_layer(
         output_layer=output_layer,
         dims=dims,
         chunks=chunks,
-        transformation=transformation,
+        transformations=transformations,
         scale_factors=scale_factors,
         c_coords=c_coords,
         overwrite=overwrite,
@@ -209,7 +190,7 @@ def _add_label_layer(
     output_layer: str,
     dims: tuple[str, ...] | None = None,
     chunks: str | tuple[int, int] | int | None = None,
-    transformation: BaseTransformation | dict[str, BaseTransformation] = None,
+    transformations: MappingToCoordinateSystem_t | None = None,
     scale_factors: ScaleFactors_t | None = None,
     overwrite: bool = False,
 ):
@@ -220,7 +201,7 @@ def _add_label_layer(
         output_layer=output_layer,
         dims=dims,
         chunks=chunks,
-        transformation=transformation,
+        transformations=transformations,
         scale_factors=scale_factors,
         overwrite=overwrite,
     )

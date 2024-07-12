@@ -5,7 +5,7 @@ import pytest
 from numpy.typing import NDArray
 from spatialdata import SpatialData
 
-from sparrow.image._apply import _precondition, apply
+from sparrow.image._apply import _precondition, map_channels_zstacks
 
 
 def _multiply(image: NDArray, parameter: Any):
@@ -289,16 +289,14 @@ def test_apply(sdata_multi_c: SpatialData):
     }
     func = _multiply
 
-    sdata_multi_c = apply(
+    sdata_multi_c = map_channels_zstacks(
         sdata_multi_c,
-        func,
         img_layer="combine_z",
         output_layer="combine_z_apply",
-        combine_c=False,
-        combine_z=False,
+        func=func,
+        fn_kwargs=fn_kwargs,
         chunks=212,
         overwrite=True,
-        fn_kwargs=fn_kwargs,
     )
 
     res = sdata_multi_c["combine_z"].sel(c=0, z=0.5).compute()
