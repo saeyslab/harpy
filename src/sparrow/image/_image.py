@@ -24,8 +24,9 @@ log = get_pylogger(__name__)
 def _substract_translation_crd(
     spatial_image: DataArray,
     crd=Tuple[int, int, int, int],
+    to_coordinate_system: str = "global",
 ) -> tuple[int, int, int, int] | None:
-    tx, ty = _get_translation(spatial_image)
+    tx, ty = _get_translation(spatial_image, to_coordinate_system=to_coordinate_system)
 
     _crd = crd
     crd = [
@@ -46,26 +47,37 @@ def _substract_translation_crd(
     return crd
 
 
-def _get_boundary(spatial_image: DataArray) -> tuple[int, int, int, int]:
-    tx, ty = _get_translation(spatial_image)
+def _get_boundary(spatial_image: DataArray, to_coordinate_system: str = "global") -> tuple[int, int, int, int]:
+    tx, ty = _get_translation(spatial_image, to_coordinate_system=to_coordinate_system)
     width = spatial_image.sizes["x"]
     height = spatial_image.sizes["y"]
     return (int(tx), int(tx + width), int(ty), int(ty + height))
 
 
-def _get_translation(spatial_image: DataArray) -> tuple[float, float]:
-    translation = get_transformation(spatial_image)
+def _get_translation(spatial_image: DataArray, to_coordinate_system: str = "global") -> tuple[float, float]:
+    transformations = get_transformation(spatial_image, get_all=True)
+    if len(transformations) > 1:
+        log.info(
+            f"There seems to be more than one coordinate system defined on the provided spatial element ('{[*transformations]}'). "
+            f"We only consider the coordinate sytem specified via parameter 'to_coordinate_system': '{to_coordinate_system}'."
+        )
+    if to_coordinate_system not in [*transformations]:
+        raise ValueError(
+            f"Coordinate system '{to_coordinate_system}' does not appear to be a coordinate system of the spatial element. "
+            f"Please choose a coordinate system from this list: {[*transformations]}."
+        )
+    translation = transformations[to_coordinate_system]
 
     if not isinstance(translation, (Sequence | Translation, Identity)):
         raise ValueError(
             f"Currently only transformations of type Translation are supported, "
-            f"while transformation associated with {spatial_image} is of type {type(translation)}."
+            f"while transformation associated with {spatial_image} in coordinate system '{to_coordinate_system}' is of type {type(translation)}."
         )
 
     return _get_translation_values(translation)
 
 
-def _apply_transform(se: DataArray) -> tuple[DataArray, np.ndarray, np.ndarray]:
+def _apply_transform(se: DataArray, to_coordinate_system: str = "global") -> tuple[DataArray, np.ndarray, np.ndarray]:
     """
     Apply the translation (if any) of the given DataArray to its x- and y-coordinates array.
 
@@ -79,7 +91,7 @@ def _apply_transform(se: DataArray) -> tuple[DataArray, np.ndarray, np.ndarray]:
     y_orig_coords = se.y.data
 
     # Translate
-    tx, ty = _get_translation(se)
+    tx, ty = _get_translation(se, to_coordinate_system=to_coordinate_system)
     x_coords = xr.DataArray(tx + np.arange(se.sizes["x"], dtype="float64"), dims="x")
     y_coords = xr.DataArray(ty + np.arange(se.sizes["y"], dtype="float64"), dims="y")
     se = se.assign_coords({"x": x_coords, "y": y_coords})

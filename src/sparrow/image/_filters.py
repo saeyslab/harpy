@@ -22,6 +22,7 @@ def min_max_filtering(
     chunks: str | tuple[int, ...] | int | None = None,
     output_layer: str = "min_max_filtered",
     crd: tuple[int, int, int, int] | None = None,
+    to_coordinate_system: str = "global",
     scale_factors: ScaleFactors_t | None = None,
     overwrite: bool = False,
 ) -> SpatialData:
@@ -47,6 +48,8 @@ def min_max_filtering(
         The name of the output layer. Defaults to "min_max_filtered".
     crd
         The coordinates specifying the region of the image to be processed. Defines the bounds (x_min, x_max, y_min, y_max).
+    to_coordinate_system
+        The coordinate system to which the `crd` is specified. Ignored if `crd` is None.
     scale_factors
         Scale factors to apply for multiscale.
     overwrite
@@ -145,6 +148,7 @@ def min_max_filtering(
         chunks=chunks,
         blockwise=False,
         crd=crd,
+        to_coordinate_system=to_coordinate_system,
         scale_factors=scale_factors,
         overwrite=overwrite,
     )
@@ -159,6 +163,7 @@ def gaussian_filtering(
     chunks: str | tuple[int, ...] | int | None = None,
     output_layer: str = "gaussian_filtered",
     crd: tuple[int, int, int, int] | None = None,
+    to_coordinate_system: str = "global",
     scale_factors: ScaleFactors_t | None = None,
     overwrite: bool = False,
 ) -> SpatialData:
@@ -184,6 +189,8 @@ def gaussian_filtering(
         The name of the output layer. Defaults to "gaussian_filtered".
     crd
         The coordinates specifying the region of the image to be processed. Defines the bounds (x_min, x_max, y_min, y_max).
+    to_coordinate_system
+        The coordinate system to which the `crd` is specified. Ignored if `crd` is None.
     scale_factors
         Scale factors to apply for multiscale.
     overwrite: bool
@@ -261,6 +268,7 @@ def gaussian_filtering(
         chunks=chunks,
         blockwise=False,
         crd=crd,
+        to_coordinate_system=to_coordinate_system,
         scale_factors=scale_factors,
         overwrite=overwrite,
     )

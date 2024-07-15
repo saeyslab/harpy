@@ -17,6 +17,7 @@ from sparrow.plot._plot import _get_z_slice_polygons, _translate_polygons
 from sparrow.shape import intersect_rectangles
 from sparrow.shape._shape import _extract_boundaries_from_geometry_collection
 from sparrow.utils._keys import _GENES_KEY
+from sparrow.utils._transformations import _identity_check_transformations_points
 from sparrow.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
@@ -38,6 +39,7 @@ def sanity_plot_transcripts_matrix(
     name_gene_column: str = _GENES_KEY,
     gene: str | None = None,
     crd: tuple[int, int, int, int] | None = None,
+    to_coordinate_system: str = "global",
     output: Path | str | None = None,
 ) -> None:
     """
@@ -84,6 +86,8 @@ def sanity_plot_transcripts_matrix(
     crd
         Coordinates to define a rectangular region for plotting as (xmin, xmax, ymin, ymax).
         If None, the entire image boundary is used.
+    to_coordinate_system
+        Coordinate system to plot.
     output
         Filepath to save the generated plot. If not provided, the plot will be displayed using plt.show().
 
@@ -138,7 +142,7 @@ def sanity_plot_transcripts_matrix(
 
     _, ax = plt.subplots(figsize=(10, 10))
 
-    image_boundary = _get_boundary(se)
+    image_boundary = _get_boundary(se, to_coordinate_system=to_coordinate_system)
 
     if crd is not None:
         _crd = crd
@@ -153,7 +157,7 @@ def sanity_plot_transcripts_matrix(
     else:
         crd = image_boundary
 
-    se, x_coords_orig, y_coords_orig = _apply_transform(se)
+    se, x_coords_orig, y_coords_orig = _apply_transform(se, to_coordinate_system=to_coordinate_system)
 
     z_index = None
     if z_slice is not None:
@@ -213,6 +217,8 @@ def sanity_plot_transcripts_matrix(
     if not hasattr(sdata, "points"):
         raise AttributeError("Please first read transcripts in SpatialData object.")
 
+    _identity_check_transformations_points(sdata.points[points_layer], to_coordinate_system=to_coordinate_system)
+
     in_df = sdata.points[points_layer]
 
     # query first and then slicing gene is faster than vice versa
@@ -256,7 +262,7 @@ def sanity_plot_transcripts_matrix(
 
         if not polygons.empty:
             # copy is necessary, otherwise, in memory shapes layer altered by performing a plot.
-            polygons = _translate_polygons(sdata.shapes[shapes_layer].copy(), to_coordinate_system="global")
+            polygons = _translate_polygons(sdata.shapes[shapes_layer].copy(), to_coordinate_system=to_coordinate_system)
             polygons = polygons.cx[crd[0] : crd[1], crd[2] : crd[3]]
             if z_index is not None:
                 polygons = _get_z_slice_polygons(polygons, z_index=z_index)

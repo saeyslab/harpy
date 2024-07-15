@@ -4,11 +4,10 @@ from pathlib import Path
 
 import dask.dataframe as dd
 import numpy as np
-import spatialdata
-from dask.dataframe.core import DataFrame as DaskDataFrame
-from spatialdata import SpatialData, read_zarr
+from spatialdata import SpatialData
+from spatialdata.models._utils import MappingToCoordinateSystem_t
 
-from sparrow.utils._io import _incremental_io_on_disk
+from sparrow.points._points import _add_points_layer
 from sparrow.utils._keys import _GENES_KEY
 from sparrow.utils.pylogger import get_pylogger
 
@@ -145,6 +144,7 @@ def read_transcripts(
     crd: tuple[int, int, int, int] | None = None,
     filter_gene_names: str | list | None = None,
     blocksize: str = "64MB",
+    transformations: MappingToCoordinateSystem_t | None = None,
 ) -> SpatialData:
     """
     Reads transcript information from a file with each row listing the x and y coordinates, along with the gene name.
@@ -284,48 +284,13 @@ def read_transcripts(
     if crd is not None:
         transformed_ddf = transformed_ddf.query(f"{crd[0]} <= pixel_x < {crd[1]} and {crd[2]} <= pixel_y < {crd[3]}")
 
-    sdata = _add_transcripts_to_sdata(
+    sdata = _add_points_layer(
         sdata,
         ddf=transformed_ddf,
         output_layer=output_layer,
         coordinates=coordinates,
+        transformations=transformations,
         overwrite=overwrite,
     )
-
-    return sdata
-
-
-def _add_transcripts_to_sdata(
-    sdata: SpatialData,
-    ddf: DaskDataFrame,
-    output_layer: str,
-    coordinates: dict[str, str],
-    overwrite: bool = True,
-):
-    points = spatialdata.models.PointsModel.parse(
-        ddf,
-        coordinates=coordinates,
-    )
-
-    # we persist points if sdata is not backed.
-    if not sdata.is_backed():
-        points = points.persist()
-
-    if output_layer in [*sdata.points]:
-        if sdata.is_backed():
-            if overwrite:
-                sdata = _incremental_io_on_disk(sdata, output_layer=output_layer, element=points)
-            else:
-                raise ValueError(
-                    f"Attempting to overwrite 'sdata.points[\"{output_layer}\"]', but overwrite is set to False. Set overwrite to True to overwrite the .zarr store."
-                )
-        else:
-            sdata[output_layer] = points
-
-    else:
-        sdata[output_layer] = points
-        if sdata.is_backed():
-            sdata.write_element(output_layer)
-            sdata = read_zarr(sdata.path)
 
     return sdata

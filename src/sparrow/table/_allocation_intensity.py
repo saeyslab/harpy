@@ -28,6 +28,7 @@ def allocate_intensity(
     labels_layer: str | None = None,
     output_layer: str = "table_intensities",
     channels: int | str | Iterable[int] | Iterable[str] | None = None,
+    to_coordinate_system: str = "global",
     chunks: str | int | tuple[int, ...] | None = 10000,
     append: bool = False,
     remove_background_intensity: bool = True,
@@ -55,6 +56,8 @@ def allocate_intensity(
         Specifies the channels to be considered when extracting intensity information from the `img_layer`.
         This parameter can take a single integer or string or an iterable of integers or strings representing specific channels.
         If set to None (the default), intensity data will be aggregated from all available channels within the image layer.
+    to_coordinate_system
+        The coordinate system that holds `img_layer` and `labels_layer`.
     chunks
         The chunk size for processing the image data. If provided as a tuple, desired chunksize for (z), y, x should be provided.
     append
@@ -137,11 +140,11 @@ def allocate_intensity(
     f"but image layer with name {img_layer} has shape {se_image.data.shape}, "
     f"while labels layer with name {labels_layer} has shape {se_labels.data.shape}  "
 
-    t1x, t1y = _get_translation(se_image)
-    t2x, t2y = _get_translation(se_labels)
+    t1x, t1y = _get_translation(se_image, to_coordinate_system=to_coordinate_system)
+    t2x, t2y = _get_translation(se_labels, to_coordinate_system=to_coordinate_system)
 
     assert (t1x, t1y) == (t2x, t2y), f"image layer with name {img_layer} should "
-    f"have same translation as labels layer with name {labels_layer}"
+    f"be registered to labels layer with name {labels_layer} in coordinate system {to_coordinate_system}."
 
     if channels is None:
         channels = se_image.c.data

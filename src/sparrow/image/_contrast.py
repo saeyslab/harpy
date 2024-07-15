@@ -23,6 +23,7 @@ def enhance_contrast(
     depth: tuple[int, ...] | dict[int, int] | int = 3000,
     output_layer: str = "clahe",
     crd: tuple[int, int, int, int] | None = None,
+    to_coordinate_system: str = "global",
     scale_factors: ScaleFactors_t | None = None,
     overwrite: bool = False,
 ):
@@ -54,6 +55,8 @@ def enhance_contrast(
         The default value is "clahe".
     crd
         The coordinates specifying the region of the image to be processed. Defines the bounds (x_min, x_max, y_min, y_max).
+    to_coordinate_system
+        The coordinate system to which the `crd` is specified. Ignored if `crd` is None.
     scale_factors
         Scale factors to apply for multiscale.
     overwrite
@@ -140,6 +143,7 @@ def enhance_contrast(
         chunks=chunks,
         blockwise=True,
         crd=crd,
+        to_coordinate_system=to_coordinate_system,
         scale_factors=scale_factors,
         overwrite=overwrite,
         depth=depth,

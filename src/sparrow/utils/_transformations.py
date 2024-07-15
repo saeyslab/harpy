@@ -1,5 +1,6 @@
 import numpy as np
-from spatialdata.transformations.transformations import Identity, Sequence, Translation
+from dask.dataframe import DataFrame
+from spatialdata.transformations import Identity, Sequence, Translation, get_transformation
 
 
 def _get_translation_values(translation: Sequence | Translation | Identity) -> tuple[float | int, float | int]:
@@ -21,3 +22,20 @@ def _get_translation_values(translation: Sequence | Translation | Identity) -> t
     ), f"The provided transform matrix {transform_matrix} represents more than just a translation in 'y' and 'x'."
 
     return tuple(transform_matrix[2:4:, -1])
+
+
+def _identity_check_transformations_points(ddf: DataFrame, to_coordinate_system: str = "global"):
+    """Check that points layer has not other transformations associated that an Identity transformation."""
+    transformations = get_transformation(ddf, get_all=True)
+
+    if to_coordinate_system not in [*transformations]:
+        raise ValueError(
+            f"Coordinate system '{to_coordinate_system}' does not appear to be a coordinate system of the spatial element. "
+            f"Please choose a coordinate system from this list: {[*transformations]}."
+        )
+    transformation = transformations[to_coordinate_system]
+
+    if not isinstance(transformation, Identity):
+        raise ValueError(
+            "Currently we do not provide support for defining transformations other than the Identity transformation on a points layer."
+        )

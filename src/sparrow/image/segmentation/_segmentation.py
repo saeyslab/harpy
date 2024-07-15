@@ -11,9 +11,10 @@ import dask.array as da
 import numpy as np
 from dask.array import Array
 from nptyping import NDArray, Shape
-from spatialdata import SpatialData
+from spatialdata import SpatialData, bounding_box_query
+from spatialdata.models._utils import MappingToCoordinateSystem_t
 from spatialdata.models.models import ScaleFactors_t
-from spatialdata.transformations import Identity, Translation
+from spatialdata.transformations import get_transformation
 from upath import UPath
 from xarray import DataArray
 
@@ -22,7 +23,6 @@ from sparrow.image._image import (
     _fix_dimensions,
     _get_spatial_element,
     _get_translation,
-    _substract_translation_crd,
 )
 from sparrow.image.segmentation._utils import (
     _SEG_DTYPE,
@@ -37,9 +37,10 @@ from sparrow.image.segmentation._utils import (
 )
 from sparrow.image.segmentation.segmentation_models._baysor import _baysor as _model_points
 from sparrow.image.segmentation.segmentation_models._cellpose import _cellpose as _model
-from sparrow.io._transcripts import _add_transcripts_to_sdata
+from sparrow.points._points import _add_points_layer
 from sparrow.shape._shape import _add_shapes_layer
 from sparrow.utils._keys import _GENES_KEY
+from sparrow.utils._transformations import _identity_check_transformations_points
 from sparrow.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
@@ -59,6 +60,7 @@ def segment(
     iou_depth: tuple[int, int] | int = 2,
     iou_threshold: float = 0.7,
     crd: tuple[int, int, int, int] | None = None,
+    to_coordinate_system: str = "global",
     scale_factors: ScaleFactors_t | None = None,
     overwrite: bool = False,
     **kwargs: Any,
@@ -101,6 +103,8 @@ def segment(
         iou threshold used for linking labels. Ignored if `iou` is set to False.
     crd
         The coordinates specifying the region of the image to be segmented. Defines the bounds (x_min, x_max, y_min, y_max).
+    to_coordinate_system
+        The coordinate system to which the `crd` is specified. Ignored if `crd` is None.
     scale_factors
         Scale factors to apply for multiscale.
     overwrite
@@ -140,6 +144,7 @@ def segment(
         output_labels_layer=output_labels_layer,
         output_shapes_layer=output_shapes_layer,
         crd=crd,
+        to_coordinate_system=to_coordinate_system,
         scale_factors=scale_factors,
         overwrite=overwrite,
         fn_kwargs=fn_kwargs,
@@ -166,6 +171,7 @@ def segment_points(
     iou_depth: tuple[int, int] | int = 2,
     iou_threshold: float = 0.7,
     crd: tuple[int, int, int, int] | None = None,
+    to_coordinate_system: str = "global",
     scale_factors: ScaleFactors_t | None = None,
     overwrite: bool = False,
     **kwargs: Any,
@@ -222,6 +228,8 @@ def segment_points(
         iou threshold used for linking labels. Ignored if `iou` is set to False.
     crd
         The coordinates specifying the region of the `points_layer` to be segmented. Defines the bounds (x_min, x_max, y_min, y_max).
+    to_coordinate_system
+        The coordinate system to which the `crd` is specified. Ignored if `crd` is None.
     scale_factors
         Scale factors to apply for multiscale.
     overwrite
@@ -275,6 +283,7 @@ def segment_points(
         output_labels_layer=output_labels_layer,
         output_shapes_layer=output_shapes_layer,
         crd=crd,
+        to_coordinate_system=to_coordinate_system,
         scale_factors=scale_factors,
         overwrite=overwrite,
         fn_kwargs=fn_kwargs,
@@ -353,7 +362,7 @@ class SegmentationModel(ABC):
         x_labels: Array,
         output_labels_layer: str,
         output_shapes_layer: str | None,
-        translation: Translation | Identity = None,
+        transformations: MappingToCoordinateSystem_t | None = None,
         scale_factors: ScaleFactors_t | None = None,
         overwrite: bool = False,
     ) -> SpatialData:
@@ -367,9 +376,7 @@ class SegmentationModel(ABC):
             arr=x_labels,
             output_layer=output_labels_layer,
             chunks=x_labels.chunksize,
-            transformations={"global": translation}
-            if translation is not None
-            else None,  # TODO support for any transformation, and any coordinate system (via use of bounding box query).
+            transformations=transformations,
             scale_factors=scale_factors,
             overwrite=overwrite,
         )
@@ -383,9 +390,7 @@ class SegmentationModel(ABC):
                 sdata,
                 input=se_labels.data,
                 output_layer=output_shapes_layer,
-                transformations={"global": translation}
-                if translation is not None
-                else None,  # TODO support for any transformation, and any coordinate system (via use of bounding box query).
+                transformations=transformations,
                 overwrite=overwrite,
             )
 
@@ -597,6 +602,7 @@ class SegmentationModelStains(SegmentationModel):
         output_labels_layer: str = "segmentation_mask",
         output_shapes_layer: str | None = "segmentation_mask_boundaries",
         crd: tuple[int, int, int, int] | None = None,
+        to_coordinate_system: str = "global",
         scale_factors: ScaleFactors_t | None = None,
         overwrite: bool = False,
         fn_kwargs: Mapping[str, Any] = MappingProxyType({}),
@@ -610,17 +616,27 @@ class SegmentationModelStains(SegmentationModel):
             )
 
         se = _get_spatial_element(sdata, layer=img_layer)
+        se_crop = None
+        if crd is not None:
+            se_crop = bounding_box_query(
+                se,
+                axes=["x", "y"],
+                min_coordinate=[crd[0], crd[2]],
+                max_coordinate=[crd[1], crd[3]],
+                target_coordinate_system=to_coordinate_system,
+            )
+            if se_crop is not None:
+                se = se_crop
+            else:
+                log.warning(
+                    f"Cropped spatial element using crd '{crd}' is None. Falling back to processing on full dataset."
+                )
 
         x, kwargs = self._precondition(se, kwargs)
 
-        # crd is specified on original uncropped pixel coordinates
-        # need to substract possible translation, because we use crd to crop dask array, which does not take
-        # translation into account
-        if crd is not None:
-            crd = _substract_translation_crd(se, crd)
-            if crd is not None:
-                x = x[:, crd[2] : crd[3], crd[0] : crd[1], :]
-                x = x.rechunk(x.chunksize)
+        # rechunk to ensure we do not have irregular chunksize after taking a crop
+        if se_crop is not None:
+            x = x.rechunk(x.chunksize)
 
         if sdata.is_backed():
             _temp_path = UPath(sdata.path).parent / f"{uuid.uuid4()}.zarr"
@@ -634,20 +650,12 @@ class SegmentationModelStains(SegmentationModel):
             **kwargs,
         )
 
-        tx, ty = _get_translation(se)
-
-        if crd is not None:
-            tx = tx + crd[0]
-            ty = ty + crd[2]
-
-        translation = Translation([tx, ty], axes=("x", "y"))
-
         sdata = self._add_to_sdata(
             sdata,
             x_labels,
             output_labels_layer=output_labels_layer,
             output_shapes_layer=output_shapes_layer,
-            translation=translation,
+            transformations=get_transformation(se, get_all=True),
             scale_factors=scale_factors,
             overwrite=overwrite,
         )
@@ -679,56 +687,67 @@ class SegmentationModelPoints(SegmentationModel):
     def _segment_layer(
         self,
         sdata: SpatialData,
-        labels_layer: str | None = None,  # prior, required for now
-        points_layer: str | None = None,
+        labels_layer: str,  # prior, required for now
+        points_layer: str,
         name_x: str = "x",
         name_y: str = "y",
         name_gene: str = _GENES_KEY,
         output_labels_layer: str = "segmentation_mask",
         output_shapes_layer: str | None = "segmentation_mask_boundaries",
         crd: tuple[int, int, int, int] | None = None,
+        to_coordinate_system: str = "global",
         scale_factors: ScaleFactors_t | None = None,
         overwrite: bool = False,
         fn_kwargs: Mapping[str, Any] = MappingProxyType({}),
         **kwargs: Any,
     ) -> SpatialData:
-        if labels_layer is None:
-            raise ValueError("Please provide a labels layer")
-        if points_layer is None:
-            points_layer = [*sdata.points][-1]
-
         fn_kwargs["name_x"] = name_x
         fn_kwargs["name_y"] = name_y
         fn_kwargs["name_gene"] = name_gene
 
         se = _get_spatial_element(sdata, layer=labels_layer)
 
+        # Now we check that there are no scaling and rotations defined on se; and that points layer has identiy transformation associated.
+        # We do not allow a transformation other than translation in y and x is defined on labels layer.
+        _get_translation(se, to_coordinate_system=to_coordinate_system)
+        # We do not allow that a transformation other than identity is defined on points layer.
+        _identity_check_transformations_points(sdata.points[points_layer], to_coordinate_system=to_coordinate_system)
+
+        se_crop = None
+        if crd is not None:
+            se_crop = bounding_box_query(
+                se,
+                axes=["x", "y"],
+                min_coordinate=[crd[0], crd[2]],
+                max_coordinate=[crd[1], crd[3]],
+                target_coordinate_system=to_coordinate_system,
+            )
+            if se_crop is not None:
+                se = se_crop
+            else:
+                log.warning(
+                    f"Cropped spatial element using crd '{crd}' is None. Falling back to processing on full dataset."
+                )
+
         # add trivial channel dimension
         se = se.expand_dims("c")
 
         x, kwargs = self._precondition(se, kwargs)
 
-        # crd is specified on original uncropped pixel coordinates
-        # need to substract possible translation, because we use crd to crop dask array, which does not take
-        # translation into account
-        if crd is not None:
-            # _substract_translation_crd will also let crd fall within the se
-            crd = _substract_translation_crd(se, crd)
-            if crd is not None:
-                x = x[:, crd[2] : crd[3], crd[0] : crd[1], :]
-                x = x.rechunk(x.chunksize)
-                tx, ty = _get_translation(se)
-                # need to define _crd_points to original coordinates.
-                _crd_points = [crd[0] + tx, crd[1] + tx, crd[2] + ty, crd[3] + ty]
-            else:
-                _crd_points = None
+        _crd_points = None
+        if se_crop is not None:
+            # rechunk to ensure we do not have irregular chunksize after taking a crop
+            x = x.rechunk(x.chunksize)
+            tx, ty = _get_translation(se_crop, to_coordinate_system=to_coordinate_system)
+            # define crd to original coordinates
+            _crd_points = [tx, tx + se_crop.sizes["x"], ty, ty + se_crop.sizes["y"]]
         else:
             _crd_points = None
 
         # handle taking crops
         if _crd_points is not None:
             # need to account for fact that there can be a translation defined on the labels layer
-            # query the dask dataframe
+            # query the dask dataframe. We use this query, because spatialdata query pulls query in memory.
             _ddf = sdata.points[points_layer].query(
                 f"{ _crd_points[0] } <= {name_x} < { _crd_points[1] } and { _crd_points[2] } <= {name_y} < { _crd_points[3] }"
             )
@@ -736,10 +755,9 @@ class SegmentationModelPoints(SegmentationModel):
 
             # we write to points layer,
             # otherwise we would need to do this query again for every chunk we process later on
-            # TODO should we do a persist here for the _ddf if sdata is not backed by .zarr store? Probably yes
             _crd_points_layer = f"{points_layer}_{'_'.join(str(int( item )) for item in _crd_points)}"
 
-            sdata = _add_transcripts_to_sdata(
+            sdata = _add_points_layer(
                 sdata,
                 ddf=_ddf,
                 output_layer=_crd_points_layer,
@@ -768,20 +786,12 @@ class SegmentationModelPoints(SegmentationModel):
             **kwargs,
         )
 
-        tx, ty = _get_translation(se)
-
-        if crd is not None:
-            tx = tx + crd[0]
-            ty = ty + crd[2]
-
-        translation = Translation([tx, ty], axes=("x", "y"))
-
         sdata = self._add_to_sdata(
             sdata,
             x_labels,
             output_labels_layer=output_labels_layer,
             output_shapes_layer=output_shapes_layer,
-            translation=translation,
+            transformations=get_transformation(se, get_all=True),
             scale_factors=scale_factors,
             overwrite=overwrite,
         )

@@ -16,6 +16,7 @@ from sparrow.image._image import _get_spatial_element, _get_translation
 from sparrow.shape._shape import _filter_shapes_layer
 from sparrow.table._table import _add_table_layer
 from sparrow.utils._keys import _CELL_INDEX, _GENES_KEY, _INSTANCE_KEY, _REGION_KEY
+from sparrow.utils._transformations import _identity_check_transformations_points
 from sparrow.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
@@ -26,6 +27,7 @@ def allocate(
     labels_layer: str,
     points_layer: str = "transcripts",
     output_layer: str = "table_transcriptomics",
+    to_coordinate_system: str = "global",
     chunks: str | tuple[int, ...] | int | None = 10000,
     name_gene_column: str = _GENES_KEY,
     append: bool = False,
@@ -45,6 +47,8 @@ def allocate(
         The points layer in `sdata` that contains the transcripts.
     output_layer
         The table layer in `sdata` in which to save the AnnData object with the transcripts counts per cell.
+    to_coordinate_system
+        The coordinate system that holds `labels_layer` and `points_layer`.
     chunks
         Chunk sizes for processing. Can be a string, integer or tuple of integers.
         Consider setting the chunks to a relatively high value to speed up processing
@@ -70,7 +74,7 @@ def allocate(
 
     Coords = namedtuple("Coords", ["x0", "y0"])
     se = _get_spatial_element(sdata, layer=labels_layer)
-    coords = Coords(*_get_translation(se))
+    coords = Coords(*_get_translation(se, to_coordinate_system=to_coordinate_system))
 
     arr = se.data
 
@@ -81,6 +85,8 @@ def allocate(
 
     if arr.ndim == 2:
         arr = arr[None, ...]
+
+    _identity_check_transformations_points(sdata.points[points_layer], to_coordinate_system=to_coordinate_system)
 
     ddf = sdata.points[points_layer]
 

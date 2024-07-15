@@ -32,6 +32,7 @@ def plot_image(
     channel: int | str | Iterable[int | str] | None = None,
     z_slice: float | None = None,
     crd: tuple[int, int, int, int] | None = None,
+    to_coordinate_system: str = "global",
     output: str | Path | None = None,
     **kwargs: dict[str, Any],
 ) -> None:
@@ -50,6 +51,8 @@ def plot_image(
         The z_slice to visualize in case of 3D (c,z,y,x) image.
     crd
         The coordinates for the region of interest in the format (xmin, xmax, ymin, ymax). If None, the entire image is considered, by default None.
+    to_coordinate_system
+        Coordinate system to plot.
     output
         Path to save the plot. If not provided, plot will be displayed.
     **kwargs
@@ -66,6 +69,7 @@ def plot_image(
         channel=channel,
         z_slice=z_slice,
         crd=crd,
+        to_coordinate_system=to_coordinate_system,
         output=output,
         **kwargs,
     )
@@ -76,6 +80,7 @@ def plot_labels(
     labels_layer: str = "segmentation_mask",
     z_slice: float | None = None,
     crd: tuple[int, int, int, int] | None = None,
+    to_coordinate_system: str = "global",
     output: str | Path | None = None,
     **kwargs: dict[str, Any],
 ) -> None:
@@ -92,6 +97,8 @@ def plot_labels(
         The z_slice to visualize in case of 3D (c,z,y,x) labels.
     crd
         The coordinates for the region of interest in the format (xmin, xmax, ymin, ymax). If None, the entire image is considered, by default None.
+    to_coordinate_system
+        Coordinate system to plot.
     output
         Path to save the plot. If not provided, plot will be displayed.
     **kwargs
@@ -107,6 +114,7 @@ def plot_labels(
         shapes_layer=None,
         z_slice=z_slice,
         crd=crd,
+        to_coordinate_system=to_coordinate_system,
         output=output,
         **kwargs,
     )
@@ -125,6 +133,7 @@ def plot_shapes(
     z_slice: float | None = None,
     alpha: float = 0.5,
     crd: tuple[int, int, int, int] | None = None,
+    to_coordinate_system: str = "global",
     vmin: float | None = None,
     vmax: float | None = None,
     vmin_img: float | None = None,
@@ -202,6 +211,8 @@ def plot_shapes(
         If no z_slice is specified and `shapes_layer` is 3D, all polygons in all z-stacks will be plotted.
     crd
         The coordinates for the region of interest in the format (xmin, xmax, ymin, ymax). If None, the entire image is considered, by default None.
+    to_coordinate_system
+        Coordinate system to plot.
     vmin
         Lower bound for color scale for continuous data (i.e. a column). Given as a percentile. Ignored if column is None.
     vmax
@@ -342,6 +353,7 @@ def plot_shapes(
                 z_slice=z_slice,
                 alpha=alpha,
                 crd=crd,
+                to_coordinate_system=to_coordinate_system,
                 vmin=vmin,
                 vmax=vmax,
                 vmin_img=vmin_img,
@@ -377,6 +389,7 @@ def _plot(
     z_slice: float | None = None,
     alpha: float = 0.5,
     crd: tuple[int, int, int, int] = None,
+    to_coordinate_system: str = "global",
     vmin: float | None = None,
     vmax: float | None = None,
     vmin_img: float | None = None,
@@ -421,6 +434,8 @@ def _plot(
         Transparency level for the cells, given by the alpha parameter of matplotlib.
     crd
         The coordinates for the region of interest in the format (xmin, xmax, ymin, ymax). If None, the entire image is considered, by default None.
+    to_coordinate_system
+        Coordinate system to plot.
     vmin
         Lower bound for color scale for continuous data (i.e. a column). Given as a percentile. Ignored if column is None.
     vmax
@@ -507,9 +522,9 @@ def _plot(
     se = _get_spatial_element(sdata, layer=layer)
 
     # Update coords
-    se, x_coords_orig, y_coords_orig = _apply_transform(se)
+    se, x_coords_orig, y_coords_orig = _apply_transform(se, to_coordinate_system=to_coordinate_system)
 
-    image_boundary = _get_boundary(se)
+    image_boundary = _get_boundary(se, to_coordinate_system=to_coordinate_system)
 
     if crd is not None:
         _crd = crd
@@ -537,7 +552,7 @@ def _plot(
     polygons = None
     if shapes_layer is not None and not sdata.shapes[shapes_layer].empty:
         # copy is necessary, otherwise, in memory shapes layer altered by performing a plot.
-        polygons = _translate_polygons(sdata.shapes[shapes_layer].copy(), to_coordinate_system="global")
+        polygons = _translate_polygons(sdata.shapes[shapes_layer].copy(), to_coordinate_system=to_coordinate_system)
         polygons = polygons.cx[crd[0] : crd[1], crd[2] : crd[3]]
         if z_index is not None:
             polygons = _get_z_slice_polygons(polygons, z_index=z_index)
@@ -684,19 +699,23 @@ def _plot(
             log.warning(f"Shapes layer {shapes_layer} was empty for crd {crd}.")
         if shapes_layer_filtered is not None:
             for i in shapes_layer_filtered:
-                polygons = sdata.shapes[i].cx[crd[0] : crd[1], crd[2] : crd[3]]
-                if z_index is not None:
-                    polygons = _get_z_slice_polygons(polygons, z_index=z_index)
-                if not polygons.empty:
-                    polygons.plot(
-                        ax=ax,
-                        edgecolor="red",
-                        linewidth=1,
-                        alpha=alpha,
-                        legend=True,
-                        aspect=1,
-                        cmap="gray",
+                if not sdata.shapes[shapes_layer_filtered].empty:
+                    polygons = _translate_polygons(
+                        sdata.shapes[shapes_layer_filtered].copy(), to_coordinate_system=to_coordinate_system
                     )
+                    polygons = polygons.cx[crd[0] : crd[1], crd[2] : crd[3]]
+                    if z_index is not None:
+                        polygons = _get_z_slice_polygons(polygons, z_index=z_index)
+                    if not polygons.empty:
+                        polygons.plot(
+                            ax=ax,
+                            edgecolor="red",
+                            linewidth=1,
+                            alpha=alpha,
+                            legend=True,
+                            aspect=1,
+                            cmap="gray",
+                        )
                 else:
                     log.warning(f"Shapes layer {i} was empty for crd {crd}.")
     ax.axes.set_aspect(aspect)
@@ -752,9 +771,13 @@ def _get_z_slice_polygons(polygons: GeoDataFrame, z_index: int) -> GeoDataFrame:
 
 def _translate_polygons(polygons: GeoDataFrame, to_coordinate_system: str = "global") -> GeoDataFrame:
     # get the transformation defined on "global"
-    transformation = get_transformation(
-        polygons, to_coordinate_system=to_coordinate_system
-    )  # TODO, should work on any coordinate system passed to plot
+    transformations = get_transformation(polygons, get_all=True)
+    if to_coordinate_system not in [*transformations]:
+        raise ValueError(
+            f"'Coordinate system {to_coordinate_system}' does not appear to be a coordinate system of the spatial element. "
+            f"Please choose a coordinate system from this list: {[*transformations]}."
+        )
+    transformation = transformations[to_coordinate_system]
     x_translation, y_translation = _get_translation_values(transformation)
     polygons["geometry"] = polygons["geometry"].apply(
         lambda geom: translate(geom, xoff=x_translation, yoff=y_translation)

@@ -8,7 +8,7 @@ import squidpy as sq
 from basicpy import BaSiC
 from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
-from spatialdata.transformations import Translation
+from spatialdata.transformations import Translation, get_transformation
 
 from sparrow.image._image import (
     _add_image_layer,
@@ -26,6 +26,7 @@ def tiling_correction(
     img_layer: Optional[str] = None,
     tile_size: int = 2144,
     crd: Optional[Tuple[int, int, int, int]] = None,
+    to_coordinate_system: str = "global",
     scale_factors: Optional[ScaleFactors_t] = None,
     output_layer: str = "tiling_correction",
     overwrite: bool = False,
@@ -45,6 +46,9 @@ def tiling_correction(
         The size of the tiles in the image.
     crd
         Coordinates defining the region of the image to correct. It defines the bounds (x_min, x_max, y_min, y_max).
+    to_coordinate_system
+        The coordinate system to which the `crd` is specified. Ignored if `crd` is None.
+        If a `crd` is specified, only the coordinate system defined here will be kept in `output_layer`.
     scale_factors
         Scale factors to apply for multiscale.
     output_layer
@@ -93,10 +97,9 @@ def tiling_correction(
     # crd is specified on original uncropped pixel coordinates
     # need to substract possible translation, because we use crd to crop imagecontainer, which does not take
     # translation into account
-    if crd:
-        crd = _substract_translation_crd(se, crd)
-
-    tx, ty = _get_translation(se)
+    if crd is not None:
+        crd = _substract_translation_crd(spatial_image=se, crd=crd, to_coordinate_system=to_coordinate_system)
+        tx, ty = _get_translation(se, to_coordinate_system=to_coordinate_system)
 
     result_list = []
     flatfields = []
@@ -153,7 +156,7 @@ def tiling_correction(
             layer="mask_black_lines",
         )
 
-        if crd:
+        if crd is not None:
             x0 = crd[0]
             x_size = crd[1] - crd[0]
             y0 = crd[2]
@@ -182,18 +185,22 @@ def tiling_correction(
     # make one dask array of shape (c,y,x)
     result = da.concatenate(result_list, axis=-1).transpose(3, 0, 1, 2).squeeze(-1)
 
-    if crd:
+    if crd is not None:
         tx = tx + crd[0]
         ty = ty + crd[2]
 
-    translation = Translation([tx, ty], axes=("x", "y"))
+        translation = Translation([tx, ty], axes=("x", "y"))
+
+    else:
+        translation = None
+        transformations = get_transformation(se, get_all=True)
 
     sdata = _add_image_layer(
         sdata,
         arr=result,
         output_layer=output_layer,
         chunks=result.chunksize,
-        transformations={"global": translation} if translation is not None else None,
+        transformations={to_coordinate_system: translation} if translation is not None else transformations,
         scale_factors=scale_factors,
         c_coords=se.c.data,
         overwrite=overwrite,
