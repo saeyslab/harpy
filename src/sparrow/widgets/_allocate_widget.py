@@ -15,7 +15,7 @@ from spatialdata import SpatialData, read_zarr
 import sparrow.utils as utils
 from sparrow.pipeline import SparrowPipeline
 from sparrow.plot._plot import _translate_polygons
-from sparrow.shape._shape import _add_shapes_layer
+from sparrow.shape._shape import add_shapes_layer
 
 log = utils.get_pylogger(__name__)
 
@@ -90,7 +90,7 @@ def allocate_widget(
     # need to add original unfiltered shapes to sdata object at the beginning of the allocation step.
     # otherwise polygons that were filtered out would not be available any more if you do a rerun of the allocation step.
     for shapes_name in [*shapes]:
-        sdata = _add_shapes_layer(sdata, input=shapes[shapes_name], output_layer=shapes_name, overwrite=True)
+        sdata = add_shapes_layer(sdata, input=shapes[shapes_name], output_layer=shapes_name, overwrite=True)
 
     # napari widget does not support the type Optional[int], therefore only choose whether there is a header or not,
     # and do same for midcount column

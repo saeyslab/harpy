@@ -15,7 +15,7 @@ from numpy.typing import NDArray
 from spatialdata import SpatialData
 
 from sparrow.image._image import _get_spatial_element, _get_translation
-from sparrow.table._table import _add_table_layer
+from sparrow.table._table import add_table_layer
 from sparrow.utils._keys import _CELL_INDEX, _INSTANCE_KEY, _REGION_KEY
 from sparrow.utils.pylogger import get_pylogger
 
@@ -227,7 +227,7 @@ def allocate_intensity(
     else:
         region = [labels_layer]
 
-    sdata = _add_table_layer(
+    sdata = add_table_layer(
         sdata,
         adata=adata,
         output_layer=output_layer,

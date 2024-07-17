@@ -40,6 +40,7 @@ def sanity_plot_transcripts_matrix(
     gene: str | None = None,
     crd: tuple[int, int, int, int] | None = None,
     to_coordinate_system: str = "global",
+    figsize: tuple[int, int] | None = None,
     output: Path | str | None = None,
 ) -> None:
     """
@@ -88,6 +89,8 @@ def sanity_plot_transcripts_matrix(
         If None, the entire image boundary is used.
     to_coordinate_system
         Coordinate system to plot.
+    figsize
+        Size of the figure for plotting.
     output
         Filepath to save the generated plot. If not provided, the plot will be displayed using plt.show().
 
@@ -140,7 +143,7 @@ def sanity_plot_transcripts_matrix(
 
     se = _get_spatial_element(sdata, layer=layer)
 
-    _, ax = plt.subplots(figsize=(10, 10))
+    _, ax = plt.subplots(figsize=(10, 10) if figsize is None else figsize)
 
     image_boundary = _get_boundary(se, to_coordinate_system=to_coordinate_system)
 

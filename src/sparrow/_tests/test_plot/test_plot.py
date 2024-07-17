@@ -3,10 +3,10 @@ import os
 import dask.array as da
 import pytest
 
-from sparrow.image._image import _add_image_layer, _add_label_layer
+from sparrow.image._image import add_image_layer, add_labels_layer
 from sparrow.plot._plot import plot_image, plot_labels, plot_shapes
 from sparrow.plot._sanity import sanity_plot_transcripts_matrix
-from sparrow.shape._shape import _add_shapes_layer
+from sparrow.shape._shape import add_shapes_layer
 
 
 def test_plot_labels(sdata_multi_c, tmp_path):
@@ -73,7 +73,7 @@ def test_plot_shapes(sdata_multi_c, tmp_path):
 
 
 def test_plot_shapes_transcriptomics(sdata_transcripts, tmp_path):
-    sdata_transcripts = _add_shapes_layer(
+    sdata_transcripts = add_shapes_layer(
         sdata_transcripts,
         input=sdata_transcripts.labels["segmentation_mask"].data,
         output_layer="segmentation_mask_boundaries",
@@ -103,7 +103,7 @@ def test_plot_shapes_transcriptomics(sdata_transcripts, tmp_path):
 def test_plot_shapes_3D(sdata_transcripts, tmp_path):
     arr_image = da.stack([sdata_transcripts["raw_image"].data, sdata_transcripts["raw_image"].data], axis=1)
 
-    sdata_transcripts = _add_image_layer(
+    sdata_transcripts = add_image_layer(
         sdata_transcripts,
         arr=arr_image,
         output_layer="raw_image_z",
@@ -114,14 +114,14 @@ def test_plot_shapes_3D(sdata_transcripts, tmp_path):
         [sdata_transcripts["segmentation_mask"].data, sdata_transcripts["segmentation_mask"].data], axis=0
     )
 
-    sdata_transcripts = _add_label_layer(
+    sdata_transcripts = add_labels_layer(
         sdata_transcripts,
         arr=arr_labels,
         output_layer="segmentation_mask_z",
         overwrite=True,
     )
 
-    sdata_transcripts = _add_shapes_layer(
+    sdata_transcripts = add_shapes_layer(
         sdata_transcripts,
         input=sdata_transcripts.labels["segmentation_mask_z"].data,
         output_layer="segmentation_mask_boundaries_z",
@@ -139,7 +139,7 @@ def test_plot_shapes_3D(sdata_transcripts, tmp_path):
 
 
 def test_sanity_plot_transcripts_matrix(sdata_transcripts, tmp_path):
-    sdata_transcripts = _add_shapes_layer(
+    sdata_transcripts = add_shapes_layer(
         sdata_transcripts,
         input=sdata_transcripts.labels["segmentation_mask"].data,
         output_layer="segmentation_mask_boundaries",

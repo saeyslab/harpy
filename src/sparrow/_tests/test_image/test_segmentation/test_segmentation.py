@@ -9,7 +9,7 @@ from spatialdata import SpatialData
 from sparrow.image.segmentation._segmentation import segment, segment_points
 from sparrow.image.segmentation.segmentation_models._baysor import _dummy
 from sparrow.image.segmentation.segmentation_models._cellpose import _cellpose
-from sparrow.points._points import _add_points_layer
+from sparrow.points._points import add_points_layer
 
 
 @pytest.mark.skipif(not importlib.util.find_spec("cellpose"), reason="requires the cellpose library")
@@ -76,7 +76,7 @@ def test_segment_points(sdata_multi_c: SpatialData):
 
     coordinates = {"x": "x", "y": "y"}
 
-    sdata_multi_c = _add_points_layer(
+    sdata_multi_c = add_points_layer(
         sdata_multi_c,
         ddf=ddf,
         output_layer="transcripts",

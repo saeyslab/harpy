@@ -12,7 +12,7 @@ from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import get_transformation
 
-from sparrow.image._image import _add_label_layer, _get_spatial_element
+from sparrow.image._image import _get_spatial_element, add_labels_layer
 from sparrow.utils._keys import _INSTANCE_KEY, _REGION_KEY, ClusteringKey
 from sparrow.utils.pylogger import get_pylogger
 
@@ -188,7 +188,7 @@ def flowsom(
         _labels_flowsom_clusters, _labels_flowsom_metaclusters = _labels_flowsom
 
         # save the predicted clusters and metaclusters as a labels layer
-        sdata = _add_label_layer(
+        sdata = add_labels_layer(
             sdata,
             arr=_labels_flowsom_clusters.squeeze(0) if to_squeeze else _labels_flowsom_clusters,
             output_layer=output_layer_clusters[i],
@@ -197,7 +197,7 @@ def flowsom(
             overwrite=overwrite,
         )
 
-        sdata = _add_label_layer(
+        sdata = add_labels_layer(
             sdata,
             arr=_labels_flowsom_metaclusters.squeeze(0) if to_squeeze else _labels_flowsom_metaclusters,
             output_layer=output_layer_metaclusters[i],

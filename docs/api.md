@@ -41,6 +41,8 @@ Operations on image and labels layers.
 .. autosummary::
     :toctree: generated
 
+    im.add_image_layer
+    im.add_labels_layer
     im.map_channels_zstacks
     im.tiling_correction
     im.enhance_contrast
@@ -56,7 +58,7 @@ Operations on image and labels layers.
     im.filter_labels_layer
     im.merge_labels_layers
     im.merge_labels_layers_nuclei
-    im.add_label_layer_from_shapes_layer
+    im.add_labels_layer_from_shapes_layer
     im.mask_to_original
     im.pixel_clustering_preprocess
     im.flowsom
@@ -74,6 +76,8 @@ Operations on shapes (polygons) layers.
 .. autosummary::
     :toctree: generated
 
+    sh.add_shapes_layer
+    sh.filter_shapes_layer
     sh.create_voronoi_boundaries
 ```
 
@@ -89,6 +93,7 @@ Operations on table (`AnnData` object) layers.
 .. autosummary::
     :toctree: generated
 
+    tb.add_table_layer
     tb.allocate
     tb.allocate_intensity
     tb.preprocess_transcriptomics
@@ -97,6 +102,7 @@ Operations on table (`AnnData` object) layers.
     tb.leiden
     tb.kmeans
     tb.score_genes
+    tb.score_genes_iter
     tb.correct_marker_genes
     tb.cluster_cleanliness
     tb.nhood_enrichment
@@ -105,6 +111,21 @@ Operations on table (`AnnData` object) layers.
     tb.cell_clustering_preprocess
     tb.flowsom
     tb.weighted_channel_expression
+```
+
+## Points
+
+Operations on points (`Dask` `DataFrame` object) layers.
+
+```{eval-rst}
+
+.. module:: sparrow.pt
+.. currentmodule:: sparrow
+
+.. autosummary::
+    :toctree: generated
+
+    pt.add_points_layer
 ```
 
 ## Plotting

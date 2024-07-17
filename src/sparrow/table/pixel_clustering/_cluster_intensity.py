@@ -14,7 +14,7 @@ from spatialdata import SpatialData
 from sparrow.image._image import _get_spatial_element
 from sparrow.table._allocation_intensity import allocate_intensity
 from sparrow.table._preprocess import preprocess_proteomics
-from sparrow.table._table import _add_table_layer
+from sparrow.table._table import add_table_layer
 from sparrow.utils._keys import _CELL_INDEX, _CELLSIZE_KEY, _INSTANCE_KEY, _RAW_COUNTS_KEY, ClusteringKey
 from sparrow.utils.pylogger import get_pylogger
 
@@ -172,7 +172,7 @@ def cluster_intensity(
 
     adata.uns[f"{ClusteringKey._METACLUSTERING_KEY.value}"] = df
 
-    sdata = _add_table_layer(
+    sdata = add_table_layer(
         sdata,
         adata=adata,
         output_layer=output_layer,

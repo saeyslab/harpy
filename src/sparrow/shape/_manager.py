@@ -12,7 +12,6 @@ import shapely
 import spatialdata
 from dask.array import Array
 from geopandas import GeoDataFrame
-from numpy.typing import NDArray
 from rasterio import Affine
 from rasterio.features import shapes
 from spatialdata import SpatialData, read_zarr
@@ -20,7 +19,7 @@ from spatialdata.models._utils import MappingToCoordinateSystem_t
 from spatialdata.transformations import get_transformation
 
 from sparrow.utils._io import _incremental_io_on_disk
-from sparrow.utils._keys import _INSTANCE_KEY
+from sparrow.utils._keys import _INSTANCE_KEY, _REGION_KEY
 from sparrow.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
@@ -57,9 +56,14 @@ class ShapesLayerManager:
     def filter_shapes(
         self,
         sdata: SpatialData,
-        indexes_to_keep: NDArray,
+        table_layer: str,
+        labels_layer: str,
         prefix_filtered_shapes_layer: str,
     ) -> SpatialData:
+        mask = sdata.tables[table_layer].obs[_REGION_KEY].isin([labels_layer])
+        indexes_to_keep = sdata.tables[table_layer].obs[mask][_INSTANCE_KEY].values.astype(int)
+        coordinate_systems_labels_layer = {*get_transformation(sdata.labels[labels_layer], get_all=True)}
+
         if len(indexes_to_keep) == 0:
             log.warning(
                 "Length of the 'indexes_to_keep' parameter is 0. "
@@ -70,6 +74,9 @@ class ShapesLayerManager:
         for _shapes_layer in [*sdata.shapes]:
             polygons = self.retrieve_data_from_sdata(sdata, name=_shapes_layer)
             polygons = self.get_polygons_from_input(polygons)
+            # only filter shapes that are in same coordinate system as the labels layer
+            if not set(coordinate_systems_labels_layer).intersection({*get_transformation(polygons, get_all=True)}):
+                continue
 
             current_indexes_shapes_layer = polygons.index.values.astype(int)
 

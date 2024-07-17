@@ -13,8 +13,8 @@ from scipy import sparse
 from spatialdata import SpatialData
 
 from sparrow.image._image import _get_spatial_element, _get_translation
-from sparrow.shape._shape import _filter_shapes_layer
-from sparrow.table._table import _add_table_layer
+from sparrow.shape._shape import filter_shapes_layer
+from sparrow.table._table import add_table_layer
 from sparrow.utils._keys import _CELL_INDEX, _GENES_KEY, _INSTANCE_KEY, _REGION_KEY
 from sparrow.utils._transformations import _identity_check_transformations_points
 from sparrow.utils.pylogger import get_pylogger
@@ -31,9 +31,9 @@ def allocate(
     chunks: str | tuple[int, ...] | int | None = 10000,
     name_gene_column: str = _GENES_KEY,
     append: bool = False,
+    update_shapes_layers: bool = True,
     overwrite: bool = False,
 ) -> SpatialData:
-    # TODO: add update_shapes_layer as a parameter
     """
     Allocates transcripts to cells via provided `labels_layer` and `points_layer` and returns updated SpatialData object with a table layer (`sdata.tables[output_layer]`) holding the AnnData object with cell counts.
 
@@ -60,6 +60,10 @@ def allocate(
         If set to True, and the `labels_layer` does not yet exist as a `_REGION_KEY` in `sdata.tables[output_layer].obs`,
         the transcripts counts obtained during the current function call will be appended (along axis=0) to any existing transcript count values.
         within the SpatialData object's table attribute. If False, and overwrite is set to True any existing data in `sdata.tables[output_layer]` will be overwritten by the newly extracted transcripts counts.
+    update_shapes_layers
+        Whether to filter the shapes layers associated with `labels_layer`.
+        If set to `True`, cells that do not appear in resulting `output_layer` (with `_REGION_KEY` equal to `labels_layer`) will be removed from the shapes layers (via `_INSTANCE_KEY`) in the `sdata` object.
+        Filtered shapes will be added to `sdata` with prefix 'filtered_segmentation'.
     overwrite
         If True, overwrites the `output_layer` if it already exists in `sdata`.
 
@@ -226,7 +230,7 @@ def allocate(
     else:
         region = [labels_layer]
 
-    sdata = _add_table_layer(
+    sdata = add_table_layer(
         sdata,
         adata=adata,
         output_layer=output_layer,
@@ -234,13 +238,12 @@ def allocate(
         overwrite=overwrite,
     )
 
-    mask = sdata.tables[output_layer].obs[_REGION_KEY].isin(region)
-    indexes_to_keep = sdata.tables[output_layer].obs[mask][_INSTANCE_KEY].values.astype(int)
-
-    sdata = _filter_shapes_layer(
-        sdata,
-        indexes_to_keep=indexes_to_keep,
-        prefix_filtered_shapes_layer="filtered_segmentation",
-    )
+    if update_shapes_layers:
+        sdata = filter_shapes_layer(
+            sdata,
+            table_layer=output_layer,
+            labels_layer=labels_layer,
+            prefix_filtered_shapes_layer="filtered_segmentation",
+        )
 
     return sdata

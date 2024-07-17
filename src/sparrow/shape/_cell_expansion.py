@@ -8,7 +8,7 @@ from shapely.geometry import Polygon
 from spatialdata import SpatialData
 from spatialdata.transformations import get_transformation
 
-from sparrow.shape._shape import _add_shapes_layer
+from sparrow.shape._shape import add_shapes_layer
 from sparrow.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
@@ -85,10 +85,10 @@ def create_voronoi_boundaries(
 
     gdf.geometry = intersected
 
-    # sanity check. If this sanity check would fail in spatialdata at some point, then pass transformation to transformations parameter of _add_shapes_layer.
+    # sanity check. If this sanity check would fail in spatialdata at some point, then pass transformation to transformations parameter of add_shapes_layer.
     assert get_transformation(gdf, get_all=True) == get_transformation(sdata[shapes_layer], get_all=True)
 
-    sdata = _add_shapes_layer(
+    sdata = add_shapes_layer(
         sdata,
         input=gdf,
         output_layer=output_layer,

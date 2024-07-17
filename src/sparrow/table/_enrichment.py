@@ -1,7 +1,7 @@
 import squidpy as sq
 from spatialdata import SpatialData
 
-from sparrow.table._table import ProcessTable, _add_table_layer
+from sparrow.table._table import ProcessTable, add_table_layer
 from sparrow.utils._keys import _ANNOTATION_KEY
 
 
@@ -48,7 +48,7 @@ def nhood_enrichment(
     sq.gr.spatial_neighbors(adata, coord_type="generic")
     sq.gr.nhood_enrichment(adata, cluster_key=celltype_column, seed=seed)
 
-    sdata = _add_table_layer(
+    sdata = add_table_layer(
         sdata,
         adata=adata,
         output_layer=output_layer,

@@ -14,7 +14,7 @@ import scanpy as sc
 from anndata import AnnData
 from spatialdata import SpatialData
 
-from sparrow.table._table import ProcessTable, _add_table_layer
+from sparrow.table._table import ProcessTable, add_table_layer
 from sparrow.utils._keys import _ANNOTATION_KEY, _CLEANLINESS_KEY, _UNKNOWN_CELLTYPE_KEY
 from sparrow.utils.pylogger import get_pylogger
 
@@ -171,7 +171,7 @@ def score_genes(
 
     celltypes_all = list(genes_dict.keys())
 
-    sdata = _add_table_layer(
+    sdata = add_table_layer(
         sdata,
         adata=adata,
         output_layer=output_layer,
@@ -211,13 +211,18 @@ def score_genes_iter(
     """
     Iterative annotation algorithm.
 
-    For each cell, a score is calculated for each cell type:
+    For each cell, a score is calculated for each cell type.
+
     In the 0-th iteration this is:
+
     First mean expression is substracted from expression levels.
     Score for each cell type is obtained via sum of these normalized expressions of the markers in the cell.
-    And in following iterations.
+
+    And in following iterations:
+
     Expression levels are normalized by substracting the mean over all celltypes assigned in iteration i-1.
     Score for each cell type is obtained via sum of these normalized expressions of the markers in the cell.
+
     Function expects scaled data (obtained through e.g. `scanpy.pp.scale`).
 
     Parameters
@@ -293,7 +298,7 @@ def score_genes_iter(
         **kwargs,  # keyword arguments passed to _annotate_celltype_weighted
     )
 
-    sdata = _add_table_layer(
+    sdata = add_table_layer(
         sdata,
         adata=adata,
         output_layer=output_layer,
@@ -701,7 +706,7 @@ def cluster_cleanliness(
         color_dict[name] = colors[i]
     adata.uns[f"{celltype_column}_colors"] = list(map(color_dict.get, adata.obs[celltype_column].cat.categories.values))
 
-    sdata = _add_table_layer(
+    sdata = add_table_layer(
         sdata,
         adata=adata,
         output_layer=output_layer,

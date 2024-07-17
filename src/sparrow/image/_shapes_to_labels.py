@@ -4,10 +4,10 @@ from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import get_transformation
 
-from sparrow.image._image import _add_label_layer
+from sparrow.image._image import add_labels_layer
 
 
-def add_label_layer_from_shapes_layer(
+def add_labels_layer_from_shapes_layer(
     sdata: SpatialData,
     shapes_layer: str,
     output_layer: str,
@@ -63,7 +63,7 @@ def add_label_layer_from_shapes_layer(
         chunks = "auto"
     masks = da.from_array(masks, chunks=chunks)
 
-    sdata = _add_label_layer(
+    sdata = add_labels_layer(
         sdata,
         arr=masks,
         output_layer=output_layer,

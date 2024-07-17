@@ -11,8 +11,8 @@ from scipy.sparse import issparse
 from spatialdata import SpatialData
 
 from sparrow.image._image import _get_spatial_element
-from sparrow.shape._shape import _filter_shapes_layer
-from sparrow.table._table import ProcessTable, _add_table_layer
+from sparrow.shape._shape import filter_shapes_layer
+from sparrow.table._table import ProcessTable, add_table_layer
 from sparrow.utils._keys import _CELL_INDEX, _CELLSIZE_KEY, _INSTANCE_KEY, _RAW_COUNTS_KEY, _REGION_KEY
 from sparrow.utils.pylogger import get_pylogger
 
@@ -31,8 +31,8 @@ def preprocess_transcriptomics(
     highly_variable_genes_kwargs: Mapping[str, Any] = MappingProxyType({}),
     max_value_scale: int = 10,
     n_comps: int = 50,
+    update_shapes_layers: bool = True,
     overwrite: bool = False,
-    # TODO: add update_shapes_layer as parameter
 ) -> SpatialData:
     """
     Preprocess a table (AnnData) attribute of a SpatialData object for transcriptomics data.
@@ -69,6 +69,10 @@ def preprocess_transcriptomics(
         The maximum value to which data will be scaled, using `scanpy.pp.scale`.
     n_comps
         Number of principal components to calculate.
+    update_shapes_layers
+        Whether to filter the shapes layers associated with `labels_layer`.
+        If set to `True`, cells that do not appear in resulting `output_layer` (with `_REGION_KEY` equal to `labels_layer`) will be removed from the shapes layers (via `_INSTANCE_KEY`) in the `sdata` object.
+        Filtered shapes will be added to `sdata` with prefix 'filtered_low_counts'.
     overwrite
         If True, overwrites the `output_layer` if it already exists in `sdata`.
 
@@ -112,7 +116,7 @@ def preprocess_transcriptomics(
         scale=True,
         max_value_scale=max_value_scale,
         calculate_pca=True,
-        update_shapes_layers=True,
+        update_shapes_layers=update_shapes_layers,
         qc_kwargs={"percent_top": [2, 5]},
         filter_cells_kwargs={"min_counts": min_counts},
         filter_genes_kwargs={"min_cells": min_cells},
@@ -330,7 +334,7 @@ class Preprocess(ProcessTable):
             self._type_check_before_pca(adata)
             sc.tl.pca(adata, copy=False, n_comps=n_comps, **pca_kwargs)
 
-        self.sdata = _add_table_layer(
+        self.sdata = add_table_layer(
             self.sdata,
             adata=adata,
             output_layer=output_layer,
@@ -339,14 +343,13 @@ class Preprocess(ProcessTable):
         )
 
         if update_shapes_layers:
-            # TODO: for multiple fov case, this will filter corresponding shapes layers for all fovs with same indexes, which is unwanted behaviour
-            mask = self.sdata.tables[output_layer].obs[_REGION_KEY].isin(self.labels_layer)
-            indexes_to_keep = self.sdata.tables[output_layer].obs[mask][_INSTANCE_KEY].values.astype(int)
-            self.sdata = _filter_shapes_layer(
-                self.sdata,
-                indexes_to_keep=indexes_to_keep,
-                prefix_filtered_shapes_layer="filtered_low_counts",
-            )
+            for _labels_layer in self.labels_layer:
+                self.sdata = filter_shapes_layer(
+                    self.sdata,
+                    table_layer=output_layer,
+                    labels_layer=_labels_layer,
+                    prefix_filtered_shapes_layer="filtered_low_counts",
+                )
 
         return self.sdata
 

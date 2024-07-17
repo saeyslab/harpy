@@ -19,10 +19,10 @@ from upath import UPath
 from xarray import DataArray
 
 from sparrow.image._image import (
-    _add_label_layer,
     _fix_dimensions,
     _get_spatial_element,
     _get_translation,
+    add_labels_layer,
 )
 from sparrow.image.segmentation._utils import (
     _SEG_DTYPE,
@@ -37,8 +37,8 @@ from sparrow.image.segmentation._utils import (
 )
 from sparrow.image.segmentation.segmentation_models._baysor import _baysor as _model_points
 from sparrow.image.segmentation.segmentation_models._cellpose import _cellpose as _model
-from sparrow.points._points import _add_points_layer
-from sparrow.shape._shape import _add_shapes_layer
+from sparrow.points._points import add_points_layer
+from sparrow.shape._shape import add_shapes_layer
 from sparrow.utils._keys import _GENES_KEY
 from sparrow.utils._transformations import _identity_check_transformations_points
 from sparrow.utils.pylogger import get_pylogger
@@ -371,7 +371,7 @@ class SegmentationModel(ABC):
         if x_labels.shape[0] == 1:
             x_labels = x_labels.squeeze(0)
 
-        sdata = _add_label_layer(
+        sdata = add_labels_layer(
             sdata,
             arr=x_labels,
             output_layer=output_labels_layer,
@@ -386,7 +386,7 @@ class SegmentationModel(ABC):
             se_labels = _get_spatial_element(sdata, layer=output_labels_layer)
 
             # convert the labels to polygons and add them as shapes layer to sdata
-            sdata = _add_shapes_layer(
+            sdata = add_shapes_layer(
                 sdata,
                 input=se_labels.data,
                 output_layer=output_shapes_layer,
@@ -757,7 +757,7 @@ class SegmentationModelPoints(SegmentationModel):
             # otherwise we would need to do this query again for every chunk we process later on
             _crd_points_layer = f"{points_layer}_{'_'.join(str(int( item )) for item in _crd_points)}"
 
-            sdata = _add_points_layer(
+            sdata = add_points_layer(
                 sdata,
                 ddf=_ddf,
                 output_layer=_crd_points_layer,

@@ -90,7 +90,7 @@ def pixie_example(fovs: list | None = None, with_pixel_output=True, with_cells_o
             results.append(arr)
         da.stack(results, axis=0)
 
-        sdata = sp.im._add_image_layer(
+        sdata = sp.im.add_image_layer(
             sdata,
             arr=da.stack(results, axis=0).squeeze(),
             output_layer=f"raw_image_{fov}",
@@ -101,7 +101,7 @@ def pixie_example(fovs: list | None = None, with_pixel_output=True, with_cells_o
             # }
         )
 
-        sdata = sp.im._add_label_layer(
+        sdata = sp.im.add_labels_layer(
             sdata,
             arr=imread.imread(os.path.join(path_segment_data, f"{fov}_nuclear.tiff")).squeeze(),
             output_layer=f"label_nuclear_{fov}",
@@ -111,7 +111,7 @@ def pixie_example(fovs: list | None = None, with_pixel_output=True, with_cells_o
             # }
         )
 
-        sdata = sp.im._add_label_layer(
+        sdata = sp.im.add_labels_layer(
             sdata,
             arr=imread.imread(os.path.join(path_segment_data, f"{fov}_whole_cell.tiff")).squeeze(),
             output_layer=f"label_whole_{fov}",

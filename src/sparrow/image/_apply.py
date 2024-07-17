@@ -11,8 +11,8 @@ from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import get_transformation
 
 from sparrow.image._image import (
-    _add_image_layer,
     _get_spatial_element,
+    add_image_layer,
 )
 from sparrow.utils.pylogger import get_pylogger
 
@@ -202,7 +202,7 @@ def map_channels_zstacks(
     # rechunk, otherwise could have issues with irregular chunking when saving to zarr
     se_result = se_result.chunk(se_result.data.chunksize)
 
-    sdata = _add_image_layer(
+    sdata = add_image_layer(
         sdata,
         arr=se_result.data,
         output_layer=output_layer,

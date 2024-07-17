@@ -18,5 +18,6 @@ Notebooks to showcase the use of Harpy for analyzing spatial proteomics data.
 
                 tutorials/FlowSOM_for_pixel_clustering.ipynb
                 tutorials/Visualizing_metaclustering.ipynb
+                tutorials/coordinate_systems.ipynb
 
 ```

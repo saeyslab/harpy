@@ -1,1 +1,1 @@
-from ._points import _add_points_layer
+from ._points import add_points_layer

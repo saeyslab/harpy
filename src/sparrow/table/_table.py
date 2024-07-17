@@ -4,7 +4,7 @@ import numpy as np
 from anndata import AnnData
 from spatialdata import SpatialData
 
-from sparrow.shape._shape import _filter_shapes_layer
+from sparrow.shape._shape import filter_shapes_layer
 from sparrow.table._manager import TableLayerManager
 from sparrow.utils._keys import _CELLSIZE_KEY, _INSTANCE_KEY, _REGION_KEY
 from sparrow.utils.pylogger import get_pylogger
@@ -204,7 +204,7 @@ def correct_marker_genes(
             adata.obs[celltype],
         )
 
-    sdata = _add_table_layer(
+    sdata = add_table_layer(
         sdata,
         adata=adata,
         output_layer=output_layer,
@@ -222,7 +222,7 @@ def filter_on_size(
     output_layer: str,
     min_size: int = 100,
     max_size: int = 100000,
-    update_shapes_layers=True,
+    update_shapes_layers: bool = True,
     cellsize_key=_CELLSIZE_KEY,
     overwrite: bool = False,
 ) -> SpatialData:
@@ -247,8 +247,10 @@ def filter_on_size(
         minimum size in pixels.
     max_size
         maximum size in pixels.
-    update_shapes_layer
-        Whether to filter the shapes layers.
+    update_shapes_layers
+        Whether to filter the shapes layers associated with `labels_layer`.
+        If set to `True`, cells that do not appear in resulting `output_layer` (with `_REGION_KEY` equal to `labels_layer`) will be removed from the shapes layers (via `_INSTANCE_KEY`) in the `sdata` object.
+        Filtered shapes will be added to `sdata` with prefix 'filtered_size'.
     cellsize_key
         Column in `sdata.tables[table_layer].obs` containing cell sizes.
     overwrite
@@ -263,11 +265,11 @@ def filter_on_size(
     start = adata.shape[0]
 
     # Filter cells based on size and distance
-    # need to do the copy because we pop the spatialdata_attrs in _add_table_layer, otherwise it would not be updated inplace
+    # need to do the copy because we pop the spatialdata_attrs in add_table_layer, otherwise it would not be updated inplace
     adata = adata[adata.obs[cellsize_key] < max_size, :].copy()
     adata = adata[adata.obs[cellsize_key] > min_size, :].copy()
 
-    sdata = _add_table_layer(
+    sdata = add_table_layer(
         sdata,
         adata=adata,
         output_layer=output_layer,
@@ -276,13 +278,13 @@ def filter_on_size(
     )
 
     if update_shapes_layers:
-        mask = sdata.tables[output_layer].obs[_REGION_KEY].isin(process_table_instance.labels_layer)
-        indexes_to_keep = sdata.tables[output_layer].obs[mask][_INSTANCE_KEY].values.astype(int)
-        sdata = _filter_shapes_layer(
-            sdata,
-            indexes_to_keep=indexes_to_keep,
-            prefix_filtered_shapes_layer="filtered_size",
-        )
+        for _labels_layer in process_table_instance.labels_layer:
+            sdata = filter_shapes_layer(
+                sdata,
+                table_layer=output_layer,
+                labels_layer=_labels_layer,
+                prefix_filtered_shapes_layer="filtered_size",
+            )
 
     filtered = start - adata.shape[0]
     log.info(f"{filtered} cells were filtered out based on size.")
@@ -290,13 +292,36 @@ def filter_on_size(
     return sdata
 
 
-def _add_table_layer(
+def add_table_layer(
     sdata: SpatialData,
     adata: AnnData,
     output_layer: str,
-    region: list[str],  # list of labels_layers , TODO, check what to do with shapes layers
+    region: list[str] | None,
     overwrite: bool = False,
 ):
+    """
+    Add a table layer to a SpatialData object.
+
+    This function allows you to add a table layer to `sdata`.
+    If `sdata` is backed by a zarr store, the resulting table layer will be backed to the zarr store.
+
+    Parameters
+    ----------
+    sdata
+        The SpatialData object to which the new table layer will be added.
+    adata
+        The AnnData object containing the table data to be added. If `region` is not None, it should contain `_REGION_KEY` and `_INSTANCE_KEY` in adata.obs.
+    output_layer
+        The name of the output layer where the table data will be stored.
+    region
+        A list of regions to associate with the table data. Typically this is all unique elements in `adata.obs[_REGION_KEY]`.
+    overwrite
+        If True, overwrites the output layer if it already exists in `sdata`.
+
+    Returns
+    -------
+    The updated `sdata` object.
+    """
     manager = TableLayerManager()
     manager.add_table(
         sdata,

@@ -10,8 +10,8 @@ from spatialdata.transformations import get_transformation
 from xarray import DataArray
 
 from sparrow.image._image import (
-    _add_image_layer,
     _get_spatial_element,
+    add_image_layer,
 )
 from sparrow.utils.pylogger import get_pylogger
 
@@ -142,7 +142,7 @@ def combine(
             f"(currently set to: {nuc_channels}) or mem_channels (currently set to {mem_channels})."
         )
 
-    sdata = _add_image_layer(
+    sdata = add_image_layer(
         sdata,
         arr=arr,
         output_layer=output_layer,

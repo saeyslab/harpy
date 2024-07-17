@@ -1,6 +1,6 @@
 from spatialdata import SpatialData
 
-from sparrow.image._image import _add_image_layer, _add_label_layer
+from sparrow.image._image import add_image_layer, add_labels_layer
 
 
 # images
@@ -10,7 +10,7 @@ def test_add_image_layer_backed(sdata_multi_c):
 
     arr = sdata_multi_c[name].data
     arr = arr + 1
-    sdata_multi_c = _add_image_layer(
+    sdata_multi_c = add_image_layer(
         sdata_multi_c,
         arr=arr,
         output_layer=new_name,
@@ -37,7 +37,7 @@ def test_add_image_layer_no_backed(sdata_multi_c):
     # create an sdata that is not backed
     sdata_no_backed = SpatialData()
 
-    sdata_no_backed = _add_image_layer(
+    sdata_no_backed = add_image_layer(
         sdata_no_backed,
         arr=sdata_multi_c[name].data,
         output_layer=name,
@@ -50,7 +50,7 @@ def test_add_image_layer_no_backed(sdata_multi_c):
     arr = sdata_no_backed[name].data
     arr = arr + 1
 
-    sdata_no_backed = _add_image_layer(sdata_no_backed, arr=arr, output_layer=new_name)
+    sdata_no_backed = add_image_layer(sdata_no_backed, arr=arr, output_layer=new_name)
 
     assert new_name in [*sdata_no_backed.images]
 
@@ -68,7 +68,7 @@ def test_add_labels_layer_backed(sdata_multi_c):
 
     arr = sdata_multi_c[name].data
     arr = arr + 1
-    sdata_multi_c = _add_label_layer(
+    sdata_multi_c = add_labels_layer(
         sdata_multi_c,
         arr=arr,
         output_layer=new_name,
@@ -95,7 +95,7 @@ def test_add_labels_layer_no_backed(sdata_multi_c):
     # create an sdata that is not backed
     sdata_no_backed = SpatialData()
 
-    sdata_no_backed = _add_label_layer(
+    sdata_no_backed = add_labels_layer(
         sdata_no_backed,
         arr=sdata_multi_c[name].data,
         output_layer=name,
@@ -108,7 +108,7 @@ def test_add_labels_layer_no_backed(sdata_multi_c):
     arr = sdata_no_backed[name].data
     arr = arr + 1
 
-    sdata_no_backed = _add_label_layer(sdata_no_backed, arr=arr, output_layer=new_name)
+    sdata_no_backed = add_labels_layer(sdata_no_backed, arr=arr, output_layer=new_name)
 
     assert new_name in [*sdata_no_backed.labels]
 

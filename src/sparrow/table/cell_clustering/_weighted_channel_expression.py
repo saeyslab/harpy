@@ -3,7 +3,7 @@ import pandas as pd
 from pandas.testing import assert_index_equal
 from spatialdata import SpatialData
 
-from sparrow.table._table import ProcessTable, _add_table_layer
+from sparrow.table._table import ProcessTable, add_table_layer
 from sparrow.table.cell_clustering._utils import _get_mapping
 from sparrow.utils._keys import _CELLSIZE_KEY, _INSTANCE_KEY, _RAW_COUNTS_KEY, ClusteringKey
 from sparrow.utils.pylogger import get_pylogger
@@ -128,7 +128,7 @@ def weighted_channel_expression(
     )
     adata_cell_clustering.obs = pd.concat([adata_cell_clustering.obs, df], axis=1)
 
-    sdata = _add_table_layer(
+    sdata = add_table_layer(
         sdata,
         adata=adata_cell_clustering,
         output_layer=output_layer,

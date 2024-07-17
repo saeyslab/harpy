@@ -11,10 +11,10 @@ from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import Translation, get_transformation
 
 from sparrow.image._image import (
-    _add_image_layer,
     _get_spatial_element,
     _get_translation,
     _substract_translation_crd,
+    add_image_layer,
 )
 from sparrow.utils.pylogger import get_pylogger
 
@@ -195,7 +195,7 @@ def tiling_correction(
         translation = None
         transformations = get_transformation(se, get_all=True)
 
-    sdata = _add_image_layer(
+    sdata = add_image_layer(
         sdata,
         arr=result,
         output_layer=output_layer,

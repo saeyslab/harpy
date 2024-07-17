@@ -10,7 +10,7 @@ from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import get_transformation
 
-from sparrow.image._image import _add_image_layer, _get_spatial_element
+from sparrow.image._image import _get_spatial_element, add_image_layer
 from sparrow.image.pixel_clustering._utils import _nonzero_nonnan_percentile, _nonzero_nonnan_percentile_axis_0
 
 
@@ -197,7 +197,7 @@ def pixel_clustering_preprocess(
             _arr_list[i] = _arr_list[i] / da.asarray(arr_percentile_post_norm_mean[..., None, None, None])
 
         # save the preprocessed images, in this way we get the preprocessed images from which we sample
-        sdata = _add_image_layer(
+        sdata = add_image_layer(
             sdata,
             arr=_arr_list[i].squeeze(1) if to_squeeze else _arr_list[i],
             output_layer=output_layer[i],

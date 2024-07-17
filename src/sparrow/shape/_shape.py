@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dask.array import Array
 from geopandas import GeoDataFrame
-from numpy.typing import NDArray
 from shapely.geometry import GeometryCollection, MultiPolygon, Polygon
 from spatialdata import SpatialData
 from spatialdata.models._utils import MappingToCoordinateSystem_t
@@ -10,13 +9,37 @@ from spatialdata.models._utils import MappingToCoordinateSystem_t
 from sparrow.shape._manager import ShapesLayerManager
 
 
-def _add_shapes_layer(
+def add_shapes_layer(
     sdata: SpatialData,
     input: Array | GeoDataFrame,
     output_layer: str,
     transformations: MappingToCoordinateSystem_t = None,
     overwrite: bool = False,
 ) -> SpatialData:
+    """
+    Add a shapes layer to a SpatialData object.
+
+    This function allows you to add a shapes layer to `sdata`.
+    The shapes layer can be derived from a Dask array or a GeoDataFrame.
+    If `sdata` is backed by a zarr store, the resulting shapes layer will be backed to the zarr store.
+
+    Parameters
+    ----------
+    sdata
+        The SpatialData object to which the new shapes layer will be added.
+    input
+        The input data containing the shapes, either as an array (i.e. segmentation masks) or a GeoDataFrame.
+    output_layer
+        The name of the output layer where the shapes data will be stored.
+    transformations
+        Transformations that will be added to the resulting `output_layer`.
+    overwrite
+        If True, overwrites the output layer if it already exists in `sdata`.
+
+    Returns
+    -------
+    The `sdata` object with the shapes layer added.
+    """
     manager = ShapesLayerManager()
     sdata = manager.add_shapes(
         sdata,
@@ -29,15 +52,40 @@ def _add_shapes_layer(
     return sdata
 
 
-def _filter_shapes_layer(
+def filter_shapes_layer(
     sdata: SpatialData,
-    indexes_to_keep: NDArray,
+    table_layer: str,
+    labels_layer: str,
     prefix_filtered_shapes_layer: str,
 ) -> SpatialData:
+    """
+    Filter shapes in a SpatialData object.
+
+    Cells that do not appear in `table_layer` (with `_REGION_KEY` equal to `labels_layer`) will be removed from the shapes layers, via the `_INSTANCE_KEY` of `sdata.tables[table_layer].obs`) and the index of the shapes layers in the `sdata` object.
+    Only shapes layers of `sdata` in same coordinate system as the `labels_layer` will be considered.
+    Polygons that are filtered out from a shapes layer (e.g. with name "shapes_example") will be added as a new shapes layer with name `prefix_filtered_shapes_layer` + "_" + "shapes_example".
+
+    Parameters
+    ----------
+    sdata
+        The SpatialData object,
+    table_layer
+        The name of the table layer.
+    labels_layer
+        The name of the labels layer.
+    prefix_filtered_shapes_layer
+        The prefix for the name of the new shapes layer consisting of the polygons that where filtered out from a shapes layer.
+
+    Returns
+    -------
+    The updated `sdata` object.
+    """
     manager = ShapesLayerManager()
+
     sdata = manager.filter_shapes(
         sdata,
-        indexes_to_keep=indexes_to_keep,
+        table_layer=table_layer,
+        labels_layer=labels_layer,
         prefix_filtered_shapes_layer=prefix_filtered_shapes_layer,
     )
     return sdata

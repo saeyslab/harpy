@@ -14,7 +14,7 @@ from spatialdata.transformations import get_transformation
 
 from sparrow.image._image import _get_spatial_element
 from sparrow.table._preprocess import preprocess_proteomics
-from sparrow.table._table import _add_table_layer
+from sparrow.table._table import add_table_layer
 from sparrow.utils._keys import _CELL_INDEX, _INSTANCE_KEY, _REGION_KEY
 
 
@@ -183,7 +183,7 @@ def cell_clustering_preprocess(
     # remove cells with no overlap with any pixel cluster
     adata = adata[~(adata.X == 0).all(axis=1)].copy()
 
-    sdata = _add_table_layer(
+    sdata = add_table_layer(
         sdata,
         adata=adata,
         output_layer=output_layer,

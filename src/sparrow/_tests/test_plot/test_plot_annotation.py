@@ -1,7 +1,7 @@
 import os
 
 from sparrow.plot import score_genes as score_genes_plot
-from sparrow.shape import _add_shapes_layer
+from sparrow.shape import add_shapes_layer
 from sparrow.table import score_genes
 
 
@@ -19,7 +19,7 @@ def test_score_genes(sdata_transcripts, path_dataset_markers, tmp_path):
     )
 
     # TODO: add shapes layer to test object.
-    sdata_transcripts = _add_shapes_layer(
+    sdata_transcripts = add_shapes_layer(
         sdata_transcripts,
         input=sdata_transcripts.labels["segmentation_mask"].data,
         output_layer="segmentation_mask_boundaries",

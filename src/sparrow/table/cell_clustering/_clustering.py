@@ -7,7 +7,7 @@ import pandas as pd
 from anndata import AnnData
 from spatialdata import SpatialData
 
-from sparrow.table._table import ProcessTable, _add_table_layer
+from sparrow.table._table import ProcessTable, add_table_layer
 from sparrow.table.cell_clustering._preprocess import cell_clustering_preprocess
 from sparrow.table.cell_clustering._utils import _get_mapping
 from sparrow.utils._keys import ClusteringKey
@@ -132,7 +132,7 @@ def flowsom(
         log.info(f"Adding mean cluster intensity to '.uns['{_key}']'")
         adata.uns[_key] = df
 
-    sdata = _add_table_layer(
+    sdata = add_table_layer(
         sdata,
         adata=adata,
         output_layer=output_layer,

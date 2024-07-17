@@ -6,7 +6,7 @@ from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import Translation
 
-from sparrow.image._image import _add_image_layer, _get_boundary, _get_spatial_element
+from sparrow.image._image import _get_boundary, _get_spatial_element, add_image_layer
 from sparrow.utils._keys import _GENES_KEY
 from sparrow.utils.pylogger import get_pylogger
 
@@ -192,7 +192,7 @@ def transcript_density(
 
     arr = blurred_transcripts[None,]
 
-    sdata = _add_image_layer(
+    sdata = add_image_layer(
         sdata,
         arr=arr,
         output_layer=output_layer,

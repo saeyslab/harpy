@@ -12,8 +12,8 @@ from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import Translation, get_transformation
 
 from sparrow.image._image import (
-    _add_label_layer,
     _get_spatial_element,
+    add_labels_layer,
 )
 from sparrow.image.segmentation._utils import (
     _SEG_DTYPE,
@@ -22,7 +22,7 @@ from sparrow.image.segmentation._utils import (
     _link_labels,
     _rechunk_overlap,
 )
-from sparrow.shape._shape import _add_shapes_layer
+from sparrow.shape._shape import add_shapes_layer
 from sparrow.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
@@ -181,7 +181,7 @@ def apply_labels_layers(
         **kwargs,
     )
 
-    sdata = _add_label_layer(
+    sdata = add_labels_layer(
         sdata,
         array,
         output_layer=output_labels_layer,
@@ -196,7 +196,7 @@ def apply_labels_layers(
         se_labels = _get_spatial_element(sdata, layer=output_labels_layer)
 
         # convert the labels to polygons and add them as shapes layer to sdata
-        sdata = _add_shapes_layer(
+        sdata = add_shapes_layer(
             sdata,
             input=se_labels.data,
             output_layer=output_shapes_layer,
