@@ -2,7 +2,21 @@
 
 ## Input data
 
-Input data is provided from a [RESOLVE experiment on mouse liver](https://cloud.irc.ugent.be/public/index.php/s/HrXG9WKqjqHBEzS). The dataset used in the examples is mouse liver A1-1. Please download the DAPI-stained image and the .txt file.
+There are some built-in datasets. For example to get data from a [Resolve](https://resolvebiosciences.com/) experiment on mouse liver:
+
+```
+from sparrow.datasets.registry import registry
+
+path_image = registry.fetch( "transcriptomics/resolve/mouse/20272_slide1_A1-1_DAPI.tiff" )
+path_coordinates = registry.fetch("transcriptomics/resolve/mouse/20272_slide1_A1-1_results.txt")
+```
+
+And to download an example SpatialData object resuling from running the `Harpy` pipeline:
+
+```
+import sparrow as sp
+sdata=sp.datasets.resolve_example()
+```
 
 ### Jupyter notebooks
 
