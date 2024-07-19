@@ -6,7 +6,6 @@ import numpy as np
 import scanpy as sc
 from spatialdata import SpatialData
 
-from sparrow.image._image import _get_boundary, _get_spatial_element
 from sparrow.plot._plot import plot_shapes
 from sparrow.utils._keys import _ANNOTATION_KEY, _CLEANLINESS_KEY, _UNKNOWN_CELLTYPE_KEY
 
@@ -17,7 +16,7 @@ def score_genes(
     celltypes: list[str],
     img_layer: str | None = None,
     shapes_layer: str = "segmentation_mask_boundaries",
-    crd: tuple[int, int, int, int] = None,
+    crd: tuple[int, int, int, int] | None = None,
     filter_index: int | None = None,
     output: str | None = None,
 ) -> None:
@@ -61,10 +60,6 @@ def score_genes(
 
     if img_layer is None:
         img_layer = [*sdata.images][-1]
-
-    if crd is None:
-        se = _get_spatial_element(sdata, layer=img_layer)
-        crd = _get_boundary(se)
 
     # Custom colormap:
     colors = np.concatenate((plt.get_cmap("tab20c")(np.arange(20)), plt.get_cmap("tab20b")(np.arange(20))))

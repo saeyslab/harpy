@@ -1,3 +1,4 @@
+import pandas as pd
 from anndata import AnnData
 
 from sparrow.table import score_genes, score_genes_iter
@@ -18,6 +19,10 @@ def test_score_genes(sdata_transcripts, path_dataset_markers):
     )
 
     assert isinstance(sdata_transcripts["table_transcriptomics_score_genes"], AnnData)
+
+    assert isinstance(
+        sdata_transcripts["table_transcriptomics_score_genes"].obs[_ANNOTATION_KEY].dtype, pd.CategoricalDtype
+    )
 
     annotated_celltypes = sdata_transcripts["table_transcriptomics_score_genes"].obs[_ANNOTATION_KEY].cat.categories
 
@@ -45,6 +50,11 @@ def test_score_genes_iter(sdata_transcripts, path_dataset_markers, tmpdir):
         n_iter=5,
     )
 
+    assert isinstance(sdata_transcripts["table_transcriptomics_score_genes"], AnnData)
+
+    assert isinstance(
+        sdata_transcripts["table_transcriptomics_score_genes"].obs[_ANNOTATION_KEY].dtype, pd.CategoricalDtype
+    )
+
     assert "dummy_33" not in celltypes_scored  # because this celltypes has no matches in the tissue
     assert "dummy_33" in celltypes_all
-    assert isinstance(sdata_transcripts["table_transcriptomics_score_genes"], AnnData)

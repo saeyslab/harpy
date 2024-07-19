@@ -207,7 +207,7 @@ def score_genes_iter(
     output_dir=None,
     celltype_column: str = _ANNOTATION_KEY,
     overwrite: bool = False,
-) -> SpatialData:
+) -> tuple[SpatialData, list[str], list[str]]:
     """
     Iterative annotation algorithm.
 
@@ -273,7 +273,13 @@ def score_genes_iter(
 
     Returns
     -------
-    Updated `sdata`.
+    tuple:
+
+        - Updated `sdata`.
+
+        - list of strings, with all celltypes that are scored (but are not in the del_celltypes list).
+
+        - list of strings, with all celltypes, some of which may not be scored, because their corresponding transcripts do not appear in the region of interest. _UNKNOWN_CELLTYPE_KEY, is also added if it is detected.
     """
     kwargs = {}
     kwargs["min_score"] = min_score
@@ -350,8 +356,8 @@ def _annotate_celltype_iter(
 
     # Remove celltype columns if they already exist in the DataFrame
     for column in marker_genes.columns:
-        log.info(f"Column '{column}' already a column in '.obs'. Removing.")
         if column in adata.obs.columns:
+            log.info(f"Column '{column}' already a column in '.obs'. Removing.")
             adata.obs.drop(column, axis=1, inplace=True)
 
     adata, _ = _annotate_celltype_weighted(
@@ -388,6 +394,7 @@ def _annotate_celltype_iter(
         if output_dir is not None:
             plt.savefig(os.path.join(output_dir, celltype_column), bbox_inches="tight")
             plt.close()
+        del adata.uns[f"{celltype_column}_colors"]
 
     # iterative clustering:
     # own_score_genes again but now no (MinMax) scaling hence mean_expression has an effect
@@ -439,6 +446,8 @@ def _annotate_celltype_iter(
                     if output_dir is not None:
                         plt.savefig(os.path.join(output_dir, f"{_name}_{_iteration}"), bbox_inches="tight")
                         plt.close()
+                # remove colors added by sc.pl.umap
+                del adata.uns[f"{celltype_column}_colors"]
             log.info((adata.obs[celltype_column].value_counts() / len(adata.obs[celltype_column])) * 100)
         else:
             if len(fr) > 1:
@@ -457,6 +466,8 @@ def _annotate_celltype_iter(
     celltypes_scored = scores.columns
 
     adata.obs = pd.concat([adata.obs, scores], axis=1)
+
+    adata.obs[celltype_column] = adata.obs[celltype_column].astype("category")
 
     return adata, celltypes_scored.to_list(), celltypes_all.to_list()
 

@@ -323,7 +323,7 @@ def add_table_layer(
     The updated `sdata` object.
     """
     manager = TableLayerManager()
-    manager.add_table(
+    sdata = manager.add_table(
         sdata,
         adata=adata,
         output_layer=output_layer,

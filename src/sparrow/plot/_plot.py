@@ -388,7 +388,7 @@ def _plot(
     channel: int | str | None = None,
     z_slice: float | None = None,
     alpha: float = 0.5,
-    crd: tuple[int, int, int, int] = None,
+    crd: tuple[int, int, int, int] | None = None,
     to_coordinate_system: str = "global",
     vmin: float | None = None,
     vmax: float | None = None,
@@ -699,10 +699,8 @@ def _plot(
             log.warning(f"Shapes layer {shapes_layer} was empty for crd {crd}.")
         if shapes_layer_filtered is not None:
             for i in shapes_layer_filtered:
-                if not sdata.shapes[shapes_layer_filtered].empty:
-                    polygons = _translate_polygons(
-                        sdata.shapes[shapes_layer_filtered].copy(), to_coordinate_system=to_coordinate_system
-                    )
+                if not sdata.shapes[i].empty:
+                    polygons = _translate_polygons(sdata.shapes[i].copy(), to_coordinate_system=to_coordinate_system)
                     polygons = polygons.cx[crd[0] : crd[1], crd[2] : crd[3]]
                     if z_index is not None:
                         polygons = _get_z_slice_polygons(polygons, z_index=z_index)

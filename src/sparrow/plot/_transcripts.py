@@ -12,6 +12,7 @@ from spatialdata import SpatialData
 from sparrow.image._image import _get_boundary, _get_spatial_element
 from sparrow.plot import plot_shapes
 from sparrow.utils._keys import _GENES_KEY, _RAW_COUNTS_KEY, _REGION_KEY
+from sparrow.utils._transformations import _identity_check_transformations_points
 from sparrow.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
@@ -22,6 +23,7 @@ def analyse_genes_left_out(
     labels_layer: str,
     table_layer: str,
     points_layer: str = "transcripts",
+    to_coordinate_system: str = "global",
     name_x: str = "x",
     name_y: str = "y",
     name_gene_column: str = _GENES_KEY,
@@ -44,6 +46,8 @@ def analyse_genes_left_out(
         The table layer in `sdata` on which to perform analysis.
     points_layer
         The layer in `sdata` containing transcript information.
+    to_coordinate_system
+        The coordinate system that holds `labels_layer` and `points_layer`.
     name_x
         The column name representing the x-coordinate in `points_layer`.
     name_y
@@ -88,24 +92,24 @@ def analyse_genes_left_out(
             "Provided SpatialData object does not have the attribute 'points', please run allocation step before using this function."
         )
 
-    if sdata.tables[table_layer].raw is not None:
+    if not np.issubdtype(sdata.tables[table_layer].X.dtype, np.integer):
         log.warning(
-            f"'sdata.tables[{table_layer}].raw' is not None. It seems that analysis is being run on an AnnData object containing normalized counts, "
+            "It seems that analysis is being run on an AnnData object containing normalized counts, "
             "please consider running this analysis before the counts in the AnnData object "
             "are normalized (i.e. on the raw counts)."
         )
-    if labels_layer is None:
-        labels_layer = [*sdata.labels][-1]
 
     if labels_layer not in [*sdata.labels]:
         raise ValueError(f"labels_layer '{labels_layer}' is not a labels layer in `sdata`.")
 
     se = _get_spatial_element(sdata, layer=labels_layer)
-    crd = _get_boundary(se)
+    crd = _get_boundary(se, to_coordinate_system=to_coordinate_system)
 
     adata = sdata.tables[table_layer][sdata.tables[table_layer].obs[_REGION_KEY] == labels_layer]
 
     ddf = sdata.points[points_layer]
+
+    _identity_check_transformations_points(ddf, to_coordinate_system=to_coordinate_system)
 
     ddf = ddf.query(f"{crd[0]} <= {name_x} < {crd[1]} and {crd[2]} <= {name_y} < {crd[3]}")
 

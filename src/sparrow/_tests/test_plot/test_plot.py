@@ -73,13 +73,6 @@ def test_plot_shapes(sdata_multi_c, tmp_path):
 
 
 def test_plot_shapes_transcriptomics(sdata_transcripts, tmp_path):
-    sdata_transcripts = add_shapes_layer(
-        sdata_transcripts,
-        input=sdata_transcripts.labels["segmentation_mask"].data,
-        output_layer="segmentation_mask_boundaries",
-        overwrite=True,
-    )
-
     plot_shapes(
         sdata_transcripts,
         img_layer="raw_image",
@@ -139,13 +132,6 @@ def test_plot_shapes_3D(sdata_transcripts, tmp_path):
 
 
 def test_sanity_plot_transcripts_matrix(sdata_transcripts, tmp_path):
-    sdata_transcripts = add_shapes_layer(
-        sdata_transcripts,
-        input=sdata_transcripts.labels["segmentation_mask"].data,
-        output_layer="segmentation_mask_boundaries",
-        overwrite=True,
-    )
-
     sanity_plot_transcripts_matrix(
         sdata_transcripts,
         img_layer="raw_image",
