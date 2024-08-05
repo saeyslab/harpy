@@ -8,10 +8,10 @@ Log in to the compute cluster:
 ssh -p 2022 user.name@compute.vib.be
 ```
 
-Ask for an interactive session:
+Ask for an interactive session, e.g.:
 
 ```bash
-salloc
+salloc --partition=gpu_a100_48C_96T_512GB --ntasks=8 --mem=16G --gres=gpu:1 --time=02:00:00
 ```
 
 In the default environment, install support for loading environment kernels (no modules should be loaded at this time, nor conda env):
@@ -38,13 +38,13 @@ mamba env create -f environment_vib_compute.yml
 Activate the environment:
 
 ```bash
-conda activate napari-sparrow
+conda activate harpy
 ```
 
-Install sparrow:
+Install Harpy:
 
 ```bash
-pip install git+ssh://git@github.com/saeyslab/napari-sparrow.git
+pip install git+ssh://git@github.com/saeyslab/harpy.git
 ```
 
 ## Run spatial transcriptomics pipeline as interactive session.
@@ -52,56 +52,9 @@ pip install git+ssh://git@github.com/saeyslab/napari-sparrow.git
 Make an ipython kernel to use in a JupyterLab notebook. The displayname is what you will select in JupyterLab.
 
 ```bash
-ipython kernel install --user --name napari-sparrow --display-name "napari-sparrow"
-```
-
-Now on [https://compute.vib.be](https://compute.vib.be), start a JupyterLab (check the conda environment box), and select Mamba as the system wide Conda Module, and fill in `napari-sparrow` as the name of the Custom Conda Environment.
-
-We should now be able to run the notebook [example_spatial_vib_compute.ipynb](../experiments/example_spatial_vib_compute.ipynb) in an interactive session on the VIB compute cluster.
-
-Input data is provided from a [RESOLVE experiment on mouse liver](https://cloud.irc.ugent.be/public/index.php/s/HrXG9WKqjqHBEzS). The dataset used in the examples is mouse liver A1-1. Please download the DAPI-stained image and the .txt file, and adopt the paths accordingly in the notebook. The marker gene list can be found [here](../experiments/markerGeneListMartinNoLow.csv).
-
-## Usage of private S3 buckets.
-
-Loading SpatialData objects from private S3 buckets is supported via this fork of sparrow [https://github.com/saeyslab/harpy](https://github.com/saeyslab/harpy).
-
-Follow the instructions for setting up a conda environment as above, but rename the environment to `harpy` in [environment_vib_compute.yml](../environment_vib_compute.yml), i.e.
-
-```
-name: harpy
-channels:
-  - pytorch
-  - conda-forge
-  - conda
-dependencies:
-  - geopandas=0.12.2
-  - leidenalg=0.9.1
-  - pyqt
-  ...
-```
-
-Next build the conda environment:
-
-```bash
-mamba env create -f environment_vib_compute.yml
-```
-
-Activate the environment:
-
-```bash
-conda activate harpy
-```
-
-Install sparrow from the `harpy` fork:
-
-```bash
-pip install git+ssh://git@github.com/saeyslab/harpy.git
-```
-
-Make an ipython kernel to use in a JupyterLab notebook. The displayname is what you will select in JupyterLab.
-
-```bash
 ipython kernel install --user --name harpy --display-name "harpy"
 ```
 
-We should now be able to run the notebook [load_spatialdata.ipynb](../experiments/load_spatialdata.ipynb) in an interactive session on the VIB compute cluster.
+Now on [https://compute.vib.be](https://compute.vib.be), start a JupyterLab (check the conda environment box), and select Mamba as the system wide Conda Module, and fill in `harpy` as the name of the Custom Conda Environment.
+
+You should now be able to run the notebook [Harpy_quickstart.ipynb](../docs/tutorials/Harpy_quickstart.ipynb) in an interactive session on the VIB compute cluster.
