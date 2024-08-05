@@ -49,3 +49,5 @@ pip install "git+https://github.com/saeyslab/harpy.git#egg=sparrow[cli]"
 ## NVIDIA GPU support
 
 We provide [environment_vib_compute.yml](../environment_vib_compute.yml) that will install `torch` with NVIDIA GPU support on Linux (tested on CentOS). After creation of the environment via `conda env create -f environment_vib_compute.yml`, activate the environment, and install `Harpy` via `pip install git+https://github.com/saeyslab/harpy.git`.
+
+For VIB members we also refer to [here](./vib_compute.md), for an example on how to use the VIB compute cluster.

@@ -18,7 +18,7 @@ In the default environment, install support for loading environment kernels (no 
 
 ```bash
 ml purge
-while [ ! -z $CONDA_PREFIX ]; do conda deactivate; done
+conda deactivate
 
 pip install environment_kernels
 ```
@@ -47,7 +47,7 @@ Install Harpy:
 pip install git+ssh://git@github.com/saeyslab/harpy.git
 ```
 
-## Run spatial transcriptomics pipeline as interactive session.
+## Run the Harpy quickstart notebook as an interactive session.
 
 Make an ipython kernel to use in a JupyterLab notebook. The displayname is what you will select in JupyterLab.
 
@@ -55,6 +55,6 @@ Make an ipython kernel to use in a JupyterLab notebook. The displayname is what 
 ipython kernel install --user --name harpy --display-name "harpy"
 ```
 
-Now on [https://compute.vib.be](https://compute.vib.be), start a JupyterLab (check the conda environment box), and select Mamba as the system wide Conda Module, and fill in `harpy` as the name of the Custom Conda Environment.
+Now on [https://compute.vib.be](https://compute.vib.be), start a JupyterLab on GPU (select Python 3.10); check the conda environment box; select Mamba as the system wide Conda Module; fill in `harpy` as the name of the Custom Conda Environment.
 
 You should now be able to run the notebook [Harpy_quickstart.ipynb](../docs/tutorials/Harpy_quickstart.ipynb) in an interactive session on the VIB compute cluster.
