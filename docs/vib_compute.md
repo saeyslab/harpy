@@ -14,7 +14,7 @@ Ask for an interactive session, e.g.:
 salloc --partition=gpu_a100_48C_96T_512GB --ntasks=8 --mem=16G --gres=gpu:1 --time=02:00:00
 ```
 
-In the default environment, install support for loading environment kernels (no modules should be loaded at this time, nor conda env):
+In the default environment, install support for loading environment kernels (no modules should be loaded at this time, nor conda environments):
 
 ```bash
 ml purge
