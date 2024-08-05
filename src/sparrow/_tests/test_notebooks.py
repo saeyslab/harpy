@@ -18,13 +18,30 @@ def run_notebook(notebook_path, timeout=600):
 
 
 @pytest.mark.skip
+@pytest.mark.skipif(
+    not importlib.util.find_spec("cellpose"),
+    reason="requires the cellpose library",
+)
+@pytest.mark.parametrize(
+    "notebook",
+    [
+        "Harpy_quickstart.ipynb",
+    ],
+)
+def test_notebooks_harpy_quickstart(notebook):
+    root = str(pyrootutils.setup_root(os.getcwd(), dotenv=True, pythonpath=True))
+
+    run_notebook(os.path.join(root, "docs/tutorials", notebook))
+
+
+@pytest.mark.skip
 @pytest.mark.parametrize(
     "notebook",
     [
         "coordinate_systems.ipynb",
     ],
 )
-def test_notebooks(notebook):
+def test_notebooks_coordinate_systems(notebook):
     root = str(pyrootutils.setup_root(os.getcwd(), dotenv=True, pythonpath=True))
 
     run_notebook(os.path.join(root, "docs/tutorials", notebook))
