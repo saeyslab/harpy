@@ -1,4 +1,4 @@
-# High Performance Computing on VIB compute cluster.
+# High Performance Computing on the VIB compute cluster.
 
 ## Set up environment
 

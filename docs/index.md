@@ -67,5 +67,6 @@ notebooks.md
 usage.md
 api.md
 hpc.md
+vib_compute.md
 contributing.md
 ```
