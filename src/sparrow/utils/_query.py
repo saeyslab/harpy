@@ -22,10 +22,10 @@ def bounding_box_query(
     crd: tuple[int, int, int, int]
     | Iterable[tuple[int, int, int, int] | None]
     | None,  # specifying None is usefull if you want to filter tables layers on specific labels layers (only keep the ones that are annotated)
-    output: str | Path | None = None,
-    copy_img_layer: bool = True,  # whether to copy all img layers to new spatialdata object or not.
+    copy_img_layer: bool = True,  # whether to copy all img layers to the new spatialdata object or not.
     copy_shapes_layer: bool = True,
     copy_points_layer: bool = True,
+    output: str | Path | None = None,  # path to zarr store, if the resulting spatialdata object needs to be backed.
 ) -> SpatialData:
     """
     Bounding box query
@@ -72,9 +72,9 @@ def bounding_box_query(
             # set labels_id to empty array, so for this labels layer, all instances will be removed from table.
             labels_ids.append(np.array([]))
             log.warning(
-                f"query with crd {crd} to coordinate system {to_coordinate_system} for labels layer {labels_layer} resulted in empty labels layer."
-                f"Therefore labels layer {labels_layer} will not be present in resulting spatialdata object. "
-                f"Instances in tables annotated by {labels_layer} will also be removed from the tables."
+                f"query with crd {crd} to coordinate system '{to_coordinate_system}' for labels layer '{labels_layer}' resulted in empty labels layer."
+                f"Therefore labels layer '{labels_layer}' will not be present in resulting spatialdata object. "
+                f"Instances in tables annotated by '{labels_layer}' will also be removed from the tables."
             )
         else:
             labels_ids.append(da.unique(se_queried.data).compute())
@@ -112,7 +112,7 @@ def bounding_box_query(
 
         if remove.all():
             log.info(
-                f"Query removed all instances from table layer {_table_layer}. "
+                f"Query removed all instances from table layer '{_table_layer}'. "
                 "Therefore this table layer will not be present in resulting spatialdata object."
             )
             continue

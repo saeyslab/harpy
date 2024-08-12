@@ -12,7 +12,7 @@ from sparrow.datasets.cluster_blobs import cluster_blobs
 from sparrow.datasets.pixie_example import pixie_example
 from sparrow.datasets.proteomics import mibi_example
 from sparrow.datasets.registry import registry
-from sparrow.datasets.transcriptomics import resolve_example
+from sparrow.datasets.transcriptomics import resolve_example, resolve_example_multiple_coordinate_systems
 
 
 @pytest.fixture(scope="function")
@@ -72,6 +72,15 @@ def sdata_multi_c(tmpdir):
 @pytest.fixture
 def sdata_transcripts(tmpdir):
     sdata = resolve_example()
+    # backing store for specific unit test
+    sdata.write(os.path.join(tmpdir, "sdata_transcriptomics.zarr"))
+    sdata = read_zarr(os.path.join(tmpdir, "sdata_transcriptomics.zarr"))
+    yield sdata
+
+
+@pytest.fixture
+def sdata_transcripts_mul_coord(tmpdir):
+    sdata = resolve_example_multiple_coordinate_systems()
     # backing store for specific unit test
     sdata.write(os.path.join(tmpdir, "sdata_transcriptomics.zarr"))
     sdata = read_zarr(os.path.join(tmpdir, "sdata_transcriptomics.zarr"))

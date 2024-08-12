@@ -1,3 +1,5 @@
+import hashlib
+
 import pooch
 
 from sparrow import __version__
@@ -18,6 +20,17 @@ registry = pooch.create(
         "transcriptomics/resolve/mouse/dummy_markers.csv": "3d62c198f5dc1636f2d4faf3c564fad4a3313026f561d2e267e2061a2356432c",
         "transcriptomics/resolve/mouse/markerGeneListMartinNoLow.csv": "1ffefe7d4e72e05ef158ee1e73919b50882a97b6590f4ae977041d6b8b66a459",
         "transcriptomics/resolve/mouse/sdata_transcriptomics.zarr.zip": "32b369195f924f31e57de66a4daa10f34ae049611cfbface46c928fbe40b8fbb",
+        "transcriptomics/resolve/mouse/sdata_transcriptomics_coordinate_systems_unit_test.zarr.zip": "ef2ba1c0f6cc9aebe4cf394d1ee00e0622ea4f9273fedd36feb9c7a2363e41a7",
         "proteomics/mibi_tof/sdata_multi_channel.zarr.zip": "930fd2574666b90d5d6660ad8b52d47afffc9522704b9e6fef39d11c9cfff06e",
     },
 )
+
+
+def _calculate_sha256(file_path):
+    """Helper function to calculate the hash of a file."""
+    sha256_hash = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        # Read the file in chunks to avoid memory issues with large files
+        for byte_block in iter(lambda: f.read(4096), b""):
+            sha256_hash.update(byte_block)
+    return sha256_hash.hexdigest()
