@@ -2,7 +2,6 @@ import dask.array as da
 import numpy as np
 import pandas as pd
 import skimage as ski
-from dask.array.random import Generator
 from dask_image import ndfilters
 from numpy.random import default_rng
 from scipy import ndimage as ndi
@@ -40,17 +39,20 @@ def cluster_blobs(
     log.debug(f"{markers.shape=}")
     nuclei_channel = _generate_blobs(nuclei_centers, shape)
     # assign each cell a random cell type
-    assigned_cell_types = np.random.randint(0, n_cell_types, size=nuclei_centers.shape[0])
+    assigned_cell_types = np.random.default_rng(seed).integers(0, n_cell_types, size=nuclei_centers.shape[0])
     log.debug(f"{assigned_cell_types.shape=}")
     lineage_channels = []
     for i in range(n_cell_types):
         selected_nuclei_centers = nuclei_centers[assigned_cell_types == i]
-        channel = _generate_blobs(selected_nuclei_centers, shape)
-        noisy_channel = _add_noise(channel, noise_scale=noise_level_channels)
-        lineage_channels.append(noisy_channel)
+        if selected_nuclei_centers.shape[0] == 0:
+            channel = da.zeros(shape)
+        else:
+            channel = _generate_blobs(selected_nuclei_centers, shape)
+            channel = _add_noise(channel, noise_scale=noise_level_channels, seed=seed)
+        lineage_channels.append(channel)
     log.debug(f"{lineage_channels[0].shape}")
     channel_names = ["nucleus"] + [f"lineage_{i}" for i in range(n_cell_types)]
-    noisy_nuclei_channel = _add_noise(nuclei_channel, noise_scale=noise_level_nuclei)
+    noisy_nuclei_channel = _add_noise(nuclei_channel, noise_scale=noise_level_nuclei, seed=seed)
     img = Image2DModel.parse(
         data=np.concatenate([noisy_nuclei_channel[np.newaxis], lineage_channels], axis=0),
         c_coords=channel_names,
@@ -136,10 +138,10 @@ def _generate_blobs(points, shape, max_value=255, sigma: int | None = None) -> A
     return mask
 
 
-def _add_noise(image, noise_scale: float | None = None, rng: Generator | None = None):
+def _add_noise(image, noise_scale: float | None = None, seed: int | None = None):
     if noise_scale is None:
         noise_scale = 0.3 * image.max()
-    rng = rng or da.random.default_rng()
+    rng = da.random.default_rng(seed)
     noise = da.abs(rng.normal(0, noise_scale, image.shape))
     output = image + noise
     # rescale output to original range

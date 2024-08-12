@@ -3,6 +3,7 @@ from typing import Dict, Iterable, Tuple
 import numpy as np
 from anndata import AnnData
 from spatialdata import SpatialData
+from spatialdata.models import TableModel
 
 from sparrow.shape._shape import filter_shapes_layer
 from sparrow.table._manager import TableLayerManager
@@ -100,7 +101,7 @@ class ProcessTable:
             )
         adata = adata.copy()
         if self.labels_layer is not None:
-            adata.uns["spatialdata_attrs"]["region"] = self.labels_layer
+            adata.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY] = self.labels_layer
 
         return adata
 

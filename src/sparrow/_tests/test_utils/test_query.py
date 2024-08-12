@@ -4,6 +4,7 @@ import dask.array as da
 import numpy as np
 import pytest
 from spatialdata import SpatialData
+from spatialdata.models import TableModel
 
 from sparrow.utils._keys import _INSTANCE_KEY, _REGION_KEY
 from sparrow.utils._query import bounding_box_query
@@ -113,7 +114,10 @@ def test_bounding_box_query_multiple_coordinate_systems_crd_none(sdata_transcrip
     for _table_name in [*sdata_transcripts_queried.tables]:
         # check that all elements that are annoted by labels_a1_1  will be removed from resulting sdata tables.
         assert _labels_layer not in sdata_transcripts_queried.tables[_table_name].obs[_REGION_KEY].values
-        assert _labels_layer not in sdata_transcripts_queried.tables[_table_name].uns["spatialdata_attrs"]["region"]
+        assert (
+            _labels_layer
+            not in sdata_transcripts_queried.tables[_table_name].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY]
+        )
     _labels_layer = "labels_a1_2"
     for _table_name in [*sdata_transcripts_queried.tables]:
         adata = sdata_transcripts_queried.tables[_table_name]

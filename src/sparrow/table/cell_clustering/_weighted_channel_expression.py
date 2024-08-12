@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 from pandas.testing import assert_index_equal
 from spatialdata import SpatialData
+from spatialdata.models import TableModel
 
 from sparrow.table._table import ProcessTable, add_table_layer
 from sparrow.table.cell_clustering._utils import _get_mapping
@@ -58,7 +59,7 @@ def weighted_channel_expression(
     sparrow.tb.cluster_intensity : calculates average intensity SOM/meta cluster (pixel clusters).
     """
     # subset over all _labels_layer in 'table_layer_cell_clustering'
-    _labels_layer = [*sdata[table_layer_cell_clustering].uns["spatialdata_attrs"]["region"]]
+    _labels_layer = [*sdata[table_layer_cell_clustering].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY]]
     process_table_clustering = ProcessTable(
         sdata, labels_layer=_labels_layer, table_layer=table_layer_cell_clustering
     )  # get all of the labels layers, to keep API not too complex, do not allow subsetting labels layers

@@ -1,6 +1,7 @@
 import spatialdata
 from anndata import AnnData
 from spatialdata import SpatialData, read_zarr
+from spatialdata.models import TableModel
 
 from sparrow.utils._io import _incremental_io_on_disk
 from sparrow.utils._keys import _INSTANCE_KEY, _REGION_KEY
@@ -15,7 +16,7 @@ class TableLayerManager:
         sdata: SpatialData,
         adata: AnnData,
         output_layer: str,
-        region: list[str] | None,  # list of labels_layers , TODO, check what to do with shapes layers
+        region: list[str] | None,  # list of labels_layers
         overwrite: bool = False,
     ) -> SpatialData:
         if region is not None:
@@ -27,8 +28,8 @@ class TableLayerManager:
             ), f"Provided 'AnnData' object should contain a column '{_INSTANCE_KEY}' in 'adata.obs'. Linking the observations to a labels layer in 'sdata'."
 
             # need to remove spatialdata_attrs, otherwise parsing gives error (TableModel.parse will add spatialdata_attrs back)
-            if "spatialdata_attrs" in adata.uns.keys():
-                adata.uns.pop("spatialdata_attrs")
+            if TableModel.ATTRS_KEY in adata.uns.keys():
+                adata.uns.pop(TableModel.ATTRS_KEY)
 
             adata = spatialdata.models.TableModel.parse(
                 adata,
@@ -37,8 +38,8 @@ class TableLayerManager:
                 instance_key=_INSTANCE_KEY,
             )
         else:
-            if "spatialdata_attrs" in adata.uns.keys():
-                adata.uns.pop("spatialdata_attrs")
+            if TableModel.ATTRS_KEY in adata.uns.keys():
+                adata.uns.pop(TableModel.ATTRS_KEY)
 
             adata = spatialdata.models.TableModel.parse(
                 adata,
