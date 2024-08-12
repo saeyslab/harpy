@@ -18,19 +18,47 @@ log = get_pylogger(__name__)
 def bounding_box_query(
     sdata: SpatialData,
     labels_layer: str | Iterable[str],
-    to_coordinate_system: str | Iterable[str] | None,  # if None, will use 'global'
-    crd: tuple[int, int, int, int]
-    | Iterable[tuple[int, int, int, int] | None]
-    | None,  # specifying None is usefull if you want to filter tables layers on specific labels layers (only keep the ones that are annotated)
-    copy_img_layer: bool = True,  # whether to copy all img layers to the new spatialdata object or not.
+    to_coordinate_system: str | Iterable[str] | None,
+    crd: tuple[int, int, int, int] | Iterable[tuple[int, int, int, int] | None] | None,
+    copy_img_layer: bool = True,
     copy_shapes_layer: bool = True,
     copy_points_layer: bool = True,
-    output: str | Path | None = None,  # path to zarr store, if the resulting spatialdata object needs to be backed.
+    output: str | Path | None = None,
 ) -> SpatialData:
     """
-    Bounding box query
+    Query the labels layers of a SpatialData object and the corresponding instances it annotates in `sdata.tables` via a bounding box query.
 
-    Test
+    Parameters
+    ----------
+    sdata
+        The SpatialData object to query.
+    labels_layer
+        The labels layer(s) to query, which can be a single string or an iterable of strings.
+    to_coordinate_system
+        The coordinate system(s) to which the query provided via `crd` is defined. If `None`, will use 'global'.
+    crd
+        Coordinates defining the bounding box, specified as a tuple of four integers (x_min, y_min, x_max, y_max), or an iterable of such tuples.
+        Setting `crd` to `None` can be usefull if you want to filter elments in tables layers that are annotated by specific labels layers.
+        E.g. setting `labels_layer=layer_1` and `crd=None`, will result in AnnData objects in `sdata.tables` containing only instances annotated by `layer_1`.
+    copy_img_layer
+        Whether to copy all image layers to the new SpatialData object. If set to `False`, image layers will not be included in the result.
+    copy_shapes_layer
+        Whether to copy all shapes layers to the new SpatialData object. If set to `False`, shapes layers will not be included in the result.
+    copy_points_layer
+        Whether to copy all points layers to the new SpatialData object. If set to `False`, points layers will not be included in the result.
+    output
+        Path to the zarr store where the resulting SpatialData object will be backed.
+        If None, the new resulting SpatialData object will be persisted in memory.
+
+    Returns
+    -------
+    SpatialData
+        A new SpatialData object containing the extracted bounding box region and associated data layers.
+
+    Raises
+    ------
+    AssertionError
+        If the number of provided `labels_layer`, `crd` and `to_coordinate_system` is not equal.
     """
 
     def _fix_name(name: str | Iterable[str]):

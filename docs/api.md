@@ -155,3 +155,18 @@ Plotting functions.
     pl.cluster_cleanliness
     pl.nhood_enrichment
 ```
+
+## Utils
+
+Utility functions.
+
+```{eval-rst}
+
+.. module:: sparrow.utils
+.. currentmodule:: sparrow
+
+.. autosummary::
+    :toctree: generated
+
+    utils.bounding_box_query
+```
