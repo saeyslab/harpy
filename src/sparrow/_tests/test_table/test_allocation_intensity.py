@@ -3,6 +3,7 @@ import numpy as np
 import pytest
 from anndata import AnnData
 from spatialdata import SpatialData
+from xrspatial import zonal_stats
 
 from sparrow.image.segmentation._align_masks import align_labels_layers
 from sparrow.table._allocation_intensity import (
@@ -74,6 +75,15 @@ def test_allocate_intensity(sdata_multi_c: SpatialData):
     )
 
     assert isinstance(sdata_multi_c, SpatialData)
+
+    # check if calculated values are same as the ones obtained via zonal_stats (used by spatialdata)
+    # note zonal_stats is much slower than allocate_intensity implementation
+    df = zonal_stats(
+        sdata_multi_c["masks_whole"],
+        sdata_multi_c["raw_image"][0],
+        stats_funcs=["sum"],
+    ).compute()
+    np.array_equal(df["sum"].values[1:], sdata_multi_c["table_intensities"].to_df()["0"].values)
 
     assert isinstance(sdata_multi_c.tables["table_intensities"], AnnData)
 

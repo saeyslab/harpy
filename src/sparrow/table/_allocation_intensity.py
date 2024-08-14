@@ -31,7 +31,7 @@ def allocate_intensity(
     to_coordinate_system: str = "global",
     chunks: str | int | tuple[int, ...] | None = 10000,
     append: bool = False,
-    remove_background_intensity: bool = True,
+    calculate_center_of_mass: bool = True,
     overwrite: bool = True,
 ) -> SpatialData:
     """
@@ -64,10 +64,11 @@ def allocate_intensity(
         If set to True, and the `labels_layer` does not yet exist as a `_REGION_KEY` in `sdata.tables[output_layer].obs`,
         the intensity values extracted during the current function call will be appended (along axis=0) to any existing intensity data
         within the SpatialData object's table attribute. If False, and overwrite is set to True any existing data in `sdata.tables[output_layer]` will be overwritten by the newly extracted intensity values.
-    remove_background_intensity
-        If set to True, the calculated intensity for the background (INSTANCE_KEY==0) will not be added to `sdata.tables[output_layer]`.
+    calculate_center_of_mass
+        If `True`, the center of mass of the labels in `labels_layer` will be calculated and added to `sdata.tables[ output_layer ].obsm["spatial"]`.
+        To calculate center of mass, we use `dask_image.ndmeasure.center_of_mass`.
     overwrite
-        If True, overwrites the `output_layer` if it already exists in `sdata`.
+        If `True`, overwrites the `output_layer` if it already exists in `sdata`.
 
     Returns
     -------
@@ -158,14 +159,22 @@ def allocate_intensity(
         _array_mask = _array_mask[None, ...]
         _array_img = _array_img[:, None, ...]
 
+    chunks_masks = None
     if chunks is not None:
         if not isinstance(chunks, (int, str)):
             if to_squeeze:
                 assert len(chunks) == _array_img.ndim - 2
-                chunks = (1, chunks[0], chunks[1])
+                chunks = (_array_img.chunksize[0], 1, chunks[0], chunks[1])
+                chunks_masks = (1, chunks[2], chunks[3])
             else:
                 assert len(chunks) == _array_img.ndim - 1
-                chunks = (chunks[0], chunks[1], chunks[2])
+                chunks = (_array_img.chunksize[0], chunks[0], chunks[1], chunks[2])
+                chunks_masks = (chunks[1], chunks[2], chunks[3])
+        else:
+            chunks_masks = chunks
+
+    _array_img = _array_img.rechunk(chunks) if chunks is not None else _array_img
+    _array_mask_rechunked = _array_mask.rechunk(chunks_masks) if chunks_masks is not None else _array_mask
 
     channel_intensities = []
     for channel in channels:
@@ -174,8 +183,8 @@ def allocate_intensity(
 
         channel_intensities.append(
             _calculate_intensity(
-                _array_img_c.rechunk(chunks) if chunks is not None else _array_img_c,
-                _array_mask.rechunk(chunks) if chunks is not None else _array_mask,
+                _array_img_c,
+                _array_mask_rechunked,
             )
         )
 
@@ -195,22 +204,23 @@ def allocate_intensity(
 
     adata.obs[_INSTANCE_KEY] = _cells_id.astype(int)
     adata.obs[_REGION_KEY] = pd.Categorical([labels_layer] * len(adata.obs))
-    if remove_background_intensity:
-        adata = adata[adata.obs[_INSTANCE_KEY] != 0]
-        _cells_id = _cells_id[_cells_id != 0]
+    # remove background intensity
+    adata = adata[adata.obs[_INSTANCE_KEY] != 0]
+    _cells_id = _cells_id[_cells_id != 0]
 
-    # add center of cells here (via the masks).
-    _array_mask = _array_mask.squeeze(0) if to_squeeze else _array_mask
-    coordinates = center_of_mass(
-        image=_array_mask,
-        label_image=_array_mask,
-        index=_cells_id,
-    )
+    if calculate_center_of_mass:
+        # add center of cells here (via the masks).
+        _array_mask = _array_mask.squeeze(0) if to_squeeze else _array_mask
+        coordinates = center_of_mass(
+            image=_array_mask,  # do not use rechunked array mask here, leads to significant increase in required ram.
+            label_image=_array_mask,
+            index=_cells_id,
+        )
 
-    coordinates = coordinates.compute()
-    coordinates += np.array([t1y, t1x]) if to_squeeze else np.array([0, t1y, t1x])
+        coordinates = coordinates.compute()
+        coordinates += np.array([t1y, t1x]) if to_squeeze else np.array([0, t1y, t1x])
 
-    adata.obsm["spatial"] = coordinates
+        adata.obsm["spatial"] = coordinates
 
     if append:
         region = []
@@ -285,7 +295,7 @@ def _calculate_intensity(
 
     for i in range(num_chunks[0]):
         for j in range(num_chunks[1]):
-            for k in range(num_chunks[1]):
+            for k in range(num_chunks[2]):
                 current_chunk = chunk_sum.blocks[i, j, k]
                 task = delayed(np.add)(sum_of_chunks, current_chunk)
                 tasks.append(task)

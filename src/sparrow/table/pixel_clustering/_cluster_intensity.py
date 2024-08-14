@@ -101,7 +101,6 @@ def cluster_intensity(
             output_layer=output_layer,
             channels=channels,
             chunks=chunks,
-            remove_background_intensity=True,
             append=append,
             overwrite=overwrite,
         )

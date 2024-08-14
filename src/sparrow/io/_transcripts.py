@@ -4,6 +4,7 @@ from pathlib import Path
 
 import dask.dataframe as dd
 import numpy as np
+import pyarrow
 from spatialdata import SpatialData
 from spatialdata.transformations import Identity
 
@@ -182,7 +183,7 @@ def read_transcripts(
     sdata
         The SpatialData object to which the transcripts will be added.
     path_count_matrix
-        Path to the .txt file containing the transcripts information. Each row should contain an x, y coordinate and a gene name.
+        Path to a `.parquet` file or `.csv` file containing the transcripts information. Each row should contain an x, y coordinate and a gene name.
         Optional a midcount column is provided. If a midcount column is provided, rows are repeated.
     path_transform_matrix
         This file should contain a 3x3 transformation matrix for the affine transformation.
@@ -205,13 +206,14 @@ def read_transcripts(
     column_midcount
         Column index for the count value to repeat rows in the count matrix. Ignored when set to None.
     delimiter
-        Delimiter used to separate values in the CSV file.
+        Delimiter used to separate values in the `.csv` file. Ignored if `path_count_matrix` is a `.parquet` file.
     header
-        Row number to use as the header in the CSV file. If None, no header is used.
+        Row number to use as the header in the CSV file. If None, no header is used. Ignored if `path_count_matrix` is a `.parquet` file.
     comment
         Character indicating that the remainder of line should not be parsed.
         If found at the beginning of a line, the line will be ignored altogether.
         This parameter must be a single character.
+        Ignored if `path_count_matrix` is a `.parquet` file.
     crd
         The coordinates (in pixels) for the region of interest in the format (xmin, xmax, ymin, ymax).
         If None, all transcripts are considered.
@@ -232,14 +234,27 @@ def read_transcripts(
     This function reads a .csv file using Dask and applies a transformation matrix to the coordinates.
     It can also repeat rows based on the `MIDCount` value and can work in a debug mode that samples the data.
     """
-    # Read the CSV file using Dask
-    ddf = dd.read_csv(
-        path_count_matrix,
-        delimiter=delimiter,
-        header=header,
-        comment=comment,
-        blocksize=blocksize,
-    )
+
+    def _read_parquet_file(path_count_matrix):
+        try:
+            # Try reading the file as a Parquet file
+            ddf = dd.read_parquet(path_count_matrix, blocksize=blocksize)
+            return ddf
+        except pyarrow.ArrowInvalid:
+            return None
+
+    # first try to read it as a parquet file.
+    ddf = _read_parquet_file(path_count_matrix=path_count_matrix)
+
+    if ddf is None:
+        # if not parquet file, consider it to be csv file
+        ddf = dd.read_csv(
+            path_count_matrix,
+            delimiter=delimiter,
+            header=header,
+            comment=comment,
+            blocksize=blocksize,
+        )
 
     def filter_names(ddf, column_gene, filter_name):
         # filter out control genes that you don't want ending up in the dataset
