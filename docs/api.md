@@ -46,6 +46,7 @@ Operations on image and labels layers.
     im.map_channels_zstacks
     im.tiling_correction
     im.enhance_contrast
+    im.normalize
     im.min_max_filtering
     im.gaussian_filtering
     im.transcript_density

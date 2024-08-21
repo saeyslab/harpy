@@ -12,15 +12,15 @@ def test_allocation(sdata_transcripts: SpatialData):
         sdata_transcripts,
         labels_layer="segmentation_mask",
         output_layer="table_transcriptomics_recompute",
-        chunks=20000,
+        chunks=1000,
         append=False,
         overwrite=True,
     )
 
     assert "table_transcriptomics_recompute" in [*sdata_transcripts.tables]
-    assert sdata_transcripts["table_transcriptomics_recompute"].shape == (649, 98)
+    assert sdata_transcripts["table_transcriptomics_recompute"].shape == (649, 96)
 
-    np.array_equal(
+    assert np.array_equal(
         sdata_transcripts["table_transcriptomics_recompute"].X.toarray(),
         sdata_transcripts["table_transcriptomics"].X.toarray(),
     )
@@ -39,7 +39,7 @@ def test_allocation_append(sdata_transcripts: SpatialData):
     )
 
     assert "table_transcriptomics" in [*sdata_transcripts.tables]
-    assert sdata_transcripts["table_transcriptomics"].shape == (649, 98)
+    assert sdata_transcripts["table_transcriptomics"].shape == (649, 96)
 
     sdata_transcripts = allocate(
         sdata_transcripts,
@@ -51,7 +51,7 @@ def test_allocation_append(sdata_transcripts: SpatialData):
     )
 
     assert "table_transcriptomics" in [*sdata_transcripts.tables]
-    assert sdata_transcripts["table_transcriptomics"].shape == (1302, 98)
+    assert sdata_transcripts["table_transcriptomics"].shape == (1302, 96)
 
 
 def test_allocation_overwrite(sdata_transcripts: SpatialData):

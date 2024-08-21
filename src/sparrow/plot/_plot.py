@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from geopandas.geodataframe import GeoDataFrame
 from geopandas.geoseries import GeoSeries
+from scipy.sparse import issparse
 from shapely.affinity import translate
 from spatialdata import SpatialData
 from spatialdata.transformations import get_transformation
@@ -565,13 +566,8 @@ def _plot(
 
     if polygons is not None and column is not None:
         if not polygons.empty:
-            mask = sdata.tables[table_layer].obs[_INSTANCE_KEY].isin(set(polygons.index.astype(int)))
-            adata_view = sdata.tables[table_layer][mask]
-            # sort both adata and polygons on _INSTANCE_KEY
-            sorted_index = adata_view.obs[_INSTANCE_KEY].sort_values().index
-            adata_view = adata_view[sorted_index]
-
-            # now do some checks on adata_view regarding the region.
+            adata_view = sdata.tables[table_layer]
+            # do some checks on adata regarding the region.
             regions_in_table = adata_view.obs[_REGION_KEY].cat.categories.to_list()
             if len(regions_in_table) > 1:
                 if region is None:
@@ -585,6 +581,12 @@ def _plot(
                     )
                 else:
                     adata_view = adata_view[adata_view.obs[_REGION_KEY] == region]
+
+            mask = adata_view.obs[_INSTANCE_KEY].isin(set(polygons.index.astype(int)))
+            adata_view = adata_view[mask]
+            # sort both adata and polygons on _INSTANCE_KEY
+            sorted_index = adata_view.obs[_INSTANCE_KEY].sort_values().index
+            adata_view = adata_view[sorted_index]
 
             # sort polygons (their index corresponds to the _INSTANCE_KEY):
             polygons.index = polygons.index.astype(int)
@@ -608,6 +610,7 @@ def _plot(
                 column = adata_view.obs[[column]].values.flatten()
             elif column in adata_view.var.index:
                 column = adata_view.X[:, np.where(adata_view.var.index == column)[0][0]]
+                column = column.toarray().flatten() if issparse(column) else column
             else:
                 log.info(
                     f"The column '{column}' is not a column in the dataframe 'sdata.tables[{table_layer}].obs', "

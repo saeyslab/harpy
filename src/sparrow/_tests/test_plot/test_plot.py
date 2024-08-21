@@ -34,7 +34,7 @@ def test_plot_image(sdata_multi_c, tmp_path):
 
 
 def test_plot_shapes(sdata_multi_c, tmp_path):
-    # plot an obs column
+    # plot a .obs column
     plot_shapes(
         sdata_multi_c,
         img_layer="combine",
@@ -82,6 +82,7 @@ def test_plot_shapes_transcriptomics(sdata_transcripts, tmp_path):
         output=os.path.join(tmp_path, "shapes_segmentation_mask"),
     )
 
+    # plot a .obs column
     plot_shapes(
         sdata_transcripts,
         img_layer="raw_image",
@@ -90,6 +91,17 @@ def test_plot_shapes_transcriptomics(sdata_transcripts, tmp_path):
         table_layer="table_transcriptomics",
         region="segmentation_mask",
         output=os.path.join(tmp_path, "shapes_segmentation_mask_cell_ID"),
+    )
+
+    # plot a .var column
+    plot_shapes(
+        sdata_transcripts,
+        img_layer="raw_image",
+        shapes_layer="segmentation_mask_boundaries",
+        column="Pck1",
+        table_layer="table_transcriptomics",
+        region="segmentation_mask",
+        output=os.path.join(tmp_path, "shapes_segmentation_mask_Pck1"),
     )
 
 

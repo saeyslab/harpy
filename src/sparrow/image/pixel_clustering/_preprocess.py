@@ -11,7 +11,7 @@ from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import get_transformation
 
 from sparrow.image._image import _get_spatial_element, add_image_layer
-from sparrow.image.pixel_clustering._utils import _nonzero_nonnan_percentile, _nonzero_nonnan_percentile_axis_0
+from sparrow.image._normalize import _nonzero_nonnan_percentile, _nonzero_nonnan_percentile_axis_0
 
 
 def pixel_clustering_preprocess(
@@ -122,7 +122,7 @@ def pixel_clustering_preprocess(
         results_arr_percentile = []
         for _arr in _arr_list:
             # 1) calculate percentiles (excluding nan and 0 from calculation)
-            arr_percentile = _nonzero_nonnan_percentile_axis_0(_arr, q=q)
+            arr_percentile = _nonzero_nonnan_percentile_axis_0(_arr, q=q, dtype=_arr.dtype)
             results_arr_percentile.append(arr_percentile)
         arr_percentile = da.stack(results_arr_percentile, axis=0)
         arr_percentile_mean = da.mean(arr_percentile, axis=0)  # mean over all images
@@ -145,7 +145,7 @@ def pixel_clustering_preprocess(
         for _arr_sum in _arr_sum_list:
             # using da.percentile reproduces exactly results of ark, but nonzero_nonnan feels like a better choice (i.e. case where there is a lot of zero in image)
             # norm_sum_percentile = da.percentile(_arr_sum.flatten(), q=q_sum)
-            norm_sum_percentile = _nonzero_nonnan_percentile(_arr_sum, q=q_sum)
+            norm_sum_percentile = _nonzero_nonnan_percentile(_arr_sum, q=q_sum, dtype=_arr_sum.dtype)
             results_norm_sum_percentile.append(norm_sum_percentile)
         # pixel_thresh_val in ark analysis, if multiple images, we take average over all norm_sum_percentile for all images, and we use that value later on.
         norm_sum_percentile = da.stack(results_norm_sum_percentile, axis=0)
@@ -184,7 +184,9 @@ def pixel_clustering_preprocess(
             _arr_list[i] = da.where(_arr_sum > 0, _arr_list[i] / _arr_sum, np.nan)
 
         if q_post is not None:
-            arr_percentile_post_norm = _nonzero_nonnan_percentile_axis_0(_arr_list[i], q=q_post)
+            arr_percentile_post_norm = _nonzero_nonnan_percentile_axis_0(
+                _arr_list[i], q=q_post, dtype=_arr_list[i].dtype
+            )
             results_arr_percentile_post_norm.append(arr_percentile_post_norm)
 
     if q_post is not None:

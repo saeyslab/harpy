@@ -9,8 +9,10 @@ import dask.dataframe as dd
 import numpy as np
 import pandas as pd
 from anndata import AnnData
+from dask.dataframe import DataFrame as DaskDataFrame
 from scipy import sparse
 from spatialdata import SpatialData
+from xarray import DataArray
 
 from sparrow.image._image import _get_spatial_element, _get_translation
 from sparrow.shape._shape import filter_shapes_layer
@@ -75,10 +77,131 @@ def allocate(
         raise ValueError(
             f"Provided labels layer '{labels_layer}' not in 'sdata', please specify a labels layer from '{[*sdata.labels]}'"
         )
+    ddf = sdata.points[points_layer]
 
-    Coords = namedtuple("Coords", ["x0", "y0"])
     se = _get_spatial_element(sdata, layer=labels_layer)
+
+    combined_partitions = _aggregate(
+        se=se,
+        ddf=ddf,
+        value_key=name_gene_column,
+        drop_coordinates=False,
+        to_coordinate_system=to_coordinate_system,
+        chunks=chunks,
+    )
+
+    if "z" in combined_partitions:
+        coordinates = combined_partitions.groupby(_CELL_INDEX)["x", "y", "z"].mean()
+    else:
+        coordinates = combined_partitions.groupby(_CELL_INDEX)["x", "y"].mean()
+
+    cell_counts = combined_partitions.groupby([_CELL_INDEX, name_gene_column]).size()
+
+    cell_counts = cell_counts.map_partitions(lambda x: x.astype(np.uint32))
+
+    coordinates, cell_counts = dask.compute(coordinates, cell_counts)
+
+    cell_counts = cell_counts.to_frame(name="values")
+    cell_counts = cell_counts.reset_index()
+
+    cell_counts[name_gene_column] = cell_counts[name_gene_column].astype("object")
+    cell_counts[name_gene_column] = pd.Categorical(cell_counts[name_gene_column])
+
+    columns_categories = cell_counts[name_gene_column].cat.categories.to_list()
+    columns_nodes = pd.Categorical(cell_counts[name_gene_column], categories=columns_categories, ordered=True)
+
+    indices_of_aggregated_rows = np.array(cell_counts[_CELL_INDEX])
+    rows_categories = np.unique(indices_of_aggregated_rows)
+
+    rows_nodes = pd.Categorical(indices_of_aggregated_rows, categories=rows_categories, ordered=True)
+
+    X = sparse.coo_matrix(
+        (
+            cell_counts["values"].values.ravel(),
+            (rows_nodes.codes, columns_nodes.codes),
+        ),
+        shape=(len(rows_categories), len(columns_categories)),
+    ).tocsr()
+
+    adata = AnnData(
+        X,
+        obs=pd.DataFrame(index=rows_categories),
+        var=pd.DataFrame(index=columns_categories),
+        dtype=X.dtype,
+    )
+
+    coordinates.index = coordinates.index.map(str)
+
+    # sanity check
+    assert np.array_equal(np.unique(coordinates.index), np.unique(adata.obs.index))
+
+    # make sure coordinates is in same order as adata
+    coordinates = coordinates.reindex(adata.obs.index)
+
+    adata.obsm["spatial"] = coordinates.values
+
+    adata.obs[_INSTANCE_KEY] = adata.obs.index.astype(int)
+
+    adata.obs[_REGION_KEY] = pd.Categorical([labels_layer] * len(adata.obs))
+
+    _uuid_value = str(uuid.uuid4())[:8]
+    adata.obs.index = adata.obs.index.map(lambda x: f"{x}_{labels_layer}_{_uuid_value}")
+
+    adata.obs.index.name = _CELL_INDEX
+
+    if append:
+        region = []
+        if output_layer in [*sdata.tables]:
+            if labels_layer in sdata.tables[output_layer].obs[_REGION_KEY].cat.categories:
+                raise ValueError(
+                    f"'{labels_layer}' already exists as a region in the 'sdata.tables[{output_layer}]' object. "
+                    "Please choose a different labels layer, choose a different 'output_layer' or set append to False and overwrite to True to overwrite the existing table."
+                )
+            adata = ad.concat([sdata.tables[output_layer], adata], axis=0)
+            # get the regions already in sdata, and append the new one
+            region = sdata.tables[output_layer].obs[_REGION_KEY].cat.categories.to_list()
+        region.append(labels_layer)
+
+    else:
+        region = [labels_layer]
+
+    sdata = add_table_layer(
+        sdata,
+        adata=adata,
+        output_layer=output_layer,
+        region=region,
+        overwrite=overwrite,
+    )
+
+    if update_shapes_layers:
+        sdata = filter_shapes_layer(
+            sdata,
+            table_layer=output_layer,
+            labels_layer=labels_layer,
+            prefix_filtered_shapes_layer="filtered_segmentation",
+        )
+
+    return sdata
+
+
+def _aggregate(
+    se: DataArray,
+    ddf: DaskDataFrame,
+    value_key: str,
+    drop_coordinates: bool = False,  # if set to True, will drop ((z),y,x) in resulting dask dataframe
+    chunks: str | tuple[int, ...] | int | None = 10000,
+    to_coordinate_system: str = "global",
+) -> DaskDataFrame:
+    # helper function to do an aggregation between a dask array containing ints, and a dask dataframe containing coordinates ((z), y, x).
+    assert np.issubdtype(se.data.dtype, np.integer), "Only integer arrays are supported."
+    assert "y" in ddf and "x" in ddf, "Dask Dataframe must contain 'y' and 'x' columns."
+    Coords = namedtuple("Coords", ["x0", "y0"])
     coords = Coords(*_get_translation(se, to_coordinate_system=to_coordinate_system))
+    _identity_check_transformations_points(ddf, to_coordinate_system=to_coordinate_system)
+
+    value_keys = ["x", "y", "z", value_key] if "z" in ddf.columns else ["x", "y", value_key]
+
+    ddf = ddf[value_keys]
 
     arr = se.data
 
@@ -90,9 +213,10 @@ def allocate(
     if arr.ndim == 2:
         arr = arr[None, ...]
 
-    _identity_check_transformations_points(sdata.points[points_layer], to_coordinate_system=to_coordinate_system)
-
-    ddf = sdata.points[points_layer]
+    ddf["x"] = ddf["x"].round().astype(int)
+    ddf["y"] = ddf["y"].round().astype(int)
+    if "z" in ddf.columns:
+        ddf["z"] = ddf["z"].round().astype(int)
 
     delayed_chunks = arr.to_delayed().flatten()
 
@@ -154,96 +278,10 @@ def allocate(
     # Combine the delayed partitions into a single Dask DataFrame
     combined_partitions = dd.from_delayed(delayed_objects)
 
-    if "z" in combined_partitions:
-        coordinates = combined_partitions.groupby(_CELL_INDEX)["x", "y", "z"].mean()
-    else:
-        coordinates = combined_partitions.groupby(_CELL_INDEX)["x", "y"].mean()
+    # remove background
+    combined_partitions = combined_partitions[combined_partitions[_CELL_INDEX] != 0]
 
-    cell_counts = combined_partitions.groupby([_CELL_INDEX, name_gene_column]).size()
+    if drop_coordinates:
+        combined_partitions = combined_partitions[[value_key, _CELL_INDEX]]
 
-    cell_counts = cell_counts.map_partitions(lambda x: x.astype(np.uint32))
-
-    coordinates, cell_counts = dask.compute(coordinates, cell_counts)
-
-    cell_counts = cell_counts.to_frame(name="values")
-    cell_counts = cell_counts.reset_index()
-
-    cell_counts[name_gene_column] = cell_counts[name_gene_column].astype("object")
-    cell_counts[name_gene_column] = pd.Categorical(cell_counts[name_gene_column])
-
-    columns_categories = cell_counts[name_gene_column].cat.categories.to_list()
-    columns_nodes = pd.Categorical(cell_counts[name_gene_column], categories=columns_categories, ordered=True)
-
-    indices_of_aggregated_rows = np.array(cell_counts[_CELL_INDEX])
-    rows_categories = np.unique(indices_of_aggregated_rows)
-
-    rows_nodes = pd.Categorical(indices_of_aggregated_rows, categories=rows_categories, ordered=True)
-
-    X = sparse.coo_matrix(
-        (
-            cell_counts["values"].values.ravel(),
-            (rows_nodes.codes, columns_nodes.codes),
-        ),
-        shape=(len(rows_categories), len(columns_categories)),
-    ).tocsr()
-
-    adata = AnnData(
-        X,
-        obs=pd.DataFrame(index=rows_categories),
-        var=pd.DataFrame(index=columns_categories),
-        dtype=X.dtype,
-    )
-
-    coordinates.index = coordinates.index.map(str)
-
-    # sanity check
-    assert np.array_equal(np.unique(coordinates.index), np.unique(adata.obs.index))
-
-    # make sure coordinates is in same order as adata
-    coordinates = coordinates.reindex(adata.obs.index)
-
-    adata = adata[adata.obs.index != "0"]
-
-    adata.obsm["spatial"] = coordinates[coordinates.index != "0"].values
-    adata.obs[_INSTANCE_KEY] = adata.obs.index.astype(int)
-
-    adata.obs[_REGION_KEY] = pd.Categorical([labels_layer] * len(adata.obs))
-
-    _uuid_value = str(uuid.uuid4())[:8]
-    adata.obs.index = adata.obs.index.map(lambda x: f"{x}_{labels_layer}_{_uuid_value}")
-
-    adata.obs.index.name = _CELL_INDEX
-
-    if append:
-        region = []
-        if output_layer in [*sdata.tables]:
-            if labels_layer in sdata.tables[output_layer].obs[_REGION_KEY].cat.categories:
-                raise ValueError(
-                    f"'{labels_layer}' already exists as a region in the 'sdata.tables[{output_layer}]' object. "
-                    "Please choose a different labels layer, choose a different 'output_layer' or set append to False and overwrite to True to overwrite the existing table."
-                )
-            adata = ad.concat([sdata.tables[output_layer], adata], axis=0)
-            # get the regions already in sdata, and append the new one
-            region = sdata.tables[output_layer].obs[_REGION_KEY].cat.categories.to_list()
-        region.append(labels_layer)
-
-    else:
-        region = [labels_layer]
-
-    sdata = add_table_layer(
-        sdata,
-        adata=adata,
-        output_layer=output_layer,
-        region=region,
-        overwrite=overwrite,
-    )
-
-    if update_shapes_layers:
-        sdata = filter_shapes_layer(
-            sdata,
-            table_layer=output_layer,
-            labels_layer=labels_layer,
-            prefix_filtered_shapes_layer="filtered_segmentation",
-        )
-
-    return sdata
+    return combined_partitions

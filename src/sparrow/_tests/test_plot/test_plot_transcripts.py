@@ -12,4 +12,4 @@ def test_analyse_genes_left_out(sdata_transcripts, tmp_path):
         output=os.path.join(tmp_path, "labels_nucleus"),
     )
 
-    assert df.shape == (98, 3)
+    assert df.shape == (96, 3)

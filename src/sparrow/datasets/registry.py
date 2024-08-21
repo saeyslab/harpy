@@ -19,8 +19,12 @@ registry = pooch.create(
         "transcriptomics/resolve/mouse/20272_slide1_A1-1_results_4288_2144.txt": "1ac0cc9a8e6cb741cc9634fafb6d1a5c0c8ba6593755fa98ba94f2549bed8f4d",
         "transcriptomics/resolve/mouse/dummy_markers.csv": "3d62c198f5dc1636f2d4faf3c564fad4a3313026f561d2e267e2061a2356432c",
         "transcriptomics/resolve/mouse/markerGeneListMartinNoLow.csv": "1ffefe7d4e72e05ef158ee1e73919b50882a97b6590f4ae977041d6b8b66a459",
-        "transcriptomics/resolve/mouse/sdata_transcriptomics.zarr.zip": "32b369195f924f31e57de66a4daa10f34ae049611cfbface46c928fbe40b8fbb",
+        "transcriptomics/resolve/mouse/sdata_transcriptomics.zarr.zip": "30a5649b8a463a623d4e573716f8c365df8c5eed3e77b3e81abf0acaf5ffd1f3",
         "transcriptomics/resolve/mouse/sdata_transcriptomics_coordinate_systems_unit_test.zarr.zip": "ef2ba1c0f6cc9aebe4cf394d1ee00e0622ea4f9273fedd36feb9c7a2363e41a7",
+        "transcriptomics/visium_hd/mouse/Visium_HD_Mouse_Small_Intestine_tissue_image.btf": "924e0f472007ae3d5983a29fb802537dad9cfe914176edcaad4dfcbf265988a2",
+        "transcriptomics/visium_hd/mouse/masks.geojson": "a02377ce9924662b440fd7ab91da95e51344e82cda5f27d698ca820030fbfbf3",
+        "transcriptomics/visium_hd/mouse/binned_outputs/square_002um/spatial/tissue_positions.parquet": "e5744349d3b1d72d89c926aad099eda5d09bd59f3128da5c3562d50225161911",
+        "transcriptomics/visium_hd/mouse/binned_outputs/square_002um/filtered_feature_bc_matrix.h5": "7e5f205a05d6b985a8c365554f6d428ca7fd22065eb89cd277806231528ddaae",
         "proteomics/mibi_tof/sdata_multi_channel.zarr.zip": "930fd2574666b90d5d6660ad8b52d47afffc9522704b9e6fef39d11c9cfff06e",
     },
 )
