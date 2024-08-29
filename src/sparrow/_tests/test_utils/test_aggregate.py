@@ -3,7 +3,8 @@ import numpy as np
 from scipy import ndimage
 from xrspatial import zonal_stats
 
-from sparrow.utils._aggregate import Aggregator
+from sparrow.utils._aggregate import Aggregator, _get_mask_area
+from sparrow.utils._keys import _CELLSIZE_KEY
 
 
 def test_aggregate_sum(sdata):
@@ -122,3 +123,14 @@ def test_aggregate_mean(sdata):
     )
 
     assert np.allclose(df_mean[2].values, scipy_mean, rtol=0, atol=1e-5)
+
+
+def test_get_mask_area(sdata):
+    se_labels = sdata["blobs_labels"]
+    mask = se_labels.data[None, ...].rechunk(512)
+    df = _get_mask_area(mask)
+
+    mask_compute = mask.compute()
+    area = ndimage.sum_labels(input=np.ones(mask_compute.shape), labels=mask_compute, index=np.unique(mask_compute))
+
+    assert np.array_equal(df[_CELLSIZE_KEY].values, area)
