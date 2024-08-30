@@ -7,7 +7,6 @@ import dask.array as da
 import numpy as np
 import pandas as pd
 from anndata import AnnData
-from dask import delayed
 from numpy.typing import NDArray
 from spatialdata import SpatialData
 from spatialdata.transformations import get_transformation
@@ -132,28 +131,21 @@ def cell_clustering_preprocess(
             lambda m, f, **kw: _cell_cluster_count(m, f, **kw),
             _array_labels,
             _array_clusters,
-            dtype=np.int32,
-            chunks=(1, len(_unique_mask), len(_unique_clusters)),
+            dtype=_array_labels.dtype,
+            chunks=(len(_unique_mask), len(_unique_clusters)),
+            drop_axis=0,
             unique_mask=_unique_mask,
             unique_clusters=_unique_clusters,
         )
 
-        sum_of_chunks = np.zeros((len(_unique_mask), len(_unique_clusters)), dtype=int)
+        dask_chunks = [
+            da.from_delayed(_chunk, shape=(len(_unique_mask), len(_unique_clusters)), dtype=_array_labels.dtype)
+            for _chunk in chunk_sum.to_delayed().flatten()
+        ]
 
-        num_chunks = chunk_sum.numblocks
-        tasks = []
+        dask_array = da.stack(dask_chunks, axis=0)
+        sum_of_chunks = da.sum(dask_array, axis=0).compute()
 
-        # sum the result for each chunk
-        for _i in range(num_chunks[0]):
-            for _j in range(num_chunks[1]):
-                for _k in range(num_chunks[2]):
-                    current_chunk = chunk_sum.blocks[_i, _j, _k]
-                    task = delayed(np.add)(sum_of_chunks, current_chunk)
-                    tasks.append(task)
-
-        total_sum_delayed = delayed(sum)(tasks)
-
-        sum_of_chunks = total_sum_delayed.compute()
         _cells_id.append(_unique_mask.reshape(-1, 1))
         _results_sum_of_chunks.append(sum_of_chunks)
         _region_keys.extend(_unique_mask.shape[0] * [labels_layer_cells[i]])
