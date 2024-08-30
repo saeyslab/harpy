@@ -125,6 +125,80 @@ def test_aggregate_mean(sdata):
     assert np.allclose(df_mean[2].values, scipy_mean, rtol=0, atol=1e-5)
 
 
+def test_aggregate_var(sdata):
+    se_image = sdata["blobs_image"]
+    se_labels = sdata["blobs_labels"]
+
+    image = se_image.data[:, None, ...]
+    mask = se_labels.data[None, ...]
+
+    aggregator = Aggregator(
+        mask_dask_array=mask.rechunk(512),
+        image_dask_array=image.rechunk(512),
+    )
+    df_var = aggregator.aggregate_var()
+
+    assert df_var.shape[1] - 1 == image.shape[0]
+
+    scipy_var = ndimage.variance(
+        input=image[0].compute(),
+        labels=mask.compute(),
+        index=da.unique(mask).compute(),
+    )
+
+    assert np.allclose(df_var[0].values, scipy_var, rtol=0, atol=1e-5)
+
+    scipy_var = ndimage.variance(
+        input=image[2].compute(),
+        labels=mask.compute(),
+        index=da.unique(mask).compute(),
+    )
+
+    assert np.allclose(df_var[2].values, scipy_var, rtol=0, atol=1e-5)
+
+
+def test_aggregate_var_3D(sdata):
+    se_image = sdata["blobs_image"]
+    se_labels = sdata["blobs_labels"]
+
+    image = se_image.data[:, None, ...]
+    mask = se_labels.data[None, ...]
+
+    # make artificial 3D mask and image
+    mask = da.concatenate([mask, mask + mask])
+    image = da.concatenate(
+        [
+            image,
+            image + image,
+        ],
+        axis=1,
+    )
+
+    aggregator = Aggregator(
+        mask_dask_array=mask.rechunk((1, 512, 512)),
+        image_dask_array=image.rechunk((1, 1, 512, 512)),
+    )
+    df_var = aggregator.aggregate_var()
+
+    assert df_var.shape[1] - 1 == image.shape[0]
+
+    scipy_var = ndimage.variance(
+        input=image[0].compute(),
+        labels=mask.compute(),
+        index=da.unique(mask).compute(),
+    )
+
+    assert np.allclose(df_var[0].values, scipy_var, rtol=0, atol=1e-5)
+
+    scipy_var = ndimage.variance(
+        input=image[2].compute(),
+        labels=mask.compute(),
+        index=da.unique(mask).compute(),
+    )
+
+    assert np.allclose(df_var[2].values, scipy_var, rtol=0, atol=1e-5)
+
+
 def test_get_mask_area(sdata):
     se_labels = sdata["blobs_labels"]
     mask = se_labels.data[None, ...].rechunk(512)
@@ -132,5 +206,23 @@ def test_get_mask_area(sdata):
 
     mask_compute = mask.compute()
     area = ndimage.sum_labels(input=np.ones(mask_compute.shape), labels=mask_compute, index=np.unique(mask_compute))
+
+    assert np.array_equal(df[_CELLSIZE_KEY].values, area)
+
+
+def test_get_mask_area_subset(sdata):
+    se_labels = sdata["blobs_labels"]
+    mask = se_labels.data[None, ...].rechunk(512)
+    mask_compute = mask.compute()
+
+    index = np.unique(mask_compute)
+    subset_index = [
+        index[4],
+        index[2],
+        index.max() + 10,
+    ]  # pick subset + an index not in mask. It will return 0 for this index.
+    df = _get_mask_area(mask, index=subset_index)
+
+    area = ndimage.sum_labels(input=np.ones(mask_compute.shape), labels=mask_compute, index=subset_index)
 
     assert np.array_equal(df[_CELLSIZE_KEY].values, area)

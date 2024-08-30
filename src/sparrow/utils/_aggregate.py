@@ -1,9 +1,7 @@
 # write general functions to do an aggregation between an image layer or points layer and a labels layer.
-from collections import defaultdict
 from functools import partial
 from typing import Callable
 
-import dask
 import dask.array as da
 import numpy as np
 import pandas as pd
@@ -15,13 +13,17 @@ from sparrow.utils._keys import _CELLSIZE_KEY, _INSTANCE_KEY
 
 # maybe support DataArray as input instead of dask arrays.
 class Aggregator:
+    """Helper class to calulate aggregated 'sum', 'mean', 'var', 'area', 'min', 'max' of image and labels using Dask."""
+
     def __init__(self, mask_dask_array: da.Array, image_dask_array: da.Array):
         self._labels = (
             da.unique(mask_dask_array).compute()
         )  # calculate this one time during initialization, otherwise we would need to calculate this multiple times.
-        assert image_dask_array.ndim == 4
-        assert mask_dask_array.ndim == 3
-        assert image_dask_array.shape[1:] == mask_dask_array.shape
+        assert image_dask_array.ndim == 4, "Currently only 4D image arrays are supported ('c', 'z', 'y', 'x')."
+        assert mask_dask_array.ndim == 3, "Currently only 3D masks are supported ('z', 'y', 'x')."
+        assert (
+            image_dask_array.shape[1:] == mask_dask_array.shape
+        ), "The mask and the image should have the same spatial dimensions ('z', 'y', 'x')."
         self._mask = mask_dask_array
         self._image = image_dask_array
 
@@ -237,42 +239,6 @@ class Aggregator:
         min_max_func = da.max if min_or_max == "max" else da.min
 
         return min_max_func(dask_array, axis=1).compute().reshape(-1, 1)
-
-
-# util function to get the area of each label in mask
-def _get_mask_area_deprecated(mask: da.Array, calculate_background_area: bool = False) -> pd.DataFrame:
-    """
-    Calculate area of each label in mask. Return as pd.Series.
-
-    Deprecated, because using scipy to calculate area will scale better for large masks image.
-    """
-
-    @dask.delayed
-    def calculate_area(mask_chunk: np.ndarray) -> tuple:
-        unique, counts = np.unique(mask_chunk, return_counts=True)
-
-        return unique, counts
-
-    delayed_results = [calculate_area(chunk) for chunk in mask.to_delayed().flatten()]
-
-    results = dask.compute(*delayed_results)
-
-    combined_counts = defaultdict(int)
-
-    # aggregate
-    for unique, counts in results:
-        for label, count in zip(unique, counts):
-            if not calculate_background_area and label == 0:
-                continue
-            combined_counts[int(label)] += count
-
-    combined_counts = pd.Series(combined_counts)
-    combined_counts.index.name = _INSTANCE_KEY
-
-    combined_counts.name = _CELLSIZE_KEY
-    combined_counts = combined_counts.to_frame().reset_index()
-
-    return combined_counts
 
 
 def _get_mask_area(mask: da.Array, index: NDArray | None = None) -> pd.DataFrame:
