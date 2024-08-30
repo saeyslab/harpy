@@ -13,7 +13,7 @@ from sparrow.utils._keys import _CELLSIZE_KEY, _INSTANCE_KEY
 
 # maybe support DataArray as input instead of dask arrays.
 class Aggregator:
-    """Helper class to calulate aggregated 'sum', 'mean', 'var', 'area', 'min', 'max' of image and labels using Dask."""
+    """Helper class to calulate aggregated 'sum', 'mean', 'var', 'area', 'min' or 'max' of image and labels using Dask."""
 
     def __init__(self, mask_dask_array: da.Array, image_dask_array: da.Array):
         if not np.issubdtype(mask_dask_array.dtype, np.integer):
