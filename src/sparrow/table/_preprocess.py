@@ -1,18 +1,16 @@
-from collections import defaultdict
 from types import MappingProxyType
 from typing import Any, Iterable, Mapping, Optional
 
-import dask
 import numpy as np
 import pandas as pd
 import scanpy as sc
-from dask.array import Array
 from scipy.sparse import issparse
 from spatialdata import SpatialData
 
 from sparrow.image._image import _get_spatial_element
 from sparrow.shape._shape import filter_shapes_layer
 from sparrow.table._table import ProcessTable, add_table_layer
+from sparrow.utils._aggregate import _get_mask_area
 from sparrow.utils._keys import _CELL_INDEX, _CELLSIZE_KEY, _INSTANCE_KEY, _RAW_COUNTS_KEY, _REGION_KEY
 from sparrow.utils.pylogger import get_pylogger
 
@@ -352,33 +350,3 @@ class Preprocess(ProcessTable):
                 )
 
         return self.sdata
-
-
-def _get_mask_area(mask: Array) -> pd.DataFrame:
-    """Calculate area of each label in mask. Return as pd.Series."""
-
-    @dask.delayed
-    def calculate_area(mask_chunk: np.ndarray) -> tuple:
-        unique, counts = np.unique(mask_chunk, return_counts=True)
-
-        return unique, counts
-
-    delayed_results = [calculate_area(chunk) for chunk in mask.to_delayed().flatten()]
-
-    results = dask.compute(*delayed_results)
-
-    combined_counts = defaultdict(int)
-
-    # aggregate
-    for unique, counts in results:
-        for label, count in zip(unique, counts):
-            if label > 0:
-                combined_counts[int(label)] += count
-
-    combined_counts = pd.Series(combined_counts)
-    combined_counts.index.name = _INSTANCE_KEY
-
-    combined_counts.name = _CELLSIZE_KEY
-    combined_counts = combined_counts.to_frame().reset_index()
-
-    return combined_counts
