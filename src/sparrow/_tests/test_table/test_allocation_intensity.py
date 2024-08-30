@@ -1,4 +1,3 @@
-import dask.array as da
 import numpy as np
 import pytest
 from anndata import AnnData
@@ -7,7 +6,6 @@ from xrspatial import zonal_stats
 
 from sparrow.image.segmentation._align_masks import align_labels_layers
 from sparrow.table._allocation_intensity import (
-    _calculate_intensity,
     allocate_intensity,
 )
 from sparrow.table._regionprops import add_regionprop_features
@@ -71,6 +69,7 @@ def test_allocate_intensity(sdata_multi_c: SpatialData):
         output_layer="table_intensities",
         chunks=100,
         append=False,
+        channels=[0, 4, 5],
         overwrite=True,
     )
 
@@ -112,37 +111,3 @@ def test_allocate_intensity_overwrite(sdata_multi_c: SpatialData):
             append=True,
             overwrite=False,
         )
-
-
-def test_calculate_intensity():
-    chunk_size = (2, 2)
-
-    mask_dask_array = da.from_array(
-        np.array([[3, 0, 0, 0], [0, 3, 1, 1], [1, 0, 1, 1], [1, 1, 0, 0]]),
-        chunks=chunk_size,
-    )
-    mask_dask_array = mask_dask_array[None, ...]
-
-    float_dask_array = da.from_array(
-        np.array(
-            [
-                [0.5, 1.5, 2.5, 3.5],
-                [4.5, 5.5, 6.5, 7.5],
-                [8.5, 9.5, 10.5, 11.5],
-                [12.5, 13.5, 14.5, 15.5],
-            ]
-        ),
-        chunks=chunk_size,
-    )
-
-    float_dask_array = float_dask_array[None, ...]
-
-    sum_of_chunks = _calculate_intensity(
-        mask_dask_array=mask_dask_array,
-        float_dask_array=float_dask_array,
-    )
-
-    # intensity from label==0, label==1 and label==3
-    expected_result = np.array([[51.5], [70.5], [6.0]])
-
-    assert np.array_equal(sum_of_chunks, expected_result)

@@ -4,18 +4,15 @@ import uuid
 from typing import Iterable
 
 import anndata as ad
-import dask.array as da
 import numpy as np
 import pandas as pd
 from anndata import AnnData
-from dask import delayed
-from dask.array import Array, unique
 from dask_image.ndmeasure import center_of_mass
-from numpy.typing import NDArray
 from spatialdata import SpatialData
 
 from sparrow.image._image import _get_spatial_element, _get_translation
 from sparrow.table._table import add_table_layer
+from sparrow.utils._aggregate import Aggregator
 from sparrow.utils._keys import _CELL_INDEX, _INSTANCE_KEY, _REGION_KEY
 from sparrow.utils.pylogger import get_pylogger
 
@@ -176,26 +173,23 @@ def allocate_intensity(
     _array_img = _array_img.rechunk(chunks) if chunks is not None else _array_img
     _array_mask_rechunked = _array_mask.rechunk(chunks_masks) if chunks_masks is not None else _array_mask
 
-    channel_intensities = []
-    for channel in channels:
-        channel_idx = list(se_image.c.data).index(channel)
-        _array_img_c = _array_img[channel_idx]
+    assert all(
+        element in se_image.c.data for element in channels
+    ), f"Some channels specified via 'channels' could not be found in image layer '{img_layer}'. Please choose 'channels' from '{list( se_image.c.data )}'."
+    channel_indices = [list(se_image.c.data).index(channel) for channel in channels]
+    _array_img = _array_img[channel_indices]
+    aggregator = Aggregator(image_dask_array=_array_img, mask_dask_array=_array_mask_rechunked)
+    df_sum = aggregator.aggregate_sum()
 
-        channel_intensities.append(
-            _calculate_intensity(
-                _array_img_c,
-                _array_mask_rechunked,
-            )
-        )
-
-    channel_intensities = np.concatenate(channel_intensities, axis=1)
+    _cells_id = df_sum[_INSTANCE_KEY].values
+    channel_intensities = df_sum.drop([_INSTANCE_KEY], axis=1).values
 
     channels = list(map(str, channels))
     var = pd.DataFrame(index=channels)
     var.index = var.index.map(str)
     var.index.name = "channels"
 
-    _cells_id = unique(se_labels.data).compute()
+    # _cells_id = unique(se_labels.data).compute()  # two times computation of unique labels, this is not necessary.
     cells = pd.DataFrame(index=_cells_id)
     _uuid_value = str(uuid.uuid4())[:8]
     cells.index = cells.index.map(lambda x: f"{x}_{labels_layer}_{_uuid_value}")
@@ -246,62 +240,3 @@ def allocate_intensity(
     )
 
     return sdata
-
-
-def _calculate_intensity(
-    float_dask_array: Array,
-    mask_dask_array: Array,
-) -> NDArray:
-    # lazy computation of pixel intensities on one channel for each label in mask_dask_array
-    # result is an array of shape (len(unique(mask_dask_array).compute(), 1 ), so be aware that if
-    # some labels are missing, e.g. unique(mask_dask_array).compute()=np.array([ 0,1,3,4 ]), resulting
-    # array will hold at postion 2 the intensity for cell with index 3.
-
-    assert float_dask_array.shape == mask_dask_array.shape
-    assert float_dask_array.ndim == 3
-    assert float_dask_array.numblocks == mask_dask_array.numblocks
-
-    labels = unique(mask_dask_array).compute()
-
-    def _calculate_intensity_per_chunk(mask_block: NDArray, float_block: NDArray) -> NDArray:
-        sums = np.bincount(mask_block.ravel(), weights=float_block.ravel())
-
-        num_padding = (max(labels) + 1) - len(sums)
-
-        sums = np.pad(sums, (0, num_padding), "constant", constant_values=(0))
-
-        sums = sums[labels]
-
-        sums = sums.reshape(-1, 1)
-
-        return sums
-
-    chunk_sum = da.map_blocks(
-        lambda m, f: _calculate_intensity_per_chunk(m, f),
-        mask_dask_array,
-        float_dask_array,
-        dtype=float,
-        chunks=(1, len(labels), 1),
-    )
-
-    # here you could persist array of shape (num_labels * nr_of_chunks_x, nr_of_chunks_y) into memory
-    # chunk_sum=chunk_sum.persist()  --> could take a lot of memory if you would have many chunks
-    # therefore we use this delayed tasks.
-
-    sum_of_chunks = np.zeros((len(labels), 1), dtype=chunk_sum.dtype)
-
-    num_chunks = chunk_sum.numblocks
-    tasks = []
-
-    for i in range(num_chunks[0]):
-        for j in range(num_chunks[1]):
-            for k in range(num_chunks[2]):
-                current_chunk = chunk_sum.blocks[i, j, k]
-                task = delayed(np.add)(sum_of_chunks, current_chunk)
-                tasks.append(task)
-
-    total_sum_delayed = delayed(sum)(tasks)
-
-    sum_of_chunks = total_sum_delayed.compute()
-
-    return sum_of_chunks

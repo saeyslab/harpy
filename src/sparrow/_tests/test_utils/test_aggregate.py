@@ -7,6 +7,38 @@ from sparrow.utils._aggregate import Aggregator, _get_mask_area
 from sparrow.utils._keys import _CELLSIZE_KEY
 
 
+def test_aggregate_sum_dask_array():
+    chunk_size = (2, 2)
+
+    mask_dask_array = da.from_array(
+        np.array([[3, 0, 0, 0], [0, 3, 1, 1], [1, 0, 1, 1], [1, 1, 0, 0]]),
+        chunks=chunk_size,
+    )
+    mask_dask_array = mask_dask_array[None, ...]
+
+    float_dask_array = da.from_array(
+        np.array(
+            [
+                [0.5, 1.5, 2.5, 3.5],
+                [4.5, 5.5, 6.5, 7.5],
+                [8.5, 9.5, 10.5, 11.5],
+                [12.5, 13.5, 14.5, 15.5],
+            ]
+        ),
+        chunks=chunk_size,
+    )
+
+    float_dask_array = float_dask_array[None, None, ...]
+
+    aggregator = Aggregator(mask_dask_array=mask_dask_array, image_dask_array=float_dask_array)
+
+    df_sum = aggregator.aggregate_sum()
+
+    expected_result = np.array([51.5, 70.5, 6.0])
+
+    assert np.array_equal(df_sum[0].values, expected_result)
+
+
 def test_aggregate_sum(sdata):
     se_image = sdata["blobs_image"]
     se_labels = sdata["blobs_labels"]

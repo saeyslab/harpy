@@ -7,6 +7,7 @@ from hydra.core.global_hydra import GlobalHydra
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig
 from spatialdata import read_zarr
+from spatialdata.datasets import blobs
 
 from sparrow.datasets.cluster_blobs import cluster_blobs
 from sparrow.datasets.pixie_example import pixie_example
@@ -94,6 +95,11 @@ def sdata_blobs():
         shape=(512, 512), n_cell_types=10, n_cells=100, noise_level_channels=1.2, noise_level_nuclei=1.2, seed=10
     )
     yield sdata
+
+
+@pytest.fixture
+def sdata():
+    yield blobs(length=1000, n_channels=3)
 
 
 @pytest.fixture
