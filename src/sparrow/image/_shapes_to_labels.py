@@ -1,4 +1,5 @@
 import dask.array as da
+import numpy as np
 from rasterio.features import rasterize
 from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
@@ -49,13 +50,20 @@ def add_labels_layer_from_shapes_layer(
 
     x_min, y_min, x_max, y_max = sdata[shapes_layer].geometry.total_bounds
 
+    assert (
+        x_max > 0 and y_max > 0
+    ), f"The maximum of the bounding box of the shapes layer {shapes_layer} is negative. This is not allowed."
+    index = sdata[shapes_layer].index.values.astype(int)
+
+    _dtype = _get_dtype(index.max())
+
     masks = rasterize(
         zip(
             sdata[shapes_layer].geometry,
-            sdata[shapes_layer].index.values.astype(float),
+            index,
         ),
         out_shape=[int(y_max - y_min), int(x_max - x_min)],
-        dtype="uint32",
+        dtype=_dtype,
         fill=0,
     )
 
@@ -74,3 +82,19 @@ def add_labels_layer_from_shapes_layer(
     )
 
     return sdata
+
+
+def _get_dtype(value: int) -> str:
+    max_uint64 = np.iinfo(np.uint64).max
+    max_uint32 = np.iinfo(np.uint32).max
+    max_uint16 = np.iinfo(np.uint16).max
+
+    if max_uint16 >= value:
+        dtype = "uint16"
+    elif max_uint32 >= value:
+        dtype = "uint32"
+    elif max_uint64 >= value:
+        dtype = "uint64"
+    else:
+        raise ValueError(f"Maximum cell number is {value}. Values higher than {max_uint64} are not supported.")
+    return dtype
