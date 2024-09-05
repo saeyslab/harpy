@@ -1,6 +1,7 @@
 # write general functions to do an aggregation between an image layer or points layer and a labels layer.
 from functools import partial
-from typing import Callable
+from types import MappingProxyType
+from typing import Any, Callable, Mapping
 
 import dask.array as da
 import numpy as np
@@ -242,6 +243,46 @@ class Aggregator:
 
         return min_max_func(dask_array, axis=1).compute().reshape(-1, 1)
 
+    def _aggregate_custom_channel(
+        self,
+        image: da.Array,  # allow image to be None. fn should allow image
+        mask: da.Array,
+        depth: int,
+        fn: Callable,
+        fn_kwargs: Mapping[str, Any] = MappingProxyType({}),
+    ):
+        # TODO maybe estimate depth. e.g. via calculation of area, and then assume it is circle, you can estimate max diamter. Then do diamter*2 for depth.
+        # TODO: put an assert on fact that you did not chunk in z dimension.
+        depth = (0, depth, depth)
+        _labels = self._labels[self._labels != 0]
+        arrays = [mask, image]
+        dask_chunks = da.map_overlap(
+            lambda *arrays, block_info=None, **kw: _aggregate_custom_block(*arrays, block_info=block_info, **kw),
+            *arrays,
+            dtype=image.dtype,
+            chunks=(len(_labels), 1),
+            trim=False,
+            drop_axis=0,
+            boundary=0,
+            depth=depth,
+            index=_labels,
+            _depth=depth,
+            fn=fn,  # callable.
+            fn_kwargs=fn_kwargs,  # keywords of the callable
+        )
+
+        dask_chunks = [
+            da.from_delayed(_chunk, shape=(len(_labels), 1), dtype=mask.dtype)
+            for _chunk in dask_chunks.to_delayed().flatten()
+        ]
+
+        # dask_array is an array of shape (len(index), nr_of_chunks in image/mask )
+        dask_array = da.concatenate(dask_chunks, axis=1)
+
+        return (
+            da.nansum(dask_array, axis=1).compute().reshape(-1, 1)
+        )  # da.nansum ignores np.nan added by _aggregate_custom_block
+
 
 def _get_mask_area(mask: da.Array, index: NDArray | None = None) -> pd.DataFrame:
     if index is None:
@@ -295,3 +336,90 @@ def _get_min_max_dtype(array):
         return np.finfo(dtype).min, np.finfo(dtype).max
     else:
         raise TypeError("Unsupported dtype")
+
+
+def _aggregate_custom_block(
+    mask_block: NDArray,
+    image_block: NDArray,
+    index: NDArray,
+    block_info,
+    _depth,
+    fn: Callable,
+    fn_kwargs: Mapping[str, Any] = MappingProxyType({}),
+) -> NDArray:
+    assert mask_block.shape == image_block.shape
+    assert 0 not in index
+    total_nr_of_blocks = block_info[0]["num-chunks"]
+    block_location = block_info[0]["chunk-location"]
+    # check if chunk is on border of larger dask array
+    y_upper_border = block_location[1] + 1 == total_nr_of_blocks[1]
+    x_upper_border = block_location[2] + 1 == total_nr_of_blocks[2]
+    y_lower_border = block_location[1] == 0
+    x_lower_border = block_location[2] == 0
+
+    border_labels = set()
+    if not y_upper_border:
+        border_labels.update(set(np.unique(mask_block[:, -(_depth[1] + 1), _depth[2] : -_depth[2]])))
+    if not x_upper_border:
+        border_labels.update(set(np.unique(mask_block[:, _depth[1] : -_depth[1], -(_depth[2] + 1)])))
+    if not y_lower_border:
+        border_labels.update(set(np.unique(mask_block[:, _depth[1], _depth[2] : -_depth[2]])))
+    if not x_lower_border:
+        border_labels.update(set(np.unique(mask_block[:, _depth[1] : -_depth[1], _depth[2]])))
+    if 0 in border_labels:
+        border_labels.remove(0)
+
+    border_labels = list(border_labels)
+    center_of_mass_border_labels = ndimage.center_of_mass(input=mask_block, labels=mask_block, index=border_labels)
+
+    def _isin_original(center: tuple[float, float, float]):
+        return (
+            center[1] >= _depth[1]
+            and center[1] < mask_block.shape[1] - _depth[1]
+            and center[2] >= _depth[2]
+            and center[2] < mask_block.shape[2] - _depth[2]
+        )
+
+    border_labels_in_original_block = []
+    for _center in center_of_mass_border_labels:
+        if _isin_original(_center):
+            border_labels_in_original_block.append(True)
+        else:
+            border_labels_in_original_block.append(False)
+
+    # get the border labels not to consider
+    if border_labels:
+        border_labels_not_to_consider = np.array(border_labels)[~np.array(border_labels_in_original_block)]
+
+    # Set all masks that are fully outside the region to zero, they will be covered by other chunks
+    subset = mask_block[:, _depth[1] : -_depth[1], _depth[2] : -_depth[2]]
+    # Unique masks gives you all masks that are at least partially in 'original' array (i.e. without depth added)
+    unique_masks = np.unique(subset)
+    # remove masks that are on border, but are covered by other chunks, because center of mass is in other chunk
+    if border_labels:
+        unique_masks = unique_masks[~np.isin(unique_masks, border_labels_not_to_consider)]
+
+    # Create a mask for labels that are NOT in unique_masks
+    mask = ~np.isin(mask_block, unique_masks)
+    mask_block[mask] = 0
+
+    unique_masks = unique_masks[unique_masks != 0]
+    index = index[index != 0]
+
+    idxs = np.searchsorted(unique_masks, index)
+    idxs[idxs >= unique_masks.size] = 0
+    found = unique_masks[idxs] == index
+
+    result = fn(
+        mask_block, **fn_kwargs
+    )  # so fn would take in mask_block and mask_image, and a 1D array of shape unique_masks.shape
+    result = result.flatten()
+    assert (
+        result.shape == unique_masks.shape
+    ), "Callable 'fn' should return an array with length equal to the number of non zero labels in the provided mask."
+    assert np.issubdtype(result.dtype, np.floating), "Callable 'fn' should return an array of dtype 'float'."
+    if any(np.isnan(result)):
+        raise AssertionError("Result of callable 'fn' is not allowed to contain NaN.")
+    result = result[idxs]
+    result[~found] = np.nan
+    return result.reshape(-1, 1)
