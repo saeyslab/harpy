@@ -248,18 +248,19 @@ class Aggregator:
         image: da.Array,  # allow image to be None. fn should allow image
         mask: da.Array,
         depth: int,
-        fn: Callable,
+        fn: Callable[[NDArray[np.int_], NDArray[np.int_ | np.float_]], NDArray[np.float_]],
         fn_kwargs: Mapping[str, Any] = MappingProxyType({}),
+        dtype: np.dtype = np.float32,  # output dtype
     ):
-        # TODO maybe estimate depth. e.g. via calculation of area, and then assume it is circle, you can estimate max diamter. Then do diamter*2 for depth.
-        # TODO: put an assert on fact that you did not chunk in z dimension.
+        assert image.numblocks[0] == 1, "image can not be chunked in z-dimension. Please rechunk."
+        assert mask.numblocks[0] == 1, "mask can not be chunked in z-dimension. Please rechunk."
         depth = (0, depth, depth)
         _labels = self._labels[self._labels != 0]
-        arrays = [mask, image]
+        arrays = [mask, image]  # =[ mask,image ] if image is not None else [mask]
         dask_chunks = da.map_overlap(
             lambda *arrays, block_info=None, **kw: _aggregate_custom_block(*arrays, block_info=block_info, **kw),
             *arrays,
-            dtype=image.dtype,
+            dtype=dtype,
             chunks=(len(_labels), 1),
             trim=False,
             drop_axis=0,
@@ -272,11 +273,11 @@ class Aggregator:
         )
 
         dask_chunks = [
-            da.from_delayed(_chunk, shape=(len(_labels), 1), dtype=mask.dtype)
+            da.from_delayed(_chunk, shape=(len(_labels), 1), dtype=dtype)
             for _chunk in dask_chunks.to_delayed().flatten()
         ]
 
-        # dask_array is an array of shape (len(index), nr_of_chunks in image/mask )
+        # dask_array is an array of shape (len(_labels), nr_of_chunks in image/mask )
         dask_array = da.concatenate(dask_chunks, axis=1)
 
         return (
@@ -359,13 +360,17 @@ def _aggregate_custom_block(
 
     border_labels = set()
     if not y_upper_border:
-        border_labels.update(set(np.unique(mask_block[:, -(_depth[1] + 1), _depth[2] : -_depth[2]])))
+        # you do not only extract the ones on border, but in the overlap region that is in the current block,
+        # e.g. you go from _depth[1] : _depth[1] * 2
+        # otherwise you could miss masks that are crossing the border, but are non continuous and do not overlap with the border.
+        # we still assume diameter < depth
+        border_labels.update(set(np.unique(mask_block[:, -(_depth[1] * 2) : -(_depth[1]), _depth[2] : -_depth[2]])))
     if not x_upper_border:
-        border_labels.update(set(np.unique(mask_block[:, _depth[1] : -_depth[1], -(_depth[2] + 1)])))
+        border_labels.update(set(np.unique(mask_block[:, _depth[1] : -_depth[1], -(_depth[2] * 2) : -(_depth[2])])))
     if not y_lower_border:
-        border_labels.update(set(np.unique(mask_block[:, _depth[1], _depth[2] : -_depth[2]])))
+        border_labels.update(set(np.unique(mask_block[:, _depth[1] : _depth[1] * 2, _depth[2] : -_depth[2]])))
     if not x_lower_border:
-        border_labels.update(set(np.unique(mask_block[:, _depth[1] : -_depth[1], _depth[2]])))
+        border_labels.update(set(np.unique(mask_block[:, _depth[1] : -_depth[1], _depth[2] : _depth[2] * 2])))
     if 0 in border_labels:
         border_labels.remove(0)
 
@@ -375,9 +380,9 @@ def _aggregate_custom_block(
     def _isin_original(center: tuple[float, float, float]):
         return (
             center[1] >= _depth[1]
-            and center[1] < mask_block.shape[1] - _depth[1]
+            and center[1] < (mask_block.shape[1] - _depth[1])
             and center[2] >= _depth[2]
-            and center[2] < mask_block.shape[2] - _depth[2]
+            and center[2] < (mask_block.shape[2] - _depth[2])
         )
 
     border_labels_in_original_block = []
@@ -406,12 +411,18 @@ def _aggregate_custom_block(
     unique_masks = unique_masks[unique_masks != 0]
     index = index[index != 0]
 
+    # if no labels in the block, there is nothing to calculate,
+    # so return 1D array containing nan at each position.
+    if len(unique_masks) == 0:
+        result = np.full(index.shape, np.nan)
+        return result.reshape(-1, 1)
+
     idxs = np.searchsorted(unique_masks, index)
     idxs[idxs >= unique_masks.size] = 0
     found = unique_masks[idxs] == index
 
     result = fn(
-        mask_block, **fn_kwargs
+        mask_block, image_block, **fn_kwargs
     )  # so fn would take in mask_block and mask_image, and a 1D array of shape unique_masks.shape
     result = result.flatten()
     assert (
