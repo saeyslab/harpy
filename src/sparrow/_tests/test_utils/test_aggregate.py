@@ -1,6 +1,8 @@
 import dask.array as da
 import numpy as np
+import pytest
 from scipy import ndimage
+from skimage.measure import regionprops_table
 from xrspatial import zonal_stats
 
 from sparrow.utils._aggregate import Aggregator, _get_mask_area
@@ -258,3 +260,90 @@ def test_get_mask_area_subset(sdata):
     area = ndimage.sum_labels(input=np.ones(mask_compute.shape), labels=mask_compute, index=subset_index)
 
     assert np.array_equal(df[_CELLSIZE_KEY].values, area)
+
+
+def test_aggregate_custom_channel(sdata):
+    def _calculate_intensity_mean(mask_block, image_block):
+        table = regionprops_table(label_image=mask_block, intensity_image=image_block, properties=["intensity_mean"])
+        return table["intensity_mean"]
+
+    se_image = sdata["blobs_image"]
+    se_labels = sdata["blobs_labels"]
+
+    image = se_image.data[:, None, ...]
+    mask = se_labels.data[None, ...]
+
+    aggregator = Aggregator(
+        mask_dask_array=mask.rechunk(512),
+        image_dask_array=image.rechunk(512),
+    )
+
+    intensity_mean = aggregator._aggregate_custom_channel(
+        image=image[0],
+        mask=mask,
+        depth=200,
+        fn=_calculate_intensity_mean,
+    )
+
+    intensity_mean_skimage = _calculate_intensity_mean(mask.compute(), image[0].compute()).astype(np.float32)
+
+    assert np.array_equal(intensity_mean.flatten(), intensity_mean_skimage.flatten())
+
+
+def test_aggregate_custom_channel_fails(sdata):
+    def _calculate_centroid_weighted(mask_block, image_block):
+        table = regionprops_table(label_image=mask_block, intensity_image=image_block, properties=["centroid_weighted"])
+        return table["centroid_weighted-1"]
+
+    se_image = sdata["blobs_image"]
+    se_labels = sdata["blobs_labels"]
+
+    image = se_image.data[:, None, ...]
+    mask = se_labels.data[None, ...]
+
+    aggregator = Aggregator(
+        mask_dask_array=mask.rechunk(512),
+        image_dask_array=image.rechunk(512),
+    )
+
+    centroid = aggregator._aggregate_custom_channel(
+        image=image[0],
+        mask=mask,
+        depth=200,
+        fn=_calculate_centroid_weighted,
+    )
+
+    centroid_skimage = _calculate_centroid_weighted(mask.compute(), image[0].compute()).astype(np.float32)
+
+    # Does not work for calculation of centroid, because this requires global information.
+    # could work if we would also pass block info to custom callable fn.
+    with pytest.raises(AssertionError):
+        assert np.array_equal(centroid.flatten(), centroid_skimage.flatten())
+
+
+def test_aggregate_custom_channel_mask(sdata):
+    # also works for euler,..
+    def _calculate_eccentricity(mask_block):
+        table = regionprops_table(label_image=mask_block[0], intensity_image=None, properties=["eccentricity"])
+        return table["eccentricity"]
+
+    se_image = sdata["blobs_image"]
+    se_labels = sdata["blobs_labels"]
+
+    image = se_image.data[:, None, ...]
+    mask = se_labels.data[None, ...]
+
+    aggregator = Aggregator(
+        mask_dask_array=mask.rechunk(512),
+        image_dask_array=image.rechunk(512),
+    )
+    eccentricity = aggregator._aggregate_custom_channel(
+        image=None,
+        mask=mask,
+        depth=200,
+        fn=_calculate_eccentricity,
+        dtype=np.float32,
+    )
+    eccentricity_skimage = _calculate_eccentricity(mask.compute()).astype(np.float32)
+
+    assert np.array_equal(eccentricity.flatten(), eccentricity_skimage.flatten())
