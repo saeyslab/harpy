@@ -256,7 +256,7 @@ class Aggregator:
         dtype: np.dtype = np.float32,  # output dtype
     ) -> NDArray:
         """
-        Aggregates a custom operation over a masked region of an image, with the option to pass additional parameters to a custom function using `dask`.
+        Aggregates a custom operation over a masked region of an image, with the option to pass additional parameters to a custom function.
 
         Parameters
         ----------
