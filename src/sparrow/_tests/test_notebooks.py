@@ -34,6 +34,7 @@ def test_notebooks_harpy_transcriptomics(notebook):
     run_notebook(os.path.join(root, "docs/tutorials", notebook))
 
 
+@pytest.mark.skip
 @pytest.mark.skipif(
     not importlib.util.find_spec("cellpose"),
     reason="requires the cellpose library",

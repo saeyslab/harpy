@@ -1,3 +1,5 @@
+import re
+
 import dask.array as da
 import numpy as np
 import pytest
@@ -262,25 +264,25 @@ def test_get_mask_area_subset(sdata):
     assert np.array_equal(df[_CELLSIZE_KEY].values, area)
 
 
-def test_aggregate_custom_channel(sdata):
+def test_aggregate_custom_channel(sdata_multi_c_no_backed):
     def _calculate_intensity_mean(mask_block, image_block):
         table = regionprops_table(label_image=mask_block, intensity_image=image_block, properties=["intensity_mean"])
         return table["intensity_mean"]
 
-    se_image = sdata["blobs_image"]
-    se_labels = sdata["blobs_labels"]
+    se_image = sdata_multi_c_no_backed["raw_image"]
+    se_labels = sdata_multi_c_no_backed["masks_whole"]
 
     image = se_image.data[:, None, ...]
     mask = se_labels.data[None, ...]
 
     aggregator = Aggregator(
-        mask_dask_array=mask.rechunk(512),
-        image_dask_array=image.rechunk(512),
+        mask_dask_array=mask,
+        image_dask_array=image,
     )
 
     intensity_mean = aggregator._aggregate_custom_channel(
-        image=image[0],
-        mask=mask,
+        image=image[0].rechunk(210),
+        mask=mask.rechunk(210),
         depth=200,
         fn=_calculate_intensity_mean,
     )
@@ -290,25 +292,25 @@ def test_aggregate_custom_channel(sdata):
     assert np.array_equal(intensity_mean.flatten(), intensity_mean_skimage.flatten())
 
 
-def test_aggregate_custom_channel_fails(sdata):
+def test_aggregate_custom_channel_fails(sdata_multi_c_no_backed):
     def _calculate_centroid_weighted(mask_block, image_block):
         table = regionprops_table(label_image=mask_block, intensity_image=image_block, properties=["centroid_weighted"])
         return table["centroid_weighted-1"]
 
-    se_image = sdata["blobs_image"]
-    se_labels = sdata["blobs_labels"]
+    se_image = sdata_multi_c_no_backed["raw_image"]
+    se_labels = sdata_multi_c_no_backed["masks_whole"]
 
     image = se_image.data[:, None, ...]
     mask = se_labels.data[None, ...]
 
     aggregator = Aggregator(
-        mask_dask_array=mask.rechunk(512),
-        image_dask_array=image.rechunk(512),
+        mask_dask_array=mask,
+        image_dask_array=image,
     )
 
     centroid = aggregator._aggregate_custom_channel(
-        image=image[0],
-        mask=mask,
+        image=image[0].rechunk(210),
+        mask=mask.rechunk(210),
         depth=200,
         fn=_calculate_centroid_weighted,
     )
@@ -321,11 +323,71 @@ def test_aggregate_custom_channel_fails(sdata):
         assert np.array_equal(centroid.flatten(), centroid_skimage.flatten())
 
 
-def test_aggregate_custom_channel_mask(sdata):
-    # also works for euler,..
+def test_aggregate_custom_channel_mask(sdata_multi_c_no_backed):
+    # also works for euler,..etc
     def _calculate_eccentricity(mask_block):
         table = regionprops_table(label_image=mask_block[0], intensity_image=None, properties=["eccentricity"])
         return table["eccentricity"]
+
+    se_image = sdata_multi_c_no_backed["raw_image"]
+    se_labels = sdata_multi_c_no_backed["masks_whole"]
+
+    image = se_image.data[:, None, ...]
+    mask = se_labels.data[None, ...]
+
+    aggregator = Aggregator(
+        mask_dask_array=mask,
+        image_dask_array=image,
+    )
+    eccentricity = aggregator._aggregate_custom_channel(
+        image=None,
+        mask=mask.rechunk(210),
+        depth=200,
+        fn=_calculate_eccentricity,
+        dtype=np.float32,
+    )
+    eccentricity_skimage = _calculate_eccentricity(mask.compute()).astype(np.float32)
+
+    assert np.array_equal(eccentricity.flatten(), eccentricity_skimage.flatten())
+
+
+def test_aggregate_custom_channel_multiple_features(sdata_multi_c_no_backed):
+    def _calculate_intensity_mean_area(mask_block, image_block):
+        table = regionprops_table(
+            label_image=mask_block, intensity_image=image_block, properties=["area", "intensity_mean"]
+        )
+        return np.stack([table["intensity_mean"], table["area"]], axis=1)
+
+    se_image = sdata_multi_c_no_backed["raw_image"]
+    se_labels = sdata_multi_c_no_backed["masks_whole"]
+
+    image = se_image.data[:, None, ...]
+    mask = se_labels.data[None, ...]
+
+    aggregator = Aggregator(
+        mask_dask_array=mask,
+        image_dask_array=image,
+    )
+
+    intensity_mean_area = aggregator._aggregate_custom_channel(
+        image=image[0].rechunk(210),
+        mask=mask.rechunk(210),
+        depth=200,
+        fn=_calculate_intensity_mean_area,
+        features=2,
+    )
+
+    intensity_mean_area_skimage = _calculate_intensity_mean_area(mask.compute(), image[0].compute()).astype(np.float32)
+
+    assert np.array_equal(intensity_mean_area.reshape(-1, 2), intensity_mean_area_skimage.reshape(-1, 2))
+
+
+def test_aggregate_custom_channel_multiple_features_sdata(sdata):
+    def _calculate_intensity_mean_area(mask_block, image_block):
+        table = regionprops_table(
+            label_image=mask_block, intensity_image=image_block, properties=["area", "intensity_mean"]
+        )
+        return np.stack([table["intensity_mean"], table["area"]], axis=1)
 
     se_image = sdata["blobs_image"]
     se_labels = sdata["blobs_labels"]
@@ -334,16 +396,22 @@ def test_aggregate_custom_channel_mask(sdata):
     mask = se_labels.data[None, ...]
 
     aggregator = Aggregator(
-        mask_dask_array=mask.rechunk(512),
-        image_dask_array=image.rechunk(512),
+        mask_dask_array=mask,
+        image_dask_array=image,
     )
-    eccentricity = aggregator._aggregate_custom_channel(
-        image=None,
-        mask=mask,
-        depth=200,
-        fn=_calculate_eccentricity,
-        dtype=np.float32,
-    )
-    eccentricity_skimage = _calculate_eccentricity(mask.compute()).astype(np.float32)
 
-    assert np.array_equal(eccentricity.flatten(), eccentricity_skimage.flatten())
+    # sdata contains masks that span almost complete tissue, so an assertion error will be raised,
+    # because we have masks with greater diameter than the depth.
+    with pytest.raises(
+        AssertionError,
+        match=re.escape(
+            "We expect exactly one non-NaN element per row (each column corresponding to a chunk of 'mask'). Please consider increasing 'depth' parameter."
+        ),
+    ):
+        aggregator._aggregate_custom_channel(
+            image=image[0].rechunk(512),
+            mask=mask.rechunk(512),
+            depth=200,
+            fn=_calculate_intensity_mean_area,
+            features=2,
+        )

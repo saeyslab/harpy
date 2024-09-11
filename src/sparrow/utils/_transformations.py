@@ -25,7 +25,7 @@ def _get_translation_values(translation: Sequence | Translation | Identity) -> t
 
 
 def _identity_check_transformations_points(ddf: DataFrame, to_coordinate_system: str = "global"):
-    """Check that points layer has not other transformations associated that an Identity transformation."""
+    """Check that the points layer has no transformations associated with it other than an Identity transformation."""
     transformations = get_transformation(ddf, get_all=True)
 
     if to_coordinate_system not in [*transformations]:

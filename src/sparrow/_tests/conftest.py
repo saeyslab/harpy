@@ -72,6 +72,12 @@ def sdata_multi_c(tmpdir):
 
 
 @pytest.fixture
+def sdata_multi_c_no_backed():
+    sdata = mibi_example()
+    yield sdata
+
+
+@pytest.fixture
 def sdata_transcripts(tmpdir):
     sdata = resolve_example()
     # backing store for specific unit test
