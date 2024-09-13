@@ -11,19 +11,71 @@ from sparrow.shape._shape import add_shapes_layer
 
 def add_grid_labels_layer(
     sdata,
-    shape: tuple[int, int],
-    hex_size: int,
-    output_shapes_layer: str,
+    shape: tuple[int, int],  # shape of the resulting labels layer, shape y, x
+    size: int,  # radius of the hexagon, or size length of the square.
+    output_shapes_layer: str,  # shapes layer corresponding to the labels layer
     output_labels_layer: str,
-    offset: tuple[int, int] = (0, 0),  # we recommend setting a non-zero offset via a translation
+    grid_type: str = "hexagon",  # can be either "hexagon" or "square".
+    offset: tuple[int, int] = (0, 0),  # we recommend setting a non-zero offset via a translation.
     chunks: str | tuple[int, ...] | int | None = None,
     transformations: MappingToCoordinateSystem_t | None = None,
     scale_factors: ScaleFactors_t | None = None,
     overwrite: bool = True,
 ) -> SpatialData:
-    # add option for 'grid' or 'hexagonal'.
-    polygons = _create_hexagon_shapes(shape, hex_size=hex_size, offset=offset)
-    # polygons = _create_square_shapes(shape, square_size=hex_size, offset=offset)
+    """
+    Adds a grid-based labels layer to the SpatialData object using either a hexagonal or square grid.
+
+    The function creates a corresponding shapes layer based on the specified grid type and parameters.
+
+    Parameters
+    ----------
+    sdata
+        The SpatialData object to which the new grid-based labels layer and shapes layer will be added.
+    shape
+        The (y, x) shape of the resulting labels layer. This defines the grid's size in terms of height (y) and width (x).
+    size
+        The size of the grid cells. For a hexagonal grid, this is the radius of the hexagons; for a square grid, this is the side length of the squares.
+    output_shapes_layer
+        The name of the shapes layer that corresponds to the generated grid. This layer will contain the polygons representing the grid's shapes.
+    output_labels_layer
+        The name of the labels layer that corresponds to the generated grid. This layer will contain the labels generated from the shapes.
+    grid_type
+        The type of grid to create. Can be either `"hexagon"` for a hexagonal grid or `"square"` for a square grid. The default is `"hexagon"`.
+    offset
+        An optional translation offset applied to the grid. This is a tuple `(y_offset, x_offset)` that can shift the grid. Default is `(0, 0)`,
+        but it is recommended to use a non-zero offset, and specify the offset via passing a `spatialdata.transformations.Translation` to `transformations`.
+    chunks
+        Specifies the chunk size for Dask arrays when adding the labels layer. Can be a string, tuple of integers, or `None`. If `None`, auto chunking is used.
+    transformations
+        Transformations that will be added to the resulting `output_shapes_layer` and `output_labels_layer`.
+    scale_factors
+        Scale factors to apply for multiscale. Only applies to `output_labels_layer`.
+    overwrite
+        If True, overwrites the `output_shapes_layer` and `output_labels_layer` if it already exists in `sdata`.
+
+    Returns
+    -------
+    SpatialData
+        The updated SpatialData object with the newly added grid-based shapes and labels layers.
+
+    Raises
+    ------
+    ValueError
+        If an unsupported grid type is specified. The valid options are `"hexagon"` or `"square"`.
+
+    Notes
+    -----
+    The function first generates a grid of shapes (either hexagons or squares) based on the specified grid type and parameters. These shapes are added as
+    a new shapes layer in `sdata`. Then, a corresponding labels layer is generated from the shapes layer. The labels layer has the same spatial
+    dimensions as specified in `shape`.
+    """
+    grid_type_supported = ["hexagon", "square"]
+    if grid_type not in grid_type_supported:
+        raise ValueError(f"Invalid shape type: '{grid_type}'. Please choose from the list: {grid_type_supported}.")
+    if grid_type == "hexagon":
+        polygons = _create_hexagon_shapes(shape, hex_size=size, offset=offset)
+    if grid_type == "square":
+        polygons = _create_square_shapes(shape, square_size=size, offset=offset)
 
     sdata = add_shapes_layer(
         sdata=sdata,
@@ -44,7 +96,6 @@ def add_grid_labels_layer(
     return sdata
 
 
-# TODO: fix code duplication
 def _create_square_shapes(
     shape: tuple[int, int],  # shape, in y, x
     square_size: int = 10,  # size of the square (side length)
@@ -52,15 +103,15 @@ def _create_square_shapes(
 ) -> gpd.GeoDataFrame:
     assert len(shape) == len(offset) == 2, "currently we only support creating 2D square grid."
 
-    def create_square(cx, cy, a):
+    def _create_square(cx, cy, a):
         """Creates a square centered at (cx, cy) with side length 'a'."""
         half_size = a / 2
         points = [
-            (cx - half_size, cy - half_size),  # bottom-left
-            (cx + half_size, cy - half_size),  # bottom-right
-            (cx + half_size, cy + half_size),  # top-right
-            (cx - half_size, cy + half_size),  # top-left
-            (cx - half_size, cy - half_size),  # back to bottom-left to close the square
+            (cx - half_size, cy - half_size),
+            (cx + half_size, cy - half_size),
+            (cx + half_size, cy + half_size),
+            (cx - half_size, cy + half_size),
+            (cx - half_size, cy - half_size),
         ]
         return Polygon(points)
 
@@ -83,7 +134,7 @@ def _create_square_shapes(
     while y <= max_y_center:
         x = min_x_center
         while x <= max_x_center:
-            square = create_square(x, y, square_size)
+            square = _create_square(x, y, square_size)
             squares.append(square)
             x += horizontal_spacing
         y += vertical_spacing
@@ -101,7 +152,7 @@ def _create_hexagon_shapes(
 ) -> gpd.GeoDataFrame:
     assert len(shape) == len(offset) == 2, "currently we only support creating 2D hexagonal grid."
 
-    def create_hexagon(cx, cy, a):
+    def _create_hexagon(cx, cy, a):
         """Creates a regular hexagon centered at (cx, cy) with size 'a'."""
         angles = np.linspace(0, 2 * np.pi, 7)
         points = [(cx + a * np.sin(angle), cy + a * np.cos(angle)) for angle in angles]
@@ -130,7 +181,7 @@ def _create_hexagon_shapes(
         x_offset = (row % 2) * (horizontal_spacing / 2)
         x = min_x_center + x_offset
         while x <= max_x_center:
-            hexagon = create_hexagon(x, y, hex_size)
+            hexagon = _create_hexagon(x, y, hex_size)
             hexagons.append(hexagon)
             x += horizontal_spacing
         y += vertical_spacing

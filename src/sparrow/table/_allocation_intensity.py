@@ -12,7 +12,7 @@ from spatialdata import SpatialData
 
 from sparrow.image._image import _get_spatial_element, _get_translation
 from sparrow.table._table import add_table_layer
-from sparrow.utils._aggregate import Aggregator
+from sparrow.utils._aggregate import RasterAggregator
 from sparrow.utils._keys import _CELL_INDEX, _INSTANCE_KEY, _REGION_KEY
 from sparrow.utils.pylogger import get_pylogger
 
@@ -178,7 +178,7 @@ def allocate_intensity(
     ), f"Some channels specified via 'channels' could not be found in image layer '{img_layer}'. Please choose 'channels' from '{list( se_image.c.data )}'."
     channel_indices = [list(se_image.c.data).index(channel) for channel in channels]
     _array_img = _array_img[channel_indices]
-    aggregator = Aggregator(image_dask_array=_array_img, mask_dask_array=_array_mask_rechunked)
+    aggregator = RasterAggregator(image_dask_array=_array_img, mask_dask_array=_array_mask_rechunked)
     df_sum = aggregator.aggregate_sum()
 
     _cells_id = df_sum[_INSTANCE_KEY].values

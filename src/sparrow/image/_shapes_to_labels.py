@@ -12,6 +12,7 @@ def add_labels_layer_from_shapes_layer(
     sdata: SpatialData,
     shapes_layer: str,
     output_layer: str,
+    out_shape: tuple[int, int] | None = None,  # output shape in y, x.
     chunks: str | tuple[int, int] | int | None = None,
     scale_factors: ScaleFactors_t | None = None,
     overwrite: bool = False,
@@ -29,6 +30,11 @@ def add_labels_layer_from_shapes_layer(
         The shapes layer to be converted to a labels layer.
     output_layer
         Name of the resulting labels layer that will be added to `sdata`.
+    out_shape
+        output shape of the resulting labels layer `(y,x)`. Will be automatically calculated if set to None.
+        If `out_shape` is not `None`, with  `x_min, y_min, x_max, y_max = sdata[shapes_layer].geometry.total_bounds`,
+        and `out_shape[1] < x_max - x_min` or `out_shape[0]<y_max -y_min` (assuming `x_min>=0` and `y_min>=0`), then shapes with coordinates outside `out_shapes` will
+        not be in resulting `output_layer`.
     chunks
         If provided, the resulting dask array that contains the masks will be rechunked according to the specified chunk size.
     scale_factors
@@ -81,7 +87,10 @@ def add_labels_layer_from_shapes_layer(
     else:
         x_shape = int(x_max)
 
-    out_shape = [y_shape, x_shape]
+    if out_shape is None:
+        out_shape = [y_shape, x_shape]
+    else:
+        out_shape = out_shape
 
     _dtype = _get_dtype(index.max())
 
