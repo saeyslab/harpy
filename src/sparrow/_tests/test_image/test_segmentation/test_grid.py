@@ -73,3 +73,4 @@ def test_add_grid_labels_layer_square(square_size):
     assert np.where(array_labels > 0)[1].min() == offset[1]
     assert (sdata[output_labels_layer].shape[0] - np.where(array_labels > 0)[0].max()) <= square_size
     assert (sdata[output_labels_layer].shape[1] - np.where(array_labels > 0)[1].max()) <= square_size
+    assert (array_labels[offset[0] : -square_size, offset[1] : -square_size] != 0).all()

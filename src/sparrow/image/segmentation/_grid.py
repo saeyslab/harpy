@@ -1,5 +1,6 @@
 import geopandas as gpd
 import numpy as np
+from shapely import box
 from shapely.geometry import Polygon
 from spatialdata import SpatialData
 from spatialdata.models._utils import MappingToCoordinateSystem_t
@@ -142,6 +143,35 @@ def _create_square_shapes(
     polygons = gpd.GeoDataFrame(geometry=squares)
     polygons.index = polygons.index + 1  # index ==0 is reserved for background
 
+    return polygons
+
+
+def _create_square_shapes_vectorize(
+    shape: tuple[int, int],
+    square_size: int = 10,
+    offset: tuple[int, int] = (0, 0),
+) -> gpd.GeoDataFrame:
+    assert len(shape) == len(offset) == 2, "Only 2D square grids are supported."
+    # slightly faster than create_square_shapes
+
+    min_x, min_y = offset[1], offset[0]
+    max_x, max_y = shape[1] + offset[1], shape[0] + offset[0]
+
+    eps = 1e-05  # to include max_x - square / 2 if square_size fits perfectly in shape
+    x_centers = np.arange(min_x + square_size / 2, max_x - square_size / 2 + eps, square_size)
+    y_centers = np.arange(min_y + square_size / 2, max_y - square_size / 2 + eps, square_size)
+    x_grid, y_grid = np.meshgrid(x_centers, y_centers)
+
+    half_size = square_size / 2
+    minx = x_grid - half_size
+    maxx = x_grid + half_size
+    miny = y_grid - half_size
+    maxy = y_grid + half_size
+
+    squares = box(minx, miny, maxx, maxy)
+
+    polygons = gpd.GeoDataFrame(geometry=squares.ravel())
+    polygons.index += 1  # index ==0 is reserved for background
     return polygons
 
 
