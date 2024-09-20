@@ -71,21 +71,15 @@ def add_labels_layer_from_shapes_layer(
             "Either remove the item from the shapes layer or increase indices of shapes with 1."
         )
 
-    x_min, y_min, x_max, y_max = sdata[shapes_layer].geometry.total_bounds
+    _, _, x_max, y_max = sdata[shapes_layer].geometry.total_bounds
 
     assert (
         x_max > 0 and y_max > 0
     ), f"The maximum of the bounding box of the shapes layer {shapes_layer} is negative. This is not allowed."
     index = sdata[shapes_layer].index.values.astype(int)
 
-    if y_min > 0:
-        y_shape = int((y_max - y_min) + y_min)
-    else:
-        y_shape = int(y_max)
-    if x_min > 0:
-        x_shape = int((x_max - x_min) + x_min)
-    else:
-        x_shape = int(x_max)
+    y_shape = int(y_max)
+    x_shape = int(x_max)
 
     if out_shape is None:
         out_shape = [y_shape, x_shape]
