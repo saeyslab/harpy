@@ -19,3 +19,4 @@ dependencies:
       - jaxlib==0.4.6
       - ipython
       - ipykernel
+      - textalloc
