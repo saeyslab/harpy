@@ -50,6 +50,30 @@ def get_registry(path: str | Path | None = None) -> Pooch:
     return registry
 
 
+def get_spatialdata_registry(path: str | Path | None = None) -> Pooch:
+    """
+    Get the Pooch SpatialData registry
+
+    Parameters
+    ----------
+    path
+        If None, example data will be downloaded in the default cache folder of your os. Set this to a custom path, to change this behaviour.
+
+    Returns
+    -------
+    Pooch registry.
+    """
+    registry = pooch.create(
+        path=pooch.os_cache("sparrow") if path is None else path,
+        base_url="https://s3.embl.de/spatialdata",
+        version=__version__,
+        registry={
+            "spatialdata-sandbox/steinbock_io.zip": "e5eac7dbe316ad7008822fde95c1abacfcfc771b8f9ab28c0e6f768d293cd8d5",
+        },
+    )
+    return registry
+
+
 def _calculate_sha256(file_path):
     """Helper function to calculate the hash of a file."""
     sha256_hash = hashlib.sha256()
