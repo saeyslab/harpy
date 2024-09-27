@@ -133,6 +133,8 @@ Operations on points (`Dask` `DataFrame` object) layers.
 
 Plotting functions.
 
+### General plots
+
 ```{eval-rst}
 
 .. module:: sparrow.pl
@@ -147,6 +149,42 @@ Plotting functions.
     pl.tiling_correction
     pl.flatfield
     pl.segment
+```
+
+### Proteomics plots
+
+```{eval-rst}
+
+.. module:: sparrow.pl
+.. currentmodule:: sparrow
+
+.. autosummary::
+    :toctree: generated
+
+    pl.snr_ratio
+    pl.group_snr_ration
+    pl.snr_clustermap
+    pl.signal_clustermap
+    pl.clustermap
+
+    pl.segmentation_coverage
+    pl.segmentation_size_boxplot
+    pl.segments_per_area
+
+    pl.ridgeplot_channel
+    pl.ridgeplot_channel_sample
+```
+
+### Transcriptomics plots
+
+```{eval-rst}
+
+.. module:: sparrow.pl
+.. currentmodule:: sparrow
+
+.. autosummary::
+    :toctree: generated
+
     pl.sanity_plot_transcripts_matrix
     pl.analyse_genes_left_out
     pl.transcript_density
@@ -170,4 +208,26 @@ Utility functions.
     :toctree: generated
 
     utils.bounding_box_query
+```
+
+## Datasets
+
+Dataset loaders.
+
+```{eval-rst}
+
+.. module:: sparrow.datasets
+.. currentmodule:: sparrow
+
+.. autosummary::
+    :toctree: generated
+
+    datasets.cluster_blobs
+    datasets.multisample_blobs
+    datasets.pixie_example
+    datasets.macsima_example
+    datasets.mibi_example
+    datasets.resolve_example
+    datasets.get_registry
+    datasets.get_spatialdata_registry
 ```
