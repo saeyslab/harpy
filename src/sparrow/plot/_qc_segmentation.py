@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import pandas as pd
+from loguru import logger
 
 
 def calculate_segmentation_coverage(sdata):
@@ -12,13 +13,20 @@ def calculate_segmentation_coverage(sdata):
     return pd.DataFrame(data, columns=["name", "coverage"])
 
 
-def calculate_segments_per_area(sdata):
-    df = sdata.table.obs.groupby("sample_id").agg(
-        {"sample_id": "count", "image_width_px": "mean", "image_height_px": "mean"}
-    )
-    # TODO: use pixel size from metadata
-    df["cells_per_mm2"] = df["sample_id"] / (df["image_width_px"] * df["image_height_px"] / 1e6)
-    df.sort_values("cells_per_mm2", inplace=True)
+def calculate_segments_per_area(sdata, sample_key="sample_id"):
+    table = sdata.table.obs.copy()
+    # for labels in 'fov_labels', look up in sdata.labels and calculate the area
+    if "image_width_px" in table.columns and "image_height_px" in table.columns:
+        df = table.groupby(sample_key).agg({sample_key: "count", "image_width_px": "mean", "image_height_px": "mean"})
+        # TODO: use pixel size from metadata
+        df["cells_per_mm2"] = df[sample_key] / (df["image_width_px"] * df["image_height_px"] / 1e6)
+    if "fov_labels" in table.columns:
+        df = table.groupby(sample_key).agg({sample_key: "count"})
+        area_map = {k: 1000 for k in table["fov_labels"].unique().tolist()}
+        logger.debug(area_map)
+        df["cells_per_mm2"] = df.index.map(area_map)
+    # df.sort_values("cells_per_mm2", inplace=True)
+    logger.debug(df)
     return df
 
 
@@ -30,15 +38,15 @@ def segmentation_coverage(sdata, ax=None, **kwargs):
     return ax
 
 
-def segmentation_size_boxplot(sdata, ax=None, **kwargs):
+def segmentation_size_boxplot(sdata, area_key="area", sample_key="sample_id", ax=None, **kwargs):
     if ax is None:
         fig, ax = plt.subplots()
-    sdata.table.obs[["area", "sample_id"]].plot.box(by="sample_id", rot=45, ax=ax)
+    sdata.table.obs[[area_key, sample_key]].plot.box(by=sample_key, rot=45, ax=ax)
     return ax
 
 
 def segments_per_area(sdata, ax=None, **kwargs):
     if ax is None:
         fig, ax = plt.subplots()
-    df = calculate_segments_per_area(sdata)
-    return df.plot.bar(y="cells_per_mm2", rot=45, ax=ax, **kwargs)
+    df = calculate_segments_per_area(sdata, **kwargs)
+    return df.plot.bar(y="cells_per_mm2", rot=45, ax=ax)

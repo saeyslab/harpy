@@ -26,16 +26,27 @@ def calculate_snr(img, nbins=65536):
 
 
 def calculate_snr_ratio(
-    sdata, image="raw_image", block_size=10000, channel_names=None, cycles=None, signal_threshold=None
+    sdata,
+    table_name="table",
+    image="raw_image",
+    block_size=10000,
+    channel_names=None,
+    cycles=None,
+    signal_threshold=None,
 ):
     logger.debug("Calculating SNR ratio")
     data = []
+    table = sdata[table_name]
+    if channel_names is None:
+        channel_names = table.var_names
+    if cycles:
+        if cycles in table.var.keys():
+            cycles = table.var[cycles]
+        else:
+            cycles = cycles
+    else:
+        cycles = [None] * len(channel_names)
     for image in sdata.images:
-        if channel_names is None:
-            channel_names = sdata.table.var_names
-        if cycles is None:
-            cycles = [None] * len(channel_names)
-
         for cycle, channel_name in zip(cycles, channel_names):
             float_block = sdata[image].sel(c=channel_name).data.rechunk(block_size)
             img = float_block.compute()
@@ -48,32 +59,139 @@ def calculate_snr_ratio(
     return df_img
 
 
-def snr_ratio(sdata, ax=None, loglog=True, **kwargs):
+def snr_ratio(sdata, ax=None, loglog=True, color="black", groupby=None, **kwargs):
     """Plot the signal to noise ratio. On the x-axis is the signal intensity and on the y-axis is the SNR-ratio"""
     logger.debug("Plotting SNR ratio")
     if ax is None:
         fig, ax = plt.subplots()
-    df_img = calculate_snr_ratio(sdata, **kwargs)
+    df_img = calculate_snr_ratio(sdata, cycles="cycle" if color == "cycle" else None, **kwargs)
     if loglog:
         ax.set_xscale("log", base=2)
         ax.set_yscale("log", base=2)
 
     # group by "channel" and take the mean of "image" and "cycle"
-    df_img = df_img.groupby(["channel"]).mean(numeric_only=True).reset_index()
+    if groupby is None:
+        groupby = ["channel"]
+    df_img = df_img.groupby(["channel"]).mean(numeric_only=True)
     # sort by channel
     df_img = df_img.sort_values("channel")
     # do a scatter plot
-    for _i, row in df_img.iterrows():
-        ax.scatter(row["signal"], row["snr"], color="black")
-        # use textalloc to add channel names
-    x = df_img["signal"]
-    y = df_img["snr"]
-    ta.allocate(ax, x=x, y=y, text_list=sorted(sdata.table.var_names), x_scatter=x, y_scatter=y)
-
+    if color == "cycle":
+        palette = sns.color_palette("viridis", n_colors=len(df_img["cycle"].unique()))
+        cmap = sns.color_palette("viridis", n_colors=len(df_img["cycle"].unique()), as_cmap=True)
+        df_img["cycle"] = get_hexes(df_img["cycle"], palette=palette)
+    logger.debug(df_img.head())
+    _plot_snr_ratio(df_img, ax, color, text_list=sdata.table.var_names)
     ax.set_xlabel("Signal intensity")
     ax.set_ylabel("Signal-to-noise ratio")
+    # cbar_ax = fig.add_axes([1, 0.1, 0.02, 0.8])
+    # cbar.set_label("Cycles")
+    # cbar.set_ticklabels(['0', '10','20', '30', '40', '51'])  # Adjust the tick labels as needed
+
+    # # add colorbar for scatter plot
+    # if color == "cycle":
+    #     cbar = fig.colorbar(palette, ax=ax)
+    #     cbar.set_label("Cycles")
+    if color == "cycle":
+        cbar_ax = fig.add_axes([1, 0.1, 0.02, 0.8])
+        mappable = plt.cm.ScalarMappable(cmap=cmap)
+        mappable.set_clim(0, len(df_img["cycle"].max()))
+        cbar = plt.colorbar(mappable, cax=cbar_ax)
+        cbar.set_label("Cycles")
     ax.legend()
     return ax
+
+
+def _plot_snr_ratio(df, ax, color, text_list):
+    for _i, row in df.iterrows():
+        # do a scatter plot
+        if color == "cycle":
+            i_color = row["cycle"]
+        else:
+            i_color = color
+        ax.scatter(row["signal"], row["snr"], color=i_color)
+        # use textalloc to add channel names
+    x = df["signal"]
+    y = df["snr"]
+    ta.allocate(ax, x=x, y=y, text_list=text_list, x_scatter=x, y_scatter=y)
+    # ax.set_xlabel("Signal intensity")
+    # ax.set_ylabel("Signal-to-noise ratio")
+    return ax
+
+
+def group_snr_ratio(sdata, groupby, ax=None, loglog=True, color="black", **kwargs):
+    """Plot the signal to noise ratio. On the x-axis is the signal intensity and on the y-axis is the SNR-ratio"""
+    logger.debug("Plotting SNR ratio")
+    df_img = calculate_snr_ratio(sdata, cycles="cycle" if color == "cycle" else None, **kwargs)
+
+    df_img = df_img.groupby(groupby).mean(numeric_only=True)
+    # sort by channel
+    df_img = df_img.sort_values("channel")
+
+    n_groups = df_img.index.levels[0].shape[0]
+
+    # Set up subplots
+    n_by_2 = n_groups // 2 + n_groups % 2
+    fig, axs = plt.subplots(n_by_2, 2, figsize=(10, 5 * (n_by_2)))
+
+    if color == "cycle":
+        palette = sns.color_palette("viridis", n_colors=len(df_img["cycle"].unique()))
+        cmap = sns.color_palette("viridis", n_colors=len(df_img["cycle"].unique()), as_cmap=True)
+        df_img["cycle"] = get_hexes(df_img["cycle"], palette=palette)
+
+    # Iterate over unique samples and create separate plots
+    for ax, sample in zip(axs.flatten(), df_img.index.levels[0]):
+        if loglog:
+            ax.set_xscale("log", base=2)
+            ax.set_yscale("log", base=2)
+        logger.debug(sample)
+        sample_df = df_img.loc[sample]
+        #     ax = axs[i // 2, i % 2]  # Get the correct subplot
+        ax.set_title(sample)
+        _plot_snr_ratio(sample_df, ax, color, text_list=sdata.table.var_names)
+        ax.set_xlabel("Signal intensity")
+        ax.set_ylabel("Signal-to-noise ratio")
+
+        #     # Add points with color gradient based on cycle value
+        #     for index, row in sample_df.iterrows():
+        #         cycle_value = row["cycle"]
+        #         color = plt.cm.seismic(cycle_value / sample_df["cycle"].max())  # Normalize cycle value to span from 0 to 51
+        #         (
+        #             ax.scatter(
+        #                 row["signal_log"],
+        #                 row["snr_log"],
+        #                 label=row["channel"],
+        #                 color=color,
+        #                 edgecolors="black",
+        #                 s=1,
+        #                 alpha=0.7,
+        #             ),
+        #         )
+        #         ax.text(
+        #             row["signal_log"] + 0.01,
+        #             row["snr_log"],
+        #             row["channel"],
+        #             horizontalalignment="left",
+        #             fontsize=9,
+        #             color=color,
+        #             bbox=dict(facecolor="none", edgecolor="black", boxstyle="round,pad=0.2", alpha=0.5),
+        #         )
+
+        # Set x-axis label
+        # ax.set_xlabel("Signal intensity (log2)", size=12)
+        # Set y-axis label
+        # ax.set_ylabel("Signal-to-noise ratio (log2)", size=12)
+
+    # # Add a colorbar with title
+    if color == "cycle":
+        cbar_ax = fig.add_axes([1, 0.1, 0.02, 0.8])
+        mappable = plt.cm.ScalarMappable(cmap=cmap)
+        mappable.set_clim(0, len(df_img["cycle"].max()))
+        cbar = plt.colorbar(mappable, cax=cbar_ax)
+        cbar.set_label("Cycles")
+    ax.legend()
+    plt.tight_layout()
+    return axs
 
 
 def arc_transform(df):
@@ -108,8 +226,9 @@ def calculate_mean_norm(sdata, overwrite=False, c_mask=None, key="normalized_", 
 
 
 def get_hexes(col, palette="Set1"):
-    pallete = sns.color_palette(palette, n_colors=len(col.unique()))
-    lut = dict(zip(col.unique(), pallete.as_hex()))
+    if isinstance(palette, str):
+        palette = sns.color_palette(palette, n_colors=len(col.unique()))
+    lut = dict(zip(col.unique().astype(str), palette.as_hex()))
     return col.astype(str).map(lut)
 
 

@@ -13,12 +13,7 @@ from shapely.affinity import translate
 from spatialdata import SpatialData
 from spatialdata.transformations import get_transformation
 
-from sparrow.image._image import (
-    _apply_transform,
-    _get_boundary,
-    _get_spatial_element,
-    _unapply_transform,
-)
+from sparrow.image._image import _apply_transform, _get_boundary, _get_spatial_element, _unapply_transform
 from sparrow.shape import intersect_rectangles
 from sparrow.utils._keys import _INSTANCE_KEY, _REGION_KEY
 from sparrow.utils._transformations import _get_translation_values

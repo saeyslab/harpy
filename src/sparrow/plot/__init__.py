@@ -10,6 +10,7 @@ from ._qc_image import (
     calculate_snr_ratio,
     clustermap,
     get_hexes,
+    group_snr_ratio,
     make_cols_colors,
     signal_clustermap,
     snr_clustermap,

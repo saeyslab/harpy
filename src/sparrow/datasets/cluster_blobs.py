@@ -1,3 +1,4 @@
+import anndata as ad
 import dask.array as da
 import numpy as np
 import pandas as pd
@@ -6,15 +7,36 @@ from dask_image import ndfilters
 from numpy.random import default_rng
 from scipy import ndimage as ndi
 from scipy.stats import qmc
-from spatialdata import SpatialData
+from spatialdata import SpatialData, concatenate
 from spatialdata._core.operations.aggregate import aggregate
 from spatialdata._types import ArrayLike
 from spatialdata.models import Image2DModel, Labels2DModel, PointsModel, TableModel
+from spatialdata.transformations import Identity
 
-from sparrow.utils._keys import _INSTANCE_KEY, _REGION_KEY
+from sparrow.table import add_regionprop_features
+from sparrow.utils._keys import _CELL_INDEX, _INSTANCE_KEY, _REGION_KEY
 from sparrow.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
+
+
+def multisample_blobs(n_samples=4, prefix="sample_{i}", **kwargs):
+    sdatas = [
+        cluster_blobs(
+            image_name=f"{prefix}_image".format(i=i),
+            labels_name=f"{prefix}_labels".format(i=i),
+            points_name=f"{prefix}_points".format(i=i),
+            table_name=f"{prefix}_table".format(i=i),
+            coordinate_system=f"{prefix}".format(i=i),
+            seed=i,
+            **kwargs,
+        )
+        for i in range(n_samples)
+    ]
+    sdata = concatenate(sdatas)
+    sdata.tables["table"] = ad.concat(sdata.tables, merge="same")
+    # sdata.tables["table"].var_names = list(sdata.images).c.values
+    return sdata
 
 
 def cluster_blobs(
@@ -25,6 +47,12 @@ def cluster_blobs(
     noise_level_channels=None,
     region_key=_REGION_KEY,
     instance_key=_INSTANCE_KEY,
+    image_name="blobs_image",
+    labels_name="blobs_labels",
+    points_name="blobs_points",
+    table_name="table",
+    coordinate_system="global",
+    metadata_cycles=True,
     seed: int | None = None,
 ):
     """Differs from spatialdata.datasets.make_blobs in that it generates cells with multiple image channels and known ground truth cell types."""
@@ -56,30 +84,50 @@ def cluster_blobs(
     img = Image2DModel.parse(
         data=np.concatenate([noisy_nuclei_channel[np.newaxis], lineage_channels], axis=0),
         c_coords=channel_names,
+        transformations={coordinate_system: Identity()},
     )
     img_segmented = _generate_segmentation(nuclei_channel, markers, watershed_line=True)
-    labels = Labels2DModel.parse(img_segmented)
-    points = PointsModel.parse(nuclei_centers)
+    labels = Labels2DModel.parse(img_segmented, transformations={coordinate_system: Identity()})
+    points = PointsModel.parse(nuclei_centers, transformations={coordinate_system: Identity()})
     # generate table
-    adata = aggregate(values=img, by=labels).tables["table"]
-    adata.obs[region_key] = pd.Categorical(["blobs_labels"] * len(adata))
+    adata = aggregate(values=img, by=labels, target_coordinate_system=coordinate_system).tables["table"]
+    adata.obs[region_key] = pd.Categorical([labels_name] * len(adata))
     adata.obs[instance_key] = adata.obs_names.astype(int)
     adata.obs["phenotype"] = assigned_cell_types.astype(str)
+    adata.obs.index.name = _CELL_INDEX
+    adata.var_names = channel_names
     del adata.uns[TableModel.ATTRS_KEY]
-    table = TableModel.parse(adata, region="blobs_labels", region_key=region_key, instance_key=instance_key)
+    if metadata_cycles:
+        # set the cycle to be per 2, so 1, 1, 2, 2, 3, 3, ...
+        n_channels = n_cell_types + 1
+        cycles = []
+        for i in range(0, n_channels // 2):
+            cycles.append(i)
+            cycles.append(i)
+        # if n_channels is odd, add one more cycle
+        if n_channels % 2:
+            cycles.append(i + 1)
+        adata.var["cycle"] = cycles
+    table = TableModel.parse(
+        adata,
+        region=labels_name,
+        region_key=region_key,
+        instance_key=instance_key,
+    )
 
-    # generate lineage marker channels
-    return SpatialData(
+    sdata = SpatialData(
         images={
-            "blobs_image": img,
+            image_name: img,
         },
         labels={
-            "blobs_labels": labels,
+            labels_name: labels,
             # "blobs_markers": Labels2DModel.parse(data=markers),
         },
-        points={"blobs_points": points},
-        table=table,
+        points={points_name: points},
+        tables={table_name: table},
     )
+    add_regionprop_features(sdata, labels_layer=labels_name, table_layer=table_name)
+    return sdata
 
 
 def _generate_segmentation(image, markers, **kwargs):  # -> Any | ndarray[Any, dtype[Any]]:
