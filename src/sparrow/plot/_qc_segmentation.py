@@ -25,8 +25,7 @@ def calculate_segments_per_area(sdata, sample_key="sample_id"):
         area_map = {k: 1000 for k in table["fov_labels"].unique().tolist()}
         logger.debug(area_map)
         df["cells_per_mm2"] = df.index.map(area_map)
-    # df.sort_values("cells_per_mm2", inplace=True)
-    logger.debug(df)
+    df.sort_values("cells_per_mm2", inplace=True)
     return df
 
 
