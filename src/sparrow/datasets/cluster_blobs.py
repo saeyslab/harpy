@@ -91,6 +91,8 @@ def cluster_blobs(
     points = PointsModel.parse(nuclei_centers, transformations={coordinate_system: Identity()})
     # generate table
     adata = aggregate(values=img, by=labels, target_coordinate_system=coordinate_system).tables["table"]
+    # make X dense as markers are limited
+    adata.X = adata.X.toarray()
     adata.obs[region_key] = pd.Categorical([labels_name] * len(adata))
     adata.obs[instance_key] = adata.obs_names.astype(int)
     adata.obs["phenotype"] = assigned_cell_types.astype(str)
