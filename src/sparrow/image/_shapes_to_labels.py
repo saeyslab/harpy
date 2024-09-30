@@ -22,6 +22,7 @@ def add_labels_layer_from_shapes_layer(
     output_layer: str,
     out_shape: tuple[int, int] | None = None,  # output shape in y, x.
     chunks: int | None = None,
+    chunksize_shapes: int = 100000,
     scale_factors: ScaleFactors_t | None = None,
     overwrite: bool = False,
 ) -> SpatialData:
@@ -45,6 +46,8 @@ def add_labels_layer_from_shapes_layer(
         not be in resulting `output_layer`.
     chunks
         If provided, creation of the labels layer will be done in a chunked manner, with data divided into chunks for efficient computation.
+    chunksize_shapes
+        Passed to `chunksize` parameter of `geopandas.from_geopandas`, when loading `shapes_layer` in a Dask dataframe.
     scale_factors
         Scale factors to apply for multiscale.
     overwrite
@@ -94,7 +97,7 @@ def add_labels_layer_from_shapes_layer(
         chunks = int(np.max([y_max, x_max]))
     _chunks = _get_chunks(y_max=y_max, x_max=x_max, chunksize=chunks)
 
-    dask_shapes = dgpd.from_geopandas(sdata.shapes[shapes_layer], chunksize=100000)
+    dask_shapes = dgpd.from_geopandas(sdata.shapes[shapes_layer], chunksize=chunksize_shapes)
     _dtype = _get_uint_dtype(index.max())
 
     @dask.delayed
@@ -125,7 +128,7 @@ def add_labels_layer_from_shapes_layer(
         blocks_inner = []
         for _tile_bounds in _chunks_inner:
             bbox = box(miny=_tile_bounds[0], maxy=_tile_bounds[1], minx=_tile_bounds[2], maxx=_tile_bounds[3])
-            gpd_bbox = gpd.GeoDataFrame({"geometry": [bbox]})
+            gpd_bbox = gpd.GeoDataFrame({"geometry": [bbox]}, crs=dask_shapes.crs)
             output_shape = (_tile_bounds[1] - _tile_bounds[0], _tile_bounds[3] - _tile_bounds[2])
             # take a subset of the polygons
             polygons = dask_shapes.clip(gpd_bbox)
