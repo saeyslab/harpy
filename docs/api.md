@@ -170,9 +170,6 @@ Plotting functions.
     pl.segmentation_coverage
     pl.segmentation_size_boxplot
     pl.segments_per_area
-
-    pl.ridgeplot_channel
-    pl.ridgeplot_channel_sample
 ```
 
 ### Transcriptomics plots

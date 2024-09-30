@@ -1,4 +1,3 @@
-import joypy
 import numpy as np
 import scanpy as sc
 
@@ -38,6 +37,8 @@ def ridgeplot_channel(adata, layer=None):
     :param layer: _description_, defaults to None
     :return: _description_
     """
+    import joypy
+
     df = adata.to_df(layer=layer)
     df_melted = df.melt(var_name="channel")
     fig, ax = joypy.joyplot(df_melted, by="channel", column="value", legend=True, alpha=0.4, grid=True)
@@ -79,6 +80,8 @@ def ridgeplot_channel_sample(
     :param path_prefix: _description_, defaults to None
     :yield: _description_
     """
+    import joypy
+
     df = adata.to_df(layer=layer)
     df[y] = adata.obs[y]
     df_melted = df.melt(id_vars=[y], var_name=channel_name, value_vars=value_vars)
