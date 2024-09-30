@@ -56,8 +56,7 @@ def add_grid_labels_layer(
 
     Returns
     -------
-    SpatialData
-        The updated SpatialData object with the newly added grid-based shapes and labels layers.
+    The updated SpatialData object with the newly added grid-based shapes and labels layers.
 
     Raises
     ------

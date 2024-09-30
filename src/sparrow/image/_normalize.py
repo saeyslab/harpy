@@ -52,8 +52,7 @@ def normalize(
 
     Returns
     -------
-    SpatialData
-        The `sdata` object with the normalized image added.
+    The `sdata` object with the normalized image added.
 
     Raises
     ------
