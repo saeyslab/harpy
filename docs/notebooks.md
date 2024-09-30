@@ -17,6 +17,8 @@ Notebooks to showcase the use of Harpy for analyzing spatial proteomics data.
                 :maxdepth: 1
 
                 tutorials/Harpy_feature_calculation.ipynb
+                tutorials/Harpy_QC_IMC.ipynb
+                tutorials/Harpy_QC_in_silico.ipynb
                 tutorials/FlowSOM_for_pixel_and_cell_clustering.ipynb
                 tutorials/Visualizing_metaclustering.ipynb
                 tutorials/coordinate_systems.ipynb
