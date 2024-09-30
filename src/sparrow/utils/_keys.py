@@ -10,6 +10,7 @@ _CLEANLINESS_KEY = "Cleanliness"
 _CELLSIZE_KEY = "shapeSize"
 
 _RAW_COUNTS_KEY = "raw_counts"
+_SPATIAL = "spatial"  # key holding coordinates (array) cell/nuclei/bin in adata.obsm
 
 
 # flowsom

@@ -559,7 +559,9 @@ def _plot(
     polygons = None
     if shapes_layer is not None and not sdata.shapes[shapes_layer].empty:
         # copy is necessary, otherwise, in memory shapes layer altered by performing a plot.
-        polygons = _translate_polygons(sdata.shapes[shapes_layer].copy(), to_coordinate_system=to_coordinate_system)
+        polygons = _translate_polygons(
+            sdata.shapes[shapes_layer].copy(), to_coordinate_system=to_coordinate_system
+        )  # TODO: this translation is slow if we have a lot of polygons. fix this by getting the translation, altering the crd, then do the cx, and then the translation for visualization purposes.
         polygons = polygons.cx[crd[0] : crd[1], crd[2] : crd[3]]
         if z_index is not None:
             polygons = _get_z_slice_polygons(polygons, z_index=z_index)
@@ -786,8 +788,9 @@ def _translate_polygons(polygons: GeoDataFrame, to_coordinate_system: str = "glo
         )
     transformation = transformations[to_coordinate_system]
     x_translation, y_translation = _get_translation_values(transformation)
-    polygons["geometry"] = polygons["geometry"].apply(
-        lambda geom: translate(geom, xoff=x_translation, yoff=y_translation)
-    )
+    if x_translation != 0 or y_translation != 0:
+        polygons["geometry"] = polygons["geometry"].apply(
+            lambda geom: translate(geom, xoff=x_translation, yoff=y_translation)
+        )
 
     return polygons

@@ -18,10 +18,10 @@ def add_grid_labels_layer(
     output_labels_layer: str,
     grid_type: str = "hexagon",  # can be either "hexagon" or "square".
     offset: tuple[int, int] = (0, 0),  # we recommend setting a non-zero offset via a translation.
-    chunks: str | tuple[int, ...] | int | None = None,
+    chunks: int | None = None,
     transformations: MappingToCoordinateSystem_t | None = None,
     scale_factors: ScaleFactors_t | None = None,
-    overwrite: bool = True,
+    overwrite: bool = False,
 ) -> SpatialData:
     """
     Adds a grid-based labels layer to the SpatialData object using either a hexagonal or square grid.
@@ -46,7 +46,7 @@ def add_grid_labels_layer(
         An optional translation offset applied to the grid. This is a tuple `(y_offset, x_offset)` that can shift the grid. Default is `(0, 0)`,
         but it is recommended to use a non-zero offset, and specify the offset via passing a `spatialdata.transformations.Translation` to `transformations`.
     chunks
-        Specifies the chunk size for Dask arrays when adding the labels layer. Can be a string, tuple of integers, or `None`. If `None`, auto chunking is used.
+        Specifies the chunk size for Dask arrays when calculating the labels layer.
     transformations
         Transformations that will be added to the resulting `output_shapes_layer` and `output_labels_layer`.
     scale_factors

@@ -3,7 +3,6 @@ import os
 import pooch
 import pyrootutils
 import pytest
-import scanpy as sc
 from hydra import compose, initialize
 from hydra.core.global_hydra import GlobalHydra
 from hydra.core.hydra_config import HydraConfig
@@ -98,7 +97,7 @@ def sdata_transcripts_mul_coord(tmpdir):
 
 
 @pytest.fixture
-def sdata_bin(tmpdir):
+def sdata_bin():
     registry = get_registry()
     unzip_path = registry.fetch(
         "transcriptomics/visium_hd/mouse/sdata_custom_binning_visium_hd_unit_test.zarr.zip", processor=pooch.Unzip()
@@ -106,20 +105,7 @@ def sdata_bin(tmpdir):
     sdata = read_zarr(os.path.commonpath(unzip_path))
     sdata.path = None
 
-    sdata.write(os.path.join(tmpdir, "sdata_visium_hd.zarr"))
-    sdata = read_zarr(os.path.join(tmpdir, "sdata_visium_hd.zarr"))
-
     yield sdata
-
-
-@pytest.fixture
-def filtered_feature_matrix():
-    registry = get_registry()
-    return sc.read(
-        registry.fetch(
-            "transcriptomics/visium_hd/mouse/binned_outputs/square_002um/subset_filtered_feature_bc_matrix.h5"
-        )
-    )
 
 
 @pytest.fixture

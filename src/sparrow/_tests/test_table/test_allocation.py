@@ -2,8 +2,8 @@ import numpy as np
 import pytest
 from spatialdata import SpatialData
 
-from sparrow.table._allocation import allocate, bin
-from sparrow.utils._keys import _INSTANCE_KEY
+from sparrow.table._allocation import allocate, bin_counts
+from sparrow.utils._keys import _INSTANCE_KEY, _SPATIAL
 
 
 def test_allocation(sdata_transcripts: SpatialData):
@@ -71,30 +71,24 @@ def test_allocation_overwrite(sdata_transcripts: SpatialData):
         )
 
 
-def test_bin(sdata_bin, filtered_feature_matrix):
-    adata = filtered_feature_matrix
-
-    points_layer = "barcodes_location_subset"
-    name_barcode_id = "barcode"
-    table_layer = "table_custom_bin_32_subset"
+def test_bin_counts(
+    sdata_bin,
+):
+    table_layer_bins = "square_002um"
+    labels_layer = (
+        "square_labels_32"  # custom grid to bin the counts of table_layer_bins, can be any segmentation mask.
+    )
+    table_layer = "table_custom_bin_32"
     output_table_layer = f"{table_layer}_reproduce"
 
-    df_barcodes_location = sdata_bin.points[points_layer][name_barcode_id].compute()
+    # check that barcodes are unique in table_layer_bins of sdata_bin
+    assert sdata_bin.tables[table_layer_bins].obs.index.is_unique
 
-    # check that barcodes are unique in adata.obs.index and df_barcodes_location
-    assert adata.obs.index.is_unique
-    assert df_barcodes_location.values.shape == np.unique(df_barcodes_location.values.shape)
-    # and check that there is a match between barcodes in adata.obs.index and 'name_barcode_id' column of points layer.
-    intersection = np.intersect1d(df_barcodes_location.values, adata.obs.index)
-    assert intersection.size > 0
-
-    sdata_bin = bin(
+    sdata_bin = bin_counts(
         sdata_bin,
-        adata=adata,
-        points_layer=points_layer,
-        labels_layer="square_labels",
+        table_layer=table_layer_bins,
+        labels_layer=labels_layer,
         output_layer=output_table_layer,
-        name_barcode_id=name_barcode_id,  # name of barcode in the points layer 'barcodes_location'
         overwrite=True,
         append=False,
     )
@@ -110,6 +104,4 @@ def test_bin(sdata_bin, filtered_feature_matrix):
 
     assert (matrix1 != matrix2).nnz == 0
 
-    assert np.allclose(
-        sdata_bin[table_layer].obsm["spatial"], sdata_bin[output_table_layer].obsm["spatial"], rtol=0, atol=1e-5
-    )
+    assert np.array_equal(sdata_bin[table_layer].obsm[_SPATIAL], sdata_bin[output_table_layer].obsm[_SPATIAL])

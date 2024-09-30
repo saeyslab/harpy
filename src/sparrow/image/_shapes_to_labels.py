@@ -1,11 +1,19 @@
+import math
+
+import dask
 import dask.array as da
+import dask_geopandas as dgpd
+import geopandas as gpd
 import numpy as np
+from affine import Affine
 from rasterio.features import rasterize
+from shapely.geometry import box
 from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import get_transformation
 
 from sparrow.image._image import add_labels_layer
+from sparrow.utils.utils import _get_uint_dtype
 
 
 def add_labels_layer_from_shapes_layer(
@@ -13,7 +21,7 @@ def add_labels_layer_from_shapes_layer(
     shapes_layer: str,
     output_layer: str,
     out_shape: tuple[int, int] | None = None,  # output shape in y, x.
-    chunks: str | tuple[int, int] | int | None = None,
+    chunks: int | None = None,
     scale_factors: ScaleFactors_t | None = None,
     overwrite: bool = False,
 ) -> SpatialData:
@@ -33,10 +41,10 @@ def add_labels_layer_from_shapes_layer(
     out_shape
         output shape of the resulting labels layer `(y,x)`. Will be automatically calculated if set to None.
         If `out_shape` is not `None`, with  `x_min, y_min, x_max, y_max = sdata[shapes_layer].geometry.total_bounds`,
-        and `out_shape[1] < x_max - x_min` or `out_shape[0]<y_max -y_min` (assuming `x_min>=0` and `y_min>=0`), then shapes with coordinates outside `out_shapes` will
+        and `out_shape[1]<x_max` or `out_shape[0]<y_max`, then shapes with coordinates outside `out_shapes` will
         not be in resulting `output_layer`.
     chunks
-        If provided, the resulting dask array that contains the masks will be rechunked according to the specified chunk size.
+        If provided, creation of the labels layer will be done in a chunked manner, with data divided into chunks for efficient computation.
     scale_factors
         Scale factors to apply for multiscale.
     overwrite
@@ -78,35 +86,63 @@ def add_labels_layer_from_shapes_layer(
     ), f"The maximum of the bounding box of the shapes layer {shapes_layer} is negative. This is not allowed."
     index = sdata[shapes_layer].index.values.astype(int)
 
-    y_shape = int(y_max)
-    x_shape = int(x_max)
-
-    if out_shape is None:
-        out_shape = [y_shape, x_shape]
-    else:
-        out_shape = out_shape
-
-    _dtype = _get_dtype(index.max())
-
-    masks = rasterize(
-        zip(
-            sdata[shapes_layer].geometry,
-            index,
-        ),
-        out_shape=out_shape,
-        dtype=_dtype,
-        fill=0,
-    )
+    if out_shape is not None:
+        y_max = out_shape[0]
+        x_max = out_shape[1]
 
     if chunks is None:
-        chunks = "auto"
-    masks = da.from_array(masks, chunks=chunks)
+        chunks = int(np.max([y_max, x_max]))
+    _chunks = _get_chunks(y_max=y_max, x_max=x_max, chunksize=chunks)
+
+    dask_shapes = dgpd.from_geopandas(sdata.shapes[shapes_layer], chunksize=100000)
+    _dtype = _get_uint_dtype(index.max())
+
+    @dask.delayed
+    def _process_chunk(tile_bounds, polygons):
+        output_shape = (tile_bounds[1] - tile_bounds[0], tile_bounds[3] - tile_bounds[2])
+        if polygons.empty:
+            output_shape = output_shape
+            return np.zeros(shape=output_shape)
+
+        transform = Affine.translation(xoff=tile_bounds[2], yoff=tile_bounds[0])
+
+        # TODO. Test datashader to do this. probably faster.
+        masks = rasterize(
+            zip(
+                polygons.geometry,
+                polygons.index.astype(int),  # take index of the polygons
+            ),
+            out_shape=output_shape,  # y,x
+            dtype=_dtype,
+            transform=transform,
+            fill=0,
+        )
+
+        return masks
+
+    blocks = []
+    for _chunks_inner in _chunks:
+        blocks_inner = []
+        for _tile_bounds in _chunks_inner:
+            bbox = box(miny=_tile_bounds[0], maxy=_tile_bounds[1], minx=_tile_bounds[2], maxx=_tile_bounds[3])
+            gpd_bbox = gpd.GeoDataFrame({"geometry": [bbox]})
+            output_shape = (_tile_bounds[1] - _tile_bounds[0], _tile_bounds[3] - _tile_bounds[2])
+            # take a subset of the polygons
+            polygons = dask_shapes.clip(gpd_bbox)
+            mask = _process_chunk(_tile_bounds, polygons)
+            blocks_inner.append(
+                da.from_delayed(
+                    mask,
+                    shape=output_shape,
+                    dtype=_dtype,
+                )
+            )
+        blocks.append(blocks_inner)
 
     sdata = add_labels_layer(
         sdata,
-        arr=masks,
+        arr=da.block(blocks),
         output_layer=output_layer,
-        chunks=chunks,
         transformations=get_transformation(sdata[shapes_layer], get_all=True),
         scale_factors=scale_factors,
         overwrite=overwrite,
@@ -115,17 +151,32 @@ def add_labels_layer_from_shapes_layer(
     return sdata
 
 
-def _get_dtype(value: int) -> str:
-    max_uint64 = np.iinfo(np.uint64).max
-    max_uint32 = np.iinfo(np.uint32).max
-    max_uint16 = np.iinfo(np.uint16).max
+def _get_chunks(y_max: int, x_max: int, chunksize: int):
+    y_max = int(y_max)
+    x_max = int(x_max)
 
-    if max_uint16 >= value:
-        dtype = "uint16"
-    elif max_uint32 >= value:
-        dtype = "uint32"
-    elif max_uint64 >= value:
-        dtype = "uint64"
-    else:
-        raise ValueError(f"Maximum cell number is {value}. Values higher than {max_uint64} are not supported.")
-    return dtype
+    y_min = 0
+    x_min = 0
+
+    # Calculate the total range along x and y
+    total_x_range = x_max
+    total_y_range = y_max
+
+    # Calculate the number of chunks along x and y axes
+    num_chunks_x = math.ceil(total_x_range / chunksize)
+    num_chunks_y = math.ceil(total_y_range / chunksize)
+
+    # Generate the boundaries of each chunk
+    chunks = []
+
+    for j in range(num_chunks_y):
+        y0 = y_min + j * chunksize
+        y1 = min(y0 + chunksize, y_max)
+        chunks_inner = []
+        for i in range(num_chunks_x):
+            x0 = x_min + i * chunksize
+            x1 = min(x0 + chunksize, x_max)
+            chunks_inner.append([y0, y1, x0, x1])
+        chunks.append(chunks_inner)
+
+    return chunks

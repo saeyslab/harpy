@@ -13,7 +13,7 @@ from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import get_transformation
 
 from sparrow.image._image import _get_spatial_element, add_labels_layer
-from sparrow.utils._keys import _INSTANCE_KEY, _REGION_KEY, ClusteringKey
+from sparrow.utils._keys import _INSTANCE_KEY, _REGION_KEY, _SPATIAL, ClusteringKey
 from sparrow.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
@@ -162,10 +162,10 @@ def flowsom(
     # add coordinates to anndata
     if to_squeeze:
         # 2D case, only save y,x position
-        adata.obsm["spatial"] = arr_sampled[:, -2:]
+        adata.obsm[_SPATIAL] = arr_sampled[:, -2:]
     else:
         # 3D case, save z,y,x position
-        adata.obsm["spatial"] = arr_sampled[:, -3:]
+        adata.obsm[_SPATIAL] = arr_sampled[:, -3:]
 
     _, fsom = _flowsom(adata, n_clusters=n_clusters, seed=random_state, **kwargs)
 

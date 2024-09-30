@@ -107,3 +107,19 @@ def _export_config(cfg: DictConfig, output_yaml: str | Path):
     os.makedirs(output_dir, exist_ok=True)
     with open(output_yaml, "w") as f:
         f.write(yaml_config)
+
+
+def _get_uint_dtype(value: int) -> str:
+    max_uint64 = np.iinfo(np.uint64).max
+    max_uint32 = np.iinfo(np.uint32).max
+    max_uint16 = np.iinfo(np.uint16).max
+
+    if max_uint16 >= value:
+        dtype = "uint16"
+    elif max_uint32 >= value:
+        dtype = "uint32"
+    elif max_uint64 >= value:
+        dtype = "uint64"
+    else:
+        raise ValueError(f"Maximum cell number is {value}. Values higher than {max_uint64} are not supported.")
+    return dtype
