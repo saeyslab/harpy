@@ -52,8 +52,7 @@ def bounding_box_query(
 
     Returns
     -------
-    SpatialData
-        A new SpatialData object containing the extracted bounding box region and associated data layers.
+    A new SpatialData object containing the extracted bounding box region and associated data layers.
 
     Raises
     ------
