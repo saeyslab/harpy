@@ -21,6 +21,7 @@ log = get_pylogger(__name__)
 
 
 def multisample_blobs(n_samples=4, prefix="sample_{i}", **kwargs):
+    """Multisample blobs."""
     sdatas = [
         cluster_blobs(
             image_name=f"{prefix}_image".format(i=i),
@@ -55,7 +56,7 @@ def cluster_blobs(
     metadata_cycles=True,
     seed: int | None = None,
 ):
-    """Differs from spatialdata.datasets.make_blobs in that it generates cells with multiple image channels and known ground truth cell types."""
+    """Differs from `spatialdata.datasets.make_blobs` in that it generates cells with multiple image channels and known ground truth cell types."""
     if shape is None:
         shape = (512, 512)
     if seed is None:

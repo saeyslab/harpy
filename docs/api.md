@@ -162,7 +162,7 @@ Plotting functions.
     :toctree: generated
 
     pl.snr_ratio
-    pl.group_snr_ration
+    pl.group_snr_ratio
     pl.snr_clustermap
     pl.signal_clustermap
     pl.clustermap
