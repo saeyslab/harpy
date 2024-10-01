@@ -52,6 +52,42 @@ def test_notebooks_harpy_feature_calculation(notebook):
 
 
 @pytest.mark.skip
+@pytest.mark.skipif(
+    not importlib.util.find_spec("textalloc") or not importlib.util.find_spec("spatialdata_plot"),
+    reason="requires the textalloc library",
+)
+@pytest.mark.parametrize(
+    "notebook",
+    [
+        "Harpy_QC_IMC.ipynb",
+    ],
+)
+def test_notebooks_harpy_qc_imc(notebook):
+    root = str(pyrootutils.setup_root(os.getcwd(), dotenv=True, pythonpath=True))
+
+    run_notebook(os.path.join(root, "docs/tutorials", notebook))
+
+
+@pytest.mark.skip
+@pytest.mark.skipif(
+    not importlib.util.find_spec("textalloc")
+    or not importlib.util.find_spec("joypy")
+    or not importlib.util.find_spec("spatialdata_plot"),
+    reason="requires the textalloc library",
+)
+@pytest.mark.parametrize(
+    "notebook",
+    [
+        "Harpy_QC_in_silico.ipynb",
+    ],
+)
+def test_notebooks_harpy_qc_in_silico(notebook):
+    root = str(pyrootutils.setup_root(os.getcwd(), dotenv=True, pythonpath=True))
+
+    run_notebook(os.path.join(root, "docs/tutorials", notebook))
+
+
+@pytest.mark.skip
 @pytest.mark.parametrize(
     "notebook",
     [

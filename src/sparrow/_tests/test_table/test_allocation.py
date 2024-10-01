@@ -2,7 +2,8 @@ import numpy as np
 import pytest
 from spatialdata import SpatialData
 
-from sparrow.table._allocation import allocate
+from sparrow.table._allocation import allocate, bin_counts
+from sparrow.utils._keys import _INSTANCE_KEY, _SPATIAL
 
 
 def test_allocation(sdata_transcripts: SpatialData):
@@ -68,3 +69,39 @@ def test_allocation_overwrite(sdata_transcripts: SpatialData):
             append=False,
             overwrite=False,
         )
+
+
+def test_bin_counts(
+    sdata_bin,
+):
+    table_layer_bins = "square_002um"
+    labels_layer = (
+        "square_labels_32"  # custom grid to bin the counts of table_layer_bins, can be any segmentation mask.
+    )
+    table_layer = "table_custom_bin_32"
+    output_table_layer = f"{table_layer}_reproduce"
+
+    # check that barcodes are unique in table_layer_bins of sdata_bin
+    assert sdata_bin.tables[table_layer_bins].obs.index.is_unique
+
+    sdata_bin = bin_counts(
+        sdata_bin,
+        table_layer=table_layer_bins,
+        labels_layer=labels_layer,
+        output_layer=output_table_layer,
+        overwrite=True,
+        append=False,
+    )
+
+    assert np.array_equal(
+        sdata_bin[table_layer].obs[_INSTANCE_KEY].values, sdata_bin[output_table_layer].obs[_INSTANCE_KEY].values
+    )
+
+    assert np.array_equal(sdata_bin[table_layer].var_names, sdata_bin[output_table_layer].var_names)
+
+    matrix1 = sdata_bin[table_layer].X
+    matrix2 = sdata_bin[output_table_layer].X
+
+    assert (matrix1 != matrix2).nnz == 0
+
+    assert np.array_equal(sdata_bin[table_layer].obsm[_SPATIAL], sdata_bin[output_table_layer].obsm[_SPATIAL])

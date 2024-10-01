@@ -12,8 +12,8 @@ from spatialdata import SpatialData
 
 from sparrow.image._image import _get_spatial_element, _get_translation
 from sparrow.table._table import add_table_layer
-from sparrow.utils._aggregate import Aggregator
-from sparrow.utils._keys import _CELL_INDEX, _INSTANCE_KEY, _REGION_KEY
+from sparrow.utils._aggregate import RasterAggregator
+from sparrow.utils._keys import _CELL_INDEX, _INSTANCE_KEY, _REGION_KEY, _SPATIAL
 from sparrow.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
@@ -62,7 +62,7 @@ def allocate_intensity(
         the intensity values extracted during the current function call will be appended (along axis=0) to any existing intensity data
         within the SpatialData object's table attribute. If False, and overwrite is set to True any existing data in `sdata.tables[output_layer]` will be overwritten by the newly extracted intensity values.
     calculate_center_of_mass
-        If `True`, the center of mass of the labels in `labels_layer` will be calculated and added to `sdata.tables[ output_layer ].obsm["spatial"]`.
+        If `True`, the center of mass of the labels in `labels_layer` will be calculated and added to `sdata.tables[ output_layer ].obsm[_SPATIAL]`.
         To calculate center of mass, we use `dask_image.ndmeasure.center_of_mass`.
     overwrite
         If `True`, overwrites the `output_layer` if it already exists in `sdata`.
@@ -178,7 +178,7 @@ def allocate_intensity(
     ), f"Some channels specified via 'channels' could not be found in image layer '{img_layer}'. Please choose 'channels' from '{list( se_image.c.data )}'."
     channel_indices = [list(se_image.c.data).index(channel) for channel in channels]
     _array_img = _array_img[channel_indices]
-    aggregator = Aggregator(image_dask_array=_array_img, mask_dask_array=_array_mask_rechunked)
+    aggregator = RasterAggregator(image_dask_array=_array_img, mask_dask_array=_array_mask_rechunked)
     df_sum = aggregator.aggregate_sum()
 
     _cells_id = df_sum[_INSTANCE_KEY].values
@@ -214,7 +214,7 @@ def allocate_intensity(
         coordinates = coordinates.compute()
         coordinates += np.array([t1y, t1x]) if to_squeeze else np.array([0, t1y, t1x])
 
-        adata.obsm["spatial"] = coordinates
+        adata.obsm[_SPATIAL] = coordinates
 
     if append:
         region = []

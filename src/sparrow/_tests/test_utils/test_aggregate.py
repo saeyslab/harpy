@@ -7,7 +7,7 @@ from scipy import ndimage
 from skimage.measure import regionprops_table
 from xrspatial import zonal_stats
 
-from sparrow.utils._aggregate import Aggregator, _get_mask_area
+from sparrow.utils._aggregate import RasterAggregator, _get_mask_area
 from sparrow.utils._keys import _CELLSIZE_KEY
 
 
@@ -34,7 +34,7 @@ def test_aggregate_sum_dask_array():
 
     float_dask_array = float_dask_array[None, None, ...]
 
-    aggregator = Aggregator(mask_dask_array=mask_dask_array, image_dask_array=float_dask_array)
+    aggregator = RasterAggregator(mask_dask_array=mask_dask_array, image_dask_array=float_dask_array)
 
     df_sum = aggregator.aggregate_sum()
 
@@ -50,7 +50,7 @@ def test_aggregate_sum(sdata):
     image = se_image.data[:, None, ...]
     mask = se_labels.data[None, ...]
 
-    aggregator = Aggregator(
+    aggregator = RasterAggregator(
         mask_dask_array=mask.rechunk(512),
         image_dask_array=image.rechunk(512),
     )
@@ -88,7 +88,7 @@ def test_aggregate_min_max(sdata):
     image = se_image.data[:, None, ...]
     mask = se_labels.data[None, ...]
 
-    aggregator = Aggregator(
+    aggregator = RasterAggregator(
         mask_dask_array=mask.rechunk(512),
         image_dask_array=image.rechunk(512),
     )
@@ -130,7 +130,7 @@ def test_aggregate_mean(sdata):
     image = se_image.data[:, None, ...]
     mask = se_labels.data[None, ...]
 
-    aggregator = Aggregator(
+    aggregator = RasterAggregator(
         mask_dask_array=mask.rechunk(512),
         image_dask_array=image.rechunk(512),
     )
@@ -168,7 +168,7 @@ def test_aggregate_var(sdata):
     image = se_image.data[:, None, ...]
     mask = se_labels.data[None, ...]
 
-    aggregator = Aggregator(
+    aggregator = RasterAggregator(
         mask_dask_array=mask.rechunk(512),
         image_dask_array=image.rechunk(512),
     )
@@ -210,7 +210,7 @@ def test_aggregate_var_3D(sdata):
         axis=1,
     )
 
-    aggregator = Aggregator(
+    aggregator = RasterAggregator(
         mask_dask_array=mask.rechunk((1, 512, 512)),
         image_dask_array=image.rechunk((1, 1, 512, 512)),
     )
@@ -275,7 +275,7 @@ def test_aggregate_custom_channel(sdata_multi_c_no_backed):
     image = se_image.data[:, None, ...]
     mask = se_labels.data[None, ...]
 
-    aggregator = Aggregator(
+    aggregator = RasterAggregator(
         mask_dask_array=mask,
         image_dask_array=image,
     )
@@ -303,7 +303,7 @@ def test_aggregate_custom_channel_fails(sdata_multi_c_no_backed):
     image = se_image.data[:, None, ...]
     mask = se_labels.data[None, ...]
 
-    aggregator = Aggregator(
+    aggregator = RasterAggregator(
         mask_dask_array=mask,
         image_dask_array=image,
     )
@@ -335,7 +335,7 @@ def test_aggregate_custom_channel_mask(sdata_multi_c_no_backed):
     image = se_image.data[:, None, ...]
     mask = se_labels.data[None, ...]
 
-    aggregator = Aggregator(
+    aggregator = RasterAggregator(
         mask_dask_array=mask,
         image_dask_array=image,
     )
@@ -364,7 +364,7 @@ def test_aggregate_custom_channel_multiple_features(sdata_multi_c_no_backed):
     image = se_image.data[:, None, ...]
     mask = se_labels.data[None, ...]
 
-    aggregator = Aggregator(
+    aggregator = RasterAggregator(
         mask_dask_array=mask,
         image_dask_array=image,
     )
@@ -395,7 +395,7 @@ def test_aggregate_custom_channel_multiple_features_sdata(sdata):
     image = se_image.data[:, None, ...]
     mask = se_labels.data[None, ...]
 
-    aggregator = Aggregator(
+    aggregator = RasterAggregator(
         mask_dask_array=mask,
         image_dask_array=image,
     )

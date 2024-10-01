@@ -1,5 +1,6 @@
 import os
 
+import pooch
 import pyrootutils
 import pytest
 from hydra import compose, initialize
@@ -92,6 +93,18 @@ def sdata_transcripts_mul_coord(tmpdir):
     # backing store for specific unit test
     sdata.write(os.path.join(tmpdir, "sdata_transcriptomics.zarr"))
     sdata = read_zarr(os.path.join(tmpdir, "sdata_transcriptomics.zarr"))
+    yield sdata
+
+
+@pytest.fixture
+def sdata_bin():
+    registry = get_registry()
+    unzip_path = registry.fetch(
+        "transcriptomics/visium_hd/mouse/sdata_custom_binning_visium_hd_unit_test.zarr.zip", processor=pooch.Unzip()
+    )
+    sdata = read_zarr(os.path.commonpath(unzip_path))
+    sdata.path = None
+
     yield sdata
 
 

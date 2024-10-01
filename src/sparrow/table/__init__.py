@@ -1,6 +1,6 @@
 from sparrow.utils.pylogger import get_pylogger
 
-from ._allocation import allocate
+from ._allocation import allocate, bin_counts
 from ._allocation_intensity import allocate_intensity
 from ._annotation import cluster_cleanliness, score_genes, score_genes_iter
 from ._clustering import kmeans, leiden

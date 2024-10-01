@@ -5,10 +5,11 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import skimage as ski
-import textalloc as ta
-from loguru import logger
 
 from sparrow.image import normalize
+from sparrow.utils.pylogger import get_pylogger
+
+log = get_pylogger(__name__)
 
 
 def calculate_snr(img, nbins=65536):
@@ -34,7 +35,7 @@ def calculate_snr_ratio(
     cycles=None,
     signal_threshold=None,
 ):
-    logger.debug("Calculating SNR ratio")
+    log.debug("Calculating SNR ratio")
     data = []
     table = sdata[table_name]
     if channel_names is None:
@@ -61,7 +62,7 @@ def calculate_snr_ratio(
 
 def snr_ratio(sdata, ax=None, loglog=True, color="black", groupby=None, **kwargs):
     """Plot the signal to noise ratio. On the x-axis is the signal intensity and on the y-axis is the SNR-ratio"""
-    logger.debug("Plotting SNR ratio")
+    log.debug("Plotting SNR ratio")
     if ax is None:
         fig, ax = plt.subplots()
     df_img = calculate_snr_ratio(sdata, cycles="cycle" if color == "cycle" else None, **kwargs)
@@ -80,7 +81,7 @@ def snr_ratio(sdata, ax=None, loglog=True, color="black", groupby=None, **kwargs
         palette = sns.color_palette("viridis", n_colors=len(df_img["cycle"].unique()))
         cmap = sns.color_palette("viridis", n_colors=len(df_img["cycle"].unique()), as_cmap=True)
         df_img["cycle"] = get_hexes(df_img["cycle"], palette=palette)
-    logger.debug(df_img.head())
+    log.debug(df_img.head())
     _plot_snr_ratio(df_img, ax, color, text_list=sdata.table.var_names)
     ax.set_xlabel("Signal intensity")
     ax.set_ylabel("Signal-to-noise ratio")
@@ -103,6 +104,8 @@ def snr_ratio(sdata, ax=None, loglog=True, color="black", groupby=None, **kwargs
 
 
 def _plot_snr_ratio(df, ax, color, text_list):
+    import textalloc as ta
+
     for _i, row in df.iterrows():
         # do a scatter plot
         if color == "cycle":
@@ -121,7 +124,7 @@ def _plot_snr_ratio(df, ax, color, text_list):
 
 def group_snr_ratio(sdata, groupby, ax=None, loglog=True, color="black", **kwargs):
     """Plot the signal to noise ratio. On the x-axis is the signal intensity and on the y-axis is the SNR-ratio"""
-    logger.debug("Plotting SNR ratio")
+    log.debug("Plotting SNR ratio")
     df_img = calculate_snr_ratio(sdata, cycles="cycle" if color == "cycle" else None, **kwargs)
 
     df_img = df_img.groupby(groupby).mean(numeric_only=True)
@@ -144,7 +147,7 @@ def group_snr_ratio(sdata, groupby, ax=None, loglog=True, color="black", **kwarg
         if loglog:
             ax.set_xscale("log", base=2)
             ax.set_yscale("log", base=2)
-        logger.debug(sample)
+        log.debug(sample)
         sample_df = df_img.loc[sample]
         #     ax = axs[i // 2, i % 2]  # Get the correct subplot
         ax.set_title(sample)

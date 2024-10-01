@@ -1,6 +1,9 @@
 import matplotlib.pyplot as plt
 import pandas as pd
-from loguru import logger
+
+from sparrow.utils.pylogger import get_pylogger
+
+log = get_pylogger(__name__)
 
 
 def calculate_segmentation_coverage(sdata):
@@ -23,7 +26,7 @@ def calculate_segments_per_area(sdata, sample_key="sample_id"):
     if "fov_labels" in table.columns:
         df = table.groupby(sample_key).agg({sample_key: "count"})
         area_map = {k: 1000 for k in table["fov_labels"].unique().tolist()}
-        logger.debug(area_map)
+        log.debug(area_map)
         df["cells_per_mm2"] = df.index.map(area_map)
     df.sort_values("cells_per_mm2", inplace=True)
     return df

@@ -3,6 +3,8 @@ import importlib.util
 import numpy as np
 import pytest
 
+from sparrow.utils._keys import _SPATIAL
+
 
 @pytest.mark.skipif(not importlib.util.find_spec("flowsom"), reason="requires the flowSOM library")
 def test_flowsom(sdata_blobs):
@@ -32,7 +34,7 @@ def test_flowsom(sdata_blobs):
     assert (fsom.get_cell_data().var.index == channels).all()
 
     # sanity check for consistency between flowsom object and sdata object.
-    coord = fsom.get_cell_data().obsm["spatial"][-2]
+    coord = fsom.get_cell_data().obsm[_SPATIAL][-2]
     assert (
         fsom.get_cell_data()[-2].to_df()["lineage_9"].values[0]
         == sdata_blobs[img_layer].sel(c=["lineage_9"]).data[0, coord[0], coord[1]].compute()
@@ -64,7 +66,7 @@ def test_flowsom_multi_c(sdata_multi_c):
     assert int(fraction * np.prod(sdata_multi_c[img_layer].shape[1:])) == fsom.get_cell_data().shape[0]
 
     # sanity check for consistency between flowsom object and sdata object.
-    coord = fsom.get_cell_data().obsm["spatial"][-2]
+    coord = fsom.get_cell_data().obsm[_SPATIAL][-2]
     assert (
         fsom.get_cell_data()[-2].to_df()["0"].values[0]
         == sdata_multi_c[img_layer].sel(c=[0]).data[0, coord[0], coord[1]].compute()

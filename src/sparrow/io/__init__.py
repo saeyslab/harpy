@@ -5,3 +5,4 @@ from ._transcripts import (
     read_transcripts,
     read_vizgen_transcripts,
 )
+from ._visium_hd import visium_hd

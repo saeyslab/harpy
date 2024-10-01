@@ -12,8 +12,8 @@ from scipy import ndimage
 from sparrow.utils._keys import _CELLSIZE_KEY, _INSTANCE_KEY
 
 
-# maybe support DataArray as input instead of dask arrays.
-class Aggregator:
+# TODO maybe support DataArray as input instead of dask arrays.
+class RasterAggregator:
     """Helper class to calulate aggregated 'sum', 'mean', 'var', 'area', 'min' or 'max' of image and labels using Dask."""
 
     def __init__(self, mask_dask_array: da.Array, image_dask_array: da.Array | None):

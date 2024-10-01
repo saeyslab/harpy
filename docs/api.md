@@ -53,6 +53,7 @@ Operations on image and labels layers.
     im.combine
     im.segment
     im.segment_points
+    im.add_grid_labels_layer
     im.expand_labels_layer
     im.align_labels_layers
     im.apply_labels_layers

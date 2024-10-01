@@ -18,6 +18,7 @@ In the default environment, install support for loading environment kernels (no 
 
 ```bash
 ml purge
+ml Python
 while [ ! -z $CONDA_PREFIX ]; do conda deactivate; done
 
 pip install environment_kernels
