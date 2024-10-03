@@ -1,22 +1,28 @@
+from __future__ import annotations
+
 import math
+import uuid
 
 import dask
 import dask.array as da
 import dask_geopandas as dgpd
+import datashader as ds
 import geopandas as gpd
 import numpy as np
-from affine import Affine
-from rasterio.features import rasterize
+import shapely
+import shapely.validation
+from shapely import GeometryCollection, MultiPolygon, Polygon
 from shapely.geometry import box
 from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import get_transformation
 
 from sparrow.image._image import add_labels_layer
+from sparrow.utils._keys import _INSTANCE_KEY
 from sparrow.utils.utils import _get_uint_dtype
 
 
-def add_labels_layer_from_shapes_layer(
+def rasterize(
     sdata: SpatialData,
     shapes_layer: str,
     output_layer: str,
@@ -40,10 +46,12 @@ def add_labels_layer_from_shapes_layer(
     output_layer
         Name of the resulting labels layer that will be added to `sdata`.
     out_shape
-        output shape of the resulting labels layer `(y,x)`. Will be automatically calculated if set to None.
+        Output shape of the resulting labels layer `(y,x)`. Will be automatically calculated if set to None via `sdata[shapes_layer].geometry.total_bounds`.
         If `out_shape` is not `None`, with  `x_min, y_min, x_max, y_max = sdata[shapes_layer].geometry.total_bounds`,
         and `out_shape[1]<x_max` or `out_shape[0]<y_max`, then shapes with coordinates outside `out_shapes` will
         not be in resulting `output_layer`.
+        For `shapes_layer` with large offset `(y_min, x_min)`,
+        we recommend translating the shapes to the origin, and add the offset via a translation (`spatialdata.transformations.Translation`).
     chunks
         If provided, creation of the labels layer will be done in a chunked manner, with data divided into chunks for efficient computation.
     chunksize_shapes
@@ -65,6 +73,8 @@ def add_labels_layer_from_shapes_layer(
         If the provided `shapes_layer` contains Points.
     ValueError
         If 0 is in the index of the `shapes_layer`. As 0 is used as background in the `output_layer`.
+    TypeError
+        If `chunks` is not `None` and not an instance of `int`.
     """
     # only 2D polygons are suported.
     has_z = sdata.shapes[shapes_layer]["geometry"].apply(lambda geom: geom.has_z)
@@ -81,47 +91,74 @@ def add_labels_layer_from_shapes_layer(
             "0 is in the index of the shapes layer. This is not allowed, because the label 0 is reserved for background. "
             "Either remove the item from the shapes layer or increase indices of shapes with 1."
         )
+    if chunks is not None and not isinstance(chunks, int):
+        raise TypeError("Parameter 'chunks' must be of type int if not None.")
 
-    _, _, x_max, y_max = sdata[shapes_layer].geometry.total_bounds
+    bounds = [int(round(coord)) for coord in sdata[shapes_layer].geometry.total_bounds]
+    x_min, y_min, x_max, y_max = bounds
+    y_min = y_min if y_min > 0 else 0
+    x_min = x_min if x_min > 0 else 0
 
     assert (
         x_max > 0 and y_max > 0
     ), f"The maximum of the bounding box of the shapes layer {shapes_layer} is negative. This is not allowed."
-    index = sdata[shapes_layer].index.values.astype(int)
+    shapes = sdata[shapes_layer].copy()
+    shapes.index = shapes.index.values.astype(int)
+    # set index name to this value, because otherwise reset_index could cause error, if _INSTANCE_KEY column already exists in the shapes layer
+    index_name = f"{_INSTANCE_KEY}_{uuid.uuid4()}"
+    shapes.index.name = index_name
+    shapes.reset_index(inplace=True)
 
     if out_shape is not None:
+        if out_shape[0] <= y_min or out_shape[1] <= x_min:
+            raise ValueError("ValueError")
         y_max = out_shape[0]
         x_max = out_shape[1]
 
     if chunks is None:
-        chunks = int(np.max([y_max, x_max]))
-    _chunks = _get_chunks(y_max=y_max, x_max=x_max, chunksize=chunks)
+        rechunksize = "auto"
+        chunks = int(np.max([y_max - y_min, x_max - x_min]))
+    else:
+        rechunksize = chunks
+    _chunks = _get_chunks(y_max=y_max, x_max=x_max, y_min=y_min, x_min=x_min, chunksize=chunks)
 
-    dask_shapes = dgpd.from_geopandas(sdata.shapes[shapes_layer], chunksize=chunksize_shapes)
-    _dtype = _get_uint_dtype(index.max())
+    dask_shapes = dgpd.from_geopandas(shapes, chunksize=chunksize_shapes)
+    _dtype = _get_uint_dtype(shapes[index_name].max())
 
     @dask.delayed
     def _process_chunk(tile_bounds, polygons):
-        output_shape = (tile_bounds[1] - tile_bounds[0], tile_bounds[3] - tile_bounds[2])
+        output_shape = (tile_bounds[1] - tile_bounds[0], tile_bounds[3] - tile_bounds[2])  # y, x
         if polygons.empty:
             output_shape = output_shape
             return np.zeros(shape=output_shape)
 
-        transform = Affine.translation(xoff=tile_bounds[2], yoff=tile_bounds[0])
-
-        # TODO. Test datashader to do this. probably faster.
-        masks = rasterize(
-            zip(
-                polygons.geometry,
-                polygons.index.astype(int),  # take index of the polygons
-            ),
-            out_shape=output_shape,  # y,x
-            dtype=_dtype,
-            transform=transform,
-            fill=0,
+        # fix polygons after a .clip is done (i.e. convert GeometryCollection to a Polygon and remove all non Polygon items)
+        polygons.geometry = polygons.geometry.map(
+            lambda cell: _ensure_polygon_multipolygon(shapely.validation.make_valid(cell))
         )
+        polygons = polygons[~polygons.geometry.isna()]
+        if polygons.empty:
+            output_shape = output_shape
+            return np.zeros(shape=output_shape)
 
-        return masks
+        y_min_chunk, y_max_chunk, x_min_chunk, x_max_chunk = tile_bounds
+        min_coordinate = [int(y_min_chunk), int(x_min_chunk)]
+        max_coordinate = [int(y_max_chunk), int(x_max_chunk)]
+        axes = ("y", "x")
+        plot_width = x_max_chunk - x_min_chunk
+        plot_height = y_max_chunk - y_min_chunk
+
+        y_range = [min_coordinate[axes.index("y")], max_coordinate[axes.index("y")]]
+        x_range = [min_coordinate[axes.index("x")], max_coordinate[axes.index("x")]]
+
+        cnv = ds.Canvas(plot_height=plot_height, plot_width=plot_width, x_range=x_range, y_range=y_range)
+
+        agg = cnv.polygons(polygons, "geometry", ds.first(index_name))
+
+        agg = agg.fillna(0)
+        arr = agg.data.astype(_dtype)
+
+        return arr
 
     blocks = []
     for _chunks_inner in _chunks:
@@ -142,9 +179,17 @@ def add_labels_layer_from_shapes_layer(
             )
         blocks.append(blocks_inner)
 
+    arr = da.block(blocks)
+    # we choose to pad with zeros, not add a translation,
+    # if shapes layer has a (large) offset (y_min!=0 or x_min!=0),
+    # it is therefore better, performance wise, to add a translation to the shapes layer, so the labels layer does not need to be padded
+    arr = da.pad(arr, pad_width=((y_min, 0), (x_min, 0)), mode="constant", constant_values=0)
+    # rechunk to avoid irregular chunksize after padding
+    arr = arr.rechunk(rechunksize)
+
     sdata = add_labels_layer(
         sdata,
-        arr=da.block(blocks),
+        arr=arr,
         output_layer=output_layer,
         transformations=get_transformation(sdata[shapes_layer], get_all=True),
         scale_factors=scale_factors,
@@ -154,16 +199,16 @@ def add_labels_layer_from_shapes_layer(
     return sdata
 
 
-def _get_chunks(y_max: int, x_max: int, chunksize: int):
+def _get_chunks(y_max: int, x_max: int, y_min: int, x_min: int, chunksize: int):
+    assert isinstance(chunksize, int), "Please only provide integer values."
     y_max = int(y_max)
     x_max = int(x_max)
-
-    y_min = 0
-    x_min = 0
+    y_min = int(y_min)
+    x_min = int(x_min)
 
     # Calculate the total range along x and y
-    total_x_range = x_max
-    total_y_range = y_max
+    total_x_range = x_max - x_min
+    total_y_range = y_max - y_min
 
     # Calculate the number of chunks along x and y axes
     num_chunks_x = math.ceil(total_x_range / chunksize)
@@ -183,3 +228,36 @@ def _get_chunks(y_max: int, x_max: int, chunksize: int):
         chunks.append(chunks_inner)
 
     return chunks
+
+
+def _ensure_polygon_multipolygon(cell: Polygon | MultiPolygon | GeometryCollection) -> Polygon | None:
+    """
+    Ensures that the provided cell becomes a Polygon or MultiPolygon.
+
+    Helper function, because datashader can not work with GeometryCollection.
+
+    Parameters
+    ----------
+    cell
+        A shapely Polygon, MultiPolygon or GeometryCollection.
+
+    Returns
+    -------
+        The shape as a Polygon or MultiPolygon
+    """
+    cell = shapely.make_valid(cell)
+
+    if isinstance(cell, (Polygon, MultiPolygon)):
+        return cell
+
+    if isinstance(cell, GeometryCollection):
+        # We only keep the geometries of type Polygon
+        geoms = [geom for geom in cell.geoms if isinstance(geom, Polygon)]
+
+        if not geoms:
+            print(f"Removing cell of type {type(cell)} as it contains no Polygon geometry")
+            return None
+
+        return MultiPolygon(geoms)  # max(geoms, key=lambda polygon: polygon.area)
+
+    return None

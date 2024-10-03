@@ -6,7 +6,7 @@ from spatialdata import SpatialData
 from spatialdata.models._utils import MappingToCoordinateSystem_t
 from spatialdata.models.models import ScaleFactors_t
 
-from sparrow.image._shapes_to_labels import add_labels_layer_from_shapes_layer
+from sparrow.image._rasterize import rasterize
 from sparrow.shape._shape import add_shapes_layer
 
 
@@ -44,7 +44,7 @@ def add_grid_labels_layer(
         The type of grid to create. Can be either `"hexagon"` for a hexagonal grid or `"square"` for a square grid. The default is `"hexagon"`.
     offset
         An optional translation offset applied to the grid. This is a tuple `(y_offset, x_offset)` that can shift the grid. Default is `(0, 0)`,
-        but it is recommended to use a non-zero offset, and specify the offset via passing a `spatialdata.transformations.Translation` to `transformations`.
+        but it is recommended to use a zero offset, and specify the offset via passing a `spatialdata.transformations.Translation` to `transformations`.
     chunks
         Specifies the chunk size for Dask arrays when calculating the labels layer.
     transformations
@@ -84,7 +84,7 @@ def add_grid_labels_layer(
         transformations=transformations,
         overwrite=overwrite,
     )
-    sdata = add_labels_layer_from_shapes_layer(
+    sdata = rasterize(
         sdata=sdata,
         shapes_layer=output_shapes_layer,
         output_layer=output_labels_layer,

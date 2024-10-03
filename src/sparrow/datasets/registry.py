@@ -39,6 +39,7 @@ def get_registry(path: str | Path | None = None) -> Pooch:
             "transcriptomics/resolve/mouse/markerGeneListMartinNoLow.csv": "1ffefe7d4e72e05ef158ee1e73919b50882a97b6590f4ae977041d6b8b66a459",
             "transcriptomics/resolve/mouse/sdata_transcriptomics.zarr.zip": "30a5649b8a463a623d4e573716f8c365df8c5eed3e77b3e81abf0acaf5ffd1f3",
             "transcriptomics/resolve/mouse/sdata_transcriptomics_coordinate_systems_unit_test.zarr.zip": "ef2ba1c0f6cc9aebe4cf394d1ee00e0622ea4f9273fedd36feb9c7a2363e41a7",
+            "transcriptomics/vizgen/mouse/_sdata_2D.zarr.zip": "e1f36061e97e74ad131eb709ca678658829dc4385a444923ef74835e783d63bc",
             "transcriptomics/visium_hd/mouse/masks.geojson": "a02377ce9924662b440fd7ab91da95e51344e82cda5f27d698ca820030fbfbf3",
             "transcriptomics/visium_hd/mouse/sdata_custom_binning_visium_hd_unit_test.zarr.zip": "346597ca5c85a6ab81239e5b7dbcd11c7715f7a4208cd4912ac78738bd3ed092",
             "transcriptomics/visium_hd/mouse/visium_hd_mouse_small_intestine.zip": "791938dc972d4b42b255673c08dcb3948ebb66c60eabd1483c2fdb67f001256b",

@@ -6,7 +6,7 @@ from ._contrast import enhance_contrast
 from ._filters import gaussian_filtering, min_max_filtering
 from ._image import add_image_layer, add_labels_layer
 from ._normalize import normalize
-from ._shapes_to_labels import add_labels_layer_from_shapes_layer
+from ._rasterize import rasterize
 from ._transcripts import transcript_density
 from .pixel_clustering._preprocess import pixel_clustering_preprocess
 from .segmentation._align_masks import align_labels_layers

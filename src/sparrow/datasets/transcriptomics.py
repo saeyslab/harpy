@@ -29,6 +29,16 @@ def resolve_example_multiple_coordinate_systems() -> SpatialData:
     return sdata
 
 
+def vizgen_example() -> SpatialData:
+    """Example transcriptomics dataset"""
+    # Fetch and unzip the file
+    registry = get_registry()
+    unzip_path = registry.fetch("transcriptomics/vizgen/mouse/_sdata_2D.zarr.zip", processor=pooch.Unzip())
+    sdata = read_zarr(os.path.commonpath(unzip_path))
+    sdata.path = None
+    return sdata
+
+
 def visium_hd_example(bin_size: int | list[int] = 16, output=None) -> SpatialData:
     """Example transcriptomics dataset
 
