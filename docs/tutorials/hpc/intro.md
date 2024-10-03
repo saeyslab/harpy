@@ -25,7 +25,7 @@ hpc$ ln -s /path/to/data/folder ./
 
 ## HPC config
 
-Follow the instructions as given in the [usage.md](usage.md), in the section _(Hydra) CLI_. Please update the `configs/default.yaml` file in the configs folder downloaded locally (we assume this path is `/Path/to/local/configs` in the remainder of this document):
+Follow the instructions as given in the [usage.md](../../usage.md), in the section _(Hydra) CLI_. Please update the `configs/default.yaml` file in the configs folder downloaded locally (we assume this path is `/Path/to/local/configs` in the remainder of this document):
 
 ```yaml
 # @package _global_

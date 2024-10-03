@@ -25,7 +25,7 @@ Please see our preprint ... for citation and to learn more.
     Learn how to install ``Harpy``.
 
 .. card:: Tutorials
-    :link: notebooks
+    :link: tutorials/index
     :link-type: doc
 
     Tutorials to help you get up to speed with ``Harpy``.
@@ -44,7 +44,7 @@ Please see our preprint ... for citation and to learn more.
 
 
 .. card:: HPC
-    :link: hpc
+    :link: tutorials/hpc/index
     :link-type: doc
 
     Learn how to run ``Harpy`` in a High-Performance Computing (HPC) environment.
@@ -60,13 +60,11 @@ Please see our preprint ... for citation and to learn more.
 
 ```{toctree}
 :hidden: true
-:maxdepth: 1
+:maxdepth: 2
 
 installation.md
-notebooks.md
 usage.md
+tutorials/index.md
 api.md
-hpc.md
-vib_compute.md
 contributing.md
 ```

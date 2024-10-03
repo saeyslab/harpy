@@ -122,10 +122,14 @@ html_static_path = ["_static"]
 html_title = project_name
 html_logo = "_static/img/logo-white.png"
 
-# html_theme_options = {
-# "repository_url": repository_url,
-# "use_repository_button": True,
-# }
+html_theme_options = {
+    "repository_url": "https://github.com/saeyslab/harpy",
+    "use_repository_button": True,
+    "use_edit_page_button": True,
+    "use_source_button": True,
+    "use_issues_button": True,
+    "path_to_docs": "./docs",
+}
 
 pygments_style = "default"
 

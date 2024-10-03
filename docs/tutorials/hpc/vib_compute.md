@@ -30,7 +30,7 @@ Load the Mamba module to create a conda env.
 ml load Mamba
 ```
 
-Next use [environment_vib_compute.yml](../environment_vib_compute.yml) to build a conda environment:
+Next use [environment_vib_compute.yml](../../../environment_vib_compute.yml) to build a conda environment:
 
 ```bash
 mamba env create -f environment_vib_compute.yml
@@ -58,4 +58,4 @@ ipython kernel install --user --name harpy --display-name "harpy"
 
 Now on [https://compute.vib.be](https://compute.vib.be/pun/sys/dashboard/batch_connect/sys/jupyter-gpu/session_contexts/new), start a JupyterLab on GPU (select Python 3.10); check the conda environment box; select Mamba as the system wide Conda Module; fill in `harpy` as the name of the Custom Conda Environment.
 
-You should now be able to run the notebook [Harpy_feature_calculation.ipynb](../docs/tutorials/Harpy_feature_calculation.ipynb) in an interactive session on the VIB compute cluster.
+You should now be able to run the notebook [Harpy_feature_calculation.ipynb](../general/Harpy_feature_calculation.ipynb) in an interactive session on the VIB compute cluster.

@@ -21,13 +21,13 @@ sdata=sp.datasets.resolve_example()
 
 ### Jupyter notebooks
 
-Check the [notebooks](notebooks.md#tutorials) in the tutorials section.
+Check the notebooks in the [tutorials section](tutorials/index.md).
 
 ### Napari plugin
 
 After installing [installing](installation.md) Harpy, you can run the plugin by first starting Napari, and starting the plugin from Napari's menu bar: `napari > Plugins > sparrow`.
 
-Use the plugin to tune the parameters of Harpy for the different steps of the pipeline. Tuning can be done on small crops of the image. After every step, a corresponding configuration _.yaml_ file will be saved in the output directory chosen by the user. We refer to the [hpc](hpc.md) documentation for information on how to use these generated configuration files via the CLI.
+Use the plugin to tune the parameters of Harpy for the different steps of the pipeline. Tuning can be done on small crops of the image. After every step, a corresponding configuration _.yaml_ file will be saved in the output directory chosen by the user. We refer to the [hpc](/tutorials/hpc/index.md) documentation for information on how to use these generated configuration files via the CLI.
 
 ### (Hydra) CLI
 
