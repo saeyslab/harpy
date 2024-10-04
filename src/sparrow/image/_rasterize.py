@@ -3,14 +3,14 @@ from __future__ import annotations
 import math
 import uuid
 
-import dask
 import dask.array as da
-import dask_geopandas as dgpd
 import datashader as ds
 import geopandas as gpd
 import numpy as np
 import shapely
 import shapely.validation
+from dask import delayed
+from dask.distributed import Client
 from shapely import GeometryCollection, MultiPolygon, Polygon
 from shapely.geometry import box
 from spatialdata import SpatialData
@@ -28,7 +28,7 @@ def rasterize(
     output_layer: str,
     out_shape: tuple[int, int] | None = None,  # output shape in y, x.
     chunks: int | None = None,
-    chunksize_shapes: int = 100000,
+    client: Client = None,
     scale_factors: ScaleFactors_t | None = None,
     overwrite: bool = False,
 ) -> SpatialData:
@@ -54,8 +54,13 @@ def rasterize(
         we recommend translating the shapes to the origin, and add the offset via a translation (`spatialdata.transformations.Translation`).
     chunks
         If provided, creation of the labels layer will be done in a chunked manner, with data divided into chunks for efficient computation.
-    chunksize_shapes
-        Passed to `chunksize` parameter of `geopandas.from_geopandas`, when loading `shapes_layer` in a Dask dataframe.
+    client
+        A `Dask` client. If specified, a copy of `sdata[shapes_layer]` will be scattered across the workers, reducing the size of the task graph.
+        If not specified, `Dask` will use the default scheduler as configured on your system.
+    client
+        A Dask `Client` instance. If specified, a copy of the GeoDataFrame (`sdata[shapes_layer]`) will be scattered across the workers.
+        This reduces the size of the task graph and can improve performance by minimizing data transfer overhead during computation.
+        If not specified, Dask will use the default scheduler as configured on your system (e.g., single-threaded, multithreaded, or a global client if one is running).
     scale_factors
         Scale factors to apply for multiscale.
     overwrite
@@ -122,12 +127,17 @@ def rasterize(
         rechunksize = chunks
     _chunks = _get_chunks(y_max=y_max, x_max=x_max, y_min=y_min, x_min=x_min, chunksize=chunks)
 
-    dask_shapes = dgpd.from_geopandas(shapes, chunksize=chunksize_shapes)
     _dtype = _get_uint_dtype(shapes[index_name].max())
+    if client is not None:
+        # if working with a client, we scatter dask shapes, to reduce the size of the dask graph
+        shapes = client.scatter(shapes)
 
-    @dask.delayed
-    def _process_chunk(tile_bounds, polygons):
-        output_shape = (tile_bounds[1] - tile_bounds[0], tile_bounds[3] - tile_bounds[2])  # y, x
+    def _process_chunk(tile_bounds, _shapes):
+        bbox = box(miny=tile_bounds[0], maxy=tile_bounds[1], minx=tile_bounds[2], maxx=tile_bounds[3])
+        gpd_bbox = gpd.GeoDataFrame({"geometry": [bbox]}, crs=_shapes.crs)
+        output_shape = (tile_bounds[1] - tile_bounds[0], tile_bounds[3] - tile_bounds[2])  # y,x
+        polygons = _shapes.clip(gpd_bbox)
+
         if polygons.empty:
             output_shape = output_shape
             return np.zeros(shape=output_shape)
@@ -164,12 +174,8 @@ def rasterize(
     for _chunks_inner in _chunks:
         blocks_inner = []
         for _tile_bounds in _chunks_inner:
-            bbox = box(miny=_tile_bounds[0], maxy=_tile_bounds[1], minx=_tile_bounds[2], maxx=_tile_bounds[3])
-            gpd_bbox = gpd.GeoDataFrame({"geometry": [bbox]}, crs=dask_shapes.crs)
             output_shape = (_tile_bounds[1] - _tile_bounds[0], _tile_bounds[3] - _tile_bounds[2])
-            # take a subset of the polygons
-            polygons = dask_shapes.clip(gpd_bbox)
-            mask = _process_chunk(_tile_bounds, polygons)
+            mask = delayed(_process_chunk)(_tile_bounds, shapes)
             blocks_inner.append(
                 da.from_delayed(
                     mask,
