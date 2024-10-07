@@ -60,7 +60,7 @@ Operations on image and labels layers.
     im.filter_labels_layer
     im.merge_labels_layers
     im.merge_labels_layers_nuclei
-    im.add_labels_layer_from_shapes_layer
+    im.rasterize
     im.mask_to_original
     im.pixel_clustering_preprocess
     im.flowsom

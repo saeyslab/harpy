@@ -17,7 +17,7 @@ def test_add_grid_labels_layer_hexagon(hex_size):
     sdata = add_grid_labels_layer(
         sdata,
         shape=shape,
-        offset=offset,  # not recommended to add offset, better to add offset vias a translation
+        offset=offset,  # not recommended to add offset, better to add offset via a translation
         size=hex_size,
         output_shapes_layer=output_shapes_layer,
         output_labels_layer=output_labels_layer,

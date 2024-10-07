@@ -1,12 +1,15 @@
+from __future__ import annotations
+
 import geopandas as gpd
 import numpy as np
+from dask.distributed import Client
 from shapely import box
 from shapely.geometry import Polygon
 from spatialdata import SpatialData
 from spatialdata.models._utils import MappingToCoordinateSystem_t
 from spatialdata.models.models import ScaleFactors_t
 
-from sparrow.image._shapes_to_labels import add_labels_layer_from_shapes_layer
+from sparrow.image._rasterize import rasterize
 from sparrow.shape._shape import add_shapes_layer
 
 
@@ -19,6 +22,7 @@ def add_grid_labels_layer(
     grid_type: str = "hexagon",  # can be either "hexagon" or "square".
     offset: tuple[int, int] = (0, 0),  # we recommend setting a non-zero offset via a translation.
     chunks: int | None = None,
+    client: Client = None,
     transformations: MappingToCoordinateSystem_t | None = None,
     scale_factors: ScaleFactors_t | None = None,
     overwrite: bool = False,
@@ -44,9 +48,12 @@ def add_grid_labels_layer(
         The type of grid to create. Can be either `"hexagon"` for a hexagonal grid or `"square"` for a square grid. The default is `"hexagon"`.
     offset
         An optional translation offset applied to the grid. This is a tuple `(y_offset, x_offset)` that can shift the grid. Default is `(0, 0)`,
-        but it is recommended to use a non-zero offset, and specify the offset via passing a `spatialdata.transformations.Translation` to `transformations`.
+        but it is recommended to use a zero offset, and specify the offset via passing a `spatialdata.transformations.Translation` to `transformations`.
     chunks
         Specifies the chunk size for Dask arrays when calculating the labels layer.
+    client
+        A Dask `Client` instance, which will be passed to 'sp.im.rasterize' (function which rasterizes the generated `output_shapes_layer`) if specified.
+        Refer to the 'sp.im.rasterize' docstring for further details.
     transformations
         Transformations that will be added to the resulting `output_shapes_layer` and `output_labels_layer`.
     scale_factors
@@ -84,12 +91,13 @@ def add_grid_labels_layer(
         transformations=transformations,
         overwrite=overwrite,
     )
-    sdata = add_labels_layer_from_shapes_layer(
+    sdata = rasterize(
         sdata=sdata,
         shapes_layer=output_shapes_layer,
         output_layer=output_labels_layer,
         out_shape=tuple(a + b for a, b in zip(shape, offset)),
         chunks=chunks,
+        client=client,
         scale_factors=scale_factors,
         overwrite=overwrite,
     )
