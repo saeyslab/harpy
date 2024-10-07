@@ -31,12 +31,12 @@ def run_notebook(notebook_path, timeout=600):
 def test_notebooks_harpy_transcriptomics(notebook):
     root = str(pyrootutils.setup_root(os.getcwd(), dotenv=True, pythonpath=True))
 
-    run_notebook(os.path.join(root, "docs/tutorials", notebook))
+    run_notebook(os.path.join(root, "docs/tutorials/advanced", notebook))
 
 
 @pytest.mark.skip
 @pytest.mark.skipif(
-    not importlib.util.find_spec("cellpose"),
+    not importlib.util.find_spec("cellpose") or not importlib.util.find_spec("spatialdata_plot"),
     reason="requires the cellpose library",
 )
 @pytest.mark.parametrize(
@@ -48,7 +48,7 @@ def test_notebooks_harpy_transcriptomics(notebook):
 def test_notebooks_harpy_feature_calculation(notebook):
     root = str(pyrootutils.setup_root(os.getcwd(), dotenv=True, pythonpath=True))
 
-    run_notebook(os.path.join(root, "docs/tutorials", notebook))
+    run_notebook(os.path.join(root, "docs/tutorials/general", notebook))
 
 
 @pytest.mark.skip
@@ -65,7 +65,7 @@ def test_notebooks_harpy_feature_calculation(notebook):
 def test_notebooks_harpy_qc_imc(notebook):
     root = str(pyrootutils.setup_root(os.getcwd(), dotenv=True, pythonpath=True))
 
-    run_notebook(os.path.join(root, "docs/tutorials", notebook))
+    run_notebook(os.path.join(root, "docs/tutorials/general", notebook))
 
 
 @pytest.mark.skip
@@ -84,7 +84,7 @@ def test_notebooks_harpy_qc_imc(notebook):
 def test_notebooks_harpy_qc_in_silico(notebook):
     root = str(pyrootutils.setup_root(os.getcwd(), dotenv=True, pythonpath=True))
 
-    run_notebook(os.path.join(root, "docs/tutorials", notebook))
+    run_notebook(os.path.join(root, "docs/tutorials/advanced", notebook))
 
 
 @pytest.mark.skip
@@ -97,7 +97,7 @@ def test_notebooks_harpy_qc_in_silico(notebook):
 def test_notebooks_coordinate_systems(notebook):
     root = str(pyrootutils.setup_root(os.getcwd(), dotenv=True, pythonpath=True))
 
-    run_notebook(os.path.join(root, "docs/tutorials", notebook))
+    run_notebook(os.path.join(root, "docs/tutorials/advanced", notebook))
 
 
 @pytest.mark.skip
@@ -111,7 +111,7 @@ def test_notebooks_coordinate_systems(notebook):
 def test_notebooks_flowsom(notebook):
     root = str(pyrootutils.setup_root(os.getcwd(), dotenv=True, pythonpath=True))
 
-    run_notebook(os.path.join(root, "docs/tutorials", notebook))
+    run_notebook(os.path.join(root, "docs/tutorials/general", notebook))
 
 
 @pytest.mark.skip
