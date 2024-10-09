@@ -9,6 +9,7 @@ These tutorials are more advanced and require a deeper understanding of the Harp
     Harpy_QC_in_silico.ipynb
     Interactive_napari_cell_annotation.ipynb
     Interactive_napari_pixel_annotation.ipynb
+    Harpy_instanseg.ipynb
     coordinate_systems.ipynb
     Harpy_transcriptomics.ipynb
 ```

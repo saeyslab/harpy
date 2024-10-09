@@ -85,10 +85,11 @@ def cluster_blobs(
     img = Image2DModel.parse(
         data=np.concatenate([noisy_nuclei_channel[np.newaxis], lineage_channels], axis=0),
         c_coords=channel_names,
+        dims="cyx",
         transformations={coordinate_system: Identity()},
     )
     img_segmented = _generate_segmentation(nuclei_channel, markers, watershed_line=True)
-    labels = Labels2DModel.parse(img_segmented, transformations={coordinate_system: Identity()})
+    labels = Labels2DModel.parse(img_segmented, dims="yx", transformations={coordinate_system: Identity()})
     points = PointsModel.parse(nuclei_centers, transformations={coordinate_system: Identity()})
     # generate table
     adata = aggregate(values=img, by=labels, target_coordinate_system=coordinate_system).tables["table"]
