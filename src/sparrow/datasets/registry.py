@@ -74,6 +74,30 @@ def get_spatialdata_registry(path: str | Path | None = None) -> Pooch:
     return registry
 
 
+def get_ome_registry(path: str | Path | None = None) -> Pooch:
+    """
+    Get the Pooch SpatialData registry
+
+    Parameters
+    ----------
+    path
+        If None, example data will be downloaded in the default cache folder of your os. Set this to a custom path, to change this behaviour.
+
+    Returns
+    -------
+    Pooch registry.
+    """
+    registry = pooch.create(
+        path=pooch.os_cache("sparrow") if path is None else path,
+        base_url="https://downloads.openmicroscopy.org/images",
+        version=__version__,
+        registry={
+            "Vectra-QPTIFF/perkinelmer/PKI_fields/LuCa-7color_%5b13860,52919%5d_1x1component_data.tif": "50c3cc12b4e644467cb752d3e5cc778bb7c43209b99f3cac0ba5f44bbbb28fcc",
+        },
+    )
+    return registry
+
+
 def _calculate_sha256(file_path):
     """Helper function to calculate the hash of a file."""
     sha256_hash = hashlib.sha256()

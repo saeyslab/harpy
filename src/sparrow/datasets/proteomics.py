@@ -1,9 +1,10 @@
 import os
 
 import pooch
+import spatialdata as sd
 from spatialdata import SpatialData, read_zarr
 
-from sparrow.datasets.registry import get_registry, get_spatialdata_registry
+from sparrow.datasets.registry import get_ome_registry, get_registry, get_spatialdata_registry
 
 
 def mibi_example() -> SpatialData:
@@ -57,4 +58,19 @@ def imc_example():
         )
         .astype("category")
     )
+    return sdata
+
+
+def vectra_example():
+    """Example proteomics dataset LuCa-7color_[13860,52919]_1x1 from Perkin Elmer"""
+    # Fetch and unzip the file
+    registry = get_ome_registry()
+    path = registry.fetch("Vectra-QPTIFF/perkinelmer/PKI_fields/LuCa-7color_%5b13860,52919%5d_1x1component_data.tif")
+    from aicsimageio import AICSImage
+
+    img = AICSImage(path)
+    input_data = img.get_image_data("CYX")
+    # TODO use pixel metadata to set the pixel size
+    sdata = sd.SpatialData(images={"image": sd.models.Image2DModel.parse(input_data, dims="cyx")})
+    sdata.path = None
     return sdata
