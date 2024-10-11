@@ -157,13 +157,15 @@ def _dummy(
     name_x: str,
     name_y: str,
     name_gene: str,
+    c_dim: int = 1,
 ) -> NDArray:
     img, _, _ = relabel_sequential(
         img,
     )
-    # dummy points segmentation, just return the labels layer
+    img = [img] * c_dim
+    # dummy points segmentation, just return c_dims times the labels layer
     # (used for benchmarking, and unit tests)
-    return img
+    return np.concatenate(img, axis=-1)
 
 
 def _read_baysor(path_polygons: str | Path, min_vertices: int = 4) -> GeoDataFrame:

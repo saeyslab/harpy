@@ -355,9 +355,10 @@ def _process_masks(
         x_label[mask] = (x_label[mask] << shift) | block_num
 
     else:
-        log.warning(
-            f"Chunks are not relabeled. "
-            f"Please make sure that provided Callable {_func} returns unique labels across chunks, otherwise collisions can be expected."
-        )
+        pass
+        # log.warning(
+        #    f"Chunks are not relabeled. "
+        #    f"Please make sure that provided Callable {_func} returns unique labels across chunks, otherwise collisions can be expected."
+        # )
 
     return x_label

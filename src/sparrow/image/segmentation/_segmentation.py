@@ -3,9 +3,10 @@ from __future__ import annotations
 import shutil
 import uuid
 from abc import ABC, abstractmethod
+from copy import deepcopy
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 
 import dask.array as da
 import numpy as np
@@ -24,6 +25,7 @@ from sparrow.image._image import (
     _get_translation,
     add_labels_layer,
 )
+from sparrow.image.segmentation._align_masks import align_labels_layers
 from sparrow.image.segmentation._utils import (
     _SEG_DTYPE,
     _add_depth_to_chunks_size,
@@ -50,13 +52,14 @@ def segment(
     sdata: SpatialData,
     img_layer: str | None = None,
     model: Callable[..., NDArray] = _model,
-    output_labels_layer: str = "segmentation_mask",
-    output_shapes_layer: str | None = "segmentation_mask_boundaries",
+    output_labels_layer: str | list[str] = "segmentation_mask",
+    output_shapes_layer: str | list[str] | None = "segmentation_mask_boundaries",
+    labels_layer_align: str | None = None,
     depth: tuple[int, int] | int = 100,
     chunks: str | int | tuple[int, int] | None = "auto",
     boundary: str = "reflect",
     trim: bool = False,
-    iou: bool = False,
+    iou: bool = True,
     iou_depth: tuple[int, int] | int = 2,
     iou_threshold: float = 0.7,
     crd: tuple[int, int, int, int] | None = None,
@@ -82,14 +85,16 @@ def segment(
         Name of the label layer in which segmentation results will be stored in `sdata`.
     output_shapes_layer
         Name of the shapes layer where boundaries obtained output_labels_layer will be stored. If set to None, shapes won't be stored.
+    labels_layer_align
+        Name of the labels layer in `output_labels_layer` to align to if `model` retuns multi channel mask.
     depth
-        The depth in y and x dimension. The depth parameter is passed to map_overlap. If trim is set to False,
+        The depth in y and x dimension. The depth parameter is passed to `dask.array.map_overlap`. If trim is set to False,
         it's recommended to set the depth to a value greater than twice the estimated diameter of the cells/nulcei.
     chunks
         Chunk sizes for processing. Can be a string, integer or tuple of integers. If chunks is a Tuple,
         they  contain the chunk size that will be used in y and x dimension. Chunking in 'z' or 'c' dimension is not supported.
     boundary
-        Boundary parameter passed to map_overlap.
+        Boundary parameter passed to `dask.array.map_overlap`.
     trim
         If set to True, overlapping regions will be processed using the `squidpy` algorithm.
         If set to False, the `sparrow` algorithm will be employed instead. For dense cell distributions,
@@ -98,9 +103,9 @@ def segment(
         If set to True, will try to link labels across chunks using a label adjacency graph with an iou threshold (see `sparrow.image.segmentation.utils._link_labels`). If set to False, conflicts will be resolved using an algorithm that only retains masks with the center in the chunk.
         Setting `iou` to False gives good results if there is reasonable agreement of the predicted labels accross adjacent chunks.
     iou_depth
-        iou depth used for linking labels. Ignored if `iou` is set to False.
+        iou depth used for linking labels.
     iou_threshold
-        iou threshold used for linking labels. Ignored if `iou` is set to False.
+        iou threshold used for linking labels.
     crd
         The coordinates specifying the region of the image to be segmented. Defines the bounds (x_min, x_max, y_min, y_max).
     to_coordinate_system
@@ -143,6 +148,7 @@ def segment(
         img_layer=img_layer,
         output_labels_layer=output_labels_layer,
         output_shapes_layer=output_shapes_layer,
+        labels_layer_align=labels_layer_align,
         crd=crd,
         to_coordinate_system=to_coordinate_system,
         scale_factors=scale_factors,
@@ -156,18 +162,19 @@ def segment(
 def segment_points(
     sdata: SpatialData,
     labels_layer: str,  # the prior
-    points_layer: str | None = None,
+    points_layer: str,
     name_x: str = "x",
     name_y: str = "y",
     name_gene: str = _GENES_KEY,
     model: Callable[..., NDArray] = _model_points,
-    output_labels_layer: str = "segmentation_mask",
-    output_shapes_layer: str | None = "segmentation_mask_boundaries",
+    output_labels_layer: str | list[str] = "segmentation_mask",
+    output_shapes_layer: str | list[str] | None = "segmentation_mask_boundaries",
+    labels_layer_align: str | None = None,
     depth: tuple[int, int] | int = 100,
     chunks: str | int | tuple[int, int] | None = "auto",
     boundary: str = "reflect",
     trim: bool = False,
-    iou: bool = False,
+    iou: bool = True,
     iou_depth: tuple[int, int] | int = 2,
     iou_threshold: float = 0.7,
     crd: tuple[int, int, int, int] | None = None,
@@ -189,7 +196,7 @@ def segment_points(
     labels_layer
         The labels layer in `sdata` to be used as a prior.
     points_layer
-        The points layer in `sdata` to be used for segmentation. If None, 'last' points layer in `sdata` will be used.
+        The points layer in `sdata` to be used for segmentation.
     name_x
         Column name for x-coordinates of the transcripts in the points layer, by default "x".
     name_y
@@ -204,17 +211,19 @@ def segment_points(
         Currently only 2D segmentation is supported (y,x).
         It can have an arbitrary number of other parameters.
     output_labels_layer
-        Name of the label layer in which segmentation results will be stored in `sdata`.
+        Name of the labels layer in which segmentation results will be stored in `sdata`.
     output_shapes_layer
         Name of the shapes layer where boundaries obtained output_labels_layer will be stored. If set to None, shapes won't be stored.
+    labels_layer_align
+        Name of the labels layer in `output_labels_layer` to align to if `model` retuns multi channel mask.
     depth
-        The depth in y and x dimension. The depth parameter is passed to map_overlap. If trim is set to False,
+        The depth in y and x dimension. The depth parameter is passed to `dask.array.map_overlap`. If trim is set to False,
         it's recommended to set the depth to a value greater than twice the estimated diameter of the cells/nulcei.
     chunks
         Chunk sizes for processing. Can be a string, integer or tuple of integers. If chunks is a Tuple,
         they  contain the chunk size that will be used in y and x dimension. Chunking in 'z' or 'c' dimension is not supported.
     boundary
-        Boundary parameter passed to map_overlap.
+        Boundary parameter passed to `dask.array.map_overlap`.
     trim
         If set to True, overlapping regions will be processed using the `squidpy` algorithm.
         If set to False, the `sparrow` algorithm will be employed instead. For dense cell distributions,
@@ -223,9 +232,9 @@ def segment_points(
         If set to True, will try to link labels across chunks using a label adjacency graph with an iou threshold (see `sparrow.image.segmentation.utils._link_labels`). If set to False, conflicts will be resolved using an algorithm that only retains masks with the center in the chunk.
         Setting `iou` to False gives good results if there is reasonable agreement of the predicted labels across adjacent chunks.
     iou_depth
-        iou depth used for linking labels. Ignored if `iou` is set to False.
+        iou depth used for linking labels.
     iou_threshold
-        iou threshold used for linking labels. Ignored if `iou` is set to False.
+        iou threshold used for linking labels.
     crd
         The coordinates specifying the region of the `points_layer` to be segmented. Defines the bounds (x_min, x_max, y_min, y_max).
     to_coordinate_system
@@ -243,20 +252,11 @@ def segment_points(
 
     Raises
     ------
-    ValueError
-        If the `labels_layer` is None.
-
     TypeError
         If the provided `model` is not callable.
     """
+    # TODO eventually should support baysor segmentation without the need to specify labels_layer.
     fn_kwargs = kwargs
-
-    # take the last points layer as layer to do next step in pipeline
-    if points_layer is None:
-        points_layer = [*sdata.points][-1]
-    if labels_layer is None:
-        raise ValueError("Please provide labels layer as prior.")
-        # TODO eventually should support baysor segmentation without labels_layer provided.
 
     if not callable(model):
         raise TypeError(f"Expected `model` to be a callable, found `{type(model)}`.")
@@ -282,6 +282,7 @@ def segment_points(
         name_gene=name_gene,
         output_labels_layer=output_labels_layer,
         output_shapes_layer=output_shapes_layer,
+        labels_layer_align=labels_layer_align,
         crd=crd,
         to_coordinate_system=to_coordinate_system,
         scale_factors=scale_factors,
@@ -304,6 +305,25 @@ class SegmentationModel(ABC):
         **kwargs,
     ) -> SpatialData:
         pass
+
+    def _precondition_output_layers_name(
+        self, output_labels_layer: str | list[str] | None, output_shapes_layer: str | list[str] | None
+    ) -> tuple[list[str] | None, list[str] | None]:
+        def _fix_name(name: str | Iterable[str]):
+            return list(name) if isinstance(name, Iterable) and not isinstance(name, str) else [name]
+
+        if output_labels_layer is not None:
+            output_labels_layer = _fix_name(output_labels_layer)
+
+        if output_shapes_layer is not None:
+            output_shapes_layer = _fix_name(output_shapes_layer)
+
+        if output_labels_layer is not None and output_shapes_layer is not None:
+            assert (
+                len(output_labels_layer) == len(output_shapes_layer)
+            ), "It 'output_labels_layer' or 'output_shapes_layer' is provided as a list, they should be of the same length."
+
+        return output_labels_layer, output_shapes_layer
 
     def _precondition(self, se: DataArray, kwargs: dict[Any, Any]) -> tuple[Array, dict[Any, Any]]:
         # take dask array and put channel dimension last,
@@ -353,46 +373,97 @@ class SegmentationModel(ABC):
                     assert len(chunks) == x.ndim - 2, "Please (only) provide chunks for ( 'y', 'x')."
                     chunks = (x.shape[0], chunks[0], chunks[1], x.shape[-1])
                     kwargs["chunks"] = chunks
+                elif isinstance(chunks, int):
+                    chunks = (x.shape[0], chunks, chunks, x.shape[-1])
+                    kwargs["chunks"] = chunks
 
         return x, kwargs
 
     def _add_to_sdata(
         self,
         sdata: SpatialData,
-        x_labels: Array,
-        output_labels_layer: str,
-        output_shapes_layer: str | None,
+        x_labels: Array,  # z,y,x,c
+        output_labels_layer: list[str],
+        output_shapes_layer: list[str] | None,
+        labels_layer_align: str | None = None,
         transformations: MappingToCoordinateSystem_t | None = None,
         scale_factors: ScaleFactors_t | None = None,
         overwrite: bool = False,
+        **kwargs: Any,
     ) -> SpatialData:
+        # x_labels c dimension should be equal to the number of labels layers specified.
+        # note that this assert will never fail due to how chunks parameter works in map_overlap.
+        # i.e. set chunks=(,...(len( output_labels_layer ),).
+        assert x_labels.shape[-1] == len(output_labels_layer), (
+            f"Expected {len(output_labels_layer)} segmentation masks (based on 'output_labels_layer'), "
+            f"but got {x_labels.shape[-1]} masks from the segmentation model."
+        )
         # squeeze the z-dim if it is 1 (i.e. case where you did not do 3D segmentation),
         # otherwise 2D labels layer would be saved as 3D
         if x_labels.shape[0] == 1:
             x_labels = x_labels.squeeze(0)
 
-        sdata = add_labels_layer(
-            sdata,
-            arr=x_labels,
-            output_layer=output_labels_layer,
-            chunks=x_labels.chunksize,
-            transformations=transformations,
-            scale_factors=scale_factors,
-            overwrite=overwrite,
-        )
+        # now iterate over x_labels and add to sdata
+        for c_index in range(x_labels.shape[-1]):
+            _x_labels = x_labels[..., c_index]
+            _output_labels_layer = output_labels_layer[c_index]
+            # do not write to multiscale if we have to align afterwards, would be waste of write operations.
+            if labels_layer_align is not None and _output_labels_layer != labels_layer_align:
+                _scale_factors = None
+            else:
+                _scale_factors = scale_factors
+            sdata = add_labels_layer(
+                sdata,
+                arr=_x_labels,
+                output_layer=_output_labels_layer,
+                chunks=_x_labels.chunksize,
+                transformations=transformations,
+                scale_factors=_scale_factors,
+                overwrite=overwrite,
+            )
+
+        # align the labels layers if labels_layer_align is specified, and if there is more than one labels layer.
+        if labels_layer_align is not None and len(output_labels_layer) > 1:
+            depth = kwargs["depth"]
+            iou_depth = kwargs["iou_depth"]
+            chunks = kwargs["chunks"]
+
+            for _output_labels_layer in output_labels_layer:
+                if _output_labels_layer == labels_layer_align:
+                    # we do not need to align labels_layer_align with labels_layer_align
+                    continue
+                sdata = align_labels_layers(
+                    sdata,
+                    labels_layer_1=_output_labels_layer,
+                    labels_layer_2=labels_layer_align,
+                    depth=(
+                        depth[1],
+                        depth[2],
+                    ),
+                    chunks=chunks
+                    if isinstance(chunks, str)
+                    else (chunks[1], chunks[2]),  # get this from kwargs. Make a copy of kwargs before it is popped
+                    iou_depth=(iou_depth[1], iou_depth[2]),
+                    iou_threshold=kwargs["iou_threshold"],
+                    output_labels_layer=_output_labels_layer,
+                    output_shapes_layer=None,
+                    scale_factors=scale_factors,
+                    overwrite=True,
+                )
 
         # only calculate shapes layer if it is specified
         if output_shapes_layer is not None:
-            se_labels = _get_spatial_element(sdata, layer=output_labels_layer)
-
-            # convert the labels to polygons and add them as shapes layer to sdata
-            sdata = add_shapes_layer(
-                sdata,
-                input=se_labels.data,
-                output_layer=output_shapes_layer,
-                transformations=transformations,
-                overwrite=overwrite,
-            )
+            for i, _output_labels_layer in enumerate(output_labels_layer):
+                se_labels = _get_spatial_element(sdata, layer=_output_labels_layer)
+                _output_shapes_layer = output_shapes_layer[i]
+                # convert the labels to polygons and add them as shapes layer to sdata
+                sdata = add_shapes_layer(
+                    sdata,
+                    input=se_labels.data,
+                    output_layer=_output_shapes_layer,
+                    transformations=transformations,
+                    overwrite=overwrite,
+                )
 
         return sdata
 
@@ -400,6 +471,7 @@ class SegmentationModel(ABC):
         self,
         x: Array,  # array with dimension z,y,x,c
         temp_path: str | Path,
+        c_dim_output_labels: int,
         fn_kwargs: Mapping[str, Any] = MappingProxyType({}),
         **kwargs: Any,  # keyword arguments to be passed to map_overlap/map_blocks
     ) -> Array:  # array with dimension z,y,x
@@ -435,14 +507,14 @@ class SegmentationModel(ABC):
         iou_depth.pop(3)
 
         output_chunks = _add_depth_to_chunks_size(x.chunks, depth)
-        # only support output chunks (i.e. labels) with channel shape == 1
-        output_chunks = output_chunks[:-1] + ((1,),)
+        #  size of output chunks in channel dimension is c_dim_output_labels, because we do not allow chunking in that dimension
+        output_chunks = output_chunks[:-1] + ((c_dim_output_labels,),)
 
         # shift added to results of every chunk (i.e. if shift is 4, then 0 0 0 0 will be added to every label).
         # These 0's are then filled in with block_id number. This way labels are unique accross the different chunks.
         # not that if x.numblocks.bit_length() would be close to 16 bit, and each chunks has labels up to 16 bits,
         # this could lead to collisions.
-        # ignore channel dim (num_blocks[3]), because channel dim of resulting label is supposed to be 1.
+        # ignore channel dim (num_blocks[3]), because num_blocks[3]==1, because we do not allow chunking in c dimension.
         num_blocks = x.numblocks
         shift = int(np.prod(num_blocks[0] * num_blocks[1] * num_blocks[2]) - 1).bit_length()
 
@@ -465,8 +537,6 @@ class SegmentationModel(ABC):
             **kwargs,
         )
 
-        # For now, only support processing of x_labels with 1 channel dim
-        x_labels = x_labels.squeeze(-1)
         # write to intermediate zarr store if sdata is backed to reduce ram memory.
         if temp_path is not None:
             _chunks = x_labels.chunks
@@ -476,67 +546,76 @@ class SegmentationModel(ABC):
             )
             x_labels = da.from_zarr(temp_path)
             x_labels = x_labels.rechunk(_chunks)
-
-        # if trim==True --> use squidpy's way of handling neighbouring blocks
-        if trim:
-            from dask_image.ndmeasure._utils._label import (
-                connected_components_delayed,
-                label_adjacency_graph,
-                relabel_blocks,
-            )
-
-            # max because labels are not continuous (and won't be continuous)
-            label_groups = label_adjacency_graph(x_labels, None, x_labels.max())
-            new_labeling = connected_components_delayed(label_groups)
-            x_labels = relabel_blocks(x_labels, new_labeling)
-            x_labels = x_labels.rechunk(x_labels.chunksize)
-
-        elif iou:
-            iou_depth = da.overlap.coerce_depth(len(depth), iou_depth)
-
-            if any(iou_depth[ax] > depth[ax] for ax in depth.keys()):
-                raise ValueError(f"iou_depth {iou_depth} > depth {depth}")
-
-            trim_depth = {k: depth[k] - iou_depth[k] for k in depth.keys()}
-            x_labels = da.overlap.trim_internal(x_labels, trim_depth, boundary=boundary)
-            x_labels = _link_labels(
-                x_labels,
-                x_labels.max(),
-                iou_depth,
-                iou_threshold=iou_threshold,
-            )
-
-            x_labels = da.overlap.trim_internal(x_labels, iou_depth, boundary=boundary)
-
-            x_labels = x_labels.rechunk(x_labels.chunksize)
-
         else:
-            x_labels = da.map_blocks(
-                _clean_up_masks,
-                x_labels,
-                dtype=_SEG_DTYPE,
-                depth=depth,
-                **kwargs,
-            )
+            x_labels = x_labels.persist()
 
-            output_chunks = _substract_depth_from_chunks_size(x_labels.chunks, depth=depth)
+        # we support multi channel labels layer
+        _all_labels = []
+        for c_index in range(x_labels.shape[-1]):
+            _x_labels = x_labels[..., c_index]
+            # if trim==True --> use squidpy's way of handling neighbouring blocks
+            if trim:
+                from dask_image.ndmeasure._utils._label import (
+                    connected_components_delayed,
+                    label_adjacency_graph,
+                    relabel_blocks,
+                )
 
-            x_labels = da.map_overlap(
-                _merge_masks,
-                x_labels,
-                dtype=_SEG_DTYPE,
-                num_blocks=x_labels.numblocks,
-                trim=False,
-                allow_rechunk=False,  # already dealed with correcting for case where depth > chunksize
-                chunks=output_chunks,  # e.g. ((7,) ,(1024, 1024, 452), (1024, 1024, 452),)
-                depth=depth,
-                boundary="reflect",
-                _depth=depth,
-            )
+                # max because labels are not continuous (and won't be continuous)
+                label_groups = label_adjacency_graph(_x_labels, None, _x_labels.max())
+                new_labeling = connected_components_delayed(label_groups)
+                _x_labels = relabel_blocks(_x_labels, new_labeling)
+                _x_labels = _x_labels.rechunk(_x_labels.chunksize)
 
-            x_labels = x_labels.rechunk(x_labels.chunksize)
+            elif iou:
+                iou_depth = da.overlap.coerce_depth(len(depth), iou_depth)
 
-        return x_labels
+                if any(iou_depth[ax] > depth[ax] for ax in depth.keys()):
+                    raise ValueError(f"iou_depth {iou_depth} > depth {depth}")
+
+                trim_depth = {k: depth[k] - iou_depth[k] for k in depth.keys()}
+                _x_labels = da.overlap.trim_internal(_x_labels, trim_depth, boundary=boundary)
+                _x_labels = _link_labels(
+                    _x_labels,
+                    _x_labels.max(),
+                    iou_depth,
+                    iou_threshold=iou_threshold,
+                )
+
+                _x_labels = da.overlap.trim_internal(_x_labels, iou_depth, boundary=boundary)
+
+                _x_labels = _x_labels.rechunk(_x_labels.chunksize)
+
+            else:
+                _x_labels = da.map_blocks(
+                    _clean_up_masks,
+                    _x_labels,
+                    dtype=_SEG_DTYPE,
+                    depth=depth,
+                    **kwargs,
+                )
+
+                output_chunks = _substract_depth_from_chunks_size(_x_labels.chunks, depth=depth)
+
+                _x_labels = da.map_overlap(
+                    _merge_masks,
+                    _x_labels,
+                    dtype=_SEG_DTYPE,
+                    num_blocks=_x_labels.numblocks,
+                    trim=False,
+                    allow_rechunk=False,  # already dealed with correcting for case where depth > chunksize
+                    chunks=output_chunks,  # e.g. ((7,) ,(1024, 1024, 452), (1024, 1024, 452),)
+                    depth=depth,
+                    boundary="reflect",
+                    _depth=depth,
+                )
+
+                _x_labels = _x_labels.rechunk(_x_labels.chunksize)
+
+            _all_labels.append(_x_labels)
+
+        # returns a dask array containing labels with dimension (z,y,x,c)
+        return da.stack(_all_labels, axis=-1)
 
     def _segment_chunk(
         self,
@@ -558,7 +637,8 @@ class SegmentationModel(ABC):
                     f"Expected the number of blocks in the c-dimension to be `1`, found `{num_blocks[-1]}`."
                 )
 
-            # note: ignore num_blocks[3]==1 and block_id[3]==0, because we assume c-dimension is 1
+            # note: ignore num_blocks[3]==1 and block_id[3]==0, because we assume there is not chunking in c dimension
+            # actually also not in z dimension, so we could remove block_id[0] (always 0)
             block_num = block_id[0] * (num_blocks[1] * num_blocks[2]) + block_id[1] * (num_blocks[2]) + block_id[2]
 
         else:
@@ -599,8 +679,9 @@ class SegmentationModelStains(SegmentationModel):
         self,
         sdata: SpatialData,
         img_layer: str | None = None,
-        output_labels_layer: str = "segmentation_mask",
-        output_shapes_layer: str | None = "segmentation_mask_boundaries",
+        output_labels_layer: str | list[str] = "segmentation_mask",
+        output_shapes_layer: str | list[str] | None = "segmentation_mask_boundaries",
+        labels_layer_align: str | None = None,
         crd: tuple[int, int, int, int] | None = None,
         to_coordinate_system: str = "global",
         scale_factors: ScaleFactors_t | None = None,
@@ -614,6 +695,15 @@ class SegmentationModelStains(SegmentationModel):
                 f"No image layer specified. "
                 f"Applying segmentation on last image layer '{img_layer}' of the provided SpatialData object."
             )
+
+        output_labels_layer, output_shapes_layer = self._precondition_output_layers_name(
+            output_labels_layer, output_shapes_layer
+        )
+        if labels_layer_align is not None and labels_layer_align not in output_labels_layer:
+            raise ValueError(
+                f"'labels_layer_align' ('{labels_layer_align}') should be one of the values in 'output_labels_layer' ({output_labels_layer})."
+            )
+        c_dim_output_labels = len(output_labels_layer)
 
         se = _get_spatial_element(sdata, layer=img_layer)
         se_crop = None
@@ -646,18 +736,22 @@ class SegmentationModelStains(SegmentationModel):
         x_labels = self._segment(
             x,
             temp_path=_temp_path,
+            c_dim_output_labels=c_dim_output_labels,
             fn_kwargs=fn_kwargs,
-            **kwargs,
+            **deepcopy(kwargs),
         )
 
+        # need to check if depth is desired order
         sdata = self._add_to_sdata(
             sdata,
             x_labels,
             output_labels_layer=output_labels_layer,
             output_shapes_layer=output_shapes_layer,
+            labels_layer_align=labels_layer_align,
             transformations=get_transformation(se, get_all=True),
             scale_factors=scale_factors,
             overwrite=overwrite,
+            **kwargs,
         )
 
         if _temp_path is not None:
@@ -692,8 +786,9 @@ class SegmentationModelPoints(SegmentationModel):
         name_x: str = "x",
         name_y: str = "y",
         name_gene: str = _GENES_KEY,
-        output_labels_layer: str = "segmentation_mask",
-        output_shapes_layer: str | None = "segmentation_mask_boundaries",
+        output_labels_layer: str | list[str] = "segmentation_mask",
+        output_shapes_layer: str | list[str] | None = "segmentation_mask_boundaries",
+        labels_layer_align: str | None = None,
         crd: tuple[int, int, int, int] | None = None,
         to_coordinate_system: str = "global",
         scale_factors: ScaleFactors_t | None = None,
@@ -704,6 +799,15 @@ class SegmentationModelPoints(SegmentationModel):
         fn_kwargs["name_x"] = name_x
         fn_kwargs["name_y"] = name_y
         fn_kwargs["name_gene"] = name_gene
+
+        output_labels_layer, output_shapes_layer = self._precondition_output_layers_name(
+            output_labels_layer, output_shapes_layer
+        )
+        if labels_layer_align is not None and labels_layer_align not in output_labels_layer:
+            raise ValueError(
+                f"'labels_layer_align' ('{labels_layer_align}') should be one of the values in 'output_labels_layer' ({output_labels_layer})."
+            )
+        c_dim_output_labels = len(output_labels_layer)
 
         se = _get_spatial_element(sdata, layer=labels_layer)
 
@@ -782,8 +886,9 @@ class SegmentationModelPoints(SegmentationModel):
         x_labels = self._segment(
             x,
             temp_path=_temp_path,
+            c_dim_output_labels=c_dim_output_labels,
             fn_kwargs=fn_kwargs,
-            **kwargs,
+            **deepcopy(kwargs),
         )
 
         sdata = self._add_to_sdata(
@@ -791,9 +896,11 @@ class SegmentationModelPoints(SegmentationModel):
             x_labels,
             output_labels_layer=output_labels_layer,
             output_shapes_layer=output_shapes_layer,
+            labels_layer_align=labels_layer_align,
             transformations=get_transformation(se, get_all=True),
             scale_factors=scale_factors,
             overwrite=overwrite,
+            **kwargs,
         )
 
         if _temp_path is not None:

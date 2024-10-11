@@ -4,6 +4,8 @@
 Goldsborough, T. et al. (2024) ‘A novel channel invariant architecture for the segmentation of cells and nuclei in multiplexed images using InstanSeg’. bioRxiv, p. 2024.09.04.611150. Available at: https://doi.org/10.1101/2024.09.04.611150.
 """
 
+from typing import Literal
+
 from InstanSeg.utils.augmentations import Augmentations
 from numpy.typing import NDArray
 
@@ -12,7 +14,7 @@ def _instanseg(
     img: NDArray,
     device: str | None = "cpu",
     instanseg_model=None,
-    output: str = "whole_cell",
+    output: Literal["whole_cell", "nuclei", "all"] = None,
 ) -> NDArray:
     # input is z,y,x,c
     # output is z,y,x,c
@@ -55,7 +57,13 @@ def _instanseg(
     # dimension 1 is (nucleus mask (0) and whole cell mask (1))
     if output == "whole_cell":
         labeled_output = labeled_output[..., 1:2]
-    else:
+    elif output == "nuclei":
         labeled_output = labeled_output[..., 0:1]
+    elif output == "all" or output is None:
+        labeled_output = labeled_output
+    else:
+        raise ValueError(
+            f"Invalid value for parameter 'output': '{output}'. Expected one of: 'whole_cell', 'nuclei', 'all', or None."
+        )
 
     return labeled_output

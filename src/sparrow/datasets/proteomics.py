@@ -1,7 +1,12 @@
+from __future__ import annotations
+
 import os
+from pathlib import Path
 
 import pooch
 import spatialdata as sd
+import tifffile
+from numpy.typing import NDArray
 from spatialdata import SpatialData, read_zarr
 
 from sparrow.datasets.registry import get_ome_registry, get_registry, get_spatialdata_registry
@@ -66,11 +71,62 @@ def vectra_example():
     # Fetch and unzip the file
     registry = get_ome_registry()
     path = registry.fetch("Vectra-QPTIFF/perkinelmer/PKI_fields/LuCa-7color_%5b13860,52919%5d_1x1component_data.tif")
-    from aicsimageio import AICSImage
-
-    img = AICSImage(path)
-    input_data = img.get_image_data("CYX")
+    input_data, physical_pixel_size_x, physical_pixel_size_y = read_tifffile(path)
+    assert physical_pixel_size_x == physical_pixel_size_y
     # TODO use pixel metadata to set the pixel size
     sdata = sd.SpatialData(images={"image": sd.models.Image2DModel.parse(input_data, dims="cyx")})
     sdata.path = None
     return sdata
+
+
+def read_tifffile(path: str | Path) -> tuple[NDArray, float, float]:
+    """Read tifffile and extract physical pixel size in microns."""
+    # Open the TIFF file
+    with tifffile.TiffFile(path) as tif:
+        image_data = tif.asarray()
+
+        tags = tif.pages[0].tags
+        x_resolution_tag = tags.get("XResolution")
+        y_resolution_tag = tags.get("YResolution")
+        resolution_unit_tag = tags.get("ResolutionUnit")
+
+        def _get_resolution(resolution_tag):
+            if resolution_tag is not None:
+                res_value = resolution_tag.value
+                if isinstance(res_value, (tuple, list)):
+                    res = res_value[0] / res_value[1]
+                else:
+                    res = float(res_value)
+                return res
+            else:
+                return None
+
+        x_res = _get_resolution(x_resolution_tag)
+        y_res = _get_resolution(y_resolution_tag)
+
+        if resolution_unit_tag is not None:
+            resolution_unit = resolution_unit_tag.value
+        else:
+            raise ValueError("No resolution unit tag found.")
+
+        # Map the resolution unit to micrometers
+        if resolution_unit == 1:
+            unit_in_micrometers = 1e6  # No unit; assume meter (1 meter = 1,000,000 µm)
+        elif resolution_unit == 2:
+            unit_in_micrometers = 25.4e3  # Inch to micrometers (1 inch = 25,400 µm)
+        elif resolution_unit == 3:
+            unit_in_micrometers = 10e3  # Centimeter to micrometers (1 cm = 10,000 µm)
+        else:
+            raise ValueError("Unknown unit.")
+
+        if x_res is not None:
+            physical_pixel_size_x = (1 / x_res) * unit_in_micrometers  # In micrometers
+        else:
+            physical_pixel_size_x = None
+
+        if y_res is not None:
+            physical_pixel_size_y = (1 / y_res) * unit_in_micrometers  # In micrometers
+        else:
+            physical_pixel_size_y = None
+
+    return image_data, physical_pixel_size_x, physical_pixel_size_y

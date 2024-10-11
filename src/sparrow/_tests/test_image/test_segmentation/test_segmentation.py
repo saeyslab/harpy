@@ -99,3 +99,28 @@ def test_segment_points(sdata_multi_c: SpatialData):
         chunks=256,
         crd=None,
     )
+
+    output_labels_layer = ["masks_whole_copy_dummy_1", "masks_whole_copy_dummy_2"]
+    output_shapes_layer = ["masks_whole_copy_dummy_boundaries_1", "masks_whole_copy_dummy_boundaries_2"]
+    # test multi channel support for output labels dimension.
+    sdata_multi_c = segment_points(
+        sdata_multi_c,
+        labels_layer="masks_whole",
+        points_layer="transcripts",
+        name_x="x",
+        name_y="y",
+        name_gene="gene",
+        model=_dummy,
+        c_dim=2,
+        output_labels_layer=output_labels_layer,
+        output_shapes_layer=output_shapes_layer,
+        labels_layer_align=output_labels_layer[0],
+        chunks=256,
+        iou_depth=[3, 4],  # this will be used when aligning labels
+        crd=None,
+    )
+
+    for _output_labels_layer in output_labels_layer:
+        assert _output_labels_layer in sdata_multi_c.labels
+    for _output_shapes_layer in output_shapes_layer:
+        assert _output_shapes_layer in sdata_multi_c.shapes
