@@ -37,8 +37,8 @@ def _cellpose(
     cellprob_threshold: int = 0,
     flow_threshold: float = 0.6,
     diameter: int = 55,
-    model_type: str = "nuclei",
-    pretrained_model: str | Path | None = None,
+    model_type: str = "nuclei",  # ignored if pretrained model is specified.
+    pretrained_model: models.CellposeModel | str | Path | None = None,
     channels: list[int] | None = None,
     device: str = "cuda" if CUDA else "cpu",
     z_axis: int = 0,
@@ -55,12 +55,15 @@ def _cellpose(
         raise RuntimeError("Module 'cellpose' is not available. Please install it to use this function.")
     gpu = torch.cuda.is_available() or torch.backends.mps.is_available()
     if pretrained_model is not None:
-        model = models.CellposeModel(gpu=gpu, pretrained_model=pretrained_model, device=torch.device(device))
+        if isinstance(pretrained_model, models.CellposeModel):
+            model = pretrained_model
+        else:
+            model = models.CellposeModel(gpu=gpu, pretrained_model=pretrained_model, device=torch.device(device))
     elif model_type is not None:
         model = models.Cellpose(gpu=gpu, model_type=model_type, device=torch.device(device))
     else:
         raise ValueError(
-            "Please provide either 'model_type' or 'pretrained_model (i.e. a path to a pretrained model)'."
+            "Please provide either 'model_type' or 'pretrained_model (i.e. a path to a pretrained model or a loaded Cellpose model of type models.CellposeModel)'."
         )
     results = model.eval(
         img,

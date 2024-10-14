@@ -4,6 +4,7 @@
 Goldsborough, T. et al. (2024) ‘A novel channel invariant architecture for the segmentation of cells and nuclei in multiplexed images using InstanSeg’. bioRxiv, p. 2024.09.04.611150. Available at: https://doi.org/10.1101/2024.09.04.611150.
 """
 
+from pathlib import Path
 from typing import Literal
 
 from InstanSeg.utils.augmentations import Augmentations
@@ -16,13 +17,41 @@ from sparrow.image.segmentation._utils import _SEG_DTYPE
 def _instanseg(
     img: NDArray,
     device: str | None = "cpu",
-    instanseg_model: RecursiveScriptModule = None,
+    instanseg_model: RecursiveScriptModule
+    | Path
+    | str = "instanseg.pt",  # can be a loaded model, or path to instanseg model (.pt file)
     output: Literal["whole_cell", "nuclei", "all"] = None,
     dtype: type = _SEG_DTYPE,
 ) -> NDArray:
     # input is z,y,x,c
     # output is z,y,x,c
+    """
+    Perform instanseg segmentation on an image.
 
+    Parameters
+    ----------
+    img
+        The input image as a NumPy array on which instance segmentation will be performed (z,y,x,c).
+    device
+        The device to run the model on. Can be "cpu", "cuda", or another supported device.
+        Default is "cpu".
+    instanseg_model
+        The InstaSeg model used for segmentation. This can either be a pre-loaded model, or
+        a file path to the model (typically a `.pt` file).
+    output
+        Specifies the output segmentation type. Options are:
+            - "whole_cell": segment entire cells,
+            - "nuclei": segment only the nuclei,
+            - "all": segment both cells and nuclei.
+        If None, will output `all`.
+    dtype
+        The data type for the output mask. Default is set by `_SEG_DTYPE`.
+
+    Returns
+    -------
+    NDArray
+        A NumPy array containing the segmented regions as labeled masks (z,y,x,c).
+    """
     if img.shape[0] != 1:
         raise ValueError("Z dimension not equal to 1 is not supported for Instanseg segmentation.")
     img = img.squeeze(0)
@@ -33,17 +62,12 @@ def _instanseg(
         from InstanSeg.utils.utils import _choose_device
 
         device = _choose_device()
-    if instanseg_model is None:
-        import os
-
+    if not isinstance(instanseg_model, RecursiveScriptModule):
         import torch
-        from InstanSeg.utils.utils import download_model
 
-        model_to_download = "fluorescence_nuclei_and_cells"  # or "brightfield_nuclei"
-        download_model(model_to_download)
-        path_to_torchscript_model = os.environ["INSTANSEG_BIOIMAGEIO_PATH"] + f"{model_to_download}/instanseg.pt"
-        # Load the model from torchscript, replace "my_first_instanseg.pt" with the name of your model.
-        instanseg_model = torch.jit.load(path_to_torchscript_model)
+        # instanseg_model is the path to the torch jit .pt file.
+        instanseg_model = torch.jit.load(instanseg_model)
+        instanseg_model.to(device)
 
     Augmenter = Augmentations()
     input_tensor, _ = Augmenter.to_tensor(img, normalize=False)  # this converts the input data to a tensor
