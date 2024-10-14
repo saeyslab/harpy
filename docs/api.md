@@ -225,6 +225,7 @@ Dataset loaders.
     datasets.pixie_example
     datasets.macsima_example
     datasets.mibi_example
+    datasets.vectra_example
     datasets.resolve_example
     datasets.get_registry
     datasets.get_spatialdata_registry

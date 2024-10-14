@@ -50,7 +50,7 @@ log = get_pylogger(__name__)
 
 def segment(
     sdata: SpatialData,
-    img_layer: str | None = None,
+    img_layer: str,
     model: Callable[..., NDArray] = _model,
     output_labels_layer: str | list[str] = "segmentation_mask",
     output_shapes_layer: str | list[str] | None = "segmentation_mask_boundaries",
@@ -76,44 +76,47 @@ def segment(
     sdata
         The SpatialData object containing the image layer to segment.
     img_layer
-        The image layer in `sdata` to be segmented. If not provided, the last image layer in `sdata` is used.
+        The image layer in `sdata` to be segmented.
     model
         The segmentation model function used to process the images.
-        Callable should take as input numpy arrays of dimension (z,y,x,c) and return labels of dimension (z,y,x,c), with
-        c dimension==1. It can have an arbitrary number of other parameters.
+        Callable should take as input numpy arrays of dimension `(z,y,x,c)` and return labels of dimension `(z,y,x,c)`. It can have an arbitrary number of other parameters.
     output_labels_layer
         Name of the label layer in which segmentation results will be stored in `sdata`.
+        Can be a list of strings, if `model` returns multi channel mask.
+        If provided as a list, its length should match the `c` dimension of the output of `model`.
     output_shapes_layer
         Name of the shapes layer where boundaries obtained output_labels_layer will be stored. If set to None, shapes won't be stored.
+        Can be a list of strings, if `model` returns multi channel mask.
+        If provided as a list, its length should match the `c` dimension of the output of `model`.
     labels_layer_align
         Name of the labels layer in `output_labels_layer` to align to if `model` retuns multi channel mask.
     depth
-        The depth in y and x dimension. The depth parameter is passed to `dask.array.map_overlap`. If trim is set to False,
+        The depth in `y` and x dimension. The depth parameter is passed to `dask.array.map_overlap`. If trim is set to `False`,
         it's recommended to set the depth to a value greater than twice the estimated diameter of the cells/nulcei.
     chunks
-        Chunk sizes for processing. Can be a string, integer or tuple of integers. If chunks is a Tuple,
-        they  contain the chunk size that will be used in y and x dimension. Chunking in 'z' or 'c' dimension is not supported.
+        Chunk sizes for processing. Can be a string, integer or tuple of integers. If chunks is a `tuple`,
+        they  contain the chunk size that will be used in y and x dimension. Chunking in `z` or `c` dimension is not supported.
     boundary
         Boundary parameter passed to `dask.array.map_overlap`.
     trim
-        If set to True, overlapping regions will be processed using the `squidpy` algorithm.
-        If set to False, the `sparrow` algorithm will be employed instead. For dense cell distributions,
-        we recommend setting trim to False.
+        If set to `True`, overlapping regions will be processed using the `squidpy` algorithm.
+        If set to `False`, the `sparrow` algorithm will be employed instead. For dense cell distributions,
+        we recommend setting trim to `False`.
     iou
-        If set to True, will try to link labels across chunks using a label adjacency graph with an iou threshold (see `sparrow.image.segmentation.utils._link_labels`). If set to False, conflicts will be resolved using an algorithm that only retains masks with the center in the chunk.
-        Setting `iou` to False gives good results if there is reasonable agreement of the predicted labels accross adjacent chunks.
+        If set to `True`, will try to harmonize labels across chunks using a label adjacency graph with an iou threshold (see `sparrow.image.segmentation.utils._link_labels`). If set to `False`, conflicts will be resolved using an algorithm that only retains masks with the center in the chunk.
+        Setting `iou` to `False` gives good results if there is reasonable agreement of the predicted labels accross adjacent chunks.
     iou_depth
-        iou depth used for linking labels.
+        iou depth used for harmonizing labels across chunks. Note that if `labels_layer_align` is specified, `iou_depth` will also be used for harmonizing labels between different chunks.
     iou_threshold
-        iou threshold used for linking labels.
+        iou threshold used for harmonizing labels across chunks. Note that if `labels_layer_align` is specified, `iou_threshold` will also be used for harmonizing labels between different chunks.
     crd
-        The coordinates specifying the region of the image to be segmented. Defines the bounds (x_min, x_max, y_min, y_max).
+        The coordinates specifying the region of the image to be segmented. Defines the bounds `(x_min, x_max, y_min, y_max)`.
     to_coordinate_system
         The coordinate system to which the `crd` is specified. Ignored if `crd` is None.
     scale_factors
         Scale factors to apply for multiscale.
     overwrite
-        If True, overwrites the existing layers if they exist. Otherwise, raises an error if the layers exist.
+        If `True`, overwrites the existing layers if they exist. Otherwise, raises an error if the layers exist.
     **kwargs
         Additional keyword arguments passed to the provided `model`.
 
@@ -205,23 +208,27 @@ def segment_points(
         Column name in the points_layer representing gene information.
     model
         The segmentation model function used to process the images.
-        Callable should take as input numpy arrays of dimension (z,y,x,c), a pandas dataframe with the transcripts,
+        Callable should take as input numpy arrays of dimension `(z,y,x,c)`, a pandas dataframe with the transcripts,
         and parameters 'name_x', 'name_y' and 'name_gene' with the column names of the x and y location and the column
-        name for the transcripts. It should return labels of dimension (z,y,x,c), with c dimension==1.
-        Currently only 2D segmentation is supported (y,x).
+        name for the transcripts. It should return labels of dimension `(z,y,x,c)`.
+        Currently only 2D segmentation is supported `(y,x)`.
         It can have an arbitrary number of other parameters.
     output_labels_layer
         Name of the labels layer in which segmentation results will be stored in `sdata`.
+        Can be a list of strings, if `model` returns multi channel mask.
+        If provided as a list, its length should match the `c` dimension of the output of `model`.
     output_shapes_layer
         Name of the shapes layer where boundaries obtained output_labels_layer will be stored. If set to None, shapes won't be stored.
+        Can be a list of strings, if `model` returns multi channel mask.
+        If provided as a list, its length should match the `c` dimension of the output of `model`.
     labels_layer_align
         Name of the labels layer in `output_labels_layer` to align to if `model` retuns multi channel mask.
     depth
-        The depth in y and x dimension. The depth parameter is passed to `dask.array.map_overlap`. If trim is set to False,
+        The depth in `y` and `x` dimension. The depth parameter is passed to `dask.array.map_overlap`. If trim is set to `False`,
         it's recommended to set the depth to a value greater than twice the estimated diameter of the cells/nulcei.
     chunks
         Chunk sizes for processing. Can be a string, integer or tuple of integers. If chunks is a Tuple,
-        they  contain the chunk size that will be used in y and x dimension. Chunking in 'z' or 'c' dimension is not supported.
+        they contain the chunk size that will be used in `y` and `x` dimension. Chunking in `z` or `c` dimension is not supported.
     boundary
         Boundary parameter passed to `dask.array.map_overlap`.
     trim
@@ -229,20 +236,20 @@ def segment_points(
         If set to False, the `sparrow` algorithm will be employed instead. For dense cell distributions,
         we recommend setting trim to False.
     iou
-        If set to True, will try to link labels across chunks using a label adjacency graph with an iou threshold (see `sparrow.image.segmentation.utils._link_labels`). If set to False, conflicts will be resolved using an algorithm that only retains masks with the center in the chunk.
-        Setting `iou` to False gives good results if there is reasonable agreement of the predicted labels across adjacent chunks.
+        If set to True, will try to harmonize labels across chunks using a label adjacency graph with an iou threshold (see `sparrow.image.segmentation.utils._link_labels`). If set to False, conflicts will be resolved using an algorithm that only retains masks with the center in the chunk.
+        Setting `iou` to False gives good results if there is reasonable agreement of the predicted labels accross adjacent chunks.
     iou_depth
-        iou depth used for linking labels.
+        iou depth used for harmonizing labels across chunks. Note that if `labels_layer_align` is specified, `iou_depth` will also be used for harmonizing labels between different chunks.
     iou_threshold
-        iou threshold used for linking labels.
+        iou threshold used for harmonizing labels across chunks. Note that if `labels_layer_align` is specified, `iou_threshold` will also be used for harmonizing labels between different chunks.
     crd
-        The coordinates specifying the region of the `points_layer` to be segmented. Defines the bounds (x_min, x_max, y_min, y_max).
+        The coordinates specifying the region of the image to be segmented. Defines the bounds `(x_min, x_max, y_min, y_max)`.
     to_coordinate_system
         The coordinate system to which the `crd` is specified. Ignored if `crd` is None.
     scale_factors
         Scale factors to apply for multiscale.
     overwrite
-        If True, overwrites the existing layers if they exist. Otherwise, raises an error if the layers exist.
+        If `True`, overwrites the existing layers if they exist. Otherwise, raises an error if the layers exist.
     **kwargs
         Additional keyword arguments passed to the provided `model`.
 
@@ -255,7 +262,6 @@ def segment_points(
     TypeError
         If the provided `model` is not callable.
     """
-    # TODO eventually should support baysor segmentation without the need to specify labels_layer.
     fn_kwargs = kwargs
 
     if not callable(model):
@@ -393,7 +399,7 @@ class SegmentationModel(ABC):
     ) -> SpatialData:
         # x_labels c dimension should be equal to the number of labels layers specified.
         # note that this assert will never fail due to how chunks parameter works in map_overlap.
-        # i.e. set chunks=(,...(len( output_labels_layer ),).
+        # i.e. we set chunks=(,...(len( output_labels_layer ),).
         assert x_labels.shape[-1] == len(output_labels_layer), (
             f"Expected {len(output_labels_layer)} segmentation masks (based on 'output_labels_layer'), "
             f"but got {x_labels.shape[-1]} masks from the segmentation model."
@@ -474,7 +480,7 @@ class SegmentationModel(ABC):
         c_dim_output_labels: int,
         fn_kwargs: Mapping[str, Any] = MappingProxyType({}),
         **kwargs: Any,  # keyword arguments to be passed to map_overlap/map_blocks
-    ) -> Array:  # array with dimension z,y,x
+    ) -> Array:  # array with dimension z,y,x,c
         assert x.ndim == 4, "Please provide a 4D array (('z', 'y', 'x', 'c'))."
         chunks = kwargs.pop("chunks", None)
         depth = kwargs.pop("depth", {0: 0, 1: 100, 2: 100, 3: 0})
@@ -678,7 +684,7 @@ class SegmentationModelStains(SegmentationModel):
     def _segment_layer(
         self,
         sdata: SpatialData,
-        img_layer: str | None = None,
+        img_layer: str,
         output_labels_layer: str | list[str] = "segmentation_mask",
         output_shapes_layer: str | list[str] | None = "segmentation_mask_boundaries",
         labels_layer_align: str | None = None,
@@ -689,13 +695,6 @@ class SegmentationModelStains(SegmentationModel):
         fn_kwargs: Mapping[str, Any] = MappingProxyType({}),
         **kwargs: Any,
     ) -> SpatialData:
-        if img_layer is None:
-            img_layer = [*sdata.images][-1]
-            log.warning(
-                f"No image layer specified. "
-                f"Applying segmentation on last image layer '{img_layer}' of the provided SpatialData object."
-            )
-
         output_labels_layer, output_shapes_layer = self._precondition_output_layers_name(
             output_labels_layer, output_shapes_layer
         )
@@ -741,7 +740,6 @@ class SegmentationModelStains(SegmentationModel):
             **deepcopy(kwargs),
         )
 
-        # need to check if depth is desired order
         sdata = self._add_to_sdata(
             sdata,
             x_labels,
@@ -812,7 +810,7 @@ class SegmentationModelPoints(SegmentationModel):
         se = _get_spatial_element(sdata, layer=labels_layer)
 
         # Now we check that there are no scaling and rotations defined on se; and that points layer has identiy transformation associated.
-        # We do not allow a transformation other than translation in y and x is defined on labels layer.
+        # We do not allow a transformation other than translation in y and x defined on labels layer.
         _get_translation(se, to_coordinate_system=to_coordinate_system)
         # We do not allow that a transformation other than identity is defined on points layer.
         _identity_check_transformations_points(sdata.points[points_layer], to_coordinate_system=to_coordinate_system)

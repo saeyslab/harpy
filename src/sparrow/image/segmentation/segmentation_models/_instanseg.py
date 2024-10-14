@@ -8,13 +8,17 @@ from typing import Literal
 
 from InstanSeg.utils.augmentations import Augmentations
 from numpy.typing import NDArray
+from torch.jit import RecursiveScriptModule
+
+from sparrow.image.segmentation._utils import _SEG_DTYPE
 
 
 def _instanseg(
     img: NDArray,
     device: str | None = "cpu",
-    instanseg_model=None,
+    instanseg_model: RecursiveScriptModule = None,
     output: Literal["whole_cell", "nuclei", "all"] = None,
+    dtype: type = _SEG_DTYPE,
 ) -> NDArray:
     # input is z,y,x,c
     # output is z,y,x,c
@@ -52,7 +56,7 @@ def _instanseg(
     )  # The labeled_output shape should be 1,1,H,W (nucleus or whole cell) or 1,2,H,W (nucleus and whole cell)
 
     # we want the c dimension to be the last dimension and the output to be in numpy format
-    labeled_output = labeled_output.permute([0, 2, 3, 1]).cpu().numpy().astype("uint32")
+    labeled_output = labeled_output.permute([0, 2, 3, 1]).cpu().numpy().astype(dtype)
     # already has a trivial z dimension (batch) at 0
     # dimension 1 is (nucleus mask (0) and whole cell mask (1))
     if output == "whole_cell":

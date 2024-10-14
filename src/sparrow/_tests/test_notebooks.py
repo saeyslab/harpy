@@ -116,6 +116,25 @@ def test_notebooks_flowsom(notebook):
 
 @pytest.mark.skip
 @pytest.mark.skipif(
+    not importlib.util.find_spec("InstanSeg")
+    or not importlib.util.find_spec("monai")
+    or not importlib.util.find_spec("torchvision"),
+    reason="requires the InstanSeg, monai and torchvision libraries",
+)
+@pytest.mark.parametrize(
+    "notebook",
+    [
+        "Harpy_instanseg.ipynb",
+    ],
+)
+def test_notebooks_instanseg(notebook):
+    root = str(pyrootutils.setup_root(os.getcwd(), dotenv=True, pythonpath=True))
+
+    run_notebook(os.path.join(root, "docs/tutorials/advanced", notebook))
+
+
+@pytest.mark.skip
+@pytest.mark.skipif(
     not importlib.util.find_spec("cellpose") or not importlib.util.find_spec("basicpy"),
     reason="requires the cellpose and basicpy libraries",
 )
