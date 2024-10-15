@@ -1,11 +1,8 @@
 from typing import List, Optional, Tuple
 
-import cv2
 import dask.array as da
-import jax.numpy as jnp
 import numpy as np
 import squidpy as sq
-from basicpy import BaSiC
 from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import Translation, get_transformation
@@ -19,6 +16,17 @@ from sparrow.image._image import (
 from sparrow.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
+
+try:
+    import jax.numpy as jnp
+    from basicpy import BaSiC
+except ImportError:
+    log.warning("'jax' or 'basicpy' not installed, to use 'sp.im.tiling_correction', please install these libraries.")
+
+try:
+    import cv2
+except ImportError:
+    log.warning("'OpenCV (cv2)' not installed, to use 'sp.im.tiling_correction' please install this library.")
 
 
 def tiling_correction(

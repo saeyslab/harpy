@@ -23,7 +23,7 @@ try:
 
     from sparrow.utils._flowsom import _flowsom
 except ImportError:
-    log.warning("'flowsom' not installed, 'sp.im.flowsom' will not be available.")
+    log.warning("'flowsom' not installed, to use 'sp.im.flowsom', please install this library.")
 
 
 def flowsom(

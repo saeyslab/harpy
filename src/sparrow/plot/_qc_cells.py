@@ -1,6 +1,18 @@
 import numpy as np
 import scanpy as sc
 
+from sparrow.utils.pylogger import get_pylogger
+
+log = get_pylogger(__name__)
+
+try:
+    import joypy
+
+except ImportError:
+    log.warning(
+        "'joypy' not installed, to use 'sp.pl.ridgeplot_channel' and 'sp.pl.ridgeplot_channel_sample', please install this library."
+    )
+
 
 def calculate_asinh(adata, q=0.2):
     df = adata.to_df()
@@ -37,8 +49,6 @@ def ridgeplot_channel(adata, layer=None):
     :param layer: _description_, defaults to None
     :return: _description_
     """
-    import joypy
-
     df = adata.to_df(layer=layer)
     df_melted = df.melt(var_name="channel")
     fig, ax = joypy.joyplot(df_melted, by="channel", column="value", legend=True, alpha=0.4, grid=True)
@@ -80,8 +90,6 @@ def ridgeplot_channel_sample(
     :param path_prefix: _description_, defaults to None
     :yield: _description_
     """
-    import joypy
-
     df = adata.to_df(layer=layer)
     df[y] = adata.obs[y]
     df_melted = df.melt(id_vars=[y], var_name=channel_name, value_vars=value_vars)

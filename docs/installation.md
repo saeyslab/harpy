@@ -13,18 +13,16 @@ mamba env update -f environment.yml --prune
 conda activate harpy
 ```
 
-Depending on your hardware, you may need to adapt the [`environment.yml`](../environment.yml) file as follows:
-
-- On Windows comment out the lines `basicpy==...`, `jax==...` and `jaxlib==...` in the `environment.yml`. We will install `basicpy` and `jax` manually as follows after the environment is build:
+If you plan to use the `Harpy` function `sp.im.tiling_correction`, please install `jax` and `basicpy`. On Mac and Linux, this can be done via `pip install ...`, on Windows you will have to run the following commands:
 
 ```bash
-pip install "jax[cpu]===0.4.10" -f https://whls.blob.core.windows.net/unstable/index.html --use-deprecated legacy-resolver
-pip install basicpy==1.0.0
+pip install "jax[cpu]" -f https://whls.blob.core.windows.net/unstable/index.html --use-deprecated legacy-resolver
+pip install basicpy
 ```
 
-- On Mac comment out the line `mkl=2024.0.0`.
+On Mac, please comment out the line `mkl=2024.0.0` in `environment.yml`.
 
-Note that `basicpy==...`, `jax==...` and `jaxlib==...` can be commented in the `environment.yml` if you do not plan to use the `Harpy` function `sp.im.tiling_correction`, you will still be able to use Harpy. For a mimimal list of requirements for `Harpy`, we refer to the [setup.cfg](../setup.cfg).
+For a mimimal list of requirements for `Harpy`, we refer to the [setup.cfg](../setup.cfg).
 
 ## 2. Install `Harpy`:
 
@@ -45,6 +43,13 @@ To run `Harpy` from the `cli`:
 ```bash
 pip install "git+https://github.com/saeyslab/harpy.git#egg=sparrow[cli]"
 ```
+
+To be able to run the unit tests:
+
+```bash
+pip install "git+https://github.com/saeyslab/harpy.git#egg=sparrow[testing]"
+```
+
 
 ## NVIDIA GPU support
 

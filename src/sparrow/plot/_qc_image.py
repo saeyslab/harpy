@@ -11,6 +11,14 @@ from sparrow.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
 
+try:
+    import textalloc as ta
+
+except ImportError:
+    log.warning(
+        "'textalloc' not installed, to use 'sp.pl.group_snr_ratio' and 'sp.pl.snr_ratio', please install this library."
+    )
+
 
 def calculate_snr(img, nbins=65536):
     """Calculate the signal to noise ratio of an image.
@@ -104,8 +112,6 @@ def snr_ratio(sdata, ax=None, loglog=True, color="black", groupby=None, **kwargs
 
 
 def _plot_snr_ratio(df, ax, color, text_list):
-    import textalloc as ta
-
     for _i, row in df.iterrows():
         # do a scatter plot
         if color == "cycle":

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Iterable
 
-import cv2
 import numpy as np
 from numpy.typing import NDArray
 from spatialdata import SpatialData
@@ -13,6 +12,11 @@ from sparrow.image._image import _get_spatial_element
 from sparrow.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
+
+try:
+    import cv2
+except ImportError:
+    log.warning("'OpenCV (cv2)' not installed, to use 'sp.im.enhance_contrast' please install this library.")
 
 
 def enhance_contrast(

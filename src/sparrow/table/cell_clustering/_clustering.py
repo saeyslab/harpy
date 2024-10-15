@@ -21,7 +21,7 @@ try:
     from sparrow.utils._flowsom import _flowsom
 
 except ImportError:
-    log.warning("'flowsom' not installed, 'sp.tb.flowsom' will not be available.")
+    log.warning("'flowsom' not installed, to use 'sp.tb.flowsom', please install this library.")
 
 
 def flowsom(

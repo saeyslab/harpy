@@ -3,12 +3,8 @@ channels:
   - conda-forge
 dependencies:
   - python=3.10.8
-  - opencv
   - pip
   - rasterio==1.3.2
   - pip:
-      - basicpy==1.0.0
-      - jax==0.4.6
-      - jaxlib==0.4.6
       - ipython
       - ipykernel

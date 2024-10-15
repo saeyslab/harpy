@@ -4,6 +4,8 @@
 Goldsborough, T. et al. (2024) ‘A novel channel invariant architecture for the segmentation of cells and nuclei in multiplexed images using InstanSeg’. bioRxiv, p. 2024.09.04.611150. Available at: https://doi.org/10.1101/2024.09.04.611150.
 """
 
+from __future__ import annotations
+
 from pathlib import Path
 from typing import Literal
 

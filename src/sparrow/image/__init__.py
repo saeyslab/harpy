@@ -7,7 +7,9 @@ from ._filters import gaussian_filtering, min_max_filtering
 from ._image import add_image_layer, add_labels_layer
 from ._normalize import normalize
 from ._rasterize import rasterize
+from ._tiling import tiling_correction
 from ._transcripts import transcript_density
+from .pixel_clustering._clustering import flowsom
 from .pixel_clustering._preprocess import pixel_clustering_preprocess
 from .segmentation._align_masks import align_labels_layers
 from .segmentation._apply import apply_labels_layers
@@ -20,19 +22,3 @@ from .segmentation._merge_masks import (
     merge_labels_layers_nuclei,
 )
 from .segmentation._segmentation import segment, segment_points
-
-log = get_pylogger(__name__)
-
-try:
-    import basicpy
-    import jax
-    import jaxlib
-
-    from ._tiling import tiling_correction
-except ImportError:
-    log.warning("'jax' or 'basicpy' not installed, 'sp.im.tiling_correction' will not be available.")
-
-try:
-    from .pixel_clustering._clustering import flowsom
-except ImportError:
-    log.warning("'flowsom' not installed, 'sp.im.flowsom' will not be available.")
