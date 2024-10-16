@@ -6,3 +6,4 @@ from ._transcripts import (
     read_vizgen_transcripts,
 )
 from ._visium_hd import visium_hd
+from ._xenium import xenium

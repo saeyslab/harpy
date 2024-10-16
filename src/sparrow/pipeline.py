@@ -309,7 +309,7 @@ class SparrowPipeline:
         sdata = sp.io.read_transcripts(
             sdata,
             path_count_matrix=self.cfg.dataset.coords,
-            path_transform_matrix=self.cfg.dataset.transform_matrix,
+            transform_matrix=self.cfg.dataset.transform_matrix,
             output_layer=self.cfg.allocate.points_layer_name,
             overwrite=self.cfg.allocate.overwrite,
             delimiter=self.cfg.allocate.delimiter,

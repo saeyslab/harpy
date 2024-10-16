@@ -5,6 +5,7 @@ from pathlib import Path
 import dask.dataframe as dd
 import numpy as np
 import pyarrow
+from numpy.typing import NDArray
 from spatialdata import SpatialData
 from spatialdata.transformations import Identity
 
@@ -62,7 +63,7 @@ def read_resolve_transcripts(
 def read_vizgen_transcripts(
     sdata: SpatialData,
     path_count_matrix: str | Path,
-    path_transform_matrix: str | Path,
+    transform_matrix: str | Path,
     output_layer: str = "transcripts",
     to_coordinate_system: str = "global",
     overwrite: bool = False,
@@ -81,7 +82,7 @@ def read_vizgen_transcripts(
         Name of the points layer of the SpatialData object to which the transcripts will be added.
     to_coordinate_system
         Coordinate system to which `output_layer` will be added.
-    path_transform_matrix
+    transform_matrix
         Path to the transformation matrix for the affine transformation.
     overwrite: bool, default=False
         If True overwrites the `output_layer` (a points layer) if it already exists.
@@ -90,7 +91,7 @@ def read_vizgen_transcripts(
     -------
     The updated SpatialData object containing the transcripts.
     """
-    args = (sdata, path_count_matrix, path_transform_matrix)
+    args = (sdata, path_count_matrix, transform_matrix)
     kwargs = {
         "column_x": 2,
         "column_y": 3,
@@ -154,7 +155,7 @@ def read_stereoseq_transcripts(
 def read_transcripts(
     sdata: SpatialData,
     path_count_matrix: str | Path,
-    path_transform_matrix: str | Path | None = None,
+    transform_matrix: str | Path | NDArray | None = None,
     output_layer: str = "transcripts",
     overwrite: bool = False,
     debug: bool = False,
@@ -168,7 +169,7 @@ def read_transcripts(
     comment: str | None = None,
     crd: tuple[int, int, int, int] | None = None,
     to_coordinate_system: str = "global",
-    filter_gene_names: str | list | None = None,
+    filter_gene_names: str | list[str] | None = None,
     blocksize: str = "64MB",
 ) -> SpatialData:
     """
@@ -183,17 +184,22 @@ def read_transcripts(
     sdata
         The SpatialData object to which the transcripts will be added.
     path_count_matrix
-        Path to a `.parquet` file or `.csv` file containing the transcripts information. Each row should contain an x, y coordinate and a gene name.
-        Optional a midcount column is provided. If a midcount column is provided, rows are repeated.
-    path_transform_matrix
-        This file should contain a 3x3 transformation matrix for the affine transformation.
-        The matrix defines the linear transformation to be applied to the coordinates of the transcripts.
+        Path to a `.parquet` file or `.csv` file containing the transcripts information. Each row should contain an `x` (`column_x`), `y` (`column_y`) coordinate and a gene name (`column_gene`).
+        Optional a count column (see `column_midcount`) is provided.
+    transform_matrix
+        This `numpy` array should contain a 3x3 transformation matrix for the affine transformation.
+        The matrix defines the linear transformation to be applied to the coordinates of the transcripts before adding it as a points layer to `sdata`.
+        E.g.:
+        | Sx  0  Tx |
+        |  0  Sy  Ty |
+        |  0   0   1 |
         If no transform matrix is specified, the identity matrix will be used.
-    output_layer: str, default='transcripts'.
+        If `transform_matrix` is specified as a path to a file, it will be read via `numpy.loadtext`.
+    output_layer
         Name of the points layer of the SpatialData object to which the transcripts will be added.
-    overwrite: bool, default=False
+    overwrite
         If True overwrites the `output_layer` (a points layer) if it already exists.
-    debug : bool, default=False
+    debug
         If True, a sample of the data is processed for debugging purposes.
     column_x
         Column index of the X coordinate in the count matrix.
@@ -204,11 +210,12 @@ def read_transcripts(
     column_gene
         Column index of the gene information in the count matrix.
     column_midcount
-        Column index for the count value to repeat rows in the count matrix. Ignored when set to None.
+        Specifies the column index that contains the count of how many times the gene is detected at that particular location.
+        Ignored when set to None.
     delimiter
         Delimiter used to separate values in the `.csv` file. Ignored if `path_count_matrix` is a `.parquet` file.
     header
-        Row number to use as the header in the CSV file. If None, no header is used. Ignored if `path_count_matrix` is a `.parquet` file.
+        Row number to use as the header in the `.csv` file. If `None`, no header is used. Ignored if `path_count_matrix` is a `.parquet` file.
     comment
         Character indicating that the remainder of line should not be parsed.
         If found at the beginning of a line, the line will be ignored altogether.
@@ -220,19 +227,14 @@ def read_transcripts(
     to_coordinate_system
         Coordinate system to which `output_layer` will be added.
     filter_gene_names
-        Regular expression(s) of gene names that need to be filtered out (via str.contains), mostly control genes that were added, and which you don't want to use.
-        If list of strings, all items in the list are seen as regular expressions. Filtering is case insensitive.
+        Gene names that need to be filtered out (via `str.contains`), mostly control genes that were added, and which you don't want to use.
+        Filtering is case insensitive.
     blocksize
         Block size of the partions of the dask dataframe stored as `points_layer` in `sdata`.
 
     Returns
     -------
     The updated SpatialData object containing the transcripts.
-
-    Notes
-    -----
-    This function reads a .csv file using Dask and applies a transformation matrix to the coordinates.
-    It can also repeat rows based on the `MIDCount` value and can work in a debug mode that samples the data.
     """
 
     def _read_parquet_file(path_count_matrix):
@@ -275,11 +277,11 @@ def read_transcripts(
             )
 
     # Read the transformation matrix
-    if path_transform_matrix is None:
+    if transform_matrix is None:
         log.info("No transform matrix given, will use identity matrix.")
         transform_matrix = np.identity(3)
-    else:
-        transform_matrix = np.loadtxt(path_transform_matrix)
+    elif isinstance(transform_matrix, (Path, str)):
+        transform_matrix = np.loadtxt(transform_matrix)
 
     log.info(f"Transform matrix used:\n {transform_matrix}")
 
