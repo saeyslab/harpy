@@ -34,7 +34,8 @@ def xenium(
     """
     Read a *10X Genomics Xenium* dataset into a SpatialData object.
 
-    Wrapper around `spatialdata_io.xenium` to read the images, transcripts, masks and table, so it can be used for analysis.
+    Wrapper around `spatialdata_io.xenium`, but with support for reading multiple samples into one spatialdata object.
+    This function reads images, transcripts, masks (cell and nuclei) and tables, so it can be used for analysis.
 
     This function reads the following files:
 
@@ -100,8 +101,9 @@ def xenium(
         set(to_coordinate_system)
     ), "All elements specified via 'to_coordinate_system' should be unique."
     if cells_table:
-        # we do not allow a non annotated table TODO maybe raise a warning here
-        log.info("Setting 'cells_labels' to True, in order to being able to annotate the table with the labels layer.")
+        log.info(
+            "Setting 'cells_labels' to True, in order to being able to annotate the table with corresponding labels layer."
+        )
         cells_labels = True
 
     for _path, _to_coordinate_system in zip(path, to_coordinate_system):

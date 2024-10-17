@@ -26,6 +26,8 @@ I/O.
     io.read_resolve_transcripts
     io.read_vizgen_transcripts
     io.read_stereoseq_transcripts
+    io.xenium
+    io.visium_hd
 
 ```
 
@@ -227,6 +229,8 @@ Dataset loaders.
     datasets.mibi_example
     datasets.vectra_example
     datasets.resolve_example
+    datasets.xenium_example
+    datasets.visium_hd_example
     datasets.get_registry
     datasets.get_spatialdata_registry
 ```

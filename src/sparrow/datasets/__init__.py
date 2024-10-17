@@ -8,4 +8,5 @@ from .transcriptomics import (
     visium_hd_example,
     visium_hd_example_custom_binning,
     vizgen_example,
+    xenium_example,
 )

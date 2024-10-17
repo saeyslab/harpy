@@ -20,7 +20,7 @@ def visium_hd(
     """
     Read *10x Genomics* Visium HD formatted dataset.
 
-    Wrapper around `spatialdata.io.readers.visium_hd.visium_hd`.
+    Wrapper around `spatialdata.io.readers.visium_hd.visium_hd`, but with the resulting table annotated by a labels layer.
 
     .. seealso::
 
