@@ -57,7 +57,7 @@ def xenium(
     path
         Specifies the location of the dataset. This can either be a single path or a list of paths, where each path corresponds to a different experiment/roi.
     to_coordinate_system
-        The coordinate system to which the images, segmentation masks and transcripts will be added for each element in path.
+        The coordinate system to which the images, segmentation masks and transcripts will be added for each item in path.
         If provided as a list, its length should be equal to the number of paths specified in `path`.
     aligned_images
         Whether to also parse, when available, additional H&E or IF aligned images. For more control over the aligned
@@ -77,7 +77,7 @@ def xenium(
         Gene names that need to be filtered out (via `str.contains`), mostly control genes that were added, and which you don't want to use.
         Filtering is case insensitive. Also see `sparrow.read_transcripts`.
     output
-        The path where the resulting `SpatialData` object will be backed. If None, it will not be backed to a zarr store.
+        The path where the resulting `SpatialData` object will be backed. If `None`, it will not be backed to a zarr store.
 
     Raises
     ------
@@ -87,6 +87,10 @@ def xenium(
         If elements in `to_coordinate_system` are not unique.
     AssertionError
         If `cells_table` is `True`, but the labels layer annotating the table is not found.
+
+    Returns
+    -------
+    A SpatialData object.
     """
 
     def _fix_name(item: str | Iterable[str]):
@@ -175,7 +179,6 @@ def xenium(
         column_y_name = XeniumKeys.TRANSCRIPTS_Y
         column_gene_name = XeniumKeys.FEATURE_NAME
 
-        # do this inside sp.io.xenium function
         column_x = table.columns.get_loc(column_x_name)
         column_y = table.columns.get_loc(column_y_name)
         column_gene = table.columns.get_loc(column_gene_name)

@@ -60,7 +60,7 @@ def read_resolve_transcripts(
     return sdata
 
 
-def read_vizgen_transcripts(
+def read_merscope_transcripts(
     sdata: SpatialData,
     path_count_matrix: str | Path,
     transform_matrix: str | Path,
@@ -69,7 +69,7 @@ def read_vizgen_transcripts(
     overwrite: bool = False,
 ) -> SpatialData:
     """
-    Reads and adds Vizgen transcript information to a SpatialData object.
+    Reads and adds merscope transcript information to a SpatialData object.
 
     Parameters
     ----------
@@ -175,7 +175,7 @@ def read_transcripts(
     """
     Reads transcript information from a file with each row listing the x and y coordinates, along with the gene name.
 
-    If a transform matrix is provided a linear transformation is applied to the coordinates of the transcripts.
+    If a transform matrix is provided an affine transformation is applied to the coordinates of the transcripts.
     The transformation is applied to the dask dataframe before adding it to `sdata`.
     The SpatialData object is augmented with a points layer named `output_layer` that contains the transcripts.
 

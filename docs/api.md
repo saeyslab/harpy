@@ -21,13 +21,14 @@ I/O.
 .. autosummary::
     :toctree: generated
 
-    io.create_sdata
-    io.read_transcripts
-    io.read_resolve_transcripts
-    io.read_vizgen_transcripts
-    io.read_stereoseq_transcripts
+    io.merscope
     io.xenium
     io.visium_hd
+    io.read_transcripts
+    io.read_resolve_transcripts
+    io.read_merscope_transcripts
+    io.read_stereoseq_transcripts
+    io.create_sdata
 
 ```
 

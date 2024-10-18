@@ -188,7 +188,7 @@ def rasterize(
     arr = da.block(blocks)
     # we choose to pad with zeros, not add a translation,
     # if shapes layer has a (large) offset (y_min!=0 or x_min!=0),
-    # it is therefore better, performance wise, to translate the shapes to the origina,
+    # it is therefore better, performance wise, to translate the shapes to the origin,
     # and add the offset as a translation to the shapes layer, so the labels layer does not need to be padded
     arr = da.pad(arr, pad_width=((y_min, 0), (x_min, 0)), mode="constant", constant_values=0)
     # rechunk to avoid irregular chunksize after padding
