@@ -230,6 +230,7 @@ Dataset loaders.
     datasets.mibi_example
     datasets.vectra_example
     datasets.resolve_example
+    datasets.merscope_example
     datasets.xenium_example
     datasets.visium_hd_example
     datasets.get_registry
