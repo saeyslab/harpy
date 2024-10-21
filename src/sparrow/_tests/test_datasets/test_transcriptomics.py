@@ -3,7 +3,12 @@ from spatialdata import SpatialData
 from spatialdata.models import TableModel
 from spatialdata.transformations import Identity, get_transformation
 
-from sparrow.datasets.transcriptomics import merscope_example, visium_hd_example, xenium_example
+from sparrow.datasets.transcriptomics import (
+    merscope_example,
+    merscope_segmentation_masks_example,
+    visium_hd_example,
+    xenium_example,
+)
 from sparrow.utils._keys import _INSTANCE_KEY, _REGION_KEY
 
 
@@ -35,4 +40,10 @@ def test_xenium_example():
 @pytest.mark.skip(reason="This test downloads a full Merscope run experiment to the OS cache.")
 def test_merscope_example():
     sdata = merscope_example(output=None, transcripts=False)
+    assert isinstance(sdata, SpatialData)
+
+
+@pytest.mark.skip(reason="This test downloads a full Merscope run experiment to the OS cache.")
+def test_merscope_segmentation_mask_example():
+    sdata = merscope_segmentation_masks_example()
     assert isinstance(sdata, SpatialData)
