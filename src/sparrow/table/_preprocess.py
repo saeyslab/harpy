@@ -266,7 +266,7 @@ class Preprocess(ProcessTable):
         if calculate_cell_size:
             # we do not want to loose the index (_CELL_INDEX)
             old_index = adata.obs.index
-            index_name = adata.obs.index.name
+            index_name = adata.obs.index.name or "index"
             if _CELLSIZE_KEY in adata.obs.columns:
                 log.warning(f"Column with name '{_CELLSIZE_KEY}' already exists. Removing column '{_CELLSIZE_KEY}'.")
                 adata.obs = adata.obs.drop(columns=_CELLSIZE_KEY)
