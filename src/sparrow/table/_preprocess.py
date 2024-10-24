@@ -11,7 +11,7 @@ from sparrow.image._image import _get_spatial_element
 from sparrow.shape._shape import filter_shapes_layer
 from sparrow.table._table import ProcessTable, add_table_layer
 from sparrow.utils._aggregate import _get_mask_area
-from sparrow.utils._keys import _CELL_INDEX, _CELLSIZE_KEY, _INSTANCE_KEY, _RAW_COUNTS_KEY, _REGION_KEY
+from sparrow.utils._keys import _CELLSIZE_KEY, _INSTANCE_KEY, _RAW_COUNTS_KEY, _REGION_KEY
 from sparrow.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
@@ -266,6 +266,7 @@ class Preprocess(ProcessTable):
         if calculate_cell_size:
             # we do not want to loose the index (_CELL_INDEX)
             old_index = adata.obs.index
+            index_name = adata.obs.index.name
             if _CELLSIZE_KEY in adata.obs.columns:
                 log.warning(f"Column with name '{_CELLSIZE_KEY}' already exists. Removing column '{_CELLSIZE_KEY}'.")
                 adata.obs = adata.obs.drop(columns=_CELLSIZE_KEY)
@@ -281,7 +282,7 @@ class Preprocess(ProcessTable):
             # note that we checked that adata.obs[ _INSTANCE_KEY ] is unique for given region (see self._get_adata())
             adata.obs = pd.merge(adata.obs.reset_index(), shapesize, on=[_INSTANCE_KEY, _REGION_KEY], how="left")
             adata.obs.index = old_index
-            adata.obs = adata.obs.drop(columns=[_CELL_INDEX])
+            adata.obs = adata.obs.drop(columns=[index_name])
 
         adata.layers[_RAW_COUNTS_KEY] = adata.X.copy()
 
