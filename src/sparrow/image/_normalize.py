@@ -6,8 +6,8 @@ from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import get_transformation
 
-from sparrow.image._apply import map_channels_zstacks
 from sparrow.image._image import _get_spatial_element, add_image_layer
+from sparrow.image._map import map_image
 
 
 def normalize(
@@ -82,7 +82,7 @@ def normalize(
             key: {"q_min": q_min_value, "q_max": q_max_value, "eps": eps, "internal_method": internal_method}
             for (key, q_min_value, q_max_value) in zip(se.c.data, q_min, q_max)
         }
-        sdata = map_channels_zstacks(
+        sdata = map_image(
             sdata,
             img_layer=img_layer,
             output_layer=output_layer,

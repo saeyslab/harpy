@@ -8,7 +8,7 @@ from spatialdata import SpatialData
 
 from sparrow.image.segmentation._segmentation import segment, segment_points
 from sparrow.image.segmentation.segmentation_models._baysor import _dummy
-from sparrow.image.segmentation.segmentation_models._cellpose import _cellpose
+from sparrow.image.segmentation.segmentation_models._cellpose import cellpose_callable
 from sparrow.points._points import add_points_layer
 
 
@@ -17,7 +17,7 @@ def test_segment(sdata_multi_c: SpatialData):
     sdata_multi_c = segment(
         sdata_multi_c,
         img_layer="combine",
-        model=_cellpose,
+        model=cellpose_callable,
         output_labels_layer="masks_cellpose",
         output_shapes_layer="masks_cellpose_boundaries",
         trim=False,
@@ -44,7 +44,7 @@ def test_segment_3D(sdata_multi_c: SpatialData):
     sdata_multi_c = segment(
         sdata_multi_c,
         img_layer="combine_z",
-        model=_cellpose,
+        model=cellpose_callable,
         output_labels_layer="masks_cellpose_3D",
         output_shapes_layer="masks_cellpose_3D_boundaries",
         trim=False,

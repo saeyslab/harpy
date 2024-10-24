@@ -6,6 +6,7 @@ from typing import Any, Iterable
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 from geopandas.geodataframe import GeoDataFrame
 from geopandas.geoseries import GeoSeries
 from scipy.sparse import issparse
@@ -561,6 +562,7 @@ def _plot(
         if z_index is not None:
             polygons = _get_z_slice_polygons(polygons, z_index=z_index)
 
+    is_categorical = False
     if polygons is not None and column is not None:
         if not polygons.empty:
             adata_view = sdata.tables[table_layer]
@@ -604,6 +606,10 @@ def _plot(
                     N=len(adata_view.uns[column + "_colors"]),
                 )
             if column in adata_view.obs.columns:
+                if pd.api.types.is_categorical_dtype(adata_view.obs[column]):
+                    is_categorical = True
+                else:
+                    is_categorical = False
                 column = adata_view.obs[[column]].values.flatten()
             elif column in adata_view.var.index:
                 column = adata_view.X[:, np.where(adata_view.var.index == column)[0][0]]
@@ -689,10 +695,13 @@ def _plot(
 
     if polygons is not None:
         if not polygons.empty:
+            if is_categorical:
+                polygons["__column_value__"] = column
+                polygons["__column_value__"] = polygons["__column_value__"].astype("category")
             polygons.plot(
                 ax=ax,
                 edgecolor="white",
-                column=column,
+                column="__column_value__" if is_categorical else column,
                 linewidth=linewidth,
                 alpha=alpha,
                 legend=True,

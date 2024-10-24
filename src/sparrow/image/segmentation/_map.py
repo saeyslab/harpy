@@ -28,7 +28,7 @@ from sparrow.utils.pylogger import get_pylogger
 log = get_pylogger(__name__)
 
 
-def apply_labels_layers(
+def map_labels(
     sdata: SpatialData,
     func: Callable[..., NDArray | Array],
     labels_layers: list[str] | str,

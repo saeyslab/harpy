@@ -38,7 +38,7 @@ from sparrow.image.segmentation._utils import (
     _substract_depth_from_chunks_size,
 )
 from sparrow.image.segmentation.segmentation_models._baysor import _baysor as _model_points
-from sparrow.image.segmentation.segmentation_models._cellpose import _cellpose as _model
+from sparrow.image.segmentation.segmentation_models._cellpose import cellpose_callable as _model
 from sparrow.points._points import add_points_layer
 from sparrow.shape._shape import add_shapes_layer
 from sparrow.utils._keys import _GENES_KEY

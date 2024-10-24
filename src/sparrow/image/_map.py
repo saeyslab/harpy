@@ -19,7 +19,7 @@ from sparrow.utils.pylogger import get_pylogger
 log = get_pylogger(__name__)
 
 
-def map_channels_zstacks(
+def map_image(
     sdata: SpatialData,
     img_layer: str,
     output_layer: str,
@@ -32,6 +32,7 @@ def map_channels_zstacks(
     to_coordinate_system: str = "global",
     scale_factors: ScaleFactors_t | None = None,
     overwrite: bool = False,
+    **kwargs: Any,
 ) -> SpatialData:
     """
     Apply a specified function to an image layer of a SpatialData object.
@@ -72,6 +73,9 @@ def map_channels_zstacks(
         Scale factors to apply for multiscale.
     overwrite
         If True, overwrites the output layer if it already exists in `sdata`.
+    kwargs
+        Additional keyword arguments to pass to :func:`dask.array.map_overlap` or :func:`dask.array.map_blocks`.
+        Ignored if `blockwise` is set to `False`.
 
     Returns
     -------
@@ -191,6 +195,7 @@ def map_channels_zstacks(
                 blockwise=blockwise,
                 dims=("c", "z", "y", "x"),
                 depth=depth,
+                **kwargs,
             )
             result_z.append(se_c_z)
         result.append(xr.concat(result_z, dim="z"))

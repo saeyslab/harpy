@@ -11,7 +11,7 @@ from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 
 from sparrow.image._image import _get_spatial_element
-from sparrow.image.segmentation._apply import apply_labels_layers
+from sparrow.image.segmentation._map import map_labels
 from sparrow.image.segmentation._utils import _SEG_DTYPE, _rechunk_overlap
 from sparrow.utils.pylogger import get_pylogger
 
@@ -87,7 +87,7 @@ def merge_labels_layers(
     datasets that may not fit entirely in memory. It is particularly useful in scenarios where two segmentation results
     need to be combined to achieve a more accurate or comprehensive segmentation outcome.
     """
-    sdata = apply_labels_layers(
+    sdata = map_labels(
         sdata,
         func=_merge_masks_block,
         labels_layers=[labels_layer_1, labels_layer_2],
@@ -192,7 +192,7 @@ def merge_labels_layers_nuclei(
         f"Labels layer '{labels_layer_nuclei_expanded}' should contain same labels as '{labels_layer_nuclei}'.",
     )
 
-    sdata = apply_labels_layers(
+    sdata = map_labels(
         sdata,
         func=_merge_masks_nuclei_block,
         labels_layers=labels_layers,
