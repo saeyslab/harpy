@@ -94,7 +94,8 @@ def analyse_genes_left_out(
 
     if not np.issubdtype(sdata.tables[table_layer].X.dtype, np.integer):
         log.warning(
-            "It seems that analysis is being run on an AnnData object containing normalized counts, "
+            f"The count matrix of the provided table layer '{table_layer}', seems to be of type '{sdata.tables[table_layer].X.dtype}', "
+            "which could indicate that the analysis is being run on normalized counts, "
             "please consider running this analysis before the counts in the AnnData object "
             "are normalized (i.e. on the raw counts)."
         )
