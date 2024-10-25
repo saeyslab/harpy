@@ -112,6 +112,7 @@ def xenium_example(output: str | Path = None) -> SpatialData:
         cells_table=True,
         nucleus_labels=True,
         cells_labels=True,
+        filter_gene_names=["Unassigned", "NegControl"],
         output=output,
     )
 
