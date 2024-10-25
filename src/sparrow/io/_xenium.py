@@ -148,7 +148,7 @@ def xenium(
             adata.obs.rename(columns={"region": _REGION_KEY, "cell_labels": _INSTANCE_KEY}, inplace=True)
             adata.obs[_REGION_KEY] = pd.Categorical(adata.obs[_REGION_KEY].astype(str) + f"_{_to_coordinate_system}")
             adata.uns.pop(TableModel.ATTRS_KEY)
-            adata.obsm[_SPATIAL] = adata.obsm[_SPATIAL] * specs["pixel_size"]
+            adata.obsm[_SPATIAL] = adata.obsm[_SPATIAL] * (1 / specs["pixel_size"])
             adata = TableModel.parse(
                 adata,
                 region_key=_REGION_KEY,
