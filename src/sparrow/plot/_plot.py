@@ -29,6 +29,7 @@ def plot_image(
     z_slice: float | None = None,
     crd: tuple[int, int, int, int] | None = None,
     to_coordinate_system: str = "global",
+    dpi: int = 300,
     output: str | Path | None = None,
     **kwargs: dict[str, Any],
 ) -> None:
@@ -49,6 +50,8 @@ def plot_image(
         The coordinates for the region of interest in the format (xmin, xmax, ymin, ymax). If None, the entire image is considered, by default None.
     to_coordinate_system
         Coordinate system to plot.
+    dpi
+        dpi for saving the plot. Default is 300.
     output
         Path to save the plot. If not provided, plot will be displayed.
     **kwargs
@@ -66,6 +69,7 @@ def plot_image(
         z_slice=z_slice,
         crd=crd,
         to_coordinate_system=to_coordinate_system,
+        dpi = dpi,
         output=output,
         **kwargs,
     )
@@ -77,6 +81,7 @@ def plot_labels(
     z_slice: float | None = None,
     crd: tuple[int, int, int, int] | None = None,
     to_coordinate_system: str = "global",
+    dpi: int = 300,
     output: str | Path | None = None,
     **kwargs: dict[str, Any],
 ) -> None:
@@ -95,6 +100,8 @@ def plot_labels(
         The coordinates for the region of interest in the format (xmin, xmax, ymin, ymax). If None, the entire image is considered, by default None.
     to_coordinate_system
         Coordinate system to plot.
+    dpi
+        dpi for saving the plot. Default is 300.
     output
         Path to save the plot. If not provided, plot will be displayed.
     **kwargs
@@ -111,6 +118,7 @@ def plot_labels(
         z_slice=z_slice,
         crd=crd,
         to_coordinate_system=to_coordinate_system,
+        dpi = dpi,
         output=output,
         **kwargs,
     )
@@ -141,6 +149,7 @@ def plot_shapes(
     channel_title: bool = True,
     aspect: str = "equal",
     figsize: tuple[int, int] | None = None,
+    dpi: int = 300,
     output: str | Path | None = None,
 ) -> None:
     """
@@ -233,6 +242,8 @@ def plot_shapes(
         Aspect ratio for the plot.
     figsize
         Size of the figure for plotting. If not provided, a default size is used based on the number of columns and rows.
+    dpi
+        dpi for saving the plot. Default is 300.
     output
         Path to save the plot. If not provided, plot will be displayed.
 
@@ -369,7 +380,7 @@ def plot_shapes(
     plt.tight_layout()
     # Save the plot to output
     if output:
-        fig.savefig(output)
+        fig.savefig(output, dpi = dpi)
     else:
         plt.show()
     plt.close()
@@ -597,6 +608,13 @@ def _plot(
                 )
                 polygons = polygons[mask_polygons]
 
+            # make sure that order of numerical categories (like clustering) remains the same (0-1-2-3-4-... instead of 0-1-10-11-12-13-2-3-4-...)
+            categorical = False
+            categories = []
+            if adata_view.obs[column].dtype.name == 'category':
+                categorical = True
+                categories = list(adata_view.obs[column].cat.categories)
+
             if column + "_colors" in adata_view.uns:
                 cmap = matplotlib.colors.LinearSegmentedColormap.from_list(
                     "new_map",
@@ -693,6 +711,8 @@ def _plot(
                 ax=ax,
                 edgecolor="white",
                 column=column,
+                categorical = categorical,
+                categories = categories,
                 linewidth=linewidth,
                 alpha=alpha,
                 legend=True,
