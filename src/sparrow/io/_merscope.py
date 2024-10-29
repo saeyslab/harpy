@@ -34,6 +34,7 @@ def merscope(
     z_projection: bool = False,
     imread_kwargs: Mapping[str, Any] = MappingProxyType({}),
     image_models_kwargs: Mapping[str, Any] = MappingProxyType({}),
+    filter_gene_names: str | list[str] = None,
     output: str | Path | None = None,
 ) -> SpatialData:
     """
@@ -71,6 +72,9 @@ def merscope(
         Keyword arguments to pass to the image reader.
     image_models_kwargs
         Keyword arguments to pass to the image models.
+    filter_gene_names
+        Gene names that need to be filtered out (via `str.contains`), mostly control genes that were added, and which you don't want to use.
+        Filtering is case insensitive. Also see `sparrow.read_transcripts`.
     output
         The path where the resulting `SpatialData` object will be backed. If `None`, it will not be backed to a zarr store.
 
@@ -215,6 +219,7 @@ def merscope(
                 header=0,
                 output_layer=f"transcripts_{_to_coordinate_system}",
                 to_coordinate_system=_to_coordinate_system,
+                filter_gene_names=filter_gene_names,
                 overwrite=False,
             )
 
