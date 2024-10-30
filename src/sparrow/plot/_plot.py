@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Iterable
+from types import MappingProxyType
+from typing import Any, Iterable, Mapping
 
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 from geopandas.geodataframe import GeoDataFrame
 from geopandas.geoseries import GeoSeries
 from scipy.sparse import issparse
@@ -29,7 +31,6 @@ def plot_image(
     z_slice: float | None = None,
     crd: tuple[int, int, int, int] | None = None,
     to_coordinate_system: str = "global",
-    dpi: int = 300,
     output: str | Path | None = None,
     **kwargs: dict[str, Any],
 ) -> None:
@@ -50,8 +51,6 @@ def plot_image(
         The coordinates for the region of interest in the format (xmin, xmax, ymin, ymax). If None, the entire image is considered, by default None.
     to_coordinate_system
         Coordinate system to plot.
-    dpi
-        dpi for saving the plot. Default is 300.
     output
         Path to save the plot. If not provided, plot will be displayed.
     **kwargs
@@ -69,7 +68,6 @@ def plot_image(
         z_slice=z_slice,
         crd=crd,
         to_coordinate_system=to_coordinate_system,
-        dpi = dpi,
         output=output,
         **kwargs,
     )
@@ -81,7 +79,6 @@ def plot_labels(
     z_slice: float | None = None,
     crd: tuple[int, int, int, int] | None = None,
     to_coordinate_system: str = "global",
-    dpi: int = 300,
     output: str | Path | None = None,
     **kwargs: dict[str, Any],
 ) -> None:
@@ -100,8 +97,6 @@ def plot_labels(
         The coordinates for the region of interest in the format (xmin, xmax, ymin, ymax). If None, the entire image is considered, by default None.
     to_coordinate_system
         Coordinate system to plot.
-    dpi
-        dpi for saving the plot. Default is 300.
     output
         Path to save the plot. If not provided, plot will be displayed.
     **kwargs
@@ -118,7 +113,6 @@ def plot_labels(
         z_slice=z_slice,
         crd=crd,
         to_coordinate_system=to_coordinate_system,
-        dpi = dpi,
         output=output,
         **kwargs,
     )
@@ -137,19 +131,21 @@ def plot_shapes(
     channel: int | str | Iterable[int] | Iterable[str] | None = None,
     z_slice: float | None = None,
     alpha: float = 0.5,
+    legend: bool = True,
     crd: tuple[int, int, int, int] | None = None,
     to_coordinate_system: str = "global",
     vmin: float | None = None,
     vmax: float | None = None,
     vmin_img: float | None = None,
     vmax_img: float | None = None,
+    colorbar: bool = False,
     shapes_layer_filtered: str | Iterable[str] | None = None,
     img_title: bool = False,
     shapes_title: bool = False,
     channel_title: bool = True,
     aspect: str = "equal",
     figsize: tuple[int, int] | None = None,
-    dpi: int = 300,
+    fig_kwargs: Mapping[str, Any] = MappingProxyType({}),
     output: str | Path | None = None,
 ) -> None:
     """
@@ -217,6 +213,10 @@ def plot_shapes(
         The z_slice to visualize in case of 3D (c,z,y,x) image/polygons.
         If no z_slice is specified and `img_layer` or `labels_layer` is 3D, a max projection along the z-axis will be performed.
         If no z_slice is specified and `shapes_layer` is 3D, all polygons in all z-stacks will be plotted.
+    alpha
+        Transparency level for the cells, given by the alpha parameter of matplotlib.
+    legend
+        Whether to plot a legend. Ignored if column is `None`.
     crd
         The coordinates for the region of interest in the format (xmin, xmax, ymin, ymax). If None, the entire image is considered, by default None.
     to_coordinate_system
@@ -229,6 +229,8 @@ def plot_shapes(
         Lower bound for plotting of `img_layer` or `labels_layer`.
     vmax_img
         Upper bound for plotting of `img_layer` or `labels_layer`.
+    colorbar
+        Whether to add a colorbar for raster data.
     shapes_layer_filtered
         Extra shapes layers to plot. E.g. shapes filtered out in previous preprocessing steps.
     img_title
@@ -241,9 +243,9 @@ def plot_shapes(
     aspect
         Aspect ratio for the plot.
     figsize
-        Size of the figure for plotting. If not provided, a default size is used based on the number of columns and rows.
-    dpi
-        dpi for saving the plot. Default is 300.
+        Size of the figure for plotting, passed to `.pyplot.figure`. If not provided, a default size is used based on the number of columns and rows.
+    fig_kwargs
+        Keyword arguments passed to the `.pyplot.figure` call. E.g. `dpi`.
     output
         Path to save the plot. If not provided, plot will be displayed.
 
@@ -331,12 +333,20 @@ def plot_shapes(
 
     nr_of_rows = len(channels)
 
-    if figsize is None:
+    if figsize is None and "figsize" not in fig_kwargs.keys():
         figsize = (
             10 * nr_of_columns,
             10 * nr_of_rows,
         )
-    fig, axes = plt.subplots(nr_of_rows, nr_of_columns, figsize=figsize)
+    if "figsize" in fig_kwargs.keys():
+        figsize = fig_kwargs.pop("figsize")
+
+    fig, axes = plt.subplots(
+        nr_of_rows,
+        nr_of_columns,
+        figsize=figsize,
+        **fig_kwargs,
+    )
 
     # Flattening axes to make iteration easier
     if nr_of_rows == 1 and nr_of_columns == 1:
@@ -363,12 +373,14 @@ def plot_shapes(
                 channel=_channel,
                 z_slice=z_slice,
                 alpha=alpha,
+                legend=legend,
                 crd=crd,
                 to_coordinate_system=to_coordinate_system,
                 vmin=vmin,
                 vmax=vmax,
                 vmin_img=vmin_img,
                 vmax_img=vmax_img,
+                colorbar=colorbar,
                 shapes_layer_filtered=shapes_layer_filtered,
                 img_title=img_title,
                 shapes_title=shapes_title,
@@ -380,7 +392,7 @@ def plot_shapes(
     plt.tight_layout()
     # Save the plot to output
     if output:
-        fig.savefig(output, dpi = dpi)
+        fig.savefig(output)
     else:
         plt.show()
     plt.close()
@@ -400,12 +412,14 @@ def _plot(
     channel: int | str | None = None,
     z_slice: float | None = None,
     alpha: float = 0.5,
+    legend: bool = True,
     crd: tuple[int, int, int, int] | None = None,
     to_coordinate_system: str = "global",
     vmin: float | None = None,
     vmax: float | None = None,
     vmin_img: float | None = None,
     vmax_img: float | None = None,
+    colorbar: bool = False,
     shapes_layer_filtered: str | Iterable[str] | None = None,
     img_title: bool = False,
     shapes_title: bool = False,
@@ -446,6 +460,8 @@ def _plot(
         If no z_slice is specified and `shapes_layer` is 3D, all polygons in all z-stacks will be plotted.
     alpha
         Transparency level for the cells, given by the alpha parameter of matplotlib.
+    legend
+        Whether to plot a legend. Ignored if column is `None`.
     crd
         The coordinates for the region of interest in the format (xmin, xmax, ymin, ymax). If None, the entire image is considered, by default None.
     to_coordinate_system
@@ -458,6 +474,8 @@ def _plot(
         Lower bound for plotting of `img_layer` or `labels_layer`.
     vmax_img
         Upper bound for plotting of `img_layer` or `labels_layer`.
+    colorbar
+        Whether to add a colorbar for raster data.
     shapes_layer_filtered
         Extra shapes layers to plot. E.g. shapes filtered out in previous preprocessing steps.
     img_title
@@ -572,6 +590,7 @@ def _plot(
         if z_index is not None:
             polygons = _get_z_slice_polygons(polygons, z_index=z_index)
 
+    is_categorical = False
     if polygons is not None and column is not None:
         if not polygons.empty:
             adata_view = sdata.tables[table_layer]
@@ -608,13 +627,6 @@ def _plot(
                 )
                 polygons = polygons[mask_polygons]
 
-            # make sure that order of numerical categories (like clustering) remains the same (0-1-2-3-4-... instead of 0-1-10-11-12-13-2-3-4-...)
-            categorical = False
-            categories = []
-            if adata_view.obs[column].dtype.name == 'category':
-                categorical = True
-                categories = list(adata_view.obs[column].cat.categories)
-
             if column + "_colors" in adata_view.uns:
                 cmap = matplotlib.colors.LinearSegmentedColormap.from_list(
                     "new_map",
@@ -622,6 +634,10 @@ def _plot(
                     N=len(adata_view.uns[column + "_colors"]),
                 )
             if column in adata_view.obs.columns:
+                if pd.api.types.is_categorical_dtype(adata_view.obs[column]):
+                    is_categorical = True
+                else:
+                    is_categorical = False
                 column = adata_view.obs[[column]].values.flatten()
             elif column in adata_view.var.index:
                 column = adata_view.X[:, np.where(adata_view.var.index == column)[0][0]]
@@ -700,22 +716,23 @@ def _plot(
         cmap=cmap_layer,
         robust=True,
         ax=ax,
-        add_colorbar=False,
+        add_colorbar=colorbar,
         vmin=vmin_img,
         vmax=vmax_img,
     )
 
     if polygons is not None:
         if not polygons.empty:
+            if is_categorical:
+                polygons["__column_value__"] = column
+                polygons["__column_value__"] = polygons["__column_value__"].astype("category")
             polygons.plot(
                 ax=ax,
                 edgecolor="white",
-                column=column,
-                categorical = categorical,
-                categories = categories,
+                column="__column_value__" if is_categorical else column,
                 linewidth=linewidth,
                 alpha=alpha,
-                legend=True,
+                legend=legend,
                 aspect=1,
                 cmap=cmap,
                 vmax=vmax,  # np.percentile(column,vmax),
@@ -736,7 +753,7 @@ def _plot(
                             edgecolor="red",
                             linewidth=linewidth,
                             alpha=alpha,
-                            legend=True,
+                            legend=legend,
                             aspect=1,
                             cmap="gray",
                         )

@@ -42,6 +42,10 @@ def allocate(
     """
     Allocates transcripts to cells via provided `labels_layer` and `points_layer` and returns updated SpatialData object with a table layer (`sdata.tables[output_layer]`) holding the AnnData object with cell counts.
 
+    It requires that `labels_layer` and `points_layer` are registered.
+    Relation between `to_coordinate_system` and `points_layer` should be a `spatialdata.transformations.Identity` transformation.
+    Relation between `to_coordinate_system` and `labels_layer` can be a `spatialdata.transformations.Identity`, `spatialdata.transformations.Translation`, or a `spatialdata.transformation.Sequence` of translations.
+
     Parameters
     ----------
     sdata

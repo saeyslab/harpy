@@ -9,7 +9,7 @@ from dask_image.ndfilters import gaussian_filter, maximum_filter, minimum_filter
 from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 
-from sparrow.image._apply import _get_spatial_element, map_channels_zstacks
+from sparrow.image._map import _get_spatial_element, map_image
 from sparrow.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
@@ -139,7 +139,7 @@ def min_max_filtering(
     else:
         fn_kwargs = {"size_min_max_filter": size_min_max_filter}
 
-    sdata = map_channels_zstacks(
+    sdata = map_image(
         sdata,
         img_layer=img_layer,
         output_layer=output_layer,
@@ -259,7 +259,7 @@ def gaussian_filtering(
     else:
         fn_kwargs = {"sigma": sigma}
 
-    sdata = map_channels_zstacks(
+    sdata = map_image(
         sdata,
         img_layer=img_layer,
         output_layer=output_layer,

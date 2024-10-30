@@ -6,6 +6,11 @@ import os
 
 os.environ["USE_PYGEOS"] = "0"
 
+try:
+    import rasterio
+except ImportError:
+    pass
+
 from . import (  # noqa: E402
     datasets,
     io,

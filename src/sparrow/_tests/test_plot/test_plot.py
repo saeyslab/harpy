@@ -1,7 +1,9 @@
 import os
 
 import dask.array as da
+import numpy as np
 import pytest
+import scanpy as sc
 
 from sparrow.image._image import add_image_layer, add_labels_layer
 from sparrow.plot._plot import plot_image, plot_labels, plot_shapes
@@ -32,6 +34,16 @@ def test_plot_image(sdata_multi_c, tmp_path):
         output=os.path.join(tmp_path, "raw_image"),
     )
 
+    # dpi + colorbar
+    plot_image(
+        sdata_multi_c,
+        img_layer="raw_image",
+        channel=[0, 1],
+        fig_kwargs={"dpi": 10},
+        colorbar=True,
+        output=os.path.join(tmp_path, "raw_image_dpi"),
+    )
+
 
 def test_plot_shapes(sdata_multi_c, tmp_path):
     # plot a .obs column
@@ -55,6 +67,19 @@ def test_plot_shapes(sdata_multi_c, tmp_path):
         table_layer="table_intensities",
         region="masks_whole",
         output=os.path.join(tmp_path, "shapes_masks_whole_channel_1"),
+    )
+
+    # plot a .obs column with dpi + legend False
+    plot_shapes(
+        sdata_multi_c,
+        img_layer="combine",
+        shapes_layer="masks_whole_boundaries",
+        column="area",
+        table_layer="table_intensities",
+        region="masks_whole",
+        fig_kwargs={"dpi": 10},
+        legend=False,
+        output=os.path.join(tmp_path, "shapes_masks_whole_area_dpi"),
     )
 
     with pytest.raises(
@@ -102,6 +127,30 @@ def test_plot_shapes_transcriptomics(sdata_transcripts, tmp_path):
         table_layer="table_transcriptomics",
         region="segmentation_mask",
         output=os.path.join(tmp_path, "shapes_segmentation_mask_Pck1"),
+    )
+
+
+def test_plot_shapes_umap_categories(sdata_transcripts, tmp_path):
+    table_layer = "table_transcriptomics_cluster"
+
+    np.random.seed(42)
+    sdata_transcripts[table_layer].obs["new_category"] = np.random.randint(
+        0, 15, size=len(sdata_transcripts[table_layer].obs)
+    )
+    sdata_transcripts[table_layer].obs["new_category"] = (
+        sdata_transcripts[table_layer].obs["new_category"].astype(int).astype("category")
+    )
+    sc.pl.umap(sdata_transcripts.tables[table_layer], color=["new_category"], show=False)
+
+    plot_shapes(
+        sdata_transcripts,
+        shapes_layer="segmentation_mask_boundaries",
+        img_layer="raw_image",
+        alpha=1,
+        table_layer=table_layer,
+        column="new_category",
+        linewidth=0,
+        output=os.path.join(tmp_path, "shapes_segmentation_mask_categorical"),
     )
 
 

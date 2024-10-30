@@ -15,7 +15,7 @@ from spatialdata_io import xenium as sdata_xenium
 from spatialdata_io._constants._constants import XeniumKeys
 
 from sparrow.io._transcripts import read_transcripts
-from sparrow.utils._keys import _INSTANCE_KEY, _REGION_KEY
+from sparrow.utils._keys import _INSTANCE_KEY, _REGION_KEY, _SPATIAL
 from sparrow.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
@@ -135,6 +135,8 @@ def xenium(
             del sdata[_layer]
 
         if cells_table:
+            with open(os.path.join(_path, XeniumKeys.XENIUM_SPECS)) as f:
+                specs = json.load(f)
             adata = sdata["table"]
             assert f"cell_labels_{_to_coordinate_system}" in [
                 *sdata.labels
@@ -146,6 +148,7 @@ def xenium(
             adata.obs.rename(columns={"region": _REGION_KEY, "cell_labels": _INSTANCE_KEY}, inplace=True)
             adata.obs[_REGION_KEY] = pd.Categorical(adata.obs[_REGION_KEY].astype(str) + f"_{_to_coordinate_system}")
             adata.uns.pop(TableModel.ATTRS_KEY)
+            adata.obsm[_SPATIAL] = adata.obsm[_SPATIAL] * (1 / specs["pixel_size"])
             adata = TableModel.parse(
                 adata,
                 region_key=_REGION_KEY,

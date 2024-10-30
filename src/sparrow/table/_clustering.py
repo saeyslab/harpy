@@ -4,7 +4,6 @@ import inspect
 from types import MappingProxyType
 from typing import Any, Callable, Iterable, Mapping
 
-import pandas as pd
 import scanpy as sc
 from anndata import AnnData
 from sklearn.cluster import KMeans
@@ -55,9 +54,9 @@ def kmeans(
     output_layer
         The output table layer in `sdata` to which table layer with results of clustering will be written.
     calculate_umap
-        If True, calculates a UMAP via `scanpy.tl.umap` for visualization of computed clusters.
+        If `True`, calculates a UMAP via `scanpy.tl.umap` for visualization of computed clusters.
     rank_genes
-        If True, ranks genes based on their contributions to the clusters via `scanpy.tl.rank_genes_groups`. TODO: To be moved to a separate function.
+        If `True`, ranks genes based on their contributions to the clusters via `scanpy.tl.rank_genes_groups`. TODO: To be moved to a separate function.
     n_neighbors
         The number of neighbors to consider when calculating neighbors via `scanpy.pp.neighbors`. Ignored if `calculate_umap` is False.
     n_pcs
@@ -67,7 +66,7 @@ def kmeans(
     key_added
         The key under which the clustering results are added to the SpatialData object (in `sdata.tables[table_layer].obs`).
     index_names_var
-        List of index names to subset in `sdata.tables[table_layer].var`. If None, `index_positions_var` will be used if not None.
+        List of index names to subset in `sdata.tables[table_layer].var`. `index_positions_var` will be used if `None`.
     index_positions_var
         List of integer positions to subset in `sdata.tables[table_layer].var`. Used if `index_names_var` is None.
     random_state
@@ -150,36 +149,36 @@ def leiden(
     sdata
         The input SpatialData object.
     labels_layer
-        The labels layer(s) of `sdata` used to select the cells via the _REGION_KEY in `sdata.tables[table_layer].obs`.
-        Note that if `output_layer` is equal to `table_layer` and overwrite is True,
-        cells in `sdata.tables[table_layer]` linked to other `labels_layer` (via the _REGION_KEY), will be removed from `sdata.tables[table_layer]`.
+        The labels layer(s) of `sdata` used to select the cells via the `_REGION_KEY` in `sdata.tables[table_layer].obs`.
+        Note that if `output_layer` is equal to `table_layer` and `overwrite` is `True`,
+        cells in `sdata.tables[table_layer]` linked to other `labels_layer` (via the `_REGION_KEY`), will be removed from `sdata.tables[table_layer]`.
         If a list of labels layers is provided, they will therefore be clustered together (e.g. multiple samples).
     table_layer:
         The table layer in `sdata` on which to perform clustering on.
     output_layer
         The output table layer in `sdata` to which table layer with results of clustering will be written.
     calculate_umap
-        If True, calculates a UMAP via `scanpy.tl.umap` for visualization of computed clusters.
+        If `True`, calculates a UMAP via `scanpy.tl.umap` for visualization of computed clusters.
     calculate_neighbors
-        If True, calculates neighbors via `scanpy.pp.neighbors` required for leiden clustering. Set to False if neighbors are already calculated for `sdata.tables[table_layer]`.
+        If `True`, calculates neighbors via `scanpy.pp.neighbors` required for leiden clustering. Set to False if neighbors are already calculated for `sdata.tables[table_layer]`.
     rank_genes
-        If True, ranks genes based on their contributions to the clusters via `scanpy.tl.rank_genes_groups`. TODO: To be moved to a separate function.
+        If `True`, ranks genes based on their contributions to the clusters via `scanpy.tl.rank_genes_groups`. TODO: To be moved to a separate function.
     n_neighbors
-        The number of neighbors to consider when calculating neighbors via `scanpy.pp.neighbors`. Ignored if `calculate_umap` is False.
+        The number of neighbors to consider when calculating neighbors via `scanpy.pp.neighbors`. Ignored if `calculate_umap` is `False`.
     n_pcs
-        The number of principal components to use when calculating neighbors via `scanpy.pp.neighbors`. Ignored if `calculate_umap` is False.
+        The number of principal components to use when calculating neighbors via `scanpy.pp.neighbors`. Ignored if `calculate_umap` is `False`.
     resolution
         Cluster resolution passed to `scanpy.tl.leiden`.
     key_added
         The key under which the clustering results are added to the SpatialData object (in `sdata.tables[table_layer].obs`).
     index_names_var
-        List of index names to subset in `sdata.tables[table_layer].var`. If None, `index_positions_var` will be used if not None.
+        List of index names to subset in `sdata.tables[table_layer].var`. `index_positions_var` will be used if `None`.
     index_positions_var
-        List of integer positions to subset in `sdata.tables[table_layer].var`. Used if `index_names_var` is None.
+        List of integer positions to subset in `sdata.tables[table_layer].var`. Used if `index_names_var` is `None`.
     random_state
         A random state for reproducibility of the clustering.
     overwrite
-        If True, overwrites the `output_layer` if it already exists in `sdata`.
+        If `True`, overwrites the `output_layer` if it already exists in `sdata`.
     **kwargs
         Additional keyword arguments passed to the leiden clustering algorithm (`sc.tl.leiden`).
 
@@ -230,7 +229,8 @@ def _kmeans(
     **kwargs,
 ) -> AnnData:
     kmeans = KMeans(**kwargs).fit(adata.X)
-    adata.obs[key_added] = pd.Categorical(kmeans.labels_)
+    adata.obs[key_added] = kmeans.labels_
+    adata.obs[key_added] = adata.obs[key_added].astype(int).astype("category")
     return adata
 
 
@@ -246,6 +246,7 @@ def _leiden(
         )
 
     sc.tl.leiden(adata, copy=False, resolution=resolution, key_added=key_added, **kwargs)
+    adata.obs[key_added] = adata.obs[key_added].astype(int).astype("category")
 
     return adata
 

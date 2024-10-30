@@ -11,7 +11,7 @@ from sparrow.image._image import _get_spatial_element
 from sparrow.shape._shape import filter_shapes_layer
 from sparrow.table._table import ProcessTable, add_table_layer
 from sparrow.utils._aggregate import _get_mask_area
-from sparrow.utils._keys import _CELL_INDEX, _CELLSIZE_KEY, _INSTANCE_KEY, _RAW_COUNTS_KEY, _REGION_KEY
+from sparrow.utils._keys import _CELLSIZE_KEY, _INSTANCE_KEY, _RAW_COUNTS_KEY, _REGION_KEY
 from sparrow.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
@@ -22,6 +22,7 @@ def preprocess_transcriptomics(
     labels_layer: str | Iterable[str],
     table_layer: str,
     output_layer: str,
+    percent_top: tuple[int, ...] = (2, 5),
     min_counts: int = 10,
     min_cells: int = 5,
     size_norm: bool = True,
@@ -38,21 +39,24 @@ def preprocess_transcriptomics(
     Performs filtering (via `scanpy.pp.filter_cells` and `scanpy.pp.filter_genes` ) and optional normalization (on size or via `scanpy.sc.pp.normalize_total`),
     log transformation (`scanpy.pp.log1p`), highly variable genes selection (`scanpy.pp.highly_variable_genes`),
     scaling (`scanpy.pp.scale`), and PCA calculation (`scanpy.tl.pca`) for transcriptomics data
-    contained in the `sdata`. QC metrics are added to `sdata.tables[output_layer].obs` using `scanpy.pp.calculate_qc_metrics`.
+    contained in the `sdata.tables[table_layer]`. QC metrics are added to `sdata.tables[output_layer].obs` using `scanpy.pp.calculate_qc_metrics`.
 
     Parameters
     ----------
     sdata
         The input SpatialData object.
     labels_layer
-        The labels layer(s) of `sdata` used to select the cells via the _REGION_KEY  in `sdata.tables[table_layer].obs`.
-        Note that if `output_layer` is equal to `table_layer` and overwrite is True,
-        cells in `sdata.tables[table_layer]` linked to other `labels_layer` (via the _REGION_KEY), will be removed from `sdata.tables[table_layer]`
+        The labels layer(s) of `sdata` used to select the cells via the `_REGION_KEY` in `sdata.tables[table_layer].obs`.
+        Note that if `output_layer` is equal to `table_layer` and overwrite is `True`,
+        cells in `sdata.tables[table_layer]` linked to other `labels_layer` (via the `_REGION_KEY`), will be removed from `sdata.tables[table_layer]`
         (also from the backing zarr store if it is backed).
     table_layer
         The table layer in `sdata` on which to perform preprocessing on.
     output_layer
         The output table layer in `sdata` to which preprocessed table layer will be written.
+    percent_top
+        List of ranks (where genes are ranked by expression) at which the cumulative proportion of expression will be reported as a percentage.
+        Passed to `scanpy.pp.calculate_qc_metrics`.
     min_counts
         Minimum number of genes a cell should contain to be kept (passed to `scanpy.pp.filter_cells`).
     min_cells
@@ -115,7 +119,7 @@ def preprocess_transcriptomics(
         max_value_scale=max_value_scale,
         calculate_pca=True,
         update_shapes_layers=update_shapes_layers,
-        qc_kwargs={"percent_top": [2, 5]},
+        qc_kwargs={"percent_top": percent_top},
         filter_cells_kwargs={"min_counts": min_counts},
         filter_genes_kwargs={"min_cells": min_cells},
         pca_kwargs={"n_comps": n_comps},
@@ -262,6 +266,7 @@ class Preprocess(ProcessTable):
         if calculate_cell_size:
             # we do not want to loose the index (_CELL_INDEX)
             old_index = adata.obs.index
+            index_name = adata.obs.index.name or "index"
             if _CELLSIZE_KEY in adata.obs.columns:
                 log.warning(f"Column with name '{_CELLSIZE_KEY}' already exists. Removing column '{_CELLSIZE_KEY}'.")
                 adata.obs = adata.obs.drop(columns=_CELLSIZE_KEY)
@@ -277,7 +282,7 @@ class Preprocess(ProcessTable):
             # note that we checked that adata.obs[ _INSTANCE_KEY ] is unique for given region (see self._get_adata())
             adata.obs = pd.merge(adata.obs.reset_index(), shapesize, on=[_INSTANCE_KEY, _REGION_KEY], how="left")
             adata.obs.index = old_index
-            adata.obs = adata.obs.drop(columns=[_CELL_INDEX])
+            adata.obs = adata.obs.drop(columns=[index_name])
 
         adata.layers[_RAW_COUNTS_KEY] = adata.X.copy()
 
@@ -330,7 +335,7 @@ class Preprocess(ProcessTable):
                     "Please consider scaling the data by passing 'scale=True', when passing 'calculate_pca=True'."
                 )
             self._type_check_before_pca(adata)
-            sc.tl.pca(adata, copy=False, n_comps=n_comps, **pca_kwargs)
+            sc.pp.pca(adata, copy=False, n_comps=n_comps, **pca_kwargs)
 
         self.sdata = add_table_layer(
             self.sdata,

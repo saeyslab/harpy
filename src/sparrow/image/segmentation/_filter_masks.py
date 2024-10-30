@@ -5,7 +5,7 @@ from numpy.typing import NDArray
 from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 
-from sparrow.image.segmentation._merge_masks import apply_labels_layers
+from sparrow.image.segmentation._map import map_labels
 from sparrow.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
@@ -75,7 +75,7 @@ def filter_labels_layer(
             overwrite=True,
         )
     """
-    sdata = apply_labels_layers(
+    sdata = map_labels(
         sdata,
         labels_layers=[labels_layer],
         func=_filter_labels_block,

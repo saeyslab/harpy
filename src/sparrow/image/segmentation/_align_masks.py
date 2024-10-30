@@ -9,7 +9,7 @@ from numpy.typing import NDArray
 from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 
-from sparrow.image.segmentation._apply import apply_labels_layers
+from sparrow.image.segmentation._map import map_labels
 from sparrow.image.segmentation._utils import (
     _SEG_DTYPE,
     _add_depth_to_chunks_size,
@@ -99,7 +99,7 @@ def align_labels_layers(
     --------
     >>> sdata = align_labels_layers(sdata, 'layer_1', 'layer_2', depth=(50, 50), overwrite=True)
     """
-    sdata = apply_labels_layers(
+    sdata = map_labels(
         sdata,
         func=_relabel_array_1_to_array_2_per_chunk,
         labels_layers=[labels_layer_1, labels_layer_2],
