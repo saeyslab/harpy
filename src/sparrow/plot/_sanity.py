@@ -5,6 +5,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 from dask.dataframe.core import DataFrame as DaskDataFrame
+from shapely.affinity import translate
 from spatialdata import SpatialData
 
 from sparrow.image._image import (
@@ -13,7 +14,7 @@ from sparrow.image._image import (
     _get_spatial_element,
     _unapply_transform,
 )
-from sparrow.plot._plot import _get_z_slice_polygons, _translate_polygons
+from sparrow.plot._plot import _get_translation_values_shapes, _get_z_slice_polygons
 from sparrow.shape import intersect_rectangles
 from sparrow.shape._shape import _extract_boundaries_from_geometry_collection
 from sparrow.utils._keys import _GENES_KEY
@@ -264,9 +265,23 @@ def sanity_plot_transcripts_matrix(
         log.info("Selecting boundaries")
 
         if not polygons.empty:
-            # copy is necessary, otherwise, in memory shapes layer altered by performing a plot.
-            polygons = _translate_polygons(sdata.shapes[shapes_layer].copy(), to_coordinate_system=to_coordinate_system)
-            polygons = polygons.cx[crd[0] : crd[1], crd[2] : crd[3]]
+            x_translation, y_translation = _get_translation_values_shapes(
+                polygons, to_coordinate_system=to_coordinate_system
+            )
+            _crd_shapes = [
+                crd[0] - x_translation,
+                crd[1] - x_translation,
+                crd[2] - y_translation,
+                crd[3] - y_translation,
+            ]
+            polygons = polygons.cx[_crd_shapes[0] : _crd_shapes[1], _crd_shapes[2] : _crd_shapes[3]]
+            if x_translation != 0 or y_translation != 0:
+                polygons = polygons.copy()  # copy is necessary, we do not want to alter in memory shapes layer
+                polygons["geometry"] = polygons["geometry"].apply(
+                    lambda geom, x_trans=x_translation, y_trans=y_translation: translate(
+                        geom, xoff=x_trans, yoff=y_trans
+                    )
+                )
             if z_index is not None:
                 polygons = _get_z_slice_polygons(polygons, z_index=z_index)
 

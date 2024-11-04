@@ -582,11 +582,21 @@ def _plot(
 
     polygons = None
     if shapes_layer is not None and not sdata.shapes[shapes_layer].empty:
-        # copy is necessary, otherwise, in memory shapes layer altered by performing a plot.
-        polygons = _translate_polygons(
-            sdata.shapes[shapes_layer].copy(), to_coordinate_system=to_coordinate_system
-        )  # TODO: this translation is slow if we have a lot of polygons. fix this by getting the translation, altering the crd, then do the cx, and then the translation for visualization purposes.
-        polygons = polygons.cx[crd[0] : crd[1], crd[2] : crd[3]]
+        x_translation, y_translation = _get_translation_values_shapes(
+            sdata.shapes[shapes_layer], to_coordinate_system=to_coordinate_system
+        )
+        _crd_shapes = [
+            crd[0] - x_translation,
+            crd[1] - x_translation,
+            crd[2] - y_translation,
+            crd[3] - y_translation,
+        ]
+        polygons = sdata[shapes_layer].cx[_crd_shapes[0] : _crd_shapes[1], _crd_shapes[2] : _crd_shapes[3]]
+        if x_translation != 0 or y_translation != 0:
+            polygons = polygons.copy()  # copy is necessary, we do not want to alter in memory shapes layer
+            polygons["geometry"] = polygons["geometry"].apply(
+                lambda geom, x_trans=x_translation, y_trans=y_translation: translate(geom, xoff=x_trans, yoff=y_trans)
+            )
         if z_index is not None:
             polygons = _get_z_slice_polygons(polygons, z_index=z_index)
 
@@ -743,8 +753,23 @@ def _plot(
         if shapes_layer_filtered is not None:
             for i in shapes_layer_filtered:
                 if not sdata.shapes[i].empty:
-                    polygons = _translate_polygons(sdata.shapes[i].copy(), to_coordinate_system=to_coordinate_system)
-                    polygons = polygons.cx[crd[0] : crd[1], crd[2] : crd[3]]
+                    x_translation, y_translation = _get_translation_values_shapes(
+                        sdata.shapes[i], to_coordinate_system=to_coordinate_system
+                    )
+                    _crd_shapes = [
+                        crd[0] - x_translation,
+                        crd[1] - x_translation,
+                        crd[2] - y_translation,
+                        crd[3] - y_translation,
+                    ]
+                    polygons = sdata.shapes[i].cx[_crd_shapes[0] : _crd_shapes[1], _crd_shapes[2] : _crd_shapes[3]]
+                    if x_translation != 0 or y_translation != 0:
+                        polygons = polygons.copy()  # copy is necessary, we do not want to alter in memory shapes layer
+                        polygons["geometry"] = polygons["geometry"].apply(
+                            lambda geom, x_trans=x_translation, y_trans=y_translation: translate(
+                                geom, xoff=x_trans, yoff=y_trans
+                            )
+                        )
                     if z_index is not None:
                         polygons = _get_z_slice_polygons(polygons, z_index=z_index)
                     if not polygons.empty:
@@ -810,7 +835,9 @@ def _get_z_slice_polygons(polygons: GeoDataFrame, z_index: int) -> GeoDataFrame:
     return polygons[polygons["geometry"].apply(_get_z_slice, args=(z_index,))]
 
 
-def _translate_polygons(polygons: GeoDataFrame, to_coordinate_system: str = "global") -> GeoDataFrame:
+def _get_translation_values_shapes(
+    polygons: GeoDataFrame, to_coordinate_system: str = "global"
+) -> tuple[float | int, float | int]:
     # get the transformation defined on "global"
     transformations = get_transformation(polygons, get_all=True)
     if to_coordinate_system not in [*transformations]:
@@ -820,9 +847,4 @@ def _translate_polygons(polygons: GeoDataFrame, to_coordinate_system: str = "glo
         )
     transformation = transformations[to_coordinate_system]
     x_translation, y_translation = _get_translation_values(transformation)
-    if x_translation != 0 or y_translation != 0:
-        polygons["geometry"] = polygons["geometry"].apply(
-            lambda geom: translate(geom, xoff=x_translation, yoff=y_translation)
-        )
-
-    return polygons
+    return x_translation, y_translation
