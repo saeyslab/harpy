@@ -82,6 +82,7 @@ Operations on shapes (polygons) layers.
 .. autosummary::
     :toctree: generated
 
+    sh.vectorize
     sh.add_shapes_layer
     sh.filter_shapes_layer
     sh.create_voronoi_boundaries

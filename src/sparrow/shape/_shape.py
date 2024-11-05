@@ -5,8 +5,54 @@ from geopandas import GeoDataFrame
 from shapely.geometry import GeometryCollection, MultiPolygon, Polygon
 from spatialdata import SpatialData
 from spatialdata.models._utils import MappingToCoordinateSystem_t
+from spatialdata.transformations import get_transformation
 
+from sparrow.image._image import _get_spatial_element
 from sparrow.shape._manager import ShapesLayerManager
+
+
+def vectorize(
+    sdata,
+    labels_layer: str,
+    output_layer: str,
+    overwrite: bool = False,
+) -> SpatialData:
+    """
+    Vectorize a labels layer.
+
+    Convert a labels layer to a shapes layer with name `output_layer`.
+    If the `rasterio` library is installed will use implementation based on `rasterio`, else will use implementation based on `skimage`.
+    We recommend installing `rasterio` for increased perforamnce and more precise vectorization.
+
+    For optimal performance it is recommended to configure `Dask` so it uses "processes" instead of "threads", e.g. via:
+
+    >>> import dask
+    >>> dask.config.set(scheduler='processes')
+
+    Parameters
+    ----------
+    sdata
+        The SpatialData object to which the new shapes layer will be added.
+    labels_layer
+        The labels layer to vectorize.
+    output_layer
+        The name of the output layer where the shapes data will be stored.
+    overwrite
+        If True, overwrites the output layer if it already exists in `sdata`.
+
+    Returns
+    -------
+    The `sdata` object with the shapes layer added.
+    """
+    se = _get_spatial_element(sdata, layer=labels_layer)
+    sdata = add_shapes_layer(
+        sdata,
+        input=se.data,
+        output_layer=output_layer,
+        transformations=get_transformation(sdata[labels_layer], get_all=True),
+        overwrite=overwrite,
+    )
+    return sdata
 
 
 def add_shapes_layer(

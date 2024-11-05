@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import itertools
+import importlib
 from functools import singledispatchmethod
 from typing import Any
 
@@ -9,11 +9,12 @@ import geopandas
 import numpy as np
 import pandas as pd
 import shapely
+import skimage
 import spatialdata
 from dask.array import Array
 from geopandas import GeoDataFrame
-from rasterio import Affine
-from rasterio.features import shapes
+from shapely import MultiPolygon, Polygon
+from skimage.measure._regionprops import RegionProperties
 from spatialdata import SpatialData, read_zarr
 from spatialdata.models._utils import MappingToCoordinateSystem_t
 from spatialdata.transformations import get_transformation
@@ -136,16 +137,23 @@ class ShapesLayerManager:
     def _get_polygons_from_array(self, input: Array) -> GeoDataFrame:
         assert np.issubdtype(input.dtype, np.integer), "Only integer arrays are supported."
         dimension = self.get_dims(input)
+        if importlib.util.find_spec("rasterio") is not None:
+            _mask_to_polygons = _mask_to_polygons_rasterio
+        else:
+            log.info(
+                "'rasterio' library is not installed. Falling back to 'skimage' for mask vectorization. "
+                "For better performance and more precise vectorization, consider installing 'rasterio'."
+            )
+            _mask_to_polygons = _mask_to_polygons_skimage
         if dimension == 3:
             all_polygons = []
             for z_slice in range(input.shape[0]):
-                polygons = _mask_image_to_polygons(input[z_slice], z_slice=z_slice)
+                polygons = _mask_to_polygons(input[z_slice], z_slice=z_slice)
                 all_polygons.append(polygons)
             polygons = geopandas.GeoDataFrame(pd.concat(all_polygons, ignore_index=False))
             return polygons
         elif dimension == 2:
-            polygons = _mask_image_to_polygons(input)
-            return _mask_image_to_polygons(input)
+            return _mask_to_polygons(input)
 
     @get_polygons_from_input.register(GeoDataFrame)
     def _get_polygons_from_geodf(self, input: GeoDataFrame) -> GeoDataFrame:
@@ -210,13 +218,17 @@ class ShapesLayerManager:
         return sdata
 
 
-def _mask_image_to_polygons(mask: Array, z_slice: int = None) -> GeoDataFrame:
+def _mask_to_polygons_rasterio(mask: Array, z_slice: int = None) -> GeoDataFrame:
     """
-    Convert a cell segmentation mask to polygons and return them as a GeoDataFrame.
+    Convert a cell segmentation mask to polygons and return them as a GeoDataFrame using `rasterio`.
 
     This function computes the polygonal outlines of the cells present in the
     given segmentation mask. The polygons are calculated in parallel using Dask
     delayed computations.
+    For optimal performance it is recommended to configure `Dask` so it uses "processes" instead of "threads".
+    E.g. via:
+    >>> import dask
+    >>> dask.config.set(scheduler='processes')
 
     Parameters
     ----------
@@ -229,9 +241,8 @@ def _mask_image_to_polygons(mask: Array, z_slice: int = None) -> GeoDataFrame:
 
     Returns
     -------
-    geopandas.GeoDataFrame
-        A GeoDataFrame containing polygons extracted from the input mask. Each polygon
-        is associated with a cell ID: the pixel intensity from the original mask.
+    A GeoDataFrame containing polygons extracted from the input mask. Each polygon
+    is associated with a cell ID.
 
     Notes
     -----
@@ -243,9 +254,9 @@ def _mask_image_to_polygons(mask: Array, z_slice: int = None) -> GeoDataFrame:
     --------
     >>> import numpy as np
     >>> import dask.array as da
-    >>> from sparrow.shape._shape import _mask_image_to_polygons
+    >>> from sparrow.shape._manager import _mask_to_polygons_rasterio
     >>> mask = da.from_array(np.array([[0, 3], [5, 5]]), chunks=(1, 1))
-    >>> gdf = _mask_image_to_polygons(mask)
+    >>> gdf = _mask_to_polygons_rasterio(mask)
     >>> gdf
                                                     geometry
     cells
@@ -256,23 +267,41 @@ def _mask_image_to_polygons(mask: Array, z_slice: int = None) -> GeoDataFrame:
     >>> gdf.geometry[5]
     <POLYGON ((0 2, 1 2, 2 2, 2 1, 1 1, 0 1, 0 2))>
     """
+    from rasterio import Affine
+    from rasterio.features import shapes
+
+    assert mask.ndim == 2, "Only 2D dask arrays are supported."
+    assert np.issubdtype(mask.dtype, np.integer), "Only integer arrays are supported."
+
+    def _get_dtype(value: int) -> np.dtype:
+        max_int16 = np.iinfo(np.int16).max
+        max_int32 = np.iinfo(np.int32).max
+
+        if max_int16 >= value:
+            dtype = np.int16
+        elif max_int32 >= value:
+            dtype = np.int32
+        else:
+            raise ValueError(
+                f"Maximum cell number is {value}. Values higher than {max_int32} are not supported. Consider relabeling the cells."
+            )
+        return dtype
 
     # Define a function to extract polygons and values from each chunk
-    @dask.delayed
-    def extract_polygons(mask_chunk: np.ndarray, chunk_coords: tuple) -> tuple:
+    def _vectorize_chunk(mask_chunk: np.ndarray, y_offset: int, x_offset: int) -> GeoDataFrame:
         all_polygons = []
         all_values = []
 
         # Compute the boolean mask before passing it to the features.shapes() function
         bool_mask = mask_chunk > 0
 
-        # Get chunk's top-left corner coordinates
-        x_offset, y_offset = chunk_coords
+        max_value = mask_chunk.max()
+        dtype = _get_dtype(max_value)
 
         for shape, value in shapes(
-            mask_chunk.astype(np.int32),
+            mask_chunk.astype(dtype),
             mask=bool_mask,
-            transform=Affine(1.0, 0, y_offset, 0, 1.0, x_offset),
+            transform=Affine(1.0, 0, x_offset, 0, 1.0, y_offset),
         ):
             if z_slice is not None:
                 coordinates = shape["coordinates"]
@@ -280,37 +309,119 @@ def _mask_image_to_polygons(mask: Array, z_slice: int = None) -> GeoDataFrame:
             all_polygons.append(shapely.geometry.shape(shape))
             all_values.append(int(value))
 
-        return all_polygons, all_values
+        return geopandas.GeoDataFrame({"geometry": all_polygons, _INSTANCE_KEY: all_values})
 
-    # Map the extract_polygons function to each chunk
     # Create a list of delayed objects
+    chunk_sizes = mask.chunks
 
-    # rechunk, otherwise chunk_coords could potentially not match
-    mask = mask.rechunk(mask.chunksize)
-
-    chunk_coords = list(itertools.product(*[range(0, s, cs) for s, cs in zip(mask.shape, mask.chunksize)]))
-
-    delayed_results = [
-        extract_polygons(chunk, coord) for chunk, coord in zip(mask.to_delayed().flatten(), chunk_coords)
+    tasks = [
+        dask.delayed(_vectorize_chunk)(chunk, sum(chunk_sizes[0][:iy]), sum(chunk_sizes[1][:ix]))
+        for iy, row in enumerate(mask.to_delayed())
+        for ix, chunk in enumerate(row)
     ]
-    # Compute the results
-    results = dask.compute(*delayed_results)
+    results = dask.compute(*tasks)
 
-    # Combine the results into a single list of polygons and values
-    all_polygons = []
-    all_values = []
-    for polygons, values in results:
-        all_polygons.extend(polygons)
-        all_values.extend(values)
+    gdf = pd.concat(results)
 
-    # Create a GeoDataFrame from the extracted polygons and values
-    gdf = geopandas.GeoDataFrame({"geometry": all_polygons, _INSTANCE_KEY: all_values})
+    gdf[_INSTANCE_KEY] = gdf[_INSTANCE_KEY].astype(mask.dtype)
 
-    # TODO. If extra column supported in a shapes layer of a SpatialData object, we could think about adding _INSTANCE_KEY as a column to the shapes.
-    # Combine polygons that are actually pieces of the same cell back together.
-    # (These pieces of same cell got written to different chunks by dask, needed for parallel processing.)
+    log.info(
+        "Finished vectorizing. Dissolving shapes at the border of the chunks. "
+        "This can take a couple minutes if input mask contains a lot of chunks."
+    )
     gdf = gdf.dissolve(by=_INSTANCE_KEY)
 
-    gdf.index = gdf.index.astype("str")
+    log.info("Dissolve is done.")
+
+    return gdf
+
+
+def _mask_to_polygons_skimage(mask: Array, z_slice=None) -> GeoDataFrame:
+    """
+    Convert a cell segmentation mask to polygons and return them as a GeoDataFrame using `skimage`.
+
+    This function computes the polygonal outlines of the cells present in the
+    given segmentation mask. The polygons are calculated in parallel using Dask
+    delayed computations.
+    For optimal performance it is recommended to configure `Dask` so it uses "processes" instead of "threads".
+    E.g. via:
+    >>> import dask
+    >>> dask.config.set(scheduler='processes')
+
+    Parameters
+    ----------
+    mask : dask.array.core.Array
+        A Dask array representing the segmentation mask. Non-zero pixels belong
+        to a cell; pixels with the same intensity value belong to the same cell.
+        Zero pixels represent background (no cell).
+    z_slice: int or None, optional.
+        The z slice that is being processed.
+
+    Returns
+    -------
+    A GeoDataFrame containing polygons extracted from the input mask. Each polygon
+    is associated with a cell ID.
+    """
+
+    # taken from spatialdata
+    # https://github.com/scverse/spatialdata/blob/27bb4a7579d8ff7cc8f6dd9b782226cb984ceb20/src/spatialdata/_core/operations/vectorize.py#L181
+    def _dissolve_on_overlaps(label: int, group: GeoDataFrame) -> GeoDataFrame:
+        if len(group) == 1:
+            return (label, group.geometry.iloc[0])
+        if len(np.unique(group["chunk-location"])) == 1:
+            return (label, MultiPolygon(list(group.geometry)))
+        return (label, group.dissolve().geometry.iloc[0])
+
+    def _vectorize_chunk(chunk: np.ndarray, yoff: int, xoff: int) -> GeoDataFrame:  # type: ignore[type-arg]
+        gdf = _vectorize_mask(chunk)
+        gdf["chunk-location"] = f"({yoff}, {xoff})"
+        gdf.geometry = gdf.translate(xoff, yoff)
+        return gdf
+
+    def _region_props_to_polygons(region_props: RegionProperties) -> list[Polygon]:
+        mask = np.pad(region_props.image, 1)
+        contours = skimage.measure.find_contours(mask, 0.5)
+
+        # shapes with <= 3 vertices, i.e. lines, can't be converted into a polygon
+        if z_slice is None:
+            polygons = [Polygon(contour[:, [1, 0]]) for contour in contours if contour.shape[0] >= 4]
+        else:
+            polygons = [
+                Polygon(np.hstack((contour[:, [1, 0]], np.full((contour.shape[0], 1), z_slice))))
+                for contour in contours
+                if contour.shape[0] >= 4
+            ]
+
+        yoff, xoff, *_ = region_props.bbox
+        return [shapely.affinity.translate(poly, xoff, yoff) for poly in polygons]
+
+    def _vectorize_mask(
+        mask: np.ndarray,  # type: ignore[type-arg]
+    ) -> GeoDataFrame:
+        if mask.max() == 0:
+            return GeoDataFrame(geometry=[])
+
+        regions = skimage.measure.regionprops(mask)
+
+        polygons_list = [_region_props_to_polygons(region) for region in regions]
+        geoms = [poly for polygons in polygons_list for poly in polygons]
+        labels = [region.label for i, region in enumerate(regions) for _ in range(len(polygons_list[i]))]
+
+        return GeoDataFrame({"label": labels}, geometry=geoms)
+
+    chunk_sizes = mask.chunks
+
+    tasks = [
+        dask.delayed(_vectorize_chunk)(chunk, sum(chunk_sizes[0][:iy]), sum(chunk_sizes[1][:ix]))
+        for iy, row in enumerate(mask.to_delayed())
+        for ix, chunk in enumerate(row)
+    ]
+    results = dask.compute(*tasks)
+
+    gdf = pd.concat(results)
+    gdf = GeoDataFrame([_dissolve_on_overlaps(*item) for item in gdf.groupby("label")], columns=["label", "geometry"])
+    gdf.index = gdf["label"].astype(mask.dtype)
+    gdf.index.name = _INSTANCE_KEY
+    gdf.drop("label", axis=1, inplace=True)
 
     return gdf

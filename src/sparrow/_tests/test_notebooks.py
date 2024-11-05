@@ -135,6 +135,23 @@ def test_notebooks_instanseg(notebook):
 
 @pytest.mark.skip
 @pytest.mark.skipif(
+    not importlib.util.find_spec("rasterio"),
+    reason="requires the rasterio library",
+)
+@pytest.mark.parametrize(
+    "notebook",
+    [
+        "Rasterize_and_vectorize.ipynb",
+    ],
+)
+def test_notebooks_rasterize_vectorize(notebook):
+    root = str(pyrootutils.setup_root(os.getcwd(), dotenv=True, pythonpath=True))
+
+    run_notebook(os.path.join(root, "docs/tutorials/advanced", notebook))
+
+
+@pytest.mark.skip
+@pytest.mark.skipif(
     not importlib.util.find_spec("cellpose") or not importlib.util.find_spec("basicpy"),
     reason="requires the cellpose and basicpy libraries",
 )
