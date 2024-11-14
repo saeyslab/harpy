@@ -7,7 +7,6 @@ from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import Translation
 
 from sparrow.image._image import _get_boundary, _get_spatial_element, add_image_layer
-from sparrow.utils._keys import _GENES_KEY
 from sparrow.utils._transformations import _identity_check_transformations_points
 from sparrow.utils.pylogger import get_pylogger
 
@@ -22,7 +21,6 @@ def transcript_density(
     name_x: str = "x",
     name_y: str = "y",
     name_z: Optional[str] = None,
-    name_gene_column: str = _GENES_KEY,
     z_index: Optional[int] = None,
     scaling_factor: float = 100,
     chunks: int = 1024,
@@ -55,8 +53,6 @@ def transcript_density(
         Column name for y-coordinates of the transcripts in the points layer, by default "y".
     name_z
         Column name for z-coordinates of the transcripts in the points layer, by default None.
-    name_gene_column
-        Column name in the points_layer representing gene information.
     z_index
         The z index in the points layer for which to calculate transcript density. If set to None for a 3D points layer
         (and `name_z` is not equal to None), an y-x transcript density projection will be calculated.
@@ -141,9 +137,7 @@ def transcript_density(
             ddf = ddf.sample(frac=fraction)
             log.info("sampling finished")
 
-    counts_location_transcript = ddf.groupby([name_x, name_y]).count()[name_gene_column]
-
-    counts_location_transcript = counts_location_transcript.reset_index()
+    counts_location_transcript = ddf.groupby([name_x, name_y]).size().reset_index().rename(columns={0: "__count__"})
 
     # crd is set to img boundary if None
     counts_location_transcript[name_x] = counts_location_transcript[name_x] - crd[0]
@@ -171,9 +165,9 @@ def transcript_density(
 
     x_values = counts_location_transcript[name_x].values
     y_values = counts_location_transcript[name_y].values
-    gene_values = counts_location_transcript[name_gene_column].values
+    values = counts_location_transcript["__count__"].values
 
-    image = image.map_blocks(populate_chunk, x=x_values, y=y_values, values=gene_values, dtype=int)
+    image = image.map_blocks(populate_chunk, x=x_values, y=y_values, values=values, dtype=int)
 
     image = scaling_factor * (image / da.max(image))
 
