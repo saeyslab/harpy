@@ -91,6 +91,12 @@ def sdata_transcripts(tmpdir):
 
 
 @pytest.fixture
+def sdata_transcripts_no_backed():
+    sdata = resolve_example()
+    yield sdata
+
+
+@pytest.fixture
 def sdata_transcripts_mul_coord(tmpdir):
     sdata = resolve_example_multiple_coordinate_systems()
     # backing store for specific unit test

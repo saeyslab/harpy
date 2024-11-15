@@ -282,15 +282,15 @@ def test_precondition_empty_fn_kwargs():
         )
 
 
-def test_apply(sdata_multi_c: SpatialData):
+def test_apply(sdata_multi_c_no_backed: SpatialData):
     fn_kwargs = {
         0: {0.5: {"parameter": 4}, 1.5: {"parameter": 8}},
         1: {0.5: {"parameter": 10}, 1.5: {"parameter": 20}},
     }
     func = _multiply
 
-    sdata_multi_c = map_image(
-        sdata_multi_c,
+    sdata_multi_c_no_backed = map_image(
+        sdata_multi_c_no_backed,
         img_layer="combine_z",
         output_layer="combine_z_apply",
         func=func,
@@ -299,18 +299,18 @@ def test_apply(sdata_multi_c: SpatialData):
         overwrite=True,
     )
 
-    res = sdata_multi_c["combine_z"].sel(c=0, z=0.5).compute()
-    res2 = sdata_multi_c["combine_z_apply"].sel(c=0, z=0.5).compute()
+    res = sdata_multi_c_no_backed["combine_z"].sel(c=0, z=0.5).compute()
+    res2 = sdata_multi_c_no_backed["combine_z_apply"].sel(c=0, z=0.5).compute()
     assert np.array_equal(res * fn_kwargs[0][0.5]["parameter"], res2)
 
-    res = sdata_multi_c["combine_z"].sel(c=0, z=1.5).compute()
-    res2 = sdata_multi_c["combine_z_apply"].sel(c=0, z=1.5).compute()
+    res = sdata_multi_c_no_backed["combine_z"].sel(c=0, z=1.5).compute()
+    res2 = sdata_multi_c_no_backed["combine_z_apply"].sel(c=0, z=1.5).compute()
     assert np.array_equal(res * fn_kwargs[0][1.5]["parameter"], res2)
 
-    res = sdata_multi_c["combine_z"].sel(c=1, z=0.5).compute()
-    res2 = sdata_multi_c["combine_z_apply"].sel(c=1, z=0.5).compute()
+    res = sdata_multi_c_no_backed["combine_z"].sel(c=1, z=0.5).compute()
+    res2 = sdata_multi_c_no_backed["combine_z_apply"].sel(c=1, z=0.5).compute()
     assert np.array_equal(res * fn_kwargs[1][0.5]["parameter"], res2)
 
-    res = sdata_multi_c["combine_z"].sel(c=1, z=1.5).compute()
-    res2 = sdata_multi_c["combine_z_apply"].sel(c=1, z=1.5).compute()
+    res = sdata_multi_c_no_backed["combine_z"].sel(c=1, z=1.5).compute()
+    res2 = sdata_multi_c_no_backed["combine_z_apply"].sel(c=1, z=1.5).compute()
     assert np.array_equal(res * fn_kwargs[1][1.5]["parameter"], res2)

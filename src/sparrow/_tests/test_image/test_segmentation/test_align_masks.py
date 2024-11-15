@@ -3,9 +3,9 @@ from spatialdata import SpatialData
 from sparrow.image.segmentation._align_masks import align_labels_layers
 
 
-def test_align_labels_layers(sdata_multi_c: SpatialData):
-    sdata_multi_c = align_labels_layers(
-        sdata_multi_c,
+def test_align_labels_layers(sdata_multi_c_no_backed: SpatialData):
+    sdata_multi_c_no_backed = align_labels_layers(
+        sdata_multi_c_no_backed,
         labels_layer_1="masks_nuclear",
         labels_layer_2="masks_whole",
         output_labels_layer="masks_nuclear_aligned",
@@ -15,5 +15,5 @@ def test_align_labels_layers(sdata_multi_c: SpatialData):
         depth=100,
     )
 
-    assert "masks_nuclear_aligned" in sdata_multi_c.labels
-    assert isinstance(sdata_multi_c, SpatialData)
+    assert "masks_nuclear_aligned" in sdata_multi_c_no_backed.labels
+    assert isinstance(sdata_multi_c_no_backed, SpatialData)

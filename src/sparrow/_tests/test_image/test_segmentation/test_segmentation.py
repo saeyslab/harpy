@@ -13,9 +13,9 @@ from sparrow.points._points import add_points_layer
 
 
 @pytest.mark.skipif(not importlib.util.find_spec("cellpose"), reason="requires the cellpose library")
-def test_segment(sdata_multi_c: SpatialData):
-    sdata_multi_c = segment(
-        sdata_multi_c,
+def test_segment(sdata_multi_c_no_backed: SpatialData):
+    sdata_multi_c_no_backed = segment(
+        sdata_multi_c_no_backed,
         img_layer="combine",
         model=cellpose_callable,
         output_labels_layer="masks_cellpose",
@@ -34,15 +34,15 @@ def test_segment(sdata_multi_c: SpatialData):
         channels=[1, 0],
     )
 
-    assert "masks_cellpose" in sdata_multi_c.labels
-    assert "masks_cellpose_boundaries" in sdata_multi_c.shapes
-    assert isinstance(sdata_multi_c, SpatialData)
+    assert "masks_cellpose" in sdata_multi_c_no_backed.labels
+    assert "masks_cellpose_boundaries" in sdata_multi_c_no_backed.shapes
+    assert isinstance(sdata_multi_c_no_backed, SpatialData)
 
 
 @pytest.mark.skipif(not importlib.util.find_spec("cellpose"), reason="requires the cellpose library")
-def test_segment_3D(sdata_multi_c: SpatialData):
-    sdata_multi_c = segment(
-        sdata_multi_c,
+def test_segment_3D(sdata_multi_c_no_backed: SpatialData):
+    sdata_multi_c_no_backed = segment(
+        sdata_multi_c_no_backed,
         img_layer="combine_z",
         model=cellpose_callable,
         output_labels_layer="masks_cellpose_3D",
@@ -62,11 +62,11 @@ def test_segment_3D(sdata_multi_c: SpatialData):
         anisotropy=1,
     )
 
-    assert "masks_cellpose_3D" in sdata_multi_c.labels
-    assert isinstance(sdata_multi_c, SpatialData)
+    assert "masks_cellpose_3D" in sdata_multi_c_no_backed.labels
+    assert isinstance(sdata_multi_c_no_backed, SpatialData)
 
 
-def test_segment_points(sdata_multi_c: SpatialData):
+def test_segment_points(sdata_multi_c_no_backed: SpatialData):
     data = {"x": [10], "y": [10], "gene": ["dummy_gene"]}
 
     # Create the DataFrame
@@ -76,18 +76,18 @@ def test_segment_points(sdata_multi_c: SpatialData):
 
     coordinates = {"x": "x", "y": "y"}
 
-    sdata_multi_c = add_points_layer(
-        sdata_multi_c,
+    sdata_multi_c_no_backed = add_points_layer(
+        sdata_multi_c_no_backed,
         ddf=ddf,
         output_layer="transcripts",
         coordinates=coordinates,
         overwrite=False,
     )
 
-    assert isinstance((sdata_multi_c.points["transcripts"]), DataFrame)
+    assert isinstance((sdata_multi_c_no_backed.points["transcripts"]), DataFrame)
 
-    sdata_multi_c = segment_points(
-        sdata_multi_c,
+    sdata_multi_c_no_backed = segment_points(
+        sdata_multi_c_no_backed,
         labels_layer="masks_whole",
         points_layer="transcripts",
         name_x="x",
@@ -103,8 +103,8 @@ def test_segment_points(sdata_multi_c: SpatialData):
     output_labels_layer = ["masks_whole_copy_dummy_1", "masks_whole_copy_dummy_2"]
     output_shapes_layer = ["masks_whole_copy_dummy_boundaries_1", "masks_whole_copy_dummy_boundaries_2"]
     # test multi channel support for output labels dimension.
-    sdata_multi_c = segment_points(
-        sdata_multi_c,
+    sdata_multi_c_no_backed = segment_points(
+        sdata_multi_c_no_backed,
         labels_layer="masks_whole",
         points_layer="transcripts",
         name_x="x",
@@ -121,6 +121,6 @@ def test_segment_points(sdata_multi_c: SpatialData):
     )
 
     for _output_labels_layer in output_labels_layer:
-        assert _output_labels_layer in sdata_multi_c.labels
+        assert _output_labels_layer in sdata_multi_c_no_backed.labels
     for _output_shapes_layer in output_shapes_layer:
-        assert _output_shapes_layer in sdata_multi_c.shapes
+        assert _output_shapes_layer in sdata_multi_c_no_backed.shapes

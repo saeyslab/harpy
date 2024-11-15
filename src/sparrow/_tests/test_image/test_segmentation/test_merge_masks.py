@@ -8,9 +8,9 @@ from sparrow.image.segmentation._merge_masks import (
 )
 
 
-def test_merge_labels_layers(sdata_multi_c: SpatialData):
-    sdata_multi_c = merge_labels_layers(
-        sdata_multi_c,
+def test_merge_labels_layers(sdata_multi_c_no_backed: SpatialData):
+    sdata_multi_c_no_backed = merge_labels_layers(
+        sdata_multi_c_no_backed,
         labels_layer_1="masks_nuclear",
         labels_layer_2="masks_whole",
         output_labels_layer="masks_merged",
@@ -20,13 +20,13 @@ def test_merge_labels_layers(sdata_multi_c: SpatialData):
         depth=100,
     )
 
-    assert "masks_merged" in sdata_multi_c.labels
-    assert isinstance(sdata_multi_c, SpatialData)
+    assert "masks_merged" in sdata_multi_c_no_backed.labels
+    assert isinstance(sdata_multi_c_no_backed, SpatialData)
 
 
-def test_merge_labels_layers_nuclei(sdata_multi_c: SpatialData):
-    sdata_multi_c = merge_labels_layers_nuclei(
-        sdata_multi_c,
+def test_merge_labels_layers_nuclei(sdata_multi_c_no_backed: SpatialData):
+    sdata_multi_c_no_backed = merge_labels_layers_nuclei(
+        sdata_multi_c_no_backed,
         labels_layer="masks_whole",
         labels_layer_nuclei_expanded="masks_nuclear",
         labels_layer_nuclei="masks_nuclear",
@@ -37,13 +37,13 @@ def test_merge_labels_layers_nuclei(sdata_multi_c: SpatialData):
         depth=100,
     )
 
-    assert "masks_merged_nuclear" in sdata_multi_c.labels
-    assert isinstance(sdata_multi_c, SpatialData)
+    assert "masks_merged_nuclear" in sdata_multi_c_no_backed.labels
+    assert isinstance(sdata_multi_c_no_backed, SpatialData)
 
 
-def test_mask_to_original(sdata_multi_c: SpatialData):
+def test_mask_to_original(sdata_multi_c_no_backed: SpatialData):
     df = mask_to_original(
-        sdata_multi_c,
+        sdata_multi_c_no_backed,
         labels_layer="masks_whole",
         original_labels_layers=["masks_nuclear"],
         depth=100,

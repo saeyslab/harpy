@@ -5,9 +5,9 @@ from sparrow.table import score_genes, score_genes_iter
 from sparrow.utils._keys import _ANNOTATION_KEY
 
 
-def test_score_genes(sdata_transcripts, path_dataset_markers):
-    sdata_transcripts, celltypes_scored, celltypes_all = score_genes(
-        sdata=sdata_transcripts,
+def test_score_genes(sdata_transcripts_no_backed, path_dataset_markers):
+    sdata_transcripts_no_backed, celltypes_scored, celltypes_all = score_genes(
+        sdata=sdata_transcripts_no_backed,
         labels_layer="segmentation_mask",
         table_layer="table_transcriptomics_cluster",
         output_layer="table_transcriptomics_score_genes",
@@ -18,13 +18,15 @@ def test_score_genes(sdata_transcripts, path_dataset_markers):
         overwrite=True,
     )
 
-    assert isinstance(sdata_transcripts["table_transcriptomics_score_genes"], AnnData)
+    assert isinstance(sdata_transcripts_no_backed["table_transcriptomics_score_genes"], AnnData)
 
     assert isinstance(
-        sdata_transcripts["table_transcriptomics_score_genes"].obs[_ANNOTATION_KEY].dtype, pd.CategoricalDtype
+        sdata_transcripts_no_backed["table_transcriptomics_score_genes"].obs[_ANNOTATION_KEY].dtype, pd.CategoricalDtype
     )
 
-    annotated_celltypes = sdata_transcripts["table_transcriptomics_score_genes"].obs[_ANNOTATION_KEY].cat.categories
+    annotated_celltypes = (
+        sdata_transcripts_no_backed["table_transcriptomics_score_genes"].obs[_ANNOTATION_KEY].cat.categories
+    )
 
     for celltype in annotated_celltypes:
         assert celltype in celltypes_scored
@@ -37,9 +39,9 @@ def test_score_genes(sdata_transcripts, path_dataset_markers):
     assert "dummy_33" in celltypes_all
 
 
-def test_score_genes_iter(sdata_transcripts, path_dataset_markers, tmpdir):
-    sdata_transcripts, celltypes_scored, celltypes_all = score_genes_iter(
-        sdata=sdata_transcripts,
+def test_score_genes_iter(sdata_transcripts_no_backed, path_dataset_markers, tmpdir):
+    sdata_transcripts_no_backed, celltypes_scored, celltypes_all = score_genes_iter(
+        sdata=sdata_transcripts_no_backed,
         labels_layer="segmentation_mask",
         table_layer="table_transcriptomics_cluster",
         output_layer="table_transcriptomics_score_genes",
@@ -50,10 +52,10 @@ def test_score_genes_iter(sdata_transcripts, path_dataset_markers, tmpdir):
         n_iter=5,
     )
 
-    assert isinstance(sdata_transcripts["table_transcriptomics_score_genes"], AnnData)
+    assert isinstance(sdata_transcripts_no_backed["table_transcriptomics_score_genes"], AnnData)
 
     assert isinstance(
-        sdata_transcripts["table_transcriptomics_score_genes"].obs[_ANNOTATION_KEY].dtype, pd.CategoricalDtype
+        sdata_transcripts_no_backed["table_transcriptomics_score_genes"].obs[_ANNOTATION_KEY].dtype, pd.CategoricalDtype
     )
 
     assert "dummy_33" not in celltypes_scored  # because this celltypes has no matches in the tissue

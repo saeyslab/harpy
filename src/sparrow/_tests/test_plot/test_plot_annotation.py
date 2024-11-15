@@ -4,9 +4,9 @@ from sparrow.plot import score_genes as score_genes_plot
 from sparrow.table import score_genes
 
 
-def test_score_genes(sdata_transcripts, path_dataset_markers, tmp_path):
-    sdata_transcripts, celltypes_scored, celltypes_all = score_genes(
-        sdata_transcripts,
+def test_score_genes(sdata_transcripts_no_backed, path_dataset_markers, tmp_path):
+    sdata_transcripts_no_backed, celltypes_scored, celltypes_all = score_genes(
+        sdata_transcripts_no_backed,
         labels_layer="segmentation_mask",
         table_layer="table_transcriptomics_cluster",
         output_layer="table_transcriptomics_score_genes",
@@ -18,7 +18,7 @@ def test_score_genes(sdata_transcripts, path_dataset_markers, tmp_path):
     )
 
     score_genes_plot(
-        sdata_transcripts,
+        sdata_transcripts_no_backed,
         table_layer="table_transcriptomics_score_genes",
         celltypes=celltypes_scored,
         img_layer="raw_image",

@@ -39,6 +39,7 @@ def sanity_plot_transcripts_matrix(
     name_z: str = "z",
     name_gene_column: str = _GENES_KEY,
     gene: str | None = None,
+    radius: str | None = None,
     crd: tuple[int, int, int, int] | None = None,
     to_coordinate_system: str = "global",
     figsize: tuple[int, int] | None = None,
@@ -85,6 +86,9 @@ def sanity_plot_transcripts_matrix(
         Column name in the points_layer representing gene information.
     gene
         Specific gene to filter and plot. If None, all genes are plotted.
+    radius
+        Column in the `shapes_layer` specifying the radius. The radius will be applied using `geometry.buffer` before plotting `shapes_layer`.
+        Useful when the `geometry` of the `shapes_layer` contains points instead of polygons.
     crd
         Coordinates to define a rectangular region for plotting as (xmin, xmax, ymin, ymax).
         If None, the entire image boundary is used.
@@ -265,6 +269,15 @@ def sanity_plot_transcripts_matrix(
         log.info("Selecting boundaries")
 
         if not polygons.empty:
+            if radius is not None:
+                if radius in polygons.columns:
+                    polygons = polygons.copy()
+                    polygons["geometry"] = polygons.geometry.buffer(polygons[radius])
+                else:
+                    log.warning(
+                        f"radius parameter was specified as '{radius}', but could not be found as a column of shapes layer '{shapes_layer}'. Will proceed "
+                        "plotting while ignoring radius parameter."
+                    )
             x_translation, y_translation = _get_translation_values_shapes(
                 polygons, to_coordinate_system=to_coordinate_system
             )
@@ -276,7 +289,6 @@ def sanity_plot_transcripts_matrix(
             ]
             polygons = polygons.cx[_crd_shapes[0] : _crd_shapes[1], _crd_shapes[2] : _crd_shapes[3]]
             if x_translation != 0 or y_translation != 0:
-                polygons = polygons.copy()  # copy is necessary, we do not want to alter in memory shapes layer
                 polygons["geometry"] = polygons["geometry"].apply(
                     lambda geom, x_trans=x_translation, y_trans=y_translation: translate(
                         geom, xoff=x_trans, yoff=y_trans

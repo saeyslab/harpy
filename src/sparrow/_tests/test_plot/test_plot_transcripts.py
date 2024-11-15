@@ -3,9 +3,9 @@ import os
 from sparrow.plot._transcripts import analyse_genes_left_out
 
 
-def test_analyse_genes_left_out(sdata_transcripts, tmp_path):
+def test_analyse_genes_left_out(sdata_transcripts_no_backed, tmp_path):
     df = analyse_genes_left_out(
-        sdata_transcripts,
+        sdata_transcripts_no_backed,
         labels_layer="segmentation_mask",
         table_layer="table_transcriptomics",
         points_layer="transcripts",

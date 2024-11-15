@@ -3,9 +3,9 @@ from spatialdata import SpatialData
 from sparrow.image.segmentation._expand_masks import expand_labels_layer
 
 
-def test_expand_labels_layer(sdata_multi_c: SpatialData):
-    sdata_multi_c = expand_labels_layer(
-        sdata_multi_c,
+def test_expand_labels_layer(sdata_multi_c_no_backed: SpatialData):
+    sdata_multi_c_no_backed = expand_labels_layer(
+        sdata_multi_c_no_backed,
         labels_layer="masks_cellpose_3D",
         distance=10,
         depth=100,
@@ -15,13 +15,13 @@ def test_expand_labels_layer(sdata_multi_c: SpatialData):
         overwrite=True,
     )
 
-    assert "masks_cellpose_3D_expanded" in sdata_multi_c.labels
-    assert "masks_cellpose_3D_expanded_boundaries" in sdata_multi_c.shapes
+    assert "masks_cellpose_3D_expanded" in sdata_multi_c_no_backed.labels
+    assert "masks_cellpose_3D_expanded_boundaries" in sdata_multi_c_no_backed.shapes
 
-    assert isinstance(sdata_multi_c, SpatialData)
+    assert isinstance(sdata_multi_c_no_backed, SpatialData)
 
-    sdata_multi_c = expand_labels_layer(
-        sdata_multi_c,
+    sdata_multi_c_no_backed = expand_labels_layer(
+        sdata_multi_c_no_backed,
         labels_layer="masks_nuclear",
         distance=10,
         depth=100,
@@ -31,7 +31,7 @@ def test_expand_labels_layer(sdata_multi_c: SpatialData):
         overwrite=True,
     )
 
-    assert "masks_nuclear_expanded" in sdata_multi_c.labels
-    assert "masks_nuclear_expanded_boundaries" in sdata_multi_c.shapes
+    assert "masks_nuclear_expanded" in sdata_multi_c_no_backed.labels
+    assert "masks_nuclear_expanded_boundaries" in sdata_multi_c_no_backed.shapes
 
-    assert isinstance(sdata_multi_c, SpatialData)
+    assert isinstance(sdata_multi_c_no_backed, SpatialData)

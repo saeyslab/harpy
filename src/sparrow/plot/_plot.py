@@ -132,6 +132,7 @@ def plot_shapes(
     z_slice: float | None = None,
     alpha: float = 0.5,
     legend: bool = True,
+    radius: str | None = None,
     crd: tuple[int, int, int, int] | None = None,
     to_coordinate_system: str = "global",
     vmin: float | None = None,
@@ -217,6 +218,9 @@ def plot_shapes(
         Transparency level for the cells, given by the alpha parameter of matplotlib.
     legend
         Whether to plot a legend. Ignored if column is `None`.
+    radius
+        Column in the `shapes_layer` specifying the radius. The radius will be applied using `geometry.buffer` before plotting `shapes_layer`.
+        Useful when the `geometry` of the `shapes_layer` contains points instead of polygons.
     crd
         The coordinates for the region of interest in the format (xmin, xmax, ymin, ymax). If None, the entire image is considered, by default None.
     to_coordinate_system
@@ -374,6 +378,7 @@ def plot_shapes(
                 z_slice=z_slice,
                 alpha=alpha,
                 legend=legend,
+                radius=radius,
                 crd=crd,
                 to_coordinate_system=to_coordinate_system,
                 vmin=vmin,
@@ -413,6 +418,7 @@ def _plot(
     z_slice: float | None = None,
     alpha: float = 0.5,
     legend: bool = True,
+    radius: str | None = None,
     crd: tuple[int, int, int, int] | None = None,
     to_coordinate_system: str = "global",
     vmin: float | None = None,
@@ -462,6 +468,9 @@ def _plot(
         Transparency level for the cells, given by the alpha parameter of matplotlib.
     legend
         Whether to plot a legend. Ignored if column is `None`.
+    radius
+        Column in the `shapes_layer` specifying the radius. The radius will be applied using `geometry.buffer` before plotting `shapes_layer`.
+        Useful when the `geometry` of the `shapes_layer` contains points instead of polygons.
     crd
         The coordinates for the region of interest in the format (xmin, xmax, ymin, ymax). If None, the entire image is considered, by default None.
     to_coordinate_system
@@ -582,8 +591,18 @@ def _plot(
 
     polygons = None
     if shapes_layer is not None and not sdata.shapes[shapes_layer].empty:
+        polygons = sdata.shapes[shapes_layer]
+        if radius is not None:
+            if radius in polygons.columns:
+                polygons = polygons.copy()
+                polygons["geometry"] = polygons.geometry.buffer(polygons[radius])
+            else:
+                log.warning(
+                    f"radius parameter was specified as '{radius}', but could not be found as a column of shapes layer '{shapes_layer}'. Will proceed "
+                    "plotting while ignoring radius parameter."
+                )
         x_translation, y_translation = _get_translation_values_shapes(
-            sdata.shapes[shapes_layer], to_coordinate_system=to_coordinate_system
+            polygons=polygons, to_coordinate_system=to_coordinate_system
         )
         _crd_shapes = [
             crd[0] - x_translation,
@@ -591,9 +610,9 @@ def _plot(
             crd[2] - y_translation,
             crd[3] - y_translation,
         ]
-        polygons = sdata[shapes_layer].cx[_crd_shapes[0] : _crd_shapes[1], _crd_shapes[2] : _crd_shapes[3]]
+        polygons = polygons.cx[_crd_shapes[0] : _crd_shapes[1], _crd_shapes[2] : _crd_shapes[3]]  # .cx generates a copy
         if x_translation != 0 or y_translation != 0:
-            polygons = polygons.copy()  # copy is necessary, we do not want to alter in memory shapes layer
+            # The latter is slow, so first do cx, then translate
             polygons["geometry"] = polygons["geometry"].apply(
                 lambda geom, x_trans=x_translation, y_trans=y_translation: translate(geom, xoff=x_trans, yoff=y_trans)
             )

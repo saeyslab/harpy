@@ -3,9 +3,9 @@ from spatialdata import SpatialData
 from sparrow.image._combine import combine
 
 
-def test_combine(sdata_multi_c: SpatialData):
-    sdata_multi_c = combine(
-        sdata_multi_c,
+def test_combine(sdata_multi_c_no_backed: SpatialData):
+    sdata_multi_c_no_backed = combine(
+        sdata_multi_c_no_backed,
         img_layer="raw_image",
         output_layer="combine",
         nuc_channels=[15, 14],
@@ -13,5 +13,5 @@ def test_combine(sdata_multi_c: SpatialData):
         overwrite=True,
     )
 
-    assert "combine" in sdata_multi_c.images
-    assert isinstance(sdata_multi_c, SpatialData)
+    assert "combine" in sdata_multi_c_no_backed.images
+    assert isinstance(sdata_multi_c_no_backed, SpatialData)
