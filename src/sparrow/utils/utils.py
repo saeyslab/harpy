@@ -11,9 +11,13 @@ from datatree import DataTree
 from geopandas import GeoDataFrame
 from omegaconf import OmegaConf
 from omegaconf.dictconfig import DictConfig
+from shapely.affinity import translate
 from shapely.geometry import LineString, MultiLineString
 from spatialdata.models import get_axes_names
+from spatialdata.transformations import get_transformation
 from xarray import DataArray
+
+from sparrow.utils._transformations import _get_translation_values
 
 
 def _linestring_to_arrays(geometries):
@@ -54,6 +58,24 @@ def _get_polygons_in_napari_format(df: GeoDataFrame) -> list:
     # this will only work for polygons and not for multipolygons
     # switch x,y positions of polygon indices, napari wants (y,x)
     polygons = _swap_coordinates(polygons)
+
+    return polygons
+
+
+def _translate_polygons(polygons: GeoDataFrame, to_coordinate_system: str = "global") -> GeoDataFrame:
+    # get the transformation defined on "global"
+    transformations = get_transformation(polygons, get_all=True)
+    if to_coordinate_system not in [*transformations]:
+        raise ValueError(
+            f"'Coordinate system {to_coordinate_system}' does not appear to be a coordinate system of the spatial element. "
+            f"Please choose a coordinate system from this list: {[*transformations]}."
+        )
+    transformation = transformations[to_coordinate_system]
+    x_translation, y_translation = _get_translation_values(transformation)
+    if x_translation != 0 or y_translation != 0:
+        polygons["geometry"] = polygons["geometry"].apply(
+            lambda geom: translate(geom, xoff=x_translation, yoff=y_translation)
+        )
 
     return polygons
 

@@ -102,6 +102,10 @@ def allocate(
     else:
         coordinates = combined_partitions.groupby(_CELL_INDEX)["x", "y"].mean()
 
+    # make sure combined_partiions[ name_gene_column ] is not categorical,
+    # because otherwise resulting cell_counts dataframe will contain zero counts for each gene for each cells (which would results in a huge dataframe)
+    combined_partitions[name_gene_column] = combined_partitions[name_gene_column].astype("str")
+
     cell_counts = combined_partitions.groupby([_CELL_INDEX, name_gene_column]).size()
 
     cell_counts = cell_counts.map_partitions(lambda x: x.astype(np.uint32))

@@ -15,7 +15,7 @@ from spatialdata import SpatialData, read_zarr
 
 import sparrow.utils as utils
 from sparrow.pipeline import SparrowPipeline
-from sparrow.plot._plot import _translate_polygons
+from sparrow.utils.utils import _translate_polygons
 
 log = utils.get_pylogger(__name__)
 
