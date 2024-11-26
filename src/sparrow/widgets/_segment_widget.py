@@ -1,8 +1,9 @@
 """Napari widget for cell segmentation of cleaned spatial transcriptomics microscopy images."""
 
 import os
+from collections.abc import Callable
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, List, Optional
 
 import napari
 import napari.layers
@@ -39,7 +40,7 @@ def segmentImage(
 def _segmentation_worker(
     sdata: SpatialData,
     method: Callable,
-    fn_kwargs: Dict[str, Any],
+    fn_kwargs: dict[str, Any],
 ) -> SpatialData:
     """Segment image in a thread worker"""
     return method(sdata, **fn_kwargs)
@@ -70,7 +71,7 @@ def segment_widget(
     if image is None:
         raise ValueError("Please select an image")
 
-    fn_kwargs: Dict[str, Any] = {}
+    fn_kwargs: dict[str, Any] = {}
 
     pipeline = viewer.layers[utils.CLEAN].metadata["pipeline"]
 

@@ -1,4 +1,6 @@
-from typing import Dict, Iterable, Tuple
+from __future__ import annotations
+
+from collections.abc import Iterable
 
 import numpy as np
 from anndata import AnnData
@@ -161,7 +163,7 @@ def correct_marker_genes(
     labels_layer: list[str],
     table_layer: str,
     output_layer: str,
-    celltype_correction_dict: Dict[str, Tuple[float, float]],
+    celltype_correction_dict: dict[str, tuple[float, float]],
     overwrite: bool = False,
 ) -> SpatialData:
     """

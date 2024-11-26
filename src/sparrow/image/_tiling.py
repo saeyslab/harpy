@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple
+from __future__ import annotations
 
 import dask.array as da
 import numpy as np
@@ -31,14 +31,14 @@ except ImportError:
 
 def tiling_correction(
     sdata: SpatialData,
-    img_layer: Optional[str] = None,
+    img_layer: str | None = None,
     tile_size: int = 2144,
-    crd: Optional[Tuple[int, int, int, int]] = None,
+    crd: tuple[int, int, int, int] | None = None,
     to_coordinate_system: str = "global",
-    scale_factors: Optional[ScaleFactors_t] = None,
+    scale_factors: ScaleFactors_t | None = None,
     output_layer: str = "tiling_correction",
     overwrite: bool = False,
-) -> Tuple[SpatialData, List[np.ndarray]]:
+) -> tuple[SpatialData, list[np.ndarray]]:
     """
     Function corrects for the tiling effect that occurs in some image data (e.g. resolve data).
 

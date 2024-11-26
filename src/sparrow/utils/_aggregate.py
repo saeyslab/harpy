@@ -1,6 +1,9 @@
+from __future__ import annotations
+
+from collections.abc import Callable, Mapping
 from functools import partial
 from types import MappingProxyType
-from typing import Any, Callable, Mapping
+from typing import Any
 
 import dask
 import dask.array as da
@@ -12,7 +15,6 @@ from scipy import ndimage
 from sparrow.utils._keys import _CELLSIZE_KEY, _INSTANCE_KEY
 
 
-# TODO maybe support DataArray as input instead of dask arrays.
 class RasterAggregator:
     """Helper class to calulate aggregated 'sum', 'mean', 'var', 'area', 'min' or 'max' of image and labels using Dask."""
 

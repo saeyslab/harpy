@@ -2,7 +2,8 @@
 
 import os
 import pathlib
-from typing import Any, Callable, Dict, Optional
+from collections.abc import Callable
+from typing import Any, Optional
 
 import napari
 import napari.layers
@@ -34,7 +35,7 @@ def allocateImage(
 def _allocation_worker(
     sdata: SpatialData,
     method: Callable,
-    fn_kwargs: Dict[str, Any],
+    fn_kwargs: dict[str, Any],
 ) -> SpatialData:
     """Allocate transcripts in a thread worker"""
     return method(sdata, **fn_kwargs)

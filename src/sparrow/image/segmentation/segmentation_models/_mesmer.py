@@ -1,4 +1,4 @@
-from typing import Optional
+from __future__ import annotations
 
 import numpy as np
 from numpy.typing import NDArray
@@ -20,8 +20,8 @@ else:
 def _mesmer(
     img: NDArray,
     image_mpp: int = 0.2,
-    nuc_channel: Optional[int] = None,
-    mem_channel: Optional[int] = None,
+    nuc_channel: int | None = None,
+    mem_channel: int | None = None,
     compartment: str = "whole-cell",
 ) -> NDArray:
     if nuc_channel is None and mem_channel is None:

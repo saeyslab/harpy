@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import inspect
+from collections.abc import Callable, Iterable, Mapping
 from types import MappingProxyType
-from typing import Any, Callable, Iterable, Mapping
+from typing import Any
 
 import scanpy as sc
 from anndata import AnnData

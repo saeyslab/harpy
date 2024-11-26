@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import os
 import tempfile
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable, Tuple
 
 import dask.array as da
 import numpy as np
@@ -276,7 +276,7 @@ def _load_image_to_dask(
 
 def _fix_crd(
     crd: tuple[int, int, int, int],
-    shape_y_x=Tuple[int, int],
+    shape_y_x=tuple[int, int],
 ) -> tuple[int, int, int, int]:
     x1, x2, y1, y2 = crd
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from typing import Iterable
+from collections.abc import Iterable
 
 import dask.array as da
 import numpy as np

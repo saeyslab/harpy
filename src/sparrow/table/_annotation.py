@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from itertools import chain
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Literal, Mapping
+from typing import Any, Literal
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt

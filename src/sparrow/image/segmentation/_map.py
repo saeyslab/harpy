@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable, Mapping
 from types import MappingProxyType
-from typing import Any, Callable, Iterable, Mapping
+from typing import Any
 
 import dask.array as da
 import numpy as np

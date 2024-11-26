@@ -3,10 +3,11 @@ from __future__ import annotations
 import shutil
 import uuid
 from abc import ABC, abstractmethod
+from collections.abc import Callable, Iterable, Mapping
 from copy import deepcopy
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Callable, Iterable, Mapping
+from typing import Any
 
 import dask.array as da
 import numpy as np

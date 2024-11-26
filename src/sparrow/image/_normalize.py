@@ -1,4 +1,6 @@
-from typing import Iterable
+from __future__ import annotations
+
+from collections.abc import Iterable
 
 import dask.array as da
 import numpy as np

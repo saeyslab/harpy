@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Tuple
-
 import dask.array as da
 import numpy as np
 import xarray as xr
@@ -23,7 +21,7 @@ log = get_pylogger(__name__)
 
 def _substract_translation_crd(
     spatial_image: DataArray,
-    crd=Tuple[int, int, int, int],
+    crd=tuple[int, int, int, int],
     to_coordinate_system: str = "global",
 ) -> tuple[int, int, int, int] | None:
     tx, ty = _get_translation(spatial_image, to_coordinate_system=to_coordinate_system)

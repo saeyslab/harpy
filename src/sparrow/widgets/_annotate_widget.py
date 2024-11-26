@@ -2,7 +2,8 @@
 
 import os
 import pathlib
-from typing import Any, Callable, Dict, List
+from collections.abc import Callable
+from typing import Any, List
 
 import napari
 import napari.layers
@@ -33,7 +34,7 @@ def annotateImage(
 
 
 @thread_worker(progress=True)
-def _annotation_worker(sdata: SpatialData, method: Callable, fn_kwargs: Dict[str, Any]) -> SpatialData:
+def _annotation_worker(sdata: SpatialData, method: Callable, fn_kwargs: dict[str, Any]) -> SpatialData:
     """Annotate data with marker genes in a thread worker"""
     return method(sdata, **fn_kwargs)
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import uuid
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -38,33 +37,8 @@ class LayerManager(ABC):
             )
             dims = self.get_dims(arr)
 
-        intermediate_output_layer = None
-        if scale_factors is not None:
-            if sdata.is_backed():
-                spatial_element = self.create_spatial_element(
-                    arr,
-                    dims=dims,
-                    scale_factors=None,
-                    chunks=chunks,
-                    transformations=transformations,
-                    **kwargs,
-                )
-
-                intermediate_output_layer = f"{uuid.uuid4()}_{output_layer}"
-                log.info(f"Writing intermediate non-multiscale results to layer '{intermediate_output_layer}'")
-                sdata = self.add_to_sdata(
-                    sdata,
-                    output_layer=intermediate_output_layer,
-                    spatial_element=spatial_element,
-                    overwrite=False,
-                )
-                arr = self.retrieve_data_from_sdata(sdata, intermediate_output_layer)
-            else:
-                arr = arr.persist()
-
-        elif not sdata.is_backed():
-            # if sdata is not backed, and if no scale factors, we also need to do a persist
-            # to prevent recomputation
+        if not sdata.is_backed():
+            # if sdata is not backed, we do a persist to prevent recomputation
             arr = arr.persist()
 
         spatial_element = self.create_spatial_element(
@@ -84,14 +58,6 @@ class LayerManager(ABC):
             spatial_element=spatial_element,
             overwrite=overwrite,
         )
-
-        if intermediate_output_layer:
-            log.info(
-                f"Removing intermediate output layer '{intermediate_output_layer}' from .zarr store at path {sdata.path}."
-            )
-            del sdata[intermediate_output_layer]
-            if sdata.is_backed():
-                sdata.delete_element_from_disk(intermediate_output_layer)
 
         return sdata
 

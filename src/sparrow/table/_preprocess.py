@@ -1,5 +1,8 @@
+from __future__ import annotations
+
+from collections.abc import Iterable, Mapping
 from types import MappingProxyType
-from typing import Any, Iterable, Mapping, Optional
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -28,7 +31,7 @@ def preprocess_transcriptomics(
     size_norm: bool = True,
     highly_variable_genes: bool = False,
     highly_variable_genes_kwargs: Mapping[str, Any] = MappingProxyType({}),
-    max_value_scale: int = 10,
+    max_value_scale: float | None = 10,
     n_comps: int = 50,
     update_shapes_layers: bool = True,
     overwrite: bool = False,
@@ -136,7 +139,7 @@ def preprocess_proteomics(
     size_norm: bool = True,
     log1p: bool = True,
     scale: bool = False,
-    max_value_scale: float = 10,
+    max_value_scale: float | None = 10,
     q: float | None = None,
     calculate_pca: bool = False,
     n_comps: int = 50,
@@ -235,7 +238,7 @@ class Preprocess(ProcessTable):
         size_norm: bool = True,
         log1p: bool = True,
         scale: bool = True,
-        max_value_scale: Optional[float] = 10,  # ignored if scale is False,
+        max_value_scale: float | None = 10,  # ignored if scale is False,
         q: float | None = None,  # quantile for normalization, typically 0.999
         highly_variable_genes: bool = False,
         calculate_pca: bool = True,

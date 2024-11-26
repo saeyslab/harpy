@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from types import MappingProxyType
-from typing import Any, Callable, Mapping
+from typing import Any
 
 import xarray as xr
 from dask.array import Array

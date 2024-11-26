@@ -5,7 +5,8 @@ The goal of cleaning is to improve the image quality so that subsequent image se
 """
 
 import os
-from typing import Any, Callable, Dict, List, Optional
+from collections.abc import Callable
+from typing import Any, List, Optional
 
 import napari
 import napari.layers
@@ -39,7 +40,7 @@ def cleanImage(
 def _clean_worker(
     sdata: SpatialData,
     method: Callable,
-    fn_kwargs: Dict[str, Any],
+    fn_kwargs: dict[str, Any],
 ) -> SpatialData:
     """Clean image in a thread worker"""
     res = method(sdata, **fn_kwargs)
@@ -110,7 +111,7 @@ def clean_widget(
     if pipeline.cfg.clean.crop_param is None:
         pipeline.cfg.clean.small_size_vis = [0, 20000, 0, 20000]
 
-    fn_kwargs: Dict[str, Any] = {
+    fn_kwargs: dict[str, Any] = {
         "pipeline": pipeline,
     }
 

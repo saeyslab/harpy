@@ -1,4 +1,4 @@
-from typing import Optional, Tuple
+from __future__ import annotations
 
 import dask.array as da
 from scipy.ndimage import gaussian_filter
@@ -15,18 +15,18 @@ log = get_pylogger(__name__)
 
 def transcript_density(
     sdata: SpatialData,
-    img_layer: Optional[str] = "raw_image",
+    img_layer: str = "raw_image",
     points_layer: str = "transcripts",
-    n_sample: Optional[int] = 15000000,
+    n_sample: int | None = 15000000,
     name_x: str = "x",
     name_y: str = "y",
-    name_z: Optional[str] = None,
-    z_index: Optional[int] = None,
+    name_z: str | None = None,
+    z_index: int | None = None,
     scaling_factor: float = 100,
     chunks: int = 1024,
-    crd: Optional[Tuple[int, int, int, int]] = None,
+    crd: tuple[int, int, int, int] | None = None,
     to_coordinate_system: str = "global",
-    scale_factors: Optional[ScaleFactors_t] = None,
+    scale_factors: ScaleFactors_t | None = None,
     output_layer: str = "transcript_density",
     overwrite: bool = False,
 ) -> SpatialData:

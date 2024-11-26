@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import os
 import uuid
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 import dask.array as da
 import numpy as np

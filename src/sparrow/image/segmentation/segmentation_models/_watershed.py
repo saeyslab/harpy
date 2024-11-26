@@ -1,4 +1,4 @@
-from typing import Optional
+from __future__ import annotations
 
 import numpy as np
 from numpy.typing import NDArray
@@ -10,7 +10,7 @@ from skimage.segmentation import watershed
 
 def _watershed(
     img: NDArray,
-    thresh: Optional[float] = None,
+    thresh: float | None = None,
     geq: bool = True,
     channel: int = 0,
 ) -> NDArray:
