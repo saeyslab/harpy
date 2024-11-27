@@ -13,11 +13,11 @@ import napari.layers
 import napari.types
 import napari.utils
 import numpy as np
-from datatree import DataTree
 from magicgui import magic_factory
 from napari.qt.threading import thread_worker
 from napari.utils.notifications import show_info
 from spatialdata import SpatialData, read_zarr
+from xarray import DataTree
 
 from sparrow import utils as utils
 from sparrow.image._image import _get_translation

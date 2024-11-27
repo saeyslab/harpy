@@ -4,13 +4,12 @@ import dask.array as da
 import numpy as np
 import xarray as xr
 from dask.array import Array
-from datatree import DataTree
 from spatialdata import SpatialData
 from spatialdata.models._utils import MappingToCoordinateSystem_t
 from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import get_transformation
 from spatialdata.transformations.transformations import Identity, Sequence, Translation
-from xarray import DataArray
+from xarray import DataArray, DataTree
 
 from sparrow.image._manager import ImageLayerManager, LabelLayerManager
 from sparrow.utils._transformations import _get_translation_values
