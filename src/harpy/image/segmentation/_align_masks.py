@@ -9,8 +9,8 @@ from numpy.typing import NDArray
 from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 
-from sparrow.image.segmentation._map import map_labels
-from sparrow.image.segmentation._utils import (
+from harpy.image.segmentation._map import map_labels
+from harpy.image.segmentation._utils import (
     _SEG_DTYPE,
     _add_depth_to_chunks_size,
     _check_boundary,
@@ -19,7 +19,7 @@ from sparrow.image.segmentation._utils import (
     _rechunk_overlap,
     _substract_depth_from_chunks_size,
 )
-from sparrow.utils.pylogger import get_pylogger
+from harpy.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
 

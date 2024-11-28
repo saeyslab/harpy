@@ -9,9 +9,9 @@ from numpy.typing import NDArray
 from spatialdata import SpatialData
 from spatialdata.transformations import Identity
 
-from sparrow.points._points import add_points_layer
-from sparrow.utils._keys import _GENES_KEY
-from sparrow.utils.pylogger import get_pylogger
+from harpy.points._points import add_points_layer
+from harpy.utils._keys import _GENES_KEY
+from harpy.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
 

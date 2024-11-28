@@ -1,6 +1,6 @@
 from spatialdata import SpatialData
 
-from sparrow.image._filters import gaussian_filtering, min_max_filtering
+from harpy.image._filters import gaussian_filtering, min_max_filtering
 
 
 def test_min_max_filtering(sdata_multi_c_no_backed: SpatialData):

@@ -7,16 +7,16 @@ from numpy.typing import NDArray
 from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 
-from sparrow.image._image import _get_spatial_element
-from sparrow.image._map import map_image
-from sparrow.utils.pylogger import get_pylogger
+from harpy.image._image import _get_spatial_element
+from harpy.image._map import map_image
+from harpy.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
 
 try:
     import cv2
 except ImportError:
-    log.warning("'OpenCV (cv2)' not installed, to use 'sp.im.enhance_contrast' please install this library.")
+    log.warning("'OpenCV (cv2)' not installed, to use 'harpy.im.enhance_contrast' please install this library.")
 
 
 def enhance_contrast(

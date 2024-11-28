@@ -9,11 +9,11 @@ from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import get_transformation
 from xarray import DataArray
 
-from sparrow.image._image import (
+from harpy.image._image import (
     _get_spatial_element,
     add_image_layer,
 )
-from sparrow.utils.pylogger import get_pylogger
+from harpy.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
 

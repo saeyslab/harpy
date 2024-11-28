@@ -11,12 +11,12 @@ import pandas as pd
 from anndata import AnnData
 from spatialdata import SpatialData
 
-from sparrow.image._image import _get_spatial_element
-from sparrow.table._allocation_intensity import allocate_intensity
-from sparrow.table._preprocess import preprocess_proteomics
-from sparrow.table._table import add_table_layer
-from sparrow.utils._keys import _CELL_INDEX, _CELLSIZE_KEY, _INSTANCE_KEY, _RAW_COUNTS_KEY, ClusteringKey
-from sparrow.utils.pylogger import get_pylogger
+from harpy.image._image import _get_spatial_element
+from harpy.table._allocation_intensity import allocate_intensity
+from harpy.table._preprocess import preprocess_proteomics
+from harpy.table._table import add_table_layer
+from harpy.utils._keys import _CELL_INDEX, _CELLSIZE_KEY, _INSTANCE_KEY, _RAW_COUNTS_KEY, ClusteringKey
+from harpy.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
 
@@ -36,7 +36,7 @@ def cluster_intensity(
 
     This function computes average intensity for each SOM cluster identified in the `labels_layer` and stores the results in a new table layer (`output_layer`).
     Average intensity per metacluster is added to `sdata.tables[output_layer].uns`.
-    The intensity calculation can be subset by channels and adjusted for chunk size for efficient processing. SOM clusters can be calculated using `sp.im.flowsom`.
+    The intensity calculation can be subset by channels and adjusted for chunk size for efficient processing. SOM clusters can be calculated using `harpy.im.flowsom`.
 
     Parameters
     ----------
@@ -47,7 +47,7 @@ def cluster_intensity(
     img_layer
         The image layer of `sdata` from which the intensity is calculated.
     labels_layer
-        The labels layer in `sdata` that contains the SOM cluster IDs. I.e. the `output_layer_clusters` labels layer obtained through `sp.im.flowsom`.
+        The labels layer in `sdata` that contains the SOM cluster IDs. I.e. the `output_layer_clusters` labels layer obtained through `harpy.im.flowsom`.
     output_layer
         The output table layer in `sdata` where results are stored.
     channels
@@ -68,7 +68,7 @@ def cluster_intensity(
 
     See Also
     --------
-    sparrow.im.flowsom : flowsom pixel clustering.
+    harpy.im.flowsom : flowsom pixel clustering.
     """
     img_layer = list(img_layer) if isinstance(img_layer, Iterable) and not isinstance(img_layer, str) else [img_layer]
     labels_layer = (
@@ -202,7 +202,7 @@ def _mean_intensity_per_metacluster(df, channels: Iterable[str]):
 
 
 def _export_to_ark_format(adata: AnnData, output: str | Path | None = None) -> pd.DataFrame:
-    """Export avg intensity per SOM cluster calculated via `sp.tb.cluster_intensity` to a csv file that can be visualized by the ark gui."""
+    """Export avg intensity per SOM cluster calculated via `harpy.tb.cluster_intensity` to a csv file that can be visualized by the ark gui."""
     df = adata.to_df().copy()
     df["pixel_meta_cluster"] = adata.obs[ClusteringKey._METACLUSTERING_KEY.value].copy()
     df["pixel_som_cluster"] = adata.obs[_INSTANCE_KEY].copy()

@@ -5,7 +5,7 @@ import numpy as np
 import squidpy as sq
 from spatialdata import SpatialData
 
-from sparrow.utils._keys import _ANNOTATION_KEY
+from harpy.utils._keys import _ANNOTATION_KEY
 
 
 def nhood_enrichment(
@@ -45,7 +45,7 @@ def nhood_enrichment(
 
     See Also
     --------
-    sparrow.tb.nhood_enrichment : Calculate neighborhood enrichment.
+    harpy.tb.nhood_enrichment : Calculate neighborhood enrichment.
     """
     # remove 'nan' values.
     tmp = sdata.tables[table_layer].uns[f"{celltype_column}_nhood_enrichment"]["zscore"]

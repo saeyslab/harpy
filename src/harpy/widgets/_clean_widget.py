@@ -19,16 +19,16 @@ from napari.utils.notifications import show_info
 from spatialdata import SpatialData, read_zarr
 from xarray import DataTree
 
-from sparrow import utils as utils
-from sparrow.image._image import _get_translation
-from sparrow.pipeline import SparrowPipeline
+from harpy import utils as utils
+from harpy.image._image import _get_translation
+from harpy.pipeline import HarpyPipeline
 
 log = utils.get_pylogger(__name__)
 
 
 def cleanImage(
     sdata: SpatialData,
-    pipeline: SparrowPipeline,
+    pipeline: HarpyPipeline,
 ) -> SpatialData:
     """Function representing the cleaning step, this calls all the needed functions to improve the image quality."""
     sdata = pipeline.clean(sdata)
@@ -117,7 +117,7 @@ def clean_widget(
 
     worker = _clean_worker(sdata, method=cleanImage, fn_kwargs=fn_kwargs)
 
-    def add_image(sdata: SpatialData, pipeline: SparrowPipeline, layer_name: str):
+    def add_image(sdata: SpatialData, pipeline: HarpyPipeline, layer_name: str):
         """Add the image to the napari viewer, overwrite if it already exists."""
         try:
             # if the layer exists, update its data

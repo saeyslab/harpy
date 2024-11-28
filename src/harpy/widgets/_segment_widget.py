@@ -14,9 +14,9 @@ from napari.qt.threading import thread_worker
 from napari.utils.notifications import show_info
 from spatialdata import SpatialData, read_zarr
 
-import sparrow.utils as utils
-from sparrow.pipeline import SparrowPipeline
-from sparrow.utils.utils import _translate_polygons
+import harpy.utils as utils
+from harpy.pipeline import HarpyPipeline
+from harpy.utils.utils import _translate_polygons
 
 log = utils.get_pylogger(__name__)
 
@@ -28,7 +28,7 @@ class ModelOption(Enum):
 
 def segmentImage(
     sdata: SpatialData,
-    pipeline: SparrowPipeline,
+    pipeline: HarpyPipeline,
 ) -> SpatialData:
     """Function representing the segmentation step, this calls the segmentation function."""
     sdata = pipeline.segment(sdata)
@@ -140,7 +140,7 @@ def segment_widget(
 
     worker = _segmentation_worker(sdata, segmentImage, fn_kwargs=fn_kwargs)
 
-    def add_shape(sdata: SpatialData, pipeline: SparrowPipeline, layer_name: str):
+    def add_shape(sdata: SpatialData, pipeline: HarpyPipeline, layer_name: str):
         """Add the shapes to the napari viewer, overwrite if it already exists."""
         try:
             # if the layer exists, update its data

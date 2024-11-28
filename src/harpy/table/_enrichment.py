@@ -1,8 +1,8 @@
 import squidpy as sq
 from spatialdata import SpatialData
 
-from sparrow.table._table import ProcessTable, add_table_layer
-from sparrow.utils._keys import _ANNOTATION_KEY
+from harpy.table._table import ProcessTable, add_table_layer
+from harpy.utils._keys import _ANNOTATION_KEY
 
 
 def nhood_enrichment(

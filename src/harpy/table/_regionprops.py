@@ -8,10 +8,10 @@ from skimage.measure import moments, regionprops, regionprops_table
 from skimage.measure._regionprops import RegionProperties
 from spatialdata import SpatialData
 
-from sparrow.image._image import _get_spatial_element
-from sparrow.table._table import add_table_layer
-from sparrow.utils._keys import _CELL_INDEX, _INSTANCE_KEY, _REGION_KEY
-from sparrow.utils.pylogger import get_pylogger
+from harpy.image._image import _get_spatial_element
+from harpy.table._table import add_table_layer
+from harpy.utils._keys import _CELL_INDEX, _INSTANCE_KEY, _REGION_KEY
+from harpy.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
 
@@ -55,7 +55,7 @@ def add_regionprop_features(
 
     Example
     -------
-    >>> sdata = sp.im.align_labels_layers(
+    >>> sdata = harpy.im.align_labels_layers(
     ...     sdata,
     ...     labels_layer_1="masks_nuclear",
     ...     labels_layer_2="masks_whole",
@@ -66,19 +66,19 @@ def add_regionprop_features(
     ...     depth=100,
     ... )
     >>>
-    >>> sdata = sp.tb.allocate_intensity(
+    >>> sdata = harpy.tb.allocate_intensity(
     ...     sdata, img_layer="raw_image", labels_layer="masks_whole", output_layer="table_intensities", chunks=100
     ... )
     >>>
-    >>> sdata = sp.tb.allocate_intensity(
+    >>> sdata = harpy.tb.allocate_intensity(
     ...     sdata, img_layer="raw_image", labels_layer="masks_nuclear_aligned", output_layer="table_intensities", chunks=100, append=True
     ... )
     >>>
-    >>> sdata = sp.tb.add_regionprop_features(
+    >>> sdata = harpy.tb.add_regionprop_features(
     ...     sdata, labels_layer="masks_whole", table_layer="table_intensities",
     ... )
     >>>
-    >>> sdata = sp.tb.add_regionprop_features(
+    >>> sdata = harpy.tb.add_regionprop_features(
     ...     sdata, labels_layer="masks_nuclear_aligned", table_layer="table_intensities",
     ... )
     """
@@ -106,7 +106,7 @@ def add_regionprop_features(
     ), f"Please link observation to a labels_layer using the '{_REGION_KEY}' column in 'sdata.tables[{table_layer}].obs'"
     assert (
         _INSTANCE_KEY in sdata.tables[table_layer].obs
-    ), f"Please add unique {_INSTANCE_KEY} (uint) for every observation in 'sdata.tables[{table_layer}]', e.g. see 'sp.table.allocate_intensity'."
+    ), f"Please add unique {_INSTANCE_KEY} (uint) for every observation in 'sdata.tables[{table_layer}]', e.g. see 'harpy.table.allocate_intensity'."
 
     cell_props[_REGION_KEY] = pd.Categorical([labels_layer] * len(cell_props))
 

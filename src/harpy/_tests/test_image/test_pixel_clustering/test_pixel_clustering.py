@@ -3,12 +3,12 @@ import importlib.util
 import numpy as np
 import pytest
 
-from sparrow.utils._keys import _SPATIAL
+from harpy.utils._keys import _SPATIAL
 
 
 @pytest.mark.skipif(not importlib.util.find_spec("flowsom"), reason="requires the flowSOM library")
 def test_flowsom(sdata_blobs):
-    from sparrow.image.pixel_clustering._clustering import flowsom
+    from harpy.image.pixel_clustering._clustering import flowsom
 
     img_layer = "blobs_image"
     channels = ["lineage_0", "lineage_1", "lineage_5", "lineage_9"]
@@ -43,7 +43,7 @@ def test_flowsom(sdata_blobs):
 
 @pytest.mark.skipif(not importlib.util.find_spec("flowsom"), reason="requires the flowSOM library")
 def test_flowsom_multi_c(sdata_multi_c_no_backed):
-    from sparrow.image.pixel_clustering._clustering import flowsom
+    from harpy.image.pixel_clustering._clustering import flowsom
 
     img_layer = "raw_image"
     fraction = 0.1

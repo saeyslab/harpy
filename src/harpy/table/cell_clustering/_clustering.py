@@ -7,21 +7,21 @@ import pandas as pd
 from anndata import AnnData
 from spatialdata import SpatialData
 
-from sparrow.table._table import ProcessTable, add_table_layer
-from sparrow.table.cell_clustering._preprocess import cell_clustering_preprocess
-from sparrow.table.cell_clustering._utils import _get_mapping
-from sparrow.utils._keys import ClusteringKey
-from sparrow.utils.pylogger import get_pylogger
+from harpy.table._table import ProcessTable, add_table_layer
+from harpy.table.cell_clustering._preprocess import cell_clustering_preprocess
+from harpy.table.cell_clustering._utils import _get_mapping
+from harpy.utils._keys import ClusteringKey
+from harpy.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
 
 try:
     import flowsom as fs
 
-    from sparrow.utils._flowsom import _flowsom
+    from harpy.utils._flowsom import _flowsom
 
 except ImportError:
-    log.warning("'flowsom' not installed, to use 'sp.tb.flowsom', please install this library.")
+    log.warning("'flowsom' not installed, to use 'harpy.tb.flowsom', please install this library.")
 
 
 def flowsom(
@@ -39,23 +39,23 @@ def flowsom(
     **kwargs,  # keyword arguments for _flowsom
 ) -> tuple[SpatialData, fs.FlowSOM]:
     """
-    Prepares the data obtained from pixel clustering for cell clustering (see docstring of `sp.tb.cell_clustering_preprocess`) and then executes the FlowSOM clustering algorithm on the resulting table layer (`output_layer`) of the SpatialData object.
+    Prepares the data obtained from pixel clustering for cell clustering (see docstring of `harpy.tb.cell_clustering_preprocess`) and then executes the FlowSOM clustering algorithm on the resulting table layer (`output_layer`) of the SpatialData object.
 
     This function applies the FlowSOM clustering algorithm (via `fs.FlowSOM`) on spatial data contained in a SpatialData object.
     The algorithm organizes data into self-organizing maps and then clusters these maps, grouping them into `n_clusters`.
     The results of this clustering are added to a table layer in the `sdata` object.
 
-    Typically one would first process `sdata` via `sp.im.pixel_clustering_preprocess` and `sp.im.flowsom` before using this function.
+    Typically one would first process `sdata` via `harpy.im.pixel_clustering_preprocess` and `harpy.im.flowsom` before using this function.
 
     Parameters
     ----------
     sdata
         The input SpatialData object.
     labels_layer_cells
-        The labels layer(s) in `sdata` that contain cell segmentation masks. These masks should be previously generated using `sp.im.segment`.
+        The labels layer(s) in `sdata` that contain cell segmentation masks. These masks should be previously generated using `harpy.im.segment`.
         If a list of labels layers is provided, they will be clustered together (e.g. multiple samples).
     labels_layer_clusters
-        The labels layer(s) in `sdata` that contain metacluster or SOM cluster masks. These should be obtained via `sp.im.flowsom`.
+        The labels layer(s) in `sdata` that contain metacluster or SOM cluster masks. These should be obtained via `harpy.im.flowsom`.
     output_layer
         The output table layer in `sdata` where results of the clustering and metaclustering will be stored.
     q
@@ -85,8 +85,8 @@ def flowsom(
 
     See Also
     --------
-    sparrow.im.flowsom : flowsom pixel clustering
-    sparrow.tb.cell_clustering_preprocess : prepares data for cell clustering.
+    harpy.im.flowsom : flowsom pixel clustering
+    harpy.tb.cell_clustering_preprocess : prepares data for cell clustering.
     """
     # first do preprocessing
     sdata = cell_clustering_preprocess(

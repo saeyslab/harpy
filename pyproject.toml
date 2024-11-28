@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 # pyproject.toml file content
 [tool.coverage.run]
-omit = ["src/sparrow/_tests/*", "experiments/*", "src/sparrow/widgets/*" ]
+omit = ["src/harpy/_tests/*", "experiments/*", "src/harpy/widgets/*" ]
 
 [tool.ruff]
 src = ["src"]
@@ -62,4 +62,4 @@ convention = "numpy"
 
 
 [tool.pytest.ini_options]
-testpaths = ['src/sparrow/_tests']
+testpaths = ['src/harpy/_tests']

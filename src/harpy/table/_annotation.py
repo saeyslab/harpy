@@ -15,9 +15,9 @@ import scanpy as sc
 from anndata import AnnData
 from spatialdata import SpatialData
 
-from sparrow.table._table import ProcessTable, add_table_layer
-from sparrow.utils._keys import _ANNOTATION_KEY, _CLEANLINESS_KEY, _UNKNOWN_CELLTYPE_KEY
-from sparrow.utils.pylogger import get_pylogger
+from harpy.table._table import ProcessTable, add_table_layer
+from harpy.utils._keys import _ANNOTATION_KEY, _CLEANLINESS_KEY, _UNKNOWN_CELLTYPE_KEY
+from harpy.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
 
@@ -236,7 +236,7 @@ def score_genes_iter(
         cells in `sdata.tables[table_layer]` linked to other `labels_layer` (via the _REGION_KEY), will be removed from `sdata.tables[table_layer]`.
         If a list of labels layers is provided, they will therefore be scored together (e.g. multiple samples).
     table_layer
-        The table layer in `sdata` on which to perform annotation on. We assume the data is already preprocessed by e.g. `sp.tb.preprocess_transcriptomics`.
+        The table layer in `sdata` on which to perform annotation on. We assume the data is already preprocessed by e.g. `harpy.tb.preprocess_transcriptomics`.
         Features should all have approximately same variance.
     output_layer
         The output table layer in `sdata` to which table layer with results of annotation will be written.

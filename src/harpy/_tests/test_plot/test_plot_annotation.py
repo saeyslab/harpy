@@ -1,7 +1,7 @@
 import os
 
-from sparrow.plot import score_genes as score_genes_plot
-from sparrow.table import score_genes
+from harpy.plot import score_genes as score_genes_plot
+from harpy.table import score_genes
 
 
 def test_score_genes(sdata_transcripts_no_backed, path_dataset_markers, tmp_path):

@@ -1,7 +1,7 @@
 from pandas import DataFrame
 from spatialdata import SpatialData
 
-from sparrow.image.segmentation._merge_masks import (
+from harpy.image.segmentation._merge_masks import (
     mask_to_original,
     merge_labels_layers,
     merge_labels_layers_nuclei,

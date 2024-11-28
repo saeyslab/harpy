@@ -2,8 +2,8 @@ import importlib.util
 
 import pytest
 
-from sparrow.table._clustering import kmeans, leiden
-from sparrow.table._preprocess import preprocess_proteomics
+from harpy.table._clustering import kmeans, leiden
+from harpy.table._preprocess import preprocess_proteomics
 
 
 @pytest.mark.skipif(not importlib.util.find_spec("sklearn"), reason="requires the scikit-learn library")

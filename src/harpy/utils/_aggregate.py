@@ -12,7 +12,7 @@ import pandas as pd
 from numpy.typing import NDArray
 from scipy import ndimage
 
-from sparrow.utils._keys import _CELLSIZE_KEY, _INSTANCE_KEY
+from harpy.utils._keys import _CELLSIZE_KEY, _INSTANCE_KEY
 
 
 class RasterAggregator:

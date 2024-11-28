@@ -1,7 +1,7 @@
 import numpy as np
 import scanpy as sc
 
-from sparrow.utils.pylogger import get_pylogger
+from harpy.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
 
@@ -10,7 +10,7 @@ try:
 
 except ImportError:
     log.warning(
-        "'joypy' not installed, to use 'sp.pl.ridgeplot_channel' and 'sp.pl.ridgeplot_channel_sample', please install this library."
+        "'joypy' not installed, to use 'harpy.pl.ridgeplot_channel' and 'harpy.pl.ridgeplot_channel_sample', please install this library."
     )
 
 

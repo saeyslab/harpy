@@ -1,7 +1,7 @@
 import dask.array as da
 from spatialdata import SpatialData
 
-from sparrow.image.segmentation._filter_masks import (
+from harpy.image.segmentation._filter_masks import (
     filter_labels_layer,
 )
 

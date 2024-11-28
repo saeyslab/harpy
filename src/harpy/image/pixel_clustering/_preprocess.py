@@ -10,8 +10,8 @@ from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import get_transformation
 
-from sparrow.image._image import _get_spatial_element, add_image_layer
-from sparrow.image._normalize import _nonzero_nonnan_percentile, _nonzero_nonnan_percentile_axis_0
+from harpy.image._image import _get_spatial_element, add_image_layer
+from harpy.image._normalize import _nonzero_nonnan_percentile, _nonzero_nonnan_percentile_axis_0
 
 
 def pixel_clustering_preprocess(
@@ -31,7 +31,7 @@ def pixel_clustering_preprocess(
     """
     Preprocess image layers specified in `img_layer`. Normalizes and blurs the images based on various quantile and gaussian blur parameters. The results are added to `sdata` as specified in `output_layer`.
 
-    Preprocessing function specifically designed for preprocessing images before using `sp.im.flowsom`.
+    Preprocessing function specifically designed for preprocessing images before using `harpy.im.flowsom`.
 
     Parameters
     ----------
@@ -74,7 +74,7 @@ def pixel_clustering_preprocess(
 
     See Also
     --------
-    sparrow.im.flowsom : flowsom pixel clustering on image layers.
+    harpy.im.flowsom : flowsom pixel clustering on image layers.
 
     """
     # setting q_sum =None, and norm_sum=False -> then there will be no data leakage in single fov case.

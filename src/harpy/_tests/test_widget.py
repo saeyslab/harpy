@@ -7,12 +7,12 @@ from hydra.core.hydra_config import HydraConfig
 
 
 @pytest.mark.skip
-def test_sparrow_widgets(make_napari_viewer, cfg_pipeline, caplog):
+def test_harpy_widgets(make_napari_viewer, cfg_pipeline, caplog):
     """
-    Integration test for sparrow plugin in napari
+    Integration test for harpy plugin in napari
     """
-    from sparrow import utils as utils
-    from sparrow.widgets import (
+    from harpy import utils as utils
+    from harpy.widgets import (
         allocate_widget,
         annotate_widget,
         clean_widget,
@@ -82,8 +82,8 @@ def test_sparrow_widgets(make_napari_viewer, cfg_pipeline, caplog):
 @pytest.mark.skip
 def test_load_widget(make_napari_viewer, cfg_pipeline, caplog):
     """Test if the load works."""
-    from sparrow import utils as utils
-    from sparrow.widgets import (
+    from harpy import utils as utils
+    from harpy.widgets import (
         load_widget,
     )
 

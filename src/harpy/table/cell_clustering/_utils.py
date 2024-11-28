@@ -7,8 +7,8 @@ import pandas as pd
 from anndata import AnnData
 from spatialdata import SpatialData
 
-from sparrow.utils._keys import ClusteringKey
-from sparrow.utils.pylogger import get_pylogger
+from harpy.utils._keys import ClusteringKey
+from harpy.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
 

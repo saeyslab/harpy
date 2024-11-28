@@ -3,9 +3,9 @@ from anndata import AnnData
 from spatialdata import SpatialData, read_zarr
 from spatialdata.models import TableModel
 
-from sparrow.utils._io import _incremental_io_on_disk
-from sparrow.utils._keys import _INSTANCE_KEY, _REGION_KEY
-from sparrow.utils.pylogger import get_pylogger
+from harpy.utils._io import _incremental_io_on_disk
+from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY
+from harpy.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
 

@@ -2,8 +2,8 @@ import numpy as np
 import pytest
 from spatialdata import SpatialData
 
-from sparrow.table._allocation import allocate, bin_counts
-from sparrow.utils._keys import _INSTANCE_KEY, _SPATIAL
+from harpy.table._allocation import allocate, bin_counts
+from harpy.utils._keys import _INSTANCE_KEY, _SPATIAL
 
 
 def test_allocation(sdata_transcripts: SpatialData):

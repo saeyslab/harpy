@@ -7,8 +7,8 @@ from scipy import ndimage
 from skimage.measure import regionprops_table
 from xrspatial import zonal_stats
 
-from sparrow.utils._aggregate import RasterAggregator, _get_mask_area
-from sparrow.utils._keys import _CELLSIZE_KEY
+from harpy.utils._aggregate import RasterAggregator, _get_mask_area
+from harpy.utils._keys import _CELLSIZE_KEY
 
 
 def test_aggregate_sum_dask_array():

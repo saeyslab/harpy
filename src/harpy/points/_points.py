@@ -3,7 +3,7 @@ from dask.dataframe.core import DataFrame as DaskDataFrame
 from spatialdata import SpatialData, read_zarr
 from spatialdata.models._utils import MappingToCoordinateSystem_t
 
-from sparrow.utils._io import _incremental_io_on_disk
+from harpy.utils._io import _incremental_io_on_disk
 
 
 def add_points_layer(
@@ -32,7 +32,7 @@ def add_points_layer(
     coordinates
         A dictionary specifying the coordinate mappings for the points data (e.g., {"x": "x_column", "y": "y_column"}).
     transformations
-        Transformations that will be added to the resulting `output_layer`. Currently `sparrow` only supports the Identity transformation.
+        Transformations that will be added to the resulting `output_layer`. Currently `harpy` only supports the Identity transformation.
     overwrite
         If True, overwrites `output_layer` if it already exists in `sdata`.
 

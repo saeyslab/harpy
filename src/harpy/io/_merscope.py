@@ -17,9 +17,9 @@ from spatialdata.transformations import get_transformation, set_transformation
 from spatialdata_io import merscope as sdata_merscope
 from spatialdata_io._constants._constants import MerscopeKeys
 
-from sparrow.image._image import _get_spatial_element
-from sparrow.io._transcripts import read_transcripts
-from sparrow.utils.pylogger import get_pylogger
+from harpy.image._image import _get_spatial_element
+from harpy.io._transcripts import read_transcripts
+from harpy.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
 
@@ -75,7 +75,7 @@ def merscope(
         Keyword arguments to pass to the image models.
     filter_gene_names
         Gene names that need to be filtered out (via `str.contains`), mostly control genes that were added, and which you don't want to use.
-        Filtering is case insensitive. Also see `sparrow.read_transcripts`.
+        Filtering is case insensitive. Also see `harpy.read_transcripts`.
     output
         The path where the resulting `SpatialData` object will be backed. If `None`, it will not be backed to a zarr store.
 

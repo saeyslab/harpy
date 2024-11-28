@@ -5,7 +5,7 @@ import importlib.util
 import pytest
 from hydra.core.hydra_config import HydraConfig
 
-from sparrow.single import main
+from harpy.single import main
 
 
 @pytest.mark.skipif(

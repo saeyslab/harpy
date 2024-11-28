@@ -14,8 +14,8 @@ from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import Identity, Translation
 
-from sparrow.image._image import _fix_dimensions, add_image_layer
-from sparrow.utils.pylogger import get_pylogger
+from harpy.image._image import _fix_dimensions, add_image_layer
+from harpy.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
 

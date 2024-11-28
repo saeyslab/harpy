@@ -1,7 +1,7 @@
 import os
 
-from sparrow.plot import cluster
-from sparrow.table._clustering import leiden
+from harpy.plot import cluster
+from harpy.table._clustering import leiden
 
 
 def test_plot_cluster(sdata_multi_c_no_backed, tmp_path):

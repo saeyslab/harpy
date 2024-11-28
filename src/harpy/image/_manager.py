@@ -10,8 +10,8 @@ from spatialdata.models._utils import MappingToCoordinateSystem_t
 from spatialdata.models.models import ScaleFactors_t
 from xarray import DataArray, DataTree
 
-from sparrow.utils._io import _incremental_io_on_disk
-from sparrow.utils.pylogger import get_pylogger
+from harpy.utils._io import _incremental_io_on_disk
+from harpy.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
 

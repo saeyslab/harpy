@@ -1,4 +1,4 @@
-from sparrow.utils.pylogger import get_pylogger
+from harpy.utils.pylogger import get_pylogger
 
 from ._allocation import allocate, bin_counts
 from ._allocation_intensity import allocate_intensity

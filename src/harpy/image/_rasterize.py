@@ -17,9 +17,9 @@ from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import get_transformation
 
-from sparrow.image._image import add_labels_layer
-from sparrow.utils._keys import _INSTANCE_KEY
-from sparrow.utils.utils import _get_uint_dtype
+from harpy.image._image import add_labels_layer
+from harpy.utils._keys import _INSTANCE_KEY
+from harpy.utils.utils import _get_uint_dtype
 
 
 def rasterize(

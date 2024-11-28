@@ -16,7 +16,7 @@ sys.path.insert(0, str(HERE / "extensions"))
 
 # -- Project information -----------------------------------------------------
 
-info = metadata("sparrow")
+info = metadata("harpy")
 project_name = info["Name"]
 author = "SaeysLab"
 copyright = f"{datetime.now():%Y}, {author}"

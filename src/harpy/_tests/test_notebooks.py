@@ -158,10 +158,10 @@ def test_notebooks_rasterize_vectorize(notebook):
 @pytest.mark.parametrize(
     "notebook",
     [
-        "SPArrOW_how_to_start.ipynb",
+        "Harpy_how_to_start.ipynb",
     ],
 )
-def test_notebook_sparrow_pipeline(notebook):
+def test_notebook_harpy_pipeline(notebook):
     root = str(pyrootutils.setup_root(os.getcwd(), dotenv=True, pythonpath=True))
 
     run_notebook(os.path.join(root, "docs/tutorials", notebook))

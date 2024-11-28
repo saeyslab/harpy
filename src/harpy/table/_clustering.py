@@ -10,8 +10,8 @@ from anndata import AnnData
 from sklearn.cluster import KMeans
 from spatialdata import SpatialData
 
-from sparrow.table._table import ProcessTable, add_table_layer
-from sparrow.utils.pylogger import get_pylogger
+from harpy.table._table import ProcessTable, add_table_layer
+from harpy.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
 
@@ -90,13 +90,13 @@ def kmeans(
     Warnings
     --------
     - The function is intended for use with spatial omics data. Input data should be appropriately preprocessed
-      (e.g. via `sp.tb.preprocess_transcriptomics` or `sp.tb.preprocess_proteomics`) to ensure meaningful clustering results.
+      (e.g. via `harpy.tb.preprocess_transcriptomics` or `harpy.tb.preprocess_proteomics`) to ensure meaningful clustering results.
     - The `rank_genes` functionality is marked for relocation to enhance modularity and clarity of the codebase.
 
     See Also
     --------
-    sparrow.tb.preprocess_transcriptomics : preprocess transcriptomics data.
-    sparrow.tb.preprocess_proteomics : preprocess proteomics data.
+    harpy.tb.preprocess_transcriptomics : preprocess transcriptomics data.
+    harpy.tb.preprocess_proteomics : preprocess proteomics data.
     """
     cluster = Cluster(sdata, labels_layer=labels_layer, table_layer=table_layer)
     cluster.cluster(
@@ -196,13 +196,13 @@ def leiden(
     Warnings
     --------
     - The function is intended for use with spatial omics data. Input data should be appropriately preprocessed
-      (e.g. via `sp.tb.preprocess_transcriptomics` or `sp.tb.preprocess_proteomics`) to ensure meaningful clustering results.
+      (e.g. via `harpy.tb.preprocess_transcriptomics` or `harpy.tb.preprocess_proteomics`) to ensure meaningful clustering results.
     - The `rank_genes` functionality is marked for relocation to enhance modularity and clarity of the codebase.
 
     See Also
     --------
-    sparrow.tb.preprocess_transcriptomics : preprocess transcriptomics data.
-    sparrow.tb.preprocess_proteomics : preprocess proteomics data.
+    harpy.tb.preprocess_transcriptomics : preprocess transcriptomics data.
+    harpy.tb.preprocess_proteomics : preprocess proteomics data.
     """
     cluster = Cluster(sdata, labels_layer=labels_layer, table_layer=table_layer)
     sdata = cluster.cluster(
@@ -243,7 +243,7 @@ def _leiden(
 ) -> AnnData:
     if "neighbors" not in adata.uns.keys():
         raise RuntimeError(
-            "Please first compute neighbors before calculating leiden cluster, by passing 'calculate_neighbors=True' to 'sp.tb.leiden'"
+            "Please first compute neighbors before calculating leiden cluster, by passing 'calculate_neighbors=True' to 'harpy.tb.leiden'"
         )
 
     sc.tl.leiden(adata, copy=False, resolution=resolution, key_added=key_added, **kwargs)

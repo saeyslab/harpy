@@ -6,8 +6,8 @@ import pandas as pd
 import seaborn as sns
 import skimage as ski
 
-from sparrow.image import normalize
-from sparrow.utils.pylogger import get_pylogger
+from harpy.image import normalize
+from harpy.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
 
@@ -16,7 +16,7 @@ try:
 
 except ImportError:
     log.warning(
-        "'textalloc' not installed, to use 'sp.pl.group_snr_ratio' and 'sp.pl.snr_ratio', please install this library."
+        "'textalloc' not installed, to use 'harpy.pl.group_snr_ratio' and 'harpy.pl.snr_ratio', please install this library."
     )
 
 

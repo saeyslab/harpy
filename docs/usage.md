@@ -5,7 +5,7 @@
 There are some built-in datasets. For example to get data from a [Resolve](https://resolvebiosciences.com/) experiment on mouse liver:
 
 ```
-from sparrow.datasets.registry import get_registry
+from harpy.datasets.registry import get_registry
 
 registry=get_registry()
 path_image = registry.fetch( "transcriptomics/resolve/mouse/20272_slide1_A1-1_DAPI.tiff" )
@@ -15,8 +15,8 @@ path_coordinates = registry.fetch("transcriptomics/resolve/mouse/20272_slide1_A1
 And to download an example SpatialData object resulting from running the `Harpy` pipeline:
 
 ```
-import sparrow as sp
-sdata=sp.datasets.resolve_example()
+import harpy as hp
+sdata=hp.datasets.resolve_example()
 ```
 
 ### Jupyter notebooks
@@ -25,7 +25,7 @@ Check the notebooks in the [tutorials section](tutorials/index.md).
 
 ### Napari plugin
 
-After installing [installing](installation.md) Harpy, you can run the plugin by first starting Napari, and starting the plugin from Napari's menu bar: `napari > Plugins > sparrow`.
+After installing [installing](installation.md) Harpy, you can run the plugin by first starting Napari, and starting the plugin from Napari's menu bar: `napari > Plugins > harpy`.
 
 Use the plugin to tune the parameters of Harpy for the different steps of the pipeline. Tuning can be done on small crops of the image. After every step, a corresponding configuration _.yaml_ file will be saved in the output directory chosen by the user. We refer to the [hpc](/tutorials/hpc/index.md) documentation for information on how to use these generated configuration files via the CLI.
 
@@ -48,7 +48,7 @@ defaults:
   - override /hydra/launcher: submitit_local
 ```
 
-If sparrow is run on a SLURM cluster, change this to:
+If harpy is run on a SLURM cluster, change this to:
 
 ```yaml
 defaults:
@@ -69,7 +69,7 @@ assuming the RESOLVE mouse liver data is used.
 The RESOLVE mouse liver experiment is preconfigured in `configs/experiment/resolve_liver.yaml`, and can now be run from the CLI:
 
 ```bash
-sparrow +experiment=resolve_liver hydra.searchpath="[/Path/to/local/configs]" task_name=results_sparrow
+harpy +experiment=resolve_liver hydra.searchpath="[/Path/to/local/configs]" task_name=results_harpy
 ```
 
 Please update the _hydra.searchpath_ with the path to the `configs` folder downloaded locally.
@@ -77,7 +77,7 @@ Please update the _hydra.searchpath_ with the path to the `configs` folder downl
 All parameters can also be overwritten from the CLI, e.g. for the size of the min max filter:
 
 ```bash
-sparrow +experiment=resolve_liver hydra.searchpath="[/Path/to/local/configs]" task_name=results_sparrow clean.size_min_max_filter=35
+harpy +experiment=resolve_liver hydra.searchpath="[/Path/to/local/configs]" task_name=results_harpy clean.size_min_max_filter=35
 ```
 
-The default values for all parameters for each step of the pipeline can be found at `src/sparrow/configs`.
+The default values for all parameters for each step of the pipeline can be found at `src/harpy/configs`.

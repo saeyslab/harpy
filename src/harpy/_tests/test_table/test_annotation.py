@@ -1,8 +1,8 @@
 import pandas as pd
 from anndata import AnnData
 
-from sparrow.table import score_genes, score_genes_iter
-from sparrow.utils._keys import _ANNOTATION_KEY
+from harpy.table import score_genes, score_genes_iter
+from harpy.utils._keys import _ANNOTATION_KEY
 
 
 def test_score_genes(sdata_transcripts_no_backed, path_dataset_markers):

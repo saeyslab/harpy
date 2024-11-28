@@ -1,7 +1,7 @@
 import pytest
 
-from sparrow.table._preprocess import preprocess_proteomics, preprocess_transcriptomics
-from sparrow.utils._keys import _CELLSIZE_KEY, _REGION_KEY
+from harpy.table._preprocess import preprocess_proteomics, preprocess_transcriptomics
+from harpy.utils._keys import _CELLSIZE_KEY, _REGION_KEY
 
 
 @pytest.mark.parametrize("q", [None, 0.999])

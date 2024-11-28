@@ -6,8 +6,8 @@ import numpy as np
 import scanpy as sc
 from spatialdata import SpatialData
 
-from sparrow.plot._plot import plot_shapes
-from sparrow.utils._keys import _ANNOTATION_KEY, _CLEANLINESS_KEY, _UNKNOWN_CELLTYPE_KEY
+from harpy.plot._plot import plot_shapes
+from harpy.utils._keys import _ANNOTATION_KEY, _CLEANLINESS_KEY, _UNKNOWN_CELLTYPE_KEY
 
 
 def score_genes(

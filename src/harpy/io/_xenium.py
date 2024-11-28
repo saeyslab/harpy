@@ -14,9 +14,9 @@ from spatialdata.transformations import get_transformation, set_transformation
 from spatialdata_io import xenium as sdata_xenium
 from spatialdata_io._constants._constants import XeniumKeys
 
-from sparrow.io._transcripts import read_transcripts
-from sparrow.utils._keys import _INSTANCE_KEY, _REGION_KEY, _SPATIAL
-from sparrow.utils.pylogger import get_pylogger
+from harpy.io._transcripts import read_transcripts
+from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY, _SPATIAL
+from harpy.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
 
@@ -75,7 +75,7 @@ def xenium(
         If `True`, labels layer annotating the table will also be added to `sdata`.
     filter_gene_names
         Gene names that need to be filtered out (via `str.contains`), mostly control genes that were added, and which you don't want to use.
-        Filtering is case insensitive. Also see `sparrow.read_transcripts`.
+        Filtering is case insensitive. Also see `harpy.read_transcripts`.
     output
         The path where the resulting `SpatialData` object will be backed. If `None`, it will not be backed to a zarr store.
 

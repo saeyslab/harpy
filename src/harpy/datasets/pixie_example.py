@@ -40,7 +40,7 @@ def pixie_example(fovs: list | None = None, with_pixel_output=True, with_cells_o
     from dask_image import imread
     from datasets import load_dataset
 
-    import sparrow as sp
+    import harpy
 
     # ['segment_image_data', 'cluster_pixels', 'cluster_cells', 'post_clustering', 'fiber_segmentation', 'LDA_preprocessing', 'LDA_training_inference', 'neighborhood_analysis', 'pairwise_spatial_enrichment', 'ome_tiff', 'ez_seg_data']
     dataset = load_dataset("angelolab/ark_example", "cluster_cells", trust_remote_code=True)
@@ -90,7 +90,7 @@ def pixie_example(fovs: list | None = None, with_pixel_output=True, with_cells_o
             results.append(arr)
         da.stack(results, axis=0)
 
-        sdata = sp.im.add_image_layer(
+        sdata = harpy.im.add_image_layer(
             sdata,
             arr=da.stack(results, axis=0).squeeze(),
             output_layer=f"raw_image_{fov}",
@@ -101,7 +101,7 @@ def pixie_example(fovs: list | None = None, with_pixel_output=True, with_cells_o
             # }
         )
 
-        sdata = sp.im.add_labels_layer(
+        sdata = harpy.im.add_labels_layer(
             sdata,
             arr=imread.imread(os.path.join(path_segment_data, f"{fov}_nuclear.tiff")).squeeze(),
             output_layer=f"label_nuclear_{fov}",
@@ -111,7 +111,7 @@ def pixie_example(fovs: list | None = None, with_pixel_output=True, with_cells_o
             # }
         )
 
-        sdata = sp.im.add_labels_layer(
+        sdata = harpy.im.add_labels_layer(
             sdata,
             arr=imread.imread(os.path.join(path_segment_data, f"{fov}_whole_cell.tiff")).squeeze(),
             output_layer=f"label_whole_{fov}",

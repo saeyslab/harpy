@@ -9,10 +9,10 @@ from spatialdata import SpatialData, read_zarr
 from spatialdata import bounding_box_query as bounding_box_query_spatialdata
 from spatialdata.transformations import get_transformation
 
-from sparrow.image._image import _get_spatial_element, add_labels_layer
-from sparrow.table._table import add_table_layer
-from sparrow.utils._keys import _INSTANCE_KEY, _REGION_KEY
-from sparrow.utils.pylogger import get_pylogger
+from harpy.image._image import _get_spatial_element, add_labels_layer
+from harpy.table._table import add_table_layer
+from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY
+from harpy.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
 

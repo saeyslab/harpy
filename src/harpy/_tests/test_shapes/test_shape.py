@@ -4,8 +4,8 @@ import dask.array as da
 import numpy as np
 import pytest
 
-from sparrow.image._rasterize import rasterize
-from sparrow.shape._shape import vectorize
+from harpy.image._rasterize import rasterize
+from harpy.shape._shape import vectorize
 
 
 def test_vectorize(sdata):

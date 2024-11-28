@@ -6,8 +6,8 @@ import pytest
 from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
-from sparrow.utils._keys import _INSTANCE_KEY, _REGION_KEY
-from sparrow.utils._query import bounding_box_query
+from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY
+from harpy.utils._query import bounding_box_query
 
 
 @pytest.mark.parametrize("crd", [[2000, 3000, 3000, 4000], None])

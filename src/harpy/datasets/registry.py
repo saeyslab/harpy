@@ -6,7 +6,8 @@ from pathlib import Path
 import pooch
 from pooch import Pooch
 
-from sparrow import __version__
+# from harpy import __version__
+__version__ = "0.0.1"  # Do not automatically update dataset Cache for each release, because it downloads a lot of data.
 
 BASE_URL = "https://objectstor.vib.be/spatial-hackathon-public/sparrow/public_datasets"
 

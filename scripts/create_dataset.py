@@ -1,4 +1,4 @@
-"""Used to create a large dataset config folder for the sparrow mutlirun analysis, see docs/hpc.md."""
+"""Used to create a large dataset config folder for the harpy mutlirun analysis, see docs/hpc.md."""
 
 import argparse
 import logging

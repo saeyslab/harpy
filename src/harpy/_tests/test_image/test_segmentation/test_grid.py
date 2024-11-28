@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 from spatialdata import SpatialData
 
-from sparrow.image.segmentation._grid import add_grid_labels_layer
+from harpy.image.segmentation._grid import add_grid_labels_layer
 
 
 @pytest.mark.parametrize("hex_size", [5, 13, 24, 27, 30])

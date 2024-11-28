@@ -4,11 +4,11 @@ from pathlib import Path
 import pooch
 from spatialdata import SpatialData, read_zarr
 
-from sparrow.datasets.registry import get_registry
-from sparrow.io._merscope import merscope
-from sparrow.io._visium_hd import visium_hd
-from sparrow.io._xenium import xenium
-from sparrow.utils.pylogger import get_pylogger
+from harpy.datasets.registry import get_registry
+from harpy.io._merscope import merscope
+from harpy.io._visium_hd import visium_hd
+from harpy.io._xenium import xenium
+from harpy.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
 

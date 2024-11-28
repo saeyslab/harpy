@@ -9,8 +9,8 @@ from spatialdata import SpatialData
 from spatialdata.models._utils import MappingToCoordinateSystem_t
 from spatialdata.models.models import ScaleFactors_t
 
-from sparrow.image._rasterize import rasterize
-from sparrow.shape._shape import add_shapes_layer
+from harpy.image._rasterize import rasterize
+from harpy.shape._shape import add_shapes_layer
 
 
 def add_grid_labels_layer(
@@ -52,8 +52,8 @@ def add_grid_labels_layer(
     chunks
         Specifies the chunk size for Dask arrays when calculating the labels layer.
     client
-        A Dask `Client` instance, which will be passed to 'sp.im.rasterize' (function which rasterizes the generated `output_shapes_layer`) if specified.
-        Refer to the 'sp.im.rasterize' docstring for further details.
+        A Dask `Client` instance, which will be passed to 'harpy.im.rasterize' (function which rasterizes the generated `output_shapes_layer`) if specified.
+        Refer to the 'harpy.im.rasterize' docstring for further details.
     transformations
         Transformations that will be added to the resulting `output_shapes_layer` and `output_labels_layer`.
     scale_factors

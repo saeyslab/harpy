@@ -9,7 +9,7 @@ import tifffile
 from numpy.typing import NDArray
 from spatialdata import SpatialData, read_zarr
 
-from sparrow.datasets.registry import get_ome_registry, get_registry, get_spatialdata_registry
+from harpy.datasets.registry import get_ome_registry, get_registry, get_spatialdata_registry
 
 
 def mibi_example() -> SpatialData:

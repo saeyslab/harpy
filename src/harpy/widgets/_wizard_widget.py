@@ -1,12 +1,11 @@
 """Napari widget for managing the other widgets and giving a general overview of the workflow."""
 
-
 from magicgui.widgets import ComboBox, Container, Label, TextEdit
 from qtpy.QtGui import QPixmap
 from qtpy.QtWidgets import QSizePolicy
 
-from sparrow.utils import get_pylogger
-from sparrow.widgets import (
+from harpy.utils import get_pylogger
+from harpy.widgets import (
     allocate_widget,
     annotate_widget,
     clean_widget,
@@ -67,8 +66,8 @@ def get_choices():
                     "### Load an image into napari.\n"
                     "- path zarr: choose the path to a zarr store that contains a SpatialData object. If you wish to create a new zarr store from an image, leave this field blank.\n"
                     "- path image: choose the path to an image, which can be either single-channel or multi-channel. This will be disregarded if the zarr path is specified.\n"
-                    "- image layer: specify the image layer within the zarr store where you want to execute Sparrow. If providing a path to an image, this will designate the image layer in the zarr store that will be created.\n"
-                    "- output dir:  choose the directory where all figures and files produced by Sparrow will be saved.\n"
+                    "- image layer: specify the image layer within the zarr store where you want to execute Harpy. If providing a path to an image, this will designate the image layer in the zarr store that will be created.\n"
+                    "- output dir:  choose the directory where all figures and files produced by Harpy will be saved.\n"
                     "- x_min, x_min, x_max, y_min and y_max (optional): select cropping region.\n"
                 ),
             ),
@@ -169,7 +168,7 @@ def wizard_widget() -> None:
     """Napari widget for managing the other widgets and giving a general overview of the workflow."""
     # Set DaMBi Icon
     icon = Label(name="icon", value="Made by DaMBi")
-    pixmap = QPixmap("./src/sparrow/widgets/dambi-white.png")
+    pixmap = QPixmap("./src/harpy/widgets/dambi-white.png")
     icon.native.setPixmap(pixmap)
 
     # Step selector

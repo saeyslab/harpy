@@ -12,18 +12,18 @@ from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import get_transformation
 
-from sparrow.image._image import _get_spatial_element, add_labels_layer
-from sparrow.utils._keys import _INSTANCE_KEY, _REGION_KEY, _SPATIAL, ClusteringKey
-from sparrow.utils.pylogger import get_pylogger
+from harpy.image._image import _get_spatial_element, add_labels_layer
+from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY, _SPATIAL, ClusteringKey
+from harpy.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
 
 try:
     import flowsom as fs
 
-    from sparrow.utils._flowsom import _flowsom
+    from harpy.utils._flowsom import _flowsom
 except ImportError:
-    log.warning("'flowsom' not installed, to use 'sp.im.flowsom', please install this library.")
+    log.warning("'flowsom' not installed, to use 'harpy.im.flowsom', please install this library.")
 
 
 def flowsom(
@@ -51,7 +51,7 @@ def flowsom(
     sdata
         The input SpatialData object.
     img_layer
-        The image layer(s) of `sdata` on which flowsom is run. It is recommended to preprocess the data with `sp.im.pixel_clustering_preprocess`.
+        The image layer(s) of `sdata` on which flowsom is run. It is recommended to preprocess the data with `harpy.im.pixel_clustering_preprocess`.
     output_layer_clusters
         The output labels layer in `sdata` to which labels layer with predicted flowsom SOM clusters are saved.
     output_layer_metaclusters
@@ -85,12 +85,12 @@ def flowsom(
 
     See Also
     --------
-    sparrow.im.pixel_clustering_preprocess : preprocess image layers before applying flowsom clustering.
+    harpy.im.pixel_clustering_preprocess : preprocess image layers before applying flowsom clustering.
 
     Warnings
     --------
     - The function is intended for use with spatial proteomics data. Input data should be appropriately preprocessed
-      (e.g. via `sp.im.pixel_clustering_preprocess`) to ensure meaningful clustering results.
+      (e.g. via `harpy.im.pixel_clustering_preprocess`) to ensure meaningful clustering results.
     - The cluster and metacluster ID's found in `output_layer_clusters` and `output_layer_metaclusters` count from 1, while they count from 0 in the `FlowSOM` object.
     """
     assert 0 < fraction <= 1, "Value must be between 0 and 1"

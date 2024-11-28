@@ -20,7 +20,7 @@ from shapely.geometry import GeometryCollection, MultiPolygon, Polygon, shape
 from shapely.validation import make_valid
 from skimage.segmentation import relabel_sequential
 
-from sparrow.utils.pylogger import get_pylogger
+from harpy.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
 

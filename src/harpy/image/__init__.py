@@ -1,4 +1,4 @@
-from sparrow.utils.pylogger import get_pylogger
+from harpy.utils.pylogger import get_pylogger
 
 from ._combine import combine
 from ._contrast import enhance_contrast

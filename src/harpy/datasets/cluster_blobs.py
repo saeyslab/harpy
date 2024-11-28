@@ -13,9 +13,9 @@ from spatialdata._types import ArrayLike
 from spatialdata.models import Image2DModel, Labels2DModel, PointsModel, TableModel
 from spatialdata.transformations import Identity
 
-from sparrow.table import add_regionprop_features
-from sparrow.utils._keys import _CELL_INDEX, _INSTANCE_KEY, _REGION_KEY
-from sparrow.utils.pylogger import get_pylogger
+from harpy.table import add_regionprop_features
+from harpy.utils._keys import _CELL_INDEX, _INSTANCE_KEY, _REGION_KEY
+from harpy.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
 

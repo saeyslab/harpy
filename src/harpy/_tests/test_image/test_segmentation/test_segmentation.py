@@ -6,10 +6,10 @@ import pytest
 from dask.dataframe import DataFrame
 from spatialdata import SpatialData
 
-from sparrow.image.segmentation._segmentation import segment, segment_points
-from sparrow.image.segmentation.segmentation_models._baysor import _dummy
-from sparrow.image.segmentation.segmentation_models._cellpose import cellpose_callable
-from sparrow.points._points import add_points_layer
+from harpy.image.segmentation._segmentation import segment, segment_points
+from harpy.image.segmentation.segmentation_models._baysor import _dummy
+from harpy.image.segmentation.segmentation_models._cellpose import cellpose_callable
+from harpy.points._points import add_points_layer
 
 
 @pytest.mark.skipif(not importlib.util.find_spec("cellpose"), reason="requires the cellpose library")

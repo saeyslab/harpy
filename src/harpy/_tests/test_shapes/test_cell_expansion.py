@@ -1,6 +1,6 @@
 from geopandas import GeoDataFrame
 
-from sparrow.shape import create_voronoi_boundaries
+from harpy.shape import create_voronoi_boundaries
 
 
 def test_cell_expansion(sdata_multi_c_no_backed):

@@ -7,8 +7,8 @@ from spatialdata import SpatialData
 from spatialdata.models._utils import MappingToCoordinateSystem_t
 from spatialdata.transformations import get_transformation
 
-from sparrow.image._image import _get_spatial_element
-from sparrow.shape._manager import ShapesLayerManager
+from harpy.image._image import _get_spatial_element
+from harpy.shape._manager import ShapesLayerManager
 
 
 def vectorize(

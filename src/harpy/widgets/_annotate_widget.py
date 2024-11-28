@@ -13,15 +13,15 @@ from napari.qt.threading import thread_worker
 from napari.utils.notifications import show_info
 from spatialdata import SpatialData, read_zarr
 
-import sparrow.utils as utils
-from sparrow.pipeline import SparrowPipeline
+import harpy.utils as utils
+from harpy.pipeline import HarpyPipeline
 
 log = utils.get_pylogger(__name__)
 
 
 def annotateImage(
     sdata: SpatialData,
-    pipeline: SparrowPipeline,
+    pipeline: HarpyPipeline,
 ) -> SpatialData:
     """Function representing the annotation step, this calls all the needed functions to annotate the cells with the celltype."""
     sdata = pipeline.annotate(sdata)
@@ -85,7 +85,7 @@ def annotate_widget(
 
     def add_metadata(
         sdata: SpatialData,
-        pipeline: SparrowPipeline,
+        pipeline: HarpyPipeline,
         layer_name: str,
     ):
         """Add the metadata to the previous layer, this way it becomes available in the next steps."""

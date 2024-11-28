@@ -1,7 +1,7 @@
 import pytest
 from spatialdata import SpatialData
 
-from sparrow.image._image import _get_spatial_element, add_image_layer, add_labels_layer
+from harpy.image._image import _get_spatial_element, add_image_layer, add_labels_layer
 
 
 @pytest.mark.parametrize(

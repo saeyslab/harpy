@@ -1,14 +1,14 @@
 from anndata import AnnData
 
-from sparrow.utils._keys import ClusteringKey
-from sparrow.utils.pylogger import get_pylogger
+from harpy.utils._keys import ClusteringKey
+from harpy.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
 
 try:
     import flowsom as fs
 except ImportError:
-    log.warning("'flowsom' not installed, 'sp.tb.flowsom' and `sp.im.flowsom` will not be available.")
+    log.warning("'flowsom' not installed, 'harpy.tb.flowsom' and `harpy.im.flowsom` will not be available.")
 
 
 def _flowsom(

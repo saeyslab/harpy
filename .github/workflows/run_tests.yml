@@ -12,7 +12,7 @@ on:
     #    - main
 
     paths:
-      - "src/sparrow/**"
+      - "src/harpy/**"
       - ".github/workflows/run_tests.yml"
 
 env:
@@ -37,7 +37,7 @@ jobs:
         with:
           miniforge-variant: Mambaforge
           miniforge-version: latest
-          activate-environment: napari-sparrow
+          activate-environment: harpy
           use-mamba: true
           python-version: ${{ matrix.python-version }}
 
@@ -58,14 +58,14 @@ jobs:
         id: cache
 
       - name: Update environment
-        run: mamba env update -n napari-sparrow -f environment.yml
+        run: mamba env update -n harpy -f environment.yml
         if: steps.cache.outputs.cache-hit != 'true'
 
       # this runs the platform-specific tests declared in tox.ini
       - name: Test with tox
         shell: bash -l {0}
         run: |
-          conda activate napari-sparrow
+          conda activate harpy
           pip install -e '.[testing]'
           pip install tox tox-gh-actions
           tox

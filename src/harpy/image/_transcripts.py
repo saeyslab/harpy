@@ -6,9 +6,9 @@ from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import Translation
 
-from sparrow.image._image import _get_boundary, _get_spatial_element, add_image_layer
-from sparrow.utils._transformations import _identity_check_transformations_points
-from sparrow.utils.pylogger import get_pylogger
+from harpy.image._image import _get_boundary, _get_spatial_element, add_image_layer
+from harpy.utils._transformations import _identity_check_transformations_points
+from harpy.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
 

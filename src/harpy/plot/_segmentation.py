@@ -5,7 +5,7 @@ from typing import Any
 
 from spatialdata import SpatialData
 
-from sparrow.plot import plot_shapes
+from harpy.plot import plot_shapes
 
 
 def segment(
@@ -52,7 +52,7 @@ def segment(
 
     See Also
     --------
-    sparrow.im.segment
+    harpy.im.segment
     """
     plot_shapes(
         sdata,

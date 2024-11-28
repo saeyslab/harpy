@@ -1,6 +1,6 @@
 from spatialdata import SpatialData
 
-from sparrow.image._combine import combine
+from harpy.image._combine import combine
 
 
 def test_combine(sdata_multi_c_no_backed: SpatialData):

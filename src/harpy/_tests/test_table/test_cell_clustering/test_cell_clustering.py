@@ -4,7 +4,7 @@ import dask.array as da
 import pandas as pd
 import pytest
 
-from sparrow.utils._keys import ClusteringKey
+from harpy.utils._keys import ClusteringKey
 
 
 @pytest.mark.skipif(not importlib.util.find_spec("flowsom"), reason="requires the flowSOM library")
@@ -12,10 +12,10 @@ def test_cell_clustering(sdata_blobs):
     """Integration test for cell clustering using flowsom"""
     import flowsom as fs
 
-    from sparrow.image.pixel_clustering._clustering import flowsom as flowsom_pixel
-    from sparrow.table.cell_clustering._clustering import flowsom as flowsom_cell
-    from sparrow.table.cell_clustering._weighted_channel_expression import weighted_channel_expression
-    from sparrow.table.pixel_clustering._cluster_intensity import cluster_intensity
+    from harpy.image.pixel_clustering._clustering import flowsom as flowsom_pixel
+    from harpy.table.cell_clustering._clustering import flowsom as flowsom_cell
+    from harpy.table.cell_clustering._weighted_channel_expression import weighted_channel_expression
+    from harpy.table.pixel_clustering._cluster_intensity import cluster_intensity
 
     img_layer = "blobs_image"
     labels_layer = "blobs_labels"

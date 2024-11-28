@@ -16,11 +16,11 @@ from shapely.affinity import translate
 from spatialdata import SpatialData
 from spatialdata.transformations import get_transformation
 
-from sparrow.image._image import _apply_transform, _get_boundary, _get_spatial_element, _unapply_transform
-from sparrow.shape import intersect_rectangles
-from sparrow.utils._keys import _INSTANCE_KEY, _REGION_KEY
-from sparrow.utils._transformations import _get_translation_values
-from sparrow.utils.pylogger import get_pylogger
+from harpy.image._image import _apply_transform, _get_boundary, _get_spatial_element, _unapply_transform
+from harpy.shape import intersect_rectangles
+from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY
+from harpy.utils._transformations import _get_translation_values
+from harpy.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
 
@@ -55,11 +55,11 @@ def plot_image(
     output
         Path to save the plot. If not provided, plot will be displayed.
     **kwargs
-        Additional arguments to be passed to the `sp.pl.plot_shapes` function.
+        Additional arguments to be passed to the `harpy.pl.plot_shapes` function.
 
     See Also
     --------
-    sparrow.pl.plot_shapes
+    harpy.pl.plot_shapes
     """
     plot_shapes(
         sdata,
@@ -101,11 +101,11 @@ def plot_labels(
     output
         Path to save the plot. If not provided, plot will be displayed.
     **kwargs
-        Additional arguments to be passed to the `sp.pl.plot_shapes` function.
+        Additional arguments to be passed to the `harpy.pl.plot_shapes` function.
 
     See Also
     --------
-    sparrow.pl.plot_shapes
+    harpy.pl.plot_shapes
     """
     plot_shapes(
         sdata,

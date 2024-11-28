@@ -1,6 +1,6 @@
 import os
 
-from sparrow.plot._transcripts import analyse_genes_left_out
+from harpy.plot._transcripts import analyse_genes_left_out
 
 
 def test_analyse_genes_left_out(sdata_transcripts_no_backed, tmp_path):

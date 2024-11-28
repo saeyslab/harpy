@@ -4,9 +4,9 @@
 
 Import Harpy as::
 
-    import sparrow as sp
+    import harpy as hp
 
-.. module:: sparrow
+.. module:: harpy
 ```
 
 ## IO
@@ -15,8 +15,8 @@ I/O.
 
 ```{eval-rst}
 
-.. module:: sparrow.io
-.. currentmodule:: sparrow
+.. module:: harpy.io
+.. currentmodule:: harpy
 
 .. autosummary::
     :toctree: generated
@@ -38,8 +38,8 @@ Operations on image and labels layers.
 
 ```{eval-rst}
 
-.. module:: sparrow.im
-.. currentmodule:: sparrow
+.. module:: harpy.im
+.. currentmodule:: harpy
 
 .. autosummary::
     :toctree: generated
@@ -76,8 +76,8 @@ Operations on shapes (polygons) layers.
 
 ```{eval-rst}
 
-.. module:: sparrow.sh
-.. currentmodule:: sparrow
+.. module:: harpy.sh
+.. currentmodule:: harpy
 
 .. autosummary::
     :toctree: generated
@@ -94,8 +94,8 @@ Operations on table (`AnnData` object) layers.
 
 ```{eval-rst}
 
-.. module:: sparrow.tb
-.. currentmodule:: sparrow
+.. module:: harpy.tb
+.. currentmodule:: harpy
 
 .. autosummary::
     :toctree: generated
@@ -126,8 +126,8 @@ Operations on points (`Dask` `DataFrame` object) layers.
 
 ```{eval-rst}
 
-.. module:: sparrow.pt
-.. currentmodule:: sparrow
+.. module:: harpy.pt
+.. currentmodule:: harpy
 
 .. autosummary::
     :toctree: generated
@@ -143,8 +143,8 @@ Plotting functions.
 
 ```{eval-rst}
 
-.. module:: sparrow.pl
-.. currentmodule:: sparrow
+.. module:: harpy.pl
+.. currentmodule:: harpy
 
 .. autosummary::
     :toctree: generated
@@ -161,8 +161,8 @@ Plotting functions.
 
 ```{eval-rst}
 
-.. module:: sparrow.pl
-.. currentmodule:: sparrow
+.. module:: harpy.pl
+.. currentmodule:: harpy
 
 .. autosummary::
     :toctree: generated
@@ -182,8 +182,8 @@ Plotting functions.
 
 ```{eval-rst}
 
-.. module:: sparrow.pl
-.. currentmodule:: sparrow
+.. module:: harpy.pl
+.. currentmodule:: harpy
 
 .. autosummary::
     :toctree: generated
@@ -204,8 +204,8 @@ Utility functions.
 
 ```{eval-rst}
 
-.. module:: sparrow.utils
-.. currentmodule:: sparrow
+.. module:: harpy.utils
+.. currentmodule:: harpy
 
 .. autosummary::
     :toctree: generated
@@ -219,8 +219,8 @@ Dataset loaders.
 
 ```{eval-rst}
 
-.. module:: sparrow.datasets
-.. currentmodule:: sparrow
+.. module:: harpy.datasets
+.. currentmodule:: harpy
 
 .. autosummary::
     :toctree: generated

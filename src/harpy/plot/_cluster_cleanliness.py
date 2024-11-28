@@ -4,8 +4,8 @@ import matplotlib.pyplot as plt
 import scanpy as sc
 from spatialdata import SpatialData
 
-from sparrow.plot._plot import plot_shapes
-from sparrow.utils._keys import _ANNOTATION_KEY
+from harpy.plot._plot import plot_shapes
+from harpy.utils._keys import _ANNOTATION_KEY
 
 
 def cluster_cleanliness(

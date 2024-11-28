@@ -7,10 +7,10 @@ from anndata import AnnData
 from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
-from sparrow.shape._shape import filter_shapes_layer
-from sparrow.table._manager import TableLayerManager
-from sparrow.utils._keys import _CELLSIZE_KEY, _INSTANCE_KEY, _REGION_KEY
-from sparrow.utils.pylogger import get_pylogger
+from harpy.shape._shape import filter_shapes_layer
+from harpy.table._manager import TableLayerManager
+from harpy.utils._keys import _CELLSIZE_KEY, _INSTANCE_KEY, _REGION_KEY
+from harpy.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
 
@@ -37,14 +37,14 @@ class ProcessTable:
         if sdata.tables == {}:
             raise ValueError(
                 "Provided SpatialData object 'sdata' does not contain any 'tables'. "
-                "Please create tables via e.g. 'sp.tb.allocation' or 'sp.tb.allocation_intensity' functions."
+                "Please create tables via e.g. 'harpy.tb.allocation' or 'harpy.tb.allocation_intensity' functions."
             )
 
         if labels_layer is not None:
             if sdata.labels == {}:
                 raise ValueError(
                     "Provided SpatialData object 'sdata' does not contain 'labels'. "
-                    "Please create a labels layer via e.g. 'sp.im.segment'."
+                    "Please create a labels layer via e.g. 'harpy.im.segment'."
                 )
             labels_layer = (
                 list(labels_layer)
@@ -231,7 +231,7 @@ def filter_on_size(
 ) -> SpatialData:
     """Returns the updated SpatialData object.
 
-    All cells with a size outside of the min and max size range are removed using the `cellsize_key` in `.obs`. Run e.g. `sp.tb.preprocess_transcriptomics` or `sp.tb.preprocess_proteomics` to obtain cell sizes.
+    All cells with a size outside of the min and max size range are removed using the `cellsize_key` in `.obs`. Run e.g. `harpy.tb.preprocess_transcriptomics` or `harpy.tb.preprocess_proteomics` to obtain cell sizes.
 
     Parameters
     ----------

@@ -1,8 +1,8 @@
 from anndata import AnnData
 from spatialdata import SpatialData
 
-from sparrow.table._allocation_intensity import allocate_intensity
-from sparrow.table._regionprops import add_regionprop_features
+from harpy.table._allocation_intensity import allocate_intensity
+from harpy.table._regionprops import add_regionprop_features
 
 
 def test_allocate_intensity(sdata_multi_c_no_backed):

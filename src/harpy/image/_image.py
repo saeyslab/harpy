@@ -11,9 +11,9 @@ from spatialdata.transformations import get_transformation
 from spatialdata.transformations.transformations import Identity, Sequence, Translation
 from xarray import DataArray, DataTree
 
-from sparrow.image._manager import ImageLayerManager, LabelLayerManager
-from sparrow.utils._transformations import _get_translation_values
-from sparrow.utils.pylogger import get_pylogger
+from harpy.image._manager import ImageLayerManager, LabelLayerManager
+from harpy.utils._transformations import _get_translation_values
+from harpy.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
 

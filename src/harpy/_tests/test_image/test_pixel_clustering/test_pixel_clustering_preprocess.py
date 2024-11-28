@@ -1,4 +1,4 @@
-from sparrow.image.pixel_clustering._preprocess import pixel_clustering_preprocess
+from harpy.image.pixel_clustering._preprocess import pixel_clustering_preprocess
 
 
 def test_pixel_clustering_preprocess_blobs(sdata_blobs):

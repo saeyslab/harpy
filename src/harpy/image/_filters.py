@@ -9,8 +9,8 @@ from dask_image.ndfilters import gaussian_filter, maximum_filter, minimum_filter
 from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 
-from sparrow.image._map import _get_spatial_element, map_image
-from sparrow.utils.pylogger import get_pylogger
+from harpy.image._map import _get_spatial_element, map_image
+from harpy.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
 

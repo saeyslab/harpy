@@ -2,15 +2,15 @@ import importlib.util
 
 import pytest
 
-from sparrow.table.pixel_clustering._cluster_intensity import _export_to_ark_format, cluster_intensity
-from sparrow.utils._keys import ClusteringKey
+from harpy.table.pixel_clustering._cluster_intensity import _export_to_ark_format, cluster_intensity
+from harpy.utils._keys import ClusteringKey
 
 
 @pytest.mark.skipif(not importlib.util.find_spec("flowsom"), reason="requires the flowSOM library")
 def test_cluster_intensity(sdata_blobs):
     import flowsom as fs
 
-    from sparrow.image.pixel_clustering._clustering import flowsom
+    from harpy.image.pixel_clustering._clustering import flowsom
 
     img_layer = "blobs_image"
     channels = ["lineage_0", "lineage_1", "lineage_5", "lineage_9"]

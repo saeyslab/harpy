@@ -10,10 +10,10 @@ from skimage.segmentation import relabel_sequential
 from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 
-from sparrow.image._image import _get_spatial_element
-from sparrow.image.segmentation._map import map_labels
-from sparrow.image.segmentation._utils import _SEG_DTYPE, _rechunk_overlap
-from sparrow.utils.pylogger import get_pylogger
+from harpy.image._image import _get_spatial_element
+from harpy.image.segmentation._map import map_labels
+from harpy.image.segmentation._utils import _SEG_DTYPE, _rechunk_overlap
+from harpy.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
 
@@ -124,7 +124,7 @@ def merge_labels_layers_nuclei(
     Merge labels layers using nuclei segmentation.
 
     Given a labels layer obtained from nuclei segmentation (`labels_layer_nuclei`),
-    and corresponding expanded nuclei (`labels_layer_nuclei_expanded`), e.g. obtained through `sp.im.expand_labels_layer`,
+    and corresponding expanded nuclei (`labels_layer_nuclei_expanded`), e.g. obtained through `harpy.im.expand_labels_layer`,
     this function merges labels in labels layer `labels_layer_nuclei_expanded` with `labels_layer` in the SpatialData object,
     if corresponding nuclei in `labels_layer_nuclei` have less than `threshold` overlap with labels from `labels_layer`.
 

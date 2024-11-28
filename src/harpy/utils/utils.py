@@ -16,7 +16,7 @@ from spatialdata.models import get_axes_names
 from spatialdata.transformations import get_transformation
 from xarray import DataArray, DataTree
 
-from sparrow.utils._transformations import _get_translation_values
+from harpy.utils._transformations import _get_translation_values
 
 
 def _linestring_to_arrays(geometries):

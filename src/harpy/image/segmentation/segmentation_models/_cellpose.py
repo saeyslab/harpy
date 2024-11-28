@@ -4,7 +4,7 @@ from pathlib import Path
 
 from numpy.typing import NDArray
 
-from sparrow.utils.pylogger import get_pylogger
+from harpy.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
 
@@ -15,7 +15,7 @@ try:
     CUDA = torch.cuda.is_available()
 except ImportError:
     log.warning(
-        "Module 'torch' not installed, please install 'torch' if you want to use the callable 'sparrow.image.segmentation.segmentation_models._cellpose' as model for 'sp.im.segment'."
+        "Module 'torch' not installed, please install 'torch' if you want to use the callable 'harpy.image.segmentation.segmentation_models._cellpose' as model for 'harpy.im.segment'."
     )
     TORCH_AVAILABLE = False
     CUDA = False
@@ -26,7 +26,7 @@ try:
     CELLPOSE_AVAILABLE = True
 except ImportError:
     log.warning(
-        "Module 'cellpose' not installed, please install 'cellpose' if you want to use the callable 'sparrow.image.segmentation.segmentation_models._cellpose' as model for 'sp.im.segment'."
+        "Module 'cellpose' not installed, please install 'cellpose' if you want to use the callable 'harpy.image.segmentation.segmentation_models._cellpose' as model for 'harpy.im.segment'."
     )
     CELLPOSE_AVAILABLE = False
 
@@ -49,7 +49,7 @@ def cellpose_callable(
     """
     Perform cell segmentation using the Cellpose model.
 
-    Should be passed to `model` parameter of `sp.im.segment` for distributed processing.
+    Should be passed to `model` parameter of `harpy.im.segment` for distributed processing.
 
     Parameters
     ----------
@@ -95,7 +95,7 @@ def cellpose_callable(
 
     See Also
     --------
-    sparrow.im.segment : distributed segmentation using `Dask`.
+    harpy.im.segment : distributed segmentation using `Dask`.
     """
     if channels is None:
         channels = [0, 0]

@@ -13,17 +13,17 @@ from napari.qt.threading import thread_worker
 from napari.utils.notifications import show_info
 from spatialdata import SpatialData, read_zarr
 
-import sparrow.utils as utils
-from sparrow.pipeline import SparrowPipeline
-from sparrow.shape._shape import add_shapes_layer
-from sparrow.utils.utils import _translate_polygons
+import harpy.utils as utils
+from harpy.pipeline import HarpyPipeline
+from harpy.shape._shape import add_shapes_layer
+from harpy.utils.utils import _translate_polygons
 
 log = utils.get_pylogger(__name__)
 
 
 def allocateImage(
     sdata: SpatialData,
-    pipeline: SparrowPipeline,
+    pipeline: HarpyPipeline,
 ) -> SpatialData:
     """Function representing the allocation step, this calls all the needed functions to allocate the transcripts to the cells."""
     sdata = pipeline.allocate(sdata)
@@ -132,7 +132,7 @@ def allocate_widget(
 
     worker = _allocation_worker(sdata, allocateImage, fn_kwargs=fn_kwargs)
 
-    def add_metadata(sdata: SpatialData, pipeline: SparrowPipeline, layer_name: str):
+    def add_metadata(sdata: SpatialData, pipeline: HarpyPipeline, layer_name: str):
         """Update the polygons, add anndata object to the metadata, so it can be viewed via napari spatialdata plugin, and it becomes visible in next steps."""
         try:
             # if the layer exists, update its data

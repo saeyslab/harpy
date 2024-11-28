@@ -16,15 +16,15 @@ from pkg_resources import resource_filename
 from spatialdata import SpatialData
 from xarray import DataTree
 
-from sparrow import utils
-from sparrow.image._image import _get_translation
-from sparrow.pipeline import SparrowPipeline
+from harpy import utils
+from harpy.image._image import _get_translation
+from harpy.pipeline import HarpyPipeline
 
 log = utils.get_pylogger(__name__)
 
 
 def loadImage(
-    pipeline: SparrowPipeline,
+    pipeline: HarpyPipeline,
 ) -> SpatialData:
     """Function representing the loading step."""
     sdata = pipeline.load()
@@ -62,7 +62,7 @@ def load_widget(
 ):
     """Function represents the load widget and is called by the wizard to create the widget."""
     # get the default values for the configs
-    abs_config_dir = resource_filename("sparrow", "configs")
+    abs_config_dir = resource_filename("harpy", "configs")
 
     with initialize_config_dir(version_base=None, config_dir=abs_config_dir):
         cfg = compose(config_name="pipeline")
@@ -85,13 +85,13 @@ def load_widget(
 
     cfg.dataset.crop_param = crd
 
-    pipeline = SparrowPipeline(cfg, image_name=image_layer)
+    pipeline = HarpyPipeline(cfg, image_name=image_layer)
 
     fn_kwargs: dict[str, Any] = {"pipeline": pipeline}
 
     worker = _load_worker(method=loadImage, fn_kwargs=fn_kwargs)
 
-    def add_image(sdata: SpatialData, pipeline: SparrowPipeline, layer_name: str):
+    def add_image(sdata: SpatialData, pipeline: HarpyPipeline, layer_name: str):
         """Add the image to the napari viewer, overwrite if it already exists."""
         try:
             # if the layer exists, update its data

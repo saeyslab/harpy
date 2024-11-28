@@ -4,10 +4,10 @@ from pandas.testing import assert_index_equal
 from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
-from sparrow.table._table import ProcessTable, add_table_layer
-from sparrow.table.cell_clustering._utils import _get_mapping
-from sparrow.utils._keys import _CELLSIZE_KEY, _INSTANCE_KEY, _RAW_COUNTS_KEY, ClusteringKey
-from sparrow.utils.pylogger import get_pylogger
+from harpy.table._table import ProcessTable, add_table_layer
+from harpy.table.cell_clustering._utils import _get_mapping
+from harpy.utils._keys import _CELLSIZE_KEY, _INSTANCE_KEY, _RAW_COUNTS_KEY, ClusteringKey
+from harpy.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
 
@@ -19,7 +19,7 @@ def weighted_channel_expression(
     output_layer: str,
     clustering_key: ClusteringKey = ClusteringKey._METACLUSTERING_KEY,
     overwrite: bool = False,
-    # specify whether the metaclustering or SOM clustering labels layer of pixel clustering results was used as input for sp.tb.flowsom, i.e. key that was used for pixel clustering
+    # specify whether the metaclustering or SOM clustering labels layer of pixel clustering results was used as input for harpy.tb.flowsom, i.e. key that was used for pixel clustering
 ) -> SpatialData:
     """
     Calculation of weighted channel expression in the context of cell clustering.
@@ -30,22 +30,22 @@ def weighted_channel_expression(
     Average marker expression for each cell weighted by pixel cluster count is added to `sdata.tables[output_layer].obs`.
     Mean over the obtained cell clusters (both SOM and meta clusters) of the average marker expression for each cell weighted by pixel cluster count is added to `sdata.tables[output_layer].uns`.
 
-    This function should be run after running `sp.tb.flowsom` and `sp.tb.cluster_intensity`.
+    This function should be run after running `harpy.tb.flowsom` and `harpy.tb.cluster_intensity`.
 
     Parameters
     ----------
     sdata
         The input SpatialData object containing the necessary data tables.
     table_layer_cell_clustering
-        The name of the table layer in `sdata` where FlowSOM cell clustering results are stored (obtained via 'sp.tb.flowsom').
-        This layer should contain the cell cluster labels derived from the FlowSOM clustering algorithm and the non-normalized pixel cluster counts in `.layers[ _RAW_COUNTS_KEY ]`, as obtained after running `sp.tb.flowsom`.
+        The name of the table layer in `sdata` where FlowSOM cell clustering results are stored (obtained via 'harpy.tb.flowsom').
+        This layer should contain the cell cluster labels derived from the FlowSOM clustering algorithm and the non-normalized pixel cluster counts in `.layers[ _RAW_COUNTS_KEY ]`, as obtained after running `harpy.tb.flowsom`.
     table_layer_pixel_cluster_intensity
-        The name of the table layer in `sdata` containing pixel cluster intensity values as obtained by running `sp.tb.cluster_intensity`.
+        The name of the table layer in `sdata` containing pixel cluster intensity values as obtained by running `harpy.tb.cluster_intensity`.
         These intensities are used to calculate the weighted expression of each channel for the cell clusters.
     output_layer
         The name of the output table layer in `sdata` where the results of the weighted channel expression computation will be stored.
     clustering_key
-        Specifies the key that was used for pixel clustering, indicating whether metaclustering or SOM clustering labels were used as input for flowsom cell clustering (`sp.tb.flowsom`).
+        Specifies the key that was used for pixel clustering, indicating whether metaclustering or SOM clustering labels were used as input for flowsom cell clustering (`harpy.tb.flowsom`).
     overwrite
         If True, overwrites any existing data in the `output_layer` if it already exists.
 
@@ -55,8 +55,8 @@ def weighted_channel_expression(
 
     See Also
     --------
-    sparrow.tb.flowsom : flowsom cell clustering
-    sparrow.tb.cluster_intensity : calculates average intensity SOM/meta cluster (pixel clusters).
+    harpy.tb.flowsom : flowsom cell clustering
+    harpy.tb.cluster_intensity : calculates average intensity SOM/meta cluster (pixel clusters).
     """
     # subset over all _labels_layer in 'table_layer_cell_clustering'
     _labels_layer = [*sdata[table_layer_cell_clustering].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY]]
@@ -70,7 +70,7 @@ def weighted_channel_expression(
         if key not in adata_cell_clustering.obs
     ]
     assert not missing_keys, (
-        "Please first run 'sp.tb.flosom' before running this function. "
+        "Please first run 'harpy.tb.flosom' before running this function. "
         f"Missing keys in '.obs' of table layer '{table_layer_cell_clustering}' are: {', '.join(missing_keys)}."
     )
     index_columns = adata_cell_clustering.to_df().columns.astype(int)

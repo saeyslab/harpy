@@ -5,14 +5,14 @@ import warnings
 from omegaconf import DictConfig, ListConfig
 from spatialdata import SpatialData, read_zarr
 
-import sparrow as sp
-from sparrow.utils._keys import _CELLSIZE_KEY
+import harpy
+from harpy.utils._keys import _CELLSIZE_KEY
 
-log = sp.utils.get_pylogger(__name__)
+log = harpy.utils.get_pylogger(__name__)
 
 
-class SparrowPipeline:
-    """Sparrow pipeline."""
+class HarpyPipeline:
+    """Harpy pipeline."""
 
     def __init__(self, cfg: DictConfig, image_name: str = "raw_image"):
         self.cfg = cfg
@@ -22,7 +22,7 @@ class SparrowPipeline:
 
     def run_pipeline(self) -> SpatialData:
         """Run the pipeline."""
-        # Checks the config paths, see the src/sparrow/configs and local configs folder for settings
+        # Checks the config paths, see the src/harpy/configs and local configs folder for settings
         _check_config(self.cfg)
 
         # Supress _core_genes futerewarnings
@@ -80,7 +80,7 @@ class SparrowPipeline:
                         f"Provided image layer '{self.loaded_image_name}' not in SpatialData object loaded from zarr."
                     )
                 log.info(
-                    f"Applying SparrowPipeline on '{self.loaded_image_name}' image layer in provided SpatialData object."
+                    f"Applying HarpyPipeline on '{self.loaded_image_name}' image layer in provided SpatialData object."
                 )
                 if self.cfg.dataset.image != self.cfg.paths.sdata:
                     # changing backing directory
@@ -91,7 +91,7 @@ class SparrowPipeline:
 
         else:
             log.info("Creating sdata.")
-            sdata = sp.io.create_sdata(
+            sdata = harpy.io.create_sdata(
                 input=filename_pattern,
                 output_path=self.cfg.paths.sdata,
                 img_layer=self.loaded_image_name,
@@ -106,7 +106,7 @@ class SparrowPipeline:
 
     def clean(self, sdata: SpatialData) -> SpatialData:
         """Cleaning step, the second step of the pipeline, performs tilingCorrection and preprocessing of the image to improve image quality."""
-        sp.pl.plot_image(
+        harpy.pl.plot_image(
             sdata=sdata,
             output=os.path.join(self.cfg.paths.output_dir, "original"),
             crd=self.cfg.clean.small_size_vis,
@@ -121,7 +121,7 @@ class SparrowPipeline:
 
             output_layer = self.cfg.clean.output_img_layer_tiling_correction
 
-            sdata, flatfields = sp.im.tiling_correction(
+            sdata, flatfields = harpy.im.tiling_correction(
                 sdata=sdata,
                 img_layer=self.cleaned_image_name,
                 crd=self.cfg.clean.crop_param if self.cfg.clean.crop_param is not None else None,
@@ -138,7 +138,7 @@ class SparrowPipeline:
             # Write plot to given path if output is enabled
             if "tiling_correction" in self.cfg.paths:
                 log.info(f"Writing tiling correction plot to {self.cfg.paths.tiling_correction}")
-                sp.pl.tiling_correction(
+                harpy.pl.tiling_correction(
                     sdata=sdata,
                     img_layer=[self.loaded_image_name, self.cleaned_image_name],
                     crd=self.cfg.clean.small_size_vis if self.cfg.clean.small_size_vis is not None else None,
@@ -147,12 +147,12 @@ class SparrowPipeline:
                 for i, flatfield in enumerate(flatfields):
                     # flatfield can be None is tiling correction failed.
                     if flatfield is not None:
-                        sp.pl.flatfield(
+                        harpy.pl.flatfield(
                             flatfield,
                             output=f"{self.cfg.paths.tiling_correction}_flatfield_{i}",
                         )
 
-            sp.pl.plot_image(
+            harpy.pl.plot_image(
                 sdata=sdata,
                 output=os.path.join(self.cfg.paths.output_dir, self.cleaned_image_name),
                 crd=self.cfg.clean.small_size_vis,
@@ -166,7 +166,7 @@ class SparrowPipeline:
 
             output_layer = self.cfg.clean.output_img_layer_min_max_filtering
 
-            sdata = sp.im.min_max_filtering(
+            sdata = harpy.im.min_max_filtering(
                 sdata=sdata,
                 img_layer=self.cleaned_image_name,
                 crd=self.cfg.clean.crop_param if self.cfg.clean.crop_param is not None else None,
@@ -182,7 +182,7 @@ class SparrowPipeline:
 
             log.info("Min max filtering finished.")
 
-            sp.pl.plot_image(
+            harpy.pl.plot_image(
                 sdata=sdata,
                 output=os.path.join(self.cfg.paths.output_dir, self.cleaned_image_name),
                 crd=self.cfg.clean.small_size_vis,
@@ -196,7 +196,7 @@ class SparrowPipeline:
 
             output_layer = self.cfg.clean.output_img_layer_clahe
 
-            sdata = sp.im.enhance_contrast(
+            sdata = harpy.im.enhance_contrast(
                 sdata=sdata,
                 img_layer=self.cleaned_image_name,
                 crd=self.cfg.clean.crop_param if self.cfg.clean.crop_param is not None else None,
@@ -214,7 +214,7 @@ class SparrowPipeline:
 
             log.info("Contrast enhancing finished.")
 
-            sp.pl.plot_image(
+            harpy.pl.plot_image(
                 sdata=sdata,
                 output=os.path.join(self.cfg.paths.output_dir, self.cleaned_image_name),
                 crd=self.cfg.clean.small_size_vis,
@@ -241,7 +241,7 @@ class SparrowPipeline:
         self.labels_layer_name = self.cfg.segmentation.output_labels_layer
 
         # Perform segmentation
-        sdata = sp.im.segment(
+        sdata = harpy.im.segment(
             sdata=sdata,
             img_layer=self.cleaned_image_name,
             output_labels_layer=self.labels_layer_name,
@@ -267,7 +267,7 @@ class SparrowPipeline:
 
         log.info("Segmentation finished.")
 
-        sp.pl.segment(
+        harpy.pl.segment(
             sdata=sdata,
             crd=self.cfg.segmentation.small_size_vis
             if self.cfg.segmentation.small_size_vis is not None
@@ -278,7 +278,7 @@ class SparrowPipeline:
         )
 
         if self.cfg.segmentation.expand_radius:
-            sdata = sp.im.expand_labels_layer(
+            sdata = harpy.im.expand_labels_layer(
                 sdata,
                 labels_layer=self.labels_layer_name,
                 distance=self.cfg.segmentation.expand_radius,
@@ -292,7 +292,7 @@ class SparrowPipeline:
             self.shapes_layer_name = f"expanded_cells_shapes_{self.cfg.segmentation.expand_radius}"
             self.labels_layer_name = f"expanded_cells_labels_{self.cfg.segmentation.expand_radius}"
 
-            sp.pl.segment(
+            harpy.pl.segment(
                 sdata=sdata,
                 crd=self.cfg.segmentation.small_size_vis
                 if self.cfg.segmentation.small_size_vis is not None
@@ -306,7 +306,7 @@ class SparrowPipeline:
 
     def allocate(self, sdata: SpatialData) -> SpatialData:
         """Allocation step, the fourth step of the pipeline, creates the adata object from the mask and allocates the transcripts from the supplied file."""
-        sdata = sp.io.read_transcripts(
+        sdata = harpy.io.read_transcripts(
             sdata,
             path_count_matrix=self.cfg.dataset.coords,
             transform_matrix=self.cfg.dataset.transform_matrix,
@@ -324,7 +324,7 @@ class SparrowPipeline:
 
         log.info("Start allocation.")
 
-        sdata = sp.tb.allocate(
+        sdata = harpy.tb.allocate(
             sdata=sdata,
             labels_layer=self.labels_layer_name,
             output_layer=self.cfg.allocate.table_layer_name,
@@ -333,7 +333,7 @@ class SparrowPipeline:
 
         log.info("Allocation finished.")
 
-        sp.pl.plot_shapes(
+        harpy.pl.plot_shapes(
             sdata,
             img_layer=self.cleaned_image_name,
             shapes_layer=self.shapes_layer_name,
@@ -343,7 +343,7 @@ class SparrowPipeline:
             output=self.cfg.paths.polygons,
         )
 
-        sp.pl.analyse_genes_left_out(
+        harpy.pl.analyse_genes_left_out(
             sdata,
             labels_layer=self.labels_layer_name,
             table_layer=self.cfg.allocate.table_layer_name,
@@ -353,7 +353,7 @@ class SparrowPipeline:
         log.info("Preprocess AnnData.")
 
         # Perform preprocessing.
-        sdata = sp.tb.preprocess_transcriptomics(
+        sdata = harpy.tb.preprocess_transcriptomics(
             sdata,
             labels_layer=self.labels_layer_name,
             table_layer=self.cfg.allocate.table_layer_name,
@@ -367,13 +367,13 @@ class SparrowPipeline:
 
         log.info("Preprocessing AnnData finished.")
 
-        sp.pl.preprocess_transcriptomics(
+        harpy.pl.preprocess_transcriptomics(
             sdata,
             table_layer=self.cfg.allocate.table_layer_name,
             output=self.cfg.paths.preprocess_adata,
         )
 
-        sp.pl.plot_shapes(
+        harpy.pl.plot_shapes(
             sdata,
             img_layer=self.cleaned_image_name,
             shapes_layer=self.shapes_layer_name,
@@ -388,7 +388,7 @@ class SparrowPipeline:
         )
 
         # Filter all cells based on size and distance
-        sdata = sp.tb.filter_on_size(
+        sdata = harpy.tb.filter_on_size(
             sdata,
             labels_layer=self.labels_layer_name,
             table_layer=self.cfg.allocate.table_layer_name,
@@ -398,7 +398,7 @@ class SparrowPipeline:
             overwrite=True,
         )
 
-        sp.pl.plot_shapes(
+        harpy.pl.plot_shapes(
             sdata,
             img_layer=self.cleaned_image_name,
             shapes_layer=self.shapes_layer_name,
@@ -414,7 +414,7 @@ class SparrowPipeline:
 
         log.info("Start clustering")
 
-        sdata = sp.tb.leiden(
+        sdata = harpy.tb.leiden(
             sdata,
             labels_layer=self.labels_layer_name,
             table_layer=self.cfg.allocate.table_layer_name,
@@ -431,14 +431,14 @@ class SparrowPipeline:
 
         log.info("Clustering finished")
 
-        sp.pl.cluster(
+        harpy.pl.cluster(
             sdata,
             table_layer=self.cfg.allocate.table_layer_name,
             key_added="leiden",
             output=self.cfg.paths.cluster,
         )
 
-        sp.pl.plot_shapes(
+        harpy.pl.plot_shapes(
             sdata,
             img_layer=self.cleaned_image_name,
             shapes_layer=self.shapes_layer_name,
@@ -454,7 +454,7 @@ class SparrowPipeline:
 
         if self.cfg.allocate.calculate_transcripts_density:
             # calculate transcript density
-            sdata = sp.im.transcript_density(
+            sdata = harpy.im.transcript_density(
                 sdata,
                 img_layer=self.cleaned_image_name,
                 crd=self.cfg.segmentation.crop_param,
@@ -463,7 +463,7 @@ class SparrowPipeline:
                 overwrite=self.cfg.allocate.overwrite,
             )
 
-            sp.pl.transcript_density(
+            harpy.pl.transcript_density(
                 sdata,
                 img_layer=[
                     self.cleaned_image_name,
@@ -487,7 +487,7 @@ class SparrowPipeline:
 
         log.info("Start scoring genes")
 
-        sdata, celltypes_scored, celltypes_all = sp.tb.score_genes(
+        sdata, celltypes_scored, celltypes_all = harpy.tb.score_genes(
             sdata=sdata,
             labels_layer=self.labels_layer_name,
             table_layer=self.cfg.allocate.table_layer_name,
@@ -504,7 +504,7 @@ class SparrowPipeline:
 
         log.info("Scoring genes finished")
 
-        sp.pl.score_genes(
+        harpy.pl.score_genes(
             sdata=sdata,
             table_layer=self.cfg.allocate.table_layer_name,
             celltypes=celltypes_scored,  # celltypes_scored, is a list of all celltypes that are scored.
@@ -522,7 +522,7 @@ class SparrowPipeline:
         """Visualisation step, the sixth and final step of the pipeline, checks the cluster cleanliness and performs nhood enrichement before saving the data as SpatialData object."""
         # Perform correction for transcripts (and corresponding celltypes) that occur in all cells and are overexpressed
         if "correct_marker_genes_dict" in self.cfg.visualize:
-            sdata = sp.tb.correct_marker_genes(
+            sdata = harpy.tb.correct_marker_genes(
                 sdata,
                 labels_layer=self.labels_layer_name,
                 table_layer=self.cfg.allocate.table_layer_name,
@@ -536,7 +536,7 @@ class SparrowPipeline:
         colors = self.cfg.visualize.colors if "colors" in self.cfg.visualize else None
 
         # Check cluster cleanliness
-        sdata, color_dict = sp.tb.cluster_cleanliness(
+        sdata, color_dict = harpy.tb.cluster_cleanliness(
             sdata,
             labels_layer=self.labels_layer_name,
             table_layer=self.cfg.allocate.table_layer_name,
@@ -547,7 +547,7 @@ class SparrowPipeline:
             overwrite=True,
         )
 
-        sp.pl.cluster_cleanliness(
+        harpy.pl.cluster_cleanliness(
             sdata=sdata,
             table_layer=self.cfg.allocate.table_layer_name,
             img_layer=self.cleaned_image_name,
@@ -562,14 +562,14 @@ class SparrowPipeline:
         # squidpy sometimes fails calculating/plotting nhood enrichement if a too small region is selected, therefore try add a try except.
         try:
             # calculate nhood enrichment
-            sdata = sp.tb.nhood_enrichment(
+            sdata = harpy.tb.nhood_enrichment(
                 sdata,
                 labels_layer=self.labels_layer_name,
                 table_layer=self.cfg.allocate.table_layer_name,
                 output_layer=self.cfg.allocate.table_layer_name,
                 overwrite=True,
             )
-            sp.pl.nhood_enrichment(
+            harpy.pl.nhood_enrichment(
                 sdata,
                 table_layer=self.cfg.allocate.table_layer_name,
                 output=self.cfg.paths.nhood,

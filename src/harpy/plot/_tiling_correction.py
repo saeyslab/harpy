@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from spatialdata import SpatialData
 
-from sparrow.plot import plot_shapes
+from harpy.plot import plot_shapes
 
 
 def tiling_correction(
@@ -61,7 +61,7 @@ def tiling_correction(
 
     See Also
     --------
-    sparrow.im.tiling_correction
+    harpy.im.tiling_correction
     """
     plot_shapes(
         sdata,
@@ -102,7 +102,7 @@ def flatfield(flatfield: np.ndarray, output: str | Path | None = None) -> None:
 
     See Also
     --------
-    sparrow.im.tiling_correction
+    harpy.im.tiling_correction
     """
     fig, ax = plt.subplots(1, 1, figsize=(20, 10))
     ax.imshow(flatfield, cmap="gray")

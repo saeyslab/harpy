@@ -11,10 +11,10 @@ from numpy.typing import NDArray
 from spatialdata import SpatialData
 from spatialdata.transformations import get_transformation
 
-from sparrow.image._image import _get_spatial_element
-from sparrow.table._preprocess import preprocess_proteomics
-from sparrow.table._table import add_table_layer
-from sparrow.utils._keys import _CELL_INDEX, _INSTANCE_KEY, _REGION_KEY
+from harpy.image._image import _get_spatial_element
+from harpy.table._preprocess import preprocess_proteomics
+from harpy.table._table import add_table_layer
+from harpy.utils._keys import _CELL_INDEX, _INSTANCE_KEY, _REGION_KEY
 
 
 def cell_clustering_preprocess(
@@ -29,7 +29,7 @@ def cell_clustering_preprocess(
     """
     Preprocesses spatial data for cell clustering.
 
-    This function prepares a SpatialData object for cell clustering by integrating cell segmentation masks (obtained via e.g. `sp.im.segment`) and SOM pixel/meta cluster (obtained via e.g. `sp.im.flosom`).
+    This function prepares a SpatialData object for cell clustering by integrating cell segmentation masks (obtained via e.g. `harpy.im.segment`) and SOM pixel/meta cluster (obtained via e.g. `harpy.im.flosom`).
     The function calculates the cluster count (clusters provided via `labels_layer_clusters`) for each cell in `labels_layer_cells`, normalized by cell size, and optionally by quantile normalization if `q` is provided.
     The results are stored in a specified table layer within the `sdata` object of shape (#cells, #clusters).
 
@@ -38,9 +38,9 @@ def cell_clustering_preprocess(
     sdata
         The input SpatialData object containing the spatial proteomics data.
     labels_layer_cells
-        The labels layer(s) in `sdata` that contain cell segmentation masks. These masks should be previously generated using `sp.im.segment`.
+        The labels layer(s) in `sdata` that contain cell segmentation masks. These masks should be previously generated using `harpy.im.segment`.
     labels_layer_clusters
-        The labels layer(s) in `sdata` that contain metacluster or cluster masks. These should be derived from `sp.im.flowsom`.
+        The labels layer(s) in `sdata` that contain metacluster or cluster masks. These should be derived from `harpy.im.flowsom`.
     output_layer
         The name of the table layer within `sdata` where the preprocessed data will be stored.
     q
@@ -56,8 +56,8 @@ def cell_clustering_preprocess(
 
     See Also
     --------
-    sparrow.im.flowsom : flowsom pixel clustering.
-    sparrow.tb.flowsom : flowsom cell clustering.
+    harpy.im.flowsom : flowsom pixel clustering.
+    harpy.tb.flowsom : flowsom cell clustering.
     """
     labels_layer_cells = (
         list(labels_layer_cells)

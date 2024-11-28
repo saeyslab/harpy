@@ -13,7 +13,7 @@ from InstanSeg.utils.augmentations import Augmentations
 from numpy.typing import NDArray
 from torch.jit import RecursiveScriptModule
 
-from sparrow.image.segmentation._utils import _SEG_DTYPE
+from harpy.image.segmentation._utils import _SEG_DTYPE
 
 
 def _instanseg(

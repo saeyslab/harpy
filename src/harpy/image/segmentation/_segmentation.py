@@ -20,14 +20,14 @@ from spatialdata.transformations import get_transformation
 from upath import UPath
 from xarray import DataArray
 
-from sparrow.image._image import (
+from harpy.image._image import (
     _fix_dimensions,
     _get_spatial_element,
     _get_translation,
     add_labels_layer,
 )
-from sparrow.image.segmentation._align_masks import align_labels_layers
-from sparrow.image.segmentation._utils import (
+from harpy.image.segmentation._align_masks import align_labels_layers
+from harpy.image.segmentation._utils import (
     _SEG_DTYPE,
     _add_depth_to_chunks_size,
     _check_boundary,
@@ -38,13 +38,13 @@ from sparrow.image.segmentation._utils import (
     _rechunk_overlap,
     _substract_depth_from_chunks_size,
 )
-from sparrow.image.segmentation.segmentation_models._baysor import _baysor as _model_points
-from sparrow.image.segmentation.segmentation_models._cellpose import cellpose_callable as _model
-from sparrow.points._points import add_points_layer
-from sparrow.shape._shape import add_shapes_layer
-from sparrow.utils._keys import _GENES_KEY
-from sparrow.utils._transformations import _identity_check_transformations_points
-from sparrow.utils.pylogger import get_pylogger
+from harpy.image.segmentation.segmentation_models._baysor import _baysor as _model_points
+from harpy.image.segmentation.segmentation_models._cellpose import cellpose_callable as _model
+from harpy.points._points import add_points_layer
+from harpy.shape._shape import add_shapes_layer
+from harpy.utils._keys import _GENES_KEY
+from harpy.utils._transformations import _identity_check_transformations_points
+from harpy.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
 
@@ -101,10 +101,10 @@ def segment(
         Boundary parameter passed to `dask.array.map_overlap`.
     trim
         If set to `True`, overlapping regions will be processed using the `squidpy` algorithm.
-        If set to `False`, the `sparrow` algorithm will be employed instead. For dense cell distributions,
+        If set to `False`, the `harpy` algorithm will be employed instead. For dense cell distributions,
         we recommend setting trim to `False`.
     iou
-        If set to `True`, will try to harmonize labels across chunks using a label adjacency graph with an iou threshold (see `sparrow.image.segmentation.utils._link_labels`). If set to `False`, conflicts will be resolved using an algorithm that only retains masks with the center in the chunk.
+        If set to `True`, will try to harmonize labels across chunks using a label adjacency graph with an iou threshold (see `harpy.image.segmentation.utils._link_labels`). If set to `False`, conflicts will be resolved using an algorithm that only retains masks with the center in the chunk.
         Setting `iou` to `False` gives good results if there is reasonable agreement of the predicted labels accross adjacent chunks.
     iou_depth
         iou depth used for harmonizing labels across chunks. Note that if `labels_layer_align` is specified, `iou_depth` will also be used for harmonizing labels between different chunks.
@@ -234,10 +234,10 @@ def segment_points(
         Boundary parameter passed to `dask.array.map_overlap`.
     trim
         If set to True, overlapping regions will be processed using the `squidpy` algorithm.
-        If set to False, the `sparrow` algorithm will be employed instead. For dense cell distributions,
+        If set to False, the `harpy` algorithm will be employed instead. For dense cell distributions,
         we recommend setting trim to False.
     iou
-        If set to True, will try to harmonize labels across chunks using a label adjacency graph with an iou threshold (see `sparrow.image.segmentation.utils._link_labels`). If set to False, conflicts will be resolved using an algorithm that only retains masks with the center in the chunk.
+        If set to True, will try to harmonize labels across chunks using a label adjacency graph with an iou threshold (see `harpy.image.segmentation.utils._link_labels`). If set to False, conflicts will be resolved using an algorithm that only retains masks with the center in the chunk.
         Setting `iou` to False gives good results if there is reasonable agreement of the predicted labels accross adjacent chunks.
     iou_depth
         iou depth used for harmonizing labels across chunks. Note that if `labels_layer_align` is specified, `iou_depth` will also be used for harmonizing labels between different chunks.

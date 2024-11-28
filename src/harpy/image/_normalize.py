@@ -8,8 +8,8 @@ from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import get_transformation
 
-from sparrow.image._image import _get_spatial_element, add_image_layer
-from sparrow.image._map import map_image
+from harpy.image._image import _get_spatial_element, add_image_layer
+from harpy.image._map import map_image
 
 
 def normalize(

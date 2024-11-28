@@ -50,7 +50,7 @@ Please read our documentation to learn more.
 
 ```
 
-The Harpy Python package described here builds on the spatial transcriptomics analysis tool [SPArrOW](https://github.com/saeyslab/napari-sparrow) and keeps the package name for compatibility.
+The Harpy Python package described here builds on the spatial transcriptomics analysis tool [SPArrOW](https://github.com/saeyslab/napari-sparrow).
 
 For spatial proteomics analysis, cite [the Harpy GitHub repository](https://github.com/saeyslab/harpy).
 

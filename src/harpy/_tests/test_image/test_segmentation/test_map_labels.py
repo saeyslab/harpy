@@ -1,6 +1,6 @@
 from spatialdata import SpatialData
 
-from sparrow.image import map_labels
+from harpy.image import map_labels
 
 
 def test_map_labels(sdata_multi_c_no_backed: SpatialData):

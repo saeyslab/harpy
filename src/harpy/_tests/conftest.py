@@ -9,11 +9,11 @@ from omegaconf import DictConfig
 from spatialdata import read_zarr
 from spatialdata.datasets import blobs
 
-from sparrow.datasets.cluster_blobs import cluster_blobs
-from sparrow.datasets.pixie_example import pixie_example
-from sparrow.datasets.proteomics import mibi_example
-from sparrow.datasets.registry import get_registry
-from sparrow.datasets.transcriptomics import (
+from harpy.datasets.cluster_blobs import cluster_blobs
+from harpy.datasets.pixie_example import pixie_example
+from harpy.datasets.proteomics import mibi_example
+from harpy.datasets.registry import get_registry
+from harpy.datasets.transcriptomics import (
     resolve_example,
     resolve_example_multiple_coordinate_systems,
     visium_hd_example_custom_binning,

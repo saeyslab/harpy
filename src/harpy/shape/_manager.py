@@ -19,9 +19,9 @@ from spatialdata import SpatialData, read_zarr
 from spatialdata.models._utils import MappingToCoordinateSystem_t
 from spatialdata.transformations import get_transformation
 
-from sparrow.utils._io import _incremental_io_on_disk
-from sparrow.utils._keys import _INSTANCE_KEY, _REGION_KEY
-from sparrow.utils.pylogger import get_pylogger
+from harpy.utils._io import _incremental_io_on_disk
+from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY
+from harpy.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
 
@@ -254,7 +254,7 @@ def _mask_to_polygons_rasterio(mask: Array, z_slice: int = None) -> GeoDataFrame
     --------
     >>> import numpy as np
     >>> import dask.array as da
-    >>> from sparrow.shape._manager import _mask_to_polygons_rasterio
+    >>> from harpy.shape._manager import _mask_to_polygons_rasterio
     >>> mask = da.from_array(np.array([[0, 3], [5, 5]]), chunks=(1, 1))
     >>> gdf = _mask_to_polygons_rasterio(mask)
     >>> gdf

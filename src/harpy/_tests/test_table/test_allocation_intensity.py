@@ -4,11 +4,11 @@ from anndata import AnnData
 from spatialdata import SpatialData
 from xrspatial import zonal_stats
 
-from sparrow.image.segmentation._align_masks import align_labels_layers
-from sparrow.table._allocation_intensity import (
+from harpy.image.segmentation._align_masks import align_labels_layers
+from harpy.table._allocation_intensity import (
     allocate_intensity,
 )
-from sparrow.table._regionprops import add_regionprop_features
+from harpy.table._regionprops import add_regionprop_features
 
 
 def test_integration_allocate_intensity(sdata_multi_c_no_backed: SpatialData):

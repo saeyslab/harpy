@@ -13,7 +13,7 @@ mamba env update -f environment.yml --prune
 conda activate harpy
 ```
 
-If you plan to use the `Harpy` function `sp.im.tiling_correction`, please install `jax` and `basicpy`. On Mac and Linux, this can be done via `pip install ...`, on Windows you will have to run the following commands:
+If you plan to use the `Harpy` function `harpy.im.tiling_correction`, please install `jax` and `basicpy`. On Mac and Linux, this can be done via `pip install ...`, on Windows you will have to run the following commands:
 
 ```bash
 pip install "jax[cpu]" -f https://whls.blob.core.windows.net/unstable/index.html --use-deprecated legacy-resolver
@@ -35,19 +35,19 @@ pip install git+https://github.com/saeyslab/harpy.git
 To use the plugin, run
 
 ```bash
-pip install "git+https://github.com/saeyslab/harpy.git#egg=sparrow[plugin]"
+pip install "git+https://github.com/saeyslab/harpy.git#egg=harpy[plugin]"
 ```
 
 To run `Harpy` from the `cli`:
 
 ```bash
-pip install "git+https://github.com/saeyslab/harpy.git#egg=sparrow[cli]"
+pip install "git+https://github.com/saeyslab/harpy.git#egg=harpy[cli]"
 ```
 
 To be able to run the unit tests:
 
 ```bash
-pip install "git+https://github.com/saeyslab/harpy.git#egg=sparrow[testing]"
+pip install "git+https://github.com/saeyslab/harpy.git#egg=harpy[testing]"
 ```
 
 

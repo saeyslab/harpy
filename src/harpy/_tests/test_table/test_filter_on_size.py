@@ -1,5 +1,5 @@
-from sparrow.table._preprocess import preprocess_proteomics
-from sparrow.table._table import filter_on_size
+from harpy.table._preprocess import preprocess_proteomics
+from harpy.table._table import filter_on_size
 
 
 def test_filter_on_size(sdata_multi_c_no_backed):
