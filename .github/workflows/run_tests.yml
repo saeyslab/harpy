@@ -7,9 +7,9 @@ on:
     branches:
       - main
 
-    #pull_request:
-    #  branches:
-    #    - main
+  pull_request:
+    branches:
+      - main
 
     paths:
       - "src/harpy/**"
@@ -67,8 +67,8 @@ jobs:
         run: |
           conda activate harpy
           pip install -e '.[testing]'
-          pip install tox tox-gh-actions
-          tox
+          pytest --ignore=src/harpy/_tests/test_widget.py --color=yes --cov=dummy --cov-config=pyproject.toml --cov-report=xml --cov-report=term-missing
+
         env:
           PLATFORM: ${{ matrix.os }}
 

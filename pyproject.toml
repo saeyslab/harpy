@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 # pyproject.toml file content
 [tool.coverage.run]
-omit = ["src/harpy/_tests/*", "experiments/*", "src/harpy/widgets/*" ]
+omit = ["src/harpy/_tests/*", "experiments/*", "src/harpy/widgets/*", "docs/*" ]
 
 [tool.ruff]
 src = ["src"]
