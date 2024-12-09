@@ -21,7 +21,9 @@ try:
     from harpy.utils._flowsom import _flowsom
 
 except ImportError:
-    log.warning("'flowsom' not installed, to use 'harpy.tb.flowsom', please install this library.")
+    log.warning(
+        "'flowsom' not installed, to use 'harpy.tb.flowsom', please install this library (https://git@github.com/saeyslab/FlowSOM_Python)."
+    )
 
 
 def flowsom(

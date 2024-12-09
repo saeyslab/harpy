@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import dask.array as da
 import numpy as np
-import squidpy as sq
 from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import Translation, get_transformation
@@ -29,6 +28,11 @@ try:
     import cv2
 except ImportError:
     log.warning("'OpenCV (cv2)' not installed, to use 'harpy.im.tiling_correction' please install this library.")
+
+try:
+    import squidpy as sq
+except ImportError:
+    log.warning("'squidpy' not installed, to use 'harpy.im.tiling_correction' please install this library.")
 
 
 def tiling_correction(
