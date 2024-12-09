@@ -18,4 +18,3 @@ python:
       path: .
       extra_requirements:
         - docs
-        - clustering
