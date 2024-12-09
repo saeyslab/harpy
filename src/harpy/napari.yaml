@@ -1,25 +1,25 @@
-name: harpy
+name: harpy-analysis
 display_name: harpy
 contributions:
   commands:
-    - id: harpy.widgets.wizard_widget
+    - id: harpy-analysis.widgets.wizard_widget
       python_name: harpy.widgets._wizard_widget:wizard_widget
       title: Wizard
-    - id: harpy.widgets.clean_widget
+    - id: harpy-analysis.widgets.clean_widget
       python_name: harpy.widgets._clean_widget:clean_widget
       title: Cleaning
-    - id: harpy.widgets.segment_widget
+    - id: harpy-analysis.widgets.segment_widget
       python_name: harpy.widgets._segment_widget:segment_widget
       title: Segment
-    - id: harpy.widgets.allocate_widget
+    - id: harpy-analysis.widgets.allocate_widget
       python_name: harpy.widgets._allocate_widget:allocate_widget
       title: Allocate
-    - id: harpy.widgets.annotate_widget
+    - id: harpy-analysis.widgets.annotate_widget
       python_name: harpy.widgets._annotate_widget:annotate_widget
       title: Annotate
   widgets:
     # display_name is the name shown in the napari menu
-    - command: harpy.widgets.wizard_widget
+    - command: harpy-analysis.widgets.wizard_widget
       display_name: Wizard
     # - command: harpy.widgets.clean_widget
     #   display_name: Clean
