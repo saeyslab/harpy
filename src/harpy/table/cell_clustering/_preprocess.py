@@ -86,7 +86,7 @@ def cell_clustering_preprocess(
         ), f"Provided labels layers '{_labels_layer_cells}' and '{_labels_layer_clusters}' do not have the same shape."
 
         assert (
-            get_transformation(se_labels) == get_transformation(se_clusters)
+            get_transformation(se_labels, get_all=True) == get_transformation(se_clusters, get_all=True)
         ), f"Transformation on provided labels layers '{_labels_layer_cells}' and '{_labels_layer_clusters}' are not equal. This is currently not supported."
 
         if i == 0:

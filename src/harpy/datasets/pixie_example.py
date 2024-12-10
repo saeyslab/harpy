@@ -96,9 +96,7 @@ def pixie_example(fovs: list | None = None, with_pixel_output=True, with_cells_o
             output_layer=f"raw_image_{fov}",
             c_coords=channels,
             overwrite=True,
-            # transformation={
-            #     fov: sd.transformations.Identity()
-            # }
+            transformations={fov: sd.transformations.Identity()},
         )
 
         sdata = harpy.im.add_labels_layer(
@@ -106,9 +104,7 @@ def pixie_example(fovs: list | None = None, with_pixel_output=True, with_cells_o
             arr=imread.imread(os.path.join(path_segment_data, f"{fov}_nuclear.tiff")).squeeze(),
             output_layer=f"label_nuclear_{fov}",
             overwrite=True,
-            # transformation={
-            #     fov: sd.transformations.Identity()
-            # }
+            transformations={fov: sd.transformations.Identity()},
         )
 
         sdata = harpy.im.add_labels_layer(
@@ -116,9 +112,7 @@ def pixie_example(fovs: list | None = None, with_pixel_output=True, with_cells_o
             arr=imread.imread(os.path.join(path_segment_data, f"{fov}_whole_cell.tiff")).squeeze(),
             output_layer=f"label_whole_{fov}",
             overwrite=True,
-            # transformation={
-            #     fov: sd.transformations.Identity()
-            # }
+            transformations={fov: sd.transformations.Identity()},
         )
     if with_cells_output:
         prefix = "label_whole_"
