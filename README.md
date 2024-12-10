@@ -17,7 +17,7 @@ Note: This package is still under very active development.
 
 ## Installation
 
-Check out the docs for [installation instructions](docs/installation.md).
+Check out the docs for [installation instructions](https://github.com/saeyslab/harpy/blob/main/docs/installation.md).
 
 ## Tutorials
 
@@ -25,11 +25,11 @@ Tutorials are available [here](https://harpy.readthedocs.io/en/latest/).
 
 ## Usage
 
-[Learn](docs/usage.md) how Harpy can be integrated into your workflow in different ways.
+[Learn](https://github.com/saeyslab/harpy/blob/main/docs/usage.md) how Harpy can be integrated into your workflow in different ways.
 
 ## Contributing
 
-See [here](docs/contributing.md) for info on how to contribute to Harpy.
+See [here](https://github.com/saeyslab/harpy/blob/main/docs/contributing.md) for info on how to contribute to Harpy.
 
 ## References
 
@@ -37,7 +37,7 @@ See [here](docs/contributing.md) for info on how to contribute to Harpy.
 
 ## License
 
-Check license under license. Harpy is free for academic usage.
+Check the [license](https://github.com/saeyslab/harpy/blob/main/LICENSE). Harpy is free for academic usage.
 For commercial usage, please contact Saeyslab.
 
 ## Issues

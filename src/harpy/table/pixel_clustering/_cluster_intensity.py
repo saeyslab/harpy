@@ -27,6 +27,7 @@ def cluster_intensity(
     img_layer: str | Iterable[str],
     labels_layer: str | Iterable[str],
     output_layer: str,
+    to_coordinate_system: str | Iterable[str] = "global",
     channels: int | str | Iterable[int] | Iterable[str] | None = None,
     chunks: str | int | tuple[int, ...] | None = 10000,
     overwrite=False,
@@ -50,6 +51,10 @@ def cluster_intensity(
         The labels layer in `sdata` that contains the SOM cluster IDs. I.e. the `output_layer_clusters` labels layer obtained through `harpy.im.flowsom`.
     output_layer
         The output table layer in `sdata` where results are stored.
+    to_coordinate_system
+        The coordinate system that holds `img_layer` and `labels_layer`.
+        If `img_layer` and `labels_layer` are provided as a list,
+        elements in `to_coordinate_system` are the respective coordinate systems that holds the elements in `img_layer` and `labels_layer`.
     channels
         Specifies the channels to be included in the intensity calculation.
     chunks
@@ -64,6 +69,8 @@ def cluster_intensity(
     Raises
     ------
     AssertionError
+        If number of provided `img_layer`, `labels_layer` and `to_coordinate_system` is not equal.
+    AssertionError
         If some labels in `labels_layer` are not found in the provided mapping pandas Series.
 
     See Also
@@ -76,10 +83,19 @@ def cluster_intensity(
         if isinstance(labels_layer, Iterable) and not isinstance(labels_layer, str)
         else [labels_layer]
     )
+    to_coordinate_system = (
+        list(to_coordinate_system)
+        if isinstance(to_coordinate_system, Iterable) and not isinstance(to_coordinate_system, str)
+        else [to_coordinate_system]
+    )
 
-    assert len(img_layer) == len(labels_layer)
+    assert (
+        len(img_layer) == len(labels_layer) == len(to_coordinate_system)
+    ), "The number of provided 'img_layer', 'labels_layer' and 'to_coordinate_system' should be equal."
 
-    for i, (_img_layer, _labels_layer) in enumerate(zip(img_layer, labels_layer)):
+    for i, (_img_layer, _labels_layer, _to_coordinate_system) in enumerate(
+        zip(img_layer, labels_layer, to_coordinate_system)
+    ):
         se = _get_spatial_element(sdata, layer=_labels_layer)
 
         labels = da.unique(se.data).compute()
@@ -100,6 +116,7 @@ def cluster_intensity(
             labels_layer=_labels_layer,
             output_layer=output_layer,
             channels=channels,
+            to_coordinate_system=_to_coordinate_system,
             chunks=chunks,
             append=append,
             overwrite=overwrite,
