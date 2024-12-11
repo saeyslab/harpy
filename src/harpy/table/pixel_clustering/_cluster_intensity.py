@@ -58,7 +58,7 @@ def cluster_intensity(
     channels
         Specifies the channels to be included in the intensity calculation.
     chunks
-        Chunk sizes for processing. If provided as a tuple, it should contain chunk sizes for `c`, `(z)`, `y`, `x`.
+        Chunk sizes for processing. If provided as a `tuple`, it should contain chunk sizes for `c`, `(z)`, `y`, `x`.
     overwrite
         If True, overwrites the `output_layer` if it already exists in `sdata`.
 
