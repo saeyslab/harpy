@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from collections.abc import Iterable
 
 import dask.array as da
@@ -7,14 +8,17 @@ import numpy as np
 import pandas as pd
 from anndata import AnnData
 from dask.array import Array
+from dask.distributed import Client
 from numpy.typing import NDArray
-from spatialdata import SpatialData
+from spatialdata import SpatialData, read_zarr
+from spatialdata.models import Image3DModel
 from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import get_transformation
 
 from harpy.image._image import _get_spatial_element, add_labels_layer
 from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY, _SPATIAL, ClusteringKey
 from harpy.utils.pylogger import get_pylogger
+from harpy.utils.utils import _get_uint_dtype
 
 log = get_pylogger(__name__)
 
@@ -39,6 +43,8 @@ def flowsom(
     random_state: int = 100,
     chunks: str | int | tuple[int, ...] | None = None,
     scale_factors: ScaleFactors_t | None = None,
+    client: Client | None = None,
+    persist_intermediate: bool = True,
     overwrite: bool = False,
     **kwargs,  # keyword arguments passed to _flowsom
 ) -> tuple[SpatialData, fs.FlowSOM, pd.Series]:
@@ -67,9 +73,18 @@ def flowsom(
     random_state
         A random state for reproducibility of the clustering and sampling.
     chunks
-        Chunk sizes for processing. If provided as a tuple, it should contain chunk sizes for `c`, `(z)`, `y`, `x`.
+        Chunk sizes used for flowsom inference step on `img_layer`. If provided as a tuple, it should contain chunk sizes for `c`, `(z)`, `y`, `x`.
     scale_factors
         Scale factors to apply for multiscale
+    client
+        A Dask `Client` instance. If specified, during inference, the trained `fs.FlowSOM` model will be scattered (`client.scatter(...)`).
+        This reduces the size of the task graph and can improve performance by minimizing data transfer overhead during computation.
+        If not specified, Dask will use the default scheduler as configured on your system (e.g., single-threaded, multithreaded, or a global client if one is running).
+    persist_intermediate
+        If set to `True` will persit intermediate computation in memory. If `img_layer`, or one of the elements in `img_layer` is large, this could lead to increased ram usage.
+        Set to `False` to write to intermediate zarr store instead, which will reduce ram usage, but will increase computation time slightly.
+        We advice to set `persist_intermediate` to `True`, as it will only persist an array of dimension `(2,z,y,x)`, of dtype `numpy.uint8`.
+        Ignored if `sdata` is not backed by a zarr store.
     overwrite
         If True, overwrites the `output_layer_cluster` and/or `output_layer_metacluster` if it already exists in `sdata`.
     **kwargs
@@ -132,9 +147,6 @@ def flowsom(
                 _array_dim == arr.ndim
             ), "Image layers specified via parameter `img_layer` should all have same number of dimensions."
 
-        if chunks is not None:
-            arr = arr.rechunk(chunks)
-
         to_squeeze = False
         if arr.ndim == 3:
             # add trivial z dimension for 2D case
@@ -169,23 +181,49 @@ def flowsom(
         # 3D case, save z,y,x position
         adata.obsm[_SPATIAL] = arr_sampled[:, -3:]
 
-    _, fsom = _flowsom(adata, n_clusters=n_clusters, seed=random_state, **kwargs)
+    xdim = kwargs.pop("xdim", 10)
+    ydim = kwargs.pop("ydim", 10)
+    dtype = _get_uint_dtype(value=xdim * ydim)
+    _, fsom = _flowsom(adata, n_clusters=n_clusters, seed=random_state, xdim=xdim, ydim=ydim, **kwargs)
+
+    if client is not None:
+        fsom_future = client.scatter(fsom)
+    else:
+        fsom_future = fsom
 
     assert len(img_layer) == len(_arr_list)
     # 2) apply fsom on all data
     for i, _array in enumerate(_arr_list):
+        if chunks is not None:
+            if to_squeeze:
+                # fix chunks to account for fact that we added trivial z-dimension
+                if isinstance(chunks, Iterable) and not isinstance(chunks, str):
+                    chunks = (chunks[0], 1, chunks[1], chunks[2])
+            _array = _array.rechunk(chunks)
         output_chunks = ((2,), _array.chunks[1], _array.chunks[2], _array.chunks[3])
 
         # predict flowsom clusters
         _labels_flowsom = da.map_blocks(
             _predict_flowsom_clusters_chunk,
             _array,  # can also be chunked in c dimension, drop_axis and new_axis take care of this
-            dtype=np.uint32,
+            dtype=dtype,
             chunks=output_chunks,
             drop_axis=0,
             new_axis=0,
-            fsom=fsom,
+            fsom=fsom_future,
         )
+
+        # write to intermediate zarr slot or persist, otherwise dask will run the flowsom inference two times (once for clusters, once for metaclusters),
+        # once for each time we call add_labels_layer.
+        if sdata.is_backed() and not persist_intermediate:
+            se_intermediate = Image3DModel.parse(_labels_flowsom)
+            _labels_flowsom_name = f"labels_flowsom_{uuid.uuid4()}"
+            sdata.images[_labels_flowsom_name] = se_intermediate
+            sdata.write_element(_labels_flowsom_name)
+            sdata = read_zarr(sdata.path)
+            _labels_flowsom = _get_spatial_element(sdata, layer=_labels_flowsom_name).data
+        else:
+            _labels_flowsom = _labels_flowsom.persist()
 
         _labels_flowsom_clusters, _labels_flowsom_metaclusters = _labels_flowsom
 
@@ -207,6 +245,10 @@ def flowsom(
             scale_factors=scale_factors,
             overwrite=overwrite,
         )
+
+        if sdata.is_backed() and not persist_intermediate:
+            del sdata[_labels_flowsom_name]
+            sdata.delete_element_from_disk(element_name=_labels_flowsom_name)
 
     # TODO decide on fix in flowsom to let clusters count from 1.
     # fsom cluster ID's count from 0, while labels layer cluster ID's count from 1.
@@ -294,6 +336,7 @@ def _sample_dask_array(array: Array, fraction: float = 0.1, remove_nan_columns: 
         final_array.shape[0],
         size=num_samples,
         replace=False,
+        chunks=num_samples,  # indices can not be multi-chunk, see https://github.com/dask/dask/blob/a9396a913c33de1d5966df9cc1901fd70107c99b/dask/array/random.py#L896
     )
 
     if remove_nan_columns:

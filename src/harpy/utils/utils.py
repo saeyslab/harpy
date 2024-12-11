@@ -134,8 +134,10 @@ def _get_uint_dtype(value: int) -> str:
     max_uint64 = np.iinfo(np.uint64).max
     max_uint32 = np.iinfo(np.uint32).max
     max_uint16 = np.iinfo(np.uint16).max
-
-    if max_uint16 >= value:
+    max_uint8 = np.iinfo(np.uint8).max
+    if max_uint8 >= value:
+        dtype = "uint8"
+    elif max_uint16 >= value:
         dtype = "uint16"
     elif max_uint32 >= value:
         dtype = "uint32"

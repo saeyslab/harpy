@@ -22,7 +22,7 @@ def add_grid_labels_layer(
     grid_type: str = "hexagon",  # can be either "hexagon" or "square".
     offset: tuple[int, int] = (0, 0),  # we recommend setting a non-zero offset via a translation.
     chunks: int | None = None,
-    client: Client = None,
+    client: Client | None = None,
     transformations: MappingToCoordinateSystem_t | None = None,
     scale_factors: ScaleFactors_t | None = None,
     overwrite: bool = False,
