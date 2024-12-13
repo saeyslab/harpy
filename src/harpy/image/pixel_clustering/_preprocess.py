@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import os
+import shutil
+import uuid
 from collections.abc import Iterable
 
 import dask.array as da
 import numpy as np
+from dask import compute, persist
 from dask.array import Array
 from dask_image.ndfilters import gaussian_filter
 from spatialdata import SpatialData
@@ -12,6 +16,9 @@ from spatialdata.transformations import get_transformation
 
 from harpy.image._image import _get_spatial_element, add_image_layer
 from harpy.image._normalize import _nonzero_nonnan_percentile, _nonzero_nonnan_percentile_axis_0
+from harpy.utils.pylogger import get_pylogger
+
+log = get_pylogger(__name__)
 
 
 def pixel_clustering_preprocess(
@@ -26,6 +33,8 @@ def pixel_clustering_preprocess(
     norm_sum: bool = True,
     chunks: str | int | tuple[int, ...] | None = None,
     scale_factors: ScaleFactors_t | None = None,
+    cast_dtype: type | None = np.float32,
+    persist_intermediate: bool = True,
     overwrite: bool = False,
 ) -> SpatialData:
     """
@@ -59,6 +68,15 @@ def pixel_clustering_preprocess(
         Chunk sizes for processing. If provided as a tuple, it should contain chunk sizes for `c`, `(z)`, `y`, `x`.
     scale_factors
         Scale factors to apply for multiscale
+    persist_intermediate
+        If set to `True` will persist all preprocessed elements in `img_layer` in memory.
+        If the elements in `img_layer` are large, this could lead to increased ram usage.
+        Set to `False` to write to intermediate zarr store instead, which will reduce ram usage, but will increase computation time slightly.
+        Persist or writing to intermediate zarr store is needed, otherwise Dask will not be able to optimize the computation graph for the multiple `img_layer` use case.
+        Ignored if `sdata` is not backed by a zarr store, or if there is only one element in `img_layer`.
+    cast_dtype
+        Image data in `img_layer` will be casted to `dtype` before preprocessing starts. If set to None, and input image is of integer type, normalizations will lead to
+        data of type `numpy.float64` due to quantile normalizations, leading to increased memory usage.
     overwrite
         If `True`, overwrites existing data in `output_layer`.
 
@@ -116,6 +134,8 @@ def pixel_clustering_preprocess(
             # add trivial z dimension for 2D case
             arr = arr[:, None, ...]
             to_squeeze = True
+        if cast_dtype is not None:
+            arr = arr.astype(cast_dtype)
         _arr_list.append(arr)
 
     if q is not None:
@@ -126,6 +146,7 @@ def pixel_clustering_preprocess(
             results_arr_percentile.append(arr_percentile)
         arr_percentile = da.stack(results_arr_percentile, axis=0)
         arr_percentile_mean = da.mean(arr_percentile, axis=0)  # mean over all images
+        # arr_percentile_mean has shape (#n_channels,)
         # for multiple img_layer, in ark one uses np.mean( arr_percentile ) as the percentile to normalize
 
     # 2) calculate norm sum percentile for img_layer
@@ -191,14 +212,37 @@ def pixel_clustering_preprocess(
 
     if q_post is not None:
         arr_percentile_post_norm = da.stack(results_arr_percentile_post_norm, axis=0)
-        arr_percentile_post_norm_mean = da.mean(arr_percentile_post_norm, axis=0)
+        arr_percentile_post_norm_mean = da.mean(
+            arr_percentile_post_norm, axis=0
+        )  # arr_percentil_post_mean is of shape (#n_channels,)
 
     # Now normalize each image layer by arr_percentile_post_norm and add to spatialdata object
-    for i in range(len(_arr_list)):
-        if q_post is not None:
+    if q_post is not None:
+        for i in range(len(_arr_list)):
             _arr_list[i] = _arr_list[i] / da.asarray(arr_percentile_post_norm_mean[..., None, None, None])
 
-        # save the preprocessed images, in this way we get the preprocessed images from which we sample
+    # need to let dask do optimization of the computation graph in case there are multiple images
+    # otherwise will recaclulate whole preprocessing every time we add an image layer to the sdata zarr store
+    # should only do this if there is more than one image
+    clean_up = False
+    if len(_arr_list) > 1:
+        if sdata.is_backed() and not persist_intermediate:
+            clean_up = True
+            _uuid = uuid.uuid4()
+            for i, _arr in enumerate(_arr_list):
+                _intermediate_zarr_store = os.path.join(os.path.dirname(sdata.path), f"{i}_{_uuid}.zarr")
+                log.info(f"Preparing to write to intermediate zarr store {_intermediate_zarr_store}.")
+                _arr.to_zarr(_intermediate_zarr_store, compute=False)
+            # write to intermediate zarr store, and let dask optimize computation graph
+            compute(_arr_list)
+            # load them dask array back lazily
+            for i in range(len(_arr_list)):
+                _arr_list[i] = da.from_zarr(os.path.join(os.path.dirname(sdata.path), f"{i}_{_uuid}.zarr"))
+        else:
+            _arr_list = persist(*_arr_list)
+
+    # save the preprocessed images, in this way we get the preprocessed images from which we sample
+    for i in range(len(_arr_list)):
         sdata = add_image_layer(
             sdata,
             arr=_arr_list[i].squeeze(1) if to_squeeze else _arr_list[i],
@@ -208,6 +252,13 @@ def pixel_clustering_preprocess(
             c_coords=channels,
             overwrite=overwrite,
         )
+
+    if clean_up:
+        # clean up the intermediate zarr store.
+        for i in range(len(_arr_list)):
+            _intermediate_zarr_store = os.path.join(os.path.dirname(sdata.path), f"{i}_{_uuid}.zarr")
+            log.info(f"Removing intermediate zarr store {_intermediate_zarr_store}")
+            shutil.rmtree(_intermediate_zarr_store)
 
     return sdata
 

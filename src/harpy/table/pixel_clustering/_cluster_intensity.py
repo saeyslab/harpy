@@ -110,6 +110,9 @@ def cluster_intensity(
             append = False
         else:
             append = True
+        log.info(
+            f"Start allocation of intensities of image layer with name '{_img_layer}' by labels in labels layer with name '{_labels_layer}'."
+        )
         sdata = allocate_intensity(
             sdata,
             img_layer=_img_layer,
@@ -121,7 +124,11 @@ def cluster_intensity(
             append=append,
             overwrite=overwrite,
         )
+        log.info(
+            f"End allocation of image layer with name '{_img_layer}' and labels layer with name '{_labels_layer}'."
+        )
 
+    log.info("Start preprocessing.")
     # for size normalization of cluster intensities
     sdata = preprocess_proteomics(
         sdata,
@@ -134,6 +141,7 @@ def cluster_intensity(
         calculate_pca=False,
         overwrite=True,
     )
+    log.info("End preprocessing.")
 
     # we are interested in the non-normalized counts (to account for multiple fov's)
     array = sdata.tables[output_layer].layers[_RAW_COUNTS_KEY]
