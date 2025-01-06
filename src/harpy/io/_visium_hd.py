@@ -52,14 +52,13 @@ def visium_hd(
         bins_as_squares=bins_as_squares,
     )
 
-    for tables_layer in [*sdata.tables]:
-        adata = sdata[tables_layer]
+    for table_layer in [*sdata.tables]:
+        adata = sdata[table_layer]
         adata.var_names_make_unique()
         adata.X = adata.X.tocsc()
 
-        adata.obs.rename(
-            columns={VisiumHDKeys.REGION_KEY: _REGION_KEY, VisiumHDKeys.INSTANCE_KEY: _INSTANCE_KEY}, inplace=True
-        )
+        _old_instance_key = sdata[table_layer].uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY]
+        adata.obs.rename(columns={VisiumHDKeys.REGION_KEY: _REGION_KEY, _old_instance_key: _INSTANCE_KEY}, inplace=True)
         adata.uns.pop(TableModel.ATTRS_KEY)
         adata = TableModel.parse(
             adata,
@@ -67,13 +66,24 @@ def visium_hd(
             region=adata.obs[_REGION_KEY].cat.categories.to_list(),
             instance_key=_INSTANCE_KEY,
         )
-
-        del sdata[tables_layer]
-
-        sdata[tables_layer] = adata
-
-    for shapes_layer in [*sdata.shapes]:
+        # get the shapes layer for this table layer
+        for _shapes_layer in [*sdata.shapes]:
+            if table_layer in _shapes_layer:
+                shapes_layer = _shapes_layer
+                break
+        assert (
+            len(sdata[shapes_layer]) == len(adata)
+        ), f"Shapes layer containing bins '{shapes_layer}' and corresponding table '{table_layer}' should have same length."
+        sdata[shapes_layer].index = (
+            adata.obs.set_index(VisiumHDKeys.INSTANCE_KEY).loc[sdata[shapes_layer].index, _INSTANCE_KEY].values
+        )
+        if VisiumHDKeys.INSTANCE_KEY in adata.obs.columns:
+            adata.obs.drop(columns=VisiumHDKeys.INSTANCE_KEY, inplace=True)
         sdata[shapes_layer].index.name = _INSTANCE_KEY
+
+        del sdata[table_layer]
+
+        sdata[table_layer] = adata
 
     if output is not None:
         sdata.write(output)
