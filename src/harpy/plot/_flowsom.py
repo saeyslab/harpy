@@ -137,17 +137,22 @@ def pixel_clusters_heatmap(
 
     if z_score:
         df = df.apply(zscore)
+        # df = df.apply(lambda x: zscore(x, axis=0), axis=1)
         if clip_value is not None:
             df = df.clip(lower=-clip_value, upper=clip_value)
 
     # Create a heatmap
     plt.figure(figsize=figsize, **fig_kwargs)
+    annot = kwargs.pop("annot", False)
+    cmap = kwargs.pop("cmap", "coolwarm")
+    fmt = kwargs.pop("fmt", ".2f")
+    cbar_kws = kwargs.pop("cbar_kws", {"label": "Mean Intensity (z-score)"})
     sns.heatmap(
         df.transpose(),
-        annot=False,
-        cmap="coolwarm",
-        fmt=".2f",
-        cbar_kws={"label": "Mean Intensity (z-score)"},
+        annot=annot,
+        cmap=cmap,
+        fmt=fmt,
+        cbar_kws=cbar_kws,
         **kwargs,
     )
     plt.title("Mean Channel Intensity per metacluster")
