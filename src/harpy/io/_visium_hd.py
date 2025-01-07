@@ -21,8 +21,6 @@ def visium_hd(
     Read *10x Genomics* Visium HD formatted dataset.
 
     Wrapper around `spatialdata.io.readers.visium_hd.visium_hd`, but with the resulting table annotated by a labels layer.
-    To use this function, please install `spatialdata_io` via this fork: https://github.com/ArneDefauw/spatialdata-io.git@visium_hd.
-    E.g. `pip install git+https://github.com/ArneDefauw/spatialdata-io.git@visium_hd`.
 
     .. seealso::
 
