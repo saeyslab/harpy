@@ -11,8 +11,10 @@ import dask.array as da
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
+from scipy.cluster.hierarchy import dendrogram, ward
 from scipy.sparse import csr_matrix
 from scipy.stats import zscore
+from sklearn.metrics.pairwise import cosine_similarity
 from spatialdata import SpatialData, bounding_box_query
 from spatialdata.models import TableModel
 
@@ -38,9 +40,40 @@ def pixel_clusters(
     render_labels_kwargs: Mapping[str, Any] = MappingProxyType({}),  # passed to pl.render_labels
     **kwargs,  # passed to pl.show() of spatialdata_plot
 ):
-    # for unit test, check if we have to do:
-    # if output is not None:
-    #    matplotlib.use("Agg")
+    """
+    Visualize spatial distribution of pixel clusters based on labels in a `SpatialData` object, obtained using `harpy.im.flowsom`.
+
+    Parameters
+    ----------
+    sdata
+        The input SpatialData object.
+    labels_layer
+        The layer in `sdata` containing labels used to identify clusters.
+    crd
+        The coordinates for the region of interest in the format `(xmin, xmax, ymin, ymax)`. If `None`, the entire image is considered, by default `None`.
+    to_coordinate_system
+        Coordinate system to plot.
+    output
+        The path to save the generated plot. If `None`, the plot will be displayed directly using `plt.show()`.
+    render_labels_kwargs
+        Additional keyword arguments passed to `sdata.pl.render_labels`, such as `cmap` or `alpha`.
+    **kwargs
+        Additional keyword arguments passed to `sdata.pl.render_labels.pl.show`, such as `dpi` or `title`.
+
+    Returns
+    -------
+    None
+        The function generates and displays or saves a spatial plot of pixel clusters.
+
+    Raises
+    ------
+    ValueError
+        If the cropped spatial element derived from `crd` is `None`.
+
+    See Also
+    --------
+    harpy.im.flowsom
+    """
     se = _get_spatial_element(sdata, layer=labels_layer)
 
     labels_layer_crop = None
@@ -122,42 +155,121 @@ def pixel_clusters_heatmap(
     fig_kwargs: Mapping[str, Any] = MappingProxyType({}),  # kwargs passed to plt.figure, e.g. dpi
     **kwargs,  # kwargs passed to sns.heatmap
 ):
-    if metaclusters:
-        key = ClusteringKey._METACLUSTERING_KEY.value
-    else:
-        key = ClusteringKey._CLUSTERING_KEY.value
+    """
+    Generate and visualize a heatmap of mean channel intensities for clusters or metaclusters.
 
-    if metaclusters:
-        df = sdata.tables[table_layer].uns[key].copy()
-        df.index = df[key]
-        df.drop(key, axis=1, inplace=True)
-    else:
-        pass
-        # get the clusters
+    Parameters
+    ----------
+    sdata
+        The input SpatialData object.
+    table_layer
+        The table layer in `sdata` containing cluster intensity for clusters and metaclusters, obtained via `hp.tb.cluster_intensity`.
+    metaclusters
+        Whether to display mean channel intensity per metacluster (`True`) or per cluster (`False`).
+    z_score
+        Whether to z-score the intensity values for normalization. We recommend setting this to `True`.
+    clip_value
+        The value to clip the z-scored data to, for better visualization. If `None`, no clipping is performed.
+        Ignored if `z_score`is `False`.
+    output
+        The path to save the generated heatmap. If `None`, the heatmap will be displayed directly using `plt.show()`.
+    figsize
+        Size of the figure in inches (width, height).
+    fig_kwargs
+        Additional keyword arguments passed to `plt.figure`, such as `dpi`.
+    **kwargs
+        Additional keyword arguments passed to `sns.heatmap`, such as `annot`, `cmap`, or `cbar_kws`.
+
+    Returns
+    -------
+    None
+        The function generates and displays or saves a heatmap.
+
+    Notes
+    -----
+    The heatmap shows mean channel intensities for either clusters or metaclusters, optionally normalized using z-scoring.
+    Clusters and metaclusters are ordered based on hierarchical clustering of their channel intensity profiles.
+
+    The function uses cosine similarity to compute the distance matrix for hierarchical clustering of channels.
+
+    Example
+    -------
+    ```
+    harpy.tb.pixel_clusters_heatmap(
+        sdata,
+        table_layer="counts_clusters",
+        figsize=(30,20),
+        fig_kwargs={"dpi":100},
+        metaclusters=True,
+        z_score=True,
+        output="heatmap.png"
+    )
+    ```
+
+    See Also
+    --------
+    harpy.tb.cluster_intensity
+    """
+    # clusters
+    df = sdata.tables[table_layer].to_df().copy()
+    df.index = sdata.tables[table_layer].obs[_INSTANCE_KEY].values
+
+    # sort clusters by metaclusters
+    cluster_info = sdata.tables[table_layer].obs.copy()
+    cluster_info_sorted = cluster_info.sort_values([ClusteringKey._METACLUSTERING_KEY.value, _INSTANCE_KEY])
+    cluster_info_sorted.index = cluster_info_sorted[_INSTANCE_KEY]
+    sorted_clusters = cluster_info_sorted.index.tolist()
+    df = df.loc[sorted_clusters, :]
+
+    new_index_labels = []
+    for cid in df.index:
+        mc_id = cluster_info_sorted.loc[cid, ClusteringKey._METACLUSTERING_KEY.value]
+        new_index_labels.append(f"{cid} ({mc_id})")
+    df.index = new_index_labels
+
+    # metaclusters
+    df_metaclusters = sdata.tables[table_layer].uns[ClusteringKey._METACLUSTERING_KEY.value].copy()
+    df_metaclusters.index = df_metaclusters[ClusteringKey._METACLUSTERING_KEY.value]
+    df_metaclusters.drop(ClusteringKey._METACLUSTERING_KEY.value, axis=1, inplace=True)
 
     if z_score:
         df = df.apply(zscore)
-        # df = df.apply(lambda x: zscore(x, axis=0), axis=1)
+        df_metaclusters = df_metaclusters.apply(zscore)
         if clip_value is not None:
             df = df.clip(lower=-clip_value, upper=clip_value)
+            df_metaclusters = df_metaclusters.clip(lower=-clip_value, upper=clip_value)
+
+    # create dendogram to cluster channel names together that have similar features
+    # ( features are the intensity per metacluster here )
+    dist_matrix = cosine_similarity(df_metaclusters.values.T)
+    linkage_matrix = ward(dist_matrix)
+    channel_names = df_metaclusters.columns
+    dendro_info = dendrogram(linkage_matrix, labels=channel_names, no_plot=True)
+    channel_order = dendro_info["ivl"]
+    # sort both metaclusters and clusters based on dendogram clustering results
+    df_metaclusters = df_metaclusters[channel_order]
+    df = df[channel_order]
 
     # Create a heatmap
     plt.figure(figsize=figsize, **fig_kwargs)
     annot = kwargs.pop("annot", False)
     cmap = kwargs.pop("cmap", "coolwarm")
     fmt = kwargs.pop("fmt", ".2f")
-    cbar_kws = kwargs.pop("cbar_kws", {"label": "Mean Intensity (z-score)"})
+    _label = "Mean Intensity (z-score)" if z_score else "Mean Intensity"
+    cbar_kws = kwargs.pop("cbar_kws", {"label": _label})
     sns.heatmap(
-        df.transpose(),
+        df_metaclusters.transpose() if metaclusters else df.transpose(),
         annot=annot,
         cmap=cmap,
         fmt=fmt,
         cbar_kws=cbar_kws,
         **kwargs,
     )
-    plt.title("Mean Channel Intensity per metacluster")
-    plt.xlabel("Channels")
-    plt.ylabel("Cluster IDs")
+    _title = "metacluster" if metaclusters else "cluster"
+    plt.title(f"Mean Channel Intensity per {_title}")
+    plt.ylabel("Channel")
+    _x_label = "Metacluster ID" if metaclusters else "Cluster ID (Metacluster ID)"
+    plt.xlabel(_x_label)
 
     if output is None:
         plt.show()

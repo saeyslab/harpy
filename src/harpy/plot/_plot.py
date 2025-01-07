@@ -49,7 +49,7 @@ def plot_image(
     z_slice
         The z_slice to visualize in case of 3D (c,z,y,x) image.
     crd
-        The coordinates for the region of interest in the format (xmin, xmax, ymin, ymax). If None, the entire image is considered, by default None.
+        The coordinates for the region of interest in the format `(xmin, xmax, ymin, ymax)`. If `None`, the entire image is considered, by default `None`.
     to_coordinate_system
         Coordinate system to plot.
     output
@@ -95,7 +95,7 @@ def plot_labels(
     z_slice
         The z_slice to visualize in case of 3D (c,z,y,x) labels.
     crd
-        The coordinates for the region of interest in the format (xmin, xmax, ymin, ymax). If None, the entire image is considered, by default None.
+        The coordinates for the region of interest in the format `(xmin, xmax, ymin, ymax)`. If `None`, the entire image is considered, by default `None`.
     to_coordinate_system
         Coordinate system to plot.
     output
@@ -223,7 +223,7 @@ def plot_shapes(
         Column in the `shapes_layer` specifying the radius. The radius will be applied using `geometry.buffer` before plotting `shapes_layer`.
         Useful when the `geometry` of the `shapes_layer` contains points instead of polygons.
     crd
-        The coordinates for the region of interest in the format (xmin, xmax, ymin, ymax). If None, the entire image is considered, by default None.
+        The coordinates for the region of interest in the format `(xmin, xmax, ymin, ymax)`. If `None`, the entire image is considered, by default `None`.
     to_coordinate_system
         Coordinate system to plot.
     vmin
@@ -473,7 +473,7 @@ def _plot(
         Column in the `shapes_layer` specifying the radius. The radius will be applied using `geometry.buffer` before plotting `shapes_layer`.
         Useful when the `geometry` of the `shapes_layer` contains points instead of polygons.
     crd
-        The coordinates for the region of interest in the format (xmin, xmax, ymin, ymax). If None, the entire image is considered, by default None.
+        The coordinates for the region of interest in the format `(xmin, xmax, ymin, ymax)`. If `None`, the entire image is considered, by default `None`.
     to_coordinate_system
         Coordinate system to plot.
     vmin
