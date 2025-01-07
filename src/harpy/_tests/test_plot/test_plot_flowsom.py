@@ -4,11 +4,11 @@ import os
 import matplotlib
 import pytest
 
-from harpy.plot._flowsom import pixel_clusters
+from harpy.plot._flowsom import pixel_clusters, pixel_clusters_heatmap
 
 
 @pytest.mark.skipif(not importlib.util.find_spec("flowsom"), reason="requires the flowSOM library")
-def test_pixel_clusters(sdata_blobs, tmp_path):
+def test_plot_pixel_clusters(sdata_blobs, tmp_path):
     from harpy.image.pixel_clustering._clustering import flowsom
     from harpy.table.pixel_clustering._cluster_intensity import cluster_intensity
 
@@ -54,3 +54,15 @@ def test_pixel_clusters(sdata_blobs, tmp_path):
         chunks="auto",
         overwrite=True,
     )
+
+    for _metaclusters in [True, False]:
+        pixel_clusters_heatmap(
+            sdata_blobs,
+            table_layer="counts_clusters",
+            figsize=(30, 20),
+            fig_kwargs={"dpi": 100},
+            linewidths=0.01,
+            metaclusters=_metaclusters,
+            z_score=True,
+            output=os.path.join(tmp_path, f"pixel_clusters_heatmap_{_metaclusters}.png"),
+        )
