@@ -167,6 +167,9 @@ Plotting functions.
 .. autosummary::
     :toctree: generated
 
+    pl.pixel_clusters
+    pl.pixel_clusters_heatmap
+
     pl.snr_ratio
     pl.group_snr_ratio
     pl.snr_clustermap

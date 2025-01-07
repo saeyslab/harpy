@@ -170,7 +170,7 @@ def pixel_clusters_heatmap(
         Whether to z-score the intensity values for normalization. We recommend setting this to `True`.
     clip_value
         The value to clip the z-scored data to, for better visualization. If `None`, no clipping is performed.
-        Ignored if `z_score`is `False`.
+        Ignored if `z_score` is `False`.
     output
         The path to save the generated heatmap. If `None`, the heatmap will be displayed directly using `plt.show()`.
     figsize
@@ -194,17 +194,16 @@ def pixel_clusters_heatmap(
 
     Example
     -------
-    ```
-    harpy.tb.pixel_clusters_heatmap(
-        sdata,
-        table_layer="counts_clusters",
-        figsize=(30,20),
-        fig_kwargs={"dpi":100},
-        metaclusters=True,
-        z_score=True,
-        output="heatmap.png"
-    )
-    ```
+
+    >>> harpy.tb.pixel_clusters_heatmap(
+    ...     sdata,
+    ...     table_layer="counts_clusters",
+    ...     figsize=(30, 20),
+    ...     fig_kwargs={"dpi": 100},
+    ...     metaclusters=True,
+    ...     z_score=True,
+    ...     output="heatmap.png"
+    ... )
 
     See Also
     --------
