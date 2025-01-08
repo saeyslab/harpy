@@ -59,7 +59,7 @@ def flowsom(
     sdata
         The input SpatialData object.
     img_layer
-        The image layer(s) of `sdata` on which flowsom is run. It is recommended to preprocess the data with `harpy.im.pixel_clustering_preprocess`.
+        The image layer(s) of `sdata` on which flowsom is run. It is recommended to preprocess the data with :func:`harpy.im.pixel_clustering_preprocess`.
     output_layer_clusters
         The output labels layer in `sdata` to which labels layer with predicted flowsom SOM clusters are saved.
     output_layer_metaclusters
@@ -107,7 +107,7 @@ def flowsom(
     Warnings
     --------
     - The function is intended for use with spatial proteomics data. Input data should be appropriately preprocessed
-      (e.g. via `harpy.im.pixel_clustering_preprocess`) to ensure meaningful clustering results.
+      (e.g. via :func:`harpy.im.pixel_clustering_preprocess`) to ensure meaningful clustering results.
     - The cluster and metacluster ID's found in `output_layer_clusters` and `output_layer_metaclusters` count from 1, while they count from 0 in the `FlowSOM` object.
     """
     assert 0 < fraction <= 1, "Value must be between 0 and 1"

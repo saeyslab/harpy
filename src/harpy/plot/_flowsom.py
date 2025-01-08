@@ -41,7 +41,7 @@ def pixel_clusters(
     **kwargs,  # passed to pl.show() of spatialdata_plot
 ):
     """
-    Visualize spatial distribution of pixel clusters based on labels in a `SpatialData` object, obtained using `harpy.im.flowsom`.
+    Visualize spatial distribution of pixel clusters based on labels in a `SpatialData` object, obtained using :func:`harpy.im.flowsom`.
 
     Parameters
     ----------
@@ -163,7 +163,7 @@ def pixel_clusters_heatmap(
     sdata
         The input SpatialData object.
     table_layer
-        The table layer in `sdata` containing cluster intensity for clusters and metaclusters, obtained via `hp.tb.cluster_intensity`.
+        The table layer in `sdata` containing cluster intensity for clusters and metaclusters, obtained via :func:`harpy.tb.cluster_intensity`.
     metaclusters
         Whether to display mean channel intensity per metacluster (`True`) or per cluster (`False`).
     z_score
@@ -172,13 +172,17 @@ def pixel_clusters_heatmap(
         The value to clip the z-scored data to, for better visualization. If `None`, no clipping is performed.
         Ignored if `z_score` is `False`.
     output
-        The path to save the generated heatmap. If `None`, the heatmap will be displayed directly using `plt.show()`.
+        The path to save the generated heatmap. If `None`, the heatmap will be displayed directly using :func:`matplotlib.pyplot.show`.
     figsize
-        Size of the figure in inches (width, height).
+        Tuple specifying the size of the figure in inches as `(width, height)`.
+        The width determines the spacing available for cluster IDs, while the height adjusts space for channels.
+        If labels (cluster IDs or channel names) are truncated, increase the respective dimension.
+        Increase `width` if cluster IDs or are not fully visible.
+        Increase `height` if channel names are not fully visible.
     fig_kwargs
-        Additional keyword arguments passed to `plt.figure`, such as `dpi`.
+        Additional keyword arguments passed to :func:`matplotlib.pyplot.figure`, such as `dpi`.
     **kwargs
-        Additional keyword arguments passed to `sns.heatmap`, such as `annot`, `cmap`, or `cbar_kws`.
+        Additional keyword arguments passed to :func:`seaborn.heatmap`, such as `annot`, `cmap`, or `cbar_kws`.
 
     Returns
     -------
