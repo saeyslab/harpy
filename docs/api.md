@@ -152,6 +152,7 @@ Plotting functions.
     pl.plot_image
     pl.plot_shapes
     pl.plot_labels
+    pl.histogram
     pl.tiling_correction
     pl.flatfield
     pl.segment

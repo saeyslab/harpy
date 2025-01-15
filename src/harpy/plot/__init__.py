@@ -14,6 +14,7 @@ from ._qc_image import (
     clustermap,
     get_hexes,
     group_snr_ratio,
+    histogram,
     make_cols_colors,
     signal_clustermap,
     snr_clustermap,

@@ -1,12 +1,22 @@
 """Calculate various image quality metrics"""
 
+from collections.abc import Mapping
+from pathlib import Path
+from types import MappingProxyType
+from typing import Any
+
+import dask
+import dask.array as da
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
 import skimage as ski
+from matplotlib.axes import Axes
+from spatialdata import SpatialData
 
 from harpy.image import normalize
+from harpy.image._image import _get_spatial_element
 from harpy.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
@@ -18,6 +28,102 @@ except ImportError:
     log.warning(
         "'textalloc' not installed, to use 'harpy.pl.group_snr_ratio' and 'harpy.pl.snr_ratio', please install this library."
     )
+
+
+def histogram(
+    sdata: SpatialData,
+    img_layer: str,
+    channel: str,
+    bins: int,
+    range: tuple[float, float] | None = None,
+    ax: Axes = None,
+    output: str | Path = None,
+    fig_kwargs: dict[str, Any] = MappingProxyType({}),  # kwargs passed to plt.figure, e.g. dpi, figsize
+    bar_kwargs: Mapping[str, Any] = MappingProxyType({}),  # kwargs passed to ax.bar, e.g. color and alpha
+    **kwargs,
+) -> Axes:
+    """
+    Generate and visualize a histogram for a specified image channel within an image of a `SpatialData` object.
+
+    Parameters
+    ----------
+    sdata
+        The input `SpatialData` object containing the image data.
+    img_layer
+        The name of the image layer within `sdata` to analyze.
+    channel
+        The specific channel of the image data to use for the histogram.
+    bins
+        The number of bins for the histogram.
+    range
+        The range of values for the histogram as `(min, max)`.
+        If not provided, range is simply `(dask.array.nanmin(...), dask.array.nanmax(...))` thus excluding NaN.
+        Values outside the range are ignored.
+    fig_kwargs
+        Additional keyword arguments passed to `plt.figure`, such as `dpi` or `figsize`. Ignored if `ax` is `None`.
+    bar_kwargs
+        Additional keyword arguments passed to `ax.bar`, such as `color` or `alpha`.
+    ax
+        An existing axes object to plot the histogram. If `None`, a new figure and axes will be created.
+    output
+        The path to save the generated plot. If `None`, the plot will not be saved.
+    **kwargs
+        Additional keyword arguments passed to :func:`dask.array.histogram`.
+
+    Returns
+    -------
+        The axes object containing the histogram plot.
+
+    Raises
+    ------
+    AssertionError
+        If `img_layer` is not found in `sdata.images`.
+
+    Examples
+    --------
+    >>> ax = histogram(
+    ...     sdata,
+    ...     img_layer="raw_image_crop_preprocessed",
+    ...     channel="Anti Rabbit (PE C1)",
+    ...     bins=100,
+    ...     range=(0, 1.0),
+    ...     fig_kwargs={"figsize": (5, 5)},
+    ...     bar_kwargs={"color": "blue", "alpha": 0.7},
+    ...     output="histogram.png"
+    ... )
+    """
+    assert img_layer in sdata.images, f"'{img_layer}' not found in 'sdata.images'."
+    se = _get_spatial_element(sdata, layer=img_layer)
+
+    array = se.data[se.c.data.tolist().index(channel)]
+
+    if range is None:
+        range = (da.nanmin(array), da.nanmax(array))
+
+    hist, bin_edges = da.histogram(array, bins=bins, range=range, **kwargs)
+
+    hist, bin_edges = dask.compute(hist, bin_edges)
+
+    # Create axes if not provided
+    if ax is None:
+        fig, ax = plt.subplots(**fig_kwargs)
+
+    # Plot
+    bar_kwargs = dict(bar_kwargs)
+    fig_kwargs = dict(fig_kwargs)
+    color = bar_kwargs.pop("color", "blue")
+    alpha = bar_kwargs.pop("alpha", 0.7)
+    align = bar_kwargs.pop("align", "edge")
+
+    ax.bar(bin_edges[:-1], hist, width=(bin_edges[1] - bin_edges[0]), align=align, alpha=alpha, color=color)
+    ax.set_xlabel("Intensity")
+    ax.set_ylabel("Frequency")
+    ax.set_title(channel)
+
+    if output is not None:
+        fig.savefig(output)
+
+    return ax
 
 
 def calculate_snr(img, nbins=65536):
@@ -266,7 +372,7 @@ def snr_clustermap(sdata, signal_threshold=None, fill_value=0, **kwargs):
 def make_cols_colors(df, palettes=None):
     df = df.copy()
     if palettes is None:
-        palettes = [f"Set{i+1}" for i in range(len(df.columns))]
+        palettes = [f"Set{i + 1}" for i in range(len(df.columns))]
     for c, p in zip(df.columns, palettes):
         df[c] = get_hexes(df[c], palette=p)
     return df

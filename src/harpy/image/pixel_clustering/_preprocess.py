@@ -65,6 +65,9 @@ def pixel_clustering_preprocess(
         Gaussian blur parameter for each channel. Use `0` to omit blurring for specific channels or `None` to skip blurring altogether.
     norm_sum
         If `True`, each channel is normalized by the sum of all channels at each pixel.
+    cap_max
+        The maximum allowable value for the elements in the resulting preprocessed image layers. If `None`, no capping is applied.
+        Typical value would be `1.0` to exclude outliers.
     chunks
         Chunk sizes for processing. If provided as a tuple, it should contain chunk sizes for `c`, `(z)`, `y`, `x`.
     scale_factors

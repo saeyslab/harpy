@@ -11,6 +11,7 @@ import dask.array as da
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
+from matplotlib.axes import Axes
 from scipy.cluster.hierarchy import dendrogram, ward
 from scipy.sparse import csr_matrix
 from scipy.stats import zscore
@@ -36,10 +37,11 @@ def pixel_clusters(
     labels_layer: str,
     crd: tuple[int, int, int, int] | None = None,
     to_coordinate_system: str = "global",
+    ax: Axes = None,
     output: str | Path | None = None,
     render_labels_kwargs: Mapping[str, Any] = MappingProxyType({}),  # passed to pl.render_labels
     **kwargs,  # passed to pl.show() of spatialdata_plot
-):
+) -> Axes:
     """
     Visualize spatial distribution of pixel clusters based on labels in a `SpatialData` object, obtained using :func:`harpy.im.flowsom`.
 
@@ -53,8 +55,10 @@ def pixel_clusters(
         The coordinates for the region of interest in the format `(xmin, xmax, ymin, ymax)`. If `None`, the entire image is considered, by default `None`.
     to_coordinate_system
         Coordinate system to plot.
+    ax
+        Matplotlib axes object to plot on. If None, a new figure is created.
     output
-        The path to save the generated plot. If `None`, the plot will be displayed directly using `plt.show()`.
+        The path to save the generated plot.
     render_labels_kwargs
         Additional keyword arguments passed to `sdata.pl.render_labels`, such as `cmap` or `alpha`.
     **kwargs
@@ -62,8 +66,7 @@ def pixel_clusters(
 
     Returns
     -------
-    None
-        The function generates and displays or saves a spatial plot of pixel clusters.
+    The axes object containing the pixel clusters.
 
     Raises
     ------
@@ -131,17 +134,17 @@ def pixel_clusters(
         **render_labels_kwargs,
     ).pl.show(
         **kwargs,
+        ax=ax,
         return_ax=True,
     )
-    if output is not None:
-        ax.figure.savefig(output)
-    else:
-        plt.show()
-    plt.close(ax.figure)
-
     del sdata.tables[intermediate_table_key]
     if labels_layer_crop is not None:
         del sdata.labels[labels_layer_crop]
+
+    if output is not None:
+        ax.figure.savefig(output)
+
+    return ax
 
 
 def pixel_clusters_heatmap(
@@ -150,11 +153,12 @@ def pixel_clusters_heatmap(
     metaclusters: bool = True,
     z_score: bool = True,
     clip_value: float | None = 3,
+    ax: Axes = None,
     output: str | Path | None = None,
     figsize: tuple[int, int] = (20, 20),
     fig_kwargs: Mapping[str, Any] = MappingProxyType({}),  # kwargs passed to plt.figure, e.g. dpi
     **kwargs,  # kwargs passed to sns.heatmap
-):
+) -> Axes:
     """
     Generate and visualize a heatmap of mean channel intensities for clusters or metaclusters.
 
@@ -171,8 +175,10 @@ def pixel_clusters_heatmap(
     clip_value
         The value to clip the z-scored data to, for better visualization. If `None`, no clipping is performed.
         Ignored if `z_score` is `False`.
+    ax
+        Matplotlib axes object to plot on. If None, a new figure is created.
     output
-        The path to save the generated heatmap. If `None`, the heatmap will be displayed directly using :func:`matplotlib.pyplot.show`.
+        The path to save the generated heatmap.
     figsize
         Tuple specifying the size of the figure in inches as `(width, height)`.
         The width determines the spacing available for cluster IDs, while the height adjusts space for channels.
@@ -180,14 +186,13 @@ def pixel_clusters_heatmap(
         Increase `width` if cluster IDs or are not fully visible.
         Increase `height` if channel names are not fully visible.
     fig_kwargs
-        Additional keyword arguments passed to :func:`matplotlib.pyplot.figure`, such as `dpi`.
+        Additional keyword arguments passed to :func:`matplotlib.pyplot.figure`, such as `dpi`. Ignored if `ax` is `None`.
     **kwargs
         Additional keyword arguments passed to :func:`seaborn.heatmap`, such as `annot`, `cmap`, or `cbar_kws`.
 
     Returns
     -------
-    None
-        The function generates and displays or saves a heatmap.
+    The function generates and displays or saves a heatmap.
 
     Notes
     -----
@@ -253,29 +258,34 @@ def pixel_clusters_heatmap(
     df_metaclusters = df_metaclusters[channel_order]
     df = df[channel_order]
 
+    # Create axes if not provided
+    if ax is None:
+        _, ax = plt.subplots(figsize=figsize, **fig_kwargs)
+
     # Create a heatmap
-    plt.figure(figsize=figsize, **fig_kwargs)
+    # plt.figure(figsize=figsize, **fig_kwargs)
     annot = kwargs.pop("annot", False)
     cmap = kwargs.pop("cmap", "coolwarm")
     fmt = kwargs.pop("fmt", ".2f")
     _label = "Mean Intensity (z-score)" if z_score else "Mean Intensity"
     cbar_kws = kwargs.pop("cbar_kws", {"label": _label})
-    sns.heatmap(
+    ax = sns.heatmap(
         df_metaclusters.transpose() if metaclusters else df.transpose(),
         annot=annot,
         cmap=cmap,
         fmt=fmt,
         cbar_kws=cbar_kws,
+        ax=ax,
         **kwargs,
     )
     _title = "metacluster" if metaclusters else "cluster"
-    plt.title(f"Mean Channel Intensity per {_title}")
-    plt.ylabel("Channel")
+    ax.set_title(f"Mean Channel Intensity per {_title}")
     _x_label = "Metacluster ID" if metaclusters else "Cluster ID (Metacluster ID)"
-    plt.xlabel(_x_label)
 
-    if output is None:
-        plt.show()
-    else:
-        plt.savefig(output, bbox_inches="tight")
-    plt.close()
+    ax.set_ylabel("Channel")
+    ax.set_xlabel(_x_label)
+
+    if output is not None:
+        ax.figure.savefig(output)
+
+    return ax

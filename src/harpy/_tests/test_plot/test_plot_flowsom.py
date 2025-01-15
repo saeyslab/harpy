@@ -2,6 +2,7 @@ import importlib
 import os
 
 import matplotlib
+import matplotlib.pyplot as plt
 import pytest
 
 from harpy.plot._flowsom import pixel_clusters, pixel_clusters_heatmap
@@ -37,12 +38,31 @@ def test_plot_pixel_clusters(sdata_blobs, tmp_path):
 
     pixel_clusters(
         sdata_blobs,
-        labels_layer="blobs_image_metaclusters",
+        labels_layer=f"{img_layer}_metaclusters",
         figsize=(10, 10),
         coordinate_systems="global",
         crd=(100, 300, 100, 300),
-        output=os.path.join(tmp_path, "pixel_clusters.png"),
+        output=os.path.join(tmp_path, "pixel_metaclusters.png"),
     )
+
+    fig, axes = plt.subplots(1, 2, figsize=(20, 5))
+
+    pixel_clusters(
+        sdata_blobs,
+        labels_layer=f"{img_layer}_clusters",
+        crd=(100, 300, 100, 300),
+        ax=axes[0],
+    )
+
+    pixel_clusters(
+        sdata_blobs,
+        labels_layer=f"{img_layer}_metaclusters",
+        crd=(100, 300, 100, 300),
+        ax=axes[1],
+    )
+
+    fig.savefig(os.path.join(tmp_path, "pixel_clusters_metaclusters"), bbox_inches="tight")
+    plt.close()
 
     sdata_blobs = cluster_intensity(
         sdata_blobs,
@@ -55,14 +75,25 @@ def test_plot_pixel_clusters(sdata_blobs, tmp_path):
         overwrite=True,
     )
 
-    for _metaclusters in [True, False]:
-        pixel_clusters_heatmap(
-            sdata_blobs,
-            table_layer="counts_clusters",
-            figsize=(30, 20),
-            fig_kwargs={"dpi": 100},
-            linewidths=0.01,
-            metaclusters=_metaclusters,
-            z_score=True,
-            output=os.path.join(tmp_path, f"pixel_clusters_heatmap_{_metaclusters}.png"),
-        )
+    fig, axes = plt.subplots(2, 1, figsize=(30, 40))
+
+    pixel_clusters_heatmap(
+        sdata_blobs,
+        table_layer="counts_clusters",
+        ax=axes[0],
+        metaclusters=True,
+        linewidths=0.01,
+        z_score=True,
+    )
+
+    pixel_clusters_heatmap(
+        sdata_blobs,
+        table_layer="counts_clusters",
+        ax=axes[1],
+        metaclusters=False,
+        linewidths=0.01,
+        z_score=True,
+    )
+
+    fig.savefig(os.path.join(tmp_path, "pixel_clusters_heatmap"), bbox_inches="tight")
+    plt.close()
