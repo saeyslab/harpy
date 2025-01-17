@@ -24,7 +24,7 @@ def _instanseg(
     output: Literal["all_outputs", "nuclei", "cells"] = None,
     dtype: type = _SEG_DTYPE,
     pixel_size: float = 0.5,
-    **kwargs,
+    **kwargs,  # kwargs passed to .eval_small_image
 ) -> NDArray:
     # input is z,y,x,c
     # output is z,y,x,c
@@ -76,6 +76,7 @@ def _instanseg(
         resolve_cell_and_nucleus=True,
         cleanup_fragments=True,
         target=output,
+        **kwargs,
     )
 
     # we want the c dimension to be the last dimension and the output to be in numpy format
