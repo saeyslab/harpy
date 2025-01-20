@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 import uuid
 from abc import ABC, abstractmethod
@@ -105,7 +106,7 @@ def segment(
         we recommend setting trim to `False`.
     iou
         If set to `True`, will try to harmonize labels across chunks using a label adjacency graph with an iou threshold (see `harpy.image.segmentation.utils._link_labels`). If set to `False`, conflicts will be resolved using an algorithm that only retains masks with the center in the chunk.
-        Setting `iou` to `False` gives good results if there is reasonable agreement of the predicted labels accross adjacent chunks.
+        Setting `iou` to `False` gives good results if there is reasonable agreement of the predicted labels across adjacent chunks.
     iou_depth
         iou depth used for harmonizing labels across chunks. Note that if `labels_layer_align` is specified, `iou_depth` will also be used for harmonizing labels between different chunks.
     iou_threshold
@@ -546,12 +547,13 @@ class SegmentationModel(ABC):
 
         # write to intermediate zarr store if sdata is backed to reduce ram memory.
         if temp_path is not None:
+            zarr_path = os.path.join(temp_path, f"sdata_{uuid.uuid4()}.zarr")
             _chunks = x_labels.chunks
             x_labels.rechunk(x_labels.chunksize).to_zarr(
-                temp_path,
-                overwrite=True,
+                zarr_path,
+                overwrite=False,
             )
-            x_labels = da.from_zarr(temp_path)
+            x_labels = da.from_zarr(zarr_path)
             x_labels = x_labels.rechunk(_chunks)
         else:
             x_labels = x_labels.persist()
@@ -629,12 +631,13 @@ class SegmentationModel(ABC):
         if x_labels.shape[-1] > 1:
             # write to intermediate zarr store, otherwise will redo solving of chunks for each label channel.
             if temp_path is not None:
+                zarr_path = os.path.join(temp_path, f"sdata_{uuid.uuid4()}.zarr")
                 _chunks = x_labels.chunks
                 x_labels.rechunk(x_labels.chunksize).to_zarr(
-                    temp_path,
-                    overwrite=True,
+                    zarr_path,
+                    overwrite=False,
                 )
-                x_labels = da.from_zarr(temp_path)
+                x_labels = da.from_zarr(zarr_path)
                 x_labels = x_labels.rechunk(_chunks)
             else:
                 x_labels = x_labels.persist()
@@ -746,7 +749,7 @@ class SegmentationModelStains(SegmentationModel):
             x = x.rechunk(x.chunksize)
 
         if sdata.is_backed():
-            _temp_path = UPath(sdata.path).parent / f"{uuid.uuid4()}.zarr"
+            _temp_path = UPath(sdata.path).parent / "tmp"
         else:
             _temp_path = None
 
