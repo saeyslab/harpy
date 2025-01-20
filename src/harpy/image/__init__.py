@@ -23,3 +23,4 @@ from .segmentation._merge_masks import (
 )
 from .segmentation._segmentation import segment, segment_points
 from .segmentation.segmentation_models._cellpose import cellpose_callable
+from .segmentation.segmentation_models._instanseg import instanseg_callable

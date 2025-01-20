@@ -15,7 +15,7 @@ from numpy.typing import NDArray
 from harpy.image.segmentation._utils import _SEG_DTYPE
 
 
-def _instanseg(
+def instanseg_callable(
     img: NDArray,
     device: str | None = "cpu",
     instanseg_model: InstanSeg
