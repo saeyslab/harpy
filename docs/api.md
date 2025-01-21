@@ -57,6 +57,7 @@ Operations on image and labels layers.
     im.segment
     im.segment_points
     im.cellpose_callable
+    im.instanseg_callable
     im.add_grid_labels_layer
     im.expand_labels_layer
     im.align_labels_layers

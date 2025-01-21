@@ -1,11 +1,13 @@
 import importlib.util
 
+import dask.array as da
 import dask.dataframe as dd
 import pandas as pd
 import pytest
 from dask.dataframe import DataFrame
 from spatialdata import SpatialData
 
+from harpy.image._image import _get_spatial_element
 from harpy.image.segmentation._segmentation import segment, segment_points
 from harpy.image.segmentation.segmentation_models._baysor import _dummy
 from harpy.image.segmentation.segmentation_models._cellpose import cellpose_callable
@@ -124,3 +126,40 @@ def test_segment_points(sdata_multi_c_no_backed: SpatialData):
         assert _output_labels_layer in sdata_multi_c_no_backed.labels
     for _output_shapes_layer in output_shapes_layer:
         assert _output_shapes_layer in sdata_multi_c_no_backed.shapes
+
+
+@pytest.mark.skipif(not importlib.util.find_spec("instanseg"), reason="requires the instanseg library")
+def test_segment_instanseg(sdata_multi_c_no_backed: SpatialData):
+    from instanseg import InstanSeg
+
+    from harpy.image.segmentation.segmentation_models._instanseg import instanseg_callable
+
+    instanseg_fluorescence = InstanSeg("fluorescence_nuclei_and_cells", verbosity=1, device="cpu")
+
+    output_labels_layer = ["labels_nuclei_instanseg", "labels_cells_instanseg"]
+    output_shapes_layer = ["shapes_nuclei_instanseg", "shapes_cells_instanseg"]
+    sdata_multi_c_no_backed = segment(
+        sdata_multi_c_no_backed,
+        img_layer="combine",
+        model=instanseg_callable,
+        output_labels_layer=output_labels_layer,
+        output_shapes_layer=output_shapes_layer,
+        labels_layer_align="labels_cells_instanseg",
+        trim=False,
+        chunks=50,
+        overwrite=True,
+        depth=30,
+        crd=[10, 110, 0, 100],
+        scale_factors=[2, 2, 2, 2],
+        instanseg_model=instanseg_fluorescence,
+        output="all_outputs",
+    )
+
+    for _output_labels_layer in output_labels_layer:
+        assert _output_labels_layer in sdata_multi_c_no_backed.labels
+    for _output_shapes_layer in output_shapes_layer:
+        assert _output_shapes_layer in sdata_multi_c_no_backed.shapes
+
+    for _output_labels_layer in output_labels_layer:
+        se = _get_spatial_element(sdata_multi_c_no_backed, layer=output_labels_layer[0])
+        assert da.any(se.data).compute()

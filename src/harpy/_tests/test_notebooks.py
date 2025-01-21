@@ -116,10 +116,8 @@ def test_notebooks_flowsom(notebook):
 
 @pytest.mark.skip
 @pytest.mark.skipif(
-    not importlib.util.find_spec("InstanSeg")
-    or not importlib.util.find_spec("monai")
-    or not importlib.util.find_spec("torchvision"),
-    reason="requires the InstanSeg, monai and torchvision libraries",
+    not importlib.util.find_spec("instanseg"),
+    reason="requires the instanseg library",
 )
 @pytest.mark.parametrize(
     "notebook",

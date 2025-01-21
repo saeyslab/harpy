@@ -21,7 +21,7 @@ def instanseg_callable(
     instanseg_model: InstanSeg
     | Path
     | str = "instanseg.pt",  # can be a loaded model, or path to instanseg model (.pt file)
-    output: Literal["all_outputs", "nuclei", "cells"] = None,
+    output: Literal["all_outputs", "nuclei", "cells"] | None = None,
     dtype: type = _SEG_DTYPE,
     pixel_size: float = 0.5,
     **kwargs,  # kwargs passed to .eval_small_image
@@ -29,7 +29,7 @@ def instanseg_callable(
     # input is z,y,x,c
     # output is z,y,x,c
     """
-    Perform instanseg segmentation on an image.
+    Perform segmentation using instanseg.
 
     Parameters
     ----------
@@ -39,14 +39,16 @@ def instanseg_callable(
         The device to run the model on. Can be "cpu", "cuda", or another supported device.
         Default is "cpu".
     instanseg_model
-        The InstaSeg model used for segmentation. This can either be a pre-loaded model, or
+        The InstanSeg model used for segmentation. This can either be a pre-loaded model, or
         a file path to the model (typically a `.pt` file).
+    pixel_size
+        pixel size in μm.
     output
-        Specifies the output segmentation type. Options are:
-            - "cells": segment entire cells,
-            - "nuclei": segment only the nuclei,
-            - "all_outputs": segment both cells and nuclei.
-        If None, will output `all_outputs`.
+        Specifies the type of segmentation to perform. Options are:
+        "cells": segment entire cells;
+        "nuclei": segment only nuclei;
+        "all_outputs": segment both cells and nuclei.
+        If `None`, `output` is set to "all_outputs".
     dtype
         The data type for the output mask. Default is set by `_SEG_DTYPE`.
 
