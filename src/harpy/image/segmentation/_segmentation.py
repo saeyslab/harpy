@@ -432,6 +432,7 @@ class SegmentationModel(ABC):
 
         # align the labels layers if labels_layer_align is specified, and if there is more than one labels layer.
         if labels_layer_align is not None and len(output_labels_layer) > 1:
+            log.info(f"Aligning labels layers: {output_labels_layer}")
             depth = kwargs["depth"]
             iou_depth = kwargs["iou_depth"]
             chunks = kwargs["chunks"]
@@ -547,7 +548,7 @@ class SegmentationModel(ABC):
 
         # write to intermediate zarr store if sdata is backed to reduce ram memory.
         if temp_path is not None:
-            zarr_path = os.path.join(temp_path, f"sdata_{uuid.uuid4()}.zarr")
+            zarr_path = os.path.join(temp_path, f"labels_{uuid.uuid4()}.zarr")
             _chunks = x_labels.chunks
             x_labels.rechunk(x_labels.chunksize).to_zarr(
                 zarr_path,
@@ -631,7 +632,7 @@ class SegmentationModel(ABC):
         if x_labels.shape[-1] > 1:
             # write to intermediate zarr store, otherwise will redo solving of chunks for each label channel.
             if temp_path is not None:
-                zarr_path = os.path.join(temp_path, f"sdata_{uuid.uuid4()}.zarr")
+                zarr_path = os.path.join(temp_path, f"labels_{uuid.uuid4()}.zarr")
                 _chunks = x_labels.chunks
                 x_labels.rechunk(x_labels.chunksize).to_zarr(
                     zarr_path,
@@ -749,7 +750,7 @@ class SegmentationModelStains(SegmentationModel):
             x = x.rechunk(x.chunksize)
 
         if sdata.is_backed():
-            _temp_path = UPath(sdata.path).parent / "tmp"
+            _temp_path = UPath(sdata.path).parent / f"tmp_{uuid.uuid4()}"
         else:
             _temp_path = None
 
@@ -898,7 +899,7 @@ class SegmentationModelPoints(SegmentationModel):
         self._crd_points = _crd_points
 
         if sdata.is_backed():
-            _temp_path = UPath(sdata.path).parent / f"{uuid.uuid4()}.zarr"
+            _temp_path = UPath(sdata.path).parent / f"tmp_{uuid.uuid4()}"
         else:
             _temp_path = None
 

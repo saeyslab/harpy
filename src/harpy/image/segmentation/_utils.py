@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import warnings
+from copy import deepcopy
+
 import dask
 import dask.array as da
 import numpy as np
@@ -23,9 +26,9 @@ def _rechunk_overlap(
 ) -> Array:
     # rechunk, so that we ensure minimum overlap
 
-    assert (
-        len(depth) == x.ndim
-    ), f"Please provide depth value for every dimension of x ({x.ndim}). Provided depth was '{depth}'"
+    assert len(depth) == x.ndim, (
+        f"Please provide depth value for every dimension of x ({x.ndim}). Provided depth was '{depth}'"
+    )
 
     if chunks is not None:
         x = x.rechunk(chunks)
@@ -38,7 +41,7 @@ def _rechunk_overlap(
         if depth[i] != 0:
             if depth[i] > x.chunksize[i]:
                 log.warning(
-                    f"Depth for dimension {i} exceeds chunk size. Adjusting to a quarter of chunk size: {x.chunksize[i]/4}"
+                    f"Depth for dimension {i} exceeds chunk size. Adjusting to a quarter of chunk size: {x.chunksize[i] / 4}"
                 )
                 depth[i] = int(x.chunksize[i] // 4)
 
@@ -56,12 +59,14 @@ def _clean_up_masks(
     depth: dict[int, int],
 ) -> NDArray:
     total_blocks = block_info[0]["num-chunks"]
-    assert (
-        total_blocks[0] == 1
-    ), "Dask arrays chunked in z dimension are not supported. Please only chunk in y and x dimensions."
+    assert total_blocks[0] == 1, (
+        "Dask arrays chunked in z dimension are not supported. Please only chunk in y and x dimensions."
+    )
     total_blocks = total_blocks[1:]
     assert depth[0] == 0, "Depth not equal to 0 in z dimension is currently not supported."
     assert len(depth) == 3, "Please provide depth values for z,y and x."
+    depth = deepcopy(depth)
+    total_blocks = deepcopy(total_blocks)
 
     # remove z-dimension from depth
     depth[0] = depth[1]
@@ -72,9 +77,9 @@ def _clean_up_masks(
     y_start, y_stop = depth[0], block.shape[1] - depth[0]
     x_start, x_stop = depth[1], block.shape[2] - depth[1]
 
-    assert (
-        block_id[0] == 0
-    ), "Dask arrays chunked in z dimension are not supported. Please only chunk in y and x dimensions."
+    assert block_id[0] == 0, (
+        "Dask arrays chunked in z dimension are not supported. Please only chunk in y and x dimensions."
+    )
     block_id = block_id[1:]
 
     # get indices of all adjacent blocks
@@ -147,9 +152,9 @@ def _merge_masks(
 ) -> NDArray:
     # helper function to merge the chunks
 
-    assert (
-        num_blocks[0] == 1
-    ), "Dask arrays chunked in z dimension are not supported. Please only chunk in y and x dimensions."
+    assert num_blocks[0] == 1, (
+        "Dask arrays chunked in z dimension are not supported. Please only chunk in y and x dimensions."
+    )
 
     assert _depth[0] == 0, "Depth not equal to 0 in z dimension is currently not supported."
     assert len(_depth) == 3, "Please provide depth values for z,y and x."
@@ -412,7 +417,8 @@ def _across_block_label_iou(face, axis, iou_threshold):
     unique = np.unique(face)
     face0, face1 = np.split(face, 2, axis)
 
-    intersection = sk_metrics.confusion_matrix(face0.reshape(-1), face1.reshape(-1))
+    warnings.filterwarnings("ignore", message="A single label was found in 'y_true' and 'y_pred'")
+    intersection = sk_metrics.confusion_matrix(face0.reshape(-1), face1.reshape(-1), labels=unique)
     sum0 = intersection.sum(axis=0, keepdims=True)
     sum1 = intersection.sum(axis=1, keepdims=True)
 
