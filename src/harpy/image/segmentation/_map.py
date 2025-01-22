@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import os
+import shutil
+import uuid
 from collections.abc import Callable, Iterable, Mapping
+from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
@@ -11,6 +15,7 @@ from numpy.typing import NDArray
 from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import Translation, get_transformation
+from upath import UPath
 
 from harpy.image._image import (
     _get_spatial_element,
@@ -154,9 +159,9 @@ def map_labels(
             )
 
             # Ensure the translation is the same as the first label layer
-            assert (
-                transformations == first_transformations
-            ), f"Provided labels layers '{labels_layers}' should all have the same transformations defined on them."
+            assert transformations == first_transformations, (
+                f"Provided labels layers '{labels_layers}' should all have the same transformations defined on them."
+            )
 
             labels_data.append(x_label)
 
@@ -171,6 +176,11 @@ def map_labels(
     kwargs.setdefault("iou_depth", iou_depth)
     kwargs.setdefault("iou_threshold", iou_threshold)
 
+    if sdata.is_backed():
+        _temp_path = UPath(sdata.path).parent / f"tmp_{uuid.uuid4()}"
+    else:
+        _temp_path = None
+
     # labels_arrays is a list of dask arrays
     # do some processing on the labels
     array = _combine_dask_arrays(
@@ -178,6 +188,7 @@ def map_labels(
         relabel_chunks=relabel_chunks,
         trim=trim,
         func=func,
+        temp_path=_temp_path,
         fn_kwargs=fn_kwargs,
         **kwargs,
     )
@@ -205,6 +216,10 @@ def map_labels(
             overwrite=overwrite,
         )
 
+    if _temp_path is not None:
+        # TODO this will not work if sdata is remote (e.g. s3 bucket).
+        shutil.rmtree(_temp_path)
+
     return sdata
 
 
@@ -213,6 +228,7 @@ def _combine_dask_arrays(
     relabel_chunks: bool,
     trim: bool,
     func: Callable[..., NDArray],
+    temp_path: str | Path,
     fn_kwargs: Mapping[str, Any] = MappingProxyType({}),  # keyword arguments to be passed to func
     **kwargs: Any,  # keyword arguments to be passed to map_overlap/map_blocks
 ) -> Array:
@@ -268,9 +284,9 @@ def _combine_dask_arrays(
     for i, x_label in enumerate(_labels_arrays):
         #  rechunk so that we ensure minimum chunksize, in order to control output_chunks sizes.
         x_label = _rechunk_overlap(x_label, depth=depth, chunks=chunks)
-        assert (
-            x_label.numblocks[0] == 1
-        ), f"Expected the number of blocks in the Z-dimension to be `1`, found `{x_label.numblocks[0]}`."
+        assert x_label.numblocks[0] == 1, (
+            f"Expected the number of blocks in the Z-dimension to be `1`, found `{x_label.numblocks[0]}`."
+        )
 
         if i == 0:
             # output_chunks can be derived from any rechunked x_label in labels_arrays
@@ -307,6 +323,21 @@ def _combine_dask_arrays(
     # return x_labels.squeeze(0)
 
     if not trim:
+        # write to intermediate zarr store if sdata is backed to reduce ram memory.
+        if temp_path is not None:
+            zarr_path = os.path.join(temp_path, f"labels_{uuid.uuid4()}.zarr")
+            _chunks = x_labels.chunks
+            x_labels.rechunk(x_labels.chunksize).to_zarr(
+                zarr_path,
+                overwrite=False,
+            )
+            x_labels = da.from_zarr(zarr_path)
+            x_labels = x_labels.rechunk(_chunks)
+        else:
+            x_labels = x_labels.persist()
+
+        log.info("Link labels across chunks.")
+
         iou_depth = da.overlap.coerce_depth(len(depth), iou_depth)
 
         if any(iou_depth[ax] > depth[ax] for ax in depth.keys()):

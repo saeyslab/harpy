@@ -639,7 +639,6 @@ class SegmentationModel(ABC):
                     overwrite=False,
                 )
                 x_labels = da.from_zarr(zarr_path)
-                x_labels = x_labels.rechunk(_chunks)
             else:
                 x_labels = x_labels.persist()
 
