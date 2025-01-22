@@ -9,10 +9,21 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from instanseg import InstanSeg
 from numpy.typing import NDArray
 
 from harpy.image.segmentation._utils import _SEG_DTYPE
+from harpy.utils.pylogger import get_pylogger
+
+log = get_pylogger(__name__)
+
+
+try:
+    from instanseg import InstanSeg
+
+except ImportError:
+    log.warning(
+        "Module 'instanseg' not installed, please install 'instanseg' (https://github.com/instanseg/instanseg) if you want to use the callable 'harpy.im.instanseg_callable' as model for 'harpy.im.segment'."
+    )
 
 
 def instanseg_callable(
@@ -34,12 +45,12 @@ def instanseg_callable(
     Parameters
     ----------
     img
-        The input image as a NumPy array on which instance segmentation will be performed (z,y,x,c).
+        The input image as a `numpy` array on which instance segmentation will be performed (z,y,x,c).
     device
         The device to run the model on. Can be "cpu", "cuda", or another supported device.
         Default is "cpu".
     instanseg_model
-        The InstanSeg model used for segmentation. This can either be a pre-loaded model, or
+        The `InstanSeg` model used for segmentation. This can either be a pre-loaded model, or
         a file path to the model (typically a `.pt` file).
     pixel_size
         pixel size in μm.
@@ -54,8 +65,7 @@ def instanseg_callable(
 
     Returns
     -------
-    NDArray
-        A NumPy array containing the segmented regions as labeled masks (z,y,x,c).
+    A `numpy` array containing the segmented regions as labeled masks (z,y,x,c).
     """
     if img.shape[0] != 1:
         raise ValueError("Z dimension not equal to 1 is not supported for Instanseg segmentation.")

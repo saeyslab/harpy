@@ -15,7 +15,7 @@ try:
     CUDA = torch.cuda.is_available()
 except ImportError:
     log.warning(
-        "Module 'torch' not installed, please install 'torch' if you want to use the callable 'harpy.image.segmentation.segmentation_models._cellpose' as model for 'harpy.im.segment'."
+        "Module 'torch' not installed, please install 'torch' if you want to use the callable 'harpy.im.cellpose_callable' as model for 'harpy.im.segment'."
     )
     TORCH_AVAILABLE = False
     CUDA = False
@@ -26,7 +26,7 @@ try:
     CELLPOSE_AVAILABLE = True
 except ImportError:
     log.warning(
-        "Module 'cellpose' not installed, please install 'cellpose' if you want to use the callable 'harpy.image.segmentation.segmentation_models._cellpose' as model for 'harpy.im.segment'."
+        "Module 'cellpose' not installed, please install 'cellpose' (https://github.com/MouseLand/cellpose) if you want to use the callable 'harpy.im.cellpose_callable' as model for 'harpy.im.segment'."
     )
     CELLPOSE_AVAILABLE = False
 
@@ -54,7 +54,7 @@ def cellpose_callable(
     Parameters
     ----------
     img
-        The input image as a NumPy array. Dimensions should follow the format (z,y,x,c).
+        The input image as a `numpy` array. Dimensions should follow the format (z,y,x,c).
     min_size
         The minimum size (in pixels) of segmented objects. Objects smaller than this will be excluded.
     cellprob_threshold
@@ -91,7 +91,7 @@ def cellpose_callable(
 
     Returns
     -------
-    A NumPy array containing the segmented regions as labeled masks `(z,y,x,c)`.
+    A `numpy` array containing the segmented regions as labeled masks `(z,y,x,c)`.
 
     See Also
     --------

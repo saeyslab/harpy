@@ -336,7 +336,7 @@ def _combine_dask_arrays(
         else:
             x_labels = x_labels.persist()
 
-        log.info("Link labels across chunks.")
+        log.info("Linking labels across chunks.")
 
         iou_depth = da.overlap.coerce_depth(len(depth), iou_depth)
 

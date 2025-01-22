@@ -627,7 +627,7 @@ class SegmentationModel(ABC):
         # returns a dask array containing labels with dimension (z,y,x,c)
         x_labels = da.stack(_all_labels, axis=-1)
 
-        log.info("Link labels across chunks.")
+        log.info("Linking labels across chunks.")
 
         if x_labels.shape[-1] > 1:
             # write to intermediate zarr store, otherwise will redo solving of chunks for each label channel.
