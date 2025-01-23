@@ -89,7 +89,7 @@ def pixel_clusters(
             target_coordinate_system=to_coordinate_system,
         )
         if se_crop is not None:
-            labels_layer_crop = f"__labels_{uuid.uuid4()}__"
+            labels_layer_crop = f"_labels_{uuid.uuid4()}_"
             sdata[labels_layer_crop] = se_crop
             se = se_crop
         else:
@@ -100,7 +100,7 @@ def pixel_clusters(
 
     cluster_ids = labels
 
-    intermediate_table_key = f"__value_clusters__{uuid.uuid4()}"
+    intermediate_table_key = f"_value_clusters_{uuid.uuid4()}"
 
     # create a dummy anndata object, so we can plot cluster ID's spatially using spatialdata plot
     obs = pd.DataFrame({_INSTANCE_KEY: cluster_ids}, index=cluster_ids)
