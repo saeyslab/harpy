@@ -150,6 +150,7 @@ Plotting functions.
 .. autosummary::
     :toctree: generated
 
+    pl.plot
     pl.plot_image
     pl.plot_shapes
     pl.plot_labels

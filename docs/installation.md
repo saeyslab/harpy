@@ -22,7 +22,7 @@ pip install basicpy
 
 On Mac, please comment out the line `mkl=2024.0.0` in `environment.yml`.
 
-For a mimimal list of requirements for `Harpy`, we refer to the [setup.cfg](../setup.cfg).
+For a mimimal list of requirements for `Harpy`, we refer to the [pyproject.toml](../pyproject.toml).
 
 ## 2. Install `Harpy`:
 

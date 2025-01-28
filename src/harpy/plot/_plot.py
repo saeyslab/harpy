@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 from geopandas.geodataframe import GeoDataFrame
 from geopandas.geoseries import GeoSeries
+from matplotlib.axes import Axes
 from scipy.sparse import issparse
 from shapely.affinity import translate
 from spatialdata import SpatialData
@@ -151,7 +152,10 @@ def plot_shapes(
     output: str | Path | None = None,
 ) -> None:
     """
-    Plot shapes and/or images/labels from a SpatialData object.
+    Plots a SpatialData object.
+
+    This function support plotting of a raster (`img_layer` or `labels_layer`), together with a `shapes_layer` respresenting (cell) boundaries.
+    These shapes can be colored if a `table_layer` and a `column` is specified.
 
     The number of provided `img_layer` or `labels_layer` and `shapes_layer` should be equal if both are iterables and if their length is greater than 1.
 
@@ -195,8 +199,10 @@ def plot_shapes(
         Labels layer(s) to be plotted.
         Displayed as columns in the plot, if multiple are provided.
     shapes_layer
-        Specifies which shapes to plot. If set to None, no shapes_layer is plotted.
-        Displayed as columns in the plot, if multiple are provided.
+        Specifies which shapes to plot. Default is 'segmentation_mask_boundaries'. If set to None, no shapes_layer is plot.
+        Can be colored by `column` in `sdata.tables[table_layer].obs` or `sdata.tables[table_layer].var`.
+        For this the index of the `shapes_layer` will be matched with `sdata.tables[table_layer].obs[_INSTANCE_KEY]` for those observations for which
+        `sdata.tables[table_layer].obs[_REGION_KEY]` equals `region` (if `region` is not `None`).
     table_layer
         Table layer to be plotted (i.e. to base cell colors on) if `column` is specified.
     column
@@ -278,7 +284,7 @@ def plot_shapes(
     """
     if img_layer is not None and labels_layer is not None:
         raise ValueError(
-            "Both img_layer and labels_layer is not None. " "Please specify either img_layer or labels_layer, not both."
+            "Both img_layer and labels_layer is not None. Please specify either img_layer or labels_layer, not both."
         )
 
     if column is not None and table_layer is None:
@@ -363,8 +369,8 @@ def plot_shapes(
 
     idx = 0
     for _channel in channels:
-        for _layer, _shapes_layer in zip(layer, shapes_layer):
-            _plot(
+        for _layer, _shapes_layer in zip(layer, shapes_layer, strict=True):
+            plot(
                 sdata,
                 axes[idx],
                 img_layer=_layer if img_layer_type else None,
@@ -404,9 +410,9 @@ def plot_shapes(
     plt.close()
 
 
-def _plot(
+def plot(
     sdata: SpatialData,
-    ax: plt.Axes,
+    ax: Axes,
     img_layer: str | None = None,
     labels_layer: str | None = None,
     shapes_layer: str | None = "segmentation_mask_boundaries",
@@ -432,22 +438,28 @@ def _plot(
     shapes_title: bool = False,
     channel_title: bool = True,
     aspect: str = "equal",
-) -> plt.Axes:
+) -> Axes:
     """
     Plots a SpatialData object.
+
+    This function support plotting of a raster (`img_layer` or `labels_layer`), together with a `shapes_layer` respresenting (cell) boundaries.
+    These shapes can be colored if a `table_layer` and a `column` is specified.
 
     Parameters
     ----------
     sdata
         Data containing spatial information for plotting.
     ax
-        Axes object to plot on.
+       Matplotlib axes object to plot on.
     img_layer
         Image layer to be plotted. By default, the last added image layer is plotted.
     labels_layer
         Labels layer to be plotted.
     shapes_layer
         Specifies which shapes to plot. Default is 'segmentation_mask_boundaries'. If set to None, no shapes_layer is plot.
+        Can be colored by `column` in `sdata.tables[table_layer].obs` or `sdata.tables[table_layer].var`.
+        For this the index of the `shapes_layer` will be matched with `sdata.tables[table_layer].obs[_INSTANCE_KEY]` for those observations for which
+        `sdata.tables[table_layer].obs[_REGION_KEY]` equals `region` (if `region` is not `None`).
     table_layer
         Table layer to be plotted (i.e. to base cell colors on) if `column` is specified.
     column
@@ -500,7 +512,7 @@ def _plot(
 
     Returns
     -------
-    The axes with the plotted SpatialData.
+    The Axes object.
 
     Raises
     ------
@@ -525,7 +537,7 @@ def _plot(
     """
     if img_layer is not None and labels_layer is not None:
         raise ValueError(
-            "Both img_layer and labels_layer is not None. " "Please specify either img_layer or labels_layer, not both."
+            "Both img_layer and labels_layer is not None. Please specify either img_layer or labels_layer, not both."
         )
 
     if column is not None and table_layer is None:
@@ -653,7 +665,7 @@ def _plot(
             mask_polygons = polygons.index.isin(adata_view.obs[_INSTANCE_KEY])
             if (~mask_polygons).any():
                 log.warning(
-                    f"There are '{sum( ~mask_polygons )}' cells in provided shapes_layer '{shapes_layer}' not found in 'sdata.tables[{table_layer}]' (linked through '{_INSTANCE_KEY}'), these cells will not be plotted."
+                    f"There are '{sum(~mask_polygons)}' cells in provided shapes_layer '{shapes_layer}' not found in 'sdata.tables[{table_layer}]' (linked through '{_INSTANCE_KEY}'), these cells will not be plotted."
                 )
                 polygons = polygons[mask_polygons]
 
@@ -736,7 +748,7 @@ def _plot(
             else:
                 log.info(
                     f"Layer '{layer}' has 3 spatial dimensions, but no z-slice was specified. "
-                    f"By default the z-slice located at the midpoint of the z-dimension ({_se.shape[0]//2}) will be utilized."
+                    f"By default the z-slice located at the midpoint of the z-dimension ({_se.shape[0] // 2}) will be utilized."
                 )
                 _se = _se[_se.shape[0] // 2, ...]
 
