@@ -41,19 +41,19 @@ def multisample_blobs(n_samples=4, prefix="sample_{i}", **kwargs):
 
 
 def cluster_blobs(
-    shape=None,
-    n_cell_types=10,
-    n_cells=20,
-    noise_level_nuclei=None,
-    noise_level_channels=None,
-    region_key=_REGION_KEY,
-    instance_key=_INSTANCE_KEY,
-    image_name="blobs_image",
-    labels_name="blobs_labels",
-    points_name="blobs_points",
-    table_name="table",
-    coordinate_system="global",
-    metadata_cycles=True,
+    shape: tuple[int, int] | None = None,
+    n_cell_types: int = 10,
+    n_cells: int = 20,
+    noise_level_nuclei: float | None = None,
+    noise_level_channels: float | None = None,
+    region_key: str = _REGION_KEY,
+    instance_key: str = _INSTANCE_KEY,
+    image_name: str = "blobs_image",
+    labels_name: str = "blobs_labels",
+    points_name: str = "blobs_points",
+    table_name: str | None = "table",
+    coordinate_system: str = "global",
+    metadata_cycles: bool = True,
     seed: int | None = None,
 ):
     """Differs from `spatialdata.datasets.make_blobs` in that it generates cells with multiple image channels and known ground truth cell types."""
@@ -92,32 +92,33 @@ def cluster_blobs(
     labels = Labels2DModel.parse(img_segmented, dims="yx", transformations={coordinate_system: Identity()})
     points = PointsModel.parse(nuclei_centers, transformations={coordinate_system: Identity()})
     # generate table
-    adata = aggregate(values=img, by=labels, target_coordinate_system=coordinate_system).tables["table"]
-    # make X dense as markers are limited
-    adata.X = adata.X.toarray()
-    adata.obs[region_key] = pd.Categorical([labels_name] * len(adata))
-    adata.obs[instance_key] = adata.obs_names.astype(int)
-    adata.obs["phenotype"] = assigned_cell_types.astype(str)
-    adata.obs.index.name = _CELL_INDEX
-    adata.var_names = channel_names
-    del adata.uns[TableModel.ATTRS_KEY]
-    if metadata_cycles:
-        # set the cycle to be per 2, so 1, 1, 2, 2, 3, 3, ...
-        n_channels = n_cell_types + 1
-        cycles = []
-        for i in range(0, n_channels // 2):
-            cycles.append(i)
-            cycles.append(i)
-        # if n_channels is odd, add one more cycle
-        if n_channels % 2:
-            cycles.append(i + 1)
-        adata.var["cycle"] = cycles
-    table = TableModel.parse(
-        adata,
-        region=labels_name,
-        region_key=region_key,
-        instance_key=instance_key,
-    )
+    if table_name is not None:
+        adata = aggregate(values=img, by=labels, target_coordinate_system=coordinate_system).tables["table"]
+        # make X dense as markers are limited
+        adata.X = adata.X.toarray()
+        adata.obs[region_key] = pd.Categorical([labels_name] * len(adata))
+        adata.obs[instance_key] = adata.obs_names.astype(int)
+        adata.obs["phenotype"] = assigned_cell_types.astype(str)
+        adata.obs.index.name = _CELL_INDEX
+        adata.var_names = channel_names
+        del adata.uns[TableModel.ATTRS_KEY]
+        if metadata_cycles:
+            # set the cycle to be per 2, so 1, 1, 2, 2, 3, 3, ...
+            n_channels = n_cell_types + 1
+            cycles = []
+            for i in range(0, n_channels // 2):
+                cycles.append(i)
+                cycles.append(i)
+            # if n_channels is odd, add one more cycle
+            if n_channels % 2:
+                cycles.append(i + 1)
+            adata.var["cycle"] = cycles
+        table = TableModel.parse(
+            adata,
+            region=labels_name,
+            region_key=region_key,
+            instance_key=instance_key,
+        )
 
     sdata = SpatialData(
         images={
@@ -128,9 +129,10 @@ def cluster_blobs(
             # "blobs_markers": Labels2DModel.parse(data=markers),
         },
         points={points_name: points},
-        tables={table_name: table},
+        tables={table_name: table} if table_name is not None else None,
     )
-    add_regionprop_features(sdata, labels_layer=labels_name, table_layer=table_name)
+    if table_name is not None:
+        add_regionprop_features(sdata, labels_layer=labels_name, table_layer=table_name)
     return sdata
 
 

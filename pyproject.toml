@@ -96,12 +96,17 @@ clustering = [
     "textalloc",
     "joypy",
     "bokeh",
-    "spatialdata-plot>=0.2.0"
+    "spatialdata-plot>=0.2.0",
+    #"flowsom @ git+https://github.com/saeyslab/FlowSOM_Python.git"
 ]
 instanseg = [
     # TODO: wait for 0.0.7 release that drops AICSImageIO dependency
     # "instanseg-torch>=0.0.7"
     "instanseg-torch @ git+https://github.com/instanseg/instanseg"
+]
+
+benchmark =[
+    "asv",
 ]
 
 [project.urls]
