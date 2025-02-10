@@ -206,7 +206,7 @@ class ShapesLayerManager:
             sdata[output_layer] = spatial_element
             if sdata.is_backed():
                 sdata.write_element(output_layer)
-                # Note: currently tables are in memory, and the latter warning will never be triggered.
+                # Note: currently shapes are in memory, and the latter warning will never be triggered.
                 if warning_message := _self_contained_warning_message(sdata, output_layer):
                     log.warning(warning_message)
                 sdata = read_zarr(sdata.path)
