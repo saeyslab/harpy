@@ -45,7 +45,7 @@ def _rechunk_overlap(
                 )
                 depth[i] = int(x.chunksize[i] // 4)
 
-    new_chunks = tuple(ensure_minimum_chunksize(size + 1, c) for size, c in zip(depth.values(), x.chunks))
+    new_chunks = tuple(ensure_minimum_chunksize(size + 1, c) for size, c in zip(depth.values(), x.chunks, strict=True))
 
     x = x.rechunk(new_chunks)  # this is a no-op if x.chunks == new_chunks
 

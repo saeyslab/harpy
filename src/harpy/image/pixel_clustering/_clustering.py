@@ -18,7 +18,7 @@ from spatialdata.transformations import get_transformation
 from harpy.image._image import _get_spatial_element, add_labels_layer
 from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY, _SPATIAL, ClusteringKey
 from harpy.utils.pylogger import get_pylogger
-from harpy.utils.utils import _get_uint_dtype
+from harpy.utils.utils import _get_uint_dtype, _self_contained_warning_message
 
 log = get_pylogger(__name__)
 
@@ -223,6 +223,8 @@ def flowsom(
             _labels_flowsom_name = f"labels_flowsom_{uuid.uuid4()}"
             sdata.images[_labels_flowsom_name] = se_intermediate
             sdata.write_element(_labels_flowsom_name)
+            if warning_message := _self_contained_warning_message(sdata, _labels_flowsom_name):
+                log.warning(warning_message)
             sdata = read_zarr(sdata.path)
             _labels_flowsom = _get_spatial_element(sdata, layer=_labels_flowsom_name).data
         else:

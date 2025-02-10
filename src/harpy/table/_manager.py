@@ -6,6 +6,7 @@ from spatialdata.models import TableModel
 from harpy.utils._io import _incremental_io_on_disk
 from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY
 from harpy.utils.pylogger import get_pylogger
+from harpy.utils.utils import _self_contained_warning_message
 
 log = get_pylogger(__name__)
 
@@ -20,12 +21,12 @@ class TableLayerManager:
         overwrite: bool = False,
     ) -> SpatialData:
         if region is not None:
-            assert (
-                _REGION_KEY in adata.obs.columns
-            ), f"Provided 'AnnData' object should contain a column '{_REGION_KEY}' in 'adata.obs'. Linking the observations to a labels layer in 'sdata'."
-            assert (
-                _INSTANCE_KEY in adata.obs.columns
-            ), f"Provided 'AnnData' object should contain a column '{_INSTANCE_KEY}' in 'adata.obs'. Linking the observations to a labels layer in 'sdata'."
+            assert _REGION_KEY in adata.obs.columns, (
+                f"Provided 'AnnData' object should contain a column '{_REGION_KEY}' in 'adata.obs'. Linking the observations to a labels layer in 'sdata'."
+            )
+            assert _INSTANCE_KEY in adata.obs.columns, (
+                f"Provided 'AnnData' object should contain a column '{_INSTANCE_KEY}' in 'adata.obs'. Linking the observations to a labels layer in 'sdata'."
+            )
 
             # need to remove spatialdata_attrs, otherwise parsing gives error (TableModel.parse will add spatialdata_attrs back)
             if TableModel.ATTRS_KEY in adata.uns.keys():
@@ -60,6 +61,9 @@ class TableLayerManager:
             sdata[output_layer] = adata
             if sdata.is_backed():
                 sdata.write_element(output_layer)
+                # Note: currently tables are in memory, and the latter warning will never be triggered.
+                if warning_message := _self_contained_warning_message(sdata, output_layer):
+                    log.warning(warning_message)
                 sdata = read_zarr(sdata.path)
 
         return sdata

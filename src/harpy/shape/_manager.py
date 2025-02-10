@@ -22,6 +22,7 @@ from spatialdata.transformations import get_transformation
 from harpy.utils._io import _incremental_io_on_disk
 from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY
 from harpy.utils.pylogger import get_pylogger
+from harpy.utils.utils import _self_contained_warning_message
 
 log = get_pylogger(__name__)
 
@@ -104,7 +105,7 @@ class ShapesLayerManager:
             filtered_polygons = self.retrieve_data_from_sdata(sdata, name=_shapes_layer)[~bool_to_keep]
 
             log.info(
-                f"Filtering {len( set(filtered_polygons.index ) )} cells from shapes layer '{_shapes_layer}'. "
+                f"Filtering {len(set(filtered_polygons.index))} cells from shapes layer '{_shapes_layer}'. "
                 f"Adding new shapes layer '{output_filtered_shapes_layer}' containing these filtered out polygons."
             )
 
@@ -205,6 +206,9 @@ class ShapesLayerManager:
             sdata[output_layer] = spatial_element
             if sdata.is_backed():
                 sdata.write_element(output_layer)
+                # Note: currently tables are in memory, and the latter warning will never be triggered.
+                if warning_message := _self_contained_warning_message(sdata, output_layer):
+                    log.warning(warning_message)
                 sdata = read_zarr(sdata.path)
 
         return sdata

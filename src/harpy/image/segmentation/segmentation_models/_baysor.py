@@ -84,7 +84,7 @@ def _baysor(
         f"-c {config_path} "
         f"-o {output_html} "
         f"--prior-segmentation-confidence={prior_confidence} "
-        f"{os.path.join( temp_dir, 'transcripts.csv' ) } "
+        f"{os.path.join(temp_dir, 'transcripts.csv')} "
         "--save-polygons=geojson "
         f"{masks_path}"
     )
@@ -139,6 +139,7 @@ def _baysor(
         zip(
             polygons.geometry,
             polygons.index.values.astype(float),
+            strict=True,
         ),
         out_shape=[img.shape[0], img.shape[1]],
         dtype="uint32",

@@ -276,7 +276,7 @@ def _gaussian_blur(
     sigma: list[float],
 ) -> Array:
     results_gaussian = []
-    for _c_arr_norm, _sigma in zip(arr, sigma):
+    for _c_arr_norm, _sigma in zip(arr, sigma, strict=True):
         # run gaussian filter on each z stack independently, otherwise issues with depth when having few z-stacks in gaussian_filter
         results_gaussian_z = []
         for _z_c_arr_norm in _c_arr_norm:

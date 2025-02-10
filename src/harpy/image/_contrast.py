@@ -131,10 +131,10 @@ def enhance_contrast(
         )
 
     if isinstance(contrast_clip, Iterable):
-        assert (
-            len(contrast_clip) == len(se.c.data)
-        ), f"If 'contrast_clip' is provided as a list, it should match the number of channels in '{se}' ({len(se.c.data)})"
-        fn_kwargs = {key: {"contrast_clip": value} for (key, value) in zip(se.c.data, contrast_clip)}
+        assert len(contrast_clip) == len(se.c.data), (
+            f"If 'contrast_clip' is provided as a list, it should match the number of channels in '{se}' ({len(se.c.data)})"
+        )
+        fn_kwargs = {key: {"contrast_clip": value} for (key, value) in zip(se.c.data, contrast_clip, strict=True)}
     else:
         fn_kwargs = {"contrast_clip": contrast_clip}
 

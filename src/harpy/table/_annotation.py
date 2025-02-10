@@ -133,9 +133,9 @@ def score_genes(
                     genes.append(df_markers.index[row])
             genes_dict[i] = genes
 
-    assert (
-        _UNKNOWN_CELLTYPE_KEY not in genes_dict.keys()
-    ), f"Cell type {_UNKNOWN_CELLTYPE_KEY} is reserved for cells that could not be assigned a specific cell type"
+    assert _UNKNOWN_CELLTYPE_KEY not in genes_dict.keys(), (
+        f"Cell type {_UNKNOWN_CELLTYPE_KEY} is reserved for cells that could not be assigned a specific cell type"
+    )
 
     # sanity check
     unique_genes = {item for sublist in genes_dict.values() for item in sublist}

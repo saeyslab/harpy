@@ -162,7 +162,7 @@ def calculate_snr_ratio(
     else:
         cycles = [None] * len(channel_names)
     for image in sdata.images:
-        for cycle, channel_name in zip(cycles, channel_names):
+        for cycle, channel_name in zip(cycles, channel_names, strict=True):
             float_block = sdata[image].sel(c=channel_name).data.rechunk(block_size)
             img = float_block.compute()
             snr, signal = calculate_snr(img)
@@ -255,7 +255,7 @@ def group_snr_ratio(sdata, groupby, ax=None, loglog=True, color="black", **kwarg
         df_img["cycle"] = get_hexes(df_img["cycle"], palette=palette)
 
     # Iterate over unique samples and create separate plots
-    for ax, sample in zip(axs.flatten(), df_img.index.levels[0]):
+    for ax, sample in zip(axs.flatten(), df_img.index.levels[0], strict=True):
         if loglog:
             ax.set_xscale("log", base=2)
             ax.set_yscale("log", base=2)
@@ -343,7 +343,7 @@ def calculate_mean_norm(sdata, overwrite=False, c_mask=None, key="normalized_", 
 def get_hexes(col, palette="Set1"):
     if isinstance(palette, str):
         palette = sns.color_palette(palette, n_colors=len(col.unique()))
-    lut = dict(zip(col.unique().astype(str), palette.as_hex()))
+    lut = dict(zip(col.unique().astype(str), palette.as_hex(), strict=True))
     return col.astype(str).map(lut)
 
 
@@ -373,6 +373,6 @@ def make_cols_colors(df, palettes=None):
     df = df.copy()
     if palettes is None:
         palettes = [f"Set{i + 1}" for i in range(len(df.columns))]
-    for c, p in zip(df.columns, palettes):
+    for c, p in zip(df.columns, palettes, strict=True):
         df[c] = get_hexes(df[c], palette=p)
     return df

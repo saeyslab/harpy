@@ -98,19 +98,19 @@ def xenium(
 
     path = _fix_name(path)
     to_coordinate_system = _fix_name(to_coordinate_system)
-    assert len(path) == len(
-        to_coordinate_system
-    ), "If parameters 'path' and/or 'to_coordinate_system' are specified as a list, their length should be equal."
-    assert len(to_coordinate_system) == len(
-        set(to_coordinate_system)
-    ), "All elements specified via 'to_coordinate_system' should be unique."
+    assert len(path) == len(to_coordinate_system), (
+        "If parameters 'path' and/or 'to_coordinate_system' are specified as a list, their length should be equal."
+    )
+    assert len(to_coordinate_system) == len(set(to_coordinate_system)), (
+        "All elements specified via 'to_coordinate_system' should be unique."
+    )
     if cells_table:
         log.info(
             "Setting 'cells_labels' to True, in order to being able to annotate the table with corresponding labels layer."
         )
         cells_labels = True
 
-    for _path, _to_coordinate_system in zip(path, to_coordinate_system):
+    for _path, _to_coordinate_system in zip(path, to_coordinate_system, strict=True):
         sdata = sdata_xenium(
             path=_path,
             cells_boundaries=False,
@@ -138,9 +138,9 @@ def xenium(
             with open(os.path.join(_path, XeniumKeys.XENIUM_SPECS)) as f:
                 specs = json.load(f)
             adata = sdata["table"]
-            assert f"cell_labels_{_to_coordinate_system}" in [
-                *sdata.labels
-            ], "labels layer annotating the table is not found in SpatialData object."
+            assert f"cell_labels_{_to_coordinate_system}" in [*sdata.labels], (
+                "labels layer annotating the table is not found in SpatialData object."
+            )
             # remove "cell_id" column in table, to avoid confusion with _INSTANCE_KEY.
             if "cell_id" in adata.obs.columns:
                 adata.obs.drop(columns=["cell_id"], inplace=True)
@@ -166,7 +166,7 @@ def xenium(
         sdata = read_zarr(output)
 
     # now read the transcripts
-    for _path, _to_coordinate_system in zip(path, to_coordinate_system):
+    for _path, _to_coordinate_system in zip(path, to_coordinate_system, strict=True):
         table = dd.read_parquet(os.path.join(_path, XeniumKeys.TRANSCRIPTS_FILE))
 
         with open(os.path.join(_path, XeniumKeys.XENIUM_SPECS)) as f:

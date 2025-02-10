@@ -4,6 +4,10 @@ from spatialdata import SpatialData, read_zarr
 from spatialdata.models._utils import MappingToCoordinateSystem_t
 
 from harpy.utils._io import _incremental_io_on_disk
+from harpy.utils.pylogger import get_pylogger
+from harpy.utils.utils import _self_contained_warning_message
+
+log = get_pylogger(__name__)
 
 
 def add_points_layer(
@@ -61,6 +65,19 @@ def add_points_layer(
         sdata[output_layer] = points
         if sdata.is_backed():
             sdata.write_element(output_layer)
+            if warning_message := _self_contained_warning_message(sdata, output_layer):
+                log.warning(warning_message)
+            if len(sdata[output_layer].dask) != 1:
+                log.warning(
+                    f"Element '{output_layer}' is Dask-backed, but not all tasks have been executed in the in-memory SpatialData object.\n"
+                    "This may lead to unexpected behavior if lazy computations are not triggered.\n"
+                    "To resolve this, ensure that you assign the result of operations:\n"
+                    "    sdata = harpy.{operation}(sdata, ...)\n"
+                    "Alternatively, manually reload from the Zarr store:\n"
+                    f"    sdata = spatialdata.read_zarr('{sdata.path}')\n"
+                    "For more details, see the discussion at:\n"
+                    "    https://github.com/saeyslab/harpy/issues/90"
+                )
             sdata = read_zarr(sdata.path)
 
     return sdata

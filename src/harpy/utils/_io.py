@@ -9,6 +9,7 @@ from spatialdata import SpatialData, read_zarr
 from xarray import DataArray, DataTree
 
 from harpy.utils.pylogger import get_pylogger
+from harpy.utils.utils import _self_contained_warning_message
 
 log = get_pylogger(__name__)
 
@@ -40,6 +41,8 @@ def _incremental_io_on_disk(
     sdata.write_element(output_layer)
     # b2. reload the new data into memory (because it has been written but in-memory it still points
     # from the backup location)
+    if warning_message := _self_contained_warning_message(sdata, output_layer):
+        log.warning(warning_message)
     sdata = read_zarr(sdata.path)
     # c. remove the backup copy
     del sdata[new_output_layer]

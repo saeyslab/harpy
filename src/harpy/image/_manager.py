@@ -12,6 +12,7 @@ from xarray import DataArray, DataTree
 
 from harpy.utils._io import _incremental_io_on_disk
 from harpy.utils.pylogger import get_pylogger
+from harpy.utils.utils import _self_contained_warning_message
 
 log = get_pylogger(__name__)
 
@@ -31,9 +32,6 @@ class LayerManager(ABC):
     ) -> SpatialData:
         chunks = chunks or arr.chunksize
         if dims is None:
-            log.warning(
-                "No dims parameter specified. Assuming order of dimension of provided array is ((c), (z), y, x)"
-            )
             dims = self.get_dims(arr)
 
         if not sdata.is_backed():
@@ -155,6 +153,8 @@ class ImageLayerManager(LayerManager):
             sdata[output_layer] = spatial_element
             if sdata.is_backed():
                 sdata.write_element(output_layer)
+                if warning_message := _self_contained_warning_message(sdata, output_layer):
+                    log.warning(warning_message)
                 sdata = read_zarr(sdata.path)
 
         return sdata
@@ -220,6 +220,8 @@ class LabelLayerManager(LayerManager):
             sdata[output_layer] = spatial_element
             if sdata.is_backed():
                 sdata.write_element(output_layer)
+                if warning_message := _self_contained_warning_message(sdata, output_layer):
+                    log.warning(warning_message)
                 sdata = read_zarr(sdata.path)
 
         return sdata

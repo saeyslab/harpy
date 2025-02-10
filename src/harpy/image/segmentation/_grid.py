@@ -95,7 +95,7 @@ def add_grid_labels_layer(
         sdata=sdata,
         shapes_layer=output_shapes_layer,
         output_layer=output_labels_layer,
-        out_shape=tuple(a + b for a, b in zip(shape, offset)),
+        out_shape=tuple(a + b for a, b in zip(shape, offset, strict=True)),
         chunks=chunks,
         client=client,
         scale_factors=scale_factors,

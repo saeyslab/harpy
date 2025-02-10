@@ -105,16 +105,16 @@ def _delete_overlap(voronoi: GeoDataFrame, polygons: GeoDataFrame) -> GeoDataFra
 
     geometry_loc = voronoi.columns.get_loc("geometry")
 
-    for cell1, cell2 in zip(I1, I2):
+    for cell1, cell2 in zip(I1, I2, strict=True):
         voronoi.iloc[cell1, geometry_loc] = voronoi.iloc[cell1].geometry.intersection(
             voronoi2.iloc[cell1].geometry.difference(voronoi2.iloc[cell2].geometry)
         )
         voronoi.iloc[cell2, geometry_loc] = voronoi.iloc[cell2].geometry.intersection(
             voronoi2.iloc[cell2].geometry.difference(voronoi2.iloc[cell1].geometry)
         )
-    assert np.array_equal(
-        np.sort(voronoi.index), np.sort(polygons.index)
-    ), "Indices of voronoi and polygons do not match"
+    assert np.array_equal(np.sort(voronoi.index), np.sort(polygons.index)), (
+        "Indices of voronoi and polygons do not match"
+    )
     polygons = polygons.reindex(voronoi.index)
     voronoi["geometry"] = voronoi.geometry.union(polygons.geometry)
     polygons = polygons.buffer(distance=0)

@@ -12,6 +12,7 @@ from omegaconf import OmegaConf
 from omegaconf.dictconfig import DictConfig
 from shapely.affinity import translate
 from shapely.geometry import LineString, MultiLineString
+from spatialdata import SpatialData
 from spatialdata.models import get_axes_names
 from spatialdata.transformations import get_transformation
 from xarray import DataArray, DataTree
@@ -146,3 +147,21 @@ def _get_uint_dtype(value: int) -> str:
     else:
         raise ValueError(f"Maximum cell number is {value}. Values higher than {max_uint64} are not supported.")
     return dtype
+
+
+def _self_contained_warning_message(sdata: SpatialData, layer: str) -> str | None:
+    elements = sdata.elements_are_self_contained()
+    if not elements[layer]:
+        warning_message = (
+            f"Element '{layer}' is Dask-backed, but the SpatialData object is not self-contained.\n"
+            "To resolve this, ensure that you assign the result of operations:\n"
+            "    sdata = harpy.{operation}(sdata, ...)\n"
+            "Alternatively, manually reload from the Zarr store:\n"
+            f"    spatialdata.read_zarr('{sdata.path}')\n"
+            "For more details, see the discussion at:\n"
+            "    https://github.com/saeyslab/harpy/issues/90"
+        )
+
+        return warning_message
+    else:
+        return None
