@@ -13,7 +13,6 @@ from harpy.image._image import _get_spatial_element, add_labels_layer
 from harpy.table._table import add_table_layer
 from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY
 from harpy.utils.pylogger import get_pylogger
-from harpy.utils.utils import _self_contained_warning_message
 
 log = get_pylogger(__name__)
 
@@ -173,8 +172,6 @@ def bounding_box_query(
         sdata_queried[_layer_to_copy] = sdata[_layer_to_copy]
         if sdata_queried.is_backed():
             sdata_queried.write_element(_layer_to_copy)
-            if warning_message := _self_contained_warning_message(sdata, _layer_to_copy):
-                log.warning(warning_message)
 
     # if backed, and if there were layers copied, we read back from zarr, otherwise sdata_queried not self contained
     if sdata_queried.is_backed() and layers_to_copy:

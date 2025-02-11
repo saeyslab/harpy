@@ -6,7 +6,6 @@ from spatialdata.models import TableModel
 from harpy.utils._io import _incremental_io_on_disk
 from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY
 from harpy.utils.pylogger import get_pylogger
-from harpy.utils.utils import _self_contained_warning_message
 
 log = get_pylogger(__name__)
 
@@ -46,11 +45,12 @@ class TableLayerManager:
                 adata,
             )
 
-        # given an adata.
         if output_layer in [*sdata.tables]:
             if sdata.is_backed():
                 if overwrite:
-                    sdata = _incremental_io_on_disk(sdata, output_layer=output_layer, element=adata)
+                    sdata = _incremental_io_on_disk(
+                        sdata, output_layer=output_layer, element=adata, element_type="tables"
+                    )
                 else:
                     raise ValueError(
                         f"Attempting to overwrite 'sdata.tables[\"{output_layer}\"]', but overwrite is set to False. Set overwrite to True to overwrite the .zarr store."
@@ -61,9 +61,9 @@ class TableLayerManager:
             sdata[output_layer] = adata
             if sdata.is_backed():
                 sdata.write_element(output_layer)
-                # Note: currently tables are in memory, and the latter warning will never be triggered.
-                if warning_message := _self_contained_warning_message(sdata, output_layer):
-                    log.warning(warning_message)
-                sdata = read_zarr(sdata.path)
+                sdata_temp = read_zarr(sdata.path, selection=["tables"])
+                del sdata[output_layer]
+                sdata[output_layer] = sdata_temp[output_layer]
+                del sdata_temp
 
         return sdata

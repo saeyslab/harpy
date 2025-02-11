@@ -12,7 +12,6 @@ from xarray import DataArray, DataTree
 
 from harpy.utils._io import _incremental_io_on_disk
 from harpy.utils.pylogger import get_pylogger
-from harpy.utils.utils import _self_contained_warning_message
 
 log = get_pylogger(__name__)
 
@@ -141,7 +140,9 @@ class ImageLayerManager(LayerManager):
         if output_layer in [*sdata.images]:
             if sdata.is_backed():
                 if overwrite:
-                    sdata = _incremental_io_on_disk(sdata, output_layer=output_layer, element=spatial_element)
+                    sdata = _incremental_io_on_disk(
+                        sdata, output_layer=output_layer, element=spatial_element, element_type="images"
+                    )
                 else:
                     raise ValueError(
                         f"Attempting to overwrite 'sdata.images[\"{output_layer}\"]', but overwrite is set to False. Set overwrite to True to overwrite the .zarr store."
@@ -153,9 +154,10 @@ class ImageLayerManager(LayerManager):
             sdata[output_layer] = spatial_element
             if sdata.is_backed():
                 sdata.write_element(output_layer)
-                if warning_message := _self_contained_warning_message(sdata, output_layer):
-                    log.warning(warning_message)
-                sdata = read_zarr(sdata.path)
+                sdata_temp = read_zarr(sdata.path, selection=["images"])
+                del sdata[output_layer]
+                sdata[output_layer] = sdata_temp[output_layer]
+                del sdata_temp
 
         return sdata
 
@@ -209,7 +211,9 @@ class LabelLayerManager(LayerManager):
         if output_layer in [*sdata.labels]:
             if sdata.is_backed():
                 if overwrite:
-                    sdata = _incremental_io_on_disk(sdata, output_layer=output_layer, element=spatial_element)
+                    sdata = _incremental_io_on_disk(
+                        sdata, output_layer=output_layer, element=spatial_element, element_type="labels"
+                    )
                 else:
                     raise ValueError(
                         f"Attempting to overwrite 'sdata.labels[\"{output_layer}\"]', but overwrite is set to False. Set overwrite to True to overwrite the .zarr store."
@@ -220,9 +224,10 @@ class LabelLayerManager(LayerManager):
             sdata[output_layer] = spatial_element
             if sdata.is_backed():
                 sdata.write_element(output_layer)
-                if warning_message := _self_contained_warning_message(sdata, output_layer):
-                    log.warning(warning_message)
-                sdata = read_zarr(sdata.path)
+                sdata_temp = read_zarr(sdata.path, selection=["labels"])
+                del sdata[output_layer]
+                sdata[output_layer] = sdata_temp[output_layer]
+                del sdata_temp
 
         return sdata
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from typing import Literal
 
 from anndata import AnnData
 from dask.dataframe import DataFrame
@@ -9,7 +10,6 @@ from spatialdata import SpatialData, read_zarr
 from xarray import DataArray, DataTree
 
 from harpy.utils.pylogger import get_pylogger
-from harpy.utils.utils import _self_contained_warning_message
 
 log = get_pylogger(__name__)
 
@@ -18,7 +18,11 @@ def _incremental_io_on_disk(
     sdata: SpatialData,
     output_layer: str,
     element: DataArray | DataTree | DataFrame | GeoDataFrame | AnnData,
+    element_type: str = Literal["images", "labels", "shapes", "tables", "points"],
 ) -> SpatialData:
+    assert element_type in ["images", "labels", "shapes", "tables", "points"], (
+        "'element_type' should be one of [ 'images', 'labels', 'shapes', 'tables', 'points' ]"
+    )
     new_output_layer = f"{output_layer}_{uuid.uuid4()}"
     # a. write a backup copy of the data
     sdata[new_output_layer] = element
@@ -33,7 +37,7 @@ def _incremental_io_on_disk(
     del sdata[new_output_layer]
     del sdata[output_layer]
     # a3 load the backup copy into memory
-    sdata_copy = read_zarr(sdata.path)
+    sdata_copy = read_zarr(sdata.path, selection=[element_type])
     # b1. rewrite the original data
     sdata.delete_element_from_disk(output_layer)
     sdata[output_layer] = sdata_copy[new_output_layer]
@@ -41,11 +45,13 @@ def _incremental_io_on_disk(
     sdata.write_element(output_layer)
     # b2. reload the new data into memory (because it has been written but in-memory it still points
     # from the backup location)
-    if warning_message := _self_contained_warning_message(sdata, output_layer):
-        log.warning(warning_message)
-    sdata = read_zarr(sdata.path)
+    sdata_materialized = read_zarr(sdata.path, selection=[element_type])
+    # to make sdata point to layer that is materialized, and keep object id.
+    del sdata[output_layer]
+    sdata[output_layer] = sdata_materialized[output_layer]
     # c. remove the backup copy
-    del sdata[new_output_layer]
-    sdata.delete_element_from_disk(new_output_layer)
+    del sdata_materialized[new_output_layer]
+    sdata_materialized.delete_element_from_disk(new_output_layer)
+    del sdata_materialized
 
     return sdata
