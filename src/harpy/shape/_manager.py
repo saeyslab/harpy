@@ -207,8 +207,8 @@ class ShapesLayerManager:
             sdata[output_layer] = spatial_element
             if sdata.is_backed():
                 sdata.write_element(output_layer)
-                sdata_temp = read_zarr(sdata.path, selection=["shapes"])
                 del sdata[output_layer]
+                sdata_temp = read_zarr(sdata.path, selection=["shapes"])
                 sdata[output_layer] = sdata_temp[output_layer]
                 del sdata_temp
 

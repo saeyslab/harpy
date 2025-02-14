@@ -45,9 +45,9 @@ def _incremental_io_on_disk(
     sdata.write_element(output_layer)
     # b2. reload the new data into memory (because it has been written but in-memory it still points
     # from the backup location)
+    del sdata[output_layer]
     sdata_materialized = read_zarr(sdata.path, selection=[element_type])
     # to make sdata point to layer that is materialized, and keep object id.
-    del sdata[output_layer]
     sdata[output_layer] = sdata_materialized[output_layer]
     # c. remove the backup copy
     del sdata_materialized[new_output_layer]

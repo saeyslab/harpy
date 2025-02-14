@@ -154,8 +154,8 @@ class ImageLayerManager(LayerManager):
             sdata[output_layer] = spatial_element
             if sdata.is_backed():
                 sdata.write_element(output_layer)
-                sdata_temp = read_zarr(sdata.path, selection=["images"])
                 del sdata[output_layer]
+                sdata_temp = read_zarr(sdata.path, selection=["images"])
                 sdata[output_layer] = sdata_temp[output_layer]
                 del sdata_temp
 
@@ -224,8 +224,8 @@ class LabelLayerManager(LayerManager):
             sdata[output_layer] = spatial_element
             if sdata.is_backed():
                 sdata.write_element(output_layer)
-                sdata_temp = read_zarr(sdata.path, selection=["labels"])
                 del sdata[output_layer]
+                sdata_temp = read_zarr(sdata.path, selection=["labels"])
                 sdata[output_layer] = sdata_temp[output_layer]
                 del sdata_temp
 

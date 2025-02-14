@@ -64,8 +64,8 @@ def add_points_layer(
         sdata[output_layer] = points
         if sdata.is_backed():
             sdata.write_element(output_layer)
-            sdata_temp = read_zarr(sdata.path, selection=["points"])
             del sdata[output_layer]
+            sdata_temp = read_zarr(sdata.path, selection=["points"])
             sdata[output_layer] = sdata_temp[output_layer]
             del sdata_temp
     return sdata

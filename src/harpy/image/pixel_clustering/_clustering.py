@@ -223,8 +223,8 @@ def flowsom(
             _labels_flowsom_name = f"labels_flowsom_{uuid.uuid4()}"
             sdata.images[_labels_flowsom_name] = se_intermediate
             sdata.write_element(_labels_flowsom_name)
-            sdata_temp = read_zarr(sdata.path, selection=["images"])
             del sdata[_labels_flowsom_name]
+            sdata_temp = read_zarr(sdata.path, selection=["images"])
             sdata[_labels_flowsom_name] = sdata_temp[_labels_flowsom_name]
             del sdata_temp
             _labels_flowsom = _get_spatial_element(sdata, layer=_labels_flowsom_name).data

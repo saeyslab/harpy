@@ -61,8 +61,8 @@ class TableLayerManager:
             sdata[output_layer] = adata
             if sdata.is_backed():
                 sdata.write_element(output_layer)
-                sdata_temp = read_zarr(sdata.path, selection=["tables"])
                 del sdata[output_layer]
+                sdata_temp = read_zarr(sdata.path, selection=["tables"])
                 sdata[output_layer] = sdata_temp[output_layer]
                 del sdata_temp
 
