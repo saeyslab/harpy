@@ -9,14 +9,18 @@ import dask
 import dask.array as da
 import numpy as np
 import pandas as pd
+from dask_image import ndmeasure
 from numpy.typing import NDArray
 from scipy import ndimage
 
 from harpy.utils._keys import _CELLSIZE_KEY, _INSTANCE_KEY
+from harpy.utils.pylogger import get_pylogger
+
+log = get_pylogger(__name__)
 
 
 class RasterAggregator:
-    """Helper class to calulate aggregated 'sum', 'mean', 'var', 'area', 'min' or 'max' of image and labels using Dask."""
+    """Helper class to calulate aggregated 'sum', 'mean', 'var', 'kurtosis', 'skew', 'area', 'min' or 'max' of image and labels using Dask."""
 
     def __init__(self, mask_dask_array: da.Array, image_dask_array: da.Array | None):
         if not np.issubdtype(mask_dask_array.dtype, np.integer):
@@ -26,12 +30,12 @@ class RasterAggregator:
         )  # calculate this one time during initialization, otherwise we would need to calculate this multiple times.
         if image_dask_array is not None:
             assert image_dask_array.ndim == 4, "Currently only 4D image arrays are supported ('c', 'z', 'y', 'x')."
-            assert (
-                image_dask_array.shape[1:] == mask_dask_array.shape
-            ), "The mask and the image should have the same spatial dimensions ('z', 'y', 'x')."
-            assert (
-                image_dask_array.chunksize[1:] == mask_dask_array.chunksize
-            ), "Provided mask ('mask_dask_array') and image ('image_dask_array') do not have the same chunksize in ( 'z', 'y', 'x' ). Please rechunk."
+            assert image_dask_array.shape[1:] == mask_dask_array.shape, (
+                "The mask and the image should have the same spatial dimensions ('z', 'y', 'x')."
+            )
+            assert image_dask_array.chunksize[1:] == mask_dask_array.chunksize, (
+                "Provided mask ('mask_dask_array') and image ('image_dask_array') do not have the same chunksize in ( 'z', 'y', 'x' ). Please rechunk."
+            )
             self._image = image_dask_array
         assert mask_dask_array.ndim == 3, "Currently only 3D masks are supported ('z', 'y', 'x')."
 
@@ -52,6 +56,16 @@ class RasterAggregator:
     ) -> pd.DataFrame:
         return self._aggregate(aggregate_func=partial(self._aggregate_stats_channel, stats_funcs=("var")))
 
+    def aggregate_kurtosis(
+        self,
+    ) -> pd.DataFrame:
+        return self._aggregate(aggregate_func=partial(self._aggregate_stats_channel, stats_funcs=("kurtosis")))
+
+    def aggregate_skew(
+        self,
+    ) -> pd.DataFrame:
+        return self._aggregate(aggregate_func=partial(self._aggregate_stats_channel, stats_funcs=("skew")))
+
     def aggregate_max(
         self,
     ) -> pd.DataFrame:
@@ -64,6 +78,9 @@ class RasterAggregator:
 
     def aggregate_area(self) -> pd.DataFrame:
         return _get_mask_area(self._mask, index=self._labels)
+
+    def center_of_mass(self) -> pd.DataFrame:
+        return _get_center_of_mass(self._mask, index=self._labels)
 
     def _aggregate(self, aggregate_func: Callable[[da.Array], pd.DataFrame]) -> pd.DataFrame:
         _result = []
@@ -81,14 +98,20 @@ class RasterAggregator:
         self,
         image: da.Array,
         mask: da.Array,
-        stats_funcs: tuple[str, ...] = ("sum", "mean", "count", "var"),
+        stats_funcs: tuple[str, ...] = ("sum", "mean", "count", "var", "kurtosis", "skew"),
     ) -> NDArray:
         # add an assert that checks that stats_funcs is in the list that is given.
         # first calculate the sum.
         if isinstance(stats_funcs, str):
             stats_funcs = (stats_funcs,)
 
-        if "sum" in stats_funcs or "mean" in stats_funcs or "var" in stats_funcs:
+        if (
+            "sum" in stats_funcs
+            or "mean" in stats_funcs
+            or "var" in stats_funcs
+            or "kurtosis" in stats_funcs
+            or "skew" in stats_funcs
+        ):
 
             def _calculate_sum_per_chunk(mask_block: NDArray, image_block: NDArray) -> NDArray:
                 unique_labels, new_labels = np.unique(mask_block, return_inverse=True)
@@ -123,15 +146,21 @@ class RasterAggregator:
 
         # then calculate the mean
         # i) first calculate the area
-        if "mean" in stats_funcs or "count" in stats_funcs or "var" in stats_funcs:
+        if (
+            "mean" in stats_funcs
+            or "count" in stats_funcs
+            or "var" in stats_funcs
+            or "kurtosis" in stats_funcs
+            or "skew" in stats_funcs
+        ):
             count = _calculate_area(mask, index=self._labels)
 
         # ii) then calculate the mean
-        if "mean" in stats_funcs or "var" in stats_funcs:
+        if "mean" in stats_funcs or "var" in stats_funcs or "kurtosis" in stats_funcs or "skew" in stats_funcs:
             mean = sum / count
 
-        if "var" in stats_funcs:
-            # calculate the sum of squares per cell
+        def sum_of_n(n: int):
+            # calculate the sum of n (e.g. squares if n=2) per cell
             def _calculate_sum_c_per_chunk(mask_block: NDArray, image_block: NDArray) -> NDArray:
                 def _sum_centered(labels):
                     # `labels` is expected to be an ndarray with the same shape as `input`.
@@ -139,7 +168,7 @@ class RasterAggregator:
                     # themselves).
                     centered_input = image_block - mean_found.flatten()[labels]
                     # bincount expects 1-D inputs, so we ravel the arguments.
-                    bc = np.bincount(labels.ravel(), weights=(centered_input * centered_input.conjugate()).ravel())
+                    bc = np.bincount(labels.ravel(), weights=(centered_input**n).ravel())
                     return bc
 
                 unique_labels, new_labels = np.unique(mask_block, return_inverse=True)
@@ -173,7 +202,14 @@ class RasterAggregator:
             # dask_array is an array of shape (len(index), nr_of_chunks in image/mask )
             dask_array = da.concatenate(dask_chunks, axis=1)
 
-            sum_c = da.sum(dask_array, axis=1).compute().reshape(-1, 1)
+            return da.sum(dask_array, axis=1).compute().reshape(-1, 1)
+
+        if "var" in stats_funcs or "kurtosis" in stats_funcs or "skew" in stats_funcs:
+            sum_square = sum_of_n(n=2)
+        if "kurtosis" in stats_funcs:
+            sum_fourth = sum_of_n(n=4)
+        if "skew" in stats_funcs:
+            sum_third = sum_of_n(n=3)
 
         to_return = {}
         if "sum" in stats_funcs:
@@ -183,7 +219,17 @@ class RasterAggregator:
         if "count" in stats_funcs:
             to_return["count"] = count
         if "var" in stats_funcs:
-            to_return["var"] = sum_c / count
+            to_return["var"] = sum_square / count
+        if "kurtosis" in stats_funcs:
+            # fisher kurtosis
+            kurtosis = ((sum_fourth / count) / ((sum_square / count) ** 2)) - 3
+            if np.isnan(kurtosis).any():
+                log.warning("Replacing NaN values in 'kurtosis' with 0 for affected cells.")
+                kurtosis = np.nan_to_num(kurtosis, nan=0)
+            to_return["kurtosis"] = kurtosis
+        if "skew" in stats_funcs:
+            skewness = (sum_third / count) / (np.sqrt(sum_square / count)) ** 3
+            to_return["skew"] = skewness
 
         to_return = [to_return[func] for func in stats_funcs if func in to_return]
 
@@ -209,9 +255,9 @@ class RasterAggregator:
         mask: da.Array,
         min_or_max: str,
     ) -> NDArray:
-        assert (
-            image.numblocks == mask.numblocks
-        ), "Dask arrays must have same number of blocks. Please rechunk arrays `image` and `mask` with same chunks size."
+        assert image.numblocks == mask.numblocks, (
+            "Dask arrays must have same number of blocks. Please rechunk arrays `image` and `mask` with same chunks size."
+        )
 
         assert min_or_max in ["max", "min"], "Please choose from [ 'min', 'max' ]."
 
@@ -339,7 +385,9 @@ class RasterAggregator:
 
         sanity, results = dask.compute(*[sanity, results])
 
-        assert sanity, "We expect exactly one non-NaN element per row (each column corresponding to a chunk of 'mask'). Please consider increasing 'depth' parameter."
+        assert sanity, (
+            "We expect exactly one non-NaN element per row (each column corresponding to a chunk of 'mask'). Please consider increasing 'depth' parameter."
+        )
 
         return results
 
@@ -386,6 +434,27 @@ def _calculate_area(mask: da.Array, index: NDArray | None = None) -> NDArray:
     dask_array = da.concatenate(dask_chunks, axis=1)
 
     return da.sum(dask_array, axis=1).compute().reshape(-1, 1)
+
+
+def _get_center_of_mass(mask: da.Array, index: NDArray | None = None) -> pd.DataFrame:
+    assert mask.ndim == 3, "Currently only 3D masks are supported."
+    if index is None:
+        index = da.unique(mask).compute()
+
+    coordinates = ndmeasure.center_of_mass(
+        image=mask,
+        label_image=mask,
+        index=index,
+    )
+
+    return pd.DataFrame(
+        {
+            _INSTANCE_KEY: index,
+            0: coordinates[:, 0],
+            1: coordinates[:, 1],
+            2: coordinates[:, 2],
+        }
+    )
 
 
 def _get_min_max_dtype(array):
@@ -486,9 +555,9 @@ def _aggregate_custom_block(
 
     result = fn(*arrays, **fn_kwargs)  # fn can either take in a mask + image, or only a mask
     result = result.reshape(-1, features)
-    assert (
-        result.shape[0] == unique_masks.shape[0]
-    ), "Callable 'fn' should return an array with length equal to the number of non zero labels in the provided mask."
+    assert result.shape[0] == unique_masks.shape[0], (
+        "Callable 'fn' should return an array with length equal to the number of non zero labels in the provided mask."
+    )
     assert np.issubdtype(result.dtype, np.floating), "Callable 'fn' should return an array of dtype 'float'."
     if any(np.isnan(result).flatten()):
         raise AssertionError("Result of callable 'fn' is not allowed to contain NaN.")
