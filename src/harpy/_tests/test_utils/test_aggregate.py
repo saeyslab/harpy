@@ -8,7 +8,7 @@ from scipy.stats import kurtosis, skew
 from skimage.measure import regionprops_table
 from xrspatial import zonal_stats
 
-from harpy.utils._aggregate import RasterAggregator, _get_center_of_mass, _get_mask_area
+from harpy.utils._aggregate import RasterAggregator, _get_center_of_mass, _get_mask_area, _region_radii_and_axes
 from harpy.utils._keys import _CELLSIZE_KEY, _INSTANCE_KEY
 
 
@@ -268,6 +268,43 @@ def test_aggregate_quantiles(sdata_multi_c_no_backed):
     )
 
 
+def test_aggregate_radii_and_axes(sdata_multi_c_no_backed):
+    se_labels = sdata_multi_c_no_backed["masks_whole"]
+
+    mask = se_labels.data[None, ...].rechunk(210)
+
+    aggregator = RasterAggregator(
+        mask_dask_array=mask,
+        image_dask_array=None,
+    )
+
+    df = aggregator.aggregate_radii_and_axes(depth=200, calculate_axes=True)
+
+    assert df.shape == (
+        len(aggregator._labels) - 1,  # radii for background (0), not computed.
+        mask.ndim + mask.ndim**2 + 1,  # 3 radii, 3*3 axes, 1 cell ID
+    )
+
+    cell_id = 2
+
+    radii, axes = _region_radii_and_axes(mask, label=cell_id)
+
+    assert np.allclose(radii, df[df[_INSTANCE_KEY] == cell_id][range(3)].values.flatten())
+    assert np.allclose(axes.flatten(), df[df[_INSTANCE_KEY] == cell_id][range(3, 12)].values.flatten())
+
+    # check that we get same results for other chunksize
+    mask = se_labels.data[None, ...].rechunk(100)
+
+    aggregator = RasterAggregator(
+        mask_dask_array=mask,
+        image_dask_array=None,
+    )
+
+    df_other_chunksize = aggregator.aggregate_radii_and_axes(depth=200, calculate_axes=True)
+
+    assert np.allclose(df_other_chunksize.values, df.values)
+
+
 def test_aggregate_var_3D(sdata):
     se_image = sdata["blobs_image"]
     se_labels = sdata["blobs_labels"]
@@ -503,3 +540,21 @@ def test_aggregate_custom_channel_multiple_features_sdata(sdata):
             fn=_calculate_intensity_mean_area,
             features=2,
         )
+
+
+def test_region_radii_and_axes():
+    mask = np.array(
+        [
+            [1, 1, 1, 0],
+            [0, 0, 0, 0],
+            [0, 0, 0, 0],
+        ]
+    )
+
+    mask = mask[None, ...]
+
+    radii, axis = _region_radii_and_axes(mask=mask, label=1)
+
+    assert np.array_equal(np.array([1.0, 0.0, 0.0]), radii)
+
+    assert np.allclose(np.array([[0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]), axis)

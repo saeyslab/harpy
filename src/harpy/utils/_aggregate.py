@@ -12,6 +12,7 @@ import pandas as pd
 from dask_image import ndmeasure
 from numpy.typing import NDArray
 from scipy import ndimage
+from sklearn.decomposition import PCA
 
 from harpy.utils._keys import _CELLSIZE_KEY, _INSTANCE_KEY
 from harpy.utils.pylogger import get_pylogger
@@ -115,6 +116,45 @@ class RasterAggregator:
             _df[_INSTANCE_KEY] = _labels
 
         return dfs
+
+    def aggregate_radii_and_axes(self, depth: int, calculate_axes: bool = True) -> pd.DataFrame:
+        """
+        Computes and aggregates radii and principal axes for segmented regions in the mask.
+
+        This method returns a pandas DataFrame where each row represents a segmented cell.
+        The DataFrame includes a column for the cell ID, three columns for the radii (sorted
+        from largest to smallest), and optionally, nine columns (3*3) for the principal axes.
+
+        Parameters
+        ----------
+        depth : int
+            The depth at which the aggregation is performed, passed to `dask.array.map_overlap`
+        calculate_axes : bool, optional
+            If True, the DataFrame will include the principal axes (default is True).
+
+        Returns
+        -------
+        pd.DataFrame
+            A DataFrame where:
+            - Each row corresponds to a segmented cell, sorted by cell ID.
+            - The next three columns contain the radii (sorted from highest to lowest).
+            - If `calculate_axes` is True, the next nine columns contain the corresponding principal axes (flattened 3*3 matrix).
+            - One column contains the cell ID.
+        """
+        results = self._aggregate_custom_channel(
+            image=None,
+            mask=self._mask,
+            depth=depth,
+            features=self._mask.ndim + self._mask.ndim * self._mask.ndim
+            if calculate_axes
+            else self._mask.ndim,  # returns 3 radii and 3 axis with (z,y,x) coordinates.
+            dtype=np.float32,
+            fn=_all_region_radii_and_axes,
+            fn_kwargs={"calculate_axes": calculate_axes},
+        )
+        df = pd.DataFrame(results)
+        df[_INSTANCE_KEY] = self._labels[self._labels != 0]
+        return df
 
     def _aggregate(self, aggregate_func: Callable[[da.Array], pd.DataFrame]) -> pd.DataFrame:
         _result = []
@@ -408,14 +448,16 @@ class RasterAggregator:
             diameter of the largest region of interest in the `mask`. This value ensures the appropriate
             neighborhood is considered when applying the function `fn`.
         fn
-            A custom function that performs operations on a mask and an optional image array. The function should accept
-            one or two NumPy arrays depending whether image is None or not: the first is the mask as an integer array,
-            and the second is the image as a float or integer array. It must return a 2D NumPy array of type `np.float`, where
-            the first dimension of the returned array matches the number of unique labels in the mask passed to `fn` (excluding label `0`),
-            ordered by its correponding label number, and second dimension are the number of features calculated by `fn`.
-            This should match `features`.
+            A custom function that processes a mask and, optionally, an image array.
+            The function must accept either one or two NumPy arrays:
+            - The first argument is the mask, provided as an integer array.
+            - The second argument (optional) is the image, given as a float or integer array.
+            The function must return a 2D NumPy array of type `np.float`, where:
+            - The first dimension corresponds to the number of unique labels in the mask (excluding label `0`), sorted by label number.
+            - The second dimension represents the number of features computed by `fn`.
+            The output of `fn` must **not** contain `NaN` values.
             User warning: the number of unique labels in the mask passed to `fn` is not equal to the number of
-            unique labels in `mask` due to the use of `dask.array.map_overlap`.
+            unique labels from the global `mask` due to the use of `dask.array.map_overlap`.
         fn_kwargs
             Additional keyword arguments to be passed to the function `fn`. The default is an empty `MappingProxyType`.
         dtype
@@ -576,6 +618,72 @@ def _quantile_intensity_distribution(
             result[i] = np.quantile(object_intensities, quantiles)
 
     return result
+
+
+def _all_region_radii_and_axes(mask: NDArray, calculate_axes: bool = True) -> NDArray:
+    unique_labels = np.unique(mask)
+    unique_labels = unique_labels[unique_labels != 0]
+
+    nr_of_features = mask.ndim + mask.ndim**2 if calculate_axes else mask.ndim
+
+    if len(unique_labels) == 0:
+        return np.empty((0, nr_of_features))
+
+    result = np.full((len(unique_labels), nr_of_features), np.nan, dtype=np.float32)
+
+    for i, label in enumerate(unique_labels):
+        radii, axes = _region_radii_and_axes(mask=mask, label=label)
+        assert radii.shape == (mask.ndim,), f"Unexpected radii shape: {radii.shape}"
+        assert axes.shape == (mask.ndim, mask.ndim), f"Unexpected axes shape: {axes.shape}"
+        result[i] = np.concatenate((radii, axes.flatten())) if calculate_axes else radii
+    return result
+
+
+def _region_radii_and_axes(mask: NDArray, label: int) -> tuple[NDArray, NDArray]:
+    """
+    Compute the principal axes and radii of an object in a mask using PCA.
+
+    This function extracts the coordinates of all pixels belonging to a given label in a segmentation mask,
+    performs Principal Component Analysis (PCA) on those coordinates, and returns the radii (square roots
+    of the eigenvalues) and the principal axes (eigenvectors).
+
+    Parameters
+    ----------
+    mask : NDArray
+        A binary or labeled mask where each object is represented by a unique integer.
+    label : int
+        The integer label of the object whose principal axes and radii are to be computed.
+
+    Returns
+    -------
+    A tuple containing:
+        - radii: A 1D numpy array of shape `(ndim,)` representing the spread of the object along each principal axis.
+        - axes: A 2D numpy array of shape `(ndim, ndim)`, where each row is a principal axis (eigenvector).
+    """
+    _ndim = mask.ndim
+
+    coords = np.column_stack(np.where(mask == label))
+
+    if len(coords) < _ndim:
+        radii = np.zeros(_ndim)
+        return radii, np.eye(_ndim)
+
+    pca = PCA(n_components=_ndim)
+    pca.fit(coords)
+
+    eigenvalues = pca.explained_variance_
+    radii = np.sqrt(eigenvalues)
+
+    axes = pca.components_
+
+    # sort radii AND axes together
+    # sort from largest to smallest eigenvalue
+    # sklearn PCA returns sorted radii, but sorting ensures consistency across implementations
+    sorted_indices = np.argsort(radii)[::-1]
+    radii = radii[sorted_indices]
+    axes = axes[sorted_indices]
+
+    return radii, axes
 
 
 def _get_min_max_dtype(array):
