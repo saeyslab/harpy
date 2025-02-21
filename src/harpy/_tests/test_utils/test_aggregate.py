@@ -234,6 +234,40 @@ def test_aggregate_skewness(sdata):
     assert np.allclose(df_skew[df_skew[_INSTANCE_KEY] == 1][0].item(), skew_scipy, rtol=0, atol=1e-5)
 
 
+def test_aggregate_quantiles(sdata_multi_c_no_backed):
+    se_image = sdata_multi_c_no_backed["raw_image"]
+    se_labels = sdata_multi_c_no_backed["masks_whole"]
+
+    image = se_image.data[:, None, ...].rechunk(210)
+    mask = se_labels.data[None, ...].rechunk(210)
+
+    aggregator = RasterAggregator(
+        mask_dask_array=mask,
+        image_dask_array=image,
+    )
+
+    quantiles = [0.3, 0.5]
+    dfs = aggregator.aggregate_quantiles(depth=200, quantiles=quantiles, quantile_background=True)
+
+    channel_id = 3
+    cell_id = 670
+    quantile = 0.3
+    assert (
+        np.quantile(image[channel_id].compute()[mask.compute() == cell_id], q=quantile)
+        == dfs[quantiles.index(quantile)][dfs[quantiles.index(quantile)][_INSTANCE_KEY] == cell_id][channel_id].item()
+    )
+
+    channel_id = 1
+    cell_id = 0
+    quantile = 0.5
+    assert np.isclose(
+        np.quantile(image[channel_id].compute()[mask.compute() == cell_id], q=quantile),
+        dfs[quantiles.index(quantile)][dfs[quantiles.index(quantile)][_INSTANCE_KEY] == cell_id][channel_id].item(),
+        rtol=0,
+        atol=1e-6,
+    )
+
+
 def test_aggregate_var_3D(sdata):
     se_image = sdata["blobs_image"]
     se_labels = sdata["blobs_labels"]

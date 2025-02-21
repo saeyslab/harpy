@@ -20,7 +20,7 @@ log = get_pylogger(__name__)
 
 
 class RasterAggregator:
-    """Helper class to calulate aggregated 'sum', 'mean', 'var', 'kurtosis', 'skew', 'area', 'min' or 'max' of image and labels using Dask."""
+    """Helper class to calulate aggregated 'sum', 'mean', 'var', 'kurtosis', 'skew', 'area', 'min', 'max' or 'quantiles' of image and labels using Dask."""
 
     def __init__(self, mask_dask_array: da.Array, image_dask_array: da.Array | None):
         if not np.issubdtype(mask_dask_array.dtype, np.integer):
@@ -81,6 +81,40 @@ class RasterAggregator:
 
     def center_of_mass(self) -> pd.DataFrame:
         return _get_center_of_mass(self._mask, index=self._labels)
+
+    def aggregate_quantiles(
+        self,
+        depth: int,
+        quantiles: list[float] | NDArray | None = None,
+        quantile_background: bool = False,
+    ) -> list[pd.DataFrame]:
+        # Returns a list of pandas DataFrames, one for per quantile.
+        # Each DataFrame contains cells as rows and channels as columns.
+        if quantiles is None:
+            quantiles = np.linspace(0.1, 0.9, 9)
+        # return a list of dataframes, one dataframe per quantile
+        if quantile_background:
+            _labels = self._labels
+        else:
+            _labels = self._labels[self._labels != 0]
+
+        result = np.full((len(self._image), len(_labels), len(quantiles)), np.nan, dtype=np.float32)
+        for i, _c_image in enumerate(self._image):
+            result[i] = self._aggregate_quantiles_channel(
+                image=_c_image,
+                mask=self._mask,
+                depth=depth,
+                quantiles=quantiles,
+                quantile_background=quantile_background,
+            )
+
+        result = result.transpose(2, 1, 0)  # shape after transpose: (nr_of_quantiles, nr_of_labels, nr_of_channels)
+        dfs = [pd.DataFrame(_result) for _result in result]
+
+        for _df in dfs:
+            _df[_INSTANCE_KEY] = _labels
+
+        return dfs
 
     def _aggregate(self, aggregate_func: Callable[[da.Array], pd.DataFrame]) -> pd.DataFrame:
         _result = []
@@ -296,6 +330,54 @@ class RasterAggregator:
 
         return min_max_func(dask_array, axis=1).compute().reshape(-1, 1)
 
+    def _aggregate_quantiles_channel(
+        self,
+        image: da.Array,
+        mask: da.Array,
+        depth: int,
+        quantiles: list[float] | None,
+        quantile_background: bool = False,
+    ) -> NDArray:
+        if quantiles is None:
+            quantiles = np.linspace(0.1, 0.9, 9)
+
+        fn_kwargs = {
+            "quantiles": quantiles,
+        }
+
+        results = self._aggregate_custom_channel(
+            image=image,
+            mask=mask,
+            depth=depth,
+            features=len(quantiles),
+            dtype=np.float32,
+            fn=_quantile_intensity_distribution,
+            fn_kwargs=fn_kwargs,
+        )
+
+        def _quantile_background(
+            image: da.Array,
+            mask: da.Array,
+            q: float = None,
+            internal_method: str = "tdigest",
+            background_label: int = 0,
+        ) -> float:
+            # calculate the quantile of the background
+            q = q * 100
+            image = image.flatten()
+            mask = mask.flatten()
+            background_non_nan_mask = (mask == background_label) & (~da.isnan(image))
+
+            array = da.compress(background_non_nan_mask, image)
+
+            return da.percentile(array, q=q, internal_method=internal_method).astype(np.float32)[0].compute()
+
+        if quantile_background and quantiles is not None:
+            results_background = np.array([_quantile_background(image, mask, q=_quantile) for _quantile in quantiles])
+            results = np.vstack((np.array(results_background), results))
+
+        return results
+
     def _aggregate_custom_channel(
         self,
         image: da.Array | None,
@@ -328,7 +410,7 @@ class RasterAggregator:
         fn
             A custom function that performs operations on a mask and an optional image array. The function should accept
             one or two NumPy arrays depending whether image is None or not: the first is the mask as an integer array,
-            and the second is the image as a float or integer array. It must return a 2D NumPy array of type `np.float_`, where
+            and the second is the image as a float or integer array. It must return a 2D NumPy array of type `np.float`, where
             the first dimension of the returned array matches the number of unique labels in the mask passed to `fn` (excluding label `0`),
             ordered by its correponding label number, and second dimension are the number of features calculated by `fn`.
             This should match `features`.
@@ -455,6 +537,45 @@ def _get_center_of_mass(mask: da.Array, index: NDArray | None = None) -> pd.Data
             2: coordinates[:, 2],
         }
     )
+
+
+def _quantile_intensity_distribution(
+    mask: NDArray, image: NDArray, quantiles: list[float] | NDArray | None = None
+) -> NDArray:
+    """
+    Calculate the quantile intensity distribution for each object in the mask.
+
+    Parameters
+    ----------
+    image
+        intensity values.
+    mask
+       should have same shape as image, with integer cell IDs (0 for background).
+    quantiles
+        list of quantiles to compute (e.g., [0.1, 0.2, ..., 0.9]).
+
+    Returns
+    -------
+        The computed quantiles as a numpy array of shape `(nr of non zero labels, len(quantiles))`.
+    """
+    if quantiles is None:
+        quantiles = np.linspace(0.1, 0.9, 9)
+
+    unique_labels = np.unique(mask)
+    unique_labels = unique_labels[unique_labels != 0]
+
+    if len(unique_labels) == 0:
+        # No objects in the mask, return an empty array with shape (0, len(quantiles))
+        return np.empty((0, len(quantiles)))
+
+    result = np.full((len(unique_labels), len(quantiles)), np.nan, dtype=np.float32)
+
+    for i, label in enumerate(unique_labels):
+        object_intensities = image[mask == label]
+        if object_intensities.size > 0:
+            result[i] = np.quantile(object_intensities, quantiles)
+
+    return result
 
 
 def _get_min_max_dtype(array):
