@@ -12,6 +12,34 @@ from harpy.utils._aggregate import RasterAggregator, _get_center_of_mass, _get_m
 from harpy.utils._keys import _CELLSIZE_KEY, _INSTANCE_KEY
 
 
+def test_aggregate_stats(sdata):
+    se_image = sdata["blobs_image"]
+    se_labels = sdata["blobs_labels"]
+
+    image = se_image.data[:, None, ...]
+    mask = se_labels.data[None, ...]
+
+    aggregator = RasterAggregator(
+        mask_dask_array=mask.rechunk(512),
+        image_dask_array=image.rechunk(512),
+    )
+    stats_funcs = ("sum", "mean", "count", "var", "kurtosis", "skew")
+    dfs = aggregator.aggregate_stats(stats_funcs=stats_funcs)
+
+    assert len(dfs) == len(stats_funcs)
+
+    for df in dfs:
+        assert df.shape == (len(aggregator._labels), image.shape[0] + 1)  # +1 for the _INSTANCE_KEY column
+
+    stats_funcs = ("sum", "wrong_stat")
+
+    with pytest.raises(
+        AssertionError,
+        match=r"^Invalid statistic function",
+    ):
+        dfs = aggregator.aggregate_stats(stats_funcs=stats_funcs)
+
+
 def test_aggregate_sum_dask_array():
     chunk_size = (2, 2)
 

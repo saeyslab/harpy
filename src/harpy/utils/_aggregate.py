@@ -42,6 +42,27 @@ class RasterAggregator:
 
         self._mask = mask_dask_array
 
+    def aggregate_stats(
+        self,
+        stats_funcs: tuple[str, ...] = ("sum", "mean", "count", "var", "kurtosis", "skew"),
+    ) -> list[pd.DataFrame]:
+        results = np.full((self._image.shape[0], len(stats_funcs), self._labels.size), np.nan, dtype=np.float32)
+
+        for i, _channel_image in enumerate(self._image):
+            results[i] = np.array(
+                self._aggregate_stats_channel(image=_channel_image, mask=self._mask, stats_funcs=stats_funcs)
+            ).squeeze()
+
+        results = results.transpose(1, 2, 0)
+
+        dfs = []
+        for _result in results:
+            df = pd.DataFrame(_result)
+            df[_INSTANCE_KEY] = self._labels
+            dfs.append(df)
+
+        return dfs
+
     def aggregate_sum(
         self,
     ) -> pd.DataFrame:
@@ -179,6 +200,12 @@ class RasterAggregator:
         if isinstance(stats_funcs, str):
             stats_funcs = (stats_funcs,)
 
+        allowed_funcs = {"sum", "mean", "count", "var", "kurtosis", "skew"}
+        invalid_funcs = [func for func in stats_funcs if func not in allowed_funcs]
+        assert not invalid_funcs, (
+            f"Invalid statistic function(s): '{invalid_funcs}'. Allowed functions: '{allowed_funcs}'."
+        )
+
         if (
             "sum" in stats_funcs
             or "mean" in stats_funcs
@@ -303,6 +330,10 @@ class RasterAggregator:
             to_return["kurtosis"] = kurtosis
         if "skew" in stats_funcs:
             skewness = (sum_third / count) / (np.sqrt(sum_square / count)) ** 3
+            if np.isnan(skewness).any():
+                log.warning("Replacing NaN values in 'skewness' with 0 for affected cells.")
+                skewness = np.nan_to_num(skewness, nan=0)
+
             to_return["skew"] = skewness
 
         to_return = [to_return[func] for func in stats_funcs if func in to_return]
