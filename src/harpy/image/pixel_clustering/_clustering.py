@@ -350,7 +350,7 @@ def _sample_dask_array(
 
     if temp_path is not None:
         coordinates.to_zarr(temp_path)
-        coordinates.from_zarr(temp_path)
+        coordinates = da.from_zarr(temp_path)
 
     final_array = da.concatenate([reshaped_array, coordinates], axis=1).rechunk("auto")
 
