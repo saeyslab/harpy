@@ -324,10 +324,16 @@ def _sample_dask_array(array: Array, fraction: float = 0.1, remove_nan_columns: 
     # Reshape the array to shape (z*y*x, c)
     reshaped_array = array.transpose(1, 2, 3, 0).reshape(-1, c)
 
-    z_coords, y_coords, x_coords = da.meshgrid(da.arange(z), da.arange(y), da.arange(x), indexing="ij")
-    coordinates = da.stack([z_coords.ravel(), y_coords.ravel(), x_coords.ravel()], axis=1)
+    z_coords, y_coords, x_coords = da.meshgrid(
+        da.arange(z, dtype=np.uint32),
+        da.arange(y, dtype=np.uint32),
+        da.arange(x, dtype=np.uint32),
+        indexing="ij",
+    )
 
-    final_array = da.concatenate([reshaped_array, coordinates], axis=1)
+    coordinates = da.stack([z_coords.ravel(), y_coords.ravel(), x_coords.ravel()], axis=1).rechunk("auto")
+
+    final_array = da.concatenate([reshaped_array, coordinates], axis=1).rechunk("auto")
 
     if fraction is None or fraction == 1:
         if remove_nan_columns:
