@@ -374,7 +374,7 @@ def _sample_dask_array(
 
     # write to intermediate slot, to reduce unmanaged memory
     if temp_path is not None:
-        final_array.to_zarr(os.path.join(temp_path, "final_array.zarr"))
+        final_array.rechunk(final_array.chunksize).to_zarr(os.path.join(temp_path, "final_array.zarr"))
         final_array = da.from_zarr(os.path.join(temp_path, "final_array.zarr"))
 
     sample = dd.from_array(final_array).sample(frac=fraction, replace=False, random_state=seed).values.compute()
