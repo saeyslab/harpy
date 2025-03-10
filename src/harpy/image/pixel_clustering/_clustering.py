@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import os
+import shutil
 import uuid
 from collections.abc import Iterable
+from pathlib import Path
 
 import dask.array as da
 import numpy as np
@@ -155,12 +158,18 @@ def flowsom(
             to_squeeze = True
         _arr_list.append(arr)
 
+        if sdata.is_backed():
+            _temp_path = os.path.join(os.path.dirname(sdata.path), f"tmp_{uuid.uuid4()}.zarr")
+
         # sample to train flowsom
         _arr_sampled = _sample_dask_array(
-            _arr_list[i], fraction=fraction, remove_nan_columns=True, seed=random_state
+            _arr_list[i], fraction=fraction, remove_nan_columns=True, seed=random_state, temp_path=_temp_path
         ).compute()
         results_arr_sampled.append(_arr_sampled)
         _region_keys.extend(_arr_sampled.shape[0] * [img_layer[i]])
+
+        if sdata.is_backed():
+            shutil.rmtree(_temp_path)
 
     arr_sampled = np.row_stack(results_arr_sampled)
 
@@ -310,7 +319,13 @@ def _predict_flowsom_clusters_chunk(array: NDArray, fsom: fs.FlowSOM) -> NDArray
     return np.stack([clusters_array, meta_clusters_array], axis=0)
 
 
-def _sample_dask_array(array: Array, fraction: float = 0.1, remove_nan_columns: bool = True, seed: int = 0) -> Array:
+def _sample_dask_array(
+    array: Array,
+    fraction: float = 0.1,
+    remove_nan_columns: bool = True,
+    seed: int = 0,
+    temp_path: str | Path | None = None,
+) -> Array:
     """Function to sample from dask array and flatten"""
     assert array.ndim == 4
 
@@ -332,6 +347,10 @@ def _sample_dask_array(array: Array, fraction: float = 0.1, remove_nan_columns: 
     )
 
     coordinates = da.stack([z_coords.ravel(), y_coords.ravel(), x_coords.ravel()], axis=1).rechunk("auto")
+
+    if temp_path is not None:
+        coordinates.to_zarr(temp_path)
+        coordinates.from_zarr(temp_path)
 
     final_array = da.concatenate([reshaped_array, coordinates], axis=1).rechunk("auto")
 
