@@ -342,7 +342,7 @@ def _sample_dask_array(
 
     def _remove_nan_columns(array):
         # remove rows for which all values are NaN along the channels
-        nan_mask = np.isnan(array[:, :-3]).all(axis=1)
+        nan_mask = da.isnan(array[:, :-3]).all(axis=1)
         return array[~nan_mask]
 
     # Reshape the array to shape (z*y*x, c)
@@ -377,14 +377,17 @@ def _sample_dask_array(
         final_array.rechunk(final_array.chunksize).to_zarr(os.path.join(temp_path, "final_array.zarr"))
         final_array = da.from_zarr(os.path.join(temp_path, "final_array.zarr"))
 
-    sample = dd.from_array(final_array).sample(frac=fraction, replace=False, random_state=seed).values.compute()
+    log.info("Start sampling")
+    sample = dd.from_array(final_array).sample(frac=fraction, replace=False, random_state=seed).values
+
+    if remove_nan_columns:
+        sample = _remove_nan_columns(sample)
+
+    sample = sample.compute()
 
     # clean up
     if temp_path is not None:
         shutil.rmtree(os.path.join(temp_path, "coordinates.zarr"))
         shutil.rmtree(os.path.join(temp_path, "final_array.zarr"))
 
-    if remove_nan_columns:
-        return _remove_nan_columns(sample)
-    else:
-        return sample
+    return sample
