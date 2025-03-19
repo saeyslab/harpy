@@ -116,6 +116,7 @@ Operations on table (`AnnData` object) layers.
     tb.nhood_enrichment
     tb.add_regionprop_features
     tb.cluster_intensity
+    tb.spatial_pixel_neighbors
     tb.cell_clustering_preprocess
     tb.flowsom
     tb.weighted_channel_expression
