@@ -34,7 +34,7 @@ def spatial_pixel_neighbors(
     Computes spatial pixel neighbors and performs neighborhood enrichment analysis.
 
     This function extracts grid-based cluster labels from the specified labels layer of a SpatialData object,
-    subdivides the spatial domain into a grid of a given size, and computes spatial neighbors along with
+    subdivides the spatial domain into a grid using a specified sampling interval, and computes spatial neighbors along with
     neighborhood enrichment statistics. The resulting AnnData object stores the cluster labels as a categorical
     observation (under the key provided by `key_added`) and the corresponding spatial coordinates in its `.obsm`
     attribute. `squidpy` is used for the spatial neighbors computation and
@@ -49,7 +49,9 @@ def spatial_pixel_neighbors(
         The key in `sdata.labels` from which the cluster label data is extracted.
         This labels layer is typically obtained using `harpy.im.flowsom`.
     size
-        The grid size used to subdivide the spatial domain for extracting pixel-wise cluster labels.
+        The sampling interval for constructing the spatial grid. This value determines the distance (in pixels)
+        between consecutive grid points along each axis. A smaller value produces a denser grid (higher resolution),
+        while a larger value yields a sparser grid.
     subset
         A list of labels to subset the analysis to, or None to include all labels in `labels_layer`.
     spatial_neighbors_kwargs
