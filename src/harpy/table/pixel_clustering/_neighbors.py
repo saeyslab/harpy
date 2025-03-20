@@ -225,6 +225,7 @@ def _get_values_grid_most_frequent(
 
     # clean up
     for _layer in [f"labels_grid_{_uuid}", f"shapes_grid_{_uuid}"]:
+        log.info(f"Removing layer '{_layer}' containing the spatial grid.")
         del sdata[_layer]
         if sdata.is_backed():
             sdata.delete_element_from_disk(_layer)
