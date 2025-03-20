@@ -536,7 +536,7 @@ class RasterAggregator:
 
         sanity = da.all((~da.isnan(dask_array)).sum(axis=1) == 1)
         # da.nansum ignores np.nan added by _aggregate_custom_block
-        results = da.nansum(dask_array, axis=1).reshape(-1, features)
+        results = da.nansum(dask_array, axis=1, dtype=dtype).reshape(-1, features)
 
         sanity, results = dask.compute(*[sanity, results])
 

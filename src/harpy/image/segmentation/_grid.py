@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 import geopandas as gpd
 import numpy as np
 from dask.distributed import Client
@@ -19,7 +21,7 @@ def add_grid_labels_layer(
     size: int,  # radius of the hexagon, or size length of the square.
     output_shapes_layer: str,  # shapes layer corresponding to the labels layer
     output_labels_layer: str,
-    grid_type: str = "hexagon",  # can be either "hexagon" or "square".
+    grid_type: Literal["hexagon", "square"] = "hexagon",  # can be either "hexagon" or "square".
     offset: tuple[int, int] = (0, 0),  # we recommend setting a non-zero offset via a translation.
     chunks: int | None = None,
     client: Client | None = None,

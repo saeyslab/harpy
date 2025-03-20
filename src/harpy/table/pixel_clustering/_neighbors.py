@@ -1,15 +1,21 @@
 from __future__ import annotations
 
+import uuid
 from collections.abc import Mapping
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
 from anndata import AnnData
 from numpy.typing import NDArray
+from spatialdata import SpatialData
+from spatialdata.transformations import get_transformation
 
-from harpy.utils._keys import _SPATIAL
+from harpy.image._image import _get_spatial_element
+from harpy.image.segmentation._grid import add_grid_labels_layer
+from harpy.utils._aggregate import RasterAggregator
+from harpy.utils._keys import _INSTANCE_KEY, _SPATIAL
 from harpy.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
@@ -21,9 +27,11 @@ except ImportError:
 
 
 def spatial_pixel_neighbors(
-    sdata,
+    sdata: SpatialData,
     labels_layer: str,
     size: int = 20,
+    mode: Literal["most_frequent", "center"] = "most_frequent",
+    grid_type: Literal["hexagon", "square"] = "hexagon",  # ignored if mode is 'most_frequent'
     subset: list[int] | None = None,
     spatial_neighbors_kwargs: Mapping[str, Any] = MappingProxyType({}),
     nhood_enrichment_kwargs: Mapping[str, Any] = MappingProxyType({}),
@@ -49,11 +57,25 @@ def spatial_pixel_neighbors(
         The key in `sdata.labels` from which the cluster label data is extracted.
         This labels layer is typically obtained using `harpy.im.flowsom`.
     size
-        The sampling interval for constructing the spatial grid. This value determines the distance (in pixels)
-        between consecutive grid points along each axis. A smaller value produces a denser grid (higher resolution),
+        If `mode` is `"center"`, `size` determines the sampling interval for constructing the spatial grid.
+        This value determines the distance (in pixels) between consecutive grid points along each axis. A smaller value produces a denser grid (higher resolution),
         while a larger value yields a sparser grid.
+        If `mode` is `"most_frequent"`, this value is passed to `harpy.im.add_grid_labels_layer`.
+    mode
+        The method used to extract grid-based pixel cluster labels. Can be either `"most_frequent"` or `"center"`.
+        - `"most_frequent"`: Assigns each grid point the most frequently occurring label within the surrounding
+        neighborhood, determined by `size` and `grid_type`. This approach smooths local variations and
+        provides a more representative cluster label for each region.
+        - `"center"`: Assigns each grid point the label of the pixel at its exact center, without considering
+        neighboring pixels. This method maintains high spatial precision but may be more sensitive to local noise.
+        When using `"most_frequent"`, the `grid_type` parameter determines whether a hexagonal or square
+        grid is used for sampling. If `"center"` is selected, `grid_type` is ignored.
+    grid_type
+        The type of grid used when extracting pixel cluster labels from `labels_layer`. Can be either `"hexagon"` or `"square"`.
+        This parameter is only relevant when `mode="most_frequent"` and is ignored when `mode="center"`.
+        Passed to `harpy.im.add_grid_labels_layer`.
     subset
-        A list of labels to subset the analysis to, or None to include all labels in `labels_layer`.
+        A list of labels to subset the analysis to, or `None` to include all labels in `labels_layer`.
     spatial_neighbors_kwargs
         Additional keyword arguments to be passed to `squidpy.gr.spatial_neighbors`.
     nhood_enrichment_kwargs
@@ -70,15 +92,25 @@ def spatial_pixel_neighbors(
     See Also
     --------
     harpy.im.flowsom : flowsom pixel clustering on image layers.
+    harpy.im.add_grid_labels_layer : construct a grid.
     """
-    array = sdata.labels[labels_layer].data.compute()
-    cluster_ids, coordinates = _get_values_grid(array=array, size=size, subset=subset)
+    if mode == "center":
+        array = sdata.labels[labels_layer].data.compute()
+        cluster_ids, coordinates = _get_values_grid_center(array=array, size=size, subset=subset)
+    elif mode == "most_frequent":
+        cluster_ids, coordinates = _get_values_grid_most_frequent(
+            sdata, labels_layer=labels_layer, size=size, grid_type=grid_type, subset=subset
+        )
+    else:
+        raise ValueError("Please set 'mode' to either 'center' or 'most_frequent'.")
 
     cluster_ids = cluster_ids.flatten()
 
     obs = pd.DataFrame({key_added: pd.Categorical(cluster_ids)})
 
     adata = AnnData(obs=obs)
+
+    log.info(f"Using '{adata.shape[0]}' observations for neighborhood analysis.")
 
     adata.obsm[_SPATIAL] = coordinates
 
@@ -98,13 +130,13 @@ def spatial_pixel_neighbors(
     return adata
 
 
-def _get_values_grid(
+def _get_values_grid_center(
     array: NDArray,
     size: int = 50,
     subset: list[int] | None = None,
 ) -> tuple[NDArray, NDArray]:
     # get values in a grid.
-    assert array.ndim == 2, "Currently only 2D arrays are supported."
+    assert array.ndim == 2, "Currently only support for 2D ('y','x')."
 
     y_coords = np.arange(0, array.shape[0], size)
     x_coords = np.arange(0, array.shape[1], size)
@@ -124,5 +156,77 @@ def _get_values_grid(
 
     values = result[:, :1]
     coordinates = result[:, -2:]
+
+    return values, coordinates
+
+
+def _get_values_grid_most_frequent(
+    sdata: SpatialData,
+    labels_layer: str,
+    size: int = 20,
+    grid_type: str = "hexagon",
+    subset: list[int] | None = None,
+) -> tuple[NDArray, NDArray]:
+    assert _get_spatial_element(sdata, layer=labels_layer).data.ndim == 2, "Currently only support for 2D ('y','x')."
+    _uuid = uuid.uuid4()
+    # Make a grid, either hexagons or squares.
+    sdata = add_grid_labels_layer(
+        sdata,
+        shape=sdata.labels[labels_layer].shape,
+        size=size,
+        output_labels_layer=f"labels_grid_{_uuid}",
+        output_shapes_layer=f"shapes_grid_{_uuid}",
+        grid_type=grid_type,
+        chunks=_get_spatial_element(sdata, layer=labels_layer).data.chunksize[
+            -1
+        ],  # if chunksize in y would be different than in x, we rechunk, see below
+        transformations=get_transformation(sdata[labels_layer], get_all=True),
+        overwrite=True,
+    )
+    mask_grid = _get_spatial_element(sdata, layer=f"labels_grid_{_uuid}").data
+    mask_pixel_clusters = _get_spatial_element(sdata, layer=labels_layer).data
+
+    if mask_grid.chunksize != mask_pixel_clusters.chunksize:
+        mask_pixel_clusters.rechunk(mask_grid.chunksize)
+
+    mask_grid = mask_grid[None, ...]  # RasterAggregator only supports z,y,x
+    mask_pixel_clusters = mask_pixel_clusters[None, None, ...]  # RasterAggregator only supports c,z,y,x
+
+    aggregator = RasterAggregator(mask_dask_array=mask_grid, image_dask_array=mask_pixel_clusters)
+
+    def _get_most_frequent_element_in_mask(mask_grid: NDArray, mask_pixel_clusters: NDArray) -> NDArray:
+        unique_labels = np.unique(mask_grid)
+        unique_labels = unique_labels[unique_labels != 0]
+        results = []
+
+        for _label in unique_labels:
+            unique_elements, counts = np.unique(mask_pixel_clusters[mask_grid == _label], return_counts=True)
+            results.append(unique_elements[np.argmax(counts)])
+
+        return np.array(results).reshape(-1, 1).astype(np.float32)
+
+    values = aggregator._aggregate_custom_channel(
+        image=mask_pixel_clusters[0],
+        mask=mask_grid,
+        depth=size,
+        fn=_get_most_frequent_element_in_mask,
+        features=1,
+        dtype=np.uint32,
+    )
+
+    center_of_mass = aggregator.center_of_mass()
+    df = center_of_mass[center_of_mass[_INSTANCE_KEY] != 0]
+    coordinates = df.values[:, -2:]  # gives you y,x coordinates
+
+    if subset is not None:
+        mask = np.isin(values, subset).flatten()
+        values = values[mask]
+        coordinates = coordinates[mask]
+
+    # clean up
+    for _layer in [f"labels_grid_{_uuid}", f"shapes_grid_{_uuid}"]:
+        del sdata[_layer]
+        if sdata.is_backed():
+            sdata.delete_element_from_disk(_layer)
 
     return values, coordinates
