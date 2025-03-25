@@ -96,7 +96,7 @@ def instanseg_callable(
     # already has a trivial z dimension (batch) at 0
     # dimension 1 is (nucleus mask (0) and whole cell mask (1))
     if output == "cells":
-        labeled_output = labeled_output[..., 1:2]
+        labeled_output = labeled_output[..., 0:1]
     elif output == "nuclei":
         labeled_output = labeled_output[..., 0:1]
     elif output == "all_outputs" or output is None:
