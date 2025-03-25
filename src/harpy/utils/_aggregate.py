@@ -46,6 +46,8 @@ class RasterAggregator:
         self,
         stats_funcs: tuple[str, ...] = ("sum", "mean", "count", "var", "kurtosis", "skew"),
     ) -> list[pd.DataFrame]:
+        if isinstance(stats_funcs, str):
+            stats_funcs = (stats_funcs,)
         results = np.full((self._image.shape[0], len(stats_funcs), self._labels.size), np.nan, dtype=np.float32)
 
         for i, _channel_image in enumerate(self._image):
