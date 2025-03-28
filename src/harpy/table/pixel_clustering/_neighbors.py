@@ -205,7 +205,7 @@ def _get_values_grid_most_frequent(
 
         return np.array(results).reshape(-1, 1).astype(np.float32)
 
-    values = aggregator._aggregate_custom_channel(
+    values = aggregator.aggregate_custom_channel(
         image=mask_pixel_clusters[0],
         mask=mask_grid,
         depth=size,

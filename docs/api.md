@@ -218,6 +218,7 @@ Utility functions.
     :toctree: generated
 
     utils.bounding_box_query
+    utils.RasterAggregator
 ```
 
 ## Datasets
