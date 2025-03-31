@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterable
+from functools import reduce
+from typing import Literal
 
 import anndata as ad
 import numpy as np
@@ -25,8 +27,10 @@ def allocate_intensity(
     labels_layer: str | None = None,
     output_layer: str = "table_intensities",
     channels: int | str | Iterable[int] | Iterable[str] | None = None,
+    mode: Literal["sum", "mean"] = "mean",
+    obs_stats: list[str] | None = None,
     to_coordinate_system: str = "global",
-    chunks: str | int | tuple[int, ...] | None = 10000,
+    chunks: str | int | tuple[int, ...] | None = None,
     append: bool = False,
     calculate_center_of_mass: bool = True,
     overwrite: bool = True,
@@ -53,6 +57,11 @@ def allocate_intensity(
         Specifies the channels to be considered when extracting intensity information from the `img_layer`.
         This parameter can take a single integer or string or an iterable of integers or strings representing specific channels.
         If set to None (the default), intensity data will be aggregated from all available channels within the image layer.
+    mode
+        When mode is set to `"sum"`, the total intensity for each label will be added to `.X` of the resulting `output_layer`; if set to `"mean"`, it calculates the average intensity per label.
+    obs_stats
+        Stats that will be added to `.obs` of `output_layer`. Currently supported: `["sum", "mean", "count", "var", "kurtosis", "skew", "max", "min"]`.
+        If `obs_stats` contains `mode`, `mode` will not be added to `.obs`.
     to_coordinate_system
         The coordinate system that holds `img_layer` and `labels_layer`.
     chunks
@@ -61,9 +70,10 @@ def allocate_intensity(
         If set to True, and the `labels_layer` does not yet exist as a `_REGION_KEY` in `sdata.tables[output_layer].obs`,
         the intensity values extracted during the current function call will be appended (along axis=0) to any existing intensity data
         within the SpatialData object's table attribute. If False, and overwrite is set to True any existing data in `sdata.tables[output_layer]` will be overwritten by the newly extracted intensity values.
+        Note that we join the AnnData objects using `anndata.concat` with `join="inner"`.
     calculate_center_of_mass
         If `True`, the center of mass of the labels in `labels_layer` will be calculated and added to `sdata.tables[ output_layer ].obsm[_SPATIAL]`.
-        To calculate center of mass, we use `dask_image.ndmeasure.center_of_mass`.
+        The center of mass is computed using `scipy.ndimage.center_of_mass`. Enabling `calculate_center_of_mass` will cause the `labels_layer` to be loaded into memory.
     overwrite
         If `True`, overwrites the `output_layer` if it already exists in `sdata`.
 
@@ -80,6 +90,7 @@ def allocate_intensity(
     - Due to the memory-intensive nature of the operation, especially for large datasets, the function implements
       chunk-based processing, aided by Dask. The `chunks` parameter allows for customization of the chunk sizes used
       during processing.
+      If sdata is backed by a Zarr store, we recommend setting `chunks=None` and ensuring that Dask arrays are chunked optimally for disk storage and computation.
 
     Example
     -------
@@ -110,6 +121,10 @@ def allocate_intensity(
     ...     sdata, img_layer="raw_image", labels_layer="masks_nuclear_aligned", output_later="table_intensities_masks_nuclear_aligned", chunks=100, append=True
     ... )
     """
+    assert mode in ["sum", "mean"], "'mode' must be either 'sum' or 'mean'."
+    if obs_stats is not None:
+        if isinstance(obs_stats, str):
+            obs_stats = [obs_stats]
     if img_layer is None:
         img_layer = [*sdata.images][-1]
         log.warning(
@@ -132,9 +147,9 @@ def allocate_intensity(
     se_image = _get_spatial_element(sdata, layer=img_layer)
     se_labels = _get_spatial_element(sdata, layer=labels_layer)
 
-    assert (
-        se_image.data.shape[1:] == se_labels.data.shape
-    ), "Only arrays with same spatial shape are currently supported, "
+    assert se_image.data.shape[1:] == se_labels.data.shape, (
+        "Only arrays with same spatial shape are currently supported, "
+    )
     f"but image layer with name {img_layer} has shape {se_image.data.shape}, "
     f"while labels layer with name {labels_layer} has shape {se_labels.data.shape}  "
 
@@ -173,16 +188,57 @@ def allocate_intensity(
     _array_img = _array_img.rechunk(chunks) if chunks is not None else _array_img
     _array_mask_rechunked = _array_mask.rechunk(chunks_masks) if chunks_masks is not None else _array_mask
 
-    assert all(
-        element in se_image.c.data for element in channels
-    ), f"Some channels specified via 'channels' could not be found in image layer '{img_layer}'. Please choose 'channels' from '{list( se_image.c.data )}'."
+    assert all(element in se_image.c.data for element in channels), (
+        f"Some channels specified via 'channels' could not be found in image layer '{img_layer}'. Please choose 'channels' from '{list(se_image.c.data)}'."
+    )
     channel_indices = [list(se_image.c.data).index(channel) for channel in channels]
     _array_img = _array_img[channel_indices]
     aggregator = RasterAggregator(image_dask_array=_array_img, mask_dask_array=_array_mask_rechunked)
-    df_sum = aggregator.aggregate_sum()
 
-    _cells_id = df_sum[_INSTANCE_KEY].values
-    channel_intensities = df_sum.drop([_INSTANCE_KEY], axis=1).values
+    if obs_stats is not None:
+        stats_funcs = [mode] + [stat for stat in obs_stats if stat != mode]
+    else:
+        stats_funcs = [mode]
+
+    def rename_columns(_df: pd.DataFrame, prefix: str):
+        # helper function to rename column of a dataframe to prefix_channel_name
+        new_columns = []
+        for _name in _df.columns:
+            if _name != _INSTANCE_KEY:
+                new_columns.append(f"{prefix}_{channels[_name]}")
+            else:
+                new_columns.append(_name)
+        _df.columns = new_columns
+
+    # Calculate max and min if necessary.
+    df_max = df_min = None
+    if "max" in stats_funcs:
+        stats_funcs.remove("max")
+        df_max = aggregator.aggregate_max()
+        rename_columns(df_max, prefix="max")
+
+    if "min" in stats_funcs:
+        stats_funcs.remove("min")
+        df_min = aggregator.aggregate_min()
+        rename_columns(df_min, prefix="min")
+
+    dfs = aggregator.aggregate_stats(stats_funcs=stats_funcs)
+
+    df_X = dfs[0]  # the first one is the mode
+
+    if obs_stats is not None and mode not in obs_stats:
+        df_obs = dfs[1:]
+        for _df, _prefix in zip(df_obs, stats_funcs[1:], strict=True):
+            if _prefix != "count":
+                rename_columns(_df, prefix=_prefix)
+            else:
+                _df.rename(columns={0: _prefix}, inplace=True)
+        df_obs = df_obs + [x for x in [df_max, df_min] if x is not None]
+        # merge
+        df_obs = reduce(lambda left, right: pd.merge(left, right, how="inner", on=_INSTANCE_KEY), df_obs)
+
+    _cells_id = df_X[_INSTANCE_KEY].values
+    channel_intensities = df_X.drop([_INSTANCE_KEY], axis=1).values
 
     channels = list(map(str, channels))
     var = pd.DataFrame(index=channels)
@@ -205,25 +261,57 @@ def allocate_intensity(
     if calculate_center_of_mass:
         # add center of cells here (via the masks).
         _array_mask = _array_mask.squeeze(0) if to_squeeze else _array_mask
-        coordinates = center_of_mass(
-            image=_array_mask,  # do not use rechunked array mask here, leads to significant increase in required ram.
-            label_image=_array_mask,
-            index=_cells_id,
-        )
 
-        coordinates = coordinates.compute()
+        # dask image center of mass for masks seems bugged (very slow), use in memory scipy.ndimage.center_of_mass for now.
+        in_memory = True
+        if not in_memory:
+            coordinates = center_of_mass(
+                image=_array_mask,  # do not use rechunked array mask here, leads to significant increase in required ram.
+                label_image=_array_mask,
+                index=_cells_id,
+            )
+
+            coordinates = coordinates.compute()
+        else:
+            from scipy import ndimage
+
+            _array_mask_in_memory = _array_mask.compute()
+            coordinates = np.array(
+                ndimage.center_of_mass(input=_array_mask_in_memory, labels=_array_mask_in_memory, index=_cells_id)
+            )
         coordinates += np.array([t1y, t1x]) if to_squeeze else np.array([0, t1y, t1x])
+        # swap y and x, because adata.obsm["SPATIAL"] requires x,y.
+        coordinates[:, [-2, -1]] = coordinates[:, [-1, -2]]
 
         adata.obsm[_SPATIAL] = coordinates
+
+    # merge the obs
+    if obs_stats is not None and mode not in obs_stats:
+        adata.obs.reset_index(inplace=True)
+        df_obs = df_obs[df_obs[_INSTANCE_KEY] != 0]
+        assert adata.obs.shape[0] == df_obs.shape[0], "Number of observations in `adata.obs` and `df_obs` do not match."
+        adata.obs = adata.obs.merge(
+            df_obs,
+            on=[_INSTANCE_KEY],
+            how="inner",
+        )
+        adata.obs.set_index(_CELL_INDEX, inplace=True, drop=True)
 
     if append:
         region = []
         if output_layer in [*sdata.tables]:
             if labels_layer in sdata.tables[output_layer].obs[_REGION_KEY].cat.categories:
                 raise ValueError(
-                    f"'{labels_layer}' already exists as a region in the 'sdata.tables[{output_layer}]' object. Please choose a different labels layer, choose a different 'output_layer' or set append to False and overwrite to True to overwrite the existing table."
+                    f"'{labels_layer}' already exists as a region in the 'sdata.tables[{output_layer}]' object. Please choose a different labels layer, choose a different 'output_layer' or set append to 'False' and overwrite to 'True' to overwrite the existing table."
                 )
-            adata = ad.concat([sdata.tables[output_layer], adata], axis=0)
+            adata = ad.concat(
+                [
+                    sdata.tables[output_layer],
+                    adata,
+                ],
+                axis=0,
+                join="inner",
+            )
             # get the regions already in sdata, and append the new one
             region = sdata.tables[output_layer].obs[_REGION_KEY].cat.categories.to_list()
         region.append(labels_layer)

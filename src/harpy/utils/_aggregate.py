@@ -21,7 +21,37 @@ log = get_pylogger(__name__)
 
 
 class RasterAggregator:
-    """Helper class to calulate aggregated 'sum', 'mean', 'var', 'kurtosis', 'skew', 'area', 'min', 'max' or 'quantiles' of image and labels using Dask."""
+    """
+    Helper class to calulate aggregated 'sum', 'mean', 'var', 'kurtosis', 'skew', 'area', 'min', 'max' 'quantiles', 'center of mass', 'radii' or 'principal_axes' of image and labels using Dask.
+
+    Parameters
+    ----------
+    mask_dask_array
+        A 3D Dask array of integer labels representing segmented regions.
+        Expected shape is ('z', 'y', 'x'). Each unique integer value represents a separate label.
+    image_dask_array
+        A 4D Dask array representing the image data with shape ('c', 'z', 'y', 'x'),
+        where 'c' is the number of channels. Can be `None` if only mask-based computations
+        (e.g., count or center of mass) are required.
+
+    Raises
+    ------
+    ValueError
+        If `mask_dask_array` does not contain an integer dtype.
+    AssertionError
+        If `mask_dask_array` is not 3D.
+    AssertionError
+        If `image_dask_array` is provided but is not 4D.
+    AssertionError
+        If spatial dimensions of `image_dask_array` and `mask_dask_array` do not match.
+    AssertionError
+        If chunk sizes of spatial dimensions do not match between image and mask.
+
+    Notes
+    -----
+    - Unique labels are computed once at initialization for efficiency.
+    - Image and mask must be aligned in spatial dimensions and chunking to ensure accurate and efficient aggregation.
+    """
 
     def __init__(self, mask_dask_array: da.Array, image_dask_array: da.Array | None):
         if not np.issubdtype(mask_dask_array.dtype, np.integer):
@@ -46,6 +76,21 @@ class RasterAggregator:
         self,
         stats_funcs: tuple[str, ...] = ("sum", "mean", "count", "var", "kurtosis", "skew"),
     ) -> list[pd.DataFrame]:
+        """
+        Computes multiple statistical metrics for each label in the mask, across all image channels.
+
+        Parameters
+        ----------
+        stats_funcs
+            A tuple of statistical functions to apply. Supported values include: "sum", "mean",
+            "count", "var", "kurtosis", and "skew". Defaults to all.
+
+        Returns
+        -------
+        A list of DataFrames, each corresponding to one of the requested statistics.
+        Each DataFrame contains one row per label a column per image channel and a column with the label ID,
+        except for stat "count", which only contains a column with the counts and a column with the label ID.
+        """
         if isinstance(stats_funcs, str):
             stats_funcs = (stats_funcs,)
         results = np.full((self._image.shape[0], len(stats_funcs), self._labels.size), np.nan, dtype=np.float32)
@@ -58,8 +103,12 @@ class RasterAggregator:
         results = results.transpose(1, 2, 0)
 
         dfs = []
-        for _result in results:
-            df = pd.DataFrame(_result)
+        for _stat, _result in zip(stats_funcs, results, strict=True):
+            if _stat == "count":
+                df = pd.DataFrame(_result[:, 0])  # count is the same for all channels.
+                # TODO. Count should not be calculated for every channel, because mask is the same for every channel.
+            else:
+                df = pd.DataFrame(_result)
             df[_INSTANCE_KEY] = self._labels
             dfs.append(df)
 
@@ -68,42 +117,107 @@ class RasterAggregator:
     def aggregate_sum(
         self,
     ) -> pd.DataFrame:
+        """
+        Computes the sum of pixel values within each labeled region for all image channels.
+
+        Returns
+        -------
+        DataFrame where rows represent labels and columns represent channels.
+        """
         return self._aggregate(aggregate_func=partial(self._aggregate_stats_channel, stats_funcs=("sum")))
 
     def aggregate_mean(
         self,
     ) -> pd.DataFrame:
+        """
+        Computes the mean of pixel values within each labeled region for all image channels.
+
+        Returns
+        -------
+        DataFrame where rows represent labels and columns represent channels.
+        """
         return self._aggregate(aggregate_func=partial(self._aggregate_stats_channel, stats_funcs=("mean")))
 
     def aggregate_var(
         self,
     ) -> pd.DataFrame:
+        """
+        Computes the variance of pixel values within each labeled region for all image channels.
+
+        Returns
+        -------
+        DataFrame where rows represent labels and columns represent channels.
+        """
         return self._aggregate(aggregate_func=partial(self._aggregate_stats_channel, stats_funcs=("var")))
 
     def aggregate_kurtosis(
         self,
     ) -> pd.DataFrame:
+        """
+        Computes the kurtosis of pixel values within each labeled region for all image channels.
+
+        Returns
+        -------
+        DataFrame where rows represent labels and columns represent channels.
+        """
         return self._aggregate(aggregate_func=partial(self._aggregate_stats_channel, stats_funcs=("kurtosis")))
 
     def aggregate_skew(
         self,
     ) -> pd.DataFrame:
+        """
+        Computes the skewness of pixel values within each labeled region for all image channels.
+
+        Returns
+        -------
+        DataFrame where rows represent labels and columns represent channels.
+        """
         return self._aggregate(aggregate_func=partial(self._aggregate_stats_channel, stats_funcs=("skew")))
 
     def aggregate_max(
         self,
     ) -> pd.DataFrame:
+        """
+        Computes the maximum pixel value within each labeled region for all image channels.
+
+        Returns
+        -------
+        DataFrame where rows represent labels and columns represent channels.
+        """
         return self._aggregate(aggregate_func=self._aggregate_max_channel)
 
     def aggregate_min(
         self,
     ) -> pd.DataFrame:
+        """
+        Computes the minimum pixel value within each labeled region for all image channels.
+
+        Returns
+        -------
+        DataFrame where rows represent labels and columns represent channels.
+        """
         return self._aggregate(aggregate_func=self._aggregate_min_channel)
 
     def aggregate_area(self) -> pd.DataFrame:
+        """
+        Computes the area (number of pixels) for each labeled region in the mask.
+
+        Returns
+        -------
+        A DataFrame with one column for area and one for label ID.
+        """
         return _get_mask_area(self._mask, index=self._labels)
 
     def center_of_mass(self) -> pd.DataFrame:
+        """
+        Computes the center of mass for each labeled region in the mask.
+
+        Note that we use scipy.ndimage.center_of_mass, which loads the mask into memory.
+
+        Returns
+        -------
+        A DataFrame with columns for spatial coordinates (z,y,x) and label ID.
+        """
         return _get_center_of_mass(self._mask, index=self._labels)
 
     def aggregate_quantiles(
@@ -112,6 +226,22 @@ class RasterAggregator:
         quantiles: list[float] | NDArray | None = None,
         quantile_background: bool = False,
     ) -> list[pd.DataFrame]:
+        """
+        Computes quantiles of pixel values for each label in the mask, across all channels.
+
+        Parameters
+        ----------
+        depth
+            Depth to apply during Dask's `map_overlap` operation. Set depth > estimated diameter of labels.
+        quantiles
+            List of quantile values to compute (between 0 and 1). Defaults to [0.1, ..., 0.9].
+        quantile_background
+            Whether to include background label (0) in computation. Defaults to False.
+
+        Returns
+        -------
+        List of DataFrames, one per quantile, with rows as labels and columns as channels.
+        """
         # Returns a list of pandas DataFrames, one for per quantile.
         # Each DataFrame contains cells as rows and channels as columns.
         if quantiles is None:
@@ -150,21 +280,21 @@ class RasterAggregator:
 
         Parameters
         ----------
-        depth : int
-            The depth at which the aggregation is performed, passed to `dask.array.map_overlap`
-        calculate_axes : bool, optional
+        depth
+            The depth at which the aggregation is performed, passed to `dask.array.map_overlap`.
+            Please set `depth` > expected diameter of the labels.
+        calculate_axes
             If True, the DataFrame will include the principal axes (default is True).
 
         Returns
         -------
-        pd.DataFrame
-            A DataFrame where:
-            - Each row corresponds to a segmented cell, sorted by cell ID.
-            - The next three columns contain the radii (sorted from highest to lowest).
-            - If `calculate_axes` is True, the next nine columns contain the corresponding principal axes (flattened 3*3 matrix).
-            - One column contains the cell ID.
+        A DataFrame where:
+        - Each row corresponds to a segmented cell, sorted by cell ID.
+        - The next three columns contain the radii (sorted from highest to lowest).
+        - If `calculate_axes` is True, the next nine columns contain the corresponding principal axes (flattened 3*3 matrix).
+        - One column contains the cell ID.
         """
-        results = self._aggregate_custom_channel(
+        results = self.aggregate_custom_channel(
             image=None,
             mask=self._mask,
             depth=depth,
@@ -418,7 +548,7 @@ class RasterAggregator:
             "quantiles": quantiles,
         }
 
-        results = self._aggregate_custom_channel(
+        results = self.aggregate_custom_channel(
             image=image,
             mask=mask,
             depth=depth,
@@ -451,7 +581,7 @@ class RasterAggregator:
 
         return results
 
-    def _aggregate_custom_channel(
+    def aggregate_custom_channel(
         self,
         image: da.Array | None,
         mask: da.Array,
@@ -470,7 +600,7 @@ class RasterAggregator:
         ----------
         image
             The input image array. If None, the function will only process the `mask`. The array is expected
-            to be a dask array (da.Array). If not None, the function will apply the operation to the image
+            to be a dask array. If not None, the function will apply the operation to the image
             based on the mask regions.
         mask
             A dask array representing the mask. Each unique non-zero value in the mask identifies
@@ -483,11 +613,15 @@ class RasterAggregator:
         fn
             A custom function that processes a mask and, optionally, an image array.
             The function must accept either one or two NumPy arrays:
+
             - The first argument is the mask, provided as an integer array.
             - The second argument (optional) is the image, given as a float or integer array.
+
             The function must return a 2D NumPy array of type `np.float`, where:
+
             - The first dimension corresponds to the number of unique labels in the mask (excluding label `0`), sorted by label number.
             - The second dimension represents the number of features computed by `fn`.
+
             The output of `fn` must **not** contain `NaN` values.
             User warning: the number of unique labels in the mask passed to `fn` is not equal to the number of
             unique labels from the global `mask` due to the use of `dask.array.map_overlap`.
@@ -598,11 +732,25 @@ def _get_center_of_mass(mask: da.Array, index: NDArray | None = None) -> pd.Data
     if index is None:
         index = da.unique(mask).compute()
 
-    coordinates = ndmeasure.center_of_mass(
-        image=mask,
-        label_image=mask,
-        index=index,
-    )
+    # dask image center of mass for masks seems bugged (very slow), use in memory scipy.ndimage.center_of_mass for now.
+    in_memory = True
+    if not in_memory:
+        coordinates = ndmeasure.center_of_mass(
+            image=mask,
+            label_image=mask,
+            index=index,
+        )
+        coordinates = coordinates.compute()
+
+    else:
+        mask_in_memory = mask.compute()
+        coordinates = np.array(
+            ndimage.center_of_mass(
+                input=mask_in_memory,
+                labels=mask_in_memory,
+                index=index,
+            )
+        )
 
     return pd.DataFrame(
         {

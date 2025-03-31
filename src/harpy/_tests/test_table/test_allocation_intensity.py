@@ -33,6 +33,7 @@ def test_integration_allocate_intensity(sdata_multi_c_no_backed: SpatialData):
         img_layer="raw_image",
         labels_layer="masks_whole",
         output_layer="table_intensities",
+        obs_stats=("max"),
         chunks=100,
         append=False,
         overwrite=True,
@@ -43,6 +44,7 @@ def test_integration_allocate_intensity(sdata_multi_c_no_backed: SpatialData):
         img_layer="raw_image",
         labels_layer="masks_nuclear_aligned",
         output_layer="table_intensities",
+        obs_stats=("max"),
         chunks=100,
         append=True,
         overwrite=True,
@@ -62,6 +64,9 @@ def test_integration_allocate_intensity(sdata_multi_c_no_backed: SpatialData):
 
     assert sdata_multi_c_no_backed.tables["table_intensities"].shape == (1299, 22)
 
+    channel_0 = sdata_multi_c_no_backed["raw_image"].c.data[0]
+    assert f"max_{channel_0}" in sdata_multi_c_no_backed.tables["table_intensities"].obs.columns
+
 
 def test_allocate_intensity(sdata_multi_c_no_backed: SpatialData):
     sdata_multi_c_no_backed = allocate_intensity(
@@ -69,6 +74,7 @@ def test_allocate_intensity(sdata_multi_c_no_backed: SpatialData):
         img_layer="raw_image",
         labels_layer="masks_whole",
         output_layer="table_intensities",
+        mode="mean",
         chunks=100,
         append=False,
         channels=[0, 4, 5],
@@ -82,9 +88,9 @@ def test_allocate_intensity(sdata_multi_c_no_backed: SpatialData):
     df = zonal_stats(
         sdata_multi_c_no_backed["masks_whole"],
         sdata_multi_c_no_backed["raw_image"][0],
-        stats_funcs=["sum"],
+        stats_funcs=["mean"],
     ).compute()
-    np.array_equal(df["sum"].values[1:], sdata_multi_c_no_backed["table_intensities"].to_df()["0"].values)
+    assert np.allclose(df["mean"].values[1:], sdata_multi_c_no_backed["table_intensities"].to_df()["0"].values)
 
     assert isinstance(sdata_multi_c_no_backed.tables["table_intensities"], AnnData)
 
@@ -110,6 +116,7 @@ def test_allocate_intensity_overwrite(sdata_multi_c: SpatialData):
             img_layer="raw_image",
             labels_layer="masks_nuclear_aligned",
             output_layer="table_intensities",
+            chunks=512,
             append=True,
             overwrite=False,
         )

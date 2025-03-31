@@ -28,8 +28,11 @@ def test_aggregate_stats(sdata):
 
     assert len(dfs) == len(stats_funcs)
 
-    for df in dfs:
-        assert df.shape == (len(aggregator._labels), image.shape[0] + 1)  # +1 for the _INSTANCE_KEY column
+    for df, _stat in zip(dfs, stats_funcs, strict=True):
+        if _stat != "count":
+            assert df.shape == (len(aggregator._labels), image.shape[0] + 1)  # +1 for the _INSTANCE_KEY column
+        else:
+            assert df.shape == (len(aggregator._labels), 1 + 1)  # +1 for the _INSTANCE_KEY column
 
     stats_funcs = ("sum", "wrong_stat")
 
@@ -433,7 +436,7 @@ def test_aggregate_custom_channel(sdata_multi_c_no_backed):
         image_dask_array=image,
     )
 
-    intensity_mean = aggregator._aggregate_custom_channel(
+    intensity_mean = aggregator.aggregate_custom_channel(
         image=image[0].rechunk(210),
         mask=mask.rechunk(210),
         depth=200,
@@ -461,7 +464,7 @@ def test_aggregate_custom_channel_fails(sdata_multi_c_no_backed):
         image_dask_array=image,
     )
 
-    centroid = aggregator._aggregate_custom_channel(
+    centroid = aggregator.aggregate_custom_channel(
         image=image[0].rechunk(210),
         mask=mask.rechunk(210),
         depth=200,
@@ -492,7 +495,7 @@ def test_aggregate_custom_channel_mask(sdata_multi_c_no_backed):
         mask_dask_array=mask,
         image_dask_array=image,
     )
-    eccentricity = aggregator._aggregate_custom_channel(
+    eccentricity = aggregator.aggregate_custom_channel(
         image=None,
         mask=mask.rechunk(210),
         depth=200,
@@ -522,7 +525,7 @@ def test_aggregate_custom_channel_multiple_features(sdata_multi_c_no_backed):
         image_dask_array=image,
     )
 
-    intensity_mean_area = aggregator._aggregate_custom_channel(
+    intensity_mean_area = aggregator.aggregate_custom_channel(
         image=image[0].rechunk(210),
         mask=mask.rechunk(210),
         depth=200,
@@ -561,7 +564,7 @@ def test_aggregate_custom_channel_multiple_features_sdata(sdata):
             "We expect exactly one non-NaN element per row (each column corresponding to a chunk of 'mask'). Please consider increasing 'depth' parameter."
         ),
     ):
-        aggregator._aggregate_custom_channel(
+        aggregator.aggregate_custom_channel(
             image=image[0].rechunk(512),
             mask=mask.rechunk(512),
             depth=200,

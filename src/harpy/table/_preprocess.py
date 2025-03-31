@@ -162,7 +162,8 @@ def preprocess_proteomics(
         cells in `sdata.tables[table_layer]` linked to other `labels_layer` (via the _REGION_KEY), will be removed from `sdata.tables[table_layer]`.
         If a list of labels layers is provided, they will therefore be preprocessed together (e.g. multiple samples).
     table_layer
-        The table layer in `sdata` on which to perform preprocessing on.
+        The table layer in sdata to apply preprocessing to.
+        It is an AnnData object containing total intensities per cell in `.obs` (rows) and per channel in `.var` (columns).
     output_layer
         The output table layer in `sdata` to which preprocessed table layer will be written.
     size_norm
@@ -331,7 +332,7 @@ class Preprocess(ProcessTable):
                 if min(adata.shape) < n_comps:
                     n_comps = min(adata.shape) - 1
                     log.warning(
-                        f"amount of pc's was set to {min( adata.shape)-1} because of the dimensionality of 'sdata.tables[table_layer]'."
+                        f"amount of pc's was set to {min(adata.shape) - 1} because of the dimensionality of 'sdata.tables[table_layer]'."
                     )
             if not scale:
                 log.warning(
