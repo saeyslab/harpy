@@ -97,7 +97,7 @@ clustering = [
     "joypy",
     "bokeh",
     "spatialdata-plot>=0.2.0",
-    #"flowsom @ git+https://github.com/saeyslab/FlowSOM_Python.git"
+    "flowsom @ git+https://github.com/saeyslab/FlowSOM_Python.git"
 ]
 instanseg = [
     # TODO: wait for 0.0.7 release that drops AICSImageIO dependency
