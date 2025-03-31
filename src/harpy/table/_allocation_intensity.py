@@ -60,7 +60,7 @@ def allocate_intensity(
     mode
         When mode is set to `"sum"`, the total intensity for each label will be added to `.X` of the resulting `output_layer`; if set to `"mean"`, it calculates the average intensity per label.
     obs_stats
-        Stats that will be added to `.obs`. Currently supported: `["sum", "mean", "count", "var", "kurtosis", "skew", "max", "min"]`.
+        Stats that will be added to `.obs` of `output_layer`. Currently supported: `["sum", "mean", "count", "var", "kurtosis", "skew", "max", "min"]`.
         If `obs_stats` contains `mode`, `mode` will not be added to `.obs`.
     to_coordinate_system
         The coordinate system that holds `img_layer` and `labels_layer`.
