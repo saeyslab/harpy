@@ -225,7 +225,7 @@ def allocate_intensity(
 
     df_X = dfs[0]  # the first one is the mode
 
-    if obs_stats is not None:
+    if obs_stats is not None and mode not in obs_stats:
         df_obs = dfs[1:]
         for _df, _prefix in zip(df_obs, stats_funcs[1:], strict=True):
             if _prefix != "count":
@@ -285,7 +285,7 @@ def allocate_intensity(
         adata.obsm[_SPATIAL] = coordinates
 
     # merge the obs
-    if obs_stats is not None:
+    if obs_stats is not None and mode not in obs_stats:
         adata.obs.reset_index(inplace=True)
         df_obs = df_obs[df_obs[_INSTANCE_KEY] != 0]
         assert adata.obs.shape[0] == df_obs.shape[0], "Number of observations in `adata.obs` and `df_obs` do not match."
