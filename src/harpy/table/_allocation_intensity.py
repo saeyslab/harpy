@@ -90,6 +90,7 @@ def allocate_intensity(
     - Due to the memory-intensive nature of the operation, especially for large datasets, the function implements
       chunk-based processing, aided by Dask. The `chunks` parameter allows for customization of the chunk sizes used
       during processing.
+      If sdata is backed by a Zarr store, we recommend setting `chunks=None` and ensuring that Dask arrays are chunked optimally for disk storage and computation.
 
     Example
     -------
