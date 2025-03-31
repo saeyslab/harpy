@@ -212,6 +212,8 @@ class RasterAggregator:
         """
         Computes the center of mass for each labeled region in the mask.
 
+        Note that we use scipy.ndimage.center_of_mass, which loads the mask into memory.
+
         Returns
         -------
         A DataFrame with columns for spatial coordinates (z,y,x) and label ID.
@@ -730,11 +732,25 @@ def _get_center_of_mass(mask: da.Array, index: NDArray | None = None) -> pd.Data
     if index is None:
         index = da.unique(mask).compute()
 
-    coordinates = ndmeasure.center_of_mass(
-        image=mask,
-        label_image=mask,
-        index=index,
-    )
+    # dask image center of mass for masks seems bugged (very slow), use in memory scipy.ndimage.center_of_mass for now.
+    in_memory = True
+    if not in_memory:
+        coordinates = ndmeasure.center_of_mass(
+            image=mask,
+            label_image=mask,
+            index=index,
+        )
+        coordinates = coordinates.compute()
+
+    else:
+        mask_in_memory = mask.compute()
+        coordinates = np.array(
+            ndimage.center_of_mass(
+                input=mask_in_memory,
+                labels=mask_in_memory,
+                index=index,
+            )
+        )
 
     return pd.DataFrame(
         {
