@@ -22,7 +22,7 @@ _SEG_DTYPE = np.uint32
 def _rechunk_overlap(
     x: Array,
     depth: dict[int, int],
-    chunks: str | int | tuple[int, ...] | None = "auto",
+    chunks: str | int | tuple[int, ...] | None = None,
 ) -> Array:
     # rechunk, so that we ensure minimum overlap
 

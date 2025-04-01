@@ -58,7 +58,7 @@ def segment(
     output_shapes_layer: str | list[str] | None = "segmentation_mask_boundaries",
     labels_layer_align: str | None = None,
     depth: tuple[int, int] | int = 100,
-    chunks: str | int | tuple[int, int] | None = "auto",
+    chunks: str | int | tuple[int, int] | None = None,
     boundary: str = "reflect",
     trim: bool = False,
     iou: bool = True,
@@ -176,7 +176,7 @@ def segment_points(
     output_shapes_layer: str | list[str] | None = "segmentation_mask_boundaries",
     labels_layer_align: str | None = None,
     depth: tuple[int, int] | int = 100,
-    chunks: str | int | tuple[int, int] | None = "auto",
+    chunks: str | int | tuple[int, int] | None = None,
     boundary: str = "reflect",
     trim: bool = False,
     iou: bool = True,
@@ -450,7 +450,7 @@ class SegmentationModel(ABC):
                         depth[2],
                     ),
                     chunks=chunks
-                    if isinstance(chunks, str)
+                    if isinstance(chunks, str | type(None))
                     else (chunks[1], chunks[2]),  # get this from kwargs. Make a copy of kwargs before it is popped
                     iou_depth=(iou_depth[1], iou_depth[2]),
                     iou_threshold=kwargs["iou_threshold"],

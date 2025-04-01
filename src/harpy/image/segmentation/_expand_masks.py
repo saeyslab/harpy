@@ -16,7 +16,7 @@ def expand_labels_layer(
     labels_layer: str,
     distance: int = 10,
     depth: tuple[int, int] | int = 100,
-    chunks: str | int | tuple[int, int] | None = "auto",
+    chunks: str | int | tuple[int, int] | None = None,
     output_labels_layer: str | None = None,
     output_shapes_layer: str | None = None,
     scale_factors: ScaleFactors_t | None = None,

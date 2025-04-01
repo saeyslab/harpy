@@ -41,7 +41,7 @@ def map_labels(
     output_labels_layer: str | None = None,
     output_shapes_layer: str | None = None,
     depth: tuple[int, int] | int = 100,
-    chunks: str | int | tuple[int, int] | None = "auto",
+    chunks: str | int | tuple[int, int] | None = None,
     scale_factors: ScaleFactors_t | None = None,
     overwrite: bool = False,
     relabel_chunks: bool = True,

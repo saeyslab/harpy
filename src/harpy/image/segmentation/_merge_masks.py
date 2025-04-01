@@ -24,7 +24,7 @@ def merge_labels_layers(
     labels_layer_2: str,
     threshold: float = 0.5,
     depth: tuple[int, int] | int = 100,
-    chunks: str | int | tuple[int, int] | None = "auto",
+    chunks: str | int | tuple[int, int] | None = None,
     output_labels_layer: str | None = None,
     output_shapes_layer: str | None = None,
     scale_factors: ScaleFactors_t | None = None,
@@ -112,7 +112,7 @@ def merge_labels_layers_nuclei(
     labels_layer_nuclei: str,
     threshold: float = 0.5,
     depth: tuple[int, int] | int = 100,
-    chunks: str | int | tuple[int, int] | None = "auto",
+    chunks: str | int | tuple[int, int] | None = None,
     output_labels_layer: str | None = None,
     output_shapes_layer: str | None = None,
     scale_factors: ScaleFactors_t | None = None,
@@ -285,7 +285,7 @@ def mask_to_original(
     labels_layer: str,
     original_labels_layers: list[str],
     depth: tuple[int, int] | int = 400,
-    chunks: str | int | tuple[int, int] | None = "auto",
+    chunks: str | int | tuple[int, int] | None = None,
 ) -> DataFrame:
     """
     Map to original.
