@@ -8,7 +8,7 @@ import scanpy as sc
 
 from harpy.image._image import add_image_layer, add_labels_layer
 from harpy.plot._plot import plot_image, plot_labels, plot_shapes
-from harpy.plot._sanity import sanity_plot_transcripts_matrix
+from harpy.plot._sanity import sanity
 from harpy.shape._shape import add_shapes_layer
 
 
@@ -216,8 +216,8 @@ def test_plot_shapes_3D(sdata_transcripts_no_backed, tmp_path):
     )
 
 
-def test_sanity_plot_transcripts_matrix(sdata_transcripts_no_backed, tmp_path):
-    sanity_plot_transcripts_matrix(
+def test_sanity(sdata_transcripts_no_backed, tmp_path):
+    sanity(
         sdata_transcripts_no_backed,
         img_layer="raw_image",
         points_layer="transcripts",

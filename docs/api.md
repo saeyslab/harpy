@@ -195,7 +195,7 @@ Plotting functions.
 .. autosummary::
     :toctree: generated
 
-    pl.sanity_plot_transcripts_matrix
+    pl.sanity
     pl.analyse_genes_left_out
     pl.transcript_density
     pl.preprocess_transcriptomics

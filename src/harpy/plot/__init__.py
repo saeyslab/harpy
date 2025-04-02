@@ -27,7 +27,7 @@ from ._qc_segmentation import (
     segmentation_size_boxplot,
     segments_per_area,
 )
-from ._sanity import sanity_plot_transcripts_matrix
+from ._sanity import sanity
 from ._segmentation import segment
 from ._tiling_correction import flatfield, tiling_correction
 from ._transcripts import analyse_genes_left_out, transcript_density

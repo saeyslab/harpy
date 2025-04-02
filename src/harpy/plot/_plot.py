@@ -56,11 +56,12 @@ def plot_image(
     output
         Path to save the plot. If not provided, plot will be displayed.
     **kwargs
-        Additional arguments to be passed to the `harpy.pl.plot_shapes` function.
+        Additional arguments to be passed to the :func:`harpy.pl.plot_shapes` function.
 
     See Also
     --------
     harpy.pl.plot_shapes
+    harpy.pl.plot
     """
     plot_shapes(
         sdata,
@@ -102,11 +103,12 @@ def plot_labels(
     output
         Path to save the plot. If not provided, plot will be displayed.
     **kwargs
-        Additional arguments to be passed to the `harpy.pl.plot_shapes` function.
+        Additional arguments to be passed to the :func:`harpy.pl.plot_shapes` function.
 
     See Also
     --------
     harpy.pl.plot_shapes
+    harpy.pl.plot
     """
     plot_shapes(
         sdata,
@@ -281,6 +283,10 @@ def plot_shapes(
     -----
     - This function offers advanced visualization options for `sdata` with support for multiple image layers, labels layers shape layers, and channels.
     - Either `img_layer` or `labels_layer` should be specified, not both.
+
+    See Also
+    --------
+    harpy.pl.plot
     """
     if img_layer is not None and labels_layer is not None:
         raise ValueError(

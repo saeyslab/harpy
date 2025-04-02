@@ -180,7 +180,7 @@ def transcript_density(
     """
     Visualize the transcript density layer.
 
-    This function wraps around the `plot_shapes` function to showcase transcript density.
+    This function wraps around the :func:`harpy.pl.plot_shapes` function to showcase transcript density.
 
     Parameters
     ----------
@@ -211,6 +211,7 @@ def transcript_density(
     See Also
     --------
     harpy.im.transcript_density
+    harpy.pl.plot_shapes
     """
     plot_shapes(
         sdata,
