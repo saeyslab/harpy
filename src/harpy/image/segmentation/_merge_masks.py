@@ -364,7 +364,7 @@ def mask_to_original(
         depth = depth2
 
     if chunks is not None:
-        if not isinstance(chunks, (int, str)):
+        if not isinstance(chunks, int | str):
             assert len(chunks) == _x_label.ndim - 1, "Please (only) provide chunks for ( 'y', 'x')."
             chunks = (_x_label.shape[0], chunks[0], chunks[1])
 
@@ -372,9 +372,9 @@ def mask_to_original(
     for x_label in _labels_arrays:
         #  rechunk so that we ensure minimum chunksize, in order to control output_chunks sizes.
         x_label = _rechunk_overlap(x_label, depth=depth, chunks=chunks)
-        assert x_label.numblocks[0] == 1, (
-            f"Expected the number of blocks in the Z-dimension to be `1`, found `{x_label.numblocks[0]}`."
-        )
+        assert (
+            x_label.numblocks[0] == 1
+        ), f"Expected the number of blocks in the Z-dimension to be `1`, found `{x_label.numblocks[0]}`."
         rechunked_arrays.append(x_label)
 
     def _mask_to_original_chunks(
@@ -393,9 +393,9 @@ def mask_to_original(
             return list_2
 
         total_blocks = block_info[0]["num-chunks"]
-        assert total_blocks[0] == 1, (
-            "Dask arrays chunked in z dimension are not supported. Please only chunk in y and x dimensions."
-        )
+        assert (
+            total_blocks[0] == 1
+        ), "Dask arrays chunked in z dimension are not supported. Please only chunk in y and x dimensions."
         assert depth[0] == 0, "Depth not equal to 0 in z dimension is currently not supported."
         assert len(depth) == 3, "Please provide depth values for z,y and x."
 

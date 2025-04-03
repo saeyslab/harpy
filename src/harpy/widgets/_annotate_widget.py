@@ -3,7 +3,7 @@
 import os
 import pathlib
 from collections.abc import Callable
-from typing import Any, List
+from typing import Any
 
 import napari
 import napari.layers
@@ -47,7 +47,7 @@ def annotate_widget(
     viewer: napari.Viewer,
     markers_file: pathlib.Path = pathlib.Path(""),
     delimiter: str = ",",
-    del_celltypes: List[str] = [],  # noqa: B006 # noqa: B006 # magicgui does not accept None
+    del_celltypes: list[str] = [],  # noqa: B006 # noqa: B006 # magicgui does not accept None
 ):
     """Function represents the annotation widget and is called by the wizard to create the widget."""
     # Check if a file was passed

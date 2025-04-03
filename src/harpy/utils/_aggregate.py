@@ -61,12 +61,12 @@ class RasterAggregator:
         )  # calculate this one time during initialization, otherwise we would need to calculate this multiple times.
         if image_dask_array is not None:
             assert image_dask_array.ndim == 4, "Currently only 4D image arrays are supported ('c', 'z', 'y', 'x')."
-            assert image_dask_array.shape[1:] == mask_dask_array.shape, (
-                "The mask and the image should have the same spatial dimensions ('z', 'y', 'x')."
-            )
-            assert image_dask_array.chunksize[1:] == mask_dask_array.chunksize, (
-                "Provided mask ('mask_dask_array') and image ('image_dask_array') do not have the same chunksize in ( 'z', 'y', 'x' ). Please rechunk."
-            )
+            assert (
+                image_dask_array.shape[1:] == mask_dask_array.shape
+            ), "The mask and the image should have the same spatial dimensions ('z', 'y', 'x')."
+            assert (
+                image_dask_array.chunksize[1:] == mask_dask_array.chunksize
+            ), "Provided mask ('mask_dask_array') and image ('image_dask_array') do not have the same chunksize in ( 'z', 'y', 'x' ). Please rechunk."
             self._image = image_dask_array
         assert mask_dask_array.ndim == 3, "Currently only 3D masks are supported ('z', 'y', 'x')."
 
@@ -334,9 +334,9 @@ class RasterAggregator:
 
         allowed_funcs = {"sum", "mean", "count", "var", "kurtosis", "skew"}
         invalid_funcs = [func for func in stats_funcs if func not in allowed_funcs]
-        assert not invalid_funcs, (
-            f"Invalid statistic function(s): '{invalid_funcs}'. Allowed functions: '{allowed_funcs}'."
-        )
+        assert (
+            not invalid_funcs
+        ), f"Invalid statistic function(s): '{invalid_funcs}'. Allowed functions: '{allowed_funcs}'."
 
         if (
             "sum" in stats_funcs
@@ -492,9 +492,9 @@ class RasterAggregator:
         mask: da.Array,
         min_or_max: str,
     ) -> NDArray:
-        assert image.numblocks == mask.numblocks, (
-            "Dask arrays must have same number of blocks. Please rechunk arrays `image` and `mask` with same chunks size."
-        )
+        assert (
+            image.numblocks == mask.numblocks
+        ), "Dask arrays must have same number of blocks. Please rechunk arrays `image` and `mask` with same chunks size."
 
         assert min_or_max in ["max", "min"], "Please choose from [ 'min', 'max' ]."
 
@@ -676,9 +676,7 @@ class RasterAggregator:
 
         sanity, results = dask.compute(*[sanity, results])
 
-        assert sanity, (
-            "We expect exactly one non-NaN element per row (each column corresponding to a chunk of 'mask'). Please consider increasing 'depth' parameter."
-        )
+        assert sanity, "We expect exactly one non-NaN element per row (each column corresponding to a chunk of 'mask'). Please consider increasing 'depth' parameter."
 
         return results
 
@@ -965,9 +963,9 @@ def _aggregate_custom_block(
 
     result = fn(*arrays, **fn_kwargs)  # fn can either take in a mask + image, or only a mask
     result = result.reshape(-1, features)
-    assert result.shape[0] == unique_masks.shape[0], (
-        "Callable 'fn' should return an array with length equal to the number of non zero labels in the provided mask."
-    )
+    assert (
+        result.shape[0] == unique_masks.shape[0]
+    ), "Callable 'fn' should return an array with length equal to the number of non zero labels in the provided mask."
     assert np.issubdtype(result.dtype, np.floating), "Callable 'fn' should return an array of dtype 'float'."
     if any(np.isnan(result).flatten()):
         raise AssertionError("Result of callable 'fn' is not allowed to contain NaN.")

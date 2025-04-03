@@ -20,9 +20,13 @@ def _incremental_io_on_disk(
     element: DataArray | DataTree | DataFrame | GeoDataFrame | AnnData,
     element_type: str = Literal["images", "labels", "shapes", "tables", "points"],
 ) -> SpatialData:
-    assert element_type in ["images", "labels", "shapes", "tables", "points"], (
-        "'element_type' should be one of [ 'images', 'labels', 'shapes', 'tables', 'points' ]"
-    )
+    assert element_type in [
+        "images",
+        "labels",
+        "shapes",
+        "tables",
+        "points",
+    ], "'element_type' should be one of [ 'images', 'labels', 'shapes', 'tables', 'points' ]"
     new_output_layer = f"{output_layer}_{uuid.uuid4()}"
     # a. write a backup copy of the data
     sdata[new_output_layer] = element

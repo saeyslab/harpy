@@ -93,7 +93,7 @@ def read_tifffile(path: str | Path) -> tuple[NDArray, float, float]:
         def _get_resolution(resolution_tag):
             if resolution_tag is not None:
                 res_value = resolution_tag.value
-                if isinstance(res_value, (tuple, list)):
+                if isinstance(res_value, tuple | list):
                     res = res_value[0] / res_value[1]
                 else:
                     res = float(res_value)

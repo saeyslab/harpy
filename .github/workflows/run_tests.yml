@@ -4,17 +4,17 @@ on:
   workflow_dispatch:
 
 # skip automatic testing
-  #push:
-  #  branches:
-  #    - main
+#push:
+#  branches:
+#    - main
 
-  #pull_request:
-  #  branches:
-  #    - main
+#pull_request:
+#  branches:
+#    - main
 
-  #  paths:
-  #    - "src/harpy/**"
-  #    - ".github/workflows/run_tests.yml"
+#  paths:
+#    - "src/harpy/**"
+#    - ".github/workflows/run_tests.yml"
 
 env:
   CACHE_NUMBER: 1 # increase to reset cache manually

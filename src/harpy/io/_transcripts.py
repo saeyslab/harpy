@@ -280,7 +280,7 @@ def read_transcripts(
     if transform_matrix is None:
         log.info("No transform matrix given, will use identity matrix.")
         transform_matrix = np.identity(3)
-    elif isinstance(transform_matrix, (Path, str)):
+    elif isinstance(transform_matrix, Path | str):
         transform_matrix = np.loadtxt(transform_matrix)
 
     log.info(f"Transform matrix used:\n {transform_matrix}")

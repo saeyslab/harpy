@@ -3,7 +3,7 @@
 import os
 import pathlib
 from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any
 
 import napari
 import napari.layers
@@ -55,8 +55,8 @@ def allocate_widget(
     column_y: int = 1,
     column_gene: int = 3,
     midcount: bool = False,
-    column_midcount: Optional[int] = None,
-    transform_matrix: Optional[pathlib.Path] = None,
+    column_midcount: int | None = None,
+    transform_matrix: pathlib.Path | None = None,
     min_counts: int = 10,
     min_cells: int = 5,
     size_normalization: bool = True,

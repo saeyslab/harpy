@@ -65,7 +65,7 @@ def _get_translation(spatial_image: DataArray, to_coordinate_system: str = "glob
         )
     translation = transformations[to_coordinate_system]
 
-    if not isinstance(translation, (Sequence | Translation, Identity)):
+    if not isinstance(translation, Sequence | Translation | Identity):
         raise ValueError(
             f"Currently only transformations of type Translation are supported, "
             f"while transformation associated with {spatial_image} in coordinate system '{to_coordinate_system}' is of type {type(translation)}."

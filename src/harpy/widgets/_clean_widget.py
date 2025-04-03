@@ -6,7 +6,7 @@ The goal of cleaning is to improve the image quality so that subsequent image se
 
 import os
 from collections.abc import Callable
-from typing import Any, List, Optional
+from typing import Any
 
 import napari
 import napari.layers
@@ -52,13 +52,13 @@ def _clean_worker(
 def clean_widget(
     viewer: napari.Viewer,
     image: napari.layers.Image,
-    subset: Optional[napari.layers.Shapes] = None,
+    subset: napari.layers.Shapes | None = None,
     tiling_correction_step: bool = True,
     tile_size: int = 2144,
     min_max_filtering_step: bool = True,
-    size_min_max_filter: List[int] = [85],  # noqa: B006 # magicgui does not accept None as default.
+    size_min_max_filter: list[int] = [85],  # noqa: B006 # magicgui does not accept None as default.
     contrast_enhancing_step: bool = True,
-    contrast_clip: List[float] = [3.5],  # noqa: B006
+    contrast_clip: list[float] = [3.5],  # noqa: B006
 ):
     """Function represents the clean widget and is called by the wizard to create the widget."""
     contrast_clip = contrast_clip.copy()

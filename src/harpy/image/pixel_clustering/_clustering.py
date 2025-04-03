@@ -128,9 +128,9 @@ def flowsom(
     output_layer_clusters = _fix_name(output_layer_clusters)
     output_layer_metaclusters = _fix_name(output_layer_metaclusters)
 
-    assert len(output_layer_clusters) == len(output_layer_metaclusters) == len(img_layer), (
-        "The number of 'output_layer_clusters' and 'output_layer_metaclusters' specified should be the equal to the the number of 'img_layer' specified."
-    )
+    assert (
+        len(output_layer_clusters) == len(output_layer_metaclusters) == len(img_layer)
+    ), "The number of 'output_layer_clusters' and 'output_layer_metaclusters' specified should be the equal to the the number of 'img_layer' specified."
 
     se_image = _get_spatial_element(sdata, layer=img_layer[0])
 
@@ -153,9 +153,9 @@ def flowsom(
         if i == 0:
             _array_dim = arr.ndim
         else:
-            assert _array_dim == arr.ndim, (
-                "Image layers specified via parameter `img_layer` should all have same number of dimensions."
-            )
+            assert (
+                _array_dim == arr.ndim
+            ), "Image layers specified via parameter `img_layer` should all have same number of dimensions."
 
         to_squeeze = False
         if arr.ndim == 3:

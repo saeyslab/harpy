@@ -254,7 +254,7 @@ def _ensure_polygon_multipolygon(cell: Polygon | MultiPolygon | GeometryCollecti
     """
     cell = shapely.make_valid(cell)
 
-    if isinstance(cell, (Polygon, MultiPolygon)):
+    if isinstance(cell, Polygon | MultiPolygon):
         return cell
 
     if isinstance(cell, GeometryCollection):

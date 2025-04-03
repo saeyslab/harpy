@@ -89,9 +89,9 @@ def cluster_intensity(
         else [to_coordinate_system]
     )
 
-    assert len(img_layer) == len(labels_layer) == len(to_coordinate_system), (
-        "The number of provided 'img_layer', 'labels_layer' and 'to_coordinate_system' should be equal."
-    )
+    assert (
+        len(img_layer) == len(labels_layer) == len(to_coordinate_system)
+    ), "The number of provided 'img_layer', 'labels_layer' and 'to_coordinate_system' should be equal."
 
     for i, (_img_layer, _labels_layer, _to_coordinate_system) in enumerate(
         zip(img_layer, labels_layer, to_coordinate_system, strict=True)
@@ -100,9 +100,9 @@ def cluster_intensity(
 
         labels = da.unique(se.data).compute()
 
-        assert np.all(np.in1d(labels[labels != 0], mapping.index.astype(int))), (
-            f"Some labels labels layer {_labels_layer} could not be found in the provided pandas Series that maps SOM cluster ID's to metacluster IDs."
-        )
+        assert np.all(
+            np.in1d(labels[labels != 0], mapping.index.astype(int))
+        ), f"Some labels labels layer {_labels_layer} could not be found in the provided pandas Series that maps SOM cluster ID's to metacluster IDs."
 
         # allocate the intensity to via the clusters labels layer
 
@@ -177,9 +177,9 @@ def cluster_intensity(
     adata.obs.index = old_index
     adata.obs = adata.obs.drop(columns=[_CELL_INDEX])
 
-    assert not adata.obs[ClusteringKey._METACLUSTERING_KEY.value].isna().any(), (
-        "Not all SOM cluster IDs could be linked to a metacluster."
-    )
+    assert (
+        not adata.obs[ClusteringKey._METACLUSTERING_KEY.value].isna().any()
+    ), "Not all SOM cluster IDs could be linked to a metacluster."
 
     # calculate mean intensity per metacluster
     df = adata.to_df().copy()

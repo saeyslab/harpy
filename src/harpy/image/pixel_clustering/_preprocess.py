@@ -106,9 +106,9 @@ def pixel_clustering_preprocess(
         if isinstance(output_layer, Iterable) and not isinstance(output_layer, str)
         else [output_layer]
     )
-    assert len(output_layer) == len(img_layer), (
-        "The number of 'output_layer' specified should be the equal to the the number of 'img_layer' specified."
-    )
+    assert len(output_layer) == len(
+        img_layer
+    ), "The number of 'output_layer' specified should be the equal to the the number of 'img_layer' specified."
 
     se_image = _get_spatial_element(sdata, layer=img_layer[0])
 
@@ -127,9 +127,9 @@ def pixel_clustering_preprocess(
         if i == 0:
             _array_dim = arr.ndim
         else:
-            assert _array_dim == arr.ndim, (
-                "Image layers specified via parameter `img_layer` should all have same number of dimensions."
-            )
+            assert (
+                _array_dim == arr.ndim
+            ), "Image layers specified via parameter `img_layer` should all have same number of dimensions."
         if chunks is not None:
             arr = arr.rechunk(chunks)
 
@@ -179,9 +179,9 @@ def pixel_clustering_preprocess(
     # 3) gaussian blur
     if sigma is not None:
         sigma = list(sigma) if isinstance(sigma, Iterable) else [sigma] * len(channels)
-        assert len(sigma) == len(channels), (
-            f"If 'sigma' is provided as a list, it should match the number of channels in '{se_image}', or the number of channels provided via the 'channels' parameter '{channels}'."
-        )
+        assert (
+            len(sigma) == len(channels)
+        ), f"If 'sigma' is provided as a list, it should match the number of channels in '{se_image}', or the number of channels provided via the 'channels' parameter '{channels}'."
         # gaussian blur for each image separately
         for i in range(len(_arr_list)):
             _arr_list[i] = _gaussian_blur(_arr_list[i], sigma=sigma)

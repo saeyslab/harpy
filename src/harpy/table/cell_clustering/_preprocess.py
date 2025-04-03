@@ -70,9 +70,9 @@ def cell_clustering_preprocess(
         else [labels_layer_clusters]
     )
 
-    assert len(labels_layer_cells) == len(labels_layer_clusters), (
-        "The number of 'labels_layer_cells' specified should be the equal to the the number of 'labels_layer_clusters' specified."
-    )
+    assert (
+        len(labels_layer_cells) == len(labels_layer_clusters)
+    ), "The number of 'labels_layer_cells' specified should be the equal to the the number of 'labels_layer_clusters' specified."
 
     # first get total number of unique labels and total number of unique cluster id's over all FOV's
     _arr_list_labels = []
@@ -83,20 +83,20 @@ def cell_clustering_preprocess(
         se_labels = _get_spatial_element(sdata, layer=_labels_layer_cells)
         se_clusters = _get_spatial_element(sdata, layer=_labels_layer_clusters)
 
-        assert se_labels.shape == se_clusters.shape, (
-            f"Provided labels layers '{_labels_layer_cells}' and '{_labels_layer_clusters}' do not have the same shape."
-        )
+        assert (
+            se_labels.shape == se_clusters.shape
+        ), f"Provided labels layers '{_labels_layer_cells}' and '{_labels_layer_clusters}' do not have the same shape."
 
-        assert get_transformation(se_labels, get_all=True) == get_transformation(se_clusters, get_all=True), (
-            f"Transformation on provided labels layers '{_labels_layer_cells}' and '{_labels_layer_clusters}' are not equal. This is currently not supported."
-        )
+        assert (
+            get_transformation(se_labels, get_all=True) == get_transformation(se_clusters, get_all=True)
+        ), f"Transformation on provided labels layers '{_labels_layer_cells}' and '{_labels_layer_clusters}' are not equal. This is currently not supported."
 
         if i == 0:
             _array_dim = se_labels.ndim
         else:
-            assert _array_dim == se_labels.ndim == se_clusters.ndim, (
-                "Labels layer specified in 'labels_layer_cells' and 'labels_layer_cluster' should all have same number of dimensions."
-            )
+            assert (
+                _array_dim == se_labels.ndim == se_clusters.ndim
+            ), "Labels layer specified in 'labels_layer_cells' and 'labels_layer_cluster' should all have same number of dimensions."
 
         _array_labels = se_labels.data
         _array_clusters = se_clusters.data
@@ -123,9 +123,9 @@ def cell_clustering_preprocess(
         _array_labels = _arr_list_labels[i]
         _array_clusters = _arr_list_clusters[i]
 
-        assert _array_labels.numblocks == _array_clusters.numblocks, (
-            f"Provided labels layers '{labels_layer_cells[i]}' and '{labels_layer_clusters[i]}' have different chunk sizes. Set 'chunk' parameter to fix this issue."
-        )
+        assert (
+            _array_labels.numblocks == _array_clusters.numblocks
+        ), f"Provided labels layers '{labels_layer_cells[i]}' and '{labels_layer_clusters[i]}' have different chunk sizes. Set 'chunk' parameter to fix this issue."
 
         _unique_mask = da.unique(_array_labels).compute()
 

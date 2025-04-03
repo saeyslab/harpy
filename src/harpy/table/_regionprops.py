@@ -101,12 +101,12 @@ def add_regionprop_features(
 
     assert _INSTANCE_KEY in cell_props.columns, f"'cell_props' should contain '{_INSTANCE_KEY}' column"
     assert _REGION_KEY not in cell_props.columns, f"'cell_props' should not contain '{_REGION_KEY}' columns."
-    assert _REGION_KEY in sdata.tables[table_layer].obs, (
-        f"Please link observation to a labels_layer using the '{_REGION_KEY}' column in 'sdata.tables[{table_layer}].obs'"
-    )
-    assert _INSTANCE_KEY in sdata.tables[table_layer].obs, (
-        f"Please add unique {_INSTANCE_KEY} (uint) for every observation in 'sdata.tables[{table_layer}]', e.g. see 'harpy.table.allocate_intensity'."
-    )
+    assert (
+        _REGION_KEY in sdata.tables[table_layer].obs
+    ), f"Please link observation to a labels_layer using the '{_REGION_KEY}' column in 'sdata.tables[{table_layer}].obs'"
+    assert (
+        _INSTANCE_KEY in sdata.tables[table_layer].obs
+    ), f"Please add unique {_INSTANCE_KEY} (uint) for every observation in 'sdata.tables[{table_layer}]', e.g. see 'harpy.table.allocate_intensity'."
 
     cell_props[_REGION_KEY] = pd.Categorical([labels_layer] * len(cell_props))
 
@@ -121,9 +121,9 @@ def add_regionprop_features(
 
     # sanity check (check that _INSTANCE_KEY unique for given labels_layer, otherwise unexpected behaviour when merging)
     for _df in [sdata.tables[table_layer].obs, cell_props]:
-        assert not _df[_df[_REGION_KEY] == labels_layer][_INSTANCE_KEY].duplicated().any(), (
-            f"{_INSTANCE_KEY} should be unique for given '{_REGION_KEY}'"
-        )
+        assert (
+            not _df[_df[_REGION_KEY] == labels_layer][_INSTANCE_KEY].duplicated().any()
+        ), f"{_INSTANCE_KEY} should be unique for given '{_REGION_KEY}'"
 
     # make copy, otherwise we would update inplace, which could give issues if we are not allowed to overwrite in the next step
     # (i.e. disagreement between on-disk `sdata` and in memory `sdata``.)

@@ -220,7 +220,7 @@ def _load_image_to_dask(
             # add z- dimension if we did a projection, we want (c,z,y,x)
             dask_array = dask_array[:, None, :, :]
 
-    elif isinstance(input, (np.ndarray, da.Array)):
+    elif isinstance(input, np.ndarray | da.Array):
         # make sure we have (c,z,y,x)
         array = _fix_dimensions(input, dims=dims)
         if isinstance(array, np.ndarray):
@@ -228,7 +228,7 @@ def _load_image_to_dask(
         else:
             dask_array = array
 
-    elif isinstance(input, (str, Path)):
+    elif isinstance(input, str | Path):
         if dims is not None:
             log.warning(f"dims parameter is equal to {dims}, but will be ignored when reading in images from a file")
         # make sure we have (c,z,y,x)
@@ -265,7 +265,7 @@ def _load_image_to_dask(
         else:
             dask_array = dask_array.squeeze(1)
 
-    if isinstance(input, (str, Path)) and output_dir is not None:
+    if isinstance(input, str | Path) and output_dir is not None:
         name = os.path.splitext(os.path.basename(input))[0]
         output_zarr = os.path.join(output_dir, f"{name}.zarr")
         dask_array.to_zarr(output_zarr)

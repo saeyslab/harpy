@@ -27,7 +27,7 @@ def test_add_grid_labels_layer_hexagon(hex_size):
     assert output_shapes_layer in [*sdata.shapes]
     assert output_labels_layer in [*sdata.labels]
 
-    assert sdata[output_labels_layer].shape == tuple(a + b for a, b in zip(shape, offset))
+    assert sdata[output_labels_layer].shape == tuple(a + b for a, b in zip(shape, offset, strict=False))
     array_labels = sdata[output_labels_layer].data.compute()
     unique_labels = np.unique(array_labels)
     unique_labels = unique_labels[unique_labels != 0]
@@ -62,7 +62,7 @@ def test_add_grid_labels_layer_square(square_size):
     assert output_shapes_layer in [*sdata.shapes]
     assert output_labels_layer in [*sdata.labels]
 
-    assert sdata[output_labels_layer].shape == tuple(a + b for a, b in zip(shape, offset))
+    assert sdata[output_labels_layer].shape == tuple(a + b for a, b in zip(shape, offset, strict=False))
     array_labels = sdata[output_labels_layer].data.compute()
     unique_labels = np.unique(array_labels)
     unique_labels = unique_labels[unique_labels != 0]

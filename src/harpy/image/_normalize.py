@@ -77,9 +77,9 @@ def normalize(
     if isinstance(q_min, Iterable):
         if not isinstance(q_max, Iterable):
             raise ValueError("'q_min' must be an iterable if `q_max` is an iterable.")
-        assert len(q_min) == len(q_max) == len(se.c.data), (
-            f"If 'q_min' and 'q_max' is provided as a list, it should match the number of channels in '{se}' ({len(se.c.data)})"
-        )
+        assert (
+            len(q_min) == len(q_max) == len(se.c.data)
+        ), f"If 'q_min' and 'q_max' is provided as a list, it should match the number of channels in '{se}' ({len(se.c.data)})"
         fn_kwargs = {
             key: {"q_min": q_min_value, "q_max": q_max_value, "eps": eps, "internal_method": internal_method}
             for (key, q_min_value, q_max_value) in zip(se.c.data, q_min, q_max, strict=True)

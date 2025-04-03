@@ -118,12 +118,12 @@ def merscope(
     z_layers = _fix_name(z_layers)
     path = _fix_name(path)
     to_coordinate_system = _fix_name(to_coordinate_system)
-    assert len(path) == len(to_coordinate_system), (
-        "If parameters 'path' and/or 'to_coordinate_system' are specified as a list, their length should be equal."
-    )
-    assert len(to_coordinate_system) == len(set(to_coordinate_system)), (
-        "All elements specified via 'to_coordinate_system' should be unique."
-    )
+    assert len(path) == len(
+        to_coordinate_system
+    ), "If parameters 'path' and/or 'to_coordinate_system' are specified as a list, their length should be equal."
+    assert len(to_coordinate_system) == len(
+        set(to_coordinate_system)
+    ), "All elements specified via 'to_coordinate_system' should be unique."
 
     for _path, _to_coordinate_system in zip(path, to_coordinate_system, strict=True):
         sdata = sdata_merscope(

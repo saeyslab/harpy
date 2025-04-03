@@ -327,9 +327,9 @@ class SegmentationModel(ABC):
             output_shapes_layer = _fix_name(output_shapes_layer)
 
         if output_labels_layer is not None and output_shapes_layer is not None:
-            assert len(output_labels_layer) == len(output_shapes_layer), (
-                "It 'output_labels_layer' or 'output_shapes_layer' is provided as a list, they should be of the same length."
-            )
+            assert (
+                len(output_labels_layer) == len(output_shapes_layer)
+            ), "It 'output_labels_layer' or 'output_shapes_layer' is provided as a list, they should be of the same length."
 
         return output_labels_layer, output_shapes_layer
 
@@ -377,7 +377,7 @@ class SegmentationModel(ABC):
         if "chunks" in kwargs:
             chunks = kwargs["chunks"]
             if chunks is not None:
-                if not isinstance(chunks, (int, str)):
+                if not isinstance(chunks, int | str):
                     assert len(chunks) == x.ndim - 2, "Please (only) provide chunks for ( 'y', 'x')."
                     chunks = (x.shape[0], chunks[0], chunks[1], x.shape[-1])
                     kwargs["chunks"] = chunks

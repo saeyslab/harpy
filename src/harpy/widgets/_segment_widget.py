@@ -3,7 +3,7 @@
 import os
 from collections.abc import Callable
 from enum import Enum
-from typing import Any, List, Optional
+from typing import Any
 
 import napari
 import napari.layers
@@ -53,15 +53,15 @@ def _segmentation_worker(
 )
 def segment_widget(
     viewer: napari.Viewer,
-    image: Optional[napari.layers.Image] = None,
-    subset: Optional[napari.layers.Shapes] = None,
+    image: napari.layers.Image | None = None,
+    subset: napari.layers.Shapes | None = None,
     device: str = "cpu",
     min_size: int = 80,
     flow_threshold: float = 0.8,
     diameter: int = 50,
     cellprob_threshold: int = -2,
     model_type: ModelOption = ModelOption.nuclei,
-    channels: List[int] = [1, 0],  # noqa: B006 # magicgui does not accept None
+    channels: list[int] = [1, 0],  # noqa: B006 # magicgui does not accept None
     expand_radius: int = 0,
     chunks: int = 2048,
     depth: int = 100,

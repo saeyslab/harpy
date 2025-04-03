@@ -1,7 +1,7 @@
 import os
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import napari
 import napari.layers
@@ -53,12 +53,12 @@ def load_widget(
     viewer: napari.Viewer,
     path_zarr: Path = Path(""),
     path_image: Path = Path(""),
-    image_layer: Optional[str] = utils.LOAD,
+    image_layer: str | None = utils.LOAD,
     output_dir: Path = Path(""),
-    x_min: Optional[str] = "",
-    x_max: Optional[str] = "",
-    y_min: Optional[str] = "",
-    y_max: Optional[str] = "",
+    x_min: str | None = "",
+    x_max: str | None = "",
+    y_min: str | None = "",
+    y_max: str | None = "",
 ):
     """Function represents the load widget and is called by the wizard to create the widget."""
     # get the default values for the configs
