@@ -384,6 +384,12 @@ class SegmentationModel(ABC):
                 elif isinstance(chunks, int):
                     chunks = (x.shape[0], chunks, chunks, x.shape[-1])
                     kwargs["chunks"] = chunks
+            else:
+                if x.chunksize[0] != x.shape[0] or x.chunksize[-1] != x.shape[-1]:
+                    log.info(
+                        "Provided array is chunked in 'z' and/or 'c' dimension. Will rechunk in 'z' and/or 'c' dimension."
+                    )
+                    kwargs["chunks"] = (x.shape[0], x.chunksize[1], x.chunksize[2], x.shape[-1])
 
         return x, kwargs
 
