@@ -25,7 +25,7 @@ def calculate_segments_per_area(sdata, sample_key="sample_id"):
         df["cells_per_mm2"] = df[sample_key] / (df["image_width_px"] * df["image_height_px"] / 1e6)
     if "fov_labels" in table.columns:
         df = table.groupby(sample_key).agg({sample_key: "count"})
-        area_map = {k: 1000 for k in table["fov_labels"].unique().tolist()}
+        area_map = dict.fromkeys(table["fov_labels"].unique().tolist(), 1000)
         log.debug(area_map)
         df["cells_per_mm2"] = df.index.map(area_map)
     df.sort_values("cells_per_mm2", inplace=True)
