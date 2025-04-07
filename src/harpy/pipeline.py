@@ -233,7 +233,7 @@ class HarpyPipeline:
         elif depth is None:
             log.info(
                 f"Depth not provided for segmentation, "
-                f"setting depth equal to 2 times the estimated size of the nucleus/cell: 2*{ self.cfg.segmentation.diameter}"
+                f"setting depth equal to 2 times the estimated size of the nucleus/cell: 2*{self.cfg.segmentation.diameter}"
             )
             depth = 2 * self.cfg.segmentation.diameter
 
