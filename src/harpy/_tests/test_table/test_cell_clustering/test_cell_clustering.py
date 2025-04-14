@@ -95,10 +95,10 @@ def test_cell_clustering(sdata_blobs):
     assert set(channels).issubset(sdata_blobs.tables[table_layer].obs.columns)
     # and average over cell clusters is added to .uns
     assert (
-        f"{ClusteringKey._CLUSTERING_KEY.value}_{sdata_blobs[ table_layer_intensity ].var_names.name}"
+        f"{ClusteringKey._CLUSTERING_KEY.value}_{sdata_blobs[table_layer_intensity].var_names.name}"
         in sdata_blobs.tables[table_layer].uns
     )
     assert (
-        f"{ClusteringKey._METACLUSTERING_KEY.value}_{sdata_blobs[ table_layer_intensity ].var_names.name}"
+        f"{ClusteringKey._METACLUSTERING_KEY.value}_{sdata_blobs[table_layer_intensity].var_names.name}"
         in sdata_blobs.tables[table_layer].uns
     )
