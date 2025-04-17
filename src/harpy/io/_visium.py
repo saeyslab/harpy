@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 from pathlib import Path
-import harpy as hp
-import pandas as pd
-import geopandas as gpd
 
+import geopandas as gpd
+import pandas as pd
 from spatialdata import SpatialData, read_zarr
 from spatialdata.models import TableModel
 from spatialdata_io._constants._constants import VisiumKeys
 from spatialdata_io.readers.visium import visium as sdata_visium
 
+import harpy as hp
 from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY
 
 
@@ -53,8 +53,8 @@ def visium(
 
         _old_instance_key = sdata[table_layer].uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY]
         _old_region_key = sdata[table_layer].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]
-        adata.obs[_REGION_KEY] = pd.Categorical(adata.obs[_old_region_key].astype(str) + '_labels')
-        if adata.obs[_old_instance_key].astype(int).min() == 0: # Make sure index starts from 1
+        adata.obs[_REGION_KEY] = pd.Categorical(adata.obs[_old_region_key].astype(str) + "_labels")
+        if adata.obs[_old_instance_key].astype(int).min() == 0:  # Make sure index starts from 1
             adata.obs[_INSTANCE_KEY] = adata.obs[_old_instance_key].astype(int) + 1
         else:
             adata.obs[_INSTANCE_KEY] = adata.obs[_old_instance_key].astype(int)
@@ -67,8 +67,8 @@ def visium(
             instance_key=_INSTANCE_KEY,
         )
 
-        assert (
-            len(sdata.shapes[dataset_id]) == len(adata)
+        assert len(sdata.shapes[dataset_id]) == len(
+            adata
         ), f"Shapes layer '{dataset_id}' and corresponding table '{table_layer}' should have same length."
 
         sdata.shapes[dataset_id].index = (
@@ -78,25 +78,27 @@ def visium(
 
         if _old_region_key in adata.obs.columns:
             adata.obs.drop(columns=_old_region_key, inplace=True)
-            
+
         if _old_instance_key in adata.obs.columns:
             adata.obs.drop(columns=_old_instance_key, inplace=True)
-            
+
         # Convert Points to Polygons
-        if 'radius' not in sdata.shapes[dataset_id].columns:
+        if "radius" not in sdata.shapes[dataset_id].columns:
             raise ValueError("Shapes layer is missing 'radius' column required for polygon buffering.")
 
-        radius = sdata.shapes[dataset_id]['radius'].mean()
+        radius = sdata.shapes[dataset_id]["radius"].mean()
         polygons = sdata.shapes[dataset_id].buffer(radius, cap_style="round")
-        sdata = hp.sh.add_shapes_layer(sdata, gpd.GeoDataFrame(geometry=polygons), output_layer=dataset_id, overwrite=True)
-        
+        sdata = hp.sh.add_shapes_layer(
+            sdata, gpd.GeoDataFrame(geometry=polygons), output_layer=dataset_id, overwrite=True
+        )
+
         # Create labels layer
         sdata = hp.im.rasterize(
             sdata,
-            shapes_layer = dataset_id,
-            output_layer = f'{dataset_id}_labels',
-            chunks = 5000,
-            overwrite = True,
+            shapes_layer=dataset_id,
+            output_layer=f"{dataset_id}_labels",
+            chunks=5000,
+            overwrite=True,
         )
 
         del sdata[table_layer]
