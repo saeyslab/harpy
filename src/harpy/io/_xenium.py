@@ -110,8 +110,14 @@ def xenium(
         )
         cells_labels = True
 
+    sdata = SpatialData()
+    # back the images to the zarr store, so we avoid having to persist the transcripts in memory in the read_transcripts step.
+    if output is not None:
+        sdata.write(output)
+        sdata = read_zarr(output)
+
     for _path, _to_coordinate_system in zip(path, to_coordinate_system, strict=True):
-        sdata = sdata_xenium(
+        _sdata = sdata_xenium(
             path=_path,
             cells_boundaries=False,
             nucleus_boundaries=False,
@@ -125,21 +131,21 @@ def xenium(
             aligned_images=aligned_images,
         )
 
-        layers = [*sdata.images] + [*sdata.labels]
+        layers = [*_sdata.images] + [*_sdata.labels]
 
         for _layer in layers:
             # rename coordinate system "global" to _to_coordinate_system
-            transformation = {_to_coordinate_system: get_transformation(sdata[_layer], to_coordinate_system="global")}
-            set_transformation(sdata[_layer], transformation=transformation, set_all=True)
-            sdata[f"{_layer}_{_to_coordinate_system}"] = sdata[_layer]
-            del sdata[_layer]
+            transformation = {_to_coordinate_system: get_transformation(_sdata[_layer], to_coordinate_system="global")}
+            set_transformation(_sdata[_layer], transformation=transformation, set_all=True)
+            _sdata[f"{_layer}_{_to_coordinate_system}"] = _sdata[_layer]
+            del _sdata[_layer]
 
         if cells_table:
             with open(os.path.join(_path, XeniumKeys.XENIUM_SPECS)) as f:
                 specs = json.load(f)
-            adata = sdata["table"]
+            adata = _sdata["table"]
             assert f"cell_labels_{_to_coordinate_system}" in [
-                *sdata.labels
+                *_sdata.labels
             ], "labels layer annotating the table is not found in SpatialData object."
             # remove "cell_id" column in table, to avoid confusion with _INSTANCE_KEY.
             if "cell_id" in adata.obs.columns:
@@ -156,14 +162,19 @@ def xenium(
                 instance_key=_INSTANCE_KEY,
             )
 
-            del sdata["table"]
+            del _sdata["table"]
 
-            sdata[f"table_{_to_coordinate_system}"] = adata
+            _sdata[f"table_{_to_coordinate_system}"] = adata
 
-    # back the images to the zarr store, so we avoid having to persist the transcripts in memory in the read_transcripts step.
-    if output is not None:
-        sdata.write(output)
-        sdata = read_zarr(output)
+        layers = [*_sdata.images] + [*_sdata.labels] + [*_sdata.tables]
+
+        for _layer in layers:
+            sdata[_layer] = _sdata[_layer]
+            if sdata.is_backed():
+                sdata.write_element(_layer)
+
+        if sdata.is_backed():
+            sdata = read_zarr(sdata.path)
 
     # now read the transcripts
     for _path, _to_coordinate_system in zip(path, to_coordinate_system, strict=True):
