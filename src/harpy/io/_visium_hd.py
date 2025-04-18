@@ -4,9 +4,9 @@ from pathlib import Path
 
 from spatialdata import SpatialData, read_zarr
 from spatialdata.models import TableModel
+from spatialdata.transformations import get_transformation, remove_transformation, set_transformation
 from spatialdata_io._constants._constants import VisiumHDKeys
 from spatialdata_io.readers.visium_hd import visium_hd as sdata_visium_hd
-from spatialdata.transformations import set_transformation, get_transformation, remove_transformation
 
 from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY
 
@@ -62,17 +62,21 @@ def visium_hd(
         load_all_images=load_all_images,
         bins_as_squares=bins_as_squares,
     )
-    
-    if fullres_image_file is not None: # Move full image from global to dataset_id coordinate system
+
+    if fullres_image_file is not None:  # Move full image from global to dataset_id coordinate system
         transformations = get_transformation(sdata.images[f"{dataset_id}_full_image"], get_all=True)
-        set_transformation(sdata.images[f"{dataset_id}_full_image"], transformations['global'], to_coordinate_system=dataset_id)
+        set_transformation(
+            sdata.images[f"{dataset_id}_full_image"], transformations["global"], to_coordinate_system=dataset_id
+        )
         remove_transformation(sdata.images[f"{dataset_id}_full_image"], to_coordinate_system="global")
 
-    if load_all_images: # Move cytassist image from global to dataset_id coordinate system
+    if load_all_images:  # Move cytassist image from global to dataset_id coordinate system
         transformations = get_transformation(sdata.images[f"{dataset_id}_cytassist_image"], get_all=True)
-        set_transformation(sdata.images[f"{dataset_id}_cytassist_image"], transformations['global'], to_coordinate_system=dataset_id)
+        set_transformation(
+            sdata.images[f"{dataset_id}_cytassist_image"], transformations["global"], to_coordinate_system=dataset_id
+        )
         remove_transformation(sdata.images[f"{dataset_id}_cytassist_image"], to_coordinate_system="global")
-        
+
     for table_layer in [*sdata.tables]:
         adata = sdata[table_layer]
         adata.var_names_make_unique()
@@ -101,11 +105,10 @@ def visium_hd(
         if VisiumHDKeys.INSTANCE_KEY in adata.obs.columns:
             adata.obs.drop(columns=VisiumHDKeys.INSTANCE_KEY, inplace=True)
         sdata[shapes_layer].index.name = _INSTANCE_KEY
-        
+
         del sdata[table_layer]
 
         sdata[table_layer] = adata
-
 
     if output is not None:
         sdata.write(output)
