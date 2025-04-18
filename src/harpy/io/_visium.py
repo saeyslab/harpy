@@ -17,6 +17,7 @@ def visium(
     path: str | Path,
     dataset_id: str | None = None,
     counts_file: str = VisiumKeys.FILTERED_COUNTS_FILE,
+    fullres_image_file: str | Path | None = None,
     output: str | Path | None = None,
 ) -> SpatialData:
     """
@@ -37,6 +38,8 @@ def visium(
     counts_file
         Name of the counts file, defaults to `'filtered_feature_bc_matrix.h5'`; a common alternative is
         `'raw_feature_bc_matrix.h5'`.
+    fullres_image_file
+        Path to the full-resolution image.
     output
         The path where the resulting `SpatialData` object will be backed. If None, it will not be backed to a zarr store.
     """
@@ -44,6 +47,7 @@ def visium(
         path=path,
         dataset_id=dataset_id,
         counts_file=counts_file,
+        fullres_image_file=fullres_image_file,
     )
 
     for table_layer in [*sdata.tables]:
