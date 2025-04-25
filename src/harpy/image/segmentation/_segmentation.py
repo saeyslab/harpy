@@ -780,8 +780,10 @@ class SegmentationModelStains(SegmentationModel):
         )
 
         if _temp_path is not None:
-            # TODO this will not work if sdata is remote (e.g. s3 bucket).
-            shutil.rmtree(_temp_path)
+            temp_path = Path(_temp_path)
+            if temp_path.exists() and temp_path.is_dir():
+                # TODO this will not work if sdata is remote (e.g. s3 bucket).
+                shutil.rmtree(_temp_path)
 
         return sdata
 
@@ -929,8 +931,10 @@ class SegmentationModelPoints(SegmentationModel):
         )
 
         if _temp_path is not None:
-            # TODO this will not work if sdata is remote (e.g. s3 bucket).
-            shutil.rmtree(_temp_path)
+            temp_path = Path(_temp_path)
+            if temp_path.exists() and temp_path.is_dir():
+                # TODO this will not work if sdata is remote (e.g. s3 bucket).
+                shutil.rmtree(_temp_path)
 
         return sdata
 
