@@ -1,5 +1,6 @@
 import importlib.util
 
+import dask
 import dask.array as da
 import dask.dataframe as dd
 import pandas as pd
@@ -16,56 +17,58 @@ from harpy.points._points import add_points_layer
 
 @pytest.mark.skipif(not importlib.util.find_spec("cellpose"), reason="requires the cellpose library")
 def test_segment(sdata_multi_c_no_backed: SpatialData):
-    sdata_multi_c_no_backed = segment(
-        sdata_multi_c_no_backed,
-        img_layer="combine",
-        model=cellpose_callable,
-        output_labels_layer="masks_cellpose",
-        output_shapes_layer="masks_cellpose_boundaries",
-        trim=False,
-        chunks=50,
-        overwrite=True,
-        depth=30,
-        crd=[10, 110, 0, 100],
-        scale_factors=[2, 2, 2, 2],
-        diameter=20,
-        cellprob_threshold=-4,
-        flow_threshold=0.9,
-        model_type="nuclei",
-        do_3D=False,
-        channels=[1, 0],
-    )
+    with dask.config.set(scheduler="processes"):
+        sdata_multi_c_no_backed = segment(
+            sdata_multi_c_no_backed,
+            img_layer="combine",
+            model=cellpose_callable,
+            output_labels_layer="masks_cellpose",
+            output_shapes_layer="masks_cellpose_boundaries",
+            trim=False,
+            chunks=50,
+            overwrite=True,
+            depth=30,
+            crd=[10, 110, 0, 100],
+            scale_factors=[2, 2, 2, 2],
+            diameter=20,
+            cellprob_threshold=-4,
+            flow_threshold=0.9,
+            model_type="nuclei",
+            do_3D=False,
+            channels=[1, 0],
+        )
 
-    assert "masks_cellpose" in sdata_multi_c_no_backed.labels
-    assert "masks_cellpose_boundaries" in sdata_multi_c_no_backed.shapes
-    assert isinstance(sdata_multi_c_no_backed, SpatialData)
+        assert "masks_cellpose" in sdata_multi_c_no_backed.labels
+        assert "masks_cellpose_boundaries" in sdata_multi_c_no_backed.shapes
+        assert isinstance(sdata_multi_c_no_backed, SpatialData)
 
 
 @pytest.mark.skipif(not importlib.util.find_spec("cellpose"), reason="requires the cellpose library")
 def test_segment_3D(sdata_multi_c_no_backed: SpatialData):
-    sdata_multi_c_no_backed = segment(
-        sdata_multi_c_no_backed,
-        img_layer="combine_z",
-        model=cellpose_callable,
-        output_labels_layer="masks_cellpose_3D",
-        output_shapes_layer="masks_cellpose_3D_boundaries",
-        trim=False,
-        chunks=(50, 50),
-        overwrite=True,
-        depth=(20, 20),
-        crd=[50, 80, 10, 70],
-        scale_factors=[2],
-        diameter=20,
-        cellprob_threshold=-4,
-        flow_threshold=0.9,
-        model_type="nuclei",
-        channels=[1, 0],
-        do_3D=True,
-        anisotropy=1,
-    )
+    with dask.config.set(scheduler="processes"):
+        sdata_multi_c_no_backed = segment(
+            sdata_multi_c_no_backed,
+            img_layer="combine_z",
+            model=cellpose_callable,
+            output_labels_layer="masks_cellpose_3D",
+            output_shapes_layer="masks_cellpose_3D_boundaries",
+            trim=False,
+            chunks=(50, 50),
+            overwrite=True,
+            depth=(20, 20),
+            crd=[50, 80, 10, 70],
+            scale_factors=[2],
+            diameter=20,
+            cellprob_threshold=-4,
+            flow_threshold=0.9,
+            model_type="nuclei",
+            channels=[1, 0],
+            do_3D=True,
+            anisotropy=1,
+        )
 
-    assert "masks_cellpose_3D" in sdata_multi_c_no_backed.labels
-    assert isinstance(sdata_multi_c_no_backed, SpatialData)
+        assert "masks_cellpose_3D" in sdata_multi_c_no_backed.labels
+        assert isinstance(sdata_multi_c_no_backed, SpatialData)
 
 
 def test_segment_points(sdata_multi_c_no_backed: SpatialData):
