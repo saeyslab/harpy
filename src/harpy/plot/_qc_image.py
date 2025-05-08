@@ -174,12 +174,16 @@ def calculate_snr_ratio(
     return df_img
 
 
-def snr_ratio(sdata, ax=None, loglog=True, color="black", groupby=None, **kwargs):
+def snr_ratio(sdata, ax=None, loglog=True, color="black", channel_names=None, groupby=None, **kwargs):
     """Plot the signal to noise ratio. On the x-axis is the signal intensity and on the y-axis is the SNR-ratio"""
     log.debug("Plotting SNR ratio")
+    if channel_names is None:
+        channel_names = sdata.table.var_names
     if ax is None:
         fig, ax = plt.subplots()
-    df_img = calculate_snr_ratio(sdata, cycles="cycle" if color == "cycle" else None, **kwargs)
+    df_img = calculate_snr_ratio(
+        sdata, cycles="cycle" if color == "cycle" else None, channel_names=channel_names, **kwargs
+    )
     if loglog:
         ax.set_xscale("log", base=2)
         ax.set_yscale("log", base=2)
@@ -196,7 +200,7 @@ def snr_ratio(sdata, ax=None, loglog=True, color="black", groupby=None, **kwargs
         cmap = sns.color_palette("viridis", n_colors=len(df_img["cycle"].unique()), as_cmap=True)
         df_img["cycle"] = get_hexes(df_img["cycle"], palette=palette)
     log.debug(df_img.head())
-    _plot_snr_ratio(df_img, ax, color, text_list=sdata.table.var_names)
+    _plot_snr_ratio(df_img, ax, color, text_list=channel_names)
     ax.set_xlabel("Signal intensity")
     ax.set_ylabel("Signal-to-noise ratio")
     # cbar_ax = fig.add_axes([1, 0.1, 0.02, 0.8])
