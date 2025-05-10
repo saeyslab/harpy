@@ -94,6 +94,7 @@ notebook = [
     "bokeh",
     "textalloc",
     "joypy",
+    "supervenn>=0.5.0",
     # require spatialdata<0.3
     "spatialdata-plot<0.2.9",
     "nbconvert",

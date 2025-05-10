@@ -16,9 +16,11 @@ from ._qc_image import (
     group_snr_ratio,
     histogram,
     make_cols_colors,
+    marker_supervenn,
     signal_clustermap,
     snr_clustermap,
     snr_ratio,
+    supervenn_of_images,
 )
 from ._qc_segmentation import (
     calculate_segmentation_coverage,

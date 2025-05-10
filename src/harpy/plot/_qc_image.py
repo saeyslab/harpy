@@ -376,3 +376,23 @@ def make_cols_colors(df, palettes=None):
     for c, p in zip(df.columns, palettes, strict=True):
         df[c] = get_hexes(df[c], palette=p)
     return df
+
+
+def marker_supervenn(markers_per_image: dict[str, list[str]]):
+    from supervenn import supervenn
+
+    image_names = markers_per_image.keys()
+    marker_set_per_image = [set(v) for v in markers_per_image.values()]
+    plot = supervenn(marker_set_per_image, set_annotations=list(image_names))
+
+    # change axis labels of plot
+    axes = plot.axes
+    axes["main"].set_ylabel("Samples")
+    axes["main"].set_xlabel("Marker names")
+
+    return plot
+
+
+def supervenn_of_images(sdata: SpatialData):
+    markers_per_image = {image: sdata[image].coords["c"].to_numpy().tolist() for image in sdata.images}
+    return marker_supervenn(markers_per_image)
