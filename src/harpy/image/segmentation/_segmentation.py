@@ -327,9 +327,9 @@ class SegmentationModel(ABC):
             output_shapes_layer = _fix_name(output_shapes_layer)
 
         if output_labels_layer is not None and output_shapes_layer is not None:
-            assert (
-                len(output_labels_layer) == len(output_shapes_layer)
-            ), "It 'output_labels_layer' or 'output_shapes_layer' is provided as a list, they should be of the same length."
+            assert len(output_labels_layer) == len(output_shapes_layer), (
+                "It 'output_labels_layer' or 'output_shapes_layer' is provided as a list, they should be of the same length."
+            )
 
         return output_labels_layer, output_shapes_layer
 
