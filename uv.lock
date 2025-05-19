@@ -1,4 +1,5 @@
 version = 1
+revision = 1
 requires-python = ">=3.10, <3.13"
 resolution-markers = [
     "python_full_version >= '3.12' and sys_platform == 'darwin'",
@@ -1564,7 +1565,7 @@ wheels = [
 
 [[package]]
 name = "harpy-analysis"
-version = "0.0.2"
+version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "crick" },
@@ -1572,6 +1573,7 @@ dependencies = [
     { name = "datasets" },
     { name = "flowsom" },
     { name = "geopandas" },
+    { name = "lazy-loader" },
     { name = "leidenalg" },
     { name = "magicgui" },
     { name = "nptyping" },
@@ -1652,6 +1654,7 @@ dev = [
     { name = "sphinxcontrib-bibtex" },
     { name = "squidpy" },
     { name = "submitit" },
+    { name = "supervenn" },
     { name = "textalloc" },
     { name = "tox" },
     { name = "tqdm" },
@@ -1689,6 +1692,7 @@ extra = [
     { name = "spatialdata-plot" },
     { name = "squidpy" },
     { name = "submitit" },
+    { name = "supervenn" },
     { name = "textalloc" },
     { name = "tqdm" },
 ]
@@ -1707,6 +1711,7 @@ notebook = [
     { name = "joypy" },
     { name = "nbconvert" },
     { name = "spatialdata-plot" },
+    { name = "supervenn" },
     { name = "textalloc" },
     { name = "tqdm" },
 ]
@@ -1731,7 +1736,7 @@ requires-dist = [
     { name = "asv", marker = "extra == 'benchmark'" },
     { name = "basicpy", marker = "extra == 'basic'", specifier = ">=1.0.0" },
     { name = "bokeh", marker = "extra == 'notebook'" },
-    { name = "cellpose", marker = "extra == 'cellpose'", specifier = ">=2.2.3" },
+    { name = "cellpose", marker = "extra == 'cellpose'", specifier = "<4.0.0" },
     { name = "crick" },
     { name = "dask", specifier = ">=2024.4.1,<=2024.11.2" },
     { name = "datasets", specifier = ">=2.16.0" },
@@ -1751,6 +1756,7 @@ requires-dist = [
     { name = "jax", marker = "extra == 'basic'", specifier = ">=0.4.6" },
     { name = "jaxlib", marker = "extra == 'basic'", specifier = ">=0.4.6" },
     { name = "joypy", marker = "extra == 'notebook'" },
+    { name = "lazy-loader", specifier = ">=0.4" },
     { name = "leidenalg", specifier = ">=0.9.1" },
     { name = "magicgui" },
     { name = "myst-nb", marker = "extra == 'docs'" },
@@ -1784,6 +1790,7 @@ requires-dist = [
     { name = "sphinxcontrib-bibtex", marker = "extra == 'docs'", specifier = ">=1.0.0" },
     { name = "squidpy", marker = "extra == 'extra'" },
     { name = "submitit", marker = "extra == 'cli'", specifier = ">=1.4.5" },
+    { name = "supervenn", marker = "extra == 'notebook'", specifier = ">=0.5.0" },
     { name = "textalloc", marker = "extra == 'notebook'" },
     { name = "tox", marker = "extra == 'test'" },
     { name = "tqdm", marker = "extra == 'notebook'" },
@@ -1793,6 +1800,7 @@ requires-dist = [
     { name = "xarray", specifier = ">=2024.10.0" },
     { name = "xarray-dataclasses", specifier = ">=1.9.1" },
 ]
+provides-extras = ["cellpose", "instanseg", "segmentation", "basic", "opencv", "clustering", "napari", "cli", "notebook", "extra", "test", "docs", "benchmark", "dev"]
 
 [[package]]
 name = "heapdict"
@@ -2769,7 +2777,7 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/8c/de/8eb6fffecd9c5f129461edcdd7e1ac944f9de15783e3d89c84ed6e0374bc/lxml-5.3.2-cp310-cp310-musllinux_1_2_ppc64le.whl", hash = "sha256:aa837e6ee9534de8d63bc4c1249e83882a7ac22bd24523f83fad68e6ffdf41ae", size = 5652903 },
     { url = "https://files.pythonhosted.org/packages/95/79/80f4102a08495c100014593680f3f0f7bd7c1333b13520aed855fc993326/lxml-5.3.2-cp310-cp310-musllinux_1_2_s390x.whl", hash = "sha256:da4c9223319400b97a2acdfb10926b807e51b69eb7eb80aad4942c0516934858", size = 5491813 },
     { url = "https://files.pythonhosted.org/packages/15/f5/9b1f7edf6565ee31e4300edb1bcc61eaebe50a3cff4053c0206d8dc772f2/lxml-5.3.2-cp310-cp310-musllinux_1_2_x86_64.whl", hash = "sha256:dc0e9bdb3aa4d1de703a437576007d366b54f52c9897cae1a3716bb44fc1fc85", size = 5227837 },
-    { url = "https://files.pythonhosted.org/packages/5c/17/c31d94364c02e3492215658917f5590c00edce8074aeb06d05b7771465d9/lxml-5.3.2-cp310-cp310-win32.whl", hash = "sha256:5f94909a1022c8ea12711db7e08752ca7cf83e5b57a87b59e8a583c5f35016ad", size = 3477533 },
+    { url = "https://files.pythonhosted.org/packages/dd/53/a187c4ccfcd5fbfca01e6c96da39499d8b801ab5dcf57717db95d7a968a8/lxml-5.3.2-cp310-cp310-win32.win32.whl", hash = "sha256:dd755a0a78dd0b2c43f972e7b51a43be518ebc130c9f1a7c4480cf08b4385486", size = 3477533 },
     { url = "https://files.pythonhosted.org/packages/f2/2c/397c5a9d76a7a0faf9e5b13143ae1a7e223e71d2197a45da71c21aacb3d4/lxml-5.3.2-cp310-cp310-win_amd64.whl", hash = "sha256:d64ea1686474074b38da13ae218d9fde0d1dc6525266976808f41ac98d9d7980", size = 3805160 },
     { url = "https://files.pythonhosted.org/packages/84/b8/2b727f5a90902f7cc5548349f563b60911ca05f3b92e35dfa751349f265f/lxml-5.3.2-cp311-cp311-macosx_10_9_universal2.whl", hash = "sha256:9d61a7d0d208ace43986a92b111e035881c4ed45b1f5b7a270070acae8b0bfb4", size = 8163457 },
     { url = "https://files.pythonhosted.org/packages/91/84/23135b2dc72b3440d68c8f39ace2bb00fe78e3a2255f7c74f7e76f22498e/lxml-5.3.2-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:856dfd7eda0b75c29ac80a31a6411ca12209183e866c33faf46e77ace3ce8a79", size = 4433445 },
@@ -6094,6 +6102,20 @@ wheels = [
 [package.optional-dependencies]
 iconify = [
     { name = "pyconify" },
+]
+
+[[package]]
+name = "supervenn"
+version = "0.5.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "matplotlib" },
+    { name = "numpy" },
+    { name = "pandas" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/07/5c/867f62a3660315080e246fef213259a6fa423b2e375360330510a66534cb/supervenn-0.5.0.tar.gz", hash = "sha256:a93949055f8a45214ad2a7ccd1e687a1c4c8927be6facc159c9df9d9a285581d", size = 22390 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6d/d1/e894860ba6fb4541f96dca010039d079267a4ab39a00daff250d653ef8d0/supervenn-0.5.0-py3-none-any.whl", hash = "sha256:255f9cc23cab1bfd4b61849734bbd4db07562b83de2a6cf5f1f1d3f3ac905826", size = 17458 },
 ]
 
 [[package]]

@@ -45,6 +45,7 @@ dependencies = [
     "universal_pathlib",
     "datasets>=2.16.0",
     "crick",
+    "lazy-loader>=0.4",
     # spatialdata_io depends on specific version of spatialdata: ImportError: cannot import name 'rasterize_bins_link_table_to_labels' from 'spatialdata' at readers/visium_hd.py", line 21
     "spatialdata_io>=0.1.6",
     "flowsom",
@@ -56,7 +57,7 @@ dependencies = [
 [project.optional-dependencies]
 # additional models
 cellpose = [
-    "cellpose>=2.2.3",
+    "cellpose<4.0.0",
 ]
 instanseg = [
     "instanseg-torch>=0.0.8",
