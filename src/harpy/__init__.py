@@ -22,21 +22,23 @@ import dask  # noqa: E402
 
 dask.config.set({"dataframe.query-planning": False})
 
-from harpy import (
-    datasets,
-    io,
-    utils,
-)
+# import submodules in specific order to avoid circular imports
+# use aliases from more convenient names
+# isort: off
+from harpy import utils  # noqa: E402
+from harpy import io  # noqa: E402
+from harpy import datasets  # noqa: E402
 from harpy import image as im  # noqa: E402
 from harpy import plot as pl  # noqa: E402
 from harpy import points as pt  # noqa: E402
 from harpy import shape as sh  # noqa: E402
 from harpy import table as tb  # noqa: E402
+# isort: on
 
 __all__ = [
-    "datasets",
-    "io",
     "utils",
+    "io",
+    "datasets",
     "im",
     "pl",
     "pt",
