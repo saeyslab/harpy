@@ -9,20 +9,19 @@ from .segmentation._merge_masks import (
     merge_labels_layers_nuclei,
 )
 from .segmentation._segmentation import segment, segment_points
-from .segmentation.segmentation_models import cellpose_callable
-from .segmentation.segmentation_models import instanseg_callable
+from .segmentation.segmentation_models import cellpose_callable, instanseg_callable
 
 __all__ = [
-    'add_grid_labels_layer',
-    'align_labels_layers',
-    'expand_labels_layer',
-    'filter_labels_layer',
-    'cellpose_callable',
-    'instanseg_callable',
-    'map_labels',
-    'mask_to_original',
-    'merge_labels_layers',
-    'merge_labels_layers_nuclei',
-    'segment',
-    'segment_points',
+    "add_grid_labels_layer",
+    "align_labels_layers",
+    "expand_labels_layer",
+    "filter_labels_layer",
+    "cellpose_callable",
+    "instanseg_callable",
+    "map_labels",
+    "mask_to_original",
+    "merge_labels_layers",
+    "merge_labels_layers_nuclei",
+    "segment",
+    "segment_points",
 ]

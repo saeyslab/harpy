@@ -1,5 +1,3 @@
-from harpy.utils.pylogger import get_pylogger
-
 # from ._allocation import allocate, bin_counts
 # from ._allocation_intensity import allocate_intensity
 # from ._annotation import cluster_cleanliness, score_genes, score_genes_iter
@@ -13,8 +11,9 @@ from harpy.utils.pylogger import get_pylogger
 # from .cell_clustering._weighted_channel_expression import weighted_channel_expression
 # from .pixel_clustering._cluster_intensity import cluster_intensity
 # from .pixel_clustering._neighbors import spatial_pixel_neighbors
-
 import lazy_loader as lazy
+
+from harpy.utils.pylogger import get_pylogger
 
 __getattr__, __dir__, __all__ = lazy.attach_stub(__name__, __file__)
 
