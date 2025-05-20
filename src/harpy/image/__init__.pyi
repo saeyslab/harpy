@@ -34,7 +34,6 @@ __all__ = [
     "filter_labels_layer",
     "flowsom",
     "gaussian_filtering",
-    "grid_labels_layer",
     "map_image",
     "map_labels",
     "mask_to_original",
