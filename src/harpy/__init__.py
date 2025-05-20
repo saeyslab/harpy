@@ -18,12 +18,11 @@ if isinstance(loglevel, str) and loglevel.upper() != "DEBUG":
     warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 # avoid newer dataframe backends, see https://github.com/dask/dask/issues/11146
-import dask
+import dask  # noqa: E402
 
 dask.config.set({"dataframe.query-planning": False})
 
-
-from harpy import datasets, io, utils
+from harpy import datasets, io, utils  # noqa: E402
 from harpy import image as im  # noqa: E402
 from harpy import plot as pl  # noqa: E402
 from harpy import points as pt  # noqa: E402
