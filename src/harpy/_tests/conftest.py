@@ -1,6 +1,5 @@
 import os
 
-import dask
 import pyrootutils
 import pytest
 from hydra import compose, initialize
@@ -15,10 +14,10 @@ from harpy.datasets.pixie_example import pixie_example
 from harpy.datasets.proteomics import mibi_example
 from harpy.datasets.registry import get_registry
 from harpy.datasets.transcriptomics import (
-    resolve_example, resolve_example_multiple_coordinate_systems,
-    visium_hd_example_custom_binning)
-
-dask.config.set(scheduler="processes")
+    resolve_example,
+    resolve_example_multiple_coordinate_systems,
+    visium_hd_example_custom_binning,
+)
 
 
 @pytest.fixture(scope="function")
