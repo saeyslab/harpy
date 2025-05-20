@@ -10,7 +10,7 @@ __version__ = importlib.metadata.version("harpy-analysis")
 os.environ["USE_PYGEOS"] = "0"
 
 loglevel = os.environ.get("LOGLEVEL")
-if isinstance(loglevel, str) and loglevel.upper() != "DEBUG":
+if loglevel is None or loglevel.upper() != "DEBUG":
     # silence developer warnings if not in debug mode
     import warnings
 
@@ -22,7 +22,11 @@ import dask  # noqa: E402
 
 dask.config.set({"dataframe.query-planning": False})
 
-from harpy import datasets, io, utils  # noqa: E402
+from harpy import (
+    datasets,
+    io,
+    utils,
+)
 from harpy import image as im  # noqa: E402
 from harpy import plot as pl  # noqa: E402
 from harpy import points as pt  # noqa: E402
