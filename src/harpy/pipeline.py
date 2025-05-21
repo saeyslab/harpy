@@ -233,7 +233,7 @@ class HarpyPipeline:
         elif depth is None:
             log.info(
                 f"Depth not provided for segmentation, "
-                f"setting depth equal to 2 times the estimated size of the nucleus/cell: 2*{ self.cfg.segmentation.diameter}"
+                f"setting depth equal to 2 times the estimated size of the nucleus/cell: 2*{self.cfg.segmentation.diameter}"
             )
             depth = 2 * self.cfg.segmentation.diameter
 
@@ -256,7 +256,7 @@ class HarpyPipeline:
             flow_threshold=self.cfg.segmentation.flow_threshold,
             diameter=self.cfg.segmentation.diameter,
             cellprob_threshold=self.cfg.segmentation.cellprob_threshold,
-            model_type=self.cfg.segmentation.model_type,
+            pretrained_model=self.cfg.segmentation.model_type,
             channels=list(self.cfg.segmentation.channels)
             if isinstance(self.cfg.segmentation.channels, ListConfig)
             else self.cfg.segmentation.channels,
