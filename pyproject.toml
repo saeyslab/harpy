@@ -58,7 +58,7 @@ dependencies = [
 [project.optional-dependencies]
 # additional models
 cellpose = [
-    "cellpose<4.0.0",
+    "cellpose>=2.2.3",
 ]
 instanseg = [
     "instanseg-torch>=0.0.8",
