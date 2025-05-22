@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from numpy.typing import NDArray
+from packaging import version
 
 from harpy.utils.pylogger import get_pylogger
 
@@ -21,6 +22,7 @@ except ImportError:
     CUDA = False
 
 try:
+    import cellpose
     from cellpose import models
 
     CELLPOSE_AVAILABLE = True
@@ -33,18 +35,22 @@ except ImportError:
 
 def cellpose_callable(
     img: NDArray,
-    min_size: int = 80,
-    cellprob_threshold: int = 0,
-    flow_threshold: float = 0.6,
-    diameter: int = 55,
-    model_type: str = "nuclei",  # ignored if pretrained model is specified.
-    pretrained_model: models.CellposeModel | str | Path | None = None,
+    batch_size: int = 8,
     channels: list[int] | None = None,
-    device: str = "cuda" if CUDA else "cpu",
-    z_axis: int = 0,
-    channel_axis: int = 3,
+    normalize: bool = True,
+    invert: bool = False,
+    diameter: int = 55,
+    flow_threshold: float = 0.6,
+    cellprob_threshold: float = 0.0,
     do_3D: bool = False,
     anisotropy: float = 2,
+    flow3D_smooth: int = 0,
+    stitch_threshold: float = 0,
+    min_size: int = 80,
+    max_size_fraction: float = 0.4,
+    niter: int | None = None,
+    pretrained_model: str | Path = "nuclei",
+    device: str = "cuda" if CUDA else "cpu",
 ) -> NDArray:
     """
     Perform cell segmentation using the Cellpose model.
@@ -55,39 +61,50 @@ def cellpose_callable(
     ----------
     img
         The input image as a `numpy` array. Dimensions should follow the format (z,y,x,c).
-    min_size
-        The minimum size (in pixels) of segmented objects. Objects smaller than this will be excluded.
-    cellprob_threshold
-         all pixels with value above threshold kept for masks, decrease to find more and larger masks. Defaults to 0.0.
-    flow_threshold
-         flow error threshold (all cells with errors below threshold are kept) (not used for 3D). Defaults to 0.4.
-    diameter : int, optional
-        The estimated diameter of cells (in pixels).
-    model_type : str, optional
-        The type of model to use for segmentation. Options are "nuclei", "cyto", etc.
-        This is ignored if `pretrained_model` is not `None`.
-    pretrained_model
-        A pretrained Cellpose model to use for segmentation. This can either be a Cellpose model object, or a file path to a saved model. Default is None.
-        We recommend passing a Cellpose model object. Otherwise a Cellpose model will be loaded for each call of `cellpose_callable` during distributed processing.
+    batch_size
+        Number of 256x256 (cellpose>=4.0) or 224x224 (cellpose<4.0) patches to run simultaneously.
+        (can make smaller or bigger depending on GPU/CPU/MPS memory usage). Defaults to 8.
     channels
         List of channels.
         First element of list is the channel to segment.
         Second element of list is the optional nuclear channel (0=none, 1=red, 2=green, 3=blue).
         For instance, to segment grayscale images, input [0,0]. To segment images with cells
         in green and nuclei in blue, input [2,3].
-    device
-        The device to run the model on. Can be "cpu", "cuda", "mps", or another supported device.
-        Default is "cuda" if available, otherwise "cpu".
-    z_axis
-        The axis representing the z-dimension in the input image. Default is 0.
-        Ignored if `do_3D` is `False`.
-    channel_axis
-        The axis representing the channel dimension in the input image.
+        `channels` is deprecated in v4.0.1+. If data contain more than 3 channels, only the first 3 channels will be used.
+    normalize
+        If `True`, normalize data so 0.0=1st percentile and 1.0=99th percentile of image intensities in each channel.
+        See documentation of `cellpose.models.CellposeModel.eval` for full description.
+    invert
+        Invert image pixel intensity before running network. Defaults to `False`.
+    diameter
+        The estimated diameter of cells (in pixels).
+    flow_threshold
+        Flow error threshold (all cells with errors below threshold are kept) (not used for 3D). Defaults to 0.4.
+    cellprob_threshold
+        All pixels with value above threshold kept for masks, decrease to find more and larger masks. Defaults to 0.0.
     do_3D
         Whether to perform 3D segmentation on the input image.
     anisotropy
         The anisotropy value (ratio of `z`-axis voxel size to `xy` voxel size) for 3D segmentation.
+        (E.g. set to 2.0 if Z is sampled half as dense as X or Y).
         Ignored if `do_3D` is `False`.
+    flow3D_smooth
+        If `do_3D` and `flow3D_smooth>0`, smooth flows with gaussian filter of this stddev.
+    stitch_threshold
+        If `stitch_threshold>0.0` and not `do_3D`, masks are stitched in 3D to return volume segmentation. Defaults to 0.0.
+    min_size
+        The minimum size (in pixels) of segmented objects. Objects smaller than this will be excluded.
+    max_size_fraction
+        Masks larger than `max_size_fraction` of total image size are removed. Default is 0.4.
+    niter
+        number of iterations for dynamics computation. if `None`, it is set proportional to the diameter. Defaults to `None`.
+    pretrained_model
+        A pretrained Cellpose model to use for segmentation. This can either be a model type, e.g. `"nuclei"`, `"cyto"`, `"cyto3"` for Cellpose<4.0 or `"cpsam"` for Cellpose >=4.0;
+        or a file path to a saved model on disk. Default is `"nuclei"`.
+    device
+        The device to run the model on. Can be `"cpu"`, `"cuda"`, `"mps"`, or another supported device.
+        Default is `"cuda"` if available, otherwise `"cpu"`.
+
 
     Returns
     -------
@@ -104,35 +121,56 @@ def cellpose_callable(
 
     if not CELLPOSE_AVAILABLE:
         raise RuntimeError("Module 'cellpose' is not available. Please install it to use this function.")
+
+    cellpose_version = version.parse(cellpose.version)
+
     gpu = torch.cuda.is_available() or torch.backends.mps.is_available()
-    if pretrained_model is not None:
-        if isinstance(pretrained_model, models.CellposeModel):
-            model = pretrained_model
-        else:
-            model = models.CellposeModel(gpu=gpu, pretrained_model=pretrained_model, device=torch.device(device))
-    elif model_type is not None:
-        model = models.Cellpose(gpu=gpu, model_type=model_type, device=torch.device(device))
+
+    model = models.CellposeModel(gpu=gpu, pretrained_model=pretrained_model, device=torch.device(device))
+
+    do_3D_segmentation = True
+    if do_3D is False and stitch_threshold == 0:
+        assert (
+            img.shape[0] == 1
+        ), f"If 'do_3D' is set to 'False' and 'stitch_threshold' equals 0, we assume z-dimension is '1', but z dimension of provided image is '{img.shape[0]}'."
+        do_3D_segmentation = False
+        img = img.squeeze(0)
+
+    common_args = {
+        "x": img,
+        "batch_size": batch_size,
+        "channels": channels,
+        "channel_axis": 3 if do_3D_segmentation else 2,
+        "z_axis": 0 if do_3D_segmentation else None,
+        "normalize": normalize,
+        "invert": invert,
+        "rescale": None,  # not supported in harpy.
+        "diameter": diameter,
+        "flow_threshold": flow_threshold,
+        "cellprob_threshold": cellprob_threshold,
+        "do_3D": do_3D,
+        "anisotropy": anisotropy,
+        "stitch_threshold": stitch_threshold,
+        "min_size": min_size,
+        "max_size_fraction": max_size_fraction,
+        "niter": niter,
+        "augment": False,
+        "tile_overlap": 0.1,
+        "compute_masks": True,
+    }
+
+    # Add version-specific arguments
+    if cellpose_version >= version.parse("3.1.1.1"):
+        common_args["flow3D_smooth"] = flow3D_smooth
     else:
-        raise ValueError(
-            "Please provide either 'model_type' or 'pretrained_model (i.e. a path to a pretrained model or a loaded Cellpose model of type 'models.CellposeModel')'."
-        )
-    results = model.eval(
-        img,
-        diameter=diameter,
-        channels=channels,
-        min_size=min_size,
-        flow_threshold=flow_threshold,
-        cellprob_threshold=cellprob_threshold,
-        z_axis=z_axis,
-        channel_axis=channel_axis,
-        do_3D=do_3D,
-        anisotropy=anisotropy,
-    )
+        common_args["dP_smooth"] = flow3D_smooth
+
+    results = model.eval(**common_args)
 
     masks = results[0]
 
     # make sure we always return z,y,x for labels.
-    if not do_3D:
+    if not do_3D_segmentation:
         masks = masks[None, ...]
 
     # add trivial channel dimension, so we return z,y,x,c

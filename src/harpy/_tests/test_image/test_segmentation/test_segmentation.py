@@ -33,7 +33,7 @@ def test_segment(sdata_multi_c_no_backed: SpatialData):
             diameter=20,
             cellprob_threshold=-4,
             flow_threshold=0.9,
-            model_type="nuclei",
+            pretrained_model="nuclei",
             do_3D=False,
             channels=[1, 0],
         )
@@ -61,9 +61,10 @@ def test_segment_3D(sdata_multi_c_no_backed: SpatialData):
             diameter=20,
             cellprob_threshold=-4,
             flow_threshold=0.9,
-            model_type="nuclei",
+            pretrained_model="nuclei",
             channels=[1, 0],
-            do_3D=True,
+            do_3D=False,  # pseudo 3D
+            stitch_threshold=0.5,  # pseudo 3D, we stitch in 3D
             anisotropy=1,
         )
 

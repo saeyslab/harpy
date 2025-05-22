@@ -277,7 +277,7 @@ class Preprocess(ProcessTable):
             for i, _labels_layer in enumerate(self.labels_layer):
                 log.info(f"Calculating cell size from provided labels_layer '{_labels_layer}'")
                 se = _get_spatial_element(self.sdata, layer=_labels_layer)
-                _shapesize = _get_mask_area(se.data)
+                _shapesize = _get_mask_area(se.data if se.data.ndim == 3 else se.data[None, ...])
                 _shapesize[_REGION_KEY] = _labels_layer
                 if i == 0:
                     shapesize = _shapesize

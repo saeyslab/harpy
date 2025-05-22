@@ -682,6 +682,7 @@ class RasterAggregator:
 
 
 def _get_mask_area(mask: da.Array, index: NDArray | None = None) -> pd.DataFrame:
+    assert mask.ndim == 3, "Currently only 3D masks are supported ('z','y','x')."
     if index is None:
         index = da.unique(mask).compute()
     _result = _calculate_area(mask, index=index)
@@ -689,6 +690,7 @@ def _get_mask_area(mask: da.Array, index: NDArray | None = None) -> pd.DataFrame
 
 
 def _calculate_area(mask: da.Array, index: NDArray | None = None) -> NDArray:
+    assert mask.ndim == 3, "Currently only 3D masks are supported ('z','y','x')."
     if index is None:
         index = da.unique(mask).compute()
 
