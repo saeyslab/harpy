@@ -160,7 +160,7 @@ def cellpose_callable(
     }
 
     # Add version-specific arguments
-    if cellpose_version >= version.parse("4.0"):
+    if cellpose_version >= version.parse("3.1.1.1"):
         common_args["flow3D_smooth"] = flow3D_smooth
     else:
         common_args["dP_smooth"] = flow3D_smooth
