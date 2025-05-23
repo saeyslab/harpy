@@ -10,7 +10,6 @@ from pathlib import Path
 
 import geopandas as gpd
 import numpy as np
-import rasterio
 import shapely
 from geopandas import GeoDataFrame
 from numpy.typing import NDArray
@@ -25,20 +24,62 @@ from harpy.utils.pylogger import get_pylogger
 log = get_pylogger(__name__)
 
 
-def _baysor(
+def baysor_callable(
     img: NDArray,
     df: PandasDataFrame,
     name_x: str,
     name_y: str,
     name_gene: str,
     config_path: str | Path,  # path to config.toml file of baysor
-    output_dir: str | Path,
-    threads: int,
+    tmp_dir: str | Path | None = None,
+    threads: int = 1,
     diameter: int = 40,  # this is scale in baysor, should be approx equal to the expected cell ,
     min_size: int | None = None,
     use_prior_segmentation: bool = True,
     prior_confidence: int = 0.2,  # expected quality of the prior (i.e. masks). 0.0 will make algorithm ignore the prior, while 1.0 restricts the algorithm from contradicting the prior.
 ) -> NDArray:
+    """
+    Perform cell segmentation using the Baysor algorithm.
+
+    Designed to be compatible with `harpy.im.segment_points` for distributed segmentation workflows.
+
+    Parameters
+    ----------
+    img
+        The input image as a `numpy` array. Dimensions should follow the format (z, y, x, c).
+    df
+        A `pandas.DataFrame` containing transcripts. Should include columns for coordinates and gene names.
+    name_x
+        The name of the column in `df` that contains the X-coordinate of each molecule.
+    name_y
+        The name of the column in `df` that contains the Y-coordinate of each molecule.
+    name_gene
+        The name of the column in `df` that contains gene identities (e.g. gene symbols or IDs).
+    config_path
+        Path to the `config.toml` file used to configure Baysor segmentation parameters.
+    tmp_dir
+        Optional temporary directory to store intermediate files. If `None`, a temporary directory will be created automatically.
+    threads
+        Number of threads to use during Baysor execution. Defaults to 1.
+    diameter
+        Approximate expected cell diameter (in pixels). Sets the "scale" parameter in Baysor, which influences segmentation granularity.
+    min_size
+        Minimum allowed cell size (in pixels). Cells smaller than this will be filtered out. If `None`, no filtering is applied.
+    use_prior_segmentation
+        Whether to incorporate a prior segmentation mask when running Baysor. If `True`, segmentation results can be influenced by prior knowledge.
+    prior_confidence
+        Degree of confidence in the prior segmentation, ranging from 0.0 (ignore prior entirely) to 1.0 (strictly adhere to prior). Defaults to 0.2.
+
+    Returns
+    -------
+    np.ndarray
+        A labeled image (`numpy` array) where each pixel contains an integer representing the segmented cell ID.
+    """
+    from rasterio.features import rasterize
+
+    if tmp_dir is None:
+        tmp_dir = tempfile.gettempdir()
+
     # img is (z,y,x,c), and returned masks are also (z,y,x,c)
     log.info(f"Prior segmentation: {use_prior_segmentation}")
     log.info(f"Prior confidence: {prior_confidence}")
@@ -58,7 +99,9 @@ def _baysor(
     # currently only support 2D segmentation with baysor.
     img = img.squeeze(0)
 
-    temp_dir = tempfile.mkdtemp(dir=output_dir)
+    temp_dir = tempfile.mkdtemp(dir=tmp_dir)
+    log.info(f"Writing intermediate results to {temp_dir}.")
+
     # Define paths for the stdout and stderr files
     stdout_path = os.path.join(temp_dir, "stdout.log")
     stderr_path = os.path.join(temp_dir, "stderr.log")
@@ -135,7 +178,7 @@ def _baysor(
     shutil.rmtree(temp_dir)
 
     # convert polygons to masks
-    masks = rasterio.features.rasterize(
+    masks = rasterize(
         zip(
             polygons.geometry,
             polygons.index.values.astype(float),

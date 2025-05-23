@@ -39,7 +39,7 @@ from harpy.image.segmentation._utils import (
     _rechunk_overlap,
     _substract_depth_from_chunks_size,
 )
-from harpy.image.segmentation.segmentation_models._baysor import _baysor as _model_points
+from harpy.image.segmentation.segmentation_models._baysor import baysor_callable as _model_points
 from harpy.image.segmentation.segmentation_models._cellpose import cellpose_callable as _model
 from harpy.points._points import add_points_layer
 from harpy.shape._shape import add_shapes_layer
