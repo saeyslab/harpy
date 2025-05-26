@@ -130,9 +130,9 @@ def cellpose_callable(
 
     do_3D_segmentation = True
     if do_3D is False and stitch_threshold == 0:
-        assert (
-            img.shape[0] == 1
-        ), f"If 'do_3D' is set to 'False' and 'stitch_threshold' equals 0, we assume z-dimension is '1', but z dimension of provided image is '{img.shape[0]}'."
+        assert img.shape[0] == 1, (
+            f"If 'do_3D' is set to 'False' and 'stitch_threshold' equals 0, we assume z-dimension is '1', but z dimension of provided image is '{img.shape[0]}'."
+        )
         do_3D_segmentation = False
         img = img.squeeze(0)
 
