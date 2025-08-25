@@ -123,7 +123,7 @@ def transcript_density(
                 f"The crd was updated from '{crd}' to '{_crd}'."
             )
         crd = _crd
-    ddf = ddf.query(f"{crd[0]} <= {name_x} < {crd[1] } and {crd[2]} <= {name_y} < {crd[3] }")
+    ddf = ddf.query(f"{crd[0]} <= {name_x} < {crd[1]} and {crd[2]} <= {name_y} < {crd[3]}")
 
     if z_index is not None:
         ddf = ddf.query(f"{name_z} == {z_index}")
