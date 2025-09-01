@@ -78,9 +78,9 @@ class ProcessTable:
             ), f"'{_INSTANCE_KEY}' is not unique for '{_REGION_KEY}' == '{_layer}'. Please make sure these are unique."
 
     def _validate(self):
-        assert (
-            self.sdata.tables[self.table_layer].obs[_INSTANCE_KEY].is_unique
-        ), f"'{_INSTANCE_KEY}' is not unique. Please make sure these are unique, or specify a 'labels_layer' via '{_REGION_KEY}'."
+        assert self.sdata.tables[self.table_layer].obs[_INSTANCE_KEY].is_unique, (
+            f"'{_INSTANCE_KEY}' is not unique. Please make sure these are unique, or specify a 'labels_layer' via '{_REGION_KEY}'."
+        )
 
     def _validated_table_layer(self):
         """Validate if the specified table layer exists in the SpatialData object."""
