@@ -291,9 +291,9 @@ class Preprocess(ProcessTable):
         adata.layers[_RAW_COUNTS_KEY] = adata.X.copy()
 
         if size_norm:
-            adata.X = (adata.X.T * 100 / adata.obs[_CELLSIZE_KEY].values).T
+            X_size_norm = (adata.X.T * 100 / adata.obs[_CELLSIZE_KEY].values).T
             if issparse(adata.X):
-                adata.X = adata.X.tocsr()
+                adata.X = X_size_norm.tocsr()
         else:
             sc.pp.normalize_total(adata, layer=None, layers=None, copy=False, inplace=True, **norm_kwargs)
 
