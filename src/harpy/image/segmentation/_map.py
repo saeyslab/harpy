@@ -346,6 +346,7 @@ def _combine_dask_arrays(
             raise ValueError(f"iou_depth {iou_depth} > depth {depth}")
 
         trim_depth = {k: depth[k] - iou_depth[k] for k in depth.keys()}
+
         x_labels = da.overlap.trim_internal(x_labels, trim_depth, boundary=boundary)
         x_labels = _link_labels(
             x_labels,

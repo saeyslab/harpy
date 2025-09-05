@@ -17,6 +17,8 @@ from harpy.points._points import add_points_layer
 
 @pytest.mark.skipif(not importlib.util.find_spec("cellpose"), reason="requires the cellpose library")
 def test_segment(sdata_multi_c_no_backed: SpatialData):
+    import torch
+
     with dask.config.set(scheduler="processes"):
         sdata_multi_c_no_backed = segment(
             sdata_multi_c_no_backed,
@@ -30,12 +32,13 @@ def test_segment(sdata_multi_c_no_backed: SpatialData):
             depth=30,
             crd=[10, 110, 0, 100],
             scale_factors=[2, 2, 2, 2],
-            diameter=20,
+            diameter=50,
             cellprob_threshold=-4,
             flow_threshold=0.9,
             pretrained_model="nuclei",
             do_3D=False,
             channels=[1, 0],
+            device="cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu",
         )
 
         assert "masks_cellpose" in sdata_multi_c_no_backed.labels
@@ -44,7 +47,42 @@ def test_segment(sdata_multi_c_no_backed: SpatialData):
 
 
 @pytest.mark.skipif(not importlib.util.find_spec("cellpose"), reason="requires the cellpose library")
+def test_segment_pseudo_3D(sdata_multi_c_no_backed: SpatialData):
+    import torch
+
+    with dask.config.set(scheduler="processes"):
+        sdata_multi_c_no_backed = segment(
+            sdata_multi_c_no_backed,
+            img_layer="combine_z",
+            model=cellpose_callable,
+            output_labels_layer="masks_cellpose_3D",
+            output_shapes_layer="masks_cellpose_3D_boundaries",
+            trim=False,
+            chunks=(50, 50),
+            overwrite=True,
+            depth=(20, 20),
+            crd=[50, 80, 10, 70],
+            scale_factors=[2],
+            diameter=None,  # specifying diameter is bugged in cellpose>=4.0.6 when running pseudo 3D segmentation.
+            cellprob_threshold=-4,
+            flow_threshold=0.9,
+            pretrained_model="nuclei",
+            channels=[1, 0],
+            do_3D=False,  # pseudo 3D
+            stitch_threshold=0.5,  # pseudo 3D, we stitch in 3D
+            anisotropy=1,
+            device="cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu",
+        )
+
+        assert "masks_cellpose_3D" in sdata_multi_c_no_backed.labels
+        assert isinstance(sdata_multi_c_no_backed, SpatialData)
+
+
+@pytest.mark.skip(reason="Skipping: 3D segmentation test is time-consuming.")
+@pytest.mark.skipif(not importlib.util.find_spec("cellpose"), reason="requires the cellpose library")
 def test_segment_3D(sdata_multi_c_no_backed: SpatialData):
+    import torch
+
     with dask.config.set(scheduler="processes"):
         sdata_multi_c_no_backed = segment(
             sdata_multi_c_no_backed,
@@ -63,9 +101,10 @@ def test_segment_3D(sdata_multi_c_no_backed: SpatialData):
             flow_threshold=0.9,
             pretrained_model="nuclei",
             channels=[1, 0],
-            do_3D=False,  # pseudo 3D
-            stitch_threshold=0.5,  # pseudo 3D, we stitch in 3D
+            do_3D=True,  #  full 3D
+            stitch_threshold=0.0,  # we segment in full 3D
             anisotropy=1,
+            device="cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu",
         )
 
         assert "masks_cellpose_3D" in sdata_multi_c_no_backed.labels

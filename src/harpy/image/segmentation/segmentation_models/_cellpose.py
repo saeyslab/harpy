@@ -136,8 +136,20 @@ def cellpose_callable(
         do_3D_segmentation = False
         img = img.squeeze(0)
 
+    # add some checks
+    if do_3D is False and stitch_threshold != 0:
+        if diameter is not None:
+            raise ValueError(
+                "Specifying the diameter currently causes a bug in pseudo-3D segmentation in Cellpose (do_3D == False and stitch_threshold != 0)."
+            )
+
+    if do_3D is True and stitch_threshold != 0:
+        raise ValueError(
+            "Please either set 'do_3D' to 'True' (3D segmentation) or 'stitch_threshold!=0' (psuedo 3D segmentation), not both."
+        )
+
     common_args = {
-        "x": img,
+        "x": [img],
         "batch_size": batch_size,
         "channels": channels,
         "channel_axis": 3 if do_3D_segmentation else 2,
@@ -167,7 +179,7 @@ def cellpose_callable(
 
     results = model.eval(**common_args)
 
-    masks = results[0]
+    masks = results[0][0]
 
     # make sure we always return z,y,x for labels.
     if not do_3D_segmentation:

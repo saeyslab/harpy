@@ -6,6 +6,7 @@ from copy import deepcopy
 import dask
 import dask.array as da
 import numpy as np
+import scipy
 from dask.array import Array
 from dask.array.overlap import ensure_minimum_chunksize
 from dask_image.ndmeasure._utils import _label
@@ -455,7 +456,14 @@ def get_slices_and_axes(chunks, shape, depth):
 
 
 def _label_adjacency_graph(labels, nlabels, depth, iou_threshold):
-    all_mappings = [da.empty((2, 0), dtype=np.int32, chunks=1)]
+    all_mappings = [da.empty((2, 0), dtype=labels.dtype, chunks=1)]
+
+    @dask.delayed
+    def _to_csr_matrix(i, j, n):
+        """Using i and j as coo-format coordinates, return csr matrix."""
+        v = np.ones_like(i)
+        mat = scipy.sparse.coo_matrix((v, (i, j)), shape=(n, n), dtype=labels.dtype)
+        return mat.tocsr()
 
     slices_and_axes = get_slices_and_axes(labels.chunks, labels.shape, depth)
     for face_slice, axis in slices_and_axes:
@@ -464,6 +472,6 @@ def _label_adjacency_graph(labels, nlabels, depth, iou_threshold):
         all_mappings.append(mapped)
 
     i, j = da.concatenate(all_mappings, axis=1)
-
-    result = _label._to_csr_matrix(i, j, nlabels + 1)
+    i, j = i.astype(labels.dtype), j.astype(labels.dtype)
+    result = _to_csr_matrix(i, j, (nlabels + da.ones(1)).astype(nlabels.dtype)[0])
     return result
