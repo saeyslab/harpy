@@ -67,20 +67,27 @@ def test_preprocess_proteomics_overwrite(sdata_multi_c_no_backed):
 
 
 @pytest.mark.parametrize("highly_variable_genes", [False, True])
-def test_preprocess_transcriptomics(sdata_transcripts_no_backed, highly_variable_genes):
+@pytest.mark.parametrize("size_norm", [True, False])
+def test_preprocess_transcriptomics(sdata_transcripts_no_backed, highly_variable_genes, size_norm):
     sdata_transcripts_no_backed = preprocess_transcriptomics(
         sdata_transcripts_no_backed,
         labels_layer="segmentation_mask",
         table_layer="table_transcriptomics",
         output_layer="table_transcriptomics",
         highly_variable_genes=highly_variable_genes,
+        size_norm=size_norm,
         overwrite=True,
     )
     adata = sdata_transcripts_no_backed.tables["table_transcriptomics"]
     if highly_variable_genes:
-        assert adata.shape == (616, 17)
+        if size_norm:
+            assert adata.shape == (616, 17)
+            assert adata.layers["raw_counts"].shape == (616, 17)
+        else:
+            assert adata.shape == (616, 32)
+            assert adata.layers["raw_counts"].shape == (616, 32)
+
         assert adata.raw.to_adata().shape == (616, 87)
-        assert adata.layers["raw_counts"].shape == (616, 17)
     else:
         assert adata.shape == (616, 87)
         assert adata.raw.to_adata().shape == (616, 87)

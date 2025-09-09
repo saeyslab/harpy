@@ -295,7 +295,7 @@ class Preprocess(ProcessTable):
             if issparse(adata.X):
                 adata.X = X_size_norm.tocsr()
         else:
-            sc.pp.normalize_total(adata, layer=None, layers=None, copy=False, inplace=True, **norm_kwargs)
+            sc.pp.normalize_total(adata, layer=None, copy=False, inplace=True, **norm_kwargs)
 
         if log1p:
             sc.pp.log1p(adata, base=None, copy=False, layer=None, obsm=None)
