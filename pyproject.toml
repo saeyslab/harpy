@@ -43,7 +43,6 @@ dependencies = [
     "magicgui",
     "pyrootutils",
     "universal_pathlib",
-    "datasets>=2.16.0",
     "crick",
     "lazy-loader>=0.4",
     # spatialdata_io depends on specific version of spatialdata: ImportError: cannot import name 'rasterize_bins_link_table_to_labels' from 'spatialdata' at readers/visium_hd.py", line 21
