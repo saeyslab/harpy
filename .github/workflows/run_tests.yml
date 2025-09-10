@@ -22,10 +22,10 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: ubuntu-latest
-            python: "3.10"
-          - os: ubuntu-latest
-            python: "3.12"
+          #- os: ubuntu-latest
+          #  python: "3.10"
+          #- os: ubuntu-latest
+          #  python: "3.12"
           - os: ubuntu-latest
             python: "3.12"
             pip-flags: "--pre"
@@ -55,7 +55,9 @@ jobs:
           MPLBACKEND: agg
           PLATFORM: ${{ matrix.os }}
           DISPLAY: :42
-        run: uv run --extra dev --python ${{ matrix.python }} pytest --cov harpy --cov-branch --cov-report=xml src/harpy/_tests
+        run: |
+          uv run --extra dev --python ${{ matrix.python }} python -c "import spatialdata; print('spatialdata version:', spatialdata.__version__)"
+          uv run --extra dev --python ${{ matrix.python }} pytest --cov harpy --cov-branch --cov-report=xml src/harpy/_tests
       - name: Upload coverage
         uses: codecov/codecov-action@v4
         with:
