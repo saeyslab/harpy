@@ -46,7 +46,10 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
-          cache-dependency-glob: pyproject.toml
+          enable-cache: true
+          cache-dependency-glob: |
+            **/uv.lock
+            **/pyproject.toml
       - name: run tests using uv and pytest
         env:
           MPLBACKEND: agg
