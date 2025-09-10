@@ -51,6 +51,7 @@ def get_registry(path: str | Path | None = None) -> Pooch:
             "transcriptomics/xenium/Xenium_V1_humanLung_Cancer_FFPE/Xenium_V1_humanLung_Cancer_FFPE_he_image.ome.tif": "0348c3aeac4be3770fd3385a0cd99c3948b25b8d5e2d853add6c95e07a8baaf1",
             "transcriptomics/xenium/Xenium_V1_humanLung_Cancer_FFPE/Xenium_V1_humanLung_Cancer_FFPE_he_imagealignment.csv": "9b8e47bf81ca1aa447dc01a476ba6315cdf9ea66d7abb357d91e06ccf67735a7",
             "transcriptomics/xenium/Xenium_V1_humanLung_Cancer_FFPE/Xenium_V1_humanLung_Cancer_FFPE_outs.zip": "865c3805a959b51514555300df61328fc05055b939b9bece43522b8918314e1d",
+            "proteomics/pixie/sdata_pixie.zarr.zip": "9e36d1391cdd264b4b8b1b3d1c2c33d4ea716f8ef304520f81bce40be41ad894",
             "proteomics/mibi_tof/sdata_multi_channel.zarr.zip": "930fd2574666b90d5d6660ad8b52d47afffc9522704b9e6fef39d11c9cfff06e",
             "proteomics/macsima/sdata_multi_channel.zarr.zip": "26187fe62b75c3411f948cbcea52abd24b318992509e768c2ed2f55ddcb99f28",
             "proteomics/macsima/tonsil_all.zarr.zip": "f3444332c9decb318c6eff03e719ee35df6d7399da2a04a17dbed5833bfd9ed7",

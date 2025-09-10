@@ -29,7 +29,7 @@ class PixelClusteringSuite:
         """Set up cache."""
         tile_repeat = (1, 10, 10)  # will results in image of size tile_repeat * ( 22, 512, 512 )
 
-        sdata = hp.datasets.pixie_example(["fov0"])
+        sdata = hp.datasets.pixie_example()
 
         # create artificial large dataset
         arr = da.tile(sdata["raw_image_fov0"].data, tile_repeat)

@@ -1,6 +1,14 @@
+import os
+
 import anndata as ad
 import pandas as pd
-from spatialdata import SpatialData
+import pooch
+from spatialdata import SpatialData, read_zarr
+
+from harpy.datasets import get_registry
+from harpy.utils.pylogger import get_pylogger
+
+log = get_pylogger(__name__)
 
 
 def _get_df(path):
@@ -29,8 +37,12 @@ def _get_adata(path, label_prefix="label_whole_"):
     return adata
 
 
-def pixie_example(fovs: list | None = None, with_pixel_output=True, with_cells_output=True) -> SpatialData:
+def pixie_example_datasets(fovs: list | None = None, with_pixel_output=True, with_cells_output=True) -> SpatialData:
     """Example pixie dataset."""
+    log.warning(
+        "pixie_example_datasets() is deprecated: it relies on Hugging Face 'datasets' loading scripts, "
+        "which were removed in datasets>=4.0.0. Use 'hp.datasets.pixie_example()' or pin 'datasets<4.0.0'."
+    )
     import glob
     import os
     from pathlib import Path
@@ -125,5 +137,15 @@ def pixie_example(fovs: list | None = None, with_pixel_output=True, with_cells_o
     return sdata
 
 
+def pixie_example() -> SpatialData:
+    """Example pixie dataset, loaded from s3 bucket"""
+    # Fetch and unzip the file
+    registry = get_registry()
+    unzip_path = registry.fetch("proteomics/pixie/sdata_pixie.zarr.zip", processor=pooch.Unzip())
+    sdata = read_zarr(os.path.commonpath(unzip_path))
+    sdata.path = None
+    return sdata
+
+
 if __name__ == "__main__":
-    pixie_example([0])
+    pixie_example()
