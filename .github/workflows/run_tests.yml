@@ -56,7 +56,6 @@ jobs:
           PLATFORM: ${{ matrix.os }}
           DISPLAY: :42
         run: |
-          uv run --extra dev --python ${{ matrix.python }} python -c "import spatialdata; print('spatialdata version:', spatialdata.__version__)"
           uv run --extra dev --python ${{ matrix.python }} pytest --cov harpy --cov-branch --cov-report=xml src/harpy/_tests
       - name: Upload coverage
         uses: codecov/codecov-action@v4

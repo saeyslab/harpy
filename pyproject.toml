@@ -108,7 +108,6 @@ extra = [
 ]
 # dev dependencies
 test = [
-    "datasets",
     "opencv-python",
     "pytest",
     "pytest-cov",
