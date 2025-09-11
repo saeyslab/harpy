@@ -43,6 +43,7 @@ jobs:
         with:
           filter: blob:none
           fetch-depth: 0
+
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
@@ -50,13 +51,17 @@ jobs:
           cache-dependency-glob: |
             **/uv.lock
             **/pyproject.toml
-      - name: run tests using uv and pytest
+
+      - name: Sync env (locked, --lock makes it fail immediatelly if uv.lock out of date with pyproject.toml)
+        run: uv sync --locked --extra dev --python ${{ matrix.python }}
+
+      - name: run tests using uv and pytest (locked, no sync)
         env:
           MPLBACKEND: agg
           PLATFORM: ${{ matrix.os }}
           DISPLAY: :42
-        run: |
-          uv run --extra dev --python ${{ matrix.python }} pytest --cov harpy --cov-branch --cov-report=xml src/harpy/_tests
+        run: uv run --no-sync pytest --cov harpy --cov-branch --cov-report=xml src/harpy/_tests
+
       - name: Upload coverage
         uses: codecov/codecov-action@v4
         with:
