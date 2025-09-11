@@ -325,7 +325,7 @@ def read_transcripts(
     # Reorder
     transformed_ddf = transformed_ddf[columns]
     # Save genes key as categorical
-    transformed_ddf[_GENES_KEY] = transformed_ddf[_GENES_KEY].astype("str").astype("category")
+    transformed_ddf = transformed_ddf.categorize(columns=[_GENES_KEY])
 
     if crd is not None:
         transformed_ddf = transformed_ddf.query(f"{crd[0]} <= pixel_x < {crd[1]} and {crd[2]} <= pixel_y < {crd[3]}")
