@@ -29,6 +29,7 @@ def get_registry(path: str | Path | None = None) -> Pooch:
         path=pooch.os_cache("sparrow") if path is None else path,
         base_url=BASE_URL,
         version=__version__,
+        env="HARPY_POOCH_CACHE",
         registry={
             "transcriptomics/resolve/mouse/20272_slide1_A1-1_DAPI.tiff": "831e5e7ee30d5aa56a21ed30bafd14a45ee667eae937de27ed0caaa7fa6df6f0",
             "transcriptomics/resolve/mouse/20272_slide1_A1-2_DAPI.tiff": "7c917f517533033a1ff97a1665f83c8a34b6a8e483e013cdb40ef8e53e55dc96",
