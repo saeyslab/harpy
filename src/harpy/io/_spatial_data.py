@@ -130,7 +130,7 @@ def create_sdata(
 
             assert dask_array.shape[0] == len(c_coords), (
                 "Length of c_coords should match number of channels provided, "
-                f"while provided c_coords is '{c_coords}' with len '{len( c_coords ) }', "
+                f"while provided c_coords is '{c_coords}' with len '{len(c_coords)}', "
                 f"and number of channels read from input is '{dask_array.shape[0]}'"
             )
 
@@ -158,7 +158,7 @@ def create_sdata(
             sdata,
             arr=dask_array,
             output_layer=img_layer,
-            chunks=chunks,
+            chunks=None,  # already rechunked in previous step. Also due to possible z projection the 'chunks' dimension can mismatch 'dims' parameter
             transformations={to_coordinate_system: transformation},
             scale_factors=scale_factors,
             c_coords=c_coords,
@@ -245,7 +245,7 @@ def _load_image_to_dask(
             dims = ["y", "x"]
             dask_array = _fix_dimensions(dask_array, dims=dims)
         else:
-            raise ValueError(f"Image has shape { dask_array.shape }, while (y, x) is required.")
+            raise ValueError(f"Image has shape {dask_array.shape}, while (y, x) is required.")
     else:
         raise ValueError(f"input of type {type(input)} not supported.")
 
