@@ -8,10 +8,17 @@
 # **Harpy: single-cell spatial proteomics analysis that makes you happy** <img src="./docs/_static/img/logo.png" align ="right" alt="" width ="150"/>
 
 [![PyPI](https://img.shields.io/pypi/v/harpy-analysis.svg)](https://pypi.org/project/harpy-analysis)
+[![Downloads](https://static.pepy.tech/badge/harpy-analysis)](https://pepy.tech/project/harpy-analysis)
 [![Build Status](https://github.com//saeyslab/harpy/actions/workflows/build.yaml/badge.svg)](https://github.com//saeyslab/harpy/actions/)
 [![documentation badge](https://readthedocs.org/projects/harpy/badge/?version=latest)](https://harpy.readthedocs.io/en/latest/)
+[![Test Status](https://github.com//saeyslab/harpy/actions/workflows/run_tests.yml/badge.svg)](https://github.com//saeyslab/harpy/actions/)
+[![codecov](https://codecov.io/gh/saeyslab/harpy/branch/main/graph/badge.svg)](https://codecov.io/gh/saeyslab/harpy)
+[![License](https://img.shields.io/badge/license-Academic%20Non--commercial-blue)](./LICENSE)
+![GitHub repo size](https://img.shields.io/github/repo-size/saeyslab/harpy)
+[![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 
-Note: This package is still under very active development.
+Note: This package is still under active development.
 
 ## Installation
 
