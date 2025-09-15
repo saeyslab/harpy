@@ -43,11 +43,11 @@ python -c 'import harpy; print(harpy.__version__)' # check if the package is ins
 python -m pytest # run the tests
 ```
 
-Checkout the docs for more [installation instructions](https://github.com/saeyslab/harpy/blob/main/docs/installation.md).
+Checkout the docs for [installation instructions](https://github.com/saeyslab/harpy/blob/main/docs/installation.md) using [conda](https://github.com/conda/conda).
 
 ## Tutorials
 
-Tutorials are available [here](https://harpy.readthedocs.io/en/latest/).
+Tutorials are available [here](https://harpy.readthedocs.io/en/latest/tutorials).
 
 ## Usage
 

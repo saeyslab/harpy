@@ -9,11 +9,15 @@ git clone https://github.com/saeyslab/harpy.git
 cd harpy
 ```
 
-Create a conda virtual environment as explained [here](./installation.md) and install `Harpy`.
+Install Harpy:
 
 ```bash
-conda activate harpy
-pip install -e '.[dev]'
+uv venv --python=3.12 # set python version
+source .venv/bin/activate # activate the virtual environment
+uv pip install -e '.[dev]' 'cellpose==3.1.1.2' # use uv to pip install dependencies and pin cellpose
+python -c 'import harpy; print(harpy.__version__)' # check if the package is installed
+# make changes
+python -m pytest # run the tests
 ```
 
 This development environment is supported for:
@@ -22,14 +26,6 @@ This development environment is supported for:
 - Ubuntu
 - MacOS with an M1/M2 Pro
 - Windows 11
-
-## Testing
-
-To run unit tests, run the following from the root of the project:
-
-```bash
-pytest
-```
 
 Continuous integration will automatically run the tests on all pull requests.
 

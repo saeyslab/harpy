@@ -149,6 +149,19 @@ def test_notebooks_rasterize_vectorize(notebook):
 
 
 @pytest.mark.skip
+@pytest.mark.parametrize(
+    "notebook",
+    [
+        "Harpy_aggregate_rasters.ipynb",
+    ],
+)
+def test_notebooks_aggregate_rasters(notebook):
+    root = str(pyrootutils.setup_root(os.getcwd(), dotenv=True, pythonpath=True))
+
+    run_notebook(os.path.join(root, "docs/tutorials/advanced", notebook))
+
+
+@pytest.mark.skip
 @pytest.mark.skipif(
     not importlib.util.find_spec("cellpose") or not importlib.util.find_spec("basicpy"),
     reason="requires the cellpose and basicpy libraries",
