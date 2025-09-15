@@ -84,7 +84,7 @@ def rasterize(
     # only 2D polygons are suported.
     has_z = sdata.shapes[shapes_layer]["geometry"].apply(lambda geom: geom.has_z)
     if any(has_z):
-        raise ValueError("Shapes layer contains 3D polygons. " "This is currently not supported.")
+        raise ValueError("Shapes layer contains 3D polygons. This is currently not supported.")
 
     if any(sdata.shapes[shapes_layer].geometry.type == "Point"):
         raise ValueError(
@@ -104,9 +104,9 @@ def rasterize(
     y_min = y_min if y_min > 0 else 0
     x_min = x_min if x_min > 0 else 0
 
-    assert (
-        x_max > 0 and y_max > 0
-    ), f"The maximum of the bounding box of the shapes layer {shapes_layer} is negative. This is not allowed."
+    assert x_max > 0 and y_max > 0, (
+        f"The maximum of the bounding box of the shapes layer {shapes_layer} is negative. This is not allowed."
+    )
     shapes = sdata[shapes_layer].copy()
     shapes.index = shapes.index.values.astype(int)
     # set index name to this value, because otherwise reset_index could cause error, if _INSTANCE_KEY column already exists in the shapes layer

@@ -94,9 +94,9 @@ def weighted_channel_expression(
             f"'clustering_key' should either be {ClusteringKey._METACLUSTERING_KEY} or {ClusteringKey._CLUSTERING_KEY}."
         )
 
-    assert (
-        df_intensity.shape[0] == cell_counts_matrix.shape[1]
-    ), f"Average intensities for {clustering_key} provided via table '{table_layer_pixel_cluster_intensity}' should contain as many rows as there are columns in table '{table_layer_cell_clustering}'."
+    assert df_intensity.shape[0] == cell_counts_matrix.shape[1], (
+        f"Average intensities for {clustering_key} provided via table '{table_layer_pixel_cluster_intensity}' should contain as many rows as there are columns in table '{table_layer_cell_clustering}'."
+    )
     df_intensity.index.name = None
     assert_index_equal(df_intensity.index.sort_values(), index_columns.sort_values())
     df_intensity = df_intensity.reindex(index_columns)

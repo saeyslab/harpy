@@ -159,9 +159,9 @@ def map_labels(
             )
 
             # Ensure the translation is the same as the first label layer
-            assert (
-                transformations == first_transformations
-            ), f"Provided labels layers '{labels_layers}' should all have the same transformations defined on them."
+            assert transformations == first_transformations, (
+                f"Provided labels layers '{labels_layers}' should all have the same transformations defined on them."
+            )
 
             labels_data.append(x_label)
 
@@ -286,9 +286,9 @@ def _combine_dask_arrays(
     for i, x_label in enumerate(_labels_arrays):
         #  rechunk so that we ensure minimum chunksize, in order to control output_chunks sizes.
         x_label = _rechunk_overlap(x_label, depth=depth, chunks=chunks)
-        assert (
-            x_label.numblocks[0] == 1
-        ), f"Expected the number of blocks in the Z-dimension to be `1`, found `{x_label.numblocks[0]}`."
+        assert x_label.numblocks[0] == 1, (
+            f"Expected the number of blocks in the Z-dimension to be `1`, found `{x_label.numblocks[0]}`."
+        )
 
         if i == 0:
             # output_chunks can be derived from any rechunked x_label in labels_arrays

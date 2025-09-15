@@ -96,9 +96,9 @@ def visium_hd(
             if table_layer in _shapes_layer:
                 shapes_layer = _shapes_layer
                 break
-        assert (
-            len(sdata[shapes_layer]) == len(adata)
-        ), f"Shapes layer containing bins '{shapes_layer}' and corresponding table '{table_layer}' should have same length."
+        assert len(sdata[shapes_layer]) == len(adata), (
+            f"Shapes layer containing bins '{shapes_layer}' and corresponding table '{table_layer}' should have same length."
+        )
         sdata[shapes_layer].index = (
             adata.obs.set_index(VisiumHDKeys.INSTANCE_KEY).loc[sdata[shapes_layer].index, _INSTANCE_KEY].values
         )

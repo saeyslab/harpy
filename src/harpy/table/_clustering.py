@@ -311,6 +311,6 @@ class Cluster(ProcessTable):
         return self.sdata
 
     def _sanity_check(self, cluster_callable: Callable):
-        assert (
-            "key_added" in inspect.signature(cluster_callable).parameters
-        ), f"Callable '{cluster_callable.__name__}' must include the parameter 'key_added'."
+        assert "key_added" in inspect.signature(cluster_callable).parameters, (
+            f"Callable '{cluster_callable.__name__}' must include the parameter 'key_added'."
+        )

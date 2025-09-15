@@ -71,9 +71,9 @@ def visium(
             instance_key=_INSTANCE_KEY,
         )
 
-        assert len(sdata.shapes[dataset_id]) == len(
-            adata
-        ), f"Shapes layer '{dataset_id}' and corresponding table '{table_layer}' should have same length."
+        assert len(sdata.shapes[dataset_id]) == len(adata), (
+            f"Shapes layer '{dataset_id}' and corresponding table '{table_layer}' should have same length."
+        )
 
         sdata.shapes[dataset_id].index = (
             adata.obs.set_index(_old_instance_key).loc[sdata.shapes[dataset_id].index, _INSTANCE_KEY].values

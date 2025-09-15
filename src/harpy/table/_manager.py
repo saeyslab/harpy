@@ -20,12 +20,12 @@ class TableLayerManager:
         overwrite: bool = False,
     ) -> SpatialData:
         if region is not None:
-            assert (
-                _REGION_KEY in adata.obs.columns
-            ), f"Provided 'AnnData' object should contain a column '{_REGION_KEY}' in 'adata.obs'. Linking the observations to a labels layer in 'sdata'."
-            assert (
-                _INSTANCE_KEY in adata.obs.columns
-            ), f"Provided 'AnnData' object should contain a column '{_INSTANCE_KEY}' in 'adata.obs'. Linking the observations to a labels layer in 'sdata'."
+            assert _REGION_KEY in adata.obs.columns, (
+                f"Provided 'AnnData' object should contain a column '{_REGION_KEY}' in 'adata.obs'. Linking the observations to a labels layer in 'sdata'."
+            )
+            assert _INSTANCE_KEY in adata.obs.columns, (
+                f"Provided 'AnnData' object should contain a column '{_INSTANCE_KEY}' in 'adata.obs'. Linking the observations to a labels layer in 'sdata'."
+            )
 
             # need to remove spatialdata_attrs, otherwise parsing gives error (TableModel.parse will add spatialdata_attrs back)
             if TableModel.ATTRS_KEY in adata.uns.keys():

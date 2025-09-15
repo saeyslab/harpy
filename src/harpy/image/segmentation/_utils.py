@@ -27,9 +27,9 @@ def _rechunk_overlap(
 ) -> Array:
     # rechunk, so that we ensure minimum overlap
 
-    assert (
-        len(depth) == x.ndim
-    ), f"Please provide depth value for every dimension of x ({x.ndim}). Provided depth was '{depth}'"
+    assert len(depth) == x.ndim, (
+        f"Please provide depth value for every dimension of x ({x.ndim}). Provided depth was '{depth}'"
+    )
 
     if chunks is not None:
         x = x.rechunk(chunks)
@@ -60,9 +60,9 @@ def _clean_up_masks(
     depth: dict[int, int],
 ) -> NDArray:
     total_blocks = block_info[0]["num-chunks"]
-    assert (
-        total_blocks[0] == 1
-    ), "Dask arrays chunked in z dimension are not supported. Please only chunk in y and x dimensions."
+    assert total_blocks[0] == 1, (
+        "Dask arrays chunked in z dimension are not supported. Please only chunk in y and x dimensions."
+    )
     total_blocks = total_blocks[1:]
     assert depth[0] == 0, "Depth not equal to 0 in z dimension is currently not supported."
     assert len(depth) == 3, "Please provide depth values for z,y and x."
@@ -78,9 +78,9 @@ def _clean_up_masks(
     y_start, y_stop = depth[0], block.shape[1] - depth[0]
     x_start, x_stop = depth[1], block.shape[2] - depth[1]
 
-    assert (
-        block_id[0] == 0
-    ), "Dask arrays chunked in z dimension are not supported. Please only chunk in y and x dimensions."
+    assert block_id[0] == 0, (
+        "Dask arrays chunked in z dimension are not supported. Please only chunk in y and x dimensions."
+    )
     block_id = block_id[1:]
 
     # get indices of all adjacent blocks
@@ -153,9 +153,9 @@ def _merge_masks(
 ) -> NDArray:
     # helper function to merge the chunks
 
-    assert (
-        num_blocks[0] == 1
-    ), "Dask arrays chunked in z dimension are not supported. Please only chunk in y and x dimensions."
+    assert num_blocks[0] == 1, (
+        "Dask arrays chunked in z dimension are not supported. Please only chunk in y and x dimensions."
+    )
 
     assert _depth[0] == 0, "Depth not equal to 0 in z dimension is currently not supported."
     assert len(_depth) == 3, "Please provide depth values for z,y and x."

@@ -147,9 +147,9 @@ def allocate_intensity(
     se_image = _get_spatial_element(sdata, layer=img_layer)
     se_labels = _get_spatial_element(sdata, layer=labels_layer)
 
-    assert (
-        se_image.data.shape[1:] == se_labels.data.shape
-    ), "Only arrays with same spatial shape are currently supported, "
+    assert se_image.data.shape[1:] == se_labels.data.shape, (
+        "Only arrays with same spatial shape are currently supported, "
+    )
     f"but image layer with name {img_layer} has shape {se_image.data.shape}, "
     f"while labels layer with name {labels_layer} has shape {se_labels.data.shape}  "
 
@@ -188,9 +188,9 @@ def allocate_intensity(
     _array_img = _array_img.rechunk(chunks) if chunks is not None else _array_img
     _array_mask_rechunked = _array_mask.rechunk(chunks_masks) if chunks_masks is not None else _array_mask
 
-    assert all(
-        element in se_image.c.data for element in channels
-    ), f"Some channels specified via 'channels' could not be found in image layer '{img_layer}'. Please choose 'channels' from '{list(se_image.c.data)}'."
+    assert all(element in se_image.c.data for element in channels), (
+        f"Some channels specified via 'channels' could not be found in image layer '{img_layer}'. Please choose 'channels' from '{list(se_image.c.data)}'."
+    )
     channel_indices = [list(se_image.c.data).index(channel) for channel in channels]
     _array_img = _array_img[channel_indices]
     aggregator = RasterAggregator(image_dask_array=_array_img, mask_dask_array=_array_mask_rechunked)

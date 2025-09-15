@@ -147,7 +147,7 @@ def _fix_dimensions(
 
     # check if the array already has the correct number of dimensions, if not add missing dimensions
     if len(array.shape) != len(dims):
-        raise ValueError(f"Dimension of array {array.shape} is not equal to dimension of provided dims { dims}")
+        raise ValueError(f"Dimension of array {array.shape} is not equal to dimension of provided dims {dims}")
     if len(array.shape) > 4:
         raise ValueError(f"Arrays with dimension larger than 4 are not supported, shape of array is {array.shape}")
 

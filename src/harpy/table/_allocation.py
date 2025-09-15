@@ -272,7 +272,9 @@ def bin_counts(
 
     # Sanity check that every barcode that could be assigned to a bin is assigned exactly ones to a bin.
     _mask = cell_counts == 1
-    assert _mask.all(), f"Some spots, given by 'sdata.tables[{table_layer}].obsm[{_SPATIAL}]', where assigned to more than one cell defined in '{labels_layer}'."
+    assert _mask.all(), (
+        f"Some spots, given by 'sdata.tables[{table_layer}].obsm[{_SPATIAL}]', where assigned to more than one cell defined in '{labels_layer}'."
+    )
     cell_counts = cell_counts.reset_index(level=_CELL_INDEX)
     assert cell_counts.index.is_unique, "Spots should not be assigned to more than one cell."
 
@@ -283,9 +285,9 @@ def bin_counts(
     # get adata
     adata_in = sdata.tables[table_layer].copy()  # should we do a copy here? otherwise in memory adata will be changed
     merged = pd.merge(adata_in.obs, cell_counts[_CELL_INDEX], left_index=True, right_index=True, how="inner")
-    assert (
-        merged.shape[0] != 0
-    ), "Result after merging AnnData object, passed via 'table_layer' parameter with aggregated spots is empty."
+    assert merged.shape[0] != 0, (
+        "Result after merging AnnData object, passed via 'table_layer' parameter with aggregated spots is empty."
+    )
     adata_in = adata_in[merged.index]
     adata_in.obs = merged
 

@@ -98,10 +98,10 @@ def load_widget(
             layer = viewer.layers[layer_name]
             viewer.layers.remove(layer)
 
-            log.info(f"Refreshing { layer_name }")
+            log.info(f"Refreshing {layer_name}")
         except KeyError:
             # otherwise add it to the viewer
-            log.info(f"Adding { layer_name }")
+            log.info(f"Adding {layer_name}")
 
         offset_x, offset_y = _get_translation(sdata[pipeline.loaded_image_name])
 
@@ -124,7 +124,7 @@ def load_widget(
         viewer.layers[layer_name].metadata["pipeline"] = pipeline
         viewer.layers[layer_name].metadata["sdata"] = sdata
 
-        log.info(f"Added '{ layer_name }' layer")
+        log.info(f"Added '{layer_name}' layer")
 
         show_info("Loading finished")
 

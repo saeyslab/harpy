@@ -69,9 +69,9 @@ def bounding_box_query(
     labels_layer = _fix_name(labels_layer)
     crd = _crd_to_iterable_of_iterables(crd)
     to_coordinate_system = _fix_name(to_coordinate_system)
-    assert (
-        len(labels_layer) == len(crd) == len(to_coordinate_system)
-    ), "The number of 'labels_layer', 'crd' and 'to_coordinate_system' specified should all be equal."
+    assert len(labels_layer) == len(crd) == len(to_coordinate_system), (
+        "The number of 'labels_layer', 'crd' and 'to_coordinate_system' specified should all be equal."
+    )
 
     sdata_queried = SpatialData()
     # back resulting sdata to zarr store if output is specified
