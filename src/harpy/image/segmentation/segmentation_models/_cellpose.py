@@ -50,7 +50,7 @@ def cellpose_callable(
     max_size_fraction: float = 0.4,
     niter: int | None = None,
     pretrained_model: str | Path = "nuclei",
-    device: str = "cuda" if CUDA else "cpu",
+    device: str | None = None,
 ) -> NDArray:
     """
     Perform cell segmentation using the Cellpose model.
@@ -103,7 +103,7 @@ def cellpose_callable(
         or a file path to a saved model on disk. Default is `"nuclei"`.
     device
         The device to run the model on. Can be `"cpu"`, `"cuda"`, `"mps"`, or another supported device.
-        Default is `"cuda"` if available, otherwise `"cpu"`.
+        If `None`, device will be automatically inferred, i.e. is `"cuda"` or `"mps"` if available, otherwise `"cpu"`.
 
 
     Returns
@@ -121,6 +121,16 @@ def cellpose_callable(
 
     if not CELLPOSE_AVAILABLE:
         raise RuntimeError("Module 'cellpose' is not available. Please install it to use this function.")
+
+    # Auto-select device per worker
+    if device is None:
+        if torch.cuda.is_available():
+            torch.cuda.set_device(0)
+            device = "cuda:0"
+        elif torch.backends.mps.is_available():
+            device = "mps"
+        else:
+            device = "cpu"
 
     cellpose_version = version.parse(cellpose.version)
 
