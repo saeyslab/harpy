@@ -13,13 +13,11 @@ try:
     import torch
 
     TORCH_AVAILABLE = True
-    CUDA = torch.cuda.is_available()
 except ImportError:
     log.warning(
         "Module 'torch' not installed, please install 'torch' if you want to use the callable 'harpy.im.cellpose_callable' as model for 'harpy.im.segment'."
     )
     TORCH_AVAILABLE = False
-    CUDA = False
 
 try:
     import cellpose
