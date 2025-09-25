@@ -8,6 +8,9 @@ __version__ = importlib.metadata.version("harpy-analysis")
 # see geopandas https://geopandas.org/en/stable/ and https://github.com/geopandas/geopandas/releases/tag/v1.0.0
 # removing this could mean only supporting gepandas >=1.0.0 and shapely 2
 os.environ["USE_PYGEOS"] = "0"
+os.environ["DASK_DATAFRAME__QUERY_PLANNING"] = (
+    "False"  # avoid newer dataframe backends, see  https://github.com/dask/dask/issues/11146
+)
 
 loglevel = os.environ.get("LOGLEVEL")
 if loglevel is None or loglevel.upper() != "DEBUG":
@@ -17,10 +20,6 @@ if loglevel is None or loglevel.upper() != "DEBUG":
     warnings.filterwarnings("ignore", category=FutureWarning)
     warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-# avoid newer dataframe backends, see https://github.com/dask/dask/issues/11146
-import dask  # noqa: E402
-
-dask.config.set({"dataframe.query-planning": False})
 
 # import submodules in specific order to avoid circular imports
 # use aliases from more convenient names
