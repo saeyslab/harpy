@@ -22,12 +22,12 @@ Note: This package is still under active development.
 
 ## Installation
 
-**Recommended** for end-users. Install the latest `harpy-analysis` [PyPI package](https://pypi.org/project/harpy-analysis) with the `extra` dependencies in a local Python environment. Note that the `cellpose` package is pinned to version 3. The recent Version 4 is compatible, but does not align yet with the current documentation.
+**Recommended** for end-users. Install the latest `harpy-analysis` [PyPI package](https://pypi.org/project/harpy-analysis) with the `extra` dependencies in a local Python environment.
 
 ```bash
 uv venv --python=3.12 # set python version
 source .venv/bin/activate # activate the virtual environment
-uv pip install 'harpy-analysis[extra]' 'cellpose==3.1.1.2' # use uv to pip install dependencies and pin cellpose
+uv pip install 'harpy-analysis[extra]' # use uv to pip install dependencies
 python -c 'import harpy; print(harpy.__version__)' # check if the package is installed
 ```
 
@@ -37,7 +37,7 @@ python -c 'import harpy; print(harpy.__version__)' # check if the package is ins
 # Clone repository from GitHub
 uv venv --python=3.12 # set python version
 source .venv/bin/activate # activate the virtual environment
-uv pip install -e '.[dev]' 'cellpose==3.1.1.2' # use uv to pip install dependencies and pin cellpose
+uv pip install -e '.[dev]' # use uv to pip install dependencies
 python -c 'import harpy; print(harpy.__version__)' # check if the package is installed
 # make changes
 python -m pytest # run the tests
