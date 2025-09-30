@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+import warnings
 from typing import Literal
 
 from anndata import AnnData
@@ -41,7 +42,14 @@ def _incremental_io_on_disk(
     del sdata[new_output_layer]
     del sdata[output_layer]
     # a3 load the backup copy into memory
-    sdata_copy = read_zarr(sdata.path, selection=[element_type])
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            category=UserWarning,
+            message="The table is annotating",
+            module="spatialdata._core.spatialdata",
+        )
+        sdata_copy = read_zarr(sdata.path, selection=[element_type])
     # b1. rewrite the original data
     sdata.delete_element_from_disk(output_layer)
     sdata[output_layer] = sdata_copy[new_output_layer]
@@ -50,7 +58,14 @@ def _incremental_io_on_disk(
     # b2. reload the new data into memory (because it has been written but in-memory it still points
     # from the backup location)
     del sdata[output_layer]
-    sdata_materialized = read_zarr(sdata.path, selection=[element_type])
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            category=UserWarning,
+            message="The table is annotating",
+            module="spatialdata._core.spatialdata",
+        )
+        sdata_materialized = read_zarr(sdata.path, selection=[element_type])
     # to make sdata point to layer that is materialized, and keep object id.
     sdata[output_layer] = sdata_materialized[output_layer]
     # c. remove the backup copy
