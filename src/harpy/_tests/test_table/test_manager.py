@@ -1,11 +1,16 @@
+import pytest
 from spatialdata import SpatialData
 
 from harpy.table._table import add_table_layer
 from harpy.utils._keys import _REGION_KEY
 
 
-def test_add_table_layer(sdata_transcripts: SpatialData, recwarn):
+@pytest.mark.parametrize("is_backed", [True, False])
+def test_add_table_layer(sdata_transcripts: SpatialData, recwarn, is_backed):
     assert sdata_transcripts.is_backed()
+
+    if not is_backed:
+        sdata_transcripts.path = None
 
     adata = sdata_transcripts["table_transcriptomics"]
 
