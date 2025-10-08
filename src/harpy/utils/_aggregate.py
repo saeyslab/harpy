@@ -644,9 +644,15 @@ class RasterAggregator:
         _labels = self._labels[self._labels != 0]
         if image is not None:
             assert image.numblocks[0] == 1, "image can not be chunked in z-dimension. Please rechunk."
+            if mask.ndim != 3 or image.ndim != 3 or mask.ndim != image.ndim:
+                raise ValueError(
+                    f"mask and image must both be 3D (z, y, x). Got mask.shape={mask.shape}, image.shape={image.shape}"
+                )
             arrays = [mask, image]
         else:
             arrays = [mask]
+            if mask.ndim != 3:
+                raise ValueError(f"mask must be 3D (z, y, x), but got {mask.ndim}D with shape {mask.shape}")
         dask_chunks = da.map_overlap(
             lambda *arrays, block_info=None, **kw: _aggregate_custom_block(*arrays, block_info=block_info, **kw),
             *arrays,
@@ -671,7 +677,7 @@ class RasterAggregator:
         # this gives you dask array of shape (features*len(_labels), nr_of_chunks in mask ) with chunksize (features*len(_labels), 1)
 
         sanity = da.all((~da.isnan(dask_array)).sum(axis=1) == 1)
-        # da.nansum ignores np.nan added by _aggregate_custom_block
+        # da.nansum ignores np.nan added by _featurize_custom_block
         results = da.nansum(dask_array, axis=1, dtype=dtype).reshape(-1, features)
 
         sanity, results = dask.compute(*[sanity, results])
