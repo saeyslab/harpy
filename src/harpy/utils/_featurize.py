@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import os
+import shutil
 import time
+import uuid
+from pathlib import Path
 
 import dask.array as da
 import numpy as np
@@ -9,7 +13,7 @@ import torch
 from numpy.typing import NDArray
 from scipy import ndimage
 
-from harpy.image.segmentation._utils import _add_depth_to_chunks_size, _rechunk_overlap
+from harpy.image.segmentation._utils import _add_depth_to_chunks_size
 from harpy.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
@@ -79,8 +83,20 @@ class Featurizer:
 
     def extract_instances(
         self,
-        depth: int,  # ~diameter/2, depth in y and x
+        depth: int,  # ~max_diameter/2, depth in y and x,
+        diameter: int
+        | None = None,  # will be dimension of resulting chunks in y and x. Can be set to value < max_diameter to optimize performance
+        zarr_output_path: str
+        | Path
+        | None = None,  # if zarr_output_path is specified, we compute the graph, otherwise we return a non-computed graph
+        store_intermediate: bool = False,
     ) -> da.Array:
+        if diameter is None:
+            diameter = 2 * depth
+        if diameter > 2 * depth:
+            log.info("Diameter is set to a value > 2*depth. Consider decreasing diameter value for performance.")
+        if store_intermediate and zarr_output_path is None:
+            raise ValueError("Please specify a 'zarr_output_path' if 'store_intermediate' is 'True'.")
         _depth = {0: 0, 1: 0, 2: depth, 3: depth}
 
         array_mask = self._mask[None, ...]  # add trivial channel dimension
@@ -89,10 +105,19 @@ class Featurizer:
         if array_image.numblocks[1] != 1:
             raise ValueError("Currently we do not allow chunking in z dimension.")
 
-        array_mask = _tranpose_chunks(
-            array_mask, depth=_depth
-        )  # TODO best make option to save these as a temp zarr store to optimize the dask graph
-        array_image = _tranpose_chunks(array_image, depth=_depth)
+        array_mask = _transpose_chunks(array_mask, depth=_depth)
+        array_image = _transpose_chunks(array_image, depth=_depth)
+
+        if store_intermediate:
+            _dirname_zarr = os.path.dirname(zarr_output_path)
+            array_image_intermediate_store = os.path.join(_dirname_zarr, f"array_image_{uuid.uuid4()}.zarr")
+            array_mask_intermediate_store = os.path.join(_dirname_zarr, f"array_mask_{uuid.uuid4()}.zarr")
+            log.info(f"Writing to intermediate zarr store {array_image_intermediate_store}")
+            log.info(f"Writing to intermediate zarr store {array_mask_intermediate_store}")
+            array_mask.to_zarr(array_mask_intermediate_store)
+            array_image.to_zarr(array_image_intermediate_store)
+            array_mask = da.from_zarr(array_mask_intermediate_store)
+            array_image = da.from_zarr(array_image_intermediate_store)
 
         # probably not even necessary to do this count_custom block, dask seems to help himself well if these are not exactly specified in featurize custom_block call below
         counts = da.map_blocks(
@@ -116,7 +141,9 @@ class Featurizer:
         if instances_not_assigned != 0:
             log.info(
                 f"The number of total labels in the mask differs from the number of labels counted per chunk "
-                f"(difference is {instances_not_assigned}). Consider increasing depth."
+                f"(difference: {instances_not_assigned}). Consider increasing the 'depth' parameter. "
+                "Some masks may not have been uniquely assigned to a chunk, even at higher depth values. "
+                "This difference should remain very small compared to the total number of cells."
             )
 
         arrays = [array_mask, array_image]
@@ -132,15 +159,26 @@ class Featurizer:
                 c_chunks,  # e.g. (3+1,1) # do allow chunking in c.
                 array_image.chunks[1],
                 tuple(counts.tolist()),
-                (_depth[2],),
-                (_depth[3],),
+                (diameter,),
+                (diameter,),
             ),
             new_axis=4,
             _depth=_depth,
+            diameter=diameter,
             index=self._labels[self._labels != 0],
         )
         # make it i,c,z,y,x
         dask_chunks = dask_chunks.transpose(2, 0, 1, 3, 4)
+
+        if zarr_output_path is not None:
+            dask_chunks.rechunk(dask_chunks.chunksize).to_zarr(zarr_output_path)
+            dask_chunks = da.from_zarr(zarr_output_path)
+
+        if store_intermediate:
+            log.info(f"Deleting intermediate zarr store {array_image_intermediate_store}")
+            log.info(f"Deleting intermediate zarr store {array_mask_intermediate_store}")
+            shutil.rmtree(array_mask_intermediate_store)
+            shutil.rmtree(array_image_intermediate_store)
 
         return dask_chunks
 
@@ -202,9 +240,8 @@ def _extract_instances(
     concat_mask: bool = True,
 ) -> NDArray:
     start = time.time()
-    log.info("Extracting instances (NumPy).")
+    log.info("Extracting instances.")
 
-    # --- validations (kept from your original) ---
     assert mask.ndim == image.ndim == 4
     assert mask.shape[0] == 1
     assert len(size) == 3
@@ -220,7 +257,7 @@ def _extract_instances(
     C, Z, Y, X = image.shape
     size_z, size_y, size_x = size
 
-    # --- foreground coords once (O(V)) ---
+    # foreground coords once (O(V))
     fg = mask != 0
     if not np.any(fg):
         out_shape = (
@@ -232,7 +269,7 @@ def _extract_instances(
         return np.empty(out_shape, dtype=np.float32)
 
     # Order of coords matches order of mask[fg], so inv indices align
-    cz, zz, yy, xx = np.nonzero(fg)
+    _, zz, yy, xx = np.nonzero(fg)
     labels = mask[fg]  # shape (N,)
 
     # sanity check
@@ -242,7 +279,7 @@ def _extract_instances(
 
     L = uniq.size
 
-    # per-label bbox via segment reductions (O(N))
+    # per-label bbox (O(N))
     zmin = np.full(L, Z, dtype=np.int64)
     ymin = np.full(L, Y, dtype=np.int64)
     xmin = np.full(L, X, dtype=np.int64)
@@ -312,13 +349,28 @@ def _pad_array(arr: NDArray, size: tuple[int, int, int]) -> NDArray:
 
     size_z, size_y, size_x = size
 
-    arr = arr[..., :size_z, :size_y, :size_x]
+    # crop in the center
+    # arr = arr[..., :size_z, :size_y, :size_x]
 
     z, y, x = arr.shape[-3:]
 
-    pad_z = size_z - z
-    pad_y = size_y - y
-    pad_x = size_x - x
+    # central crop if array is too large
+    start_z = max((z - size_z) // 2, 0)
+    start_y = max((y - size_y) // 2, 0)
+    start_x = max((x - size_x) // 2, 0)
+
+    end_z = start_z + min(size_z, z)
+    end_y = start_y + min(size_y, y)
+    end_x = start_x + min(size_x, x)
+
+    arr = arr[..., start_z:end_z, start_y:end_y, start_x:end_x]
+
+    # padding for smaller arrays
+    z, y, x = arr.shape[-3:]
+
+    pad_z = max(size_z - z, 0)
+    pad_y = max(size_y - y, 0)
+    pad_x = max(size_x - x, 0)
 
     pad_z_left = pad_z // 2
     pad_z_right = pad_z - pad_z_left
@@ -345,6 +397,7 @@ def _featurize_custom_block(
     index: NDArray,
     block_info,
     _depth,
+    diameter,
 ) -> NDArray:
     mask_block = arrays[0]
     assert len(arrays) == 2
@@ -371,8 +424,8 @@ def _featurize_custom_block(
         image_block,
         size=(
             image_block.shape[1],
-            _depth[2],
-            _depth[3],
+            diameter,
+            diameter,
         ),  # no chunking in z dimension, so size in z is image_block.shape[1]
         concat_mask=concat_mask,
     )
@@ -456,12 +509,32 @@ def _mask_center_of_mass_outside(mask_block: NDArray, _depth):
     return mask_block, unique_masks
 
 
-def _tranpose_chunks(array: da.Array, depth: dict[int, int]):
+def _transpose_chunks(array: da.Array, depth: dict[int, int]):
     def return_block(block):
         # dummy function, to do a map_overlap
         return block
 
-    array = _rechunk_overlap(array, depth=depth, chunks=array.chunks)
+    # we only support regular chunked arrays, so rechunk first
+    array = array.rechunk(array.chunksize)
+
+    for i in range(len(depth)):
+        if depth[i] != 0:
+            if depth[i] > array.chunksize[i]:
+                raise ValueError(
+                    f"Depth for dimension {i} exceeds chunk size. Consider decreasing depth, or increase the chunk size."
+                )
+
+    _, _, Y_c, X_c = array.chunksize
+
+    # only the last chunk can be different than the chunk size
+    y_rest = Y_c - array.chunks[2][-1]
+    x_rest = X_c - array.chunks[3][-1]
+
+    array = da.pad(array, ((0, 0), (0, 0), (0, y_rest), (0, x_rest))).rechunk(array.chunksize)
+    # no need to to a rechunk_overlap due to the padding
+
+    ### PAD TO multiple of the chunk size, make sure to rechunk also with chunksize before, so it also supports irregular chunks as input
+    # array = _rechunk_overlap(array, depth=depth, chunks=array.chunks)
     output_chunks = _add_depth_to_chunks_size(array.chunks, depth)
 
     # map an overlap
@@ -476,11 +549,6 @@ def _tranpose_chunks(array: da.Array, depth: dict[int, int]):
         boundary=0,
     )
     _, _, chunksize_y, chunksize_x = array.chunksize
-
-    y_rest = chunksize_y - array.chunks[2][-1]
-    x_rest = chunksize_x - array.chunks[3][-1]
-
-    array = da.pad(array, ((0, 0), (0, 0), (0, y_rest), (0, x_rest))).rechunk(array.chunksize)
 
     array_list = []
     for _c_chunksize, _array in zip(array.chunks[0], array.to_delayed(), strict=True):
