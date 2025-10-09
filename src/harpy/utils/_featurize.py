@@ -176,7 +176,7 @@ class Featurizer:
         c_chunks = tuple([c_chunks[0] + 1] + list(c_chunks[1:]))  # we concat mask to first c channel chunk
         # returns c,z,i,y,x tensor
         dask_chunks = da.map_blocks(
-            lambda *arrays, block_info=None, **kw: _featurize_custom_block(*arrays, block_info=block_info, **kw),
+            lambda *arrays, block_info=None, **kw: _featurize_block(*arrays, block_info=block_info, **kw),
             *arrays,
             dtype=np.float32,  # images and mask will be cast to dtype, if dtype==np.float32, max label supported is 2**24. # TODO cast to float64 if max label>2**24
             chunks=(
@@ -239,6 +239,117 @@ class Featurizer:
         df[_INSTANCE_KEY] = instances_ids
 
         return df.sort_values(by=_INSTANCE_KEY).reset_index(drop=True)
+
+
+def _transpose_chunks(array: da.Array, depth: dict[int, int]):
+    def return_block(block):
+        # dummy function, to do a map_overlap
+        return block
+
+    # we only support regular chunked arrays, so rechunk first
+    array = array.rechunk(array.chunksize)
+
+    for i in range(len(depth)):
+        if depth[i] != 0:
+            if depth[i] > array.chunksize[i]:
+                raise ValueError(
+                    f"Depth for dimension {i} exceeds chunk size. Consider decreasing depth, or increase the chunk size."
+                )
+
+    _, _, Y_c, X_c = array.chunksize
+
+    # only the last chunk can be different than the chunk size
+    y_rest = Y_c - array.chunks[2][-1]
+    x_rest = X_c - array.chunks[3][-1]
+
+    array = da.pad(array, ((0, 0), (0, 0), (0, y_rest), (0, x_rest))).rechunk(array.chunksize)
+    # no need to to a rechunk_overlap due to the padding
+
+    ### PAD TO multiple of the chunk size, make sure to rechunk also with chunksize before, so it also supports irregular chunks as input
+    # array = _rechunk_overlap(array, depth=depth, chunks=array.chunks)
+    output_chunks = _add_depth_to_chunks_size(array.chunks, depth)
+
+    # map an overlap
+    array = da.map_overlap(
+        array,
+        return_block,
+        depth=depth,
+        chunks=output_chunks,
+        allow_rechunk=False,
+        dtype=array.dtype,
+        trim=False,
+        boundary=0,
+    )
+    _, _, chunksize_y, chunksize_x = array.chunksize
+
+    array_list = []
+    for _c_chunksize, _array in zip(array.chunks[0], array.to_delayed(), strict=True):
+        array_list.append(
+            da.concatenate(
+                [
+                    da.from_delayed(_item, shape=(_c_chunksize, 1, chunksize_y, chunksize_x), dtype=array.dtype)
+                    for _item in _array.flatten()
+                ],
+                axis=2,
+            )
+        )  # for now assume z_dim==1
+    array = da.concatenate(array_list, axis=0)
+    return array
+
+
+def _featurize_block(
+    *arrays,
+    index: NDArray,
+    block_info,
+    _depth,
+    diameter,
+) -> NDArray:
+    mask_block = arrays[0]
+    assert len(arrays) == 2
+    image_block = arrays[1]
+    assert mask_block.shape[3:] == image_block.shape[3:]
+    assert mask_block.ndim == image_block.ndim == 4
+    if len(arrays) > 2:
+        raise ValueError("Only accepts one or two arrays.")
+    assert 0 not in index
+
+    # do a copy of mask_block, because we alter mask_block inside _mask_center_of_mass_outside
+    mask_block, _ = _mask_center_of_mass_outside(mask_block=mask_block.copy(), _depth=_depth)
+
+    # i,c,z,y,x tensor
+    # concat the mask instances to the block at channel location 0.
+    c_location_block = block_info[1]["chunk-location"][0]
+    if c_location_block == 0:
+        concat_mask = True
+    else:
+        concat_mask = False
+
+    instances = _extract_instances(
+        mask_block,
+        image_block,
+        size=(
+            image_block.shape[1],
+            diameter,
+            diameter,
+        ),  # no chunking in z dimension, so size in z is image_block.shape[1]
+        concat_mask=concat_mask,
+    )
+
+    # return c,z,i,y,x tensor
+    return instances.transpose(1, 2, 0, 3, 4)
+
+
+def _labels_per_block(
+    mask_block: NDArray,
+    index: NDArray,
+    _depth,
+) -> NDArray:
+    assert mask_block.ndim == 4
+    assert 0 not in index
+
+    _, unique_masks_inside = _mask_center_of_mass_outside(mask_block=mask_block.copy(), _depth=_depth)
+
+    return unique_masks_inside.reshape(1, 1, -1, 1)
 
 
 def _extract_instances(
@@ -400,74 +511,6 @@ def _pad_array(arr: NDArray, size: tuple[int, int, int]) -> NDArray:
     return arr
 
 
-def _featurize_custom_block(
-    *arrays,
-    index: NDArray,
-    block_info,
-    _depth,
-    diameter,
-) -> NDArray:
-    mask_block = arrays[0]
-    assert len(arrays) == 2
-    image_block = arrays[1]
-    assert mask_block.shape[3:] == image_block.shape[3:]
-    assert mask_block.ndim == image_block.ndim == 4
-    if len(arrays) > 2:
-        raise ValueError("Only accepts one or two arrays.")
-    assert 0 not in index
-
-    # do a copy of mask_block, because we alter mask_block inside _mask_center_of_mass_outside
-    mask_block, _ = _mask_center_of_mass_outside(mask_block=mask_block.copy(), _depth=_depth)
-
-    # i,c,z,y,x tensor
-    # concat the mask instances to the block at channel location 0.
-    c_location_block = block_info[1]["chunk-location"][0]
-    if c_location_block == 0:
-        concat_mask = True
-    else:
-        concat_mask = False
-
-    instances = _extract_instances(
-        mask_block,
-        image_block,
-        size=(
-            image_block.shape[1],
-            diameter,
-            diameter,
-        ),  # no chunking in z dimension, so size in z is image_block.shape[1]
-        concat_mask=concat_mask,
-    )
-
-    # return c,z,i,y,x tensor
-    return instances.transpose(1, 2, 0, 3, 4)
-
-
-def _labels_per_block(
-    mask_block: NDArray,
-    index: NDArray,
-    _depth,
-) -> NDArray:
-    assert mask_block.ndim == 4
-    assert 0 not in index
-
-    _, unique_masks_inside = _mask_center_of_mass_outside(mask_block=mask_block.copy(), _depth=_depth)
-
-    return unique_masks_inside.reshape(1, 1, -1, 1)
-
-
-def _count_custom_block(
-    mask_block: NDArray,
-    index: NDArray,
-    _depth,
-) -> NDArray:
-    assert mask_block.ndim == 4
-    assert 0 not in index
-
-    _, unique_masks_inside = _mask_center_of_mass_outside(mask_block=mask_block.copy(), _depth=_depth)
-
-    return np.array([len(unique_masks_inside)]).reshape(-1, 1, 1, 1)
-
-
 def _mask_center_of_mass_outside(mask_block: NDArray, _depth):
     assert len(_depth) == 4
     assert mask_block.ndim == 4
@@ -530,62 +573,6 @@ def _mask_center_of_mass_outside(mask_block: NDArray, _depth):
     return mask_block, unique_masks
 
 
-def _transpose_chunks(array: da.Array, depth: dict[int, int]):
-    def return_block(block):
-        # dummy function, to do a map_overlap
-        return block
-
-    # we only support regular chunked arrays, so rechunk first
-    array = array.rechunk(array.chunksize)
-
-    for i in range(len(depth)):
-        if depth[i] != 0:
-            if depth[i] > array.chunksize[i]:
-                raise ValueError(
-                    f"Depth for dimension {i} exceeds chunk size. Consider decreasing depth, or increase the chunk size."
-                )
-
-    _, _, Y_c, X_c = array.chunksize
-
-    # only the last chunk can be different than the chunk size
-    y_rest = Y_c - array.chunks[2][-1]
-    x_rest = X_c - array.chunks[3][-1]
-
-    array = da.pad(array, ((0, 0), (0, 0), (0, y_rest), (0, x_rest))).rechunk(array.chunksize)
-    # no need to to a rechunk_overlap due to the padding
-
-    ### PAD TO multiple of the chunk size, make sure to rechunk also with chunksize before, so it also supports irregular chunks as input
-    # array = _rechunk_overlap(array, depth=depth, chunks=array.chunks)
-    output_chunks = _add_depth_to_chunks_size(array.chunks, depth)
-
-    # map an overlap
-    array = da.map_overlap(
-        array,
-        return_block,
-        depth=depth,
-        chunks=output_chunks,
-        allow_rechunk=False,
-        dtype=array.dtype,
-        trim=False,
-        boundary=0,
-    )
-    _, _, chunksize_y, chunksize_x = array.chunksize
-
-    array_list = []
-    for _c_chunksize, _array in zip(array.chunks[0], array.to_delayed(), strict=True):
-        array_list.append(
-            da.concatenate(
-                [
-                    da.from_delayed(_item, shape=(_c_chunksize, 1, chunksize_y, chunksize_x), dtype=array.dtype)
-                    for _item in _array.flatten()
-                ],
-                axis=2,
-            )
-        )  # for now assume z_dim==1
-    array = da.concatenate(array_list, axis=0)
-    return array
-
-
 def _count_custom_block_fast(
     *arrays,
     index,
@@ -619,7 +606,6 @@ def _count_custom_block_fast(
         unique_masks = unique_masks[unique_masks != 0]
         return np.array([unique_masks.size]).reshape(-1, 1, 1)
 
-    # ----- compute centroids for border labels (no SciPy) -----
     # Select voxels that belong to border labels
     # (np.isin is vectorized in C; much faster than Python loops)
     sel = np.isin(mask_block, border_labels)
