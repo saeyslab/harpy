@@ -10,7 +10,6 @@ import dask
 import dask.array as da
 import numpy as np
 import pandas as pd
-import torch
 from numpy.typing import NDArray
 from scipy import ndimage
 
@@ -20,6 +19,7 @@ from harpy.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
 
+"""
 try:
     import torch
     import torch.nn.functional as F
@@ -29,6 +29,7 @@ except ImportError:
     log.warning(
         "Module 'torch' not installed, please install 'torch' if you want to use the callable 'harpy.im.cellpose_callable' as model for 'harpy.im.segment'."
     )
+"""
 
 
 class Featurizer:
@@ -238,32 +239,6 @@ class Featurizer:
         df[_INSTANCE_KEY] = instances_ids
 
         return df.sort_values(by=_INSTANCE_KEY).reset_index(drop=True)
-
-
-def _stats(mask: NDArray, image: NDArray, size: tuple[int, int, int], device="cpu") -> NDArray:
-    instances_mask, instances = _extract_instances(
-        mask, image, size=size, device="cpu"
-    )  # extracting instances on cpu is fastest
-    # can be any complex function here
-    instances_mask = instances_mask.to(device)
-    instances = instances.to(device)
-    mean = _masked_mean(instances, instances_mask, dim=[2, 3, 4])
-    return np.stack([mean.cpu().numpy(), mean.cpu().numpy()])
-    return mean.cpu().numpy()
-
-
-def _masked_mean(x: torch.Tensor, mask: torch.Tensor, dim=None, keepdim=False, nan_if_empty=True) -> torch.Tensor:
-    mask = mask != 0  # bool mask
-    x = x.to(torch.float32)  # ensure float division
-
-    cnt = mask.sum(dim=dim, keepdim=keepdim)
-    s = x.masked_fill(~mask, 0).sum(dim=dim, keepdim=keepdim)
-    mean = s / cnt.clamp_min(1)
-
-    # note that in our case cnt==0 will not happen, because we only feed 'real' masks
-    if nan_if_empty:
-        mean = torch.where(cnt == 0, torch.zeros_like(mean), mean)
-    return mean
 
 
 def _extract_instances(
@@ -704,182 +679,3 @@ def _count_custom_block_fast(
         unique_masks = unique_masks[~np.isin(unique_masks, border_labels_not_to_consider)]
 
     return np.array([unique_masks.size]).reshape(-1, 1, 1)
-
-
-def _extract_instances_slow(
-    mask: NDArray,
-    image: NDArray,
-    size: tuple[int, int, int] = (1, 100, 100),
-    concat_mask: bool = True,
-) -> tuple[NDArray, NDArray]:
-    # returns two tensors of shape i,c,z,y,x
-    start = time.time()
-    log.info("Extracting instances.")
-    # rewrite this in torch
-    assert mask.ndim == image.ndim == 4
-    assert len(size) == 3
-
-    if np.max(mask) > 2**24:
-        raise ValueError(f"Maximum value allowed in mask is ({2**24}).")
-    if not np.issubdtype(image.dtype, np.floating):
-        if np.max(image) > 2**24:
-            raise ValueError(f"Cannot savely cast image to float32. Please clip the image to values <={2**24}")
-    else:  # case where it is floating -> we only support np.float32
-        if not np.issubdtype(image.dtype, np.float32):
-            raise ValueError("Currently only images of dtype int and float32 are supported.")
-
-    # image = torch.from_numpy(image).to(torch.float32).to(device)
-
-    unique_labels = np.unique(mask)
-    unique_labels = unique_labels[unique_labels != 0]
-
-    instance_list = []
-    instance_mask_list = []
-
-    total_inner = 0
-    for _label in unique_labels:
-        if _label == 0:
-            continue
-        size_z, size_y, size_x = size  # ~ diameter of the cell ~2*depth ( 2* depth+1 )
-        # _, z_mask, y_mask, x_mask = torch.where(mask == _label)
-        start_inner = time.time()
-        vox_idx = (mask == _label).nonzero()  # this one makes it slow
-        total_inner += time.time() - start_inner
-        z_min = int(vox_idx[1].min().item())
-        z_max = int(vox_idx[1].max().item())
-        y_min = int(vox_idx[2].min().item())
-        y_max = int(vox_idx[2].max().item())
-        x_min = int(vox_idx[3].min().item())
-        x_max = int(vox_idx[3].max().item())
-
-        instance = image[:, z_min : z_max + 1, y_min : y_max + 1, x_min : x_max + 1]
-        instance_mask = mask[:, z_min : z_max + 1, y_min : y_max + 1, x_min : x_max + 1]
-
-        instance_mask = instance_mask * (instance_mask == _label)  # put to zero everywhere there is no feature
-
-        # instance_mask = torch.where(instance_mask == _label, instance_mask, 0)
-        # instance = instance * (instance_mask != 0)
-        # put to zero everywhere there is no feature
-        instance = np.where(instance_mask != 0, instance, 0)
-        instance = _pad_array(instance, size=[size_z, size_y, size_x])
-        instance_mask = _pad_array(instance_mask, size=[size_z, size_y, size_x])
-        instance_list.append(instance)
-        instance_mask_list.append(instance_mask)
-
-    log.info(
-        f"Finished extracting instances, took {time.time() - start} seconds ({len(unique_labels) / (time.time() - start)} instances/second)."
-    )
-
-    mask = np.stack(instance_mask_list).astype(np.float32)
-    image = np.stack(instance_list).astype(np.float32)
-
-    print(total_inner)
-
-    if concat_mask:
-        return np.concatenate([mask, image], axis=1)
-    else:
-        return image
-
-
-def _extract_instances_torch(
-    mask: NDArray,
-    image: NDArray,
-    size: tuple[int, int, int] = (1, 100, 100),
-    device: str = "cpu",  # this is fastest on cpu, so maybe rewrite to numpy again
-) -> tuple[torch.Tensor, torch.Tensor]:
-    # returns two tensors of shape i,c,z,y,x
-    #
-    start = time.time()
-    log.info("Extracting instances.")
-    # rewrite this in torch
-    assert mask.ndim == image.ndim == 4
-    assert len(size) == 3
-
-    if np.max(mask) > torch.iinfo(torch.int32).max:
-        raise ValueError(f"Maximum value allowed in mask is {torch.iinfo(torch.int32)}.")
-
-    mask = torch.from_numpy(mask).to(torch.int32).to(device)
-
-    if not np.issubdtype(image.dtype, np.floating):
-        if np.max(image) > 2**24:
-            raise ValueError(f"Cannot savely cast image to float32. Please clip the image to values <={2**24}")
-    else:  # case where it is floating -> we only support np.float32
-        if not np.issubdtype(image.dtype, np.float32):
-            raise ValueError("Currently only images of dtype int and float32 are supported.")
-
-    image = torch.from_numpy(image).to(torch.float32).to(device)
-
-    unique_labels = torch.unique(mask)
-    unique_labels = unique_labels[unique_labels != 0]
-
-    instance_list = []
-    instance_mask_list = []
-
-    for _label in unique_labels:
-        if _label == 0:
-            continue
-        size_z, size_y, size_x = size  # ~ diameter of the cell ~2*depth ( 2* depth+1 )
-        # _, z_mask, y_mask, x_mask = torch.where(mask == _label)
-        vox_idx = (mask == _label).nonzero(as_tuple=False)
-        z_min = int(vox_idx[:, 1].amin().item())
-        z_max = int(vox_idx[:, 1].amax().item())
-        y_min = int(vox_idx[:, 2].amin().item())
-        y_max = int(vox_idx[:, 2].amax().item())
-        x_min = int(vox_idx[:, 3].amin().item())
-        x_max = int(vox_idx[:, 3].amax().item())
-
-        # z_max, z_min = max(z_mask), min(z_mask)
-        # y_max, y_min = max(y_mask), min(y_mask)
-        # x_max, x_min = max(x_mask), min(x_mask)
-
-        instance = image[:, z_min : z_max + 1, y_min : y_max + 1, x_min : x_max + 1]
-        instance_mask = mask[:, z_min : z_max + 1, y_min : y_max + 1, x_min : x_max + 1]
-
-        instance_mask = instance_mask * (instance_mask == _label)  # put to zero everywhere there is no _label
-
-        # instance_mask = torch.where(instance_mask == _label, instance_mask, 0)
-        instance = instance * (instance_mask != 0).to(instance.dtype)
-        instance = torch.where(instance_mask != 0, instance, 0)
-        instance = _pad_tensor(instance, size=[size_z, size_y, size_x])
-        instance_mask = _pad_tensor(instance_mask, size=[size_z, size_y, size_x])
-        instance_list.append(instance)
-        instance_mask_list.append(instance_mask)
-
-    log.info(
-        f"Finished extracting instances, took {time.time() - start} seconds ({len(unique_labels) / (time.time() - start)} instances/second)."
-    )
-    return torch.stack(instance_mask_list), torch.stack(instance_list)
-
-
-def _pad_tensor(t: torch.Tensor, size: tuple[int, int, int]) -> torch.Tensor:
-    """
-    Resize a torch tensor to shape (size_z, size_y, size_x) or (..., size_z, size_y, size_x).
-
-    - Crops if dimensions exceed target size.
-    - Pads with zeros if smaller.
-
-    Raises
-    ------
-    ValueError
-        If the input tensor has ndim < 3.
-    """
-    if t.ndim < 3:
-        raise ValueError("Tensor must have at least 3 dimensions (z, y, x).")
-
-    size_z, size_y, size_x = size
-
-    t = t[..., :size_z, :size_y, :size_x]
-
-    z, y, x = t.shape[-3:]
-    pad_z = size_z - z
-    pad_y = size_y - y
-    pad_x = size_x - x
-
-    # Order for F.pad: (x_left, x_right, y_left, y_right, z_left, z_right, ...)
-    pad = (0, pad_x, 0, pad_y, 0, pad_z)
-
-    if any(p < 0 for p in pad):
-        raise ValueError(f"Target size {size} is smaller than tensor shape {t.shape[-3:]}")
-
-    t = F.pad(t, pad, mode="constant", value=0)
-    return t
