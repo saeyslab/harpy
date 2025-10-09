@@ -6,6 +6,7 @@ import time
 import uuid
 from pathlib import Path
 
+import dask
 import dask.array as da
 import numpy as np
 import pandas as pd
@@ -14,6 +15,7 @@ from numpy.typing import NDArray
 from scipy import ndimage
 
 from harpy.image.segmentation._utils import _add_depth_to_chunks_size
+from harpy.utils._keys import _INSTANCE_KEY
 from harpy.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
@@ -119,14 +121,15 @@ class Featurizer:
             array_mask = da.from_zarr(array_mask_intermediate_store)
             array_image = da.from_zarr(array_image_intermediate_store)
 
-        # probably not even necessary to do this count_custom block, dask seems to help himself well if these are not exactly specified in featurize custom_block call below
-        counts = da.map_blocks(
-            _count_custom_block,
+        N = 500  # guess for nr of labels per block.
+        # This guess does not need to be exact, because we do a dask.compute() on labels_per_chunk and then dask does not need exact chunk sizes
+        labels_per_chunk = da.map_blocks(
+            _labels_per_block,
             array_mask,
             chunks=(
                 (1,),  # trivial c dimension
                 (1,) * len(array_mask.chunks[1]),
-                (1,) * len(array_mask.chunks[2]),
+                N,  # N is a guess, add this step you do not know size of resulting chunks.
                 (1,) * len(array_mask.chunks[3]),
             ),  # e.g. ((1,),(1, 1, 1,), (1, 1,),),
             dtype=array_mask.dtype,
@@ -134,16 +137,36 @@ class Featurizer:
             index=self._labels[self._labels != 0],
         )
 
-        log.info("Calculating instances per chunk. This could take a few minutes for large images.")
-        counts = counts.compute().flatten()
+        log.info("Calculating instance number per chunk. This could take a few minutes for large images.")
+        labels_per_chunk = dask.compute(*labels_per_chunk.to_delayed().flatten())
+        labels_per_chunk = [_item.flatten() for _item in labels_per_chunk]
+        counts = [len(_item) for _item in labels_per_chunk]
 
-        instances_not_assigned = len(self._labels[self._labels != 0]) - sum(counts)
-        if instances_not_assigned != 0:
+        instances_ids = np.concatenate(labels_per_chunk)
+
+        unique_instance_ids, idx, _returned_counts = np.unique(instances_ids, return_index=True, return_counts=True)
+        duplicates = unique_instance_ids[_returned_counts > 1]
+
+        # This case should not happen if depth> max_diameter/2.
+        if duplicates:
             log.info(
-                f"The number of total labels in the mask differs from the number of labels counted per chunk "
-                f"(difference: {instances_not_assigned}). Consider increasing the 'depth' parameter. "
-                "Some masks may not have been uniquely assigned to a chunk, even at higher depth values. "
-                "This difference should remain very small compared to the total number of cells."
+                f"There are {len(duplicates)} instances that are assigned to more than one chunk (instance id's: {duplicates}). Consider increasing depth. "
+                "We will only keep the first occurence. If increasing depth does not help, please report this."
+            )
+
+        # instances that are not assigned to any chunk. Can happen for edge cases, or if depth is too small.
+        _diff = np.setdiff1d(
+            self._labels[self._labels != 0],
+            unique_instance_ids,
+        )
+
+        if _diff:
+            log.info(
+                f"There are {len(_diff)} labels that could not be assigned to a chunk. "
+                "Consider increasing the 'depth' parameter."
+                "Some labels may not be assigned to a chunk even at high depth values. "
+                "This number should remain very small compared to the total number of instances."
+                f"Instance ids: {_diff}."
             )
 
         arrays = [array_mask, array_image]
@@ -158,7 +181,7 @@ class Featurizer:
             chunks=(
                 c_chunks,  # e.g. (3+1,1) # do allow chunking in c.
                 array_image.chunks[1],
-                tuple(counts.tolist()),
+                tuple(counts),
                 (diameter,),
                 (diameter,),
             ),
@@ -170,6 +193,13 @@ class Featurizer:
         # make it i,c,z,y,x
         dask_chunks = dask_chunks.transpose(2, 0, 1, 3, 4)
 
+        # Correct for non unique instances in instance_ids. Case should not happen for depth>max_diameter/2
+        if len(idx) < len(instances_ids):  # equivalent to 'if duplicates:'
+            log.info("Removing duplicates.")
+            indices_to_keep = np.sort(idx)
+            instances_ids = instances_ids[indices_to_keep]
+            dask_chunks = dask_chunks[indices_to_keep]
+
         if zarr_output_path is not None:
             dask_chunks.rechunk(dask_chunks.chunksize).to_zarr(zarr_output_path)
             dask_chunks = da.from_zarr(zarr_output_path)
@@ -180,31 +210,34 @@ class Featurizer:
             shutil.rmtree(array_mask_intermediate_store)
             shutil.rmtree(array_image_intermediate_store)
 
-        return dask_chunks
+        return instances_ids, dask_chunks
 
-    def mean(
+    def _mean(
         self,
         diameter: int,  # estimated max diameter of cell in y, x
-        device: str = "cpu",
     ) -> pd.DataFrame:
-        fn_kwargs = {
-            "size": (self._image.shape[1], diameter, diameter),
-            "device": device,
-        }
-
-        return self.featurize(
-            depth=diameter * 2,
-            features=2,
-            dtype=np.float32,
-            fn=_stats,
-            fn_kwargs=fn_kwargs,
+        """Function calculates mean intensity. Please use optimized RasterAggregator.aggregate_mean() function."""
+        # this is dummy function, please use optimized RasterAggregator
+        instances_ids, dask_chunks = self.extract_instances(
+            depth=diameter // 2,
+            diameter=diameter,
+            zarr_output_path=None,
+            store_intermediate=False,
         )
 
-        # df = pd.DataFrame(_result)
+        mask = dask_chunks[:, 0:1, ...]  # the first one is the mask
+        image = dask_chunks[:, 1:, ...]
+        mask = mask != 0
+        sum_nonmask = (image * mask).sum(axis=(2, 3, 4))
+        count_nonzero = mask.sum(axis=(2, 3, 4))
 
-        # df[_INSTANCE_KEY] = self._labels[self._labels != 0]
+        avg_intensity = da.where(count_nonzero > 0, sum_nonmask / count_nonzero, 0)
 
-        # return df
+        df = pd.DataFrame(avg_intensity)
+
+        df[_INSTANCE_KEY] = instances_ids
+
+        return df.sort_values(by=_INSTANCE_KEY).reset_index(drop=True)
 
 
 def _stats(mask: NDArray, image: NDArray, size: tuple[int, int, int], device="cpu") -> NDArray:
@@ -432,6 +465,19 @@ def _featurize_custom_block(
 
     # return c,z,i,y,x tensor
     return instances.transpose(1, 2, 0, 3, 4)
+
+
+def _labels_per_block(
+    mask_block: NDArray,
+    index: NDArray,
+    _depth,
+) -> NDArray:
+    assert mask_block.ndim == 4
+    assert 0 not in index
+
+    _, unique_masks_inside = _mask_center_of_mass_outside(mask_block=mask_block.copy(), _depth=_depth)
+
+    return unique_masks_inside.reshape(1, 1, -1, 1)
 
 
 def _count_custom_block(
