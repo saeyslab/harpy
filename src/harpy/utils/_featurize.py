@@ -11,7 +11,6 @@ import dask.array as da
 import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
-from scipy import ndimage
 
 from harpy.image.segmentation._utils import _add_depth_to_chunks_size
 from harpy.utils._keys import _INSTANCE_KEY
@@ -551,6 +550,7 @@ def _mask_center_of_mass_outside(mask_block: NDArray, _depth):
         # if no border labels, nothing to do
         return mask_block, unique_masks[unique_masks != 0]
 
+    """
     border_labels = list(border_labels)
     center_of_mass_border_labels = ndimage.center_of_mass(input=mask_block, labels=mask_block, index=border_labels)
 
@@ -568,6 +568,16 @@ def _mask_center_of_mass_outside(mask_block: NDArray, _depth):
     if border_labels:
         border_labels_not_to_consider = np.array(border_labels)[~np.array(border_labels_in_original_block)]
         unique_masks = unique_masks[~np.isin(unique_masks, border_labels_not_to_consider)]
+    """
+    border_labels_in_original_block = _is_inside(
+        mask_block.squeeze(0),
+        instance_ids=border_labels,
+        DY=_depth[2],
+        DX=_depth[3],
+    )
+
+    border_labels_not_to_consider = np.array(border_labels)[~np.array(border_labels_in_original_block)]
+    unique_masks = unique_masks[~np.isin(unique_masks, border_labels_not_to_consider)]
 
     unique_masks = unique_masks[unique_masks != 0]
 
@@ -575,6 +585,78 @@ def _mask_center_of_mass_outside(mask_block: NDArray, _depth):
     mask_block[mask] = 0
 
     return mask_block, unique_masks
+
+
+def _is_inside(mask_array: NDArray, instance_ids: NDArray, DY: int, DX: int):
+    """
+    Check for each id in instance_ids that area is in DY:-DY,DX:-DX
+
+    Count pixels (areas) for each cell_id within nine regions of mask_array.
+
+    Parameters
+    ----------
+    mask_array : (Y, X) uint ndarray
+    instance_ids : 1D array-like of uint32
+    DY, DX : int
+        Border thicknesses. Assumes 0 < DY < Y and 0 < DX < X.
+
+    Returns
+    -------
+    Instance ids that are in DY:-DY,DX:-DX.
+    """
+    assert mask_array.ndim == 3
+    assert instance_ids.ndim == 1
+    _, Y, X = mask_array.shape
+    assert DY < Y
+    assert DX < X
+
+    assert 0 not in instance_ids  # we assume these do not contain 0, are sorted, and unique
+    # ids = ids[ ids!=0 ]
+
+    # Define convenient slices
+    top = slice(0, DY)
+    middle_y = slice(DY, Y - DY)
+    bottom = slice(Y - DY, Y)
+
+    left = slice(0, DX)
+    middle_x = slice(DX, X - DX)
+    right = slice(X - DX, X)
+
+    regions = {
+        0: (bottom, left),  # [-DY:Y, 0:DX]
+        1: (bottom, middle_x),  # [-DY:Y, DX:-DX]
+        2: (bottom, right),  # [-DY:Y, -DX:X]
+        3: (middle_y, right),  # [DY:-DY, -DX:X]
+        4: (top, right),  # [0:DY, -DX:X]
+        5: (top, middle_x),  # [0:DY, DX:-DX]
+        6: (top, left),  # [0:DY, 0:DX]
+        7: (middle_y, left),  # [DY:-DY, 0:DX]
+        8: (middle_y, middle_x),  # [DY:-DY, DX:-DX]
+    }
+
+    def counts_for(view: NDArray, ids: NDArray) -> NDArray:
+        # Flatten region labels, find positions in ids_sorted via searchsorted
+        vals = view.ravel()
+        idx = np.searchsorted(ids, vals)
+        # make idx valid
+        idx[idx >= ids.size] = 0
+        # bincount
+        hits = ids[idx] == vals
+        return np.bincount(idx[hits], minlength=ids.size)
+
+    stacked = np.empty((9, instance_ids.size), dtype=np.uint32)
+    for r in range(9):
+        ysl, xsl = regions[r]
+        view = mask_array[:, ysl, xsl]
+        cnts = counts_for(view=view, ids=instance_ids)
+        stacked[r] = cnts
+
+    max_rows = np.argmax(stacked, axis=0)
+
+    # True when the max is in row 8 ->inside
+    mask = max_rows == 8
+
+    return mask
 
 
 def _count_custom_block_fast(
@@ -611,10 +693,8 @@ def _count_custom_block_fast(
         return np.array([unique_masks.size]).reshape(-1, 1, 1)
 
     # Select voxels that belong to border labels
-    # (np.isin is vectorized in C; much faster than Python loops)
     sel = np.isin(mask_block, border_labels)
     if not np.any(sel):
-        # Fallback: no selected voxels (degenerate), just count uniques in subset
         unique_masks = unique_masks[unique_masks != 0]
         return np.array([unique_masks.size]).reshape(-1, 1, 1)
 

@@ -107,7 +107,7 @@ def test_featurize_duplicates_blobs(sdata):
     assert np.array_equal(
         instances_ids,
         np.array(
-            [1, 3, 5, 11, 12, 18, 19, 25, 29, 30, 31, 6, 13, 17, 22, 26, 4, 8, 9, 16, 20, 23, 24, 27, 2, 10],
+            [3, 5, 11, 12, 18, 19, 25, 29, 30, 31, 1, 6, 13, 17, 22, 26, 4, 8, 9, 16, 20, 23, 24, 27, 2, 10],
             dtype=np.int16,
         ),
     )
