@@ -149,10 +149,12 @@ class Featurizer:
         duplicates = unique_instance_ids[_returned_counts > 1]
 
         # This case should not happen if depth> max_diameter/2.
-        if duplicates:
+        if duplicates.size:
             log.info(
-                f"There are {len(duplicates)} instances that are assigned to more than one chunk (instance id's: {duplicates}). Consider increasing depth. "
-                "We will only keep the first occurence. If increasing depth does not help, please report this."
+                f"There are {len(duplicates)} instances that are assigned to more than one chunk (instance id's: {duplicates}). "
+                "Consider increasing depth. "
+                "We will only keep the first occurence. "
+                "If increasing depth does not help, please report this."
             )
 
         # instances that are not assigned to any chunk. Can happen for edge cases, or if depth is too small.
@@ -161,13 +163,13 @@ class Featurizer:
             unique_instance_ids,
         )
 
-        if _diff:
+        if _diff.size:
             log.info(
                 f"There are {len(_diff)} labels that could not be assigned to a chunk. "
-                "Consider increasing the 'depth' parameter."
+                "Consider increasing the 'depth' parameter. "
                 "Some labels may not be assigned to a chunk even at high depth values. "
-                "This number should remain very small compared to the total number of instances."
-                f"Instance ids: {_diff}."
+                "This number should remain very small compared to the total number of instances. "
+                f"(Instance ids: {_diff}.)"
             )
 
         arrays = [array_mask, array_image]
@@ -195,7 +197,7 @@ class Featurizer:
         dask_chunks = dask_chunks.transpose(2, 0, 1, 3, 4)
 
         # Correct for non unique instances in instance_ids. Case should not happen for depth>max_diameter/2
-        if len(idx) < len(instances_ids):  # equivalent to 'if duplicates:'
+        if len(idx) < len(instances_ids):  # equivalent to 'if duplicates.size:'
             log.info("Removing duplicates.")
             indices_to_keep = np.sort(idx)
             instances_ids = instances_ids[indices_to_keep]
@@ -211,6 +213,8 @@ class Featurizer:
             shutil.rmtree(array_mask_intermediate_store)
             shutil.rmtree(array_image_intermediate_store)
 
+        # Note that instance_ids are not sorted.
+        # It is recommended not to do so (otherwise the dask_chunks array needs to be sorted, which is not optimal)
         return instances_ids, dask_chunks
 
     def _mean(
@@ -218,9 +222,9 @@ class Featurizer:
         diameter: int,  # estimated max diameter of cell in y, x
     ) -> pd.DataFrame:
         """Function calculates mean intensity. Please use optimized RasterAggregator.aggregate_mean() function."""
-        # this is dummy function, please use optimized RasterAggregator
+        # this is dummy function to illustrate working of ._extract_instances, please use optimized RasterAggregator
         instances_ids, dask_chunks = self.extract_instances(
-            depth=diameter // 2,
+            depth=diameter // 2 + 1,
             diameter=diameter,
             zarr_output_path=None,
             store_intermediate=False,
@@ -271,8 +275,8 @@ def _transpose_chunks(array: da.Array, depth: dict[int, int]):
 
     # map an overlap
     array = da.map_overlap(
-        array,
         return_block,
+        array,
         depth=depth,
         chunks=output_chunks,
         allow_rechunk=False,
