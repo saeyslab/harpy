@@ -64,23 +64,21 @@ class Featurizer:
     - Image and mask must be aligned in spatial dimensions and chunking to ensure accurate and efficient featurization.
     """
 
-    def __init__(self, mask_dask_array: da.Array, image_dask_array: da.Array | None):
+    def __init__(self, mask_dask_array: da.Array, image_dask_array: da.Array):
         if not np.issubdtype(mask_dask_array.dtype, np.integer):
             raise ValueError(f"'mask_dask_array' should contains chunks of type {np.integer}.")
         self._labels = (
             da.unique(mask_dask_array).compute()
         )  # calculate this one time during initialization, otherwise we would need to calculate this multiple times.
-        if image_dask_array is not None:
-            assert image_dask_array.ndim == 4, "Currently only 4D image arrays are supported ('c', 'z', 'y', 'x')."
-            assert image_dask_array.shape[1:] == mask_dask_array.shape, (
-                "The mask and the image should have the same spatial dimensions ('z', 'y', 'x')."
-            )
-            assert image_dask_array.chunksize[1:] == mask_dask_array.chunksize, (
-                "Provided mask ('mask_dask_array') and image ('image_dask_array') do not have the same chunksize in ( 'z', 'y', 'x' ). Please rechunk."
-            )
-            self._image = image_dask_array
+        assert image_dask_array.ndim == 4, "Currently only 4D image arrays are supported ('c', 'z', 'y', 'x')."
         assert mask_dask_array.ndim == 3, "Currently only 3D masks are supported ('z', 'y', 'x')."
-
+        assert image_dask_array.shape[1:] == mask_dask_array.shape, (
+            "The mask and the image should have the same spatial dimensions ('z', 'y', 'x')."
+        )
+        assert image_dask_array.chunksize[1:] == mask_dask_array.chunksize, (
+            "Provided mask ('mask_dask_array') and image ('image_dask_array') do not have the same chunksize in ( 'z', 'y', 'x' ). Please rechunk."
+        )
+        self._image = image_dask_array
         self._mask = mask_dask_array
 
     def extract_instances(
@@ -88,11 +86,72 @@ class Featurizer:
         depth: int,  # ~max_diameter/2, depth in y and x,
         diameter: int
         | None = None,  # will be dimension of resulting chunks in y and x. Can be set to value < max_diameter to optimize performance
+        remove_background: bool = True,
         zarr_output_path: str
         | Path
         | None = None,  # if zarr_output_path is specified, we compute the graph, otherwise we return a non-computed graph
         store_intermediate: bool = False,
     ) -> da.Array:
+        """
+        Extract per-label instance windows from the mask and image of size `diameter` in `y` and `x` using `dask.array.map_overlap` and `dask.array.map_blocks`.
+
+        For every non-zero label in the mask, this method builds a Dask graph that
+        slices out a centered, square window in the `y`,`x` plane around that instance.
+        The `z` dimension is preserved from the source arrays. The corresponding image data
+        are gathered for each instance (aligned in `z`, `y` and `x`, with channels preserved)
+
+        Parameters
+        ----------
+        depth
+            Passed to `dask.map_overlap`. Please set depth `~ max_diameter / 2`).
+        diameter
+            Optional explicit side length of the resulting `y`, `x` window for every
+            instance. If not provided `diameter` is set to 2 times `depth`.
+        remove_background
+            If `True` (default), pixels outside the instance label within each
+            window are set to background (e.g., zero) so that only the object remains
+            inside the cutout. If ``False``, the entire window content is kept.
+        zarr_output_path
+            If a filesystem path (string or ``Path``) is provided, the extracted
+            instances are **computed** and materialized to a Zarr store at that
+            location. The returned object will still be a Dask array pointing at the
+            written data, but all computations necessary to populate the store will
+            have been executed. If `None` (default), no data are written and the
+            method returns a **lazy** (not yet computed) Dask array.
+        store_intermediate
+            If `True`, and intermediate `.zarr` file is written to disk.
+            Setting this to `True` will decrease ram usage.
+            If `zarr_output_path` is not specified, it is not allowed to set
+            `store_intermediate` to `True`.
+
+        Returns
+        -------
+        tuple:
+
+            - a dask array containing indices of extracted labels, shape `(i,)`.
+            Dimension of `i` will be equal to the total number of non-zero labels in the mask.
+
+            - a dask array of dimension `(i,c,z,y,x)`, with dimension of y and x equal to `diameter`,
+             or 2*`depth` if `diameter` is not specified.
+
+        Examples
+        --------
+        >>> fe = Featurizer(mask_dask_array=mask, image_dask_array=img)
+        >>> instance_ids, instances = fe.extract_instances(depth=100, diameter=75)            # lazy graph
+        >>> instances                                                             # inspect shape/chunks
+        dask.array<...>
+
+        # Persist to Zarr on disk (computes now)
+        >>> instance_ids, instances = fe.extract_instances(
+        ...     depth=100,
+        ...     diameter=75,
+        ...     zarr_output_path="instances.zarr",
+        ... )
+
+        # Keep full window content instead of masking to the instance
+        >>> inst = fe.extract_instances(depth=100, diameter=75 remove_background=False)
+
+        """
         if diameter is None:
             diameter = 2 * depth
         if diameter > 2 * depth:
@@ -153,7 +212,6 @@ class Featurizer:
                 f"There are {len(duplicates)} instances that are assigned to more than one chunk (instance id's: {duplicates}). "
                 "Consider increasing depth. "
                 "We will only keep the first occurence. "
-                "If increasing depth does not help, please report this."
             )
 
         # instances that are not assigned to any chunk. Can happen for edge cases, or if depth is too small.
@@ -191,6 +249,7 @@ class Featurizer:
             _depth=_depth,
             diameter=diameter,
             index=self._labels[self._labels != 0],
+            remove_background=remove_background,
         )
         # make it i,c,z,y,x
         dask_chunks = dask_chunks.transpose(2, 0, 1, 3, 4)
@@ -303,9 +362,10 @@ def _transpose_chunks(array: da.Array, depth: dict[int, int]):
 def _featurize_block(
     *arrays,
     index: NDArray,
-    block_info,
-    _depth,
-    diameter,
+    block_info: dict,
+    _depth: dict[int, int],
+    diameter: int,
+    remove_background: bool,
 ) -> NDArray:
     mask_block = arrays[0]
     assert len(arrays) == 2
@@ -336,6 +396,7 @@ def _featurize_block(
             diameter,
         ),  # no chunking in z dimension, so size in z is image_block.shape[1]
         concat_mask=concat_mask,
+        remove_background=remove_background,
     )
 
     # return c,z,i,y,x tensor
@@ -359,6 +420,7 @@ def _extract_instances(
     mask: NDArray,
     image: NDArray,
     size: tuple[int, int, int] = (1, 100, 100),
+    remove_background=True,
     concat_mask: bool = True,
 ) -> NDArray:
     start = time.time()
@@ -424,6 +486,21 @@ def _extract_instances(
         ys, ye = int(ymin[i]), int(ymax[i]) + 1
         xs, xe = int(xmin[i]), int(xmax[i]) + 1
 
+        # If we want to keep background, we need to extend the bbox to size_z,size_y,size_x
+        if not remove_background:
+            zl = ze - zs
+            yl = ye - ys
+            xl = xe - xs
+            if zl < size_z:
+                zs = max(0, zs - (size_z - zl) // 2)
+                ze = min(Z, ze + ((size_z - zl) // 2) + 1)  # +1 to account for rounding when //2
+            if yl < size_y:
+                ys = max(0, ys - (size_y - yl) // 2)
+                ye = min(Y, ye + ((size_y - yl) // 2) + 1)
+            if xl < size_x:
+                xs = max(0, xs - (size_x - xl) // 2)
+                xe = min(X, xe + ((size_x - xl) // 2) + 1)
+
         # crop
         inst_img = image[:, zs:ze, ys:ye, xs:xe]  # .copy() # no copy needed, because we use np.where later
         inst_mask = mask[:, zs:ze, ys:ye, xs:xe]  # .copy()
@@ -431,8 +508,9 @@ def _extract_instances(
         # keep only this label in the mask, zero everywhere else
         lbl = uniq[i]
         inst_mask = np.where(inst_mask == lbl, inst_mask, 0)
-        # zero image outside the instance
-        inst_img = np.where(inst_mask != 0, inst_img, 0)
+        if remove_background:
+            # zero image outside the instance
+            inst_img = np.where(inst_mask != 0, inst_img, 0)
 
         inst_img = _pad_array(inst_img, size=[size_z, size_y, size_x])
         inst_mask = _pad_array(inst_mask, size=[size_z, size_y, size_x])
@@ -518,9 +596,6 @@ def _mask_center_of_mass_outside(mask_block: NDArray, _depth):
     assert len(_depth) == 4
     assert mask_block.ndim == 4
     # Set all masks that are fully outside the region to zero, they will be covered by other chunks
-    # (NOTE: theoretically possible that mask fully outside chunk, but center of mass inside chunks
-    # to solve, we should not construct the mask below, and we should consider all masks from 0:2DX and -2DX:X
-    # for performance we ignore this edge case)
     DY = _depth[2]
     DX = _depth[3]
     subset = mask_block[:, :, DY:-DY, DX:-DX]
@@ -623,15 +698,15 @@ def _is_inside(mask_array: NDArray, instance_ids: NDArray, DY: int, DX: int):
     right = slice(X - DX, X)
 
     regions = {
-        0: (bottom, left),  # [-DY:Y, 0:DX]
-        1: (bottom, middle_x),  # [-DY:Y, DX:-DX]
-        2: (bottom, right),  # [-DY:Y, -DX:X]
-        3: (middle_y, right),  # [DY:-DY, -DX:X]
-        4: (top, right),  # [0:DY, -DX:X]
-        5: (top, middle_x),  # [0:DY, DX:-DX]
-        6: (top, left),  # [0:DY, 0:DX]
-        7: (middle_y, left),  # [DY:-DY, 0:DX]
-        8: (middle_y, middle_x),  # [DY:-DY, DX:-DX]
+        0: (middle_y, middle_x),  # [DY:-DY, DX:-DX]
+        1: (bottom, left),  # [-DY:Y, 0:DX]
+        2: (bottom, middle_x),  # [-DY:Y, DX:-DX]
+        3: (bottom, right),  # [-DY:Y, -DX:X]
+        4: (middle_y, right),  # [DY:-DY, -DX:X]
+        5: (top, right),  # [0:DY, -DX:X]
+        6: (top, middle_x),  # [0:DY, DX:-DX]
+        7: (top, left),  # [0:DY, 0:DX]
+        8: (middle_y, left),  # [DY:-DY, 0:DX]
     }
 
     def counts_for(view: NDArray, ids: NDArray) -> NDArray:
@@ -653,99 +728,7 @@ def _is_inside(mask_array: NDArray, instance_ids: NDArray, DY: int, DX: int):
 
     max_rows = np.argmax(stacked, axis=0)
 
-    # True when the max is in row 8 ->inside
-    mask = max_rows == 8
+    # True when the max is in row 0 ->inside
+    mask = max_rows == 0
 
     return mask
-
-
-def _count_custom_block_fast(
-    *arrays,
-    index,
-    _depth,
-):
-    mask_block = arrays[0]
-    if len(arrays) == 2:
-        image_block = arrays[1]
-        assert mask_block.shape == image_block.shape
-    if len(arrays) > 2:
-        raise ValueError("Only accepts one or two arrays.")
-    assert 0 not in index
-
-    D0, D1, D2 = _depth
-    Z, Y, X = mask_block.shape
-
-    # Build border "overlap region" once, then unique
-    slabs = [
-        mask_block[:, -(D1 * 2) : -D1, D2:-D2],  # near +Y border (inner overlap band)
-        mask_block[:, D1:-D1, -(D2 * 2) : -D2],  # near +X border
-        mask_block[:, D1 : D1 * 2, D2:-D2],  # near -Y border
-        mask_block[:, D1:-D1, D2 : D2 * 2],  # near -X border
-    ]
-    border_labels = np.unique(np.concatenate([s.ravel() for s in slabs]))
-    border_labels = border_labels[border_labels != 0]  # drop background early
-
-    # If no border labels, just count uniques in the inner subset and return
-    subset = mask_block[:, D1 : Y - D1, D2 : X - D2]
-    unique_masks = np.unique(subset)
-    if border_labels.size == 0:
-        unique_masks = unique_masks[unique_masks != 0]
-        return np.array([unique_masks.size]).reshape(-1, 1, 1)
-
-    # Select voxels that belong to border labels
-    sel = np.isin(mask_block, border_labels)
-    if not np.any(sel):
-        unique_masks = unique_masks[unique_masks != 0]
-        return np.array([unique_masks.size]).reshape(-1, 1, 1)
-
-    # Coordinates of selected voxels
-    zz, yy, xx = np.nonzero(sel)
-
-    """
-    labs = mask_block[sel]
-
-    # Map labs -> [0..k-1] for bincounts
-    lbls_sorted = np.sort(border_labels)
-    # searchsorted requires labels to be in the sorted list
-    # positions give compact indices for bincount
-    idx = np.searchsorted(lbls_sorted, labs)
-
-    counts = np.bincount(idx)
-    sum_y = np.bincount(idx, weights=yy.astype(np.float64))
-    sum_x = np.bincount(idx, weights=xx.astype(np.float64))
-
-    cy = sum_y / counts
-    cx = sum_x / counts
-    # We don't actually need cz for the inside test, but compute the same way if you do:
-    # sum_z = np.bincount(idx, weights=zz.astype(np.float64))
-    # cz = sum_z / counts
-
-    # vectorized inside-original check (Y,X only)
-    inside_y = (cy >= D1) & (cy < (Y - D1))
-    inside_x = (cx >= D2) & (cx < (X - D2))
-    inside = inside_y & inside_x
-    """
-    labs = mask_block[sel]  # labels present in selection
-    labs_unique, inv = np.unique(labs, return_inverse=True)
-    counts = np.bincount(inv)
-    sum_y = np.bincount(inv, weights=yy.astype(np.float64))
-    sum_x = np.bincount(inv, weights=xx.astype(np.float64))
-    cy = sum_y / counts
-    cx = sum_x / counts
-
-    inside = (cy >= D1) & (cy < (Y - D1)) & (cx >= D2) & (cx < (X - D2))
-    labels_inside = labs_unique[inside]
-
-    # labels to exclude = border labels that are NOT inside
-    border_labels_not_to_consider = border_labels[~np.isin(border_labels, labels_inside)]
-
-    # Labels whose COM is OUTSIDE the original block (to be excluded)
-    # border_labels_not_to_consider = lbls_sorted[~inside]
-
-    # Unique masks that intersect the inner subset
-    unique_masks = unique_masks[unique_masks != 0]
-    if border_labels_not_to_consider.size:
-        # Remove those to be ignored
-        unique_masks = unique_masks[~np.isin(unique_masks, border_labels_not_to_consider)]
-
-    return np.array([unique_masks.size]).reshape(-1, 1, 1)
