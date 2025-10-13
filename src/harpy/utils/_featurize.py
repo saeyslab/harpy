@@ -52,7 +52,7 @@ class Featurizer:
     AssertionError
         If `mask_dask_array` is not 3D.
     AssertionError
-        If `image_dask_array` is provided but is not 4D.
+        If `image_dask_array` is is not 4D.
     AssertionError
         If spatial dimensions of `image_dask_array` and `mask_dask_array` do not match.
     AssertionError
@@ -67,6 +67,7 @@ class Featurizer:
     def __init__(self, mask_dask_array: da.Array, image_dask_array: da.Array):
         if not np.issubdtype(mask_dask_array.dtype, np.integer):
             raise ValueError(f"'mask_dask_array' should contains chunks of type {np.integer}.")
+        log.info("Calculating unique labels in the mask.")
         self._labels = (
             da.unique(mask_dask_array).compute()
         )  # calculate this one time during initialization, otherwise we would need to calculate this multiple times.
@@ -99,6 +100,8 @@ class Featurizer:
         slices out a centered, square window in the `y`,`x` plane around that instance.
         The `z` dimension is preserved from the source arrays. The corresponding image data
         are gathered for each instance (aligned in `z`, `y` and `x`, with channels preserved)
+        Note that decreasing the chunk size of the provided image and mask dask array will lead to decreased
+        consumption of ram. A good first guess for chunk size is `(5,1,2048,2048)`.
 
         Parameters
         ----------
@@ -196,8 +199,9 @@ class Featurizer:
             index=self._labels[self._labels != 0],
         )
 
-        log.info("Calculating instance number per chunk. This could take a few minutes for large images.")
+        log.info("Calculating instance numbers per chunk. This could take a few minutes for large images.")
         labels_per_chunk = dask.compute(*labels_per_chunk.to_delayed().flatten())
+        log.info("Finished calculating instance numbers per chunks.")
         labels_per_chunk = [_item.flatten() for _item in labels_per_chunk]
         counts = [len(_item) for _item in labels_per_chunk]
 
@@ -260,6 +264,7 @@ class Featurizer:
             indices_to_keep = np.sort(idx)
             instances_ids = instances_ids[indices_to_keep]
             dask_chunks = dask_chunks[indices_to_keep]
+            log.info("Finished removing duplicates.")
 
         if zarr_output_path is not None:
             dask_chunks.rechunk(dask_chunks.chunksize).to_zarr(zarr_output_path)
