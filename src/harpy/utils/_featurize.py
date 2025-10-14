@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import inspect
 import os
 import shutil
 import time
 import uuid
+from collections.abc import Callable, Mapping
 from pathlib import Path
+from types import MappingProxyType
+from typing import Any
 
 import dask
 import dask.array as da
@@ -15,6 +19,7 @@ from numpy.typing import NDArray
 from harpy.image.segmentation._utils import _add_depth_to_chunks_size
 from harpy.utils._keys import _INSTANCE_KEY
 from harpy.utils.pylogger import get_pylogger
+from harpy.utils.utils import _dummy_patch_embedding
 
 log = get_pylogger(__name__)
 
@@ -82,6 +87,90 @@ class Featurizer:
         self._image = image_dask_array
         self._mask = mask_dask_array
 
+    def featurize(
+        self,
+        depth: int,
+        embedding_dimension: int,
+        diameter: int | None = None,
+        remove_background: bool = True,
+        zarr_output_path: str
+        | Path
+        | None = None,  # if zarr_output_path is specified, we compute the graph, otherwise we return a non-computed graph
+        store_intermediate: bool = False,
+        model: Callable[..., NDArray] = _dummy_patch_embedding,
+        batch_size: int | None = None,
+        fn_kwargs: Mapping[str, Any] = MappingProxyType({}),
+        **kwargs: Any,
+    ) -> tuple[NDArray, da.Array]:
+        if store_intermediate and zarr_output_path is None:
+            raise ValueError("Please specify a 'zarr_output_path' if 'store_intermediate' is 'True'.")
+
+        if zarr_output_path is not None and store_intermediate:
+            intermediate_zarr_output_path = os.path.join(
+                os.path.dirname(zarr_output_path), f"instances_{uuid.uuid4()}.zarr"
+            )
+        else:
+            intermediate_zarr_output_path = None
+        instance_ids, dask_chunks = self.extract_instances(
+            depth=depth,
+            diameter=diameter,
+            remove_background=remove_background,
+            zarr_output_path=intermediate_zarr_output_path,
+            store_intermediate=store_intermediate,
+            batch_size=batch_size,
+        )
+
+        assert "embedding_dimension" in inspect.signature(model).parameters, (
+            f"Callable '{model.__name__}' must include the parameter 'embedding_dimension'."
+        )
+
+        # remove the masks
+        dask_chunks = dask_chunks[:, 1:, ...]
+
+        # dask_chunks is array of dimension (i,c,z,y,x)
+        if batch_size is not None:
+            chunks = (
+                batch_size,
+                dask_chunks.shape[1],  # we do not allow chunking in c-dimension
+                dask_chunks.shape[2],
+                dask_chunks.shape[3],
+                dask_chunks.shape[4],
+            )
+        else:
+            chunks = (
+                dask_chunks.chunks[0],
+                dask_chunks.shape[1],  # we do not allow chunking in c-dimension
+                dask_chunks.shape[2],
+                dask_chunks.shape[3],
+                dask_chunks.shape[4],
+            )
+
+        # this rechunk is potentially computationally demanding.
+        dask_chunks = dask_chunks.rechunk(
+            chunks
+        )  # this is a no-op if batch_size is None, and if self._image/self._mask is not chunked in c dimension.
+        embedded_dask_chunks = da.map_blocks(
+            model,
+            dask_chunks,
+            chunks=(dask_chunks.chunks[0], embedding_dimension),
+            drop_axis=[2, 3, 4],
+            dtype=np.float32,
+            **kwargs,
+            embedding_dimension=embedding_dimension,
+            **fn_kwargs,
+        )
+
+        if zarr_output_path is not None:
+            embedded_dask_chunks.rechunk(embedded_dask_chunks.chunksize).to_zarr(zarr_output_path)
+            embedded_dask_chunks = da.from_zarr(zarr_output_path)
+
+        if store_intermediate:
+            log.info(f"Deleting intermediate zarr store {intermediate_zarr_output_path}")
+            if Path(intermediate_zarr_output_path).suffix == ".zarr":
+                shutil.rmtree(intermediate_zarr_output_path)
+
+        return instance_ids, embedded_dask_chunks
+
     def extract_instances(
         self,
         depth: int,  # ~max_diameter/2, depth in y and x,
@@ -92,7 +181,8 @@ class Featurizer:
         | Path
         | None = None,  # if zarr_output_path is specified, we compute the graph, otherwise we return a non-computed graph
         store_intermediate: bool = False,
-    ) -> da.Array:
+        batch_size: int | None = None,
+    ) -> tuple[NDArray, da.Array]:
         """
         Extract per-label instance windows from the mask and image of size `diameter` in `y` and `x` using `dask.array.map_overlap` and `dask.array.map_blocks`.
 
@@ -126,12 +216,14 @@ class Featurizer:
             Setting this to `True` will decrease ram usage.
             If `zarr_output_path` is not specified, it is not allowed to set
             `store_intermediate` to `True`.
+        batch_size
+            Chunksize of the resulting dask array in ì` dimension.
 
         Returns
         -------
         tuple:
 
-            - a dask array containing indices of extracted labels, shape `(i,)`.
+            - a numpy array containing indices of extracted labels, shape `(i,)`.
             Dimension of `i` will be equal to the total number of non-zero labels in the mask.
 
             - a dask array of dimension `(i,c,z,y,x)`, with dimension of y and x equal to `diameter`,
@@ -258,7 +350,10 @@ class Featurizer:
         # make it i,c,z,y,x
         dask_chunks = dask_chunks.transpose(2, 0, 1, 3, 4)
 
-        # Correct for non unique instances in instance_ids. Case should not happen for depth>max_diameter/2
+        chunksize = dask_chunks.chunksize
+        if batch_size is not None:
+            chunksize = (batch_size, chunksize[1], chunksize[2], chunksize[3], chunksize[4])
+        # Correct for non unique instances in instance_ids.
         if len(idx) < len(instances_ids):  # equivalent to 'if duplicates.size:'
             log.info("Removing duplicates.")
             indices_to_keep = np.sort(idx)
@@ -266,15 +361,20 @@ class Featurizer:
             dask_chunks = dask_chunks[indices_to_keep]
             log.info("Finished removing duplicates.")
 
+        # removing instances messes up the chunksize, so rechunk.
+        dask_chunks = dask_chunks.rechunk(chunksize)
+
         if zarr_output_path is not None:
-            dask_chunks.rechunk(dask_chunks.chunksize).to_zarr(zarr_output_path)
+            dask_chunks.to_zarr(zarr_output_path)
             dask_chunks = da.from_zarr(zarr_output_path)
 
         if store_intermediate:
             log.info(f"Deleting intermediate zarr store {array_image_intermediate_store}")
             log.info(f"Deleting intermediate zarr store {array_mask_intermediate_store}")
-            shutil.rmtree(array_mask_intermediate_store)
-            shutil.rmtree(array_image_intermediate_store)
+            if Path(array_image_intermediate_store).suffix == ".zarr":
+                shutil.rmtree(array_mask_intermediate_store)
+            if Path(array_mask_intermediate_store).suffix == ".zarr":
+                shutil.rmtree(array_image_intermediate_store)
 
         # Note that instance_ids are not sorted.
         # It is recommended not to do so (otherwise the dask_chunks array needs to be sorted, which is not optimal)

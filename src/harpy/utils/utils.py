@@ -8,6 +8,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 from geopandas import GeoDataFrame
+from numpy.typing import NDArray
 from omegaconf import OmegaConf
 from omegaconf.dictconfig import DictConfig
 from shapely.affinity import translate
@@ -165,3 +166,10 @@ def _self_contained_warning_message(sdata: SpatialData, layer: str) -> str | Non
         return warning_message
     else:
         return None
+
+
+def _dummy_patch_embedding(array: NDArray, embedding_dimension: int) -> NDArray:
+    import torch
+
+    random_torch_array = torch.rand(array.shape[0], embedding_dimension, dtype=torch.float32)
+    return random_torch_array.cpu().numpy()
