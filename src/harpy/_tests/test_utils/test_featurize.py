@@ -1,12 +1,49 @@
 import dask.array as da
 import numpy as np
 from scipy import ndimage
+from spatialdata import SpatialData
 
 from harpy.image import add_image_layer
 from harpy.utils._featurize import Featurizer
 
 
-def test_featurize(sdata_transcripts_no_backed):
+def test_featurize(sdata_transcripts_no_backed: SpatialData):
+    sdata = sdata_transcripts_no_backed
+
+    chunksize_spatial = 2048
+    depth = 100
+    embedding_dimension = 50
+    mask = sdata["segmentation_mask"].data[None, ...].rechunk(chunksize_spatial)
+
+    image = sdata["raw_image"].data.rechunk(chunksize_spatial)
+
+    sdata = add_image_layer(
+        sdata,
+        arr=da.concatenate([image, image, image, image], axis=0),
+        output_layer="raw_image",
+        overwrite=True,
+    )
+    image = sdata["raw_image"].data[:, None, ...].rechunk((3, 1, chunksize_spatial, chunksize_spatial))
+
+    featurizer = Featurizer(mask_dask_array=mask, image_dask_array=image)
+
+    instances_ids, dask_chunks = featurizer.featurize(
+        depth=depth,
+        diameter=75,
+        embedding_dimension=embedding_dimension,
+    )
+
+    result = dask_chunks.compute()
+    # check that all labels are extracted
+    index = da.unique(mask).compute()
+    index = index[index != 0]
+
+    assert np.array_equal(index, np.sort(instances_ids))
+    assert result.shape[0] == index.shape[0]
+    assert result.shape[1] == embedding_dimension
+
+
+def test_extract_instances(sdata_transcripts_no_backed):
     sdata = sdata_transcripts_no_backed
 
     chunksize_spatial = 2048
@@ -46,7 +83,7 @@ def test_featurize(sdata_transcripts_no_backed):
     assert np.array_equal(index, np.sort(instances_ids))
 
 
-def test_featurize_mean(sdata_transcripts_no_backed):
+def test_extract_instances_mean(sdata_transcripts_no_backed):
     sdata = sdata_transcripts_no_backed
 
     chunksize_spatial = 2048
@@ -75,7 +112,7 @@ def test_featurize_mean(sdata_transcripts_no_backed):
     assert np.allclose(df_mean_featurizer[0].values, scipy_mean, rtol=0, atol=1e-3)
 
 
-def test_featurize_duplicates_blobs(sdata):
+def test_extract_instances_duplicates_blobs(sdata):
     chunksize_spatial = 512
     depth = 250
 
@@ -113,7 +150,7 @@ def test_featurize_duplicates_blobs(sdata):
     )
 
 
-def test_featurize_mean_blobs(sdata):
+def test_extract_instances_mean_blobs(sdata):
     chunksize_spatial = 1000
 
     mask = sdata["blobs_labels"].data[None, ...].rechunk(chunksize_spatial)  # 1 chunk

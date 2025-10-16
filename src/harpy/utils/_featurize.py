@@ -137,6 +137,7 @@ class Featurizer:
             A callable that maps a batch of instance windows to embeddings, e.g.
             `model(batch, **model_kwargs) -> np.ndarray` of shape `(batch, embedding_dimension)`.
             The callable should accept NumPy arrays; Dask will handle chunking and batching.
+            The callable must include the parameter 'embedding_dimension'
         batch_size
             Chunk size of the resulting Dask array in the instance dimension `i` during model
             evaluation. Lower values can reduce (GPU) memory usage at the cost of more overhead.
