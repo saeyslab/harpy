@@ -90,6 +90,104 @@ class Featurizer:
         model_kwargs: Mapping[str, Any] = MappingProxyType({}),
         **kwargs: Any,
     ) -> tuple[NDArray, da.Array]:
+        """
+        Extract per-instance feature vectors from the image/mask using a user-provided embedding `model`.
+
+        This method constructs a Dask graph that, for each non-zero label in the mask, extracts a
+        centered `y`,`x` window (size set by `diameter` or `2*depth`), optionally removes background
+        pixels outside the labeled object, and feeds the resulting instance cutout (with preserved `z`
+        and channel dimensions) through `model` to produce an embedding of size `embedding_dimension`.
+
+        Internally, instance windows are generated lazily (via `dask.array.map_overlap` and
+        `dask.array.map_blocks`) and then batched along the instance dimension to evaluate `model`
+        in parallel. The output is a Dask array of shape `(i, d)`, where `i` is the number of
+        non-zero labels and `d == embedding_dimension`. Note that decreasing the chunk size of the
+        provided image and mask Dask arrays will reduce RAM usage. A good first guess for image/mask
+        chunking is `(10, 1, 2048, 2048)`.
+
+        For optimal performance, configure Dask to use `processes`, e.g. (`dask.config.set(scheduler="processes")`).
+
+        Parameters
+        ----------
+        depth
+            Passed to `dask.map_overlap`. Please set depth `~ max_diameter / 2`.
+        embedding_dimension
+            The dimensionality `d` of the feature vectors returned by `model`. The returned Dask
+            array will have shape `(i, embedding_dimension)`.
+        diameter
+            Optional explicit side length of the resulting `y`, `x` window for every
+            instance. If not provided `diameter` is set to 2 times `depth`.
+        remove_background
+            If `True` (default), pixels outside the instance label within each window are set to
+            background (e.g., zero) so that only the object remains inside the cutout. If `False`,
+            the full window content is passed to `model`.
+        zarr_output_path
+            If a filesystem path (string or ``Path``) is provided, the feature Dask array is
+            **computed** and materialized to a Zarr store at that location. The returned object will
+            still be a Dask array backed by the written data, but all computations necessary to
+            populate the store will have been executed. If `None` (default), no data are written and
+            the method returns a **lazy** (not yet computed) Dask array.
+        store_intermediate
+            If `True`, intermediate `.zarr` data may be written to disk to reduce peak RAM usage.
+            This is useful for large datasets or models. If `zarr_output_path` is not specified, it is
+            not allowed to set `store_intermediate=True`.
+            It is preferred to set `store_intermediate=False`, and work with a Dask client,
+            so Dask can spill to disk.
+        model
+            A callable that maps a batch of instance windows to embeddings, e.g.
+            `model(batch, **model_kwargs) -> np.ndarray` of shape `(batch, embedding_dimension)`.
+            The callable should accept NumPy arrays; Dask will handle chunking and batching.
+        batch_size
+            Chunk size of the resulting Dask array in the instance dimension `i` during model
+            evaluation. Lower values can reduce (GPU) memory usage at the cost of more overhead.
+        model_kwargs
+            Extra keyword arguments forwarded to `model` at call time (e.g., device selection,
+            inference flags).
+        **kwargs
+            Additional keyword arguments forwarded to `map_blocks`. Use with care.
+
+        Returns
+        -------
+        tuple
+            - A NumPy array of instance (label) indices, shape `(i,)`, where `i` equals the total
+            number of non-zero labels in the mask, matching the rows in the feature matrix.
+            - A Dask array of features with shape `(i, embedding_dimension)`. If `zarr_output_path`
+            is provided, this array points to the computed Zarr store; otherwise it is lazy.
+
+        Examples
+        --------
+        >>> fe = Featurizer(mask_dask_array=mask, image_dask_array=img)
+
+        # Lazy graph: generate embeddings with default dummy model
+        >>> instance_ids, feats = fe.featurize(
+        ...     depth=100,
+        ...     embedding_dimension=128,
+        ...     diameter=75,
+        ... )
+        >>> feats    # inspect shape/chunks without computing
+        dask.array<...>
+
+        # Use a custom model with arguments, and persist to Zarr on disk (computes now)
+        >>> def my_model(batch, *, normalize: bool = True) -> np.ndarray:
+        ...     # batch: (b, c, z, y, x) -> return (b, d)
+        ...     vecs = batch.reshape(batch.shape[0], -1).astype(np.float32)
+        ...     if normalize:
+        ...         norms = np.linalg.norm(vecs, axis=1, keepdims=True) + 1e-8
+        ...         vecs = vecs / norms
+        ...     # project to desired dim (toy example)
+        ...     W = np.random.RandomState(0).randn(vecs.shape[1], 64).astype(np.float32)
+        ...     return vecs @ W
+        ...
+        >>> instance_ids, feats = fe.featurize(
+        ...     depth=96,
+        ...     embedding_dimension=64,
+        ...     diameter=192,
+        ...     model=my_model,
+        ...     model_kwargs={"normalize": True},
+        ...     batch_size=64,
+        ...     zarr_output_path="features.zarr",
+        ... )
+        """
         if store_intermediate and zarr_output_path is None:
             raise ValueError("Please specify a 'zarr_output_path' if 'store_intermediate' is 'True'.")
 
@@ -179,12 +277,14 @@ class Featurizer:
         The `z` dimension is preserved from the source arrays. The corresponding image data
         are gathered for each instance (aligned in `z`, `y` and `x`, with channels preserved)
         Note that decreasing the chunk size of the provided image and mask dask array will lead to decreased
-        consumption of ram. A good first guess for chunk size is `(5,1,2048,2048)`.
+        consumption of RAM. A good first guess for chunk size is `(5,1,2048,2048)`.
+
+        For optimal performance, configure Dask to use `processes`, e.g. (`dask.config.set(scheduler="processes")`).
 
         Parameters
         ----------
         depth
-            Passed to `dask.map_overlap`. Please set depth `~ max_diameter / 2`).
+            Passed to `dask.map_overlap`. Please set depth `~ max_diameter / 2`.
         diameter
             Optional explicit side length of the resulting `y`, `x` window for every
             instance. If not provided `diameter` is set to 2 times `depth`.
@@ -204,8 +304,10 @@ class Featurizer:
             Setting this to `True` will decrease ram usage.
             If `zarr_output_path` is not specified, it is not allowed to set
             `store_intermediate` to `True`.
+            It is recommended to set `store_intermediate=False`, and work with a Dask client,
+            so Dask can spill to disk.
         batch_size
-            Chunksize of the resulting dask array in ì` dimension.
+            Chunksize of the resulting dask array in the `i` dimension.
 
         Returns
         -------
@@ -214,7 +316,7 @@ class Featurizer:
             - a numpy array containing indices of extracted labels, shape `(i,)`.
             Dimension of `i` will be equal to the total number of non-zero labels in the mask.
 
-            - a dask array of dimension `(i,c,z,y,x)`, with dimension of y and x equal to `diameter`,
+            - a dask array of dimension `(i,c,z,y,x)`, with dimension of `y` and `x` equal to `diameter`,
              or 2*`depth` if `diameter` is not specified.
 
         Examples
