@@ -19,21 +19,9 @@ from numpy.typing import NDArray
 from harpy.image.segmentation._utils import _add_depth_to_chunks_size
 from harpy.utils._keys import _INSTANCE_KEY
 from harpy.utils.pylogger import get_pylogger
-from harpy.utils.utils import _dummy_patch_embedding
+from harpy.utils.utils import _dummy_embedding
 
 log = get_pylogger(__name__)
-
-"""
-try:
-    import torch
-    import torch.nn.functional as F
-
-    TORCH_AVAILABLE = True
-except ImportError:
-    log.warning(
-        "Module 'torch' not installed, please install 'torch' if you want to use the callable 'harpy.im.cellpose_callable' as model for 'harpy.im.segment'."
-    )
-"""
 
 
 class Featurizer:
@@ -97,9 +85,9 @@ class Featurizer:
         | Path
         | None = None,  # if zarr_output_path is specified, we compute the graph, otherwise we return a non-computed graph
         store_intermediate: bool = False,
-        model: Callable[..., NDArray] = _dummy_patch_embedding,
+        model: Callable[..., NDArray] = _dummy_embedding,
         batch_size: int | None = None,
-        fn_kwargs: Mapping[str, Any] = MappingProxyType({}),
+        model_kwargs: Mapping[str, Any] = MappingProxyType({}),
         **kwargs: Any,
     ) -> tuple[NDArray, da.Array]:
         if store_intermediate and zarr_output_path is None:
@@ -124,7 +112,7 @@ class Featurizer:
             f"Callable '{model.__name__}' must include the parameter 'embedding_dimension'."
         )
 
-        # remove the masks
+        # remove the masks, located at first dimension
         dask_chunks = dask_chunks[:, 1:, ...]
 
         # dask_chunks is array of dimension (i,c,z,y,x)
@@ -157,7 +145,7 @@ class Featurizer:
             dtype=np.float32,
             **kwargs,
             embedding_dimension=embedding_dimension,
-            **fn_kwargs,
+            **model_kwargs,
         )
 
         if zarr_output_path is not None:
