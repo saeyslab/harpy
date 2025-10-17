@@ -49,8 +49,14 @@ def macsima(
     Read *MACSima* formatted dataset.
 
     This function reads images from a MACSima cyclic imaging experiment.
-    The channel names will be in the format "{cycle}_{scantype}_{channel_name}_{roi_id}_{reagents}"
-    if `keep_reagents` is `True` else "{cycle}_{scantype}_{channel_name}_{roi_id}".
+
+    The channel names will follow one of the following formats:
+
+    - If `keep_reagents` is **True**:
+    cycle_scantype_channelname_roiid_reagent
+
+    - If `keep_reagents` is **False**:
+    cycle_scantype_channelname_roiid
 
     .. seealso::
 
@@ -76,10 +82,13 @@ def macsima(
     -------
     :class:`spatialdata.SpatialData`
 
-
     Examples
     --------
-    >>> sdata = macsima(path="path/to/your/tiff/files", image_model_kwargs={ "chunks": ( 1, 3000, 3000 ) })
+    >>> sdata = macsima(
+    ...     path="path/to/your/tiff/files",
+    ...     c_subset=["DAPI", "CD43"],
+    ...     image_model_kwargs={"chunks": (1, 3000, 3000)},
+    ... )
     """
     # chunks not correctly passed to sd.models.Image2DModel.parse in case scale_factors is not None, so we rechunk ourself.
     if "chunks" in image_models_kwargs.keys():
