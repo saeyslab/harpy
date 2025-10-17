@@ -1,9 +1,11 @@
-from spatialdata import SpatialData
+import numpy as np
 import pandas as pd
 from sklearn.cluster import KMeans
-import numpy as np
+from spatialdata import SpatialData
+
 from harpy.table._table import add_table_layer
 from harpy.utils._keys import _REGION_KEY
+
 
 def nhood_count(
     sdata: SpatialData,
@@ -11,14 +13,14 @@ def nhood_count(
     output_layer: str,
     cell_type_column: str,
     connectivity_key: str = "spatial_connectivities",
-    save_key="nhood_counts", 
+    save_key="nhood_counts",
     overwrite: bool = False,
 ):
     """
     Compute for each cell the number and fraction of neighbours that belong to every cell type. This uses an existing spatial graph calculated by Squidpy.
 
     The results are saved to `adata.uns[{cell_type_column}_{save_key}]` as (N × K) DataFrames.
-    
+
     Args:
         sdata:
             The SpatialData object containing the input table.
@@ -34,33 +36,32 @@ def nhood_count(
             '{save_key}' will be used to store the results in `sdata.tables[table_layer].uns`. Defaults to `nhood_counts`.
         overwrite
             If True, overwrites the `output_layer` if it already exists in `sdata`.
-    
-    Returns:
+
+    Returns
     -------
     The SpatialData object containing the updated AnnData object as an attribute (`sdata.tables[output_layer]`).
     """
-    
     # Create copy of table layer
     adata = sdata.tables[table_layer].copy()
-    
-    # Get connectivities
-    connectivities = adata.obsp[connectivity_key].tocsr() # N × N sparse
 
-    # One‑hot encode cell types 
+    # Get connectivities
+    connectivities = adata.obsp[connectivity_key].tocsr()  # N × N sparse
+
+    # One‑hot encode cell types
     cell_types = adata.obs[cell_type_column].astype("category")
-    onehot = pd.get_dummies(cell_types, sparse=True) # N × K
+    onehot = pd.get_dummies(cell_types, sparse=True)  # N × K
     onehot_mat = onehot.sparse.to_coo().tocsr()
 
     # Counts neighbours of each cell type
-    counts = connectivities.dot(onehot_mat) # N × K sparse
+    counts = connectivities.dot(onehot_mat)  # N × K sparse
 
     # Convert to fractions
-    neigh_totals = np.asarray(connectivities.sum(axis=1)).ravel() # length N
+    neigh_totals = np.asarray(connectivities.sum(axis=1)).ravel()  # length N
     with np.errstate(divide="ignore"):
         frac = counts.multiply(1 / neigh_totals[:, None])
 
     frac = frac.toarray()
-    frac[np.isnan(frac)] = 0 # Set isolated cells to 0
+    frac[np.isnan(frac)] = 0  # Set isolated cells to 0
 
     # Add results to adata.uns
     dict_uns = {
@@ -73,7 +74,7 @@ def nhood_count(
 
     adata.uns[save_key] = dict_uns
 
-    # Add table layer  
+    # Add table layer
     sdata = add_table_layer(
         sdata,
         adata=adata,
@@ -81,7 +82,7 @@ def nhood_count(
         region=adata.obs[_REGION_KEY].cat.categories.to_list(),
         overwrite=overwrite,
     )
-    
+
     return sdata
 
 
@@ -120,7 +121,7 @@ def nhood_kmeans(
         overwrite
             If True, overwrites the `output_layer` if it already exists in `sdata`.
 
-    Returns:
+    Returns
     -------
     The SpatialData object containing the updated AnnData object as an attribute (`sdata.tables[output_layer]`).
     """
@@ -129,13 +130,10 @@ def nhood_kmeans(
 
     # Check uns key
     if nhood_counts_key not in adata.uns:
-        raise KeyError(
-            f"`{nhood_counts_key}` not found in `adata.uns`. "
-            "Run `nhood_count` first or check your keys."
-        )
+        raise KeyError(f"`{nhood_counts_key}` not found in `adata.uns`. Run `nhood_count` first or check your keys.")
 
     # Get fractions matrix
-    frac = adata.uns[nhood_counts_key]['fractions'] # dense (N × K)
+    frac = adata.uns[nhood_counts_key]["fractions"]  # dense (N × K)
 
     # Handle cells with zero neighbours (all‑zero rows)
     mask_valid = frac.sum(axis=1) > 0
@@ -151,8 +149,8 @@ def nhood_kmeans(
     labels_full = np.full(frac.shape[0], nan_label, dtype=object)
     labels_full[mask_valid] = kmeans.labels_
     adata.obs[output_column] = pd.Categorical(labels_full)
-    
-    # Add table layer  
+
+    # Add table layer
     sdata = add_table_layer(
         sdata,
         adata=adata,
@@ -160,5 +158,5 @@ def nhood_kmeans(
         region=adata.obs[_REGION_KEY].cat.categories.to_list(),
         overwrite=overwrite,
     )
-    
+
     return sdata
