@@ -9,8 +9,10 @@ from types import MappingProxyType
 from typing import Any
 
 import dask.array as da
+import numpy as np
 import spatialdata as sd
 from bioio import BioImage
+from numpy.typing import NDArray
 from ome_types.model import Pixels, UnitsLength
 from spatialdata import SpatialData
 from spatialdata._logging import logger
@@ -36,14 +38,19 @@ class MacsimaKeys(ModeEnum):
 def macsima(
     path: str | Path,
     c_subset: list[str] = None,
+    keep_reagents: bool = False,
     transformations: bool = False,
+    chunks: int = None,  # chunks is currently ignored by spatialdata
     imread_kwargs: Mapping[str, Any] = MappingProxyType({}),
     image_models_kwargs: Mapping[str, Any] = MappingProxyType({}),
+    output: str | Path | None = None,
 ) -> SpatialData:
     """
     Read *MACSima* formatted dataset.
 
     This function reads images from a MACSima cyclic imaging experiment.
+    The channel names will be in the format "{cycle}_{scantype}_{channel_name}_{roi_id}_{reagents}"
+    if `keep_reagents` is `True` else "{cycle}_{scantype}_{channel_name}_{roi_id}".
 
     .. seealso::
 
@@ -55,17 +62,30 @@ def macsima(
         Path to the directory containing the data.
     c_subset
         Channel names to consider.
+    keep_reagents
+        If `True`, reagents will be in the channel name.
     transformations
         Whether to add a transformation from pixels to microns to the image.
     imread_kwargs
         Keyword arguments passed to :func:`bioio.BioImage`.
     image_model_kwargs
         Keyword arguments to pass to the image models.
+        E.g. "chunks" or "scale_factors".
 
     Returns
     -------
     :class:`spatialdata.SpatialData`
+
+
+    Examples
+    --------
+    >>> sdata = macsima(path="path/to/your/tiff/files", image_model_kwargs={ "chunks": ( 1, 3000, 3000 ) })
     """
+    # chunks not correctly passed to sd.models.Image2DModel.parse in case scale_factors is not None, so we rechunk ourself.
+    if "chunks" in image_models_kwargs.keys():
+        chunks = image_models_kwargs["chunks"]
+    else:
+        chunks = None
     path_list = glob.glob(f"{path}/*{MacsimaKeys.IMAGE_OMETIF}")
     if not path_list:
         raise ValueError(f"Cannot determine data set, expecting '*{MacsimaKeys.IMAGE_OMETIF}' files in {path}.")
@@ -86,6 +106,8 @@ def macsima(
     else:
         to_coordinate_system = "global"
 
+    if not keep_reagents:
+        metadata = [name_parts[:4] for name_parts in metadata]
     names = ["_".join([part for part in name_parts if part]) for name_parts in metadata]
     number_pattern = re.compile(r"^\d+")
     # sort by cycle number
@@ -114,12 +136,50 @@ def macsima(
     pixels_to_microns = _parse_physical_size(pixels=imgs[0].ome_metadata.images[0].pixels)
     # sanity check (physical size of all images should be the same for one ROI)
     for _img in imgs:
-        assert pixels_to_microns == _parse_physical_size(_img.ome_metadata.images[0].pixels)
-    assert imgs[0].dims.order == "TCZYX"
-    array = [_img.get_image_dask_data().squeeze() for _img in imgs]
+        if pixels_to_microns != _parse_physical_size(_img.ome_metadata.images[0].pixels):
+            raise ValueError("Physical units of all images in a ROI should be the same.")
+    if imgs[0].dims.order != "TCZYX":
+        raise ValueError("Dimension is expected to be 'TCZYX'.")
 
-    arrays = [_img.get_image_dask_data().squeeze((0, 1)) for _img in imgs]  # squeeze T and Z
-    array = _stack_pad_to_largest_yx(arrays)  # TODO: add support for rechunking
+    arrays = [_img.get_image_dask_data() for _img in imgs]
+    translations = _get_translations(imgs)
+    sizes = np.array([_arr.shape[-2:] for _arr in arrays])
+
+    # get chunksize from largest array to avoid irregular chunking
+    # get some sane chunksizes for case chunks is None (prevent irregular chunking due to padding)
+    if chunks is None:
+        max_y_idx, max_x_idx = np.argmax(sizes, axis=0)
+        _, _, _, chunksize_y, _ = arrays[max_y_idx].chunksize
+        _, _, _, _, chunksize_x = arrays[max_x_idx].chunksize
+
+    # resulting size after padding with translation will be done:
+    sizes_trans = sizes + translations
+    # resulting max sizes after padding with translation will be done:
+    max_y, max_x = np.max(sizes_trans, axis=0)
+
+    padded_arrays = []
+    for _arr, _translation, _size in zip(arrays, translations, sizes_trans, strict=True):
+        _arr = _arr.squeeze((0, 2))  # squeeze T and Z dimension
+        pad_y_prepend = _translation[0]
+        pad_x_prepend = _translation[1]
+
+        pad_y_append = max_y - _size[0]
+        pad_x_append = max_x - _size[1]
+
+        pad_width = (
+            (0, 0),  # C
+            (pad_y_prepend, pad_y_append),  # Y
+            (pad_x_prepend, pad_x_append),  # X
+        )
+        _arr = da.pad(_arr, pad_width, mode="constant", constant_values=0)
+        if chunks is None:
+            _arr = _arr.rechunk((1, chunksize_y, chunksize_x))
+        padded_arrays.append(_arr)
+
+    array = da.concatenate(padded_arrays, axis=0)
+
+    if chunks is not None:
+        array = array.rechunk(chunks)
 
     t_pixels_to_microns = (
         sd.transformations.Scale([pixels_to_microns, pixels_to_microns], axes=("x", "y"))
@@ -141,6 +201,10 @@ def macsima(
     image_name = _clean_string(image_name)
     sdata = sd.SpatialData(images={image_name: se}, table=None)
 
+    if output is not None:
+        sdata.write(sdata)
+        sdata = sd.read_zarr(sdata.path)
+
     return sdata
 
 
@@ -150,7 +214,8 @@ def _get_structured_annotations(img: BioImage, metadata_key: str) -> str | None:
     if not value:
         return None
     assert all(x == value[0] for x in value), (
-        f"Structured annotations for key '{metadata_key}' are not equal (found '{value}') for object of type '{type(img).__name__}': {img}."
+        f"Structured annotations for key '{metadata_key}' are not equal "
+        f"(found '{value}') for object of type '{type(img).__name__}': {img}."
     )
     return value[0]
 
@@ -174,20 +239,23 @@ def _get_metadata(img: BioImage) -> list[str | None]:
     channel_name = channel_name[0]
     if not channel_name:
         raise ValueError(
-            f"'{MacsimaKeys.CHANNEL_NAMES}' is not specified in metadata for object of type '{type(img).__name__}': {img}"
+            f"'{MacsimaKeys.CHANNEL_NAMES}' is not specified in metadata "
+            f"for object of type '{type(img).__name__}': {img}"
         )
     # get the reagents used from ome metadata if they can be found in ome metadata
     reagents = None
     if hasattr(img.ome_metadata, MacsimaKeys.SCREENS):
         screens = getattr(img.ome_metadata, MacsimaKeys.SCREENS)
         assert len(screens) == 1, (
-            f"There should be exactly one '{MacsimaKeys.SCREENS}' specified in ome metadata, but found '{screens}' for object of type '{type(img).__name__}': {img}."
+            f"There should be exactly one '{MacsimaKeys.SCREENS}' specified in ome metadata, "
+            f"but found '{screens}' for object of type '{type(img).__name__}': {img}."
         )
         screens = screens[0]
         reagents = getattr(screens, MacsimaKeys.REAGENTS, None)
         if reagents:
             assert len(reagents) == 1, (
-                f"There should be exactly one '{MacsimaKeys.REAGENTS}' specified in ome metadata, but found '{reagents}' for object of type '{type(img).__name__}': {img}."
+                f"There should be exactly one '{MacsimaKeys.REAGENTS}' "
+                f"specified in ome metadata, but found '{reagents}' for object of type '{type(img).__name__}': {img}."
             )
             reagents = reagents[0].name
     roi_id = _get_structured_annotations(img, metadata_key=MacsimaKeys.ROI_ID) or _get_structured_annotations(
@@ -222,49 +290,32 @@ def _clean_string(input_string: str) -> str:
     return output_string
 
 
-def _stack_pad_to_largest_yx(arrs: list[da.Array]) -> da.Array:
-    """
-    Pad and stack.
+def _get_translations(imgs: list[BioImage]) -> NDArray:
+    # get the translations in y and x
+    translations = []
+    for _img in imgs:
+        translation_y = 0
+        translation_x = 0
+        if not hasattr(_img.ome_metadata, "images"):
+            logger.info("No metadata found for position, assuming position is 0,0.")
+            translations.append(0, 0)
+            continue
+        _images = _img.ome_metadata.images
+        assert len(_images) == 1  # replace with ValueError
+        if not hasattr(_images[0].pixels, "planes"):
+            logger.info("No metadata found for position, assuming position is 0,0.")
+            translations.append(0, 0)
+            continue
+        _planes = _images[0].pixels.planes
+        assert len(_planes) == 1  # replace with ValueError
+        if not hasattr(_planes[0], "position_y") or not hasattr(_planes[0], "position_x"):
+            logger.info("No metadata found for position, assuming position is 0,0.")
+            translations.append(0, 0)
+            continue
+        translation_y = _planes[0].position_y
+        translation_x = _planes[0].position_x
+        translations.append((translation_y, translation_x))
 
-    arrs: list of Dask arrays shaped (C, Y, X), with C=1.
-    Returns: Dask array shaped (C, Y, X), where C == len(arrs).
-    Pads on Y/X by *prepending* zeros to match the largest Y/X among inputs.
-    """
-    y_sizes = [a.shape[1] for a in arrs]
-    x_sizes = [a.shape[2] for a in arrs]
-
-    target_y = max(y_sizes)
-    target_x = max(x_sizes)
-
-    idx_y = y_sizes.index(target_y)
-    idx_x = x_sizes.index(target_x)
-
-    # get chunksizes, because padding will lead to a rechunk
-    chunksize_y = arrs[idx_y].chunksize[1]
-    chunksize_x = arrs[idx_x].chunksize[2]
-
-    padded_arrs = []
-    for _arr in arrs:
-        if _arr.shape[0] != 1:
-            raise ValueError("Only arrays with channel dimension equal to 1 are supported.")
-        pad_y_before = int(target_y - _arr.shape[1])
-        pad_x_before = int(target_x - _arr.shape[2])
-        # sanity
-        pad_y_before = max(0, pad_y_before)
-        pad_x_before = max(0, pad_x_before)
-
-        pad_width = (
-            (0, 0),  # C
-            (pad_y_before, 0),  # Y
-            (pad_x_before, 0),  # X
-        )
-
-        _arr = da.pad(_arr, pad_width, mode="constant", constant_values=0)
-        if pad_y_before != 0 or pad_x_before != 0:
-            _arr = _arr.rechunk((1, chunksize_y, chunksize_x))
-        _arr = _arr.squeeze(0)
-        padded_arrs.append(_arr)
-
-    stacked = da.stack(padded_arrs, axis=0)
-
-    return stacked
+    translations = np.array(translations)
+    mins = translations.min(axis=0)
+    return translations - mins
