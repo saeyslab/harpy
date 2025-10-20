@@ -11,13 +11,17 @@ from typing import Any
 import dask.array as da
 import numpy as np
 import spatialdata as sd
-from bioio import BioImage
 from numpy.typing import NDArray
 from ome_types.model import Pixels, UnitsLength
 from spatialdata import SpatialData
 from spatialdata._logging import logger
 from spatialdata.transformations import Identity
 from spatialdata_io._constants._enum import ModeEnum
+
+try:
+    from bioio import BioImage
+except ImportError:
+    logger.warning("Module 'bioio' not installed, please install 'bioio' if you want to use 'harpy.io.macsima'.")
 
 
 @unique
@@ -38,7 +42,7 @@ class MacsimaKeys(ModeEnum):
 def macsima(
     path: str | Path,
     c_subset: list[str] = None,
-    keep_reagents: bool = False,
+    remove_bleached: bool = True,
     transformations: bool = False,
     chunks: int = None,  # chunks is currently ignored by spatialdata
     imread_kwargs: Mapping[str, Any] = MappingProxyType({}),
@@ -50,13 +54,8 @@ def macsima(
 
     This function reads images from a MACSima cyclic imaging experiment.
 
-    The channel names will follow one of the following formats:
-
-    - If `keep_reagents` is **True**:
+    The channel names will follow the following format:
     cycle_scantype_channelname_roiid_reagent
-
-    - If `keep_reagents` is **False**:
-    cycle_scantype_channelname_roiid
 
     .. seealso::
 
@@ -68,8 +67,8 @@ def macsima(
         Path to the directory containing the data.
     c_subset
         Channel names to consider.
-    keep_reagents
-        If `True`, reagents will be in the channel name.
+    remove_bleached
+        If set to `True` will remove all channels of scantype `'B'` (=bleached).
     transformations
         Whether to add a transformation from pixels to microns to the image.
     imread_kwargs
@@ -103,7 +102,6 @@ def macsima(
     image_name = imgs[0].ome_metadata.experiments[0].description
 
     metadata = [_get_metadata(_img) for _img in imgs]
-    c_coords = [item[2] for item in metadata]
     roi = [item[3] for item in metadata]
     if roi[0] is not None:
         assert all(x == roi[0] for x in roi), (
@@ -115,31 +113,62 @@ def macsima(
     else:
         to_coordinate_system = "global"
 
-    if not keep_reagents:
-        metadata = [name_parts[:4] for name_parts in metadata]
+    if remove_bleached:
+        metadata_imgs = [
+            (m, i)
+            for m, i in zip(metadata, imgs, strict=True)
+            if m[1] is None or m[1] != "B"  # we keep if scantype is None
+        ]
+        metadata, imgs = zip(*metadata_imgs, strict=True) if metadata_imgs else ([], [])
+        if not metadata:
+            raise ValueError(
+                "Resulting number of channels after removing channels of scantype 'B'(=bleached) is zero. "
+                "Consider setting the parameter 'remove_bleached' to 'False'."
+            )
+
+    remove_dapi = True
+    if remove_dapi:
+        metadata_imgs = [
+            (m, i)
+            for m, i in zip(metadata, imgs, strict=True)
+            if m[2] is None
+            or m[0] is None
+            or m[2] != "DAPI"
+            or (m[2] == "DAPI" and m[0] == "0")  # we keep only first round DAPI
+        ]
+        metadata, imgs = zip(*metadata_imgs, strict=True) if metadata_imgs else ([], [])
+        if not metadata:
+            raise ValueError(
+                "Resulting number of channels after removing DAPI channels (from cycle round i with i>0), is zero. "
+                "Consider setting the parameter 'remove_dapi' to 'True'."
+            )
+
+        # remove all dapi not collected in first cycle
+
     names = ["_".join([part for part in name_parts if part]) for name_parts in metadata]
     number_pattern = re.compile(r"^\d+")
     # sort by cycle number
-    combined_sorted = sorted(
-        zip(names, c_coords, imgs, strict=True), key=lambda x: int(number_pattern.match(x[0]).group())
-    )
-    names, c_coords, imgs = zip(*combined_sorted, strict=True)
+    combined_sorted = sorted(zip(names, imgs, strict=True), key=lambda x: int(number_pattern.match(x[0]).group()))
+    names, imgs = zip(*combined_sorted, strict=True)
+    names = [_name.strip("_") for _name in names]  # macsima adds these trailing _ to reagents.
 
     if c_subset:
-        names, c_coords, imgs = map(
-            list,
-            zip(
-                *[
-                    (elem1, elem2, elem3)
-                    for elem1, elem2, elem3 in zip(names, c_coords, imgs, strict=True)
-                    if elem2 in c_subset
-                ],
-                strict=True,
-            ),
-        )
+        matched = []
+        for item in names:
+            match = False
+            for _c_subset in c_subset:
+                if _case_insensitive_in(_c_subset, item):
+                    matched.append(True)
+                    match = True
+                    break
+            if not match:
+                matched.append(False)
 
-    if not c_coords:
-        raise ValueError(f"List of channels to consider is empty after subsetting by {c_subset}")
+        if not any(matched):
+            raise ValueError(f"List of channels to consider is empty after subsetting by {c_subset}")
+
+        names = [v for v, m in zip(names, matched, strict=True) if m]
+        imgs = [v for v, m in zip(imgs, matched, strict=True) if m]
 
     # get physical units:
     pixels_to_microns = _parse_physical_size(pixels=imgs[0].ome_metadata.images[0].pixels)
@@ -208,7 +237,9 @@ def macsima(
 
     # spatialdata only allows alphanumeric and _ in the name
     image_name = _clean_string(image_name)
-    sdata = sd.SpatialData(images={image_name: se}, table=None)
+    sdata = sd.SpatialData(
+        images={image_name: se},
+    )
 
     if output is not None:
         sdata.write(sdata)
@@ -294,7 +325,7 @@ def _parse_physical_size(pixels: Pixels | None = None) -> float:
 
 
 def _clean_string(input_string: str) -> str:
-    """Replace all non-alphanumeric characters with '_'"""
+    """Replace all non-alphanumeric characters with '_', and replace ' ' with '-'."""
     output_string = re.sub(r"[^a-zA-Z0-9_]", "_", input_string)
     return output_string
 
@@ -328,3 +359,8 @@ def _get_translations(imgs: list[BioImage]) -> NDArray:
     translations = np.array(translations)
     mins = translations.min(axis=0)
     return translations - mins
+
+
+def _case_insensitive_in(a: str, b: str) -> bool:
+    pattern = re.compile(re.escape(a), re.IGNORECASE)
+    return bool(pattern.search(b))

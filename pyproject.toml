@@ -102,6 +102,8 @@ notebook = [
 ]
 # best default for end-users
 extra = [
+    "bioio",
+    "bioio-ome-tiff",
     "squidpy",
     # do not support basic tiling correction by default in default PyPI install
     "harpy-analysis[napari,cli,segmentation,opencv,clustering,notebook]",
