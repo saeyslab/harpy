@@ -78,6 +78,7 @@ def get_spatialdata_registry(path: str | Path | None = None) -> Pooch:
         path=pooch.os_cache("sparrow") if path is None else path,
         base_url="https://s3.embl.de/spatialdata",
         version=__version__,
+        env="HARPY_POOCH_CACHE",
         registry={
             "spatialdata-sandbox/steinbock_io.zip": None,
         },
@@ -102,6 +103,7 @@ def get_ome_registry(path: str | Path | None = None) -> Pooch:
         path=pooch.os_cache("sparrow") if path is None else path,
         base_url="https://downloads.openmicroscopy.org/images",
         version=__version__,
+        env="HARPY_POOCH_CACHE",
         registry={
             "Vectra-QPTIFF/perkinelmer/PKI_fields/LuCa-7color_%5b13860,52919%5d_1x1component_data.tif": "50c3cc12b4e644467cb752d3e5cc778bb7c43209b99f3cac0ba5f44bbbb28fcc",
         },
