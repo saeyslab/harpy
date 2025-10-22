@@ -183,7 +183,6 @@ def _macsima(
                 "Consider setting the parameter 'remove_bleached' to 'False'."
             )
 
-    remove_dapi = True
     if remove_dapi:
         metadata_imgs = [
             (m, i)
