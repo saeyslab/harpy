@@ -128,14 +128,15 @@ class Featurizer:
             populate the store will have been executed. If `None` (default), no data are written and
             the method returns a **lazy** (not yet computed) Dask array.
         store_intermediate
-            If `True`, intermediate `.zarr` data may be written to disk to reduce peak RAM usage.
-            This is useful for large datasets or models. If `zarr_output_path` is not specified, it is
+            If `True`, intermediate `.zarr` data will be written to disk to reduce peak RAM usage.
+            This is useful for large datasets. If `zarr_output_path` is not specified, it is
             not allowed to set `store_intermediate=True`.
             It is preferred to set `store_intermediate=False`, and work with a Dask client,
             so Dask can spill to disk.
         model
-            A callable that maps a batch of instance windows to embeddings, e.g.
-            `model(batch, **model_kwargs) -> np.ndarray` of shape `(batch, embedding_dimension)`.
+            A callable that maps a batch of instance windows to embeddings:
+            `(batch_size, c,z,y,x)->(batch_size, embedding_dimension)` , e.g.
+            `model(batch, **model_kwargs) -> np.ndarray`.
             The callable should accept NumPy arrays; Dask will handle chunking and batching.
             The callable must include the parameter 'embedding_dimension'
         batch_size
@@ -152,7 +153,7 @@ class Featurizer:
         tuple
             - A NumPy array of instance (label) indices, shape `(i,)`, where `i` equals the total
             number of non-zero labels in the mask, matching the rows in the feature matrix.
-            - A Dask array of features with shape `(i, embedding_dimension)`. If `zarr_output_path`
+            - A Dask array (feature matrix) of features with shape `(i, embedding_dimension)`. If `zarr_output_path`
             is provided, this array points to the computed Zarr store; otherwise it is lazy.
 
         Examples

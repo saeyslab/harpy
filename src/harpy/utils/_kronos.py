@@ -111,7 +111,7 @@ def kronos_embedding(
     # squeeze the z dimension
     array = array.squeeze(2)
 
-    # only keep the data specific channels that could be matched
+    # account for case where matched_channels contains channel_id_data_specific_name id's that are >= array.shape[1]
     keep_channels = matched_channels[channel_id_data_specific_name].values[
         matched_channels[channel_id_data_specific_name].values < array.shape[1]
     ]
