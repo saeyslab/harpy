@@ -169,8 +169,9 @@ def _self_contained_warning_message(sdata: SpatialData, layer: str) -> str | Non
         return None
 
 
-def _dummy_embedding(array: NDArray, embedding_dimension: int) -> NDArray:
-    random_array = np.random.rand(array.shape[0], embedding_dimension).astype(np.float32)
+def _dummy_embedding(array: NDArray, embedding_dimension: int, seed: int = 42) -> NDArray:
+    rng = np.random.default_rng(seed)
+    random_array = rng.random((array.shape[0], embedding_dimension), dtype=np.float32)
     return random_array
 
 
