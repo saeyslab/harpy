@@ -57,7 +57,7 @@ def kronos_embedding(
         - `channel_std_name` (default: `"marker_std"`): per-channel standard deviation used for
           standardization.
 
-        Only channels in `array` which index can be matched (via `matched_channels`) to the pre-trained schema are kept.
+        Only channels in `array` which index is matched (via `matched_channels`) to the pre-trained schema are kept.
 
     do_instance_embedding
         If `True` (default), aggregate across channels to produce **one feature per instance**

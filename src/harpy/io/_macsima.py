@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import glob
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from enum import unique
 from pathlib import Path
 from types import MappingProxyType
@@ -18,6 +18,8 @@ from spatialdata._logging import logger
 from spatialdata.transformations import Identity
 from spatialdata_io._constants._enum import ModeEnum
 from xarray import DataArray, DataTree
+
+from harpy.utils.utils import _make_list
 
 try:
     from bioio import BioImage
@@ -107,12 +109,6 @@ def macsima(
     ...     image_model_kwargs={"chunks": (1, 3000, 3000)},
     ... )
     """
-
-    def _make_list(item: str | Iterable[str]) -> list[str]:
-        if isinstance(item, str) or not isinstance(item, Iterable):
-            return [item]
-        return list(item)
-
     path = _make_list(path)
     sdata = sd.SpatialData()
     for _path in path:

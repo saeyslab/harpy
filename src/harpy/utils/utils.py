@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -171,3 +172,9 @@ def _self_contained_warning_message(sdata: SpatialData, layer: str) -> str | Non
 def _dummy_embedding(array: NDArray, embedding_dimension: int) -> NDArray:
     random_array = np.random.rand(array.shape[0], embedding_dimension).astype(np.float32)
     return random_array
+
+
+def _make_list(item: str | Iterable[str]) -> list[str]:
+    if isinstance(item, str) or not isinstance(item, Iterable):
+        return [item]
+    return list(item)
