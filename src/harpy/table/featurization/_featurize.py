@@ -34,7 +34,95 @@ def extract_instances(
     batch_size: int | None = None,
     to_coordinate_system: str = "global",
 ) -> tuple[NDArray, da.Array]:
-    """Extract instances."""
+    """
+    Extract per-label instance windows from `img_layer`/`labels_layer` of size `diameter` in `y` and `x` using `dask.array.map_overlap` and `dask.array.map_blocks`.
+
+    For every non-zero label in the `labels_layer`, this method builds a Dask graph that
+    slices out a centered, square window in the `y`,`x` plane around that instance (preserving
+    the `z` dimension) both for the `img_layer` and `labels_layer`.
+
+    Note that decreasing the chunk size on disk of the `image_layer` and `labels_layer` will lead to decreased
+    consumption of RAM. A good first guess for chunk sizes is: `(c_chunksize, y_chunksize, x_chunksize)=(10, 2048, 2048)`.
+
+    For optimal performance, configure Dask to use `processes`, e.g. (`dask.config.set(scheduler="processes")`).
+
+    Parameters
+    ----------
+    sdata
+        SpatialData object.
+    img_layer
+        Name of the image layer.
+    labels_layer
+        Name of the labels layer.
+    depth
+        Passed to `dask.map_overlap`. Please set depth `~ max_diameter / 2`.
+    diameter
+        Optional explicit side length of the resulting `y`, `x` window for every
+        instance. If not provided `diameter` is set to 2 times `depth`.
+    remove_background
+        If `True` (default), pixels outside the instance label within each
+        window are set to background (e.g., zero) so that only the object remains
+        inside the cutout. If ``False``, the entire window content is kept.
+    zarr_output_path
+        If a filesystem path (string or ``Path``) is provided, the extracted
+        instances are **computed** and materialized to a Zarr store at that
+        location. The returned object will still be a Dask array pointing at the
+        written data, but all computations necessary to populate the store will
+        have been executed. If `None` (default), no data are written and the
+        method returns a **lazy** (not yet computed) Dask array.
+    batch_size
+        Chunksize of the resulting dask array in the `i` dimension.
+    to_coordinate_system
+        The coordinate system that holds `img_layer` and `labels_layer`.
+
+    Returns
+    -------
+    tuple:
+
+        - a Numpy array containing indices of extracted labels, shape `(i,)`.
+        Dimension of `i` will be equal to the total number of non-zero labels in the mask.
+
+        - a Dask array of dimension `(i,c+1,z,y,x)`, with dimension of `c` the number of channels in `img_layer`.
+        At channel index 0 of each instance, is the corresponding mask.
+        dimension of `y` and `x` equal to `diameter`, or 2*`depth` if `diameter` is not specified.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from numpy.typing import NDArray
+    >>> import harpy as hp
+    # Persist to Zarr on disk (computes instances now)
+    >>> instances_ids, instances = hp.tb.extract_instances(
+    ...     sdata,
+    ...     img_layer="my_image",
+    ...     labels_layer="my_labels",
+    ...     depth=100,
+    ...     diameter=75,
+    ...     remove_background=True,
+    ...     zarr_output_path="/path/to/my/zarr_strore.zarr"
+    ...     batch_size=64,
+    ...     to_coordinate_system="global",
+    ... )
+    # Inspect shape/chunks
+    >>> instances
+    dask.array<...>
+    # Construct a lazy Dask graph.
+    >>> instances_ids, instances = hp.tb.extract_instances(
+    ...     sdata,
+    ...     img_layer="my_image",
+    ...     labels_layer="my_labels",
+    ...     depth=100,
+    ...     diameter=75,
+    ...     remove_background=True,
+    ...     zarr_output_path=None,
+    ...     batch_size=64,
+    ...     to_coordinate_system="global",
+    ... )
+    >>> instances # instances not computed.
+    dask.array<...>
+    # persist to Zarr on disk (computes instances now).
+    >>> instances.to_zarr( "/path/to/my/zarr_strore.zarr" )
+    """
     se_image, se_labels = _precondition(
         sdata, img_layer=img_layer, labels_layer=labels_layer, to_coordinate_system=to_coordinate_system
     )

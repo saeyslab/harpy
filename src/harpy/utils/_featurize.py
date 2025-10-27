@@ -242,33 +242,10 @@ class Featurizer:
         """
         Extract per-label instance windows from the mask and image of size `diameter` in `y` and `x` using `dask.array.map_overlap` and `dask.array.map_blocks`.
 
-        For every non-zero label in the mask, this method builds a Dask graph that
-        slices out a centered, square window in the `y`,`x` plane around that instance.
-        The `z` dimension is preserved from the source arrays. The corresponding image data
-        are gathered for each instance (aligned in `z`, `y` and `x`, with channels preserved)
-        Note that decreasing the chunk size of the provided image and mask dask array will lead to decreased
-        consumption of RAM. A good first guess for chunk size is `(5,1,2048,2048)`.
-
-        For optimal performance, configure Dask to use `processes`, e.g. (`dask.config.set(scheduler="processes")`).
+        See `hp.tb.extract_instances` for a full description.
 
         Parameters
         ----------
-        depth
-            Passed to `dask.map_overlap`. Please set depth `~ max_diameter / 2`.
-        diameter
-            Optional explicit side length of the resulting `y`, `x` window for every
-            instance. If not provided `diameter` is set to 2 times `depth`.
-        remove_background
-            If `True` (default), pixels outside the instance label within each
-            window are set to background (e.g., zero) so that only the object remains
-            inside the cutout. If ``False``, the entire window content is kept.
-        zarr_output_path
-            If a filesystem path (string or ``Path``) is provided, the extracted
-            instances are **computed** and materialized to a Zarr store at that
-            location. The returned object will still be a Dask array pointing at the
-            written data, but all computations necessary to populate the store will
-            have been executed. If `None` (default), no data are written and the
-            method returns a **lazy** (not yet computed) Dask array.
         store_intermediate
             If `True`, and intermediate `.zarr` file is written to disk.
             Setting this to `True` will decrease ram usage.
@@ -276,8 +253,6 @@ class Featurizer:
             `store_intermediate` to `True`.
             It is recommended to set `store_intermediate=False`, and work with a Dask client,
             so Dask can spill to disk.
-        batch_size
-            Chunksize of the resulting dask array in the `i` dimension.
 
         Returns
         -------
@@ -286,8 +261,9 @@ class Featurizer:
             - a numpy array containing indices of extracted labels, shape `(i,)`.
             Dimension of `i` will be equal to the total number of non-zero labels in the mask.
 
-            - a dask array of dimension `(i,c,z,y,x)`, with dimension of `y` and `x` equal to `diameter`,
-             or 2*`depth` if `diameter` is not specified.
+            - a Dask array of dimension `(i,c+1,z,y,x)`, with dimension of `c` the number of channels in the image array.
+            At channel index 0 of each instance, is the corresponding mask.
+            dimension of `y` and `x` equal to `diameter`, or 2*`depth` if `diameter` is not specified.
 
         Examples
         --------
@@ -295,14 +271,12 @@ class Featurizer:
         >>> instance_ids, instances = fe.extract_instances(depth=100, diameter=75)            # lazy graph
         >>> instances                                                             # inspect shape/chunks
         dask.array<...>
-
-        # Persist to Zarr on disk (computes now)
+        # Persist to Zarr on disk (computes instances now)
         >>> instance_ids, instances = fe.extract_instances(
         ...     depth=100,
         ...     diameter=75,
         ...     zarr_output_path="instances.zarr",
         ... )
-
         # Keep full window content instead of masking to the instance
         >>> inst = fe.extract_instances(depth=100, diameter=75 remove_background=False)
 
@@ -830,7 +804,7 @@ def _mask_center_of_mass_outside(mask_block: NDArray, _depth):
     return mask_block, unique_masks
 
 
-def _is_inside(mask_array: NDArray, instance_ids: NDArray, DY: int, DX: int):
+def _is_inside(mask_array: NDArray, instance_ids: NDArray, DY: int, DX: int) -> NDArray:
     """
     Check for each id in instance_ids that area is in DY:-DY,DX:-DX
 
