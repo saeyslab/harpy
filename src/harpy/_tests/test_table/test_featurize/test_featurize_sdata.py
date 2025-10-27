@@ -6,9 +6,58 @@ from spatialdata.models import TableModel
 
 from harpy.image import add_image_layer, add_labels_layer
 from harpy.table._table import add_table_layer
-from harpy.table.featurization.featurize import featurize
+from harpy.table.featurization.featurize import extract_instances, featurize
 from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY
 from harpy.utils.utils import _dummy_embedding
+
+
+def test_extract_instances_sdata(sdata_transcripts_no_backed: SpatialData):
+    sdata = sdata_transcripts_no_backed
+
+    chunksize_spatial = 2048
+    img_layer = "raw_image"
+    labels_layer = "segmentation_mask"
+
+    image = sdata[img_layer].data
+
+    sdata = add_image_layer(
+        sdata,
+        arr=da.concatenate([image] * 6, axis=0).rechunk((3, chunksize_spatial, chunksize_spatial)),
+        output_layer=img_layer,
+        overwrite=True,
+    )
+
+    sdata = add_labels_layer(
+        sdata,
+        arr=sdata[labels_layer].data.rechunk(chunksize_spatial),
+        output_layer=labels_layer,
+        overwrite=True,
+    )
+
+    instances_ids, instances = extract_instances(
+        sdata,
+        img_layer=img_layer,
+        labels_layer=labels_layer,
+        depth=100,
+        diameter=75,
+        zarr_output_path=None,
+        batch_size=250,
+    )
+
+    instances = instances.compute()
+
+    # check that mask of each instance contains the index corresponding to instances_ids
+    for _index, _item in zip(instances_ids, instances, strict=True):
+        _item_labels = np.unique(_item[0])
+        _item_labels = _item_labels[_item_labels != 0]
+        assert len(_item_labels) == 1
+        assert _index == _item_labels[0]
+
+    # check that all labels are extracted
+    index = da.unique(instances[:, 0, ...]).compute()
+    index = index[index != 0]
+
+    assert np.array_equal(index, np.sort(instances_ids))
 
 
 @pytest.mark.parametrize(
@@ -22,28 +71,32 @@ def test_featurize_sdata(sdata_transcripts_no_backed: SpatialData, table_layer):
     embedding_dim = 384
     embedding_obsm_key = "embedding_dummy"
 
-    image = sdata["raw_image"].data
+    img_layer = "raw_image"
+    labels_layer = "segmentation_mask"
+    output_layer = "table_transcriptomics_embedding"
+
+    image = sdata[img_layer].data
 
     sdata = add_image_layer(
         sdata,
         arr=da.concatenate([image] * 6, axis=0).rechunk((3, chunksize_spatial, chunksize_spatial)),
-        output_layer="raw_image",
+        output_layer=img_layer,
         overwrite=True,
     )
 
     sdata = add_labels_layer(
         sdata,
-        arr=sdata["segmentation_mask"].data.rechunk(chunksize_spatial),
-        output_layer="segmentation_mask",
+        arr=sdata[labels_layer].data.rechunk(chunksize_spatial),
+        output_layer=labels_layer,
         overwrite=True,
     )
 
     sdata = featurize(
         sdata,
-        img_layer="raw_image",
-        labels_layer="segmentation_mask",
+        img_layer=img_layer,
+        labels_layer=labels_layer,
         table_layer=table_layer,
-        output_layer="table_transcriptomics_embedding",
+        output_layer=output_layer,
         depth=100,
         diameter=75,
         embedding_dimension=embedding_dim,
@@ -53,15 +106,15 @@ def test_featurize_sdata(sdata_transcripts_no_backed: SpatialData, table_layer):
         overwrite=True,
     )
 
-    assert embedding_obsm_key in sdata["table_transcriptomics_embedding"].obsm
+    assert embedding_obsm_key in sdata[output_layer].obsm
     if table_layer is None:
-        assert sdata["table_transcriptomics_embedding"].obsm[embedding_obsm_key].shape == (
-            da.unique(sdata["segmentation_mask"].data).compute().size - 1,
+        assert sdata[output_layer].obsm[embedding_obsm_key].shape == (
+            da.unique(sdata[labels_layer].data).compute().size - 1,
             embedding_dim,
         )
     else:
-        assert sdata["table_transcriptomics_embedding"].obsm[embedding_obsm_key].shape == (
-            sdata["table_transcriptomics"].shape[0],
+        assert sdata[output_layer].obsm[embedding_obsm_key].shape == (
+            sdata[table_layer].shape[0],
             embedding_dim,
         )
 

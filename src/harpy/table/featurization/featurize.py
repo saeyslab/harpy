@@ -1,17 +1,19 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
 import anndata as ad
+import dask.array as da
 import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
 from scipy.sparse import csr_matrix
 from spatialdata import SpatialData
 
-from harpy.image._image import _get_spatial_element
+from harpy.image._image import _precondition
 from harpy.table._table import ProcessTable, add_table_layer
 from harpy.utils._featurize import Featurizer
 from harpy.utils._keys import _CELL_INDEX, _INSTANCE_KEY, _REGION_KEY
@@ -21,12 +23,39 @@ from harpy.utils.utils import _dummy_embedding, _make_list
 log = get_pylogger(__name__)
 
 
-def extract_instances(sdata):
+def extract_instances(
+    sdata,
+    img_layer: str,
+    labels_layer: str,
+    depth: int,
+    diameter: int | None = None,
+    remove_background: bool = True,
+    zarr_output_path: str | Path | None = None,
+    batch_size: int | None = None,
+    to_coordinate_system: str = "global",
+) -> tuple[NDArray, da.Array]:
     """Extract instances."""
-    # sometimes you want to extract instances.
-    # place holder, TODO, implement
-    instances_ids = None
-    instances = None
+    se_image, se_labels = _precondition(
+        sdata, img_layer=img_layer, labels_layer=labels_layer, to_coordinate_system=to_coordinate_system
+    )
+
+    image_array = se_image.data
+    mask_array = se_labels.data
+
+    image_array = image_array[:, None, ...] if image_array.ndim == 3 else image_array
+    mask_array = mask_array[None, ...] if mask_array.ndim == 2 else mask_array
+
+    featurizer = Featurizer(mask_dask_array=mask_array, image_dask_array=image_array)
+
+    instances_ids, instances = featurizer.extract_instances(
+        depth=depth,
+        diameter=diameter,
+        remove_background=remove_background,
+        zarr_output_path=zarr_output_path,
+        store_intermediate=False,
+        batch_size=batch_size,
+    )
+
     return instances_ids, instances
 
 
@@ -44,6 +73,7 @@ def featurize(
     batch_size: int | None = None,
     model_kwargs: Mapping[str, Any] = MappingProxyType({}),
     embedding_obsm_key="embedding",
+    to_coordinate_system: str = "global",
     overwrite: bool = False,
     **kwargs: Any,
 ) -> SpatialData:
@@ -58,9 +88,15 @@ def featurize(
     features_list = []
 
     for _img_layer, _labels_layer in zip(img_layer, labels_layer, strict=True):
-        # TODO: raise valueError if translation defined on them that does not match
-        image_array = _get_spatial_element(sdata, layer=_img_layer).data
-        mask_array = _get_spatial_element(sdata, layer=_labels_layer).data
+        # currently this function will only work if img_layer and labels_layer have the same shape.
+        # And are in same position, i.e. if one is translated, other should be translated with same offset
+
+        se_image, se_labels = _precondition(
+            sdata, img_layer=_img_layer, labels_layer=_labels_layer, to_coordinate_system=to_coordinate_system
+        )
+
+        image_array = se_image.data
+        mask_array = se_labels.data
 
         image_array = image_array[:, None, ...] if image_array.ndim == 3 else image_array
         mask_array = mask_array[None, ...] if mask_array.ndim == 2 else mask_array
@@ -75,7 +111,7 @@ def featurize(
             zarr_output_path=None,
             store_intermediate=False,
             model=model,
-            batch_size=batch_size,  # 1m10  # 6m 60 MB max, chunksize 2048 # 4mins if you take markers_to_keep
+            batch_size=batch_size,
             model_kwargs=model_kwargs,
             **kwargs,
         )

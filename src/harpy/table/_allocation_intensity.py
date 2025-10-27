@@ -147,17 +147,21 @@ def allocate_intensity(
     se_image = _get_spatial_element(sdata, layer=img_layer)
     se_labels = _get_spatial_element(sdata, layer=labels_layer)
 
-    assert se_image.data.shape[1:] == se_labels.data.shape, (
-        "Only arrays with same spatial shape are currently supported, "
-    )
-    f"but image layer with name {img_layer} has shape {se_image.data.shape}, "
-    f"while labels layer with name {labels_layer} has shape {se_labels.data.shape}  "
+    if se_image.data.shape[1:] != se_labels.data.shape:
+        raise ValueError(
+            "Only arrays with same spatial shape are currently supported, "
+            f"but image layer with name {img_layer} has shape {se_image.data.shape}, "
+            f"while labels layer with name {labels_layer} has shape {se_labels.data.shape}."
+        )
 
     t1x, t1y = _get_translation(se_image, to_coordinate_system=to_coordinate_system)
     t2x, t2y = _get_translation(se_labels, to_coordinate_system=to_coordinate_system)
 
-    assert (t1x, t1y) == (t2x, t2y), f"image layer with name {img_layer} should "
-    f"be registered to labels layer with name {labels_layer} in coordinate system {to_coordinate_system}."
+    if (t1x, t1y) != (t2x, t2y):
+        raise ValueError(
+            f"image layer with name {img_layer} should "
+            f"be registered to labels layer with name {labels_layer} in coordinate system {to_coordinate_system}."
+        )
 
     if channels is None:
         channels = se_image.c.data
