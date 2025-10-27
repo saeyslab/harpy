@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dask.array import Array
 from geopandas import GeoDataFrame
-from shapely.geometry import GeometryCollection, MultiPolygon, Polygon
+from shapely.geometry import GeometryCollection, MultiPolygon, Polygon, Point, MultiPoint, LineString, MultiLineString
 from spatialdata import SpatialData
 from spatialdata.models._utils import MappingToCoordinateSystem_t
 from spatialdata.transformations import get_transformation
@@ -10,6 +10,7 @@ from spatialdata.transformations import get_transformation
 from harpy.image._image import _get_spatial_element
 from harpy.shape._manager import ShapesLayerManager
 
+import numpy as np
 
 def vectorize(
     sdata,
@@ -179,3 +180,119 @@ def intersect_rectangles(rect1: list[int | float], rect2: list[int | float]) -> 
         return [x_min, x_max, y_min, y_max]
     else:
         return None
+    
+    
+def prep_region_annotations(
+    sdata: SpatialData,
+    shapes_layer: str,
+    output_shapes_layer: str,
+    shape_names_column: str = "name",
+    unnamed: str = "unnamed",
+    unique_shape_names_column: str = "name-unique",
+    erosion: float = 0.5,
+    overwrite: bool = False,
+):
+    """
+    Prepares region annotations in a shapes layer for `hp.sh.filter_by_morphology`, `hp.tb.assign_cells_to_shapes` and `hp.tb.compute_distance_to_shapes`.
+    Operations performed:
+        - Ensures a shape name column exists and fills missing names.
+        - Converts Points with a `radius` column into circular polygons. Points without a `radius` column will be preserved as Points.
+        - Slightly erodes polygons to avoid shared edges.
+        - Explodes multipolygons into separate single polygons.
+        - Generates unique names for shapes with duplicate base names.
+
+    Parameters
+    ----------
+    sdata
+        The SpatialData object containing the input shapes layer.
+    shapes_layer
+        The shapes layer in `sdata.shapes` to use as input.
+    output_shapes_layer
+        The output shapes layer in `sdata.tables` to which the updated shapes layer will be written.
+    shape_names_column
+        Column name in shapes layer containing geometry names. If not present, new names will be generated.
+    unnamed
+        Name to be assigned to any unnamed geometries in `shape_names_column`. Defaults to 'unnamed'.
+    unique_shape_names_column
+        Column name in which unique names will be created for single polygons by appending a counter to the original name in `shape_names_column` for polygons with the same name. Note 
+        that multipolygons will be split in individual polygons and each will get a unique name based on the original name of the multipolygon. Unique names will be stored in 
+        `{shape_names_column}-unique` in the updated shapes layer.
+    erosion
+        Number of pixels to erode polygons by. This can avoid problems with overlapping edges of geometries when calculating distances. Default is 0.5 (i.e. erosion by 0.5 pixels).    
+    overwrite
+        If True, overwrites the `output_shapes_layer` if it already exists in `sdata`.
+        
+    Returns
+    -------
+    Modified `sdata` object with updated updated shapes layer.
+    """
+    
+    # Create copy of shapes layer
+    gdf = sdata.shapes[shapes_layer].copy()
+    print(f"Found {len(gdf)} geometries in {shapes_layer}.")
+    
+    # Ensure shape_names_column exist
+    if shape_names_column not in gdf.columns:
+        gdf[shape_names_column] = unnamed
+        
+    gdf[shape_names_column] = gdf[shape_names_column].fillna("").astype(str)
+    unnamed_mask = gdf[shape_names_column] == ""
+    for i, idx in enumerate(gdf[unnamed_mask].index):
+        gdf.at[idx, shape_names_column] = unnamed
+    
+    # Convert Points with a radius column to circular polygons
+    def _point_to_circle(geom, radius=None):
+        if isinstance(geom, Point) and radius is not None:
+            return geom.buffer(radius, resolution=16)
+        return geom
+    
+    if "radius" in gdf.columns:
+        mask_points_with_radius = gdf.geometry.geom_type.eq("Point") & gdf["radius"].notna()
+        n_converted = mask_points_with_radius.sum()
+
+        if n_converted > 0:
+            print(f"Converting {n_converted} Point geometries with 'radius' to circular polygons.")
+            gdf.loc[mask_points_with_radius, "geometry"] = gdf.loc[mask_points_with_radius].apply(
+                lambda row: _point_to_circle(row.geometry, getattr(row, "radius", None)),
+                axis=1
+            )
+        
+    # Slightly erode all polygons (this avoids any shared borders between polygons)
+    gdf["geometry"] = gdf.geometry.apply(
+        lambda geom: geom.buffer(
+            -erosion, 
+            join_style=2, 
+            resolution=16)
+        if geom.geom_type in ["Polygon", "MultiPolygon"] else geom
+    )
+    polygon_mask = ~gdf.geometry.is_empty 
+    removed = len(gdf) - polygon_mask.sum() 
+    gdf = gdf[polygon_mask] # drop any polygons that collapsed to empty 
+    if removed > 0: 
+        print(f"Removed {removed} polygons that collapsed to empty after erosion.")
+        
+    # Explode multipolygons into single polygons (this allows us to treat multipolygons as unique polygons)
+    n_multipolygons = gdf.geometry.apply(lambda g: g.geom_type == "MultiPolygon").sum()
+    gdf = gdf.explode(index_parts=False).reset_index(drop=True)
+    n_after = len(gdf)
+    print(f"Split {n_multipolygons} multipolygons into individual polygons. Total number of geometries after splitting multipolgons is {n_after}.")
+    
+    # Create unique names
+    sizes = gdf.groupby(shape_names_column)[shape_names_column].transform("size")
+    counter = gdf.groupby(shape_names_column).cumcount() + 1
+    gdf[unique_shape_names_column] = np.where(
+        sizes.eq(1),
+        gdf[shape_names_column],
+        gdf[shape_names_column] + counter.astype(str)
+    )
+
+    # Add filtered shapes layer
+    sdata = add_shapes_layer(
+        sdata,
+        input=gdf,
+        output_layer=output_shapes_layer,
+        overwrite=overwrite,
+    )
+
+    return sdata
+        

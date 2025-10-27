@@ -3,9 +3,11 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 import numpy as np
+import pandas as pd
 from anndata import AnnData
 from spatialdata import SpatialData
 from spatialdata.models import TableModel
+from typing import Optional, Union, Sequence
 
 from harpy.shape._shape import filter_shapes_layer
 from harpy.table._manager import TableLayerManager
@@ -223,15 +225,17 @@ def filter_on_size(
     labels_layer: list[str],
     table_layer: str,
     output_layer: str,
-    min_size: int = 100,
-    max_size: int = 100000,
-    update_shapes_layers: bool = True,
     cellsize_key=_CELLSIZE_KEY,
+    min_size: float | int | None = None,
+    max_size: float | int | None = None,
+    update_shapes_layers: bool = True,
+    prefix_filtered_shapes_layer: str = "filtered_size",
     overwrite: bool = False,
 ) -> SpatialData:
     """Returns the updated SpatialData object.
 
     All cells with a size outside of the min and max size range are removed using the `cellsize_key` in `.obs`. Run e.g. `harpy.tb.preprocess_transcriptomics` or `harpy.tb.preprocess_proteomics` to obtain cell sizes.
+    Cells are kept if min_size ≤ cellsize_key ≤ max_size.
 
     Parameters
     ----------
@@ -246,16 +250,83 @@ def filter_on_size(
         The table layer in `sdata`.
     output_layer
         The output table layer in `sdata`.
+    cellsize_key
+        Column in `sdata.tables[table_layer].obs` containing cell sizes.
     min_size
-        minimum size in pixels.
+        minimum size in pixels. If None, this value is not used for filtering.
     max_size
-        maximum size in pixels.
+        maximum size in pixels. If None, this value is not used for filtering.
     update_shapes_layers
         Whether to filter the shapes layers associated with `labels_layer`.
         If set to `True`, cells that do not appear in resulting `output_layer` (with `_REGION_KEY` equal to `labels_layer`) will be removed from the shapes layers (via `_INSTANCE_KEY`) in the `sdata` object.
-        Filtered shapes will be added to `sdata` with prefix 'filtered_size'.
-    cellsize_key
-        Column in `sdata.tables[table_layer].obs` containing cell sizes.
+        Filtered shapes will be added to `sdata` with prefix `prefix_filtered_shapes_layer`.
+    prefix_filtered_shapes_layer
+        prefix to use for filtered shapes layer if update_shapes_layers is True. Defaults to 'filtered_size'.
+    overwrite
+        If True, overwrites the `output_layer` if it already exists in `sdata`.
+
+    Returns
+    -------
+    The updated SpatialData object.
+    """
+    
+    sdata = filter_numerical(
+        sdata = sdata,
+        labels_layer = labels_layer,
+        table_layer = table_layer,
+        output_layer = output_layer,
+        numerical_column = cellsize_key,
+        min_value = min_size,
+        max_value = max_size,
+        update_shapes_layers = update_shapes_layers,
+        prefix_filtered_shapes_layer = prefix_filtered_shapes_layer,
+        overwrite = overwrite,
+    )
+
+    return sdata
+
+
+def filter_numerical(
+    sdata: SpatialData,
+    labels_layer: list[str],
+    table_layer: str,
+    output_layer: str,
+    numerical_column: str,
+    min_value: float | int | None = None,
+    max_value: float | int | None = None,
+    update_shapes_layers: bool = True,
+    prefix_filtered_shapes_layer: str = "filtered",
+    overwrite: bool = False,
+) -> SpatialData:
+    """Returns the updated SpatialData object.
+
+    All cells with a size outside of the min and max size range are removed using the `numerical_column` in `.obs` (cells are kept if min_value ≤ numerical_column ≤ max_value).
+    
+    Parameters
+    ----------
+    sdata
+        The SpatialData object.
+    labels_layer
+        The labels layer(s) of `sdata` used to select the cells via the _REGION_KEY  in `sdata.tables[table_layer].obs`.
+        Note that if `output_layer` is equal to `table_layer` and overwrite is True,
+        cells in `sdata.tables[table_layer]` linked to other `labels_layer` (via the _REGION_KEY), will be removed from `sdata.tables[table_layer]`
+        (also from the backing zarr store if it is backed).
+    table_layer
+        The table layer in `sdata`.
+    output_layer
+        The output table layer in `sdata`.
+    numerical_column
+        Name of numerical column in `sdata.tables[table_layer].obs` to use for filtering with `min_value` and `max_value`.
+    min_value
+        minimum value of `numerical_column`. If None, this value is not used for filtering.
+    max_value
+        maximum value of `numerical_column`. If None, this value is not used for filtering.
+    update_shapes_layers
+        Whether to filter the shapes layers associated with `labels_layer`.
+        If set to `True`, cells that do not appear in resulting `output_layer` (with `_REGION_KEY` equal to `labels_layer`) will be removed from the shapes layers (via `_INSTANCE_KEY`) in the `sdata` object.
+        Filtered shapes will be added to `sdata` with prefix `prefix_filtered_shapes_layer`.
+    prefix_filtered_shapes_layer
+        prefix to use for filtered shapes layer if update_shapes_layers is True. Defaults to 'filtered'.
     overwrite
         If True, overwrites the `output_layer` if it already exists in `sdata`.
 
@@ -264,13 +335,32 @@ def filter_on_size(
     The updated SpatialData object.
     """
     process_table_instance = ProcessTable(sdata, labels_layer=labels_layer, table_layer=table_layer)
-    adata = process_table_instance._get_adata()
+    adata = process_table_instance._get_adata().copy()
     start = adata.shape[0]
+    
+    if numerical_column not in adata.obs.columns:
+        raise ValueError(
+            f"Column '{numerical_column}' not found in '{table_layer}.obs'. "
+        )
+        
+    if not np.issubdtype(adata.obs[numerical_column].dtype, np.number):
+        raise ValueError(
+            f"Column '{numerical_column}' must be numeric, but dtype is {adata.obs[numerical_column].dtype}."
+        )
 
-    # Filter cells based on size and distance
-    # need to do the copy because we pop the spatialdata_attrs in add_table_layer, otherwise it would not be updated inplace
-    adata = adata[adata.obs[cellsize_key] < max_size, :].copy()
-    adata = adata[adata.obs[cellsize_key] > min_size, :].copy()
+    # Filter cells based on min and max values
+    mask = pd.Series(True, index=adata.obs.index)
+    
+    if min_value is not None:
+        below = (adata.obs[numerical_column] < min_value).sum()
+        log.info(f"Removed {below} cells below {min_value}.")
+        mask &= adata.obs[numerical_column] >= min_value
+    if max_value is not None:
+        above = (adata.obs[numerical_column] > max_value).sum()
+        log.info(f"Removed {above} cells above {max_value}.")
+        mask &= adata.obs[numerical_column] <= max_value
+        
+    adata = adata[mask, :].copy()
 
     sdata = add_table_layer(
         sdata,
@@ -286,11 +376,125 @@ def filter_on_size(
                 sdata,
                 table_layer=output_layer,
                 labels_layer=_labels_layer,
-                prefix_filtered_shapes_layer="filtered_size",
+                prefix_filtered_shapes_layer=prefix_filtered_shapes_layer,
             )
 
     filtered = start - adata.shape[0]
-    log.info(f"{filtered} cells were filtered out based on size.")
+    log.info(
+        f"Removed {filtered} / {start} cells based on '{numerical_column}' (min={min_value}, max={max_value}) and kept {adata.shape[0]}."
+    )
+
+    return sdata
+
+
+def filter_categorical(
+    sdata: SpatialData,
+    labels_layer: list[str],
+    table_layer: str,
+    output_layer: str,
+    categorical_column: str,
+    include_values: Optional[Union[str, Sequence[str]]] = None,
+    exclude_values: Optional[Union[str, Sequence[str]]] = None,
+    update_shapes_layers: bool = True,
+    prefix_filtered_shapes_layer: str = "filtered",
+    overwrite: bool = False,
+) -> SpatialData:
+    """Filter cells based on categorical values in `.obs`.
+
+    Removes or keeps cells based on specific values in a categorical column of 
+    `sdata.tables[table_layer].obs`.
+
+    Parameters
+    ----------
+    sdata
+        The SpatialData object.
+    labels_layer
+        The labels layer(s) of `sdata` used to select the cells via the _REGION_KEY  in `sdata.tables[table_layer].obs`.
+        Note that if `output_layer` is equal to `table_layer` and overwrite is True,
+        cells in `sdata.tables[table_layer]` linked to other `labels_layer` (via the _REGION_KEY), will be removed from `sdata.tables[table_layer]`
+        (also from the backing zarr store if it is backed).
+    table_layer
+        The table layer in `sdata`.
+    output_layer
+        The output table layer in `sdata`.
+    categorical_column
+        Name of the categorical column in `.obs` to use for filtering.
+    include_values
+        Value(s) to keep. Only cells whose `categorical_column` matches one of these
+        values will be kept. Mutually exclusive with `exclude_values`.
+    exclude_values
+        Value(s) to remove. Cells whose `categorical_column` matches one of these
+        values will be removed. Mutually exclusive with `include_values`.
+    update_shapes_layers
+        Whether to filter the shapes layers associated with `labels_layer`.
+        If set to `True`, cells that do not appear in resulting `output_layer` (with `_REGION_KEY` equal to `labels_layer`) will be removed from the shapes layers (via `_INSTANCE_KEY`) in the `sdata` object.
+        Filtered shapes will be added to `sdata` with prefix `prefix_filtered_shapes_layer`.
+    prefix_filtered_shapes_layer
+        prefix to use for filtered shapes layer if update_shapes_layers is True. Defaults to 'filtered'.
+    overwrite
+        If True, overwrites the `output_layer` if it already exists in `sdata`.
+
+    Returns
+    -------
+    The updated SpatialData object.
+    """
+    if include_values is not None and exclude_values is not None:
+        raise ValueError("Specify only one of 'include_values' or 'exclude_values'.")
+
+    process_table_instance = ProcessTable(sdata, labels_layer=labels_layer, table_layer=table_layer)
+    adata = process_table_instance._get_adata().copy()
+    start = adata.shape[0]
+    
+    if categorical_column not in adata.obs.columns:
+        raise ValueError(f"Column '{categorical_column}' not found in '{table_layer}.obs'.")
+
+    # Ensure include/exclude are lists
+    if isinstance(include_values, str):
+        include_values = [include_values]
+    if isinstance(exclude_values, str):
+        exclude_values = [exclude_values]
+
+    # Filter
+    mask = pd.Series(True, index=adata.obs.index)
+
+    if include_values is not None:
+        kept = adata.obs[categorical_column].isin(include_values).sum()
+        removed = (~adata.obs[categorical_column].isin(include_values)).sum()
+        log.info(f"Found {kept} cells in {include_values} to keep.")
+        mask &= adata.obs[categorical_column].isin(include_values)
+
+    elif exclude_values is not None:
+        removed = adata.obs[categorical_column].isin(exclude_values).sum()
+        kept = (~adata.obs[categorical_column].isin(exclude_values)).sum()
+        log.info(f"Found {removed} cells in {exclude_values} to remove.")
+        mask &= ~adata.obs[categorical_column].isin(exclude_values)
+
+    adata = adata[mask, :].copy()
+
+    sdata = add_table_layer(
+        sdata,
+        adata=adata,
+        output_layer=output_layer,
+        region=process_table_instance.labels_layer,
+        overwrite=overwrite,
+    )
+
+    if update_shapes_layers:
+        for _labels_layer in process_table_instance.labels_layer:
+            sdata = filter_shapes_layer(
+                sdata,
+                table_layer=output_layer,
+                labels_layer=_labels_layer,
+                prefix_filtered_shapes_layer=prefix_filtered_shapes_layer,
+            )
+
+    filtered = start - adata.shape[0]
+    log.info(
+        f"Removed {filtered} / {start} cells based on '{categorical_column}' "
+        f"({'included' if include_values is not None else 'excluded'}: "
+        f"{include_values if include_values is not None else exclude_values}) "
+        f"and kept {adata.shape[0]}."
+    )
 
     return sdata
 
