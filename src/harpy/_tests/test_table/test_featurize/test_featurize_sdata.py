@@ -6,7 +6,7 @@ from spatialdata.models import TableModel
 
 from harpy.image import add_image_layer, add_labels_layer
 from harpy.table._table import add_table_layer
-from harpy.table.featurization.featurize import extract_instances, featurize
+from harpy.table.featurization._featurize import extract_instances, featurize
 from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY
 from harpy.utils.utils import _dummy_embedding
 

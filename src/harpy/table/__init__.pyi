@@ -9,12 +9,15 @@ from ._table import add_table_layer, correct_marker_genes, filter_on_size
 from .cell_clustering._clustering import flowsom
 from .cell_clustering._preprocess import cell_clustering_preprocess
 from .cell_clustering._weighted_channel_expression import weighted_channel_expression
+from .featurization._featurize import extract_instances, featurize
 from .pixel_clustering._cluster_intensity import cluster_intensity
 from .pixel_clustering._neighbors import spatial_pixel_neighbors
 
 __all__ = [
     "add_table_layer",
     "correct_marker_genes",
+    "extract_instances",
+    "featurize",
     "filter_on_size",
     "flowsom",
     "weighted_channel_expression",

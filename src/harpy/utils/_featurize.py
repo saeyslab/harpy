@@ -26,7 +26,7 @@ log = get_pylogger(__name__)
 
 class Featurizer:
     """
-    Helper class to featurize images and labels using Dask and PyTorch.
+    Helper class to featurize images and labels using Dask.
 
     Parameters
     ----------
@@ -93,34 +93,10 @@ class Featurizer:
         """
         Extract per-instance feature vectors from the image/mask using a user-provided embedding `model`.
 
-        This method constructs a Dask graph that, for each non-zero label in the mask, extracts a
-        centered `y`,`x` window (size set by `diameter` or `2*depth`), optionally removes background
-        pixels outside the labeled object, and feeds the resulting instance cutout (with preserved `z`
-        and channel dimensions) through `model` to produce an embedding of size `embedding_dimension`.
-
-        Internally, instance windows are generated lazily (via `dask.array.map_overlap` and
-        `dask.array.map_blocks`) and then batched along the instance dimension to evaluate `model`
-        in parallel. The output is a Dask array of shape `(i, d)`, where `i` is the number of
-        non-zero labels and `d == embedding_dimension`. Note that decreasing the chunk size of the
-        provided image and mask Dask arrays will reduce RAM usage. A good first guess for image/mask
-        chunking is `(10, 1, 2048, 2048)`.
-
-        For optimal performance, configure Dask to use `processes`, e.g. (`dask.config.set(scheduler="processes")`).
+        See `hp.tb.featurize` for a full description.
 
         Parameters
         ----------
-        depth
-            Passed to `dask.map_overlap`. Please set depth `~ max_diameter / 2`.
-        embedding_dimension
-            The dimensionality `d` of the feature vectors returned by `model`. The returned Dask
-            array will have shape `(i, embedding_dimension)`.
-        diameter
-            Optional explicit side length of the resulting `y`, `x` window for every
-            instance. If not provided `diameter` is set to 2 times `depth`.
-        remove_background
-            If `True` (default), pixels outside the instance label within each window are set to
-            background (e.g., zero) so that only the object remains inside the cutout. If `False`,
-            the full window content is passed to `model`.
         zarr_output_path
             If a filesystem path (string or ``Path``) is provided, the feature Dask array is
             **computed** and materialized to a Zarr store at that location. The returned object will
@@ -133,18 +109,6 @@ class Featurizer:
             not allowed to set `store_intermediate=True`.
             It is preferred to set `store_intermediate=False`, and work with a Dask client,
             so Dask can spill to disk.
-        model
-            A callable that maps a batch of instance windows to embeddings:
-            `(batch_size, c,z,y,x)->(batch_size, embedding_dimension)` , e.g.
-            `model(batch, **model_kwargs) -> np.ndarray`.
-            The callable should accept NumPy arrays; Dask will handle chunking and batching.
-            The callable must include the parameter 'embedding_dimension'
-        batch_size
-            Chunk size of the resulting Dask array in the instance dimension `i` during model
-            evaluation. Lower values can reduce (GPU) memory usage at the cost of more overhead.
-        model_kwargs
-            Extra keyword arguments forwarded to `model` at call time (e.g., device selection,
-            inference flags).
         **kwargs
             Additional keyword arguments forwarded to `map_blocks`. Use with care.
 
@@ -189,6 +153,10 @@ class Featurizer:
         ...     batch_size=64,
         ...     zarr_output_path="features.zarr",
         ... )
+
+        See Also
+        --------
+        harpy.tb.featurize : featurize instances in labels layer from an image layer using an embedding model.
         """
         if store_intermediate and zarr_output_path is None:
             raise ValueError("Please specify a 'zarr_output_path' if 'store_intermediate' is 'True'.")
@@ -338,6 +306,9 @@ class Featurizer:
         # Keep full window content instead of masking to the instance
         >>> inst = fe.extract_instances(depth=100, diameter=75 remove_background=False)
 
+        See Also
+        --------
+        harpy.tb.extract_instances : extract instances in labels layer from an image layer.
         """
         if diameter is None:
             diameter = 2 * depth

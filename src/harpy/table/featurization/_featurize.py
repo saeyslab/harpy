@@ -77,7 +77,103 @@ def featurize(
     overwrite: bool = False,
     **kwargs: Any,
 ) -> SpatialData:
-    """Featurize"""
+    """
+    Extract per-instance feature vectors from the `img_layer`/`labels_layer` using a user-provided embedding `model`.
+
+    This method constructs a Dask graph that, for each non-zero label in `labels_layer`, extracts a
+    centered `y`,`x` window (size set by `diameter` or `2*depth`) from `img_layer`,
+    optionally removes background pixels outside the labeled object (in `img_layer`),
+    and feeds the resulting instance cutout (with preserved `z` and channel dimensions) through `model`
+    to produce an embedding of size `embedding_dimension`.
+
+    Internally, instance windows are generated lazily (via `dask.array.map_overlap` and
+    `dask.array.map_blocks`) and then batched along the instance dimension to evaluate `model`
+    in parallel. The output is a Dask array of shape `(i, d)`, where `i` is the number of
+    non-zero labels and `d == embedding_dimension`. Note that decreasing the chunk size of the
+    provided image and mask Dask arrays will reduce RAM usage. A good first guess for image/mask
+    chunking is `(c_chunksize, y_chunksize, x_chunksize)=(10, 2048, 2048)`.
+
+    The resulting feature vectors are computed and added to `sdata[output_layer].obsm[embedding_obsm_key]` as a numpy array.
+    If `table_layer` is None, an empty table layer is created at `output_layer`,
+    otherwise, the feature vectors are sorted and filtered according to `sdata[table_layer].obs[_INSTANCE_KEY]`,
+    and similarly added to `sdata[output_layer].obsm[embedding_obsm_key]`.
+
+    For optimal performance, configure Dask to use `processes`, e.g. (`dask.config.set(scheduler="processes")`).
+
+    Parameters
+    ----------
+    sdata
+        SpatialData object.
+    img_layer
+        Name of the image layer.
+    labels_layer
+        Name of the labels layer.
+    table_layer
+        Name of the table layer.
+    output_layer
+        Name of the output tables layer. Can be set equal to `table_layer` if overwrite is set to `True`.
+    depth
+        Passed to `dask.map_overlap`. Please set depth `~ max_diameter / 2`.
+    embedding_dimension
+        The dimensionality `d` of the feature vectors returned by `model`. The returned Dask
+        array will have shape `(i, embedding_dimension)`.
+    diameter
+        Optional explicit side length of the resulting `y`, `x` window for every
+        instance. If not provided `diameter` is set to 2 times `depth`.
+    remove_background
+        If `True` (default), pixels outside the instance label within each window are set to
+        background (e.g., zero) so that only the object remains inside the cutout. If `False`,
+        the full window content is passed to `model`.
+    model
+        A callable that maps a batch of instance windows to embeddings:
+        `(batch_size, c,z,y,x)->(batch_size, embedding_dimension)` , e.g.
+        `model(batch, **model_kwargs) -> np.ndarray`.
+        The callable should accept NumPy arrays; Dask will handle chunking and batching.
+        The callable must include the parameter 'embedding_dimension'
+    batch_size
+        Chunk size of the resulting Dask array in the instance dimension `i` during model
+        evaluation. Lower values can reduce (GPU) memory usage at the cost of more overhead.
+    model_kwargs
+        Extra keyword arguments forwarded to `model` at call time (e.g., device selection,
+        inference flags).
+    embedding_obsm_key
+        Name of the feature matrix added to `sdata[output_layer].obsm`.
+    to_coordinate_system
+        The coordinate system that holds `img_layer` and `labels_layer`.
+    overwrite
+        If `True`, overwrites the `output_layer` if it already exists in `sdata`.
+
+
+    Returns
+    -------
+    Spatialdata object.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from numpy.typing import NDArray
+    >>> import harpy as hp
+    >>>
+    >>> def _dummy_embedding(array: NDArray, embedding_dimension: int, seed: int = 42) -> NDArray:
+    ...     rng = np.random.default_rng(seed)
+    ...     random_array = rng.random((array.shape[0], embedding_dimension), dtype=np.float32)
+    ...     return random_array
+    >>>
+    >>> sdata = hp.tb.featurize(
+    ...     sdata,
+    ...     img_layer="my_image",
+    ...     labels_layer="my_labels",
+    ...     table_layer="my_table",
+    ...     output_layer="my_table",
+    ...     depth=100,
+    ...     embedding_dimension=128,
+    ...     diameter=75,
+    ...     model=_dummy_embedding,
+    ...     remove_background=True,
+    ...     batch_size=64,
+    ...     overwrite=True,
+    ... )
+    """
     # if table_layer is None, we create an empty Anndata, that is annotated by labels layer
     # do it with dummy embedding first
 
