@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 
 import numpy as np
 import pandas as pd
 from anndata import AnnData
 from spatialdata import SpatialData
 from spatialdata.models import TableModel
-from typing import Optional, Union, Sequence
 
 from harpy.shape._shape import filter_shapes_layer
 from harpy.table._manager import TableLayerManager
@@ -269,18 +268,17 @@ def filter_on_size(
     -------
     The updated SpatialData object.
     """
-    
     sdata = filter_numerical(
-        sdata = sdata,
-        labels_layer = labels_layer,
-        table_layer = table_layer,
-        output_layer = output_layer,
-        numerical_column = cellsize_key,
-        min_value = min_size,
-        max_value = max_size,
-        update_shapes_layers = update_shapes_layers,
-        prefix_filtered_shapes_layer = prefix_filtered_shapes_layer,
-        overwrite = overwrite,
+        sdata=sdata,
+        labels_layer=labels_layer,
+        table_layer=table_layer,
+        output_layer=output_layer,
+        numerical_column=cellsize_key,
+        min_value=min_size,
+        max_value=max_size,
+        update_shapes_layers=update_shapes_layers,
+        prefix_filtered_shapes_layer=prefix_filtered_shapes_layer,
+        overwrite=overwrite,
     )
 
     return sdata
@@ -301,7 +299,7 @@ def filter_numerical(
     """Returns the updated SpatialData object.
 
     All cells with a size outside of the min and max size range are removed using the `numerical_column` in `.obs` (cells are kept if min_value ≤ numerical_column ≤ max_value).
-    
+
     Parameters
     ----------
     sdata
@@ -337,12 +335,10 @@ def filter_numerical(
     process_table_instance = ProcessTable(sdata, labels_layer=labels_layer, table_layer=table_layer)
     adata = process_table_instance._get_adata().copy()
     start = adata.shape[0]
-    
+
     if numerical_column not in adata.obs.columns:
-        raise ValueError(
-            f"Column '{numerical_column}' not found in '{table_layer}.obs'. "
-        )
-        
+        raise ValueError(f"Column '{numerical_column}' not found in '{table_layer}.obs'. ")
+
     if not np.issubdtype(adata.obs[numerical_column].dtype, np.number):
         raise ValueError(
             f"Column '{numerical_column}' must be numeric, but dtype is {adata.obs[numerical_column].dtype}."
@@ -350,7 +346,7 @@ def filter_numerical(
 
     # Filter cells based on min and max values
     mask = pd.Series(True, index=adata.obs.index)
-    
+
     if min_value is not None:
         below = (adata.obs[numerical_column] < min_value).sum()
         log.info(f"Removed {below} cells below {min_value}.")
@@ -359,7 +355,7 @@ def filter_numerical(
         above = (adata.obs[numerical_column] > max_value).sum()
         log.info(f"Removed {above} cells above {max_value}.")
         mask &= adata.obs[numerical_column] <= max_value
-        
+
     adata = adata[mask, :].copy()
 
     sdata = add_table_layer(
@@ -393,15 +389,15 @@ def filter_categorical(
     table_layer: str,
     output_layer: str,
     categorical_column: str,
-    include_values: Optional[Union[str, Sequence[str]]] = None,
-    exclude_values: Optional[Union[str, Sequence[str]]] = None,
+    include_values: str | Sequence[str] | None = None,
+    exclude_values: str | Sequence[str] | None = None,
     update_shapes_layers: bool = True,
     prefix_filtered_shapes_layer: str = "filtered",
     overwrite: bool = False,
 ) -> SpatialData:
     """Filter cells based on categorical values in `.obs`.
 
-    Removes or keeps cells based on specific values in a categorical column of 
+    Removes or keeps cells based on specific values in a categorical column of
     `sdata.tables[table_layer].obs`.
 
     Parameters
@@ -444,7 +440,7 @@ def filter_categorical(
     process_table_instance = ProcessTable(sdata, labels_layer=labels_layer, table_layer=table_layer)
     adata = process_table_instance._get_adata().copy()
     start = adata.shape[0]
-    
+
     if categorical_column not in adata.obs.columns:
         raise ValueError(f"Column '{categorical_column}' not found in '{table_layer}.obs'.")
 
