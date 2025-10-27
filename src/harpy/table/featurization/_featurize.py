@@ -60,7 +60,7 @@ def extract_instances(
         Optional explicit side length of the resulting `y`, `x` window for every
         instance. If not provided `diameter` is set to 2 times `depth`.
     remove_background
-        If `True` (default), pixels outside the instance label within each
+        If `True`, pixels outside the instance label within each
         window are set to background (e.g., zero) so that only the object remains
         inside the cutout. If ``False``, the entire window content is kept.
     zarr_output_path
@@ -80,11 +80,11 @@ def extract_instances(
     tuple:
 
         - a Numpy array containing indices of extracted labels, shape `(i,)`.
-        Dimension of `i` will be equal to the total number of non-zero labels in the mask.
+          Dimension of `i` will be equal to the total number of non-zero labels in the mask.
 
         - a Dask array of dimension `(i,c+1,z,y,x)`, with dimension of `c` the number of channels in `img_layer`.
-        At channel index 0 of each instance, is the corresponding mask.
-        dimension of `y` and `x` equal to `diameter`, or 2*`depth` if `diameter` is not specified.
+          At channel index 0 of each instance, is the corresponding mask.
+          Dimension of `y` and `x` equal to `diameter`, or 2*`depth` if `diameter` is not specified.
 
     Examples
     --------
@@ -166,27 +166,33 @@ def featurize(
     **kwargs: Any,
 ) -> SpatialData:
     """
-    Extract per-instance feature vectors from the `img_layer`/`labels_layer` using a user-provided embedding `model`.
+    Extract per-instance feature vectors from `img_layer` and `labels_layer` using a user-provided embedding `model`.
 
     This method constructs a Dask graph that, for each non-zero label in `labels_layer`, extracts a
-    centered `y`,`x` window (size set by `diameter` or `2*depth`) from `img_layer`,
-    optionally removes background pixels outside the labeled object (in `img_layer`),
+    centered `(y, x)` window (size set by `diameter` or `2 * depth`) from `img_layer`,
+    optionally removes background pixels outside the labeled object (also in the corresponding `img_layer`),
     and feeds the resulting instance cutout (with preserved `z` and channel dimensions) through `model`
     to produce an embedding of size `embedding_dimension`.
 
     Internally, instance windows are generated lazily (via `dask.array.map_overlap` and
     `dask.array.map_blocks`) and then batched along the instance dimension to evaluate `model`
     in parallel. The output is a Dask array of shape `(i, d)`, where `i` is the number of
-    non-zero labels and `d == embedding_dimension`. Note that decreasing the chunk size of the
-    provided image and mask Dask arrays will reduce RAM usage. A good first guess for image/mask
-    chunking is `(c_chunksize, y_chunksize, x_chunksize)=(10, 2048, 2048)`.
+    non-zero labels and `d == embedding_dimension`.
 
-    The resulting feature vectors are computed and added to `sdata[output_layer].obsm[embedding_obsm_key]` as a numpy array.
-    If `table_layer` is None, an empty table layer is created at `output_layer`,
-    otherwise, the feature vectors are sorted and filtered according to `sdata[table_layer].obs[_INSTANCE_KEY]`,
-    and similarly added to `sdata[output_layer].obsm[embedding_obsm_key]`.
+    The resulting feature vectors are computed and added to
+    `sdata[output_layer].obsm[embedding_obsm_key]` as a NumPy array.
+    If `table_layer` is `None`, an empty table layer is created at `output_layer`.
+    Otherwise, the feature vectors are sorted and filtered according to
+    `sdata[table_layer].obs[_INSTANCE_KEY]`, and similarly added to
+    `sdata[output_layer].obsm[embedding_obsm_key]`.
 
-    For optimal performance, configure Dask to use `processes`, e.g. (`dask.config.set(scheduler="processes")`).
+    For optimal performance, configure Dask to use `processes`, e.g.:
+    `dask.config.set(scheduler="processes")`.
+
+    Note:
+        Decreasing the chunk size of the provided image and mask arrays will reduce RAM usage.
+        A good first guess for image/mask chunking is
+        `(c_chunksize, y_chunksize, x_chunksize) = (10, 2048, 2048)`.
 
     Parameters
     ----------
@@ -230,7 +236,8 @@ def featurize(
         The coordinate system that holds `img_layer` and `labels_layer`.
     overwrite
         If `True`, overwrites the `output_layer` if it already exists in `sdata`.
-
+    **kwargs
+        Additional keyword arguments forwarded to `map_blocks`. Use with care.
 
     Returns
     -------

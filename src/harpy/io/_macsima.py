@@ -60,7 +60,7 @@ def macsima(
     This function reads images from a MACSima cyclic imaging experiment.
 
     The channel names will follow the following format:
-    cycle_scantype_channelname_roiid_reagent
+    **cycle_scantype_channelname_roiid_reagent**
 
     .. seealso::
 

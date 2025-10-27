@@ -21,6 +21,7 @@ I/O.
 .. autosummary::
     :toctree: generated
 
+    io.macsima
     io.merscope
     io.xenium
     io.visium_hd
@@ -107,7 +108,9 @@ Operations on table (`AnnData` object) layers.
     tb.allocate_intensity
     tb.preprocess_transcriptomics
     tb.preprocess_proteomics
+    tb.extract_instances
     tb.filter_on_size
+    tb.featurize
     tb.leiden
     tb.kmeans
     tb.score_genes
