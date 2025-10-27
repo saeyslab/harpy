@@ -3,10 +3,26 @@ from __future__ import annotations
 from pathlib import Path
 
 import pandas as pd
-import torch
-from kronos import create_model_from_pretrained
-from kronos.vision_transformer import DinoVisionTransformer
 from numpy.typing import NDArray
+
+from harpy.utils.pylogger import get_pylogger
+
+log = get_pylogger(__name__)
+
+try:
+    import torch
+except ImportError:
+    log.warning(
+        "Module 'torch' not installed, please install 'torch' if you want to use the callable 'harpy.utils.kronos_embedding' as a model for 'harpy.tb.featurize'."
+    )
+
+try:
+    from kronos import create_model_from_pretrained
+    from kronos.vision_transformer import DinoVisionTransformer
+except ImportError:
+    log.warning(
+        "Module 'kronos' not installed, please install 'kronos' if you want to use the callable 'harpy.utils.kronos_embedding' as a model for 'harpy.tb.featurize'."
+    )
 
 
 def kronos_embedding(

@@ -223,6 +223,7 @@ Utility functions.
 
     utils.bounding_box_query
     utils.RasterAggregator
+    utils.kronos_embedding
 ```
 
 ## Datasets

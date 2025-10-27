@@ -2,27 +2,24 @@
 
 from __future__ import annotations
 
-import uuid
 from collections.abc import Mapping
 from types import MappingProxyType
 from typing import Any
 
-import dask.array as da
+import pandas as pd
 import spatialdata_plot  # noqa: F401
 from matplotlib.axes import Axes
 from spatialdata import SpatialData, bounding_box_query
-from spatialdata.models import TableModel
 
-from harpy.image._image import _get_spatial_element
-from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY
+from harpy.utils._keys import _REGION_KEY
 
 
 def plot_spatialdata(
     sdata: SpatialData,
     img_layer: str,
     channel: str,
-    labels_layer: str | None,
-    table_layer: str | None,
+    labels_layer: str | None = None,
+    table_layer: str | None = None,
     ax: Axes | None = None,
     crd: tuple[int, int, int, int] | None = None,
     to_coordinate_system: str = "global",
@@ -32,59 +29,34 @@ def plot_spatialdata(
 ) -> Axes:
     if table_layer is not None and labels_layer is None:
         raise ValueError(
-            f"Please specify a labels layer (which annotates the table layer {table_layer}) if 'table_layer' is specified."
+            f"Please specify a labels layer (which annotates the table layer '{table_layer}') if 'table_layer' is specified."
         )
 
     if table_layer is not None:
         adata = sdata[table_layer]
-        # subset
-        # TODO need to check that we do not alter underlying spatialdata object.
-        adata = adata[adata.obs[_REGION_KEY] == labels_layer]
-        if adata.shape[0] == 0:
+        # sanity check
+        mask = adata.obs[_REGION_KEY] == labels_layer
+        if not mask.any():
             raise ValueError(
                 f"The labels layer '{labels_layer}' does not seem to annotate the table layer '{table_layer}."
             )
 
-    img_layer_crop = f"{img_layer}_{uuid.uuid4()}"
-    labels_layer_crop = f"{labels_layer}_{uuid.uuid4()}"
-    table_layer_crop = f"{table_layer}_{uuid.uuid4()}"
+    sdata_to_plot = sdata
+    queried = False
     if crd is not None:
-        sdata[img_layer_crop] = bounding_box_query(
-            sdata[img_layer],
+        queried = True
+        sdata_to_plot = bounding_box_query(
+            sdata,
             axes=["x", "y"],
             min_coordinate=[crd[0], crd[2]],
             max_coordinate=[crd[1], crd[3]],
             target_coordinate_system=to_coordinate_system,
+            filter_table=True,
         )
-        if labels_layer is not None:
-            sdata[labels_layer_crop] = bounding_box_query(
-                sdata[labels_layer],
-                axes=["x", "y"],
-                min_coordinate=[crd[0], crd[2]],
-                max_coordinate=[crd[1], crd[3]],
-                target_coordinate_system=to_coordinate_system,
-            )
-            if table_layer is not None:
-                # annotate with labels_layer_crop
-                adata.obs[_REGION_KEY] = labels_layer_crop
-                adata.obs[_REGION_KEY] = adata.obs[_REGION_KEY].astype("category")
-                # subset adata
-                se = _get_spatial_element(sdata, layer=labels_layer_crop)
-                labels_crop = da.unique(se.data).compute()
-                adata = adata[adata.obs[_INSTANCE_KEY].isin(labels_crop)]
-                adata.uns.pop(TableModel.ATTRS_KEY)
-                adata = TableModel.parse(
-                    adata=adata,
-                    region=labels_layer_crop,
-                    region_key=_REGION_KEY,
-                    instance_key=_INSTANCE_KEY,
-                )
-                # add subsetted adata to spatialdata object
-                sdata[table_layer_crop] = adata
 
     if labels_layer is None:
-        ax = sdata.pl.render_images(
-            img_layer if crd is None else img_layer_crop,
+        ax = sdata_to_plot.pl.render_images(
+            img_layer,
             channel=channel,
             **render_images_kwargs,
         ).pl.show(
@@ -94,16 +66,31 @@ def plot_spatialdata(
         )
 
     else:
-        assert "table_name" not in render_labels_kwargs.keys()  # TODO raise valueerror if provided.
+        if "table_name" in render_labels_kwargs.keys():
+            raise ValueError(
+                "Please specify 'table_name' via the keyword argument 'table_layer' of 'plot_spatialdata.'"
+            )
+        # workaround for https://github.com/scverse/spatialdata-plot/issues/414, also see
+        # https://github.com/ArneDefauw/spatialdata-plot/blob/5af65aa118f7abf87e47470038ecdbddb27ef1ca/tests/pl/test_render_labels.py#L250
+        if "color" in render_labels_kwargs.keys():
+            if queried:
+                color = render_labels_kwargs["color"]
+                if color in sdata_to_plot[table_layer].obs and pd.api.types.is_categorical_dtype(
+                    sdata_to_plot[table_layer].obs[color]
+                ):
+                    sdata_to_plot[table_layer].obs[color] = (
+                        sdata_to_plot[table_layer].obs[color].cat.remove_unused_categories()
+                    )
+
         ax = (
-            sdata.pl.render_images(
-                img_layer if crd is None else img_layer_crop,
+            sdata_to_plot.pl.render_images(
+                img_layer,
                 channel=channel,
                 **render_images_kwargs,
             )
             .pl.render_labels(
-                labels_layer if crd is None else labels_layer_crop,
-                table_name=table_layer if crd is None else table_layer_crop,
+                labels_layer,
+                table_name=table_layer,
                 **render_labels_kwargs,
             )
             .pl.show(
@@ -112,12 +99,5 @@ def plot_spatialdata(
                 return_ax=True,
             )
         )
-
-    if crd is not None:
-        del sdata[img_layer_crop]
-        if labels_layer is not None:
-            del sdata[labels_layer_crop]
-            if table_layer is not None:
-                del sdata[table_layer_crop]
 
     return ax
