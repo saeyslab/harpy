@@ -88,7 +88,7 @@ def plot_spatialdata(
     >>> from spatialdata.datasets import blobs
     >>> import matplotlib.pyplot as plt
     >>> from matplotlib.colors import Normalize
-    >>> import harpy.plot as hp
+    >>> import harpy as hp
     >>>
     >>> # Load example spatial dataset
     >>> sdata = blobs()

@@ -155,6 +155,7 @@ Plotting functions.
 .. autosummary::
     :toctree: generated
 
+    pl.plot_spatialdata
     pl.plot
     pl.plot_image
     pl.plot_shapes
