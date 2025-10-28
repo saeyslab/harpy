@@ -37,7 +37,7 @@ def pixel_clusters(
     labels_layer: str,
     crd: tuple[int, int, int, int] | None = None,
     to_coordinate_system: str = "global",
-    ax: Axes = None,
+    ax: Axes | None = None,
     output: str | Path | None = None,
     render_labels_kwargs: Mapping[str, Any] = MappingProxyType({}),  # passed to pl.render_labels
     **kwargs,  # passed to pl.show() of spatialdata_plot

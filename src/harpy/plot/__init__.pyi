@@ -4,6 +4,7 @@ from ._clustering import cluster
 from ._enrichment import nhood_enrichment
 from ._flowsom import pixel_clusters, pixel_clusters_heatmap
 from ._plot import plot, plot_image, plot_labels, plot_shapes
+from ._plot_spatialdata import plot_spatialdata
 from ._preprocess import preprocess_transcriptomics
 from ._qc_cells import plot_adata, ridgeplot_channel, ridgeplot_channel_sample
 from ._qc_image import (
@@ -43,6 +44,7 @@ __all__ = [
     "plot_image",
     "plot_labels",
     "plot_shapes",
+    "plot_spatialdata",
     "preprocess_transcriptomics",
     "plot_adata",
     "ridgeplot_channel",

@@ -74,6 +74,39 @@ def _get_translation(spatial_image: DataArray, to_coordinate_system: str = "glob
     return _get_translation_values(translation)
 
 
+def _precondition(
+    sdata, img_layer: str, labels_layer: str, to_coordinate_system: str = "global"
+) -> tuple[DataArray, DataArray]:
+    """Helper function that gets highest resolution `img_layer` and `labels_layer`, and checks that `img_layer` and `labels_layer` are co-registered."""
+    if img_layer not in sdata.images:
+        raise ValueError(
+            f"image layer with name '{img_layer}' not found in sdata.images. Please choose from: {[*sdata.images]}."
+        )
+    if labels_layer not in sdata.labels:
+        raise ValueError(
+            f"labels layer with name '{labels_layer}' not found in sdata.labels. Please choose from: {[*sdata.labels]}."
+        )
+    se_image = _get_spatial_element(sdata, layer=img_layer)
+    se_labels = _get_spatial_element(sdata, layer=labels_layer)
+
+    if se_image.data.shape[1:] != se_labels.data.shape:
+        raise ValueError(
+            "Only arrays with same spatial shape are currently supported, "
+            f"but image layer with name {img_layer} has shape {se_image.data.shape}, "
+            f"while labels layer with name {labels_layer} has shape {se_labels.data.shape}."
+        )
+
+    t1x, t1y = _get_translation(se_image, to_coordinate_system=to_coordinate_system)
+    t2x, t2y = _get_translation(se_labels, to_coordinate_system=to_coordinate_system)
+
+    if (t1x, t1y) != (t2x, t2y):
+        raise ValueError(
+            f"image layer with name {img_layer} should "
+            f"be registered to labels layer with name {labels_layer} in coordinate system {to_coordinate_system}."
+        )
+    return se_image, se_labels
+
+
 def _apply_transform(se: DataArray, to_coordinate_system: str = "global") -> tuple[DataArray, np.ndarray, np.ndarray]:
     """
     Apply the translation (if any) of the given DataArray to its x- and y-coordinates array.

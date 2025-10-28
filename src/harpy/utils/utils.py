@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -8,6 +9,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 from geopandas import GeoDataFrame
+from numpy.typing import NDArray
 from omegaconf import OmegaConf
 from omegaconf.dictconfig import DictConfig
 from shapely.affinity import translate
@@ -165,3 +167,15 @@ def _self_contained_warning_message(sdata: SpatialData, layer: str) -> str | Non
         return warning_message
     else:
         return None
+
+
+def _dummy_embedding(array: NDArray, embedding_dimension: int, seed: int = 42) -> NDArray:
+    rng = np.random.default_rng(seed)
+    random_array = rng.random((array.shape[0], embedding_dimension), dtype=np.float32)
+    return random_array
+
+
+def _make_list(item: str | Iterable[str]) -> list[str]:
+    if isinstance(item, str) or not isinstance(item, Iterable):
+        return [item]
+    return list(item)

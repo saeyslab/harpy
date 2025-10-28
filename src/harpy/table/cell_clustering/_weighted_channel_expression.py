@@ -59,7 +59,9 @@ def weighted_channel_expression(
     harpy.tb.cluster_intensity : calculates average intensity SOM/meta cluster (pixel clusters).
     """
     # subset over all _labels_layer in 'table_layer_cell_clustering'
-    _labels_layer = [*sdata[table_layer_cell_clustering].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY]]
+    _labels_layer = [
+        *sdata[table_layer_cell_clustering].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY]
+    ]  # TODO, check for case where only one region
     process_table_clustering = ProcessTable(
         sdata, labels_layer=_labels_layer, table_layer=table_layer_cell_clustering
     )  # get all of the labels layers, to keep API not too complex, do not allow subsetting labels layers
