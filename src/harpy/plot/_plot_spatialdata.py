@@ -47,7 +47,7 @@ def plot_spatialdata(
     img_layer
         Image layer to plot from `sdata.images`.
     channel
-        Channel(s) to visualize, passed to `.pl.render_images`.
+        Channel(s) to visualize, passed to `.pl.render_images()`.
     labels_layer
         Labels layer to plot from `sdata.labels`.
     table_layer
