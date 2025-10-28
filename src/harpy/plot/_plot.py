@@ -281,7 +281,7 @@ def plot_shapes(
 
     Notes
     -----
-    - This function offers advanced visualization options for `sdata` with support for multiple image layers, labels layers shape layers, and channels.
+    - This function offers advanced visualization options for `sdata` with support for multiple image layers, labels layers, shape layers, and channels.
     - Either `img_layer` or `labels_layer` should be specified, not both.
 
     See Also
