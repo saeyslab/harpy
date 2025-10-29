@@ -294,6 +294,8 @@ class Preprocess(ProcessTable):
             X_size_norm = (adata.X.T * 100 / adata.obs[_CELLSIZE_KEY].values).T
             if issparse(adata.X):
                 adata.X = X_size_norm.tocsr()
+            else:
+                adata.X = X_size_norm
         else:
             sc.pp.normalize_total(adata, layer=None, copy=False, inplace=True, **norm_kwargs)
 

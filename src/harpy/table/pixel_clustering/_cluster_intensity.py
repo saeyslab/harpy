@@ -100,7 +100,7 @@ def cluster_intensity(
 
         labels = da.unique(se.data).compute()
 
-        assert np.all(np.in1d(labels[labels != 0], mapping.index.astype(int))), (
+        assert np.all(np.isin(labels[labels != 0], mapping.index.astype(int))), (
             f"Some labels labels layer {_labels_layer} could not be found in the provided pandas Series that maps SOM cluster ID's to metacluster IDs."
         )
 
@@ -119,6 +119,7 @@ def cluster_intensity(
             labels_layer=_labels_layer,
             output_layer=output_layer,
             channels=channels,
+            mode="sum",
             to_coordinate_system=_to_coordinate_system,
             chunks=chunks,
             append=append,
