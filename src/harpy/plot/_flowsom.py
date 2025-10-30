@@ -149,7 +149,7 @@ def pixel_clusters(
 
 def pixel_clusters_heatmap(
     sdata: SpatialData,
-    table_layer: str,  # obtained via hp.tb.cluster_intensity
+    table_layer: str,  # obtained via hp.tb.cluster_intensity_SOM
     metaclusters: bool = True,
     z_score: bool = True,
     clip_value: float | None = 3,
@@ -216,7 +216,7 @@ def pixel_clusters_heatmap(
 
     See Also
     --------
-    harpy.tb.cluster_intensity
+    harpy.tb.cluster_intensity_SOM
     """
     # clusters
     df = sdata.tables[table_layer].to_df().copy()

@@ -1,5 +1,6 @@
 from ._annotation import score_genes
 from ._cluster_cleanliness import cluster_cleanliness
+from ._cluster_intensity import cluster_intensity_heatmap
 from ._clustering import cluster
 from ._enrichment import nhood_enrichment
 from ._flowsom import pixel_clusters, pixel_clusters_heatmap
@@ -36,6 +37,7 @@ from ._transcripts import analyse_genes_left_out, transcript_density
 __all__ = [
     "score_genes",
     "cluster_cleanliness",
+    "cluster_intensity_heatmap",
     "cluster",
     "nhood_enrichment",
     "pixel_clusters",

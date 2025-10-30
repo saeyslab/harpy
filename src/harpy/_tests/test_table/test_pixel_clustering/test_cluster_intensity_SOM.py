@@ -2,7 +2,7 @@ import importlib.util
 
 import pytest
 
-from harpy.table.pixel_clustering._cluster_intensity import _export_to_ark_format, cluster_intensity
+from harpy.table.pixel_clustering._cluster_intensity import _export_to_ark_format, cluster_intensity_SOM
 from harpy.utils._keys import ClusteringKey
 
 
@@ -29,7 +29,7 @@ def test_cluster_intensity(sdata_blobs):
         overwrite=True,
     )
 
-    sdata_blobs = cluster_intensity(
+    sdata_blobs = cluster_intensity_SOM(
         sdata_blobs,
         mapping=mapping,
         img_layer=img_layer,

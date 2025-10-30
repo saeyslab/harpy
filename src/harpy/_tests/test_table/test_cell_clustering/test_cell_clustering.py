@@ -15,7 +15,7 @@ def test_cell_clustering(sdata_blobs):
     from harpy.image.pixel_clustering._clustering import flowsom as flowsom_pixel
     from harpy.table.cell_clustering._clustering import flowsom as flowsom_cell
     from harpy.table.cell_clustering._weighted_channel_expression import weighted_channel_expression
-    from harpy.table.pixel_clustering._cluster_intensity import cluster_intensity
+    from harpy.table.pixel_clustering._cluster_intensity import cluster_intensity_SOM
 
     img_layer = "blobs_image"
     labels_layer = "blobs_labels"
@@ -72,7 +72,7 @@ def test_cell_clustering(sdata_blobs):
     assert isinstance(sdata_blobs[table_layer].obs[ClusteringKey._CLUSTERING_KEY.value].dtype, pd.CategoricalDtype)
 
     # calculate average cluster intensity both for the metaclusters and clusters
-    sdata_blobs = cluster_intensity(
+    sdata_blobs = cluster_intensity_SOM(
         sdata_blobs,
         mapping=mapping,
         img_layer=[img_layer],

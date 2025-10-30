@@ -21,7 +21,7 @@ from harpy.utils.pylogger import get_pylogger
 log = get_pylogger(__name__)
 
 
-def cluster_intensity(
+def cluster_intensity_SOM(
     sdata: SpatialData,
     mapping: pd.Series,  # pandas series with at the index the clusters and as values the metaclusters # TODO maybe should also allow passing None, and calculate mapping from provided som labels layer and meta cluster labels layer
     img_layer: str | Iterable[str],
