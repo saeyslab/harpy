@@ -8,8 +8,10 @@ import spatialdata as sd
 import tifffile
 from numpy.typing import NDArray
 from spatialdata import SpatialData, read_zarr
+from spatialdata.transformations import get_transformation
 
 from harpy.datasets.registry import get_ome_registry, get_registry, get_spatialdata_registry
+from harpy.image._image import add_image_layer
 
 
 def mibi_example() -> SpatialData:
@@ -29,6 +31,26 @@ def macsima_example() -> SpatialData:
     unzip_path = registry.fetch("proteomics/macsima/sdata_multi_channel.zarr.zip", processor=pooch.Unzip())
     sdata = read_zarr(os.path.commonpath(unzip_path))
     sdata.path = None
+    c_coords = sdata["HumanLiverH35"].c.data
+    new_c_coords = []
+    counts = {}
+    # fix duplicate names
+    for name in c_coords:
+        if name in counts:
+            counts[name] += 1
+            new_c_coords.append(f"{name}_{counts[name]}")
+        else:
+            counts[name] = 0
+            new_c_coords.append(name)
+    sdata = add_image_layer(
+        sdata,
+        arr=sdata["HumanLiverH35"].data,
+        output_layer="HumanLiverH35",
+        c_coords=new_c_coords,
+        transformations=get_transformation(sdata["HumanLiverH35"], get_all=True),
+        overwrite=True,
+    )
+    assert len(new_c_coords) == len(set(new_c_coords))
     return sdata
 
 

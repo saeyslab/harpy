@@ -205,9 +205,8 @@ def cluster_intensity_heatmap(
         ax=ax,
         **kwargs,
     )
-    _title = "cluster"
-    ax.set_title(f"Mean Channel Intensity per {_title}")
-    _x_label = "Cluster"
+    ax.set_title(f"Mean Channel Intensity per {cluster_key} cluster")
+    _x_label = f"{cluster_key} cluster"
 
     ax.set_ylabel("Channel")
     ax.set_xlabel(_x_label)
