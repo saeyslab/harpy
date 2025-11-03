@@ -29,6 +29,7 @@ def preprocess_transcriptomics(
     min_counts: int = 10,
     min_cells: int = 5,
     size_norm: bool = True,
+    library_norm: bool = False,
     highly_variable_genes: bool = False,
     highly_variable_genes_kwargs: Mapping[str, Any] = MappingProxyType({}),
     max_value_scale: float | None = 10,
@@ -65,7 +66,9 @@ def preprocess_transcriptomics(
     min_cells
         Minimum number of cells a gene should be in to be kept (passed to `scanpy.pp.filter_genes`).
     size_norm
-        If `True`, normalization is based on the size of the nucleus/cell. If `False`, `scanpy.sc.pp.normalize_total` is used for normalization.
+        If `True`, normalization is based on the size of the nucleus/cell.
+    library_norm
+        If `True`, `scanpy.sc.pp.normalize_total` is used for normalization.
     highly_variable_genes
         If `True`, will only retain highly variable genes, as calculated by `scanpy.pp.highly_variable_genes`.
     highly_variable_genes_kwargs
@@ -115,6 +118,7 @@ def preprocess_transcriptomics(
         filter_genes=True,
         calculate_cell_size=True,
         size_norm=size_norm,
+        library_norm=library_norm,
         log1p=True,
         highly_variable_genes=highly_variable_genes,
         highly_variable_genes_kwargs=highly_variable_genes_kwargs,
@@ -137,6 +141,7 @@ def preprocess_proteomics(
     table_layer: str,
     output_layer: str,
     size_norm: bool = True,
+    library_norm: bool = False,
     log1p: bool = True,
     scale: bool = False,
     max_value_scale: float | None = 10,
@@ -167,9 +172,11 @@ def preprocess_proteomics(
     output_layer
         The output table layer in `sdata` to which preprocessed table layer will be written.
     size_norm
-        If `True`, normalization is based on the size of the nucleus/cell. If False, `scanpy.sc.pp.normalize_total` is used for normalization.
+        If `True`, normalization is based on the size of the nucleus/cell.
+    library_norm
+        If `True`, `scanpy.sc.pp.normalize_total` is used for normalization.
     log1p
-        If `True`, applies log1p transformation to the data.
+        If `True`, applies log1p transformation to the data, after optional normalization.
     scale
         If `True`, scales the data to have zero mean and a variance of one. The scaling is capped at `max_value_scale`.
     max_value_scale
@@ -215,6 +222,7 @@ def preprocess_proteomics(
         filter_genes=False,
         calculate_cell_size=True,
         size_norm=size_norm,
+        library_norm=library_norm,
         log1p=log1p,
         scale=scale,
         q=q,
@@ -237,6 +245,7 @@ class Preprocess(ProcessTable):
         filter_genes: bool = True,
         calculate_cell_size: bool = True,
         size_norm: bool = True,
+        library_norm: bool = False,
         log1p: bool = True,
         scale: bool = True,
         max_value_scale: float | None = 10,  # ignored if scale is False,
@@ -247,9 +256,7 @@ class Preprocess(ProcessTable):
         qc_kwargs: Mapping[str, Any] = MappingProxyType({}),  # keyword arguments passed to sc.pp.calculate_qc_metrics
         filter_cells_kwargs: Mapping[str, Any] = MappingProxyType({}),  # keyword arguments passed to sc.pp.filter_cells
         filter_genes_kwargs: Mapping[str, Any] = MappingProxyType({}),  # keyword arguments passed to sc.pp.filter_genes
-        norm_kwargs: Mapping[str, Any] = MappingProxyType(
-            {}
-        ),  # keyword arguments passed to sc.pp.normalize_total, ignored if size_norm is True.
+        norm_kwargs: Mapping[str, Any] = MappingProxyType({}),  # keyword arguments passed to sc.pp.normalize_total.
         highly_variable_genes_kwargs: Mapping[str, Any] = MappingProxyType(
             {}
         ),  # keyword arguments passed to sc.pp.highly_variable_genes
@@ -288,7 +295,19 @@ class Preprocess(ProcessTable):
             adata.obs.index = old_index
             adata.obs = adata.obs.drop(columns=[index_name])
 
-        adata.layers[_RAW_COUNTS_KEY] = adata.X.copy()
+        if any([size_norm, library_norm, log1p, scale]) or q is not None:
+            log.info(f"Saving non preprocessed data matrix to 'adata.layers[{_RAW_COUNTS_KEY}]'.")
+            if _RAW_COUNTS_KEY in adata.layers:
+                log.warning(
+                    f"Key '{_RAW_COUNTS_KEY}' already exists in 'adata.layers'. "
+                    "You are probably preprocessing an already preprocessed table."
+                )
+            adata.layers[_RAW_COUNTS_KEY] = adata.X.copy()
+
+        if size_norm and library_norm:
+            raise ValueError(
+                "Both 'size_norm' and 'library_norm' were set to True. Please set only one of them to True."
+            )
 
         if size_norm:
             X_size_norm = (adata.X.T * 100 / adata.obs[_CELLSIZE_KEY].values).T
@@ -296,7 +315,7 @@ class Preprocess(ProcessTable):
                 adata.X = X_size_norm.tocsr()
             else:
                 adata.X = X_size_norm
-        else:
+        if library_norm:
             sc.pp.normalize_total(adata, layer=None, copy=False, inplace=True, **norm_kwargs)
 
         if log1p:
@@ -304,12 +323,13 @@ class Preprocess(ProcessTable):
 
         if highly_variable_genes:
             sc.pp.highly_variable_genes(adata, layer=None, inplace=True, subset=False, **highly_variable_genes_kwargs)
-            adata.raw = adata.copy()
+            if adata.raw is None:
+                adata.raw = adata.copy()
             adata = adata[:, adata.var.highly_variable]
 
         if scale and q is not None:
             raise ValueError(
-                "Please choose between scaling via 'harpy.pp.scale' or normalization by q quantile, not both."
+                "Please choose between scaling via 'scanpy.pp.scale' or normalization by q quantile, not both."
             )
 
         if scale:

@@ -161,7 +161,7 @@ def featurize(
     batch_size: int | None = None,
     model_kwargs: Mapping[str, Any] = MappingProxyType({}),
     embedding_obsm_key="embedding",
-    to_coordinate_system: str = "global",
+    to_coordinate_system: str | list[str] = "global",
     overwrite: bool = False,
     **kwargs: Any,
 ) -> SpatialData:
@@ -274,16 +274,19 @@ def featurize(
 
     img_layer = _make_list(img_layer)
     labels_layer = _make_list(labels_layer)
+    to_coordinate_system = _make_list(to_coordinate_system)
 
     instances_ids_list = []
     features_list = []
 
-    for _img_layer, _labels_layer in zip(img_layer, labels_layer, strict=True):
+    for _img_layer, _labels_layer, _to_coordinate_system in zip(
+        img_layer, labels_layer, to_coordinate_system, strict=True
+    ):
         # currently this function will only work if img_layer and labels_layer have the same shape.
         # And are in same position, i.e. if one is translated, other should be translated with same offset
 
         se_image, se_labels = _precondition(
-            sdata, img_layer=_img_layer, labels_layer=_labels_layer, to_coordinate_system=to_coordinate_system
+            sdata, img_layer=_img_layer, labels_layer=_labels_layer, to_coordinate_system=_to_coordinate_system
         )
 
         image_array = se_image.data
