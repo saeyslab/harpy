@@ -36,10 +36,10 @@ def kronos_embedding(
     model_type: str = "vits16",  # Type of pre-trained model to use (e.g., vits16)
     token_overlap: bool = False,  # whether to use token overlap during feature extraction; in tutorial token overlap False only used for unsupervised phenotyping
     max_value: int = 1,  # max value of larger dask array. Depends on image type. We will do array / max, so they are in range 0-1
-    channel_id_pretrained_name: str = "marker_id",  # Change this to channel_id_pretrained
-    channel_id_data_specific_name: str = "channel_id",  # And this to channel_id_data_specific, only keep the channels from array that could be matched to pretrained dataset.
-    channel_mean_name: str = "marker_mean",  # change this to channel_mean, ideally comes from pretrained
-    channel_std_name: str = "marker_std",  # change this to channel_std, ideally comes from pretrained
+    channel_id_pretrained_name: str = "marker_id_pretrained",
+    channel_id_data_specific_name: str = "marker_id",  # only keep the channels from array that could be matched to pretrained dataset.
+    channel_mean_name: str = "marker_mean",
+    channel_std_name: str = "marker_std",
 ) -> NDArray:
     """
     Compute KRONOS embeddings for multi-channel instance windows using a pre-trained vision transformer.
@@ -76,13 +76,14 @@ def kronos_embedding(
         Only channels in `array` which index is matched (via `matched_channels`) to the pre-trained schema are kept.
 
     do_instance_embedding
-        If `True` (default), aggregate across channels to produce **one feature per instance**
-        with output shape `(i, 384)`. If `False` output shape is `i, c_matched*384`.
+        If `True`(default), `KRONOS` aggregates the computed embedding across channels to produce an output shape of `(i, 384)`.
+        If `False` output shape is `i, c_matched*384`. With `c_matched` the number of channels that were successfully matched between your
+        data and the pre-trained schema, see docstring description of `matched_channels`.
     checkpoint_path
         Path or identifier for the pre-trained weights. By default, loads from the Hugging Face
         Hub (`"hf_hub:MahmoodLab/kronos"`). Local filesystem paths are also supported.
     hf_auth_token
-        Optional Hugging Face authentication token.
+        Optional Hugging Face authentication token. This needs to be provided when loading from Hugging Face hub.
     cache_dir
         Cache dir for the model when loaded from Hugging Face hub.
     model_type

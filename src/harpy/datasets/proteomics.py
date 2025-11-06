@@ -117,6 +117,18 @@ def vectra_example():
     return sdata
 
 
+def codex_example():
+    """Example annotated codex dataset (cHL maps dataset), Shaban, M. et al. Data for MAPS: Pathologist-level Cell Type Annotation from Tissue Images through Machine Learning. https://zenodo.org/records/10067010. (2023)."""
+    registry = get_registry()
+
+    unzip_path = registry.fetch(
+        "proteomics/codex/chl_maps_dataset/sdata_codex_zarr_with_annotations.zarr.zip", processor=pooch.Unzip()
+    )
+    sdata = read_zarr(os.path.commonpath(unzip_path))
+    sdata.path = None
+    return sdata
+
+
 def read_tifffile(path: str | Path) -> tuple[NDArray, float, float]:
     """Read tifffile and extract physical pixel size in microns."""
     # Open the TIFF file

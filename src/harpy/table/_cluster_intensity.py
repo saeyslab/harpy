@@ -42,7 +42,7 @@ def cluster_intensity(
     table_layer
         The table layer containing the mean intensities per instance in 'sdata.tables[table_layer].X' or
         'sdata.tables[table_layer].layers[layer_mean_intensities]' if `layer_mean_intensities` is not `None`; and the `cluster_key` in `sdata.tables[table_layer].obs`.
-        Mean intensities can be calculated via `harpy.tb.allocate_intensity(..., mode="sum",...)` and `harpy.tb.preprocess_proteomics()`.
+        Mean intensities can be calculated using `harpy.tb.allocate_intensity(..., mode="mean",...)`.
         See docstring of `harpy.pl.cluster_intensity_heatmap` for an example.
     labels_layer
         The labels layer(s) of `sdata` used to select the instances via the `region_key` in `sdata.tables[table_layer].obs`.

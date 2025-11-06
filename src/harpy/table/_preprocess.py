@@ -146,6 +146,7 @@ def preprocess_proteomics(
     scale: bool = False,
     max_value_scale: float | None = 10,
     q: float | None = None,
+    max_value_q: float | None = 1,
     calculate_pca: bool = False,
     n_comps: int = 50,
     overwrite: bool = False,
@@ -182,7 +183,9 @@ def preprocess_proteomics(
     max_value_scale
         The maximum value to which data will be scaled. Ignored if `scale` is `False`.
     q
-        Quantile used for normalization. If specified, values are normalized by this quantile calculated for each `adata.var`. Values are multiplied by 100 after normalization. Typical value used is 0.999,
+        Quantile used for normalization. If specified, values are normalized by this quantile calculated for each `adata.var`. Typical value used is 0.999,
+    max_value_q
+        The maximum value to which data will be scaled when performing quantile normalization. Ignored if `q` is `None`.
     calculate_pca
         If `True`, calculates principal component analysis (PCA) on the data.
     n_comps
@@ -225,8 +228,9 @@ def preprocess_proteomics(
         library_norm=library_norm,
         log1p=log1p,
         scale=scale,
-        q=q,
         max_value_scale=max_value_scale,
+        q=q,
+        max_value_q=max_value_q,
         highly_variable_genes=False,
         calculate_pca=calculate_pca,
         update_shapes_layers=False,
@@ -250,6 +254,7 @@ class Preprocess(ProcessTable):
         scale: bool = True,
         max_value_scale: float | None = 10,  # ignored if scale is False,
         q: float | None = None,  # quantile for normalization, typically 0.999
+        max_value_q: float | None = 1,  # ignored if q is None
         highly_variable_genes: bool = False,
         calculate_pca: bool = True,
         update_shapes_layers: bool = True,  # whether to update the shapes layer based on the items filtered out in sdata.tables[self.table_layer].
@@ -296,10 +301,10 @@ class Preprocess(ProcessTable):
             adata.obs = adata.obs.drop(columns=[index_name])
 
         if any([size_norm, library_norm, log1p, scale]) or q is not None:
-            log.info(f"Saving non preprocessed data matrix to 'adata.layers[{_RAW_COUNTS_KEY}]'.")
+            log.info(f"Saving non preprocessed data matrix to '.layers[{_RAW_COUNTS_KEY}]'.")
             if _RAW_COUNTS_KEY in adata.layers:
                 log.warning(
-                    f"Key '{_RAW_COUNTS_KEY}' already exists in 'adata.layers'. "
+                    f"Key '{_RAW_COUNTS_KEY}' already exists in '.layers'. "
                     "You are probably preprocessing an already preprocessed table."
                 )
             adata.layers[_RAW_COUNTS_KEY] = adata.X.copy()
@@ -310,7 +315,7 @@ class Preprocess(ProcessTable):
             )
 
         if size_norm:
-            X_size_norm = (adata.X.T * 100 / adata.obs[_CELLSIZE_KEY].values).T
+            X_size_norm = (adata.X.T / adata.obs[_CELLSIZE_KEY].values).T
             if issparse(adata.X):
                 adata.X = X_size_norm.tocsr()
             else:
@@ -343,7 +348,9 @@ class Preprocess(ProcessTable):
             arr = adata.X.toarray() if issparse(adata.X) else adata.X  # np.where not defined on sparse matrix
             arr = np.where(arr == 0, np.nan, arr)
             arr_quantile = np.nanquantile(arr, q, axis=0)
-            adata.X = (adata.X.T * 100 / arr_quantile.reshape(-1, 1)).T
+            adata.X = (adata.X.T / arr_quantile.reshape(-1, 1)).T
+            if max_value_q is not None:
+                adata.X = np.where(adata.X > max_value_q, max_value_q, adata.X)
             if issparse(adata.X):
                 adata.X = adata.X.tocsr()
 
@@ -356,9 +363,9 @@ class Preprocess(ProcessTable):
                     log.warning(
                         f"amount of pc's was set to {min(adata.shape) - 1} because of the dimensionality of 'sdata.tables[table_layer]'."
                     )
-            if not scale:
+            if not scale and (q is None):
                 log.warning(
-                    "Please consider scaling the data by passing 'scale=True', when passing 'calculate_pca=True'."
+                    "Please consider scaling the data by passing 'scale=True' or setting 'q', when passing 'calculate_pca=True'."
                 )
             self._type_check_before_pca(adata)
             sc.pp.pca(adata, copy=False, n_comps=n_comps, **pca_kwargs)

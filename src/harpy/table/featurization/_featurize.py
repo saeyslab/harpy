@@ -203,7 +203,8 @@ def featurize(
     labels_layer
         Name of the labels layer.
     table_layer
-        Name of the table layer.
+        Name of the table layer. If `table_layer` is `None`, an empty `table_layer` will be created with
+        the calculated embeddings at `.obsm[embedding_obsm_key]`, and annotated by `labels_layer`.
     output_layer
         Name of the output tables layer. Can be set equal to `table_layer` if overwrite is set to `True`.
     depth
