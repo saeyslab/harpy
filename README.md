@@ -22,12 +22,14 @@ Note: This package is still under active development.
 
 ## Installation
 
-**Recommended** for end-users. Install the latest `harpy-analysis` [PyPI package](https://pypi.org/project/harpy-analysis) with the `extra` dependencies in a local Python environment.
+**Recommended** for end-users.
+
+<!--Install the latest `harpy-analysis` [PyPI package](https://pypi.org/project/harpy-analysis) with the `extra` dependencies in a local Python environment.-->
 
 ```bash
 uv venv --python=3.12 # set python version
 source .venv/bin/activate # activate the virtual environment
-uv pip install 'harpy-analysis[extra]' # use uv to pip install dependencies
+uv pip install "git+https://github.com/saeyslab/harpy.git#egg=harpy-analysis[extra]" # use uv to pip install dependencies
 python -c 'import harpy; print(harpy.__version__)' # check if the package is installed
 ```
 
