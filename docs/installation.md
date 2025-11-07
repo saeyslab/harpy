@@ -54,7 +54,7 @@ For a mimimal list of requirements for `Harpy`, we refer to the [pyproject.toml]
 ### 2. Install `Harpy`:
 
 ```
-pip install "git+https://github.com/saeyslab/harpy.git#egg=harpy[extra]"
+pip install "git+https://github.com/saeyslab/harpy.git#egg=harpy-analysis[extra]"
 ```
 
 ### 3. Additional dependencies
@@ -62,7 +62,7 @@ pip install "git+https://github.com/saeyslab/harpy.git#egg=harpy[extra]"
 To be able to run the unit tests:
 
 ```bash
-pip install "git+https://github.com/saeyslab/harpy.git#egg=harpy[dev]"
+pip install "git+https://github.com/saeyslab/harpy.git#egg=harpy-analysis[dev]"
 ```
 
 ## NVIDIA GPU support
