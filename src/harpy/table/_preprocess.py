@@ -66,7 +66,7 @@ def preprocess_transcriptomics(
     min_cells
         Minimum number of cells a gene should be in to be kept (passed to `scanpy.pp.filter_genes`).
     size_norm
-        If `True`, normalization is based on the size of the nucleus/cell.
+        If `True`, normalization is based on the size of the nucleus/cell. Resulting values are multiplied by 100 after normalization.
     library_norm
         If `True`, `scanpy.sc.pp.normalize_total` is used for normalization.
     highly_variable_genes
@@ -173,7 +173,7 @@ def preprocess_proteomics(
     output_layer
         The output table layer in `sdata` to which preprocessed table layer will be written.
     size_norm
-        If `True`, normalization is based on the size of the nucleus/cell.
+        If `True`, normalization is based on the size of the nucleus/cell. Resulting values are multiplied by 100 after normalization.
     library_norm
         If `True`, `scanpy.sc.pp.normalize_total` is used for normalization.
     log1p
@@ -183,7 +183,8 @@ def preprocess_proteomics(
     max_value_scale
         The maximum value to which data will be scaled. Ignored if `scale` is `False`.
     q
-        Quantile used for normalization. If specified, values are normalized by this quantile calculated for each `adata.var`. Typical value used is 0.999,
+        Quantile used for normalization. If specified, values are normalized by this quantile calculated for each `adata.var`. Typical value used is 0.999.
+        Resulting values are multiplied by 100 after normalization.
     max_value_q
         The maximum value to which data will be scaled when performing quantile normalization. Ignored if `q` is `None`.
     calculate_pca
