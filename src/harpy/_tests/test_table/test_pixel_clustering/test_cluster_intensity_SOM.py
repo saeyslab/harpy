@@ -1,5 +1,6 @@
 import importlib.util
 
+import dask
 import pytest
 
 from harpy.table.pixel_clustering._cluster_intensity import _export_to_ark_format, cluster_intensity_SOM
@@ -12,22 +13,26 @@ def test_cluster_intensity(sdata_blobs):
 
     from harpy.image.pixel_clustering._clustering import flowsom
 
+    batch_model = fs.models.BatchFlowSOMEstimator
+
     img_layer = "blobs_image"
     channels = ["lineage_0", "lineage_1", "lineage_5", "lineage_9"]
     fraction = 0.1
 
-    sdata_blobs, fsom, mapping = flowsom(
-        sdata_blobs,
-        img_layer=[img_layer],
-        output_layer_clusters=[f"{img_layer}_clusters"],
-        output_layer_metaclusters=[f"{img_layer}_metaclusters"],
-        channels=channels,
-        fraction=fraction,
-        n_clusters=20,
-        random_state=100,
-        chunks=(1, 200, 200),
-        overwrite=True,
-    )
+    with dask.config.set(scheduler="threads"):
+        sdata_blobs, fsom, mapping = flowsom(
+            sdata_blobs,
+            img_layer=[img_layer],
+            output_layer_clusters=[f"{img_layer}_clusters"],
+            output_layer_metaclusters=[f"{img_layer}_metaclusters"],
+            channels=channels,
+            fraction=fraction,
+            n_clusters=20,
+            random_state=100,
+            chunks=(1, 200, 200),
+            model=batch_model,
+            overwrite=True,
+        )
 
     sdata_blobs = cluster_intensity_SOM(
         sdata_blobs,

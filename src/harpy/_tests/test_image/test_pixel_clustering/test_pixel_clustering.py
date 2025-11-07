@@ -1,5 +1,6 @@
 import importlib.util
 
+import dask
 import numpy as np
 import pytest
 
@@ -8,24 +9,30 @@ from harpy.utils._keys import _SPATIAL
 
 @pytest.mark.skipif(not importlib.util.find_spec("flowsom"), reason="requires the flowSOM library")
 def test_flowsom(sdata_blobs):
+    import flowsom as fs
+
     from harpy.image.pixel_clustering._clustering import flowsom
 
     img_layer = "blobs_image"
     channels = ["lineage_0", "lineage_1", "lineage_5", "lineage_9"]
     fraction = 0.1
 
-    sdata_blobs, fsom, mapping = flowsom(
-        sdata_blobs,
-        img_layer=[img_layer],
-        output_layer_clusters=[f"{img_layer}_clusters"],
-        output_layer_metaclusters=[f"{img_layer}_metaclusters"],
-        channels=channels,
-        fraction=fraction,
-        n_clusters=20,
-        random_state=100,
-        chunks=(1, 200, 200),
-        overwrite=True,
-    )
+    batch_model = fs.models.BatchFlowSOMEstimator
+
+    with dask.config.set(scheduler="threads"):
+        sdata_blobs, fsom, mapping = flowsom(
+            sdata_blobs,
+            img_layer=[img_layer],
+            output_layer_clusters=[f"{img_layer}_clusters"],
+            output_layer_metaclusters=[f"{img_layer}_metaclusters"],
+            channels=channels,
+            fraction=fraction,
+            n_clusters=20,
+            random_state=100,
+            chunks=(1, 200, 200),
+            model=batch_model,  # when installing with UV, unit test fails if we do not specify batch_model
+            overwrite=True,
+        )
 
     assert f"{img_layer}_clusters" in sdata_blobs.labels
     assert f"{img_layer}_metaclusters" in sdata_blobs.labels
@@ -43,22 +50,28 @@ def test_flowsom(sdata_blobs):
 
 @pytest.mark.skipif(not importlib.util.find_spec("flowsom"), reason="requires the flowSOM library")
 def test_flowsom_multi_c(sdata_multi_c_no_backed):
+    import flowsom as fs
+
     from harpy.image.pixel_clustering._clustering import flowsom
+
+    batch_model = fs.models.BatchFlowSOMEstimator
 
     img_layer = "raw_image"
     fraction = 0.1
 
-    sdata_multi_c_no_backed, fsom, mapping = flowsom(
-        sdata_multi_c_no_backed,
-        img_layer=[img_layer],
-        output_layer_clusters=[f"{img_layer}_clusters"],
-        output_layer_metaclusters=[f"{img_layer}_metaclusters"],
-        fraction=fraction,
-        n_clusters=20,
-        random_state=100,
-        chunks=(1, 200, 200),
-        overwrite=True,
-    )
+    with dask.config.set(scheduler="threads"):
+        sdata_multi_c_no_backed, fsom, mapping = flowsom(
+            sdata_multi_c_no_backed,
+            img_layer=[img_layer],
+            output_layer_clusters=[f"{img_layer}_clusters"],
+            output_layer_metaclusters=[f"{img_layer}_metaclusters"],
+            fraction=fraction,
+            n_clusters=20,
+            random_state=100,
+            chunks=(1, 200, 200),
+            model=batch_model,
+            overwrite=True,
+        )
 
     assert f"{img_layer}_clusters" in sdata_multi_c_no_backed.labels
     assert f"{img_layer}_metaclusters" in sdata_multi_c_no_backed.labels

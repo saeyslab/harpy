@@ -1,7 +1,7 @@
 import pytest
 
 from harpy.table._preprocess import preprocess_proteomics, preprocess_transcriptomics
-from harpy.utils._keys import _CELLSIZE_KEY, _REGION_KEY
+from harpy.utils._keys import _CELLSIZE_KEY, _RAW_COUNTS_KEY, _REGION_KEY
 
 
 @pytest.mark.parametrize("q", [None, 0.999])
@@ -76,22 +76,23 @@ def test_preprocess_transcriptomics(sdata_transcripts_no_backed, highly_variable
         output_layer="table_transcriptomics",
         highly_variable_genes=highly_variable_genes,
         size_norm=size_norm,
+        library_norm=not size_norm,
         overwrite=True,
     )
     adata = sdata_transcripts_no_backed.tables["table_transcriptomics"]
     if highly_variable_genes:
         if size_norm:
             assert adata.shape == (616, 17)
-            assert adata.layers["raw_counts"].shape == (616, 17)
+            assert adata.layers[_RAW_COUNTS_KEY].shape == (616, 17)
         else:
             assert adata.shape == (616, 32)
-            assert adata.layers["raw_counts"].shape == (616, 32)
+            assert adata.layers[_RAW_COUNTS_KEY].shape == (616, 32)
 
         assert adata.raw.to_adata().shape == (616, 87)
     else:
         assert adata.shape == (616, 87)
         assert adata.raw.to_adata().shape == (616, 87)
-        assert adata.layers["raw_counts"].shape == (616, 87)
+        assert adata.layers[_RAW_COUNTS_KEY].shape == (616, 87)
     assert len(adata.obs[_REGION_KEY].cat.categories) == 1
     assert "segmentation_mask" in adata.obs[_REGION_KEY].cat.categories
     assert _CELLSIZE_KEY in adata.obs.columns

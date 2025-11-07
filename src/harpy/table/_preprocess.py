@@ -315,7 +315,9 @@ class Preprocess(ProcessTable):
             )
 
         if size_norm:
-            X_size_norm = (adata.X.T / adata.obs[_CELLSIZE_KEY].values).T
+            X_size_norm = (
+                adata.X.T * 100 / adata.obs[_CELLSIZE_KEY].values
+            ).T  # *100 for numerical stability. Otherwise sc.pp.highly_variable_genes could filter too many values.
             if issparse(adata.X):
                 adata.X = X_size_norm.tocsr()
             else:
@@ -348,7 +350,7 @@ class Preprocess(ProcessTable):
             arr = adata.X.toarray() if issparse(adata.X) else adata.X  # np.where not defined on sparse matrix
             arr = np.where(arr == 0, np.nan, arr)
             arr_quantile = np.nanquantile(arr, q, axis=0)
-            adata.X = (adata.X.T / arr_quantile.reshape(-1, 1)).T
+            adata.X = (adata.X.T * 100 / arr_quantile.reshape(-1, 1)).T
             if max_value_q is not None:
                 adata.X = np.where(adata.X > max_value_q, max_value_q, adata.X)
             if issparse(adata.X):

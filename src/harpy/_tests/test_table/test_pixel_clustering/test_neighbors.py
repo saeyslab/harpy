@@ -1,11 +1,18 @@
+import importlib
+
 import dask.array as da
 import numpy as np
+import pytest
 from anndata import AnnData
 
 from harpy.table.pixel_clustering._neighbors import spatial_pixel_neighbors
 from harpy.utils._keys import _SPATIAL
 
 
+@pytest.mark.skipif(
+    not importlib.util.find_spec("squidpy"),
+    reason="requires the squidpy library",
+)
 def test_spatial_pixel_neighbors(sdata):
     # note: hp.tb.spatial_pixel_neighbors would typically be run on a labels layer obtained via `hp.im.flowsom`.
     adata = spatial_pixel_neighbors(

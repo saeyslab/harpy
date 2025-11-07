@@ -153,6 +153,7 @@ class ImageLayerManager(LayerManager):
         else:
             sdata[output_layer] = spatial_element
             if sdata.is_backed():
+                # to make sdata point to layer that is materialized, and keep object id.
                 sdata.write_element(output_layer)
                 del sdata[output_layer]
                 sdata_temp = read_zarr(sdata.path, selection=["images"])

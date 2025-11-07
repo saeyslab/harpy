@@ -1,6 +1,7 @@
 import importlib
 import os
 
+import dask
 import matplotlib
 import matplotlib.pyplot as plt
 import pytest
@@ -10,8 +11,12 @@ from harpy.plot._flowsom import pixel_clusters, pixel_clusters_heatmap
 
 @pytest.mark.skipif(not importlib.util.find_spec("flowsom"), reason="requires the flowSOM library")
 def test_plot_pixel_clusters(sdata_blobs, tmp_path):
+    import flowsom as fs
+
     from harpy.image.pixel_clustering._clustering import flowsom
     from harpy.table.pixel_clustering._cluster_intensity import cluster_intensity_SOM
+
+    batch_model = fs.models.BatchFlowSOMEstimator
 
     matplotlib.use("Agg")
 
@@ -19,18 +24,20 @@ def test_plot_pixel_clusters(sdata_blobs, tmp_path):
     channels = ["lineage_0", "lineage_1", "lineage_5", "lineage_9"]
     fraction = 0.1
 
-    sdata_blobs, fsom, mapping = flowsom(
-        sdata_blobs,
-        img_layer=[img_layer],
-        output_layer_clusters=[f"{img_layer}_clusters"],
-        output_layer_metaclusters=[f"{img_layer}_metaclusters"],
-        channels=channels,
-        fraction=fraction,
-        n_clusters=20,
-        random_state=100,
-        chunks=(1, 200, 200),
-        overwrite=True,
-    )
+    with dask.config.set(scheduler="threads"):
+        sdata_blobs, fsom, mapping = flowsom(
+            sdata_blobs,
+            img_layer=[img_layer],
+            output_layer_clusters=[f"{img_layer}_clusters"],
+            output_layer_metaclusters=[f"{img_layer}_metaclusters"],
+            channels=channels,
+            fraction=fraction,
+            n_clusters=20,
+            random_state=100,
+            chunks=(1, 200, 200),
+            model=batch_model,
+            overwrite=True,
+        )
 
     assert f"{img_layer}_clusters" in sdata_blobs.labels
     assert f"{img_layer}_metaclusters" in sdata_blobs.labels

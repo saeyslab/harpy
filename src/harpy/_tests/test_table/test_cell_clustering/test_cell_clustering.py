@@ -1,5 +1,6 @@
 import importlib
 
+import dask
 import dask.array as da
 import pandas as pd
 import pytest
@@ -17,6 +18,8 @@ def test_cell_clustering(sdata_blobs):
     from harpy.table.cell_clustering._weighted_channel_expression import weighted_channel_expression
     from harpy.table.pixel_clustering._cluster_intensity import cluster_intensity_SOM
 
+    batch_model = fs.models.BatchFlowSOMEstimator
+
     img_layer = "blobs_image"
     labels_layer = "blobs_labels"
     table_layer = "table_cell_clustering"
@@ -24,18 +27,20 @@ def test_cell_clustering(sdata_blobs):
     channels = ["lineage_0", "lineage_1", "lineage_5", "lineage_9"]
     fraction = 0.1
 
-    sdata_blobs, _, mapping = flowsom_pixel(
-        sdata_blobs,
-        img_layer=[img_layer],
-        output_layer_clusters=[f"{img_layer}_clusters"],
-        output_layer_metaclusters=[f"{img_layer}_metaclusters"],
-        channels=channels,
-        fraction=fraction,
-        n_clusters=20,
-        random_state=100,
-        chunks=(1, 200, 200),
-        overwrite=True,
-    )
+    with dask.config.set(scheduler="threads"):
+        sdata_blobs, _, mapping = flowsom_pixel(
+            sdata_blobs,
+            img_layer=[img_layer],
+            output_layer_clusters=[f"{img_layer}_clusters"],
+            output_layer_metaclusters=[f"{img_layer}_metaclusters"],
+            channels=channels,
+            fraction=fraction,
+            n_clusters=20,
+            random_state=100,
+            chunks=(1, 200, 200),
+            model=batch_model,
+            overwrite=True,
+        )
 
     sdata_blobs, fsom = flowsom_cell(
         sdata_blobs,
