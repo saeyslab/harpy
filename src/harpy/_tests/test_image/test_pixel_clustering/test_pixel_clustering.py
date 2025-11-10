@@ -3,12 +3,14 @@ import importlib.util
 import dask
 import numpy as np
 import pytest
+from dask.distributed import Client, LocalCluster
 
 from harpy.utils._keys import _SPATIAL
 
 
 @pytest.mark.skipif(not importlib.util.find_spec("flowsom"), reason="requires the flowSOM library")
-def test_flowsom(sdata_blobs):
+@pytest.mark.parametrize("client", [True, False])
+def test_flowsom(sdata_blobs, client):
     import flowsom as fs
 
     from harpy.image.pixel_clustering._clustering import flowsom
@@ -19,20 +21,33 @@ def test_flowsom(sdata_blobs):
 
     batch_model = fs.models.BatchFlowSOMEstimator
 
-    with dask.config.set(scheduler="threads"):
-        sdata_blobs, fsom, mapping = flowsom(
-            sdata_blobs,
-            img_layer=[img_layer],
-            output_layer_clusters=[f"{img_layer}_clusters"],
-            output_layer_metaclusters=[f"{img_layer}_metaclusters"],
-            channels=channels,
-            fraction=fraction,
-            n_clusters=20,
-            random_state=100,
-            chunks=(1, 200, 200),
-            model=batch_model,  # when installing with UV, unit test fails if we do not specify batch_model
-            overwrite=True,
+    if client:
+        cluster = LocalCluster(
+            n_workers=1,
+            threads_per_worker=4,
         )
+
+        client = Client(cluster)
+    else:
+        client = None
+
+    sdata_blobs, fsom, mapping = flowsom(
+        sdata_blobs,
+        img_layer=[img_layer],
+        output_layer_clusters=[f"{img_layer}_clusters"],
+        output_layer_metaclusters=[f"{img_layer}_metaclusters"],
+        channels=channels,
+        fraction=fraction,
+        n_clusters=20,
+        random_state=100,
+        chunks=(1, 200, 200),
+        model=batch_model,
+        client=client,
+        overwrite=True,
+    )
+
+    if client is not None:
+        client.close()
 
     assert f"{img_layer}_clusters" in sdata_blobs.labels
     assert f"{img_layer}_metaclusters" in sdata_blobs.labels

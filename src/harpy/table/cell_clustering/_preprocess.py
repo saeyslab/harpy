@@ -152,8 +152,8 @@ def cell_clustering_preprocess(
         _results_sum_of_chunks.append(sum_of_chunks)
         _region_keys.extend(_unique_mask.shape[0] * [labels_layer_cells[i]])
 
-    sum_of_chunks = np.row_stack(_results_sum_of_chunks)
-    _cells_id = np.row_stack(_cells_id)
+    sum_of_chunks = np.vstack(_results_sum_of_chunks)
+    _cells_id = np.vstack(_cells_id)
 
     var = pd.DataFrame(index=_unique_clusters)
     var.index = var.index.map(str)

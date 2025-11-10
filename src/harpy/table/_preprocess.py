@@ -186,7 +186,8 @@ def preprocess_proteomics(
         Quantile used for normalization. If specified, values are normalized by this quantile calculated for each `adata.var`. Typical value used is 0.999.
         Resulting values are multiplied by 100 after normalization.
     max_value_q
-        The maximum value to which data will be scaled when performing quantile normalization. Ignored if `q` is `None`.
+        The maximum value to which data will be scaled when performing quantile normalization. Ignored if `q` is `None`. Typical value is 1.
+        Resulting values are multiplied by 100 after normalization.
     calculate_pca
         If `True`, calculates principal component analysis (PCA) on the data.
     n_comps
@@ -353,7 +354,7 @@ class Preprocess(ProcessTable):
             arr_quantile = np.nanquantile(arr, q, axis=0)
             adata.X = (adata.X.T * 100 / arr_quantile.reshape(-1, 1)).T
             if max_value_q is not None:
-                adata.X = np.where(adata.X > max_value_q, max_value_q, adata.X)
+                adata.X = np.where(adata.X > max_value_q * 100, max_value_q * 100, adata.X)
             if issparse(adata.X):
                 adata.X = adata.X.tocsr()
 
