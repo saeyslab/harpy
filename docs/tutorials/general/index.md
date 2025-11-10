@@ -9,5 +9,6 @@ These tutorials are intended for users who are new to Harpy and want to learn th
     Harpy_feature_calculation.ipynb
     Harpy_QC_IMC.ipynb
     FlowSOM_for_pixel_and_cell_clustering.ipynb
+    Featurize_with_kronos.ipynb
     Visualizing_napari.ipynb
 ```
