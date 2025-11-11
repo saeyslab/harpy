@@ -10,7 +10,6 @@ These tutorials are more advanced and require a deeper understanding of the Harp
     Interactive_napari_cell_annotation.ipynb
     Interactive_napari_pixel_annotation.ipynb
     Harpy_distance_calc.ipynb
-    Harpy_instanseg.ipynb
     coordinate_systems.ipynb
     Rasterize_and_vectorize.ipynb
     Harpy_aggregate_rasters.ipynb

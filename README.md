@@ -18,6 +18,8 @@
 [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 
+> 💫 **If you find Harpy useful, please give us a [⭐](https://github.com/saeyslab/harpy)!** It helps others discover the project and supports continued development.
+
 Note: This package is still under active development.
 
 ## Installation
@@ -47,13 +49,50 @@ python -m pytest # run the tests
 
 Checkout the docs for [installation instructions](https://github.com/saeyslab/harpy/blob/main/docs/installation.md) using [conda](https://github.com/conda/conda).
 
-## Tutorials
+## 🧭 Tutorials and Guides
 
-Tutorials are available [here](https://harpy.readthedocs.io/en/latest/tutorials).
+Explore how to use Harpy for segmentation, shallow and deep feature extraction, clustering, and spatial analysis of gigapixel-scale multiplexed data with these step-by-step notebooks:
+
+- **🚀 Basic Usage of Harpy**
+  Learn how to read in data, perform **tiled segmentation** using [**Cellpose**](https://github.com/MouseLand/cellpose) and [**Dask-CUDA**](https://docs.rapids.ai/api/dask-cuda/stable/), extract features, and carry out clustering.
+  📘 [Open notebook →](./docs/tutorials/general/Harpy_feature_calculation.ipynb)
+
+- **🧩 Pixel and Cell Clustering**
+  Learn how to perform unsupervised pixel- and cell-level clustering using `Harpy` together with [**FlowSOM**](https://github.com/saeyslab/FlowSOM_Python).
+  📘 [Open notebook →](./docs/tutorials/general/FlowSOM_for_pixel_and_cell_clustering.ipynb)
+
+- **🔬 Cell Segmentation**
+  Explore segmentation workflows in `Harpy` using different tools:
+
+  - With [**Instanseg**](https://github.com/instanseg/instanseg)
+    📘 [Open notebook →](./docs/tutorials/general//Harpy_instanseg.ipynb)
+
+  - With [**Cellpose**](https://github.com/MouseLand/cellpose)
+    📘 [Open notebook →](./docs/tutorials/general/Harpy_feature_calculation.ipynb)
+
+  💡 Want us to add support for another segmentation method?
+  👉 [Open an issue](https://github.com/saeyslab/harpy/issues) and let us know!
+
+- **🧠 Deep Feature Extraction**
+  Discover how `Harpy` enables fast, scalable extraction of deep, cell-level features from multiplex imaging data with the [**KRONOS**](https://github.com/mahmoodlab/KRONOS) foundation model for proteomics.
+  📘 [Open notebook →](./docs/tutorials/general/Featurize_with_kronos.ipynb)
+
+  💡 Want us to add support for another deep feature extraction method?
+  👉 [Open an issue](https://github.com/saeyslab/harpy/issues) and let us know!
+
+- **🔬 Shallow Feature Extraction**
+  Learn to extract shallow features—such as **mean**, **median**, and **standard deviation** of intensities—from multiplex imaging data with `Harpy`.
+  📘 [Open notebook →](./docs/tutorials/advanced/Harpy_aggregate_rasters.ipynb)
+
+- **🧬 Spatial Transcriptomics**
+  Learn how to analyze spatial transcriptomics data with `Harpy`. For detailed information, refer to the [**SPArrOW documentation**](https://sparrow-pipeline.readthedocs.io/en/latest).
+  📘 [Open notebook →](./docs/tutorials/advanced/Harpy_transcriptomics.ipynb)
+
+📚 For a complete list of tutorials, visit the [**Harpy documentation**](https://harpy.readthedocs.io/en/latest/tutorials).
 
 ## Usage
 
-[Learn](https://github.com/saeyslab/harpy/blob/main/docs/usage.md) how Harpy can be integrated into your workflow in different ways.
+[Learn](https://github.com/saeyslab/harpy/blob/main/docs/usage.md) how `Harpy` can be integrated into your workflow.
 
 ## Contributing
 
