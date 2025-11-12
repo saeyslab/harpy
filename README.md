@@ -63,7 +63,6 @@ Explore how to use Harpy for segmentation, shallow and deep feature extraction, 
 
 - **🔬 Cell Segmentation**
   Explore segmentation workflows in `Harpy` using different tools:
-
   - With [**Instanseg**](https://github.com/instanseg/instanseg)
     📘 [Open notebook →](./docs/tutorials/general//Harpy_instanseg.ipynb)
 
