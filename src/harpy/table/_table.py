@@ -103,7 +103,9 @@ class ProcessTable:
             )
         adata = adata.copy()
         if self.labels_layer is not None:
-            adata.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY] = self.labels_layer
+            adata.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY] = (
+                self.labels_layer
+            )  # TODO this should be TableModel.REGION_KEY_KEY
 
         return adata
 

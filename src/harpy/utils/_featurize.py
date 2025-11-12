@@ -366,6 +366,9 @@ class Featurizer:
 
         c_chunks = array_image.chunks[0]
         c_chunks = tuple([c_chunks[0] + 1] + list(c_chunks[1:]))  # we concat mask to first c channel chunk
+        # TODO: should we consider not keeping the mask, and only extract the instances, that way we prevent a potential
+        # computational intens rechunk along channel dimension due to adding mask to first chunk.
+        # (chunks are now e.g. (2,1,1,1,1), and chunksize=2, so rechunk by chunksize 2, leads to rechunk along channel dimension)
         # returns c,z,i,y,x tensor
         dask_chunks = da.map_blocks(
             lambda *arrays, block_info=None, **kw: _featurize_block(*arrays, block_info=block_info, **kw),

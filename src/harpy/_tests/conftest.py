@@ -31,10 +31,23 @@ def cfg_pipeline_global(path_dataset_markers) -> DictConfig:
     dataset_image = registry.fetch("transcriptomics/resolve/mouse/20272_slide1_A1-1_DAPI_4288_2144.tiff")
     dataset_coords = registry.fetch("transcriptomics/resolve/mouse/20272_slide1_A1-1_results_4288_2144.txt")
 
+    import torch
+
+    if torch.backends.mps.is_available():
+        device = "mps"
+    elif torch.cuda.is_available():
+        device = "cuda"
+    else:
+        device = "cpu"
+
+    n_workers = 1  # only one chunk to segment
+
     with initialize(version_base="1.2", config_path="../configs"):
         cfg = compose(
             config_name="pipeline",
             overrides=[
+                f"device={device}",
+                f"n_workers={n_workers}",
                 f"paths.data_dir={root}",
                 f"dataset.data_dir={root}",
                 f"dataset.image={dataset_image}",
@@ -45,6 +58,7 @@ def cfg_pipeline_global(path_dataset_markers) -> DictConfig:
                 "allocate.column_y=1",
                 "allocate.column_gene=3",
                 "segmentation=cellpose",
+                "clean.tilingCorrection=False",  # don't include tiling correction in unit test, because of dependencies (jax, basicpy).
             ],
             return_hydra_config=True,
         )

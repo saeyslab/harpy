@@ -1,6 +1,7 @@
 from ._allocation import allocate, bin_counts
 from ._allocation_intensity import allocate_intensity
 from ._annotation import cluster_cleanliness, score_genes, score_genes_iter
+from ._cluster_intensity import cluster_intensity
 from ._clustering import kmeans, leiden
 from ._enrichment import nhood_enrichment
 from ._preprocess import preprocess_proteomics, preprocess_transcriptomics
@@ -10,7 +11,7 @@ from .cell_clustering._clustering import flowsom
 from .cell_clustering._preprocess import cell_clustering_preprocess
 from .cell_clustering._weighted_channel_expression import weighted_channel_expression
 from .featurization._featurize import extract_instances, featurize
-from .pixel_clustering._cluster_intensity import cluster_intensity
+from .pixel_clustering._cluster_intensity import cluster_intensity_SOM
 from .pixel_clustering._neighbors import spatial_pixel_neighbors
 
 __all__ = [
@@ -23,6 +24,7 @@ __all__ = [
     "weighted_channel_expression",
     "cell_clustering_preprocess",
     "cluster_intensity",
+    "cluster_intensity_SOM",
     "spatial_pixel_neighbors",
     "kmeans",
     "leiden",

@@ -56,6 +56,9 @@ def get_registry(path: str | Path | None = None) -> Pooch:
             "proteomics/mibi_tof/sdata_multi_channel.zarr.zip": "930fd2574666b90d5d6660ad8b52d47afffc9522704b9e6fef39d11c9cfff06e",
             "proteomics/macsima/sdata_multi_channel.zarr.zip": "26187fe62b75c3411f948cbcea52abd24b318992509e768c2ed2f55ddcb99f28",
             "proteomics/macsima/tonsil_all.zarr.zip": "f3444332c9decb318c6eff03e719ee35df6d7399da2a04a17dbed5833bfd9ed7",
+            "proteomics/codex/chl_maps_dataset/sdata_codex_zarr_with_annotations.zarr.zip": "d5e701bce2459a7abee440829634a1100d94440646958a9a78bb404509f7f07f",
+            "proteomics/codex/chl_maps_dataset/marker_metadata.csv": "b6ad06e7407143c06529111f1e01d57b2bdda6cdaaa212fa93d83d71b7ef69f9",  # marker metadata of Kronos model (https://github.com/mahmoodlab/kronos)
+            "proteomics/codex/chl_maps_dataset/marker_metadata_mapped.csv": "99d612ffaabac1feae08c1df510d921c144d57367fe44322389e070997fe6007",
         },
     )
     return registry

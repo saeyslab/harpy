@@ -82,7 +82,7 @@ def flowsom(
     scale_factors
         Scale factors to apply for multiscale
     client
-        A Dask `Client` instance. If specified, during inference, the trained `fs.FlowSOM` model will be scattered (`client.scatter(...)`).
+        A Dask `Client` instance. If specified, during inference, the trained `fs.models.BaseFlowSOMEstimator` model will be scattered (`client.scatter(...)`).
         This reduces the size of the task graph and can improve performance by minimizing data transfer overhead during computation.
         If not specified, Dask will use the default scheduler as configured on your system (e.g., single-threaded, multithreaded, or a global client if one is running).
     persist_intermediate
@@ -180,7 +180,7 @@ def flowsom(
         if sdata.is_backed() and write_intermediate:
             shutil.rmtree(_temp_path)
 
-    arr_sampled = np.row_stack(results_arr_sampled)
+    arr_sampled = np.vstack(results_arr_sampled)
 
     # create anndata object
     var = pd.DataFrame(index=channels)
@@ -207,10 +207,12 @@ def flowsom(
     _, fsom = _flowsom(adata, n_clusters=n_clusters, seed=random_state, xdim=xdim, ydim=ydim, **kwargs)
     log.info("Finished FlowSOM training. Starting inference ")
 
+    fsom_model = fsom.model
+
     if client is not None:
-        fsom_future = client.scatter(fsom)
+        fsom_model_future = client.scatter(fsom_model)
     else:
-        fsom_future = fsom
+        fsom_model_future = fsom_model
 
     assert len(img_layer) == len(_arr_list)
     # 2) apply fsom on all data
@@ -231,7 +233,7 @@ def flowsom(
             chunks=output_chunks,
             drop_axis=0,
             new_axis=0,
-            fsom=fsom_future,
+            fsom_model=fsom_model_future,
         )
 
         # write to intermediate zarr slot or persist, otherwise dask will run the flowsom inference two times (once for clusters, once for metaclusters),
@@ -285,7 +287,10 @@ def flowsom(
     return sdata, fsom, mapping
 
 
-def _predict_flowsom_clusters_chunk(array: NDArray, fsom: fs.FlowSOM) -> NDArray:
+def _predict_flowsom_clusters_chunk(
+    array: NDArray,
+    fsom_model: fs.models.BaseFlowSOMEstimator,
+) -> NDArray:
     def _remove_nan_columns(array):
         # remove rows that contain NaN's, flowsom can not work with NaN's
         nan_mask = np.isnan(array[:, :-3]).any(axis=1)
@@ -311,8 +316,8 @@ def _predict_flowsom_clusters_chunk(array: NDArray, fsom: fs.FlowSOM) -> NDArray
     coordinates = final_array[:, -3:].astype(int)
     values = final_array[:, :-3]
 
-    y_clusters = fsom.model.cluster_model.predict(values)
-    y_codes = fsom.model._y_codes
+    y_clusters = fsom_model.cluster_model.predict(values)
+    y_codes = fsom_model._y_codes
 
     # do not do the latter, because it could lead to race condition
     # y_metaclusters=fsom.model.predict(values )

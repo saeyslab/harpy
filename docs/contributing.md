@@ -14,10 +14,19 @@ Install Harpy:
 ```bash
 uv venv --python=3.12 # set python version
 source .venv/bin/activate # activate the virtual environment
-uv pip install -e '.[dev]' 'cellpose==3.1.1.2' # use uv to pip install dependencies and pin cellpose
+uv pip install -e '.[dev]' # use uv to pip install dependencies
 python -c 'import harpy; print(harpy.__version__)' # check if the package is installed
 # make changes
 python -m pytest # run the tests
+```
+
+If you update the [pyproject.toml](../pyproject.toml), please also update the the [uv lock file](../uv.lock):
+
+```bash
+# update the lock file
+uv lock
+# check if lock file was updated correctly.
+uv lock --check
 ```
 
 This development environment is supported for:
@@ -29,7 +38,7 @@ This development environment is supported for:
 
 Continuous integration will automatically run the tests on all pull requests.
 
-### Type testing
+## Type testing
 
 Do a type test:
 

@@ -9,6 +9,7 @@ from typing import Any
 import anndata as ad
 import dask.array as da
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import seaborn as sns
 from matplotlib.axes import Axes
@@ -79,6 +80,12 @@ def pixel_clusters(
     """
     se = _get_spatial_element(sdata, layer=labels_layer)
 
+    unique_values = da.unique(se.data).compute()
+    labels = unique_values[unique_values != 0]
+    _colors = np.array(_get_distinct_colors(max(labels)))
+    if crd is None:
+        _colors = _colors[labels - 1]
+
     labels_layer_crop = None
     if crd is not None:
         se_crop = bounding_box_query(
@@ -95,8 +102,11 @@ def pixel_clusters(
         else:
             raise ValueError(f"Cropped spatial element using crd '{crd}' is None.")
 
-    unique_values = da.unique(se.data).compute()
-    labels = unique_values[unique_values != 0]
+    if labels_layer_crop is not None:
+        # recompute unique labels in the crop
+        unique_values = da.unique(se.data).compute()
+        labels = unique_values[unique_values != 0]
+        _colors = _colors[labels - 1]
 
     cluster_ids = labels
 
@@ -126,6 +136,8 @@ def pixel_clusters(
     sdata[intermediate_table_key].obs[f"{_INSTANCE_KEY}_cat"] = (
         sdata[intermediate_table_key].obs[_INSTANCE_KEY].astype("category")
     )
+    sdata[intermediate_table_key].uns[f"{_INSTANCE_KEY}_cat_colors"] = _colors
+    sdata[intermediate_table_key].uns[f"{_INSTANCE_KEY}_cat"] = "__value__"  # placeholder
 
     ax = sdata.pl.render_labels(
         labels_layer if labels_layer_crop is None else labels_layer_crop,
@@ -149,7 +161,7 @@ def pixel_clusters(
 
 def pixel_clusters_heatmap(
     sdata: SpatialData,
-    table_layer: str,  # obtained via hp.tb.cluster_intensity
+    table_layer: str,  # obtained via hp.tb.cluster_intensity_SOM
     metaclusters: bool = True,
     z_score: bool = True,
     clip_value: float | None = 3,
@@ -216,7 +228,7 @@ def pixel_clusters_heatmap(
 
     See Also
     --------
-    harpy.tb.cluster_intensity
+    harpy.tb.cluster_intensity_SOM
     """
     # clusters
     df = sdata.tables[table_layer].to_df().copy()
@@ -289,3 +301,29 @@ def pixel_clusters_heatmap(
         ax.figure.savefig(output)
 
     return ax
+
+
+def _get_distinct_colors(n: int):
+    """
+    Return n distinct hex colors.
+
+    - Up to 20: use Scanpy's default_20
+    - Up to 102: use Scanpy's default_102
+    - Beyond that: extend with HUSL-generated colors
+    """
+    import matplotlib.colors as mcolors
+    import scanpy as sc
+    import seaborn as sns
+
+    # Base palettes from scanpy
+    PALETTE_20 = list(sc.plotting.palettes.default_20)
+    PALETTE_102 = list(sc.plotting.palettes.default_102)
+    if n <= len(PALETTE_20):
+        return PALETTE_20[:n]
+    elif n <= len(PALETTE_102):
+        return PALETTE_102[:n]
+    else:
+        extra_needed = n - len(PALETTE_102)
+        extra_colors = sns.color_palette("husl", extra_needed)
+        extra_hex = [mcolors.to_hex(c) for c in extra_colors]
+        return PALETTE_102 + extra_hex

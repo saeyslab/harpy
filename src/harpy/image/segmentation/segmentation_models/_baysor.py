@@ -72,8 +72,7 @@ def baysor_callable(
 
     Returns
     -------
-    np.ndarray
-        A labeled image (`numpy` array) where each pixel contains an integer representing the segmented cell ID.
+    A labeled image (`numpy` array) where each pixel contains an integer representing the segmented cell ID.
     """
     from rasterio.features import rasterize
 

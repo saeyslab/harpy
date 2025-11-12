@@ -4,12 +4,14 @@ We recommend using [uv](https://github.com/astral-sh/uv) to install Harpy.
 
 ## Installation using uv.
 
-**Recommended** for end-users. Install the latest `harpy-analysis` [PyPI package](https://pypi.org/project/harpy-analysis) with the `extra` dependencies in a local Python environment.
+**Recommended** for end-users.
+
+<!-- Install the latest `harpy-analysis` [PyPI package](https://pypi.org/project/harpy-analysis) with the `extra` dependencies in a local Python environment. -->
 
 ```bash
 uv venv --python=3.12 # set python version
 source .venv/bin/activate # activate the virtual environment
-uv pip install 'harpy-analysis[extra]' # use uv to pip install dependencies
+uv pip install "git+https://github.com/saeyslab/harpy.git#egg=harpy-analysis[extra]" # use uv to pip install dependencies
 python -c 'import harpy; print(harpy.__version__)' # check if the package is installed
 ```
 
@@ -54,7 +56,7 @@ For a mimimal list of requirements for `Harpy`, we refer to the [pyproject.toml]
 ### 2. Install `Harpy`:
 
 ```
-pip install "git+https://github.com/saeyslab/harpy.git#egg=harpy[extra]"
+pip install "git+https://github.com/saeyslab/harpy.git#egg=harpy-analysis[extra]"
 ```
 
 ### 3. Additional dependencies
@@ -62,7 +64,7 @@ pip install "git+https://github.com/saeyslab/harpy.git#egg=harpy[extra]"
 To be able to run the unit tests:
 
 ```bash
-pip install "git+https://github.com/saeyslab/harpy.git#egg=harpy[dev]"
+pip install "git+https://github.com/saeyslab/harpy.git#egg=harpy-analysis[dev]"
 ```
 
 ## NVIDIA GPU support

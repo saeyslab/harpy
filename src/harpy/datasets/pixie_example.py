@@ -138,7 +138,11 @@ def pixie_example_datasets(fovs: list | None = None, with_pixel_output=True, wit
 
 
 def pixie_example() -> SpatialData:
-    """Example pixie dataset, loaded from s3 bucket"""
+    """
+    Example pixie dataset, loaded from s3 bucket.
+
+    Liu, C.C., Greenwald, N.F., Kong, A., et al. (2023). *Robust phenotyping of highly multiplexed tissue imaging data using pixel-level clustering*. Nature Communications, 14, 4618. https://doi.org/10.1038/s41467-023-40068-5.
+    """
     # Fetch and unzip the file
     registry = get_registry()
     unzip_path = registry.fetch("proteomics/pixie/sdata_pixie.zarr.zip", processor=pooch.Unzip())

@@ -1,4 +1,5 @@
 import importlib.util
+import os
 
 import dask
 import dask.array as da
@@ -173,30 +174,39 @@ def test_segment_points(sdata_multi_c_no_backed: SpatialData):
 
 @pytest.mark.skipif(not importlib.util.find_spec("instanseg"), reason="requires the instanseg library")
 def test_segment_instanseg(sdata_multi_c_no_backed: SpatialData):
+    import torch
     from instanseg import InstanSeg
 
     from harpy.image.segmentation.segmentation_models._instanseg import instanseg_callable
 
-    instanseg_fluorescence = InstanSeg("fluorescence_nuclei_and_cells", verbosity=1, device="cpu")
+    device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+
+    _ = InstanSeg("fluorescence_nuclei_and_cells", verbosity=1, device=device)
+
+    path_model = os.path.join(
+        os.environ.get("INSTANSEG_BIOIMAGEIO_PATH"), "fluorescence_nuclei_and_cells/0.1.1/instanseg.pt"
+    )
 
     output_labels_layer = ["labels_nuclei_instanseg", "labels_cells_instanseg"]
     output_shapes_layer = ["shapes_nuclei_instanseg", "shapes_cells_instanseg"]
-    sdata_multi_c_no_backed = segment(
-        sdata_multi_c_no_backed,
-        img_layer="combine",
-        model=instanseg_callable,
-        output_labels_layer=output_labels_layer,
-        output_shapes_layer=output_shapes_layer,
-        labels_layer_align="labels_cells_instanseg",
-        trim=False,
-        chunks=50,
-        overwrite=True,
-        depth=30,
-        crd=[10, 110, 0, 100],
-        scale_factors=[2, 2, 2, 2],
-        instanseg_model=instanseg_fluorescence,
-        output="all_outputs",
-    )
+    with dask.config.set(scheduler="processes"):
+        sdata_multi_c_no_backed = segment(
+            sdata_multi_c_no_backed,
+            img_layer="combine",
+            model=instanseg_callable,
+            output_labels_layer=output_labels_layer,
+            output_shapes_layer=output_shapes_layer,
+            labels_layer_align="labels_cells_instanseg",
+            trim=False,
+            chunks=50,
+            overwrite=True,
+            depth=30,
+            crd=[10, 110, 0, 100],
+            scale_factors=[2, 2, 2, 2],
+            device=device,
+            instanseg_model=path_model,
+            output="all_outputs",
+        )
 
     for _output_labels_layer in output_labels_layer:
         assert _output_labels_layer in sdata_multi_c_no_backed.labels

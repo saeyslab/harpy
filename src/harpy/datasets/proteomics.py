@@ -8,8 +8,10 @@ import spatialdata as sd
 import tifffile
 from numpy.typing import NDArray
 from spatialdata import SpatialData, read_zarr
+from spatialdata.transformations import get_transformation
 
 from harpy.datasets.registry import get_ome_registry, get_registry, get_spatialdata_registry
+from harpy.image._image import add_image_layer
 
 
 def mibi_example() -> SpatialData:
@@ -29,6 +31,26 @@ def macsima_example() -> SpatialData:
     unzip_path = registry.fetch("proteomics/macsima/sdata_multi_channel.zarr.zip", processor=pooch.Unzip())
     sdata = read_zarr(os.path.commonpath(unzip_path))
     sdata.path = None
+    c_coords = sdata["HumanLiverH35"].c.data
+    new_c_coords = []
+    counts = {}
+    # fix duplicate names
+    for name in c_coords:
+        if name in counts:
+            counts[name] += 1
+            new_c_coords.append(f"{name}_{counts[name]}")
+        else:
+            counts[name] = 0
+            new_c_coords.append(name)
+    sdata = add_image_layer(
+        sdata,
+        arr=sdata["HumanLiverH35"].data,
+        output_layer="HumanLiverH35",
+        c_coords=new_c_coords,
+        transformations=get_transformation(sdata["HumanLiverH35"], get_all=True),
+        overwrite=True,
+    )
+    assert len(new_c_coords) == len(set(new_c_coords))
     return sdata
 
 
@@ -91,6 +113,18 @@ def vectra_example():
     assert physical_pixel_size_x == physical_pixel_size_y
     # TODO use pixel metadata to set the pixel size
     sdata = sd.SpatialData(images={"image": sd.models.Image2DModel.parse(input_data, dims="cyx")})
+    sdata.path = None
+    return sdata
+
+
+def codex_example():
+    """Example annotated codex dataset (cHL maps dataset), Shaban, M. et al. Data for MAPS: Pathologist-level Cell Type Annotation from Tissue Images through Machine Learning. https://zenodo.org/records/10067010. (2023)."""
+    registry = get_registry()
+
+    unzip_path = registry.fetch(
+        "proteomics/codex/chl_maps_dataset/sdata_codex_zarr_with_annotations.zarr.zip", processor=pooch.Unzip()
+    )
+    sdata = read_zarr(os.path.commonpath(unzip_path))
     sdata.path = None
     return sdata
 

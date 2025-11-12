@@ -2,6 +2,7 @@ import glob
 import os
 import warnings
 
+from dask.distributed import Client
 from omegaconf import DictConfig, ListConfig
 from spatialdata import SpatialData, read_zarr
 
@@ -241,6 +242,10 @@ class HarpyPipeline:
         self.labels_layer_name = self.cfg.segmentation.output_labels_layer
 
         # Perform segmentation
+        client = Client(n_workers=self.cfg.n_workers, threads_per_worker=1, processes=True)
+
+        log.info(client.dashboard_link)
+
         sdata = harpy.im.segment(
             sdata=sdata,
             img_layer=self.cleaned_image_name,
@@ -264,6 +269,7 @@ class HarpyPipeline:
             anisotropy=self.cfg.segmentation.anisotropy,
             overwrite=self.cfg.segmentation.overwrite,
         )
+        client.close()
 
         log.info("Segmentation finished.")
 
@@ -574,7 +580,7 @@ class HarpyPipeline:
                 table_layer=self.cfg.allocate.table_layer_name,
                 output=self.cfg.paths.nhood,
             )
-        except ValueError as e:
+        except Exception as e:  # noqa: BLE001
             log.warning(
                 f"Could not calculate nhood enrichment for this region. Reason: {e}. Try with a different area if a subset was selected."
             )
