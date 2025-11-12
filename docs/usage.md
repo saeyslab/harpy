@@ -2,7 +2,7 @@
 
 ## Input data
 
-There are some built-in datasets. For example to get data from a [Resolve](https://resolvebiosciences.com/) experiment on mouse liver:
+Harpy includes several built-in-datasets. For example to load data from a [Resolve Molecular Cartography](https://resolvebiosciences.com/) experiment on mouse liver:
 
 ```
 from harpy.datasets.registry import get_registry
@@ -12,12 +12,14 @@ path_image = registry.fetch( "transcriptomics/resolve/mouse/20272_slide1_A1-1_DA
 path_coordinates = registry.fetch("transcriptomics/resolve/mouse/20272_slide1_A1-1_results.txt")
 ```
 
-And to download an example SpatialData object resulting from running the `Harpy` pipeline:
+And to download an example `SpatialData` object resulting from running the `Harpy` pipeline for transcriptomics:
 
 ```
 import harpy as hp
 sdata=hp.datasets.resolve_example()
 ```
+
+> 🔍 Explore more built-in datasets in the [**Harpy documentation**](https://harpy.readthedocs.io/en/latest/api.html#datasets).
 
 ### Jupyter notebooks
 
@@ -28,6 +30,8 @@ Check the notebooks in the [tutorials section](tutorials/index.md).
 After installing [installing](installation.md) Harpy, you can run the plugin by first starting Napari, and starting the plugin from Napari's menu bar: `napari > Plugins > harpy`.
 
 Use the plugin to tune the parameters of Harpy for the different steps of the pipeline. Tuning can be done on small crops of the image. After every step, a corresponding configuration _.yaml_ file will be saved in the output directory chosen by the user. We refer to the [hpc](/tutorials/hpc/index.md) documentation for information on how to use these generated configuration files via the CLI.
+
+Currently this plugin only supports analysis of spatial transcriptomics data.
 
 ### (Hydra) CLI
 

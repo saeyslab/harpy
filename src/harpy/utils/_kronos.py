@@ -111,12 +111,11 @@ def kronos_embedding(
 
     Returns
     -------
-    NDArray
-        - If `do_instance_embedding=True`: an array of shape `(i, 384)`.
-        - If `do_instance_embedding=False`: an array of shape `(i, c_matched*384)`.
+    - If `do_instance_embedding=True`: an array of shape `(i, 384)`.
+    - If `do_instance_embedding=False`: an array of shape `(i, c_matched*384)`.
 
-        Here, `c_matched` is the number of channels that were successfully matched between your
-        data and the pre-trained schema.
+    Here, `c_matched` is the number of channels that were successfully matched between your
+    data and the pre-trained schema.
 
     Notes
     -----
