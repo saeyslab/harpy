@@ -56,12 +56,12 @@ def plot_spatialdata(
         Ignored if `color` is `None`.
     color
         Column from `sdata[table_layer].obs` or name from `sdata[table_layer].var_names` to color the instances from `labels_layer`.
-        A ValueError is raised when color is specified and `table_layer` is `None`.
+        A ValueError is raised when `color` is specified and `table_layer` is `None`.
         Set to `None` if you do not want to color the labels, and only want to visualise the labels in `labels_layer`.
     crd
-        The coordinates for the region of interest in the format `(xmin, xmax, ymin, ymax)`.
+        The coordinates for the region of interest in the format `(xmin, xmax, ymin, ymax)`, in the coordinate system `to_coordinate_system`.
     to_coordinate_system
-        Coordinate system to plot. Only necessary to specify if `crd` is not `None`.
+        Coordinate system to plot.
     region_key
         Column in `sdata[table_layer].obs` that contains the labels layer that annotates the `table_layer`.
         Ignored if `table_layer` or `labels_layer` is None.
@@ -171,12 +171,25 @@ def plot_spatialdata(
                 f"The labels layer '{labels_layer}' does not seem to annotate the table layer '{table_layer}."
             )
 
+    if "coordinate_systems" in show_kwargs.keys():
+        raise ValueError(
+            "'coordinate_systems' found as key in 'show_kwargs'"
+            " Please specify the coordinate sytem to plot via the parameter 'to_coordinate_system', not via 'show_kwargs'."
+        )
+
+    if isinstance(show_kwargs, MappingProxyType):
+        show_kwargs = {}
+    if not isinstance(show_kwargs, dict):
+        raise ValueError("Please specify 'show_kwargs' as a dict.")
+
+    show_kwargs["coordinate_systems"] = [to_coordinate_system]
+
     sdata_to_plot = sdata
     queried = False
     if crd is not None:
         queried = True
         sdata_to_plot = bounding_box_query(
-            sdata,
+            sdata_to_plot,
             axes=["x", "y"],
             min_coordinate=[crd[0], crd[2]],
             max_coordinate=[crd[1], crd[3]],

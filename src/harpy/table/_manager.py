@@ -17,14 +17,16 @@ class TableLayerManager:
         adata: AnnData,
         output_layer: str,
         region: list[str] | None,  # list of labels_layers
+        instance_key: str = _INSTANCE_KEY,
+        region_key: str = _REGION_KEY,
         overwrite: bool = False,
     ) -> SpatialData:
         if region is not None:
-            assert _REGION_KEY in adata.obs.columns, (
-                f"Provided 'AnnData' object should contain a column '{_REGION_KEY}' in 'adata.obs'. Linking the observations to a labels layer in 'sdata'."
+            assert region_key in adata.obs.columns, (
+                f"Provided 'AnnData' object should contain a column '{region_key}' in 'adata.obs'. Linking the observations to a labels layer in 'sdata'."
             )
-            assert _INSTANCE_KEY in adata.obs.columns, (
-                f"Provided 'AnnData' object should contain a column '{_INSTANCE_KEY}' in 'adata.obs'. Linking the observations to a labels layer in 'sdata'."
+            assert instance_key in adata.obs.columns, (
+                f"Provided 'AnnData' object should contain a column '{instance_key}' in 'adata.obs'. Linking the observations to a labels layer in 'sdata'."
             )
 
             # need to remove spatialdata_attrs, otherwise parsing gives error (TableModel.parse will add spatialdata_attrs back)
@@ -33,9 +35,9 @@ class TableLayerManager:
 
             adata = spatialdata.models.TableModel.parse(
                 adata,
-                region_key=_REGION_KEY,
+                region_key=region_key,
                 region=region,
-                instance_key=_INSTANCE_KEY,
+                instance_key=instance_key,
             )
         else:
             if TableModel.ATTRS_KEY in adata.uns.keys():
