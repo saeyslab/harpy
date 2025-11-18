@@ -1,16 +1,19 @@
-from typing import Optional, Dict, Union, List, Literal, Sequence
-from spatialdata import SpatialData
-import geopandas as gpd
-import pandas as pd
-import numpy as np
-from shapely.geometry import Polygon, MultiPolygon, Point, MultiPoint, LineString, MultiLineString
-from shapely.ops import unary_union
-from harpy.shape._shape import add_shapes_layer
+from collections.abc import Sequence
+from typing import Literal
 
+import geopandas as gpd
+import numpy as np
+import pandas as pd
+from shapely.geometry import LineString, MultiPolygon, Polygon
+from shapely.ops import unary_union
+from spatialdata import SpatialData
 from spatialdata.transformations import get_transformation
 
+from harpy.shape._shape import add_shapes_layer
 from harpy.utils.pylogger import get_pylogger
+
 log = get_pylogger(__name__)
+
 
 # Extract exterior and interior boundaries
 def _extract_exterior_lines(geom):
@@ -19,6 +22,7 @@ def _extract_exterior_lines(geom):
     elif isinstance(geom, MultiPolygon):
         return [poly.exterior for poly in geom.geoms]
     return []
+
 
 def _extract_interior_lines(geom):
     if isinstance(geom, Polygon):
@@ -29,6 +33,7 @@ def _extract_interior_lines(geom):
             lines.extend(poly.interiors)
         return lines
     return []
+
 
 def morphological_features(
     sdata: SpatialData,
@@ -43,30 +48,30 @@ def morphological_features(
     Compute morphological features for polygons in a shapes layer. Only Polygon and MultiPolygon are supported.
     It is recommended to run `hp.sh.prep_region_annotations` first when computing features for region annotations that
     may contain multipolygons, point geometries, unnamed annotations, etc.
-    
-        - `area`: Area of the polygon (px² or µm²).  
-        - `perimeter`: Perimeter length (px or µm).  
-        - `equivalent_diameter`: Diameter of a circle with the same area (px or µm).  
-        - `convex_area`: Area of convex hull (px² or µm²).  
+
+        - `area`: Area of the polygon (px² or µm²).
+        - `perimeter`: Perimeter length (px or µm).
+        - `equivalent_diameter`: Diameter of a circle with the same area (px or µm).
+        - `convex_area`: Area of convex hull (px² or µm²).
         - `convex_perimeter`: Perimeter of convex hull (px or µm).
-        - `circularity`: 4π * area / perimeter².  
+        - `circularity`: 4π * area / perimeter².
             → 1 for a perfect circle; lower = irregular shape.
-        - `compactness`: perimeter² / area.  
-        - `solidity`: area / convex_area.  
+        - `compactness`: perimeter² / area.
+        - `solidity`: area / convex_area.
             → Low values mean concave or fragmented shapes.
-        - `convexity`: convex_perimeter / perimeter.  
+        - `convexity`: convex_perimeter / perimeter.
             → 1 for perfectly convex shapes. Lower for rough or spiky boundaries.
-        - `centroid_x`: X-coordinate of the polygon centroid (px). 
+        - `centroid_x`: X-coordinate of the polygon centroid (px).
         - `centroid_y`: Y-coordinate of the polygon centroid (px).
-        - `centroid_dif`: Distance between polygon and convex hull centroids normalized by the polygon area.  
+        - `centroid_dif`: Distance between polygon and convex hull centroids normalized by the polygon area.
             → Captures off-centered concavity or asymmetry.
-        - `major_axis_length`: Length of the longest side of the minimum rotated bounding box (px or µm).  
-        - `minor_axis_length`: Length of the shortest side of the minimum rotated bounding box (px or µm).  
-        - `major_minor_axis_ratio`: major_axis_length / minor_axis_length.  
-        - `num_vertices`: Number of vertices along exterior boundaries.  
-        - `boundary_complexity`: num_vertices / perimeter.  
-            → Normalized measure of boundary irregularity.  
-        - `num_holes`: Count of internal holes.  
+        - `major_axis_length`: Length of the longest side of the minimum rotated bounding box (px or µm).
+        - `minor_axis_length`: Length of the shortest side of the minimum rotated bounding box (px or µm).
+        - `major_minor_axis_ratio`: major_axis_length / minor_axis_length.
+        - `num_vertices`: Number of vertices along exterior boundaries.
+        - `boundary_complexity`: num_vertices / perimeter.
+            → Normalized measure of boundary irregularity.
+        - `num_holes`: Count of internal holes.
         - `hole_area`: Area covered by internal holes (px² or µm²)
 
     Parameters
@@ -84,10 +89,10 @@ def morphological_features(
         the same name in `shape_names_column`.
     pixel_size_um
         Scale factor to convert geometric measurements from pixel to micron units.
-        - Applied to: 
+        - Applied to:
             * "perimeter", "major_axis_length", and "minor_axis_length" → scaled by (pixel_size_um)
-            * "area" and "convex_area" → scaled by (pixel_size_um)²  
-        - Dimensionless ratios (e.g., "circularity", "compactness", "solidity", "convexity", "centroid_dif", "major_minor_axis_ratio") 
+            * "area" and "convex_area" → scaled by (pixel_size_um)²
+        - Dimensionless ratios (e.g., "circularity", "compactness", "solidity", "convexity", "centroid_dif", "major_minor_axis_ratio")
             are unaffected by scaling but are computed using the scaled geometric quantities.
         - XY-coordinates are kept in original units.
         Defaults to 1.0 (no scaling, i.e. units remain in pixels).
@@ -101,19 +106,23 @@ def morphological_features(
     """
     # Create copy of shapes layer
     gdf = sdata.shapes[shapes_layer].copy()
-    
+
     # Filter out geometries that are not Polygon or MultiPolygon
     supported_mask = gdf.geometry.apply(lambda x: isinstance(x, (Polygon, MultiPolygon)))
 
     unssuported = len(gdf) - supported_mask.sum()
     if unssuported > 0:
-        raise ValueError(f"Found {unssuported} non-polygon geometries in {shapes_layer}. Consider running `hp.sh.prep_region_annotations` first to clean up geometries.")
-    if unssuported == len(gdf):  
-        log.warning(f"No supported geometries (Polygon, MultiPolygon) found. Skipping addition of shapes layer '{output_shapes_layer}' to sdata.")
+        raise ValueError(
+            f"Found {unssuported} non-polygon geometries in {shapes_layer}. Consider running `hp.sh.prep_region_annotations` first to clean up geometries."
+        )
+    if unssuported == len(gdf):
+        log.warning(
+            f"No supported geometries (Polygon, MultiPolygon) found. Skipping addition of shapes layer '{output_shapes_layer}' to sdata."
+        )
         return sdata
 
     gdf = gdf[supported_mask].copy()
-    
+
     # Multipolygon check
     n_multipolygons = gdf.geometry.apply(lambda x: isinstance(x, MultiPolygon)).sum()
     if n_multipolygons > 0:
@@ -121,7 +130,7 @@ def morphological_features(
             f"Detected {n_multipolygons} MultiPolygon geometries in '{shapes_layer}'. "
             "Consider running `hp.sh.prep_region_annotations` first to split MultiPolygons before feature extraction."
         )
-    
+
     # Dissolve polygons by name
     grouped_gdf = None
     if grouped_features:
@@ -156,8 +165,7 @@ def morphological_features(
         gdf[f"centroid_y{suffix}"] = gdf.geometry.centroid.y
         hull_centroids = convex_hulls.centroid
         gdf[f"centroid_dif{suffix}"] = np.sqrt(
-            (gdf[f"centroid_x{suffix}"] - hull_centroids.x) ** 2 +
-            (gdf[f"centroid_y{suffix}"] - hull_centroids.y) ** 2
+            (gdf[f"centroid_x{suffix}"] - hull_centroids.x) ** 2 + (gdf[f"centroid_y{suffix}"] - hull_centroids.y) ** 2
         ) / np.sqrt(gdf[f"area{suffix}"])
 
         # Major/minor axis (from rotated rectangle)
@@ -165,7 +173,7 @@ def morphological_features(
             try:
                 rect = geom.minimum_rotated_rectangle
                 x, y = rect.exterior.coords.xy
-                edges = np.sqrt(np.diff(x)**2 + np.diff(y)**2)
+                edges = np.sqrt(np.diff(x) ** 2 + np.diff(y) ** 2)
                 edges = np.sort(edges[:-1])  # remove duplicate closing edge
                 minor, major = edges[0], edges[1]
                 ratio = major / minor if minor > 0 else np.nan
@@ -185,14 +193,12 @@ def morphological_features(
             return sum(len(line.coords) for line in exteriors)
 
         gdf[f"num_vertices{suffix}"] = gdf.geometry.apply(_num_vertices)
-        gdf[f"boundary_complexity{suffix}"] = (
-            gdf[f"num_vertices{suffix}"] / gdf[f"perimeter{suffix}"]
-        )
+        gdf[f"boundary_complexity{suffix}"] = gdf[f"num_vertices{suffix}"] / gdf[f"perimeter{suffix}"]
 
         # Hole topology
         def _num_holes(geom):
             return len(_extract_interior_lines(geom))
-        
+
         def _hole_area(g):
             interiors = _extract_interior_lines(g)
             if not interiors:
@@ -206,11 +212,11 @@ def morphological_features(
 
         gdf[f"num_holes{suffix}"] = gdf.geometry.apply(_num_holes)
         gdf[f"hole_area{suffix}"] = gdf.geometry.apply(_hole_area) * pixel_size_um**2
-        
+
         return gdf
 
     gdf = _compute_features(gdf, pixel_size_um, "")
-    
+
     if grouped_features and not grouped_gdf.empty:
         grouped_gdf = _compute_features(grouped_gdf, pixel_size_um, "-grouped")
 
@@ -219,7 +225,6 @@ def morphological_features(
         grouped_lookup = grouped_gdf.set_index(shape_names_column)
         for col in grouped_metrics:
             gdf[col] = gdf[shape_names_column].map(grouped_lookup[col])
-
 
     # sanity check. If this sanity check would fail in spatialdata at some point, then pass transformation to transformations parameter of add_shapes_layer.
     assert get_transformation(gdf, get_all=True) == get_transformation(sdata[shapes_layer], get_all=True)
@@ -272,14 +277,10 @@ def filter_shapes_numerical(
     gdf = sdata.shapes[shapes_layer].copy()
 
     if numerical_column not in gdf.columns:
-        raise ValueError(
-            f"Column '{numerical_column}' not found in '{shapes_layer}.obs'. "
-        )
-        
+        raise ValueError(f"Column '{numerical_column}' not found in '{shapes_layer}.obs'. ")
+
     if not np.issubdtype(gdf[numerical_column].dtype, np.number):
-        raise ValueError(
-            f"Column '{numerical_column}' must be numeric, but dtype is {gdf[numerical_column].dtype}."
-        )
+        raise ValueError(f"Column '{numerical_column}' must be numeric, but dtype is {gdf[numerical_column].dtype}.")
 
     # Filter cells based on min and max values
     start = len(gdf)
@@ -297,7 +298,9 @@ def filter_shapes_numerical(
     filtered_gdf = gdf[mask].copy()
     kept = len(filtered_gdf)
     removed = start - len(filtered_gdf)
-    log.info(f"Removed {removed}/{start} polygons outside {min_value}–{max_value} for '{numerical_column}' (kept {kept}).")
+    log.info(
+        f"Removed {removed}/{start} polygons outside {min_value}–{max_value} for '{numerical_column}' (kept {kept})."
+    )
 
     # sanity check. If this sanity check would fail in spatialdata at some point, then pass transformation to transformations parameter of add_shapes_layer.
     assert get_transformation(filtered_gdf, get_all=True) == get_transformation(sdata[shapes_layer], get_all=True)
@@ -317,9 +320,9 @@ def filter_shapes_categorical(
     sdata: SpatialData,
     shapes_layer: str,
     output_shapes_layer: str,
-    categorical_column: Optional[str] = None,
-    include_values: Optional[Union[str, Sequence[str]]] = None,
-    exclude_values: Optional[Union[str, Sequence[str]]] = None,
+    categorical_column: str | None = None,
+    include_values: str | Sequence[str] | None = None,
+    exclude_values: str | Sequence[str] | None = None,
     overwrite: bool = False,
 ) -> SpatialData:
     """
@@ -353,7 +356,7 @@ def filter_shapes_categorical(
         raise ValueError("Specify only one of 'include_values' or 'exclude_values'.")
 
     gdf = sdata.shapes[shapes_layer].copy()
-    
+
     if categorical_column is not None and categorical_column not in gdf.columns:
         raise ValueError(f"Column '{categorical_column}' not found in '{shapes_layer}'.")
 
@@ -379,7 +382,7 @@ def filter_shapes_categorical(
             mask &= gdf.index.isin(include_values)
         elif exclude_values is not None:
             mask &= ~gdf.index.isin(exclude_values)
-            
+
     filtered_gdf = gdf[mask].copy()
     kept = len(filtered_gdf)
     removed = start - kept
@@ -406,15 +409,25 @@ def filter_shapes_by_shapes(
     target_shapes_layer: str,
     mask_shapes_layer: str,
     output_shapes_layer: str,
-    shape_names_column: Optional[str] = None,
-    shape_names: Optional[Union[str, List[str]]] = None,
-    mode: Literal["intersects", "within", "centroid_within", "touches", "disjoint", "overlap_fraction", "edge", "outer_edge", "inner_edge"] = "centroid_within",
+    shape_names_column: str | None = None,
+    shape_names: str | list[str] | None = None,
+    mode: Literal[
+        "intersects",
+        "within",
+        "centroid_within",
+        "touches",
+        "disjoint",
+        "overlap_fraction",
+        "edge",
+        "outer_edge",
+        "inner_edge",
+    ] = "centroid_within",
     keep: bool = True,
-    threshold: Optional[float] = None,
+    threshold: float | None = None,
     overwrite: bool = False,
 ):
     """
-    Filter polygons in a target shapes layer based on geometric relationships to polygons of a mask shapes layer. 
+    Filter polygons in a target shapes layer based on geometric relationships to polygons of a mask shapes layer.
     A typical use-case would be to filter cell segmentations based on their location within annotated regions.
 
     Parameters
@@ -449,15 +462,14 @@ def filter_shapes_by_shapes(
         Threshold to use for overlap_fraction.
     overwrite
         If True, overwrites the output shapes layer if it exists.
-    
+
     Returns
     -------
     SpatialData object with filtered shapes layer.
     """
-
     # Copy target layer
     target_gdf = sdata.shapes[target_shapes_layer].copy()
-    
+
     # Copy mask layer
     mask_gdf = sdata.shapes[mask_shapes_layer].copy()
 
@@ -470,7 +482,7 @@ def filter_shapes_by_shapes(
         mask_gdf = mask_gdf[mask_gdf[shape_names_column].isin(shape_names)].copy()
         if mask_gdf.empty:
             raise ValueError(f"No geometries found in '{mask_shapes_layer}' matching {shape_names}.")
-        
+
     # Build mask union
     mask_union = mask_gdf.unary_union
 
@@ -493,7 +505,7 @@ def filter_shapes_by_shapes(
         fraction = overlaps.area / intersecting.geometry.area
         condition = pd.Series(False, index=target_gdf.index)
         condition.loc[intersecting.index] = fraction > threshold
-    elif mode == "edge": 
+    elif mode == "edge":
         condition = target_gdf.geometry.intersects(mask_union) & ~target_gdf.geometry.within(mask_union)
     elif mode in ["outer_edge", "inner_edge"]:
         outer_boundaries = []
@@ -507,13 +519,19 @@ def filter_shapes_by_shapes(
             outer_boundaries.extend(_extract_exterior_lines(mask_union))
             inner_boundaries.extend(_extract_interior_lines(mask_union))
 
-        outer_boundary_union = unary_union([LineString(boundary) for boundary in outer_boundaries]) if outer_boundaries else None
-        inner_boundary_union = unary_union([LineString(boundary) for boundary in inner_boundaries]) if inner_boundaries else None
+        outer_boundary_union = (
+            unary_union([LineString(boundary) for boundary in outer_boundaries]) if outer_boundaries else None
+        )
+        inner_boundary_union = (
+            unary_union([LineString(boundary) for boundary in inner_boundaries]) if inner_boundaries else None
+        )
 
         if mode == "outer_edge":
             condition = target_gdf.geometry.intersects(outer_boundary_union)
         elif mode == "inner_edge":
-            condition = target_gdf.geometry.intersects(inner_boundary_union) if inner_boundary_union is not None else False
+            condition = (
+                target_gdf.geometry.intersects(inner_boundary_union) if inner_boundary_union is not None else False
+            )
 
     else:
         raise ValueError(f"Unsupported mode '{mode}'.")
@@ -526,9 +544,11 @@ def filter_shapes_by_shapes(
         log.info(f"Kept {len(filtered_gdf)} / {len(target_gdf)} geometries (removed {removed}).")
     else:
         log.info(f"Removed {removed} / {len(target_gdf)} geometries (kept {len(filtered_gdf)}).")
-    
+
     # sanity check. If this sanity check would fail in spatialdata at some point, then pass transformation to transformations parameter of add_shapes_layer.
-    assert get_transformation(filtered_gdf, get_all=True) == get_transformation(sdata[target_shapes_layer], get_all=True)
+    assert get_transformation(filtered_gdf, get_all=True) == get_transformation(
+        sdata[target_shapes_layer], get_all=True
+    )
 
     # Add to SpatialData
     sdata = add_shapes_layer(
