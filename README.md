@@ -70,6 +70,7 @@ Explore how to use Harpy for segmentation, shallow and deep feature extraction, 
 - **🔬 Cell Segmentation**
 
   Explore segmentation workflows in `Harpy` using different tools:
+
   - With [**Instanseg**](https://github.com/instanseg/instanseg) 👉 [Tutorial](./docs/tutorials/general//Harpy_instanseg.ipynb)
 
   - With [**Cellpose**](https://github.com/MouseLand/cellpose) 👉 [Tutorial ](./docs/tutorials/general/Harpy_feature_calculation.ipynb)
@@ -97,6 +98,12 @@ Explore how to use Harpy for segmentation, shallow and deep feature extraction, 
 - **🧬 Spatial Transcriptomics**
 
   Learn how to analyze spatial transcriptomics data with `Harpy`. For detailed information, refer to the [**SPArrOW documentation**](https://sparrow-pipeline.readthedocs.io/en/latest). 👉 [Tutorial](./docs/tutorials/advanced/Harpy_transcriptomics.ipynb)
+
+---
+
+- **🌐 Multiple samples and coordinate systems**
+
+  Learn how to work with multiple samples, instrinsic and micron coordinates. 👉 [Tutorial](./docs/tutorials/advanced/coordinate_systems.ipynb)
 
 ---
 

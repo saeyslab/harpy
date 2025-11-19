@@ -202,6 +202,11 @@ def plot_sdata(
             if table_layer is not None
             else False,  # table do not need to be filtered if table layer is not specified
         )
+        if sdata_to_plot is None:
+            raise ValueError(
+                f"Bounding box query with coordinates {crd!r} (xmin, xmax, ymin, ymax) produced an empty SpatialData object. "
+                "Please try different crop parameters."
+            )
 
     if labels_layer is None:
         ax = sdata_to_plot.pl.render_images(
@@ -299,7 +304,7 @@ def plot_sdata_genes(
         * If a list is provided, only points in ``points_layer`` from this list (via ``name_gene_column``) are plotted
         (as categories).
         * If ``None``, points are plotted without gene-specific coloring and
-          ``color`` is used instead.
+        ``color`` is used instead.
     color
         Color used to plot the points when ``genes`` is ``None``. Ignored if
         ``genes`` is not ``None``.
@@ -327,8 +332,7 @@ def plot_sdata_genes(
 
     Returns
     -------
-    Axes
-        Matplotlib Axes.
+    Matplotlib Axes.
 
     Examples
     --------
@@ -396,7 +400,7 @@ def plot_sdata_genes(
     if genes is None and df[name_gene_column].dtype == "category":
         log.info(
             f"Column '{name_gene_column}' of 'sdata.points[{points_layer}]' is of dtype categorical, while 'genes' is 'None'. "
-            "We proceed with converting to dtype object, to prevent spatialdata-plot to plot all genes as categores. In case of a backed SpatialData object, "
+            "We proceed with converting to dtype object, to prevent spatialdata-plot to plot all genes as categories. In case of a backed SpatialData object, "
             f"this will not affect the underlying zarr store, only the in-memory representation of 'sdata.points[{points_layer}][{name_gene_column}]'."
         )
         df[name_gene_column] = df[name_gene_column].astype(str)

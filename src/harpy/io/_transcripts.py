@@ -21,12 +21,12 @@ def read_resolve_transcripts(
     path_count_matrix: str | Path,
     output_layer: str = "transcripts",
     to_coordinate_system: str = "global",
-    to_micron_coordinate_system: str = "micron",
-    pixel_size: float = 0.138,
+    to_micron_coordinate_system: str | None = "micron",
+    pixel_size: float | None = 0.138,
     overwrite: bool = False,
 ) -> SpatialData:
     """
-    Reads and adds Resolve transcript information to a SpatialData object.
+    Reads and adds transcripts from Resolve Biosciences’ Molecular Cartography technology to a SpatialData object.
 
     Parameters
     ----------
@@ -38,9 +38,12 @@ def read_resolve_transcripts(
     output_layer: str, default='transcripts'.
         Name of the points layer of the SpatialData object to which the transcripts will be added.
     to_coordinate_system
-        Coordinate system to which `output_layer` will be added.
+        Pixel coordinate system to which `output_layer` will be added.
     to_micron_coordinate_system
         Micron coordinate system to which `output_layer` will be added.
+    pixel_size
+        Size of the pixels in micron. Transcripts from Resolve Molecular Cartography are in pixels.
+        By specifying 'pixel_size', we can add the micron coordinate system 'to_micron_coordinate_system'.
     overwrite
         If True overwrites the `output_layer` (a points layer) if it already exists.
 
@@ -58,7 +61,7 @@ def read_resolve_transcripts(
         "overwrite": overwrite,
         "output_layer": output_layer,
         "to_coordinate_system": to_coordinate_system,
-        "to_micron_coordinate_system": to_micron_coordinate_system,
+        "to_micron_coordinate_system": to_micron_coordinate_system if pixel_size is not None else None,
         "pixel_size": pixel_size,
     }
 
@@ -88,7 +91,7 @@ def read_merscope_transcripts(
     output_layer: str, default='transcripts'.
         Name of the points layer of the SpatialData object to which the transcripts will be added.
     to_coordinate_system
-        Coordinate system to which `output_layer` will be added.
+        Pixel coordinate system to which `output_layer` will be added.
     to_micron_coordinate_system
         Micron coordinate system to which `output_layer` will be added.
     transform_matrix
@@ -245,7 +248,7 @@ def read_transcripts(
         The coordinates (in pixels) for the region of interest in the format (xmin, xmax, ymin, ymax).
         If `None`, all transcripts are considered.
     to_coordinate_system
-        Coordinate system to which `output_layer` will be added.
+        Pixel coordinate system to which `output_layer` will be added.
         This is the pixel coordinate system.
     to_micron_coordinate_system
         Micron coordinate system to which `output_layer` will be added, if 'transform_matrix' is not the identity matrix, or 'pixel_size' is not 'None'.
