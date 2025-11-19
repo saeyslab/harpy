@@ -60,8 +60,11 @@ def merscope(
     """
     Read *MERSCOPE* data from Vizgen.
 
-    Wrapper around `spatialdata_io.merscope`, but with support to read in the data as 3D `(z,y,x)` or perform a z-projection,
-    with support for rasterizing the cell boundaries, and with support for reading multiple samples into one spatialdata object
+    Wrapper around `spatialdata_io.merscope`, but with support i) to read in the data as 3D `(z,y,x)` or perform a z-projection,
+    ii) for rasterizing the cell boundaries, iii) for adding micron coordinate system  iv) for reading multiple samples into one SpatialData object.
+    The micron coordinate system wil be added as '{to_coordinate_system}_micron', and is available for all spatial elements in the resulting
+    SpatialData object.
+
     This function reads the following files:
 
         - ``{ms.TRANSCRIPTS_FILE!r}``: Transcript file.
@@ -281,6 +284,7 @@ def merscope(
                     path=_path,
                     z_layer=_z_layer,
                     to_coordinate_system=_to_coordinate_system,
+                    to_micron_coordinate_system=f"{to_coordinate_system}_micron",
                     dataset_id=dataset_id,
                     instance_key=instance_key,
                 )
@@ -414,7 +418,7 @@ def merscope(
                 header=0,
                 output_layer=output_layer,
                 to_coordinate_system=_to_coordinate_system,
-                add_micron_coordinate_system=True,
+                to_micron_coordinate_system=f"{to_coordinate_system}_micron",
                 filter_gene_names=filter_gene_names,
                 overwrite=False,
             )
@@ -439,6 +443,7 @@ def _add_shapes(
     path: str | Path,
     z_layer: int,
     to_coordinate_system: str,
+    to_micron_coordinate_system: str,
     dataset_id: str,
     instance_key: str,
 ) -> tuple[SpatialData, str]:
@@ -486,14 +491,14 @@ def _add_shapes(
     output_layer = f"{dataset_id}_z{z_layer}_{to_coordinate_system}_shapes"
 
     log.info(f"Saving cell boundaries for z stack '{z_layer}' as '{output_layer}'.")
-    log.info(f"Adding micron coordinate system for cell boundaries: '{to_coordinate_system}_micron'.")
+    log.info(f"Adding micron coordinate system for cell boundaries: '{to_micron_coordinate_system}'.")
     sdata = add_shapes_layer(
         sdata,
         input=gdf,
         output_layer=output_layer,
         transformations={
             to_coordinate_system: Identity(),
-            f"{to_coordinate_system}_micron": pixels_to_micron,
+            f"{to_micron_coordinate_system}": pixels_to_micron,
         },
         overwrite=False,
     )
