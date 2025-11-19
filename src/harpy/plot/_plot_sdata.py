@@ -10,8 +10,10 @@ import pandas as pd
 from matplotlib.axes import Axes
 from spatialdata import SpatialData, bounding_box_query
 
+from harpy.plot._utils import _get_distinct_colors
 from harpy.utils._keys import _GENES_KEY, _REGION_KEY
 from harpy.utils.pylogger import get_pylogger
+from harpy.utils.utils import _make_list
 
 log = get_pylogger(__name__)
 
@@ -270,6 +272,7 @@ def plot_sdata_genes(
     channel: str | list[str] | None = None,  # ignored if img_layer is None
     name_gene_column: str | None = _GENES_KEY,
     genes: str | list[str] = None,  #
+    palette: str | list[str] | None = None,
     color: str = "cornflowerblue",  # ignored if genes is not None
     frac: float | None = None,
     size: int | float = 5,  # size of the points
@@ -305,6 +308,9 @@ def plot_sdata_genes(
         (as categories).
         * If ``None``, points are plotted without gene-specific coloring and
         ``color`` is used instead.
+    palette
+        Colors used to color each gene in ``genes``. If ``None``, defaults to  :mod:`scanpy`’s standard color palette.
+        Ignored if ``genes`` is ``None``.
     color
         Color used to plot the points when ``genes`` is ``None``. Ignored if
         ``genes`` is not ``None``.
@@ -406,6 +412,26 @@ def plot_sdata_genes(
         df[name_gene_column] = df[name_gene_column].astype(str)
         sdata[points_layer] = df
 
+    # we work with the palette, to prevent spatialdata-plot to calculate color from total number of categories in the dask dataframe, which can be hundreds,
+    # which results in spatialdata-plot setting all genes to grey (if nr of categories >= 103)
+    if genes is not None:
+        genes = _make_list(genes)
+        if palette is None:
+            palette = _get_distinct_colors(len(genes))
+        palette = _make_list(palette)
+        if len(palette) != len(genes):
+            raise ValueError(
+                f"The number of genes specified via 'genes' ({len(genes)}) differs "
+                f"from the number of colors in 'palette' ({len(palette)})."
+            )
+    else:
+        if palette is not None:
+            log.info(
+                "'palette' is not 'None', while 'genes' is 'None'. Will proceed with setting 'palette' to 'None'. "
+                "To set the color when 'genes' is 'None', please set 'color'."
+            )
+            palette = None
+
     if "coordinate_systems" in show_kwargs.keys():
         raise ValueError(
             "'coordinate_systems' found as key in 'show_kwargs'"
@@ -448,6 +474,7 @@ def plot_sdata_genes(
             points_layer,
             color=color,
             alpha=alpha,
+            palette=palette,
             size=size,
             groups=genes,
         ).pl.show(
@@ -466,6 +493,7 @@ def plot_sdata_genes(
                 points_layer,
                 color=color,
                 alpha=alpha,
+                palette=palette,
                 size=size,
                 groups=genes,
             )

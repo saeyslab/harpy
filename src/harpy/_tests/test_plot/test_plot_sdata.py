@@ -474,7 +474,7 @@ def test_plot_sdata_genes_crop(sdata: SpatialData, tmp_path, crd):
     fig.savefig(tmp_path / f"plot_genes_{name}.png", dpi=dpi)
 
 
-def test_plot_sdata_genes_wrong_name(sdata: SpatialData):
+def test_plot_sdata_genes_name_raises(sdata: SpatialData):
     points_layer = "blobs_points"
     img_layer = "blobs_image"
 
@@ -489,7 +489,7 @@ def test_plot_sdata_genes_wrong_name(sdata: SpatialData):
         )
 
 
-def test_plot_sdata_genes_wrong_show_kwargs(sdata: SpatialData):
+def test_plot_sdata_genes_show_kwargs_raises(sdata: SpatialData):
     points_layer = "blobs_points"
     img_layer = "blobs_image"
 
@@ -502,4 +502,40 @@ def test_plot_sdata_genes_wrong_show_kwargs(sdata: SpatialData):
             img_layer=img_layer,
             name_gene_column="genes",
             show_kwargs=show_kwargs,
+        )
+
+
+def test_plot_sdata_genes_palette(sdata: SpatialData, tmp_path):
+    points_layer = "blobs_points"
+    img_layer = "blobs_image"
+
+    dpi = 200
+
+    fig, ax = plt.subplots()
+
+    plot_sdata_genes(
+        sdata,
+        points_layer=points_layer,
+        img_layer=img_layer,
+        name_gene_column="genes",
+        genes=["gene_a", "gene_b"],
+        palette=["pink", "red"],
+        ax=ax,
+    )
+
+    fig.savefig(tmp_path / "plot_genes_palette.png", dpi=dpi)
+
+
+def test_plot_sdata_genes_palette_raises(sdata: SpatialData, tmp_path):
+    points_layer = "blobs_points"
+    img_layer = "blobs_image"
+
+    with pytest.raises(ValueError, match="The number of genes specified via 'genes' "):
+        plot_sdata_genes(
+            sdata,
+            points_layer=points_layer,
+            img_layer=img_layer,
+            name_gene_column="genes",
+            genes=["gene_a", "gene_b"],
+            palette=["pink"],
         )
