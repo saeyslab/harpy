@@ -302,6 +302,8 @@ def add_table_layer(
     adata: AnnData,
     output_layer: str,
     region: list[str] | None,
+    instance_key: str = _INSTANCE_KEY,
+    region_key: str = _REGION_KEY,
     overwrite: bool = False,
 ):
     """
@@ -315,11 +317,15 @@ def add_table_layer(
     sdata
         The SpatialData object to which the new table layer will be added.
     adata
-        The AnnData object containing the table data to be added. If `region` is not None, it should contain `_REGION_KEY` and `_INSTANCE_KEY` in adata.obs.
+        The AnnData object containing the table data to be added. If `region` is not None, it should contain `region_key` and `instance_key` in adata.obs.
     output_layer
         The name of the output layer where the table data will be stored.
     region
-        A list of regions to associate with the table data. Typically this is all unique elements in `adata.obs[_REGION_KEY]`.
+        A list of regions to associate with the table data. Typically this is all unique elements in `adata.obs[region_key]`.
+    instance_key
+        Instance key. The name of the column in `adata.obs` that holds the instance ids.
+    region_key
+        Region key. The name of the column in `adata.obs` that holds the name of the elements (`region`) that annotate the table layer.
     overwrite
         If True, overwrites the output layer if it already exists in `sdata`.
 
@@ -333,6 +339,8 @@ def add_table_layer(
         adata=adata,
         output_layer=output_layer,
         region=region,
+        instance_key=instance_key,
+        region_key=region_key,
         overwrite=overwrite,
     )
 

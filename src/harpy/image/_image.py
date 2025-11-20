@@ -8,7 +8,7 @@ from spatialdata import SpatialData
 from spatialdata.models._utils import MappingToCoordinateSystem_t
 from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import get_transformation
-from spatialdata.transformations.transformations import Identity, Sequence, Translation
+from spatialdata.transformations.transformations import Affine, Identity, Sequence, Translation
 from xarray import DataArray, DataTree
 
 from harpy.image._manager import ImageLayerManager, LabelLayerManager
@@ -65,9 +65,9 @@ def _get_translation(spatial_image: DataArray, to_coordinate_system: str = "glob
         )
     translation = transformations[to_coordinate_system]
 
-    if not isinstance(translation, Sequence | Translation | Identity):
+    if not isinstance(translation, Sequence | Translation | Identity | Affine):
         raise ValueError(
-            f"Currently only transformations of type Translation are supported, "
+            f"Currently only transformations of type Translation are supported for coordinate system '{to_coordinate_system}', "
             f"while transformation associated with {spatial_image} in coordinate system '{to_coordinate_system}' is of type {type(translation)}."
         )
 

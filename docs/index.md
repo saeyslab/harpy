@@ -53,6 +53,12 @@ Explore how to use Harpy for segmentation, shallow and deep feature extraction, 
 
 ---
 
+- **🌐 Multiple samples and coordinate systems**
+
+  Learn how to work with multiple samples, instrinsic and micron coordinates. 👉 [Tutorial](../docs/tutorials/advanced/coordinate_systems.ipynb)
+
+---
+
 📚 For a complete list of tutorials, visit the [**tutorials section**](https://harpy.readthedocs.io/en/latest/tutorials).
 
 ```{eval-rst}

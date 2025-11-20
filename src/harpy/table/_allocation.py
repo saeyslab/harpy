@@ -33,7 +33,7 @@ def allocate(
     points_layer: str = "transcripts",
     output_layer: str = "table_transcriptomics",
     to_coordinate_system: str = "global",
-    chunks: str | tuple[int, ...] | int | None = 10000,
+    chunks: str | tuple[int, ...] | int | None = None,
     name_gene_column: str = _GENES_KEY,
     append: bool = False,
     update_shapes_layers: bool = True,
@@ -58,11 +58,9 @@ def allocate(
         The table layer in `sdata` in which to save the AnnData object with the transcripts counts per cell.
     to_coordinate_system
         The coordinate system that holds `labels_layer` and `points_layer`.
+        This should be the intrinsic coordinate system in pixels.
     chunks
-        Chunk sizes for processing. Can be a string, integer or tuple of integers.
-        Consider setting the chunks to a relatively high value to speed up processing
-        (>10000, or only chunk in z-dimension if data is 3D, and one z-slice fits in memory),
-        taking into account the available memory of your system.
+        Chunk size for processing. Consider setting 'chunks' to 'None' and rechunk the 'labels_layer' to the desired chunk size on disk, e.g. with :func:`harpy.im.add_labels_layer`.
     name_gene_column
         Column name in the `points_layer` representing gene information.
     append

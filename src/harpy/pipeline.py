@@ -325,7 +325,6 @@ class HarpyPipeline:
             column_z=self.cfg.allocate.column_z,
             column_gene=self.cfg.allocate.column_gene,
             column_midcount=self.cfg.allocate.column_midcount,
-            debug=self.cfg.allocate.debug,
         )
 
         log.info("Start allocation.")

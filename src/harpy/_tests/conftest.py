@@ -148,3 +148,9 @@ def sdata_pixie():
 def path_dataset_markers():
     registry = get_registry()
     return registry.fetch("transcriptomics/resolve/mouse/dummy_markers.csv")
+
+
+@pytest.fixture
+def path_transcripts():
+    registry = get_registry()
+    return registry.fetch("transcriptomics/resolve/mouse/20272_slide1_A1-1_results_4288_2144.txt")

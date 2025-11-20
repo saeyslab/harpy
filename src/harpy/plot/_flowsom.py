@@ -21,6 +21,7 @@ from spatialdata import SpatialData, bounding_box_query
 from spatialdata.models import TableModel
 
 from harpy.image._image import _get_spatial_element
+from harpy.plot._utils import _get_distinct_colors
 from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY, ClusteringKey
 from harpy.utils.pylogger import get_pylogger
 
@@ -301,29 +302,3 @@ def pixel_clusters_heatmap(
         ax.figure.savefig(output)
 
     return ax
-
-
-def _get_distinct_colors(n: int):
-    """
-    Return n distinct hex colors.
-
-    - Up to 20: use Scanpy's default_20
-    - Up to 102: use Scanpy's default_102
-    - Beyond that: extend with HUSL-generated colors
-    """
-    import matplotlib.colors as mcolors
-    import scanpy as sc
-    import seaborn as sns
-
-    # Base palettes from scanpy
-    PALETTE_20 = list(sc.plotting.palettes.default_20)
-    PALETTE_102 = list(sc.plotting.palettes.default_102)
-    if n <= len(PALETTE_20):
-        return PALETTE_20[:n]
-    elif n <= len(PALETTE_102):
-        return PALETTE_102[:n]
-    else:
-        extra_needed = n - len(PALETTE_102)
-        extra_colors = sns.color_palette("husl", extra_needed)
-        extra_hex = [mcolors.to_hex(c) for c in extra_colors]
-        return PALETTE_102 + extra_hex

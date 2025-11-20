@@ -7,7 +7,7 @@ import numpy as np
 import pyarrow
 from numpy.typing import NDArray
 from spatialdata import SpatialData
-from spatialdata.transformations import Identity
+from spatialdata.transformations import Affine, Identity, Scale
 
 from harpy.points._points import add_points_layer
 from harpy.utils._keys import _GENES_KEY
@@ -21,10 +21,12 @@ def read_resolve_transcripts(
     path_count_matrix: str | Path,
     output_layer: str = "transcripts",
     to_coordinate_system: str = "global",
+    to_micron_coordinate_system: str | None = "micron",
+    pixel_size: float | None = 0.138,
     overwrite: bool = False,
 ) -> SpatialData:
     """
-    Reads and adds Resolve transcript information to a SpatialData object.
+    Reads and adds transcripts from Resolve Biosciences’ Molecular Cartography technology to a SpatialData object.
 
     Parameters
     ----------
@@ -36,7 +38,12 @@ def read_resolve_transcripts(
     output_layer: str, default='transcripts'.
         Name of the points layer of the SpatialData object to which the transcripts will be added.
     to_coordinate_system
-        Coordinate system to which `output_layer` will be added.
+        Pixel coordinate system to which `output_layer` will be added.
+    to_micron_coordinate_system
+        Micron coordinate system to which `output_layer` will be added.
+    pixel_size
+        Size of the pixels in micron. Transcripts from Resolve Molecular Cartography are in pixels.
+        By specifying 'pixel_size', we can add the micron coordinate system 'to_micron_coordinate_system'.
     overwrite
         If True overwrites the `output_layer` (a points layer) if it already exists.
 
@@ -54,6 +61,8 @@ def read_resolve_transcripts(
         "overwrite": overwrite,
         "output_layer": output_layer,
         "to_coordinate_system": to_coordinate_system,
+        "to_micron_coordinate_system": to_micron_coordinate_system if pixel_size is not None else None,
+        "pixel_size": pixel_size,
     }
 
     sdata = read_transcripts(*args, **kwargs)
@@ -66,6 +75,7 @@ def read_merscope_transcripts(
     transform_matrix: str | Path,
     output_layer: str = "transcripts",
     to_coordinate_system: str = "global",
+    to_micron_coordinate_system: str = "micron",
     overwrite: bool = False,
 ) -> SpatialData:
     """
@@ -81,7 +91,9 @@ def read_merscope_transcripts(
     output_layer: str, default='transcripts'.
         Name of the points layer of the SpatialData object to which the transcripts will be added.
     to_coordinate_system
-        Coordinate system to which `output_layer` will be added.
+        Pixel coordinate system to which `output_layer` will be added.
+    to_micron_coordinate_system
+        Micron coordinate system to which `output_layer` will be added.
     transform_matrix
         Path to the transformation matrix for the affine transformation.
     overwrite: bool, default=False
@@ -101,6 +113,7 @@ def read_merscope_transcripts(
         "overwrite": overwrite,
         "output_layer": output_layer,
         "to_coordinate_system": to_coordinate_system,
+        "to_micron_coordinate_system": to_micron_coordinate_system,
     }
 
     sdata = read_transcripts(*args, **kwargs)
@@ -156,9 +169,9 @@ def read_transcripts(
     sdata: SpatialData,
     path_count_matrix: str | Path,
     transform_matrix: str | Path | NDArray | None = None,
+    pixel_size: int | None = None,
     output_layer: str = "transcripts",
     overwrite: bool = False,
-    debug: bool = False,
     column_x: int = 0,
     column_y: int = 1,
     column_z: int | None = None,
@@ -169,13 +182,14 @@ def read_transcripts(
     comment: str | None = None,
     crd: tuple[int, int, int, int] | None = None,
     to_coordinate_system: str = "global",
+    to_micron_coordinate_system: str | None = None,
     filter_gene_names: str | list[str] | None = None,
     blocksize: str = "64MB",
 ) -> SpatialData:
     """
     Reads transcript information from a file with each row listing the x and y coordinates, along with the gene name.
 
-    If a transform matrix is provided an affine transformation is applied to the coordinates of the transcripts.
+    If a transform matrix is provided an affine transformation from micron to pixels is applied to the coordinates of the transcripts.
     The transformation is applied to the dask dataframe before adding it to `sdata`.
     The SpatialData object is augmented with a points layer named `output_layer` that contains the transcripts.
 
@@ -187,20 +201,29 @@ def read_transcripts(
         Path to a `.parquet` file or `.csv` file containing the transcripts information. Each row should contain an `x` (`column_x`), `y` (`column_y`) coordinate and a gene name (`column_gene`).
         Optional a count column (see `column_midcount`) is provided.
     transform_matrix
-        This `numpy` array should contain a 3x3 transformation matrix for the affine transformation.
-        The matrix defines the linear transformation to be applied to the coordinates of the transcripts before adding it as a points layer to `sdata`.
-        E.g.:
-        | Sx  0  Tx |
-        |  0  Sy  Ty |
-        |  0   0   1 |
-        If no transform matrix is specified, the identity matrix will be used.
-        If `transform_matrix` is specified as a path to a file, it will be read via `numpy.loadtext`.
+        This `numpy` array should contain a 3x3 transformation matrix for the affine transformation from micron to pixels.
+        The matrix defines the linear transformation to be applied to the `x` and `y` coordinates of the transcripts before adding it as a points layer to `sdata`
+        in the coordinate system `to_coordinate_system`. E.g. `to_coordinate_system` will be the intrinsic pixel coordinate system.
+
+        Example transform matrix:
+
+        Sx  0  Tx
+
+        0  Sy  Ty
+
+        0   0   1
+
+        If no transform matrix is specified, `transform_matrix` will default to the identity matrix, and we assume transcripts coordinates are already in pixels.
+        If `transform_matrix` is specified as a path to a file, it will be read via `numpy.genfromtxt`.
+        If `to_micron_coordinate_system` is specifed and `transform_matrix` is not the identity matrix, a micron coordinate system will be added at `to_micron_coordinate_system`,
+        with the inverse of the `transform_matrix` defined on it (inverse == transformation from pixels to micron).
+    pixel_size
+        Size of the pixels in micron. This can only be specified if 'transform_matrix' is equal to the identity matrix or 'None' (i.e. transcripts are already in pixels).
+        If 'to_micron_coordinate_system' is specified, a micron coordinate system will be added, otherwise this parameter will be ignored.
     output_layer
         Name of the points layer of the SpatialData object to which the transcripts will be added.
     overwrite
         If True overwrites the `output_layer` (a points layer) if it already exists.
-    debug
-        If True, a sample of the data is processed for debugging purposes.
     column_x
         Column index of the X coordinate in the count matrix.
     column_y
@@ -223,14 +246,23 @@ def read_transcripts(
         Ignored if `path_count_matrix` is a `.parquet` file.
     crd
         The coordinates (in pixels) for the region of interest in the format (xmin, xmax, ymin, ymax).
-        If None, all transcripts are considered.
+        If `None`, all transcripts are considered.
     to_coordinate_system
-        Coordinate system to which `output_layer` will be added.
+        Intrinsic pixel coordinate system to which `output_layer` will be added.
+        This is the pixel coordinate system.
+    to_micron_coordinate_system
+        Micron coordinate system to which `output_layer` will be added, if 'transform_matrix' is not the identity matrix, or 'pixel_size' is not 'None'.
+        This is the micron coordinate system.
     filter_gene_names
         Gene names that need to be filtered out (via `str.contains`), mostly control genes that were added, and which you don't want to use.
         Filtering is case insensitive.
     blocksize
         Block size of the partions of the dask dataframe stored as `points_layer` in `sdata`.
+
+    Raises
+    ------
+    ValueError
+        If `pixel_size` is not `None`, and `transform_matrix` is not equal to the identity matrix.
 
     Returns
     -------
@@ -249,6 +281,7 @@ def read_transcripts(
     ddf = _read_parquet_file(path_count_matrix=path_count_matrix)
 
     if ddf is None:
+        log.info(f"Failed to read '{path_count_matrix}' as a Parquet file. Attempting to read it as CSV instead.")
         # if not parquet file, consider it to be csv file
         ddf = dd.read_csv(
             path_count_matrix,
@@ -275,20 +308,33 @@ def read_transcripts(
             log.info(
                 "instance to filter on isn't a string nor a list. No genes are filtered out based on the gene name. "
             )
-
     # Read the transformation matrix
     if transform_matrix is None:
         log.info("No transform matrix given, will use identity matrix.")
         transform_matrix = np.identity(3)
     elif isinstance(transform_matrix, Path | str):
-        transform_matrix = np.loadtxt(transform_matrix)
-
+        transform_matrix = np.genfromtxt(transform_matrix)
     log.info(f"Transform matrix used:\n {transform_matrix}")
 
-    if debug:
-        n = 100000
-        fraction = n / len(ddf)
-        ddf = ddf.sample(frac=fraction)
+    if to_micron_coordinate_system is not None:
+        if pixel_size is not None and not np.array_equal(transform_matrix, np.identity(3)):
+            raise ValueError(
+                "The transform matrix from micron to pixels is not equal to the identity matrix, which implies transcripts are in micron coordinates, while "
+                "'pixel_size' is not 'None', which implies transcripts are in pixel coordinates, this is a contradiction and therefore not allowed."
+            )
+    pixels_to_micron = None
+    if to_micron_coordinate_system is not None:
+        if np.array_equal(transform_matrix, np.identity(3)):
+            if pixel_size is not None:
+                log.info(f"Adding micron coordinate system for transcripts: '{to_micron_coordinate_system}'.")
+                pixels_to_micron = Scale(axes=["x", "y"], scale=[pixel_size, pixel_size])
+        else:
+            log.info(f"Adding micron coordinate system for transcripts: '{to_micron_coordinate_system}'.")
+            pixels_to_micron = Affine(
+                transform_matrix,
+                input_axes=("x", "y"),
+                output_axes=("x", "y"),
+            ).inverse()
 
     # Function to repeat rows based on MIDCount value
     def repeat_rows(df):
@@ -335,7 +381,9 @@ def read_transcripts(
         ddf=transformed_ddf,
         output_layer=output_layer,
         coordinates=coordinates,
-        transformations={to_coordinate_system: Identity()},
+        transformations={to_coordinate_system: Identity(), f"{to_micron_coordinate_system}": pixels_to_micron}
+        if pixels_to_micron is not None
+        else {to_coordinate_system: Identity()},
         overwrite=overwrite,
     )
 
