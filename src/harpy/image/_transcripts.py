@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dask.array as da
+import numpy as np
 from scipy.ndimage import gaussian_filter
 from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
@@ -22,7 +23,6 @@ def transcript_density(
     name_y: str = "y",
     name_z: str | None = None,
     z_index: int | None = None,
-    scaling_factor: float = 100,
     chunks: int = 1024,
     crd: tuple[int, int, int, int] | None = None,
     to_coordinate_system: str = "global",
@@ -56,8 +56,6 @@ def transcript_density(
     z_index
         The z index in the points layer for which to calculate transcript density. If set to None for a 3D points layer
         (and `name_z` is not equal to None), an y-x transcript density projection will be calculated.
-    scaling_factor
-        Factor to scale the transcript density image, by default 100.
     chunks
         Chunksize for calculation of density using gaussian filter.
     crd
@@ -145,7 +143,7 @@ def transcript_density(
     counts_location_transcript[name_y] = counts_location_transcript[name_y] - crd[2]
 
     chunks = (chunks, chunks)
-    image = da.zeros((crd[1] - crd[0], crd[3] - crd[2]), chunks=chunks, dtype=int)
+    image = da.zeros((crd[1] - crd[0], crd[3] - crd[2]), chunks=chunks, dtype=np.int32)
 
     def populate_chunk(block, block_info=None, x=None, y=None, values=None):
         # Extract the indices of the current block
@@ -168,9 +166,12 @@ def transcript_density(
     y_values = counts_location_transcript[name_y].values
     values = counts_location_transcript["__count__"].values
 
-    image = image.map_blocks(populate_chunk, x=x_values, y=y_values, values=values, dtype=int)
+    image = image.map_blocks(
+        populate_chunk, x=x_values, y=y_values, values=values, dtype=np.int32
+    )  # we assume never more than np.iinfo(np.int32).max transcripts per pixel
 
-    image = scaling_factor * (image / da.max(image))
+    image = image / da.max(image)
+    image = image.astype(np.float32)  # some small precision loss by casting
 
     sigma = 7
 
@@ -180,7 +181,9 @@ def transcript_density(
     # take overlap to be 3 times sigma
     overlap = sigma * 3
 
-    blurred_transcripts = image.map_overlap(chunked_gaussian_filter, depth=overlap, boundary="reflect")
+    blurred_transcripts = image.map_overlap(
+        chunked_gaussian_filter, depth=overlap, boundary="reflect", dtype=np.float32
+    )
 
     blurred_transcripts = blurred_transcripts.T
     # rechunk, otherwise possible issues when saving to zarr
