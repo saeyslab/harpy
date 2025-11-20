@@ -248,7 +248,7 @@ def read_transcripts(
         The coordinates (in pixels) for the region of interest in the format (xmin, xmax, ymin, ymax).
         If `None`, all transcripts are considered.
     to_coordinate_system
-        Pixel coordinate system to which `output_layer` will be added.
+        Intrinsic pixel coordinate system to which `output_layer` will be added.
         This is the pixel coordinate system.
     to_micron_coordinate_system
         Micron coordinate system to which `output_layer` will be added, if 'transform_matrix' is not the identity matrix, or 'pixel_size' is not 'None'.
@@ -258,6 +258,11 @@ def read_transcripts(
         Filtering is case insensitive.
     blocksize
         Block size of the partions of the dask dataframe stored as `points_layer` in `sdata`.
+
+    Raises
+    ------
+    ValueError
+        If `pixel_size` is not `None`, and `transform_matrix` is not equal to the identity matrix.
 
     Returns
     -------
@@ -276,6 +281,7 @@ def read_transcripts(
     ddf = _read_parquet_file(path_count_matrix=path_count_matrix)
 
     if ddf is None:
+        log.info(f"Failed to read '{path_count_matrix}' as a Parquet file. Attempting to read it as CSV instead.")
         # if not parquet file, consider it to be csv file
         ddf = dd.read_csv(
             path_count_matrix,
