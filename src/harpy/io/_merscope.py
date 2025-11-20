@@ -60,10 +60,13 @@ def merscope(
     """
     Read *MERSCOPE* data from Vizgen.
 
-    Wrapper around `spatialdata_io.merscope`, but with support i) to read in the data as 3D `(z,y,x)` or perform a z-projection,
-    ii) for rasterizing the cell boundaries, iii) for adding micron coordinate system  iv) for reading multiple samples into one SpatialData object.
-    The micron coordinate system wil be added as '{to_coordinate_system}_micron', and is available for all spatial elements in the resulting
-    SpatialData object.
+    A wrapper around :func:`spatialdata_io.merscope` that adds some additional capabilities:
+    (i) loading data in full 3D (z, y, x) or applying a z-projection,
+    (ii) rasterizing cell boundaries,
+    (iii) adding a micron-based coordinate system, and
+    (iv) loading multiple samples into a single SpatialData object.
+
+    The micron coordinate system is added as {to_coordinate_system}_micron and is available to all spatial elements within the resulting SpatialData object.
 
     This function reads the following files:
 

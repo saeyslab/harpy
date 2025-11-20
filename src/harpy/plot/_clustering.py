@@ -32,8 +32,8 @@ def cluster(sdata: SpatialData, table_layer: str, key_added: str = "leiden", out
 
     See Also
     --------
-    harpy.tb.leiden
-    harpy.tb.kmeans
+    harpy.tb.leiden: leiden clustering
+    harpy.tb.kmeans: kmeans clustering
     """
     # Plot clusters on a UMAP
     sc.pl.umap(sdata.tables[table_layer], color=[key_added], show=not output)

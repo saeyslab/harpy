@@ -42,7 +42,7 @@ def transcript_density(
         Data containing spatial information.
     img_layer
         The layer of the SpatialData object used for determining image boundary.
-        Defaults to the last layer if set to None. `img_layer` and `points_layer` should be registered in coordinate system `to_coordinate_system`.
+        `img_layer` and `points_layer` should be registered in coordinate system `to_coordinate_system`.
     points_layer
         The layer name that contains the transcript data points, by default "transcripts".
     n_sample
@@ -65,6 +65,7 @@ def transcript_density(
         If provided, the density is computed only for this region, by default None.
     to_coordinate_system
         The coordinate system that holds `img_layer` and `points_layer`.
+        This coordinate system should be the intrinsic coordinate system in pixels.
     scale_factors
         Scale factors to apply for multiscale.
     output_layer
