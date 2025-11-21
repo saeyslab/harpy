@@ -369,7 +369,7 @@ def _parse_physical_size(pixels: Pixels | None = None) -> float:
         logger.error("Physical units for x and y dimensions are not the same.")
         raise NotImplementedError
     if pixels.physical_size_x != pixels.physical_size_y:
-        logger.error("Physical sizes for x and y dimensions are the same.")
+        logger.error("Physical sizes for x and y dimensions are not the same.")
         raise NotImplementedError
     # convert to micrometer if needed
     if pixels.physical_size_x_unit == UnitsLength.NANOMETER:
@@ -396,19 +396,19 @@ def _get_translations(imgs: list[BioImage]) -> NDArray:
         translation_x = 0
         if not hasattr(_img.ome_metadata, "images"):
             logger.info("No metadata found for position, assuming position is 0,0.")
-            translations.append(0, 0)
+            translations.append((0, 0))
             continue
         _images = _img.ome_metadata.images
         assert len(_images) == 1  # replace with ValueError
         if not hasattr(_images[0].pixels, "planes"):
             logger.info("No metadata found for position, assuming position is 0,0.")
-            translations.append(0, 0)
+            translations.append((0, 0))
             continue
         _planes = _images[0].pixels.planes
         assert len(_planes) == 1  # replace with ValueError
         if not hasattr(_planes[0], "position_y") or not hasattr(_planes[0], "position_x"):
             logger.info("No metadata found for position, assuming position is 0,0.")
-            translations.append(0, 0)
+            translations.append((0, 0))
             continue
         translation_y = _planes[0].position_y
         translation_x = _planes[0].position_x
