@@ -412,9 +412,9 @@ class Featurizer:
             log.info(f"Deleting intermediate zarr store {array_image_intermediate_store}")
             log.info(f"Deleting intermediate zarr store {array_mask_intermediate_store}")
             if Path(array_image_intermediate_store).suffix == ".zarr":
-                shutil.rmtree(array_mask_intermediate_store)
-            if Path(array_mask_intermediate_store).suffix == ".zarr":
                 shutil.rmtree(array_image_intermediate_store)
+            if Path(array_mask_intermediate_store).suffix == ".zarr":
+                shutil.rmtree(array_mask_intermediate_store)
 
         # Note that instance_ids are not sorted.
         # It is recommended not to do so (otherwise the dask_chunks array needs to be sorted, which is not optimal)
