@@ -24,7 +24,17 @@ from harpy.utils.utils import _make_list
 try:
     from bioio import BioImage
 except ImportError:
-    logger.warning("Module 'bioio' not installed, please install 'bioio' if you want to use 'harpy.io.macsima'.")
+    logger.warning("Module 'bioio' is not installed. Install it with `pip install bioio` to use `harpy.io.macsima`.")
+
+try:
+    import bioio_ome_tiff
+
+    _ = bioio_ome_tiff  # to silence precommit checks
+except ImportError:
+    logger.warning(
+        "Module 'bioio-ome-tiff' is not installed. "
+        "Install it with `pip install bioio-ome-tiff` to use `harpy.io.macsima`."
+    )
 
 
 @unique
@@ -110,6 +120,18 @@ def macsima(
     ...     image_models_kwargs={"chunks": (1, 3000, 3000)},
     ... )
     """
+    try:
+        import bioio
+
+        _ = bioio
+        import bioio_ome_tiff
+
+        _ = bioio_ome_tiff
+    except ImportError as e:
+        raise ImportError(
+            "To use 'harpy.io.macsima', the 'bioio' and 'bioio-ome-tiff' package is required. "
+            "Please install it with `pip install bioio bioio-ome-tiff`."
+        ) from e
     path = _make_list(path)
     sdata = SpatialData()
     for _path in path:
