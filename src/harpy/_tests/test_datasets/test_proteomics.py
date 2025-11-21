@@ -6,7 +6,7 @@ from spatialdata import SpatialData, get_pyramid_levels
 from spatialdata.transformations import Identity, Scale, get_transformation
 
 from harpy.datasets.proteomics import macsima_colorectal_carcinoma, macsima_example, macsima_tonsil, mibi_example
-from harpy.image import get_dataarray
+from harpy.image._image import get_dataarray
 
 
 @pytest.mark.skip(reason="This test downloads a full experiment to the OS cache.")

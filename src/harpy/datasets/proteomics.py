@@ -101,14 +101,6 @@ def macsima_colorectal_carcinoma(subset: bool = True, path: str | Path | None = 
     harpy.io.macsima : Reader for MACSima data.
     """
     registry = get_registry(path)
-    if not subset:
-        unzip_path = registry.fetch(
-            "proteomics/macsima/REAscreen_IO_CRC/REAscreen_IO_CRC_fixed.zip", processor=pooch.Unzip()
-        )
-        return macsima(
-            os.path.commonpath(unzip_path),
-            **kwargs,
-        )
     if subset:
         files = [
             "C-000_S-000_S_DAPI_R-02_W-A-1_ROI-01_A-DAPI.tif",
@@ -126,7 +118,7 @@ def macsima_colorectal_carcinoma(subset: bool = True, path: str | Path | None = 
             "proteomics/macsima/REAscreen_IO_CRC/REAscreen_IO_CRC_fixed.zip", processor=pooch.Unzip()
         )
         return macsima(
-            unzip_path,
+            os.path.commonpath(unzip_path),
             **kwargs,
         )
 
