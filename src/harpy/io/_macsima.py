@@ -47,7 +47,6 @@ def macsima(
     c_subset: list[str] = None,
     remove_bleached: bool = True,
     remove_dapi: bool = True,
-    chunks: int = None,  # chunks is currently ignored by spatialdata
     imread_kwargs: Mapping[str, Any] = MappingProxyType({}),
     image_models_kwargs: Mapping[str, Any] = MappingProxyType({}),
     output: str | Path | None = None,
@@ -86,7 +85,7 @@ def macsima(
         If set to `True` will remove all dapi channels for which cycle number>0.
     imread_kwargs
         Keyword arguments passed to :class:`bioio.BioImage`.
-    image_model_kwargs
+    image_models_kwargs
         Keyword arguments to pass to the image models.
         E.g. "chunks" or "scale_factors".
     output
@@ -103,12 +102,12 @@ def macsima(
     >>> sdata = macsima(
     ...     path="path/to/your/tiff/files", # creates one image layer
     ...     c_subset=["DAPI", "CD43"],
-    ...     image_model_kwargs={"chunks": (1, 3000, 3000)},
+    ...     image_models_kwargs={"chunks": (1, 3000, 3000)},
     ... )
     >>> sdata = macsima(
     ...     path=["path/to/your/tiff/files","another_path/to/your/tiff/files"], # creates two image layers
     ...     c_subset=["DAPI", "CD43"],
-    ...     image_model_kwargs={"chunks": (1, 3000, 3000)},
+    ...     image_models_kwargs={"chunks": (1, 3000, 3000)},
     ... )
     """
     path = _make_list(path)
@@ -119,7 +118,6 @@ def macsima(
             c_subset=c_subset,
             remove_bleached=remove_bleached,
             remove_dapi=remove_dapi,
-            chunks=chunks,
             imread_kwargs=imread_kwargs,
             image_models_kwargs=image_models_kwargs,
         )
@@ -137,7 +135,6 @@ def _macsima(
     c_subset: list[str] = None,
     remove_bleached: bool = True,
     remove_dapi: bool = True,
-    chunks: int = None,  # chunks is currently ignored by spatialdata
     imread_kwargs: Mapping[str, Any] = MappingProxyType({}),
     image_models_kwargs: Mapping[str, Any] = MappingProxyType({}),
 ) -> tuple[str, DataArray | DataTree]:
