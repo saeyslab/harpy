@@ -10,12 +10,12 @@ from typing import Any
 
 import dask.array as da
 import numpy as np
-import spatialdata as sd
 from numpy.typing import NDArray
 from ome_types.model import Pixels, UnitsLength
-from spatialdata import SpatialData
+from spatialdata import SpatialData, read_zarr
 from spatialdata._logging import logger
-from spatialdata.transformations import Identity
+from spatialdata.models import Image2DModel
+from spatialdata.transformations import Identity, Scale
 from spatialdata_io._constants._enum import ModeEnum
 from xarray import DataArray, DataTree
 
@@ -47,7 +47,6 @@ def macsima(
     c_subset: list[str] = None,
     remove_bleached: bool = True,
     remove_dapi: bool = True,
-    transformations: bool = False,
     chunks: int = None,  # chunks is currently ignored by spatialdata
     imread_kwargs: Mapping[str, Any] = MappingProxyType({}),
     image_models_kwargs: Mapping[str, Any] = MappingProxyType({}),
@@ -61,6 +60,11 @@ def macsima(
 
     The channel names will follow the following format:
     **cycle_scantype_channelname_roiid_reagent**
+
+    The pixel coordinate system is added as **global_roiid**, while the
+    micron coordinate system is added as **global_roiid_micron**. Both
+    coordinate systems are available to all spatial elements within the
+    resulting SpatialData object.
 
     .. seealso::
 
@@ -80,10 +84,8 @@ def macsima(
         If set to `True` will remove all channels of scantype `'B'` (=bleached).
     remove_dapi
         If set to `True` will remove all dapi channels for which cycle number>0.
-    transformations
-        Whether to add a transformation from pixels to microns to the image.
     imread_kwargs
-        Keyword arguments passed to :func:`bioio.BioImage`.
+        Keyword arguments passed to :class:`bioio.BioImage`.
     image_model_kwargs
         Keyword arguments to pass to the image models.
         E.g. "chunks" or "scale_factors".
@@ -110,14 +112,13 @@ def macsima(
     ... )
     """
     path = _make_list(path)
-    sdata = sd.SpatialData()
+    sdata = SpatialData()
     for _path in path:
         image_name, se = _macsima(
             _path,
             c_subset=c_subset,
             remove_bleached=remove_bleached,
             remove_dapi=remove_dapi,
-            transformations=transformations,
             chunks=chunks,
             imread_kwargs=imread_kwargs,
             image_models_kwargs=image_models_kwargs,
@@ -126,7 +127,7 @@ def macsima(
 
     if output is not None:
         sdata.write(output, overwrite=overwrite)
-        sdata = sd.read_zarr(sdata.path)
+        sdata = read_zarr(sdata.path)
 
     return sdata
 
@@ -136,13 +137,12 @@ def _macsima(
     c_subset: list[str] = None,
     remove_bleached: bool = True,
     remove_dapi: bool = True,
-    transformations: bool = False,
     chunks: int = None,  # chunks is currently ignored by spatialdata
     imread_kwargs: Mapping[str, Any] = MappingProxyType({}),
     image_models_kwargs: Mapping[str, Any] = MappingProxyType({}),
 ) -> tuple[str, DataArray | DataTree]:
     """See Docstring of macsima."""
-    # chunks not correctly passed to sd.models.Image2DModel.parse in case scale_factors is not None, so we rechunk ourself.
+    # chunks not correctly passed to Image2DModel.parse in case scale_factors is not None, so we rechunk ourself.
     if "chunks" in image_models_kwargs.keys():
         chunks = image_models_kwargs["chunks"]
     else:
@@ -192,7 +192,7 @@ def _macsima(
         if not metadata:
             raise ValueError(
                 "Resulting number of channels after removing DAPI channels (from cycle round i with i>0), is zero. "
-                "Consider setting the parameter 'remove_dapi' to 'True'."
+                "Consider setting the parameter 'remove_dapi' to 'False'."
             )
 
         # remove all dapi not collected in first cycle
@@ -227,7 +227,7 @@ def _macsima(
     # sanity check (physical size of all images should be the same for one ROI)
     for _img in imgs:
         if pixels_to_microns != _parse_physical_size(_img.ome_metadata.images[0].pixels):
-            raise ValueError("Physical units of all images in a ROI should be the same.")
+            raise ValueError("Physical units of all images in an ROI should be the same.")
     if imgs[0].dims.order != "TCZYX":
         raise ValueError("Dimension is expected to be 'TCZYX'.")
 
@@ -271,19 +271,13 @@ def _macsima(
     if chunks is not None:
         array = array.rechunk(chunks)
 
-    t_pixels_to_microns = (
-        sd.transformations.Scale([pixels_to_microns, pixels_to_microns], axes=("x", "y"))
-        if transformations
-        else Identity()
-    )
+    pixels_to_microns = Scale(axes=("x", "y"), scale=[pixels_to_microns, pixels_to_microns])
 
-    se = sd.models.Image2DModel.parse(
+    se = Image2DModel.parse(
         array,
         dims=["c", "y", "x"],
         c_coords=names,
-        transformations={
-            to_coordinate_system: t_pixels_to_microns,
-        },
+        transformations={to_coordinate_system: Identity(), f"{to_coordinate_system}_micron": pixels_to_microns},
         **image_models_kwargs,
     )
 

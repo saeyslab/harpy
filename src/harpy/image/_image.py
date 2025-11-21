@@ -137,13 +137,42 @@ def _unapply_transform(se: DataArray, x_coords: np.ndarray, y_coords: np.ndarray
     return se
 
 
+def get_dataarray(sdata: SpatialData, layer: str) -> DataArray:
+    """
+    Retrieve the highest-resolution :class:`xarray.DataArray` from a layer in ``sdata.images`` or ``sdata.labels``.
+
+    If ``sdata.images[layer]`` or ``sdata.labels[layer]`` is a
+    :class:`xarray.DataTree`, this function returns the highest-resolution
+    (base-scale) :class:`xarray.DataArray`, else it returns ``sdata.images[layer]`` or ``sdata.labels[layer]``.
+
+    Parameters
+    ----------
+    sdata : SpatialData
+        The SpatialData object containing image and/or labels layers.
+    layer : str
+        The name of the layer to retrieve.
+
+    Returns
+    -------
+    The resolved :class:`xarray.DataArray` corresponding to the requested layer.
+
+    Raises
+    ------
+    KeyError
+        If the layer does not exist in ``sdata.images`` or ``sdata.labels``.
+    ValueError
+        If the layer exists but is stored in an unsupported format.
+    """
+    return _get_spatial_element(sdata, layer=layer)
+
+
 def _get_spatial_element(sdata: SpatialData, layer: str) -> DataArray:
     if layer in sdata.images:
         si = sdata.images[layer]
     elif layer in sdata.labels:
         si = sdata.labels[layer]
     else:
-        raise KeyError(f"'{layer}' not found in sdata.images or sdata.labels")
+        raise KeyError(f"'{layer}' not found in 'sdata.images' or 'sdata.labels'")
     if isinstance(si, DataArray):
         return si
     elif isinstance(si, DataTree):

@@ -24,7 +24,7 @@ try:
     _ = spatialdata_plot  # prevent precommit to complain about unused imports
 except ImportError:
     log.warning(
-        "Module 'spatialdata-plot' not installed, please install 'spatialdata-plot' if you want to use 'hp.pl.plot_sdata'."
+        "Module 'spatialdata-plot' not installed, please install 'spatialdata-plot' if you want to use 'harpy.pl.plot_sdata' or 'harpy.pl.plot_sdata_genes'."
     )
 
 
@@ -204,10 +204,17 @@ def plot_sdata(
             if table_layer is not None
             else False,  # table do not need to be filtered if table layer is not specified
         )
-        if sdata_to_plot is None:
+        if img_layer not in sdata_to_plot.images:
             raise ValueError(
-                f"Bounding box query with coordinates {crd!r} (xmin, xmax, ymin, ymax) produced an empty SpatialData object. "
-                "Please try different crop parameters."
+                f"After applying the bounding-box query with coordinates {crd!r} "
+                f"(xmin, xmax, ymin, ymax), the image layer '{img_layer}' is no longer present "
+                "in the resulting SpatialData object. Please try different parameters for 'crd'."
+            )
+        if labels_layer is not None and labels_layer not in sdata_to_plot.labels:
+            raise ValueError(
+                f"After applying the bounding-box query with coordinates {crd!r} "
+                f"(xmin, xmax, ymin, ymax), the labels layer '{labels_layer}' is no longer present "
+                "in the resulting SpatialData object. Please try different parameters for 'crd'."
             )
 
     if labels_layer is None:
@@ -465,6 +472,18 @@ def plot_sdata_genes(
             max_coordinate=[crd[1], crd[3]],
             target_coordinate_system=to_coordinate_system,
         )
+        if points_layer not in sdata_to_plot.points:
+            raise ValueError(
+                f"After applying the bounding-box query with coordinates {crd!r} "
+                f"(xmin, xmax, ymin, ymax), the points layer '{points_layer}' is no longer present "
+                "in the resulting SpatialData object. Please try different parameters for 'crd'."
+            )
+        if img_layer is not None and img_layer not in sdata_to_plot.images:
+            raise ValueError(
+                f"After applying the bounding-box query with coordinates {crd!r} "
+                f"(xmin, xmax, ymin, ymax), the image layer '{img_layer}' is no longer present "
+                "in the resulting SpatialData object. Please try different parameters for 'crd'."
+            )
 
     if genes is not None:
         log.info(f"Plotting column {name_gene_column} of 'sdata.points[{points_layer}]' as categorical.")

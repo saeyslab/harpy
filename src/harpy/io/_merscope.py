@@ -66,7 +66,7 @@ def merscope(
     (iii) adding a micron-based coordinate system, and
     (iv) loading multiple samples into a single SpatialData object.
 
-    The micron coordinate system is added as {to_coordinate_system}_micron and is available to all spatial elements within the resulting SpatialData object.
+    The micron coordinate system is added as '{to_coordinate_system}_micron' and is available to all spatial elements within the resulting SpatialData object.
 
     This function reads the following files:
 
