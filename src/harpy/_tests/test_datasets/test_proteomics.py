@@ -3,6 +3,7 @@ import importlib
 import numpy as np
 import pytest
 from spatialdata import SpatialData, get_pyramid_levels
+from spatialdata.transformations import Identity, Scale, get_transformation
 
 from harpy.datasets.proteomics import macsima_colorectal_carcinoma, macsima_example, macsima_tonsil, mibi_example
 from harpy.image import get_dataarray
@@ -74,6 +75,15 @@ def test_macsima_colorectal_carcinoma(backed, remove_dapi, chunks, tmp_path):
     se = get_dataarray(sdata, layer="REAscreen_IO_CRC_1")
     assert len(se.c.data) == (4 if remove_dapi else 5)
     assert se.data.chunksize == chunks
+    # check transformations
+    transformations = get_transformation(sdata["REAscreen_IO_CRC_1"], get_all=True)
+    assert "global_1" in transformations.keys()
+    assert "global_1_micron" in transformations.keys()
+    assert transformations["global_1"] == Identity()
+    assert np.array_equal(
+        transformations["global_1_micron"].to_affine_matrix(input_axes=("y", "x"), output_axes=("y", "x")),
+        Scale(axes=("y", "x"), scale=[0.17, 0.17]).to_affine_matrix(input_axes=("y", "x"), output_axes=("y", "x")),
+    )
 
 
 @pytest.mark.skipif(
@@ -98,3 +108,12 @@ def test_macsima_colorectal_carcinoma_c_subset():
     se = get_dataarray(sdata, layer="REAscreen_IO_CRC_1")
     assert np.array_equal(np.array(["0_DAPI_1_DAPI", "4_CD15_1_CD15__VIMC6"], dtype="<U20"), se.c.data)
     assert se.data.chunksize == chunks
+    # check transformations
+    transformations = get_transformation(sdata["REAscreen_IO_CRC_1"], get_all=True)
+    assert "global_1" in transformations.keys()
+    assert "global_1_micron" in transformations.keys()
+    assert transformations["global_1"] == Identity()
+    assert np.array_equal(
+        transformations["global_1_micron"].to_affine_matrix(input_axes=("y", "x"), output_axes=("y", "x")),
+        Scale(axes=("y", "x"), scale=[0.17, 0.17]).to_affine_matrix(input_axes=("y", "x"), output_axes=("y", "x")),
+    )
