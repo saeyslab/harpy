@@ -59,6 +59,12 @@ def get_registry(path: str | Path | None = None) -> Pooch:
             "proteomics/codex/chl_maps_dataset/sdata_codex_zarr_with_annotations.zarr.zip": "d5e701bce2459a7abee440829634a1100d94440646958a9a78bb404509f7f07f",
             "proteomics/codex/chl_maps_dataset/marker_metadata.csv": "b6ad06e7407143c06529111f1e01d57b2bdda6cdaaa212fa93d83d71b7ef69f9",  # marker metadata of Kronos model (https://github.com/mahmoodlab/kronos)
             "proteomics/codex/chl_maps_dataset/marker_metadata_mapped.csv": "99d612ffaabac1feae08c1df510d921c144d57367fe44322389e070997fe6007",
+            "proteomics/macsima/REAscreen_IO_CRC/REAscreen_IO_CRC_fixed.zip": "65e6d5d722dbe27e75dce9bb375fdcba110599db4943ee3008f13b1a364bb691",
+            "proteomics/macsima/REAscreen_IO_CRC/C-000_S-000_S_DAPI_R-02_W-A-1_ROI-01_A-DAPI.tif": "21516f1075f5993e23c0f41769fca529d5b35f14963be81532ec5ecccf7a7271",
+            "proteomics/macsima/REAscreen_IO_CRC/C-034_S-000_S_DAPI_R-02_W-A-1_ROI-01_A-DAPI.tif": "96c6fb42638e52d066f23e05467fc9f91d2b6abe2e1aea333f4fbe6cb54fe2eb",
+            "proteomics/macsima/REAscreen_IO_CRC/C-002_S-000_S_FITC_R-02_W-A-1_ROI-01_A-CD8a_C-REA1024.tif": "d726a50eacc6b511d52f154e93b9a2c6af32031948b18b2bf4b9a3c3afd5e4e1",
+            "proteomics/macsima/REAscreen_IO_CRC/C-004_S-000_S_FITC_R-02_W-A-1_ROI-01_A-CD15_C-VIMC6.tif": "fba87cfec6c2761915001d8f6da0e0303c20a17a055d4e0aa3d40e90b26dfec9",
+            "proteomics/macsima/REAscreen_IO_CRC/C-004_S-000_S_PE_R-02_W-A-1_ROI-01_A-CD45_C-5B1.tif": "dc26434d0d6fc3693f88a39bfb5a3bdfd4d3ef24aa12e388222fc5c1cae2a764",
         },
     )
     return registry
@@ -114,7 +120,7 @@ def get_ome_registry(path: str | Path | None = None) -> Pooch:
     return registry
 
 
-def _calculate_sha256(file_path):
+def _calculate_sha256(file_path: str | Path):
     """Helper function to calculate the hash of a file."""
     sha256_hash = hashlib.sha256()
     with open(file_path, "rb") as f:

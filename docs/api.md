@@ -47,6 +47,7 @@ Operations on image and labels layers.
 
     im.add_image_layer
     im.add_labels_layer
+    im.get_dataarray
     im.map_image
     im.tiling_correction
     im.enhance_contrast
@@ -246,6 +247,8 @@ Dataset loaders.
     datasets.multisample_blobs
     datasets.pixie_example
     datasets.macsima_example
+    datasets.macsima_colorectal_carcinoma
+    datasets.macsima_tonsil
     datasets.mibi_example
     datasets.vectra_example
     datasets.resolve_example

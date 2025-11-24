@@ -1,7 +1,7 @@
 from ._combine import combine
 from ._contrast import enhance_contrast
 from ._filters import gaussian_filtering, min_max_filtering
-from ._image import add_image_layer, add_labels_layer
+from ._image import add_image_layer, add_labels_layer, get_dataarray
 from ._map import _precondition, map_image
 from ._normalize import normalize
 from ._rasterize import rasterize
@@ -35,6 +35,7 @@ __all__ = [
     "filter_labels_layer",
     "flowsom",
     "gaussian_filtering",
+    "get_dataarray",
     "map_image",
     "map_labels",
     "mask_to_original",

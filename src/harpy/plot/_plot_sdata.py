@@ -9,9 +9,10 @@ from typing import Any
 import pandas as pd
 from matplotlib.axes import Axes
 from spatialdata import SpatialData, bounding_box_query
+from spatialdata.models import TableModel
 
 from harpy.plot._utils import _get_distinct_colors
-from harpy.utils._keys import _GENES_KEY, _REGION_KEY
+from harpy.utils._keys import _GENES_KEY
 from harpy.utils.pylogger import get_pylogger
 from harpy.utils.utils import _make_list
 
@@ -24,7 +25,7 @@ try:
     _ = spatialdata_plot  # prevent precommit to complain about unused imports
 except ImportError:
     log.warning(
-        "Module 'spatialdata-plot' not installed, please install 'spatialdata-plot' if you want to use 'hp.pl.plot_sdata'."
+        "Module 'spatialdata-plot' not installed, please install 'spatialdata-plot' if you want to use 'harpy.pl.plot_sdata' or 'harpy.pl.plot_sdata_genes'."
     )
 
 
@@ -37,7 +38,6 @@ def plot_sdata(
     color: str | None = None,
     crd: tuple[int, int, int, int] | None = None,
     to_coordinate_system: str = "global",
-    region_key: str = _REGION_KEY,
     render_images_kwargs: Mapping[str, Any] = MappingProxyType({}),
     render_labels_kwargs: Mapping[str, Any] = MappingProxyType({}),
     show_kwargs: Mapping[str, Any] = MappingProxyType({}),
@@ -58,7 +58,7 @@ def plot_sdata(
         Labels layer to plot from `sdata.labels`.
     table_layer
         Table layer from `sdata.tables` used to color instances of the `labels_layer`.
-        If specified, the table layer should be annotated by `labels_layer` via `region_key`.
+        If specified, the table layer should be annotated by `labels_layer`.
         Ignored if `color` is `None`.
     color
         Column from `sdata[table_layer].obs` or name from `sdata[table_layer].var_names` to color the instances from `labels_layer`.
@@ -68,9 +68,6 @@ def plot_sdata(
         The coordinates for the region of interest in the format `(xmin, xmax, ymin, ymax)`, in the coordinate system `to_coordinate_system`.
     to_coordinate_system
         Coordinate system to plot.
-    region_key
-        Column in `sdata[table_layer].obs` that contains the labels layer that annotates the `table_layer`.
-        Ignored if `table_layer` or `labels_layer` is None.
     render_images_kwargs
         Keyword arguments passed to `.pl.render_images()`.
     render_labels_kwargs
@@ -87,6 +84,8 @@ def plot_sdata(
         If `table_layer` is not None and `labels_layer` is None.
     ValueError
         If `color` is not None and `table_layer` is None.
+    ValueError
+        If `coordinate_systems`in `show_kwargs`. Please pass coordinate system to plot via `to_coordinate_system`.
 
 
     Examples
@@ -126,7 +125,6 @@ def plot_sdata(
     ...     labels_layer="blobs_labels",
     ...     table_layer="table",
     ...     color="channel_1_sum",
-    ...     region_key="region",
     ...     render_images_kwargs=render_images_kwargs,
     ...     render_labels_kwargs=render_labels_kwargs,
     ...     show_kwargs=show_kwargs,
@@ -165,16 +163,17 @@ def plot_sdata(
     if color is not None and table_layer is None:
         raise ValueError(
             f"Please specify a 'table_layer' if 'color' is specified. "
-            f"Choose from {[*sdata.tables]}, and make sure the table layer is annotated by '{labels_layer}' via '{region_key}'."
+            f"Choose from {[*sdata.tables]}, and make sure the table layer is annotated by '{labels_layer}'."
         )
 
     if table_layer is not None:
-        adata = sdata[table_layer]
-        # sanity check TODO, get the region key straight from the table layer .table[ATTRS]
+        adata = sdata.tables[table_layer]
+        region_key = adata.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]
+        # sanity check
         mask = adata.obs[region_key] == labels_layer
         if not mask.any():
             raise ValueError(
-                f"The labels layer '{labels_layer}' does not seem to annotate the table layer '{table_layer}."
+                f"The labels layer '{labels_layer}' does not seem to annotate the table layer '{table_layer}'."
             )
 
     if "coordinate_systems" in show_kwargs.keys():
@@ -204,10 +203,17 @@ def plot_sdata(
             if table_layer is not None
             else False,  # table do not need to be filtered if table layer is not specified
         )
-        if sdata_to_plot is None:
+        if img_layer not in sdata_to_plot.images:
             raise ValueError(
-                f"Bounding box query with coordinates {crd!r} (xmin, xmax, ymin, ymax) produced an empty SpatialData object. "
-                "Please try different crop parameters."
+                f"After applying the bounding-box query with coordinates {crd!r} "
+                f"(xmin, xmax, ymin, ymax), the image layer '{img_layer}' is no longer present "
+                "in the resulting SpatialData object. Please try different parameters for 'crd'."
+            )
+        if labels_layer is not None and labels_layer not in sdata_to_plot.labels:
+            raise ValueError(
+                f"After applying the bounding-box query with coordinates {crd!r} "
+                f"(xmin, xmax, ymin, ymax), the labels layer '{labels_layer}' is no longer present "
+                "in the resulting SpatialData object. Please try different parameters for 'crd'."
             )
 
     if labels_layer is None:
@@ -465,6 +471,18 @@ def plot_sdata_genes(
             max_coordinate=[crd[1], crd[3]],
             target_coordinate_system=to_coordinate_system,
         )
+        if points_layer not in sdata_to_plot.points:
+            raise ValueError(
+                f"After applying the bounding-box query with coordinates {crd!r} "
+                f"(xmin, xmax, ymin, ymax), the points layer '{points_layer}' is no longer present "
+                "in the resulting SpatialData object. Please try different parameters for 'crd'."
+            )
+        if img_layer is not None and img_layer not in sdata_to_plot.images:
+            raise ValueError(
+                f"After applying the bounding-box query with coordinates {crd!r} "
+                f"(xmin, xmax, ymin, ymax), the image layer '{img_layer}' is no longer present "
+                "in the resulting SpatialData object. Please try different parameters for 'crd'."
+            )
 
     if genes is not None:
         log.info(f"Plotting column {name_gene_column} of 'sdata.points[{points_layer}]' as categorical.")

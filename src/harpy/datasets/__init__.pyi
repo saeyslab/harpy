@@ -1,6 +1,13 @@
 from .cluster_blobs import cluster_blobs, multisample_blobs
 from .pixie_example import pixie_example
-from .proteomics import codex_example, macsima_example, macsima_tonsil, mibi_example, vectra_example
+from .proteomics import (
+    codex_example,
+    macsima_colorectal_carcinoma,
+    macsima_example,
+    macsima_tonsil,
+    mibi_example,
+    vectra_example,
+)
 from .registry import get_ome_registry, get_registry, get_spatialdata_registry
 from .transcriptomics import (
     merscope_example,
@@ -19,6 +26,7 @@ __all__ = [
     "macsima_example",
     "macsima_tonsil",
     "codex_example",
+    "macsima_colorectal_carcinoma",
     "mibi_example",
     "vectra_example",
     "get_ome_registry",

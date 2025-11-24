@@ -12,6 +12,7 @@ from spatialdata.transformations import get_transformation
 
 from harpy.datasets.registry import get_ome_registry, get_registry, get_spatialdata_registry
 from harpy.image._image import add_image_layer
+from harpy.io._macsima import macsima
 
 
 def mibi_example() -> SpatialData:
@@ -68,6 +69,58 @@ def macsima_tonsil(filter_regex: str | None = "None|FITC|PE|APC") -> SpatialData
             sdata[image] = sdata[image].drop_isel(c=sdata[image].coords["c"].str.contains(filter_regex, regex=True))
 
     return sdata
+
+
+def macsima_colorectal_carcinoma(subset: bool = True, path: str | Path | None = None, **kwargs) -> SpatialData:
+    """
+    Load the Colorectal Carcinoma MACSima dataset as a :class:`spatialdata.SpatialData` object.
+
+    This function provides access to a highly multiplexed MACSima imaging dataset
+    of colorectal carcinoma tissue. By default, a standardized subset of the data
+    is returned for convenience and faster loading (5-plex), but the full dataset
+    (63-plex) can be loaded if desired (requires ~50 GB of storage).
+
+    Parameters
+    ----------
+    subset
+        Whether to load a pre-defined subset of the dataset (5-plex). Set to
+        ``False`` to load the full dataset (63-plex, ~50 GB).
+    path
+        If ``None``, the example data will be downloaded into the default cache
+        directory for your OS. Provide a custom path to change this behavior.
+    **kwargs
+        Additional keyword arguments passed to :func:`harpy.io.macsima`.
+
+    Returns
+    -------
+    A :class:`spatialdata.SpatialData` object containing the MACSima colorectal carcinoma
+    imaging data.
+
+    See Also
+    --------
+    harpy.io.macsima : Reader for MACSima data.
+    """
+    registry = get_registry(path)
+    if subset:
+        files = [
+            "C-000_S-000_S_DAPI_R-02_W-A-1_ROI-01_A-DAPI.tif",
+            "C-034_S-000_S_DAPI_R-02_W-A-1_ROI-01_A-DAPI.tif",
+            "C-002_S-000_S_FITC_R-02_W-A-1_ROI-01_A-CD8a_C-REA1024.tif",
+            "C-004_S-000_S_FITC_R-02_W-A-1_ROI-01_A-CD15_C-VIMC6.tif",
+            "C-004_S-000_S_PE_R-02_W-A-1_ROI-01_A-CD45_C-5B1.tif",
+        ]
+        for _file in files:
+            # fetch the files and file paths
+            image_path = registry.fetch(os.path.join("proteomics/macsima/REAscreen_IO_CRC", _file))
+        return macsima(os.path.dirname(image_path), **kwargs)
+    else:
+        unzip_path = registry.fetch(
+            "proteomics/macsima/REAscreen_IO_CRC/REAscreen_IO_CRC_fixed.zip", processor=pooch.Unzip()
+        )
+        return macsima(
+            os.path.commonpath(unzip_path),
+            **kwargs,
+        )
 
 
 def imc_example():
