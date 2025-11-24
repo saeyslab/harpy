@@ -11,7 +11,6 @@ from typing import Any
 import dask.array as da
 import numpy as np
 from numpy.typing import NDArray
-from ome_types.model import Pixels, UnitsLength
 from spatialdata import SpatialData, read_zarr
 from spatialdata._logging import logger
 from spatialdata.models import Image2DModel
@@ -34,6 +33,16 @@ except ImportError:
     logger.warning(
         "Module 'bioio-ome-tiff' is not installed. "
         "Install it with `pip install bioio-ome-tiff` to use `harpy.io.macsima`."
+    )
+
+try:
+    import ome_types  # will be installed after installing bioio-ome-tiff
+    from ome_types.model import Pixels, UnitsLength
+
+    _ = ome_types
+except ImportError:
+    logger.warning(
+        "Module 'ome-types' is not installed. Install it with `pip install ome-types` to use `harpy.io.macsima`."
     )
 
 
