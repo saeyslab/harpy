@@ -2,15 +2,17 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from pathlib import Path
+from types import MappingProxyType
+from typing import Any
 
 import dask.dataframe as dd
 import numpy as np
 import pandas as pd
 from spatialdata import SpatialData, read_zarr
 from spatialdata.models import TableModel
-from spatialdata.transformations import get_transformation, set_transformation
+from spatialdata.transformations import Scale, Sequence, get_transformation, set_transformation
 from spatialdata_io import xenium as sdata_xenium
 from spatialdata_io._constants._constants import XeniumKeys
 
@@ -27,21 +29,30 @@ def xenium(
     aligned_images: bool = True,
     cells_labels: bool = False,
     nucleus_labels: bool = False,
+    morphology_mip: bool = False,
+    morpholohy_focus: bool = True,
     cells_table: bool = False,
     filter_gene_names: str | list[str] = None,
+    imread_kwargs: Mapping[str, Any] = MappingProxyType({}),
+    image_models_kwargs: Mapping[str, Any] = MappingProxyType({}),
+    labels_models_kwargs: Mapping[str, Any] = MappingProxyType({}),
     output: str | Path | None = None,
 ) -> SpatialData:
     """
-    Read a *10X Genomics Xenium* dataset into a SpatialData object.
+    Read a *10X Genomics Xenium* dataset into a :class:`~spatialdata.SpatialData` object.
 
-    Wrapper around `spatialdata_io.xenium`, but with support for reading multiple samples into one spatialdata object.
+    Wrapper around :func:`spatialdata_io.xenium` that adds some additional capabilities:
+    (i) adding a micron-based coordinate system, and
+    (ii) loading multiple samples into a single SpatialData object.
+
     This function reads images, transcripts, masks (cell and nuclei) and tables, so it can be used for analysis.
+    The resulting :class:`~anndata.AnnData` table will be annotated by a labels layer.
+
+    The micron coordinate system is added as '{to_coordinate_system}_micron' and is available to all spatial elements within the resulting SpatialData object.
 
     This function reads the following files:
 
         - ``{xx.XENIUM_SPECS!r}``: File containing specifications.
-        - ``{xx.NUCLEUS_BOUNDARIES_FILE!r}``: Polygons of nucleus boundaries.
-        - ``{xx.CELL_BOUNDARIES_FILE!r}``: Polygons of cell boundaries.
         - ``{xx.TRANSCRIPTS_FILE!r}``: File containing transcripts.
         - ``{xx.CELL_FEATURE_MATRIX_FILE!r}``: File containing cell feature matrix.
         - ``{xx.CELL_METADATA_FILE!r}``: File containing cell metadata.
@@ -69,15 +80,25 @@ def xenium(
     nucleus_labels
         Whether to read nucleus labels (raster) provided by Xenium. The polygonal version of the nucleus labels are simplified
         for visualization purposes, and using the raster version is recommended for analysis.
+    morphology_mip
+        Whether to read the morphology mip image (available in versions < 2.0.0).
+    morphology_focus
+        Whether to read the morphology focus image.
     cells_table
         Whether to read the cell annotations in the `AnnData` table.
         Will be added to the `f"table_{to_coordinate_system}"` slot in `sdata.tables`, or  f"table_{to_coordinate_system[i]}" if `to_coordinate_system` is a list.
         If `True`, labels layer annotating the table will also be added to `sdata`.
     filter_gene_names
         Gene names that need to be filtered out (via `str.contains`), mostly control genes that were added, and which you don't want to use.
-        Filtering is case insensitive. Also see `harpy.read_transcripts`.
+        Filtering is case insensitive. Also see :func:`harpy.read_transcripts`.
+    imread_kwargs
+        Keyword arguments to pass to the image reader.
+    image_models_kwargs
+        Keyword arguments to pass to the image models.
+    labels_models_kwargs
+        Keyword arguments to pass to the labels models.
     output
-        The path where the resulting `SpatialData` object will be backed. If `None`, it will not be backed to a zarr store.
+        The path where the resulting :class:`~spatialdata.SpatialData` object object will be backed. If `None`, it will not be backed to a Zarr store.
 
     Raises
     ------
@@ -90,7 +111,7 @@ def xenium(
 
     Returns
     -------
-    A SpatialData object.
+    A :class:`~spatialdata.SpatialData` object object.
     """
 
     def _fix_name(item: str | Iterable[str]):
@@ -105,9 +126,7 @@ def xenium(
         "All elements specified via 'to_coordinate_system' should be unique."
     )
     if cells_table:
-        log.info(
-            "Setting 'cells_labels' to True, in order to being able to annotate the table with corresponding labels layer."
-        )
+        log.info("Setting 'cell_labels' to 'True' to allow annotation of the table with the associated labels layer.")
         cells_labels = True
 
     sdata = SpatialData()
@@ -123,38 +142,49 @@ def xenium(
             nucleus_boundaries=False,
             cells_labels=cells_labels,
             nucleus_labels=nucleus_labels,
-            morphology_focus=True,
-            morphology_mip=False,
+            morphology_mip=morphology_mip,
+            morphology_focus=morpholohy_focus,
             cells_as_circles=False,
-            transcripts=False,
+            transcripts=False,  # we have our own reader for transcripts
             cells_table=cells_table,
             aligned_images=aligned_images,
+            imread_kwargs=imread_kwargs,
+            image_models_kwargs=image_models_kwargs,
+            labels_models_kwargs=labels_models_kwargs,
         )
 
         layers = [*_sdata.images] + [*_sdata.labels]
 
+        with open(os.path.join(_path, XeniumKeys.XENIUM_SPECS)) as f:
+            specs = json.load(f)
+            pixel_size = specs["pixel_size"]
+
+        scale_pixels_to_micron = Scale(axes=("x", "y"), scale=[pixel_size, pixel_size])
+
         for _layer in layers:
-            # rename coordinate system "global" to _to_coordinate_system
-            transformation = {_to_coordinate_system: get_transformation(_sdata[_layer], to_coordinate_system="global")}
-            set_transformation(_sdata[_layer], transformation=transformation, set_all=True)
+            # rename coordinate system "global" to _to_coordinate_system, and add micron coordinate system
+            transformation = get_transformation(_sdata[_layer], to_coordinate_system="global")
+            transformations = {
+                _to_coordinate_system: transformation,
+                f"{_to_coordinate_system}_micron": Sequence([transformation, scale_pixels_to_micron]),
+            }
+            set_transformation(_sdata[_layer], transformation=transformations, set_all=True)
             _sdata[f"{_layer}_{_to_coordinate_system}"] = _sdata[_layer]
             del _sdata[_layer]
 
         if cells_table:
-            with open(os.path.join(_path, XeniumKeys.XENIUM_SPECS)) as f:
-                specs = json.load(f)
             adata = _sdata["table"]
             assert f"cell_labels_{_to_coordinate_system}" in [*_sdata.labels], (
                 "labels layer annotating the table is not found in SpatialData object."
             )
             # remove "cell_id" column in table, to avoid confusion with _INSTANCE_KEY.
-            if "cell_id" in adata.obs.columns:
-                adata.obs.drop(columns=["cell_id"], inplace=True)
+            if XeniumKeys.CELL_ID in adata.obs.columns:
+                adata.obs.drop(columns=[XeniumKeys.CELL_ID], inplace=True)
 
             adata.obs.rename(columns={"region": _REGION_KEY, "cell_labels": _INSTANCE_KEY}, inplace=True)
             adata.obs[_REGION_KEY] = pd.Categorical(adata.obs[_REGION_KEY].astype(str) + f"_{_to_coordinate_system}")
             adata.uns.pop(TableModel.ATTRS_KEY)
-            adata.obsm[_SPATIAL] = adata.obsm[_SPATIAL] * (1 / specs["pixel_size"])
+            adata.obsm[_SPATIAL] = adata.obsm[_SPATIAL] * (1 / pixel_size)
             adata = TableModel.parse(
                 adata,
                 region_key=_REGION_KEY,
@@ -186,8 +216,8 @@ def xenium(
         # Create a 3x3 identity matrix
         affine_matrix = np.eye(3)
 
-        affine_matrix[0, 0] = 1 / specs["pixel_size"]  # Scaling in x
-        affine_matrix[1, 1] = 1 / specs["pixel_size"]  # Scaling in y
+        affine_matrix[0, 0] = 1 / pixel_size  # Scaling in x
+        affine_matrix[1, 1] = 1 / pixel_size  # Scaling in y
 
         column_x_name = XeniumKeys.TRANSCRIPTS_X
         column_y_name = XeniumKeys.TRANSCRIPTS_Y
@@ -207,6 +237,7 @@ def xenium(
             column_z=None,
             column_gene=column_gene,
             to_coordinate_system=_to_coordinate_system,
+            to_micron_coordinate_system=f"{_to_coordinate_system}_micron",
             filter_gene_names=filter_gene_names,
             overwrite=False,
         )
