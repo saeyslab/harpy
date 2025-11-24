@@ -1,4 +1,5 @@
 import importlib
+import re
 
 import dask.array as da
 import matplotlib
@@ -48,7 +49,7 @@ def _prep_sdata(
     sdata[table_layer] = table
     sdata[table_layer].obs[obs_column] = sdata[table_layer].obs[obs_column].astype("category")
 
-    sdata[table_layer].uns[f"{obs_column}_colors"] = ["#800080", "#008000", "#FFFF00"]  # purple, green ,yellow
+    sdata[table_layer].uns[f"{obs_column}_colors"] = ["#800080", "#008000", "#FFFF00"]  # purple, green, yellow
     # placeholder, otherwise "category_colors" will be ignored by spatialdata
     sdata[table_layer].uns[obs_column] = "__value__"
     return sdata
@@ -68,7 +69,6 @@ def test_plot_sdata_image(sdata: SpatialData, tmp_path):
     vmax = da.percentile(se.data[c_id].flatten(), q=99).compute()  # clip to 99% percentile
     norm = Normalize(vmax=vmax, clip=True)
 
-    # https://matplotlib.org/stable/gallery/color/named_colors.html -> list of colors that can be passed to palette
     render_images_kwargs = {
         "cmap": "grey",
         "norm": norm,
@@ -226,8 +226,7 @@ def test_plot_sdata_label(sdata: SpatialData, tmp_path):
     fig, ax = plt.subplots()
 
     # now with a crop
-    # note that when cropping colormap changes. I.e. colors of similar cells before and after crop are not the same
-
+    # note that when cropping colormap changes. I.e. colors of similar cells before and after crop are not the same (if not colored by e.g. .obs)
     plot_sdata(
         sdata,
         channel=channel_name,
@@ -382,6 +381,100 @@ def test_plot_sdata_label_numerical(sdata: SpatialData, tmp_path):
     )
 
     fig.savefig(tmp_path / "image_label_numerical_crop.png", dpi=dpi)
+
+
+def test_plot_sdata_raises(
+    sdata: SpatialData,
+):
+    img_layer = "blobs_multiscale_image"
+    labels_layer = "blobs_labels"
+    table_layer = "table"
+    with pytest.raises(
+        ValueError,
+        match=re.escape(
+            f"Please specify a labels layer (which annotates the table layer '{table_layer}') if 'table_layer' is specified."
+        ),
+    ):
+        plot_sdata(
+            sdata,
+            img_layer=img_layer,
+            labels_layer=None,
+            table_layer=table_layer,
+            channel=0,
+        )
+    with pytest.raises(
+        ValueError,
+        match=re.escape("Please specify a 'table_layer' if 'color' is specified."),
+    ):
+        plot_sdata(
+            sdata,
+            img_layer=img_layer,
+            labels_layer=labels_layer,
+            color="channel_0_sum",
+            table_layer=None,
+            channel=0,
+        )
+    with pytest.raises(
+        ValueError,
+        match=re.escape("'coordinate_systems' found as key in 'show_kwargs'"),
+    ):
+        show_kwargs = {"coordinate_systems": "global"}
+        plot_sdata(
+            sdata,
+            img_layer=img_layer,
+            show_kwargs=show_kwargs,
+            channel=0,
+        )
+    with pytest.raises(ValueError, match="After applying the bounding-box query with coordinates"):
+        plot_sdata(
+            sdata,
+            img_layer=img_layer,
+            labels_layer=labels_layer,
+            channel=0,
+            crd=[2000, 3000, 2000, 3000],
+        )
+    render_labels_kwargs = {"table_name": labels_layer}
+    with pytest.raises(ValueError, match="Please specify 'table_name' via the keyword argument 'table_layer'"):
+        plot_sdata(
+            sdata,
+            img_layer=img_layer,
+            labels_layer=labels_layer,
+            render_labels_kwargs=render_labels_kwargs,
+            channel=0,
+        )
+    with pytest.raises(ValueError, match="Please specify a 'table_layer' if 'color' is specified"):
+        plot_sdata(
+            sdata,
+            img_layer=img_layer,
+            labels_layer=labels_layer,
+            color="channel_0_sum",
+            render_labels_kwargs=render_labels_kwargs,
+            channel=0,
+        )
+    render_labels_kwargs = {"color": "channel_0_sum"}
+    with pytest.raises(ValueError, match="Please specify 'color' via the keyword argument 'color'"):
+        plot_sdata(
+            sdata,
+            img_layer=img_layer,
+            labels_layer=labels_layer,
+            table_layer=table_layer,
+            render_labels_kwargs=render_labels_kwargs,
+            channel=0,
+        )
+    labels_layer = "blobs_multiscale_labels"
+    table_layer = "table"
+    with pytest.raises(
+        ValueError, match=f"The labels layer '{labels_layer}' does not seem to annotate the table layer '{table_layer}'"
+    ):
+        plot_sdata(
+            sdata,
+            img_layer=img_layer,
+            labels_layer=labels_layer,
+            color="channel_0_sum",
+            table_layer=table_layer,
+            render_labels_kwargs=render_labels_kwargs,
+            channel=0,
+        )
 
 
 @pytest.mark.skipif(not importlib.util.find_spec("spatialdata_plot"), reason="requires the spatialdata-plot library")
