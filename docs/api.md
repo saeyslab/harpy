@@ -247,6 +247,8 @@ Dataset loaders.
     datasets.multisample_blobs
     datasets.pixie_example
     datasets.macsima_example
+    datasets.macsima_colorectal_carcinoma
+    datasets.macsima_tonsil
     datasets.mibi_example
     datasets.vectra_example
     datasets.resolve_example
