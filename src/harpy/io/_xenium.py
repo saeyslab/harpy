@@ -125,7 +125,7 @@ def xenium(
     assert len(to_coordinate_system) == len(set(to_coordinate_system)), (
         "All elements specified via 'to_coordinate_system' should be unique."
     )
-    if cells_table:
+    if cells_table and not cells_labels:
         log.info("Setting 'cell_labels' to 'True' to allow annotation of the table with the associated labels layer.")
         cells_labels = True
 
