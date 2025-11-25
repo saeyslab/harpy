@@ -138,8 +138,8 @@ def xenium(
     for _path, _to_coordinate_system in zip(path, to_coordinate_system, strict=True):
         _sdata = sdata_xenium(
             path=_path,
-            cells_boundaries=False,
-            nucleus_boundaries=False,
+            cells_boundaries=True,
+            nucleus_boundaries=True,
             cells_labels=cells_labels,
             nucleus_labels=nucleus_labels,
             morphology_mip=morphology_mip,
@@ -153,7 +153,7 @@ def xenium(
             labels_models_kwargs=labels_models_kwargs,
         )
 
-        layers = [*_sdata.images] + [*_sdata.labels]
+        layers = [*_sdata.images] + [*_sdata.labels] + [*_sdata.shapes]
 
         with open(os.path.join(_path, XeniumKeys.XENIUM_SPECS)) as f:
             specs = json.load(f)
@@ -177,9 +177,9 @@ def xenium(
             assert f"cell_labels_{_to_coordinate_system}" in [*_sdata.labels], (
                 "labels layer annotating the table is not found in SpatialData object."
             )
-            # remove "cell_id" column in table, to avoid confusion with _INSTANCE_KEY.
+            # rename "cell_id" column in table, because anndata does not allow "cell_id" and "cell_ID" (=_INSTANCE_KEY).
             if XeniumKeys.CELL_ID in adata.obs.columns:
-                adata.obs.drop(columns=[XeniumKeys.CELL_ID], inplace=True)
+                adata.obs.rename(columns={XeniumKeys.CELL_ID: "cell_id_str"}, inplace=True)
 
             adata.obs.rename(columns={"region": _REGION_KEY, "cell_labels": _INSTANCE_KEY}, inplace=True)
             adata.obs[_REGION_KEY] = pd.Categorical(adata.obs[_REGION_KEY].astype(str) + f"_{_to_coordinate_system}")
