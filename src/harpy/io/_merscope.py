@@ -52,7 +52,7 @@ def merscope(
     image_models_kwargs: Mapping[str, Any] = MappingProxyType({}),
     filter_gene_names: str | list[str] = None,
     instance_key: str = _INSTANCE_KEY,
-    region_key: str = _REGION_KEY,  # this is REGION_KEY_KEY in spatialdata
+    region_key: str = _REGION_KEY,
     spatial_key: str = _SPATIAL,
     cell_index_name: str = _CELL_INDEX,
     output: str | Path | None = None,

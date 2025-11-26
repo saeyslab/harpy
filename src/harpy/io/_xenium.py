@@ -11,6 +11,7 @@ import dask.dataframe as dd
 import numpy as np
 import pandas as pd
 from spatialdata import SpatialData, read_zarr
+from spatialdata._logging import logger
 from spatialdata.models import TableModel
 from spatialdata.transformations import Scale, Sequence, get_transformation, set_transformation
 from spatialdata_io import xenium as sdata_xenium
@@ -27,15 +28,18 @@ def xenium(
     path: str | Path | list[str] | list[Path],
     to_coordinate_system: str | list[str] = "global",
     aligned_images: bool = True,
-    cells_labels: bool = False,
-    nucleus_labels: bool = False,
+    cells_labels: bool = True,
+    nucleus_labels: bool = True,
     morphology_mip: bool = False,
     morpholohy_focus: bool = True,
-    cells_table: bool = False,
+    cells_table: bool = True,
     filter_gene_names: str | list[str] = None,
     imread_kwargs: Mapping[str, Any] = MappingProxyType({}),
     image_models_kwargs: Mapping[str, Any] = MappingProxyType({}),
     labels_models_kwargs: Mapping[str, Any] = MappingProxyType({}),
+    instance_key: str = _INSTANCE_KEY,
+    region_key: str = _REGION_KEY,
+    spatial_key: str = _SPATIAL,
     output: str | Path | None = None,
 ) -> SpatialData:
     """
@@ -49,6 +53,9 @@ def xenium(
     The resulting :class:`~anndata.AnnData` table will be annotated by a labels layer.
 
     The micron coordinate system is added as '{to_coordinate_system}_micron' and is available to all spatial elements within the resulting SpatialData object.
+
+    Cell and nuclear boundaries provided by Xenium will not be loaded, as these polygonal versions of the cell and nucleus labels are approximations.
+    They can however be generated from the cell and nuclear labels using :func:`harpy.sh.vectorize`.
 
     This function reads the following files:
 
@@ -97,6 +104,15 @@ def xenium(
         Keyword arguments to pass to the image models.
     labels_models_kwargs
         Keyword arguments to pass to the labels models.
+    instance_key
+        Instance key. The name of the column in :class:`~anndata.AnnData` table `.obs` that will hold the instance ids.
+        Ignored if `table` is `False`.
+    region_key
+        Region key. The name of the column in  :class:`~anndata.AnnData` table `.obs` that will hold the name of the elements that annotate the table.
+        Ignored if `table` is `False`.
+    spatial_key
+        The key in the :class:`~anndata.AnnData` table `.obsm` that will hold the `x` and `y` center of the instances.
+        Ignored if `table` is `False`.
     output
         The path where the resulting :class:`~spatialdata.SpatialData` object object will be backed. If `None`, it will not be backed to a Zarr store.
 
@@ -138,8 +154,8 @@ def xenium(
     for _path, _to_coordinate_system in zip(path, to_coordinate_system, strict=True):
         _sdata = sdata_xenium(
             path=_path,
-            cells_boundaries=True,
-            nucleus_boundaries=True,
+            cells_boundaries=False,  # use harpy.sh.vectorize on the cell labels
+            nucleus_boundaries=False,  # use harpy.sh.vectorize on the nucleus labels
             cells_labels=cells_labels,
             nucleus_labels=nucleus_labels,
             morphology_mip=morphology_mip,
@@ -153,7 +169,7 @@ def xenium(
             labels_models_kwargs=labels_models_kwargs,
         )
 
-        layers = [*_sdata.images] + [*_sdata.labels] + [*_sdata.shapes]
+        layers = [*_sdata.images] + [*_sdata.labels]
 
         with open(os.path.join(_path, XeniumKeys.XENIUM_SPECS)) as f:
             specs = json.load(f)
@@ -177,19 +193,19 @@ def xenium(
             assert f"cell_labels_{_to_coordinate_system}" in [*_sdata.labels], (
                 "labels layer annotating the table is not found in SpatialData object."
             )
-            # rename "cell_id" column in table, because anndata does not allow "cell_id" and "cell_ID" (=_INSTANCE_KEY).
+            # set "cell_id" column in table as index, because anndata does not allow both "cell_id" and "cell_ID" (=_INSTANCE_KEY) as columns in obs.
             if XeniumKeys.CELL_ID in adata.obs.columns:
-                adata.obs.rename(columns={XeniumKeys.CELL_ID: "cell_id_str"}, inplace=True)
-
-            adata.obs.rename(columns={"region": _REGION_KEY, "cell_labels": _INSTANCE_KEY}, inplace=True)
-            adata.obs[_REGION_KEY] = pd.Categorical(adata.obs[_REGION_KEY].astype(str) + f"_{_to_coordinate_system}")
+                logger.info(f"Setting '{XeniumKeys.CELL_ID}' as table index.")
+                adata.obs.set_index(XeniumKeys.CELL_ID, inplace=True)
+            adata.obs.rename(columns={"region": region_key, "cell_labels": instance_key}, inplace=True)
+            adata.obs[region_key] = pd.Categorical(adata.obs[region_key].astype(str) + f"_{_to_coordinate_system}")
             adata.uns.pop(TableModel.ATTRS_KEY)
-            adata.obsm[_SPATIAL] = adata.obsm[_SPATIAL] * (1 / pixel_size)
+            adata.obsm[spatial_key] = adata.obsm[spatial_key] * (1 / pixel_size)
             adata = TableModel.parse(
                 adata,
-                region_key=_REGION_KEY,
-                region=adata.obs[_REGION_KEY].cat.categories.to_list(),
-                instance_key=_INSTANCE_KEY,
+                region_key=region_key,
+                region=adata.obs[region_key].cat.categories.to_list(),
+                instance_key=instance_key,
             )
 
             del _sdata["table"]

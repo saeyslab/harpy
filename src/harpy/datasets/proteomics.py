@@ -26,7 +26,7 @@ def mibi_example() -> SpatialData:
 
 
 def macsima_example() -> SpatialData:
-    """Example proteomics dataset"""
+    """Example proteomics dataset generated using the MACSima platform. The dataset is a small crop of a full MACSima run."""
     # Fetch and unzip the file
     registry = get_registry()
     unzip_path = registry.fetch("proteomics/macsima/sdata_multi_channel.zarr.zip", processor=pooch.Unzip())
@@ -55,10 +55,18 @@ def macsima_example() -> SpatialData:
     return sdata
 
 
-def macsima_tonsil(filter_regex: str | None = "None|FITC|PE|APC") -> SpatialData:
-    """Tonsil proteomics dataset"""
+def macsima_tonsil(filter_regex: str | None = "None|FITC|PE|APC", path: str | Path | None = None) -> SpatialData:
+    """
+    Tonsil proteomics dataset generated using the MACSima platform
+
+    Parameters
+    ----------
+    path
+        If ``None``, the example data will be downloaded into the default cache
+        directory for your OS. Provide a custom path to change this behavior.
+    """
     # Fetch and unzip the file
-    registry = get_registry()
+    registry = get_registry(path)
     unzip_path = registry.fetch("proteomics/macsima/tonsil_all.zarr.zip", processor=pooch.Unzip())
     sdata = read_zarr(os.path.commonpath(unzip_path))
     sdata.path = None
@@ -79,6 +87,9 @@ def macsima_colorectal_carcinoma(subset: bool = True, path: str | Path | None = 
     of colorectal carcinoma tissue. By default, a standardized subset of the data
     is returned for convenience and faster loading (5-plex), but the full dataset
     (63-plex) can be loaded if desired (requires ~50 GB of storage).
+
+    Data downloaded from (accessed 20/11/2025):
+    https://eur01.safelinks.protection.outlook.com/?url=https%3A%2F%2Fmiltenyibiotec.canto.de%2Fdirect%2Fother%2Fo1l6flt6e11bl87qbk04rf2m1g%2FtkD2iQTphD-7AfwFfttGdlvvLmw%2Foriginal%3Fcontent-type%3Dapplication%252Fzip%26name%3DREAscreen_IO_CRC.zip&data=05%7C02%7Cjulien.mortier%40vib.be%7C1a45432012054bce911908dd832ecb2f%7C2d714a65b97f41a98ff1ec2cdf7df5cd%7C0%7C0%7C638810959196608917%7CUnknown%7CTWFpbGZsb3d8eyJFbXB0eU1hcGkiOnRydWUsIlYiOiIwLjAuMDAwMCIsIlAiOiJXaW4zMiIsIkFOIjoiTWFpbCIsIldUIjoyfQ%3D%3D%7C0%7C%7C%7C&sdata=gNnFXb05qxfzDd0luMLpLHKoHNi27pgZ9VU8RpNiMJs%3D&reserved=0
 
     Parameters
     ----------
@@ -170,9 +181,17 @@ def vectra_example():
     return sdata
 
 
-def codex_example():
-    """Example annotated codex dataset (cHL maps dataset), Shaban, M. et al. Data for MAPS: Pathologist-level Cell Type Annotation from Tissue Images through Machine Learning. https://zenodo.org/records/10067010. (2023)."""
-    registry = get_registry()
+def codex_example(path: str | Path | None = None):
+    """
+    Example annotated codex dataset (cHL maps dataset), Shaban, M. et al. Data for MAPS: Pathologist-level Cell Type Annotation from Tissue Images through Machine Learning. https://zenodo.org/records/10067010. (2023).
+
+    Parameters
+    ----------
+    path
+        If ``None``, the example data will be downloaded into the default cache
+        directory for your OS. Provide a custom path to change this behavior.
+    """
+    registry = get_registry(path)
 
     unzip_path = registry.fetch(
         "proteomics/codex/chl_maps_dataset/sdata_codex_zarr_with_annotations.zarr.zip", processor=pooch.Unzip()
