@@ -8,6 +8,9 @@ from spatialdata.transformations import Identity, Scale, get_transformation
 from harpy.datasets.proteomics import macsima_colorectal_carcinoma, macsima_example, macsima_tonsil, mibi_example
 from harpy.image._image import get_dataarray
 
+# Do not forget to set the pooch cache dir when running these unit test on an hpc, e.g:
+# export HARPY_POOCH_CACHE=/data/groups/technologies/spatial.catalyst/Arne/pooch_cache
+
 
 @pytest.mark.skip(reason="This test downloads a full experiment to the OS cache.")
 def test_macsima_tonsil():

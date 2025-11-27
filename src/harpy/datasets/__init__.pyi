@@ -10,13 +10,14 @@ from .proteomics import (
 )
 from .registry import get_ome_registry, get_registry, get_spatialdata_registry
 from .transcriptomics import (
-    merscope_example,
-    merscope_segmentation_masks_example,
+    merscope_mouse_liver,
+    merscope_mouse_liver_segmentation_mask,
     resolve_example,
     resolve_example_multiple_coordinate_systems,
     visium_hd_example,
     visium_hd_example_custom_binning,
-    xenium_example,
+    xenium_human_lung_cancer,
+    xenium_human_ovarian_cancer,
 )
 
 __all__ = [
@@ -32,11 +33,12 @@ __all__ = [
     "get_ome_registry",
     "get_registry",
     "get_spatialdata_registry",
-    "merscope_example",
-    "merscope_segmentation_masks_example",
+    "merscope_mouse_liver",
+    "merscope_mouse_liver_segmentation_mask",
     "resolve_example",
     "resolve_example_multiple_coordinate_systems",
     "visium_hd_example",
     "visium_hd_example_custom_binning",
-    "xenium_example",
+    "xenium_human_lung_cancer",
+    "xenium_human_ovarian_cancer",
 ]

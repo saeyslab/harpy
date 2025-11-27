@@ -52,7 +52,7 @@ def merscope(
     image_models_kwargs: Mapping[str, Any] = MappingProxyType({}),
     filter_gene_names: str | list[str] = None,
     instance_key: str = _INSTANCE_KEY,
-    region_key: str = _REGION_KEY,  # this is REGION_KEY_KEY in spatialdata
+    region_key: str = _REGION_KEY,
     spatial_key: str = _SPATIAL,
     cell_index_name: str = _CELL_INDEX,
     output: str | Path | None = None,
@@ -110,10 +110,10 @@ def merscope(
         Gene names that need to be filtered out (via `str.contains`) from the resulting points layer (transcripts), mostly control genes that were added, and which you don't want to use.
         Filtering is case insensitive. Also see :func:`harpy.read_transcripts`. Ignored if `transcripts` is `False`.
     instance_key
-        Instance key. The name of the column in :class:`~anndata.AnnData` table `.obs` that holds the instance ids.
+        Instance key. The name of the column in :class:`~anndata.AnnData` table `.obs` that will hold the instance ids.
         Ignored if `table` is `False`.
     region_key
-        Region key. The name of the column in  :class:`~anndata.AnnData` table `.obs` that holds the name of the elements that annotate the table.
+        Region key. The name of the column in  :class:`~anndata.AnnData` table `.obs` that will hold the name of the elements that annotate the table.
         Ignored if `table` is `False`.
     spatial_key
         The key in the :class:`~anndata.AnnData` table `.obsm` that will hold the `x` and `y` center of the instances.
