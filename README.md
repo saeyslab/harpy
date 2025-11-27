@@ -20,8 +20,6 @@
 
 > 💫 **If you find Harpy useful, please give us a [⭐](https://github.com/saeyslab/harpy)!** It helps others discover the project and supports continued development.
 
-Note: This package is still under active development.
-
 ## Installation
 
 **Recommended** for end-users.
@@ -70,6 +68,7 @@ Explore how to use Harpy for segmentation, shallow and deep feature extraction, 
 - **🔬 Cell Segmentation**
 
   Explore segmentation workflows in `Harpy` using different tools:
+
   - With [**Instanseg**](https://github.com/instanseg/instanseg) 👉 [Tutorial](./docs/tutorials/general//Harpy_instanseg.ipynb)
 
   - With [**Cellpose**](https://github.com/MouseLand/cellpose) 👉 [Tutorial ](./docs/tutorials/general/Harpy_feature_calculation.ipynb)
@@ -96,7 +95,11 @@ Explore how to use Harpy for segmentation, shallow and deep feature extraction, 
 
 - **🧬 Spatial Transcriptomics**
 
-  Learn how to analyze spatial transcriptomics data with `Harpy`. For detailed information, refer to the [**SPArrOW documentation**](https://sparrow-pipeline.readthedocs.io/en/latest). 👉 [Tutorial](./docs/tutorials/advanced/Harpy_transcriptomics.ipynb)
+  Learn how to analyze spatial transcriptomics data with `Harpy`. For detailed information, refer to the [**SPArrOW documentation**](https://sparrow-pipeline.readthedocs.io/en/latest).
+
+  👉 [Tutorial (Mouse Liver, Resolve Molecular Cartography)](./docs/tutorials/advanced/Harpy_transcriptomics.ipynb)
+
+  👉 [Tutorial (Human Ovarian Cancer, Xenium 10x Genomics)](./docs/tutorials/advanced/Harpy_transcriptomics_xenium.ipynb)
 
 ---
 

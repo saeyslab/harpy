@@ -14,5 +14,6 @@ These tutorials are more advanced and require a deeper understanding of the Harp
     Rasterize_and_vectorize.ipynb
     Harpy_aggregate_rasters.ipynb
     Harpy_transcriptomics.ipynb
+    Harpy_transcriptomics_xenium.ipynb
     Understanding_Dask.ipynb
 ```

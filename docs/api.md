@@ -252,8 +252,9 @@ Dataset loaders.
     datasets.mibi_example
     datasets.vectra_example
     datasets.resolve_example
-    datasets.merscope_example
-    datasets.xenium_example
+    datasets.merscope_mouse_liver
+    datasets.xenium_human_lung_cancer
+    datasets.xenium_human_ovarian_cancer
     datasets.visium_hd_example
     datasets.get_registry
     datasets.get_spatialdata_registry
