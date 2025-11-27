@@ -74,7 +74,7 @@ def preprocess_transcriptomics(
     highly_variable_genes_kwargs
         Keyword arguments passed to `scanpy.pp.highly_variable_genes`. Ignored if `highly_variable_genes` is `False`.
     max_value_scale
-        The maximum value to which data will be scaled, using `scanpy.pp.scale`.
+        The maximum value to which data will be scaled, when scaling the data to have zero mean and a variance of one, using `scanpy.pp.scale`.
     n_comps
         Number of principal components to calculate.
     update_shapes_layers

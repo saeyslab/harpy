@@ -297,7 +297,7 @@ def plot_sdata_genes(
     sdata
         SpatialData object.
     points_layer
-        Points layer to plot from ``sdata.points``. The associated table is expected
+        Points layer to plot from ``sdata.points``. The associated :class:`~dask.dataframe.DataFrame` is expected
         to contain gene information in ``name_gene_column``.
     img_layer
         Optional image layer to plot from ``sdata.images`` as background.

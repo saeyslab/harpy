@@ -48,6 +48,7 @@ def analyse_genes_left_out(
         The layer in `sdata` containing transcript information.
     to_coordinate_system
         The coordinate system that holds `labels_layer` and `points_layer`.
+        This should be the intrinsic coordinate system in pixels.
     name_x
         The column name representing the x-coordinate in `points_layer`.
     name_y
