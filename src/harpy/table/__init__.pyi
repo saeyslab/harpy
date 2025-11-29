@@ -5,8 +5,9 @@ from ._cluster_intensity import cluster_intensity
 from ._clustering import kmeans, leiden
 from ._enrichment import nhood_enrichment
 from ._preprocess import preprocess_proteomics, preprocess_transcriptomics
+from ._region_annotations import assign_cells_to_shapes, compute_distance_to_shapes
 from ._regionprops import add_regionprop_features
-from ._table import add_table_layer, correct_marker_genes, filter_on_size
+from ._table import add_table_layer, correct_marker_genes, filter_categorical, filter_numerical, filter_on_size
 from .cell_clustering._clustering import flowsom
 from .cell_clustering._preprocess import cell_clustering_preprocess
 from .cell_clustering._weighted_channel_expression import weighted_channel_expression
@@ -20,6 +21,8 @@ __all__ = [
     "extract_instances",
     "featurize",
     "filter_on_size",
+    "filter_numerical",
+    "filter_categorical",
     "flowsom",
     "weighted_channel_expression",
     "cell_clustering_preprocess",
@@ -38,4 +41,6 @@ __all__ = [
     "allocate",
     "bin_counts",
     "allocate_intensity",
+    "assign_cells_to_shapes",
+    "compute_distance_to_shapes",
 ]
