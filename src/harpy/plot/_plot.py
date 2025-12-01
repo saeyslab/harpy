@@ -15,11 +15,11 @@ from matplotlib.axes import Axes
 from scipy.sparse import issparse
 from shapely.affinity import translate
 from spatialdata import SpatialData
+from spatialdata.models import TableModel
 from spatialdata.transformations import get_transformation
 
 from harpy.image._image import _apply_transform, _get_boundary, _get_spatial_element, _unapply_transform
 from harpy.shape import intersect_rectangles
-from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY
 from harpy.utils._transformations import _get_translation_values
 from harpy.utils.pylogger import get_pylogger
 
@@ -203,14 +203,15 @@ def plot_shapes(
     shapes_layer
         Specifies which shapes to plot. Default is 'segmentation_mask_boundaries'. If set to None, no shapes_layer is plot.
         Can be colored by `column` in `sdata.tables[table_layer].obs` or `sdata.tables[table_layer].var`.
-        For this the index of the `shapes_layer` will be matched with `sdata.tables[table_layer].obs[_INSTANCE_KEY]` for those observations for which
-        `sdata.tables[table_layer].obs[_REGION_KEY]` equals `region` (if `region` is not `None`).
+        For this the index of the `shapes_layer` will be matched with `sdata.tables[table_layer].obs[instance_key]` for those observations for which
+        `sdata.tables[table_layer].obs[region_key]` equals `region` (if `region` is not `None`).
+        `instance_key` and `region_key` are read from `sdata.tables[table_layer].uns[TableModel.ATTRS_KEY]`.
     table_layer
         Table layer to be plotted (i.e. to base cell colors on) if `column` is specified.
     column
         Column in `sdata.tables[table_layer].obs` or name in `sdata.tables[table_layer].var.index` to base cell colors on. If none provided, default color is used.
     region
-        If `table_layer` and `column` is specified, this specifies the region in `sdata.tables[table_layer]` to be plotted (via `sdata.tables[table_layer].obs[_REGION_KEY]`).
+        If `table_layer` and `column` is specified, this specifies the region in `sdata.tables[table_layer]` to be plotted (via `sdata.tables[table_layer].obs[region_key]`).
     cmap
         Colormap for column. Ignored if column is None, or if column + "_colors" is in `sdata.tables[table_layer].uns`.
     linewidth
@@ -275,9 +276,9 @@ def plot_shapes(
     ValueError
         If `table_layer` is specified, but `table_layer` is not a table in `sdata.tables`.
     ValueError
-        If `sdata.tables[table_layer].obs[_REGION_KEY].cat.categories` contains more than on element, but `region` is not specified.
+        If the `table_layer` annotates more than one element, but `region` is not specified.
     ValueError
-        If both `table_layer`, `column` and `region` are specified, but `region` is not in `sdata.tables[table_layer].obs[_REGION_KEY].cat.categories`.
+        If both `table_layer`, `column` and `region` are specified, but `region` is not annotated by the table.
 
     Notes
     -----
@@ -464,14 +465,15 @@ def plot(
     shapes_layer
         Specifies which shapes to plot. Default is 'segmentation_mask_boundaries'. If set to None, no shapes_layer is plot.
         Can be colored by `column` in `sdata.tables[table_layer].obs` or `sdata.tables[table_layer].var`.
-        For this the index of the `shapes_layer` will be matched with `sdata.tables[table_layer].obs[_INSTANCE_KEY]` for those observations for which
-        `sdata.tables[table_layer].obs[_REGION_KEY]` equals `region` (if `region` is not `None`).
+        For this the index of the `shapes_layer` will be matched with `sdata.tables[table_layer].obs[instance_key]` for those observations for which
+        `sdata.tables[table_layer].obs[region_key]` equals `region` (if `region` is not `None`).
+        `instance_key` and `region_key` are read from `sdata.tables[table_layer].uns[TableModel.ATTRS_KEY]`.
     table_layer
         Table layer to be plotted (i.e. to base cell colors on) if `column` is specified.
     column
         Column in `sdata.tables[table_layer].obs` or name in `sdata.tables[table_layer].var.index` to base cell colors on. If none provided, default color is used for plotting shapes.
     region
-        If `table_layer` and `column` is specified, this specifies the region in `sdata.tables[table_layer]` to be plotted (via `sdata.tables[table_layer].obs[_REGION_KEY]`).
+        If `table_layer` and `column` is specified, this specifies the region in `sdata.tables[table_layer]` to be plotted.
     cmap
         Colormap for column. Ignored if column is None, or if column + "_colors" is in `sdata.tables[table_layer].uns`.
     linewidth
@@ -518,7 +520,7 @@ def plot(
 
     Returns
     -------
-    The Axes object.
+    The :class:`matplotlib.axes.Axes` object.
 
     Raises
     ------
@@ -533,9 +535,9 @@ def plot(
     ValueError
         If `table_layer` is specified, but `table_layer` is not a table in `sdata.tables`.
     ValueError
-        If `sdata.tables[table_layer].obs[_REGION_KEY].cat.categories` contains more than on element, but `region` is not specified.
+        If `table_layer` annotates more than on element, but `region` is not specified.
     ValueError
-        If both `table_layer`, `column` and `region` are specified, but `region` is not in `sdata.tables[table_layer].obs[_REGION_KEY].cat.categories`.
+        If both `table_layer`, `column` and `region` are specified, but `region` is not annotated by the `table_layer`.
 
     Notes
     -----
@@ -642,36 +644,38 @@ def plot(
     if polygons is not None and column is not None:
         if not polygons.empty:
             adata_view = sdata.tables[table_layer]
+            region_key = adata_view.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]
+            regions_in_table = adata_view.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY]
+            instance_key = adata_view.uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY]
             # do some checks on adata regarding the region.
-            regions_in_table = adata_view.obs[_REGION_KEY].cat.categories.to_list()
             if len(regions_in_table) > 1:
                 if region is None:
                     raise ValueError(
-                        f"'sdata.tables[{table_layer}]' contains more than one region in 'sdata.tables[{table_layer}].obs[ {_REGION_KEY} ]', please specify 'region'. Choose from the list '{regions_in_table}'."
+                        f"'sdata.tables[{table_layer}]' contains more than one region in 'sdata.tables[{table_layer}].obs[ {region_key} ]', please specify 'region'. Choose from the list '{regions_in_table}'."
                     )
             if region is not None:
                 if region not in regions_in_table:
                     raise ValueError(
-                        f"Provided 'region' ({region}) is not one of the regions in 'sdata.tables[{table_layer}].obs[ {_REGION_KEY} ]'. Please choose a region from the list '({regions_in_table})'."
+                        f"Provided 'region' ({region}) is not one of the regions in 'sdata.tables[{table_layer}].obs[ {region_key} ]'. Please choose a region from the list '({regions_in_table})'."
                     )
                 else:
-                    adata_view = adata_view[adata_view.obs[_REGION_KEY] == region]
+                    adata_view = adata_view[adata_view.obs[region_key] == region]
 
-            mask = adata_view.obs[_INSTANCE_KEY].isin(set(polygons.index.astype(int)))
+            mask = adata_view.obs[instance_key].isin(set(polygons.index.astype(int)))
             adata_view = adata_view[mask]
-            # sort both adata and polygons on _INSTANCE_KEY
-            sorted_index = adata_view.obs[_INSTANCE_KEY].sort_values().index
+            # sort both adata and polygons on instance_key
+            sorted_index = adata_view.obs[instance_key].sort_values().index
             adata_view = adata_view[sorted_index]
 
-            # sort polygons (their index corresponds to the _INSTANCE_KEY):
+            # sort polygons (their index corresponds to the instance_key):
             polygons.index = polygons.index.astype(int)
             polygons = polygons.sort_index()
 
             # could be that polygons contains more elements than adata_view. So we also filter in that direction, but with raising a warning
-            mask_polygons = polygons.index.isin(adata_view.obs[_INSTANCE_KEY])
+            mask_polygons = polygons.index.isin(adata_view.obs[instance_key])
             if (~mask_polygons).any():
                 log.warning(
-                    f"There are '{sum(~mask_polygons)}' cells in provided shapes_layer '{shapes_layer}' not found in 'sdata.tables[{table_layer}]' (linked through '{_INSTANCE_KEY}'), these cells will not be plotted."
+                    f"There are '{sum(~mask_polygons)}' cells in provided shapes_layer '{shapes_layer}' not found in 'sdata.tables[{table_layer}]' (linked through '{instance_key}'), these cells will not be plotted."
                 )
                 polygons = polygons[mask_polygons]
 
@@ -701,13 +705,13 @@ def plot(
             if column is not None or cmap is not None:
                 # sanity checks
                 assert adata_view.shape[0] == polygons.shape[0], (
-                    f"The number of observations in 'sdata.tables[{table_layer}]' (for which 'sdata.tables[{table_layer}].obs[ {_REGION_KEY} ] == {region}') "
+                    f"The number of observations in 'sdata.tables[{table_layer}]' (for which 'sdata.tables[{table_layer}].obs[ {region_key} ] == {region}') "
                     f"is different than number of observation in 'sdata.shapes[{shapes_layer}]'."
                 )
 
-                assert np.array_equal(adata_view.obs[_INSTANCE_KEY].values, polygons.index.values), (
-                    f"'{_INSTANCE_KEY}'s of shapes layer 'sdata.shapes[{shapes_layer}]' are not the same as "
-                    f"the '{_INSTANCE_KEY}'s in 'sdata.tables[{table_layer}].obs' (for which 'sdata.tables[{table_layer}].obs[ {_REGION_KEY} ] == {region}')."
+                assert np.array_equal(adata_view.obs[instance_key].values, polygons.index.values), (
+                    f"'{instance_key}'s of shapes layer 'sdata.shapes[{shapes_layer}]' are not the same as "
+                    f"the '{instance_key}'s in 'sdata.tables[{table_layer}].obs' (for which 'sdata.tables[{table_layer}].obs[ {region_key} ] == {region}')."
                 )
 
         else:

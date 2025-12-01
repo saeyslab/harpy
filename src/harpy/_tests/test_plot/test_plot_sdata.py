@@ -392,7 +392,7 @@ def test_plot_sdata_raises(
     with pytest.raises(
         ValueError,
         match=re.escape(
-            f"Please specify a labels layer (which annotates the table layer '{table_layer}') if 'table_layer' is specified."
+            f"Please specify a labels layer (which is annotated by the table layer '{table_layer}') if 'table_layer' is specified."
         ),
     ):
         plot_sdata(
@@ -464,7 +464,8 @@ def test_plot_sdata_raises(
     labels_layer = "blobs_multiscale_labels"
     table_layer = "table"
     with pytest.raises(
-        ValueError, match=f"The labels layer '{labels_layer}' does not seem to annotate the table layer '{table_layer}'"
+        ValueError,
+        match=f"The labels layer '{labels_layer}' does not seem to be annotated by the table layer '{table_layer}'",
     ):
         plot_sdata(
             sdata,

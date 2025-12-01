@@ -6,7 +6,7 @@ from spatialdata.models import TableModel
 
 from harpy.table._table import ProcessTable, add_table_layer
 from harpy.table.cell_clustering._utils import _get_mapping
-from harpy.utils._keys import _CELLSIZE_KEY, _INSTANCE_KEY, _RAW_COUNTS_KEY, ClusteringKey
+from harpy.utils._keys import _CELLSIZE_KEY, _RAW_COUNTS_KEY, ClusteringKey
 from harpy.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
@@ -18,6 +18,8 @@ def weighted_channel_expression(
     table_layer_pixel_cluster_intensity: str,
     output_layer: str,
     clustering_key: ClusteringKey = ClusteringKey._METACLUSTERING_KEY,
+    instance_size_key: str = _CELLSIZE_KEY,
+    raw_counts_key: str = _RAW_COUNTS_KEY,
     overwrite: bool = False,
     # specify whether the metaclustering or SOM clustering labels layer of pixel clustering results was used as input for harpy.tb.flowsom, i.e. key that was used for pixel clustering
 ) -> SpatialData:
@@ -38,7 +40,7 @@ def weighted_channel_expression(
         The input SpatialData object containing the necessary data tables.
     table_layer_cell_clustering
         The name of the table layer in `sdata` where FlowSOM cell clustering results are stored (obtained via 'harpy.tb.flowsom').
-        This layer should contain the cell cluster labels derived from the FlowSOM clustering algorithm and the non-normalized pixel cluster counts in `.layers[ _RAW_COUNTS_KEY ]`, as obtained after running `harpy.tb.flowsom`.
+        This layer should contain the cell cluster labels derived from the FlowSOM clustering algorithm and the non-normalized pixel cluster counts in `.layers[raw_counts_key]`, as obtained after running `harpy.tb.flowsom`.
     table_layer_pixel_cluster_intensity
         The name of the table layer in `sdata` containing pixel cluster intensity values as obtained by running `harpy.tb.cluster_intensity`.
         These intensities are used to calculate the weighted expression of each channel for the cell clusters.
@@ -46,6 +48,10 @@ def weighted_channel_expression(
         The name of the output table layer in `sdata` where the results of the weighted channel expression computation will be stored.
     clustering_key
         Specifies the key that was used for pixel clustering, indicating whether metaclustering or SOM clustering labels were used as input for flowsom cell clustering (`harpy.tb.flowsom`).
+    instance_size_key
+        The key in the `.obs` attribute of the :class:`~anndata.AnnData` table at slot 'table_layer_cell_clustering' that holds the size of the instances.
+    raw_counts_key
+        The name of the :class:`~anndata.AnnData` layer, at slot 'table_layer_cell_clustering' of `sdata`, where the non-preprocessed counts are stored, see :func:`~harpy.tb.flowsom`.
     overwrite
         If True, overwrites any existing data in the `output_layer` if it already exists.
 
@@ -55,13 +61,14 @@ def weighted_channel_expression(
 
     See Also
     --------
+    harpy.tb.cell_clustering_preprocess : prepares data for cell clustering.
     harpy.tb.flowsom : flowsom cell clustering
     harpy.tb.cluster_intensity : calculates average intensity SOM/meta cluster (pixel clusters).
     """
     # subset over all _labels_layer in 'table_layer_cell_clustering'
-    _labels_layer = [
-        *sdata[table_layer_cell_clustering].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY]
-    ]  # TODO, check for case where only one region
+    _labels_layer = sdata[table_layer_cell_clustering].uns[TableModel.ATTRS_KEY][
+        TableModel.REGION_KEY
+    ]  # this is always a list
     process_table_clustering = ProcessTable(
         sdata, labels_layer=_labels_layer, table_layer=table_layer_cell_clustering
     )  # get all of the labels layers, to keep API not too complex, do not allow subsetting labels layers
@@ -78,7 +85,7 @@ def weighted_channel_expression(
     index_columns = adata_cell_clustering.to_df().columns.astype(int)
     index_columns.name = None
 
-    cell_counts_matrix = adata_cell_clustering.layers[_RAW_COUNTS_KEY]
+    cell_counts_matrix = adata_cell_clustering.layers[raw_counts_key]
 
     process_table_intensity = ProcessTable(sdata, labels_layer=None, table_layer=table_layer_pixel_cluster_intensity)
     adata_cluster_intensity = process_table_intensity._get_adata()
@@ -89,7 +96,7 @@ def weighted_channel_expression(
         df_intensity.index = df_intensity.index.astype(int)
     elif clustering_key.value == ClusteringKey._CLUSTERING_KEY.value:
         df_intensity = adata_cluster_intensity.to_df().copy()
-        df_intensity[clustering_key.value] = adata_cluster_intensity.obs[_INSTANCE_KEY]
+        df_intensity[clustering_key.value] = adata_cluster_intensity.obs[process_table_intensity.instance_key]
         df_intensity.set_index(clustering_key.value, inplace=True)
     else:
         raise ValueError(
@@ -103,9 +110,9 @@ def weighted_channel_expression(
     assert_index_equal(df_intensity.index.sort_values(), index_columns.sort_values())
     df_intensity = df_intensity.reindex(index_columns)
 
-    data = np.matmul(cell_counts_matrix, df_intensity.values) / adata_cell_clustering.obs[_CELLSIZE_KEY].values.reshape(
-        -1, 1
-    )
+    data = np.matmul(cell_counts_matrix, df_intensity.values) / adata_cell_clustering.obs[
+        instance_size_key
+    ].values.reshape(-1, 1)
     df = pd.DataFrame(data)
     df.columns = adata_cluster_intensity.var_names
     df.index = adata_cell_clustering.obs_names
@@ -136,6 +143,8 @@ def weighted_channel_expression(
         adata=adata_cell_clustering,
         output_layer=output_layer,
         region=process_table_clustering.labels_layer,
+        instance_key=process_table_clustering.instance_key,
+        region_key=process_table_clustering.region_key,
         overwrite=overwrite,
     )
 

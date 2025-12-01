@@ -9,12 +9,14 @@ from spatialdata.transformations import get_transformation
 
 from harpy.image._image import _get_spatial_element
 from harpy.shape._manager import ShapesLayerManager
+from harpy.utils._keys import _INSTANCE_KEY
 
 
 def vectorize(
     sdata,
     labels_layer: str,
     output_layer: str,
+    instance_key: str = _INSTANCE_KEY,
     overwrite: bool = False,
 ) -> SpatialData:
     """
@@ -22,7 +24,7 @@ def vectorize(
 
     Convert a labels layer to a shapes layer with name `output_layer`.
     If the `rasterio` library is installed will use implementation based on `rasterio`, else will use implementation based on `skimage`.
-    We recommend installing `rasterio` for increased perforamnce and more precise vectorization.
+    We recommend installing `rasterio` for increased performance and more precise vectorization.
 
     For optimal performance it is recommended to configure `Dask` so it uses "processes" instead of "threads", e.g. via:
 
@@ -37,6 +39,9 @@ def vectorize(
         The labels layer to vectorize.
     output_layer
         The name of the output layer where the shapes data will be stored.
+    instance_key
+        Name of the resulting index of the GeoDataFrame.
+        The user can set this to any value, it will only be used to name the index.
     overwrite
         If True, overwrites the output layer if it already exists in `sdata`.
 
@@ -50,6 +55,7 @@ def vectorize(
         input=se.data,
         output_layer=output_layer,
         transformations=get_transformation(sdata[labels_layer], get_all=True),
+        instance_key=instance_key,
         overwrite=overwrite,
     )
     return sdata
@@ -60,6 +66,7 @@ def add_shapes_layer(
     input: Array | GeoDataFrame,
     output_layer: str,
     transformations: MappingToCoordinateSystem_t = None,
+    instance_key: str = _INSTANCE_KEY,
     overwrite: bool = False,
 ) -> SpatialData:
     """
@@ -79,6 +86,9 @@ def add_shapes_layer(
         The name of the output layer where the shapes data will be stored.
     transformations
         Transformations that will be added to the resulting `output_layer`.
+    instance_key
+        Name of the resulting index of the GeoDataFrame.
+        The user can set this to any value, it will only be used to name the index.
     overwrite
         If True, overwrites the output layer if it already exists in `sdata`.
 
@@ -92,6 +102,7 @@ def add_shapes_layer(
         input=input,
         output_layer=output_layer,
         transformations=transformations,
+        instance_key=instance_key,
         overwrite=overwrite,
     )
 
@@ -107,7 +118,7 @@ def filter_shapes_layer(
     """
     Filter shapes in a SpatialData object.
 
-    Cells that do not appear in `table_layer` (with `_REGION_KEY` equal to `labels_layer`) will be removed from the shapes layers, via the `_INSTANCE_KEY` of `sdata.tables[table_layer].obs`) and the index of the shapes layers in the `sdata` object.
+    Instances that do not appear in `table_layer` (with region key equal to `labels_layer`) will be removed from the shapes layers, via the instance key of `sdata.tables[table_layer].obs`) and the index of the shapes layers in the `sdata` object.
     Only shapes layers of `sdata` in same coordinate system as the `labels_layer` will be considered.
     Polygons that are filtered out from a shapes layer (e.g. with name "shapes_example") will be added as a new shapes layer with name `prefix_filtered_shapes_layer` + "_" + "shapes_example".
 

@@ -27,20 +27,22 @@ def score_genes(
     labels_layer: list[str],
     table_layer: str,
     output_layer: str,
-    path_marker_genes: str | Path | pd.DataFrame,
+    marker_genes: str | Path | pd.DataFrame,
     delimiter=",",
     row_norm: bool = False,
     repl_columns: dict[str, str] | None = None,
-    del_celltypes: dict[str] | None = None,
+    del_celltypes: list[str] | None = None,
     input_dict: bool = False,
     celltype_column: str = _ANNOTATION_KEY,
+    unknown_celltype_key: str = _UNKNOWN_CELLTYPE_KEY,
+    cleanliness_key: str = _CLEANLINESS_KEY,
     overwrite: bool = False,
     **kwargs: Any,
 ) -> tuple[SpatialData, list[str], list[str]]:
     """
-    The function loads marker genes from a CSV file and scores cells for each cell type using those markers using scanpy's `sc.tl.score_genes` function.
+    The function loads marker genes from a CSV file and scores cells for each cell type using those markers using scanpy's :func:`~scanpy.tl.score_genes` function.
 
-    Function annotates cells to the celltype with the maximum score obtained through `sc.tl.score_genes`.
+    Function annotates cells to the celltype with the maximum score obtained through :func:`~scanpy.tl.score_genes`.
     Marker genes can be provided as a one-hot encoded matrix with cell types listed in the first row, and marker genes in the first column;
     or in dictionary format. The function further allows replacements of column names and deletions of specific marker genes.
 
@@ -49,52 +51,60 @@ def score_genes(
     sdata
         The SpatialData object.
     labels_layer
-        The labels layer(s) of `sdata` used to select the cells via the _REGION_KEY in `sdata.tables[table_layer].obs`.
+        The labels layer(s) of `sdata` used to select the cells via the region key in `sdata.tables[table_layer].obs`.
         Note that if `output_layer` is equal to `table_layer` and overwrite is True,
-        cells in `sdata.tables[table_layer]` linked to other `labels_layer` (via the _REGION_KEY), will be removed from `sdata.tables[table_layer]`.
+        cells in `sdata.tables[table_layer]` linked to other `labels_layer` (via the region key), will be removed from `sdata.tables[table_layer]`.
         If a list of labels layers is provided, they will therefore be scored together (e.g. multiple samples).
     table_layer
         The table layer in `sdata` on which to perform annotation on.
     output_layer
         The output table layer in `sdata` to which table layer with results of annotation will be written.
-    path_marker_genes
-        Path to the CSV file containing the marker genes or a pandas dataframe.
+    marker_genes
+        Path to a CSV file, or a :class:`~pandas.DataFrame` containing the marker genes.
         It should be a one-hot encoded matrix with cell types listed in the first row, and marker genes in the first column.
     delimiter
-        Delimiter used in the CSV file, default is ','.
+        Delimiter used in the CSV file, if `marker_genes` is provided as a CSV.
     row_norm
         Flag to determine if row normalization is applied, default is False.
     repl_columns
         Dictionary containing cell types to be replaced. The keys are the original cell type names and
         the values are their replacements.
+        This parameter is deprecated, and will be removed in a future version.
     del_celltypes
         List of cell types to be deleted from the list of possible cell type candidates.
         Cells are scored for these cell types, but will not be assigned a cell type from this list.
     input_dict
         If True, the marker gene list from the CSV file is treated as a dictionary with the first column being
         the cell type names and the subsequent columns being the marker genes for those cell types. Default is False.
+        This parameter is deprecated, and will be removed in a future version.
     celltype_column
-        The column name in the SpatialData object's table that specifies the cell type annotations.
-        The default value is `_ANNOTATION_KEY`.
+        The column name in the `.obs` attribute of the :class:`anndata.AnnData` table where the predicted cell type will be saved.
+    unknown_celltype_key
+        The name reserved for cells that could not be assigned a specific cell type.
+    cleanliness_key
+        The column name in the `.obs` attribute of the :class:`anndata.AnnData` where we will store a score for the cleanliness of the predicted cell type.
     overwrite
         If True, overwrites the `output_layer` if it already exists in `sdata`.
     **kwargs
-        Additional keyword arguments passed to `scanpy.tl.score_genes`.
+        Additional keyword arguments passed to :func:`~scanpy.tl.score_genes`.
 
     Returns
     -------
     tuple:
 
-        - Updated `sdata`.
+        - Updated `sdata` with in `sdata.tables[output_layer].obs` an extra column `celltype_column`.
 
         - list of strings, with all celltypes that are scored (but are not in the del_celltypes list).
 
-        - list of strings, with all celltypes, some of which may not be scored, because their corresponding transcripts do not appear in the region of interest. _UNKNOWN_CELLTYPE_KEY, is also added if it is detected.
+        - list of strings, with all celltypes, some of which may not be scored, because their corresponding transcripts do not appear in the region of interest. `unknown_celltype_key`, is also added if it is detected.
 
     Notes
     -----
-    The cell type `_UNKNOWN_CELLTYPE_KEY` is reserved for cells that could not be assigned a specific cell type.
+    The cell type `unknown_celltype_key` is reserved for cells that could not be assigned a specific cell type.
 
+    See Also
+    --------
+    harpy.tb.score_genes_iter : iterative scoring algorithm.
     """
     process_table_instance = ProcessTable(sdata, labels_layer=labels_layer, table_layer=table_layer)
     adata = process_table_instance._get_adata()
@@ -106,19 +116,19 @@ def score_genes(
             "It should be a one-hot encoded matrix with cell types listed in the first row "
             "and marker genes in the first column."
         )
-        df_markers = pd.read_csv(path_marker_genes, header=None, index_col=0, delimiter=delimiter)
+        df_markers = pd.read_csv(marker_genes, header=None, index_col=0, delimiter=delimiter)
         df_markers = df_markers.T
         genes_dict = df_markers.to_dict("list")
         for i in genes_dict:
             genes_dict[i] = [x for x in genes_dict[i] if str(x) != "nan"]
     # Replace column names in marker genes
     else:
-        if isinstance(path_marker_genes, pd.DataFrame):
-            df_markers = path_marker_genes
-        elif isinstance(path_marker_genes, str | Path):
-            df_markers = pd.read_csv(path_marker_genes, index_col=0, delimiter=delimiter)
+        if isinstance(marker_genes, pd.DataFrame):
+            df_markers = marker_genes
+        elif isinstance(marker_genes, str | Path):
+            df_markers = pd.read_csv(marker_genes, index_col=0, delimiter=delimiter)
         else:
-            raise ValueError("Please pass either a path to a .csv file, or a pandas Dataframe to 'path_marker_genes'.")
+            raise ValueError("Please pass either a path to a .csv file, or a pandas Dataframe to 'marker_genes'.")
 
         if repl_columns:
             for column, replace in repl_columns.items():
@@ -133,15 +143,16 @@ def score_genes(
                     genes.append(df_markers.index[row])
             genes_dict[i] = genes
 
-    assert _UNKNOWN_CELLTYPE_KEY not in genes_dict.keys(), (
-        f"Cell type {_UNKNOWN_CELLTYPE_KEY} is reserved for cells that could not be assigned a specific cell type"
-    )
+    if unknown_celltype_key in genes_dict.keys():
+        raise ValueError(
+            f"Cell type '{unknown_celltype_key}' is reserved for cells that could not be assigned a specific cell type"
+        )
 
     # sanity check
     unique_genes = {item for sublist in genes_dict.values() for item in sublist}
     if not set(adata.var.index).intersection(unique_genes):
         raise ValueError(
-            f"No genes in provided marker genes file at '{path_marker_genes}' where found in .var of table layer '{table_layer}'."
+            f"No genes in provided marker genes file at '{marker_genes}' where found in attribute .var of the table layer '{table_layer}'."
         )
 
     # Score all cells for all celltypes
@@ -164,11 +175,13 @@ def score_genes(
         celltypes=df_markers.columns,
         row_norm=row_norm,
         celltype_column=celltype_column,
+        unknown_celltype_key=unknown_celltype_key,
+        cleanliness_key=cleanliness_key,
     )
 
-    # add _UNKNOWN_CELLTYPE_KEY to the list of celltypes if it is detected.
-    if _UNKNOWN_CELLTYPE_KEY in adata.obs[celltype_column].cat.categories:
-        genes_dict[_UNKNOWN_CELLTYPE_KEY] = []
+    # add unknown_celltype_key to the list of celltypes if it is detected.
+    if unknown_celltype_key in adata.obs[celltype_column].cat.categories:
+        genes_dict[unknown_celltype_key] = []
 
     celltypes_all = list(genes_dict.keys())
 
@@ -177,6 +190,8 @@ def score_genes(
         adata=adata,
         output_layer=output_layer,
         region=process_table_instance.labels_layer,
+        instance_key=process_table_instance.instance_key,
+        region_key=process_table_instance.region_key,
         overwrite=overwrite,
     )
 
@@ -188,7 +203,7 @@ def score_genes_iter(
     labels_layer: list[str],
     table_layer: str,
     output_layer: str,
-    path_marker_genes: str | Path | pd.DataFrame,
+    marker_genes: str | Path | pd.DataFrame,
     delimiter: str = ",",
     min_score: Literal["Zero", "Quantile", None] = "Zero",
     min_score_p: float = 25,
@@ -207,6 +222,8 @@ def score_genes_iter(
     umap_kwargs: Mapping[str, Any] = MappingProxyType({}),
     output_dir=None,
     celltype_column: str = _ANNOTATION_KEY,
+    unknown_celltype_key: str = _UNKNOWN_CELLTYPE_KEY,
+    cleanliness_key: str = _CLEANLINESS_KEY,
     overwrite: bool = False,
 ) -> tuple[SpatialData, list[str], list[str]]:
     """
@@ -224,23 +241,23 @@ def score_genes_iter(
     Expression levels are normalized by substracting the mean over all celltypes assigned in iteration i-1.
     Score for each cell type is obtained via sum of these normalized expressions of the markers in the cell.
 
-    Function expects scaled data (obtained through e.g. `scanpy.pp.scale`).
+    Function expects scaled data (obtained through e.g. :func:`~scanpy.pp.scale`).
 
     Parameters
     ----------
     sdata
-        The SpatialData object.
+        The :class:`~SpatialData` object.
     labels_layer
-        The labels layer(s) of `sdata` used to select the cells via the _REGION_KEY in `sdata.tables[table_layer].obs`.
+        The labels layer(s) of `sdata` used to select the cells via the region key in `sdata.tables[table_layer].obs`.
         Note that if `output_layer` is equal to `table_layer` and overwrite is True,
-        cells in `sdata.tables[table_layer]` linked to other `labels_layer` (via the _REGION_KEY), will be removed from `sdata.tables[table_layer]`.
+        cells in `sdata.tables[table_layer]` linked to other `labels_layer` (via the region key), will be removed from `sdata.tables[table_layer]`.
         If a list of labels layers is provided, they will therefore be scored together (e.g. multiple samples).
     table_layer
-        The table layer in `sdata` on which to perform annotation on. We assume the data is already preprocessed by e.g. `harpy.tb.preprocess_transcriptomics`.
+        The table layer in `sdata` on which to perform annotation on. We assume the data is already preprocessed by e.g. :func:`~harpy.tb.preprocess_transcriptomics`.
         Features should all have approximately same variance.
     output_layer
         The output table layer in `sdata` to which table layer with results of annotation will be written.
-    path_marker_genes
+    marker_genes
         Path to the CSV file containing the marker genes or a pandas dataframe.
         It should be a one-hot encoded matrix with cell types listed in the first row, and marker genes in the first column.
     delimiter
@@ -256,19 +273,22 @@ def score_genes_iter(
     n_iter
         Number of iterations.
     calculate_umap
-        If `True`, calculates a UMAP via `scanpy.tl.umap` for visualization of obtained annotations per iteration.
+        If `True`, calculates a UMAP via :func:`~scanpy.tl.umap` for visualization of obtained annotations per iteration.
         If `False` and 'umap' or 'X_umap' is not in .obsm, then no umap will be plotted.
     calculate_neighbors
-        If `True`, calculates neighbors via `scanpy.pp.neighbors`. Ignored if `calculate_umap` is set to `False`.
+        If `True`, calculates neighbors via :func:`~scanpy.pp.neighbors`. Ignored if `calculate_umap` is set to `False`.
     umap_kwargs
-        Keyword arguments passed to `scanpy.tl.umap`. Ignored if `calculate_umap` is `False`.
+        Keyword arguments passed to :func:`~scanpy.tl.umap`. Ignored if `calculate_umap` is `False`.
     neigbors_kwargs
-        Keyword arguments passed to `scanpy.pp.neighbors`. Ignored if `calculate_umap` is `False` or if `calculate_neighbors` is set to `False` and "neighbors" already in `.uns.keys()`.
+        Keyword arguments passed to :func:`~scanpy.pp.neighbors`. Ignored if `calculate_umap` is `False` or if `calculate_neighbors` is set to `False` and "neighbors" already in `.uns.keys()`.
     output_dir
         If specified, figures with umaps will be saved in this directory after each iteration. If None, the plots will be displayed directly without saving.
     celltype_column
-        The column name in the SpatialData object's table that specifies the cell type annotations.
-        The default value is `_ANNOTATION_KEY`.
+        The column name in the `.obs` attribute of the :class:`anndata.AnnData` table where the predicted cell type will be saved.
+    unknown_celltype_key
+        The name reserved for cells that could not be assigned a specific cell type.
+    cleanliness_key
+        The column name in the `.obs` attribute of the :class:`anndata.AnnData` where we will store a score for the cleanliness of the predicted cell type.
     overwrite
         If True, overwrites the `output_layer` if it already exists in `sdata`.
 
@@ -281,6 +301,10 @@ def score_genes_iter(
         - list of strings, with all celltypes that are scored (but are not in the del_celltypes list).
 
         - list of strings, with all celltypes, some of which may not be scored, because their corresponding transcripts do not appear in the region of interest. _UNKNOWN_CELLTYPE_KEY, is also added if it is detected.
+
+    See Also
+    --------
+    harpy.tb.score_genes : score genes using :func:`~scanpy.tl.score_genes`.
     """
     kwargs = {}
     kwargs["min_score"] = min_score
@@ -293,7 +317,7 @@ def score_genes_iter(
 
     adata, celltypes_scored, celltypes_all = _annotate_celltype_iter(
         adata=adata,
-        path_marker_genes=path_marker_genes,
+        marker_genes=marker_genes,
         delimiter=delimiter,
         n_iter=n_iter,
         calculate_umap=calculate_umap,
@@ -302,6 +326,8 @@ def score_genes_iter(
         umap_kwargs=umap_kwargs,
         output_dir=output_dir,
         celltype_column=celltype_column,
+        unknown_celltype_key=unknown_celltype_key,
+        cleanliness_key=cleanliness_key,
         **kwargs,  # keyword arguments passed to _annotate_celltype_weighted
     )
 
@@ -310,6 +336,8 @@ def score_genes_iter(
         adata=adata,
         output_layer=output_layer,
         region=process_table_instance.labels_layer,
+        instance_key=process_table_instance.instance_key,
+        region_key=process_table_instance.region_key,
         overwrite=overwrite,
     )
 
@@ -318,7 +346,7 @@ def score_genes_iter(
 
 def _annotate_celltype_iter(
     adata: AnnData,
-    path_marker_genes: str | Path | pd.DataFrame,
+    marker_genes: str | Path | pd.DataFrame,
     delimiter: str = ",",
     n_iter=5,
     calculate_umap=False,
@@ -327,6 +355,8 @@ def _annotate_celltype_iter(
     umap_kwargs: Mapping[str, Any] = MappingProxyType({}),  # keyword arguments passed to sc.tl.umap
     output_dir=None,
     celltype_column: str = _ANNOTATION_KEY,
+    unknown_celltype_key: str = _UNKNOWN_CELLTYPE_KEY,
+    cleanliness_key: str = _CLEANLINESS_KEY,
     **kwargs,
 ) -> tuple[AnnData, pd.DataFrame]:
     # initial clustering: = typical own_score_genes
@@ -336,12 +366,12 @@ def _annotate_celltype_iter(
     if celltype_column in adata.obs:
         log.warning(f"Column '{celltype_column}' already a column in '.obs'. This column will be overwritten.")
 
-    if isinstance(path_marker_genes, str | Path):
-        marker_genes = pd.read_csv(path_marker_genes, index_col=0, delimiter=delimiter)
-    elif isinstance(path_marker_genes, pd.DataFrame):
-        marker_genes = path_marker_genes
+    if isinstance(marker_genes, str | Path):
+        marker_genes = pd.read_csv(marker_genes, index_col=0, delimiter=delimiter)
+    elif isinstance(marker_genes, pd.DataFrame):
+        marker_genes = marker_genes
     else:
-        raise ValueError("Please pass either a path to a .csv file, or a pandas Dataframe to 'path_marker_genes'.")
+        raise ValueError("Please pass either a path to a .csv file, or a pandas Dataframe to 'marker_genes'.")
 
     # only retain marker genes that are in adata
     marker_genes = marker_genes[marker_genes.index.isin(adata.var_names)]
@@ -366,6 +396,8 @@ def _annotate_celltype_iter(
         marker_genes=marker_genes,
         mean_values=None,
         celltype_column=celltype_column,
+        unknown_celltype_key=unknown_celltype_key,
+        cleanliness_key=cleanliness_key,
         **kwargs,
     )
 
@@ -405,8 +437,8 @@ def _annotate_celltype_iter(
     for _iteration in range(n_iter):
         log.info(f"Iteration {_iteration}.")
         cell_types = np.unique(adata.obs[celltype_column]).tolist()
-        if _UNKNOWN_CELLTYPE_KEY in cell_types:
-            cell_types.remove(_UNKNOWN_CELLTYPE_KEY)
+        if unknown_celltype_key in cell_types:
+            cell_types.remove(unknown_celltype_key)
         mean_per_ct = []
         for ct in cell_types:
             l = pd.DataFrame(adata.obs[celltype_column] == ct)
@@ -428,6 +460,8 @@ def _annotate_celltype_iter(
             marker_genes=marker_genes,
             mean_values=next_mean,
             celltype_column=celltype_column,
+            unknown_celltype_key=unknown_celltype_key,
+            cleanliness_key=cleanliness_key,
             **kwargs,
         )
         t = adata.obs[celltype_column] == adata.obs[f"{celltype_column}_previous"]
@@ -488,6 +522,8 @@ def _annotate_celltype_weighted(
     scale_score_p: float = 1,
     mean_values=None,
     celltype_column: str = _ANNOTATION_KEY,
+    unknown_celltype_key: str = _UNKNOWN_CELLTYPE_KEY,
+    cleanliness_key: str = _CLEANLINESS_KEY,
 ) -> tuple[AnnData, pd.DataFrame]:
     _min_score_options = (
         "Zero",
@@ -603,12 +639,12 @@ def _annotate_celltype_weighted(
     def assign_cell_type(row):
         # If all NaN, return _UNKNOWN_CELLTYPE_KEY for this cell
         if row.isna().all():
-            return _UNKNOWN_CELLTYPE_KEY
+            return unknown_celltype_key
         # Identify the cell type with the max score
         return row.idxmax()
 
     adata.obs[celltype_column] = scores_cell_celltype.apply(assign_cell_type, axis=1).values
-    adata.obs[_CLEANLINESS_KEY] = cleanliness
+    adata.obs[cleanliness_key] = cleanliness
 
     return adata, scores_cell_celltype
 
@@ -622,6 +658,8 @@ def cluster_cleanliness(
     celltype_indexes: dict[str, int] | None = None,
     colors: list[str] | None = None,
     celltype_column: str = _ANNOTATION_KEY,
+    unknown_celltype_key: str = _UNKNOWN_CELLTYPE_KEY,
+    cleanliness_key: str = _CLEANLINESS_KEY,
     overwrite: bool = False,
 ) -> tuple[SpatialData, dict | None]:
     """
@@ -635,16 +673,16 @@ def cluster_cleanliness(
     sdata
         Data containing spatial information.
     labels_layer
-        The labels layer(s) of `sdata` used to select the cells via the _REGION_KEY in `sdata.tables[table_layer].obs`.
+        The labels layer(s) of `sdata` used to select the cells via the region key in `sdata.tables[table_layer].obs`.
         Note that if `output_layer` is equal to `table_layer` and overwrite is True,
-        cells in `sdata.tables[table_layer]` linked to other `labels_layer` (via the _REGION_KEY), will be removed from `sdata.tables[table_layer]`.
+        cells in `sdata.tables[table_layer]` linked to other `labels_layer` (via the region key), will be removed from `sdata.tables[table_layer]`.
         If a list of labels layers is provided, they will therefore be scored together (e.g. multiple samples).
     table_layer
         The table layer in `sdata` on which to perform cleaning on.
     output_layer
         The output table layer in `sdata` to which table layer with results of cleaned annotations will be written.
     celltypes
-        List of celltypes that you want to use for annotation, can be a subset of what is available in .obs of corresponding table.
+        List of celltypes that you want to use for annotation, can be a subset of what is available in the `.obs` attribute of the corresponding table.
     celltype_indexes
         Dictionary with cell type as keys and indexes as values.
         Cell types with provided indexes will be grouped together under new cell type provided as key.
@@ -655,8 +693,12 @@ def cluster_cleanliness(
         List of colors to be used for visualizing different cell types. If not provided,
         a default colormap will be generated.
     celltype_column
-        The column name in the SpatialData object's table that specifies the cell type annotations.
-        The default value is `_ANNOTATION_KEY`.
+        The column name in the `.obs` attribute of the :class:`anndata.AnnData` table where the predicted cell type is stored
+        (obtained through :func:`~harpy.tb.score_genes` or :func:`~harpy.tb.score_genes_iter`).
+    unknown_celltype_key
+        The name reserved for cells that could not be assigned a specific cell type.
+    cleanliness_key
+        The column name in the `.obs` attribute of the :class:`anndata.AnnData` where we will store a score for the cleanliness of the predicted cell type.
     overwrite
         If True, overwrites the `output_layer` if it already exists in `sdata`.
 
@@ -664,9 +706,13 @@ def cluster_cleanliness(
     -------
     tuple:
 
-        - Updated spatial data after the cleanliness analysis.
+        - Updated :class:`~spatialdata.SpatialData` object after the cleanliness analysis.
 
         - Dictionary with cell types as keys and their corresponding colors as values.
+
+    See Also
+    --------
+    harpy.tb.score_genes : score genes using :func:`~scanpy.tl.score_genes`.
     """
     process_table_instance = ProcessTable(sdata, labels_layer=labels_layer, table_layer=table_layer)
     adata = process_table_instance._get_adata()
@@ -680,6 +726,8 @@ def cluster_cleanliness(
         celltypes=celltypes,
         row_norm=False,
         celltype_column=celltype_column,
+        unknown_celltype_key=unknown_celltype_key,
+        cleanliness_key=cleanliness_key,
     )
 
     # Create custom colormap for clusters
@@ -723,6 +771,8 @@ def cluster_cleanliness(
         adata=adata,
         output_layer=output_layer,
         region=process_table_instance.labels_layer,
+        instance_key=process_table_instance.instance_key,
+        region_key=process_table_instance.region_key,
         overwrite=overwrite,
     )
 
@@ -734,6 +784,8 @@ def _annotate_celltype(
     celltypes: list[str],
     row_norm: bool = False,
     celltype_column: str = _ANNOTATION_KEY,
+    unknown_celltype_key: str = _UNKNOWN_CELLTYPE_KEY,
+    cleanliness_key: str = _CLEANLINESS_KEY,
 ) -> tuple[SpatialData, list[str]]:
     scoresper_cluster = adata.obs[[col for col in adata.obs if col in celltypes]]
 
@@ -758,23 +810,23 @@ def _annotate_celltype(
     cleanliness = np.full(max_scores.shape, np.inf)
     cleanliness[~mask] = difference[~mask] / (sum_scores[~mask] / 2.0)
 
-    adata.obs[_CLEANLINESS_KEY] = cleanliness
+    adata.obs[cleanliness_key] = cleanliness
 
     def assign_cell_type(row):
         # Identify the cell type with the max score
         max_score_type = row.idxmax()
         # If max score is <= 0, assign _UNKNOWN_CELLTYPE_KEY
         if row[max_score_type] <= 0:
-            return _UNKNOWN_CELLTYPE_KEY
+            return unknown_celltype_key
         else:
             return max_score_type
 
-    # Assign _UNKNOWN_CELLTYPE_KEY cell_type if no cell type could be found that has larger expression than random sample
+    # Assign unknown_celltype_key if no cell type could be found that has larger expression than random sample
     # as calculated by sc.tl.score_genes function of scanpy.
     adata.obs[celltype_column] = scoresper_cluster.apply(assign_cell_type, axis=1)
     adata.obs[celltype_column] = adata.obs[celltype_column].astype("category")
-    # Set the Cleanliness score for UNKNOWN_CELLTYPE_KEY equal to 0 (i.e. not clean)
-    adata.obs.loc[adata.obs[celltype_column] == _UNKNOWN_CELLTYPE_KEY, _CLEANLINESS_KEY] = 0
+    # Set the Cleanliness score for unknown_celltype_key equal to 0 (i.e. not clean)
+    adata.obs.loc[adata.obs[celltype_column] == unknown_celltype_key, cleanliness_key] = 0
 
     return adata, list(scoresper_cluster.columns.values)
 

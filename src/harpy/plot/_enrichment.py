@@ -36,7 +36,6 @@ def nhood_enrichment(
         The table layer in `sdata` to visualize.
     celltype_column
         The column name in the SpatialData object's table that specifies the cell type annotations.
-        The default value is `_ANNOTATION_KEY`.
     output
         If provided, the plot will be displayed and also saved to a file with the specified filename.
         If None, the plot will be displayed directly without saving.

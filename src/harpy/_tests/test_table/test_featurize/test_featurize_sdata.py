@@ -150,6 +150,8 @@ def test_featurize_sdata_blobs(sdata: SpatialData):
         adata=sdata[table_layer],
         output_layer=table_layer,
         region=[labels_layer],
+        instance_key=_INSTANCE_KEY,
+        region_key=_REGION_KEY,
         overwrite=True,
     )
 

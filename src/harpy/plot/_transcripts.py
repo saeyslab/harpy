@@ -8,10 +8,11 @@ import pandas as pd
 import seaborn as sns
 from scipy.stats import pearsonr
 from spatialdata import SpatialData
+from spatialdata.models import TableModel
 
 from harpy.image._image import _get_boundary, _get_spatial_element
 from harpy.plot import plot_shapes
-from harpy.utils._keys import _GENES_KEY, _RAW_COUNTS_KEY, _REGION_KEY
+from harpy.utils._keys import _GENES_KEY, _RAW_COUNTS_KEY
 from harpy.utils._transformations import _identity_check_transformations_points
 from harpy.utils.pylogger import get_pylogger
 
@@ -41,7 +42,7 @@ def analyse_genes_left_out(
         This layer is used to calculate the crd (region of interest) that was used in the segmentation step,
         otherwise transcript counts in `points_layer` of `sdata` (containing all transcripts)
         and the counts obtained via `sdata.tables[ table_layer ]` are not comparable.
-        It is also used to select the cells in `sdata.tables[table_layer]` that are linked to this `labels_layer` via the _REGION_KEY.
+        It is also used to select the cells in `sdata.tables[table_layer]` that are linked to this `labels_layer` via the region key.
     table_layer
         The table layer in `sdata` on which to perform analysis.
     points_layer
@@ -60,7 +61,7 @@ def analyse_genes_left_out(
 
     Returns
     -------
-    A DataFrame containing information about the proportion of transcripts kept for each gene,
+    A :class:`pandas.DataFrame` containing information about the proportion of transcripts kept for each gene,
     raw counts (i.e. obtained from `points_layer` of `sdata`), and the log of raw counts.
 
     Raises
@@ -107,7 +108,9 @@ def analyse_genes_left_out(
     se = _get_spatial_element(sdata, layer=labels_layer)
     crd = _get_boundary(se, to_coordinate_system=to_coordinate_system)
 
-    adata = sdata.tables[table_layer][sdata.tables[table_layer].obs[_REGION_KEY] == labels_layer]
+    region_key = sdata.tables[table_layer].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]
+
+    adata = sdata.tables[table_layer][sdata.tables[table_layer].obs[region_key] == labels_layer]
 
     ddf = sdata.points[points_layer]
 

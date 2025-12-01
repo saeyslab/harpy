@@ -33,6 +33,10 @@ class RasterAggregator:
         A 4D Dask array representing the image data with shape ('c', 'z', 'y', 'x'),
         where 'c' is the number of channels. Can be `None` if only mask-based computations
         (e.g., count or center of mass) are required.
+    instance_key
+        name of the instance key
+    instance_size_key
+        name of the instance size key
 
     Raises
     ------
@@ -53,7 +57,13 @@ class RasterAggregator:
     - Image and mask must be aligned in spatial dimensions and chunking to ensure accurate and efficient aggregation.
     """
 
-    def __init__(self, mask_dask_array: da.Array, image_dask_array: da.Array | None):
+    def __init__(
+        self,
+        mask_dask_array: da.Array,
+        image_dask_array: da.Array | None,
+        instance_key: str = _INSTANCE_KEY,
+        instance_size_key: str = _CELLSIZE_KEY,
+    ):
         if not np.issubdtype(mask_dask_array.dtype, np.integer):
             raise ValueError(f"'mask_dask_array' should contains chunks of type {np.integer}.")
         self._labels = (
@@ -71,6 +81,8 @@ class RasterAggregator:
         assert mask_dask_array.ndim == 3, "Currently only 3D masks are supported ('z', 'y', 'x')."
 
         self._mask = mask_dask_array
+        self._instance_key = instance_key
+        self._instance_size_key = instance_size_key
 
     def aggregate_stats(
         self,
@@ -109,7 +121,7 @@ class RasterAggregator:
                 # TODO. Count should not be calculated for every channel, because mask is the same for every channel.
             else:
                 df = pd.DataFrame(_result)
-            df[_INSTANCE_KEY] = self._labels
+            df[self._instance_key] = self._labels
             dfs.append(df)
 
         return dfs
@@ -206,7 +218,9 @@ class RasterAggregator:
         -------
         A DataFrame with one column for area and one for label ID.
         """
-        return _get_mask_area(self._mask, index=self._labels)
+        return _get_mask_area(
+            self._mask, index=self._labels, instance_key=self._instance_key, instance_size_key=self._instance_size_key
+        )
 
     def center_of_mass(self) -> pd.DataFrame:
         """
@@ -218,7 +232,7 @@ class RasterAggregator:
         -------
         A DataFrame with columns for spatial coordinates (z,y,x) and label ID.
         """
-        return _get_center_of_mass(self._mask, index=self._labels)
+        return _get_center_of_mass(self._mask, index=self._labels, instance_key=self._instance_key)
 
     def aggregate_quantiles(
         self,
@@ -266,7 +280,7 @@ class RasterAggregator:
         dfs = [pd.DataFrame(_result) for _result in result]
 
         for _df in dfs:
-            _df[_INSTANCE_KEY] = _labels
+            _df[self._instance_key] = _labels
 
         return dfs
 
@@ -306,7 +320,7 @@ class RasterAggregator:
             fn_kwargs={"calculate_axes": calculate_axes},
         )
         df = pd.DataFrame(results)
-        df[_INSTANCE_KEY] = self._labels[self._labels != 0]
+        df[self._instance_key] = self._labels[self._labels != 0]
         return df
 
     def _aggregate(self, aggregate_func: Callable[[da.Array], pd.DataFrame]) -> pd.DataFrame:
@@ -317,7 +331,7 @@ class RasterAggregator:
 
         df = pd.DataFrame(_result)
 
-        df[_INSTANCE_KEY] = self._labels
+        df[self._instance_key] = self._labels
         return df
 
     # this calculates sum, count, mean and var
@@ -689,12 +703,17 @@ class RasterAggregator:
         return results
 
 
-def _get_mask_area(mask: da.Array, index: NDArray | None = None) -> pd.DataFrame:
+def _get_mask_area(
+    mask: da.Array,
+    index: NDArray | None = None,
+    instance_key: str = _INSTANCE_KEY,
+    instance_size_key: str = _CELLSIZE_KEY,
+) -> pd.DataFrame:
     assert mask.ndim == 3, "Currently only 3D masks are supported ('z','y','x')."
     if index is None:
         index = da.unique(mask).compute()
     _result = _calculate_area(mask, index=index)
-    return pd.DataFrame({_INSTANCE_KEY: index, _CELLSIZE_KEY: _result.flatten()})
+    return pd.DataFrame({instance_key: index, instance_size_key: _result.flatten()})
 
 
 def _calculate_area(mask: da.Array, index: NDArray | None = None) -> NDArray:
@@ -735,7 +754,9 @@ def _calculate_area(mask: da.Array, index: NDArray | None = None) -> NDArray:
     return da.sum(dask_array, axis=1).compute().reshape(-1, 1)
 
 
-def _get_center_of_mass(mask: da.Array, index: NDArray | None = None) -> pd.DataFrame:
+def _get_center_of_mass(
+    mask: da.Array, index: NDArray | None = None, instance_key: str = _INSTANCE_KEY
+) -> pd.DataFrame:
     assert mask.ndim == 3, "Currently only 3D masks are supported."
     if index is None:
         index = da.unique(mask).compute()
@@ -762,7 +783,7 @@ def _get_center_of_mass(mask: da.Array, index: NDArray | None = None) -> pd.Data
 
     return pd.DataFrame(
         {
-            _INSTANCE_KEY: index,
+            instance_key: index,
             0: coordinates[:, 0],
             1: coordinates[:, 1],
             2: coordinates[:, 2],

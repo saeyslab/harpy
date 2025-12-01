@@ -37,6 +37,7 @@ def spatial_pixel_neighbors(
     nhood_enrichment_kwargs: Mapping[str, Any] = MappingProxyType({}),
     seed: int = 0,
     key_added: str = "cluster_id",
+    spatial_key: str = _SPATIAL,
 ) -> AnnData:
     """
     Computes spatial pixel neighbors and performs neighborhood enrichment analysis.
@@ -84,6 +85,8 @@ def spatial_pixel_neighbors(
         The random seed used for reproducibility in the neighborhood enrichment computation.
     key_added
         The key under which the extracted cluster labels will be stored in `.obs` of the returned AnnData object.
+    spatial_key
+        The key in the resulting :class:`~anndata.AnnData` `.obsm` that will hold the `x` and `y` center of the instances (grid).
 
     Returns
     -------
@@ -112,11 +115,11 @@ def spatial_pixel_neighbors(
 
     log.info(f"Using '{adata.shape[0]}' observations for neighborhood analysis.")
 
-    adata.obsm[_SPATIAL] = coordinates
+    adata.obsm[spatial_key] = coordinates
 
     spatial_neighbors_kwargs = dict(spatial_neighbors_kwargs)
     coord_type = spatial_neighbors_kwargs.pop("coord_type", "grid")
-    spatial_key = spatial_neighbors_kwargs.pop("spatial_key", _SPATIAL)
+    spatial_key = spatial_neighbors_kwargs.pop("spatial_key", spatial_key)
 
     nhood_enrichment_kwargs = dict(nhood_enrichment_kwargs)
     cluster_key = nhood_enrichment_kwargs.pop("cluster_key", key_added)
@@ -192,7 +195,11 @@ def _get_values_grid_most_frequent(
     mask_grid = mask_grid[None, ...]  # RasterAggregator only supports z,y,x
     mask_pixel_clusters = mask_pixel_clusters[None, None, ...]  # RasterAggregator only supports c,z,y,x
 
-    aggregator = RasterAggregator(mask_dask_array=mask_grid, image_dask_array=mask_pixel_clusters)
+    aggregator = RasterAggregator(
+        mask_dask_array=mask_grid,
+        image_dask_array=mask_pixel_clusters,
+        instance_key=_INSTANCE_KEY,
+    )
 
     def _get_most_frequent_element_in_mask(mask_grid: NDArray, mask_pixel_clusters: NDArray) -> NDArray:
         unique_labels = np.unique(mask_grid)
@@ -205,6 +212,7 @@ def _get_values_grid_most_frequent(
 
         return np.array(results).reshape(-1, 1).astype(np.float32)
 
+    # TODO: replace with featurizer, will be faster
     values = aggregator.aggregate_custom_channel(
         image=mask_pixel_clusters[0],
         mask=mask_grid,

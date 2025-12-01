@@ -7,11 +7,11 @@ import dask.array as da
 import numpy as np
 from spatialdata import SpatialData, read_zarr
 from spatialdata import bounding_box_query as bounding_box_query_spatialdata
+from spatialdata.models import TableModel
 from spatialdata.transformations import get_transformation
 
-from harpy.image._image import _get_spatial_element, add_labels_layer
+from harpy.image._image import add_labels_layer, get_dataarray
 from harpy.table._table import add_table_layer
-from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY
 from harpy.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
@@ -82,7 +82,7 @@ def bounding_box_query(
     labels_ids = []
     # labels_layer_queried=[]
     for _labels_layer, _crd, _to_coordinate_system in zip(labels_layer, crd, to_coordinate_system, strict=True):
-        se = _get_spatial_element(sdata, layer=_labels_layer)
+        se = get_dataarray(sdata, layer=_labels_layer)
 
         if _crd is None:
             se_queried = se
@@ -120,6 +120,21 @@ def bounding_box_query(
         region = []
         adata = sdata.tables[_table_layer]
         remove = np.ones(len(adata), dtype=bool)
+        if TableModel.ATTRS_KEY in adata.uns:
+            region_key = adata.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]
+            instance_key = adata.uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY]
+        else:
+            # do not query the table layers that do not annotate any region
+            log.info(
+                f"table_layer={_table_layer} does not annotate any spatial element — adding data as such to the resulting SpatialData object."
+            )
+            sdata_queried = add_table_layer(
+                sdata_queried,
+                adata=adata.copy(),
+                output_layer=_table_layer,
+                region=None,
+            )
+            continue
 
         for _labels_layer, _crd, _to_coordinate_system, _labels_id in zip(
             labels_layer,
@@ -129,11 +144,11 @@ def bounding_box_query(
             strict=True,
         ):
             # the code also handles case when labels layer does not annotate the table
-            # (i.e. _labels_layer not in adata.obs[_REGION_KEY].values), because remove already set to True for all instances.
-            if _labels_layer in adata.obs[_REGION_KEY].values:
-                mask_label = adata.obs[_REGION_KEY] == _labels_layer
+            # (i.e. _labels_layer not in adata.obs[region_key].values), because remove already set to True for all instances.
+            if _labels_layer in adata.obs[region_key].values:
+                mask_label = adata.obs[region_key] == _labels_layer
 
-                remove_label = ~((mask_label) & (adata.obs[_INSTANCE_KEY].isin(_labels_id))).to_numpy()
+                remove_label = ~((mask_label) & (adata.obs[instance_key].isin(_labels_id))).to_numpy()
                 remove = remove & remove_label
                 if remove_label[
                     (mask_label).to_numpy()
@@ -156,6 +171,8 @@ def bounding_box_query(
             adata=adata,
             output_layer=_table_layer,
             region=region,
+            instance_key=instance_key,
+            region_key=region_key,
         )
 
     # now copy image, shapes and points layer if copy is True.

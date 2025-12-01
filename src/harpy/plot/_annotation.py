@@ -18,6 +18,9 @@ def score_genes(
     shapes_layer: str = "segmentation_mask_boundaries",
     crd: tuple[int, int, int, int] | None = None,
     filter_index: int | None = None,
+    celltype_column: str = _ANNOTATION_KEY,
+    unknown_celltype_key: str = _UNKNOWN_CELLTYPE_KEY,
+    cleanliness_key: str = _CLEANLINESS_KEY,
     output: str | None = None,
 ) -> None:
     """
@@ -28,6 +31,8 @@ def score_genes(
     - assigned celltype for all cells in region of interest (crd).
     - a heatmap of the assigned leiden cluster for each cell type.
     - a heatmap of the assigned leiden cluster for each cell type, with leiden cluster >= filter_index.
+
+    This function is deprecated and will be removed in a future version.
 
     Parameters
     ----------
@@ -45,6 +50,12 @@ def score_genes(
         The coordinates for a region of interest in the format (xmin, xmax, ymin, ymax). Only used for plotting purposes.
     filter_index
         Index used to filter leiden clusters when plotting the heatmap. Only leiden clusters >= filter index will be plotted.
+    celltype_column
+        The column name in the `.obs` attribute of the :class:`anndata.AnnData` table where the cell types are stored.
+    unknown_celltype_key
+        The name reserved for cells that could not be assigned a specific cell type.
+    cleanliness_key
+        The column name in the `.obs` attribute of the :class:`anndata.AnnData` table where a score for the cleanliness of the predicted cell type is stored.
     output
         Filepath to save the plots. If not provided, plots will be displayed without being saved.
 
@@ -56,7 +67,7 @@ def score_genes(
     -----
     This function uses `scanpy` for plotting and may save multiple plots based on the output parameter.
     """
-    celltypes = [element for element in celltypes if element != _UNKNOWN_CELLTYPE_KEY]
+    celltypes = [element for element in celltypes if element != unknown_celltype_key]
 
     if img_layer is None:
         img_layer = [*sdata.images][-1]
@@ -66,32 +77,32 @@ def score_genes(
     colors = [mpl.colors.rgb2hex(colors[j * 4 + i]) for i in range(4) for j in range(10)]
 
     # Plot cleanliness and leiden next to annotation
-    sc.pl.umap(sdata.tables[table_layer], color=[_CLEANLINESS_KEY, _ANNOTATION_KEY], show=False)
+    sc.pl.umap(sdata.tables[table_layer], color=[cleanliness_key, celltype_column], show=False)
 
     if output:
-        plt.savefig(output + f"_{_CLEANLINESS_KEY}_{_ANNOTATION_KEY}", bbox_inches="tight")
+        plt.savefig(output + f"_{cleanliness_key}_{celltype_column}", bbox_inches="tight")
     else:
         plt.show()
     plt.close()
 
-    sc.pl.umap(sdata.tables[table_layer], color=["leiden", _ANNOTATION_KEY], show=False)
+    sc.pl.umap(sdata.tables[table_layer], color=["leiden", celltype_column], show=False)
 
     if output:
-        plt.savefig(output + f"_leiden_{_ANNOTATION_KEY}", bbox_inches="tight")
+        plt.savefig(output + f"_leiden_{celltype_column}", bbox_inches="tight")
     else:
         plt.show()
     plt.close()
 
     # Plot annotation and cleanliness columns of sdata.tables[table_layer] (AnnData) object
-    sdata.tables[table_layer].uns[f"{_ANNOTATION_KEY}_colors"] = colors
+    sdata.tables[table_layer].uns[f"{celltype_column}_colors"] = colors
     plot_shapes(
         sdata=sdata,
         img_layer=img_layer,
         shapes_layer=shapes_layer,
         table_layer=table_layer,
-        column=_ANNOTATION_KEY,
+        column=celltype_column,
         crd=crd,
-        output=output + f"_{_ANNOTATION_KEY}" if output else None,
+        output=output + f"_{celltype_column}" if output else None,
     )
 
     # Plot heatmap of celltypes and filtered celltypes based on filter index

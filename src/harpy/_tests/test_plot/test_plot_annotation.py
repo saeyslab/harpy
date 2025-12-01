@@ -10,7 +10,7 @@ def test_score_genes(sdata_transcripts_no_backed, path_dataset_markers, tmp_path
         labels_layer="segmentation_mask",
         table_layer="table_transcriptomics_cluster",
         output_layer="table_transcriptomics_score_genes",
-        path_marker_genes=path_dataset_markers,
+        marker_genes=path_dataset_markers,
         delimiter=",",
         row_norm=False,
         del_celltypes=["dummy_20"],  # celltypes that will not be considered for annotation.

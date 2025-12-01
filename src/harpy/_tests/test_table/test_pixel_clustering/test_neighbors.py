@@ -15,8 +15,15 @@ from harpy.utils._keys import _SPATIAL
 )
 def test_spatial_pixel_neighbors(sdata):
     # note: hp.tb.spatial_pixel_neighbors would typically be run on a labels layer obtained via `hp.im.flowsom`.
+    spatial_key = _SPATIAL
     adata = spatial_pixel_neighbors(
-        sdata, labels_layer="blobs_labels", key_added="cluster_id", size=50, mode="center", subset=None
+        sdata,
+        labels_layer="blobs_labels",
+        key_added="cluster_id",
+        size=50,
+        mode="center",
+        subset=None,
+        spatial_key=spatial_key,
     )
 
     assert isinstance(adata, AnnData)
@@ -28,7 +35,7 @@ def test_spatial_pixel_neighbors(sdata):
     index = 2
     assert (
         adata.obs["cluster_id"][index]
-        == sdata["blobs_labels"].data.compute()[adata.obsm["spatial"][index][0], adata.obsm[_SPATIAL][index][1]]
+        == sdata["blobs_labels"].data.compute()[adata.obsm["spatial"][index][0], adata.obsm[spatial_key][index][1]]
     )
 
     # divide in hexagon grid and take most frequent occuring cluster id in each bin.
@@ -40,6 +47,7 @@ def test_spatial_pixel_neighbors(sdata):
         mode="most_frequent",
         grid_type="hexagon",
         subset=None,
+        spatial_key=_SPATIAL,
     )
 
     assert isinstance(adata, AnnData)

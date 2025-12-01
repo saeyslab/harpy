@@ -235,6 +235,7 @@ def test_aggregate_kurtosis(sdata):
     aggregator = RasterAggregator(
         mask_dask_array=mask.rechunk(100),
         image_dask_array=image.rechunk(100),
+        instance_key=_INSTANCE_KEY,
     )
     df_kurt = aggregator.aggregate_kurtosis()
 
@@ -255,6 +256,7 @@ def test_aggregate_skewness(sdata):
     aggregator = RasterAggregator(
         mask_dask_array=mask.rechunk(100),
         image_dask_array=image.rechunk(100),
+        instance_key=_INSTANCE_KEY,
     )
     df_skew = aggregator.aggregate_skew()
 
@@ -275,6 +277,7 @@ def test_aggregate_quantiles(sdata_multi_c_no_backed):
     aggregator = RasterAggregator(
         mask_dask_array=mask,
         image_dask_array=image,
+        instance_key=_INSTANCE_KEY,
     )
 
     quantiles = [0.3, 0.5]
@@ -307,6 +310,7 @@ def test_aggregate_radii_and_axes(sdata_multi_c_no_backed):
     aggregator = RasterAggregator(
         mask_dask_array=mask,
         image_dask_array=None,
+        instance_key=_INSTANCE_KEY,
     )
 
     df = aggregator.aggregate_radii_and_axes(depth=200, calculate_axes=True)
@@ -381,7 +385,7 @@ def test_aggregate_var_3D(sdata):
 def test_get_mask_area(sdata):
     se_labels = sdata["blobs_labels"]
     mask = se_labels.data[None, ...].rechunk(512)
-    df = _get_mask_area(mask)
+    df = _get_mask_area(mask, instance_size_key=_CELLSIZE_KEY)
 
     mask_compute = mask.compute()
     area = ndimage.sum_labels(input=np.ones(mask_compute.shape), labels=mask_compute, index=np.unique(mask_compute))
@@ -400,7 +404,7 @@ def test_get_mask_area_subset(sdata):
         index[2],
         index.max() + 10,
     ]  # pick subset + an index not in mask. It will return 0 for this index.
-    df = _get_mask_area(mask, index=subset_index)
+    df = _get_mask_area(mask, index=subset_index, instance_size_key=_CELLSIZE_KEY)
 
     area = ndimage.sum_labels(input=np.ones(mask_compute.shape), labels=mask_compute, index=subset_index)
 

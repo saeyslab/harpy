@@ -14,7 +14,7 @@ from spatialdata.transformations import get_transformation
 from harpy.image._image import _get_spatial_element
 from harpy.table._preprocess import preprocess_proteomics
 from harpy.table._table import add_table_layer
-from harpy.utils._keys import _CELL_INDEX, _INSTANCE_KEY, _REGION_KEY
+from harpy.utils._keys import _CELL_INDEX, _CELLSIZE_KEY, _INSTANCE_KEY, _RAW_COUNTS_KEY, _REGION_KEY
 
 
 def cell_clustering_preprocess(
@@ -24,6 +24,11 @@ def cell_clustering_preprocess(
     output_layer: str,
     q: float | None = 0.999,
     chunks: str | int | tuple[int, ...] | None = None,
+    region_key: str = _REGION_KEY,
+    instance_key: str = _INSTANCE_KEY,
+    cell_index_name: str = _CELL_INDEX,
+    instance_size_key: str = _CELLSIZE_KEY,
+    raw_counts_key: str = _RAW_COUNTS_KEY,
     overwrite: bool = False,
 ) -> SpatialData:
     """
@@ -47,6 +52,16 @@ def cell_clustering_preprocess(
         Quantile used for normalization. If specified, each pixel SOM/meta cluster column in `output_layer` is normalized by this quantile. Values are multiplied by 100 after normalization.
     chunks
         Chunk sizes for processing the data. If provided as a tuple, it should detail chunk sizes for each dimension `(z)`, `y`, `x`.
+    instance_key
+        Instance key. The name of the column in :class:`~anndata.AnnData` table `.obs` that will hold the instance ids.
+    region_key
+        Region key. The name of the column in  :class:`~anndata.AnnData` table `.obs` that will hold the name of the element(s) that are annotated by the resulting table.
+    cell_index_name
+        The name of the index of the resulting :class:`~anndata.AnnData` table.
+    instance_size_key
+        The key in the :class:`~anndata.AnnData` table `.obs` that will hold the size of the instances (obtained from `labels_layer_cells`).
+    raw_counts_key
+        Name of the :class:`~anndata.AnnData` layer where the non-preprocessed counts will be stored.
     overwrite
         If True, overwrites the existing data in the specified `output_layer` if it already exists.
 
@@ -163,15 +178,15 @@ def cell_clustering_preprocess(
     _uuid_value = str(uuid.uuid4())[:8]
 
     cells.index = [f"{idx}_{_region_keys[i]}_{_uuid_value}" for i, idx in enumerate(cells.index)]
-    cells.index.name = _CELL_INDEX
+    cells.index.name = cell_index_name
 
     adata = AnnData(X=sum_of_chunks, obs=cells, var=var)
 
-    adata.obs[_INSTANCE_KEY] = _cells_id.astype(int)
-    adata.obs[_REGION_KEY] = pd.Categorical(_region_keys)
+    adata.obs[instance_key] = _cells_id.astype(int)
+    adata.obs[region_key] = pd.Categorical(_region_keys)
 
     # remove count for background (i.e. cluster id=='0' and label ==0)
-    adata = adata[adata.obs[_INSTANCE_KEY] != 0].copy()
+    adata = adata[adata.obs[instance_key] != 0].copy()
     adata = adata[:, ~adata.var_names.isin(["0"])].copy()
 
     # remove cells with no overlap with any pixel cluster
@@ -182,6 +197,8 @@ def cell_clustering_preprocess(
         adata=adata,
         output_layer=output_layer,
         region=labels_layer_cells,
+        instance_key=instance_key,
+        region_key=region_key,
         overwrite=overwrite,
     )
 
@@ -196,6 +213,8 @@ def cell_clustering_preprocess(
         scale=False,
         q=q,
         calculate_pca=False,
+        instance_size_key=instance_size_key,
+        raw_counts_key=raw_counts_key,
         overwrite=True,
     )
 

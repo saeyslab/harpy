@@ -15,7 +15,7 @@ from harpy.image._image import _get_spatial_element
 from harpy.table._allocation_intensity import allocate_intensity
 from harpy.table._preprocess import preprocess_proteomics
 from harpy.table._table import add_table_layer
-from harpy.utils._keys import _CELL_INDEX, _CELLSIZE_KEY, _INSTANCE_KEY, _RAW_COUNTS_KEY, ClusteringKey
+from harpy.utils._keys import _RAW_COUNTS_KEY, ClusteringKey
 from harpy.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
@@ -30,6 +30,9 @@ def cluster_intensity_SOM(
     to_coordinate_system: str | Iterable[str] = "global",
     channels: int | str | Iterable[int] | Iterable[str] | None = None,
     chunks: str | int | tuple[int, ...] | None = 10000,
+    instance_key: str = "SOM_cluster_ID",
+    instance_size_key: str = "SOM_cluster_size",
+    index_name: str = "SOM_cluster_ID_index",
     overwrite=False,
 ) -> SpatialData:
     """
@@ -59,6 +62,12 @@ def cluster_intensity_SOM(
         Specifies the channels to be included in the intensity calculation.
     chunks
         Chunk sizes for processing. If provided as a `tuple`, it should contain chunk sizes for `c`, `(z)`, `y`, `x`.
+    instance_key
+        Instance key. The name of the column in :class:`~anndata.AnnData` table `.obs` that will hold the instance ids (SOM cluster IDs).
+    instance_size_key
+        The key in the :class:`~anndata.AnnData` table `.obs` that will hold the size of the instances.
+    index_name
+        The name of the index of the resulting :class:`~anndata.AnnData` table.
     overwrite
         If True, overwrites the `output_layer` if it already exists in `sdata`.
 
@@ -123,6 +132,10 @@ def cluster_intensity_SOM(
             to_coordinate_system=_to_coordinate_system,
             chunks=chunks,
             append=append,
+            calculate_center_of_mass=False,
+            instance_key=instance_key,
+            instance_size_key=instance_size_key,
+            cell_index_name=index_name,
             overwrite=overwrite,
         )
         log.info(
@@ -131,6 +144,7 @@ def cluster_intensity_SOM(
 
     log.info("Start preprocessing.")
     # for size normalization of cluster intensities
+    # note, we could also have done allocate_intensity( mode="sum", obs_stats="counts"), instead of also having to run preprocess_proteomics.
     sdata = preprocess_proteomics(
         sdata,
         labels_layer=labels_layer,
@@ -140,6 +154,8 @@ def cluster_intensity_SOM(
         log1p=False,
         scale=False,
         calculate_pca=False,
+        instance_size_key=instance_size_key,
+        raw_counts_key=_RAW_COUNTS_KEY,
         overwrite=True,
     )
     log.info("End preprocessing.")
@@ -147,11 +163,11 @@ def cluster_intensity_SOM(
     # we are interested in the non-normalized counts (to account for multiple fov's)
     array = sdata.tables[output_layer].layers[_RAW_COUNTS_KEY]
     df = pd.DataFrame(array)
-    df[_INSTANCE_KEY] = sdata.tables[output_layer].obs[_INSTANCE_KEY].values
-    df = df.groupby(_INSTANCE_KEY).sum()
+    df[instance_key] = sdata.tables[output_layer].obs[instance_key].values
+    df = df.groupby(instance_key).sum()
     df.sort_index(inplace=True)
     df_obs = sdata.tables[output_layer].obs.copy()
-    df_obs = df_obs.groupby(_INSTANCE_KEY).sum(_CELLSIZE_KEY)
+    df_obs = df_obs.groupby(instance_key).sum(instance_size_key)
     df_obs.sort_index(inplace=True)
     df = df * (100 / df_obs.values)
 
@@ -162,21 +178,21 @@ def cluster_intensity_SOM(
     cells = pd.DataFrame(index=df.index)
     _uuid_value = str(uuid.uuid4())[:8]
     cells.index = cells.index.map(lambda x: f"{x}_{output_layer}_{_uuid_value}")
-    cells.index.name = _CELL_INDEX
+    cells.index.name = index_name
     adata = AnnData(X=df.values, obs=cells, var=var)
-    adata.obs[_INSTANCE_KEY] = df.index
+    adata.obs[instance_key] = df.index
 
-    adata.obs[_CELLSIZE_KEY] = df_obs[
-        _CELLSIZE_KEY
+    adata.obs[instance_size_key] = df_obs[
+        instance_size_key
     ].values  # for multiple fov's this is the sum of the size over all the clusters
 
     # append metacluster labels to the table using the mapping
-    mapping = mapping.reset_index().rename(columns={"index": _INSTANCE_KEY})  # _INSTANCE_KEY is the cluster ID
-    mapping[_INSTANCE_KEY] = mapping[_INSTANCE_KEY].astype(int)
+    mapping = mapping.reset_index().rename(columns={"index": instance_key})  # instance_key is the cluster ID
+    mapping[instance_key] = mapping[instance_key].astype(int)
     old_index = adata.obs.index
-    adata.obs = pd.merge(adata.obs.reset_index(), mapping, on=[_INSTANCE_KEY], how="left")
+    adata.obs = pd.merge(adata.obs.reset_index(), mapping, on=[instance_key], how="left")
     adata.obs.index = old_index
-    adata.obs = adata.obs.drop(columns=[_CELL_INDEX])
+    adata.obs = adata.obs.drop(columns=[index_name])
 
     assert not adata.obs[ClusteringKey._METACLUSTERING_KEY.value].isna().any(), (
         "Not all SOM cluster IDs could be linked to a metacluster."
@@ -184,8 +200,8 @@ def cluster_intensity_SOM(
 
     # calculate mean intensity per metacluster
     df = adata.to_df().copy()
-    df[[_CELLSIZE_KEY, ClusteringKey._METACLUSTERING_KEY.value]] = adata.obs[
-        [_CELLSIZE_KEY, ClusteringKey._METACLUSTERING_KEY.value]
+    df[[instance_size_key, ClusteringKey._METACLUSTERING_KEY.value]] = adata.obs[
+        [instance_size_key, ClusteringKey._METACLUSTERING_KEY.value]
     ].copy()
 
     if channels is None:
@@ -193,7 +209,7 @@ def cluster_intensity_SOM(
     else:
         channels = list(channels) if isinstance(channels, Iterable) and not isinstance(channels, str) else [channels]
 
-    df = _mean_intensity_per_metacluster(df, channels=channels)
+    df = _mean_intensity_per_metacluster(df, channels=channels, instance_size_key=instance_size_key)
 
     adata.uns[f"{ClusteringKey._METACLUSTERING_KEY.value}"] = df
 
@@ -208,7 +224,7 @@ def cluster_intensity_SOM(
     return sdata
 
 
-def _mean_intensity_per_metacluster(df, channels: Iterable[str]):
+def _mean_intensity_per_metacluster(df, channels: Iterable[str], instance_size_key: str = "SOM_cluster_size"):
     # Assuming df is your dataframe
     def weighted_mean(x, data, weight):
         """Calculate weighted mean for a column."""
@@ -219,7 +235,7 @@ def _mean_intensity_per_metacluster(df, channels: Iterable[str]):
         ClusteringKey._METACLUSTERING_KEY.value,
     ).apply(
         lambda x: pd.Series(
-            {col: weighted_mean(x[col], x, _CELLSIZE_KEY) for col in channels},
+            {col: weighted_mean(x[col], x, instance_size_key) for col in channels},
         ),
         include_groups=False,
     )
@@ -227,12 +243,17 @@ def _mean_intensity_per_metacluster(df, channels: Iterable[str]):
     return weighted_averages.reset_index()
 
 
-def _export_to_ark_format(adata: AnnData, output: str | Path | None = None) -> pd.DataFrame:
+def _export_to_ark_format(
+    adata: AnnData,
+    output: str | Path | None = None,
+    instance_key: str = "SOM_cluster_ID",
+    instance_size_key: str = "SOM_cluster_size",
+) -> pd.DataFrame:
     """Export avg intensity per SOM cluster calculated via `harpy.tb.cluster_intensity` to a csv file that can be visualized by the ark gui."""
     df = adata.to_df().copy()
     df["pixel_meta_cluster"] = adata.obs[ClusteringKey._METACLUSTERING_KEY.value].copy()
-    df["pixel_som_cluster"] = adata.obs[_INSTANCE_KEY].copy()
-    df["count"] = adata.obs[_CELLSIZE_KEY].copy()
+    df["pixel_som_cluster"] = adata.obs[instance_key].copy()
+    df["count"] = adata.obs[instance_size_key].copy()
 
     if output is not None:
         output_file = os.path.join(output, "average_intensities_SOM_clusters.csv")

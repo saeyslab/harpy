@@ -162,6 +162,9 @@ def featurize(
     model_kwargs: Mapping[str, Any] = MappingProxyType({}),
     embedding_obsm_key="embedding",
     to_coordinate_system: str | list[str] = "global",
+    instance_key: str = _INSTANCE_KEY,
+    region_key: str = _REGION_KEY,
+    cell_index_name: str = _CELL_INDEX,
     overwrite: bool = False,
     **kwargs: Any,
 ) -> SpatialData:
@@ -235,6 +238,15 @@ def featurize(
         Name of the feature matrix added to `sdata[output_layer].obsm`.
     to_coordinate_system
         The coordinate system that holds `img_layer` and `labels_layer`.
+    instance_key
+        Instance key. The name of the column in `adata.obs` that will hold the instance ids.
+        Ignored if `table_layer` is not None.
+    region_key
+        Region key. The name of the column in `adata.obs` that holds the name of the elements (`region`) that are annotated by the table layer.
+        Ignored if `table_layer` is not None.
+    cell_index_name
+        The name of the index of the resulting :class:`~anndata.AnnData` table.
+        Ignored if `table_layer` is not None.
     overwrite
         If `True`, overwrites the `output_layer` if it already exists in `sdata`.
     **kwargs
@@ -323,6 +335,8 @@ def featurize(
 
     # now add the features to the table
     if table_layer is None:
+        region_key = region_key
+        instance_key = instance_key
         # create an anndata object with dummy count matrix.
         _region_keys = np.concatenate(
             [np.full(len(ids), label) for label, ids in zip(labels_layer, instances_ids_list, strict=True)]
@@ -331,26 +345,28 @@ def featurize(
 
         index = [f"{id}_{region}" for id, region in zip(instances_ids, _region_keys, strict=True)]
 
-        obs = pd.DataFrame({_INSTANCE_KEY: instances_ids}, index=index)
-        obs.index.name = _CELL_INDEX
+        obs = pd.DataFrame({instance_key: instances_ids}, index=index)
+        obs.index.name = cell_index_name
         # dummy count matrix
         count_matrix = csr_matrix((instances_ids.shape[0], 0))
         # create the anndata object
         adata = ad.AnnData(X=count_matrix, obs=obs)
-        adata.obs[_INSTANCE_KEY] = adata.obs[_INSTANCE_KEY]
+        adata.obs[instance_key] = adata.obs[instance_key]
 
-        adata.obs[_REGION_KEY] = _region_keys
-        adata.obs[_REGION_KEY] = adata.obs[_REGION_KEY].astype("category")
+        adata.obs[region_key] = _region_keys
+        adata.obs[region_key] = adata.obs[region_key].astype("category")
         # create an empty table, with all the layers in them i.e. set region key, instance key etc. instance keys are all unique ids in corresponding labels layer
     else:
         process_table_instance = ProcessTable(sdata, labels_layer=labels_layer, table_layer=table_layer)
+        instance_key = process_table_instance.instance_key
+        region_key = process_table_instance.region_key
         adata = process_table_instance._get_adata()
 
     for i, (_labels_layer, instances_ids, features) in enumerate(
         zip(labels_layer, instances_ids_list, features_list, strict=True)
     ):
         # get the instance_ids in adata, and sort features and instances_ids matrix in the same way.
-        instances_ids_adata = adata[adata.obs[_REGION_KEY] == _labels_layer].obs[_INSTANCE_KEY].values
+        instances_ids_adata = adata[adata.obs[region_key] == _labels_layer].obs[instance_key].values
         _, features = _sort_features(
             instances_ids_adata=instances_ids_adata, instances_ids=instances_ids, features=features
         )
@@ -361,7 +377,9 @@ def featurize(
         sdata,
         adata=adata,
         output_layer=output_layer,
-        region=adata.obs[_REGION_KEY].cat.categories.to_list(),  # equal to labels_layer
+        region=adata.obs[region_key].cat.categories.to_list(),  # equal to labels_layer
+        instance_key=instance_key,
+        region_key=region_key,
         overwrite=overwrite,
     )
 

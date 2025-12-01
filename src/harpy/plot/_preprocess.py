@@ -9,7 +9,10 @@ from harpy.utils._keys import _CELLSIZE_KEY
 
 
 def preprocess_transcriptomics(
-    sdata: SpatialData, table_layer: str = "table_transcriptomics", output: str | None = None
+    sdata: SpatialData,
+    table_layer: str = "table_transcriptomics",
+    instance_size_key: str = _CELLSIZE_KEY,
+    output: str | None = None,
 ) -> None:
     """
     Function plots the size of the nucleus/cell related to the counts.
@@ -20,6 +23,8 @@ def preprocess_transcriptomics(
         SpatialData object containing the spatial data and annotations.
     table_layer
         The table layer in `sdata`.
+    instance_size_key
+        The key in the :class:`~anndata.AnnData` table `.obs` that holds the size of the instances.
     output
         The file path prefix for the plots (default is None).
 
@@ -41,12 +46,12 @@ def preprocess_transcriptomics(
     plt.close()
     sc.pl.pca(
         sdata.tables[table_layer],
-        color=_CELLSIZE_KEY,
+        color=instance_size_key,
         show=False,
         title="PC plot colored by object size",
     )
     if output:
-        plt.savefig(output + f"_{_CELLSIZE_KEY}_pca.png")
+        plt.savefig(output + f"_{instance_size_key}_pca.png")
         plt.close()
     else:
         plt.show()
@@ -62,9 +67,9 @@ def preprocess_transcriptomics(
     plt.close()
 
     fig, ax = plt.subplots()
-    plt.scatter(sdata.tables[table_layer].obs[_CELLSIZE_KEY], sdata.tables[table_layer].obs["total_counts"])
-    ax.set_title(f"{_CELLSIZE_KEY} vs Transcripts Count")
-    ax.set_xlabel(_CELLSIZE_KEY)
+    plt.scatter(sdata.tables[table_layer].obs[instance_size_key], sdata.tables[table_layer].obs["total_counts"])
+    ax.set_title(f"{instance_size_key} vs Transcripts Count")
+    ax.set_xlabel(instance_size_key)
     ax.set_ylabel("Total Counts")
     if output:
         plt.savefig(output + "_size_count.png")

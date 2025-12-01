@@ -10,7 +10,7 @@ from spatialdata import SpatialData
 from harpy.table._table import ProcessTable, add_table_layer
 from harpy.table.cell_clustering._preprocess import cell_clustering_preprocess
 from harpy.table.cell_clustering._utils import _get_mapping
-from harpy.utils._keys import ClusteringKey
+from harpy.utils._keys import _CELL_INDEX, _CELLSIZE_KEY, _INSTANCE_KEY, _RAW_COUNTS_KEY, _REGION_KEY, ClusteringKey
 from harpy.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
@@ -37,13 +37,18 @@ def flowsom(
     index_names_var: Iterable[str] | None = None,
     index_positions_var: Iterable[int] | None = None,
     random_state: int = 100,
+    region_key: str = _REGION_KEY,
+    instance_key: str = _INSTANCE_KEY,
+    cell_index_name: str = _CELL_INDEX,
+    instance_size_key: str = _CELLSIZE_KEY,
+    raw_counts_key: str = _RAW_COUNTS_KEY,
     overwrite: bool = False,
     **kwargs,  # keyword arguments for _flowsom
 ) -> tuple[SpatialData, fs.FlowSOM]:
     """
     Prepares the data obtained from pixel clustering for cell clustering (see docstring of `harpy.tb.cell_clustering_preprocess`) and then executes the FlowSOM clustering algorithm on the resulting table layer (`output_layer`) of the SpatialData object.
 
-    This function applies the FlowSOM clustering algorithm (via `fs.FlowSOM`) on spatial data contained in a SpatialData object.
+    This function applies the FlowSOM clustering algorithm (via :func:`flowsom.FlowSOM`) on spatial data contained in a SpatialData object.
     The algorithm organizes data into self-organizing maps and then clusters these maps, grouping them into `n_clusters`.
     The results of this clustering are added to a table layer in the `sdata` object.
 
@@ -72,6 +77,16 @@ def flowsom(
         Specifies the positions of variables to be used from `sdata.tables[table_layer].var` for clustering. Used if `index_names_var` is None.
     random_state
         A random state for reproducibility of the clustering.
+    instance_key
+        Instance key. The name of the column in :class:`~anndata.AnnData` table `.obs` that will hold the instance ids.
+    region_key
+        Region key. The name of the column in  :class:`~anndata.AnnData` table `.obs` that will hold the name of the element(s) that are annotated by the resulting table.
+    cell_index_name
+        The name of the index of the resulting :class:`~anndata.AnnData` table.
+    instance_size_key
+        The key in the :class:`~anndata.AnnData` table `.obs` that will hold the size of the instances (obtained from `labels_layer_cells`).
+    raw_counts_key
+        Name of the :class:`~anndata.AnnData` layer where the non-preprocessed counts will be stored.
     overwrite
         If True, overwrites the existing data in `output_layer` if it already exists.
     **kwargs
@@ -83,14 +98,14 @@ def flowsom(
 
         - The updated `sdata` with the clustering results added.
 
-        - An instance of `fs.FlowSOM` containing the trained FlowSOM model.
+        - An instance of :func:`flowsom.FlowSOM` containing the trained FlowSOM model.
 
     See Also
     --------
     harpy.im.flowsom : flowsom pixel clustering
     harpy.tb.cell_clustering_preprocess : prepares data for cell clustering.
     """
-    # first do preprocessing
+    # first do preprocessing (this creates an AnnData table)
     sdata = cell_clustering_preprocess(
         sdata,
         labels_layer_cells=labels_layer_cells,
@@ -98,6 +113,11 @@ def flowsom(
         output_layer=output_layer,
         q=q,
         chunks=chunks,
+        region_key=region_key,
+        instance_key=instance_key,
+        cell_index_name=cell_index_name,
+        instance_size_key=instance_size_key,
+        raw_counts_key=raw_counts_key,
         overwrite=overwrite,
     )
 
@@ -139,6 +159,8 @@ def flowsom(
         adata=adata,
         output_layer=output_layer,
         region=process_table_instance.labels_layer,
+        instance_key=process_table_instance.instance_key,
+        region_key=process_table_instance.region_key,
         overwrite=overwrite,
     )
 

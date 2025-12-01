@@ -1,9 +1,10 @@
 import numpy as np
 import pytest
 from spatialdata import SpatialData
+from spatialdata.models import TableModel
 
 from harpy.table._allocation import allocate, bin_counts
-from harpy.utils._keys import _INSTANCE_KEY, _SPATIAL
+from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY, _SPATIAL
 
 
 def test_allocation(sdata_transcripts: SpatialData):
@@ -55,6 +56,88 @@ def test_allocation_append(sdata_transcripts: SpatialData):
     assert sdata_transcripts["table_transcriptomics"].shape == (1302, 96)
 
 
+def test_allocation_append_raises_instance_key(sdata_transcripts_no_backed: SpatialData):
+    sdata_transcripts = sdata_transcripts_no_backed
+    instance_key = "instance_id"
+    region_key = "roi"
+    sdata_transcripts = allocate(
+        sdata_transcripts,
+        labels_layer="segmentation_mask",
+        output_layer="table_transcriptomics",
+        chunks=20000,
+        append=False,
+        instance_key=instance_key,
+        region_key=region_key,
+        overwrite=True,
+    )
+
+    assert (
+        instance_key
+        == sdata_transcripts.tables["table_transcriptomics"].uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY]
+    )
+    assert (
+        region_key
+        == sdata_transcripts.tables["table_transcriptomics"].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]
+    )
+
+    instance_key = f"{instance_key}_test"
+    with pytest.raises(
+        ValueError,
+        match=f"Provided instance key '{instance_key}' is different than the instance key of the AnnData object you wish to append to.*This is not allowed",
+    ):
+        sdata_transcripts = allocate(
+            sdata_transcripts,
+            labels_layer="segmentation_mask_expanded",
+            output_layer="table_transcriptomics",
+            chunks=20000,
+            append=True,  # append to existing table
+            instance_key=instance_key,
+            region_key="roi",
+            overwrite=True,
+        )
+
+
+def test_allocation_append_raises_region_key(sdata_transcripts_no_backed: SpatialData):
+    sdata_transcripts = sdata_transcripts_no_backed
+    instance_key = "instance_id"
+    region_key = "roi"
+    sdata_transcripts = allocate(
+        sdata_transcripts,
+        labels_layer="segmentation_mask",
+        output_layer="table_transcriptomics",
+        chunks=20000,
+        append=False,
+        instance_key=instance_key,
+        region_key=region_key,
+        overwrite=True,
+    )
+
+    assert (
+        instance_key
+        == sdata_transcripts.tables["table_transcriptomics"].uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY]
+    )
+    assert (
+        region_key
+        == sdata_transcripts.tables["table_transcriptomics"].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]
+    )
+
+    region_key = f"{region_key}_test"
+    with pytest.raises(
+        ValueError,
+        match=f"Provided region key '{region_key}' is different than the region key of the AnnData object you wish to append to .*This is not allowed",
+    ):
+        sdata_transcripts = allocate(
+            sdata_transcripts,
+            labels_layer="segmentation_mask_expanded",
+            output_layer="table_transcriptomics",
+            chunks=20000,
+            append=True,  # append to existing table
+            instance_key="instance_id",
+            region_key=region_key,
+            overwrite=True,
+        )
+
+
 def test_allocation_overwrite(sdata_transcripts: SpatialData):
     with pytest.raises(
         ValueError,
@@ -90,6 +173,9 @@ def test_bin_counts(
         labels_layer=labels_layer,
         output_layer=output_table_layer,
         overwrite=True,
+        region_key=_REGION_KEY,
+        instance_key=_INSTANCE_KEY,
+        spatial_key=_SPATIAL,
         append=False,
     )
 

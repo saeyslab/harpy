@@ -423,6 +423,7 @@ class Featurizer:
     def _mean(
         self,
         diameter: int,  # estimated max diameter of cell in y, x
+        instance_key: str = _INSTANCE_KEY,
     ) -> pd.DataFrame:
         """Function calculates mean intensity. Please use optimized RasterAggregator.aggregate_mean() function."""
         # this is dummy function to illustrate working of ._extract_instances, please use optimized RasterAggregator
@@ -443,9 +444,9 @@ class Featurizer:
 
         df = pd.DataFrame(avg_intensity)
 
-        df[_INSTANCE_KEY] = instances_ids
+        df[instance_key] = instances_ids
 
-        return df.sort_values(by=_INSTANCE_KEY).reset_index(drop=True)
+        return df.sort_values(by=instance_key).reset_index(drop=True)
 
 
 def _transpose_chunks(array: da.Array, depth: dict[int, int]):
