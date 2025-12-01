@@ -6,7 +6,6 @@ import pytest
 from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
-from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY
 from harpy.utils._query import bounding_box_query
 
 
@@ -24,7 +23,9 @@ def test_bounding_box_query(sdata_transcripts, tmpdir, crd):
     assert isinstance(sdata_transcripts_queried, SpatialData)
     for _table_name in [*sdata_transcripts_queried.tables]:
         adata = sdata_transcripts_queried.tables[_table_name]
-        ids = adata[adata.obs[_REGION_KEY] == labels_layer].obs[_INSTANCE_KEY].values
+        region_key = adata.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]
+        instance_key = adata.uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY]
+        ids = adata[adata.obs[region_key] == labels_layer].obs[instance_key].values
         labels_queried = da.unique(sdata_transcripts_queried.labels[labels_layer].data).compute()
         labels_queried = labels_queried[labels_queried != 0]
 
@@ -74,7 +75,9 @@ def test_bounding_box_query_multiple_coordinate_systems(sdata_transcripts_mul_co
     for _labels_layer in labels_layer:
         for _table_name in [*sdata_transcripts_queried.tables]:
             adata = sdata_transcripts_queried.tables[_table_name]
-            ids = adata[adata.obs[_REGION_KEY] == _labels_layer].obs[_INSTANCE_KEY].values
+            region_key = adata.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]
+            instance_key = adata.uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY]
+            ids = adata[adata.obs[region_key] == _labels_layer].obs[instance_key].values
             labels_queried = da.unique(sdata_transcripts_queried.labels[_labels_layer].data).compute()
             labels_queried = labels_queried[labels_queried != 0]
 
@@ -113,7 +116,8 @@ def test_bounding_box_query_multiple_coordinate_systems_crd_none(sdata_transcrip
     assert _labels_layer not in sdata_transcripts_queried.labels
     for _table_name in [*sdata_transcripts_queried.tables]:
         # check that all elements that are annoted by labels_a1_1  will be removed from resulting sdata tables.
-        assert _labels_layer not in sdata_transcripts_queried.tables[_table_name].obs[_REGION_KEY].values
+        region = sdata_transcripts_queried.tables[_table_name].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY]
+        assert _labels_layer not in region
         assert (
             _labels_layer
             not in sdata_transcripts_queried.tables[_table_name].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY]
@@ -121,7 +125,9 @@ def test_bounding_box_query_multiple_coordinate_systems_crd_none(sdata_transcrip
     _labels_layer = "labels_a1_2"
     for _table_name in [*sdata_transcripts_queried.tables]:
         adata = sdata_transcripts_queried.tables[_table_name]
-        ids = adata[adata.obs[_REGION_KEY] == _labels_layer].obs[_INSTANCE_KEY].values
+        region_key = adata.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]
+        instance_key = adata.uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY]
+        ids = adata[adata.obs[region_key] == _labels_layer].obs[instance_key].values
         labels_queried = da.unique(sdata_transcripts_queried.labels[_labels_layer].data).compute()
         labels_queried = labels_queried[labels_queried != 0]
 

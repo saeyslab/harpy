@@ -50,6 +50,9 @@ def flowsom(
     client: Client | None = None,
     persist_intermediate: bool = True,
     write_intermediate: bool = True,
+    instance_key: str = _INSTANCE_KEY,
+    region_key: str = _REGION_KEY,
+    spatial_key: str = _SPATIAL,
     overwrite: bool = False,
     **kwargs,  # keyword arguments passed to _flowsom
 ) -> tuple[SpatialData, fs.FlowSOM, pd.Series]:
@@ -94,6 +97,17 @@ def flowsom(
         If set to `True`, an intermediate Zarr store will be used during sampling from `img_layer` for flowsom training.
         Enable this option to reduce RAM usage, especially if `img_layer` or any of its components is large.
         Ignored if `sdata` is not backed by a Zarr store.
+    instance_key
+        Instance key. The name of the column in the `.obs` attribute of the :class:`~anndata.AnnData` table at slot "cell_data"
+        of the :class:`mudata.MuData` object (which is an attribute of the returned :class:`flowsom.FlowSOM` object) that will hold the instance ids.
+    region_key
+        Region key. The name of the column in the `.obs` attribute of the :class:`~anndata.AnnData` table at slot "cell_data"
+        of the :class:`mudata.MuData` object (which is an attribute of the returned :class:`flowsom.FlowSOM` object)
+        that will hold the name of the image layer that is annotated by the table.
+    spatial_key
+        Spatial key. The name of the slot in the `.obsm` attribute of the :class:`~anndata.AnnData` table at slot "cell_data"
+        of the :class:`mudata.MuData` object (which is an attribute of the returned :class:`flowsom.FlowSOM` object)
+        that will hold the (z),y,x coordinate of the pixel.
     overwrite
         If `True`, overwrites the `output_layer_cluster` and/or `output_layer_metacluster` if it already exists in `sdata`.
     **kwargs
@@ -189,16 +203,16 @@ def flowsom(
 
     adata = AnnData(X=arr_sampled[:, :-3], var=var)
 
-    adata.obs[_INSTANCE_KEY] = np.arange(arr_sampled.shape[0])
-    adata.obs[_REGION_KEY] = pd.Categorical(_region_keys)
+    adata.obs[instance_key] = np.arange(arr_sampled.shape[0])
+    adata.obs[region_key] = pd.Categorical(_region_keys)
 
     # add coordinates to anndata
     if to_squeeze:
         # 2D case, only save y,x position
-        adata.obsm[_SPATIAL] = arr_sampled[:, -2:]
+        adata.obsm[spatial_key] = arr_sampled[:, -2:]
     else:
         # 3D case, save z,y,x position
-        adata.obsm[_SPATIAL] = arr_sampled[:, -3:]
+        adata.obsm[spatial_key] = arr_sampled[:, -3:]
 
     xdim = kwargs.pop("xdim", 10)
     ydim = kwargs.pop("ydim", 10)

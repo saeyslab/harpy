@@ -10,11 +10,11 @@ import scanpy as sc
 from scipy.sparse import issparse
 from spatialdata import SpatialData
 
-from harpy.image._image import _get_spatial_element
+from harpy.image._image import get_dataarray
 from harpy.shape._shape import filter_shapes_layer
 from harpy.table._table import ProcessTable, add_table_layer
 from harpy.utils._aggregate import _get_mask_area
-from harpy.utils._keys import _CELLSIZE_KEY, _INSTANCE_KEY, _RAW_COUNTS_KEY, _REGION_KEY
+from harpy.utils._keys import _CELLSIZE_KEY, _RAW_COUNTS_KEY
 from harpy.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
@@ -35,24 +35,26 @@ def preprocess_transcriptomics(
     max_value_scale: float | None = 10,
     n_comps: int = 50,
     update_shapes_layers: bool = True,
+    instance_size_key: str = _CELLSIZE_KEY,
+    raw_counts_key: str = _RAW_COUNTS_KEY,
     overwrite: bool = False,
 ) -> SpatialData:
     """
     Preprocess a table (AnnData) attribute of a SpatialData object for transcriptomics data.
 
-    Performs filtering (via `scanpy.pp.filter_cells` and `scanpy.pp.filter_genes` ) and optional normalization (on size or via `scanpy.sc.pp.normalize_total`),
-    log transformation (`scanpy.pp.log1p`), highly variable genes selection (`scanpy.pp.highly_variable_genes`),
-    scaling (`scanpy.pp.scale`), and PCA calculation (`scanpy.tl.pca`) for transcriptomics data
-    contained in the `sdata.tables[table_layer]`. QC metrics are added to `sdata.tables[output_layer].obs` using `scanpy.pp.calculate_qc_metrics`.
+    Performs filtering (via :func:`~scanpy.pp.filter_cells` and :func:`~scanpy.pp.filter_genes` ) and optional normalization (on size or via :func:`~scanpy.sc.pp.normalize_total`),
+    log transformation (:func:`~scanpy.pp.log1p`), highly variable genes selection (:func:`~scanpy.pp.highly_variable_genes`),
+    scaling (:func:`~scanpy.pp.scale`), and PCA calculation (:func:`~scanpy.tl.pca`) for transcriptomics data
+    contained in the `sdata.tables[table_layer]`. QC metrics are added to `sdata.tables[output_layer].obs` using :func:`~scanpy.pp.calculate_qc_metrics`.
 
     Parameters
     ----------
     sdata
         The input SpatialData object.
     labels_layer
-        The labels layer(s) of `sdata` used to select the cells via the `_REGION_KEY` in `sdata.tables[table_layer].obs`.
+        The labels layer(s) of `sdata` used to select the cells via the region key in `sdata.tables[table_layer].obs`.
         Note that if `output_layer` is equal to `table_layer` and overwrite is `True`,
-        cells in `sdata.tables[table_layer]` linked to other `labels_layer` (via the `_REGION_KEY`), will be removed from `sdata.tables[table_layer]`
+        cells in `sdata.tables[table_layer]` linked to other `labels_layer` (via the region key), will be removed from `sdata.tables[table_layer]`
         (also from the backing zarr store if it is backed).
     table_layer
         The table layer in `sdata` on which to perform preprocessing on.
@@ -60,27 +62,33 @@ def preprocess_transcriptomics(
         The output table layer in `sdata` to which preprocessed table layer will be written.
     percent_top
         List of ranks (where genes are ranked by expression) at which the cumulative proportion of expression will be reported as a percentage.
-        Passed to `scanpy.pp.calculate_qc_metrics`.
+        Passed to :func:`~scanpy.pp.calculate_qc_metrics`.
     min_counts
-        Minimum number of genes a cell should contain to be kept (passed to `scanpy.pp.filter_cells`).
+        Minimum number of genes a cell should contain to be kept (passed to :func:`~scanpy.pp.filter_cells`).
     min_cells
-        Minimum number of cells a gene should be in to be kept (passed to `scanpy.pp.filter_genes`).
+        Minimum number of cells a gene should be in to be kept (passed to :func:`~scanpy.pp.filter_genes`).
     size_norm
         If `True`, normalization is based on the size of the nucleus/cell. Resulting values are multiplied by 100 after normalization.
     library_norm
-        If `True`, `scanpy.sc.pp.normalize_total` is used for normalization.
+        If `True`, :func:`~scanpy.sc.pp.normalize_total` is used for normalization.
     highly_variable_genes
-        If `True`, will only retain highly variable genes, as calculated by `scanpy.pp.highly_variable_genes`.
+        If `True`, will only retain highly variable genes, as calculated by :func:`~scanpy.pp.highly_variable_genes`.
     highly_variable_genes_kwargs
-        Keyword arguments passed to `scanpy.pp.highly_variable_genes`. Ignored if `highly_variable_genes` is `False`.
+        Keyword arguments passed to :func:`~scanpy.pp.highly_variable_genes`. Ignored if `highly_variable_genes` is `False`.
     max_value_scale
-        The maximum value to which data will be scaled, when scaling the data to have zero mean and a variance of one, using `scanpy.pp.scale`.
+        The maximum value to which data will be scaled, when scaling the data to have zero mean and a variance of one, using :func:`~scanpy.pp.scale`.
     n_comps
         Number of principal components to calculate.
     update_shapes_layers
         Whether to filter the shapes layers associated with `labels_layer`.
-        If set to `True`, cells that do not appear in resulting `output_layer` (with `_REGION_KEY` equal to `labels_layer`) will be removed from the shapes layers (via `_INSTANCE_KEY`) in the `sdata` object.
+        If set to `True`, cells that do not appear in resulting `output_layer` (with the region key equal to `labels_layer`) will be removed from the shapes layers (via region key) in the `sdata` object.
         Filtered shapes will be added to `sdata` with prefix 'filtered_low_counts'.
+        This parameter is deprecated, and will be removed in a future version.
+    instance_size_key
+        The key in the :class:`~anndata.AnnData` table `.obs` that holds the size of the instances. If `instance_size_key` is not found in `.obs` it will be calculated from the `labels_layer`.
+        Ignored if `size_norm` is `False`.
+    raw_counts_key
+        Name of the :class:`~anndata.AnnData` layer where the non-preprocessed counts will be stored.
     overwrite
         If True, overwrites the `output_layer` if it already exists in `sdata`.
 
@@ -130,6 +138,8 @@ def preprocess_transcriptomics(
         filter_cells_kwargs={"min_counts": min_counts},
         filter_genes_kwargs={"min_cells": min_cells},
         pca_kwargs={"n_comps": n_comps},
+        instance_size_key=instance_size_key,
+        raw_counts_key=raw_counts_key,
         overwrite=overwrite,
     )
     return sdata
@@ -149,13 +159,15 @@ def preprocess_proteomics(
     max_value_q: float | None = 1,
     calculate_pca: bool = False,
     n_comps: int = 50,
+    instance_size_key: str = _CELLSIZE_KEY,
+    raw_counts_key: str = _RAW_COUNTS_KEY,
     overwrite: bool = False,
 ) -> SpatialData:
     """
     Preprocess a table (AnnData) attribute of a SpatialData object for proteomics data.
 
-    Performs optional normalization (on size or via `scanpy.sc.pp.normalize_total`), log transformation
-    (`scanpy.pp.log1p`), scaling (`scanpy.pp.scale`)/ quantile normalization and PCA calculation (`scanpy.tl.pca`)
+    Performs optional normalization (on size or via :func:`~scanpy.sc.pp.normalize_total`), log transformation
+    (:func:`~scanpy.pp.log1p`), scaling (:func:`~scanpy.pp.scale`)/ quantile normalization and PCA calculation (:func:`~scanpy.tl.pca`)
     for proteomics data contained in `sdata`.
 
     Parameters
@@ -163,9 +175,9 @@ def preprocess_proteomics(
     sdata
         The input SpatialData object.
     labels_layer
-        The labels layer(s) of `sdata` used to select the cells via the _REGION_KEY  in `sdata.tables[table_layer].obs`.
+        The labels layer(s) of `sdata` used to select the cells via the region key in `sdata.tables[table_layer].obs`.
         Note that if `output_layer` is equal to `table_layer` and overwrite is True,
-        cells in `sdata.tables[table_layer]` linked to other `labels_layer` (via the _REGION_KEY), will be removed from `sdata.tables[table_layer]`.
+        cells in `sdata.tables[table_layer]` linked to other `labels_layer` (via the region key), will be removed from `sdata.tables[table_layer]`.
         If a list of labels layers is provided, they will therefore be preprocessed together (e.g. multiple samples).
     table_layer
         The table layer in sdata to apply preprocessing to.
@@ -175,9 +187,9 @@ def preprocess_proteomics(
     size_norm
         If `True`, normalization is based on the size of the nucleus/cell. Resulting values are multiplied by 100 after normalization.
     library_norm
-        If `True`, `scanpy.sc.pp.normalize_total` is used for normalization.
+        If `True`, :func:`~scanpy.sc.pp.normalize_total` is used for normalization.
     log1p
-        If `True`, applies log1p transformation to the data, after optional normalization.
+        If `True`, applies log1p transformation to the data (via :func:`~scanpy.pp.log1p`), after optional normalization.
     scale
         If `True`, scales the data to have zero mean and a variance of one. The scaling is capped at `max_value_scale`.
     max_value_scale
@@ -192,6 +204,12 @@ def preprocess_proteomics(
         If `True`, calculates principal component analysis (PCA) on the data.
     n_comps
         Number of principal components to calculate. Ignored if `calculate_pca` is False.
+    instance_size_key
+        The key in the :class:`~anndata.AnnData` table `.obs` that holds the size of the instances. If `instance_size_key` is not found in `.obs` it will be calculated from the `labels_layer`.
+        Ignored if `size_norm` is `False`.
+    raw_counts_key
+        Name of the :class:`~anndata.AnnData` layer where the non-preprocessed intensities will be stored.
+        This parameter is ignored if no preprocessing is applied (i.e. `size_norm`, `library_norm`, `log1p`, `scale` are all `False` and q is `None`).
     overwrite
         If `True`, overwrites the `output_layer` if it already exists in `sdata`.
 
@@ -237,6 +255,8 @@ def preprocess_proteomics(
         calculate_pca=calculate_pca,
         update_shapes_layers=False,
         pca_kwargs={"n_comps": n_comps},
+        instance_size_key=instance_size_key,
+        raw_counts_key=raw_counts_key,
         overwrite=overwrite,
     )
     return sdata
@@ -268,6 +288,8 @@ class Preprocess(ProcessTable):
             {}
         ),  # keyword arguments passed to sc.pp.highly_variable_genes
         pca_kwargs: Mapping[str, Any] = MappingProxyType({}),  # keyword arguments passed to sc.tl.pca
+        instance_size_key: str = _CELLSIZE_KEY,
+        raw_counts_key: str = _RAW_COUNTS_KEY,
         overwrite: bool = False,
     ) -> SpatialData:
         adata = self._get_adata()
@@ -285,31 +307,39 @@ class Preprocess(ProcessTable):
             # we do not want to loose the index (_CELL_INDEX)
             old_index = adata.obs.index
             index_name = adata.obs.index.name or "index"
-            if _CELLSIZE_KEY in adata.obs.columns:
-                log.warning(f"Column with name '{_CELLSIZE_KEY}' already exists. Removing column '{_CELLSIZE_KEY}'.")
-                adata.obs = adata.obs.drop(columns=_CELLSIZE_KEY)
+            if instance_size_key in adata.obs.columns:
+                log.warning(
+                    f"Column with name '{instance_size_key}' already exists. Removing column '{instance_size_key}'."
+                )
+                adata.obs = adata.obs.drop(columns=instance_size_key)
             for i, _labels_layer in enumerate(self.labels_layer):
                 log.info(f"Calculating cell size from provided labels_layer '{_labels_layer}'")
-                se = _get_spatial_element(self.sdata, layer=_labels_layer)
-                _shapesize = _get_mask_area(se.data if se.data.ndim == 3 else se.data[None, ...])
-                _shapesize[_REGION_KEY] = _labels_layer
+                se = get_dataarray(self.sdata, layer=_labels_layer)
+                _shapesize = _get_mask_area(
+                    se.data if se.data.ndim == 3 else se.data[None, ...],
+                    instance_key=self.instance_key,
+                    instance_size_key=instance_size_key,
+                )
+                _shapesize[self.region_key] = _labels_layer
                 if i == 0:
                     shapesize = _shapesize
                 else:
                     shapesize = pd.concat([shapesize, _shapesize], ignore_index=True)
-            # note that we checked that adata.obs[ _INSTANCE_KEY ] is unique for given region (see self._get_adata())
-            adata.obs = pd.merge(adata.obs.reset_index(), shapesize, on=[_INSTANCE_KEY, _REGION_KEY], how="left")
+            # note that we checked that adata.obs[ self.instance_key ] is unique for given region (see self._get_adata())
+            adata.obs = pd.merge(
+                adata.obs.reset_index(), shapesize, on=[self.instance_key, self.region_key], how="left"
+            )
             adata.obs.index = old_index
             adata.obs = adata.obs.drop(columns=[index_name])
 
         if any([size_norm, library_norm, log1p, scale]) or q is not None:
-            log.info(f"Saving non preprocessed data matrix to '.layers[{_RAW_COUNTS_KEY}]'.")
-            if _RAW_COUNTS_KEY in adata.layers:
+            log.info(f"Saving non preprocessed data matrix to the AnnData '.layers[{raw_counts_key}]'.")
+            if raw_counts_key in adata.layers:
                 log.warning(
-                    f"Key '{_RAW_COUNTS_KEY}' already exists in '.layers'. "
+                    f"Key '{raw_counts_key}' already exists in '.layers'. "
                     "You are probably preprocessing an already preprocessed table."
                 )
-            adata.layers[_RAW_COUNTS_KEY] = adata.X.copy()
+            adata.layers[raw_counts_key] = adata.X.copy()
 
         if size_norm and library_norm:
             raise ValueError(
@@ -318,7 +348,7 @@ class Preprocess(ProcessTable):
 
         if size_norm:
             X_size_norm = (
-                adata.X.T * 100 / adata.obs[_CELLSIZE_KEY].values
+                adata.X.T * 100 / adata.obs[instance_size_key].values
             ).T  # *100 for numerical stability. Otherwise sc.pp.highly_variable_genes could filter too many values.
             if issparse(adata.X):
                 adata.X = X_size_norm.tocsr()
@@ -379,6 +409,8 @@ class Preprocess(ProcessTable):
             adata=adata,
             output_layer=output_layer,
             region=self.labels_layer,
+            instance_key=self.instance_key,
+            region_key=self.region_key,
             overwrite=overwrite,
         )
 

@@ -42,7 +42,7 @@ def cluster_cleanliness(
     color_dict
         Custom colormap dictionary for coloring cell types in the barplot.
     celltype_column
-        Name of the column in `sdata.tables[table_layer]` containing cell type annotations (default is `_ANNOTATION_KEY`).
+        Name of the column in `sdata.tables[table_layer].obs` containing cell type annotations.
     output
         The file path prefix for the plots (default is None).
         If provided, the plots will be saved to the specified output file path with "_barplot.png",
@@ -62,7 +62,7 @@ def cluster_cleanliness(
         .fillna(0)
     )
     stacked_norm = stacked.div(stacked.sum(axis=1), axis=0)
-    stacked_norm.columns = list(sdata.tables[table_layer].obs[_ANNOTATION_KEY].cat.categories)
+    stacked_norm.columns = list(sdata.tables[table_layer].obs[celltype_column].cat.categories)
     fig, ax = plt.subplots(1, 1, figsize=(10, 5))
 
     if color_dict:

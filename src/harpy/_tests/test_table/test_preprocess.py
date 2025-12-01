@@ -1,7 +1,8 @@
 import pytest
+from spatialdata.models import TableModel
 
 from harpy.table._preprocess import preprocess_proteomics, preprocess_transcriptomics
-from harpy.utils._keys import _CELLSIZE_KEY, _RAW_COUNTS_KEY, _REGION_KEY
+from harpy.utils._keys import _CELLSIZE_KEY, _RAW_COUNTS_KEY
 
 
 @pytest.mark.parametrize("q", [None, 0.999])
@@ -12,6 +13,7 @@ def test_preprocess_proteomics(sdata_multi_c_no_backed, q):
         table_layer="table_intensities",
         output_layer="table_intensities_preprocessed",
         q=q,
+        instance_size_key=_CELLSIZE_KEY,
         overwrite=True,
     )
 
@@ -19,15 +21,16 @@ def test_preprocess_proteomics(sdata_multi_c_no_backed, q):
     assert sdata_multi_c_no_backed["table_intensities_preprocessed"].shape == (674, 22)
 
     adata = sdata_multi_c_no_backed.tables["table_intensities_preprocessed"]
+    region_key = adata.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]
     assert (adata.raw is None) if q is None else (adata.raw is not None)
-    assert len(adata.obs[_REGION_KEY].cat.categories) == 1
-    assert "masks_whole" in adata.obs[_REGION_KEY].cat.categories
+    assert len(adata.obs[region_key].cat.categories) == 1
+    assert "masks_whole" in adata.obs[region_key].cat.categories
     assert _CELLSIZE_KEY in adata.obs.columns
     assert "log1p" in adata.uns.keys()
 
 
 def test_preprocess_proteomics_multiple_samples(sdata_multi_c_no_backed):
-    # instead of one labels layer, user could give up multiple labels layers (linked to sdata.tables[table_layer] via the _REGION_KEY),
+    # instead of one labels layer, user could give up multiple labels layers (linked to sdata.tables[table_layer] via the region key),
     # which could represent multiple samples that need to be preprocessed together.
     # in this dummy example, we preprocess cell masks and corresponding nuclear masks together, which does not make much sense in practice.
     sdata_multi_c_no_backed = preprocess_proteomics(
@@ -35,6 +38,7 @@ def test_preprocess_proteomics_multiple_samples(sdata_multi_c_no_backed):
         labels_layer=["masks_whole", "masks_nuclear_aligned"],
         table_layer="table_intensities",
         output_layer="table_intensities_preprocessed",
+        instance_size_key=_CELLSIZE_KEY,
         overwrite=True,
     )
 
@@ -42,9 +46,10 @@ def test_preprocess_proteomics_multiple_samples(sdata_multi_c_no_backed):
     assert sdata_multi_c_no_backed["table_intensities_preprocessed"].shape == (1299, 22)
 
     adata = sdata_multi_c_no_backed.tables["table_intensities_preprocessed"]
-    assert len(adata.obs[_REGION_KEY].cat.categories) == 2
-    assert "masks_whole" in adata.obs[_REGION_KEY].cat.categories
-    assert "masks_nuclear_aligned" in adata.obs[_REGION_KEY].cat.categories
+    region_key = adata.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]
+    assert len(adata.obs[region_key].cat.categories) == 2
+    assert "masks_whole" in adata.obs[region_key].cat.categories
+    assert "masks_nuclear_aligned" in adata.obs[region_key].cat.categories
     assert _CELLSIZE_KEY in adata.obs.columns
     assert "log1p" in adata.uns.keys()
 
@@ -55,13 +60,15 @@ def test_preprocess_proteomics_overwrite(sdata_multi_c_no_backed):
         labels_layer="masks_whole",
         table_layer="table_intensities",
         output_layer="table_intensities",
+        instance_size_key=_CELLSIZE_KEY,
         overwrite=True,
     )
     # running preprocess takes cells corresponding to certain labels_layer from sdata.tables[table_layer].
     adata = sdata_multi_c_no_backed.tables["table_intensities"]
+    region_key = adata.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]
     assert adata.shape == (674, 22)
-    assert len(adata.obs[_REGION_KEY].cat.categories) == 1
-    assert "masks_whole" in adata.obs[_REGION_KEY].cat.categories
+    assert len(adata.obs[region_key].cat.categories) == 1
+    assert "masks_whole" in adata.obs[region_key].cat.categories
     assert _CELLSIZE_KEY in adata.obs.columns
     assert "log1p" in adata.uns.keys()
 
@@ -77,9 +84,12 @@ def test_preprocess_transcriptomics(sdata_transcripts_no_backed, highly_variable
         highly_variable_genes=highly_variable_genes,
         size_norm=size_norm,
         library_norm=not size_norm,
+        instance_size_key=_CELLSIZE_KEY,
+        raw_counts_key=_RAW_COUNTS_KEY,
         overwrite=True,
     )
     adata = sdata_transcripts_no_backed.tables["table_transcriptomics"]
+    region_key = adata.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]
     if highly_variable_genes:
         if size_norm:
             assert adata.shape == (616, 17)
@@ -93,8 +103,8 @@ def test_preprocess_transcriptomics(sdata_transcripts_no_backed, highly_variable
         assert adata.shape == (616, 87)
         assert adata.raw.to_adata().shape == (616, 87)
         assert adata.layers[_RAW_COUNTS_KEY].shape == (616, 87)
-    assert len(adata.obs[_REGION_KEY].cat.categories) == 1
-    assert "segmentation_mask" in adata.obs[_REGION_KEY].cat.categories
+    assert len(adata.obs[region_key].cat.categories) == 1
+    assert "segmentation_mask" in adata.obs[region_key].cat.categories
     assert _CELLSIZE_KEY in adata.obs.columns
     assert "log1p" in adata.uns.keys()
     assert "pca" in adata.uns.keys()

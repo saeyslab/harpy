@@ -78,6 +78,10 @@ def plot_sdata(
     ax:
        Matplotlib axes object to plot on.
 
+    Returns
+    -------
+    Matplotlib Axes.
+
     Raises
     ------
     ValueError
@@ -158,12 +162,12 @@ def plot_sdata(
     """
     if table_layer is not None and labels_layer is None:
         raise ValueError(
-            f"Please specify a labels layer (which annotates the table layer '{table_layer}') if 'table_layer' is specified."
+            f"Please specify a labels layer (which is annotated by the table layer '{table_layer}') if 'table_layer' is specified."
         )
     if color is not None and table_layer is None:
         raise ValueError(
             f"Please specify a 'table_layer' if 'color' is specified. "
-            f"Choose from {[*sdata.tables]}, and make sure the table layer is annotated by '{labels_layer}'."
+            f"Choose from {[*sdata.tables]}, and make sure the table layer annotates the labels layer '{labels_layer}'."
         )
 
     if table_layer is not None:
@@ -173,7 +177,7 @@ def plot_sdata(
         mask = adata.obs[region_key] == labels_layer
         if not mask.any():
             raise ValueError(
-                f"The labels layer '{labels_layer}' does not seem to annotate the table layer '{table_layer}'."
+                f"The labels layer '{labels_layer}' does not seem to be annotated by the table layer '{table_layer}'."
             )
 
     if "coordinate_systems" in show_kwargs.keys():

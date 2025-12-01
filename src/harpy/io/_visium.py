@@ -18,6 +18,8 @@ def visium(
     dataset_id: str | None = None,
     counts_file: str = VisiumKeys.FILTERED_COUNTS_FILE,
     fullres_image_file: str | Path | None = None,
+    instance_key: str = _INSTANCE_KEY,
+    region_key: str = _REGION_KEY,
     output: str | Path | None = None,
 ) -> SpatialData:
     """
@@ -40,6 +42,10 @@ def visium(
         `'raw_feature_bc_matrix.h5'`.
     fullres_image_file
         Path to the full-resolution image.
+    instance_key
+        Instance key. The name of the column in :class:`~anndata.AnnData` table `.obs` that will hold the instance ids.
+    region_key
+        Region key. The name of the column in  :class:`~anndata.AnnData` table `.obs` that will hold the name of the elements that annotate the table.
     output
         The path where the resulting `SpatialData` object will be backed. If None, it will not be backed to a zarr store.
     """
@@ -57,18 +63,18 @@ def visium(
 
         _old_instance_key = sdata[table_layer].uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY]
         _old_region_key = sdata[table_layer].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]
-        adata.obs[_REGION_KEY] = pd.Categorical(adata.obs[_old_region_key].astype(str) + "_labels")
+        adata.obs[region_key] = pd.Categorical(adata.obs[_old_region_key].astype(str) + "_labels")
         if adata.obs[_old_instance_key].astype(int).min() == 0:  # Make sure index starts from 1
-            adata.obs[_INSTANCE_KEY] = adata.obs[_old_instance_key].astype(int) + 1
+            adata.obs[instance_key] = adata.obs[_old_instance_key].astype(int) + 1
         else:
-            adata.obs[_INSTANCE_KEY] = adata.obs[_old_instance_key].astype(int)
+            adata.obs[instance_key] = adata.obs[_old_instance_key].astype(int)
 
         adata.uns.pop(TableModel.ATTRS_KEY)
         adata = TableModel.parse(
             adata,
-            region_key=_REGION_KEY,
-            region=adata.obs[_REGION_KEY].cat.categories.to_list(),
-            instance_key=_INSTANCE_KEY,
+            region=adata.obs[region_key].cat.categories.to_list(),
+            region_key=region_key,
+            instance_key=instance_key,
         )
 
         assert len(sdata.shapes[dataset_id]) == len(adata), (
@@ -76,9 +82,9 @@ def visium(
         )
 
         sdata.shapes[dataset_id].index = (
-            adata.obs.set_index(_old_instance_key).loc[sdata.shapes[dataset_id].index, _INSTANCE_KEY].values
+            adata.obs.set_index(_old_instance_key).loc[sdata.shapes[dataset_id].index, instance_key].values
         )
-        sdata.shapes[dataset_id].index.name = _INSTANCE_KEY
+        sdata.shapes[dataset_id].index.name = instance_key
 
         if _old_region_key in adata.obs.columns:
             adata.obs.drop(columns=_old_region_key, inplace=True)

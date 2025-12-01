@@ -17,18 +17,32 @@ class TableLayerManager:
         adata: AnnData,
         output_layer: str,
         region: list[str] | None,  # list of labels_layers
-        instance_key: str = _INSTANCE_KEY,
-        region_key: str = _REGION_KEY,
+        instance_key: str = _INSTANCE_KEY,  # ignored if region is None
+        region_key: str = _REGION_KEY,  # ignored if region is None
         overwrite: bool = False,
     ) -> SpatialData:
         if region is not None:
-            assert region_key in adata.obs.columns, (
-                f"Provided 'AnnData' object should contain a column '{region_key}' in 'adata.obs'. Linking the observations to a labels layer in 'sdata'."
-            )
-            assert instance_key in adata.obs.columns, (
-                f"Provided 'AnnData' object should contain a column '{instance_key}' in 'adata.obs'. Linking the observations to a labels layer in 'sdata'."
-            )
-
+            # do some sanity checks on the provided instance and region keys
+            # e.g. to catch case that adata object would already be annotated with another region or instance key
+            if TableModel.ATTRS_KEY in adata.uns.keys():
+                if TableModel.REGION_KEY_KEY in adata.uns[TableModel.ATTRS_KEY]:
+                    if region_key != adata.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]:
+                        raise ValueError(
+                            f"The provided region key '{region_key}' is not equal to the region key in the AnnData object ({adata.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]}). This is not allowed."
+                        )
+                if TableModel.INSTANCE_KEY in adata.uns[TableModel.ATTRS_KEY]:
+                    if instance_key != adata.uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY]:
+                        raise ValueError(
+                            f"The provided instance key '{instance_key}' is not equal to the instance key in the AnnData object ({adata.uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY]}). This is not allowed."
+                        )
+            if region_key not in adata.obs.columns:
+                raise ValueError(
+                    f"Provided 'AnnData' object should contain a column '{region_key}' in 'adata.obs'. Linking the observations to a region (e.g. a labels layer) in 'sdata'."
+                )
+            if instance_key not in adata.obs.columns:
+                raise ValueError(
+                    f"Provided 'AnnData' object should contain a column '{instance_key}' in 'adata.obs'. Linking the observations to a region (e.g. a labels layer) in 'sdata'."
+                )
             # need to remove spatialdata_attrs, otherwise parsing gives error (TableModel.parse will add spatialdata_attrs back)
             if TableModel.ATTRS_KEY in adata.uns.keys():
                 adata.uns.pop(TableModel.ATTRS_KEY)

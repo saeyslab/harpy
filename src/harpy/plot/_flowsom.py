@@ -45,12 +45,12 @@ def pixel_clusters(
     **kwargs,  # passed to pl.show() of spatialdata_plot
 ) -> Axes:
     """
-    Visualize spatial distribution of pixel clusters based on labels in a `SpatialData` object, obtained using :func:`harpy.im.flowsom`.
+    Visualize spatial distribution of pixel clusters based on labels in a :class:`~spatialdata.SpatialData` object, obtained using :func:`harpy.im.flowsom`.
 
     Parameters
     ----------
     sdata
-        The input SpatialData object.
+        The input :class:`~spatialdata.SpatialData` object.
     labels_layer
         The layer in `sdata` containing labels used to identify clusters.
     crd
@@ -168,6 +168,7 @@ def pixel_clusters_heatmap(
     clip_value: float | None = 3,
     ax: Axes = None,
     output: str | Path | None = None,
+    instance_key: str = "SOM_cluster_ID",
     figsize: tuple[int, int] = (20, 20),
     fig_kwargs: Mapping[str, Any] = MappingProxyType({}),  # kwargs passed to plt.figure, e.g. dpi
     **kwargs,  # kwargs passed to sns.heatmap
@@ -192,6 +193,8 @@ def pixel_clusters_heatmap(
         Matplotlib axes object to plot on. If None, a new figure is created.
     output
         The path to save the generated heatmap.
+    instance_key
+        Instance key. The name of the column in :class:`~anndata.AnnData` table `.obs` that holds the instance ids (SOM cluster IDs).
     figsize
         Tuple specifying the size of the figure in inches as `(width, height)`.
         The width determines the spacing available for cluster IDs, while the height adjusts space for channels.
@@ -233,12 +236,12 @@ def pixel_clusters_heatmap(
     """
     # clusters
     df = sdata.tables[table_layer].to_df().copy()
-    df.index = sdata.tables[table_layer].obs[_INSTANCE_KEY].values
+    df.index = sdata.tables[table_layer].obs[instance_key].values
 
     # sort clusters by metaclusters
     cluster_info = sdata.tables[table_layer].obs.copy()
-    cluster_info_sorted = cluster_info.sort_values([ClusteringKey._METACLUSTERING_KEY.value, _INSTANCE_KEY])
-    cluster_info_sorted.index = cluster_info_sorted[_INSTANCE_KEY]
+    cluster_info_sorted = cluster_info.sort_values([ClusteringKey._METACLUSTERING_KEY.value, instance_key])
+    cluster_info_sorted.index = cluster_info_sorted[instance_key]
     sorted_clusters = cluster_info_sorted.index.tolist()
     df = df.loc[sorted_clusters, :]
 

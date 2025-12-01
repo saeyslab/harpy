@@ -19,6 +19,8 @@ def visium_hd(
     bins_as_squares: bool = True,
     fullres_image_file: str | Path | None = None,
     load_all_images: bool = False,
+    instance_key: str = _INSTANCE_KEY,
+    region_key: str = _REGION_KEY,
     output: str | Path | None = None,
 ) -> SpatialData:
     """
@@ -49,6 +51,10 @@ def visium_hd(
     load_all_images
         If `False`, load only the full resolution, high resolution and low resolution images. If `True`, also the
         following images: `cytassist_image.tiff`.
+    instance_key
+        Instance key. The name of the column in :class:`~anndata.AnnData` table `.obs` that will hold the instance ids.
+    region_key
+        Region key. The name of the column in  :class:`~anndata.AnnData` table `.obs` that will hold the name of the elements that annotate the table.
     output
         The path where the resulting `SpatialData` object will be backed. If None, it will not be backed to a zarr store.
     """
@@ -83,13 +89,13 @@ def visium_hd(
         adata.X = adata.X.tocsc()
 
         _old_instance_key = sdata[table_layer].uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY]
-        adata.obs.rename(columns={VisiumHDKeys.REGION_KEY: _REGION_KEY, _old_instance_key: _INSTANCE_KEY}, inplace=True)
+        adata.obs.rename(columns={VisiumHDKeys.REGION_KEY: region_key, _old_instance_key: instance_key}, inplace=True)
         adata.uns.pop(TableModel.ATTRS_KEY)
         adata = TableModel.parse(
             adata,
-            region_key=_REGION_KEY,
-            region=adata.obs[_REGION_KEY].cat.categories.to_list(),
-            instance_key=_INSTANCE_KEY,
+            region_key=region_key,
+            region=adata.obs[region_key].cat.categories.to_list(),
+            instance_key=instance_key,
         )
         # get the shapes layer for this table layer
         for _shapes_layer in [*sdata.shapes]:
@@ -100,11 +106,11 @@ def visium_hd(
             f"Shapes layer containing bins '{shapes_layer}' and corresponding table '{table_layer}' should have same length."
         )
         sdata[shapes_layer].index = (
-            adata.obs.set_index(VisiumHDKeys.INSTANCE_KEY).loc[sdata[shapes_layer].index, _INSTANCE_KEY].values
+            adata.obs.set_index(VisiumHDKeys.INSTANCE_KEY).loc[sdata[shapes_layer].index, instance_key].values
         )
         if VisiumHDKeys.INSTANCE_KEY in adata.obs.columns:
             adata.obs.drop(columns=VisiumHDKeys.INSTANCE_KEY, inplace=True)
-        sdata[shapes_layer].index.name = _INSTANCE_KEY
+        sdata[shapes_layer].index.name = instance_key
 
         del sdata[table_layer]
 

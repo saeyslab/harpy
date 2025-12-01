@@ -9,8 +9,8 @@ def cluster(sdata: SpatialData, table_layer: str, key_added: str = "leiden", out
     """
     Visualize clusters.
 
-    Plot sthe clusters on a UMAP (using `scanpy.pl.umap`),
-    and shows the most differentially expressed genes/channels for each cluster on a second plot (using `scanpy.pl.rank_genes_group`), if "rank_genes_groups" is in `sdata.tables[table_layer].uns.keys()`.
+    Plot sthe clusters on a UMAP (using :func:`~scanpy.pl.umap`),
+    and shows the most differentially expressed genes/channels for each cluster on a second plot (using :func:`~scanpy.pl.rank_genes_group`), if "rank_genes_groups" is in `sdata.tables[table_layer].uns.keys()`.
 
     Parameters
     ----------

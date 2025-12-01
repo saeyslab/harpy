@@ -16,11 +16,12 @@ from geopandas import GeoDataFrame
 from shapely import MultiPolygon, Polygon
 from skimage.measure._regionprops import RegionProperties
 from spatialdata import SpatialData, read_zarr
+from spatialdata.models import TableModel
 from spatialdata.models._utils import MappingToCoordinateSystem_t
 from spatialdata.transformations import get_transformation
 
 from harpy.utils._io import _incremental_io_on_disk
-from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY
+from harpy.utils._keys import _INSTANCE_KEY
 from harpy.utils.pylogger import get_pylogger
 
 log = get_pylogger(__name__)
@@ -33,9 +34,10 @@ class ShapesLayerManager:
         input: Array | GeoDataFrame,
         output_layer: str,
         transformations: MappingToCoordinateSystem_t = None,
+        instance_key: str = _INSTANCE_KEY,
         overwrite: bool = False,
     ) -> SpatialData:
-        polygons = self.get_polygons_from_input(input)
+        polygons = self.get_polygons_from_input(input, instance_key=instance_key)
 
         if polygons.empty:
             log.warning(
@@ -61,8 +63,11 @@ class ShapesLayerManager:
         labels_layer: str,
         prefix_filtered_shapes_layer: str,
     ) -> SpatialData:
-        mask = sdata.tables[table_layer].obs[_REGION_KEY].isin([labels_layer])
-        indexes_to_keep = sdata.tables[table_layer].obs[mask][_INSTANCE_KEY].values.astype(int)
+        region_key = sdata[table_layer].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]
+        instance_key = sdata[table_layer].uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY]
+
+        mask = sdata.tables[table_layer].obs[region_key].isin([labels_layer])
+        indexes_to_keep = sdata.tables[table_layer].obs[mask][instance_key].values.astype(int)
         coordinate_systems_labels_layer = {*get_transformation(sdata.labels[labels_layer], get_all=True)}
 
         if len(indexes_to_keep) == 0:
@@ -74,7 +79,7 @@ class ShapesLayerManager:
 
         for _shapes_layer in [*sdata.shapes]:
             polygons = self.retrieve_data_from_sdata(sdata, name=_shapes_layer)
-            polygons = self.get_polygons_from_input(polygons)
+            polygons = self.get_polygons_from_input(polygons, instance_key=instance_key)
             # only filter shapes that are in same coordinate system as the labels layer
             if not set(coordinate_systems_labels_layer).intersection({*get_transformation(polygons, get_all=True)}):
                 continue
@@ -130,11 +135,11 @@ class ShapesLayerManager:
         return sdata
 
     @singledispatchmethod
-    def get_polygons_from_input(self, input: Any) -> GeoDataFrame:
+    def get_polygons_from_input(self, input: Any, instance_key: str = _INSTANCE_KEY) -> GeoDataFrame:
         raise ValueError("Unsupported input type.")
 
     @get_polygons_from_input.register(Array)
-    def _get_polygons_from_array(self, input: Array) -> GeoDataFrame:
+    def _get_polygons_from_array(self, input: Array, instance_key: str = _INSTANCE_KEY) -> GeoDataFrame:
         assert np.issubdtype(input.dtype, np.integer), "Only integer arrays are supported."
         dimension = self.get_dims(input)
         if importlib.util.find_spec("rasterio") is not None:
@@ -148,16 +153,17 @@ class ShapesLayerManager:
         if dimension == 3:
             all_polygons = []
             for z_slice in range(input.shape[0]):
-                polygons = _mask_to_polygons(input[z_slice], z_slice=z_slice)
+                polygons = _mask_to_polygons(mask=input[z_slice], z_slice=z_slice, instance_key=instance_key)
                 all_polygons.append(polygons)
             polygons = geopandas.GeoDataFrame(pd.concat(all_polygons, ignore_index=False))
             return polygons
         elif dimension == 2:
-            return _mask_to_polygons(input)
+            return _mask_to_polygons(mask=input, z_slice=None, instance_key=instance_key)
 
     @get_polygons_from_input.register(GeoDataFrame)
-    def _get_polygons_from_geodf(self, input: GeoDataFrame) -> GeoDataFrame:
+    def _get_polygons_from_geodf(self, input: GeoDataFrame, instance_key: str = _INSTANCE_KEY) -> GeoDataFrame:
         self.get_dims(input)
+        input.index.name = instance_key
         return input
 
     @singledispatchmethod
@@ -223,7 +229,7 @@ class ShapesLayerManager:
         return sdata
 
 
-def _mask_to_polygons_rasterio(mask: Array, z_slice: int = None) -> GeoDataFrame:
+def _mask_to_polygons_rasterio(mask: Array, z_slice: int = None, instance_key: str = _INSTANCE_KEY) -> GeoDataFrame:
     """
     Convert a cell segmentation mask to polygons and return them as a GeoDataFrame using `rasterio`.
 
@@ -243,11 +249,13 @@ def _mask_to_polygons_rasterio(mask: Array, z_slice: int = None) -> GeoDataFrame
         Zero pixels represent background (no cell).
     z_slice: int or None, optional.
         The z slice that is being processed.
+    instance_key
+        Name of the resulting index of the GeoDataFrame.
 
     Returns
     -------
-    A GeoDataFrame containing polygons extracted from the input mask. Each polygon
-    is associated with a cell ID.
+    A GeoDataFrame of polygons extracted from the input mask, where each polygon represents one instance (corresponding to a label in the mask).
+    The instance key is stored in the GeoDataFrame index.
 
     Notes
     -----
@@ -314,7 +322,7 @@ def _mask_to_polygons_rasterio(mask: Array, z_slice: int = None) -> GeoDataFrame
             all_polygons.append(shapely.geometry.shape(shape))
             all_values.append(int(value))
 
-        return geopandas.GeoDataFrame({"geometry": all_polygons, _INSTANCE_KEY: all_values})
+        return geopandas.GeoDataFrame({"geometry": all_polygons, instance_key: all_values})
 
     # Create a list of delayed objects
     chunk_sizes = mask.chunks
@@ -328,20 +336,20 @@ def _mask_to_polygons_rasterio(mask: Array, z_slice: int = None) -> GeoDataFrame
 
     gdf = pd.concat(results)
 
-    gdf[_INSTANCE_KEY] = gdf[_INSTANCE_KEY].astype(mask.dtype)
+    gdf[instance_key] = gdf[instance_key].astype(mask.dtype)
 
     log.info(
         "Finished vectorizing. Dissolving shapes at the border of the chunks. "
-        "This can take a couple minutes if input mask contains a lot of chunks."
+        "This can take a couple minutes if input mask contains many chunks."
     )
-    gdf = gdf.dissolve(by=_INSTANCE_KEY)
+    gdf = gdf.dissolve(by=instance_key)
 
     log.info("Dissolve is done.")
 
     return gdf
 
 
-def _mask_to_polygons_skimage(mask: Array, z_slice=None) -> GeoDataFrame:
+def _mask_to_polygons_skimage(mask: Array, z_slice=None, instance_key: str = _INSTANCE_KEY) -> GeoDataFrame:
     """
     Convert a cell segmentation mask to polygons and return them as a GeoDataFrame using `skimage`.
 
@@ -361,11 +369,13 @@ def _mask_to_polygons_skimage(mask: Array, z_slice=None) -> GeoDataFrame:
         Zero pixels represent background (no cell).
     z_slice: int or None, optional.
         The z slice that is being processed.
+    instance_key
+        Name of the resulting index of the GeoDataFrame.
 
     Returns
     -------
-    A GeoDataFrame containing polygons extracted from the input mask. Each polygon
-    is associated with a cell ID.
+    A GeoDataFrame of polygons extracted from the input mask, where each polygon represents one instance (corresponding to a label in the mask).
+    The instance key is stored in the GeoDataFrame index.
     """
 
     # taken from spatialdata
@@ -426,7 +436,7 @@ def _mask_to_polygons_skimage(mask: Array, z_slice=None) -> GeoDataFrame:
     gdf = pd.concat(results)
     gdf = GeoDataFrame([_dissolve_on_overlaps(*item) for item in gdf.groupby("label")], columns=["label", "geometry"])
     gdf.index = gdf["label"].astype(mask.dtype)
-    gdf.index.name = _INSTANCE_KEY
+    gdf.index.name = instance_key
     gdf.drop("label", axis=1, inplace=True)
 
     return gdf

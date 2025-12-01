@@ -143,7 +143,7 @@ def merscope(
     See Also
     --------
     harpy.io.read_transcripts : read transcripts.
-    harpy.im.rasterize: rasterize cell boundaries
+    harpy.im.rasterize: rasterize cell boundaries.
     """
     if mosaic_images:
         if backend is None:

@@ -497,7 +497,7 @@ class HarpyPipeline:
             labels_layer=self.labels_layer_name,
             table_layer=self.cfg.allocate.table_layer_name,
             output_layer=self.cfg.allocate.table_layer_name,
-            path_marker_genes=self.cfg.dataset.markers,
+            marker_genes=self.cfg.dataset.markers,
             delimiter=self.cfg.annotate.delimiter,
             row_norm=self.cfg.annotate.row_norm,
             repl_columns=repl_columns,

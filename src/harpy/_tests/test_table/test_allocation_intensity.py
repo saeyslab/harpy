@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 from anndata import AnnData
 from spatialdata import SpatialData
+from spatialdata.models import TableModel
 from xrspatial import zonal_stats
 
 from harpy.image.segmentation._align_masks import align_labels_layers
@@ -119,4 +120,91 @@ def test_allocate_intensity_overwrite(sdata_multi_c: SpatialData):
             chunks=512,
             append=True,
             overwrite=False,
+        )
+
+
+def test_allocate_intensity_raises_instance_key(sdata_pixie: SpatialData):
+    instance_key = "my_instance_key"
+    region_key = "my_region_key"
+    instance_size_key = "instance_size"
+    sdata_pixie = allocate_intensity(
+        sdata_pixie,
+        img_layer="raw_image_fov0",
+        labels_layer="label_whole_fov0",
+        to_coordinate_system="fov0",
+        output_layer="my_table",
+        mode="sum",
+        obs_stats="count",
+        region_key=region_key,
+        instance_key=instance_key,
+        instance_size_key=instance_size_key,
+        overwrite=True,
+    )
+
+    assert instance_key == sdata_pixie.tables["my_table"].uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY]
+    assert region_key == sdata_pixie.tables["my_table"].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]
+    assert instance_size_key in sdata_pixie.tables["my_table"].obs.columns
+
+    instance_key = f"{instance_key}_test"
+
+    with pytest.raises(
+        ValueError,
+        match=f"Provided instance key '{instance_key}' is different than the instance key of the AnnData object you wish to append to.*This is not allowed",
+    ):
+        sdata_pixie = allocate_intensity(
+            sdata_pixie,
+            img_layer="raw_image_fov1",
+            labels_layer="label_whole_fov1",
+            to_coordinate_system="fov1",
+            output_layer="my_table",
+            mode="sum",
+            obs_stats="count",
+            region_key=region_key,
+            instance_key=instance_key,
+            append=True,
+            overwrite=True,
+        )
+
+
+def test_allocate_intensity_raises_region_key(sdata_pixie: SpatialData):
+    instance_key = "my_instance_key"
+    region_key = "my_region_key"
+    instance_size_key = "instance_size"
+    sdata_pixie = allocate_intensity(
+        sdata_pixie,
+        img_layer="raw_image_fov0",
+        labels_layer="label_whole_fov0",
+        to_coordinate_system="fov0",
+        output_layer="my_table",
+        mode="sum",
+        obs_stats="count",
+        region_key=region_key,
+        instance_key=instance_key,
+        instance_size_key=instance_size_key,
+        overwrite=True,
+    )
+
+    assert instance_key == sdata_pixie.tables["my_table"].uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY]
+    assert region_key == sdata_pixie.tables["my_table"].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]
+    assert instance_size_key in sdata_pixie.tables["my_table"].obs.columns
+
+    region_key = f"{region_key}_test"
+
+    with pytest.raises(
+        ValueError,
+        match=f"Provided region key '{region_key}' is different than the region key of the AnnData object you wish to append to.*This is not allowed",
+    ):
+        sdata_pixie = allocate_intensity(
+            sdata_pixie,
+            img_layer="raw_image_fov1",
+            labels_layer="label_whole_fov1",
+            to_coordinate_system="fov1",
+            output_layer="my_table",
+            mode="sum",
+            obs_stats="count",
+            region_key=region_key,
+            instance_key=instance_key,
+            instance_size_key=instance_size_key,
+            append=True,
+            overwrite=True,
         )
