@@ -43,6 +43,7 @@ def macsima_example() -> SpatialData:
         else:
             counts[name] = 0
             new_c_coords.append(name)
+    new_c_coords = [_name.replace(" ", "_") for _name in new_c_coords]  # remove the " "
     sdata = add_image_layer(
         sdata,
         arr=sdata["HumanLiverH35"].data,

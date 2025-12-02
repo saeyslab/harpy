@@ -132,7 +132,13 @@ def cluster_blobs(
         tables={table_name: table} if table_name is not None else None,
     )
     if table_name is not None:
-        add_regionprop_features(sdata, labels_layer=labels_name, table_layer=table_name)
+        add_regionprop_features(
+            sdata,
+            labels_layer=labels_name,
+            table_layer=table_name,
+            output_layer=table_name,
+            overwrite=True,
+        )
     return sdata
 
 
