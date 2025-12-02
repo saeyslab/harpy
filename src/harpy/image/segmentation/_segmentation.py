@@ -13,6 +13,7 @@ from typing import Any
 import dask.array as da
 import numpy as np
 from dask.array import Array
+from loguru import logger as log
 from numpy.typing import NDArray
 from spatialdata import SpatialData, bounding_box_query
 from spatialdata.models._utils import MappingToCoordinateSystem_t
@@ -45,9 +46,6 @@ from harpy.points._points import add_points_layer
 from harpy.shape._shape import add_shapes_layer
 from harpy.utils._keys import _GENES_KEY
 from harpy.utils._transformations import _identity_check_transformations_points
-from harpy.utils.pylogger import get_pylogger
-
-log = get_pylogger(__name__)
 
 
 def segment(

@@ -6,6 +6,7 @@ from typing import Any
 
 import xarray as xr
 from dask.array import Array
+from loguru import logger as log
 from numpy.typing import NDArray
 from spatialdata import SpatialData, bounding_box_query, map_raster
 from spatialdata.models.models import ScaleFactors_t
@@ -15,9 +16,6 @@ from harpy.image._image import (
     _get_spatial_element,
     add_image_layer,
 )
-from harpy.utils.pylogger import get_pylogger
-
-log = get_pylogger(__name__)
 
 
 def map_image(

@@ -13,6 +13,7 @@ import pandas as pd
 from anndata import AnnData
 from dask.array import Array
 from dask.distributed import Client
+from loguru import logger as log
 from numpy.typing import NDArray
 from spatialdata import SpatialData, read_zarr
 from spatialdata.models import Image3DModel
@@ -21,10 +22,7 @@ from spatialdata.transformations import get_transformation
 
 from harpy.image._image import _get_spatial_element, add_labels_layer
 from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY, _SPATIAL, ClusteringKey
-from harpy.utils.pylogger import get_pylogger
 from harpy.utils.utils import _get_uint_dtype
-
-log = get_pylogger(__name__)
 
 try:
     import flowsom as fs

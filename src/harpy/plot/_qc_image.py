@@ -12,14 +12,12 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import skimage as ski
+from loguru import logger as log
 from matplotlib.axes import Axes
 from spatialdata import SpatialData
 
 from harpy.image import normalize
 from harpy.image._image import _get_spatial_element
-from harpy.utils.pylogger import get_pylogger
-
-log = get_pylogger(__name__)
 
 try:
     import textalloc as ta

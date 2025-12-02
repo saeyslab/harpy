@@ -4,6 +4,7 @@ from collections.abc import Iterable
 
 import dask.array as da
 from dask.array import Array
+from loguru import logger as log
 from spatialdata import SpatialData, bounding_box_query
 from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import get_transformation
@@ -13,9 +14,6 @@ from harpy.image._image import (
     _get_spatial_element,
     add_image_layer,
 )
-from harpy.utils.pylogger import get_pylogger
-
-log = get_pylogger(__name__)
 
 
 def combine(

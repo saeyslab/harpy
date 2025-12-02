@@ -3,15 +3,13 @@ from __future__ import annotations
 import geopandas
 import numpy as np
 from geopandas import GeoDataFrame
+from loguru import logger as log
 from longsgis import voronoiDiagram4plg
 from shapely.geometry import Polygon
 from spatialdata import SpatialData
 from spatialdata.transformations import get_transformation
 
 from harpy.shape._shape import add_shapes_layer
-from harpy.utils.pylogger import get_pylogger
-
-log = get_pylogger(__name__)
 
 
 def create_voronoi_boundaries(

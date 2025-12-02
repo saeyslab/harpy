@@ -10,12 +10,9 @@ import scipy
 from dask.array import Array
 from dask.array.overlap import ensure_minimum_chunksize
 from dask_image.ndmeasure._utils import _label
+from loguru import logger as log
 from numpy.typing import NDArray
 from sklearn import metrics as sk_metrics
-
-from harpy.utils.pylogger import get_pylogger
-
-log = get_pylogger(__name__)
 
 _SEG_DTYPE = np.uint32
 

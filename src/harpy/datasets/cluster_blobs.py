@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import skimage as ski
 from dask_image import ndfilters
+from loguru import logger as log
 from numpy.random import default_rng
 from scipy import ndimage as ndi
 from scipy.stats import qmc
@@ -15,9 +16,6 @@ from spatialdata.transformations import Identity
 
 from harpy.table import add_regionprop_features
 from harpy.utils._keys import _CELL_INDEX, _INSTANCE_KEY, _REGION_KEY
-from harpy.utils.pylogger import get_pylogger
-
-log = get_pylogger(__name__)
 
 
 def multisample_blobs(n_samples=4, prefix="sample_{i}", **kwargs):

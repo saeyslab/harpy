@@ -13,6 +13,7 @@ import skimage
 import spatialdata
 from dask.array import Array
 from geopandas import GeoDataFrame
+from loguru import logger as log
 from shapely import MultiPolygon, Polygon
 from skimage.measure._regionprops import RegionProperties
 from spatialdata import SpatialData, read_zarr
@@ -22,9 +23,6 @@ from spatialdata.transformations import get_transformation
 
 from harpy.utils._io import _incremental_io_on_disk
 from harpy.utils._keys import _INSTANCE_KEY
-from harpy.utils.pylogger import get_pylogger
-
-log = get_pylogger(__name__)
 
 
 class ShapesLayerManager:

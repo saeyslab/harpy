@@ -10,15 +10,13 @@ import numpy as np
 from dask import compute, persist
 from dask.array import Array
 from dask_image.ndfilters import gaussian_filter
+from loguru import logger as log
 from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import get_transformation
 
 from harpy.image._image import _get_spatial_element, add_image_layer
 from harpy.image._normalize import _nonzero_nonnan_percentile, _nonzero_nonnan_percentile_axis_0
-from harpy.utils.pylogger import get_pylogger
-
-log = get_pylogger(__name__)
 
 
 def pixel_clustering_preprocess(

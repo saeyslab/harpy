@@ -5,6 +5,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 from dask.dataframe.core import DataFrame as DaskDataFrame
+from loguru import logger as log
 from shapely.affinity import translate
 from spatialdata import SpatialData
 
@@ -19,9 +20,6 @@ from harpy.shape import intersect_rectangles
 from harpy.shape._shape import _extract_boundaries_from_geometry_collection
 from harpy.utils._keys import _GENES_KEY
 from harpy.utils._transformations import _identity_check_transformations_points
-from harpy.utils.pylogger import get_pylogger
-
-log = get_pylogger(__name__)
 
 
 def sanity(

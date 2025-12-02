@@ -13,13 +13,11 @@ import numpy as np
 import pandas as pd
 import scanpy as sc
 from anndata import AnnData
+from loguru import logger as log
 from spatialdata import SpatialData
 
 from harpy.table._table import ProcessTable, add_table_layer
 from harpy.utils._keys import _ANNOTATION_KEY, _CLEANLINESS_KEY, _UNKNOWN_CELLTYPE_KEY
-from harpy.utils.pylogger import get_pylogger
-
-log = get_pylogger(__name__)
 
 
 def score_genes(

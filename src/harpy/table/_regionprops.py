@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+from loguru import logger as log
 from numpy.typing import NDArray
 from pandas import DataFrame
 from skimage.measure import moments, regionprops, regionprops_table
@@ -12,10 +13,7 @@ from spatialdata.models import TableModel
 from harpy.image._image import get_dataarray
 from harpy.table._table import ProcessTable, add_table_layer
 from harpy.utils._keys import _INSTANCE_KEY
-from harpy.utils.pylogger import get_pylogger
 from harpy.utils.utils import _make_list
-
-log = get_pylogger(__name__)
 
 
 def add_regionprop_features(

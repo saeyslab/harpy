@@ -8,6 +8,7 @@ from typing import Any
 import napari
 import napari.layers
 import napari.types
+from loguru import logger as log
 from magicgui import magic_factory
 from napari.qt.threading import thread_worker
 from napari.utils.notifications import show_info
@@ -15,8 +16,6 @@ from spatialdata import SpatialData, read_zarr
 
 import harpy.utils as utils
 from harpy.pipeline import HarpyPipeline
-
-log = utils.get_pylogger(__name__)
 
 
 def annotateImage(

@@ -15,6 +15,7 @@ import dask.dataframe as dd
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+from loguru import logger as log
 from spatialdata import SpatialData, read_zarr
 from spatialdata.models import Image2DModel, Image3DModel
 from spatialdata.models._utils import get_axes_names
@@ -28,9 +29,6 @@ from harpy.io._transcripts import read_transcripts
 from harpy.shape import add_shapes_layer
 from harpy.table._table import add_table_layer
 from harpy.utils._keys import _CELL_INDEX, _INSTANCE_KEY, _REGION_KEY, _SPATIAL
-from harpy.utils.pylogger import get_pylogger
-
-log = get_pylogger(__name__)
 
 # the column in MerscopeKeys.BOUNDARIES_FILE holding cell ID. This should be a unique ID.
 MerscopeKeys_CELL_ID = "ID"

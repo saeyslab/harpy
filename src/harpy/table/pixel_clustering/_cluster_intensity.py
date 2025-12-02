@@ -9,6 +9,7 @@ import dask.array as da
 import numpy as np
 import pandas as pd
 from anndata import AnnData
+from loguru import logger as log
 from spatialdata import SpatialData
 
 from harpy.image._image import _get_spatial_element
@@ -16,9 +17,6 @@ from harpy.table._allocation_intensity import allocate_intensity
 from harpy.table._preprocess import preprocess_proteomics
 from harpy.table._table import add_table_layer
 from harpy.utils._keys import _RAW_COUNTS_KEY, ClusteringKey
-from harpy.utils.pylogger import get_pylogger
-
-log = get_pylogger(__name__)
 
 
 def cluster_intensity_SOM(

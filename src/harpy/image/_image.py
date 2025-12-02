@@ -4,6 +4,7 @@ import dask.array as da
 import numpy as np
 import xarray as xr
 from dask.array import Array
+from loguru import logger as log
 from spatialdata import SpatialData
 from spatialdata.models._utils import MappingToCoordinateSystem_t
 from spatialdata.models.models import ScaleFactors_t
@@ -13,9 +14,6 @@ from xarray import DataArray, DataTree
 
 from harpy.image._manager import ImageLayerManager, LabelLayerManager
 from harpy.utils._transformations import _get_translation_values
-from harpy.utils.pylogger import get_pylogger
-
-log = get_pylogger(__name__)
 
 
 def _substract_translation_crd(

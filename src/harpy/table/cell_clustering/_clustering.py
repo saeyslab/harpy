@@ -5,15 +5,13 @@ from collections.abc import Iterable
 import numpy as np
 import pandas as pd
 from anndata import AnnData
+from loguru import logger as log
 from spatialdata import SpatialData
 
 from harpy.table._table import ProcessTable, add_table_layer
 from harpy.table.cell_clustering._preprocess import cell_clustering_preprocess
 from harpy.table.cell_clustering._utils import _get_mapping
 from harpy.utils._keys import _CELL_INDEX, _CELLSIZE_KEY, _INSTANCE_KEY, _RAW_COUNTS_KEY, _REGION_KEY, ClusteringKey
-from harpy.utils.pylogger import get_pylogger
-
-log = get_pylogger(__name__)
 
 try:
     import flowsom as fs

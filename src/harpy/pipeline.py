@@ -3,13 +3,12 @@ import os
 import warnings
 
 from dask.distributed import Client
+from loguru import logger as log
 from omegaconf import DictConfig, ListConfig
 from spatialdata import SpatialData, read_zarr
 
 import harpy
 from harpy.utils._keys import _CELLSIZE_KEY
-
-log = harpy.utils.get_pylogger(__name__)
 
 
 class HarpyPipeline:

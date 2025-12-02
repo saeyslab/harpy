@@ -6,9 +6,6 @@ from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 
 from harpy.image.segmentation._map import map_labels
-from harpy.utils.pylogger import get_pylogger
-
-log = get_pylogger(__name__)
 
 
 def expand_labels_layer(

@@ -10,14 +10,12 @@ import numpy as np
 import spatialdata
 from dask.array import from_zarr
 from dask_image import imread
+from loguru import logger as log
 from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import Identity, Translation
 
 from harpy.image._image import _fix_dimensions, add_image_layer
-from harpy.utils.pylogger import get_pylogger
-
-log = get_pylogger(__name__)
 
 
 def create_sdata(

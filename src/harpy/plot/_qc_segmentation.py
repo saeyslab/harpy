@@ -1,9 +1,6 @@
 import matplotlib.pyplot as plt
 import pandas as pd
-
-from harpy.utils.pylogger import get_pylogger
-
-log = get_pylogger(__name__)
+from loguru import logger as log
 
 
 def calculate_segmentation_coverage(sdata):

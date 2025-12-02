@@ -2,12 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from loguru import logger as log
 from numpy.typing import NDArray
 from packaging import version
-
-from harpy.utils.pylogger import get_pylogger
-
-log = get_pylogger(__name__)
 
 try:
     import torch

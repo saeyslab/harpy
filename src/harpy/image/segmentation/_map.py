@@ -11,6 +11,7 @@ from typing import Any
 import dask.array as da
 import numpy as np
 from dask.array import Array
+from loguru import logger as log
 from numpy.typing import NDArray
 from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
@@ -29,9 +30,6 @@ from harpy.image.segmentation._utils import (
     _rechunk_overlap,
 )
 from harpy.shape._shape import add_shapes_layer
-from harpy.utils.pylogger import get_pylogger
-
-log = get_pylogger(__name__)
 
 
 def map_labels(

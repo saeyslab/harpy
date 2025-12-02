@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from loguru import logger as log
 from scipy.stats import pearsonr
 from spatialdata import SpatialData
 from spatialdata.models import TableModel
@@ -14,9 +15,6 @@ from harpy.image._image import _get_boundary, _get_spatial_element
 from harpy.plot import plot_shapes
 from harpy.utils._keys import _GENES_KEY, _RAW_COUNTS_KEY
 from harpy.utils._transformations import _identity_check_transformations_points
-from harpy.utils.pylogger import get_pylogger
-
-log = get_pylogger(__name__)
 
 
 def analyse_genes_left_out(

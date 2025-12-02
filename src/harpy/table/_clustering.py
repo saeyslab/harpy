@@ -7,13 +7,11 @@ from typing import Any
 
 import scanpy as sc
 from anndata import AnnData
+from loguru import logger as log
 from sklearn.cluster import KMeans
 from spatialdata import SpatialData
 
 from harpy.table._table import ProcessTable, add_table_layer
-from harpy.utils.pylogger import get_pylogger
-
-log = get_pylogger(__name__)
 
 
 def kmeans(

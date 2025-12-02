@@ -3,15 +3,13 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 import numpy as np
+from loguru import logger as log
 from numpy.typing import NDArray
 from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 
 from harpy.image._image import _get_spatial_element
 from harpy.image._map import map_image
-from harpy.utils.pylogger import get_pylogger
-
-log = get_pylogger(__name__)
 
 try:
     import cv2

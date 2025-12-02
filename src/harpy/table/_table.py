@@ -4,15 +4,13 @@ from collections.abc import Iterable
 
 import numpy as np
 from anndata import AnnData
+from loguru import logger as log
 from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
 from harpy.shape._shape import filter_shapes_layer
 from harpy.table._manager import TableLayerManager
 from harpy.utils._keys import _CELLSIZE_KEY, _INSTANCE_KEY, _REGION_KEY
-from harpy.utils.pylogger import get_pylogger
-
-log = get_pylogger(__name__)
 
 
 class ProcessTable:

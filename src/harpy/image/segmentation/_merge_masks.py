@@ -13,9 +13,6 @@ from spatialdata.models.models import ScaleFactors_t
 from harpy.image._image import _get_spatial_element
 from harpy.image.segmentation._map import map_labels
 from harpy.image.segmentation._utils import _SEG_DTYPE, _rechunk_overlap
-from harpy.utils.pylogger import get_pylogger
-
-log = get_pylogger(__name__)
 
 
 def merge_labels_layers(

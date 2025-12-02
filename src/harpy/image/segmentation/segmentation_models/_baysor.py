@@ -12,16 +12,13 @@ import geopandas as gpd
 import numpy as np
 import shapely
 from geopandas import GeoDataFrame
+from loguru import logger as log
 from numpy.typing import NDArray
 from pandas import DataFrame as PandasDataFrame
 from PIL import Image
 from shapely.geometry import GeometryCollection, MultiPolygon, Polygon, shape
 from shapely.validation import make_valid
 from skimage.segmentation import relabel_sequential
-
-from harpy.utils.pylogger import get_pylogger
-
-log = get_pylogger(__name__)
 
 
 def baysor_callable(

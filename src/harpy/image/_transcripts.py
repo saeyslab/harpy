@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import dask.array as da
 import numpy as np
+from loguru import logger as log
 from scipy.ndimage import gaussian_filter
 from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
@@ -9,9 +10,6 @@ from spatialdata.transformations import Translation
 
 from harpy.image._image import _get_boundary, _get_spatial_element, add_image_layer
 from harpy.utils._transformations import _identity_check_transformations_points
-from harpy.utils.pylogger import get_pylogger
-
-log = get_pylogger(__name__)
 
 
 def transcript_density(

@@ -3,12 +3,10 @@ import os
 import anndata as ad
 import pandas as pd
 import pooch
+from loguru import logger as log
 from spatialdata import SpatialData, read_zarr
 
 from harpy.datasets import get_registry
-from harpy.utils.pylogger import get_pylogger
-
-log = get_pylogger(__name__)
 
 
 def _get_df(path):

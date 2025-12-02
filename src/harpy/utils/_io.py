@@ -7,12 +7,9 @@ from typing import Literal
 from anndata import AnnData
 from dask.dataframe import DataFrame
 from geopandas import GeoDataFrame
+from loguru import logger as log
 from spatialdata import SpatialData, read_zarr
 from xarray import DataArray, DataTree
-
-from harpy.utils.pylogger import get_pylogger
-
-log = get_pylogger(__name__)
 
 
 def _incremental_io_on_disk(

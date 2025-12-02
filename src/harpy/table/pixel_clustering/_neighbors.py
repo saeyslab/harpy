@@ -8,6 +8,7 @@ from typing import Any, Literal
 import numpy as np
 import pandas as pd
 from anndata import AnnData
+from loguru import logger as log
 from numpy.typing import NDArray
 from spatialdata import SpatialData
 from spatialdata.transformations import get_transformation
@@ -16,9 +17,6 @@ from harpy.image._image import _get_spatial_element
 from harpy.image.segmentation._grid import add_grid_labels_layer
 from harpy.utils._aggregate import RasterAggregator
 from harpy.utils._keys import _INSTANCE_KEY, _SPATIAL
-from harpy.utils.pylogger import get_pylogger
-
-log = get_pylogger(__name__)
 
 try:
     import squidpy as sq

@@ -9,6 +9,7 @@ import anndata as ad
 import dask.array as da
 import numpy as np
 import pandas as pd
+from loguru import logger as log
 from numpy.typing import NDArray
 from scipy.sparse import csr_matrix
 from spatialdata import SpatialData
@@ -17,10 +18,7 @@ from harpy.image._image import _precondition
 from harpy.table._table import ProcessTable, add_table_layer
 from harpy.utils._featurize import Featurizer
 from harpy.utils._keys import _CELL_INDEX, _INSTANCE_KEY, _REGION_KEY
-from harpy.utils.pylogger import get_pylogger
 from harpy.utils.utils import _dummy_embedding, _make_list
-
-log = get_pylogger(__name__)
 
 
 def extract_instances(

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import dask.array as da
 import numpy as np
+from loguru import logger as log
 from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import Translation, get_transformation
@@ -12,9 +13,6 @@ from harpy.image._image import (
     _substract_translation_crd,
     add_image_layer,
 )
-from harpy.utils.pylogger import get_pylogger
-
-log = get_pylogger(__name__)
 
 try:
     import jax.numpy as jnp
