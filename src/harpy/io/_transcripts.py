@@ -5,15 +5,13 @@ from pathlib import Path
 import dask.dataframe as dd
 import numpy as np
 import pyarrow
+from loguru import logger as log
 from numpy.typing import NDArray
 from spatialdata import SpatialData
 from spatialdata.transformations import Affine, Identity, Scale
 
 from harpy.points._points import add_points_layer
 from harpy.utils._keys import _GENES_KEY
-from harpy.utils.pylogger import get_pylogger
-
-log = get_pylogger(__name__)
 
 
 def read_resolve_transcripts(

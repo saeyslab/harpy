@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 from anndata import AnnData
 from dask.dataframe import DataFrame as DaskDataFrame
+from loguru import logger as log
 from scipy import sparse
 from scipy.sparse import issparse
 from spatialdata import SpatialData
@@ -23,9 +24,6 @@ from harpy.table._table import add_table_layer
 from harpy.table._utils import _sanity_check_append_region
 from harpy.utils._keys import _CELL_INDEX, _GENES_KEY, _INSTANCE_KEY, _REGION_KEY, _SPATIAL
 from harpy.utils._transformations import _identity_check_transformations_points
-from harpy.utils.pylogger import get_pylogger
-
-log = get_pylogger(__name__)
 
 
 def allocate(

@@ -9,13 +9,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
+from loguru import logger as log
 from numpy.typing import NDArray
 
 from harpy.image.segmentation._utils import _SEG_DTYPE
-from harpy.utils.pylogger import get_pylogger
-
-log = get_pylogger(__name__)
-
 
 try:
     from instanseg import InstanSeg

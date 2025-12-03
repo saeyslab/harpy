@@ -4,15 +4,13 @@ from collections.abc import Iterable
 
 import numpy as np
 from anndata import AnnData
+from loguru import logger as log
 from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
 from harpy.shape._shape import filter_shapes_layer
 from harpy.table._manager import TableLayerManager
 from harpy.utils._keys import _CELLSIZE_KEY, _INSTANCE_KEY, _REGION_KEY
-from harpy.utils.pylogger import get_pylogger
-
-log = get_pylogger(__name__)
 
 
 class ProcessTable:
@@ -73,12 +71,12 @@ class ProcessTable:
         """Generic layer validation helper to reduce code duplication."""
         for _layer in layer_list:
             if _layer not in [*getattr(self.sdata, layer_type)]:
-                raise ValueError(f"'{layer_type}' layer '{_layer}' not in 'sdata.{layer_type}'.")
+                raise ValueError(f"{layer_type} layer '{_layer}' not in 'sdata.{layer_type}'.")
             if (
                 _layer not in self.sdata.tables[self.table_layer].obs[self.region_key].cat.categories
                 or _layer not in self.sdata.tables[self.table_layer].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY]
             ):
-                raise ValueError(f"'{layer_type}' layer '{_layer}' not annotated by table layer {self.table_layer}.")
+                raise ValueError(f"{layer_type} layer '{_layer}' not annotated by table layer '{self.table_layer}'.")
             # Check for uniqueness of instance keys
             assert (
                 self.sdata.tables[self.table_layer]

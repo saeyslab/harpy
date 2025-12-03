@@ -52,11 +52,11 @@ def test_integration_allocate_intensity(sdata_multi_c_no_backed: SpatialData):
     )
 
     sdata_multi_c_no_backed = add_regionprop_features(
-        sdata_multi_c_no_backed, labels_layer="masks_whole", table_layer="table_intensities"
-    )
-
-    sdata_multi_c_no_backed = add_regionprop_features(
-        sdata_multi_c_no_backed, labels_layer="masks_nuclear_aligned", table_layer="table_intensities"
+        sdata_multi_c_no_backed,
+        labels_layer=["masks_whole", "masks_nuclear_aligned"],
+        table_layer="table_intensities",
+        output_layer="table_intensities",
+        overwrite=True,
     )
 
     assert isinstance(sdata_multi_c_no_backed, SpatialData)

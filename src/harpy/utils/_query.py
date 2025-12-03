@@ -5,6 +5,7 @@ from pathlib import Path
 
 import dask.array as da
 import numpy as np
+from loguru import logger as log
 from spatialdata import SpatialData, read_zarr
 from spatialdata import bounding_box_query as bounding_box_query_spatialdata
 from spatialdata.models import TableModel
@@ -12,9 +13,6 @@ from spatialdata.transformations import get_transformation
 
 from harpy.image._image import add_labels_layer, get_dataarray
 from harpy.table._table import add_table_layer
-from harpy.utils.pylogger import get_pylogger
-
-log = get_pylogger(__name__)
 
 
 def bounding_box_query(

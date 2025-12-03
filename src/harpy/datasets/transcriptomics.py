@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 import pooch
+from loguru import logger as log
 from spatialdata import SpatialData, read_zarr
 from spatialdata.models import TableModel
 from spatialdata.transformations import Scale, Sequence, get_transformation, set_transformation
@@ -15,9 +16,6 @@ from harpy.datasets.registry import get_registry
 from harpy.io._merscope import merscope
 from harpy.io._visium_hd import visium_hd
 from harpy.io._xenium import xenium
-from harpy.utils.pylogger import get_pylogger
-
-log = get_pylogger(__name__)
 
 
 def resolve_example(path: str | Path | None = None) -> SpatialData:

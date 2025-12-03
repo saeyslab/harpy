@@ -13,6 +13,7 @@ import napari.layers
 import napari.types
 import napari.utils
 import numpy as np
+from loguru import logger as log
 from magicgui import magic_factory
 from napari.qt.threading import thread_worker
 from napari.utils.notifications import show_info
@@ -22,8 +23,6 @@ from xarray import DataTree
 from harpy import utils as utils
 from harpy.image._image import _get_translation
 from harpy.pipeline import HarpyPipeline
-
-log = utils.get_pylogger(__name__)
 
 
 def cleanImage(

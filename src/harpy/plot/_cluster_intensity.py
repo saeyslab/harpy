@@ -13,10 +13,7 @@ from scipy.stats import zscore
 from sklearn.metrics.pairwise import cosine_similarity
 from spatialdata import SpatialData
 
-from harpy.utils.pylogger import get_pylogger
 from harpy.utils.utils import _make_list
-
-log = get_pylogger(__name__)
 
 
 def cluster_intensity_heatmap(

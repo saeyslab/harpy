@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from loguru import logger as log
 from matplotlib.axes import Axes
 from scipy.cluster.hierarchy import dendrogram, ward
 from scipy.sparse import csr_matrix
@@ -23,9 +24,6 @@ from spatialdata.models import TableModel
 from harpy.image._image import _get_spatial_element
 from harpy.plot._utils import _get_distinct_colors
 from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY, ClusteringKey
-from harpy.utils.pylogger import get_pylogger
-
-log = get_pylogger(__name__)
 
 try:
     import spatialdata_plot  # noqa: F401

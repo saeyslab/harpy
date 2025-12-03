@@ -89,14 +89,15 @@ source_suffix = {
     ".myst": "myst-nb",
 }
 
-# intersphinx_mapping = {
-#    "anndata": ("https://anndata.readthedocs.io/en/stable/", None),
-#    "numpy": ("https://numpy.org/doc/stable/", None),
-#    "geopandas": ("https://geopandas.org/en/stable/", None),
-#    "xarray": ("https://docs.xarray.dev/en/stable/", None),
-#    "datatree": ("https://datatree.readthedocs.io/en/latest/", None),
-#    "dask": ("https://docs.dask.org/en/latest/", None),
-# }
+intersphinx_mapping = {
+    "anndata": ("https://anndata.readthedocs.io/en/stable/", None),
+    "scanpy": ("https://scanpy.readthedocs.io/en/stable/", None),
+    "numpy": ("https://numpy.org/doc/stable/", None),
+    "geopandas": ("https://geopandas.org/en/stable/", None),
+    "xarray": ("https://docs.xarray.dev/en/stable/", None),
+    "datatree": ("https://datatree.readthedocs.io/en/latest/", None),
+    "dask": ("https://docs.dask.org/en/latest/", None),
+}
 
 
 # List of patterns, relative to source directory, that match files and

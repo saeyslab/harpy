@@ -10,14 +10,12 @@ import dask.array as da
 import numpy as np
 import pandas as pd
 from dask_image import ndmeasure
+from loguru import logger as log
 from numpy.typing import NDArray
 from scipy import ndimage
 from sklearn.decomposition import PCA
 
 from harpy.utils._keys import _CELLSIZE_KEY, _INSTANCE_KEY
-from harpy.utils.pylogger import get_pylogger
-
-log = get_pylogger(__name__)
 
 
 class RasterAggregator:

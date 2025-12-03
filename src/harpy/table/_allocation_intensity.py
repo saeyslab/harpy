@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 from anndata import AnnData
 from dask_image.ndmeasure import center_of_mass
+from loguru import logger as log
 from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
@@ -18,9 +19,6 @@ from harpy.table._table import add_table_layer
 from harpy.table._utils import _sanity_check_append_region
 from harpy.utils._aggregate import RasterAggregator
 from harpy.utils._keys import _CELL_INDEX, _CELLSIZE_KEY, _INSTANCE_KEY, _REGION_KEY, _SPATIAL
-from harpy.utils.pylogger import get_pylogger
-
-log = get_pylogger(__name__)
 
 
 def allocate_intensity(
@@ -71,9 +69,9 @@ def allocate_intensity(
         Supported values: `["sum", "mean", "count", "var", "kurtosis", "skew", "max", "min"]`.
 
         - If `obs_stats` contains `"mode"`, it will **not** be added to `.obs`.
-        - For each `stat` in `["sum", "mean", "var", "kurtosis", "skew", "max", "min"]`,
-        the result is stored as: `{channel_name}_{stat}`.
+        - For each `stat` in `["sum", "mean", "var", "kurtosis", "skew", "max", "min"]`, the result is stored as: `{channel_name}_{stat}`.
         - `"count"` is stored in `.obs` using the name given by `cellsize_key`.
+
     to_coordinate_system
         The coordinate system that holds `img_layer` and `labels_layer`.
         This should be the intrinsic coordinate system in pixels.

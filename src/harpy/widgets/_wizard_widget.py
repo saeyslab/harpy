@@ -4,7 +4,6 @@ from magicgui.widgets import ComboBox, Container, Label, TextEdit
 from qtpy.QtGui import QPixmap
 from qtpy.QtWidgets import QSizePolicy
 
-from harpy.utils import get_pylogger
 from harpy.widgets import (
     allocate_widget,
     annotate_widget,
@@ -12,8 +11,6 @@ from harpy.widgets import (
     load_widget,
     segment_widget,
 )
-
-log = get_pylogger(__name__)
 
 
 # Class for step widgets

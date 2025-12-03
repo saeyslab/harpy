@@ -3,16 +3,14 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 import pandas as pd
+from loguru import logger as log
 from spatialdata import SpatialData
 
 from harpy.image._image import _get_spatial_element
 from harpy.table._table import ProcessTable, add_table_layer
 from harpy.utils._aggregate import _get_mask_area
 from harpy.utils._keys import _CELLSIZE_KEY, _INSTANCE_KEY, _REGION_KEY
-from harpy.utils.pylogger import get_pylogger
 from harpy.utils.utils import _make_list
-
-log = get_pylogger(__name__)
 
 
 def cluster_intensity(

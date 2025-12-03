@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import scanpy as sc
+from loguru import logger as log
 from scipy.sparse import issparse
 from spatialdata import SpatialData
 
@@ -15,9 +16,6 @@ from harpy.shape._shape import filter_shapes_layer
 from harpy.table._table import ProcessTable, add_table_layer
 from harpy.utils._aggregate import _get_mask_area
 from harpy.utils._keys import _CELLSIZE_KEY, _RAW_COUNTS_KEY
-from harpy.utils.pylogger import get_pylogger
-
-log = get_pylogger(__name__)
 
 
 def preprocess_transcriptomics(
@@ -44,7 +42,7 @@ def preprocess_transcriptomics(
 
     Performs filtering (via :func:`~scanpy.pp.filter_cells` and :func:`~scanpy.pp.filter_genes` ) and optional normalization (on size or via :func:`~scanpy.sc.pp.normalize_total`),
     log transformation (:func:`~scanpy.pp.log1p`), highly variable genes selection (:func:`~scanpy.pp.highly_variable_genes`),
-    scaling (:func:`~scanpy.pp.scale`), and PCA calculation (:func:`~scanpy.tl.pca`) for transcriptomics data
+    scaling (:func:`~scanpy.pp.scale`), and PCA calculation (:func:`~scanpy.pp.pca`) for transcriptomics data
     contained in the `sdata.tables[table_layer]`. QC metrics are added to `sdata.tables[output_layer].obs` using :func:`~scanpy.pp.calculate_qc_metrics`.
 
     Parameters
@@ -166,8 +164,8 @@ def preprocess_proteomics(
     """
     Preprocess a table (AnnData) attribute of a SpatialData object for proteomics data.
 
-    Performs optional normalization (on size or via :func:`~scanpy.sc.pp.normalize_total`), log transformation
-    (:func:`~scanpy.pp.log1p`), scaling (:func:`~scanpy.pp.scale`)/ quantile normalization and PCA calculation (:func:`~scanpy.tl.pca`)
+    Performs optional normalization (on size or via :func:`~scanpy.pp.normalize_total`), log transformation
+    (:func:`~scanpy.pp.log1p`), scaling (:func:`~scanpy.pp.scale`)/ quantile normalization and PCA calculation (:func:`~scanpy.pp.pca`)
     for proteomics data contained in `sdata`.
 
     Parameters
@@ -187,7 +185,7 @@ def preprocess_proteomics(
     size_norm
         If `True`, normalization is based on the size of the nucleus/cell. Resulting values are multiplied by 100 after normalization.
     library_norm
-        If `True`, :func:`~scanpy.sc.pp.normalize_total` is used for normalization.
+        If `True`, :func:`~scanpy.pp.normalize_total` is used for normalization.
     log1p
         If `True`, applies log1p transformation to the data (via :func:`~scanpy.pp.log1p`), after optional normalization.
     scale
@@ -287,7 +285,7 @@ class Preprocess(ProcessTable):
         highly_variable_genes_kwargs: Mapping[str, Any] = MappingProxyType(
             {}
         ),  # keyword arguments passed to sc.pp.highly_variable_genes
-        pca_kwargs: Mapping[str, Any] = MappingProxyType({}),  # keyword arguments passed to sc.tl.pca
+        pca_kwargs: Mapping[str, Any] = MappingProxyType({}),  # keyword arguments passed to sc.pp.pca
         instance_size_key: str = _CELLSIZE_KEY,
         raw_counts_key: str = _RAW_COUNTS_KEY,
         overwrite: bool = False,

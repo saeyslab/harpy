@@ -10,6 +10,7 @@ from typing import Any
 import dask.dataframe as dd
 import numpy as np
 import pandas as pd
+from loguru import logger as log
 from spatialdata import SpatialData, read_zarr
 from spatialdata._logging import logger
 from spatialdata.models import TableModel
@@ -19,9 +20,6 @@ from spatialdata_io._constants._constants import XeniumKeys
 
 from harpy.io._transcripts import read_transcripts
 from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY, _SPATIAL
-from harpy.utils.pylogger import get_pylogger
-
-log = get_pylogger(__name__)
 
 
 def xenium(

@@ -7,17 +7,14 @@ from types import MappingProxyType
 from typing import Any
 
 import pandas as pd
+from loguru import logger as log
 from matplotlib.axes import Axes
 from spatialdata import SpatialData, bounding_box_query
 from spatialdata.models import TableModel
 
 from harpy.plot._utils import _get_distinct_colors
 from harpy.utils._keys import _GENES_KEY
-from harpy.utils.pylogger import get_pylogger
 from harpy.utils.utils import _make_list
-
-log = get_pylogger(__name__)
-
 
 try:
     import spatialdata_plot

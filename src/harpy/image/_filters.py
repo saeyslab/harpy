@@ -6,13 +6,11 @@ import dask.array as da
 import numpy as np
 from dask.array import Array
 from dask_image.ndfilters import gaussian_filter, maximum_filter, minimum_filter
+from loguru import logger as log
 from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 
 from harpy.image._map import _get_spatial_element, map_image
-from harpy.utils.pylogger import get_pylogger
-
-log = get_pylogger(__name__)
 
 
 def min_max_filtering(

@@ -11,9 +11,6 @@ from harpy.datasets.transcriptomics import (
     xenium_human_ovarian_cancer,
 )
 from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY
-from harpy.utils.pylogger import get_pylogger
-
-log = get_pylogger(__name__)
 
 # Do not forget to set the pooch cache dir when running these unit tests on an hpc,
 # otherwise data will be downloaded in the default cache of the os e.g:

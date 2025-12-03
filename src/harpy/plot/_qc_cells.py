@@ -1,9 +1,6 @@
 import numpy as np
 import scanpy as sc
-
-from harpy.utils.pylogger import get_pylogger
-
-log = get_pylogger(__name__)
+from loguru import logger as log
 
 try:
     import joypy

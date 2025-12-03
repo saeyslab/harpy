@@ -14,14 +14,12 @@ import dask
 import dask.array as da
 import numpy as np
 import pandas as pd
+from loguru import logger as log
 from numpy.typing import NDArray
 
 from harpy.image.segmentation._utils import _add_depth_to_chunks_size
 from harpy.utils._keys import _INSTANCE_KEY
-from harpy.utils.pylogger import get_pylogger
 from harpy.utils.utils import _dummy_embedding
-
-log = get_pylogger(__name__)
 
 
 class Featurizer:
