@@ -63,6 +63,12 @@ Explore how to use Harpy for segmentation, shallow and deep feature extraction, 
 
 ---
 
+- **📐 Unifying Raster and Vector Annotations**
+
+  Learn how to convert a segmentation mask (array) into its vectorized form, and segmentation boundaries (polygons) into their rasterized equivalents. This conversion is useful, for example, when integrating annotations (e.g., from [QuPath](https://qupath.github.io/)) into downstream spatial omics analysis.👉 [Tutorial](../docs/tutorials/advanced/Rasterize_and_vectorize.ipynb)
+
+---
+
 📚 For a complete list of tutorials, visit the [**tutorials section**](https://harpy.readthedocs.io/en/latest/tutorials).
 
 ```{eval-rst}
