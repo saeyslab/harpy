@@ -97,6 +97,8 @@ intersphinx_mapping = {
     "xarray": ("https://docs.xarray.dev/en/stable/", None),
     "datatree": ("https://datatree.readthedocs.io/en/latest/", None),
     "dask": ("https://docs.dask.org/en/latest/", None),
+    "spatialdata": ("https://spatialdata.scverse.org/en/stable/", None),
+    "spatialdata_io": ("https://spatialdata.scverse.org/projects/io/en/stable/", None),
 }
 
 
