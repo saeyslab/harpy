@@ -147,7 +147,7 @@ def _get_uint_dtype(value: int) -> str:
     elif max_uint64 >= value:
         dtype = "uint64"
     else:
-        raise ValueError(f"Maximum cell number is {value}. Values higher than {max_uint64} are not supported.")
+        raise ValueError(f"Maximum number is {value}. Values higher than {max_uint64} are not supported.")
     return dtype
 
 

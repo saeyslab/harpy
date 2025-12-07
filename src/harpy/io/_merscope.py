@@ -16,6 +16,8 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 from loguru import logger as log
+from numpy.typing import NDArray
+from scipy.sparse import csr_matrix
 from spatialdata import SpatialData, read_zarr
 from spatialdata.models import Image2DModel, Image3DModel
 from spatialdata.models._utils import get_axes_names
@@ -29,9 +31,6 @@ from harpy.io._transcripts import read_transcripts
 from harpy.shape import add_shapes_layer
 from harpy.table._table import add_table_layer
 from harpy.utils._keys import _CELL_INDEX, _INSTANCE_KEY, _REGION_KEY, _SPATIAL
-
-# the column in MerscopeKeys.BOUNDARIES_FILE holding cell ID. This should be a unique ID.
-MerscopeKeys_CELL_ID = "ID"
 
 
 def merscope(
@@ -60,9 +59,10 @@ def merscope(
 
     A wrapper around :func:`spatialdata_io.merscope` that adds some additional capabilities:
     (i) loading data in full 3D (z, y, x) or applying a z-projection,
-    (ii) rasterizing cell boundaries,
-    (iii) adding a micron-based coordinate system, and
-    (iv) loading multiple samples into a single SpatialData object.
+    (ii) loading both the unprocessed and processed :class:`~anndata.AnnData` table (with leiden clusters) provided by Vizgen,
+    (iii) rasterizing cell boundaries,
+    (iv) adding a micron-based coordinate system, and
+    (v) loading multiple samples into a single SpatialData object.
 
     The micron coordinate system is added as '{to_coordinate_system}_micron' and is available to all spatial elements within the resulting SpatialData object.
 
@@ -79,6 +79,7 @@ def merscope(
     to_coordinate_system
         The coordinate system to which the elements will be added for each item in path.
         If provided as a list, its length should be equal to the number of paths specified in `path`.
+        A micron coordinate system will be added at '{to_coordinate_system}_micron'.
     z_layers
         Indices of the z-layers to consider. Either one `int` index, or a list of `int` indices. If `None`, then no image is loaded.
         By default, only the middle layer is considered (that is, layer 3).
@@ -111,7 +112,7 @@ def merscope(
         Instance key. The name of the column in :class:`~anndata.AnnData` table `.obs` that will hold the instance ids.
         Ignored if `table` is `False`.
     region_key
-        Region key. The name of the column in  :class:`~anndata.AnnData` table `.obs` that will hold the name of the elements that annotate the table.
+        Region key. The name of the column in  :class:`~anndata.AnnData` table `.obs` that will hold the name of the elements that are annotated by the table.
         Ignored if `table` is `False`.
     spatial_key
         The key in the :class:`~anndata.AnnData` table `.obsm` that will hold the `x` and `y` center of the instances.
@@ -124,7 +125,7 @@ def merscope(
     Raises
     ------
     AssertionError
-        Raised when the number of elements in `path` and `to_coordinate_system` are not the same.
+        If the number of elements in `path` and `to_coordinate_system` are not the same.
     AssertionError
         If elements in `to_coordinate_system` are not unique.
     ValueError
@@ -285,7 +286,7 @@ def merscope(
                     path=_path,
                     z_layer=_z_layer,
                     to_coordinate_system=_to_coordinate_system,
-                    to_micron_coordinate_system=f"{to_coordinate_system}_micron",
+                    to_micron_coordinate_system=f"{_to_coordinate_system}_micron",
                     dataset_id=dataset_id,
                     instance_key=instance_key,
                 )
@@ -309,7 +310,7 @@ def merscope(
                     _output_labels_layer = f"{dataset_id}_z{_z_layer}_{_to_coordinate_system}_labels"
                     log.info(f"Saving cell masks for z stack '{_z_layer}' as '{_output_labels_layer}'.")
                     log.info(
-                        f"Adding micron coordinate system for cell masks: '{to_coordinate_system}_micron'."
+                        f"Adding micron coordinate system for cell masks: '{_to_coordinate_system}_micron'."
                     )  # coordinate system of shapes is copied to labels via hp.im.rasterize
                     sdata = rasterize(
                         sdata,
@@ -322,48 +323,58 @@ def merscope(
                     )
             assert len(z_layers_to_iterate) == 1, "Currently masks provided by merscope are not 3D."
             if table:
+                micron_to_pixels_matrix = Affine(
+                    np.genfromtxt(os.path.join(_path, MerscopeKeys.IMAGES_DIR, MerscopeKeys.TRANSFORMATION_FILE)),
+                    input_axes=("x", "y"),
+                    output_axes=("x", "y"),
+                ).to_affine_matrix(
+                    input_axes=("x", "y"),
+                    output_axes=("x", "y"),
+                )
+
+                shapes = sdata.shapes[_output_shapes_layer]
+                # 1) read the raw unprocessed counts
                 count_path = os.path.join(_path, MerscopeKeys.COUNTS_FILE)
                 obs_path = os.path.join(_path, MerscopeKeys.CELL_METADATA_FILE)
 
                 data = pd.read_csv(count_path, index_col=0, dtype={MerscopeKeys.COUNTS_CELL_KEY: str})
                 obs = pd.read_csv(obs_path, index_col=0, dtype={MerscopeKeys.METADATA_CELL_KEY: str})
 
+                if not obs.index.is_unique:
+                    raise ValueError(f"The index of the file at '{obs_path}' is not unique. Please report this.")
+                if not data.index.is_unique:
+                    raise ValueError(f"The index of the file at '{count_path}' is not unique. Please report this.")
+
+                data.index.name = MerscopeKeys.METADATA_CELL_KEY  # put name the same as for obs, for consistency
+                # do a sanity check on data and obs
+                if not np.array_equal(data.index.values, obs.index.values):
+                    raise ValueError(
+                        f"The values for {MerscopeKeys.METADATA_CELL_KEY} in '{obs_path}' (metadata) do not match "
+                        f"the {MerscopeKeys.COUNTS_CELL_KEY} values in '{count_path}' (counts). "
+                        f"This indicates a mismatch between the metadata and count files."
+                    )
+                # remove observations from data and obs for which no valid cell boundary is found
+                _mask = data.index.isin(set(shapes[MerscopeKeys.METADATA_CELL_KEY]))
+                removed_entity_ids = data.index[~_mask].tolist()  # for logging
+                data = data.loc[_mask]
+                # filter obs
+                obs = obs.loc[_mask]
+                if len(removed_entity_ids):
+                    log.info(
+                        f"Skipping instances because cell boundaries could not be found. "
+                        f"{MerscopeKeys.METADATA_CELL_KEY}: {removed_entity_ids}."
+                    )
+
                 is_gene = ~data.columns.str.lower().str.contains("blank")  # exclude blank gene from adata.X
                 adata = ad.AnnData(data.loc[:, is_gene], dtype=data.values.dtype, obs=obs)
+                adata.obs.index.name = MerscopeKeys.METADATA_CELL_KEY
+                adata.obs.index = adata.obs.index.astype(str)
                 adata.obs.reset_index(inplace=True)
+                adata.X = csr_matrix(adata.X)
 
-                shapes = sdata.shapes[_output_shapes_layer]
-                # the index of shapes is instance_key
-                shapes.reset_index(inplace=True)
+                adata = _merge_adata_and_shapes(adata=adata, shapes=shapes, instance_key=instance_key)
 
-                shapes[MerscopeKeys.METADATA_CELL_KEY] = shapes[MerscopeKeys.METADATA_CELL_KEY].astype(str)
-
-                # Sanity checks before merging shapes and adata.obs. Note, we do not care that some cells in shapes would not be found in adata.obs
-
-                # 1) check that all cells in adata.obs could be matched
-                missing = set(adata.obs[MerscopeKeys.METADATA_CELL_KEY]) - set(shapes[MerscopeKeys.METADATA_CELL_KEY])
-                if missing:
-                    raise ValueError(
-                        f"{len(missing)} {MerscopeKeys.METADATA_CELL_KEY} values in .obs not found in cell boundaries (e.g. {list(missing)[:5]})"
-                    )
-
-                # 2) check that there are no duplicates in shapes. If there would be duplicates in shapes, then rows in adata.obs would be multiplied, we want to catch this early
-                duplicates = shapes[shapes.duplicated(subset=MerscopeKeys.METADATA_CELL_KEY, keep=False)]
-                if not duplicates.empty:
-                    raise ValueError(
-                        f"Duplicate {MerscopeKeys.METADATA_CELL_KEY} values found in polygons (e.g. {duplicates[MerscopeKeys.METADATA_CELL_KEY].unique()[:5]})"
-                    )
-                # now merge
-                adata.obs = pd.merge(
-                    adata.obs,
-                    shapes[
-                        [MerscopeKeys.METADATA_CELL_KEY, MerscopeKeys.Z_INDEX, instance_key]
-                    ],  # we merge, because we want the instance_key in adata.obs, so we can annotate by labels layer
-                    how="inner",
-                    on=[MerscopeKeys.METADATA_CELL_KEY],
-                )
-
-                # set adata.obs.index in same way as we set it in hp.tb.allocate
+                # set adata.obs.index in same way as we set it in hp.tb.allocate, for consistency
                 _uuid_value = str(uuid.uuid4())[:8]
                 adata.obs.index = adata.obs.index.map(
                     lambda x, layer=_output_labels_layer, uid=_uuid_value: f"{str(x)}_{layer}_{uid}"
@@ -379,12 +390,104 @@ def merscope(
                 adata.obsm["blank"] = data.loc[
                     :, ~is_gene
                 ]  #  genes with 'blank' in the name are excluded from adata.X, so we add them to .obsm
-                adata.obsm[spatial_key] = adata.obs[[MerscopeKeys.CELL_X, MerscopeKeys.CELL_Y]].values
-
+                # transform to 'intrinsic' pixel space
+                coords = adata.obs[[MerscopeKeys.CELL_X, MerscopeKeys.CELL_Y]].values
+                coords = _affine_transform(coords=coords, transform_matrix=micron_to_pixels_matrix)
+                adata.obsm[spatial_key] = coords
+                log.info(
+                    f"Adding AnnData table with non normalized counts as '{dataset_id}_{_to_coordinate_system}_table'."
+                )
                 sdata = add_table_layer(
                     sdata,
                     adata=adata,
                     output_layer=f"{dataset_id}_{_to_coordinate_system}_table",
+                    region=[_output_labels_layer],
+                    instance_key=instance_key,
+                    region_key=region_key,
+                    overwrite=False,
+                )
+
+                # 2) read the table provided by Vizgen with the preprocessed counts and leiden clusters, if it can be found (provided as .h5ad)
+                adata_path_preprocessed = os.path.join(_path, f"{dataset_id}.h5ad")
+                if not os.path.isfile(adata_path_preprocessed):
+                    log.info(f"Preprocessed AnnData table missing at '{adata_path_preprocessed}'. Skipping.")
+                    continue
+                adata_preprocessed = ad.read_h5ad(adata_path_preprocessed)
+                if not adata_preprocessed.obs.index.is_unique:
+                    raise ValueError(
+                        f"The index of the resulting AnnData table at '{adata_preprocessed}' is not unique. Please report this."
+                    )
+                # transform to 'intrinsic' pixel space.
+                coords = adata_preprocessed.obs[[MerscopeKeys.CELL_X, MerscopeKeys.CELL_Y]].values
+                coords = _affine_transform(coords=coords, transform_matrix=micron_to_pixels_matrix)
+                adata_preprocessed.obsm[spatial_key] = coords
+                # remove instances in adata_preprocessed for which no valid cell boundaries could be found (same way as we did for unprocessed adata)
+                adata_preprocessed.obs.index = adata_preprocessed.obs.index.astype(str)
+                _mask = adata_preprocessed.obs.index.isin(set(shapes[MerscopeKeys.METADATA_CELL_KEY].astype(str)))
+                # check that there is at least one match (e.g. to catch the case where METADATA_CELL_KEY is no longer in the index of the .obs of the unprocessed adata table)
+                if not any(_mask):
+                    raise ValueError(
+                        f"No match could be found between the index of the unprocessed AnnData table at '{adata_path_preprocessed}' and the cell boundaries. Please report this."
+                    )
+                removed_entity_ids = adata_preprocessed.obs[~_mask].index.tolist()
+                adata_preprocessed = adata_preprocessed[_mask].copy()
+                if len(removed_entity_ids):
+                    log.info(
+                        f"Skipping instances because cell boundaries could not be found. "
+                        f"{MerscopeKeys.METADATA_CELL_KEY}: {removed_entity_ids}."
+                    )
+                adata_preprocessed.obs.index.name = MerscopeKeys.METADATA_CELL_KEY
+                adata_preprocessed.obs.index = adata_preprocessed.obs.index.astype(str)
+                adata_preprocessed.obs.reset_index(inplace=True)
+                # sanity check (we do not want cells in adata_preprocessed that are not in unprocessed adata)
+                missing = adata_preprocessed.obs[MerscopeKeys.METADATA_CELL_KEY][
+                    ~adata_preprocessed.obs[MerscopeKeys.METADATA_CELL_KEY].isin(
+                        set(adata.obs[MerscopeKeys.METADATA_CELL_KEY])
+                    )
+                ]
+                # we want to catch this missing early, otherwise our inner join and setting adata_preprocessed.obs = ... will fail.
+                if missing.size:
+                    raise ValueError(
+                        f"There are instances in the preprocessed AnnData table that could not be found in the unprocessed AnnData table. Please report this. "
+                        f"{MerscopeKeys.METADATA_CELL_KEY}: {missing.values.tolist()}."
+                    )
+                adata_preprocessed.X = csr_matrix(adata_preprocessed.X)
+                adata_preprocessed = _merge_adata_and_shapes(
+                    adata=adata_preprocessed, shapes=shapes, instance_key=instance_key
+                )
+
+                # add all the metadata in .obs of unprocessed AnnData also to the preprocessed AnnData
+                columns_unprocessed_table = adata.obs.columns
+
+                columns_to_merge = [
+                    _item
+                    for _item in columns_unprocessed_table
+                    if (_item not in adata_preprocessed.obs.columns and _item != region_key) or _item == instance_key
+                ]
+
+                adata_preprocessed.obs = pd.merge(
+                    adata_preprocessed.obs,
+                    adata.obs[columns_to_merge],
+                    how="inner",
+                    on=[instance_key],
+                )
+                # set adata.obs.index in same way as we set it in hp.tb.allocate, just for consistency
+                adata_preprocessed.obs.index = adata_preprocessed.obs.index.map(
+                    lambda x, layer=_output_labels_layer, uid=_uuid_value: f"{str(x)}_{layer}_{uid}"
+                )
+                adata_preprocessed.obs.index.name = cell_index_name
+
+                adata_preprocessed.obs[region_key] = pd.Series(
+                    _output_labels_layer, index=adata_preprocessed.obs_names, dtype="category"
+                )  # we annotate with the labels layer
+                log.info(
+                    f"Adding preprocessed AnnData table with normalized counts and leiden cluster ID's as "
+                    f"'{dataset_id}_{_to_coordinate_system}_preprocessed_table'."
+                )
+                sdata = add_table_layer(
+                    sdata,
+                    adata=adata_preprocessed,
+                    output_layer=f"{dataset_id}_{_to_coordinate_system}_preprocessed_table",
                     region=[_output_labels_layer],
                     instance_key=instance_key,
                     region_key=region_key,
@@ -419,7 +522,7 @@ def merscope(
                 header=0,
                 output_layer=output_layer,
                 to_coordinate_system=_to_coordinate_system,
-                to_micron_coordinate_system=f"{to_coordinate_system}_micron",
+                to_micron_coordinate_system=f"{_to_coordinate_system}_micron",
                 filter_gene_names=filter_gene_names,
                 overwrite=False,
             )
@@ -452,19 +555,33 @@ def _add_shapes(
     from shapely.affinity import affine_transform
 
     # NOTE: currently, the gdf.geometry of merscope output is the same for all z-stacks.
-    # for future compatibility, we add seperate mask for each z stack.
-    gdf = gdf[gdf[MerscopeKeys.Z_INDEX] == z_layer].rename(columns={MerscopeKeys_CELL_ID: instance_key})
+    # for future compatibility, we provide code to add seperate mask for each z stack.
+    gdf = gdf[gdf[MerscopeKeys.Z_INDEX] == z_layer]
+
+    if instance_key in gdf.columns:
+        raise ValueError(
+            f"Column '{instance_key}' already exists in the cell boundaries file "
+            f"('{MerscopeKeys.CELLPOSE_BOUNDARIES}'). "
+            f"Please choose an 'instance_key' that is not one of: {list(gdf.columns)}"
+        )
+    gdf[instance_key] = range(1, len(gdf) + 1)
+    gdf.set_index(instance_key, inplace=True)
+
+    if MerscopeKeys.METADATA_CELL_KEY not in gdf.columns:
+        raise ValueError(
+            f"Column {MerscopeKeys.METADATA_CELL_KEY} not found in cell boundaries file. Please report this."
+        )
+    gdf[MerscopeKeys.METADATA_CELL_KEY] = gdf[MerscopeKeys.METADATA_CELL_KEY].astype(str)
 
     gdf = gdf.rename_geometry("geometry")
-    gdf = gdf[gdf.geometry.is_valid]
-    gdf.geometry = gdf.geometry.map(lambda x: MultiPolygon(x.geoms))
-    gdf[instance_key] = gdf[instance_key].astype(int)
-    if not gdf[instance_key].is_unique:
-        raise ValueError(
-            f"Column '{MerscopeKeys_CELL_ID}' of '{MerscopeKeys.BOUNDARIES_FILE}' of dataset with id '{dataset_id}' contains duplicates. "
-            "Please report this bug."
+    _valid_mask = gdf.geometry.is_valid
+    filtered = gdf[~_valid_mask][MerscopeKeys.METADATA_CELL_KEY]
+    if len(filtered):
+        log.info(
+            f"Filtered {len(filtered)} cell boundaries with invalid geometry. Invalid {MerscopeKeys.METADATA_CELL_KEY}: {filtered.values}."
         )
-    gdf.set_index(instance_key, inplace=True)
+    gdf = gdf[_valid_mask]
+    gdf.geometry = gdf.geometry.map(lambda x: MultiPolygon(x.geoms))
 
     # transformation from mircon to pixels
     # apply this to the cell boundaries
@@ -501,7 +618,75 @@ def _add_shapes(
             to_coordinate_system: Identity(),
             f"{to_micron_coordinate_system}": pixels_to_micron,
         },
+        instance_key=instance_key,
         overwrite=False,
     )
 
     return sdata, output_layer
+
+
+def _merge_adata_and_shapes(adata: ad.AnnData, shapes: gpd.GeoDataFrame, instance_key: str = _INSTANCE_KEY):
+    """Helper function to merge an AnnData object with a Geopandas object to obtain an instance key that can be linked to a segmentation mask (labels layer)."""
+    # METADATA_CELL_KEY is the key we need in order to merge shapes with anndata table.
+    # We perform this merge as a sanity check, and to obtain the z-index and the cell ID, for future compatibility with 3D data.
+    if MerscopeKeys.METADATA_CELL_KEY not in shapes.columns:
+        raise ValueError(
+            f"Column '{MerscopeKeys.METADATA_CELL_KEY}' not found in cell boundary data. Please report this."
+        )
+
+    if MerscopeKeys.METADATA_CELL_KEY not in adata.obs.columns:
+        raise ValueError(
+            f"Column '{MerscopeKeys.METADATA_CELL_KEY}' not found in '.obs' attribute of the AnnData table. Please report this."
+        )
+
+    shapes = shapes.copy()  # do a copy, because we reset index later on.
+    # sanity check on instance_key
+    if instance_key not in shapes.columns:
+        if shapes.index.name != instance_key:
+            raise ValueError(
+                f"The name of the index of the polygons should be '{instance_key}', but found '{shapes.index.name}'. Please report this."
+            )
+        shapes.reset_index(inplace=True)
+
+    if not shapes[instance_key].is_unique:
+        raise ValueError(f"Column of shapes holding the instance key '{instance_key}' should be unique.")
+
+    shapes[MerscopeKeys.METADATA_CELL_KEY] = shapes[MerscopeKeys.METADATA_CELL_KEY].astype(str)
+
+    # Sanity checks before merging shapes and adata.obs. Note, we do not care that some cells in shapes would not be found in adata.obs
+
+    # 1) check that all cells in adata.obs could be matched
+    missing = set(adata.obs[MerscopeKeys.METADATA_CELL_KEY]) - set(shapes[MerscopeKeys.METADATA_CELL_KEY])
+    if missing:
+        raise ValueError(
+            f"{len(missing)} {MerscopeKeys.METADATA_CELL_KEY} values in the `.obs` attribute were not found "
+            f"in the cell boundary data (showing up to 5 examples: {list(missing)[:5]}). "
+        )
+
+    # 2) check that there are no duplicates in shapes. If there would be duplicates in shapes, then rows in adata.obs would be multiplied, we want to catch this early
+    duplicates = shapes[shapes.duplicated(subset=MerscopeKeys.METADATA_CELL_KEY, keep=False)]
+    if not duplicates.empty:
+        raise ValueError(
+            f"Duplicate {MerscopeKeys.METADATA_CELL_KEY} values found in polygons (e.g. {duplicates[MerscopeKeys.METADATA_CELL_KEY].unique()[:5]})"
+        )
+    # now merge
+    adata.obs = pd.merge(
+        adata.obs,
+        shapes[
+            [MerscopeKeys.METADATA_CELL_KEY, MerscopeKeys.Z_INDEX, instance_key]
+        ],  # we merge, because we want the instance_key in adata.obs, so we can annotate by labels layer
+        how="inner",
+        on=[MerscopeKeys.METADATA_CELL_KEY],
+    )
+
+    return adata
+
+
+def _affine_transform(coords: NDArray, transform_matrix: NDArray) -> NDArray:
+    assert transform_matrix.shape == (3, 3)
+    assert coords.ndim == 2
+    assert coords.shape[1] == 2
+    coords = np.hstack([coords, np.ones((coords.shape[0], 1))])
+    coords = coords @ transform_matrix.T
+    coords = coords[:, :2]
+    return coords
