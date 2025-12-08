@@ -99,6 +99,7 @@ intersphinx_mapping = {
     "dask": ("https://docs.dask.org/en/latest/", None),
     "spatialdata": ("https://spatialdata.scverse.org/en/stable/", None),
     "spatialdata_io": ("https://spatialdata.scverse.org/projects/io/en/stable/", None),
+    "matplotlib": ("https://matplotlib.org/stable/", None),
 }
 
 
