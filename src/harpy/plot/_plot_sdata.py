@@ -1,20 +1,21 @@
 from __future__ import annotations
 
-import uuid
 from collections.abc import Mapping
 from copy import deepcopy
 from types import MappingProxyType
 from typing import Any
 
+import numpy as np
 import pandas as pd
 from loguru import logger as log
 from matplotlib.axes import Axes
 from spatialdata import SpatialData, bounding_box_query
 from spatialdata.models import TableModel
+from spatialdata.transformations import get_transformation
 
 from harpy.plot._utils import _get_distinct_colors
 from harpy.utils._keys import _GENES_KEY
-from harpy.utils.utils import _make_list
+from harpy.utils.utils import _affine_transform, _make_list
 
 try:
     import spatialdata_plot
@@ -29,7 +30,7 @@ except ImportError:
 def plot_sdata(
     sdata: SpatialData,
     img_layer: str,
-    channel: str | list[str],
+    channel: str | list[str] | None = None,
     labels_layer: str | None = None,
     table_layer: str | None = None,
     color: str | None = None,
@@ -46,7 +47,7 @@ def plot_sdata(
     Parameters
     ----------
     sdata
-        SpatialData object.
+        :class:`~spatialdata.SpatialData` object.
     img_layer
         Image layer to plot from `sdata.images`.
     channel
@@ -54,8 +55,8 @@ def plot_sdata(
     labels_layer
         Labels layer to plot from `sdata.labels`.
     table_layer
-        Table layer from `sdata.tables` used to color instances of the `labels_layer`.
-        If specified, the table layer should be annotated by `labels_layer`.
+        :class:`anndata.AnnData` table from `sdata.tables` used to color instances of the `labels_layer`.
+        If specified, the labels layer at `labels_layer` should be annotated by `table_layer`.
         Ignored if `color` is `None`.
     color
         Column from `sdata[table_layer].obs` or name from `sdata[table_layer].var_names` to color the instances from `labels_layer`.
@@ -73,11 +74,12 @@ def plot_sdata(
     show_kwargs
         Keyword arguments passed to `.pl.show()`.
     ax:
-       Matplotlib axes object to plot on.
+       :class:`matplotlib.axes.Axes` object to plot on. If ``None``, a new axes is created by
+        the underlying plotting function.
 
     Returns
     -------
-    Matplotlib Axes.
+    :class:`matplotlib.axes.Axes` object.
 
     Raises
     ------
@@ -187,10 +189,11 @@ def plot_sdata(
         show_kwargs = {}
     if not isinstance(show_kwargs, dict):
         raise ValueError("Please specify 'show_kwargs' as a dict.")
-    show_kwargs = deepcopy(show_kwargs)  # otherwise inplace update of show_kwargs
+    show_kwargs = deepcopy(show_kwargs)  # otherwise inplace updsate of show_kwargs
     show_kwargs["coordinate_systems"] = [to_coordinate_system]
 
-    sdata_to_plot = sdata
+    # we remove points from sdata, because a potential bounding box query on points is slow
+    sdata_to_plot = sdata.subset(element_names=[*sdata.images] + [*sdata.labels] + [*sdata.tables])
     queried = False
     if crd is not None:
         queried = True
@@ -296,7 +299,7 @@ def plot_sdata_genes(
     Parameters
     ----------
     sdata
-        SpatialData object.
+        :class:`~spatialdata.SpatialData` object.
     points_layer
         Points layer to plot from ``sdata.points``. The associated :class:`~dask.dataframe.DataFrame` is expected
         to contain gene information in ``name_gene_column``.
@@ -340,12 +343,12 @@ def plot_sdata_genes(
     show_kwargs
         Keyword arguments passed to ``.pl.show()``.
     ax
-        Matplotlib axes object to plot on. If ``None``, a new axes is created by
+       :class:`matplotlib.axes.Axes` object to plot on. If ``None``, a new axes is created by
         the underlying plotting function.
 
     Returns
     -------
-    Matplotlib Axes.
+    :class:`matplotlib.axes.Axes` object.
 
     Examples
     --------
@@ -394,6 +397,10 @@ def plot_sdata_genes(
     ... )
     """
     df = sdata.points[points_layer]
+    if img_layer is not None:
+        se = sdata.images[img_layer]
+    else:
+        se = None
     if name_gene_column not in df.columns:
         raise ValueError(
             f"Column '{name_gene_column}' not found in 'sdata.points[{points_layer}].columns'. "
@@ -408,7 +415,7 @@ def plot_sdata_genes(
             f"this will not affect the underlying zarr store, only the in-memory representation of 'sdata.points[{points_layer}][{name_gene_column}]'."
         )
         df = df.categorize(columns=[name_gene_column])
-        sdata[points_layer] = df
+        # sdata[points_layer] = df
     # if genes is None, we want the name_gene_column to NOT be plot as categorical (otherwise all genes are plot as categories, resulting in hundreds of categories,)
     if genes is None and df[name_gene_column].dtype == "category":
         log.info(
@@ -417,7 +424,7 @@ def plot_sdata_genes(
             f"this will not affect the underlying zarr store, only the in-memory representation of 'sdata.points[{points_layer}][{name_gene_column}]'."
         )
         df[name_gene_column] = df[name_gene_column].astype(str)
-        sdata[points_layer] = df
+        # sdata[points_layer] = df
 
     # we work with the palette, to prevent spatialdata-plot to calculate color from total number of categories in the dask dataframe, which can be hundreds,
     # which results in spatialdata-plot setting all genes to grey (if nr of categories >= 103)
@@ -452,38 +459,56 @@ def plot_sdata_genes(
     show_kwargs = deepcopy(show_kwargs)  # otherwise inplace update of show_kwargs
     show_kwargs["coordinate_systems"] = [to_coordinate_system]
 
+    sdata_to_plot = SpatialData()
+
     # Note, we sample, before query.
-    sampled = False
     if frac is not None:
         if frac < 0 or frac > 1:
             raise ValueError(f"Please set 'frac' to a value between 0 and 1; received {frac}.")
         df = df.sample(frac=frac, random_state=42)
-        sampled_points_layer = f"{points_layer}_sample_{uuid.uuid4()}"
-        sdata[sampled_points_layer] = df
-        points_layer = sampled_points_layer
-        sampled = True
 
-    sdata_to_plot = sdata
     if crd is not None:
-        sdata_to_plot = bounding_box_query(
-            sdata,
-            axes=["x", "y"],
-            min_coordinate=[crd[0], crd[2]],
-            max_coordinate=[crd[1], crd[3]],
-            target_coordinate_system=to_coordinate_system,
+        # query the points
+        # we do not use bounding_box_query of spatialdata, because querying of points is slow in spatialdata
+        coords = np.array([[crd[0], crd[2]], [crd[1], crd[3]]])
+        transform_matrix = (
+            get_transformation(df, to_coordinate_system=to_coordinate_system)
+            .inverse()
+            .to_affine_matrix(input_axes=["x", "y"], output_axes=["x", "y"])
         )
-        if points_layer not in sdata_to_plot.points:
+        coords = _affine_transform(coords=coords, transform_matrix=transform_matrix)
+        name_x = "x"  # NOTE: spatialdata always uses the names "x" and "y" as the name of the coordinates for points
+        name_y = "y"
+        x_query = f"{coords[0, 0].item()} <={name_x} < {coords[1, 0]}"
+        y_query = f"{coords[0, 1].item()} <={name_y} < {coords[1, 1]}"
+
+        query = f"{y_query} and {x_query}"
+
+        df = df.query(query)
+        if len(df) == 0:
             raise ValueError(
                 f"After applying the bounding-box query with coordinates {crd!r} "
                 f"(xmin, xmax, ymin, ymax), the points layer '{points_layer}' is no longer present "
                 "in the resulting SpatialData object. Please try different parameters for 'crd'."
             )
-        if img_layer is not None and img_layer not in sdata_to_plot.images:
-            raise ValueError(
-                f"After applying the bounding-box query with coordinates {crd!r} "
-                f"(xmin, xmax, ymin, ymax), the image layer '{img_layer}' is no longer present "
-                "in the resulting SpatialData object. Please try different parameters for 'crd'."
+
+        if se is not None:
+            se = bounding_box_query(
+                se,
+                axes=["x", "y"],
+                min_coordinate=[crd[0], crd[2]],
+                max_coordinate=[crd[1], crd[3]],
+                target_coordinate_system=to_coordinate_system,
             )
+            if se is None:
+                raise ValueError(
+                    f"After applying the bounding-box query with coordinates {crd!r} "
+                    f"(xmin, xmax, ymin, ymax), the image layer '{img_layer}' is no longer present "
+                    "in the resulting SpatialData object. Please try different parameters for 'crd'."
+                )
+    if se is not None:
+        sdata_to_plot.images[img_layer] = se
+    sdata_to_plot.points[points_layer] = df
 
     if genes is not None:
         log.info(f"Plotting column {name_gene_column} of 'sdata.points[{points_layer}]' as categorical.")
@@ -522,8 +547,4 @@ def plot_sdata_genes(
                 return_ax=True,
             )
         )
-
-    if sampled:
-        del sdata[points_layer]
-
     return ax

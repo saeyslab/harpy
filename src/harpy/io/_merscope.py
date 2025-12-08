@@ -16,7 +16,6 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 from loguru import logger as log
-from numpy.typing import NDArray
 from scipy.sparse import csr_matrix
 from spatialdata import SpatialData, read_zarr
 from spatialdata.models import Image2DModel, Image3DModel
@@ -31,6 +30,7 @@ from harpy.io._transcripts import read_transcripts
 from harpy.shape import add_shapes_layer
 from harpy.table._table import add_table_layer
 from harpy.utils._keys import _CELL_INDEX, _INSTANCE_KEY, _REGION_KEY, _SPATIAL
+from harpy.utils.utils import _affine_transform
 
 
 def merscope(
@@ -680,13 +680,3 @@ def _merge_adata_and_shapes(adata: ad.AnnData, shapes: gpd.GeoDataFrame, instanc
     )
 
     return adata
-
-
-def _affine_transform(coords: NDArray, transform_matrix: NDArray) -> NDArray:
-    assert transform_matrix.shape == (3, 3)
-    assert coords.ndim == 2
-    assert coords.shape[1] == 2
-    coords = np.hstack([coords, np.ones((coords.shape[0], 1))])
-    coords = coords @ transform_matrix.T
-    coords = coords[:, :2]
-    return coords

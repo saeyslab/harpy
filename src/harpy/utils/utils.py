@@ -179,3 +179,41 @@ def _make_list(item: str | Iterable[str]) -> list[str]:
     if isinstance(item, str) or not isinstance(item, Iterable):
         return [item]
     return list(item)
+
+
+def _affine_transform(coords: NDArray, transform_matrix: NDArray) -> NDArray:
+    """
+    Apply a 2D affine transformation to a set of coordinates.
+
+    The input coordinates are interpreted as 2D points of shape ``(N, 2)``.
+    They are augmented with a homogeneous dimension, multiplied by the
+    provided 3×3 affine transformation matrix, and then converted back to
+    standard 2D coordinates.
+
+    Parameters
+    ----------
+    coords
+        Array of shape ``(N, 2)`` containing the 2D coordinates to be
+        transformed.
+    transform_matrix
+        Affine transformation matrix of shape ``(3, 3)``. It is applied
+        in homogeneous coordinates as ``coords @ transform_matrix.T``.
+
+    Raises
+    ------
+    AssertionError
+        If `transform_matrix` does not have shape ``(3, 3)``.
+    AssertionError
+        If `coords` is not a 2D array of shape ``(N, 2)``.
+
+    Returns
+    -------
+    Array of shape ``(N, 2)`` containing the transformed coordinates.
+    """
+    assert transform_matrix.shape == (3, 3)
+    assert coords.ndim == 2
+    assert coords.shape[1] == 2
+    coords = np.hstack([coords, np.ones((coords.shape[0], 1))])
+    coords = coords @ transform_matrix.T
+    coords = coords[:, :2]
+    return coords
