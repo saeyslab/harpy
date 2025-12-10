@@ -470,11 +470,11 @@ class RasterAggregator:
                 idxs[idxs >= unique_labels.size] = 0
                 found = unique_labels[idxs] == self._labels
 
-                # i) self._mean contains the mean over all channels, i.e. it is of shape (i,c),
+                # i) self._mean contains the mean over all channels (global), i.e. it is of shape (I,C),
                 #  we only need the channels that are in the current block
                 # ii) self._mean is the mean for all i, but we only select the ones that are in current block
                 img_info = block_info[1]
-                c_start, c_stop = img_info["array-location"][0]  # check this with a debugger
+                c_start, c_stop = img_info["array-location"][0]
                 mean_found = self._mean[found, c_start:c_stop]
 
                 n_unique = unique_labels.size
@@ -490,12 +490,12 @@ class RasterAggregator:
                 #    * n_unique,  # NOTE: specifying minlength not really necessary here, keep it for documentation
                 # ).reshape(C, n_unique)
 
-                mean_per_pixel = mean_found.T[:, new_labels]
-
-                centered = image_block.reshape(C, -1) - mean_per_pixel
-                weights = centered**n  # sum of N
+                mean_per_pixel = mean_found.T[
+                    :, new_labels
+                ]  # creates an array of shape (c,image_block.shape[1]*image_block.shape[2]*image_block.shape[3])
+                centered_weights = (image_block.reshape(C, -1) - mean_per_pixel) ** n
                 sums_c = []
-                for _c_weights in weights:
+                for _c_weights in centered_weights:
                     sums_c.append(
                         np.bincount(new_labels.ravel(), _c_weights.ravel(), minlength=n_unique),
                     )
