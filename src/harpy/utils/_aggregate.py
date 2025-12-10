@@ -356,7 +356,8 @@ class RasterAggregator:
 
     def _aggregate(self, aggregate_func: Callable[[da.Array], pd.DataFrame]) -> pd.DataFrame:
         results = aggregate_func()
-        df = pd.DataFrame(results)
+        assert len(results) == 1
+        df = pd.DataFrame(results[0])
         df[self._instance_key] = self._labels
         return df
 
@@ -364,7 +365,7 @@ class RasterAggregator:
     def _aggregate_stats(
         self,
         stats_funcs: tuple[str, ...] = ("sum", "mean", "count", "var", "kurtosis", "skew"),
-    ) -> NDArray:
+    ) -> list[NDArray]:
         # add an assert that checks that stats_funcs is in the list that is given.
         # first calculate the sum.
         if isinstance(stats_funcs, str):
@@ -566,7 +567,7 @@ class RasterAggregator:
 
         to_return = [to_return[func] for func in stats_funcs if func in to_return]
 
-        return to_return[0] if len(to_return) == 1 else to_return
+        return to_return
 
     def _aggregate_max(
         self,
@@ -581,7 +582,7 @@ class RasterAggregator:
     def _min_max(
         self,
         min_or_max: Literal["max", "min"],
-    ) -> NDArray:
+    ) -> list[NDArray]:
         assert min_or_max in ["max", "min"], "Please choose from [ 'min', 'max' ]."
 
         min_dtype, max_dtype = _get_min_max_dtype(self._image)
@@ -633,7 +634,8 @@ class RasterAggregator:
 
         dask_min_max_func = da.max if min_or_max == "max" else da.min
 
-        return dask_min_max_func(chunk_min_max, axis=-1).compute()
+        # return a list, so it is in line with self._aggregate_stats()
+        return [dask_min_max_func(chunk_min_max, axis=-1).compute()]
 
     def _aggregate_quantiles_channel(
         self,

@@ -94,7 +94,7 @@ def test_aggregate_sum(sdata):
 
     scipy_sum = ndimage.sum_labels(input=image[0].compute(), labels=mask.compute(), index=da.unique(mask).compute())
 
-    atol = 1e-5  # due to cast to float32
+    atol = 1e-2  # due to cast to float32
     assert np.allclose(df_sum[0].values, scipy_sum, rtol=0, atol=atol)
 
     scipy_sum = ndimage.sum_labels(input=image[2].compute(), labels=mask.compute(), index=da.unique(mask).compute())

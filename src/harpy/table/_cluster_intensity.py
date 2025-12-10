@@ -9,7 +9,7 @@ from spatialdata import SpatialData
 from harpy.image._image import _get_spatial_element
 from harpy.table._table import ProcessTable, add_table_layer
 from harpy.utils._aggregate import _get_mask_area
-from harpy.utils._keys import _CELLSIZE_KEY, _INSTANCE_KEY, _REGION_KEY
+from harpy.utils._keys import _CELLSIZE_KEY
 from harpy.utils.utils import _make_list
 
 
@@ -22,8 +22,6 @@ def cluster_intensity(
     cluster_key_uns: str | None = None,
     layer_mean_intensities: str | None = None,
     instance_size_key: str = _CELLSIZE_KEY,
-    instance_key: str = _INSTANCE_KEY,
-    region_key: str = _REGION_KEY,
     overwrite: bool = False,
 ) -> SpatialData:
     """
@@ -59,10 +57,6 @@ def cluster_intensity(
     instance_size_key
         The key in `sdata.tables[table_layer].obs` that holds instance size.
         Instance sizes will be calculated from `labels_layer` if not found in `.obs`.
-    instance_key
-        Instance key
-    region_key
-        Region key
     overwrite
         If `True`, overwrites the `output_layer` if it already exists in `sdata`.
 
@@ -91,6 +85,9 @@ def cluster_intensity(
     # get the adata
     process_table_instance = ProcessTable(sdata, labels_layer=labels_layer, table_layer=table_layer)
     adata = process_table_instance._get_adata()
+    instance_key = process_table_instance.instance_key
+    region_key = process_table_instance.region_key
+
     if cluster_key not in adata.obs.columns:
         raise ValueError(f"Cluster key '{cluster_key}' not found in 'sdata[{table_layer}].obs'.")
     if cluster_key_uns in adata.uns.keys():
@@ -110,7 +107,11 @@ def cluster_intensity(
         for i, _labels_layer in enumerate(process_table_instance.labels_layer):
             log.info(f"Calculating instance size from provided labels layer '{_labels_layer}'")
             se = _get_spatial_element(sdata, layer=_labels_layer)
-            _shapesize = _get_mask_area(se.data if se.data.ndim == 3 else se.data[None, ...])
+            _shapesize = _get_mask_area(
+                se.data if se.data.ndim == 3 else se.data[None, ...],
+                instance_key=instance_key,
+                instance_size_key=instance_size_key,
+            )
             _shapesize[region_key] = _labels_layer
             if i == 0:
                 shapesize = _shapesize
@@ -120,6 +121,8 @@ def cluster_intensity(
         adata.obs = pd.merge(adata.obs.reset_index(), shapesize, on=[instance_key, region_key], how="left")
         adata.obs.index = old_index
         adata.obs = adata.obs.drop(columns=[index_name])
+    # merge results in adata.obs[region_key] no longer categorical
+    adata.obs[region_key] = adata.obs[region_key].astype("category")
     if layer_mean_intensities is None:
         df = pd.DataFrame(adata.X, columns=adata.var_names)
     else:
@@ -137,7 +140,9 @@ def cluster_intensity(
         sdata,
         adata=adata,
         output_layer=output_layer,
-        region=process_table_instance.labels_layer,
+        region=adata.obs[region_key].cat.categories.to_list(),
+        instance_key=instance_key,
+        region_key=region_key,
         overwrite=overwrite,
     )
 
