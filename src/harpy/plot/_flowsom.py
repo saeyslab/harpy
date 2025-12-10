@@ -26,7 +26,9 @@ from harpy.plot._utils import _get_distinct_colors
 from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY, ClusteringKey
 
 try:
-    import spatialdata_plot  # noqa: F401
+    import spatialdata_plot
+
+    _ = spatialdata_plot
 
 except ImportError:
     log.warning("'spatialdata-plot' not installed, to use 'harpy.pl.plot_pixel_clusters', please install this library.")
