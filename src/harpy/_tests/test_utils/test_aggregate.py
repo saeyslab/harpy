@@ -94,11 +94,12 @@ def test_aggregate_sum(sdata):
 
     scipy_sum = ndimage.sum_labels(input=image[0].compute(), labels=mask.compute(), index=da.unique(mask).compute())
 
-    assert np.allclose(df_sum[0].values, scipy_sum, rtol=0, atol=1e-5)
+    atol = 1e-5  # due to cast to float32
+    assert np.allclose(df_sum[0].values, scipy_sum, rtol=0, atol=atol)
 
     scipy_sum = ndimage.sum_labels(input=image[2].compute(), labels=mask.compute(), index=da.unique(mask).compute())
 
-    assert np.allclose(df_sum[2].values, scipy_sum, rtol=0, atol=1e-5)
+    assert np.allclose(df_sum[2].values, scipy_sum, rtol=0, atol=atol)
 
     # check if we get same results as xrspatial
 
@@ -110,7 +111,7 @@ def test_aggregate_sum(sdata):
 
     xrspatial_sum = xrspatial_sum.compute()
 
-    assert np.allclose(df_sum[0].values, xrspatial_sum["sum"].values, rtol=0, atol=1e-5)
+    assert np.allclose(df_sum[0].values, xrspatial_sum["sum"].values, rtol=0, atol=atol)
 
 
 def test_aggregate_min_max(sdata):
@@ -421,7 +422,7 @@ def test_get_center_of_mask(sdata):
         ndimage.center_of_mass(input=mask_compute, labels=mask_compute, index=np.unique(mask_compute))
     )
 
-    assert np.array_equal(df[[0, 1, 2]].values, np.array(scipy_center_of_mass), equal_nan=True)
+    assert np.array_equal(df[[0, 1, 2]].values, scipy_center_of_mass, equal_nan=True)
 
 
 def test_aggregate_custom_channel(sdata_multi_c_no_backed):

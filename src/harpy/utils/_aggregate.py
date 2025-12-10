@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from functools import partial
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Literal
 
 import dask
 import dask.array as da
@@ -81,6 +81,8 @@ class RasterAggregator:
         self._mask = mask_dask_array
         self._instance_key = instance_key
         self._instance_size_key = instance_size_key
+        # where area will be saved
+        self._count = None
 
     def aggregate_stats(
         self,
@@ -103,22 +105,10 @@ class RasterAggregator:
         """
         if isinstance(stats_funcs, str):
             stats_funcs = (stats_funcs,)
-        results = np.full((self._image.shape[0], len(stats_funcs), self._labels.size), np.nan, dtype=np.float32)
-
-        for i, _channel_image in enumerate(self._image):
-            results[i] = np.array(
-                self._aggregate_stats_channel(image=_channel_image, mask=self._mask, stats_funcs=stats_funcs)
-            ).squeeze()
-
-        results = results.transpose(1, 2, 0)
-
+        results = self._aggregate_stats(stats_funcs=stats_funcs)
         dfs = []
-        for _stat, _result in zip(stats_funcs, results, strict=True):
-            if _stat == "count":
-                df = pd.DataFrame(_result[:, 0])  # count is the same for all channels.
-                # TODO. Count should not be calculated for every channel, because mask is the same for every channel.
-            else:
-                df = pd.DataFrame(_result)
+        for _result in results:
+            df = pd.DataFrame(_result)
             df[self._instance_key] = self._labels
             dfs.append(df)
 
@@ -134,7 +124,7 @@ class RasterAggregator:
         -------
         DataFrame where rows represent labels and columns represent channels.
         """
-        return self._aggregate(aggregate_func=partial(self._aggregate_stats_channel, stats_funcs=("sum")))
+        return self._aggregate(aggregate_func=partial(self._aggregate_stats, stats_funcs=("sum")))
 
     def aggregate_mean(
         self,
@@ -146,7 +136,7 @@ class RasterAggregator:
         -------
         DataFrame where rows represent labels and columns represent channels.
         """
-        return self._aggregate(aggregate_func=partial(self._aggregate_stats_channel, stats_funcs=("mean")))
+        return self._aggregate(aggregate_func=partial(self._aggregate_stats, stats_funcs=("mean")))
 
     def aggregate_var(
         self,
@@ -158,7 +148,7 @@ class RasterAggregator:
         -------
         DataFrame where rows represent labels and columns represent channels.
         """
-        return self._aggregate(aggregate_func=partial(self._aggregate_stats_channel, stats_funcs=("var")))
+        return self._aggregate(aggregate_func=partial(self._aggregate_stats, stats_funcs=("var")))
 
     def aggregate_kurtosis(
         self,
@@ -170,7 +160,7 @@ class RasterAggregator:
         -------
         DataFrame where rows represent labels and columns represent channels.
         """
-        return self._aggregate(aggregate_func=partial(self._aggregate_stats_channel, stats_funcs=("kurtosis")))
+        return self._aggregate(aggregate_func=partial(self._aggregate_stats, stats_funcs=("kurtosis")))
 
     def aggregate_skew(
         self,
@@ -182,7 +172,7 @@ class RasterAggregator:
         -------
         DataFrame where rows represent labels and columns represent channels.
         """
-        return self._aggregate(aggregate_func=partial(self._aggregate_stats_channel, stats_funcs=("skew")))
+        return self._aggregate(aggregate_func=partial(self._aggregate_stats, stats_funcs=("skew")))
 
     def aggregate_max(
         self,
@@ -194,7 +184,7 @@ class RasterAggregator:
         -------
         DataFrame where rows represent labels and columns represent channels.
         """
-        return self._aggregate(aggregate_func=self._aggregate_max_channel)
+        return self._aggregate(aggregate_func=self._aggregate_max)
 
     def aggregate_min(
         self,
@@ -206,7 +196,7 @@ class RasterAggregator:
         -------
         DataFrame where rows represent labels and columns represent channels.
         """
-        return self._aggregate(aggregate_func=self._aggregate_min_channel)
+        return self._aggregate(aggregate_func=self._aggregate_min)
 
     def aggregate_area(self) -> pd.DataFrame:
         """
@@ -322,21 +312,14 @@ class RasterAggregator:
         return df
 
     def _aggregate(self, aggregate_func: Callable[[da.Array], pd.DataFrame]) -> pd.DataFrame:
-        _result = []
-        for _c_image in self._image:
-            _result.append(aggregate_func(_c_image, self._mask))
-        _result = np.concatenate(_result, axis=1)
-
-        df = pd.DataFrame(_result)
-
+        results = aggregate_func()
+        df = pd.DataFrame(results)
         df[self._instance_key] = self._labels
         return df
 
-    # this calculates sum, count, mean and var
-    def _aggregate_stats_channel(
+    # this calculates "sum", "count", "mean", "var", "kurtosis" and "skew"
+    def _aggregate_stats(
         self,
-        image: da.Array,
-        mask: da.Array,
         stats_funcs: tuple[str, ...] = ("sum", "mean", "count", "var", "kurtosis", "skew"),
     ) -> NDArray:
         # add an assert that checks that stats_funcs is in the list that is given.
@@ -357,37 +340,65 @@ class RasterAggregator:
             or "kurtosis" in stats_funcs
             or "skew" in stats_funcs
         ):
-
-            def _calculate_sum_per_chunk(mask_block: NDArray, image_block: NDArray) -> NDArray:
+            # calculate the sum
+            def _calculate_sum_per_chunk(*arrays: NDArray) -> NDArray:
+                assert len(arrays) == 2
+                mask_block = arrays[0]
+                image_block = arrays[1]
                 unique_labels, new_labels = np.unique(mask_block, return_inverse=True)
                 new_labels = np.reshape(new_labels, (-1,))  # flatten, since it may be >1-D
                 idxs = np.searchsorted(unique_labels, self._labels)
                 # make all of idxs valid
                 idxs[idxs >= unique_labels.size] = 0
                 found = unique_labels[idxs] == self._labels
-                sums = np.bincount(new_labels, weights=image_block.ravel())
-                sums = sums[idxs]
-                sums[~found] = 0
-                return sums.reshape(-1, 1)
 
+                n_unique = unique_labels.size
+
+                # NOTE: doing it without a for loop, e.g. with one bincount,
+                # takes a lot of RAM when there are many channels (>100)
+                # C = image.shape[0]
+                # encoded_labels = new_labels[None, :] + n_unique * np.arange(C)[:, None]  # shape (c,i)
+                # sums = np.bincount(
+                #    encoded_labels.ravel(),
+                #    weights=image_block.reshape(C, -1).ravel(),
+                #    minlength=C
+                #    * n_unique,
+                # ).reshape(C, n_unique)
+
+                sums = []
+                for _c_image_block in image_block:
+                    sums.append(
+                        np.bincount(new_labels.ravel(), _c_image_block.ravel(), minlength=n_unique),
+                    )
+                sums = np.stack(sums)
+                sums = sums[:, idxs]
+                sums[:, ~found] = 0
+                # sums is of shape (c,i), with i = len(self._labels)
+                # we make it i,c,z,y,x
+                sums = sums.T
+                return sums[..., None, None, None].astype(np.float32)
+
+            # add dummy C dimension for the mask, so we can pass it to map_blocks
+            arrays = [self._mask[None, ...], self._image]
+
+            meta = np.empty((0, 0, 0, 0, 0), dtype=np.float32)
             chunk_sum = da.map_blocks(
-                lambda m, f: _calculate_sum_per_chunk(m, f),
-                mask,
-                image,
-                dtype=image.dtype,
-                chunks=(len(self._labels), 1),
-                drop_axis=0,
+                _calculate_sum_per_chunk,
+                *arrays,
+                dtype=np.float32,  # for background pixels, theoretically this could overflow for float32
+                chunks=(
+                    (len(self._labels),),
+                    self._image.chunks[0],
+                    (1,) * self._image.numblocks[1],
+                    (1,) * self._image.numblocks[2],
+                    (1,) * self._image.numblocks[3],
+                ),
+                new_axis=0,  # add the i dimension
+                meta=meta,
             )
 
-            dask_chunks = [
-                da.from_delayed(_chunk, shape=(len(self._labels), 1), dtype=image.dtype)
-                for _chunk in chunk_sum.to_delayed().flatten()
-            ]
-
-            # dask_array is an array of shape (len(index), nr_of_chunks in image/mask )
-            dask_array = da.concatenate(dask_chunks, axis=1)
-
-            sum = da.sum(dask_array, axis=1).compute().reshape(-1, 1)
+            # chunk_sum is an array of shape (i, c, num_blocks_z,  num_blocks_y, num_blocks_x), with i=nr of unique labels
+            sum = chunk_sum.reshape(len(self._labels), self._image.shape[0], -1).sum(axis=-1).compute()
 
         # then calculate the mean
         # i) first calculate the area
@@ -398,56 +409,86 @@ class RasterAggregator:
             or "kurtosis" in stats_funcs
             or "skew" in stats_funcs
         ):
-            count = _calculate_area(mask, index=self._labels)
+            if self._count is None:
+                self._count = _calculate_area(self._mask, index=self._labels)
 
         # ii) then calculate the mean
         if "mean" in stats_funcs or "var" in stats_funcs or "kurtosis" in stats_funcs or "skew" in stats_funcs:
-            mean = sum / count
+            self._mean = sum / self._count
 
-        def sum_of_n(n: int):
+        def sum_of_n(n: int) -> NDArray:
             # calculate the sum of n (e.g. squares if n=2) per cell
-            def _calculate_sum_c_per_chunk(mask_block: NDArray, image_block: NDArray) -> NDArray:
-                def _sum_centered(labels):
-                    # `labels` is expected to be an ndarray with the same shape as `input`.
-                    # It must contain the label indices (which are not necessarily the labels
-                    # themselves).
-                    centered_input = image_block - mean_found.flatten()[labels]
-                    # bincount expects 1-D inputs, so we ravel the arguments.
-                    bc = np.bincount(labels.ravel(), weights=(centered_input**n).ravel())
-                    return bc
-
+            def _calculate_sum_c_per_chunk(mask_block: NDArray, image_block: NDArray, block_info=None) -> NDArray:
                 unique_labels, new_labels = np.unique(mask_block, return_inverse=True)
                 new_labels = np.reshape(new_labels, (-1,))  # flatten, since it may be >1-D
                 idxs = np.searchsorted(unique_labels, self._labels)
                 # make all of idxs valid
                 idxs[idxs >= unique_labels.size] = 0
                 found = unique_labels[idxs] == self._labels
-                mean_found = mean[
-                    found
-                ]  # mean is the total mean calculated in previous step, but we only select the ones that are found
-                sums_c = _sum_centered(new_labels.reshape(mask_block.shape))
-                sums_c = sums_c[idxs]
-                sums_c[~found] = 0
-                return sums_c.reshape(-1, 1)
 
+                # i) self._mean contains the mean over all channels, i.e. it is of shape (i,c),
+                #  we only need the channels that are in the current block
+                # ii) self._mean is the mean for all i, but we only select the ones that are in current block
+                img_info = block_info[1]
+                c_start, c_stop = img_info["array-location"][0]  # check this with a debugger
+                mean_found = self._mean[found, c_start:c_stop]
+
+                n_unique = unique_labels.size
+                C = image_block.shape[0]
+
+                # NOTE: doing it without a for loop, e.g. with one bincount,
+                # takes a lot of RAM when there are many channels (>100)
+                # encoded_labels = new_labels[None, :] + n_unique * np.arange(C)[:, None]  # shape (c,i)
+                # sums_c = np.bincount(
+                #    encoded_labels.ravel(),
+                #    weights=weights.ravel(),
+                #    minlength=C
+                #    * n_unique,  # NOTE: specifying minlength not really necessary here, keep it for documentation
+                # ).reshape(C, n_unique)
+
+                mean_per_pixel = mean_found.T[:, new_labels]
+
+                centered = image_block.reshape(C, -1) - mean_per_pixel
+                weights = centered**n  # sum of N
+                sums_c = []
+                for _c_weights in weights:
+                    sums_c.append(
+                        np.bincount(new_labels.ravel(), _c_weights.ravel(), minlength=n_unique),
+                    )
+                sums_c = np.stack(sums_c)
+                sums_c = sums_c[:, idxs]
+                sums_c[:, ~found] = 0
+                # sums_c is of shape (c,i), with i = len(self._labels)
+                # we make it i,c,z,y,x
+                sums_c = sums_c.T
+                return sums_c[..., None, None, None].astype(np.float32)
+
+            arrays = [self._mask[None, ...], self._image]
+
+            meta = np.empty((0, 0, 0, 0, 0), dtype=np.float32)
             chunk_sum_c = da.map_blocks(
-                lambda m, f: _calculate_sum_c_per_chunk(m, f),
-                mask,
-                image,
-                dtype=image.dtype,
-                chunks=(len(self._labels), 1),
-                drop_axis=0,
+                _calculate_sum_c_per_chunk,
+                *arrays,
+                dtype=np.float32,
+                chunks=(
+                    (len(self._labels),),  # i: labels
+                    self._image.chunks[0],  # c: channels
+                    (1,) * self._image.numblocks[1],  # z-block index
+                    (1,) * self._image.numblocks[2],  # y-block index
+                    (1,) * self._image.numblocks[3],  # x-block index
+                ),
+                new_axis=0,  # add the i dimension
+                meta=meta,
+            )
+            # chunk_sum_c is an array of shape (i, c, num_blocks_z,  num_blocks_y, num_blocks_x),
+            # with i=nr of unique labels, and num_blocks the number of blocks in z,y,x of the image and the mask.
+            sum_c_n = (
+                chunk_sum_c.reshape(len(self._labels), self._image.shape[0], -1)
+                .sum(axis=-1)  # sum over all chunks
+                .compute()
             )
 
-            dask_chunks = [
-                da.from_delayed(_chunk, shape=(len(self._labels), 1), dtype=image.dtype)
-                for _chunk in chunk_sum_c.to_delayed().flatten()
-            ]
-
-            # dask_array is an array of shape (len(index), nr_of_chunks in image/mask )
-            dask_array = da.concatenate(dask_chunks, axis=1)
-
-            return da.sum(dask_array, axis=1).compute().reshape(-1, 1)
+            return sum_c_n
 
         if "var" in stats_funcs or "kurtosis" in stats_funcs or "skew" in stats_funcs:
             sum_square = sum_of_n(n=2)
@@ -460,22 +501,22 @@ class RasterAggregator:
         if "sum" in stats_funcs:
             to_return["sum"] = sum
         if "mean" in stats_funcs:
-            to_return["mean"] = mean
+            to_return["mean"] = self._mean
         if "count" in stats_funcs:
-            to_return["count"] = count
+            to_return["count"] = self._count
         if "var" in stats_funcs:
-            to_return["var"] = sum_square / count
+            to_return["var"] = sum_square / self._count
         if "kurtosis" in stats_funcs:
             # fisher kurtosis
-            kurtosis = ((sum_fourth / count) / ((sum_square / count) ** 2)) - 3
+            kurtosis = ((sum_fourth / self._count) / ((sum_square / self._count) ** 2)) - 3
             if np.isnan(kurtosis).any():
-                log.warning("Replacing NaN values in 'kurtosis' with 0 for affected cells.")
+                log.warning("Replacing NaN values in 'kurtosis' with 0 for affected instances.")
                 kurtosis = np.nan_to_num(kurtosis, nan=0)
             to_return["kurtosis"] = kurtosis
         if "skew" in stats_funcs:
-            skewness = (sum_third / count) / (np.sqrt(sum_square / count)) ** 3
+            skewness = (sum_third / self._count) / (np.sqrt(sum_square / self._count)) ** 3
             if np.isnan(skewness).any():
-                log.warning("Replacing NaN values in 'skewness' with 0 for affected cells.")
+                log.warning("Replacing NaN values in 'skewness' with 0 for affected instances.")
                 skewness = np.nan_to_num(skewness, nan=0)
 
             to_return["skew"] = skewness
@@ -484,66 +525,72 @@ class RasterAggregator:
 
         return to_return[0] if len(to_return) == 1 else to_return
 
-    def _aggregate_max_channel(
+    def _aggregate_max(
         self,
-        image: da.Array,
-        mask: da.Array,
     ):
-        return self._min_max_channel(image, mask, min_or_max="max")
+        return self._min_max(min_or_max="max")
 
-    def _aggregate_min_channel(
+    def _aggregate_min(
         self,
-        image: da.Array,
-        mask: da.Array,
     ):
-        return self._min_max_channel(image, mask, min_or_max="min")
+        return self._min_max(min_or_max="min")
 
-    def _min_max_channel(
+    def _min_max(
         self,
-        image: da.Array,
-        mask: da.Array,
-        min_or_max: str,
+        min_or_max: Literal["max", "min"],
     ) -> NDArray:
-        assert image.numblocks == mask.numblocks, (
-            "Dask arrays must have same number of blocks. Please rechunk arrays `image` and `mask` with same chunks size."
-        )
-
         assert min_or_max in ["max", "min"], "Please choose from [ 'min', 'max' ]."
 
-        min_dtype, max_dtype = _get_min_max_dtype(image)
+        min_dtype, max_dtype = _get_min_max_dtype(self._image)
 
-        def _calculate_min_max_per_chunk(mask_block: NDArray, image_block: NDArray) -> NDArray:
-            max = ndimage.labeled_comprehension(
-                image_block,
-                mask_block,
-                self._labels,
-                func=np.max if min_or_max == "max" else np.min,
-                out_dtype=image_block.dtype,
-                default=min_dtype if min_or_max == "max" else max_dtype,
-            )  # also works if we have a lot of labels. scipy makes sure it only searches for labels of self._labels that are in mask_block
+        def _calculate_min_max_per_chunk(*arrays: NDArray) -> NDArray:
+            assert len(arrays) == 2
+            mask_block = arrays[0]
+            image_block = arrays[1]
+            min_or_max_array = []
+            for _c_image_block in image_block:
+                min_or_max_c = ndimage.labeled_comprehension(
+                    _c_image_block,
+                    mask_block,
+                    self._labels,
+                    func=np.max if min_or_max == "max" else np.min,
+                    out_dtype=image_block.dtype,
+                    default=min_dtype
+                    if min_or_max == "max"
+                    else max_dtype,  # set the default for labels in self._labels not found in current mask_block
+                )  # also works if we have a lot of labels. scipy makes sure it only searches for labels of self._labels that are in mask_block
+                min_or_max_array.append(min_or_max_c)
+            min_or_max_array = np.stack(min_or_max_array)
+            # max is (c,i)
+            # make it (i,c,z,y,x)
+            min_or_max_array = min_or_max_array.T
+            return min_or_max_array[..., None, None, None]
 
-            return max.reshape(-1, 1)
+        arrays = [self._mask[None, ...], self._image]
+        meta = np.empty((0, 0, 0, 0, 0), dtype=self._image.dtype)
 
         chunk_min_max = da.map_blocks(
-            lambda m, f: _calculate_min_max_per_chunk(m, f),
-            mask,
-            image,
-            dtype=image.dtype,
-            chunks=(len(self._labels), 1),
-            drop_axis=0,
+            _calculate_min_max_per_chunk,
+            *arrays,
+            dtype=self._image.dtype,
+            chunks=(
+                (len(self._labels),),
+                self._image.chunks[0],
+                (1,) * self._image.numblocks[1],
+                (1,) * self._image.numblocks[2],
+                (1,) * self._image.numblocks[3],
+            ),
+            new_axis=0,  # add the i dimension
+            meta=meta,
         )
 
-        dask_chunks = [
-            da.from_delayed(_chunk, shape=(len(self._labels), 1), dtype=image.dtype)
-            for _chunk in chunk_min_max.to_delayed().flatten()
-        ]
+        # chunk_min_max is an array of shape (i, c, num_blocks_z,  num_blocks_y, num_blocks_x),
+        # with i=nr of unique labels, and num_blocks the number of blocks in z,y,x of the image and the mask.
+        chunk_min_max = chunk_min_max.reshape(len(self._labels), self._image.shape[0], -1)
 
-        # dask_array is an array of shape (len(self._labels), nr_of_chunks in image/mask )
-        dask_array = da.concatenate(dask_chunks, axis=1)
+        dask_min_max_func = da.max if min_or_max == "max" else da.min
 
-        min_max_func = da.max if min_or_max == "max" else da.min
-
-        return min_max_func(dask_array, axis=1).compute().reshape(-1, 1)
+        return dask_min_max_func(chunk_min_max, axis=-1).compute()
 
     def _aggregate_quantiles_channel(
         self,
@@ -711,11 +758,12 @@ def _get_mask_area(
     if index is None:
         index = da.unique(mask).compute()
     _result = _calculate_area(mask, index=index)
-    return pd.DataFrame({instance_key: index, instance_size_key: _result.flatten()})
+    return pd.DataFrame({instance_key: index, instance_size_key: _result.ravel()})
 
 
 def _calculate_area(mask: da.Array, index: NDArray | None = None) -> NDArray:
     assert mask.ndim == 3, "Currently only 3D masks are supported ('z','y','x')."
+
     if index is None:
         index = da.unique(mask).compute()
 
@@ -728,28 +776,35 @@ def _calculate_area(mask: da.Array, index: NDArray | None = None) -> NDArray:
         idxs[idxs >= unique_labels.size] = 0
         found = unique_labels[idxs] == index
         # calculate counts
-        counts = np.bincount(new_labels)
+        counts = np.bincount(
+            new_labels, minlength=unique_labels.size
+        )  # NOTE: specifying minlength not really necessary here, we keep it for documentation
         counts = counts[idxs]
         counts[~found] = 0
-        return counts.reshape(-1, 1)
+        # counts is an array of shape len(self._lables)
+        # we make it i,z,y,x
+        return counts[
+            :, None, None, None
+        ].astype(
+            np.float32
+        )  # TODO, potential overflow problem, should we remove background, or just cast to np.float64 (which it is already)
 
+    meta = np.empty((0, 0, 0, 0, 0), dtype=np.float32)
     chunk_count = da.map_blocks(
         _calculate_count_per_chunk,
         mask,
-        dtype=mask.dtype,
-        chunks=(len(index), 1),
-        drop_axis=0,
+        dtype=np.float32,
+        chunks=(
+            (len(index)),
+            (1,) * mask.numblocks[0],
+            (1,) * mask.numblocks[1],
+            (1,) * mask.numblocks[2],
+        ),
+        new_axis=0,  # i, new axis contains the sum for each label (in the chunk)
+        meta=meta,
     )
-
-    dask_chunks = [
-        da.from_delayed(_chunk, shape=(len(index), 1), dtype=mask.dtype)
-        for _chunk in chunk_count.to_delayed().flatten()
-    ]
-
-    # dask_array is an array of shape (len(index), nr_of_chunks in image/mask )
-    dask_array = da.concatenate(dask_chunks, axis=1)
-
-    return da.sum(dask_array, axis=1).compute().reshape(-1, 1)
+    sum = chunk_count.reshape(len(index), -1).sum(axis=-1).compute()
+    return sum.reshape(-1, 1)
 
 
 def _get_center_of_mass(
@@ -759,7 +814,7 @@ def _get_center_of_mass(
     if index is None:
         index = da.unique(mask).compute()
 
-    # dask image center of mass for masks seems bugged (very slow), use in memory scipy.ndimage.center_of_mass for now.
+    # dask image center of mass for masks seems bugged (very slow), use in memory scipy.ndimage.center_of_mass.
     in_memory = True
     if not in_memory:
         coordinates = ndmeasure.center_of_mass(
@@ -996,7 +1051,7 @@ def _aggregate_custom_block(
         "Callable 'fn' should return an array with length equal to the number of non zero labels in the provided mask."
     )
     assert np.issubdtype(result.dtype, np.floating), "Callable 'fn' should return an array of dtype 'float'."
-    if any(np.isnan(result).flatten()):
+    if any(np.isnan(result).ravel()):
         raise AssertionError("Result of callable 'fn' is not allowed to contain NaN.")
     result = result[idxs]
     result[~found] = np.nan

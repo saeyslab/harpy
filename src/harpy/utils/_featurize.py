@@ -238,7 +238,7 @@ class Featurizer:
         batch_size: int | None = None,
     ) -> tuple[NDArray, da.Array]:
         """
-        Extract per-label instance windows from the mask and image of size `diameter` in `y` and `x` using `dask.array.map_overlap` and `dask.array.map_blocks`.
+        Extract per-label instance windows from the mask and image of size `diameter` in `y` and `x` using :func:`dask.array.map_overlap` and :func:`dask.array.map_blocks`.
 
         See `hp.tb.extract_instances` for a full description.
 
@@ -337,7 +337,7 @@ class Featurizer:
         unique_instance_ids, idx, _returned_counts = np.unique(instances_ids, return_index=True, return_counts=True)
         duplicates = unique_instance_ids[_returned_counts > 1]
 
-        # This case should not happen if depth> max_diameter/2.
+        # This case can also happen if depth> max_diameter/2, e.g. mask consisting of two points, one in each chunk.
         if duplicates.size:
             log.info(
                 f"There are {len(duplicates)} instances that are assigned to more than one chunk (instance id's: {duplicates}). "
@@ -345,7 +345,7 @@ class Featurizer:
                 "We will only keep the first occurence. "
             )
 
-        # instances that are not assigned to any chunk. Can happen for edge cases, or if depth is too small.
+        # instances that are not assigned to any chunk. This should not happen if depth>max_diameter/2.
         _diff = np.setdiff1d(
             self._labels[self._labels != 0],
             unique_instance_ids,
@@ -366,7 +366,7 @@ class Featurizer:
         c_chunks = tuple([c_chunks[0] + 1] + list(c_chunks[1:]))  # we concat mask to first c channel chunk
         # TODO: should we consider not keeping the mask, and only extract the instances, that way we prevent a potential
         # computational intens rechunk along channel dimension due to adding mask to first chunk.
-        # (chunks are now e.g. (2,1,1,1,1), and chunksize=2, so rechunk by chunksize 2, leads to rechunk along channel dimension)
+        # (chunks are now e.g. (2,1,1,1,1), and we would get chunksize=2, so rechunk by chunksize 2, leads to rechunk along channel dimension)
         # returns c,z,i,y,x tensor
         dask_chunks = da.map_blocks(
             lambda *arrays, block_info=None, **kw: _featurize_block(*arrays, block_info=block_info, **kw),
