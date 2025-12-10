@@ -28,12 +28,13 @@ def extract_instances(
     depth: int,
     diameter: int | None = None,
     remove_background: bool = True,
+    add_mask: bool = False,
     zarr_output_path: str | Path | None = None,
     batch_size: int | None = None,
     to_coordinate_system: str = "global",
 ) -> tuple[NDArray, da.Array]:
     """
-    Extract per-label instance windows from `img_layer`/`labels_layer` of size `diameter` in `y` and `x` using `dask.array.map_overlap` and `dask.array.map_blocks`.
+    Extract per-label instance windows from `img_layer`/`labels_layer` of size `diameter` in `y` and `x` using :func:`dask.array.map_overlap` and :func:`dask.array.map_blocks`.
 
     For every non-zero label in the `labels_layer`, this method builds a Dask graph that
     slices out a centered, square window in the `y`,`x` plane around that instance (preserving
@@ -61,6 +62,9 @@ def extract_instances(
         If `True`, pixels outside the instance label within each
         window are set to background (e.g., zero) so that only the object remains
         inside the cutout. If ``False``, the entire window content is kept.
+    add_mask
+        If `True`, the corresponding mask (extracted from the `labels_layer`)
+        will be added at channel index 0 of each extracted instance.
     zarr_output_path
         If a filesystem path (string or ``Path``) is provided, the extracted
         instances are **computed** and materialized to a Zarr store at that
@@ -80,9 +84,9 @@ def extract_instances(
         - a Numpy array containing indices of extracted labels, shape `(i,)`.
           Dimension of `i` will be equal to the total number of non-zero labels in the mask.
 
-        - a Dask array of dimension `(i,c+1,z,y,x)`, with dimension of `c` the number of channels in `img_layer`.
-          At channel index 0 of each instance, is the corresponding mask.
-          Dimension of `y` and `x` equal to `diameter`, or 2*`depth` if `diameter` is not specified.
+        - a Dask array of dimension `(i,c+1,z,y,x)` or `(i,c,z,y,x)`, with dimension of `c` the number of channels in `img_layer`.
+          At channel index 0 of each instance, is the corresponding mask if `add_mask` is set to `True`.
+          Dimension of `y` and `x` are equal to `diameter`, or 2*`depth` if `diameter` is not specified.
 
     Examples
     --------
@@ -137,6 +141,7 @@ def extract_instances(
         depth=depth,
         diameter=diameter,
         remove_background=remove_background,
+        add_mask=add_mask,
         zarr_output_path=zarr_output_path,
         store_intermediate=False,
         batch_size=batch_size,
@@ -228,7 +233,7 @@ def featurize(
         The callable must include the parameter 'embedding_dimension'
     batch_size
         Chunk size of the resulting Dask array in the instance dimension `i` during model
-        evaluation. Lower values can reduce (GPU) memory usage at the cost of more overhead.
+        evaluation. Lower values can reduce (GPU) memory usage during model evaluation, but at the cost of more overhead (rechunking).
     model_kwargs
         Extra keyword arguments forwarded to `model` at call time (e.g., device selection,
         inference flags).

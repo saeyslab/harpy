@@ -65,6 +65,7 @@ def test_extract_instances(sdata_transcripts_no_backed):
     instances_ids, dask_chunks = featurizer.extract_instances(
         depth=depth,
         diameter=75,
+        add_mask=True,
     )
 
     instances = dask_chunks.compute()
@@ -124,6 +125,7 @@ def test_extract_instances_duplicates_blobs(sdata):
     instances_ids, dask_chunks = featurizer.extract_instances(
         depth=depth,
         diameter=1000,
+        add_mask=True,
     )
 
     instances = dask_chunks.compute()

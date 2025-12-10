@@ -62,6 +62,7 @@ class Featurizer:
         self._labels = (
             da.unique(mask_dask_array).compute()
         )  # calculate this one time during initialization, otherwise we would need to calculate this multiple times.
+        log.info("Finished calculating unique labels in the mask.")
         assert image_dask_array.ndim == 4, "Currently only 4D image arrays are supported ('c', 'z', 'y', 'x')."
         assert mask_dask_array.ndim == 3, "Currently only 3D masks are supported ('z', 'y', 'x')."
         assert image_dask_array.shape[1:] == mask_dask_array.shape, (
@@ -172,6 +173,7 @@ class Featurizer:
             zarr_output_path=intermediate_zarr_output_path,
             store_intermediate=store_intermediate,
             batch_size=batch_size,
+            add_mask=False,
         )
 
         assert "embedding_dimension" in inspect.signature(model).parameters, (
@@ -179,7 +181,7 @@ class Featurizer:
         )
 
         # remove the masks, located at first dimension
-        dask_chunks = dask_chunks[:, 1:, ...]
+        # dask_chunks = dask_chunks[:, 1:, ...]  # in self.extract_instances we already pass add_mask==False
 
         # dask_chunks is array of dimension (i,c,z,y,x)
         if batch_size is not None:
@@ -207,7 +209,7 @@ class Featurizer:
             model,
             dask_chunks,
             chunks=(dask_chunks.chunks[0], embedding_dimension),
-            drop_axis=[2, 3, 4],
+            drop_axis=[2, 3, 4],  # we do not allow chunking in 2,3 and 4, and we drop them
             dtype=np.float32,
             **kwargs,
             embedding_dimension=embedding_dimension,
@@ -231,6 +233,7 @@ class Featurizer:
         diameter: int
         | None = None,  # will be dimension of resulting chunks in y and x. Can be set to value < max_diameter to optimize performance
         remove_background: bool = True,
+        add_mask: bool = False,
         zarr_output_path: str
         | Path
         | None = None,  # if zarr_output_path is specified, we compute the graph, otherwise we return a non-computed graph
@@ -240,7 +243,7 @@ class Featurizer:
         """
         Extract per-label instance windows from the mask and image of size `diameter` in `y` and `x` using :func:`dask.array.map_overlap` and :func:`dask.array.map_blocks`.
 
-        See `hp.tb.extract_instances` for a full description.
+        See :func:`harpy.tb.extract_instances` for a full description.
 
         Parameters
         ----------
@@ -311,7 +314,7 @@ class Featurizer:
             array_image = da.from_zarr(array_image_intermediate_store)
 
         N = 500  # guess for nr of labels per block.
-        # This guess does not need to be exact, because we do a dask.compute() on labels_per_chunk and then dask does not need exact chunk sizes
+        # This guess does not need to be exact, because we do a dask.compute() on labels_per_chunk and then Dask does not need exact chunk sizes
         labels_per_chunk = da.map_blocks(
             _labels_per_block,
             array_mask,
@@ -341,7 +344,8 @@ class Featurizer:
         if duplicates.size:
             log.info(
                 f"There are {len(duplicates)} instances that are assigned to more than one chunk (instance id's: {duplicates}). "
-                "Consider increasing depth. "
+                "If 'depth' is already set to a value > 2* maximum expected diameter, this message can be ignored, "
+                "else consider increasing depth. "
                 "We will only keep the first occurence. "
             )
 
@@ -363,8 +367,10 @@ class Featurizer:
         arrays = [array_mask, array_image]
 
         c_chunks = array_image.chunks[0]
-        c_chunks = tuple([c_chunks[0] + 1] + list(c_chunks[1:]))  # we concat mask to first c channel chunk
-        # TODO: should we consider not keeping the mask, and only extract the instances, that way we prevent a potential
+        c_chunks = (
+            tuple([c_chunks[0] + 1] + list(c_chunks[1:])) if add_mask else c_chunks
+        )  # we concat mask to first c channel chunk
+        # It is computationally more optimal to set add_mask==False, and only extract the instances, that way we prevent a potential
         # computational intens rechunk along channel dimension due to adding mask to first chunk.
         # (chunks are now e.g. (2,1,1,1,1), and we would get chunksize=2, so rechunk by chunksize 2, leads to rechunk along channel dimension)
         # returns c,z,i,y,x tensor
@@ -384,6 +390,7 @@ class Featurizer:
             diameter=diameter,
             index=self._labels[self._labels != 0],
             remove_background=remove_background,
+            add_mask=add_mask,
         )
         # make it i,c,z,y,x
         dask_chunks = dask_chunks.transpose(2, 0, 1, 3, 4)
@@ -423,16 +430,19 @@ class Featurizer:
         diameter: int,  # estimated max diameter of cell in y, x
         instance_key: str = _INSTANCE_KEY,
     ) -> pd.DataFrame:
-        """Function calculates mean intensity. Please use optimized RasterAggregator.aggregate_mean() function."""
+        """Function calculates mean intensity. Please use the optimized RasterAggregator.aggregate_mean() function."""
         # this is dummy function to illustrate working of ._extract_instances, please use optimized RasterAggregator
         instances_ids, dask_chunks = self.extract_instances(
             depth=diameter // 2 + 1,
             diameter=diameter,
             zarr_output_path=None,
+            add_mask=True,
             store_intermediate=False,
         )
 
-        mask = dask_chunks[:, 0:1, ...]  # the first one is the mask
+        mask = dask_chunks[
+            :, 0:1, ...
+        ]  # the first 'channel' dimension of (i,c,z,y,x) vector is the mask if add_mask==True
         image = dask_chunks[:, 1:, ...]
         mask = mask != 0
         sum_nonmask = (image * mask).sum(axis=(2, 3, 4))
@@ -510,6 +520,7 @@ def _featurize_block(
     _depth: dict[int, int],
     diameter: int,
     remove_background: bool,
+    add_mask: bool,
 ) -> NDArray:
     mask_block = arrays[0]
     assert len(arrays) == 2
@@ -526,10 +537,9 @@ def _featurize_block(
     # i,c,z,y,x tensor
     # concat the mask instances to the block at channel location 0.
     c_location_block = block_info[1]["chunk-location"][0]
-    if c_location_block == 0:
-        concat_mask = True
-    else:
-        concat_mask = False
+    _concat_mask = False
+    if c_location_block == 0 and add_mask:
+        _concat_mask = True
 
     instances = _extract_instances(
         mask_block,
@@ -539,7 +549,7 @@ def _featurize_block(
             diameter,
             diameter,
         ),  # no chunking in z dimension, so size in z is image_block.shape[1]
-        concat_mask=concat_mask,
+        concat_mask=_concat_mask,
         remove_background=remove_background,
     )
 
