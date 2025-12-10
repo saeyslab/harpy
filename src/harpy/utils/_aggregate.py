@@ -17,6 +17,27 @@ from sklearn.decomposition import PCA
 
 from harpy.utils._keys import _CELLSIZE_KEY, _INSTANCE_KEY
 
+# NOTE:
+# aggregate works by computing statistics per chunk. For each chunk, it produces
+# a matrix with shape (i, c, z, y, x), where:
+#   - i = total number of labels in the global mask
+#   - c = number of channels in the chunk
+#   - z = 1
+#   - y = 1
+#   - x = 1
+#
+# We deliberately avoid the optimization where i is set to the maximum number of
+# labels in any chunk, because that would require an extra pass over the global
+# mask to count labels per chunk (as done in Featurizer).
+#
+# Since i is on the order of thousands to millions, and we only compute a single
+# feature (e.g. mean), each chunk of the aggregated matrix stays below ~50 MB
+# (assuming chunksize c = 1), even if the global mask contains ~10M labels.
+#
+# By chunking over the (c, z, y, x) dimensions, the user can control RAM usage.
+# As a rule of thumb, choose chunk sizes of about z,y,x ≈ 4000 and c ≈ 5,
+# adjusting as needed based on available memory.
+
 
 class RasterAggregator:
     """
@@ -51,8 +72,30 @@ class RasterAggregator:
 
     Notes
     -----
-    - Unique labels are computed once at initialization for efficiency.
-    - Image and mask must be aligned in spatial dimensions and chunking to ensure accurate and efficient aggregation.
+    The aggregate operation computes statistics per chunk.
+    For each chunk in `mask_dask_array` and `image_dask_array`, it
+    produces a matrix with shape (i, c, z, y, x), where:
+
+    - i: total number of labels in the global mask
+    - c: number of channels in the chunk
+    - z = 1, y = 1, x = 1
+
+    These matrices (chunks) are then aggregated, to obtain statistics for the
+    global mask and image.
+
+    We intentionally avoid the optimization of setting i to the maximum number of
+    labels in any chunk, because this would require an additional pass over the
+    global mask to count labels per chunk (as done in :class:`harpy.utils._featurize.Featurizer`).
+
+    Because i typically ranges from thousands to millions, and because only a single
+    feature (e.g., a mean statistic) is computed, each chunk of the aggregated
+    matrix remains under ~50 MB (for a chunksize of c = 1), even when the global
+    mask contains around 10 million labels.
+
+    By chunking the underlying dask arrays along the (c, z, y, x) dimensions in the
+    on-disk Zarr store, the user can effectively control RAM usage during
+    aggregation. As a practical guideline, choose chunk sizes of roughly
+    z, y, x ≈ 4096 and c ≈ 5, adjusting these values based on the available memory.
     """
 
     def __init__(
