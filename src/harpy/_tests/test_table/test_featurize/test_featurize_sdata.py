@@ -41,6 +41,7 @@ def test_extract_instances_sdata(sdata_transcripts_no_backed: SpatialData):
         depth=100,
         diameter=75,
         zarr_output_path=None,
+        extract_mask=True,  # extract the mask, so we can perform sanity checks
         batch_size=250,
     )
 

@@ -55,7 +55,7 @@ class Featurizer:
     - Image and mask must be aligned in spatial dimensions and chunking to ensure accurate and efficient featurization.
     """
 
-    def __init__(self, mask_dask_array: da.Array, image_dask_array: da.Array):
+    def __init__(self, mask_dask_array: da.Array, image_dask_array: da.Array | None = None):
         if not np.issubdtype(mask_dask_array.dtype, np.integer):
             raise ValueError(f"'mask_dask_array' should contains chunks of type {np.integer}.")
         log.info("Calculating unique labels in the mask.")
@@ -63,14 +63,16 @@ class Featurizer:
             da.unique(mask_dask_array).compute()
         )  # calculate this one time during initialization, otherwise we would need to calculate this multiple times.
         log.info("Finished calculating unique labels in the mask.")
-        assert image_dask_array.ndim == 4, "Currently only 4D image arrays are supported ('c', 'z', 'y', 'x')."
+        if image_dask_array is not None:
+            assert image_dask_array.ndim == 4, "Currently only 4D image arrays are supported ('c', 'z', 'y', 'x')."
+            assert image_dask_array.shape[1:] == mask_dask_array.shape, (
+                "The mask and the image should have the same spatial dimensions ('z', 'y', 'x')."
+            )
+            assert image_dask_array.chunksize[1:] == mask_dask_array.chunksize, (
+                "Provided mask ('mask_dask_array') and image ('image_dask_array') do not have the same chunksize in ( 'z', 'y', 'x' ). Please rechunk."
+            )
         assert mask_dask_array.ndim == 3, "Currently only 3D masks are supported ('z', 'y', 'x')."
-        assert image_dask_array.shape[1:] == mask_dask_array.shape, (
-            "The mask and the image should have the same spatial dimensions ('z', 'y', 'x')."
-        )
-        assert image_dask_array.chunksize[1:] == mask_dask_array.chunksize, (
-            "Provided mask ('mask_dask_array') and image ('image_dask_array') do not have the same chunksize in ( 'z', 'y', 'x' ). Please rechunk."
-        )
+
         self._image = image_dask_array
         self._mask = mask_dask_array
 
@@ -87,6 +89,7 @@ class Featurizer:
         model: Callable[..., NDArray] = _dummy_embedding,
         batch_size: int | None = None,
         model_kwargs: Mapping[str, Any] = MappingProxyType({}),
+        dtype: np.dtype = np.float32,
         **kwargs: Any,
     ) -> tuple[NDArray, da.Array]:
         """
@@ -173,7 +176,7 @@ class Featurizer:
             zarr_output_path=intermediate_zarr_output_path,
             store_intermediate=store_intermediate,
             batch_size=batch_size,
-            add_mask=False,
+            extract_mask=False,
         )
 
         assert "embedding_dimension" in inspect.signature(model).parameters, (
@@ -181,7 +184,7 @@ class Featurizer:
         )
 
         # remove the masks, located at first dimension
-        # dask_chunks = dask_chunks[:, 1:, ...]  # in self.extract_instances we already pass add_mask==False
+        # dask_chunks = dask_chunks[:, 1:, ...]  # in self.extract_instances we already pass extract_mask==False
 
         # dask_chunks is array of dimension (i,c,z,y,x)
         if batch_size is not None:
@@ -210,7 +213,7 @@ class Featurizer:
             dask_chunks,
             chunks=(dask_chunks.chunks[0], embedding_dimension),
             drop_axis=[2, 3, 4],  # we do not allow chunking in 2,3 and 4, and we drop them
-            dtype=np.float32,
+            dtype=dtype,
             **kwargs,
             embedding_dimension=embedding_dimension,
             **model_kwargs,
@@ -233,7 +236,7 @@ class Featurizer:
         diameter: int
         | None = None,  # will be dimension of resulting chunks in y and x. Can be set to value < max_diameter to optimize performance
         remove_background: bool = True,
-        add_mask: bool = False,
+        extract_mask: bool = False,
         zarr_output_path: str
         | Path
         | None = None,  # if zarr_output_path is specified, we compute the graph, otherwise we return a non-computed graph
@@ -292,25 +295,30 @@ class Featurizer:
         if store_intermediate and zarr_output_path is None:
             raise ValueError("Please specify a 'zarr_output_path' if 'store_intermediate' is 'True'.")
         _depth = {0: 0, 1: 0, 2: depth, 3: depth}
+        if self._image is None and not extract_mask:
+            log.info(
+                "No image available and 'extract_mask' is False; forcing 'extract_mask=True' since nothing can be extracted otherwise."
+            )
+            extract_mask = True
 
         array_mask = self._mask[None, ...]  # add trivial channel dimension
         array_image = self._image
 
-        if array_image.numblocks[1] != 1:
+        if array_image is not None and array_image.numblocks[1] != 1:
             raise ValueError("Currently we do not allow chunking in z dimension.")
 
         array_mask = _transpose_chunks(array_mask, depth=_depth)
-        array_image = _transpose_chunks(array_image, depth=_depth)
+        array_image = _transpose_chunks(array_image, depth=_depth) if array_image is not None else None
 
         if store_intermediate:
             _dirname_zarr = os.path.dirname(zarr_output_path)
-            array_image_intermediate_store = os.path.join(_dirname_zarr, f"array_image_{uuid.uuid4()}.zarr")
             array_mask_intermediate_store = os.path.join(_dirname_zarr, f"array_mask_{uuid.uuid4()}.zarr")
-            log.info(f"Writing to intermediate zarr store {array_image_intermediate_store}")
             log.info(f"Writing to intermediate zarr store {array_mask_intermediate_store}")
             array_mask.to_zarr(array_mask_intermediate_store)
-            array_image.to_zarr(array_image_intermediate_store)
             array_mask = da.from_zarr(array_mask_intermediate_store)
+            array_image_intermediate_store = os.path.join(_dirname_zarr, f"array_image_{uuid.uuid4()}.zarr")
+            log.info(f"Writing to intermediate zarr store {array_image_intermediate_store}")
+            array_image.to_zarr(array_image_intermediate_store)
             array_image = da.from_zarr(array_image_intermediate_store)
 
         N = 500  # guess for nr of labels per block.
@@ -364,23 +372,34 @@ class Featurizer:
                 f"(Instance ids: {_diff}.)"
             )
 
-        arrays = [array_mask, array_image]
+        arrays = [array_mask, array_image] if array_image is not None else [array_mask]
 
-        c_chunks = array_image.chunks[0]
-        c_chunks = (
-            tuple([c_chunks[0] + 1] + list(c_chunks[1:])) if add_mask else c_chunks
-        )  # we concat mask to first c channel chunk
-        # It is computationally more optimal to set add_mask==False, and only extract the instances, that way we prevent a potential
+        if array_image is None:
+            c_chunks = (1,)
+        else:
+            c_chunks = array_image.chunks[0]
+            c_chunks = tuple([c_chunks[0] + 1] + list(c_chunks[1:])) if extract_mask else c_chunks
+        # we concat mask to first c channel chunk
+        # It is computationally more optimal to set extract_labels==False, and only extract the instances, that way we prevent a potential
         # computational intens rechunk along channel dimension due to adding mask to first chunk.
         # (chunks are now e.g. (2,1,1,1,1), and we would get chunksize=2, so rechunk by chunksize 2, leads to rechunk along channel dimension)
         # returns c,z,i,y,x tensor
+        if extract_mask:
+            if array_image is not None:
+                output_dtype = np.result_type(array_image.dtype, array_mask.dtype)
+            else:
+                output_dtype = array_mask.dtype
+        else:
+            output_dtype = array_image.dtype
+        _func = _featurize_mask_block if array_image is None else _featurize_block
+
         dask_chunks = da.map_blocks(
-            lambda *arrays, block_info=None, **kw: _featurize_block(*arrays, block_info=block_info, **kw),
+            lambda *arrays, block_info=None, **kw: _func(*arrays, block_info=block_info, **kw),
             *arrays,
-            dtype=np.float32,  # images and mask will be cast to dtype, if dtype==np.float32, max label supported is 2**24. # TODO cast to float64 if max label>2**24
+            dtype=output_dtype,
             chunks=(
                 c_chunks,  # e.g. (3+1,1) # do allow chunking in c.
-                array_image.chunks[1],
+                array_mask.chunks[1],
                 tuple(counts),
                 (diameter,),
                 (diameter,),
@@ -390,7 +409,7 @@ class Featurizer:
             diameter=diameter,
             index=self._labels[self._labels != 0],
             remove_background=remove_background,
-            add_mask=add_mask,
+            extract_mask=extract_mask,
         )
         # make it i,c,z,y,x
         dask_chunks = dask_chunks.transpose(2, 0, 1, 3, 4)
@@ -436,13 +455,13 @@ class Featurizer:
             depth=diameter // 2 + 1,
             diameter=diameter,
             zarr_output_path=None,
-            add_mask=True,
+            extract_mask=True,
             store_intermediate=False,
         )
 
         mask = dask_chunks[
             :, 0:1, ...
-        ]  # the first 'channel' dimension of (i,c,z,y,x) vector is the mask if add_mask==True
+        ]  # the first 'channel' dimension of (i,c,z,y,x) vector is the mask if extract_mask==True
         image = dask_chunks[:, 1:, ...]
         mask = mask != 0
         sum_nonmask = (image * mask).sum(axis=(2, 3, 4))
@@ -520,7 +539,7 @@ def _featurize_block(
     _depth: dict[int, int],
     diameter: int,
     remove_background: bool,
-    add_mask: bool,
+    extract_mask: bool,
 ) -> NDArray:
     mask_block = arrays[0]
     assert len(arrays) == 2
@@ -538,12 +557,12 @@ def _featurize_block(
     # concat the mask instances to the block at channel location 0.
     c_location_block = block_info[1]["chunk-location"][0]
     _concat_mask = False
-    if c_location_block == 0 and add_mask:
+    if c_location_block == 0 and extract_mask:
         _concat_mask = True
 
     instances = _extract_instances(
-        mask_block,
-        image_block,
+        mask=mask_block,
+        image=image_block,
         size=(
             image_block.shape[1],
             diameter,
@@ -554,6 +573,39 @@ def _featurize_block(
     )
 
     # return c,z,i,y,x tensor
+    return instances.transpose(1, 2, 0, 3, 4)
+
+
+def _featurize_mask_block(
+    *arrays,
+    index: NDArray,
+    block_info: dict,  # placeholder
+    _depth: dict[int, int],
+    diameter: int,
+    remove_background: bool,
+    extract_mask: bool,  # placeholder
+) -> NDArray:
+    mask_block = arrays[0]
+    assert len(arrays) == 1
+    assert mask_block.ndim == 4
+    assert 0 not in index
+
+    # do a copy of mask_block, because we alter mask_block inside _mask_center_of_mass_outside
+    mask_block, _ = _mask_center_of_mass_outside(mask_block=mask_block.copy(), _depth=_depth)
+
+    instances = _extract_instances(
+        mask=mask_block,
+        image=None,
+        size=(
+            mask_block.shape[1],
+            diameter,
+            diameter,
+        ),  # no chunking in z dimension, so size in z is image_block.shape[1]
+        concat_mask=True,
+        remove_background=remove_background,
+    )
+
+    # return 1,z,i,y,x tensor
     return instances.transpose(1, 2, 0, 3, 4)
 
 
@@ -572,27 +624,28 @@ def _labels_per_block(
 
 def _extract_instances(
     mask: NDArray,
-    image: NDArray,
+    image: NDArray | None,
     size: tuple[int, int, int] = (1, 100, 100),
     remove_background=True,
     concat_mask: bool = True,
 ) -> NDArray:
+    if image is None and not concat_mask:
+        raise ValueError("'concat_mask' should be set to True if 'image' is None.")
     start = time.time()
     log.info("Extracting instances.")
-
-    assert mask.ndim == image.ndim == 4
+    if image is not None:
+        assert image.ndim == 4
+    assert mask.ndim == 4
     assert mask.shape[0] == 1
     assert len(size) == 3
-    if np.max(mask) > 2**24:
-        raise ValueError(f"Maximum value allowed in mask is ({2**24}).")
-    if not np.issubdtype(image.dtype, np.floating):
-        if np.max(image) > 2**24:
-            raise ValueError(f"Cannot safely cast image to float32. Please clip the image to <= {2**24}")
-    else:
-        if not np.issubdtype(image.dtype, np.float32):
-            raise ValueError("Currently only images of dtype int and float32 are supported.")
+    # catch an edge case where mask id's would be >2**53
+    if image is not None and concat_mask and np.issubdtype(image.dtype, np.floating) and np.max(mask) > 2**53:
+        raise ValueError(f"Cannot safely cast to float (float64). Maximum value allowed in mask is ({2**53}).")
 
-    C, Z, Y, X = image.shape
+    if image is not None:
+        C, Z, Y, X = image.shape
+    else:
+        C, Z, Y, X = mask.shape
     size_z, size_y, size_x = size
 
     # foreground coords once (O(V))
@@ -656,30 +709,37 @@ def _extract_instances(
                 xe = min(X, xe + ((size_x - xl) // 2) + 1)
 
         # crop
-        inst_img = image[:, zs:ze, ys:ye, xs:xe]  # .copy() # no copy needed, because we use np.where later
+        if image is not None:
+            inst_img = image[:, zs:ze, ys:ye, xs:xe]  # .copy() # no copy needed, because we use np.where later
         inst_mask = mask[:, zs:ze, ys:ye, xs:xe]  # .copy()
 
         # keep only this label in the mask, zero everywhere else
         lbl = uniq[i]
         inst_mask = np.where(inst_mask == lbl, inst_mask, 0)
-        if remove_background:
+        if remove_background and image is not None:
             # zero image outside the instance
             inst_img = np.where(inst_mask != 0, inst_img, 0)
 
-        inst_img = _pad_array(inst_img, size=[size_z, size_y, size_x])
+        if image is not None:
+            inst_img = _pad_array(inst_img, size=[size_z, size_y, size_x])
         inst_mask = _pad_array(inst_mask, size=[size_z, size_y, size_x])
 
-        instance_list.append(inst_img)
+        if image is not None:
+            instance_list.append(inst_img)
         instance_mask_list.append(inst_mask)
 
     # create i,c,z,y,x
-    mask_out = np.stack(instance_mask_list).astype(np.float32)
-    img_out = np.stack(instance_list).astype(np.float32)
+    mask_out = np.stack(instance_mask_list)
+    if image is not None:
+        img_out = np.stack(instance_list)
 
     log.info(
         f"Finished extracting instances, took {time.time() - start:.3f}s "
         f"({L / max(1e-9, (time.time() - start)):.2f} instances/s)."
     )
+
+    if image is None:
+        return mask_out
 
     return np.concatenate([mask_out, img_out], axis=1) if concat_mask else img_out
 

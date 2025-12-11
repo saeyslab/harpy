@@ -28,7 +28,7 @@ def extract_instances(
     depth: int,
     diameter: int | None = None,
     remove_background: bool = True,
-    add_mask: bool = False,
+    extract_mask: bool = False,
     zarr_output_path: str | Path | None = None,
     batch_size: int | None = None,
     to_coordinate_system: str = "global",
@@ -62,9 +62,9 @@ def extract_instances(
         If `True`, pixels outside the instance label within each
         window are set to background (e.g., zero) so that only the object remains
         inside the cutout. If ``False``, the entire window content is kept.
-    add_mask
+    extract_mask
         If `True`, the corresponding mask (extracted from the `labels_layer`)
-        will be added at channel index 0 of each extracted instance.
+        will be added at channel index 0 for each extracted instance tensor.
     zarr_output_path
         If a filesystem path (string or ``Path``) is provided, the extracted
         instances are **computed** and materialized to a Zarr store at that
@@ -141,7 +141,7 @@ def extract_instances(
         depth=depth,
         diameter=diameter,
         remove_background=remove_background,
-        add_mask=add_mask,
+        extract_mask=extract_mask,
         zarr_output_path=zarr_output_path,
         store_intermediate=False,
         batch_size=batch_size,
@@ -168,6 +168,7 @@ def featurize(
     instance_key: str = _INSTANCE_KEY,
     region_key: str = _REGION_KEY,
     cell_index_name: str = _CELL_INDEX,
+    dtype: np.dtype = np.float32,
     overwrite: bool = False,
     **kwargs: Any,
 ) -> SpatialData:
@@ -250,6 +251,8 @@ def featurize(
     cell_index_name
         The name of the index of the resulting :class:`~anndata.AnnData` table.
         Ignored if `table_layer` is not None.
+    dtype
+        Output dtype of `model`.
     overwrite
         If `True`, overwrites the `output_layer` if it already exists in `sdata`.
     **kwargs
@@ -323,6 +326,7 @@ def featurize(
             model=model,
             batch_size=batch_size,
             model_kwargs=model_kwargs,
+            dtype=dtype,
             **kwargs,
         )
 

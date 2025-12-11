@@ -1,5 +1,6 @@
 import dask.array as da
 import numpy as np
+import pytest
 from scipy import ndimage
 from spatialdata import SpatialData
 
@@ -43,7 +44,8 @@ def test_featurize(sdata_transcripts_no_backed: SpatialData):
     assert result.shape[1] == embedding_dimension
 
 
-def test_extract_instances(sdata_transcripts_no_backed):
+@pytest.mark.parametrize("extract_mask", [True, False])
+def test_extract_instances(sdata_transcripts_no_backed, extract_mask):
     sdata = sdata_transcripts_no_backed
 
     chunksize_spatial = 2048
@@ -65,10 +67,46 @@ def test_extract_instances(sdata_transcripts_no_backed):
     instances_ids, dask_chunks = featurizer.extract_instances(
         depth=depth,
         diameter=75,
-        add_mask=True,
+        extract_mask=extract_mask,
     )
 
     instances = dask_chunks.compute()
+    assert instances.dtype == np.uint32 if extract_mask else image.dtype
+    assert instances.shape == (657, 5, 1, 75, 75) if extract_mask else (657, 4, 1, 75, 75)
+
+    if extract_mask:
+        # check that mask of each instance contains the index corresponding to instances_ids
+        for _index, _item in zip(instances_ids, instances, strict=True):
+            _item_labels = np.unique(_item[0])
+            _item_labels = _item_labels[_item_labels != 0]
+            assert len(_item_labels) == 1
+            assert _index == _item_labels[0]
+
+        # check that all labels are extracted
+        index = da.unique(instances[:, 0, ...]).compute()
+        index = index[index != 0]
+
+        assert np.array_equal(index, np.sort(instances_ids))
+
+
+def test_extract_instances_mask(sdata_transcripts_no_backed):
+    sdata = sdata_transcripts_no_backed
+
+    chunksize_spatial = 2048
+    depth = 100
+    mask = sdata["segmentation_mask"].data[None, ...].rechunk(chunksize_spatial)
+
+    featurizer = Featurizer(mask_dask_array=mask, image_dask_array=None)
+
+    instances_ids, dask_chunks = featurizer.extract_instances(
+        depth=depth,
+        diameter=75,
+        extract_mask=True,
+    )
+
+    instances = dask_chunks.compute()
+    assert instances.dtype == mask.dtype
+    assert instances.shape == (657, 1, 1, 75, 75)  # we only extract the mask
 
     # check that mask of each instance contains the index corresponding to instances_ids
     for _index, _item in zip(instances_ids, instances, strict=True):
@@ -125,7 +163,7 @@ def test_extract_instances_duplicates_blobs(sdata):
     instances_ids, dask_chunks = featurizer.extract_instances(
         depth=depth,
         diameter=1000,
-        add_mask=True,
+        extract_mask=True,
     )
 
     instances = dask_chunks.compute()
