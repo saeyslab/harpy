@@ -54,7 +54,7 @@ def extract_instances(
     labels_layer
         Name of the labels layer.
     depth
-        Passed to `dask.map_overlap`. Please set depth `~ max_diameter / 2`.
+        Passed to :func:`dask.map_overlap`. Please set depth `~ max_diameter / 2`.
     diameter
         Optional explicit side length of the resulting `y`, `x` window for every
         instance. If not provided `diameter` is set to 2 times `depth`.
@@ -215,7 +215,7 @@ def featurize(
     output_layer
         Name of the output tables layer. Can be set equal to `table_layer` if overwrite is set to `True`.
     depth
-        Passed to `dask.map_overlap`. Please set depth `~ max_diameter / 2`.
+        Passed to :func:`dask.map_overlap`. Please set depth `~ max_diameter / 2`.
     embedding_dimension
         The dimensionality `d` of the feature vectors returned by `model`. The returned Dask
         array will have shape `(i, embedding_dimension)`.

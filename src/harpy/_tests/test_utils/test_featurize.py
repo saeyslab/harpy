@@ -6,6 +6,7 @@ from spatialdata import SpatialData
 
 from harpy.image import add_image_layer
 from harpy.utils._featurize import Featurizer
+from harpy.utils._keys import _INSTANCE_KEY
 
 
 def test_featurize(sdata_transcripts_no_backed: SpatialData):
@@ -188,6 +189,72 @@ def test_extract_instances_duplicates_blobs(sdata):
             dtype=np.int16,
         ),
     )
+
+
+@pytest.mark.parametrize("fov_nr", [0, 1])
+def test_instance_statistics_quantiles(sdata_pixie, fov_nr):
+    image = sdata_pixie[f"raw_image_fov{fov_nr}"].data[:, None, ...].rechunk(100)
+    mask = sdata_pixie[f"label_whole_fov{fov_nr}"].data[None, ...].rechunk(100)
+    featurizer = Featurizer(
+        mask_dask_array=mask,
+        image_dask_array=image,
+    )
+    q = [0.3, 0.5]
+    dfs = featurizer.quantiles(q=q, diameter=75, depth=50, batch_size=100, instance_key=_INSTANCE_KEY)
+    assert len(dfs) == len(q)
+    image = image.compute()
+    mask = mask.compute()
+
+    labels = np.unique(mask)
+    labels = labels[labels != 0]
+
+    C = image.shape[0]
+
+    for _label in labels:
+        quantiles_label = np.quantile(image[:, mask == _label], q=q, axis=1)  # quantiles_label is of shape len(q), c
+        for i, _df_q in enumerate(dfs):
+            assert _df_q.shape == (len(labels), C + 1)
+            _q_label = quantiles_label[i]
+            _q_label_computed = _df_q[_df_q[_INSTANCE_KEY] == _label][np.arange(0, C)].values
+            assert np.allclose(_q_label, _q_label_computed)
+
+
+def test_instance_statistics_quantiles_blobs(sdata):
+    chunksize_spatial = 1000
+
+    mask = (
+        sdata["blobs_labels"].data[None, ...].rechunk(chunksize_spatial)
+    )  # 1 chunk (labels in blobs_labels are non-local, they span complete image, therefore process as one chunk)
+    image = sdata["blobs_image"].data[:, None, ...].rechunk(chunksize_spatial)
+
+    featurizer = Featurizer(
+        mask_dask_array=mask,
+        image_dask_array=image,
+    )
+    q = [0.3, 0.5]
+    dfs = featurizer.quantiles(
+        q=q,
+        diameter=chunksize_spatial,
+        depth=50,  # FIXME depth 0 results in error, fix this, should work if there is only one chunk
+        batch_size=5,
+        instance_key=_INSTANCE_KEY,
+    )  # one chunk
+    assert len(dfs) == len(q)
+    image = image.compute()
+    mask = mask.compute()
+
+    labels = np.unique(mask)
+    labels = labels[labels != 0]
+
+    C = image.shape[0]
+
+    for _label in labels:
+        quantiles_label = np.quantile(image[:, mask == _label], q=q, axis=1)  # quantiles_label is of shape len(q), c
+        for i, _df_q in enumerate(dfs):
+            assert _df_q.shape == (len(labels), C + 1)
+            _q_label = quantiles_label[i]
+            _q_label_computed = _df_q[_df_q[_INSTANCE_KEY] == _label][np.arange(0, C)].values
+            assert np.allclose(_q_label, _q_label_computed)
 
 
 def test_extract_instances_mean_blobs(sdata):

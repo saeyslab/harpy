@@ -19,7 +19,7 @@ from numpy.typing import NDArray
 
 from harpy.image.segmentation._utils import _add_depth_to_chunks_size
 from harpy.utils._keys import _INSTANCE_KEY
-from harpy.utils.utils import _dummy_embedding
+from harpy.utils.utils import _dummy_embedding, _make_list
 
 
 class Featurizer:
@@ -213,7 +213,7 @@ class Featurizer:
             dask_chunks,
             chunks=(dask_chunks.chunks[0], embedding_dimension),
             drop_axis=[2, 3, 4],  # we do not allow chunking in 2,3 and 4, and we drop them
-            dtype=dtype,
+            dtype=dtype,  # FIXME, would it be possible to remove the dtype here
             **kwargs,
             embedding_dimension=embedding_dimension,
             **model_kwargs,
@@ -229,6 +229,84 @@ class Featurizer:
                 shutil.rmtree(intermediate_zarr_output_path)
 
         return instance_ids, embedded_dask_chunks
+
+    def calculate_instance_statistics(
+        self,
+        depth: int,
+        statistic_dimension: int,
+        diameter: int | None = None,
+        zarr_output_path: str
+        | Path
+        | None = None,  # if zarr_output_path is specified, we compute the graph, otherwise we return a non-computed graph
+        store_intermediate: bool = False,
+        fn: Callable[
+            ..., NDArray
+        ] = _dummy_embedding,  # FIXME update this default to a dummy statistic to illustrate its use
+        batch_size: int | None = None,
+        fn_kwargs: Mapping[str, Any] = MappingProxyType({}),
+        **kwargs: Any,
+    ) -> tuple[NDArray, da.Array]:
+        # FIXME write docstring
+        # calculate single cell statistics
+        if store_intermediate and zarr_output_path is None:
+            raise ValueError("Please specify a 'zarr_output_path' if 'store_intermediate' is 'True'.")
+
+        if zarr_output_path is not None and store_intermediate:
+            intermediate_zarr_output_path = os.path.join(
+                os.path.dirname(zarr_output_path), f"instances_{uuid.uuid4()}.zarr"
+            )
+        else:
+            intermediate_zarr_output_path = None
+        instance_ids, dask_chunks = self.extract_instances(
+            depth=depth,
+            diameter=diameter,
+            remove_background=True,  #
+            zarr_output_path=intermediate_zarr_output_path,
+            store_intermediate=store_intermediate,
+            batch_size=batch_size,
+            extract_mask=True,  # always extract the mask, we need it; the user can decide if wants to calculate statistic on the mask, or on the image
+        )
+
+        # transpose dask chunks, so it is c,i,z,y,x, that way we can allow chunking in c dimension
+        dask_chunks = dask_chunks.transpose(1, 0, 2, 3, 4)
+        if self._image is not None:
+            arrays = [dask_chunks[0][None], dask_chunks[1:]]  # the mask and the images
+        else:
+            arrays = [dask_chunks[0][None]]  # only the masks (and add dummy c dimension for consistency)
+
+        c_chunks = arrays[1].chunks[0] if self._image is not None else arrays[0].chunks[0]
+
+        # we allow chunking in c dimension, because statistic can typically be calculated on each channel separately, so no rechunk necessary
+        calculated_statistic = da.map_blocks(
+            _calculate_statistic_image_block if self._image is not None else _calculate_statistic_mask_block,
+            *arrays,
+            chunks=(c_chunks, arrays[0].chunks[1], statistic_dimension),  # c,i,statistic_dimension
+            drop_axis=[
+                3,
+                4,
+            ],  # we do not allow chunking in 3 and 4 (spatial dimensions of the instance windows), so we drop them
+            dtype=np.float32 if self._image is not None else self._mask.dtype,
+            fn=fn,
+            statistic_dimension=statistic_dimension,
+            fn_kwargs=fn_kwargs,
+            **kwargs,
+        )
+
+        if zarr_output_path is not None:
+            calculated_statistic.rechunk(calculated_statistic.chunksize).to_zarr(zarr_output_path)
+            calculated_statistic = da.from_zarr(zarr_output_path)
+
+        if store_intermediate:
+            log.info(f"Deleting intermediate zarr store {intermediate_zarr_output_path}")
+            if Path(intermediate_zarr_output_path).suffix == ".zarr":
+                shutil.rmtree(intermediate_zarr_output_path)
+
+        # make it (i,c,statistic_dimension)
+        calculated_statistic = calculated_statistic.transpose(1, 0, 2)
+
+        return instance_ids, calculated_statistic
+
+        # FIXME write proper func for np.quantile case. then write for dummy case; then for radii and axes (only mask needed), and then for only mask (most occuring element)
 
     def extract_instances(
         self,
@@ -271,7 +349,15 @@ class Featurizer:
 
         Examples
         --------
-        >>> fe = Featurizer(mask_dask_array=mask, image_dask_array=img)
+        ### example 1
+        >>> import dask
+        >>> import dask.array as da
+        >>> import matplotlib.pyplot as plt
+        >>> import hp as hp
+        >>> sdata = hp.datasets.resolve_example()
+        >>> mask_array = sdata[ "segmentation_mask" ].data[ None, ... ].rechunk( 1024 )
+        >>> image_array = sdata[ "raw_image" ].data[ :, None, ... ].rechunk( 1024 )
+        >>> fe = Featurizer(mask_dask_array=mask_array, image_dask_array=image_array)
         >>> instance_ids, instances = fe.extract_instances(depth=100, diameter=75)            # lazy graph
         >>> instances                                                             # inspect shape/chunks
         dask.array<...>
@@ -282,7 +368,44 @@ class Featurizer:
         ...     zarr_output_path="instances.zarr",
         ... )
         # Keep full window content instead of masking to the instance
-        >>> inst = fe.extract_instances(depth=100, diameter=75 remove_background=False)
+        >>> instance_ids, instances = fe.extract_instances(depth=100, diameter=75 remove_background=False)
+
+        ### example 2 (with a visual sanity check of the extracted instances)
+        >>> import dask
+        >>> import dask.array as da
+        >>> import matplotlib.pyplot as plt
+        >>> import hp as hp
+
+        >>> sdata = hp.datasets.resolve_example()
+        >>> mask_array = sdata["segmentation_mask"].data[None, ...]
+
+        >>> fe = Featurizer(
+        ...     mask_dask_array=mask_array,
+        ...     image_dask_array=None,
+        ... )
+        >>> instance_ids, instances = fe.extract_instances(
+        ...     depth=100,
+        ...     diameter=200,
+        ...     batch_size=500,
+        ...     extract_mask=True,
+        ... )
+
+        >>> instances = instances.compute()
+
+        >>> instance_id = 23
+        >>> mask = instances[instance_ids == instance_id][0][0][0]
+        >>> plt.imshow(mask)
+
+        >>> mask_array_remove = da.where(mask_array == instance_id, mask_array, 0)
+
+        >>> _, y_, x_ = da.where(mask_array == instance_id)
+        >>> y_, x_ = dask.compute(y_, x_)
+
+        >>> plt.imshow(
+        ...     mask_array_remove[
+        ...         0, y_.min():y_.max(), x_.min():x_.max()
+        ...     ]
+        ... )
 
         See Also
         --------
@@ -352,7 +475,7 @@ class Featurizer:
         if duplicates.size:
             log.info(
                 f"There are {len(duplicates)} instances that are assigned to more than one chunk (instance id's: {duplicates}). "
-                "If 'depth' is already set to a value > 2* maximum expected diameter, this message can be ignored, "
+                "If 'depth' is already set to a value > maximum expected diameter//2, this message can be ignored, "
                 "else consider increasing depth. "
                 "We will only keep the first occurence. "
             )
@@ -443,6 +566,42 @@ class Featurizer:
         # Note that instance_ids are not sorted.
         # It is recommended not to do so (otherwise the dask_chunks array needs to be sorted, which is not optimal)
         return instances_ids, dask_chunks
+
+    # need to make this a general function, that calculates various statistics in one shot.
+    def quantiles(
+        self,
+        q: float | list[float] | NDArray,
+        diameter: int,  # estimated max diameter of cell in y, x,
+        depth: int | None = None,
+        batch_size: int | None = None,
+        instance_key: str = _INSTANCE_KEY,
+    ) -> list[pd.DataFrame]:
+        # FIXME write docstring
+        if depth is None:
+            depth = diameter // 2 + 1
+            log.info(f"Parameter depth not provided; using default depth={depth} (computed from diameter={diameter})")
+        # need to add a check to see if q is provided as a list, and if it is float, make it a list.
+        # quantiles_lazy is a lazy dask array
+        q = _make_list(q)
+        fn_kwargs = {"q": q}
+        instance_ids, quantiles_lazy = self.calculate_instance_statistics(
+            depth=depth,
+            statistic_dimension=len(q),
+            diameter=diameter,
+            zarr_output_path=None,
+            store_intermediate=False,
+            batch_size=batch_size,
+            fn=_quantile,
+            fn_kwargs=fn_kwargs,
+        )
+
+        quantiles = quantiles_lazy.compute().transpose(2, 0, 1)  # shape after transpose (statistic_dimension, i, c)
+        dfs = [pd.DataFrame(_quantile) for _quantile in quantiles]
+
+        for _df in dfs:
+            _df[instance_key] = instance_ids
+
+        return dfs
 
     def _mean(
         self,
@@ -946,3 +1105,92 @@ def _is_inside(mask_array: NDArray, instance_ids: NDArray, DY: int, DX: int) -> 
     mask = max_rows == 0
 
     return mask
+
+
+def _calculate_statistic_mask_block(
+    *arrays: NDArray,
+    statistic_dimension: int,
+    func: Callable[..., NDArray],
+    func_kwargs: Mapping[str, Any] = MappingProxyType({}),
+):
+    # array should be an array of shape 1,i,z,y,x
+    assert len(arrays) == 2
+    mask = arrays[0]
+    assert mask.ndim == 5
+    mask = mask[0]  # make it i,z,y,x
+
+    # FIXME-> finish this
+    # here it is probably best not to flatten the array (i.e. you want to calculate some regional properties about the mask, radii, axis,...)
+
+
+def _calculate_statistic_image_block(
+    *arrays: NDArray,
+    statistic_dimension: int,
+    fn: Callable[
+        ..., NDArray
+    ],  # callable that expects shape=(c, number of pixels corresponding to non zero mask for instance i) and returns shape=(c,statistic_dimension)
+    fn_kwargs: Mapping[str, Any] = MappingProxyType({}),
+) -> NDArray:
+    # array should be an array of shape c,i,z,y,x
+    assert len(arrays) == 2
+    mask = arrays[0]
+    image = arrays[1]
+    assert mask.ndim == 5
+    assert image.ndim == 5
+
+    mask = mask.transpose(1, 0, 2, 3, 4)
+    image = image.transpose(1, 0, 2, 3, 4)  # make it i,c,z,y,c
+
+    I, C, _, _, _ = image.shape
+
+    mask_flat = (mask != 0).reshape(I, -1)  # i,z*y*x
+
+    vals_flat = image.reshape(I, C, -1)  # i,c,z*y*x
+
+    calculated_statistic = np.full(
+        (I, C, statistic_dimension), np.nan, dtype=np.float32
+    )  # set statistic to nan when there is no mask found
+
+    for i in range(I):
+        m = mask_flat[i]  # (z*y*x)
+        if not np.any(m):
+            # this could happen for edge cases, i.e. very small masks
+            log.info(
+                "Instance found with no non-zero corresponding mask in the instance window. "
+                "This could happen for very small masks."
+            )  # skip instances with no non zero mask
+            continue
+
+        v = vals_flat[
+            i, :, m
+        ]  # shape of v=(number of pixels corresponding to non zero mask for instance i,c)  # v gives you all pixels in image for which corresponding mask is non zero -> now we can apply our statistic
+
+        #  pass v.T to fn, shape of v.T=(c, number of pixels corresponding to non zero mask for instance i)
+        _result = fn(v.T, **fn_kwargs)  # shape of result=(c, statistic_dimension)
+        calculated_statistic[i] = _result
+
+    # calculated statistic is of shape ( i,c,statistic_dimension )
+    # so we transpose to (c,i,statistic_dimension)
+    return calculated_statistic.astype(np.float32).transpose(1, 0, 2)
+
+
+def _quantile(
+    array: NDArray,
+    q: list[float] | NDArray | None = None,
+) -> NDArray:
+    assert array.ndim == 2
+    # shape of array=(c, number of pixels corresponding to non zero mask for instance i)
+    if q is None:  # maybe leave this fallback out
+        q = np.linspace(0.1, 0.9, 9)
+    result = np.quantile(array, q=q, axis=1)  # result of shape ( statistic_dimension, c)
+    result = result.T
+    # sanity check
+    assert result.shape[0] == array.shape[0]
+    assert result.shape[1] == len(q)
+    return result  # of shape ( c, statistic_dimension)
+
+
+def _spread():
+    # Q3 - Q1
+    # to implement
+    pass
