@@ -5,7 +5,7 @@ from scipy import ndimage
 from spatialdata import SpatialData
 
 from harpy.image import add_image_layer
-from harpy.utils._featurize import Featurizer
+from harpy.utils._featurize import Featurizer, _region_radii_and_axes
 from harpy.utils._keys import _INSTANCE_KEY
 
 
@@ -200,7 +200,13 @@ def test_instance_statistics_quantiles(sdata_pixie, fov_nr):
         image_dask_array=image,
     )
     q = [0.3, 0.5]
-    dfs = featurizer.quantiles(q=q, diameter=75, depth=50, batch_size=100, instance_key=_INSTANCE_KEY)
+    dfs = featurizer.quantiles(
+        q=q,
+        diameter=75,
+        depth=50,
+        batch_size=100,
+        instance_key=_INSTANCE_KEY,
+    )
     assert len(dfs) == len(q)
     image = image.compute()
     mask = mask.compute()
@@ -235,7 +241,7 @@ def test_instance_statistics_quantiles_blobs(sdata):
     dfs = featurizer.quantiles(
         q=q,
         diameter=chunksize_spatial,
-        depth=50,  # FIXME depth 0 results in error, fix this, should work if there is only one chunk
+        depth=50,  # FIXME depth 0 results in error, fix this, because it should work if there is only one chunk
         batch_size=5,
         instance_key=_INSTANCE_KEY,
     )  # one chunk
@@ -255,6 +261,65 @@ def test_instance_statistics_quantiles_blobs(sdata):
             _q_label = quantiles_label[i]
             _q_label_computed = _df_q[_df_q[_INSTANCE_KEY] == _label][np.arange(0, C)].values
             assert np.allclose(_q_label, _q_label_computed)
+
+
+@pytest.mark.parametrize("fov_nr", [0, 1])
+def test_instance_statistics_radii_and_principal_axes(sdata_pixie, fov_nr):
+    mask = sdata_pixie[f"label_whole_fov{fov_nr}"].data[None, ...].rechunk(100)
+
+    featurizer = Featurizer(
+        mask_dask_array=mask,
+        image_dask_array=None,  # one could specify the image here, but anyway it is not used for calculation of radii and axes
+    )
+    df = featurizer.radii_and_principal_axes(
+        calculate_axes=True,
+        diameter=75,
+        depth=50,
+        batch_size=100,
+        instance_key=_INSTANCE_KEY,
+    )
+
+    mask = mask.compute()
+    labels = np.unique(mask)
+    labels = labels[labels != 0]
+
+    for _label in labels:
+        radii, axes = _region_radii_and_axes(mask, label=_label)
+        assert np.allclose(radii, df[df[_INSTANCE_KEY] == _label][range(3)].values.flatten())
+        # NOTE: for fov2 the following test will fail. For instance with ID=287,
+        # the featurizer.radii_and_principal_axes will give the vector:
+        # (0.707107	-0.707107	0.0) for the first principal axes, while _region_radii_and_axes gives:
+        # (-0.707107	0.707107	0.0) for the first principal axes, these are equivalent axes
+        assert np.allclose(axes.flatten(), df[df[_INSTANCE_KEY] == _label][range(3, 12)].values.flatten())
+
+
+def test_instance_statistics_radii_and_principal_axes_blobs(sdata_blobs):
+    chunksize_spatial = 1000
+
+    mask = (
+        sdata_blobs["blobs_labels"].data[None, ...].rechunk(chunksize_spatial)
+    )  # 1 chunk (labels in blobs_labels are non-local, they span complete image, therefore process as one chunk)
+
+    featurizer = Featurizer(
+        mask_dask_array=mask,
+        image_dask_array=None,  # one could specify the image here, but anyway it is not used for calculation of radii and axes
+    )
+    df = featurizer.radii_and_principal_axes(
+        calculate_axes=True,
+        diameter=chunksize_spatial,
+        depth=50,
+        batch_size=5,
+        instance_key=_INSTANCE_KEY,
+    )
+
+    mask = mask.compute()
+    labels = np.unique(mask)
+    labels = labels[labels != 0]
+
+    for _label in labels:
+        radii, axes = _region_radii_and_axes(mask, label=_label)
+        assert np.allclose(radii, df[df[_INSTANCE_KEY] == _label][range(3)].values.flatten())
+        assert np.allclose(axes.flatten(), df[df[_INSTANCE_KEY] == _label][range(3, 12)].values.flatten())
 
 
 def test_extract_instances_mean_blobs(sdata):

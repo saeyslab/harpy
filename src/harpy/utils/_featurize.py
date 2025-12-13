@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 from loguru import logger as log
 from numpy.typing import NDArray
+from sklearn.decomposition import PCA
 
 from harpy.image.segmentation._utils import _add_depth_to_chunks_size
 from harpy.utils._keys import _INSTANCE_KEY
@@ -177,6 +178,7 @@ class Featurizer:
             store_intermediate=store_intermediate,
             batch_size=batch_size,
             extract_mask=False,
+            extract_image=True,
         )
 
         assert "embedding_dimension" in inspect.signature(model).parameters, (
@@ -243,11 +245,12 @@ class Featurizer:
             ..., NDArray
         ] = _dummy_embedding,  # FIXME update this default to a dummy statistic to illustrate its use
         batch_size: int | None = None,
+        extract_image: bool = True,
         fn_kwargs: Mapping[str, Any] = MappingProxyType({}),
         **kwargs: Any,
     ) -> tuple[NDArray, da.Array]:
         # FIXME write docstring
-        # calculate single cell statistics
+        # calculate single cell statistics for each instance
         if store_intermediate and zarr_output_path is None:
             raise ValueError("Please specify a 'zarr_output_path' if 'store_intermediate' is 'True'.")
 
@@ -260,32 +263,33 @@ class Featurizer:
         instance_ids, dask_chunks = self.extract_instances(
             depth=depth,
             diameter=diameter,
-            remove_background=True,  #
+            remove_background=True,  # always remove background
             zarr_output_path=intermediate_zarr_output_path,
             store_intermediate=store_intermediate,
             batch_size=batch_size,
+            extract_image=extract_image,  # if extract_image is True, dask_chunks is of dimension (i,c(+1),z,y,x)
             extract_mask=True,  # always extract the mask, we need it; the user can decide if wants to calculate statistic on the mask, or on the image
         )
 
         # transpose dask chunks, so it is c,i,z,y,x, that way we can allow chunking in c dimension
         dask_chunks = dask_chunks.transpose(1, 0, 2, 3, 4)
-        if self._image is not None:
+        if extract_image:
             arrays = [dask_chunks[0][None], dask_chunks[1:]]  # the mask and the images
         else:
             arrays = [dask_chunks[0][None]]  # only the masks (and add dummy c dimension for consistency)
 
-        c_chunks = arrays[1].chunks[0] if self._image is not None else arrays[0].chunks[0]
+        c_chunks = arrays[1].chunks[0] if extract_image else arrays[0].chunks[0]
 
         # we allow chunking in c dimension, because statistic can typically be calculated on each channel separately, so no rechunk necessary
         calculated_statistic = da.map_blocks(
-            _calculate_statistic_image_block if self._image is not None else _calculate_statistic_mask_block,
+            _calculate_statistic_image_block if extract_image else _calculate_statistic_mask_block,
             *arrays,
             chunks=(c_chunks, arrays[0].chunks[1], statistic_dimension),  # c,i,statistic_dimension
             drop_axis=[
                 3,
                 4,
-            ],  # we do not allow chunking in 3 and 4 (spatial dimensions of the instance windows), so we drop them
-            dtype=np.float32 if self._image is not None else self._mask.dtype,
+            ],  # we do not allow chunking in 3 and 4 (y,x-spatial dimensions of the instance windows), so we drop them
+            dtype=np.float32,
             fn=fn,
             statistic_dimension=statistic_dimension,
             fn_kwargs=fn_kwargs,
@@ -315,6 +319,7 @@ class Featurizer:
         | None = None,  # will be dimension of resulting chunks in y and x. Can be set to value < max_diameter to optimize performance
         remove_background: bool = True,
         extract_mask: bool = False,
+        extract_image: bool = True,
         zarr_output_path: str
         | Path
         | None = None,  # if zarr_output_path is specified, we compute the graph, otherwise we return a non-computed graph
@@ -418,14 +423,20 @@ class Featurizer:
         if store_intermediate and zarr_output_path is None:
             raise ValueError("Please specify a 'zarr_output_path' if 'store_intermediate' is 'True'.")
         _depth = {0: 0, 1: 0, 2: depth, 3: depth}
+        if not extract_image and not extract_mask:
+            raise ValueError("Please either set 'extract_image' or 'extract_mask' to True.")
+        # sanity checks on extract_mask and extract_image parameters
         if self._image is None and not extract_mask:
             log.info(
                 "No image available and 'extract_mask' is False; forcing 'extract_mask=True' since nothing can be extracted otherwise."
             )
             extract_mask = True
+        if self._image is None and extract_image:
+            log.info("No image available and 'extract_image' is True; forcing 'extract_image=False'.")
+            extract_image = False
 
         array_mask = self._mask[None, ...]  # add trivial channel dimension
-        array_image = self._image
+        array_image = self._image if extract_image else None
 
         if array_image is not None and array_image.numblocks[1] != 1:
             raise ValueError("Currently we do not allow chunking in z dimension.")
@@ -567,11 +578,11 @@ class Featurizer:
         # It is recommended not to do so (otherwise the dask_chunks array needs to be sorted, which is not optimal)
         return instances_ids, dask_chunks
 
-    # need to make this a general function, that calculates various statistics in one shot.
+    # need to make this a general function, that calculates various statistics in one feature extraction pass.
     def quantiles(
         self,
-        q: float | list[float] | NDArray,
         diameter: int,  # estimated max diameter of cell in y, x,
+        q: float | list[float] | NDArray = np.linspace(0.1, 0.9, 9),
         depth: int | None = None,
         batch_size: int | None = None,
         instance_key: str = _INSTANCE_KEY,
@@ -580,7 +591,6 @@ class Featurizer:
         if depth is None:
             depth = diameter // 2 + 1
             log.info(f"Parameter depth not provided; using default depth={depth} (computed from diameter={diameter})")
-        # need to add a check to see if q is provided as a list, and if it is float, make it a list.
         # quantiles_lazy is a lazy dask array
         q = _make_list(q)
         fn_kwargs = {"q": q}
@@ -591,17 +601,53 @@ class Featurizer:
             zarr_output_path=None,
             store_intermediate=False,
             batch_size=batch_size,
+            extract_image=True,  # we need the image
             fn=_quantile,
             fn_kwargs=fn_kwargs,
         )
-
-        quantiles = quantiles_lazy.compute().transpose(2, 0, 1)  # shape after transpose (statistic_dimension, i, c)
+        # quantiles_lazy is of shape=(i,c,statistic_dimension)
+        quantiles = quantiles_lazy.compute().transpose(2, 0, 1)  # shape after transpose=(statistic_dimension, i, c)
         dfs = [pd.DataFrame(_quantile) for _quantile in quantiles]
 
         for _df in dfs:
             _df[instance_key] = instance_ids
-
+            _df.sort_values(by=instance_key, inplace=True, ignore_index=True)
         return dfs
+
+    def radii_and_principal_axes(
+        self,
+        diameter: int,  # estimated max diameter of cell in y, x,
+        calculate_axes: bool = True,
+        depth: int | None = None,
+        batch_size: int | None = None,
+        instance_key: str = _INSTANCE_KEY,
+    ) -> pd.DataFrame:
+        # FIXME write docstring
+        if depth is None:
+            depth = diameter // 2 + 1
+            log.info(f"Parameter depth not provided; using default depth={depth} (computed from diameter={diameter})")
+        # need to add a check to see if q is provided as a list, and if it is float, make it a list.
+        # quantiles_lazy is a lazy dask array
+        # FIXME: test this function
+        statistic_dimension = self._mask.ndim + self._mask.ndim**2 if calculate_axes else self._mask.ndim
+        fn_kwargs = {"calculate_axes": calculate_axes}
+        instance_ids, radii_and_principal_axes_lazy = self.calculate_instance_statistics(
+            depth=depth,
+            statistic_dimension=statistic_dimension,  # returns 3 radii and 3 axis with (z,y,x) coordinates.
+            diameter=diameter,
+            zarr_output_path=None,
+            store_intermediate=False,
+            batch_size=batch_size,
+            extract_image=False,  # we only need the mask
+            fn=_radii_and_principal_axes,
+            fn_kwargs=fn_kwargs,
+        )
+        # radii_and_principal_axes is of shape (i,1,statistic_dimension)
+        radii_and_principal_axes = radii_and_principal_axes_lazy.compute().squeeze(1)
+        df = pd.DataFrame(radii_and_principal_axes)
+        df[instance_key] = instance_ids
+        df.sort_values(by=instance_key, inplace=True, ignore_index=True)
+        return df
 
     def _mean(
         self,
@@ -1110,17 +1156,35 @@ def _is_inside(mask_array: NDArray, instance_ids: NDArray, DY: int, DX: int) -> 
 def _calculate_statistic_mask_block(
     *arrays: NDArray,
     statistic_dimension: int,
-    func: Callable[..., NDArray],
-    func_kwargs: Mapping[str, Any] = MappingProxyType({}),
+    fn: Callable[..., NDArray],  # input = (z,y,x), output (statistic_dimension,)
+    fn_kwargs: Mapping[str, Any] = MappingProxyType({}),
 ):
-    # array should be an array of shape 1,i,z,y,x
-    assert len(arrays) == 2
+    assert len(arrays) == 1
     mask = arrays[0]
-    assert mask.ndim == 5
+    assert mask.ndim == 5  # shape = 1,i,z,y,x
     mask = mask[0]  # make it i,z,y,x
 
-    # FIXME-> finish this
-    # here it is probably best not to flatten the array (i.e. you want to calculate some regional properties about the mask, radii, axis,...)
+    I, _, _, _ = mask.shape
+
+    calculated_statistic = np.full(
+        (I, statistic_dimension), np.nan, dtype=np.float32
+    )  # set statistic to nan when there is no mask found
+
+    # also catch case if there is no label in the mask (only background==0)
+    for i, _mask_instance in enumerate(mask):  # shape of _mask_instance is (z,y,x)
+        if not np.any(_mask_instance):
+            # this could happen for edge cases, i.e. very small fragmented masks
+            log.info(
+                "Instance found with no non-zero mask values within the instance window. "
+                "This often occurs with very small or fragmented instances. "
+                "Increasing the diameter may help."
+            )  # skip instances with no non zero mask
+            continue
+        result = fn(_mask_instance, **fn_kwargs)  # shape of result is (statistic_dimension,)
+        calculated_statistic[i] = result.reshape(1, statistic_dimension)
+
+    # make it (1,i,statistic_dimension), and cast to float
+    return calculated_statistic[None, ...].astype(np.float32)
 
 
 def _calculate_statistic_image_block(
@@ -1156,8 +1220,9 @@ def _calculate_statistic_image_block(
         if not np.any(m):
             # this could happen for edge cases, i.e. very small masks
             log.info(
-                "Instance found with no non-zero corresponding mask in the instance window. "
-                "This could happen for very small masks."
+                "Instance found with no non-zero mask values within the instance window. "
+                "This often occurs with very small or fragmented instances. "
+                "Increasing the diameter may help."
             )  # skip instances with no non zero mask
             continue
 
@@ -1194,3 +1259,90 @@ def _spread():
     # Q3 - Q1
     # to implement
     pass
+
+
+def _radii_and_principal_axes(mask: NDArray, calculate_axes: bool = True) -> NDArray:
+    assert mask.ndim == 3
+    unique_labels = np.unique(mask)
+    unique_labels = unique_labels[unique_labels != 0]
+
+    statistic_dimension = mask.ndim + mask.ndim**2 if calculate_axes else mask.ndim
+
+    if len(unique_labels) == 0:
+        return np.full(statistic_dimension, np.nan)
+
+    if len(unique_labels) > 1:
+        raise ValueError("The number of labels in the mask of the instance is >1. Report this.")
+    _label = unique_labels[0]
+    radii, axes = _region_radii_and_axes(mask=mask, label=_label)
+    assert radii.shape == (mask.ndim,), f"Unexpected radii shape: {radii.shape}. Report this."
+    assert axes.shape == (mask.ndim, mask.ndim), f"Unexpected axes shape: {axes.shape}. Report this."
+    result = np.concatenate((radii, axes.flatten())) if calculate_axes else radii
+    return result.squeeze()
+
+
+def _all_region_radii_and_axes(mask: NDArray, calculate_axes: bool = True) -> NDArray:
+    unique_labels = np.unique(mask)
+    unique_labels = unique_labels[unique_labels != 0]
+
+    nr_of_features = mask.ndim + mask.ndim**2 if calculate_axes else mask.ndim
+
+    if len(unique_labels) == 0:
+        return np.empty((0, nr_of_features))
+
+    result = np.full((len(unique_labels), nr_of_features), np.nan, dtype=np.float32)
+
+    for i, label in enumerate(unique_labels):
+        radii, axes = _region_radii_and_axes(mask=mask, label=label)
+        assert radii.shape == (mask.ndim,), f"Unexpected radii shape: {radii.shape}"
+        assert axes.shape == (mask.ndim, mask.ndim), f"Unexpected axes shape: {axes.shape}"
+        result[i] = np.concatenate((radii, axes.flatten())) if calculate_axes else radii
+    # result is of shape i, nr_of_features
+    return result
+
+
+def _region_radii_and_axes(mask: NDArray, label: int) -> tuple[NDArray, NDArray]:
+    """
+    Compute the principal axes and radii of an object in a mask using PCA.
+
+    This function extracts the coordinates of all pixels belonging to a given label in a segmentation mask,
+    performs Principal Component Analysis (PCA) on those coordinates, and returns the radii (square roots
+    of the eigenvalues) and the principal axes (eigenvectors).
+
+    Parameters
+    ----------
+    mask : NDArray
+        A binary or labeled mask where each object is represented by a unique integer.
+    label : int
+        The integer label of the object whose principal axes and radii are to be computed.
+
+    Returns
+    -------
+    A tuple containing:
+        - radii: A 1D numpy array of shape `(ndim,)` representing the spread of the object along each principal axis.
+        - axes: A 2D numpy array of shape `(ndim, ndim)`, where each row is a principal axis (eigenvector).
+    """
+    _ndim = mask.ndim
+
+    coords = np.column_stack(np.where(mask == label))
+
+    if len(coords) < _ndim:
+        radii = np.zeros(_ndim)
+        return radii, np.eye(_ndim)
+
+    pca = PCA(n_components=_ndim)
+    pca.fit(coords)
+
+    eigenvalues = pca.explained_variance_
+    radii = np.sqrt(eigenvalues)
+
+    axes = pca.components_
+
+    # sort radii AND axes together
+    # sort from largest to smallest eigenvalue
+    # sklearn PCA returns sorted radii, but sorting ensures consistency across implementations
+    sorted_indices = np.argsort(radii)[::-1]
+    radii = radii[sorted_indices]
+    axes = axes[sorted_indices]
+
+    return radii, axes
