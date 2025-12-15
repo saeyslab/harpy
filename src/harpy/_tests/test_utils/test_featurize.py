@@ -1,6 +1,7 @@
 import dask.array as da
 import numpy as np
 import pytest
+from numpy.typing import NDArray
 from scipy import ndimage
 from spatialdata import SpatialData
 
@@ -263,6 +264,58 @@ def test_instance_statistics_quantiles_blobs(sdata):
             assert np.allclose(_q_label, _q_label_computed)
 
 
+def test_instance_statistics_dummy_statistic_image(sdata_pixie):
+    # Load example dataset
+    sdata = sdata_pixie
+
+    # Prepare image and mask arrays
+    image_array = sdata["raw_image_fov0"].data[:, None, ...]
+    mask_array = sdata["label_whole_fov0"].data[None, ...]
+
+    C, _, _, _ = image_array.shape
+
+    def _dummy_statistic_image(array: NDArray, value: int):
+        np.random.seed(42)
+        # shape of array=(c, number of pixels corresponding to non zero mask for instance i)
+        assert array.ndim == 2
+        C = array.shape[0]
+        _statistic_dimension = 3
+        # return dummy statistic of shape (C, statistic_dimension)
+        return np.random.rand(C, _statistic_dimension) + value
+
+    # Create featurizer
+    featurizer = Featurizer(
+        mask_dask_array=mask_array,
+        image_dask_array=image_array,
+    )
+
+    value = 100
+    statistic_dimension = 3
+    fn_kwargs = {"value": value}
+
+    # Compute instance statistics
+    instance_ids, calculated_statistic_lazy = featurizer.calculate_instance_statistics(
+        diameter=50,
+        depth=100,
+        statistic_dimension=statistic_dimension,
+        fn=_dummy_statistic_image,
+        fn_kwargs=fn_kwargs,
+        extract_image=True,
+        batch_size=500,
+    )
+
+    result = calculated_statistic_lazy.compute()
+
+    labels = da.unique(mask_array).compute()
+    labels = labels[labels != 0]
+    I = labels.shape[0]
+
+    assert set(labels) == set(instance_ids)
+    assert result.shape == (I, C, statistic_dimension)
+    # some sanity check on the result
+    assert (result > value).all()
+
+
 @pytest.mark.parametrize("fov_nr", [0, 1])
 def test_instance_statistics_radii_and_principal_axes(sdata_pixie, fov_nr):
     mask = sdata_pixie[f"label_whole_fov{fov_nr}"].data[None, ...].rechunk(100)
@@ -322,6 +375,50 @@ def test_instance_statistics_radii_and_principal_axes_blobs(sdata_blobs):
         assert np.allclose(axes.flatten(), df[df[_INSTANCE_KEY] == _label][range(3, 12)].values.flatten())
 
 
+def test_instance_statistics_dummy_statistic_mask(sdata_pixie):
+    sdata = sdata_pixie
+
+    mask_array = sdata["label_whole_fov0"].data[None, ...]
+
+    def _dummy_statistic_mask(array: NDArray, value: int) -> NDArray:
+        # array should be of dtype int
+        np.random.seed(42)
+        assert np.issubdtype(array.dtype, np.integer)
+        # array is of shape = z,y,x, with y and x the size of the instance window.
+        assert array.ndim == 3
+        statistic_dimension = 5
+        result = np.random.rand(statistic_dimension) + value
+        # return array containing float of shape (statistic_dimension,)
+        return result[None, ...]
+
+    featurizer = Featurizer(mask_dask_array=mask_array, image_dask_array=None)
+
+    value = 100
+    statistic_dimension = 5
+    fn_kwargs = {"value": value}
+
+    instance_ids, calculated_statistic_lazy = featurizer.calculate_instance_statistics(
+        diameter=100,
+        depth=50,
+        statistic_dimension=statistic_dimension,
+        fn=_dummy_statistic_mask,
+        fn_kwargs=fn_kwargs,
+        extract_image=True,
+        batch_size=500,
+    )
+
+    result = calculated_statistic_lazy.compute()
+
+    labels = da.unique(mask_array).compute()
+    labels = labels[labels != 0]
+    I = labels.shape[0]
+
+    assert set(labels) == set(instance_ids)
+    assert result.shape == (I, 1, statistic_dimension)
+    # some sanity check on the result
+    assert (result > value).all()
+
+
 def test_extract_instances_mean_blobs(sdata):
     chunksize_spatial = 1000
 
@@ -349,3 +446,21 @@ def test_extract_instances_mean_blobs(sdata):
     assert df_mean_featurizer.shape[1] - 1 == image.shape[0]
 
     assert np.allclose(df_mean_featurizer[0].values, scipy_mean, rtol=0, atol=1e-5)
+
+
+def test_region_radii_and_axes():
+    mask = np.array(
+        [
+            [1, 1, 1, 0],
+            [0, 0, 0, 0],
+            [0, 0, 0, 0],
+        ]
+    )
+
+    mask = mask[None, ...]
+
+    radii, axis = _region_radii_and_axes(mask=mask, label=1)
+
+    assert np.array_equal(np.array([1.0, 0.0, 0.0]), radii)
+
+    assert np.allclose(np.array([[0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]), axis)

@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from functools import partial
-from types import MappingProxyType
-from typing import Any, Literal
+from typing import Literal
 
-import dask
 import dask.array as da
 import numpy as np
 import pandas as pd
@@ -13,30 +11,8 @@ from dask_image import ndmeasure
 from loguru import logger as log
 from numpy.typing import NDArray
 from scipy import ndimage
-from sklearn.decomposition import PCA
 
 from harpy.utils._keys import _CELLSIZE_KEY, _INSTANCE_KEY
-
-# NOTE:
-# aggregate works by computing statistics per chunk. For each chunk, it produces
-# a matrix with shape (i, c, z, y, x), where:
-#   - i = total number of labels in the global mask
-#   - c = number of channels in the chunk
-#   - z = 1
-#   - y = 1
-#   - x = 1
-#
-# We deliberately avoid the optimization where i is set to the maximum number of
-# labels in any chunk, because that would require an extra pass over the global
-# mask to count labels per chunk (as done in Featurizer).
-#
-# Since i is on the order of thousands to millions, and we only compute a single
-# feature (e.g. mean), each chunk of the aggregated matrix stays below ~50 MB
-# (assuming chunksize c = 1), even if the global mask contains ~10M labels.
-#
-# By chunking over the (c, z, y, x) dimensions, the user can control RAM usage.
-# As a rule of thumb, choose chunk sizes of about z,y,x ≈ 4000 and c ≈ 5,
-# adjusting as needed based on available memory.
 
 
 class RasterAggregator:
@@ -85,7 +61,7 @@ class RasterAggregator:
 
     We intentionally avoid the optimization of setting i to the maximum number of
     labels in any chunk, because this would require an additional pass over the
-    global mask to count labels per chunk (as done in :class:`harpy.utils._featurize.Featurizer`).
+    global mask to count labels per chunk (as done in :class:`harpy.utils.Featurizer`).
 
     Because i typically ranges from thousands to millions, and because only a single
     feature (e.g., a mean statistic) is computed, each chunk of the aggregated
@@ -265,6 +241,7 @@ class RasterAggregator:
         """
         return _get_center_of_mass(self._mask, index=self._labels, instance_key=self._instance_key)
 
+    '''
     def aggregate_quantiles(
         self,
         depth: int,
@@ -287,6 +264,10 @@ class RasterAggregator:
         -------
         List of DataFrames, one per quantile, with rows as labels and columns as channels.
         """
+        log.warning(
+            "'RasterAggregator.aggregate_quantiles' is deprecated and will be removed in a future release. "
+            "Please use 'harpy.utils.Featurizer.quantiles' instead."
+        )
         # Returns a list of pandas DataFrames, one for per quantile.
         # Each DataFrame contains cells as rows and channels as columns.
         if quantiles is None:
@@ -314,7 +295,9 @@ class RasterAggregator:
             _df[self._instance_key] = _labels
 
         return dfs
+    '''
 
+    '''
     def aggregate_radii_and_axes(self, depth: int, calculate_axes: bool = True) -> pd.DataFrame:
         """
         Computes and aggregates radii and principal axes for segmented regions in the mask.
@@ -339,6 +322,10 @@ class RasterAggregator:
         - If `calculate_axes` is True, the next nine columns contain the corresponding principal axes (flattened 3*3 matrix).
         - One column contains the cell ID.
         """
+        log.warning(
+            "'RasterAggregator.aggregate_radii_and_axes' is deprecated and will be removed in a future release. "
+            "Please use 'harpy.utils.Featurizer.radii_and_principal_axes' instead."
+        )
         results = self.aggregate_custom_channel(
             image=None,
             mask=self._mask,
@@ -353,6 +340,7 @@ class RasterAggregator:
         df = pd.DataFrame(results)
         df[self._instance_key] = self._labels[self._labels != 0]
         return df
+    '''
 
     def _aggregate(self, aggregate_func: Callable[[da.Array], pd.DataFrame]) -> pd.DataFrame:
         results = aggregate_func()
@@ -637,6 +625,7 @@ class RasterAggregator:
         # return a list, so it is in line with self._aggregate_stats()
         return [dask_min_max_func(chunk_min_max, axis=-1).compute()]
 
+    '''
     def _aggregate_quantiles_channel(
         self,
         image: da.Array,
@@ -700,6 +689,8 @@ class RasterAggregator:
         """
         Aggregates a custom operation over a masked region of an image, with the option to pass additional parameters to a custom function.
 
+        Deprecated. Please use :func:`harpy.utils.Featurizer.calculate_instance_statistics` instead.
+
         Parameters
         ----------
         image
@@ -743,6 +734,10 @@ class RasterAggregator:
         The array has the same number of elements as the unique labels in the `mask` excluding `0`, and the results are ordered based on the ordered labels.
         The shape of the 2D Numpy array is thus (`len( self._labels[[self._labels!=0]]), features)`, with `self._labels = dask.array.unique( mask ).compute()`.
         """
+        log.warning(
+            "RasterAggregator.aggregate_custom_channel() is deprecated and will be removed in a future release. "
+            "Please use harpy.utils.Featurizer.calculate_instance_statistics instead."
+        )
         assert mask.numblocks[0] == 1, "mask can not be chunked in z-dimension. Please rechunk."
         depth = (0, depth, depth)
         _labels = self._labels[self._labels != 0]
@@ -791,6 +786,7 @@ class RasterAggregator:
         )
 
         return results
+    '''
 
 
 def _get_mask_area(
@@ -889,6 +885,17 @@ def _get_center_of_mass(
     )
 
 
+def _get_min_max_dtype(array):
+    dtype = array.dtype
+    if np.issubdtype(dtype, np.integer):
+        return np.iinfo(dtype).min, np.iinfo(dtype).max
+    elif np.issubdtype(dtype, np.floating):
+        return np.finfo(dtype).min, np.finfo(dtype).max
+    else:
+        raise TypeError("Unsupported dtype")
+
+
+'''
 def _quantile_intensity_distribution(
     mask: NDArray, image: NDArray, quantiles: list[float] | NDArray | None = None
 ) -> NDArray:
@@ -926,8 +933,9 @@ def _quantile_intensity_distribution(
             result[i] = np.quantile(object_intensities, quantiles)
 
     return result
+'''
 
-
+"""'
 def _all_region_radii_and_axes(mask: NDArray, calculate_axes: bool = True) -> NDArray:
     unique_labels = np.unique(mask)
     unique_labels = unique_labels[unique_labels != 0]
@@ -945,65 +953,9 @@ def _all_region_radii_and_axes(mask: NDArray, calculate_axes: bool = True) -> ND
         assert axes.shape == (mask.ndim, mask.ndim), f"Unexpected axes shape: {axes.shape}"
         result[i] = np.concatenate((radii, axes.flatten())) if calculate_axes else radii
     return result
+"""
 
-
-def _region_radii_and_axes(mask: NDArray, label: int) -> tuple[NDArray, NDArray]:
-    """
-    Compute the principal axes and radii of an object in a mask using PCA.
-
-    This function extracts the coordinates of all pixels belonging to a given label in a segmentation mask,
-    performs Principal Component Analysis (PCA) on those coordinates, and returns the radii (square roots
-    of the eigenvalues) and the principal axes (eigenvectors).
-
-    Parameters
-    ----------
-    mask : NDArray
-        A binary or labeled mask where each object is represented by a unique integer.
-    label : int
-        The integer label of the object whose principal axes and radii are to be computed.
-
-    Returns
-    -------
-    A tuple containing:
-        - radii: A 1D numpy array of shape `(ndim,)` representing the spread of the object along each principal axis.
-        - axes: A 2D numpy array of shape `(ndim, ndim)`, where each row is a principal axis (eigenvector).
-    """
-    _ndim = mask.ndim
-
-    coords = np.column_stack(np.where(mask == label))
-
-    if len(coords) < _ndim:
-        radii = np.zeros(_ndim)
-        return radii, np.eye(_ndim)
-
-    pca = PCA(n_components=_ndim)
-    pca.fit(coords)
-
-    eigenvalues = pca.explained_variance_
-    radii = np.sqrt(eigenvalues)
-
-    axes = pca.components_
-
-    # sort radii AND axes together
-    # sort from largest to smallest eigenvalue
-    # sklearn PCA returns sorted radii, but sorting ensures consistency across implementations
-    sorted_indices = np.argsort(radii)[::-1]
-    radii = radii[sorted_indices]
-    axes = axes[sorted_indices]
-
-    return radii, axes
-
-
-def _get_min_max_dtype(array):
-    dtype = array.dtype
-    if np.issubdtype(dtype, np.integer):
-        return np.iinfo(dtype).min, np.iinfo(dtype).max
-    elif np.issubdtype(dtype, np.floating):
-        return np.finfo(dtype).min, np.finfo(dtype).max
-    else:
-        raise TypeError("Unsupported dtype")
-
-
+"""
 def _aggregate_custom_block(
     *arrays,
     index: NDArray,
@@ -1101,3 +1053,4 @@ def _aggregate_custom_block(
     result = result[idxs]
     result[~found] = np.nan
     return result
+"""

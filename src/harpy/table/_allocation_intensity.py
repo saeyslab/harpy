@@ -113,34 +113,41 @@ def allocate_intensity(
       chunk-based processing, aided by Dask.
       If sdata is backed by a Zarr store, we recommend using `chunks=None` and ensuring that the on-disk Dask array chunks are optimized for both storage efficiency and computational performance.
 
-    Example
-    -------
-    >>> sdata = hp.datasets.pixie_example()
-    >>>
-    >>> # Compute intensity statistics in coordinate system "fov0"
-    >>> sdata = hp.tb.allocate_intensity(
-    ...     sdata,
-    ...     img_layer="raw_image_fov0",
-    ...     labels_layer="label_whole_fov0",
-    ...     to_coordinate_system="fov0",
-    ...     output_layer="my_table",
-    ...     mode="sum",
-    ...     obs_stats="count",  # cell size
-    ...     overwrite=True,
-    ... )
-    >>>
-    >>> # Append intensity statistics in coordinate system "fov1"
-    >>> sdata = hp.tb.allocate_intensity(
-    ...     sdata,
-    ...     img_layer="raw_image_fov1",
-    ...     labels_layer="label_whole_fov1",
-    ...     to_coordinate_system="fov1",
-    ...     output_layer="my_table",
-    ...     mode="sum",
-    ...     obs_stats="count",  # cell size
-    ...     append=True,
-    ...     overwrite=True,
-    ... )
+
+    Examples
+    --------
+    Allocate intensity statistics into an AnnData table:
+
+    .. code-block:: python
+
+        import harpy as hp
+
+        sdata = hp.datasets.pixie_example()
+
+        # Compute intensity statistics in coordinate system "fov0"
+        sdata = hp.tb.allocate_intensity(
+            sdata,
+            img_layer="raw_image_fov0",
+            labels_layer="label_whole_fov0",
+            to_coordinate_system="fov0",
+            output_layer="my_table",
+            mode="sum",
+            obs_stats="count",  # cell size
+            overwrite=True,
+        )
+
+        # Append intensity statistics in coordinate system "fov1"
+        sdata = hp.tb.allocate_intensity(
+            sdata,
+            img_layer="raw_image_fov1",
+            labels_layer="label_whole_fov1",
+            to_coordinate_system="fov1",
+            output_layer="my_table",
+            mode="sum",
+            obs_stats="count",  # cell size
+            append=True,
+            overwrite=True,
+        )
     """
     assert mode in ["sum", "mean"], "'mode' must be either 'sum' or 'mean'."
     if obs_stats is not None:

@@ -37,13 +37,13 @@ def extract_instances(
     Extract per-label instance windows from `img_layer`/`labels_layer` of size `diameter` in `y` and `x` using :func:`dask.array.map_overlap` and :func:`dask.array.map_blocks`.
 
     For every non-zero label in the `labels_layer`, this method builds a Dask graph that
-    slices out a centered, square window in the `y`,`x` plane around that instance (preserving
+    slices out a centered, square window in the `y`, `x` plane around that instance (preserving
     the `z` dimension) both for the `img_layer` and `labels_layer`.
 
     Note that decreasing the chunk size on disk of the `image_layer` and `labels_layer` will lead to decreased
     consumption of RAM. A good first guess for chunk sizes is: `(c_chunksize, y_chunksize, x_chunksize)=(10, 2048, 2048)`.
 
-    For optimal performance, configure Dask to use `processes`, e.g. (`dask.config.set(scheduler="processes")`).
+    For optimal performance, configure :mod:`dask` to use `processes`, e.g. (`dask.config.set(scheduler="processes")`).
 
     Parameters
     ----------
@@ -54,7 +54,8 @@ def extract_instances(
     labels_layer
         Name of the labels layer.
     depth
-        Passed to :func:`dask.map_overlap`. Please set depth `~ max_diameter / 2`.
+        Passed to :func:`dask.array.map_overlap`.
+        For correct results, choose depth to be roughly half of the estimated maximum diameter or larger.
     diameter
         Optional explicit side length of the resulting `y`, `x` window for every
         instance. If not provided `diameter` is set to 2 times `depth`.
@@ -90,40 +91,70 @@ def extract_instances(
 
     Examples
     --------
-    >>> import numpy as np
-    >>> from numpy.typing import NDArray
-    >>> import harpy as hp
-    # Persist to Zarr on disk (computes instances now)
-    >>> instances_ids, instances = hp.tb.extract_instances(
-    ...     sdata,
-    ...     img_layer="my_image",
-    ...     labels_layer="my_labels",
-    ...     depth=100,
-    ...     diameter=75,
-    ...     remove_background=True,
-    ...     zarr_output_path="/path/to/my/zarr_strore.zarr"
-    ...     batch_size=64,
-    ...     to_coordinate_system="global",
-    ... )
-    # Inspect shape/chunks
-    >>> instances
-    dask.array<...>
-    # Construct a lazy Dask graph.
-    >>> instances_ids, instances = hp.tb.extract_instances(
-    ...     sdata,
-    ...     img_layer="my_image",
-    ...     labels_layer="my_labels",
-    ...     depth=100,
-    ...     diameter=75,
-    ...     remove_background=True,
-    ...     zarr_output_path=None,
-    ...     batch_size=64,
-    ...     to_coordinate_system="global",
-    ... )
-    >>> instances # instances not computed.
-    dask.array<...>
-    # persist to Zarr on disk (computes instances now).
-    >>> instances.to_zarr( "/path/to/my/zarr_strore.zarr" )
+    Extract instances directly from a SpatialData object:
+
+    .. code-block:: python
+
+        import harpy as hp
+        import matplotlib.pyplot as plt
+
+        sdata = hp.datasets.pixie_example()
+
+        img_layer = "raw_image_fov0"
+        labels_layer = "label_whole_fov0"
+
+        # Persist to Zarr on disk (computes instances now)
+        instance_ids, instances = hp.tb.extract_instances(
+            sdata,
+            img_layer=img_layer,
+            labels_layer=labels_layer,
+            depth=100,
+            diameter=40,
+            remove_background=True,
+            extract_mask=False,
+            zarr_output_path="instances.zarr",
+            batch_size=64,
+            to_coordinate_system="fov0",
+        )
+
+        mask_array = sdata[labels_layer].data[None, ...]
+
+        instance_id = 23
+        channel_idx = 20
+
+        array = instances[instance_ids == instance_id][0][channel_idx][0]
+        plt.imshow(array)
+        plt.show()
+
+    Or construct a lazy Dask graph:
+
+    .. code-block:: python
+
+        import harpy as hp
+        import dask.array as da
+        import matplotlib.pyplot as plt
+
+        sdata = hp.datasets.pixie_example()
+
+        img_layer = "raw_image_fov0"
+        labels_layer = "label_whole_fov0"
+
+        instance_ids, instances_lazy = hp.tb.extract_instances(
+            sdata,
+            img_layer=img_layer,
+            labels_layer=labels_layer,
+            depth=100,
+            diameter=40,
+            remove_background=True,
+            extract_mask=False,
+            zarr_output_path=None,
+            batch_size=64,
+            to_coordinate_system="fov0",
+        )
+
+        # compute instances now:
+        instances_lazy.to_zarr( "instances.zarr" )
+        instances = da.from_zarr( "instances.zarr" )
     """
     se_image, se_labels = _precondition(
         sdata, img_layer=img_layer, labels_layer=labels_layer, to_coordinate_system=to_coordinate_system
@@ -181,8 +212,8 @@ def featurize(
     and feeds the resulting instance cutout (with preserved `z` and channel dimensions) through `model`
     to produce an embedding of size `embedding_dimension`.
 
-    Internally, instance windows are generated lazily (via `dask.array.map_overlap` and
-    `dask.array.map_blocks`) and then batched along the instance dimension to evaluate `model`
+    Internally, instance windows are generated lazily (via :func:`dask.array.map_overlap` and
+    :func:`dask.array.map_blocks`) and then batched along the instance dimension to evaluate `model`
     in parallel. The output is a Dask array of shape `(i, d)`, where `i` is the number of
     non-zero labels and `d == embedding_dimension`.
 
@@ -193,7 +224,7 @@ def featurize(
     `sdata[table_layer].obs[_INSTANCE_KEY]`, and similarly added to
     `sdata[output_layer].obsm[embedding_obsm_key]`.
 
-    For optimal performance, configure Dask to use `processes`, e.g.:
+    For optimal performance, configure :mod:`dask` to use `processes`, e.g.:
     `dask.config.set(scheduler="processes")`.
 
     Note:
@@ -215,7 +246,8 @@ def featurize(
     output_layer
         Name of the output tables layer. Can be set equal to `table_layer` if overwrite is set to `True`.
     depth
-        Passed to :func:`dask.map_overlap`. Please set depth `~ max_diameter / 2`.
+        Passed to :func:`dask.array.map_overlap`.
+        For correct results, choose depth to be roughly half of the estimated maximum diameter or larger.
     embedding_dimension
         The dimensionality `d` of the feature vectors returned by `model`. The returned Dask
         array will have shape `(i, embedding_dimension)`.
@@ -256,7 +288,7 @@ def featurize(
     overwrite
         If `True`, overwrites the `output_layer` if it already exists in `sdata`.
     **kwargs
-        Additional keyword arguments forwarded to `map_blocks`. Use with care.
+        Additional keyword arguments forwarded to :func:`dask.array.map_blocks`. Use with care.
 
     Returns
     -------
@@ -264,29 +296,71 @@ def featurize(
 
     Examples
     --------
-    >>> import numpy as np
-    >>> from numpy.typing import NDArray
-    >>> import harpy as hp
-    >>>
-    >>> def _dummy_embedding(array: NDArray, embedding_dimension: int, seed: int = 42) -> NDArray:
-    ...     rng = np.random.default_rng(seed)
-    ...     random_array = rng.random((array.shape[0], embedding_dimension), dtype=np.float32)
-    ...     return random_array
-    >>>
-    >>> sdata = hp.tb.featurize(
-    ...     sdata,
-    ...     img_layer="my_image",
-    ...     labels_layer="my_labels",
-    ...     table_layer="my_table",
-    ...     output_layer="my_table",
-    ...     depth=100,
-    ...     embedding_dimension=128,
-    ...     diameter=75,
-    ...     model=_dummy_embedding,
-    ...     remove_background=True,
-    ...     batch_size=64,
-    ...     overwrite=True,
-    ... )
+    Allocate intensity statistics and compute embeddings using a custom model:
+
+    .. code-block:: python
+
+        import numpy as np
+        import harpy as hp
+
+        sdata = hp.datasets.pixie_example()
+
+        img_layer = "raw_image_fov0"
+        labels_layer = "label_whole_fov0"
+
+        # First, create an AnnData table by allocating intensity statistics
+        # Note that this step is optional.
+        sdata = hp.tb.allocate_intensity(
+            sdata,
+            img_layer=img_layer,
+            labels_layer=labels_layer,
+            to_coordinate_system="fov0",
+            output_layer="my_table",
+            mode="sum",
+            obs_stats="count",  # cell size
+            overwrite=True,
+        )
+
+        # Define a custom embedding model
+        def my_model(
+            batch,
+            normalize: bool = True,
+            embedding_dimension: int = 64,
+        ) -> np.ndarray:
+            # batch: (b, c, z, y, x) -> return (b, d)
+            vecs = batch.reshape(batch.shape[0], -1).astype(np.float32)
+
+            if normalize:
+                norms = np.linalg.norm(vecs, axis=1, keepdims=True) + 1e-8
+                vecs = vecs / norms
+
+            # Project to desired embedding dimension (toy example)
+            W = np.random.RandomState(0).randn(
+                vecs.shape[1],
+                embedding_dimension,
+            ).astype(np.float32)
+
+            return vecs @ W
+
+        # Add embeddings to the table
+        sdata = hp.tb.featurize(
+            sdata,
+            img_layer=img_layer,
+            labels_layer=labels_layer,
+            table_layer="my_table",
+            output_layer="my_table",
+            depth=96,
+            embedding_dimension=64,
+            diameter=192,
+            model=my_model,
+            model_kwargs={"normalize": True},
+            batch_size=100,
+            to_coordinate_system="fov0",
+            embedding_obsm_key="embedding",
+        )
+
+        # Access the computed embedding for each instance
+        sdata["my_table"].obsm["embedding"]
     """
     # if table_layer is None, we create an empty Anndata, that is annotated by labels layer
     # do it with dummy embedding first

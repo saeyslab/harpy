@@ -217,3 +217,25 @@ def _affine_transform(coords: NDArray, transform_matrix: NDArray) -> NDArray:
     coords = coords @ transform_matrix.T
     coords = coords[:, :2]
     return coords
+
+
+def _dummy_statistic_image(array: NDArray, value: int) -> NDArray:
+    np.random.seed(42)
+    assert array.ndim == 2
+    # shape of array=(c, number of pixels corresponding to non zero mask for instance i)
+    C = array.shape[0]
+    _statistic_dimension = 3
+    # return dummy statistic of shape C, statistic_dimension
+    return np.random.rand(C, _statistic_dimension) + value
+
+
+def _dummy_statistic_mask(array: NDArray, value: int) -> NDArray:
+    np.random.seed(42)
+    # array should be of dtype int
+    assert np.issubdtype(array.dtype, np.integer)
+    # array is of shape = z,y,x, with y and x the size of the instance window.
+    assert array.ndim == 3
+    _statistic_dimension = 5
+    result = np.random.rand(_statistic_dimension) + value
+    # return array containing float of shape (statistic_dimension,)
+    return result[None, ...]

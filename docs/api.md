@@ -226,9 +226,10 @@ Utility functions.
 .. autosummary::
     :toctree: generated
 
-    utils.bounding_box_query
     utils.RasterAggregator
+    utils.Featurizer
     utils.kronos_embedding
+    utils.bounding_box_query
 ```
 
 ## Datasets

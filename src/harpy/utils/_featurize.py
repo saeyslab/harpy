@@ -20,7 +20,7 @@ from sklearn.decomposition import PCA
 
 from harpy.image.segmentation._utils import _add_depth_to_chunks_size
 from harpy.utils._keys import _INSTANCE_KEY
-from harpy.utils.utils import _dummy_embedding, _make_list
+from harpy.utils.utils import _dummy_embedding, _dummy_statistic_image, _make_list
 
 
 class Featurizer:
@@ -96,7 +96,7 @@ class Featurizer:
         """
         Extract per-instance feature vectors from the image/mask using a user-provided embedding `model`.
 
-        See `hp.tb.featurize` for a full description.
+        See :func:`harpy.tb.featurize` for a full description.
 
         Parameters
         ----------
@@ -113,7 +113,7 @@ class Featurizer:
             It is preferred to set `store_intermediate=False`, and work with a Dask client,
             so Dask can spill to disk.
         **kwargs
-            Additional keyword arguments forwarded to `map_blocks`. Use with care.
+            Additional keyword arguments forwarded to :func:`dask.array.map_blocks`. Use with care.
 
         Returns
         -------
@@ -123,39 +123,77 @@ class Featurizer:
             - A Dask array (feature matrix) of features with shape `(i, embedding_dimension)`. If `zarr_output_path`
             is provided, this array points to the computed Zarr store; otherwise it is lazy.
 
+
         Examples
         --------
-        >>> fe = Featurizer(mask_dask_array=mask, image_dask_array=img)
+        .. code-block:: python
 
-        # Lazy graph: generate embeddings with default dummy model
-        >>> instance_ids, feats = fe.featurize(
-        ...     depth=100,
-        ...     embedding_dimension=128,
-        ...     diameter=75,
-        ... )
-        >>> feats    # inspect shape/chunks without computing
-        dask.array<...>
+            import harpy as hp
+            import numpy as np
 
-        # Use a custom model with arguments, and persist to Zarr on disk (computes now)
-        >>> def my_model(batch, *, normalize: bool = True) -> np.ndarray:
-        ...     # batch: (b, c, z, y, x) -> return (b, d)
-        ...     vecs = batch.reshape(batch.shape[0], -1).astype(np.float32)
-        ...     if normalize:
-        ...         norms = np.linalg.norm(vecs, axis=1, keepdims=True) + 1e-8
-        ...         vecs = vecs / norms
-        ...     # project to desired dim (toy example)
-        ...     W = np.random.RandomState(0).randn(vecs.shape[1], 64).astype(np.float32)
-        ...     return vecs @ W
-        ...
-        >>> instance_ids, feats = fe.featurize(
-        ...     depth=96,
-        ...     embedding_dimension=64,
-        ...     diameter=192,
-        ...     model=my_model,
-        ...     model_kwargs={"normalize": True},
-        ...     batch_size=64,
-        ...     zarr_output_path="features.zarr",
-        ... )
+            sdata = hp.datasets.pixie_example()
+
+            img_layer = "raw_image_fov0"
+            labels_layer = "label_whole_fov0"
+
+            mask_array = (
+                sdata[labels_layer]
+                .data[None, ...]
+                .rechunk(1024)
+            )
+
+            image_array = (
+                sdata[img_layer]
+                .data[:, None, ...]
+                .rechunk(1024)
+            )
+
+            fe = hp.utils.Featurizer(
+                mask_dask_array=mask_array,
+                image_dask_array=image_array,
+            )
+
+            # Use a custom model with arguments
+            def my_model(batch, normalize: bool = True, embedding_dimension:int=64) -> np.ndarray:
+                # batch: (b, c, z, y, x) -> return (b, d)
+                vecs = batch.reshape(batch.shape[0], -1).astype(np.float32)
+                if normalize:
+                    norms = np.linalg.norm(vecs, axis=1, keepdims=True) + 1e-8
+                    vecs = vecs / norms
+
+                # Project to desired dimension (toy example)
+                W = np.random.RandomState(0).randn(
+                    vecs.shape[1],
+                    embedding_dimension,
+                ).astype(np.float32)
+                return vecs @ W
+
+
+            # Lazy graph: generate embeddings with default dummy model
+            instance_ids, feats_lazy = fe.featurize(
+                depth=96,
+                embedding_dimension=64,
+                diameter=192,
+                model=my_model,
+                model_kwargs={"normalize": True},
+                batch_size=100,
+                zarr_output_path=None,
+            )
+
+            # Inspect shape and chunking without computing
+            feats_lazy
+
+            # persist to Zarr on disk
+            # (this computes immediately)
+            instance_ids, feats = fe.featurize(
+                depth=96,
+                embedding_dimension=64,
+                diameter=192,
+                model=my_model,
+                model_kwargs={"normalize": True},
+                batch_size=100,
+                zarr_output_path="features.zarr",
+            )
 
         See Also
         --------
@@ -241,18 +279,199 @@ class Featurizer:
         | Path
         | None = None,  # if zarr_output_path is specified, we compute the graph, otherwise we return a non-computed graph
         store_intermediate: bool = False,
-        fn: Callable[
-            ..., NDArray
-        ] = _dummy_embedding,  # FIXME update this default to a dummy statistic to illustrate its use
+        fn: Callable[..., NDArray] = _dummy_statistic_image,
         batch_size: int | None = None,
         extract_image: bool = True,
         fn_kwargs: Mapping[str, Any] = MappingProxyType({}),
         **kwargs: Any,
     ) -> tuple[NDArray, da.Array]:
-        # FIXME write docstring
+        """
+        Extract per-instance statistics using a user-provided callable ``fn``.
+
+        This method constructs a Dask graph that processes each non-zero label in the
+        mask (provided via ``harpy.utils.Featurizer(mask_dask_array=...)``). For each
+        labeled instance, a centered ``(y, x)`` window is extracted, with size
+        determined by ``diameter`` or ``2 * depth``. If ``extract_image`` is True and
+        an image is provided via
+        ``harpy.utils.Featurizer(image_dask_array=...)``, a corresponding window is
+        also extracted from the image.
+
+        When ``extract_image=True``, pixels outside the labeled object are removed
+        from the image window, and only the remaining pixel values are passed to
+        the callable ``fn``. In this case, ``fn`` receives an array of shape
+        ``(c, N)``, where ``c`` is the number of channels and ``N`` is the number of
+        pixels belonging to the non-zero mask for the given instance. The callable
+        must return an array of shape ``(c, statistic_dimension)``.
+
+        Chunking along the channel dimension ``c`` is supported. If the image is
+        chunked along this dimension, ``fn`` will be invoked separately for each
+        channel chunk.
+
+        When ``extract_image=False``, pixels outside the labeled object are set to
+        zero in the mask window, and the resulting array is passed to ``fn``.
+        In this mode, ``fn`` receives an array of shape
+        ``(z, diameter, diameter)`` and must return an array of shape
+        ``(statistic_dimension,)``.
+
+        Note:
+            Decreasing the chunk size of the provided image and mask arrays will reduce RAM usage.
+            A good first guess for image/mask chunking is
+            `(c_chunksize, y_chunksize, x_chunksize) = (10, 2048, 2048)`.
+
+        Parameters
+        ----------
+        depth
+            Passed to :func:`dask.array.map_overlap`.
+            For correct results, choose depth to be roughly half of the estimated maximum diameter or larger.
+        statistic_dimension
+            The dimensionality `s` of the statistics returned by `fn`. The returned Dask
+            array will have shape `(i, c, s)`.
+        diameter
+            Optional explicit side length of the resulting `y`, `x` window for every
+            instance. If not provided `diameter` is set to 2 times `depth`.
+        zarr_output_path
+            If a filesystem path (string or ``Path``) is provided, the feature Dask array is
+            **computed** and materialized to a Zarr store at that location. The returned object will
+            still be a Dask array backed by the written data, but all computations necessary to
+            populate the store will have been executed. If `None` (default), no data are written and
+            the method returns a **lazy** (not yet computed) Dask array.
+        store_intermediate
+            If `True`, intermediate `.zarr` data will be written to disk to reduce peak RAM usage.
+            This is useful for large datasets. If `zarr_output_path` is not specified, it is
+            not allowed to set `store_intermediate=True`.
+            It is preferred to set `store_intermediate=False`, and work with a Dask client,
+            so Dask can spill to disk.
+        fn
+            Function applied to each extracted instance window.
+
+            If ``extract_image=True``, ``fn`` is called with an array of shape
+            ``(c, N)``, where ``c`` is the number of channels and ``N`` is the number
+            of pixels corresponding to the non-zero mask for the given instance.
+            The function must return an array of shape
+            ``(c, statistic_dimension)``.
+
+            If ``extract_image=False``, ``fn`` receives an array of shape
+            ``(z, diameter, diameter)``, where values outside the labeled object
+            are set to zero. In this case, the function must return an array of
+            shape ``(statistic_dimension,)``.
+        batch_size
+            Number of instances processed together along the instance dimension
+            ``i`` when evaluating the statistic computation (through `fn`).
+
+            Smaller values reduce peak memory usage during function evaluation,
+            but may increase overhead due to more frequent rechunking and task
+            scheduling in the Dask graph.
+        extract_image : bool
+            If True, extract instance windows from the image. See the description
+            of ``fn`` for details on the expected input and output shapes.
+        fn_kwargs : dict, optional
+            Additional keyword arguments passed to ``fn``.
+        **kwargs
+            Additional keyword arguments forwarded to :func:`dask.array.map_blocks`. Use with care.
+
+        Returns
+        -------
+        tuple
+            - A NumPy array of instance (label) indices, shape `(i,)`, where `i` equals the total
+            number of non-zero labels in the mask, matching the rows in the feature matrix.
+            - A Dask array (feature matrix) of statistics with shape `(i,c,statistic_dimension)`. If `zarr_output_path`
+            is provided, this array points to the computed Zarr store; otherwise it is lazy.
+
+        Examples
+        --------
+        Example 1
+
+        .. code-block:: python
+
+            import harpy as hp
+            import numpy as np
+            from numpy.typing import NDArray
+
+            # Load example dataset
+            sdata = hp.datasets.pixie_example()
+
+            # Prepare image and mask arrays
+            image_array = sdata["raw_image_fov0"].data[:, None, ...]
+            mask_array = sdata["label_whole_fov0"].data[None, ...]
+
+            def _dummy_statistic_image(array: NDArray, value: int):
+                np.random.seed(42)
+                # shape of array=(c, number of pixels corresponding to non zero mask for instance i)
+                assert array.ndim == 2
+                C = array.shape[0]
+                _statistic_dimension=3
+                # return dummy statistic of shape (C, statistic_dimension)
+                return np.random.rand(C, _statistic_dimension) + value
+
+            # Create featurizer
+            featurizer = hp.utils.Featurizer(
+                mask_dask_array=mask_array,
+                image_dask_array=image_array,
+            )
+
+            value = 100
+            fn_kwargs = {"value": value}
+
+            # Compute instance statistics
+            instance_ids, calculated_statistic_lazy = featurizer.calculate_instance_statistics(
+                diameter=50,
+                depth=100,
+                statistic_dimension=3,
+                fn=_dummy_statistic_image,
+                fn_kwargs=fn_kwargs,
+                extract_image=True,
+                batch_size=500,
+            )
+
+            # Execute the computation
+            result = calculated_statistic_lazy.compute()
+
+        Example 2
+
+        .. code-block:: python
+
+            import harpy as hp
+            import numpy as np
+            from numpy.typing import NDArray
+
+            sdata=hp.datasets.pixie_example()
+
+            image_array=sdata[ "raw_image_fov0" ].data[ :, None, ... ]
+            mask_array=sdata[ "label_whole_fov0" ].data[ None, ... ]
+
+            def _dummy_statistic_mask( array: NDArray, value: int )->NDArray:
+                # array should be of dtype int
+                assert np.issubdtype(array.dtype, np.integer)
+                # array is of shape = z,y,x, with y and x the size of the instance window.
+                assert array.ndim == 3
+                statistic_dimension=5
+                result = np.random.rand( statistic_dimension)+value
+                # return array containing float of shape (statistic_dimension,)
+                return result[ None, ... ]
+
+            featurizer=hp.utils.Featurizer( mask_dask_array=mask_array, image_dask_array=None )
+
+            value=100
+            fn_kwargs = { "value": value }
+
+            instance_ids, calculated_statistic_lazy = featurizer.calculate_instance_statistics(
+                diameter=100,
+                depth = 50,
+                statistic_dimension=5,
+                fn=_dummy_statistic_mask,
+                fn_kwargs=fn_kwargs,
+                extract_image=True,
+                batch_size=500,
+            )
+            result = calculated_statistic_lazy.compute()
+        """
         # calculate single cell statistics for each instance
         if store_intermediate and zarr_output_path is None:
             raise ValueError("Please specify a 'zarr_output_path' if 'store_intermediate' is 'True'.")
+        # sanity checks on extract_image and self._image
+        if self._image is None and extract_image:
+            log.info("No image available and 'extract_image' is True; forcing 'extract_image=False'.")
+            extract_image = False
 
         if zarr_output_path is not None and store_intermediate:
             intermediate_zarr_output_path = os.path.join(
@@ -268,7 +487,7 @@ class Featurizer:
             store_intermediate=store_intermediate,
             batch_size=batch_size,
             extract_image=extract_image,  # if extract_image is True, dask_chunks is of dimension (i,c(+1),z,y,x)
-            extract_mask=True,  # always extract the mask, we need it; the user can decide if wants to calculate statistic on the mask, or on the image
+            extract_mask=True,  # always extract the mask, we need it; the user can decide if wants to calculate statistic on the mask, or on the image, via the parameter extract_image
         )
 
         # transpose dask chunks, so it is c,i,z,y,x, that way we can allow chunking in c dimension
@@ -305,12 +524,10 @@ class Featurizer:
             if Path(intermediate_zarr_output_path).suffix == ".zarr":
                 shutil.rmtree(intermediate_zarr_output_path)
 
-        # make it (i,c,statistic_dimension)
+        # transpose calculated_statistic to (i,c,statistic_dimension)
         calculated_statistic = calculated_statistic.transpose(1, 0, 2)
 
         return instance_ids, calculated_statistic
-
-        # FIXME write proper func for np.quantile case. then write for dummy case; then for radii and axes (only mask needed), and then for only mask (most occuring element)
 
     def extract_instances(
         self,
@@ -327,94 +544,137 @@ class Featurizer:
         batch_size: int | None = None,
     ) -> tuple[NDArray, da.Array]:
         """
-        Extract per-label instance windows from the mask and image of size `diameter` in `y` and `x` using :func:`dask.array.map_overlap` and :func:`dask.array.map_blocks`.
+        Extract per-label instance windows from the mask and image of size ``diameter`` in ``y`` and ``x`` using :func:`dask.array.map_overlap` and :func:`dask.array.map_blocks`.
 
         See :func:`harpy.tb.extract_instances` for a full description.
 
         Parameters
         ----------
         store_intermediate
-            If `True`, and intermediate `.zarr` file is written to disk.
-            Setting this to `True` will decrease ram usage.
-            If `zarr_output_path` is not specified, it is not allowed to set
-            `store_intermediate` to `True`.
-            It is recommended to set `store_intermediate=False`, and work with a Dask client,
-            so Dask can spill to disk.
+            If True, write an intermediate ``.zarr`` store to disk. This can reduce RAM
+            usage during computation.
+
+            If ``zarr_output_path`` is not specified, ``store_intermediate`` must be
+            False.
+
+            In most cases, prefer ``store_intermediate=False`` and use a Dask client so
+            Dask can spill to disk.
 
         Returns
         -------
-        tuple:
+        tuple
+            - A NumPy array of extracted instance (label) IDs with shape ``(i,)``, where
+            ``i`` equals the number of non-zero labels in the mask.
 
-            - a numpy array containing indices of extracted labels, shape `(i,)`.
-            Dimension of `i` will be equal to the total number of non-zero labels in the mask.
-
-            - a Dask array of dimension `(i,c+1,z,y,x)`, with dimension of `c` the number of channels in the image array.
-            At channel index 0 of each instance, is the corresponding mask.
-            dimension of `y` and `x` equal to `diameter`, or 2*`depth` if `diameter` is not specified.
+            - A Dask array of shape ``(i, c+1, z, y, x)``, where ``c`` is the number of
+            channels in the image. Channel index 0 contains the corresponding mask.
+            The ``y`` and ``x`` dimensions are ``diameter`` (or ``2 * depth`` if
+            ``diameter`` is not specified).
 
         Examples
         --------
-        ### example 1
-        >>> import dask
-        >>> import dask.array as da
-        >>> import matplotlib.pyplot as plt
-        >>> import hp as hp
-        >>> sdata = hp.datasets.resolve_example()
-        >>> mask_array = sdata[ "segmentation_mask" ].data[ None, ... ].rechunk( 1024 )
-        >>> image_array = sdata[ "raw_image" ].data[ :, None, ... ].rechunk( 1024 )
-        >>> fe = Featurizer(mask_dask_array=mask_array, image_dask_array=image_array)
-        >>> instance_ids, instances = fe.extract_instances(depth=100, diameter=75)            # lazy graph
-        >>> instances                                                             # inspect shape/chunks
-        dask.array<...>
-        # Persist to Zarr on disk (computes instances now)
-        >>> instance_ids, instances = fe.extract_instances(
-        ...     depth=100,
-        ...     diameter=75,
-        ...     zarr_output_path="instances.zarr",
-        ... )
-        # Keep full window content instead of masking to the instance
-        >>> instance_ids, instances = fe.extract_instances(depth=100, diameter=75 remove_background=False)
+        Basic usage:
 
-        ### example 2 (with a visual sanity check of the extracted instances)
-        >>> import dask
-        >>> import dask.array as da
-        >>> import matplotlib.pyplot as plt
-        >>> import hp as hp
+        .. code-block:: python
 
-        >>> sdata = hp.datasets.resolve_example()
-        >>> mask_array = sdata["segmentation_mask"].data[None, ...]
+            import harpy as hp
 
-        >>> fe = Featurizer(
-        ...     mask_dask_array=mask_array,
-        ...     image_dask_array=None,
-        ... )
-        >>> instance_ids, instances = fe.extract_instances(
-        ...     depth=100,
-        ...     diameter=200,
-        ...     batch_size=500,
-        ...     extract_mask=True,
-        ... )
+            sdata = hp.datasets.pixie_example()
 
-        >>> instances = instances.compute()
+            img_layer = "raw_image_fov0"
+            labels_layer = "label_whole_fov0"
 
-        >>> instance_id = 23
-        >>> mask = instances[instance_ids == instance_id][0][0][0]
-        >>> plt.imshow(mask)
+            mask_array = (
+                sdata[labels_layer]
+                .data[None, ...]
+                .rechunk(1024)
+            )
 
-        >>> mask_array_remove = da.where(mask_array == instance_id, mask_array, 0)
+            image_array = (
+                sdata[img_layer]
+                .data[:, None, ...]
+                .rechunk(1024)
+            )
 
-        >>> _, y_, x_ = da.where(mask_array == instance_id)
-        >>> y_, x_ = dask.compute(y_, x_)
+            fe = hp.utils.Featurizer(
+                mask_dask_array=mask_array,
+                image_dask_array=image_array,
+            )
 
-        >>> plt.imshow(
-        ...     mask_array_remove[
-        ...         0, y_.min():y_.max(), x_.min():x_.max()
-        ...     ]
-        ... )
+            # Lazy Dask graph
+            instance_ids, instances = fe.extract_instances(
+                depth=100,
+                diameter=75,
+            )
+
+            # Inspect shape and chunking
+            instances
+
+            # Persist to Zarr on disk (computes instances)
+            instance_ids, instances = fe.extract_instances(
+                depth=100,
+                diameter=75,
+                zarr_output_path="instances.zarr",
+            )
+
+            # Keep full window content instead of masking to the instance
+            instance_ids, instances = fe.extract_instances(
+                depth=100,
+                diameter=75,
+                remove_background=False,
+            )
+
+        Visual sanity check of extracted instances:
+
+        .. code-block:: python
+
+            import dask
+            import dask.array as da
+            import matplotlib.pyplot as plt
+            import harpy as hp
+
+            sdata = hp.datasets.pixie_example()
+
+            labels_layer = "label_whole_fov0"
+            mask_array = sdata[labels_layer].data[None, ...]
+
+            fe = hp.utils.Featurizer(
+                mask_dask_array=mask_array,
+                image_dask_array=None,
+            )
+
+            instance_ids, instances = fe.extract_instances(
+                depth=50,
+                diameter=75,
+                batch_size=500,
+                extract_mask=True,
+                extract_image=True,
+            )
+
+            instances = instances.compute()
+
+            instance_id = 23
+            mask = instances[instance_ids == instance_id][0][0][0]
+            plt.imshow(mask)
+            plt.show()
+
+            mask_array_remove = da.where(mask_array == instance_id, mask_array, 0)
+
+            _, y_, x_ = da.where(mask_array == instance_id)
+            y_, x_ = dask.compute(y_, x_)
+
+            plt.imshow(
+                mask_array_remove[
+                    0,
+                    y_.min():y_.max(),
+                    x_.min():x_.max(),
+                ]
+            )
+            plt.show()
 
         See Also
         --------
-        harpy.tb.extract_instances : extract instances in labels layer from an image layer.
+        harpy.tb.extract_instances : Extract instance windows from a labels layer and (optionally) an image layer.
         """
         if diameter is None:
             diameter = 2 * depth
@@ -587,7 +847,45 @@ class Featurizer:
         batch_size: int | None = None,
         instance_key: str = _INSTANCE_KEY,
     ) -> list[pd.DataFrame]:
-        # FIXME write docstring
+        """
+        Compute per-instance intensity quantiles.
+
+        For each labeled instance, a centered window of size ``diameter`` in the
+        ``y`` and ``x`` dimensions is
+        extracted, and the requested quantiles of the instance pixel intensities
+        are computed.
+
+        Parameters
+        ----------
+        diameter
+            Estimated maximum diameter of an instance in the ``y`` and ``x``
+            dimensions. Used to determine the spatial extent of the extracted
+            window.
+        q
+            Quantile or quantiles to compute. May be a single float in the interval
+            ``[0, 1]`` or a sequence of floats. By default, nine evenly spaced
+            quantiles between 0.1 and 0.9 are computed.
+        depth
+            Passed to :func:`dask.array.map_overlap`.
+            For correct results, choose depth to be roughly half of the estimated maximum diameter or larger.
+        batch_size
+            Number of instances processed together during computation. Smaller
+            values reduce peak memory usage at the cost of increased overhead.
+        instance_key
+            Name of the column in the output DataFrames that contains the identifier of
+            each instance, matching the corresponding label value in the mask.
+
+        Returns
+        -------
+        A list of DataFrames containing the computed quantiles for each
+        instance. Each DataFrame corresponds to a computed quantile
+        and is indexed by the instance identifier.
+
+        Notes
+        -----
+        The computation is performed lazily and may be executed in parallel using
+        :mod:`dask`. Memory usage can be controlled via ``batch_size``.
+        """
         if depth is None:
             depth = diameter // 2 + 1
             log.info(f"Parameter depth not provided; using default depth={depth} (computed from diameter={diameter})")
@@ -616,12 +914,57 @@ class Featurizer:
 
     def radii_and_principal_axes(
         self,
-        diameter: int,  # estimated max diameter of cell in y, x,
+        diameter: int,  # estimated max diameter of instance in y, x,
         calculate_axes: bool = True,
         depth: int | None = None,
         batch_size: int | None = None,
         instance_key: str = _INSTANCE_KEY,
     ) -> pd.DataFrame:
+        """
+        Compute per-instance radii and principal axes.
+
+        For each labeled instance, a centered window of size ``diameter`` in the
+        ``y`` and ``x`` dimensions is
+        extracted from the mask. The spatial extent of each instance is used to
+        compute its radii (sorted from largest to smallest), and optionally its
+        principal axes.
+
+        Parameters
+        ----------
+        diameter
+            Estimated maximum diameter of an instance in the ``y`` and ``x``
+            dimensions. Used to determine the spatial extent of the extracted
+            window.
+        calculate_axes
+            If True, compute and include the principal axes for each instance.
+            When enabled, the axes are returned as a flattened ``3 × 3`` matrix
+            (nine columns) per instance.
+        depth
+            Passed to :func:`dask.array.map_overlap`.
+            For correct results, choose ``depth`` to be roughly half of the
+            estimated maximum diameter or larger.
+        batch_size
+            Number of instances processed together during computation. Smaller
+            values reduce peak memory usage at the cost of increased overhead.
+        instance_key
+            Name of the column in the output DataFrame that contains the identifier
+            of each instance, matching the corresponding label value in the mask.
+
+        Returns
+        -------
+        A DataFrame where each row corresponds to a single instance and rows
+        are ordered by instance identifier. The DataFrame contains:
+
+        - One column with the instance (label) identifier.
+        - Three columns containing the radii, sorted from largest to smallest.
+        - If ``calculate_axes`` is True, nine additional columns containing the
+        flattened ``3 × 3`` principal axes matrix.
+
+        Notes
+        -----
+        The computation is performed lazily and may be executed in parallel using
+        ``dask``. Memory usage can be controlled via ``batch_size``.
+        """
         # FIXME write docstring
         if depth is None:
             depth = diameter // 2 + 1
@@ -1279,26 +1622,6 @@ def _radii_and_principal_axes(mask: NDArray, calculate_axes: bool = True) -> NDA
     assert axes.shape == (mask.ndim, mask.ndim), f"Unexpected axes shape: {axes.shape}. Report this."
     result = np.concatenate((radii, axes.flatten())) if calculate_axes else radii
     return result.squeeze()
-
-
-def _all_region_radii_and_axes(mask: NDArray, calculate_axes: bool = True) -> NDArray:
-    unique_labels = np.unique(mask)
-    unique_labels = unique_labels[unique_labels != 0]
-
-    nr_of_features = mask.ndim + mask.ndim**2 if calculate_axes else mask.ndim
-
-    if len(unique_labels) == 0:
-        return np.empty((0, nr_of_features))
-
-    result = np.full((len(unique_labels), nr_of_features), np.nan, dtype=np.float32)
-
-    for i, label in enumerate(unique_labels):
-        radii, axes = _region_radii_and_axes(mask=mask, label=label)
-        assert radii.shape == (mask.ndim,), f"Unexpected radii shape: {radii.shape}"
-        assert axes.shape == (mask.ndim, mask.ndim), f"Unexpected axes shape: {axes.shape}"
-        result[i] = np.concatenate((radii, axes.flatten())) if calculate_axes else radii
-    # result is of shape i, nr_of_features
-    return result
 
 
 def _region_radii_and_axes(mask: NDArray, label: int) -> tuple[NDArray, NDArray]:
