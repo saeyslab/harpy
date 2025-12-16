@@ -42,7 +42,7 @@ def plot_sdata(
     ax: Axes | None = None,
 ) -> Axes:
     """
-    Light wrapper around `spatialdata-plot` to plot a :class:`~spatialdata.SpatialData` object.
+    Light wrapper around :mod:`spatialdata-plot` to plot a :class:`~spatialdata.SpatialData` object.
 
     Parameters
     ----------
@@ -210,13 +210,13 @@ def plot_sdata(
         if img_layer not in sdata_to_plot.images:
             raise ValueError(
                 f"After applying the bounding-box query with coordinates {crd!r} "
-                f"(xmin, xmax, ymin, ymax), the image layer '{img_layer}' is no longer present "
+                f"'(xmin, xmax, ymin, ymax)', the image layer '{img_layer}' is no longer present "
                 "in the resulting SpatialData object. Please try different parameters for 'crd'."
             )
         if labels_layer is not None and labels_layer not in sdata_to_plot.labels:
             raise ValueError(
                 f"After applying the bounding-box query with coordinates {crd!r} "
-                f"(xmin, xmax, ymin, ymax), the labels layer '{labels_layer}' is no longer present "
+                f"'(xmin, xmax, ymin, ymax)', the labels layer '{labels_layer}' is no longer present "
                 "in the resulting SpatialData object. Please try different parameters for 'crd'."
             )
 
@@ -294,7 +294,7 @@ def plot_sdata_genes(
     ax: Axes | None = None,
 ) -> Axes:
     """
-    Light wrapper around `spatialdata-plot` to visualize gene expression from a :class:`~spatialdata.SpatialData` object.
+    Light wrapper around :mod:`spatialdata-plot` to visualize gene expression from a :class:`~spatialdata.SpatialData` object.
 
     Parameters
     ----------

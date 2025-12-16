@@ -13,9 +13,10 @@ from numpy.typing import NDArray
 from spatialdata import SpatialData
 from spatialdata.transformations import get_transformation
 
-from harpy.image._image import _get_spatial_element
+from harpy.image._image import get_dataarray
 from harpy.image.segmentation._grid import add_grid_labels_layer
 from harpy.utils._aggregate import RasterAggregator
+from harpy.utils._featurize import Featurizer
 from harpy.utils._keys import _INSTANCE_KEY, _SPATIAL
 
 try:
@@ -44,9 +45,9 @@ def spatial_pixel_neighbors(
     subdivides the spatial domain into a grid using a specified sampling interval, and computes spatial neighbors along with
     neighborhood enrichment statistics. The resulting AnnData object stores the cluster labels as a categorical
     observation (under the key provided by `key_added`) and the corresponding spatial coordinates in its `.obsm`
-    attribute. `squidpy` is used for the spatial neighbors computation and
-    the neighborhood enrichment analysis (i.e. `squidpy.gr.spatial_neighbors` and `squidpy.gr.nhood_enrichment`).
-    Results can then be visualized using e.g. `squidpy.pl.nhood_enrichment`.
+    attribute. :mod:`squidpy` is used for the spatial neighbors computation and
+    the neighborhood enrichment analysis (i.e. :func:`squidpy.gr.spatial_neighbors` and :func:`squidpy.gr.nhood_enrichment`).
+    Results can then be visualized using e.g. :func:`squidpy.pl.nhood_enrichment`.
 
     Parameters
     ----------
@@ -59,7 +60,7 @@ def spatial_pixel_neighbors(
         If `mode` is `"center"`, `size` determines the sampling interval for constructing the spatial grid.
         This value determines the distance (in pixels) between consecutive grid points along each axis. A smaller value produces a denser grid (higher resolution),
         while a larger value yields a sparser grid.
-        If `mode` is `"most_frequent"`, this value is passed to `harpy.im.add_grid_labels_layer`.
+        If `mode` is `"most_frequent"`, this value is passed to :func:`harpy.im.add_grid_labels_layer`.
     mode
         The method used to extract grid-based pixel cluster labels. Can be either `"most_frequent"` or `"center"`.
         - `"most_frequent"`: Assigns each grid point the most frequently occurring label within the surrounding
@@ -76,9 +77,9 @@ def spatial_pixel_neighbors(
     subset
         A list of labels to subset the analysis to, or `None` to include all labels in `labels_layer`.
     spatial_neighbors_kwargs
-        Additional keyword arguments to be passed to `squidpy.gr.spatial_neighbors`.
+        Additional keyword arguments to be passed to :func:`squidpy.gr.spatial_neighbors`.
     nhood_enrichment_kwargs
-        Additional keyword arguments to be passed to `squidpy.gr.nhood_enrichment`.
+        Additional keyword arguments to be passed to :func:`squidpy.gr.nhood_enrichment`.
     seed
         The random seed used for reproducibility in the neighborhood enrichment computation.
     key_added
@@ -168,7 +169,7 @@ def _get_values_grid_most_frequent(
     grid_type: str = "hexagon",
     subset: list[int] | None = None,
 ) -> tuple[NDArray, NDArray]:
-    assert _get_spatial_element(sdata, layer=labels_layer).data.ndim == 2, "Currently only support for 2D ('y','x')."
+    assert get_dataarray(sdata, layer=labels_layer).data.ndim == 2, "Currently only support for 2D ('y','x')."
     _uuid = uuid.uuid4()
     # Make a grid, either hexagons or squares.
     sdata = add_grid_labels_layer(
@@ -178,54 +179,78 @@ def _get_values_grid_most_frequent(
         output_labels_layer=f"labels_grid_{_uuid}",
         output_shapes_layer=f"shapes_grid_{_uuid}",
         grid_type=grid_type,
-        chunks=_get_spatial_element(sdata, layer=labels_layer).data.chunksize[
+        chunks=get_dataarray(sdata, layer=labels_layer).data.chunksize[
             -1
         ],  # if chunksize in y would be different than in x, we rechunk, see below
         transformations=get_transformation(sdata[labels_layer], get_all=True),
         overwrite=True,
     )
-    mask_grid = _get_spatial_element(sdata, layer=f"labels_grid_{_uuid}").data
-    mask_pixel_clusters = _get_spatial_element(sdata, layer=labels_layer).data
+    mask_grid = get_dataarray(sdata, layer=f"labels_grid_{_uuid}").data
+    mask_pixel_clusters = get_dataarray(sdata, layer=labels_layer).data
 
     if mask_grid.chunksize != mask_pixel_clusters.chunksize:
         mask_pixel_clusters.rechunk(mask_grid.chunksize)
 
-    mask_grid = mask_grid[None, ...]  # RasterAggregator only supports z,y,x
-    mask_pixel_clusters = mask_pixel_clusters[None, None, ...]  # RasterAggregator only supports c,z,y,x
+    mask_grid = mask_grid[None, ...]  # mask for featurizer (z,y,x)
+    mask_pixel_clusters = mask_pixel_clusters[None, None, ...]  # 'image' for featurizer (1,z,y,x)
+
+    featurizer = Featurizer(
+        mask_dask_array=mask_grid,
+        image_dask_array=mask_pixel_clusters,
+    )
+
+    def _most_frequent(array: NDArray):
+        # shape of array = ( 1, number of pixels correponding to non zero mask for instance i) )
+        assert array.shape[0] == 1
+        unique_elements, counts = np.unique(array, return_counts=True)
+        return unique_elements[np.argmax(counts)].reshape(1, 1)
+
+    diameter = size * 2 if grid_type == "hexagon" else size
+    instance_ids, most_frequent_lazy = featurizer.calculate_instance_statistics(
+        depth=diameter // 2 + 1,
+        statistic_dimension=1,
+        diameter=diameter,
+        zarr_output_path=None,
+        store_intermediate=False,
+        fn=_most_frequent,
+        batch_size=None,
+        extract_image=True,
+    )
+
+    # most_frequent_lazy is of shape (i,1,statistic_dimension=1)
+    most_frequent = most_frequent_lazy.squeeze(1).compute()
+    most_frequent = most_frequent.astype(get_dataarray(sdata, layer=labels_layer).dtype)
+    df_most_frequent = pd.DataFrame(most_frequent)
+    df_most_frequent[_INSTANCE_KEY] = instance_ids
+    if not df_most_frequent[_INSTANCE_KEY].is_unique:
+        raise ValueError(f"Instance key '{_INSTANCE_KEY}' is not unique. Please report this bug.")
 
     aggregator = RasterAggregator(
         mask_dask_array=mask_grid,
-        image_dask_array=mask_pixel_clusters,
+        image_dask_array=None,
         instance_key=_INSTANCE_KEY,
     )
 
-    def _get_most_frequent_element_in_mask(mask_grid: NDArray, mask_pixel_clusters: NDArray) -> NDArray:
-        unique_labels = np.unique(mask_grid)
-        unique_labels = unique_labels[unique_labels != 0]
-        results = []
+    df_center_of_mass = aggregator.center_of_mass()
+    df_center_of_mass = df_center_of_mass[df_center_of_mass[_INSTANCE_KEY] != 0]
+    df_center_of_mass.rename(columns={0: "z", 1: "y", 2: "x"}, inplace=True)
 
-        for _label in unique_labels:
-            unique_elements, counts = np.unique(mask_pixel_clusters[mask_grid == _label], return_counts=True)
-            results.append(unique_elements[np.argmax(counts)])
+    # sanity check
+    valid = set(df_most_frequent[_INSTANCE_KEY])
+    cm_keys = set(df_center_of_mass[_INSTANCE_KEY])
 
-        return np.array(results).reshape(-1, 1).astype(np.float32)
+    if cm_keys != valid:
+        raise ValueError(f"Instance keys differ: expected {valid - cm_keys}, got {cm_keys - valid}.")
 
-    # TODO: replace with featurizer, will be faster
-    values = aggregator.aggregate_custom_channel(
-        image=mask_pixel_clusters[0],
-        mask=mask_grid,
-        depth=size,
-        fn=_get_most_frequent_element_in_mask,
-        features=1,
-        dtype=np.uint32,
-    )
-
-    center_of_mass = aggregator.center_of_mass()
-    df = center_of_mass[center_of_mass[_INSTANCE_KEY] != 0]
-    coordinates = df.values[:, -2:]  # gives you y,x coordinates
+    # inner merge
+    df = pd.merge(df_center_of_mass, df_most_frequent, on=_INSTANCE_KEY, how="inner")
+    coordinates = df[["y", "x"]].values
+    values = df[[0]].values
 
     if subset is not None:
         mask = np.isin(values, subset).flatten()
+        if not mask.any():
+            raise ValueError(f"None of the cluster id's in '{labels_layer}' match any element in 'subset'.")
         values = values[mask]
         coordinates = coordinates[mask]
 

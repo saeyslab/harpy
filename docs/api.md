@@ -106,12 +106,14 @@ Operations on table (`AnnData` object) layers.
 
     tb.add_table_layer
     tb.allocate
+    tb.bin_counts
     tb.allocate_intensity
+    tb.add_regionprop_features
+    tb.extract_instances
+    tb.featurize
     tb.preprocess_transcriptomics
     tb.preprocess_proteomics
-    tb.extract_instances
     tb.filter_on_size
-    tb.featurize
     tb.leiden
     tb.kmeans
     tb.score_genes
@@ -119,7 +121,6 @@ Operations on table (`AnnData` object) layers.
     tb.correct_marker_genes
     tb.cluster_cleanliness
     tb.nhood_enrichment
-    tb.add_regionprop_features
     tb.cluster_intensity
     tb.cluster_intensity_SOM
     tb.spatial_pixel_neighbors
@@ -226,9 +227,10 @@ Utility functions.
 .. autosummary::
     :toctree: generated
 
-    utils.bounding_box_query
     utils.RasterAggregator
+    utils.Featurizer
     utils.kronos_embedding
+    utils.bounding_box_query
 ```
 
 ## Datasets

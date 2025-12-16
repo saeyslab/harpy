@@ -45,6 +45,8 @@ def allocate_intensity(
 
     It requires that the image layer and the labels layer have the same shape and alignment.
 
+    Internally this function uses :func:`harpy.utils.RasterAggregator`.
+
     Parameters
     ----------
     sdata
@@ -70,7 +72,7 @@ def allocate_intensity(
 
         - If `obs_stats` contains `"mode"`, it will **not** be added to `.obs`.
         - For each `stat` in `["sum", "mean", "var", "kurtosis", "skew", "max", "min"]`, the result is stored as: `{channel_name}_{stat}`.
-        - `"count"` is stored in `.obs` using the name given by `cellsize_key`.
+        - `"count"` is stored in `.obs` using the name given by `instance_size_key`.
 
     to_coordinate_system
         The coordinate system that holds `img_layer` and `labels_layer`.
@@ -113,34 +115,45 @@ def allocate_intensity(
       chunk-based processing, aided by Dask.
       If sdata is backed by a Zarr store, we recommend using `chunks=None` and ensuring that the on-disk Dask array chunks are optimized for both storage efficiency and computational performance.
 
-    Example
-    -------
-    >>> sdata = hp.datasets.pixie_example()
-    >>>
-    >>> # Compute intensity statistics in coordinate system "fov0"
-    >>> sdata = hp.tb.allocate_intensity(
-    ...     sdata,
-    ...     img_layer="raw_image_fov0",
-    ...     labels_layer="label_whole_fov0",
-    ...     to_coordinate_system="fov0",
-    ...     output_layer="my_table",
-    ...     mode="sum",
-    ...     obs_stats="count",  # cell size
-    ...     overwrite=True,
-    ... )
-    >>>
-    >>> # Append intensity statistics in coordinate system "fov1"
-    >>> sdata = hp.tb.allocate_intensity(
-    ...     sdata,
-    ...     img_layer="raw_image_fov1",
-    ...     labels_layer="label_whole_fov1",
-    ...     to_coordinate_system="fov1",
-    ...     output_layer="my_table",
-    ...     mode="sum",
-    ...     obs_stats="count",  # cell size
-    ...     append=True,
-    ...     overwrite=True,
-    ... )
+
+    Examples
+    --------
+    Allocate intensity statistics into an AnnData table:
+
+    .. code-block:: python
+
+        import harpy as hp
+
+        sdata = hp.datasets.pixie_example()
+
+        # Compute intensity statistics in coordinate system "fov0"
+        sdata = hp.tb.allocate_intensity(
+            sdata,
+            img_layer="raw_image_fov0",
+            labels_layer="label_whole_fov0",
+            to_coordinate_system="fov0",
+            output_layer="my_table",
+            mode="sum",
+            obs_stats="count",  # cell size
+            overwrite=True,
+        )
+
+        # Append intensity statistics in coordinate system "fov1"
+        sdata = hp.tb.allocate_intensity(
+            sdata,
+            img_layer="raw_image_fov1",
+            labels_layer="label_whole_fov1",
+            to_coordinate_system="fov1",
+            output_layer="my_table",
+            mode="sum",
+            obs_stats="count",  # cell size
+            append=True,
+            overwrite=True,
+        )
+
+    See Also
+    --------
+    harpy.utils.RasterAggregator : out of core calculation of statistics from raster data.
     """
     assert mode in ["sum", "mean"], "'mode' must be either 'sum' or 'mean'."
     if obs_stats is not None:

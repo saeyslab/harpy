@@ -1,4 +1,5 @@
 from ._aggregate import RasterAggregator
+from ._featurize import Featurizer
 from ._kronos import kronos_embedding
 from ._query import bounding_box_query
 from .utils import _export_config, _get_polygons_in_napari_format, _get_raster_multiscale
@@ -11,6 +12,7 @@ ALLOCATION = "allocation"
 
 __all__ = [
     "RasterAggregator",
+    "Featurizer",
     "bounding_box_query",
     "kronos_embedding",
     "_export_config",

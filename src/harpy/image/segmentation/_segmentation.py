@@ -128,6 +128,53 @@ def segment(
     ------
     TypeError
         If the provided `model` is not a callable.
+
+    Example
+    --------
+    .. code-block:: python
+
+        import os
+        import harpy as hp
+
+        from spatialdata import read_zarr
+        from dask.distributed import LocalCluster, Client
+
+        cluster = LocalCluster(
+            n_workers=1,
+            threads_per_worker=1,
+        )
+        client = Client(cluster)
+
+        print(client.dashboard_link)
+
+        sdata = hp.datasets.resolve_example()
+
+        # Write to a Zarr store for optimal performance
+        sdata.write(
+            os.path.join(os.environ.get("TMPDIR"), "sdata.zarr"),
+            overwrite=True,
+        )
+        sdata = read_zarr(sdata.path)
+
+        sdata = hp.im.segment(
+            sdata,
+            img_layer="raw_image",
+            crd=[1000, 2000, 3000, 4000],  # only segment a crop
+            output_labels_layer="segmentation_mask_computed",
+            output_shapes_layer=None,
+            model=hp.im.cellpose_callable,
+            # Keyword arguments passed to the model
+            flow_threshold=0.8,
+        )
+
+        client.close()
+
+        hp.pl.plot_sdata(
+            sdata,
+            img_layer="raw_image",
+            labels_layer="segmentation_mask_computed",
+            crd=[1000, 2000, 3000, 4000],
+        )
     """
     fn_kwargs = kwargs
 
