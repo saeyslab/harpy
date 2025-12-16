@@ -117,12 +117,16 @@ class Featurizer:
 
         Returns
         -------
-        tuple
-            - A NumPy array of instance (label) indices, shape `(i,)`, where `i` equals the total
-            number of non-zero labels in the mask, matching the rows in the feature matrix.
-            - A Dask array (feature matrix) of features with shape `(i, embedding_dimension)`. If `zarr_output_path`
-            is provided, this array points to the computed Zarr store; otherwise it is lazy.
+        tuple:
 
+            - a Numpy array containing indices of extracted labels, shape ``(i,)``.
+              Dimension of ``i`` will be equal to the total number of non-zero
+              labels in the mask.
+
+            - A Dask array (feature matrix) of features with shape
+              ``(i, embedding_dimension)``. If ``zarr_output_path`` is
+              provided, this array points to the computed Zarr store; otherwise
+              it is lazy.
 
         Examples
         --------
@@ -253,7 +257,7 @@ class Featurizer:
             dask_chunks,
             chunks=(dask_chunks.chunks[0], embedding_dimension),
             drop_axis=[2, 3, 4],  # we do not allow chunking in 2,3 and 4, and we drop them
-            dtype=dtype,  # FIXME, would it be possible to remove the dtype here
+            dtype=dtype,  # FIXME, would it be possible to remove the dtype here?
             **kwargs,
             embedding_dimension=embedding_dimension,
             **model_kwargs,
@@ -371,11 +375,16 @@ class Featurizer:
 
         Returns
         -------
-        tuple
-            - A NumPy array of instance (label) indices, shape `(i,)`, where `i` equals the total
-            number of non-zero labels in the mask, matching the rows in the feature matrix.
-            - A Dask array (feature matrix) of statistics with shape `(i,c,statistic_dimension)`. If `zarr_output_path`
-            is provided, this array points to the computed Zarr store; otherwise it is lazy.
+        tuple:
+
+            - a Numpy array containing indices of extracted labels, shape ``(i,)``.
+              Dimension of ``i`` will be equal to the total number of non-zero
+              labels in the mask.
+
+            - A Dask array (feature matrix) of statistics with shape
+              ``(i, c, statistic_dimension)``. If ``zarr_output_path`` is
+              provided, this array points to the computed Zarr store; otherwise
+              it is lazy.
 
         Examples
         --------
@@ -553,23 +562,28 @@ class Featurizer:
         store_intermediate
             If True, write an intermediate ``.zarr`` store to disk. This can reduce RAM
             usage during computation.
-
             If ``zarr_output_path`` is not specified, ``store_intermediate`` must be
             False.
-
             In most cases, prefer ``store_intermediate=False`` and use a Dask client so
             Dask can spill to disk.
 
+
         Returns
         -------
-        tuple
-            - A NumPy array of extracted instance (label) IDs with shape ``(i,)``, where
-            ``i`` equals the number of non-zero labels in the mask.
+        tuple:
 
-            - A Dask array of shape ``(i, c+1, z, y, x)``, where ``c`` is the number of
-            channels in the image. Channel index 0 contains the corresponding mask.
-            The ``y`` and ``x`` dimensions are ``diameter`` (or ``2 * depth`` if
-            ``diameter`` is not specified).
+            - a Numpy array containing indices of extracted labels, shape ``(i,)``.
+              Dimension of ``i`` will be equal to the total number of non-zero
+              labels in the mask.
+
+            - a Dask array of dimension ``(i, c+1, z, y, x)`` or
+              ``(i, c, z, y, x)``, with dimension of ``c`` the number of channels
+              in ``img_layer``.
+              At channel index 0 of each instance, is the corresponding mask if
+              ``add_mask`` is set to ``True``.
+              Dimension of ``y`` and ``x`` are equal to ``diameter``, or
+              ``2 * depth`` if ``diameter`` is not specified.
+
 
         Examples
         --------
@@ -955,23 +969,22 @@ class Featurizer:
         A DataFrame where each row corresponds to a single instance and rows
         are ordered by instance identifier. The DataFrame contains:
 
-        - One column with the instance (label) identifier.
-        - Three columns containing the radii, sorted from largest to smallest.
-        - If ``calculate_axes`` is True, nine additional columns containing the
-        flattened ``3 × 3`` principal axes matrix.
+            - One column with the instance (label) identifier.
+            - Three columns containing the radii, sorted from largest to
+              smallest.
+            - If ``calculate_axes`` is True, nine additional columns containing
+              the flattened ``3 × 3`` principal axes matrix.
 
         Notes
         -----
         The computation is performed lazily and may be executed in parallel using
         ``dask``. Memory usage can be controlled via ``batch_size``.
         """
-        # FIXME write docstring
         if depth is None:
             depth = diameter // 2 + 1
             log.info(f"Parameter depth not provided; using default depth={depth} (computed from diameter={diameter})")
         # need to add a check to see if q is provided as a list, and if it is float, make it a list.
         # quantiles_lazy is a lazy dask array
-        # FIXME: test this function
         statistic_dimension = self._mask.ndim + self._mask.ndim**2 if calculate_axes else self._mask.ndim
         fn_kwargs = {"calculate_axes": calculate_axes}
         instance_ids, radii_and_principal_axes_lazy = self.calculate_instance_statistics(

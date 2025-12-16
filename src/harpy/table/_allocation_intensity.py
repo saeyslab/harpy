@@ -45,6 +45,8 @@ def allocate_intensity(
 
     It requires that the image layer and the labels layer have the same shape and alignment.
 
+    Internally this function uses :func:`harpy.utils.RasterAggregator`.
+
     Parameters
     ----------
     sdata
@@ -70,7 +72,7 @@ def allocate_intensity(
 
         - If `obs_stats` contains `"mode"`, it will **not** be added to `.obs`.
         - For each `stat` in `["sum", "mean", "var", "kurtosis", "skew", "max", "min"]`, the result is stored as: `{channel_name}_{stat}`.
-        - `"count"` is stored in `.obs` using the name given by `cellsize_key`.
+        - `"count"` is stored in `.obs` using the name given by `instance_size_key`.
 
     to_coordinate_system
         The coordinate system that holds `img_layer` and `labels_layer`.
@@ -148,6 +150,10 @@ def allocate_intensity(
             append=True,
             overwrite=True,
         )
+
+    See Also
+    --------
+    harpy.utils.RasterAggregator : out of core calculation of statistics from raster data.
     """
     assert mode in ["sum", "mean"], "'mode' must be either 'sum' or 'mean'."
     if obs_stats is not None:

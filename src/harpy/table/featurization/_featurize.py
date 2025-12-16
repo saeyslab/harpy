@@ -82,12 +82,16 @@ def extract_instances(
     -------
     tuple:
 
-        - a Numpy array containing indices of extracted labels, shape `(i,)`.
-          Dimension of `i` will be equal to the total number of non-zero labels in the mask.
+        - a Numpy array containing indices of extracted labels, shape ``(i,)``.
+            Dimension of ``i`` will be equal to the total number of non-zero
+            labels in the mask.
 
-        - a Dask array of dimension `(i,c+1,z,y,x)` or `(i,c,z,y,x)`, with dimension of `c` the number of channels in `img_layer`.
-          At channel index 0 of each instance, is the corresponding mask if `add_mask` is set to `True`.
-          Dimension of `y` and `x` are equal to `diameter`, or 2*`depth` if `diameter` is not specified.
+        - a Dask array of dimension ``(i, c+1, z, y, x)`` or
+            ``(i, c, z, y, x)``, with dimension of ``c`` the number of channels
+            in ``img_layer``. At channel index 0 of each instance, is the
+            corresponding mask if ``add_mask`` is set to ``True``. Dimension
+            of ``y`` and ``x`` are equal to ``diameter``, or ``2 * depth`` if
+            ``diameter`` is not specified.
 
     Examples
     --------

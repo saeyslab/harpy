@@ -121,6 +121,38 @@ class RasterAggregator:
         A list of DataFrames, each corresponding to one of the requested statistics.
         Each DataFrame contains one row per label a column per image channel and a column with the label ID,
         except for stat "count", which only contains a column with the counts and a column with the label ID.
+
+        Example
+        --------
+        .. code-block:: python
+
+            import harpy as hp
+
+            # Load example dataset
+            sdata = hp.datasets.pixie_example()
+
+            img_layer = "raw_image_fov0"
+            labels_layer = "label_whole_fov0"
+
+            image_array = hp.im.get_dataarray(sdata, layer=img_layer).data
+            mask_array = hp.im.get_dataarray(sdata, layer=labels_layer).data
+
+            # Add dummy z dimension
+            image_array = image_array[:, None, ...]
+            mask_array = mask_array[None, ...]
+
+            aggregator = hp.utils.RasterAggregator(
+                mask_dask_array=mask_array,
+                image_dask_array=image_array,
+            )
+
+            df_mean, df_area = aggregator.aggregate_stats(
+                stats_funcs=("mean", "count")
+            )
+
+        See Also
+        --------
+        harpy.tb.allocate_intensity : create an AnnData table from raster data.
         """
         if isinstance(stats_funcs, str):
             stats_funcs = (stats_funcs,)
