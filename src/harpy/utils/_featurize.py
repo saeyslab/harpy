@@ -627,14 +627,36 @@ class Featurizer:
         assert array_mask_update.chunks == array_mask.chunks
 
         log.info("Calculating instance numbers per chunk. This could take a few minutes for large images.")
-        # compute this, so it does not need to be computed each time -> this significantly reduces complexity of the dask graph
-        array_mask_update, instance_ids = da.compute(*[array_mask_update, instance_ids])
+
+        # FIXME: work with a context manager to clean up these temp files.
+        if store_intermediate:
+            _dirname_zarr = os.path.dirname(zarr_output_path)
+            array_mask_intermediate_store = os.path.join(_dirname_zarr, f"array_mask_{uuid.uuid4()}.zarr")
+            _chunks = array_mask_update.chunks
+            array_mask_update = array_mask_update.rechunk(array_mask_update.chunksize)
+            _write_to_zarr = array_mask_update.to_zarr(
+                array_mask_intermediate_store,
+                overwrite=True,
+                compute=False,
+            )
+            out = dask.compute(_write_to_zarr, *instance_ids)
+            array_mask = da.from_zarr(
+                array_mask_intermediate_store
+            ).rechunk(
+                _chunks
+            )  # FIXME? maybe better to do the trick with the overlap and pad of the chunks instead of the rechunk_overlap, this would prevent the rechunk here
+            instance_ids = list(out[1:])
+
+        else:
+            # compute this, so it does not need to be computed each time -> this significantly reduces complexity of the task graph
+            array_mask_update, instance_ids = dask.compute(array_mask_update, instance_ids)
+            array_mask = da.asarray(array_mask_update, chunks=array_mask.chunks)
+
         log.info("Finished calculating instance numbers per chunks.")
 
         # do a sanity check here -> check that all ID's in mask_array_update (after np.unique()) are in instance_ids and vice versa) ->this should always hold if they come from same function,
         # maybe do not do it.
         # mask_array_update is in memory -> maybe we could let user write this to a zarr store, that is maybe also an option.
-        array_mask = da.asarray(array_mask_update, chunks=array_mask.chunks)
 
         counts = [len(_instance_ids) for _instance_ids in instance_ids]
         instance_ids = np.concatenate(instance_ids)
@@ -725,6 +747,11 @@ class Featurizer:
         if zarr_output_path is not None:
             instances.to_zarr(zarr_output_path)
             instances = da.from_zarr(zarr_output_path)
+
+        if store_intermediate:
+            log.info(f"Deleting intermediate zarr store {array_mask_intermediate_store}")
+            if Path(array_mask_intermediate_store).suffix == ".zarr":
+                shutil.rmtree(array_mask_intermediate_store)
 
         # Note that instance_ids are not sorted.
         # It is recommended not to do so (otherwise the instances array needs to be sorted, which is not optimal)
