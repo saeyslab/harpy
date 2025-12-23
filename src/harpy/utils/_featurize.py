@@ -651,12 +651,14 @@ class Featurizer:
         # else:
         # compute this, so it does not need to be computed each time -> this significantly reduces complexity of the task graph, but it requires the masks to be in memory.
         log.info("Assigning instances to chunks. This could take a few minutes for large images.")
-        array_mask_update, instance_ids = dask.persist(array_mask_update, instance_ids)
         # get the instance ids in memory
-        instance_ids = dask.compute(*instance_ids)
+        # for some reason doing .persist() consumes more memory
+        # array_mask_update, instance_ids = dask.persist(array_mask_update, instance_ids)
+        # instance_ids = dask.compute(*instance_ids)
 
-        # array_mask_update, instance_ids = dask.compute(array_mask_update, instance_ids)
-        # array_mask = da.asarray(array_mask_update, chunks=array_mask.chunks)
+        # do it with compute
+        array_mask_update, instance_ids = dask.compute(array_mask_update, instance_ids)
+        array_mask = da.asarray(array_mask_update, chunks=array_mask.chunks)
         log.info("Finished assigning instances to chunks.")
 
         # do a sanity check here -> check that all ID's in mask_array_update (after np.unique()) are in instance_ids and vice versa) ->this should always hold if they come from same function,
