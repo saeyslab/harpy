@@ -21,7 +21,7 @@ from loguru import logger as log
 from numpy.typing import NDArray
 from sklearn.decomposition import PCA
 
-from harpy.image.segmentation._utils import _add_depth_to_chunks_size, _rechunk_overlap
+from harpy.image.segmentation._utils import _add_depth_to_chunks_size
 from harpy.utils._keys import _INSTANCE_KEY
 from harpy.utils.utils import _dummy_embedding, _dummy_statistic_image, _make_list
 
@@ -584,6 +584,7 @@ class Featurizer:
 
         # rechunk overlap allows to send allow_rechunk to False
         # this is basically the same as settting allow_rechunk to True, but now we have more control over the chunk sizes
+        """
         array_mask = _rechunk_overlap(x=array_mask, depth=_depth, chunks=None)
         array_image = _rechunk_overlap(x=array_image, depth=_depth, chunks=None)
 
@@ -600,6 +601,39 @@ class Featurizer:
             allow_rechunk=False,
             boundary=0,
         )
+        """
+
+        def _pad_overlap_array(array: da.Array, depth):
+            assert array.ndim == 4
+            assert len(depth) == 4
+
+            # we only support regular chunked arrays, so rechunk first
+            array = array.rechunk(array.chunksize)
+
+            for i in range(len(depth)):
+                if depth[i] != 0:
+                    if depth[i] > array.chunksize[i]:
+                        raise ValueError(
+                            f"Depth for dimension {i} exceeds chunk size. Consider decreasing depth, or increase the chunk size."
+                        )
+
+            _, _, Y_c, X_c = array.chunksize
+
+            # only the last chunk can be different than the chunk size
+            y_rest = Y_c - array.chunks[2][-1]
+            x_rest = X_c - array.chunks[3][-1]
+
+            array = da.pad(array, ((0, 0), (0, 0), (0, y_rest), (0, x_rest))).rechunk(array.chunksize)
+
+            return overlap(
+                array,
+                depth=depth,
+                allow_rechunk=False,
+                boundary=0,
+            )
+
+        array_mask = _pad_overlap_array(array_mask, depth=_depth)
+        array_image = _pad_overlap_array(array_image, depth=_depth)
 
         instance_ids = []
         array_mask_update = []
@@ -632,6 +666,14 @@ class Featurizer:
         if store_intermediate:
             _dirname_zarr = os.path.dirname(zarr_output_path)
             array_mask_intermediate_store = os.path.join(_dirname_zarr, f"array_mask_{uuid.uuid4()}.zarr")
+            _write_to_zarr = array_mask_update.to_zarr(
+                array_mask_intermediate_store,
+                overwrite=True,
+                compute=False,
+            )
+            out = dask.compute(_write_to_zarr, *instance_ids)
+            array_mask = da.from_zarr(array_mask_intermediate_store)
+            """
             _chunks = array_mask_update.chunks
             array_mask_update = array_mask_update.rechunk(array_mask_update.chunksize)
             _write_to_zarr = array_mask_update.to_zarr(
@@ -645,6 +687,7 @@ class Featurizer:
             ).rechunk(
                 _chunks
             )  # FIXME? maybe better to do the trick with the overlap and pad of the chunks instead of the rechunk_overlap, this would prevent the rechunk here
+            """
             instance_ids = list(out[1:])
 
         else:
