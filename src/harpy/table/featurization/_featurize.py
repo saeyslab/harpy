@@ -178,7 +178,6 @@ def extract_instances(
         remove_background=remove_background,
         extract_mask=extract_mask,
         zarr_output_path=zarr_output_path,
-        store_intermediate=False,
         batch_size=batch_size,
     )
 

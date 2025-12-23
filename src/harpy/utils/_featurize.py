@@ -211,6 +211,7 @@ class Featurizer:
         if store_intermediate and zarr_output_path is None:
             raise ValueError("Please specify a 'zarr_output_path' if 'store_intermediate' is 'True'.")
 
+        # FIXME: work with a context manager here
         if zarr_output_path is not None and store_intermediate:
             intermediate_zarr_output_path = os.path.join(
                 os.path.dirname(zarr_output_path), f"instances_{uuid.uuid4()}.zarr"
@@ -222,7 +223,6 @@ class Featurizer:
             diameter=diameter,
             remove_background=remove_background,
             zarr_output_path=intermediate_zarr_output_path,
-            store_intermediate=store_intermediate,
             batch_size=batch_size,
             extract_mask=False,
             extract_image=True,
@@ -498,7 +498,6 @@ class Featurizer:
             diameter=diameter,
             remove_background=True,  # always remove background
             zarr_output_path=intermediate_zarr_output_path,
-            store_intermediate=store_intermediate,
             batch_size=batch_size,
             extract_image=extract_image,  # if extract_image is True, dask_chunks is of dimension (i,c(+1),z,y,x)
             extract_mask=True,  # always extract the mask, we need it; the user can decide if wants to calculate statistic on the mask, or on the image, via the parameter extract_image
@@ -543,221 +542,6 @@ class Featurizer:
 
         return instance_ids, calculated_statistic
 
-    def extract_instances_update(
-        self,
-        depth: int,  # ~max_diameter/2, depth in y and x,
-        diameter: int
-        | None = None,  # will be dimension of resulting chunks in y and x. Can be set to value < max_diameter to optimize performance
-        remove_background: bool = True,
-        extract_mask: bool = False,
-        extract_image: bool = True,
-        zarr_output_path: str
-        | Path
-        | None = None,  # if zarr_output_path is specified, we compute the graph, otherwise we return a non-computed graph
-        store_intermediate: bool = False,
-        batch_size: int | None = None,
-    ) -> tuple[NDArray, da.Array]:
-        if diameter is None:
-            diameter = 2 * depth
-        if diameter > 2 * depth:
-            log.info("Diameter is set to a value > 2*depth. Consider decreasing diameter value for performance.")
-        if store_intermediate and zarr_output_path is None:
-            raise ValueError("Please specify a 'zarr_output_path' if 'store_intermediate' is 'True'.")
-        _depth = {0: 0, 1: 0, 2: depth, 3: depth}
-        if not extract_image and not extract_mask:
-            raise ValueError("Please either set 'extract_image' or 'extract_mask' to True.")
-        # sanity checks on extract_mask and extract_image parameters
-        if self._image is None and not extract_mask:
-            log.info(
-                "No image available and 'extract_mask' is False; forcing 'extract_mask=True' since nothing can be extracted otherwise."
-            )
-            extract_mask = True
-        if self._image is None and extract_image:
-            log.info("No image available and 'extract_image' is True; forcing 'extract_image=False'.")
-            extract_image = False
-
-        array_mask = self._mask[None, ...]  # add trivial channel dimension
-        array_image = self._image if extract_image else None
-
-        if array_image is not None and array_image.numblocks[1] != 1:
-            raise ValueError("Currently we do not allow chunking in z dimension.")
-
-        # rechunk overlap allows to send allow_rechunk to False
-        # this is basically the same as settting allow_rechunk to True, but now we have more control over the chunk sizes
-
-        array_mask = _rechunk_overlap(x=array_mask, depth=_depth, chunks=None)
-        array_image = _rechunk_overlap(x=array_image, depth=_depth, chunks=None)
-
-        array_mask = overlap(
-            array_mask,
-            depth=_depth,
-            allow_rechunk=False,
-            boundary=0,
-        )
-
-        array_image = overlap(
-            array_image,
-            depth=_depth,
-            allow_rechunk=False,
-            boundary=0,
-        )
-
-        instance_ids = []
-        array_mask_update = []
-
-        chunk_shapes_mask_array = list(itertools.product(*array_mask.chunks))
-
-        # get the instances_ids in every chunk; set labels to zero if they do not 'belong' to the chunk, and update the mask accordingly
-        for _mask_chunk, _chunk_shape in zip(
-            array_mask.to_delayed().flatten(),
-            chunk_shapes_mask_array,
-            strict=True,
-        ):
-            result = delayed(_mask_center_of_mass_outside)(_mask_chunk, _depth=_depth)
-            _mask_chunk = result[0]
-            array_mask_update.append(da.from_delayed(_mask_chunk, shape=_chunk_shape, dtype=array_mask.dtype))
-            instance_ids.append(result[1])
-
-        # chunk grid, e.g. (1, 1, 5, 3)
-        grid = tuple(len(c) for c in array_mask.chunks)
-
-        blocks = _nest_blocks(array_mask_update, grid)
-        array_mask_update = da.block(blocks)
-        # sanity checks
-        assert array_mask_update.shape == array_mask.shape
-        assert array_mask_update.chunks == array_mask.chunks
-
-        # Note: do not do the latter, as the necessary rechunk (to prevent irregular chunks) causes increase in ram usage
-        # if store_intermediate:
-        #    _dirname_zarr = os.path.dirname(zarr_output_path)
-        #    array_mask_intermediate_store = os.path.join(_dirname_zarr, f"array_mask_{uuid.uuid4()}.zarr")
-        #    _chunks = array_mask_update.chunks
-        #    array_mask_update = array_mask_update.rechunk(array_mask_update.chunksize)
-        #    _write_to_zarr = array_mask_update.to_zarr(
-        #        array_mask_intermediate_store,
-        #        overwrite=True,
-        #        compute=False,
-        #    )
-        #    out = dask.compute(_write_to_zarr, *instance_ids)
-        #    array_mask = da.from_zarr(
-        #        array_mask_intermediate_store
-        #    ).rechunk(
-        #        _chunks
-        #    )  # note that the trick with the pad_overlap, causes even more ram usage
-        #
-        #    instance_ids = list(out[1:])
-
-        log.info("Assigning instances to chunks. This could take a few minutes for large images.")
-        # persist this, so it does not need to be computed each time -> this significantly reduces complexity of the task graph, but it requires the masks to be in memory.
-        array_mask, instance_ids = dask.persist(array_mask_update, instance_ids)
-        # get the instance ids in memory
-        instance_ids = dask.compute(*instance_ids)
-
-        # compute fails for large masks (e.g. merscope)
-        # array_mask_update, instance_ids = dask.compute(array_mask_update, instance_ids)
-        # array_mask = da.asarray(array_mask_update, chunks=array_mask.chunks)
-        log.info("Finished assigning instances to chunks.")
-
-        counts = [len(_instance_ids) for _instance_ids in instance_ids]
-        instance_ids = np.concatenate(instance_ids)
-
-        unique_instance_ids, idx, _returned_counts = np.unique(instance_ids, return_index=True, return_counts=True)
-        duplicates = unique_instance_ids[_returned_counts > 1]
-
-        # This case can also happen if depth> max_diameter/2, e.g. mask consisting of two points, one in each chunk.
-        if duplicates.size:
-            log.info(
-                f"There are {len(duplicates)} instances that are assigned to more than one chunk (instance id's: {duplicates}). "
-                "If 'depth' is already set to a value > maximum expected diameter//2, this message can be ignored, "
-                "else consider increasing depth. "
-                "We will only keep the first occurence. "
-            )
-
-        # instances that are not assigned to any chunk. This should not happen if depth>max_diameter/2.
-        _diff = np.setdiff1d(
-            self._labels[self._labels != 0],
-            unique_instance_ids,
-        )
-
-        if _diff.size:
-            log.info(
-                f"There are {len(_diff)} labels that could not be assigned to a chunk. "
-                "Consider increasing the 'depth' parameter. "
-                "Some labels may not be assigned to a chunk even at high depth values. "
-                "This number should remain very small compared to the total number of instances. "
-                f"(Instance ids: {_diff}.)"
-            )
-        if extract_mask:
-            if array_image is not None:
-                output_dtype = np.result_type(array_image.dtype, array_mask.dtype)
-            else:
-                output_dtype = array_mask.dtype
-        else:
-            output_dtype = array_image.dtype
-
-        if array_image is None:
-            c_chunks = (1,)
-        else:
-            c_chunks = array_image.chunks[0]
-
-        instances = []
-        # For now we do not allow chunking in z, but to support chunking in z, only thing that needs to be updated is this line,
-        # We should get the chunksize in z from the chunks.
-        size = (array_mask.shape[1], diameter, diameter)
-
-        #  FIXME add support for case where array_image is None -> i.e. we want to calculate mask statistics.
-        for i, (c_block_image_array, _c_chunks) in enumerate(zip(array_image.to_delayed(), c_chunks, strict=True)):
-            instances_c = []
-            if i == 0 and extract_mask:
-                _concat_mask = True  # concat the mask to the channel dimension 0, if extract mask is True
-            else:
-                _concat_mask = False
-            for _labels_chunk, _mask_chunk, _image_chunk in zip(
-                counts,
-                array_mask.to_delayed().flatten(),
-                c_block_image_array.flatten(),
-                strict=True,
-            ):
-                _instances_chunk = delayed(_extract_instances_update)(
-                    _mask_chunk, _image_chunk, size=size, concat_mask=_concat_mask, remove_background=remove_background
-                )
-                _instances_chunk = da.from_delayed(
-                    _instances_chunk,
-                    shape=(_labels_chunk, _c_chunks + 1 if _concat_mask else _c_chunks, size[0], size[1], size[2]),
-                    dtype=output_dtype,
-                )
-                instances_c.append(_instances_chunk)
-            instances.append(da.concatenate(instances_c, axis=0))
-        instances = da.concatenate(instances, axis=1)
-
-        chunksize = instances.chunksize
-        if batch_size is not None:
-            chunksize = (batch_size, chunksize[1], chunksize[2], chunksize[3], chunksize[4])
-        # Correct for non unique instances in instance_ids.
-        if len(idx) < len(instance_ids):  # equivalent to 'if duplicates.size:'
-            log.info("Removing duplicates.")
-            indices_to_keep = np.sort(idx)
-            instance_ids = instance_ids[indices_to_keep]
-            instances = instances[indices_to_keep]
-
-        # removing instances messes up the chunksize, so rechunk.
-        instances = instances.rechunk(chunksize)
-
-        if zarr_output_path is not None:
-            instances.to_zarr(zarr_output_path)
-            instances = da.from_zarr(zarr_output_path)
-
-        """
-        if store_intermediate:
-            log.info(f"Deleting intermediate zarr store {array_mask_intermediate_store}")
-            if Path(array_mask_intermediate_store).suffix == ".zarr":
-                shutil.rmtree(array_mask_intermediate_store)
-        """
-
-        # Note that instance_ids are not sorted.
-        # It is recommended not to do so (otherwise the instances array needs to be sorted, which is not optimal)
-        return instance_ids, instances
-
     def extract_instances(
         self,
         depth: int,  # ~max_diameter/2, depth in y and x,
@@ -769,24 +553,12 @@ class Featurizer:
         zarr_output_path: str
         | Path
         | None = None,  # if zarr_output_path is specified, we compute the graph, otherwise we return a non-computed graph
-        store_intermediate: bool = False,
         batch_size: int | None = None,
     ) -> tuple[NDArray, da.Array]:
         """
         Extract per-label instance windows from the mask and image of size ``diameter`` in ``y`` and ``x`` using :func:`dask.array.map_overlap` and :func:`dask.array.map_blocks`.
 
         See :func:`harpy.tb.extract_instances` for a full description.
-
-        Parameters
-        ----------
-        store_intermediate
-            If True, write an intermediate ``.zarr`` store to disk. This can reduce RAM
-            usage during computation.
-            If ``zarr_output_path`` is not specified, ``store_intermediate`` must be
-            False.
-            In most cases, prefer ``store_intermediate=False`` and use a Dask client so
-            Dask can spill to disk.
-
 
         Returns
         -------
@@ -910,6 +682,239 @@ class Featurizer:
         --------
         harpy.tb.extract_instances : Extract instance windows from a labels layer and (optionally) an image layer.
         """
+        if diameter is None:
+            diameter = 2 * depth
+        if diameter > 2 * depth:
+            log.info("Diameter is set to a value > 2*depth. Consider decreasing diameter value for performance.")
+        _depth = {0: 0, 1: 0, 2: depth, 3: depth}
+        if not extract_image and not extract_mask:
+            raise ValueError("Please either set 'extract_image' or 'extract_mask' to True.")
+        # sanity checks on extract_mask and extract_image parameters
+        if self._image is None and not extract_mask:
+            log.info(
+                "No image available and 'extract_mask' is False; forcing 'extract_mask=True' since nothing can be extracted otherwise."
+            )
+            extract_mask = True
+        if self._image is None and extract_image:
+            log.info("No image available and 'extract_image' is True; forcing 'extract_image=False'.")
+            extract_image = False
+
+        array_mask = self._mask[None, ...]  # add trivial channel dimension
+        array_image = self._image if extract_image else None
+
+        if array_image is not None and array_image.numblocks[1] != 1:
+            raise ValueError("Currently we do not allow chunking in z dimension.")
+
+        # rechunk overlap allows to send allow_rechunk to False
+        # this is basically the same as settting allow_rechunk to True, but now we have more control over the chunk sizes
+
+        array_mask = _rechunk_overlap(x=array_mask, depth=_depth, chunks=None)
+        array_mask = overlap(
+            array_mask,
+            depth=_depth,
+            allow_rechunk=False,
+            boundary=0,
+        )
+
+        if array_image is not None:
+            array_image = _rechunk_overlap(x=array_image, depth=_depth, chunks=None)
+            array_image = overlap(
+                array_image,
+                depth=_depth,
+                allow_rechunk=False,
+                boundary=0,
+            )
+
+        instance_ids = []
+        array_mask_update = []
+
+        chunk_shapes_mask_array = list(itertools.product(*array_mask.chunks))
+
+        # get the instances_ids in every chunk; set labels to zero if they do not 'belong' to the chunk; and update the chunks in array_mask accordingly
+        # note that we choose to do this upfront, otherwise for every c-block we would need to calculate this.
+        for _mask_chunk, _chunk_shape in zip(
+            array_mask.to_delayed().flatten(),
+            chunk_shapes_mask_array,
+            strict=True,
+        ):
+            result = delayed(_mask_center_of_mass_outside)(_mask_chunk, _depth=_depth)
+            _mask_chunk = result[0]
+            array_mask_update.append(da.from_delayed(_mask_chunk, shape=_chunk_shape, dtype=array_mask.dtype))
+            instance_ids.append(result[1])
+
+        # chunk grid, e.g. (1, 1, 5, 3)
+        grid = tuple(len(c) for c in array_mask.chunks)
+
+        blocks = _nest_blocks(array_mask_update, grid)
+        array_mask_update = da.block(blocks)
+        # sanity checks
+        assert array_mask_update.shape == array_mask.shape
+        assert array_mask_update.chunks == array_mask.chunks
+
+        # Note: do not do the latter, as the necessary rechunk (to prevent irregular chunks) causes increase in ram usage
+        # if store_intermediate:
+        #    _dirname_zarr = os.path.dirname(zarr_output_path)
+        #    array_mask_intermediate_store = os.path.join(_dirname_zarr, f"array_mask_{uuid.uuid4()}.zarr")
+        #    _chunks = array_mask_update.chunks
+        #    array_mask_update = array_mask_update.rechunk(array_mask_update.chunksize)
+        #    _write_to_zarr = array_mask_update.to_zarr(
+        #        array_mask_intermediate_store,
+        #        overwrite=True,
+        #        compute=False,
+        #    )
+        #    out = dask.compute(_write_to_zarr, *instance_ids)
+        #    array_mask = da.from_zarr(
+        #        array_mask_intermediate_store
+        #    ).rechunk(
+        #        _chunks
+        #    )  # note that the trick with the pad_overlap, causes even more ram usage
+        #
+        #    instance_ids = list(out[1:])
+
+        log.info("Assigning instances to chunks. This could take a few minutes for large images.")
+        # persist this, so it does not need to be computed each time
+        # -> this significantly reduces complexity of the task graph, but it requires the masks to be in memory.
+        array_mask, instance_ids = dask.persist(array_mask_update, instance_ids)
+        # get the instance ids in memory
+        instance_ids = dask.compute(*instance_ids)
+
+        # this compute fails for large masks (e.g. merscope) and when using a client
+        # array_mask_update, instance_ids = dask.compute(array_mask_update, instance_ids)
+        # array_mask = da.asarray(array_mask_update, chunks=array_mask.chunks)
+        log.info("Finished assigning instances to chunks.")
+
+        counts = [len(_instance_ids) for _instance_ids in instance_ids]
+        instance_ids = np.concatenate(instance_ids)
+
+        unique_instance_ids, idx, _returned_counts = np.unique(instance_ids, return_index=True, return_counts=True)
+        duplicates = unique_instance_ids[_returned_counts > 1]
+
+        # This case can also happen if depth> max_diameter/2, e.g. mask consisting of two points, one in each chunk.
+        if duplicates.size:
+            log.info(
+                f"There are {len(duplicates)} instances that are assigned to more than one chunk (instance id's: {duplicates}). "
+                "If 'depth' is already set to a value > maximum expected diameter//2, this message can be ignored, "
+                "else consider increasing depth. "
+                "We will only keep the first occurence. "
+            )
+
+        # instances that are not assigned to any chunk. This should not happen if depth>max_diameter/2.
+        _diff = np.setdiff1d(
+            self._labels[self._labels != 0],
+            unique_instance_ids,
+        )
+
+        if _diff.size:
+            log.info(
+                f"There are {len(_diff)} labels that could not be assigned to a chunk. "
+                "Consider increasing the 'depth' parameter. "
+                "Some labels may not be assigned to a chunk even at high depth values. "
+                "This number should remain very small compared to the total number of instances. "
+                f"(Instance ids: {_diff}.)"
+            )
+        if extract_mask:
+            if array_image is not None:
+                output_dtype = np.result_type(array_image.dtype, array_mask.dtype)
+            else:
+                output_dtype = array_mask.dtype
+        else:
+            output_dtype = array_image.dtype
+
+        if array_image is None:
+            c_chunks = (1,)  # array_mask has trivial c dimension
+        else:
+            c_chunks = array_image.chunks[0]
+
+        instances = []
+        # For now we do not allow chunking in z, but to support chunking in z, only thing that needs to be updated is this line,
+        # We should get the chunksize in z from the chunks.
+        size = (array_mask.shape[1], diameter, diameter)
+
+        if array_image is not None:
+            for i, (c_block_image_array, _c_chunks) in enumerate(zip(array_image.to_delayed(), c_chunks, strict=True)):
+                instances_c = []
+                if i == 0 and extract_mask:
+                    _concat_mask = True  # concat the mask to the channel dimension 0, if extract mask is True
+                else:
+                    _concat_mask = False
+                for _labels_chunk, _mask_chunk, _image_chunk in zip(
+                    counts,
+                    array_mask.to_delayed().flatten(),
+                    c_block_image_array.flatten(),
+                    strict=True,
+                ):
+                    _instances_chunk = delayed(_extract_instances)(
+                        mask=_mask_chunk,
+                        image=_image_chunk,
+                        size=size,
+                        concat_mask=_concat_mask,
+                        remove_background=remove_background,
+                    )
+                    _instances_chunk = da.from_delayed(
+                        _instances_chunk,
+                        shape=(_labels_chunk, _c_chunks + 1 if _concat_mask else _c_chunks, size[0], size[1], size[2]),
+                        dtype=output_dtype,
+                    )
+                    instances_c.append(_instances_chunk)
+                instances.append(da.concatenate(instances_c, axis=0))
+            instances = da.concatenate(instances, axis=1)
+        else:
+            # case where we only extract the mask
+            for _labels_chunk, _mask_chunk in zip(
+                counts,
+                array_mask.to_delayed().flatten(),
+                strict=True,
+            ):
+                _instances_chunk = delayed(_extract_instances)(
+                    mask=_mask_chunk, image=None, size=size, concat_mask=True, remove_background=remove_background
+                )
+                _instances_chunk = da.from_delayed(
+                    _instances_chunk,
+                    shape=(_labels_chunk, c_chunks[0], size[0], size[1], size[2]),
+                    dtype=output_dtype,
+                )
+                instances.append(_instances_chunk)
+            instances = da.concatenate(instances, axis=0)
+
+        chunksize = instances.chunksize
+        if batch_size is not None:
+            chunksize = (batch_size, chunksize[1], chunksize[2], chunksize[3], chunksize[4])
+        # Correct for non unique instances in instance_ids.
+        if len(idx) < len(instance_ids):  # equivalent to 'if duplicates.size:'
+            log.info("Removing duplicates.")
+            indices_to_keep = np.sort(idx)
+            instance_ids = instance_ids[indices_to_keep]
+            instances = instances[indices_to_keep]
+
+        # removing instances messes up the chunksize, so rechunk.
+        instances = instances.rechunk(chunksize)
+
+        if zarr_output_path is not None:
+            instances.to_zarr(zarr_output_path)
+            instances = da.from_zarr(zarr_output_path)
+
+        # Note that instance_ids are not sorted.
+        # It is recommended not to do so (otherwise the instances array needs to be sorted, which is not optimal)
+        return instance_ids, instances
+
+    """
+    # old implementation of extract_instances.
+    # Requires too much RAM, only
+    # solution to decrease RAM usage for the latter was to write to intermediate zarr stores.
+    def extract_instances(
+        self,
+        depth: int,  # ~max_diameter/2, depth in y and x,
+        diameter: int
+        | None = None,  # will be dimension of resulting chunks in y and x. Can be set to value < max_diameter to optimize performance
+        remove_background: bool = True,
+        extract_mask: bool = False,
+        extract_image: bool = True,
+        zarr_output_path: str
+        | Path
+        | None = None,  # if zarr_output_path is specified, we compute the graph, otherwise we return a non-computed graph
+        store_intermediate: bool = False,
+        batch_size: int | None = None,
+    ) -> tuple[NDArray, da.Array]:
         if diameter is None:
             diameter = 2 * depth
         if diameter > 2 * depth:
@@ -1071,6 +1076,7 @@ class Featurizer:
         # Note that instance_ids are not sorted.
         # It is recommended not to do so (otherwise the dask_chunks array needs to be sorted, which is not optimal)
         return instances_ids, dask_chunks
+    """
 
     # need to make this a general function, that calculates various statistics in one feature extraction pass.
     def quantiles(
@@ -1237,7 +1243,6 @@ class Featurizer:
             diameter=diameter,
             zarr_output_path=None,
             extract_mask=True,
-            store_intermediate=False,
         )
 
         mask = dask_chunks[
