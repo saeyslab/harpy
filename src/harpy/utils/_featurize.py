@@ -21,7 +21,7 @@ from loguru import logger as log
 from numpy.typing import NDArray
 from sklearn.decomposition import PCA
 
-from harpy.image.segmentation._utils import _add_depth_to_chunks_size
+from harpy.image.segmentation._utils import _add_depth_to_chunks_size, _rechunk_overlap
 from harpy.utils._keys import _INSTANCE_KEY
 from harpy.utils.utils import _dummy_embedding, _dummy_statistic_image, _make_list
 
@@ -584,7 +584,7 @@ class Featurizer:
 
         # rechunk overlap allows to send allow_rechunk to False
         # this is basically the same as settting allow_rechunk to True, but now we have more control over the chunk sizes
-        """
+
         array_mask = _rechunk_overlap(x=array_mask, depth=_depth, chunks=None)
         array_image = _rechunk_overlap(x=array_image, depth=_depth, chunks=None)
 
@@ -601,39 +601,6 @@ class Featurizer:
             allow_rechunk=False,
             boundary=0,
         )
-        """
-
-        def _pad_overlap_array(array: da.Array, depth):
-            assert array.ndim == 4
-            assert len(depth) == 4
-
-            # we only support regular chunked arrays, so rechunk first
-            array = array.rechunk(array.chunksize)
-
-            for i in range(len(depth)):
-                if depth[i] != 0:
-                    if depth[i] > array.chunksize[i]:
-                        raise ValueError(
-                            f"Depth for dimension {i} exceeds chunk size. Consider decreasing depth, or increase the chunk size."
-                        )
-
-            _, _, Y_c, X_c = array.chunksize
-
-            # only the last chunk can be different than the chunk size
-            y_rest = Y_c - array.chunks[2][-1]
-            x_rest = X_c - array.chunks[3][-1]
-
-            array = da.pad(array, ((0, 0), (0, 0), (0, y_rest), (0, x_rest))).rechunk(array.chunksize)
-
-            return overlap(
-                array,
-                depth=depth,
-                allow_rechunk=False,
-                boundary=0,
-            )
-
-        array_mask = _pad_overlap_array(array_mask, depth=_depth)
-        array_image = _pad_overlap_array(array_image, depth=_depth)
 
         instance_ids = []
         array_mask_update = []
@@ -660,20 +627,11 @@ class Featurizer:
         assert array_mask_update.shape == array_mask.shape
         assert array_mask_update.chunks == array_mask.chunks
 
-        log.info("Calculating instance numbers per chunk. This could take a few minutes for large images.")
-
-        # FIXME: work with a context manager to clean up these temp files.
+        """
+        # Do not do this, as the necessary rechunk causes increase in ram usage
         if store_intermediate:
             _dirname_zarr = os.path.dirname(zarr_output_path)
             array_mask_intermediate_store = os.path.join(_dirname_zarr, f"array_mask_{uuid.uuid4()}.zarr")
-            _write_to_zarr = array_mask_update.to_zarr(
-                array_mask_intermediate_store,
-                overwrite=True,
-                compute=False,
-            )
-            out = dask.compute(_write_to_zarr, *instance_ids)
-            array_mask = da.from_zarr(array_mask_intermediate_store)
-            """
             _chunks = array_mask_update.chunks
             array_mask_update = array_mask_update.rechunk(array_mask_update.chunksize)
             _write_to_zarr = array_mask_update.to_zarr(
@@ -686,16 +644,20 @@ class Featurizer:
                 array_mask_intermediate_store
             ).rechunk(
                 _chunks
-            )  # FIXME? maybe better to do the trick with the overlap and pad of the chunks instead of the rechunk_overlap, this would prevent the rechunk here
-            """
+            )  # note that the trick with the pad_overlap, causes even more ram usage
+
             instance_ids = list(out[1:])
+        """
+        # else:
+        # compute this, so it does not need to be computed each time -> this significantly reduces complexity of the task graph, but it requires the masks to be in memory.
+        log.info("Assigning instances to chunks. This could take a few minutes for large images.")
+        array_mask_update, instance_ids = dask.persist(array_mask_update, instance_ids)
+        # get the instance ids in memory
+        instance_ids = dask.compute(*instance_ids)
 
-        else:
-            # compute this, so it does not need to be computed each time -> this significantly reduces complexity of the task graph
-            array_mask_update, instance_ids = dask.compute(array_mask_update, instance_ids)
-            array_mask = da.asarray(array_mask_update, chunks=array_mask.chunks)
-
-        log.info("Finished calculating instance numbers per chunks.")
+        # array_mask_update, instance_ids = dask.compute(array_mask_update, instance_ids)
+        # array_mask = da.asarray(array_mask_update, chunks=array_mask.chunks)
+        log.info("Finished assigning instances to chunks.")
 
         # do a sanity check here -> check that all ID's in mask_array_update (after np.unique()) are in instance_ids and vice versa) ->this should always hold if they come from same function,
         # maybe do not do it.
@@ -782,7 +744,6 @@ class Featurizer:
             indices_to_keep = np.sort(idx)
             instance_ids = instance_ids[indices_to_keep]
             instances = instances[indices_to_keep]
-            log.info("Finished removing duplicates.")
 
         # removing instances messes up the chunksize, so rechunk.
         instances = instances.rechunk(chunksize)
@@ -791,10 +752,12 @@ class Featurizer:
             instances.to_zarr(zarr_output_path)
             instances = da.from_zarr(zarr_output_path)
 
+        """
         if store_intermediate:
             log.info(f"Deleting intermediate zarr store {array_mask_intermediate_store}")
             if Path(array_mask_intermediate_store).suffix == ".zarr":
                 shutil.rmtree(array_mask_intermediate_store)
+        """
 
         # Note that instance_ids are not sorted.
         # It is recommended not to do so (otherwise the instances array needs to be sorted, which is not optimal)
