@@ -627,30 +627,28 @@ class Featurizer:
         assert array_mask_update.shape == array_mask.shape
         assert array_mask_update.chunks == array_mask.chunks
 
-        """
-        # Do not do this, as the necessary rechunk causes increase in ram usage
-        if store_intermediate:
-            _dirname_zarr = os.path.dirname(zarr_output_path)
-            array_mask_intermediate_store = os.path.join(_dirname_zarr, f"array_mask_{uuid.uuid4()}.zarr")
-            _chunks = array_mask_update.chunks
-            array_mask_update = array_mask_update.rechunk(array_mask_update.chunksize)
-            _write_to_zarr = array_mask_update.to_zarr(
-                array_mask_intermediate_store,
-                overwrite=True,
-                compute=False,
-            )
-            out = dask.compute(_write_to_zarr, *instance_ids)
-            array_mask = da.from_zarr(
-                array_mask_intermediate_store
-            ).rechunk(
-                _chunks
-            )  # note that the trick with the pad_overlap, causes even more ram usage
+        # Note: do not do the latter, as the necessary rechunk (to prevent irregular chunks) causes increase in ram usage
+        # if store_intermediate:
+        #    _dirname_zarr = os.path.dirname(zarr_output_path)
+        #    array_mask_intermediate_store = os.path.join(_dirname_zarr, f"array_mask_{uuid.uuid4()}.zarr")
+        #    _chunks = array_mask_update.chunks
+        #    array_mask_update = array_mask_update.rechunk(array_mask_update.chunksize)
+        #    _write_to_zarr = array_mask_update.to_zarr(
+        #        array_mask_intermediate_store,
+        #        overwrite=True,
+        #        compute=False,
+        #    )
+        #    out = dask.compute(_write_to_zarr, *instance_ids)
+        #    array_mask = da.from_zarr(
+        #        array_mask_intermediate_store
+        #    ).rechunk(
+        #        _chunks
+        #    )  # note that the trick with the pad_overlap, causes even more ram usage
+        #
+        #    instance_ids = list(out[1:])
 
-            instance_ids = list(out[1:])
-        """
-        # else:
-        # compute this, so it does not need to be computed each time -> this significantly reduces complexity of the task graph, but it requires the masks to be in memory.
         log.info("Assigning instances to chunks. This could take a few minutes for large images.")
+        # persist this, so it does not need to be computed each time -> this significantly reduces complexity of the task graph, but it requires the masks to be in memory.
         array_mask, instance_ids = dask.persist(array_mask_update, instance_ids)
         # get the instance ids in memory
         instance_ids = dask.compute(*instance_ids)
@@ -659,10 +657,6 @@ class Featurizer:
         # array_mask_update, instance_ids = dask.compute(array_mask_update, instance_ids)
         # array_mask = da.asarray(array_mask_update, chunks=array_mask.chunks)
         log.info("Finished assigning instances to chunks.")
-
-        # do a sanity check here -> check that all ID's in mask_array_update (after np.unique()) are in instance_ids and vice versa) ->this should always hold if they come from same function,
-        # maybe do not do it.
-        # mask_array_update is in memory -> maybe we could let user write this to a zarr store, that is maybe also an option.
 
         counts = [len(_instance_ids) for _instance_ids in instance_ids]
         instance_ids = np.concatenate(instance_ids)
