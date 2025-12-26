@@ -181,12 +181,15 @@ def test_extract_instances_duplicates_blobs(sdata):
     index = da.unique(instances[:, 0, ...]).compute()
     index = index[index != 0]
 
-    assert np.array_equal(index, np.sort(instances_ids))
+    uniq_labels = da.unique(mask).compute()
+    uniq_labels = uniq_labels[uniq_labels != 0]
 
+    assert np.array_equal(uniq_labels, index)
+    assert np.array_equal(uniq_labels, np.sort(instances_ids))
     assert np.array_equal(
         instances_ids,
         np.array(
-            [3, 5, 11, 12, 18, 19, 25, 29, 30, 31, 1, 6, 13, 17, 22, 26, 4, 8, 9, 16, 20, 23, 24, 27, 2, 10],
+            [3, 5, 11, 12, 19, 20, 23, 25, 26, 27, 29, 30, 31, 1, 6, 10, 13, 2, 4, 9, 16, 18, 22, 24, 8, 17],
             dtype=np.int16,
         ),
     )

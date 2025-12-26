@@ -13,6 +13,7 @@ from typing import Any
 
 import dask
 import dask.array as da
+import dask.dataframe as dd
 import numpy as np
 import pandas as pd
 from dask import delayed
@@ -725,6 +726,341 @@ class Featurizer:
                 boundary=0,
             )
 
+        blocks = array_mask.to_delayed()  # shape == array_mask.numblocks, e.g. ( nr_of_chunks in c, nr of chunks in z, nr of chunks in y, nr of chunks in x )
+
+        dfs = []
+        for i in range(blocks.shape[0]):
+            for j in range(blocks.shape[1]):
+                for k in range(blocks.shape[2]):
+                    for l in range(blocks.shape[3]):
+                        b = blocks[i, j, k, l]
+                        chunk_index = (i, j, k, l)
+                        df_delayed = delayed(_block_label_counts)(
+                            block=b, chunk_index=chunk_index, numblocks=array_mask.numblocks
+                        )
+                        dfs.append(df_delayed)
+
+        meta = pd.DataFrame(
+            {
+                "label": np.array([], dtype=array_mask.dtype),
+                "count": np.array([], dtype="int64"),
+                "chunk_c": np.array([], dtype="int16"),
+                "chunk_z": np.array([], dtype="int16"),
+                "chunk_y": np.array([], dtype="int16"),
+                "chunk_x": np.array([], dtype="int16"),
+                "chunk_id": np.array([], dtype="int32"),
+            }
+        )
+        ddf = dd.from_delayed(dfs, meta=meta)
+        # For each instance, get the chunk id with max pixels.
+        # So for each instance, we want the row in ddf for which count is maximal
+        ddf = ddf.sort_values(
+            [
+                "label",
+                "count",
+                "chunk_id",
+            ],  # also sort on chunk id, so the results are the same if you rerun the extract instances
+            ascending=[True, False, True],
+        )
+        ddf = ddf.drop_duplicates(subset=["label"], keep="first")
+
+        log.info("Assigning instances to chunks.")
+        ddf = ddf.compute()
+        chunk_to_labels = (
+            ddf.groupby(["chunk_c", "chunk_z", "chunk_y", "chunk_x"])["label"].apply(lambda s: s.to_numpy()).to_dict()
+        )
+
+        # all chunk_ids
+        chunk_ids = list(np.ndindex(array_mask.numblocks))
+        # add the chunk ids with no instances to chunk_to_labels
+        chunk_to_labels_all = {}
+        for _chunk_id in chunk_ids:
+            if _chunk_id in chunk_to_labels:
+                chunk_to_labels_all[_chunk_id] = chunk_to_labels[_chunk_id]
+            else:
+                chunk_to_labels_all[_chunk_id] = np.array([], dtype=array_mask.dtype)
+        chunk_to_labels = chunk_to_labels_all
+
+        # get instance ids
+        instance_ids = list(chunk_to_labels.values())
+        # counts = [len(_instance_ids) for _instance_ids in instance_ids]
+        instance_ids = np.concatenate(instance_ids)
+        log.info("Finished assigning instances to chunks.")
+
+        if extract_mask:
+            if array_image is not None:
+                output_dtype = np.result_type(array_image.dtype, array_mask.dtype)
+            else:
+                output_dtype = array_mask.dtype
+        else:
+            output_dtype = array_image.dtype
+
+        if array_image is None:
+            c_chunks = (1,)  # array_mask has trivial c dimension
+        else:
+            c_chunks = array_image.chunks[0]
+
+        instances = []
+        # For now we do not allow chunking in z, but to support chunking in z, only thing that needs to be updated is this line,
+        # We should get the chunksize in z from the chunks.
+        size = (array_mask.shape[1], diameter, diameter)
+
+        if array_image is not None:
+            for i, (c_block_image_array, _c_chunks) in enumerate(zip(array_image.to_delayed(), c_chunks, strict=True)):
+                instances_c = []
+                if i == 0 and extract_mask:
+                    _concat_mask = True  # concat the mask to the channel dimension 0, if extract mask is True
+                else:
+                    _concat_mask = False
+                for _chunk_id, _mask_chunk, _image_chunk in zip(
+                    chunk_ids,
+                    array_mask.to_delayed().flatten(),
+                    c_block_image_array.flatten(),
+                    strict=True,
+                ):
+                    # labels = the labels to consider for this chunk
+                    labels = chunk_to_labels[_chunk_id]
+                    if len(labels) == 0:
+                        continue
+                    _instances_chunk = delayed(_extract_instances)(
+                        mask=_mask_chunk,
+                        image=_image_chunk,
+                        labels=labels,
+                        size=size,
+                        concat_mask=_concat_mask,
+                        remove_background=remove_background,
+                    )
+                    _instances_chunk = da.from_delayed(
+                        _instances_chunk,
+                        shape=(len(labels), _c_chunks + 1 if _concat_mask else _c_chunks, size[0], size[1], size[2]),
+                        dtype=output_dtype,
+                    )
+                    instances_c.append(_instances_chunk)
+                instances.append(da.concatenate(instances_c, axis=0))
+            instances = da.concatenate(instances, axis=1)
+        else:
+            # case where we only extract the mask
+            for _chunk_id, _mask_chunk in zip(
+                chunk_ids,
+                array_mask.to_delayed().flatten(),
+                strict=True,
+            ):
+                # labels = the labels to consider for this chunk
+                labels = chunk_to_labels[_chunk_id]
+                if len(labels) == 0:
+                    continue
+                _instances_chunk = delayed(_extract_instances)(
+                    mask=_mask_chunk,
+                    image=None,
+                    labels=labels,
+                    size=size,
+                    concat_mask=True,
+                    remove_background=remove_background,
+                )
+                _instances_chunk = da.from_delayed(
+                    _instances_chunk,
+                    shape=(len(labels), c_chunks[0], size[0], size[1], size[2]),
+                    dtype=output_dtype,
+                )
+                instances.append(_instances_chunk)
+            instances = da.concatenate(instances, axis=0)
+
+        chunksize = instances.chunksize
+        if batch_size is not None:
+            chunksize = (batch_size, chunksize[1], chunksize[2], chunksize[3], chunksize[4])
+        # rechunk, because chunks have irregular chunksize
+        instances = instances.rechunk(chunksize)
+        if zarr_output_path is not None:
+            instances.to_zarr(zarr_output_path)
+            instances = da.from_zarr(zarr_output_path)
+
+        # Note that instance_ids are not sorted.
+        # It is recommended not to do so (otherwise the instances array needs to be sorted, which is not optimal)
+        return instance_ids, instances
+
+    def extract_instances_old(
+        self,
+        depth: int,  # ~max_diameter/2, depth in y and x,
+        diameter: int
+        | None = None,  # will be dimension of resulting chunks in y and x. Can be set to value < max_diameter to optimize performance
+        remove_background: bool = True,
+        extract_mask: bool = False,
+        extract_image: bool = True,
+        zarr_output_path: str
+        | Path
+        | None = None,  # if zarr_output_path is specified, we compute the graph, otherwise we return a non-computed graph
+        batch_size: int | None = None,
+    ) -> tuple[NDArray, da.Array]:
+        """
+        Extract per-label instance windows from the mask and image of size ``diameter`` in ``y`` and ``x`` using :func:`dask.array.map_overlap` and :func:`dask.array.map_blocks`.
+
+        See :func:`harpy.tb.extract_instances` for a full description.
+
+        Returns
+        -------
+        tuple:
+
+            - a Numpy array containing indices of extracted labels, shape ``(i,)``.
+              Dimension of ``i`` will be equal to the total number of non-zero
+              labels in the mask.
+
+            - a Dask array of dimension ``(i, c+1, z, y, x)`` or
+              ``(i, c, z, y, x)``, with dimension of ``c`` the number of channels
+              in ``img_layer``.
+              At channel index 0 of each instance, is the corresponding mask if
+              ``add_mask`` is set to ``True``.
+              Dimension of ``y`` and ``x`` are equal to ``diameter``, or
+              ``2 * depth`` if ``diameter`` is not specified.
+
+
+        Examples
+        --------
+        Basic usage:
+
+        .. code-block:: python
+
+            import harpy as hp
+
+            sdata = hp.datasets.pixie_example()
+
+            img_layer = "raw_image_fov0"
+            labels_layer = "label_whole_fov0"
+
+            mask_array = (
+                sdata[labels_layer]
+                .data[None, ...]
+                .rechunk(1024)
+            )
+
+            image_array = (
+                sdata[img_layer]
+                .data[:, None, ...]
+                .rechunk(1024)
+            )
+
+            fe = hp.utils.Featurizer(
+                mask_dask_array=mask_array,
+                image_dask_array=image_array,
+            )
+
+            # Lazy Dask graph
+            instance_ids, instances = fe.extract_instances(
+                depth=100,
+                diameter=75,
+            )
+
+            # Inspect shape and chunking
+            instances
+
+            # Persist to Zarr on disk (computes instances)
+            instance_ids, instances = fe.extract_instances(
+                depth=100,
+                diameter=75,
+                zarr_output_path="instances.zarr",
+            )
+
+            # Keep full window content instead of masking to the instance
+            instance_ids, instances = fe.extract_instances(
+                depth=100,
+                diameter=75,
+                remove_background=False,
+            )
+
+        Visual sanity check of extracted instances:
+
+        .. code-block:: python
+
+            import dask
+            import dask.array as da
+            import matplotlib.pyplot as plt
+            import harpy as hp
+
+            sdata = hp.datasets.pixie_example()
+
+            labels_layer = "label_whole_fov0"
+            mask_array = sdata[labels_layer].data[None, ...]
+
+            fe = hp.utils.Featurizer(
+                mask_dask_array=mask_array,
+                image_dask_array=None,
+            )
+
+            instance_ids, instances = fe.extract_instances(
+                depth=50,
+                diameter=75,
+                batch_size=500,
+                extract_mask=True,
+                extract_image=True,
+            )
+
+            instances = instances.compute()
+
+            instance_id = 23
+            mask = instances[instance_ids == instance_id][0][0][0]
+            plt.imshow(mask)
+            plt.show()
+
+            mask_array_remove = da.where(mask_array == instance_id, mask_array, 0)
+
+            _, y_, x_ = da.where(mask_array == instance_id)
+            y_, x_ = dask.compute(y_, x_)
+
+            plt.imshow(
+                mask_array_remove[
+                    0,
+                    y_.min():y_.max(),
+                    x_.min():x_.max(),
+                ]
+            )
+            plt.show()
+
+        See Also
+        --------
+        harpy.tb.extract_instances : Extract instance windows from a labels layer and (optionally) an image layer.
+        """
+        if diameter is None:
+            diameter = 2 * depth
+        if diameter > 2 * depth:
+            log.info("Diameter is set to a value > 2*depth. Consider decreasing diameter value for performance.")
+        _depth = {0: 0, 1: 0, 2: depth, 3: depth}
+        if not extract_image and not extract_mask:
+            raise ValueError("Please either set 'extract_image' or 'extract_mask' to True.")
+        # sanity checks on extract_mask and extract_image parameters
+        if self._image is None and not extract_mask:
+            log.info(
+                "No image available and 'extract_mask' is False; forcing 'extract_mask=True' since nothing can be extracted otherwise."
+            )
+            extract_mask = True
+        if self._image is None and extract_image:
+            log.info("No image available and 'extract_image' is True; forcing 'extract_image=False'.")
+            extract_image = False
+
+        array_mask = self._mask[None, ...]  # add trivial channel dimension
+        array_image = self._image if extract_image else None
+
+        if array_image is not None and array_image.numblocks[1] != 1:
+            raise ValueError("Currently we do not allow chunking in z dimension.")
+
+        # rechunk overlap allows to send allow_rechunk to False
+        # this is basically the same as settting allow_rechunk to True, but now we have more control over the chunk sizes
+
+        array_mask = _rechunk_overlap(x=array_mask, depth=_depth, chunks=None)
+        array_mask = overlap(
+            array_mask,
+            depth=_depth,
+            allow_rechunk=False,
+            boundary=0,
+        )
+
+        if array_image is not None:
+            array_image = _rechunk_overlap(x=array_image, depth=_depth, chunks=None)
+            array_image = overlap(
+                array_image,
+                depth=_depth,
+                allow_rechunk=False,
+                boundary=0,
+            )
+
         instance_ids = []
         array_mask_update = []
 
@@ -843,6 +1179,8 @@ class Featurizer:
                     c_block_image_array.flatten(),
                     strict=True,
                 ):
+                    # FIXME get chunk_to_labels, get the index of the chunk in the grid, pass it to extract_instances,
+                    # so you know in extract instances which labels to extract, put to zero all masks not in one of chunk_to_labels.
                     _instances_chunk = delayed(_extract_instances)(
                         mask=_mask_chunk,
                         image=_image_chunk,
@@ -1533,6 +1871,7 @@ def _extract_instances_update(
 def _extract_instances(
     mask: NDArray,
     image: NDArray | None,
+    labels: NDArray,
     size: tuple[int, int, int] = (1, 100, 100),
     remove_background=True,
     concat_mask: bool = True,
@@ -1544,11 +1883,15 @@ def _extract_instances(
     if image is not None:
         assert image.ndim == 4
     assert mask.ndim == 4
+    assert labels.ndim == 1
     assert mask.shape[0] == 1
     assert len(size) == 3
     # catch an edge case where mask id's would be >2**53
     if image is not None and concat_mask and np.issubdtype(image.dtype, np.floating) and np.max(mask) > 2**53:
         raise ValueError(f"Cannot safely cast to float (float64). Maximum value allowed in mask is ({2**53}).")
+
+    # set all labels to zero that are not in labels
+    mask = np.where(np.isin(mask, labels), mask, 0)  # returns a copy of mask
 
     if image is not None:
         C, Z, Y, X = image.shape
@@ -2053,3 +2396,47 @@ def _nest_blocks(flat, grid):
         return out
 
     return rec(flat, list(grid))
+
+
+def _block_label_counts(block: NDArray, chunk_index: tuple[int, int, int, int], numblocks: tuple[int, int, int, int]):
+    """
+    Calculate the number of pixels of each instance in a block.
+
+    Parameters
+    ----------
+    block
+        Mask array for a single chunk.
+    chunk_index
+        (chunk_c, chunk_z, chunk_y, chunk_x) index in the chunk grid.
+    numblocks
+        number of blocks in the chunk grid
+
+    Returns
+    -------
+    pandas.DataFrame with columns: ['label', 'count', 'chunk_c', 'chunk_z', 'chunk_y', 'chunk_x', 'chunk_id' ]
+    """
+    block = block.ravel()
+    # remove background
+    block = block[block != 0]
+    if block.size == 0:
+        # No instances in this chunk
+        return pd.DataFrame(
+            {"label": [], "count": [], "chunk_c": [], "chunk_z": [], "chunk_y": [], "chunk_x": [], "chunk_id": []},
+            dtype="int32",
+        )
+    labels_unique, counts = np.unique(block, return_counts=True)
+
+    c, z, y, x = chunk_index
+    _, nZ, nY, nX = numblocks
+    chunk_id = (((c * nZ) + z) * nY + y) * nX + x
+    return pd.DataFrame(
+        {
+            "label": labels_unique.astype(block.dtype),
+            "count": counts.astype("int64"),
+            "chunk_c": np.full_like(labels_unique, c, dtype="int16"),
+            "chunk_z": np.full_like(labels_unique, z, dtype="int16"),
+            "chunk_y": np.full_like(labels_unique, y, dtype="int16"),
+            "chunk_x": np.full_like(labels_unique, x, dtype="int16"),
+            "chunk_id": np.full_like(labels_unique, chunk_id, dtype="int32"),
+        }
+    )
