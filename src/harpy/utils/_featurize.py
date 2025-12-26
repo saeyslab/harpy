@@ -769,7 +769,6 @@ class Featurizer:
         chunk_to_labels = (
             ddf.groupby(["chunk_c", "chunk_z", "chunk_y", "chunk_x"])["label"].apply(lambda s: s.to_numpy()).to_dict()
         )
-
         # all chunk_ids
         chunk_ids = list(np.ndindex(array_mask.numblocks))
         # add the chunk ids with no instances to chunk_to_labels
@@ -783,8 +782,32 @@ class Featurizer:
 
         # get instance ids
         instance_ids = list(chunk_to_labels.values())
-        # counts = [len(_instance_ids) for _instance_ids in instance_ids]
+        counts = [len(_instance_ids) for _instance_ids in instance_ids]
         instance_ids = np.concatenate(instance_ids)
+
+        def _update_mask(
+            block: NDArray,
+            chunk_to_labels: dict[tuple[int, int, int, int] : NDArray],
+            block_info,
+        ):
+            # set all labels to zero that are not in labels
+            chunk_id = tuple(block_info[0]["chunk-location"])  # (c,z,y,x)
+            labels = chunk_to_labels[chunk_id]
+            assert labels.ndim == 1
+            if labels is None or len(labels) == 0:
+                return np.zeros_like(block)
+            return np.where(np.isin(block, labels), block, 0)  # returns a copy of block
+
+        # do a map blocks that updates the mask -> use this mask downstream
+        array_mask = da.map_blocks(
+            _update_mask,
+            array_mask,
+            chunk_to_labels=chunk_to_labels,
+            dtype=array_mask.dtype,
+        )
+        # update the array_mask
+        (array_mask,) = dask.persist(array_mask)
+
         log.info("Finished assigning instances to chunks.")
 
         if extract_mask:
@@ -812,27 +835,22 @@ class Featurizer:
                     _concat_mask = True  # concat the mask to the channel dimension 0, if extract mask is True
                 else:
                     _concat_mask = False
-                for _chunk_id, _mask_chunk, _image_chunk in zip(
-                    chunk_ids,
+                for _count, _mask_chunk, _image_chunk in zip(
+                    counts,
                     array_mask.to_delayed().flatten(),
                     c_block_image_array.flatten(),
                     strict=True,
                 ):
-                    # labels = the labels to consider for this chunk
-                    labels = chunk_to_labels[_chunk_id]
-                    if len(labels) == 0:
-                        continue
                     _instances_chunk = delayed(_extract_instances)(
                         mask=_mask_chunk,
                         image=_image_chunk,
-                        labels=labels,
                         size=size,
                         concat_mask=_concat_mask,
                         remove_background=remove_background,
                     )
                     _instances_chunk = da.from_delayed(
                         _instances_chunk,
-                        shape=(len(labels), _c_chunks + 1 if _concat_mask else _c_chunks, size[0], size[1], size[2]),
+                        shape=(_count, _c_chunks + 1 if _concat_mask else _c_chunks, size[0], size[1], size[2]),
                         dtype=output_dtype,
                     )
                     instances_c.append(_instances_chunk)
@@ -840,26 +858,21 @@ class Featurizer:
             instances = da.concatenate(instances, axis=1)
         else:
             # case where we only extract the mask
-            for _chunk_id, _mask_chunk in zip(
-                chunk_ids,
+            for _count, _mask_chunk in zip(
+                counts,
                 array_mask.to_delayed().flatten(),
                 strict=True,
             ):
-                # labels = the labels to consider for this chunk
-                labels = chunk_to_labels[_chunk_id]
-                if len(labels) == 0:
-                    continue
                 _instances_chunk = delayed(_extract_instances)(
                     mask=_mask_chunk,
                     image=None,
-                    labels=labels,
                     size=size,
                     concat_mask=True,
                     remove_background=remove_background,
                 )
                 _instances_chunk = da.from_delayed(
                     _instances_chunk,
-                    shape=(len(labels), c_chunks[0], size[0], size[1], size[2]),
+                    shape=(_count, c_chunks[0], size[0], size[1], size[2]),
                     dtype=output_dtype,
                 )
                 instances.append(_instances_chunk)
@@ -1871,7 +1884,6 @@ def _extract_instances_update(
 def _extract_instances(
     mask: NDArray,
     image: NDArray | None,
-    labels: NDArray,
     size: tuple[int, int, int] = (1, 100, 100),
     remove_background=True,
     concat_mask: bool = True,
@@ -1883,15 +1895,11 @@ def _extract_instances(
     if image is not None:
         assert image.ndim == 4
     assert mask.ndim == 4
-    assert labels.ndim == 1
     assert mask.shape[0] == 1
     assert len(size) == 3
     # catch an edge case where mask id's would be >2**53
     if image is not None and concat_mask and np.issubdtype(image.dtype, np.floating) and np.max(mask) > 2**53:
         raise ValueError(f"Cannot safely cast to float (float64). Maximum value allowed in mask is ({2**53}).")
-
-    # set all labels to zero that are not in labels
-    mask = np.where(np.isin(mask, labels), mask, 0)  # returns a copy of mask
 
     if image is not None:
         C, Z, Y, X = image.shape
