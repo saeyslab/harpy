@@ -787,7 +787,7 @@ class Featurizer:
 
         def _update_mask(
             block: NDArray,
-            chunk_to_labels: dict[tuple[int, int, int, int] : NDArray],
+            chunk_to_labels: dict[tuple[int, int, int, int], NDArray],
             block_info,
         ):
             # set all labels to zero that are not in labels
@@ -1760,129 +1760,7 @@ def _labels_per_block(
     return unique_masks_inside.reshape(1, 1, -1, 1)
 
 
-def _extract_instances_update(
-    mask: NDArray,
-    image: NDArray | None,
-    size: tuple[int, int, int] = (1, 100, 100),
-    remove_background=True,
-    concat_mask: bool = True,
-) -> tuple[NDArray, NDArray]:
-    if image is None and not concat_mask:
-        raise ValueError("'concat_mask' should be set to True if 'image' is None.")
-    start = time.time()
-    log.info("Extracting instances.")
-    if image is not None:
-        assert image.ndim == 4
-    assert mask.ndim == 4
-    assert mask.shape[0] == 1
-    assert len(size) == 3
-    # catch an edge case where mask id's would be >2**53
-    if image is not None and concat_mask and np.issubdtype(image.dtype, np.floating) and np.max(mask) > 2**53:
-        raise ValueError(f"Cannot safely cast to float (float64). Maximum value allowed in mask is ({2**53}).")
-
-    if image is not None:
-        C, Z, Y, X = image.shape
-    else:
-        C, Z, Y, X = mask.shape
-    size_z, size_y, size_x = size
-
-    # foreground coords once (O(V))
-    fg = mask != 0
-    if not np.any(fg):
-        out_shape = (
-            (0, C + (1 if concat_mask else 0), size_z, size_y, size_x)
-            if concat_mask
-            else (0, C, size_z, size_y, size_x)
-        )
-        log.info("No instances found.")
-        return np.empty(out_shape, dtype=np.float32)
-
-    # Order of coords matches order of mask[fg], so inv indices align
-    _, zz, yy, xx = np.nonzero(fg)
-    labels = mask[fg]  # shape (N,)
-
-    # sanity check
-    assert 0 not in labels
-
-    uniq, inv = np.unique(labels, return_inverse=True)
-
-    L = uniq.size
-
-    # per-label bbox (O(N))
-    zmin = np.full(L, Z, dtype=np.int64)
-    ymin = np.full(L, Y, dtype=np.int64)
-    xmin = np.full(L, X, dtype=np.int64)
-    zmax = np.full(L, -1, dtype=np.int64)
-    ymax = np.full(L, -1, dtype=np.int64)
-    xmax = np.full(L, -1, dtype=np.int64)
-
-    np.minimum.at(zmin, inv, zz)
-    np.minimum.at(ymin, inv, yy)
-    np.minimum.at(xmin, inv, xx)
-    np.maximum.at(zmax, inv, zz)
-    np.maximum.at(ymax, inv, yy)
-    np.maximum.at(xmax, inv, xx)
-
-    instance_list = []
-    instance_mask_list = []
-
-    for i in range(L):
-        zs, ze = int(zmin[i]), int(zmax[i]) + 1
-        ys, ye = int(ymin[i]), int(ymax[i]) + 1
-        xs, xe = int(xmin[i]), int(xmax[i]) + 1
-
-        # If we want to keep background, we need to extend the bbox to size_z,size_y,size_x
-        if not remove_background:
-            zl = ze - zs
-            yl = ye - ys
-            xl = xe - xs
-            if zl < size_z:
-                zs = max(0, zs - (size_z - zl) // 2)
-                ze = min(Z, ze + ((size_z - zl) // 2) + 1)  # +1 to account for rounding when //2
-            if yl < size_y:
-                ys = max(0, ys - (size_y - yl) // 2)
-                ye = min(Y, ye + ((size_y - yl) // 2) + 1)
-            if xl < size_x:
-                xs = max(0, xs - (size_x - xl) // 2)
-                xe = min(X, xe + ((size_x - xl) // 2) + 1)
-
-        # crop
-        if image is not None:
-            inst_img = image[:, zs:ze, ys:ye, xs:xe]  # .copy() # no copy needed, because we use np.where later
-        inst_mask = mask[:, zs:ze, ys:ye, xs:xe]  # .copy()
-
-        # keep only this label in the mask, zero everywhere else
-        lbl = uniq[i]
-        inst_mask = np.where(inst_mask == lbl, inst_mask, 0)
-        if remove_background and image is not None:
-            # zero image outside the instance
-            inst_img = np.where(inst_mask != 0, inst_img, 0)
-
-        if image is not None:
-            inst_img = _pad_array(inst_img, size=[size_z, size_y, size_x])
-        inst_mask = _pad_array(inst_mask, size=[size_z, size_y, size_x])
-
-        if image is not None:
-            instance_list.append(inst_img)
-        instance_mask_list.append(inst_mask)
-
-    # create i,c,z,y,x
-    mask_out = np.stack(instance_mask_list)
-    if image is not None:
-        img_out = np.stack(instance_list)
-
-    log.info(
-        f"Finished extracting instances, took {time.time() - start:.3f}s "
-        f"({L / max(1e-9, (time.time() - start)):.2f} instances/s)."
-    )
-
-    if image is None:
-        return mask_out
-
-    return np.concatenate([mask_out, img_out], axis=1) if concat_mask else img_out
-
-
-def _extract_instances(
+def _extract_instances_old(
     mask: NDArray,
     image: NDArray | None,
     size: tuple[int, int, int] = (1, 100, 100),
@@ -2002,6 +1880,137 @@ def _extract_instances(
         return mask_out
 
     return np.concatenate([mask_out, img_out], axis=1) if concat_mask else img_out
+
+
+def _extract_instances(
+    mask: NDArray,
+    image: NDArray | None,
+    size: tuple[int, int, int] = (1, 100, 100),
+    remove_background: bool = True,
+    concat_mask: bool = True,
+) -> NDArray:
+    if image is None and not concat_mask:
+        raise ValueError("'concat_mask' should be set to True if 'image' is None.")
+
+    start = time.time()
+
+    assert mask.ndim == 4 and mask.shape[0] == 1
+    if image is not None:
+        assert image.ndim == 4 and image.shape[1:] == mask.shape[1:]
+
+    size_z, size_y, size_x = size
+    C = image.shape[0] if image is not None else mask.shape[0]
+    Z, Y, X = mask.shape[1:]
+
+    fg = mask != 0
+    if not np.any(fg):
+        outC = (C + 1) if (image is not None and concat_mask) else (1 if concat_mask else C)
+        return np.empty((0, outC, size_z, size_y, size_x), dtype=np.float32)
+
+    _, zz, yy, xx = np.nonzero(fg)
+    labels = mask[fg]  # (N,)
+    uniq, inv = np.unique(labels, return_inverse=True)
+    L = uniq.size
+
+    # bbox per label
+    zmin = np.full(L, Z, dtype=np.int64)
+    ymin = np.full(L, Y, dtype=np.int64)
+    xmin = np.full(L, X, dtype=np.int64)
+    zmax = np.full(L, -1, dtype=np.int64)
+    ymax = np.full(L, -1, dtype=np.int64)
+    xmax = np.full(L, -1, dtype=np.int64)
+
+    np.minimum.at(zmin, inv, zz)
+    np.minimum.at(ymin, inv, yy)
+    np.minimum.at(xmin, inv, xx)
+    np.maximum.at(zmax, inv, zz)
+    np.maximum.at(ymax, inv, yy)
+    np.maximum.at(xmax, inv, xx)
+
+    if image is None:
+        out = np.zeros((L, 1, size_z, size_y, size_x), dtype=mask.dtype)
+        out_mask = out
+        out_img = None
+    else:
+        if concat_mask:
+            out = np.zeros((L, 1 + C, size_z, size_y, size_x), dtype=np.result_type(image.dtype, mask.dtype))
+            out_mask = out[:, :1]
+            out_img = out[:, 1:]
+        else:
+            out = np.zeros((L, C, size_z, size_y, size_x), dtype=image.dtype)
+            out_mask = None
+            out_img = out
+
+    for i, lbl in enumerate(uniq):
+        zs, ze = int(zmin[i]), int(zmax[i]) + 1
+        ys, ye = int(ymin[i]), int(ymax[i]) + 1
+        xs, xe = int(xmin[i]), int(xmax[i]) + 1
+
+        # If we want to keep background, we need to extend the bbox to size_z,size_y,size_x
+        if not remove_background:
+            zl = ze - zs
+            yl = ye - ys
+            xl = xe - xs
+            if zl < size_z:
+                zs = max(0, zs - (size_z - zl) // 2)
+                ze = min(Z, ze + ((size_z - zl) // 2) + 1)  # +1 to account for rounding when //2
+            if yl < size_y:
+                ys = max(0, ys - (size_y - yl) // 2)
+                ye = min(Y, ye + ((size_y - yl) // 2) + 1)
+            if xl < size_x:
+                xs = max(0, xs - (size_x - xl) // 2)
+                xe = min(X, xe + ((size_x - xl) // 2) + 1)
+
+        # crop views
+        m_crop = mask[:, zs:ze, ys:ye, xs:xe]
+        m_bool = m_crop == lbl  # bool mask for this instance
+
+        if out_mask is not None:
+            # write mask into fixed canvas
+            # out_mask[i] has shape (1, size_z, size_y, size_x)
+            tmp = np.zeros((1, size_z, size_y, size_x), dtype=mask.dtype)
+            _center_crop_pad_into(tmp, m_bool.astype(mask.dtype) * lbl)
+            out_mask[i] = tmp
+
+        if image is not None:
+            img_crop = image[:, zs:ze, ys:ye, xs:xe]
+            if remove_background:
+                img_crop = img_crop * m_bool  # broadcast (C,...) * (1,...)
+
+            tmp_img = np.zeros((C, size_z, size_y, size_x), dtype=image.dtype)
+            _center_crop_pad_into(tmp_img, img_crop)
+            out_img[i] = tmp_img
+
+    log.info(
+        f"Finished extracting instances, took {time.time() - start:.3f}s "
+        f"({L / max(1e-9, (time.time() - start)):.2f} instances/s)."
+    )
+    return out
+
+
+def _center_crop_pad_into(out: NDArray, src: NDArray) -> None:
+    """Copy src into the center of out with central cropping/padding out and src are (..., z, y, x)"""
+    sz, sy, sx = src.shape[-3:]
+    oz, oy, ox = out.shape[-3:]
+
+    # crop src centrally to at most out size
+    src_z0 = max((sz - oz) // 2, 0)
+    src_y0 = max((sy - oy) // 2, 0)
+    src_x0 = max((sx - ox) // 2, 0)
+    src_z1 = src_z0 + min(oz, sz)
+    src_y1 = src_y0 + min(oy, sy)
+    src_x1 = src_x0 + min(ox, sx)
+
+    src_crop = src[..., src_z0:src_z1, src_y0:src_y1, src_x0:src_x1]
+
+    cz, cy, cx = src_crop.shape[-3:]
+
+    # place into out centrally
+    out_z0 = (oz - cz) // 2
+    out_y0 = (oy - cy) // 2
+    out_x0 = (ox - cx) // 2
+
+    out[..., out_z0 : out_z0 + cz, out_y0 : out_y0 + cy, out_x0 : out_x0 + cx] = src_crop
 
 
 def _pad_array(arr: NDArray, size: tuple[int, int, int]) -> NDArray:
