@@ -759,7 +759,7 @@ class Featurizer:
                 "label",
                 "count",
                 "chunk_id",
-            ],  # also sort on chunk id, so the results are the same if you rerun the extract instances
+            ],  # also sort on chunk id, so the results are always the same if you rerun the extract instances
             ascending=[True, False, True],
         )
         ddf = ddf.drop_duplicates(subset=["label"], keep="first")
@@ -780,7 +780,7 @@ class Featurizer:
                 chunk_to_labels_all[_chunk_id] = np.array([], dtype=array_mask.dtype)
         chunk_to_labels = chunk_to_labels_all
 
-        # get instance ids
+        # get instance ids and counts per label
         instance_ids = list(chunk_to_labels.values())
         counts = [len(_instance_ids) for _instance_ids in instance_ids]
         instance_ids = np.concatenate(instance_ids)
@@ -799,15 +799,16 @@ class Featurizer:
             return np.where(np.isin(block, labels), block, 0)  # returns a copy of block
 
         # do a map blocks that updates the mask -> use this mask downstream
+        # NOTE: if we do not update the mask upfront, and instead choose to update the mask inside _extract_instances,
+        # we notice a gradual increase in ram usage, and the code becomes much slower.
         array_mask = da.map_blocks(
             _update_mask,
             array_mask,
             chunk_to_labels=chunk_to_labels,
             dtype=array_mask.dtype,
         )
-        # update the array_mask
+        # update the array_mask, and persist, this requires the segmentation mask to fit into RAM.
         (array_mask,) = dask.persist(array_mask)
-
         log.info("Finished assigning instances to chunks.")
 
         if extract_mask:
