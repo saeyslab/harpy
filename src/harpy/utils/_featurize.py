@@ -10,7 +10,6 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
-import dask
 import dask.array as da
 import dask.dataframe as dd
 import numpy as np
@@ -800,6 +799,7 @@ class Featurizer:
         # do a map blocks that updates the mask -> use this mask downstream
         # NOTE: if we do not update the mask upfront, and instead choose to update the mask inside _extract_instances,
         # we notice a gradual increase in ram usage, and the code becomes much slower.
+        """
         array_mask = da.map_blocks(
             _update_mask,
             array_mask,
@@ -808,6 +808,7 @@ class Featurizer:
         )
         # update the array_mask, and persist, this requires the segmentation mask to fit into RAM.
         (array_mask,) = dask.persist(array_mask)
+        """
         log.info("Finished assigning instances to chunks.")
 
         if extract_mask:
@@ -835,22 +836,32 @@ class Featurizer:
                     _concat_mask = True  # concat the mask to the channel dimension 0, if extract mask is True
                 else:
                     _concat_mask = False
-                for _count, _mask_chunk, _image_chunk in zip(
+                for _count, _chunk_id, _mask_chunk, _image_chunk in zip(
                     counts,
+                    chunk_ids,
                     array_mask.to_delayed().flatten(),
                     c_block_image_array.flatten(),
                     strict=True,
                 ):
+                    if len(chunk_to_labels[_chunk_id]) == 0:
+                        continue
                     _instances_chunk = delayed(_extract_instances)(
                         mask=_mask_chunk,
                         image=_image_chunk,
+                        labels=chunk_to_labels[_chunk_id],
                         size=size,
                         concat_mask=_concat_mask,
                         remove_background=remove_background,
                     )
                     _instances_chunk = da.from_delayed(
                         _instances_chunk,
-                        shape=(_count, _c_chunks + 1 if _concat_mask else _c_chunks, size[0], size[1], size[2]),
+                        shape=(
+                            len(chunk_to_labels[_chunk_id]),
+                            _c_chunks + 1 if _concat_mask else _c_chunks,
+                            size[0],
+                            size[1],
+                            size[2],
+                        ),
                         dtype=output_dtype,
                     )
                     instances_c.append(_instances_chunk)
@@ -1078,6 +1089,7 @@ class Featurizer:
 def _extract_instances(
     mask: NDArray,
     image: NDArray | None,
+    labels: NDArray | None,
     size: tuple[int, int, int] = (1, 100, 100),
     remove_background: bool = True,
     concat_mask: bool = True,
@@ -1101,8 +1113,21 @@ def _extract_instances(
         return np.empty((0, outC, size_z, size_y, size_x), dtype=np.float32)
 
     _, zz, yy, xx = np.nonzero(fg)
-    labels = mask[fg]  # (N,)
-    uniq, inv = np.unique(labels, return_inverse=True)
+    labels_mask = mask[fg]
+
+    labels = np.asarray(labels)
+    keep = np.isin(labels_mask, labels)
+
+    labels_mask = labels_mask[keep]
+    zz = zz[keep]
+    yy = yy[keep]
+    xx = xx[keep]
+
+    if labels_mask.size == 0:
+        outC = (C + 1) if (image is not None and concat_mask) else (1 if concat_mask else C)
+        return np.empty((0, outC, size_z, size_y, size_x), dtype=np.float32)
+
+    uniq, inv = np.unique(labels_mask, return_inverse=True)
     L = uniq.size
 
     # bbox per label
