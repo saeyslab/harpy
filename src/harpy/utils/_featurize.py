@@ -785,14 +785,10 @@ class Featurizer:
         def _chunk_global_start(chunks, chunk_id):
             return tuple(int(np.sum(axis_chunks[:i])) for axis_chunks, i in zip(chunks, chunk_id, strict=True))
 
-        # return instance_ids, center_of_mass, array_mask, array_image
-
         # substract global start from the centers and add the depth -> this will get you the correct ofset
 
         # all chunk_ids
         chunk_ids = list(np.ndindex(array_mask.numblocks))
-
-        # blocks = array_mask.to_delayed()  # shape == array_mask.numblocks, e.g. ( nr_of_chunks in c, nr of chunks in z, nr of chunks in y, nr of chunks in x )
 
         if extract_mask:
             if array_image is not None:
