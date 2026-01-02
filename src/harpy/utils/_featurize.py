@@ -794,7 +794,6 @@ class Featurizer:
             return tuple(int(np.sum(axis_chunks[:i])) for axis_chunks, i in zip(chunks, chunk_id, strict=True))
 
         centroids = []
-        # instance_ids_chunk=[]
         for _chunk_id in chunk_ids:
             chunk_global_start_position = _chunk_global_start(
                 chunks=_chunks_without_depth_added,
@@ -814,13 +813,26 @@ class Featurizer:
                 (_df[["z", "y", "x"]].values - np.asarray(chunk_global_start_position[1:]))
                 + np.asarray([0, depth, depth])
             )
-            # instance_ids_chunk.append(  )
 
         centroids = np.concatenate(centroids, axis=0)
 
         path_centroids = os.path.join(os.path.dirname(zarr_output_path), "centroids.zarr")
-        centroids = da.from_array(centroids).to_zarr(path_centroids, overwrite=True)
+        path_instance_ids = os.path.join(os.path.dirname(zarr_output_path), "instance_ids.zarr")
+
+        da.from_array(centroids).to_zarr(path_centroids, overwrite=True)
         centroids = da.from_zarr(path_centroids)
+
+        da.from_array(instance_ids).to_zarr(path_instance_ids, overwrite=True)
+        instance_ids_lazy = da.from_zarr(path_instance_ids)
+
+        center_of_mass.drop(
+            columns=[
+                "z",
+                "y",
+                "x",
+            ],
+            inplace=True,
+        )
 
         # return instance_ids, _chunks_without_depth_added, chunk_ids, center_of_mass
 
@@ -864,6 +876,7 @@ class Featurizer:
                     if _df.empty:
                         continue
                     instance_ids_chunk = _df[_INSTANCE_KEY].values
+                    instance_ids_lazy[np.isin(instance_ids, instance_ids_chunk)]
                     # chunk_global_start_position = _chunk_global_start(
                     #    chunks=_chunks_without_depth_added,
                     #    chunk_id=(_chunk_id[0], _chunk_id[1], _chunk_id[2], _chunk_id[3]),
@@ -877,7 +890,7 @@ class Featurizer:
                         image=_image_chunk,
                         size=size,
                         centroids=centroids[np.isin(instance_ids, instance_ids_chunk)],
-                        instance_ids=instance_ids_chunk,
+                        instance_ids=instance_ids_lazy[np.isin(instance_ids, instance_ids_chunk)],
                         remove_background=remove_background,
                         concat_mask=_concat_mask,
                     )
