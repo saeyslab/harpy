@@ -1202,7 +1202,7 @@ class Featurizer:
         # counts = [len(_instance_ids) for _instance_ids in instance_ids]
         instance_ids = np.concatenate(instance_ids)
         log.info("Finished assigning instances to chunks.")
-        """
+
         def _update_mask(
             block: NDArray,
             chunk_to_labels: dict[tuple[int, int, int, int], NDArray],
@@ -1223,9 +1223,10 @@ class Featurizer:
             chunk_to_labels=chunk_to_labels,
             dtype=array_mask.dtype,
         )
+        import dask
+
         # update the array_mask, and persist, this requires the segmentation mask to fit into RAM.
         (array_mask,) = dask.persist(array_mask)
-        """
 
         if extract_mask:
             if array_image is not None:
@@ -1263,7 +1264,7 @@ class Featurizer:
                     _instances_chunk = delayed(_extract_instances)(
                         mask=_mask_chunk,
                         image=_image_chunk,
-                        labels=chunk_to_labels[_chunk_id],
+                        # labels=chunk_to_labels[_chunk_id],
                         size=size,
                         concat_mask=_concat_mask,
                         remove_background=remove_background,
@@ -1675,7 +1676,7 @@ def _extract_instance_patches(
 def _extract_instances(
     mask: NDArray,
     image: NDArray | None,
-    labels: NDArray | None,  # the labels to consider
+    # labels: NDArray | None,  # the labels to consider
     size: tuple[int, int, int] = (1, 100, 100),
     remove_background: bool = True,
     concat_mask: bool = True,
@@ -1701,13 +1702,13 @@ def _extract_instances(
     _, zz, yy, xx = np.nonzero(fg)
     labels_mask = mask[fg]
 
-    labels = np.asarray(labels)
-    keep = np.isin(labels_mask, labels)
+    # labels = np.asarray(labels)
+    # keep = np.isin(labels_mask, labels)
 
-    labels_mask = labels_mask[keep]
-    zz = zz[keep]
-    yy = yy[keep]
-    xx = xx[keep]
+    # labels_mask = labels_mask[keep]
+    # zz = zz[keep]
+    # yy = yy[keep]
+    # xx = xx[keep]
 
     if labels_mask.size == 0:
         outC = (C + 1) if (image is not None and concat_mask) else (1 if concat_mask else C)
