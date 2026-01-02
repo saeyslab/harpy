@@ -815,15 +815,16 @@ class Featurizer:
             )
 
         centroids = np.concatenate(centroids, axis=0)
+        centroids = da.asarray(centroids)
 
-        path_centroids = os.path.join(os.path.dirname(zarr_output_path), "centroids.zarr")
-        path_instance_ids = os.path.join(os.path.dirname(zarr_output_path), "instance_ids.zarr")
+        # path_centroids = os.path.join(os.path.dirname(zarr_output_path), "centroids.zarr")
+        # path_instance_ids = os.path.join(os.path.dirname(zarr_output_path), "instance_ids.zarr")
 
-        da.from_array(centroids).to_zarr(path_centroids, overwrite=True)
-        centroids = da.from_zarr(path_centroids)
+        # da.from_array(centroids).to_zarr(path_centroids, overwrite=True)
+        # centroids = da.from_zarr(path_centroids)
 
-        da.from_array(instance_ids).to_zarr(path_instance_ids, overwrite=True)
-        instance_ids_lazy = da.from_zarr(path_instance_ids)
+        # da.from_array(instance_ids).to_zarr(path_instance_ids, overwrite=True)
+        # instance_ids_lazy = da.from_zarr(path_instance_ids)
 
         center_of_mass.drop(
             columns=[
@@ -876,7 +877,6 @@ class Featurizer:
                     if _df.empty:
                         continue
                     instance_ids_chunk = _df[_INSTANCE_KEY].values
-                    instance_ids_lazy[np.isin(instance_ids, instance_ids_chunk)]
                     # chunk_global_start_position = _chunk_global_start(
                     #    chunks=_chunks_without_depth_added,
                     #    chunk_id=(_chunk_id[0], _chunk_id[1], _chunk_id[2], _chunk_id[3]),
@@ -885,12 +885,12 @@ class Featurizer:
                     # centroids = (
                     #    _df[["z", "y", "x"]].values - np.asarray(chunk_global_start_position[1:])
                     # ) + np.asarray([0, depth, depth])
-                    _instances_chunk = delayed(_extract_instance_patches)(
+                    _instances_chunk = delayed(_extract_instance_patches_sliced)(
                         mask=_mask_chunk,
                         image=_image_chunk,
                         size=size,
                         centroids=centroids[np.isin(instance_ids, instance_ids_chunk)],
-                        instance_ids=instance_ids_lazy[np.isin(instance_ids, instance_ids_chunk)],
+                        instance_ids=instance_ids_chunk,
                         remove_background=remove_background,
                         concat_mask=_concat_mask,
                     )
@@ -930,7 +930,7 @@ class Featurizer:
                 centroids = (_df[["z", "y", "x"]].values - np.asarray(chunk_global_start_position[1:])) + np.asarray(
                     [0, depth, depth]
                 )
-                _instances_chunk = delayed(_extract_instance_patches)(
+                _instances_chunk = delayed(_extract_instance_patches_sliced)(
                     mask=_mask_chunk,
                     image=None,
                     size=size,
@@ -1502,6 +1502,80 @@ class Featurizer:
         df[instance_key] = instances_ids
 
         return df.sort_values(by=instance_key).reset_index(drop=True)
+
+
+def _extract_instance_patches_sliced(
+    mask,
+    image,
+    size,
+    centroids,
+    instance_ids,
+    center_round="round",
+    remove_background=True,
+    concat_mask=True,
+):
+    if image is None and not concat_mask:
+        raise ValueError("'concat_mask' should be set to True if 'image' is None.")
+    if not instance_ids.size:
+        raise ValueError("No instances provided.")
+    assert mask.ndim == 4 and mask.shape[0] == 1
+    assert len(size) == 3
+
+    start = time.time()
+
+    centroids = np.asarray(centroids)
+    instance_ids = np.asarray(instance_ids, dtype=mask.dtype)
+
+    if center_round == "round":
+        cz, cy, cx = np.rint(centroids).astype(np.int64).T
+    elif center_round == "floor":
+        cz, cy, cx = np.floor(centroids).astype(np.int64).T
+    elif center_round == "ceil":
+        cz, cy, cx = np.ceil(centroids).astype(np.int64).T
+    else:
+        raise ValueError
+
+    dz, dy, dx = map(int, size)
+    hz, hy, hx = dz // 2, dy // 2, dx // 2
+
+    i = len(instance_ids)
+    # allocate output directly (avoid big temporaries)
+    mask_out = np.empty((i, 1, dz, dy, dx), dtype=mask.dtype)
+
+    if image is not None:
+        c = image.shape[0]
+        img_out = np.empty((i, c, dz, dy, dx), dtype=image.dtype)
+
+    m0 = mask[0]  # (z,y,x)
+
+    for n, (zz, yy, xx, inst) in enumerate(zip(cz, cy, cx, instance_ids, strict=True)):
+        z0, z1 = zz - hz, zz - hz + dz
+        y0, y1 = yy - hy, yy - hy + dy
+        x0, x1 = xx - hx, xx - hx + dx
+
+        m_patch = m0[z0:z1, y0:y1, x0:x1]  # view (no copy)
+        if remove_background:
+            # create only patch-sized boolean (small)
+            k = m_patch == inst
+            mask_out[n, 0] = m_patch * k
+            if image is not None:
+                img_patch = image[:, z0:z1, y0:y1, x0:x1]
+                img_out[n] = img_patch * k[None, ...]
+        else:
+            mask_out[n, 0] = m_patch
+            if image is not None:
+                img_out[n] = image[:, z0:z1, y0:y1, x0:x1]
+
+    log.info(
+        f"Finished extracting instances, took {time.time() - start:.3f}s "
+        f"({len(centroids) / max(1e-9, (time.time() - start)):.2f} instances/s)."
+    )
+
+    if image is None:
+        return mask_out
+    if concat_mask:
+        return np.concatenate([mask_out, img_out], axis=1)
+    return img_out
 
 
 def _extract_instance_patches(
