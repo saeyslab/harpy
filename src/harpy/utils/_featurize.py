@@ -21,6 +21,7 @@ from numpy.typing import NDArray
 from sklearn.decomposition import PCA
 
 from harpy.image.segmentation._utils import _rechunk_overlap
+from harpy.utils._aggregate import _get_center_of_mass
 from harpy.utils._keys import _INSTANCE_KEY
 from harpy.utils.utils import _dummy_embedding, _dummy_statistic_image, _make_list
 
@@ -83,9 +84,9 @@ class Featurizer:
 
     def featurize(
         self,
-        depth: int,
         embedding_dimension: int,
-        diameter: int | None = None,
+        diameter: int,
+        depth: int | None = None,
         remove_background: bool = True,
         zarr_output_path: str
         | Path
@@ -543,6 +544,380 @@ class Featurizer:
 
     def extract_instances(
         self,
+        diameter: int,  # will be dimension of resulting chunks in y and x. Can be set to value < max_diameter to optimize performance
+        depth: int | None,  # ~max_diameter/2, depth in y and x,
+        remove_background: bool = True,
+        extract_mask: bool = False,
+        extract_image: bool = True,
+        zarr_output_path: str
+        | Path
+        | None = None,  # if zarr_output_path is specified, we compute the graph, otherwise we return a non-computed graph, recommend specifying an output path FIXME: also support h5ad format.
+        batch_size: int | None = None,  # FIXME: currently ignored if zarr_output_path is None
+    ) -> tuple[NDArray, da.Array]:
+        """
+        Extract per-label instance windows from the mask and image of size ``diameter`` in ``y`` and ``x`` using :func:`dask.array.map_overlap` and :func:`dask.array.map_blocks`.
+
+        See :func:`harpy.tb.extract_instances` for a full description.
+
+        Returns
+        -------
+        tuple:
+
+            - a Numpy array containing indices of extracted labels, shape ``(i,)``.
+              Dimension of ``i`` will be equal to the total number of non-zero
+              labels in the mask.
+
+            - a Dask array of dimension ``(i, c+1, z, y, x)`` or
+              ``(i, c, z, y, x)``, with dimension of ``c`` the number of channels
+              in ``img_layer``.
+              At channel index 0 of each instance, is the corresponding mask if
+              ``add_mask`` is set to ``True``.
+              Dimension of ``y`` and ``x`` are equal to ``diameter``, or
+              ``2 * depth`` if ``diameter`` is not specified.
+
+
+        Examples
+        --------
+        Basic usage:
+
+        .. code-block:: python
+
+            import harpy as hp
+
+            sdata = hp.datasets.pixie_example()
+
+            img_layer = "raw_image_fov0"
+            labels_layer = "label_whole_fov0"
+
+            mask_array = (
+                sdata[labels_layer]
+                .data[None, ...]
+                .rechunk(1024)
+            )
+
+            image_array = (
+                sdata[img_layer]
+                .data[:, None, ...]
+                .rechunk(1024)
+            )
+
+            fe = hp.utils.Featurizer(
+                mask_dask_array=mask_array,
+                image_dask_array=image_array,
+            )
+
+            # Lazy Dask graph
+            instance_ids, instances = fe.extract_instances(
+                depth=100,
+                diameter=75,
+            )
+
+            # Inspect shape and chunking
+            instances
+
+            # Persist to Zarr on disk (computes instances)
+            instance_ids, instances = fe.extract_instances(
+                depth=100,
+                diameter=75,
+                zarr_output_path="instances.zarr",
+            )
+
+            # Keep full window content instead of masking to the instance
+            instance_ids, instances = fe.extract_instances(
+                depth=100,
+                diameter=75,
+                remove_background=False,
+            )
+
+        Visual sanity check of extracted instances:
+
+        .. code-block:: python
+
+            import dask
+            import dask.array as da
+            import matplotlib.pyplot as plt
+            import harpy as hp
+
+            sdata = hp.datasets.pixie_example()
+
+            labels_layer = "label_whole_fov0"
+            mask_array = sdata[labels_layer].data[None, ...]
+
+            fe = hp.utils.Featurizer(
+                mask_dask_array=mask_array,
+                image_dask_array=None,
+            )
+
+            instance_ids, instances = fe.extract_instances(
+                depth=50,
+                diameter=75,
+                batch_size=500,
+                extract_mask=True,
+                extract_image=True,
+            )
+
+            instances = instances.compute()
+
+            instance_id = 23
+            mask = instances[instance_ids == instance_id][0][0][0]
+            plt.imshow(mask)
+            plt.show()
+
+            mask_array_remove = da.where(mask_array == instance_id, mask_array, 0)
+
+            _, y_, x_ = da.where(mask_array == instance_id)
+            y_, x_ = dask.compute(y_, x_)
+
+            plt.imshow(
+                mask_array_remove[
+                    0,
+                    y_.min():y_.max(),
+                    x_.min():x_.max(),
+                ]
+            )
+            plt.show()
+
+        See Also
+        --------
+        harpy.tb.extract_instances : Extract instance windows from a labels layer and (optionally) an image layer.
+        """
+        if depth is None:
+            depth = (diameter // 2) + 1
+        if depth < diameter // 2:
+            raise ValueError("Depth is set to a value smaller than diameter//2. This is not allowed.")
+        _depth = {0: 0, 1: 0, 2: depth, 3: depth}
+        if not extract_image and not extract_mask:
+            raise ValueError("Please either set 'extract_image' or 'extract_mask' to True.")
+        # sanity checks on extract_mask and extract_image parameters
+        if self._image is None and not extract_mask:
+            log.info(
+                "No image available and 'extract_mask' is False; forcing 'extract_mask=True' since nothing can be extracted otherwise."
+            )
+            extract_mask = True
+        if self._image is None and extract_image:
+            log.info("No image available and 'extract_image' is True; forcing 'extract_image=False'.")
+            extract_image = False
+
+        array_mask = self._mask[None, ...]  # add trivial channel dimension
+        array_image = self._image if extract_image else None
+
+        if array_image is not None and array_image.numblocks[1] != 1:
+            raise ValueError("Currently we do not allow chunking in z dimension.")
+
+        # rechunk overlap allows to send allow_rechunk to False
+        # this is basically the same as settting allow_rechunk to True, but now we have more control over the chunk sizes
+
+        array_mask = _rechunk_overlap(x=array_mask, depth=_depth, chunks=None, allow_adjust_depth=False)
+
+        log.info("Calculating center of mass for each instance.")
+        center_of_mass = _get_center_of_mass(
+            mask=array_mask.squeeze(0),  # center of mass does not support channel dimension
+            index=self._labels[self._labels != 0],
+            instance_key=_INSTANCE_KEY,
+        )
+        log.info("Finished calculating center of mass for each instance.")
+
+        # now we get the chunk id to which each center of mass belongs
+        center_of_mass = center_of_mass.rename(columns={0: "z", 1: "y", 2: "x"}).copy()
+
+        z_chunks = array_mask.chunks[1]
+        y_chunks = array_mask.chunks[2]
+        x_chunks = array_mask.chunks[3]
+
+        z_starts = np.r_[0, np.cumsum(z_chunks)[:-1]]
+        y_starts = np.r_[0, np.cumsum(y_chunks)[:-1]]
+        x_starts = np.r_[0, np.cumsum(x_chunks)[:-1]]
+
+        nz, ny, nx = len(z_chunks), len(y_chunks), len(x_chunks)
+
+        def coord_to_chunk(coord, starts, n_chunks):
+            # exact boundary goes to the next chunk
+            idx = np.searchsorted(starts, coord, side="right") - 1
+            return np.clip(idx, 0, n_chunks - 1)
+
+        valid = center_of_mass["z"].notna() & center_of_mass["y"].notna() & center_of_mass["x"].notna()
+
+        center_of_mass["z_chunk"] = np.nan
+        center_of_mass["y_chunk"] = np.nan
+        center_of_mass["x_chunk"] = np.nan
+
+        center_of_mass.loc[valid, "z_chunk"] = coord_to_chunk(center_of_mass.loc[valid, "z"].to_numpy(), z_starts, nz)
+        center_of_mass.loc[valid, "y_chunk"] = coord_to_chunk(center_of_mass.loc[valid, "y"].to_numpy(), y_starts, ny)
+        center_of_mass.loc[valid, "x_chunk"] = coord_to_chunk(center_of_mass.loc[valid, "x"].to_numpy(), x_starts, nx)
+
+        # we do not need this chunk_id, remove it
+        center_of_mass["chunk_id"] = list(
+            zip(
+                center_of_mass["z_chunk"].fillna(-1).astype(int),
+                center_of_mass["y_chunk"].fillna(-1).astype(int),
+                center_of_mass["x_chunk"].fillna(-1).astype(int),
+                strict=True,
+            )
+        )
+        # if we sort on this chunk_idx, center_of_mass will be in the order array_mask.to_delayed().flatten() will be
+        # -> important for extracting the instance ids
+        center_of_mass["chunk_idx"] = (
+            (center_of_mass["z_chunk"].astype(int) * (ny * nx))
+            + (center_of_mass["y_chunk"].astype(int) * nx)
+            + center_of_mass["x_chunk"].astype(int)
+        )
+        center_of_mass.sort_values(["chunk_idx", _INSTANCE_KEY], inplace=True)
+        instance_ids = center_of_mass[_INSTANCE_KEY].values
+
+        _chunks_without_depth_added = array_mask.chunks
+
+        array_mask = overlap(
+            array_mask,
+            depth=_depth,
+            allow_rechunk=False,
+            boundary=0,
+        )
+
+        if array_image is not None:
+            array_image = _rechunk_overlap(x=array_image, depth=_depth, chunks=None, allow_adjust_depth=False)
+            array_image = overlap(
+                array_image,
+                depth=_depth,
+                allow_rechunk=False,
+                boundary=0,
+            )
+
+        def _chunk_global_start(chunks, chunk_id):
+            return tuple(int(np.sum(axis_chunks[:i])) for axis_chunks, i in zip(chunks, chunk_id, strict=True))
+
+        # return instance_ids, center_of_mass, array_mask, array_image
+
+        # substract global start from the centers and add the depth -> this will get you the correct ofset
+
+        # all chunk_ids
+        chunk_ids = list(np.ndindex(array_mask.numblocks))
+
+        # blocks = array_mask.to_delayed()  # shape == array_mask.numblocks, e.g. ( nr_of_chunks in c, nr of chunks in z, nr of chunks in y, nr of chunks in x )
+
+        if extract_mask:
+            if array_image is not None:
+                output_dtype = np.result_type(array_image.dtype, array_mask.dtype)
+            else:
+                output_dtype = array_mask.dtype
+        else:
+            output_dtype = array_image.dtype
+
+        if array_image is None:
+            c_chunks = (1,)  # array_mask has trivial c dimension
+        else:
+            c_chunks = array_image.chunks[0]
+
+        instances = []
+        # For now we do not allow chunking in z, but to support chunking in z, only thing that needs to be updated is this line,
+        # where we get the chunksize in z from the chunks.
+        size = (array_mask.shape[1], diameter, diameter)
+
+        if array_image is not None:
+            for i, (c_block_image_array, _c_chunks) in enumerate(zip(array_image.to_delayed(), c_chunks, strict=True)):
+                instances_c = []
+                if i == 0 and extract_mask:
+                    _concat_mask = True  # concat the mask to the channel dimension 0, if extract mask is True
+                else:
+                    _concat_mask = False
+                for _chunk_id, _mask_chunk, _image_chunk in zip(
+                    chunk_ids,
+                    array_mask.to_delayed().flatten(),
+                    c_block_image_array.flatten(),
+                    strict=True,
+                ):
+                    _df = center_of_mass[
+                        (center_of_mass["z_chunk"] == _chunk_id[1])
+                        & (center_of_mass["y_chunk"] == _chunk_id[2])
+                        & (center_of_mass["x_chunk"] == _chunk_id[3])
+                    ]
+                    # no instances in the chunk for which center of mass falls in the chunk
+                    if _df.empty:
+                        continue
+                    chunk_global_start_position = _chunk_global_start(
+                        chunks=_chunks_without_depth_added,
+                        chunk_id=(_chunk_id[0], _chunk_id[1], _chunk_id[2], _chunk_id[3]),
+                    )
+                    # convert centroids from global position to position in the chunk
+                    centroids = (
+                        _df[["z", "y", "x"]].values - np.asarray(chunk_global_start_position[1:])
+                    ) + np.asarray([0, depth, depth])
+                    _instances_chunk = delayed(_extract_instance_patches)(
+                        mask=_mask_chunk,
+                        image=_image_chunk,
+                        size=size,
+                        centroids=centroids,
+                        instance_ids=_df[_INSTANCE_KEY].values,
+                        remove_background=remove_background,
+                        concat_mask=_concat_mask,
+                    )
+                    _instances_chunk = da.from_delayed(
+                        _instances_chunk,
+                        shape=(
+                            len(centroids),
+                            _c_chunks + 1 if _concat_mask else _c_chunks,
+                            size[0],
+                            size[1],
+                            size[2],
+                        ),
+                        dtype=output_dtype,
+                    )
+                    instances_c.append(_instances_chunk)
+                instances.append(da.concatenate(instances_c, axis=0))
+            instances = da.concatenate(instances, axis=1)
+        else:
+            # case where we only extract the mask
+            for _chunk_id, _mask_chunk in zip(
+                chunk_ids,
+                array_mask.to_delayed().flatten(),
+                strict=True,
+            ):
+                _df = center_of_mass[
+                    (center_of_mass["z_chunk"] == _chunk_id[1])
+                    & (center_of_mass["y_chunk"] == _chunk_id[2])
+                    & (center_of_mass["x_chunk"] == _chunk_id[3])
+                ]
+                if _df.empty:
+                    continue
+                chunk_global_start_position = _chunk_global_start(
+                    chunks=_chunks_without_depth_added,
+                    chunk_id=(_chunk_id[0], _chunk_id[1], _chunk_id[2], _chunk_id[3]),
+                )
+                # convert centroids from global position to position in the chunk
+                centroids = (_df[["z", "y", "x"]].values - np.asarray(chunk_global_start_position[1:])) + np.asarray(
+                    [0, depth, depth]
+                )
+                _instances_chunk = delayed(_extract_instance_patches)(
+                    mask=_mask_chunk,
+                    image=None,
+                    size=size,
+                    centroids=centroids,
+                    instance_ids=_df[_INSTANCE_KEY].values,
+                    remove_background=remove_background,
+                    concat_mask=True,
+                )
+                _instances_chunk = da.from_delayed(
+                    _instances_chunk,
+                    shape=(len(centroids), c_chunks[0], size[0], size[1], size[2]),
+                    dtype=output_dtype,
+                )
+                instances.append(_instances_chunk)
+            instances = da.concatenate(instances, axis=0)
+
+        chunksize = instances.chunksize
+        if batch_size is not None:
+            chunksize = (batch_size, chunksize[1], chunksize[2], chunksize[3], chunksize[4])
+        # rechunk, because chunks have irregular chunksize
+        instances = instances.rechunk(chunksize)
+        if zarr_output_path is not None:
+            instances.to_zarr(zarr_output_path)
+            instances = da.from_zarr(zarr_output_path)
+
+        # Note that instance_ids are not sorted.
+        # It is recommended not to do so (otherwise the instances array needs to be sorted, which is not optimal)
+        return instance_ids, instances
+
+    def extract_instances_old(
+        self,
         depth: int,  # ~max_diameter/2, depth in y and x,
         diameter: int
         | None = None,  # will be dimension of resulting chunks in y and x. Can be set to value < max_diameter to optimize performance
@@ -780,9 +1155,10 @@ class Featurizer:
 
         # get instance ids and counts per label
         instance_ids = list(chunk_to_labels.values())
-        counts = [len(_instance_ids) for _instance_ids in instance_ids]
+        # counts = [len(_instance_ids) for _instance_ids in instance_ids]
         instance_ids = np.concatenate(instance_ids)
-
+        log.info("Finished assigning instances to chunks.")
+        """
         def _update_mask(
             block: NDArray,
             chunk_to_labels: dict[tuple[int, int, int, int], NDArray],
@@ -797,9 +1173,6 @@ class Featurizer:
             return np.where(np.isin(block, labels), block, 0)  # returns a copy of block
 
         # do a map blocks that updates the mask -> use this mask downstream
-        # NOTE: if we do not update the mask upfront, and instead choose to update the mask inside _extract_instances,
-        # we notice a gradual increase in ram usage, and the code becomes much slower.
-        """
         array_mask = da.map_blocks(
             _update_mask,
             array_mask,
@@ -809,7 +1182,6 @@ class Featurizer:
         # update the array_mask, and persist, this requires the segmentation mask to fit into RAM.
         (array_mask,) = dask.persist(array_mask)
         """
-        log.info("Finished assigning instances to chunks.")
 
         if extract_mask:
             if array_image is not None:
@@ -836,8 +1208,7 @@ class Featurizer:
                     _concat_mask = True  # concat the mask to the channel dimension 0, if extract mask is True
                 else:
                     _concat_mask = False
-                for _count, _chunk_id, _mask_chunk, _image_chunk in zip(
-                    counts,
+                for _chunk_id, _mask_chunk, _image_chunk in zip(
                     chunk_ids,
                     array_mask.to_delayed().flatten(),
                     c_block_image_array.flatten(),
@@ -869,21 +1240,24 @@ class Featurizer:
             instances = da.concatenate(instances, axis=1)
         else:
             # case where we only extract the mask
-            for _count, _mask_chunk in zip(
-                counts,
+            for _chunk_id, _mask_chunk in zip(
+                chunk_ids,
                 array_mask.to_delayed().flatten(),
                 strict=True,
             ):
+                if len(chunk_to_labels[_chunk_id]) == 0:
+                    continue
                 _instances_chunk = delayed(_extract_instances)(
                     mask=_mask_chunk,
                     image=None,
+                    labels=chunk_to_labels[_chunk_id],
                     size=size,
                     concat_mask=True,
                     remove_background=remove_background,
                 )
                 _instances_chunk = da.from_delayed(
                     _instances_chunk,
-                    shape=(_count, c_chunks[0], size[0], size[1], size[2]),
+                    shape=(len(chunk_to_labels[_chunk_id]), c_chunks[0], size[0], size[1], size[2]),
                     dtype=output_dtype,
                 )
                 instances.append(_instances_chunk)
@@ -1086,10 +1460,96 @@ class Featurizer:
         return df.sort_values(by=instance_key).reset_index(drop=True)
 
 
+def _extract_instance_patches(
+    mask: NDArray,  # np.ndarray, shape (Z,Y,X) integer labels: 0 background, 1..K instances
+    image: NDArray | None,
+    size: tuple[int, int, int],
+    centroids: NDArray,
+    instance_ids: NDArray,
+    center_round: str = "round",  # "round" | "floor" | "ceil"
+    remove_background: bool = True,
+    concat_mask: bool = True,
+) -> NDArray:
+    """Returns patches of shape (i, C+1, dz, dy, dx). Assumes every patch is fully inside seg/img bounds (no padding needed)."""
+    if image is None and not concat_mask:
+        raise ValueError("'concat_mask' should be set to True if 'image' is None.")
+    if not instance_ids.size:
+        raise ValueError("No instances provided. There is nothing to extract.")
+        # FIXME: check if we should let this pass, and return an empty numpy array instead
+    assert len(size) == 3
+
+    start = time.time()
+
+    assert mask.ndim == 4 and mask.shape[0] == 1
+    if image is not None:
+        assert image.ndim == 4 and image.shape[1:] == mask.shape[1:]
+
+    centroids = np.asarray(centroids)
+    instance_ids = np.asarray(instance_ids, dtype=mask.dtype)
+
+    assert instance_ids.ndim == 1
+    assert centroids.ndim == 2
+    assert len(centroids) == len(instance_ids)
+    assert centroids.shape[0] == instance_ids.shape[0]
+    assert centroids.shape[1] == 3  # 3 spatial dimensions
+
+    if center_round == "round":
+        cz, cy, cx = np.rint(centroids).astype(np.int64).T
+    elif center_round == "floor":
+        cz, cy, cx = np.floor(centroids).astype(np.int64).T
+    elif center_round == "ceil":
+        cz, cy, cx = np.ceil(centroids).astype(np.int64).T
+    else:
+        raise ValueError("center_round must be 'round', 'floor', or 'ceil'")
+
+    dz, dy, dx = int(size[0]), int(size[1]), int(size[2])
+    hz, hy, hx = dz // 2, dy // 2, dx // 2
+
+    # offsets (e.g. for dz=5 -> [-2,-1,0,1,2])
+    oz = np.arange(-hz, -hz + dz, dtype=np.int64)
+    oy = np.arange(-hy, -hy + dy, dtype=np.int64)
+    ox = np.arange(-hx, -hx + dx, dtype=np.int64)
+
+    z_idx = cz[:, None] + oz[None, :]  # (i, dz)
+    y_idx = cy[:, None] + oy[None, :]  # (i, dy)
+    x_idx = cx[:, None] + ox[None, :]  # (i, dx)
+
+    # mask is 1,z,y,x
+    mask_p = mask[
+        :, z_idx[:, :, None, None], y_idx[:, None, :, None], x_idx[:, None, None, :]
+    ]  # mask_p is 1,i,dz,dy,dx, make it i,dz,dy,dx
+    mask_p = mask_p[0]
+
+    if image is not None:
+        image_p = image[
+            :, z_idx[:, :, None, None], y_idx[:, None, :, None], x_idx[:, None, None, :]
+        ]  # image is c,i,dz,dy,dx
+        image_p = image_p.transpose(1, 0, 2, 3, 4)  # make it (i, c, dz, dy, dx)
+
+    if remove_background:
+        keep = mask_p == instance_ids[:, None, None, None]  # (i, dz, dy, dx)
+        mask_p = mask_p * keep
+        if image is not None:
+            image_p = image_p * keep[:, None, :, :, :]
+
+    log.info(
+        f"Finished extracting instances, took {time.time() - start:.3f}s "
+        f"({len(centroids) / max(1e-9, (time.time() - start)):.2f} instances/s)."
+    )
+    # mask_p is (i,dz,dy,dx), make it (i,1,dz,dy,dx)
+    mask_p = mask_p[:, None, ...]
+    if image is None:
+        return mask_p
+    if concat_mask:
+        # combine into (i, c+1, dz, dy, dx)
+        return np.concatenate([mask_p, image_p], axis=1)
+    return image_p
+
+
 def _extract_instances(
     mask: NDArray,
     image: NDArray | None,
-    labels: NDArray | None,
+    labels: NDArray | None,  # the labels to consider
     size: tuple[int, int, int] = (1, 100, 100),
     remove_background: bool = True,
     concat_mask: bool = True,

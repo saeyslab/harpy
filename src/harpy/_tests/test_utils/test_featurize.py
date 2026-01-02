@@ -155,7 +155,7 @@ def test_extract_instances_mean(sdata_transcripts_no_backed):
 
 def test_extract_instances_duplicates_blobs(sdata):
     chunksize_spatial = 512
-    depth = 250
+    depth = 500
 
     mask = sdata["blobs_labels"].data[None, ...].rechunk(chunksize_spatial)
     image = sdata["blobs_image"].data[:, None, ...].astype(np.float32).rechunk(chunksize_spatial)
@@ -188,10 +188,7 @@ def test_extract_instances_duplicates_blobs(sdata):
     assert np.array_equal(uniq_labels, np.sort(instances_ids))
     assert np.array_equal(
         instances_ids,
-        np.array(
-            [3, 5, 11, 12, 19, 20, 23, 25, 26, 27, 29, 30, 31, 1, 6, 10, 13, 2, 4, 9, 16, 18, 22, 24, 8, 17],
-            dtype=np.int16,
-        ),
+        uniq_labels,
     )
 
 
@@ -231,6 +228,7 @@ def test_instance_statistics_quantiles(sdata_pixie, fov_nr):
 
 def test_instance_statistics_quantiles_blobs(sdata):
     chunksize_spatial = 1000
+    diameter = 1990
 
     mask = (
         sdata["blobs_labels"].data[None, ...].rechunk(chunksize_spatial)
@@ -244,8 +242,7 @@ def test_instance_statistics_quantiles_blobs(sdata):
     q = [0.3, 0.5]
     dfs = featurizer.quantiles(
         q=q,
-        diameter=chunksize_spatial,
-        depth=50,  # FIXME depth 0 results in error, fix this, because it should work if there is only one chunk
+        diameter=diameter,
         batch_size=5,
         instance_key=_INSTANCE_KEY,
     )  # one chunk
@@ -363,7 +360,6 @@ def test_instance_statistics_radii_and_principal_axes_blobs(sdata_blobs):
     df = featurizer.radii_and_principal_axes(
         calculate_axes=True,
         diameter=chunksize_spatial,
-        depth=50,
         batch_size=5,
         instance_key=_INSTANCE_KEY,
     )
@@ -444,7 +440,7 @@ def test_extract_instances_mean_blobs(sdata):
         mask_dask_array=mask,
         image_dask_array=image,
     )
-    df_mean_featurizer = featurizer._mean(diameter=1000)
+    df_mean_featurizer = featurizer._mean(diameter=1990)
 
     assert df_mean_featurizer.shape[1] - 1 == image.shape[0]
 

@@ -25,8 +25,8 @@ def extract_instances(
     sdata,
     img_layer: str,
     labels_layer: str,
-    depth: int,
-    diameter: int | None = None,
+    diameter: int,
+    depth: int | None = None,
     remove_background: bool = True,
     extract_mask: bool = False,
     zarr_output_path: str | Path | None = None,
@@ -53,12 +53,12 @@ def extract_instances(
         Name of the image layer.
     labels_layer
         Name of the labels layer.
+    diameter
+        Side length of the resulting `y`, `x` window for every
+        instance.
     depth
         Passed to :func:`dask.array.map_overlap`.
-        For correct results, choose depth to be roughly half of the estimated maximum diameter or larger.
-    diameter
-        Optional explicit side length of the resulting `y`, `x` window for every
-        instance. If not provided `diameter` is set to 2 times `depth`.
+        If not provided `depth` is set to `diameter`//2 +1.
     remove_background
         If `True`, pixels outside the instance label within each
         window are set to background (e.g., zero) so that only the object remains
@@ -190,9 +190,9 @@ def featurize(
     labels_layer: str | list[str],
     table_layer: str | None,
     output_layer: str,
-    depth: int,
+    diameter: int,  # for kronos patch sizes must be multiples of 16
     embedding_dimension: int,  # e.g. 384*matched_channels.shape[0]
-    diameter: int | None = None,  # for kronos patch sizes must be multiples of 16
+    depth: int | None = None,
     remove_background: bool = True,
     model: Callable[..., NDArray] = _dummy_embedding,
     batch_size: int | None = None,
@@ -248,15 +248,16 @@ def featurize(
         the calculated embeddings at `.obsm[embedding_obsm_key]`, and annotated by `labels_layer`.
     output_layer
         Name of the output tables layer. Can be set equal to `table_layer` if overwrite is set to `True`.
-    depth
-        Passed to :func:`dask.array.map_overlap`.
-        For correct results, choose depth to be roughly half of the estimated maximum diameter or larger.
+    diameter
+        Side length of the resulting `y`, `x` window for every
+        instance.
     embedding_dimension
         The dimensionality `d` of the feature vectors returned by `model`. The returned Dask
         array will have shape `(i, embedding_dimension)`.
-    diameter
-        Optional explicit side length of the resulting `y`, `x` window for every
-        instance. If not provided `diameter` is set to 2 times `depth`.
+    depth
+        Passed to :func:`dask.array.map_overlap`.
+        For correct results, choose depth to be roughly half of the estimated maximum diameter or larger.
+        If not provided `depth` is set to `diameter`//2 +1.
     remove_background
         If `True` (default), pixels outside the instance label within each window are set to
         background (e.g., zero) so that only the object remains inside the cutout. If `False`,

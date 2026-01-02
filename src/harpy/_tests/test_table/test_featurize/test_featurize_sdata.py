@@ -162,7 +162,6 @@ def test_featurize_sdata_blobs(sdata: SpatialData):
         labels_layer=labels_layer,
         table_layer=table_layer,
         output_layer=output_layer,
-        depth=250,
         diameter=1000,
         embedding_dimension=embedding_dim,
         model=_dummy_embedding,
