@@ -784,7 +784,7 @@ class RasterAggregator:
             # global start indices of this block in the full array
             start_position = tuple(s.start if hasattr(s, "start") else s[0] for s in info["array-location"])
             # get the coordinates
-            z, y, x = np.indices(_shape, dtype=np.int64) + np.array(start_position)[:, None, None, None]
+            z, y, x = np.indices(_shape, dtype=np.int32) + np.array(start_position)[:, None, None, None]
 
             # now get the center of mass
             sum_z = np.bincount(new_labels.ravel(), weights=z.ravel(), minlength=unique_labels.size)

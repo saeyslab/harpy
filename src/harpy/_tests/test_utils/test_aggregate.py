@@ -415,7 +415,6 @@ def test_get_mask_area_subset(sdata):
 def test_get_center_of_mask(sdata):
     se_labels = sdata["blobs_labels"]
     mask = se_labels.data[None, ...].rechunk(512)
-    # TODO: rasteraggregator should not automatically compute da.unique(), and we should allow passing index to all functions
     aggregator = RasterAggregator(mask_dask_array=mask, image_dask_array=None)
     index = da.unique(mask).compute()
     index = index[index != 0]
