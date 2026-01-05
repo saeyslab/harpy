@@ -5,7 +5,7 @@ from scipy import ndimage
 from scipy.stats import kurtosis, skew
 from xrspatial import zonal_stats
 
-from harpy.utils._aggregate import RasterAggregator, _get_center_of_mass, _get_mask_area
+from harpy.utils._aggregate import RasterAggregator, _get_mask_area
 from harpy.utils._keys import _CELLSIZE_KEY, _INSTANCE_KEY
 
 
@@ -21,15 +21,16 @@ def test_aggregate_stats(sdata):
         image_dask_array=image.rechunk(512),
     )
     stats_funcs = ("sum", "mean", "count", "var", "kurtosis", "skew")
-    dfs = aggregator.aggregate_stats(stats_funcs=stats_funcs)
+    index = da.unique(mask).compute()
+    dfs = aggregator.aggregate_stats(stats_funcs=stats_funcs, index=index)
 
     assert len(dfs) == len(stats_funcs)
 
     for df, _stat in zip(dfs, stats_funcs, strict=True):
         if _stat != "count":
-            assert df.shape == (len(aggregator._labels), image.shape[0] + 1)  # +1 for the _INSTANCE_KEY column
+            assert df.shape == (len(index), image.shape[0] + 1)  # +1 for the _INSTANCE_KEY column
         else:
-            assert df.shape == (len(aggregator._labels), 1 + 1)  # +1 for the _INSTANCE_KEY column
+            assert df.shape == (len(index), 1 + 1)  # +1 for the _INSTANCE_KEY column
 
     stats_funcs = ("sum", "wrong_stat")
 
@@ -414,14 +415,16 @@ def test_get_mask_area_subset(sdata):
 def test_get_center_of_mask(sdata):
     se_labels = sdata["blobs_labels"]
     mask = se_labels.data[None, ...].rechunk(512)
-    df = _get_center_of_mass(mask)
+    # TODO: rasteraggregator should not automatically compute da.unique(), and we should allow passing index to all functions
+    aggregator = RasterAggregator(mask_dask_array=mask, image_dask_array=None)
+    index = da.unique(mask).compute()
+    index = index[index != 0]
+    df = aggregator.center_of_mass(index=index)
 
     mask_compute = mask.compute()
-    scipy_center_of_mass = np.array(
-        ndimage.center_of_mass(input=mask_compute, labels=mask_compute, index=np.unique(mask_compute))
-    )
+    scipy_center_of_mass = np.array(ndimage.center_of_mass(input=mask_compute, labels=mask_compute, index=index))
 
-    assert np.array_equal(df[[0, 1, 2]].values, scipy_center_of_mass, equal_nan=True)
+    assert np.array_equal(df[[0, 1, 2]].values, scipy_center_of_mass)
 
 
 """

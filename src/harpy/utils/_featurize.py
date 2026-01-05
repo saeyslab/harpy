@@ -21,7 +21,7 @@ from numpy.typing import NDArray
 from sklearn.decomposition import PCA
 
 from harpy.image.segmentation._utils import _rechunk_overlap
-from harpy.utils._aggregate import _get_center_of_mass
+from harpy.utils._aggregate import RasterAggregator
 from harpy.utils._keys import _INSTANCE_KEY
 from harpy.utils.utils import _dummy_embedding, _dummy_statistic_image, _make_list
 
@@ -704,20 +704,25 @@ class Featurizer:
         if array_image is not None and array_image.numblocks[1] != 1:
             raise ValueError("Currently we do not allow chunking in z dimension.")
 
-        # rechunk overlap allows to send allow_rechunk to False
-        # this is basically the same as settting allow_rechunk to True, but now we have more control over the chunk sizes
-
         log.info("Calculating center of mass for each instance.")
-        center_of_mass = _get_center_of_mass(
-            mask=array_mask.squeeze(0),  # center of mass does not support channel dimension
-            index=self._labels[self._labels != 0],
+        aggregator = RasterAggregator(
+            mask_dask_array=array_mask.squeeze(0),
+            image_dask_array=None,
             instance_key=_INSTANCE_KEY,
         )
+        center_of_mass = aggregator.center_of_mass(index=self._labels[self._labels != 0])
+        # center_of_mass = _get_center_of_mass(
+        #    mask=array_mask.squeeze(0),  # center of mass does not support channel dimension
+        #    index=self._labels[self._labels != 0],
+        #    instance_key=_INSTANCE_KEY,
+        # )
         log.info("Finished calculating center of mass for each instance.")
 
-        # now we get the chunk id to which each center of mass belongs
+        # now want to obtain the chunk id to which each center of mass belongs
         center_of_mass = center_of_mass.rename(columns={0: "z", 1: "y", 2: "x"}).copy()
 
+        # rechunk overlap allows to send allow_rechunk to False
+        # this is basically the same as settting allow_rechunk to True, but now we have more control over the chunk sizes
         array_mask = _rechunk_overlap(x=array_mask, depth=_depth, chunks=None, allow_adjust_depth=False)
         z_chunks = array_mask.chunks[1]
         y_chunks = array_mask.chunks[2]
@@ -744,7 +749,7 @@ class Featurizer:
         center_of_mass.loc[valid, "y_chunk"] = coord_to_chunk(center_of_mass.loc[valid, "y"].to_numpy(), y_starts, ny)
         center_of_mass.loc[valid, "x_chunk"] = coord_to_chunk(center_of_mass.loc[valid, "x"].to_numpy(), x_starts, nx)
 
-        # we do not need this chunk_id, remove it
+        # we do not need this chunk_id
         # center_of_mass["chunk_id"] = list(
         #    zip(
         #        center_of_mass["z_chunk"].fillna(-1).astype(int),
@@ -938,9 +943,8 @@ class Featurizer:
 
     def extract_instances_deprecated(
         self,
-        depth: int,  # ~max_diameter/2, depth in y and x,
-        diameter: int
-        | None = None,  # will be dimension of resulting chunks in y and x. Can be set to value < max_diameter to optimize performance
+        diameter: int,  # will be dimension of resulting chunks in y and x. Can be set to value < max_diameter to optimize performance
+        depth: int | None,  # ~max_diameter/2, depth in y and x,
         remove_background: bool = True,
         extract_mask: bool = False,
         extract_image: bool = True,
@@ -1076,10 +1080,8 @@ class Featurizer:
         --------
         harpy.tb.extract_instances : Extract instance windows from a labels layer and (optionally) an image layer.
         """
-        if diameter is None:
-            diameter = 2 * depth
-        if diameter > 2 * depth:
-            log.info("Diameter is set to a value > 2*depth. Consider decreasing diameter value for performance.")
+        if depth is None:
+            depth = (diameter // 2) + 1
         _depth = {0: 0, 1: 0, 2: depth, 3: depth}
         if not extract_image and not extract_mask:
             raise ValueError("Please either set 'extract_image' or 'extract_mask' to True.")
