@@ -21,6 +21,7 @@ def _rechunk_overlap(
     x: Array,
     depth: dict[int, int],
     chunks: str | int | tuple[int, ...] | None = None,
+    allow_adjust_depth: bool = True,
 ) -> Array:
     # rechunk, so that we ensure minimum overlap
 
@@ -38,10 +39,15 @@ def _rechunk_overlap(
     for i in range(len(depth)):
         if depth[i] != 0:
             if depth[i] > x.chunksize[i]:
-                log.warning(
-                    f"Depth for dimension {i} exceeds chunk size. Adjusting to a quarter of chunk size: {x.chunksize[i] / 4}"
-                )
-                depth[i] = int(x.chunksize[i] // 4)
+                if allow_adjust_depth:
+                    log.warning(
+                        f"Depth for dimension {i} exceeds chunk size. Adjusting to a quarter of chunk size: {x.chunksize[i] / 4}"
+                    )
+                    depth[i] = int(x.chunksize[i] // 4)
+                else:
+                    raise ValueError(
+                        f"Depth for dimension {i} exceeds chunk size. Consider increasing the chunksize or decreasing depth."
+                    )
 
     new_chunks = tuple(ensure_minimum_chunksize(size + 1, c) for size, c in zip(depth.values(), x.chunks, strict=True))
 

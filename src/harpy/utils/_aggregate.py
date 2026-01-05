@@ -17,7 +17,7 @@ from harpy.utils._keys import _CELLSIZE_KEY, _INSTANCE_KEY
 
 class RasterAggregator:
     """
-    Helper class to calulate aggregated 'sum', 'mean', 'var', 'kurtosis', 'skew', 'area', 'min', 'max' 'quantiles', 'center of mass', 'radii' or 'principal_axes' of image and labels using Dask.
+    Helper class to calulate aggregated 'sum', 'mean', 'var', 'kurtosis', 'skew', 'area', 'min', 'max', 'center of mass', 'radii' or 'principal_axes' of image and labels using Dask.
 
     Parameters
     ----------
@@ -83,9 +83,6 @@ class RasterAggregator:
     ):
         if not np.issubdtype(mask_dask_array.dtype, np.integer):
             raise ValueError(f"'mask_dask_array' should contains chunks of type {np.integer}.")
-        self._labels = (
-            da.unique(mask_dask_array).compute()
-        )  # calculate this one time during initialization, otherwise we would need to calculate this multiple times.
         if image_dask_array is not None:
             assert image_dask_array.ndim == 4, "Currently only 4D image arrays are supported ('c', 'z', 'y', 'x')."
             assert image_dask_array.shape[1:] == mask_dask_array.shape, (
@@ -100,12 +97,15 @@ class RasterAggregator:
         self._mask = mask_dask_array
         self._instance_key = instance_key
         self._instance_size_key = instance_size_key
-        # where area will be saved
+        # where area will be saved (avoid recomputation)
         self._count = None
+        # where mean will be saved (avoid recomputation)
+        self._mean = None
 
     def aggregate_stats(
         self,
         stats_funcs: tuple[str, ...] = ("sum", "mean", "count", "var", "kurtosis", "skew"),
+        index: NDArray | None = None,
     ) -> list[pd.DataFrame]:
         """
         Computes multiple statistical metrics for each label in the mask, across all image channels.
@@ -115,6 +115,8 @@ class RasterAggregator:
         stats_funcs
             A tuple of statistical functions to apply. Supported values include: "sum", "mean",
             "count", "var", "kurtosis", and "skew". Defaults to all.
+        index
+            Labels to consider. If None all labels will be considered, including background.
 
         Returns
         -------
@@ -154,124 +156,193 @@ class RasterAggregator:
         --------
         harpy.tb.allocate_intensity : create an AnnData table from raster data.
         """
+        if index is None:
+            index = da.unique(self._mask).compute()
         if isinstance(stats_funcs, str):
             stats_funcs = (stats_funcs,)
-        results = self._aggregate_stats(stats_funcs=stats_funcs)
+        results = self._aggregate_stats(stats_funcs=stats_funcs, index=index)
         dfs = []
         for _result in results:
             df = pd.DataFrame(_result)
-            df[self._instance_key] = self._labels
+            df[self._instance_key] = index
             dfs.append(df)
 
         return dfs
 
     def aggregate_sum(
         self,
+        index: NDArray | None = None,
     ) -> pd.DataFrame:
         """
         Computes the sum of pixel values within each labeled region for all image channels.
 
+        Parameters
+        ----------
+        index
+            Labels to consider. If None all labels will be considered, including background.
+
         Returns
         -------
         DataFrame where rows represent labels and columns represent channels.
         """
-        return self._aggregate(aggregate_func=partial(self._aggregate_stats, stats_funcs=("sum")))
+        return self._aggregate(
+            aggregate_func=partial(self._aggregate_stats, stats_funcs=("sum"), index=index), index=index
+        )
 
     def aggregate_mean(
         self,
+        index: NDArray | None = None,
     ) -> pd.DataFrame:
         """
         Computes the mean of pixel values within each labeled region for all image channels.
 
+        Parameters
+        ----------
+        index
+            Labels to consider. If None all labels will be considered, including background.
+
         Returns
         -------
         DataFrame where rows represent labels and columns represent channels.
         """
-        return self._aggregate(aggregate_func=partial(self._aggregate_stats, stats_funcs=("mean")))
+        return self._aggregate(
+            aggregate_func=partial(self._aggregate_stats, stats_funcs=("mean"), index=index), index=index
+        )
 
     def aggregate_var(
         self,
+        index: NDArray | None = None,
     ) -> pd.DataFrame:
         """
         Computes the variance of pixel values within each labeled region for all image channels.
 
+        Parameters
+        ----------
+        index
+            Labels to consider. If None all labels will be considered, including background.
+
         Returns
         -------
         DataFrame where rows represent labels and columns represent channels.
         """
-        return self._aggregate(aggregate_func=partial(self._aggregate_stats, stats_funcs=("var")))
+        return self._aggregate(
+            aggregate_func=partial(self._aggregate_stats, stats_funcs=("var"), index=index), index=index
+        )
 
     def aggregate_kurtosis(
         self,
+        index: NDArray | None = None,
     ) -> pd.DataFrame:
         """
         Computes the kurtosis of pixel values within each labeled region for all image channels.
 
+        Parameters
+        ----------
+        index
+            Labels to consider. If None all labels will be considered, including background.
+
         Returns
         -------
         DataFrame where rows represent labels and columns represent channels.
         """
-        return self._aggregate(aggregate_func=partial(self._aggregate_stats, stats_funcs=("kurtosis")))
+        return self._aggregate(
+            aggregate_func=partial(self._aggregate_stats, stats_funcs=("kurtosis"), index=index), index=index
+        )
 
     def aggregate_skew(
         self,
+        index: NDArray | None = None,
     ) -> pd.DataFrame:
         """
         Computes the skewness of pixel values within each labeled region for all image channels.
 
+        Parameters
+        ----------
+        index
+            Labels to consider. If None all labels will be considered, including background.
+
         Returns
         -------
         DataFrame where rows represent labels and columns represent channels.
         """
-        return self._aggregate(aggregate_func=partial(self._aggregate_stats, stats_funcs=("skew")))
+        return self._aggregate(
+            aggregate_func=partial(self._aggregate_stats, stats_funcs=("skew"), index=index), index=index
+        )
 
     def aggregate_max(
         self,
+        index: NDArray | None = None,
     ) -> pd.DataFrame:
         """
         Computes the maximum pixel value within each labeled region for all image channels.
 
+        Parameters
+        ----------
+        index
+            Labels to consider. If None all labels will be considered, including background.
+
         Returns
         -------
         DataFrame where rows represent labels and columns represent channels.
         """
-        return self._aggregate(aggregate_func=self._aggregate_max)
+        return self._aggregate(aggregate_func=partial(self._aggregate_max, index=index), index=index)
 
     def aggregate_min(
         self,
+        index: NDArray | None = None,
     ) -> pd.DataFrame:
         """
         Computes the minimum pixel value within each labeled region for all image channels.
 
+        Parameters
+        ----------
+        index
+            Labels to consider. If None all labels will be considered, including background.
+
         Returns
         -------
         DataFrame where rows represent labels and columns represent channels.
         """
-        return self._aggregate(aggregate_func=self._aggregate_min)
+        return self._aggregate(aggregate_func=partial(self._aggregate_min, index=index), index=index)
 
-    def aggregate_area(self) -> pd.DataFrame:
+    def aggregate_area(self, index: NDArray | None = None) -> pd.DataFrame:
         """
         Computes the area (number of pixels) for each labeled region in the mask.
+
+        Parameters
+        ----------
+        index
+            Labels to consider. If None all labels will be considered, including background.
 
         Returns
         -------
         A DataFrame with one column for area and one for label ID.
         """
         return _get_mask_area(
-            self._mask, index=self._labels, instance_key=self._instance_key, instance_size_key=self._instance_size_key
+            self._mask, index=index, instance_key=self._instance_key, instance_size_key=self._instance_size_key
         )
 
-    def center_of_mass(self) -> pd.DataFrame:
+    def center_of_mass(self, index: NDArray | None = None) -> pd.DataFrame:
         """
         Computes the center of mass for each labeled region in the mask.
 
         Note that we use scipy.ndimage.center_of_mass, which loads the mask into memory.
 
+        Parameters
+        ----------
+        index
+            Labels to consider. If None all labels will be considered, including background.
+
         Returns
         -------
         A DataFrame with columns for spatial coordinates (z,y,x) and label ID.
         """
-        return _get_center_of_mass(self._mask, index=self._labels, instance_key=self._instance_key)
+        if index is None:
+            index = da.unique(self._mask).compute()
+        center_of_mass = self._center_of_mass(index=index)
+        df = pd.DataFrame(center_of_mass)
+        df[self._instance_key] = index
+        return df
 
     '''
     def aggregate_quantiles(
@@ -374,20 +445,27 @@ class RasterAggregator:
         return df
     '''
 
-    def _aggregate(self, aggregate_func: Callable[[da.Array], pd.DataFrame]) -> pd.DataFrame:
-        results = aggregate_func()
+    def _aggregate(
+        self, aggregate_func: Callable[[da.Array], pd.DataFrame], index: NDArray | None = None
+    ) -> pd.DataFrame:
+        if index is None:
+            index = da.unique(self._mask).compute()
+        results = aggregate_func(index=index)
         assert len(results) == 1
         df = pd.DataFrame(results[0])
-        df[self._instance_key] = self._labels
+        df[self._instance_key] = index
         return df
 
     # this calculates "sum", "count", "mean", "var", "kurtosis" and "skew"
     def _aggregate_stats(
         self,
         stats_funcs: tuple[str, ...] = ("sum", "mean", "count", "var", "kurtosis", "skew"),
+        index: NDArray | None = None,
     ) -> list[NDArray]:
         # add an assert that checks that stats_funcs is in the list that is given.
         # first calculate the sum.
+        if index is None:
+            index = da.unique(self._mask).compute()
         if isinstance(stats_funcs, str):
             stats_funcs = (stats_funcs,)
 
@@ -411,10 +489,10 @@ class RasterAggregator:
                 image_block = arrays[1]
                 unique_labels, new_labels = np.unique(mask_block, return_inverse=True)
                 new_labels = np.reshape(new_labels, (-1,))  # flatten, since it may be >1-D
-                idxs = np.searchsorted(unique_labels, self._labels)
+                idxs = np.searchsorted(unique_labels, index)
                 # make all of idxs valid
                 idxs[idxs >= unique_labels.size] = 0
-                found = unique_labels[idxs] == self._labels
+                found = unique_labels[idxs] == index
 
                 n_unique = unique_labels.size
 
@@ -437,7 +515,7 @@ class RasterAggregator:
                 sums = np.stack(sums)
                 sums = sums[:, idxs]
                 sums[:, ~found] = 0
-                # sums is of shape (c,i), with i = len(self._labels)
+                # sums is of shape (c,i), with i = len(index)
                 # we make it i,c,z,y,x
                 sums = sums.T
                 return sums[..., None, None, None].astype(np.float32)
@@ -451,7 +529,7 @@ class RasterAggregator:
                 *arrays,
                 dtype=np.float32,  # for background pixels, theoretically this could overflow for float32
                 chunks=(
-                    (len(self._labels),),
+                    (len(index),),
                     self._image.chunks[0],
                     (1,) * self._image.numblocks[1],
                     (1,) * self._image.numblocks[2],
@@ -462,7 +540,7 @@ class RasterAggregator:
             )
 
             # chunk_sum is an array of shape (i, c, num_blocks_z,  num_blocks_y, num_blocks_x), with i=nr of unique labels
-            sum = chunk_sum.reshape(len(self._labels), self._image.shape[0], -1).sum(axis=-1).compute()
+            sum = chunk_sum.reshape(len(index), self._image.shape[0], -1).sum(axis=-1).compute()
 
         # then calculate the mean
         # i) first calculate the area
@@ -473,22 +551,37 @@ class RasterAggregator:
             or "kurtosis" in stats_funcs
             or "skew" in stats_funcs
         ):
-            if self._count is None:
-                self._count = _calculate_area(self._mask, index=self._labels)
+            if (
+                self._count is None
+                or getattr(self, "_count_index", None) is None
+                or not np.array_equal(self._count_index, index)
+            ):
+                if self._count is not None:
+                    log.warning("Count was computed for a different index. Recalculating.")
+                self._count = _calculate_area(self._mask, index=index)
+                self._count_index = index.copy()
 
         # ii) then calculate the mean
         if "mean" in stats_funcs or "var" in stats_funcs or "kurtosis" in stats_funcs or "skew" in stats_funcs:
-            self._mean = sum / self._count
+            if (
+                self._mean is None
+                or getattr(self, "_mean_index", None) is None
+                or not np.array_equal(self._mean_index, index)
+            ):
+                if self._mean is not None:
+                    log.warning("Mean was computed for a different index. Recalculating.")
+                self._mean = sum / self._count
+                self._mean_index = index.copy()
 
         def sum_of_n(n: int) -> NDArray:
             # calculate the sum of n (e.g. squares if n=2) per cell
             def _calculate_sum_c_per_chunk(mask_block: NDArray, image_block: NDArray, block_info=None) -> NDArray:
                 unique_labels, new_labels = np.unique(mask_block, return_inverse=True)
                 new_labels = np.reshape(new_labels, (-1,))  # flatten, since it may be >1-D
-                idxs = np.searchsorted(unique_labels, self._labels)
+                idxs = np.searchsorted(unique_labels, index)
                 # make all of idxs valid
                 idxs[idxs >= unique_labels.size] = 0
-                found = unique_labels[idxs] == self._labels
+                found = unique_labels[idxs] == index
 
                 # i) self._mean contains the mean over all channels (global), i.e. it is of shape (I,C),
                 #  we only need the channels that are in the current block
@@ -522,7 +615,7 @@ class RasterAggregator:
                 sums_c = np.stack(sums_c)
                 sums_c = sums_c[:, idxs]
                 sums_c[:, ~found] = 0
-                # sums_c is of shape (c,i), with i = len(self._labels)
+                # sums_c is of shape (c,i), with i = len(index)
                 # we make it i,c,z,y,x
                 sums_c = sums_c.T
                 return sums_c[..., None, None, None].astype(np.float32)
@@ -535,7 +628,7 @@ class RasterAggregator:
                 *arrays,
                 dtype=np.float32,
                 chunks=(
-                    (len(self._labels),),  # i: labels
+                    (len(index),),  # i: labels
                     self._image.chunks[0],  # c: channels
                     (1,) * self._image.numblocks[1],  # z-block index
                     (1,) * self._image.numblocks[2],  # y-block index
@@ -547,7 +640,7 @@ class RasterAggregator:
             # chunk_sum_c is an array of shape (i, c, num_blocks_z,  num_blocks_y, num_blocks_x),
             # with i=nr of unique labels, and num_blocks the number of blocks in z,y,x of the image and the mask.
             sum_c_n = (
-                chunk_sum_c.reshape(len(self._labels), self._image.shape[0], -1)
+                chunk_sum_c.reshape(len(index), self._image.shape[0], -1)
                 .sum(axis=-1)  # sum over all chunks
                 .compute()
             )
@@ -591,18 +684,23 @@ class RasterAggregator:
 
     def _aggregate_max(
         self,
+        index: NDArray | None = None,
     ):
-        return self._min_max(min_or_max="max")
+        return self._min_max(min_or_max="max", index=index)
 
     def _aggregate_min(
         self,
+        index: NDArray | None = None,
     ):
-        return self._min_max(min_or_max="min")
+        return self._min_max(min_or_max="min", index=index)
 
     def _min_max(
         self,
         min_or_max: Literal["max", "min"],
+        index: NDArray | None = None,
     ) -> list[NDArray]:
+        if index is None:
+            index = da.unique(self._mask).compute()
         assert min_or_max in ["max", "min"], "Please choose from [ 'min', 'max' ]."
 
         min_dtype, max_dtype = _get_min_max_dtype(self._image)
@@ -616,13 +714,13 @@ class RasterAggregator:
                 min_or_max_c = ndimage.labeled_comprehension(
                     _c_image_block,
                     mask_block,
-                    self._labels,
+                    index,
                     func=np.max if min_or_max == "max" else np.min,
                     out_dtype=image_block.dtype,
                     default=min_dtype
                     if min_or_max == "max"
-                    else max_dtype,  # set the default for labels in self._labels not found in current mask_block
-                )  # also works if we have a lot of labels. scipy makes sure it only searches for labels of self._labels that are in mask_block
+                    else max_dtype,  # set the default for labels in index not found in current mask_block
+                )  # also works if we have a lot of labels. scipy makes sure it only searches for labels of index that are in mask_block
                 min_or_max_array.append(min_or_max_c)
             min_or_max_array = np.stack(min_or_max_array)
             # max is (c,i)
@@ -638,7 +736,7 @@ class RasterAggregator:
             *arrays,
             dtype=self._image.dtype,
             chunks=(
-                (len(self._labels),),
+                (len(index),),
                 self._image.chunks[0],
                 (1,) * self._image.numblocks[1],
                 (1,) * self._image.numblocks[2],
@@ -650,12 +748,74 @@ class RasterAggregator:
 
         # chunk_min_max is an array of shape (i, c, num_blocks_z,  num_blocks_y, num_blocks_x),
         # with i=nr of unique labels, and num_blocks the number of blocks in z,y,x of the image and the mask.
-        chunk_min_max = chunk_min_max.reshape(len(self._labels), self._image.shape[0], -1)
+        chunk_min_max = chunk_min_max.reshape(len(index), self._image.shape[0], -1)
 
         dask_min_max_func = da.max if min_or_max == "max" else da.min
 
         # return a list, so it is in line with self._aggregate_stats()
         return [dask_min_max_func(chunk_min_max, axis=-1).compute()]
+
+    def _center_of_mass(
+        self,
+        index: NDArray | None = None,
+    ) -> NDArray:
+        if index is None:
+            index = da.unique(self._mask).compute()
+        if (
+            self._count is None
+            or getattr(self, "_count_index", None) is None
+            or not np.array_equal(self._count_index, index)
+        ):
+            if self._count is not None:
+                log.warning("Count was computed for a different index. Recalculating.")
+            self._count = _calculate_area(self._mask, index=index)
+            self._count_index = index.copy()
+
+        def _calculate_mass_moment_vector_chunk(mask_block: NDArray, block_info) -> NDArray:
+            # fix labels, so we do not need to calculate for all
+            unique_labels, new_labels = np.unique(mask_block, return_inverse=True)
+            _shape = mask_block.shape
+            new_labels = np.reshape(new_labels, (-1,))
+            idxs = np.searchsorted(unique_labels, index)
+            # make all of idxs valid
+            idxs[idxs >= unique_labels.size] = 0
+            found = unique_labels[idxs] == index
+            info = block_info[0]
+            # global start indices of this block in the full array
+            start_position = tuple(s.start if hasattr(s, "start") else s[0] for s in info["array-location"])
+            # get the coordinates
+            z, y, x = np.indices(_shape, dtype=np.int32) + np.array(start_position)[:, None, None, None]
+
+            # now get the center of mass
+            sum_z = np.bincount(new_labels.ravel(), weights=z.ravel(), minlength=unique_labels.size)
+            sum_y = np.bincount(new_labels.ravel(), weights=y.ravel(), minlength=unique_labels.size)
+            sum_x = np.bincount(new_labels.ravel(), weights=x.ravel(), minlength=unique_labels.size)
+
+            result = np.stack([sum_z, sum_y, sum_x], axis=1)
+            result = result[idxs]
+            result[~found] = 0
+
+            return result[..., None, None, None]  # potential overflow problem, so we do not cast to float64
+
+        mask = self._mask
+        meta = np.empty((0, 0, 0, 0, 0), dtype=np.float64)
+        mass_moment_vector = da.map_blocks(
+            _calculate_mass_moment_vector_chunk,
+            mask,
+            dtype=np.float64,
+            chunks=(
+                (len(index)),
+                (3),
+                (1,) * mask.numblocks[0],
+                (1,) * mask.numblocks[1],
+                (1,) * mask.numblocks[2],
+            ),
+            new_axis=[0, 1],  # i,3 are new axis containing (sum(mi*zi), sum(mi*yi), sum(mi*xi)) for each chunk
+            meta=meta,
+        )
+        center_of_mass = mass_moment_vector.reshape(len(index), 3, -1).sum(axis=-1) / self._count
+
+        return center_of_mass.compute()
 
     '''
     def _aggregate_quantiles_channel(
