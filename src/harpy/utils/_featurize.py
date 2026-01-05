@@ -1895,7 +1895,12 @@ def _extract_instance_patches_sliced(
 
     m0 = mask[0]  # (z,y,x)
 
+    Z, Y, X = m0.shape
+
     for n, (zz, yy, xx, inst) in enumerate(zip(cz, cy, cx, instance_ids, strict=True)):
+        zz = np.clip(zz, 0, Z - 1)
+        yy = np.clip(yy, 0, Y - 1)
+        xx = np.clip(xx, 0, X - 1)
         z0, z1 = zz - hz, zz - hz + dz
         y0, y1 = yy - hy, yy - hy + dy
         x0, x1 = xx - hx, xx - hx + dx
