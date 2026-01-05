@@ -774,7 +774,7 @@ class RasterAggregator:
         def _calculate_mass_moment_vector_chunk(mask_block: NDArray, block_info) -> NDArray:
             # fix labels, so we do not need to calculate for all
             unique_labels, new_labels = np.unique(mask_block, return_inverse=True)
-            _shape = new_labels.shape
+            _shape = mask_block.shape
             new_labels = np.reshape(new_labels, (-1,))
             idxs = np.searchsorted(unique_labels, index)
             # make all of idxs valid
