@@ -6,10 +6,10 @@ from functools import reduce
 from typing import Literal
 
 import anndata as ad
+import dask.array as da
 import numpy as np
 import pandas as pd
 from anndata import AnnData
-from dask_image.ndmeasure import center_of_mass
 from loguru import logger as log
 from spatialdata import SpatialData
 from spatialdata.models import TableModel
@@ -237,6 +237,7 @@ def allocate_intensity(
         instance_key=instance_key,
         instance_size_key=instance_size_key,
     )
+    index = da.unique(_array_mask_rechunked).compute()
 
     if obs_stats is not None:
         stats_funcs = [mode] + [stat for stat in obs_stats if stat != mode]
@@ -257,15 +258,15 @@ def allocate_intensity(
     df_max = df_min = None
     if "max" in stats_funcs:
         stats_funcs.remove("max")
-        df_max = aggregator.aggregate_max()
+        df_max = aggregator.aggregate_max(index=index)
         rename_columns(df_max, prefix="max")
 
     if "min" in stats_funcs:
         stats_funcs.remove("min")
-        df_min = aggregator.aggregate_min()
+        df_min = aggregator.aggregate_min(index=index)
         rename_columns(df_min, prefix="min")
 
-    dfs = aggregator.aggregate_stats(stats_funcs=stats_funcs)
+    dfs = aggregator.aggregate_stats(stats_funcs=stats_funcs, index=index)
 
     df_X = dfs[0]  # the first one is the mode
 
@@ -303,6 +304,8 @@ def allocate_intensity(
 
     if calculate_center_of_mass:
         # add center of cells here (via the masks).
+        coordinates = aggregator._center_of_mass(index=index[index != 0])
+        """
         _array_mask = _array_mask.squeeze(0) if to_squeeze else _array_mask
 
         # dask image center of mass for masks seems bugged (very slow), use in memory scipy.ndimage.center_of_mass for now.
@@ -322,12 +325,12 @@ def allocate_intensity(
             coordinates = np.array(
                 ndimage.center_of_mass(input=_array_mask_in_memory, labels=_array_mask_in_memory, index=_cells_id)
             )
-        coordinates += (
-            np.array([t1y, t1x]) if to_squeeze else np.array([0, t1y, t1x])
-        )  # we account for possible translation in y and x
+        """
+        coordinates += np.array([0, t1y, t1x])  # we account for possible translation in y and x
         # swap y and x, because adata.obsm["SPATIAL"] requires x,y.
         coordinates[:, [-2, -1]] = coordinates[:, [-1, -2]]
-
+        if to_squeeze:
+            coordinates = coordinates[:, -2:]
         adata.obsm[spatial_key] = coordinates
 
     # merge the obs

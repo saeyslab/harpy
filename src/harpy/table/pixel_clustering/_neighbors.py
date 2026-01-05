@@ -231,8 +231,9 @@ def _get_values_grid_most_frequent(
         instance_key=_INSTANCE_KEY,
     )
 
-    df_center_of_mass = aggregator.center_of_mass()
-    df_center_of_mass = df_center_of_mass[df_center_of_mass[_INSTANCE_KEY] != 0]
+    # this way we prevent recalculation of labels
+    index = featurizer._labels[featurizer._labels != 0]
+    df_center_of_mass = aggregator.center_of_mass(index=index)
     df_center_of_mass.rename(columns={0: "z", 1: "y", 2: "x"}, inplace=True)
 
     # sanity check

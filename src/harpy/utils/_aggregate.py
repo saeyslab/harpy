@@ -156,6 +156,8 @@ class RasterAggregator:
         --------
         harpy.tb.allocate_intensity : create an AnnData table from raster data.
         """
+        if index is None:
+            index = da.unique(self._mask).compute()
         if isinstance(stats_funcs, str):
             stats_funcs = (stats_funcs,)
         results = self._aggregate_stats(stats_funcs=stats_funcs, index=index)
@@ -335,6 +337,8 @@ class RasterAggregator:
         -------
         A DataFrame with columns for spatial coordinates (z,y,x) and label ID.
         """
+        if index is None:
+            index = da.unique(self._mask).compute()
         center_of_mass = self._center_of_mass(index=index)
         df = pd.DataFrame(center_of_mass)
         df[self._instance_key] = index
