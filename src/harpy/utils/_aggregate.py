@@ -358,10 +358,10 @@ class RasterAggregator:
         A DataFrame with columns for spatial coordinates (z,y,x) and label ID.
         """
         if index is None:
-            index = da.unique(self._mask).compute()
+            index = _da_unique(self._mask, run_on_gpu=self._run_on_gpu)
         center_of_mass = self._center_of_mass(index=index)
-        df = pd.DataFrame(center_of_mass)
-        df[self._instance_key] = index
+        df = pd.DataFrame(_to_numpy(center_of_mass))
+        df[self._instance_key] = _to_numpy(index)
         return df
 
     '''
@@ -779,25 +779,36 @@ class RasterAggregator:
         self,
         index: NDArray | None = None,
     ) -> NDArray:
+        xp, _ = _get_xp(getattr(self._mask, "_meta", None), run_on_gpu=self._run_on_gpu)
+
         if index is None:
-            index = da.unique(self._mask).compute()
+            index = _da_unique(self._mask, run_on_gpu=self._run_on_gpu)
+        # put on correct backend
+        index = xp.asarray(index)
+        if getattr(self, "_count_index", None) is not None:
+            self._count_index = xp.asarray(self._count_index)
         if (
             self._count is None
             or getattr(self, "_count_index", None) is None
-            or not np.array_equal(self._count_index, index)
+            or not xp.array_equal(
+                self._count_index, index
+            )  # FIXME consider moving self._count and self._count_index to cpu when no longer needed on gpu
         ):
             if self._count is not None:
                 log.warning("Count was computed for a different index. Recalculating.")
-            self._count = _calculate_area(self._mask, index=index)
+            self._count = _calculate_area(self._mask, index=index, run_on_gpu=self._run_on_gpu)
             self._count_index = index.copy()
+        self._count = xp.asarray(self._count)
 
         def _calculate_mass_moment_vector_chunk(mask_block: NDArray, block_info) -> NDArray:
+            # for safety
+            xp, _ = _get_xp(mask_block, run_on_gpu=self._run_on_gpu)
             # fix labels, so we do not need to calculate for all
-            unique_labels, new_labels = np.unique(mask_block, return_inverse=True)
-            new_labels = np.reshape(new_labels, (-1,))
-            idxs = np.searchsorted(unique_labels, index)
+            unique_labels, new_labels = xp.unique(mask_block, return_inverse=True)
+            new_labels = xp.reshape(new_labels, (-1,))
+            idxs = xp.searchsorted(unique_labels, index)
             # make all of idxs valid
-            idxs[idxs >= unique_labels.size] = 0
+            idxs = xp.where(idxs >= unique_labels.size, 0, idxs)
             found = unique_labels[idxs] == index
             info = block_info[0]
             # global start indices of this block in the full array
@@ -806,7 +817,7 @@ class RasterAggregator:
             # get the coordinates
             nz, ny, nx = mask_block.shape
             N = nz * ny * nx
-            lin = np.arange(N, dtype=np.int64)
+            lin = xp.arange(N, dtype=xp.int64)
             stride_yx = ny * nx
             z = lin // stride_yx
             rem = lin - z * stride_yx
@@ -817,19 +828,20 @@ class RasterAggregator:
             y = y + start_y
             x = x + start_x
 
-            # now get the center of mass
-            sum_z = np.bincount(new_labels.ravel(), weights=z.ravel(), minlength=unique_labels.size)
-            sum_y = np.bincount(new_labels.ravel(), weights=y.ravel(), minlength=unique_labels.size)
-            sum_x = np.bincount(new_labels.ravel(), weights=x.ravel(), minlength=unique_labels.size)
+            # now get the mass moment vector
+            wdtype = xp.float64
+            sum_z = xp.bincount(new_labels.ravel(), weights=z.astype(wdtype), minlength=unique_labels.size)
+            sum_y = xp.bincount(new_labels.ravel(), weights=y.astype(wdtype), minlength=unique_labels.size)
+            sum_x = xp.bincount(new_labels.ravel(), weights=x.astype(wdtype), minlength=unique_labels.size)
 
-            result = np.stack([sum_z, sum_y, sum_x], axis=1)
+            result = xp.stack([sum_z, sum_y, sum_x], axis=1)
             result = result[idxs]
-            result[~found] = 0
+            result = xp.where(found[:, None], result, 0)
 
             return result[..., None, None, None]  # potential overflow problem, so we do not cast to float64
 
         mask = self._mask
-        meta = np.empty((0, 0, 0, 0, 0), dtype=np.float64)
+        meta = xp.empty((0, 0, 0, 0, 0), dtype=xp.float64)
         mass_moment_vector = da.map_blocks(
             _calculate_mass_moment_vector_chunk,
             mask,
@@ -1033,13 +1045,12 @@ def _calculate_area(mask: da.Array, index: NDArray | None = None, run_on_gpu: bo
     if index is None:
         index = _da_unique(mask, run_on_gpu=run_on_gpu)
 
-    # put on correct backend (should already be fine via _da_unique)
+    # put on correct backend
     index = xp.asarray(index)
 
     def _calculate_count_per_chunk(mask_block: NDArray) -> NDArray:
         # for safety
         xp, _ = _get_xp(mask_block, run_on_gpu=run_on_gpu)
-        # index_xp = index_cp if (is_cupy and index_cp is not None) else np.asarray(index)
         # fix labels, so we do not need to calculate for all
         unique_labels, new_labels = xp.unique(mask_block, return_inverse=True)
         new_labels = xp.reshape(new_labels, (-1,))  # flatten, since it may be >1-D
@@ -1065,7 +1076,7 @@ def _calculate_area(mask: da.Array, index: NDArray | None = None, run_on_gpu: bo
     chunk_count = da.map_blocks(
         _calculate_count_per_chunk,
         mask,
-        dtype=xp.float32,
+        dtype=np.float32,
         chunks=(
             (len(index)),
             (1,) * mask.numblocks[0],

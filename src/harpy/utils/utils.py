@@ -273,7 +273,7 @@ def _to_cupy_dask_array(arr: da.Array) -> da.Array:
     return x_cu
 
 
-def _to_numpy(x):
+def _to_numpy(x) -> NDArray:
     """Return a NumPy array (no-op for NumPy; explicit copy to host for CuPy)."""
     try:
         import cupy as cp
