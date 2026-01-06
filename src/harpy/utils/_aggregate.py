@@ -13,6 +13,7 @@ from numpy.typing import NDArray
 from scipy import ndimage
 
 from harpy.utils._keys import _CELLSIZE_KEY, _INSTANCE_KEY
+from harpy.utils.utils import _da_unique, _get_xp, _to_cupy_dask_array, _to_numpy
 
 
 class RasterAggregator:
@@ -80,9 +81,11 @@ class RasterAggregator:
         image_dask_array: da.Array | None,
         instance_key: str = _INSTANCE_KEY,
         instance_size_key: str = _CELLSIZE_KEY,
+        run_on_gpu: bool = True,
     ):
         if not np.issubdtype(mask_dask_array.dtype, np.integer):
             raise ValueError(f"'mask_dask_array' should contains chunks of type {np.integer}.")
+        self._image = None
         if image_dask_array is not None:
             assert image_dask_array.ndim == 4, "Currently only 4D image arrays are supported ('c', 'z', 'y', 'x')."
             assert image_dask_array.shape[1:] == mask_dask_array.shape, (
@@ -94,6 +97,22 @@ class RasterAggregator:
             self._image = image_dask_array
         assert mask_dask_array.ndim == 3, "Currently only 3D masks are supported ('z', 'y', 'x')."
 
+        if run_on_gpu:
+            try:
+                import cupy
+
+                _ = cupy
+            except ImportError:
+                log.warning(
+                    "Parameter 'run_on_gpu' was set to True, while 'cupy' is not installed. Setting 'run_on_gpu' to False."
+                )
+                run_on_gpu = False
+
+        if run_on_gpu:
+            mask_dask_array = _to_cupy_dask_array(mask_dask_array)
+            if self._image is not None:
+                self._image = _to_cupy_dask_array(self._image)
+
         self._mask = mask_dask_array
         self._instance_key = instance_key
         self._instance_size_key = instance_size_key
@@ -101,6 +120,7 @@ class RasterAggregator:
         self._count = None
         # where mean will be saved (avoid recomputation)
         self._mean = None
+        self._run_on_gpu = run_on_gpu
 
     def aggregate_stats(
         self,
@@ -997,47 +1017,55 @@ def _get_mask_area(
     index: NDArray | None = None,
     instance_key: str = _INSTANCE_KEY,
     instance_size_key: str = _CELLSIZE_KEY,
+    run_on_gpu: bool = True,
 ) -> pd.DataFrame:
     assert mask.ndim == 3, "Currently only 3D masks are supported ('z','y','x')."
     if index is None:
-        index = da.unique(mask).compute()
-    _result = _calculate_area(mask, index=index)
-    return pd.DataFrame({instance_key: index, instance_size_key: _result.ravel()})
+        index = _da_unique(mask, run_on_gpu=run_on_gpu)
+    _result = _calculate_area(mask, index=index, run_on_gpu=run_on_gpu)
+    return pd.DataFrame({instance_key: _to_numpy(index), instance_size_key: _to_numpy(_result.ravel())})
 
 
-def _calculate_area(mask: da.Array, index: NDArray | None = None) -> NDArray:
+def _calculate_area(mask: da.Array, index: NDArray | None = None, run_on_gpu: bool = True) -> NDArray:
     assert mask.ndim == 3, "Currently only 3D masks are supported ('z','y','x')."
+    xp, _ = _get_xp(getattr(mask, "_meta", None), run_on_gpu=run_on_gpu)
 
     if index is None:
-        index = da.unique(mask).compute()
+        index = _da_unique(mask, run_on_gpu=run_on_gpu)
+
+    # put on correct backend (should already be fine via _da_unique)
+    index = xp.asarray(index)
 
     def _calculate_count_per_chunk(mask_block: NDArray) -> NDArray:
+        # for safety
+        xp, _ = _get_xp(mask_block, run_on_gpu=run_on_gpu)
+        # index_xp = index_cp if (is_cupy and index_cp is not None) else np.asarray(index)
         # fix labels, so we do not need to calculate for all
-        unique_labels, new_labels = np.unique(mask_block, return_inverse=True)
-        new_labels = np.reshape(new_labels, (-1,))  # flatten, since it may be >1-D
-        idxs = np.searchsorted(unique_labels, index)
+        unique_labels, new_labels = xp.unique(mask_block, return_inverse=True)
+        new_labels = xp.reshape(new_labels, (-1,))  # flatten, since it may be >1-D
+        idxs = xp.searchsorted(unique_labels, index)
         # make all of idxs valid
-        idxs[idxs >= unique_labels.size] = 0
+        idxs = xp.where(idxs >= unique_labels.size, 0, idxs)
         found = unique_labels[idxs] == index
         # calculate counts
-        counts = np.bincount(
+        counts = xp.bincount(
             new_labels, minlength=unique_labels.size
         )  # NOTE: specifying minlength not really necessary here, we keep it for documentation
         counts = counts[idxs]
-        counts[~found] = 0
+        counts = xp.where(found, counts, 0)
         # counts is an array of shape len(self._lables)
         # we make it i,z,y,x
         return counts[
             :, None, None, None
         ].astype(
-            np.float32
+            xp.float32
         )  # TODO, potential overflow problem, should we remove background, or just cast to np.float64 (which it is already)
 
-    meta = np.empty((0, 0, 0, 0, 0), dtype=np.float32)
+    meta = xp.empty((0, 0, 0, 0, 0), dtype=xp.float32)
     chunk_count = da.map_blocks(
         _calculate_count_per_chunk,
         mask,
-        dtype=np.float32,
+        dtype=xp.float32,
         chunks=(
             (len(index)),
             (1,) * mask.numblocks[0],
