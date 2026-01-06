@@ -244,7 +244,7 @@ def _dummy_statistic_mask(array: NDArray, value: int) -> NDArray:
 
 
 def _get_xp(arr=None, run_on_gpu=True):
-    """Returns (xp, is_cupy). If arr is provided, choose based on arr type (so you don't accidentally mix)."""
+    """Returns (xp, is_cupy). If arr is provided, choose based on arr type."""
     if not run_on_gpu:
         return np, False
     try:
@@ -274,7 +274,7 @@ def _to_cupy_dask_array(arr: da.Array) -> da.Array:
 
 
 def _to_numpy(x) -> NDArray:
-    """Return a NumPy array (no-op for NumPy; explicit copy to host for CuPy)."""
+    """Convert from cupy to numpy."""
     try:
         import cupy as cp
 
@@ -285,10 +285,10 @@ def _to_numpy(x) -> NDArray:
     return np.asarray(x)
 
 
-def _da_unique(arr: da.Array, run_on_gpu: bool = True) -> NDArray:  # FIXME fix type
+def _da_unique(arr: da.Array, run_on_gpu: bool = True) -> NDArray:  # FIXME fix type, can return a cupy numpy array
+    """Compute unique ids in arr."""
     xp, _ = _get_xp(getattr(arr, "_meta", None), run_on_gpu=run_on_gpu)
 
-    # build delayed blocks
     blocks = arr.to_delayed().ravel()
 
     @dask.delayed

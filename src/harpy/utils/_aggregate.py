@@ -33,6 +33,8 @@ class RasterAggregator:
         name of the instance key
     instance_size_key
         name of the instance size key
+    run_on_gpu
+        Whether to run on gpu. If no installation of cupy could be detected, will fall back to cpu.
 
     Raises
     ------
@@ -177,14 +179,14 @@ class RasterAggregator:
         harpy.tb.allocate_intensity : create an AnnData table from raster data.
         """
         if index is None:
-            index = da.unique(self._mask).compute()
+            index = _da_unique(self._mask, run_on_gpu=self._run_on_gpu)
         if isinstance(stats_funcs, str):
             stats_funcs = (stats_funcs,)
         results = self._aggregate_stats(stats_funcs=stats_funcs, index=index)
         dfs = []
         for _result in results:
-            df = pd.DataFrame(_result)
-            df[self._instance_key] = index
+            df = pd.DataFrame(_to_numpy(_result))
+            df[self._instance_key] = _to_numpy(index)
             dfs.append(df)
 
         return dfs
@@ -469,11 +471,11 @@ class RasterAggregator:
         self, aggregate_func: Callable[[da.Array], pd.DataFrame], index: NDArray | None = None
     ) -> pd.DataFrame:
         if index is None:
-            index = da.unique(self._mask).compute()
+            index = _da_unique(self._mask, run_on_gpu=self._run_on_gpu)
         results = aggregate_func(index=index)
         assert len(results) == 1
-        df = pd.DataFrame(results[0])
-        df[self._instance_key] = index
+        df = pd.DataFrame(_to_numpy(results[0]))
+        df[self._instance_key] = _to_numpy(index)
         return df
 
     # this calculates "sum", "count", "mean", "var", "kurtosis" and "skew"
@@ -484,8 +486,14 @@ class RasterAggregator:
     ) -> list[NDArray]:
         # add an assert that checks that stats_funcs is in the list that is given.
         # first calculate the sum.
+        _, is_cupy_mask = _get_xp(getattr(self._mask, "_meta", None), run_on_gpu=self._run_on_gpu)
+        xp, is_cupy_image = _get_xp(getattr(self._image, "_meta", None), run_on_gpu=self._run_on_gpu)
+        if is_cupy_mask != is_cupy_image:
+            raise ValueError("Mask and image should be on the same backend.")
         if index is None:
-            index = da.unique(self._mask).compute()
+            index = _da_unique(self._mask, run_on_gpu=self._run_on_gpu)
+        # put on currect backend
+        index = xp.asarray(index)
         if isinstance(stats_funcs, str):
             stats_funcs = (stats_funcs,)
 
@@ -494,7 +502,6 @@ class RasterAggregator:
         assert not invalid_funcs, (
             f"Invalid statistic function(s): '{invalid_funcs}'. Allowed functions: '{allowed_funcs}'."
         )
-
         if (
             "sum" in stats_funcs
             or "mean" in stats_funcs
@@ -505,18 +512,23 @@ class RasterAggregator:
             # calculate the sum
             def _calculate_sum_per_chunk(*arrays: NDArray) -> NDArray:
                 assert len(arrays) == 2
-                mask_block = arrays[0]
+                mask_block = arrays[0][0]  # make it z,y,x
                 image_block = arrays[1]
-                unique_labels, new_labels = np.unique(mask_block, return_inverse=True)
-                new_labels = np.reshape(new_labels, (-1,))  # flatten, since it may be >1-D
-                idxs = np.searchsorted(unique_labels, index)
+                _, is_cupy_index = _get_xp(index, run_on_gpu=self._run_on_gpu)
+                _, is_cupy_mask = _get_xp(mask_block, run_on_gpu=self._run_on_gpu)
+                xp, is_cupy_image = _get_xp(image_block, run_on_gpu=self._run_on_gpu)
+                if len({is_cupy_mask, is_cupy_image, is_cupy_index}) != 1:
+                    raise ValueError("Mask and image should be on the same backend.")
+                unique_labels, new_labels = xp.unique(mask_block, return_inverse=True)
+                new_labels = xp.reshape(new_labels, (-1,))  # flatten, since it may be >1-D
+                idxs = xp.searchsorted(unique_labels, index)
                 # make all of idxs valid
-                idxs[idxs >= unique_labels.size] = 0
+                idxs = xp.where(idxs >= unique_labels.size, 0, idxs)
                 found = unique_labels[idxs] == index
 
                 n_unique = unique_labels.size
 
-                # NOTE: doing it without a for loop, e.g. with one bincount,
+                # NOTE: doing it without a for loop, e.g. with one bincount, # FIXME: check if on GPU one big bincount is not faster
                 # takes a lot of RAM when there are many channels (>100)
                 # C = image.shape[0]
                 # encoded_labels = new_labels[None, :] + n_unique * np.arange(C)[:, None]  # shape (c,i)
@@ -530,20 +542,20 @@ class RasterAggregator:
                 sums = []
                 for _c_image_block in image_block:
                     sums.append(
-                        np.bincount(new_labels.ravel(), _c_image_block.ravel(), minlength=n_unique),
+                        xp.bincount(new_labels.ravel(), _c_image_block.ravel(), minlength=n_unique),
                     )
-                sums = np.stack(sums)
+                sums = xp.stack(sums)
                 sums = sums[:, idxs]
-                sums[:, ~found] = 0
+                sums = xp.where(found[None, :], sums, 0)
                 # sums is of shape (c,i), with i = len(index)
                 # we make it i,c,z,y,x
                 sums = sums.T
-                return sums[..., None, None, None].astype(np.float32)
+                return sums[..., None, None, None].astype(xp.float32)
 
             # add dummy C dimension for the mask, so we can pass it to map_blocks
             arrays = [self._mask[None, ...], self._image]
 
-            meta = np.empty((0, 0, 0, 0, 0), dtype=np.float32)
+            meta = xp.empty((0, 0, 0, 0, 0), dtype=xp.float32)
             chunk_sum = da.map_blocks(
                 _calculate_sum_per_chunk,
                 *arrays,
@@ -571,36 +583,48 @@ class RasterAggregator:
             or "kurtosis" in stats_funcs
             or "skew" in stats_funcs
         ):
+            if getattr(self, "_count_index", None) is not None:
+                self._count_index = xp.asarray(self._count_index)
             if (
                 self._count is None
                 or getattr(self, "_count_index", None) is None
-                or not np.array_equal(self._count_index, index)
+                or not xp.array_equal(self._count_index, index)
             ):
                 if self._count is not None:
                     log.warning("Count was computed for a different index. Recalculating.")
-                self._count = _calculate_area(self._mask, index=index)
+                self._count = _calculate_area(self._mask, index=index, run_on_gpu=self._run_on_gpu)
                 self._count_index = index.copy()
+            self._count = xp.asarray(self._count)
 
         # ii) then calculate the mean
         if "mean" in stats_funcs or "var" in stats_funcs or "kurtosis" in stats_funcs or "skew" in stats_funcs:
+            if getattr(self, "_mean_index", None) is not None:
+                self._mean_index = xp.asarray(self._mean_index)
             if (
                 self._mean is None
                 or getattr(self, "_mean_index", None) is None
-                or not np.array_equal(self._mean_index, index)
+                or not xp.array_equal(self._mean_index, index)
             ):
                 if self._mean is not None:
                     log.warning("Mean was computed for a different index. Recalculating.")
                 self._mean = sum / self._count
                 self._mean_index = index.copy()
+            self._mean = xp.asarray(self._mean)
 
         def sum_of_n(n: int) -> NDArray:
             # calculate the sum of n (e.g. squares if n=2) per cell
             def _calculate_sum_c_per_chunk(mask_block: NDArray, image_block: NDArray, block_info=None) -> NDArray:
-                unique_labels, new_labels = np.unique(mask_block, return_inverse=True)
-                new_labels = np.reshape(new_labels, (-1,))  # flatten, since it may be >1-D
-                idxs = np.searchsorted(unique_labels, index)
+                mask_block = mask_block[0]  # make it z,y,x again
+                _, is_cupy_index = _get_xp(index, run_on_gpu=self._run_on_gpu)
+                _, is_cupy_mask = _get_xp(mask_block, run_on_gpu=self._run_on_gpu)
+                xp, is_cupy_image = _get_xp(image_block, run_on_gpu=self._run_on_gpu)
+                if len({is_cupy_mask, is_cupy_image, is_cupy_index}) != 1:
+                    raise ValueError("Mask, image and index should be on the same backend.")
+                unique_labels, new_labels = xp.unique(mask_block, return_inverse=True)
+                new_labels = xp.reshape(new_labels, (-1,))  # flatten, since it may be >1-D
+                idxs = xp.searchsorted(unique_labels, index)
                 # make all of idxs valid
-                idxs[idxs >= unique_labels.size] = 0
+                idxs = xp.where(idxs >= unique_labels.size, 0, idxs)
                 found = unique_labels[idxs] == index
 
                 # i) self._mean contains the mean over all channels (global), i.e. it is of shape (I,C),
@@ -630,19 +654,20 @@ class RasterAggregator:
                 sums_c = []
                 for _c_weights in centered_weights:
                     sums_c.append(
-                        np.bincount(new_labels.ravel(), _c_weights.ravel(), minlength=n_unique),
+                        xp.bincount(new_labels.ravel(), _c_weights.ravel(), minlength=n_unique),
                     )
-                sums_c = np.stack(sums_c)
+                sums_c = xp.stack(sums_c)
                 sums_c = sums_c[:, idxs]
-                sums_c[:, ~found] = 0
+                sums_c = xp.where(found[None, :], sums_c, 0)
+                # sums_c[:, ~found] = 0
                 # sums_c is of shape (c,i), with i = len(index)
                 # we make it i,c,z,y,x
                 sums_c = sums_c.T
-                return sums_c[..., None, None, None].astype(np.float32)
+                return sums_c[..., None, None, None].astype(xp.float32)
 
             arrays = [self._mask[None, ...], self._image]
 
-            meta = np.empty((0, 0, 0, 0, 0), dtype=np.float32)
+            meta = xp.empty((0, 0, 0, 0, 0), dtype=xp.float32)
             chunk_sum_c = da.map_blocks(
                 _calculate_sum_c_per_chunk,
                 *arrays,
@@ -686,15 +711,15 @@ class RasterAggregator:
         if "kurtosis" in stats_funcs:
             # fisher kurtosis
             kurtosis = ((sum_fourth / self._count) / ((sum_square / self._count) ** 2)) - 3
-            if np.isnan(kurtosis).any():
+            if xp.isnan(kurtosis).any():
                 log.warning("Replacing NaN values in 'kurtosis' with 0 for affected instances.")
-                kurtosis = np.nan_to_num(kurtosis, nan=0)
+                kurtosis = xp.nan_to_num(kurtosis, nan=0)
             to_return["kurtosis"] = kurtosis
         if "skew" in stats_funcs:
-            skewness = (sum_third / self._count) / (np.sqrt(sum_square / self._count)) ** 3
-            if np.isnan(skewness).any():
+            skewness = (sum_third / self._count) / (xp.sqrt(sum_square / self._count)) ** 3
+            if xp.isnan(skewness).any():
                 log.warning("Replacing NaN values in 'skewness' with 0 for affected instances.")
-                skewness = np.nan_to_num(skewness, nan=0)
+                skewness = xp.nan_to_num(skewness, nan=0)
 
             to_return["skew"] = skewness
 
@@ -802,7 +827,10 @@ class RasterAggregator:
 
         def _calculate_mass_moment_vector_chunk(mask_block: NDArray, block_info) -> NDArray:
             # for safety
-            xp, _ = _get_xp(mask_block, run_on_gpu=self._run_on_gpu)
+            _, is_cupy_index = _get_xp(index, run_on_gpu=self._run_on_gpu)
+            xp, is_cupy_mask = _get_xp(mask_block, run_on_gpu=self._run_on_gpu)
+            if len({is_cupy_mask, is_cupy_index}) != 1:
+                raise ValueError("Mask and index should be on the same backend.")
             # fix labels, so we do not need to calculate for all
             unique_labels, new_labels = xp.unique(mask_block, return_inverse=True)
             new_labels = xp.reshape(new_labels, (-1,))
@@ -1050,7 +1078,10 @@ def _calculate_area(mask: da.Array, index: NDArray | None = None, run_on_gpu: bo
 
     def _calculate_count_per_chunk(mask_block: NDArray) -> NDArray:
         # for safety
-        xp, _ = _get_xp(mask_block, run_on_gpu=run_on_gpu)
+        _, is_cupy_index = _get_xp(index, run_on_gpu=run_on_gpu)
+        xp, is_cupy_mask = _get_xp(mask_block, run_on_gpu=run_on_gpu)
+        if len({is_cupy_mask, is_cupy_index}) != 1:
+            raise ValueError("Mask and index should be on the same backend.")
         # fix labels, so we do not need to calculate for all
         unique_labels, new_labels = xp.unique(mask_block, return_inverse=True)
         new_labels = xp.reshape(new_labels, (-1,))  # flatten, since it may be >1-D
