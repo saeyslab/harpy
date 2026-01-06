@@ -774,7 +774,6 @@ class RasterAggregator:
         def _calculate_mass_moment_vector_chunk(mask_block: NDArray, block_info) -> NDArray:
             # fix labels, so we do not need to calculate for all
             unique_labels, new_labels = np.unique(mask_block, return_inverse=True)
-            _shape = mask_block.shape
             new_labels = np.reshape(new_labels, (-1,))
             idxs = np.searchsorted(unique_labels, index)
             # make all of idxs valid
@@ -783,8 +782,20 @@ class RasterAggregator:
             info = block_info[0]
             # global start indices of this block in the full array
             start_position = tuple(s.start if hasattr(s, "start") else s[0] for s in info["array-location"])
+            start_z, start_y, start_x = map(int, start_position)
             # get the coordinates
-            z, y, x = np.indices(_shape, dtype=np.int32) + np.array(start_position)[:, None, None, None]
+            nz, ny, nx = mask_block.shape
+            N = nz * ny * nx
+            lin = np.arange(N, dtype=np.int64)
+            stride_yx = ny * nx
+            z = lin // stride_yx
+            rem = lin - z * stride_yx
+            y = rem // nx
+            x = rem - y * nx
+            # shift to global coords
+            z = z + start_z
+            y = y + start_y
+            x = x + start_x
 
             # now get the center of mass
             sum_z = np.bincount(new_labels.ravel(), weights=z.ravel(), minlength=unique_labels.size)
