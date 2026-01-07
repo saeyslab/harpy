@@ -744,37 +744,96 @@ class RasterAggregator:
         min_or_max: Literal["max", "min"],
         index: NDArray | None = None,
     ) -> list[NDArray]:
+        _, is_cupy_mask = _get_xp(getattr(self._mask, "_meta", None), run_on_gpu=self._run_on_gpu)
+        xp, is_cupy_image = _get_xp(getattr(self._image, "_meta", None), run_on_gpu=self._run_on_gpu)
+        if is_cupy_mask != is_cupy_image:
+            raise ValueError("Mask and image should be on the same backend.")
         if index is None:
-            index = da.unique(self._mask).compute()
+            index = _da_unique(self._mask, run_on_gpu=self._run_on_gpu)
+        # put on currect backend
+        index = xp.asarray(index)
         assert min_or_max in ["max", "min"], "Please choose from [ 'min', 'max' ]."
 
-        min_dtype, max_dtype = _get_min_max_dtype(self._image)
+        def _calculate_min_max_per_chunk(*arrays: NDArray):
+            """Returns (mins, maxs) with shape (C, n_labels+1). Row = channel, col = label id."""
+            assert len(arrays) == 2
+            mask_block = arrays[0][0]  # make it z,y,x
+            image_block = arrays[1]
+            C = image_block.shape[0]
+            assert mask_block.shape == image_block.shape[1:]
 
+            # relabel to 0....K-1
+            unique_labels, new_labels = xp.unique(mask_block, return_inverse=True)
+            new_labels = xp.reshape(new_labels, (-1,))  # flatten, since it may be >1-D
+            idxs = xp.searchsorted(unique_labels, index)
+            # make all of idxs valid
+            idxs = xp.where(idxs >= unique_labels.size, 0, idxs)
+            found = unique_labels[idxs] == index
+            image_block = image_block.reshape(C, -1)
+            K = unique_labels.size
+
+            if xp.issubdtype(image_block.dtype, xp.integer):
+                info = xp.iinfo(image_block.dtype)
+                init_min = info.max
+                init_max = info.min
+            else:
+                init_min = xp.inf
+                init_max = -xp.inf
+
+            if min_or_max == "min":
+                out = xp.full((C, K), init_min, dtype=image_block.dtype)
+            else:
+                out = xp.full((C, K), init_max, dtype=image_block.dtype)
+
+            N = new_labels.size
+            ch = xp.repeat(xp.arange(C), N)  # (c*N,)
+            lab = xp.tile(new_labels, C)  # (c*N,)
+            vals = image_block.reshape(-1)  # (c*N,)
+
+            if min_or_max == "min":
+                xp.minimum.at(out, (ch, lab), vals)
+            else:
+                xp.maximum.at(out, (ch, lab), vals)
+
+            out = out.transpose(1, 0)  # make it (N,c)
+            out = out[idxs]  # make it (i,c)
+            # fill
+            out = xp.where(found[:, None], out, init_min if min_or_max == "min" else init_max)
+            return out[..., None, None, None]  # make it i,c,z,y,x
+
+        """ alternative implementation, slower, especially on GPU
         def _calculate_min_max_per_chunk(*arrays: NDArray) -> NDArray:
             assert len(arrays) == 2
-            mask_block = arrays[0]
+            mask_block = arrays[0][0]  # make it z,y,x
             image_block = arrays[1]
+            _, is_cupy_index = _get_xp(index, run_on_gpu=self._run_on_gpu)
+            _, is_cupy_mask = _get_xp(mask_block, run_on_gpu=self._run_on_gpu)
+            xp, is_cupy_image = _get_xp(image_block, run_on_gpu=self._run_on_gpu)
+            if len({is_cupy_mask, is_cupy_image, is_cupy_index}) != 1:
+                raise ValueError("Mask and image should be on the same backend.")
+
             min_or_max_array = []
             for _c_image_block in image_block:
-                min_or_max_c = ndimage.labeled_comprehension(
+                min_or_max_c = labeled_comprehension(
                     _c_image_block,
                     mask_block,
                     index,
-                    func=np.max if min_or_max == "max" else np.min,
+                    func=xp.max if min_or_max == "max" else xp.min,
                     out_dtype=image_block.dtype,
                     default=min_dtype
                     if min_or_max == "max"
                     else max_dtype,  # set the default for labels in index not found in current mask_block
                 )  # also works if we have a lot of labels. scipy makes sure it only searches for labels of index that are in mask_block
                 min_or_max_array.append(min_or_max_c)
-            min_or_max_array = np.stack(min_or_max_array)
+            min_or_max_array = xp.stack(min_or_max_array)
             # max is (c,i)
             # make it (i,c,z,y,x)
             min_or_max_array = min_or_max_array.T
             return min_or_max_array[..., None, None, None]
+        """
 
         arrays = [self._mask[None, ...], self._image]
-        meta = np.empty((0, 0, 0, 0, 0), dtype=self._image.dtype)
+        meta = xp.empty((0, 0, 0, 0, 0), dtype=self._image.dtype)
 
         chunk_min_max = da.map_blocks(
             _calculate_min_max_per_chunk,
@@ -815,9 +874,7 @@ class RasterAggregator:
         if (
             self._count is None
             or getattr(self, "_count_index", None) is None
-            or not xp.array_equal(
-                self._count_index, index
-            )  # FIXME consider moving self._count and self._count_index to cpu when no longer needed on gpu
+            or not xp.array_equal(self._count_index, index)
         ):
             if self._count is not None:
                 log.warning("Count was computed for a different index. Recalculating.")
