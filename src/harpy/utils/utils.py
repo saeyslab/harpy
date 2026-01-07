@@ -5,6 +5,8 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
+import dask
+import dask.array as da
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
@@ -239,3 +241,61 @@ def _dummy_statistic_mask(array: NDArray, value: int) -> NDArray:
     result = np.random.rand(_statistic_dimension) + value
     # return array containing float of shape (statistic_dimension,)
     return result[None, ...]
+
+
+def _get_xp(arr=None, run_on_gpu=True):
+    """Returns (xp, is_cupy). If arr is provided, choose based on arr type."""
+    if not run_on_gpu:
+        return np, False
+    try:
+        import cupy as cp
+    except ImportError:
+        return np, False
+
+    if arr is None:
+        return cp, True
+
+    # If arr is already a CuPy array, stick with CuPy
+    if isinstance(arr, cp.ndarray):
+        return cp, True
+
+    return np, False
+
+
+def _to_cupy_dask_array(arr: da.Array) -> da.Array:
+    import cupy as cp
+
+    x_cu = arr.map_blocks(
+        cp.asarray,
+        dtype=arr.dtype,
+        meta=cp.empty((0,) * arr.ndim, dtype=arr.dtype),
+    )
+    return x_cu
+
+
+def _to_numpy(x) -> NDArray:
+    """Convert from cupy to numpy."""
+    try:
+        import cupy as cp
+
+        if isinstance(x, cp.ndarray):
+            return cp.asnumpy(x)
+    except ImportError:
+        pass
+    return np.asarray(x)
+
+
+def _da_unique(arr: da.Array, run_on_gpu: bool = True) -> NDArray:  # FIXME fix type, can return a cupy numpy array
+    """Compute unique ids in arr."""
+    xp, _ = _get_xp(getattr(arr, "_meta", None), run_on_gpu=run_on_gpu)
+
+    blocks = arr.to_delayed().ravel()
+
+    @dask.delayed
+    def unique_block(b):
+        return xp.unique(b)
+
+    uniques = [unique_block(b) for b in blocks]
+
+    uniques_np = dask.compute(*uniques)
+    return xp.unique(xp.concatenate(uniques_np))
