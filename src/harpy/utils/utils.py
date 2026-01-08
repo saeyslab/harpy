@@ -273,6 +273,17 @@ def _to_cupy_dask_array(arr: da.Array) -> da.Array:
     return x_cu
 
 
+def _to_numpy_dask_array(arr: da.Array) -> da.Array:
+    import cupy as cp
+
+    x_nu = arr.map_blocks(
+        cp.asnumpy,
+        dtype=arr.dtype,
+        meta=np.empty((0,) * arr.ndim, dtype=arr.dtype),
+    )
+    return x_nu
+
+
 def _to_numpy(x) -> NDArray:
     """Convert from cupy to numpy."""
     try:

@@ -8,6 +8,7 @@ from spatialdata import SpatialData
 from harpy.image import add_image_layer
 from harpy.utils._featurize import Featurizer, _region_radii_and_axes
 from harpy.utils._keys import _INSTANCE_KEY
+from harpy.utils.utils import _get_xp, _to_numpy
 
 
 def test_featurize(sdata_transcripts_no_backed: SpatialData):
@@ -73,6 +74,8 @@ def test_extract_instances(sdata_transcripts_no_backed, extract_mask):
     )
 
     instances = dask_chunks.compute()
+    # put it on cpu
+    instances = _to_numpy(instances)
     assert instances.dtype == np.uint32 if extract_mask else image.dtype
     assert instances.shape == (657, 5, 1, 75, 75) if extract_mask else (657, 4, 1, 75, 75)
 
@@ -107,6 +110,7 @@ def test_extract_instances_mask(sdata_transcripts_no_backed):
     )
 
     instances = dask_chunks.compute()
+    instances = _to_numpy(instances)
     assert instances.dtype == mask.dtype
     assert instances.shape == (657, 1, 1, 75, 75)  # we only extract the mask
 
@@ -169,7 +173,7 @@ def test_extract_instances_duplicates_blobs(sdata):
     )
 
     instances = dask_chunks.compute()
-
+    instances = _to_numpy(instances)
     # check that mask of each instance contains the index corresponding to instances_ids
     for _index, _item in zip(instances_ids, instances, strict=True):
         _item_labels = np.unique(_item[0])
@@ -274,14 +278,19 @@ def test_instance_statistics_dummy_statistic_image(sdata_pixie):
 
     C, _, _, _ = image_array.shape
 
-    def _dummy_statistic_image(array: NDArray, value: int):
-        np.random.seed(42)
+    def _dummy_statistic_image(
+        array: NDArray,
+        value: int,
+        run_on_gpu: bool = True,
+    ):
+        xp, _ = _get_xp(array, run_on_gpu=run_on_gpu)
+        xp.random.seed(42)
         # shape of array=(c, number of pixels corresponding to non zero mask for instance i)
         assert array.ndim == 2
         C = array.shape[0]
         _statistic_dimension = 3
         # return dummy statistic of shape (C, statistic_dimension)
-        return np.random.rand(C, _statistic_dimension) + value
+        return xp.random.rand(C, _statistic_dimension) + value
 
     # Create featurizer
     featurizer = Featurizer(
@@ -323,6 +332,7 @@ def test_instance_statistics_radii_and_principal_axes(sdata_pixie, fov_nr):
     featurizer = Featurizer(
         mask_dask_array=mask,
         image_dask_array=None,  # one could specify the image here, but anyway it is not used for calculation of radii and axes
+        run_on_gpu=False,
     )
     df = featurizer.radii_and_principal_axes(
         calculate_axes=True,
@@ -356,6 +366,7 @@ def test_instance_statistics_radii_and_principal_axes_blobs(sdata_blobs):
     featurizer = Featurizer(
         mask_dask_array=mask,
         image_dask_array=None,  # one could specify the image here, but anyway it is not used for calculation of radii and axes
+        run_on_gpu=False,
     )
     df = featurizer.radii_and_principal_axes(
         calculate_axes=True,
@@ -379,14 +390,19 @@ def test_instance_statistics_dummy_statistic_mask(sdata_pixie):
 
     mask_array = sdata["label_whole_fov0"].data[None, ...]
 
-    def _dummy_statistic_mask(array: NDArray, value: int) -> NDArray:
+    def _dummy_statistic_mask(
+        array: NDArray,
+        value: int,
+        run_on_gpu: bool = True,
+    ) -> NDArray:
+        xp, _ = _get_xp(array, run_on_gpu=run_on_gpu)
         # array should be of dtype int
-        np.random.seed(42)
-        assert np.issubdtype(array.dtype, np.integer)
+        xp.random.seed(42)
+        assert xp.issubdtype(array.dtype, xp.integer)
         # array is of shape = z,y,x, with y and x the size of the instance window.
         assert array.ndim == 3
         statistic_dimension = 5
-        result = np.random.rand(statistic_dimension) + value
+        result = xp.random.rand(statistic_dimension) + value
         # return array containing float of shape (statistic_dimension,)
         return result[None, ...]
 

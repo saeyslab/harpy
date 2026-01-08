@@ -10,6 +10,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
+import dask
 import dask.array as da
 import dask.dataframe as dd
 import numpy as np
@@ -23,7 +24,16 @@ from sklearn.decomposition import PCA
 from harpy.image.segmentation._utils import _rechunk_overlap
 from harpy.utils._aggregate import RasterAggregator
 from harpy.utils._keys import _INSTANCE_KEY
-from harpy.utils.utils import _dummy_embedding, _dummy_statistic_image, _make_list
+from harpy.utils.utils import (
+    _da_unique,
+    _dummy_embedding,
+    _dummy_statistic_image,
+    _get_xp,
+    _make_list,
+    _to_cupy_dask_array,
+    _to_numpy,
+    _to_numpy_dask_array,
+)
 
 
 class Featurizer:
@@ -59,13 +69,29 @@ class Featurizer:
     - Image and mask must be aligned in spatial dimensions and chunking to ensure accurate and efficient featurization.
     """
 
-    def __init__(self, mask_dask_array: da.Array, image_dask_array: da.Array | None = None):
+    def __init__(
+        self,
+        mask_dask_array: da.Array,
+        image_dask_array: da.Array | None = None,
+        run_on_gpu: bool = True,
+    ):
         if not np.issubdtype(mask_dask_array.dtype, np.integer):
             raise ValueError(f"'mask_dask_array' should contains chunks of type {np.integer}.")
+        if run_on_gpu:
+            try:
+                import cupy
+
+                _ = cupy
+            except ImportError:
+                log.warning(
+                    "Parameter 'run_on_gpu' was set to True, but 'cupy' is not installed. "
+                    "Falling back to CPU execution. Please install 'cupy' to enable GPU support."
+                )
+                run_on_gpu = False
+        self._run_on_gpu = run_on_gpu
         log.info("Calculating unique labels in the mask.")
-        self._labels = (
-            da.unique(mask_dask_array).compute()
-        )  # calculate this one time during initialization, otherwise we would need to calculate this multiple times.
+        # calculate this one time during initialization, otherwise we would need to calculate this multiple times.
+        self._labels = _da_unique(mask_dask_array, run_on_gpu=self._run_on_gpu)
         log.info("Finished calculating unique labels in the mask.")
         if image_dask_array is not None:
             assert image_dask_array.ndim == 4, "Currently only 4D image arrays are supported ('c', 'z', 'y', 'x')."
@@ -78,6 +104,11 @@ class Featurizer:
             assert image_dask_array.numblocks[1] == 1, "Currently we do not allo chunking in the 'z' dimension."
         assert mask_dask_array.ndim == 3, "Currently only 3D masks are supported ('z', 'y', 'x')."
         assert mask_dask_array.numblocks[0] == 1, "Currently we do not allo chunking in the 'z' dimension."
+
+        if run_on_gpu:
+            mask_dask_array = _to_cupy_dask_array(mask_dask_array)
+            if image_dask_array is not None:
+                image_dask_array = _to_cupy_dask_array(image_dask_array)
 
         self._image = image_dask_array
         self._mask = mask_dask_array
@@ -348,8 +379,6 @@ class Featurizer:
             If `True`, intermediate `.zarr` data will be written to disk to reduce peak RAM usage.
             This is useful for large datasets. If `zarr_output_path` is not specified, it is
             not allowed to set `store_intermediate=True`.
-            It is preferred to set `store_intermediate=False`, and work with a Dask client,
-            so Dask can spill to disk.
         fn
             Function applied to each extracted instance window.
 
@@ -500,8 +529,12 @@ class Featurizer:
             zarr_output_path=intermediate_zarr_output_path,
             batch_size=batch_size,
             extract_image=extract_image,  # if extract_image is True, dask_chunks is of dimension (i,c(+1),z,y,x)
-            extract_mask=True,  # always extract the mask, we need it; the user can decide if wants to calculate statistic on the mask, or on the image, via the parameter extract_image
+            extract_mask=True,  # always extract the mask, we need it to extract instances; the user can decide if wants to calculate statistic on the mask, or on the image, via the parameter extract_image
         )
+
+        if store_intermediate and self._run_on_gpu:
+            # need to put them back on cupy if stored intermediate
+            dask_chunks = _to_cupy_dask_array(arr=dask_chunks)
 
         # transpose dask chunks, so it is c,i,z,y,x, that way we can allow chunking in c dimension
         dask_chunks = dask_chunks.transpose(1, 0, 2, 3, 4)
@@ -524,14 +557,20 @@ class Featurizer:
             dtype=np.float32,
             fn=fn,
             statistic_dimension=statistic_dimension,
+            run_on_gpu=self._run_on_gpu,
             fn_kwargs=fn_kwargs,
             **kwargs,
         )
 
         if zarr_output_path is not None:
+            calculated_statistic = calculated_statistic.rechunk(calculated_statistic.chunksize)
+            if self._run_on_gpu:
+                # put back on cpu if we write to zarr
+                calculated_statistic = _to_numpy_dask_array(calculated_statistic)
             calculated_statistic.rechunk(calculated_statistic.chunksize).to_zarr(zarr_output_path)
             calculated_statistic = da.from_zarr(zarr_output_path)
 
+        # FIXME need to clean this up with a context manager
         if store_intermediate:
             log.info(f"Deleting intermediate zarr store {intermediate_zarr_output_path}")
             if Path(intermediate_zarr_output_path).suffix == ".zarr":
@@ -698,6 +737,12 @@ class Featurizer:
             log.info("No image available and 'extract_image' is True; forcing 'extract_image=False'.")
             extract_image = False
 
+        _, is_cupy = _get_xp(getattr(self._mask, "_meta", None), run_on_gpu=self._run_on_gpu)
+        if self._image is not None:
+            _, is_cupy_image = _get_xp(getattr(self._image, "_meta", None), run_on_gpu=self._run_on_gpu)
+            if len({is_cupy, is_cupy_image}) != 1:
+                raise ValueError("Mask and image should be on the same backend.")
+
         array_mask = self._mask[None, ...]  # add trivial channel dimension
         array_image = self._image if extract_image else None
 
@@ -709,13 +754,9 @@ class Featurizer:
             mask_dask_array=array_mask.squeeze(0),
             image_dask_array=None,
             instance_key=_INSTANCE_KEY,
+            run_on_gpu=self._run_on_gpu,
         )
         center_of_mass = aggregator.center_of_mass(index=self._labels[self._labels != 0])
-        # center_of_mass = _get_center_of_mass(
-        #    mask=array_mask.squeeze(0),  # center of mass does not support channel dimension
-        #    index=self._labels[self._labels != 0],
-        #    instance_key=_INSTANCE_KEY,
-        # )
         log.info("Finished calculating center of mass for each instance.")
 
         # now want to obtain the chunk id to which each center of mass belongs
@@ -845,8 +886,6 @@ class Featurizer:
         else:
             c_chunks = array_image.chunks[0]
 
-        import dask
-
         # persisting speeds up processing, when we do not persist, it gets slower
         (array_mask,) = dask.persist(array_mask)
 
@@ -854,6 +893,8 @@ class Featurizer:
         # For now we do not allow chunking in z, but to support chunking in z, only thing that needs to be updated is this line,
         # where we get the chunksize in z from the chunks.
         size = (array_mask.shape[1], diameter, diameter)
+
+        _extract_func = _extract_instance_patches if self._run_on_gpu else _extract_instance_patches_sliced
 
         if array_image is not None:
             for i, (c_block_image_array, _c_chunks) in enumerate(zip(array_image.to_delayed(), c_chunks, strict=True)):
@@ -871,9 +912,7 @@ class Featurizer:
                     instance_ids_chunk = chunk_to_labels[_chunk_id]
                     if len(instance_ids_chunk) == 0:
                         continue
-                    _instances_chunk = delayed(
-                        _extract_instance_patches_sliced
-                    )(  # extract_instance_patches_sliced is faster, but can not be run on gpu so easy
+                    _instances_chunk = delayed(_extract_func)(
                         mask=_mask_chunk,
                         image=_image_chunk,
                         size=size,
@@ -906,7 +945,7 @@ class Featurizer:
                 instance_ids_chunk = chunk_to_labels[_chunk_id]
                 if len(instance_ids_chunk) == 0:
                     continue
-                _instances_chunk = delayed(_extract_instance_patches_sliced)(
+                _instances_chunk = delayed(_extract_func)(
                     mask=_mask_chunk,
                     image=None,
                     size=size,
@@ -929,6 +968,9 @@ class Featurizer:
         # rechunk, because chunks have irregular chunksize
         instances = instances.rechunk(chunksize)
         if zarr_output_path is not None:
+            # put back on cpu if we write to zarr
+            if self._run_on_gpu:
+                instances = _to_numpy_dask_array(instances)
             instances.to_zarr(zarr_output_path)
             instances = da.from_zarr(zarr_output_path)
 
@@ -1305,10 +1347,14 @@ class Featurizer:
         self,
         diameter: int,  # estimated max diameter of cell in y, x,
         q: float | list[float] | NDArray = np.linspace(0.1, 0.9, 9),
+        zarr_output_path: str
+        | Path
+        | None = None,  # if zarr_output_path is specified, we compute the graph, otherwise we return a non-computed graph
+        store_intermediate: bool = False,
         depth: int | None = None,
         batch_size: int | None = None,
         instance_key: str = _INSTANCE_KEY,
-    ) -> list[pd.DataFrame]:
+    ) -> list[pd.DataFrame] | tuple[NDArray, da.Array]:
         """
         Compute per-instance intensity quantiles.
 
@@ -1327,6 +1373,16 @@ class Featurizer:
             Quantile or quantiles to compute. May be a single float in the interval
             ``[0, 1]`` or a sequence of floats. By default, nine evenly spaced
             quantiles between 0.1 and 0.9 are computed.
+        zarr_output_path
+            If a filesystem path (string or ``Path``) is provided, the feature Dask array is
+            **computed** and materialized to a Zarr store at that location. The returned object will
+            still be a Dask array backed by the written data, but all computations necessary to
+            populate the store will have been executed. If `None` (default), no data are written and
+            the method returns a **lazy** (not yet computed) Dask array.
+        store_intermediate
+            If `True`, intermediate `.zarr` data will be written to disk to reduce peak RAM usage.
+            This is useful for large datasets. If `zarr_output_path` is not specified, it is
+            not allowed to set `store_intermediate=True`.
         depth
             Passed to :func:`dask.array.map_overlap`.
             For correct results, choose depth to be roughly half of the estimated maximum diameter or larger.
@@ -1339,9 +1395,16 @@ class Featurizer:
 
         Returns
         -------
-        A list of DataFrames containing the computed quantiles for each
-        instance. Each DataFrame corresponds to a computed quantile
-        and is indexed by the instance identifier.
+        If `zarr_output_path` is None
+            Returns a list of pandas DataFrames, one per requested quantile.
+            Each DataFrame contains the per-instance quantile values and is
+            indexed by the instance identifier.
+
+        If `zarr_output_path` is specified
+            Returns a tuple ``(instance_ids, quantiles)``, where ``instance_ids``
+            is a NumPy array of instance identifiers and ``quantiles`` is a
+            Dask array backed by the written Zarr store. In this case, all
+            computations required to populate the Zarr store are executed.
 
         Notes
         -----
@@ -1354,25 +1417,28 @@ class Featurizer:
         # quantiles_lazy is a lazy dask array
         q = _make_list(q)
         fn_kwargs = {"q": q}
-        instance_ids, quantiles_lazy = self.calculate_instance_statistics(
+        instance_ids, quantiles = self.calculate_instance_statistics(
             depth=depth,
             statistic_dimension=len(q),
             diameter=diameter,
-            zarr_output_path=None,
-            store_intermediate=False,
+            zarr_output_path=zarr_output_path,
+            store_intermediate=store_intermediate,
             batch_size=batch_size,
             extract_image=True,  # we need the image
             fn=_quantile,
             fn_kwargs=fn_kwargs,
         )
-        # quantiles_lazy is of shape=(i,c,statistic_dimension)
-        quantiles = quantiles_lazy.compute().transpose(2, 0, 1)  # shape after transpose=(statistic_dimension, i, c)
-        dfs = [pd.DataFrame(_quantile) for _quantile in quantiles]
+        if zarr_output_path is None:
+            # quantiles_lazy is of shape=(i,c,statistic_dimension)
+            quantiles = quantiles.compute().transpose(2, 0, 1)  # shape after transpose=(statistic_dimension, i, c)
+            dfs = [pd.DataFrame(_to_numpy(_quantile)) for _quantile in quantiles]
 
-        for _df in dfs:
-            _df[instance_key] = instance_ids
-            _df.sort_values(by=instance_key, inplace=True, ignore_index=True)
-        return dfs
+            for _df in dfs:
+                _df[instance_key] = instance_ids
+                _df.sort_values(by=instance_key, inplace=True, ignore_index=True)
+            return dfs
+        else:
+            return instance_ids, quantiles
 
     def radii_and_principal_axes(
         self,
@@ -1476,6 +1542,8 @@ class Featurizer:
         count_nonzero = mask.sum(axis=(2, 3, 4))
 
         avg_intensity = da.where(count_nonzero > 0, sum_nonmask / count_nonzero, 0)
+        if self._run_on_gpu:
+            avg_intensity = _to_numpy_dask_array(avg_intensity)
 
         df = pd.DataFrame(avg_intensity)
 
@@ -1501,8 +1569,6 @@ def _extract_instance_patches_sliced(
     assert mask.ndim == 4 and mask.shape[0] == 1
     assert len(size) == 3
 
-    # return np.random.random( ( len(instance_ids), image.shape[0], size[0], size[1], size[2]  )).astype( np.float32 )
-
     start = time.time()
 
     centroids = np.asarray(centroids)
@@ -1521,13 +1587,28 @@ def _extract_instance_patches_sliced(
     hz, hy, hx = dz // 2, dy // 2, dx // 2
 
     i = len(instance_ids)
-    mask_out = np.empty((i, 1, dz, dy, dx), dtype=mask.dtype)
+    # mask_out = np.empty((i, 1, dz, dy, dx), dtype=mask.dtype)
 
-    if image is not None:
-        c = image.shape[0]
-        img_out = np.empty((i, c, dz, dy, dx), dtype=image.dtype)
+    # if image is not None:
+    #    c = image.shape[0]
+    #    img_out = np.empty((i, c, dz, dy, dx), dtype=image.dtype)
 
     m0 = mask[0]  # (z,y,x)
+
+    if image is None:
+        out = np.empty((i, 1, dz, dy, dx), dtype=mask.dtype)
+        mask_out = out
+        img_out = None
+    else:
+        c = image.shape[0]
+        if concat_mask:
+            # One combined output: [mask (1 channel), image (c channels)]
+            out = np.empty((i, 1 + c, dz, dy, dx), dtype=np.result_type(image, mask))
+            mask_out = out[:, :1]
+            img_out = out[:, 1:]
+        else:
+            mask_out = np.empty((i, 1, dz, dy, dx), dtype=mask.dtype)
+            img_out = np.empty((i, c, dz, dy, dx), dtype=image.dtype)
 
     Z, Y, X = m0.shape
 
@@ -1572,6 +1653,7 @@ def _extract_instance_patches(
     center_round: str = "round",  # "round" | "floor" | "ceil"
     remove_background: bool = True,
     concat_mask: bool = True,
+    run_on_gpu: bool = True,
 ) -> NDArray:
     """Returns patches of shape (i, C+1, dz, dy, dx). Assumes every patch is fully inside seg/img bounds (no padding needed)."""
     if image is None and not concat_mask:
@@ -1581,14 +1663,23 @@ def _extract_instance_patches(
         # FIXME: check if we should let this pass, and return an empty numpy array instead
     assert len(size) == 3
 
+    xp, is_cupy_mask = _get_xp(mask, run_on_gpu=run_on_gpu)
+    if image is not None:
+        _, is_cupy_image = _get_xp(image, run_on_gpu=run_on_gpu)
+        if len({is_cupy_mask, is_cupy_image}) != 1:
+            raise ValueError("Mask and image should be on the same backend.")
+    if run_on_gpu:
+        if not is_cupy_mask:
+            raise ValueError("Parameter 'run_on_gpu' is True while 'mask' is not on 'cupy' backend.")
+
     start = time.time()
 
     assert mask.ndim == 4 and mask.shape[0] == 1
     if image is not None:
         assert image.ndim == 4 and image.shape[1:] == mask.shape[1:]
 
-    centroids = np.asarray(centroids)
-    instance_ids = np.asarray(instance_ids, dtype=mask.dtype)
+    centroids = xp.asarray(centroids)
+    instance_ids = xp.asarray(instance_ids, dtype=mask.dtype)
 
     assert instance_ids.ndim == 1
     assert centroids.ndim == 2
@@ -1597,11 +1688,11 @@ def _extract_instance_patches(
     assert centroids.shape[1] == 3  # 3 spatial dimensions
 
     if center_round == "round":
-        cz, cy, cx = np.rint(centroids).astype(np.int64).T
+        cz, cy, cx = xp.rint(centroids).astype(xp.int64).T
     elif center_round == "floor":
-        cz, cy, cx = np.floor(centroids).astype(np.int64).T
+        cz, cy, cx = xp.floor(centroids).astype(xp.int64).T
     elif center_round == "ceil":
-        cz, cy, cx = np.ceil(centroids).astype(np.int64).T
+        cz, cy, cx = xp.ceil(centroids).astype(xp.int64).T
     else:
         raise ValueError("center_round must be 'round', 'floor', or 'ceil'")
 
@@ -1609,9 +1700,9 @@ def _extract_instance_patches(
     hz, hy, hx = dz // 2, dy // 2, dx // 2
 
     # offsets (e.g. for dz=5 -> [-2,-1,0,1,2])
-    oz = np.arange(-hz, -hz + dz, dtype=np.int64)
-    oy = np.arange(-hy, -hy + dy, dtype=np.int64)
-    ox = np.arange(-hx, -hx + dx, dtype=np.int64)
+    oz = xp.arange(-hz, -hz + dz, dtype=xp.int64)
+    oy = xp.arange(-hy, -hy + dy, dtype=xp.int64)
+    ox = xp.arange(-hx, -hx + dx, dtype=xp.int64)
 
     z_idx = cz[:, None] + oz[None, :]  # (i, dz)
     y_idx = cy[:, None] + oy[None, :]  # (i, dy)
@@ -1620,13 +1711,13 @@ def _extract_instance_patches(
     # mask is 1,z,y,x
     mask = mask[
         :, z_idx[:, :, None, None], y_idx[:, None, :, None], x_idx[:, None, None, :]
-    ]  # mask_p is 1,i,dz,dy,dx, make it i,dz,dy,dx
+    ]  # mask is 1,i,dz,dy,dx, make it i,dz,dy,dx
     mask = mask[0]
 
     if image is not None:
         image = image[
             :, z_idx[:, :, None, None], y_idx[:, None, :, None], x_idx[:, None, None, :]
-        ]  # this creates a copy of image image is c,i,dz,dy,dx
+        ]  # this creates a copy of image, image is c,i,dz,dy,dx
         image = image.transpose(1, 0, 2, 3, 4)  # make it (i, c, dz, dy, dx)
 
     if remove_background:
@@ -1640,20 +1731,20 @@ def _extract_instance_patches(
         f"Finished extracting instances, took {time.time() - start:.3f}s "
         f"({len(centroids) / max(1e-9, (time.time() - start)):.2f} instances/s)."
     )
-    # mask_p is (i,dz,dy,dx), make it (i,1,dz,dy,dx)
+    # mask is (i,dz,dy,dx), make it (i,1,dz,dy,dx)
     mask = mask[:, None, ...]
 
+    # if run_on_gpu:
+    #    mask = xp.asnumpy(mask)
+    #    image = xp.asnumpy(image)
+
     del oz, oy, ox, z_idx, y_idx, x_idx
-
-    # import gc
-
-    # gc.collect()
 
     if image is None:
         return mask
     if concat_mask:
         # combine into (i, c+1, dz, dy, dx)
-        return np.concatenate([mask, image], axis=1)
+        return xp.concatenate([mask, image], axis=1)
     return image
 
 
@@ -1780,126 +1871,6 @@ def _extract_instances(
     return out
 
 
-def _extract_instances_works(
-    mask: NDArray,
-    image: NDArray | None,
-    # labels: NDArray | None,  # the labels to consider
-    size: tuple[int, int, int] = (1, 100, 100),
-    remove_background: bool = True,
-    concat_mask: bool = True,
-) -> NDArray:
-    if image is None and not concat_mask:
-        raise ValueError("'concat_mask' should be set to True if 'image' is None.")
-
-    start = time.time()
-
-    assert mask.ndim == 4 and mask.shape[0] == 1
-    if image is not None:
-        assert image.ndim == 4 and image.shape[1:] == mask.shape[1:]
-
-    size_z, size_y, size_x = size
-    C = image.shape[0] if image is not None else mask.shape[0]
-    Z, Y, X = mask.shape[1:]
-
-    fg = mask != 0
-    if not np.any(fg):
-        outC = (C + 1) if (image is not None and concat_mask) else (1 if concat_mask else C)
-        return np.empty((0, outC, size_z, size_y, size_x), dtype=np.float32)
-
-    _, zz, yy, xx = np.nonzero(fg)
-    labels_mask = mask[fg]
-
-    # labels = np.asarray(labels)
-    # keep = np.isin(labels_mask, labels)
-
-    # labels_mask = labels_mask[keep]
-    # zz = zz[keep]
-    # yy = yy[keep]
-    # xx = xx[keep]
-
-    if labels_mask.size == 0:
-        outC = (C + 1) if (image is not None and concat_mask) else (1 if concat_mask else C)
-        return np.empty((0, outC, size_z, size_y, size_x), dtype=np.float32)
-
-    uniq, inv = np.unique(labels_mask, return_inverse=True)
-    L = uniq.size
-
-    # bbox per label
-    zmin = np.full(L, Z, dtype=np.int64)
-    ymin = np.full(L, Y, dtype=np.int64)
-    xmin = np.full(L, X, dtype=np.int64)
-    zmax = np.full(L, -1, dtype=np.int64)
-    ymax = np.full(L, -1, dtype=np.int64)
-    xmax = np.full(L, -1, dtype=np.int64)
-
-    np.minimum.at(zmin, inv, zz)
-    np.minimum.at(ymin, inv, yy)
-    np.minimum.at(xmin, inv, xx)
-    np.maximum.at(zmax, inv, zz)
-    np.maximum.at(ymax, inv, yy)
-    np.maximum.at(xmax, inv, xx)
-
-    if image is None:
-        out = np.zeros((L, 1, size_z, size_y, size_x), dtype=mask.dtype)
-        out_mask = out
-        out_img = None
-    else:
-        if concat_mask:
-            out = np.zeros((L, 1 + C, size_z, size_y, size_x), dtype=np.result_type(image.dtype, mask.dtype))
-            out_mask = out[:, :1]
-            out_img = out[:, 1:]
-        else:
-            out = np.zeros((L, C, size_z, size_y, size_x), dtype=image.dtype)
-            out_mask = None
-            out_img = out
-
-    for i, lbl in enumerate(uniq):
-        zs, ze = int(zmin[i]), int(zmax[i]) + 1
-        ys, ye = int(ymin[i]), int(ymax[i]) + 1
-        xs, xe = int(xmin[i]), int(xmax[i]) + 1
-
-        # If we want to keep background, we need to extend the bbox to size_z,size_y,size_x
-        if not remove_background:
-            zl = ze - zs
-            yl = ye - ys
-            xl = xe - xs
-            if zl < size_z:
-                zs = max(0, zs - (size_z - zl) // 2)
-                ze = min(Z, ze + ((size_z - zl) // 2) + 1)  # +1 to account for rounding when //2
-            if yl < size_y:
-                ys = max(0, ys - (size_y - yl) // 2)
-                ye = min(Y, ye + ((size_y - yl) // 2) + 1)
-            if xl < size_x:
-                xs = max(0, xs - (size_x - xl) // 2)
-                xe = min(X, xe + ((size_x - xl) // 2) + 1)
-
-        # crop views
-        m_crop = mask[:, zs:ze, ys:ye, xs:xe]
-        m_bool = m_crop == lbl  # bool mask for this instance
-
-        if out_mask is not None:
-            # write mask into fixed canvas
-            # out_mask[i] has shape (1, size_z, size_y, size_x)
-            tmp = np.zeros((1, size_z, size_y, size_x), dtype=mask.dtype)
-            _center_crop_pad_into(tmp, m_bool.astype(mask.dtype) * lbl)
-            out_mask[i] = tmp
-
-        if image is not None:
-            img_crop = image[:, zs:ze, ys:ye, xs:xe]
-            if remove_background:
-                img_crop = img_crop * m_bool  # broadcast (C,...) * (1,...)
-
-            tmp_img = np.zeros((C, size_z, size_y, size_x), dtype=image.dtype)
-            _center_crop_pad_into(tmp_img, img_crop)
-            out_img[i] = tmp_img
-
-    log.info(
-        f"Finished extracting instances, took {time.time() - start:.3f}s "
-        f"({L / max(1e-9, (time.time() - start)):.2f} instances/s)."
-    )
-    return out
-
-
 def _center_crop_pad_into(out: NDArray, src: NDArray) -> None:
     """Copy src into the center of out with central cropping/padding out and src are (..., z, y, x)"""
     sz, sy, sx = src.shape[-3:]
@@ -1930,21 +1901,27 @@ def _calculate_statistic_mask_block(
     statistic_dimension: int,
     fn: Callable[..., NDArray],  # input = (z,y,x), output (statistic_dimension,)
     fn_kwargs: Mapping[str, Any] = MappingProxyType({}),
+    run_on_gpu: bool = True,
 ):
     assert len(arrays) == 1
     mask = arrays[0]
     assert mask.ndim == 5  # shape = 1,i,z,y,x
     mask = mask[0]  # make it i,z,y,x
 
+    xp, is_cupy_mask = _get_xp(mask, run_on_gpu=run_on_gpu)
+    if run_on_gpu:
+        if not is_cupy_mask:
+            raise ValueError("Parameter 'run_on_gpu' is True while 'mask' is not on 'cupy' backend.")
+
     I, _, _, _ = mask.shape
 
-    calculated_statistic = np.full(
-        (I, statistic_dimension), np.nan, dtype=np.float32
+    calculated_statistic = xp.full(
+        (I, statistic_dimension), xp.nan, dtype=xp.float32
     )  # set statistic to nan when there is no mask found
 
     # also catch case if there is no label in the mask (only background==0)
     for i, _mask_instance in enumerate(mask):  # shape of _mask_instance is (z,y,x)
-        if not np.any(_mask_instance):
+        if not xp.any(_mask_instance):
             # this could happen for edge cases, i.e. very small fragmented masks
             log.info(
                 "Instance found with no non-zero mask values within the instance window. "
@@ -1952,11 +1929,11 @@ def _calculate_statistic_mask_block(
                 "Increasing the diameter may help."
             )  # skip instances with no non zero mask
             continue
-        result = fn(_mask_instance, **fn_kwargs)  # shape of result is (statistic_dimension,)
+        result = fn(_mask_instance, run_on_gpu=run_on_gpu, **fn_kwargs)  # shape of result is (statistic_dimension,)
         calculated_statistic[i] = result.reshape(1, statistic_dimension)
 
     # make it (1,i,statistic_dimension), and cast to float
-    return calculated_statistic[None, ...].astype(np.float32)
+    return calculated_statistic[None, ...].astype(xp.float32)
 
 
 def _calculate_statistic_image_block(
@@ -1966,6 +1943,7 @@ def _calculate_statistic_image_block(
         ..., NDArray
     ],  # callable that expects shape=(c, number of pixels corresponding to non zero mask for instance i) and returns shape=(c,statistic_dimension)
     fn_kwargs: Mapping[str, Any] = MappingProxyType({}),
+    run_on_gpu: bool = True,
 ) -> NDArray:
     # array should be an array of shape c,i,z,y,x
     assert len(arrays) == 2
@@ -1977,19 +1955,27 @@ def _calculate_statistic_image_block(
     mask = mask.transpose(1, 0, 2, 3, 4)
     image = image.transpose(1, 0, 2, 3, 4)  # make it i,c,z,y,c
 
+    xp, is_cupy_mask = _get_xp(mask, run_on_gpu=run_on_gpu)
+    _, is_cupy_image = _get_xp(image, run_on_gpu=run_on_gpu)
+    if len({is_cupy_mask, is_cupy_image}) != 1:
+        raise ValueError("Mask and image should be on the same backend.")
+    if run_on_gpu:
+        if not is_cupy_mask:
+            raise ValueError("Parameter 'run_on_gpu' is True while 'mask' is not on 'cupy' backend.")
+
     I, C, _, _, _ = image.shape
 
     mask_flat = (mask != 0).reshape(I, -1)  # i,z*y*x
 
     vals_flat = image.reshape(I, C, -1)  # i,c,z*y*x
 
-    calculated_statistic = np.full(
-        (I, C, statistic_dimension), np.nan, dtype=np.float32
+    calculated_statistic = xp.full(
+        (I, C, statistic_dimension), xp.nan, dtype=xp.float32
     )  # set statistic to nan when there is no mask found
 
     for i in range(I):
         m = mask_flat[i]  # (z*y*x)
-        if not np.any(m):
+        if not xp.any(m):
             # this could happen for edge cases, i.e. very small masks
             log.info(
                 "Instance found with no non-zero mask values within the instance window. "
@@ -2003,23 +1989,27 @@ def _calculate_statistic_image_block(
         ]  # shape of v=(number of pixels corresponding to non zero mask for instance i,c)  # v gives you all pixels in image for which corresponding mask is non zero -> now we can apply our statistic
 
         #  pass v.T to fn, shape of v.T=(c, number of pixels corresponding to non zero mask for instance i)
-        _result = fn(v.T, **fn_kwargs)  # shape of result=(c, statistic_dimension)
+        _result = fn(v.T, run_on_gpu=run_on_gpu, **fn_kwargs)  # shape of result=(c, statistic_dimension)
         calculated_statistic[i] = _result
 
     # calculated statistic is of shape ( i,c,statistic_dimension )
     # so we transpose to (c,i,statistic_dimension)
-    return calculated_statistic.astype(np.float32).transpose(1, 0, 2)
+    return calculated_statistic.astype(xp.float32).transpose(1, 0, 2)
 
 
 def _quantile(
     array: NDArray,
     q: list[float] | NDArray | None = None,
+    run_on_gpu: bool = True,
 ) -> NDArray:
     assert array.ndim == 2
+    # get the backend
+    xp, _ = _get_xp(array, run_on_gpu=run_on_gpu)
     # shape of array=(c, number of pixels corresponding to non zero mask for instance i)
     if q is None:  # maybe leave this fallback out
-        q = np.linspace(0.1, 0.9, 9)
-    result = np.quantile(array, q=q, axis=1)  # result of shape ( statistic_dimension, c)
+        q = xp.linspace(0.1, 0.9, 9)
+    q = xp.asarray(q)
+    result = xp.quantile(array, q=q, axis=1)  # result of shape ( statistic_dimension, c)
     result = result.T
     # sanity check
     assert result.shape[0] == array.shape[0]
@@ -2033,7 +2023,13 @@ def _spread():
     pass
 
 
-def _radii_and_principal_axes(mask: NDArray, calculate_axes: bool = True) -> NDArray:
+def _radii_and_principal_axes(
+    mask: NDArray,
+    calculate_axes: bool = True,
+    run_on_gpu: bool = False,
+) -> NDArray:
+    if run_on_gpu:
+        raise ValueError("Not implemented for 'cupy' backed arrays.")
     assert mask.ndim == 3
     unique_labels = np.unique(mask)
     unique_labels = unique_labels[unique_labels != 0]
