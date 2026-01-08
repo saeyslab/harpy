@@ -873,70 +873,58 @@ class Featurizer:
         )
         del center_of_mass
 
-        if extract_mask:
-            if array_image is not None:
-                output_dtype = np.result_type(array_image.dtype, array_mask.dtype)
-            else:
-                output_dtype = array_mask.dtype
-        else:
-            output_dtype = array_image.dtype
-
-        if array_image is None:
-            c_chunks = (1,)  # array_mask has trivial c dimension
-        else:
-            c_chunks = array_image.chunks[0]
-
         # persisting speeds up processing, when we do not persist, it gets slower
         (array_mask,) = dask.persist(array_mask)
 
         instances = []
+        mask_instances = []
         # For now we do not allow chunking in z, but to support chunking in z, only thing that needs to be updated is this line,
         # where we get the chunksize in z from the chunks.
         size = (array_mask.shape[1], diameter, diameter)
 
         _extract_func = _extract_instance_patches if self._run_on_gpu else _extract_instance_patches_sliced
 
-        if array_image is not None:
-            for i, (c_block_image_array, _c_chunks) in enumerate(zip(array_image.to_delayed(), c_chunks, strict=True)):
-                instances_c = []
-                if i == 0 and extract_mask:
-                    _concat_mask = True  # concat the mask to the channel dimension 0, if extract mask is True
-                else:
-                    _concat_mask = False
-                for _chunk_id, _mask_chunk, _image_chunk in zip(
-                    chunk_ids,
-                    array_mask.to_delayed().flatten(),
-                    c_block_image_array.flatten(),
-                    strict=True,
+        if extract_image:
+            if array_image is not None:
+                c_chunks = array_image.chunks[0]
+                for i, (c_block_image_array, _c_chunks) in enumerate(
+                    zip(array_image.to_delayed(), c_chunks, strict=True)
                 ):
-                    instance_ids_chunk = chunk_to_labels[_chunk_id]
-                    if len(instance_ids_chunk) == 0:
-                        continue
-                    _instances_chunk = delayed(_extract_func)(
-                        mask=_mask_chunk,
-                        image=_image_chunk,
-                        size=size,
-                        centroids=np.stack([centroid_map[i] for i in instance_ids_chunk], axis=0),
-                        instance_ids=instance_ids_chunk,
-                        remove_background=remove_background,
-                        concat_mask=_concat_mask,
-                    )
-                    _instances_chunk = da.from_delayed(
-                        _instances_chunk,
-                        shape=(
-                            len(instance_ids_chunk),
-                            _c_chunks + 1 if _concat_mask else _c_chunks,
-                            size[0],
-                            size[1],
-                            size[2],
-                        ),
-                        dtype=output_dtype,
-                    )
-                    instances_c.append(_instances_chunk)
-                instances.append(da.concatenate(instances_c, axis=0))
-            instances = da.concatenate(instances, axis=1)
-        else:
-            # case where we only extract the mask
+                    instances_c = []
+                    for _chunk_id, _mask_chunk, _image_chunk in zip(
+                        chunk_ids,
+                        array_mask.to_delayed().flatten(),
+                        c_block_image_array.flatten(),
+                        strict=True,
+                    ):
+                        instance_ids_chunk = chunk_to_labels[_chunk_id]
+                        if len(instance_ids_chunk) == 0:
+                            continue
+                        _instances_chunk = delayed(_extract_func)(
+                            mask=_mask_chunk,
+                            image=_image_chunk,
+                            size=size,
+                            centroids=np.stack([centroid_map[i] for i in instance_ids_chunk], axis=0),
+                            instance_ids=instance_ids_chunk,
+                            remove_background=remove_background,
+                        )
+                        _instances_chunk = da.from_delayed(
+                            _instances_chunk,
+                            shape=(
+                                len(instance_ids_chunk),
+                                _c_chunks,
+                                size[0],
+                                size[1],
+                                size[2],
+                            ),
+                            dtype=array_image.dtype,
+                        )
+                        instances_c.append(_instances_chunk)
+                    instances.append(da.concatenate(instances_c, axis=0))
+                instances = da.concatenate(instances, axis=1)
+        if extract_mask:
+            c_chunks = (1,)
+            # extract the mask
             for _chunk_id, _mask_chunk in zip(
                 chunk_ids,
                 array_mask.to_delayed().flatten(),
@@ -957,25 +945,43 @@ class Featurizer:
                 _instances_chunk = da.from_delayed(
                     _instances_chunk,
                     shape=(len(instance_ids_chunk), c_chunks[0], size[0], size[1], size[2]),
-                    dtype=output_dtype,
+                    dtype=array_mask.dtype,
                 )
-                instances.append(_instances_chunk)
-            instances = da.concatenate(instances, axis=0)
+                mask_instances.append(_instances_chunk)
+            mask_instances = da.concatenate(mask_instances, axis=0)
 
-        chunksize = instances.chunksize
-        if batch_size is not None:
-            chunksize = (batch_size, chunksize[1], chunksize[2], chunksize[3], chunksize[4])
-        # rechunk, because chunks have irregular chunksize
-        instances = instances.rechunk(chunksize)
-        if zarr_output_path is not None:
-            # put back on cpu if we write to zarr
-            if self._run_on_gpu:
-                instances = _to_numpy_dask_array(instances)
-            instances.to_zarr(zarr_output_path)
-            instances = da.from_zarr(zarr_output_path)
+        out = [instances, mask_instances]
+        for _instances, _name in zip(out, ["image.zarr", "mask.zarr"], strict=True):
+            if len(_instances):
+                chunksize_instances = _instances.chunksize
+                if batch_size is not None:
+                    chunksize_instances = (
+                        batch_size,
+                        chunksize_instances[1],
+                        chunksize_instances[2],
+                        chunksize_instances[3],
+                        chunksize_instances[4],
+                    )
+                # rechunk, because chunks have irregular chunksize
+                _instances = _instances.rechunk(chunksize_instances)
+                if zarr_output_path is not None:
+                    # put back on cpu if we write to zarr
+                    if self._run_on_gpu:
+                        _instances = _to_numpy_dask_array(_instances)
+                    _instances.to_zarr(os.path.join(zarr_output_path, _name))
+                    _instances = da.from_zarr(os.path.join(zarr_output_path, _name))
 
         # Note that instance_ids are not sorted.
         # It is recommended not to do so (otherwise the instances array needs to be sorted, which is not optimal)
+        if extract_image and extract_mask:
+            return instance_ids, out
+
+        if extract_image:
+            return instance_ids, out[0]
+
+        if extract_mask:
+            return instance_ids, out[1]
+
         return instance_ids, instances
 
     def extract_instances_deprecated(
@@ -1560,10 +1566,7 @@ def _extract_instance_patches_sliced(
     instance_ids,
     center_round="round",
     remove_background=True,
-    concat_mask=True,
 ):
-    if image is None and not concat_mask:
-        raise ValueError("'concat_mask' should be set to True if 'image' is None.")
     if not instance_ids.size:
         raise ValueError("No instances provided.")
     assert mask.ndim == 4 and mask.shape[0] == 1
@@ -1601,14 +1604,8 @@ def _extract_instance_patches_sliced(
         img_out = None
     else:
         c = image.shape[0]
-        if concat_mask:
-            # One combined output: [mask (1 channel), image (c channels)]
-            out = np.empty((i, 1 + c, dz, dy, dx), dtype=np.result_type(image, mask))
-            mask_out = out[:, :1]
-            img_out = out[:, 1:]
-        else:
-            mask_out = np.empty((i, 1, dz, dy, dx), dtype=mask.dtype)
-            img_out = np.empty((i, c, dz, dy, dx), dtype=image.dtype)
+        mask_out = np.empty((i, 1, dz, dy, dx), dtype=mask.dtype)
+        img_out = np.empty((i, c, dz, dy, dx), dtype=image.dtype)
 
     Z, Y, X = m0.shape
 
@@ -1639,8 +1636,6 @@ def _extract_instance_patches_sliced(
 
     if image is None:
         return mask_out
-    if concat_mask:
-        return np.concatenate([mask_out, img_out], axis=1)
     return img_out
 
 
@@ -1652,12 +1647,9 @@ def _extract_instance_patches(
     instance_ids: NDArray,
     center_round: str = "round",  # "round" | "floor" | "ceil"
     remove_background: bool = True,
-    concat_mask: bool = True,
     run_on_gpu: bool = True,
 ) -> NDArray:
     """Returns patches of shape (i, C+1, dz, dy, dx). Assumes every patch is fully inside seg/img bounds (no padding needed)."""
-    if image is None and not concat_mask:
-        raise ValueError("'concat_mask' should be set to True if 'image' is None.")
     if not instance_ids.size:
         raise ValueError("No instances provided. There is nothing to extract.")
         # FIXME: check if we should let this pass, and return an empty numpy array instead
@@ -1742,10 +1734,8 @@ def _extract_instance_patches(
 
     if image is None:
         return mask
-    if concat_mask:
-        # combine into (i, c+1, dz, dy, dx)
-        return xp.concatenate([mask, image], axis=1)
-    return image
+    else:
+        return image
 
 
 def _extract_instances(
