@@ -1,3 +1,4 @@
+import dask
 import dask.array as da
 import numpy as np
 import pytest
@@ -34,7 +35,7 @@ def test_extract_instances_sdata(sdata_transcripts_no_backed: SpatialData):
         overwrite=True,
     )
 
-    instances_ids, instances = extract_instances(
+    instances_ids, out = extract_instances(
         sdata,
         img_layer=img_layer,
         labels_layer=labels_layer,
@@ -45,17 +46,23 @@ def test_extract_instances_sdata(sdata_transcripts_no_backed: SpatialData):
         batch_size=250,
     )
 
-    instances = instances.compute()
+    assert out[0].shape == (657, 1, 1, 75, 75)
+    assert out[1].shape == (657, 6, 1, 75, 75)
+
+    mask_instances, image_instances = dask.compute(*out)
+
+    assert image_instances.shape == (657, 6, 1, 75, 75)
+    assert mask_instances.shape == (657, 1, 1, 75, 75)
 
     # check that mask of each instance contains the index corresponding to instances_ids
-    for _index, _item in zip(instances_ids, instances, strict=True):
+    for _index, _item in zip(instances_ids, mask_instances, strict=True):
         _item_labels = np.unique(_item[0])
         _item_labels = _item_labels[_item_labels != 0]
         assert len(_item_labels) == 1
         assert _index == _item_labels[0]
 
     # check that all labels are extracted
-    index = da.unique(instances[:, 0, ...]).compute()
+    index = da.unique(mask_instances[:, 0, ...]).compute()
     index = index[index != 0]
 
     assert np.array_equal(index, np.sort(instances_ids))

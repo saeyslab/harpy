@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import functools
 import inspect
 import os
 import shutil
 import time
 import uuid
 from collections.abc import Callable, Mapping
+from functools import cache
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
@@ -263,9 +265,6 @@ class Featurizer:
             f"Callable '{model.__name__}' must include the parameter 'embedding_dimension'."
         )
 
-        # remove the masks, located at first dimension
-        # dask_chunks = dask_chunks[:, 1:, ...]  # in self.extract_instances we already pass extract_mask==False
-
         # dask_chunks is array of dimension (i,c,z,y,x)
         if batch_size is not None:
             chunks = (
@@ -323,6 +322,7 @@ class Featurizer:
         batch_size: int | None = None,
         extract_image: bool = True,
         fn_kwargs: Mapping[str, Any] = MappingProxyType({}),
+        overwrite: bool = False,
         **kwargs: Any,
     ) -> tuple[NDArray, da.Array]:
         """
@@ -392,6 +392,13 @@ class Featurizer:
             ``(z, diameter, diameter)``, where values outside the labeled object
             are set to zero. In this case, the function must return an array of
             shape ``(statistic_dimension,)``.
+
+            The callable may optionally accept the keyword argument ``run_on_gpu``.
+            If present and ``run_on_gpu`` is set to ``True`` when initializing
+            ``Featurizer``, the function may use GPU-specific implementations
+            (e.g. via CuPy). If ``run_on_gpu`` is not accepted by ``fn``, it is
+            called without this argument and the computation backend is determined
+            solely by the type of the input array.
         batch_size
             Number of instances processed together along the instance dimension
             ``i`` when evaluating the statistic computation (through `fn`).
@@ -404,6 +411,8 @@ class Featurizer:
             of ``fn`` for details on the expected input and output shapes.
         fn_kwargs : dict, optional
             Additional keyword arguments passed to ``fn``.
+        overwrite
+            If set to `True` will overwrite the zarr store at `zarr_output_path`. Ignored if `zarr_output_path` is `None`.
         **kwargs
             Additional keyword arguments forwarded to :func:`dask.array.map_blocks`. Use with care.
 
@@ -482,7 +491,7 @@ class Featurizer:
             image_array=sdata[ "raw_image_fov0" ].data[ :, None, ... ]
             mask_array=sdata[ "label_whole_fov0" ].data[ None, ... ]
 
-            def _dummy_statistic_mask( array: NDArray, value: int )->NDArray:
+            def _dummy_statistic_mask( array: NDArray, value: int,)->NDArray:
                 # array should be of dtype int
                 assert np.issubdtype(array.dtype, np.integer)
                 # array is of shape = z,y,x, with y and x the size of the instance window.
@@ -516,32 +525,47 @@ class Featurizer:
             log.info("No image available and 'extract_image' is True; forcing 'extract_image=False'.")
             extract_image = False
 
+        # swallow run_on_gpu parameter if not keyword argument of fn
+        fn = _ensure_run_on_gpu_kw(fn)
+
         if zarr_output_path is not None and store_intermediate:
-            intermediate_zarr_output_path = os.path.join(
-                os.path.dirname(zarr_output_path), f"instances_{uuid.uuid4()}.zarr"
+            intermediate_zarr_output_path_image = os.path.join(
+                os.path.dirname(zarr_output_path), f"image_{uuid.uuid4()}.zarr"
+            )
+            intermediate_zarr_output_path_mask = os.path.join(
+                os.path.dirname(zarr_output_path), f"mask_{uuid.uuid4()}.zarr"
             )
         else:
-            intermediate_zarr_output_path = None
-        instance_ids, dask_chunks = self.extract_instances(
+            intermediate_zarr_output_path_image = None
+            intermediate_zarr_output_path_mask = None
+
+        instance_ids, arrays = self.extract_instances(
             depth=depth,
             diameter=diameter,
             remove_background=True,  # always remove background
-            zarr_output_path=intermediate_zarr_output_path,
+            zarr_output_path=os.path.dirname(intermediate_zarr_output_path_mask)
+            if intermediate_zarr_output_path_mask is not None
+            else None,
+            name_instances_image=os.path.basename(intermediate_zarr_output_path_image)
+            if intermediate_zarr_output_path_image is not None
+            else None,
+            name_instances_mask=os.path.basename(intermediate_zarr_output_path_mask)
+            if intermediate_zarr_output_path_mask is not None
+            else None,
             batch_size=batch_size,
             extract_image=extract_image,  # if extract_image is True, dask_chunks is of dimension (i,c(+1),z,y,x)
             extract_mask=True,  # always extract the mask, we need it to extract instances; the user can decide if wants to calculate statistic on the mask, or on the image, via the parameter extract_image
         )
 
+        if not extract_image:  # if extract_image is False, arrays is not a list but a dask array
+            arrays = [arrays]
+
         if store_intermediate and self._run_on_gpu:
             # need to put them back on cupy if stored intermediate
-            dask_chunks = _to_cupy_dask_array(arr=dask_chunks)
+            arrays = [_to_cupy_dask_array(_arr) for _arr in arrays]
 
         # transpose dask chunks, so it is c,i,z,y,x, that way we can allow chunking in c dimension
-        dask_chunks = dask_chunks.transpose(1, 0, 2, 3, 4)
-        if extract_image:
-            arrays = [dask_chunks[0][None], dask_chunks[1:]]  # the mask and the images
-        else:
-            arrays = [dask_chunks[0][None]]  # only the masks (and add dummy c dimension for consistency)
+        arrays = [_arr.transpose(1, 0, 2, 3, 4) for _arr in arrays]
 
         c_chunks = arrays[1].chunks[0] if extract_image else arrays[0].chunks[0]
 
@@ -567,14 +591,15 @@ class Featurizer:
             if self._run_on_gpu:
                 # put back on cpu if we write to zarr
                 calculated_statistic = _to_numpy_dask_array(calculated_statistic)
-            calculated_statistic.rechunk(calculated_statistic.chunksize).to_zarr(zarr_output_path)
+            calculated_statistic.rechunk(calculated_statistic.chunksize).to_zarr(zarr_output_path, overwrite=overwrite)
             calculated_statistic = da.from_zarr(zarr_output_path)
 
-        # FIXME need to clean this up with a context manager
         if store_intermediate:
-            log.info(f"Deleting intermediate zarr store {intermediate_zarr_output_path}")
-            if Path(intermediate_zarr_output_path).suffix == ".zarr":
-                shutil.rmtree(intermediate_zarr_output_path)
+            for _path in [intermediate_zarr_output_path_image, intermediate_zarr_output_path_mask]:
+                if _path is not None:
+                    log.info(f"Deleting intermediate zarr store at '{_path}'.")
+                    if Path(_path).suffix == ".zarr":
+                        shutil.rmtree(_path)
 
         # transpose calculated_statistic to (i,c,statistic_dimension)
         calculated_statistic = calculated_statistic.transpose(1, 0, 2)
@@ -591,8 +616,11 @@ class Featurizer:
         zarr_output_path: str
         | Path
         | None = None,  # if zarr_output_path is specified, we compute the graph, otherwise we return a non-computed graph, recommend specifying an output path FIXME: also support h5ad format.
+        name_instances_image: str = "image.zarr",  # ignored if extract_image is False
+        name_instances_mask: str = "mask.zarr",  # ignored if extract_mask is False
         batch_size: int | None = None,  # FIXME: currently ignored if zarr_output_path is None
-    ) -> tuple[NDArray, da.Array]:
+        overwrite: bool = False,
+    ) -> tuple[NDArray, da.Array | tuple[da.Array, da.Array]]:
         """
         Extract per-label instance windows from the mask and image of size ``diameter`` in ``y`` and ``x`` using :func:`dask.array.map_overlap` and :func:`dask.array.map_blocks`.
 
@@ -602,17 +630,31 @@ class Featurizer:
         -------
         tuple:
 
-            - a Numpy array containing indices of extracted labels, shape ``(i,)``.
-              Dimension of ``i`` will be equal to the total number of non-zero
-              labels in the mask.
+            - One-dimensional NumPy array of shape ``(i,)`` containing the labels
+              of the extracted instances. The value ``i`` is the total number of
+              non-zero labels in the input mask. The order of ``instance_ids`` is
+              not guaranteed to be sorted.
 
-            - a Dask array of dimension ``(i, c+1, z, y, x)`` or
-              ``(i, c, z, y, x)``, with dimension of ``c`` the number of channels
-              in ``img_layer``.
-              At channel index 0 of each instance, is the corresponding mask if
-              ``add_mask`` is set to ``True``.
-              Dimension of ``y`` and ``x`` are equal to ``diameter``, or
-              ``2 * depth`` if ``diameter`` is not specified.
+            - Extracted instance windows.
+                - If exactly one of ``extract_mask`` or ``extract_image`` is ``True``,
+                this is a single Dask array with shape ``(i, c, z, y, x)``.
+
+                - If both ``extract_mask`` and ``extract_image`` are ``True``,
+                this is a 2-tuple ``(mask_instances, image_instances)`` where:
+
+                    * ``mask_instances`` has shape ``(i, 1, z, y, x)`` and contains
+                    the extracted instance masks.
+
+                    * ``image_instances`` has shape ``(i, c, z, y, x)`` and contains
+                    the extracted instance image windows.
+
+                Here, ``c`` is the number of image channels, ``z`` is the number of
+                planes in the z-dimension, and ``y`` and ``x`` are equal to
+                ``diameter``.
+
+                The returned Dask arrays are lazy unless ``zarr_output_path`` is
+                specified, in which case the data are written to disk and reloaded
+                as Dask arrays backed by Zarr.
 
 
         Examples
@@ -940,7 +982,6 @@ class Featurizer:
                     centroids=np.stack([centroid_map[i] for i in instance_ids_chunk], axis=0),
                     instance_ids=instance_ids_chunk,
                     remove_background=remove_background,
-                    concat_mask=True,
                 )
                 _instances_chunk = da.from_delayed(
                     _instances_chunk,
@@ -950,8 +991,9 @@ class Featurizer:
                 mask_instances.append(_instances_chunk)
             mask_instances = da.concatenate(mask_instances, axis=0)
 
-        out = [instances, mask_instances]
-        for _instances, _name in zip(out, ["image.zarr", "mask.zarr"], strict=True):
+        out = [mask_instances, instances]
+        out_names = [name_instances_mask, name_instances_image]
+        for i, (_instances, _name) in enumerate(zip(out, out_names, strict=True)):
             if len(_instances):
                 chunksize_instances = _instances.chunksize
                 if batch_size is not None:
@@ -968,21 +1010,20 @@ class Featurizer:
                     # put back on cpu if we write to zarr
                     if self._run_on_gpu:
                         _instances = _to_numpy_dask_array(_instances)
-                    _instances.to_zarr(os.path.join(zarr_output_path, _name))
+                    _instances.to_zarr(os.path.join(zarr_output_path, _name), overwrite=overwrite)
                     _instances = da.from_zarr(os.path.join(zarr_output_path, _name))
+                out[i] = _instances
 
         # Note that instance_ids are not sorted.
         # It is recommended not to do so (otherwise the instances array needs to be sorted, which is not optimal)
         if extract_image and extract_mask:
-            return instance_ids, out
+            return instance_ids, tuple(out)
 
         if extract_image:
-            return instance_ids, out[0]
-
-        if extract_mask:
             return instance_ids, out[1]
 
-        return instance_ids, instances
+        if extract_mask:
+            return instance_ids, out[0]
 
     def extract_instances_deprecated(
         self,
@@ -1360,6 +1401,7 @@ class Featurizer:
         depth: int | None = None,
         batch_size: int | None = None,
         instance_key: str = _INSTANCE_KEY,
+        overwrite: bool = False,
     ) -> list[pd.DataFrame] | tuple[NDArray, da.Array]:
         """
         Compute per-instance intensity quantiles.
@@ -1380,11 +1422,13 @@ class Featurizer:
             ``[0, 1]`` or a sequence of floats. By default, nine evenly spaced
             quantiles between 0.1 and 0.9 are computed.
         zarr_output_path
-            If a filesystem path (string or ``Path``) is provided, the feature Dask array is
-            **computed** and materialized to a Zarr store at that location. The returned object will
-            still be a Dask array backed by the written data, but all computations necessary to
-            populate the store will have been executed. If `None` (default), no data are written and
-            the method returns a **lazy** (not yet computed) Dask array.
+            Filesystem path (string or ``Path``) where the feature Dask array is
+            written as a Zarr store. If provided, the Dask graph is **computed**
+            and the data are materialized to disk at this location. The returned
+            object is still a Dask array backed by the written data.
+
+            If ``None`` (default), no data are written and the method returns a
+            **lazy** (not yet computed) Dask array.
         store_intermediate
             If `True`, intermediate `.zarr` data will be written to disk to reduce peak RAM usage.
             This is useful for large datasets. If `zarr_output_path` is not specified, it is
@@ -1398,19 +1442,21 @@ class Featurizer:
         instance_key
             Name of the column in the output DataFrames that contains the identifier of
             each instance, matching the corresponding label value in the mask.
+        overwrite
+            If set to `True` will overwrite the zarr store at `zarr_output_path`. Ignored if `zarr_output_path` is `None`.
 
         Returns
         -------
-        If `zarr_output_path` is None
-            Returns a list of pandas DataFrames, one per requested quantile.
-            Each DataFrame contains the per-instance quantile values and is
-            indexed by the instance identifier.
+        quantiles : list[pandas.DataFrame] or tuple[numpy.ndarray, dask.array.Array]
+            If ``zarr_output_path`` is ``None``, returns a list of pandas DataFrames,
+            one per requested quantile. Each DataFrame contains per-instance quantile
+            values and is indexed by the instance identifier.
 
-        If `zarr_output_path` is specified
-            Returns a tuple ``(instance_ids, quantiles)``, where ``instance_ids``
-            is a NumPy array of instance identifiers and ``quantiles`` is a
-            Dask array backed by the written Zarr store. In this case, all
-            computations required to populate the Zarr store are executed.
+            If ``zarr_output_path`` is specified, returns a tuple
+            ``(instance_ids, quantiles)``, where ``instance_ids`` is a NumPy array
+            of instance identifiers and ``quantiles`` is a Dask array backed by the
+            written Zarr store. In this case, all computations required to populate
+            the Zarr store are executed.
 
         Notes
         -----
@@ -1433,10 +1479,13 @@ class Featurizer:
             extract_image=True,  # we need the image
             fn=_quantile,
             fn_kwargs=fn_kwargs,
+            overwrite=overwrite,
         )
+        # quantiles is of shape=(i,c,statistic_dimension)
+        quantiles = quantiles.transpose(2, 0, 1)  # shape after transpose=(statistic_dimension, i, c)
+
         if zarr_output_path is None:
-            # quantiles_lazy is of shape=(i,c,statistic_dimension)
-            quantiles = quantiles.compute().transpose(2, 0, 1)  # shape after transpose=(statistic_dimension, i, c)
+            quantiles = quantiles.compute()
             dfs = [pd.DataFrame(_to_numpy(_quantile)) for _quantile in quantiles]
 
             for _df in dfs:
@@ -1532,17 +1581,16 @@ class Featurizer:
     ) -> pd.DataFrame:
         """Function calculates mean intensity. Please use the optimized RasterAggregator.aggregate_mean() function."""
         # this is dummy function to illustrate working of ._extract_instances, please use optimized RasterAggregator
-        instances_ids, dask_chunks = self.extract_instances(
+        instances_ids, out = self.extract_instances(
             depth=diameter // 2 + 1,
             diameter=diameter,
             zarr_output_path=None,
             extract_mask=True,
+            extract_image=True,
         )
 
-        mask = dask_chunks[
-            :, 0:1, ...
-        ]  # the first 'channel' dimension of (i,c,z,y,x) vector is the mask if extract_mask==True
-        image = dask_chunks[:, 1:, ...]
+        mask = out[0]
+        image = out[1]
         mask = mask != 0
         sum_nonmask = (image * mask).sum(axis=(2, 3, 4))
         count_nonzero = mask.sum(axis=(2, 3, 4))
@@ -1559,13 +1607,13 @@ class Featurizer:
 
 
 def _extract_instance_patches_sliced(
-    mask,
-    image,
-    size,
-    centroids,
-    instance_ids,
-    center_round="round",
-    remove_background=True,
+    mask: NDArray,
+    image: NDArray | None,
+    size: tuple[int, int, int],
+    centroids: NDArray,
+    instance_ids: NDArray,
+    center_round: str = "round",
+    remove_background: bool = True,
 ):
     if not instance_ids.size:
         raise ValueError("No instances provided.")
@@ -2128,6 +2176,31 @@ def _block_label_counts(block: NDArray, chunk_index: tuple[int, int, int, int], 
             "chunk_id": np.full_like(labels_unique, chunk_id, dtype="int32"),
         }
     )
+
+
+@cache
+def _fn_accepts_run_on_gpu(fn: Callable[..., Any]) -> bool:
+    try:
+        sig = inspect.signature(fn)
+    except (TypeError, ValueError):
+        return False
+
+    params = sig.parameters.values()
+    if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params):
+        return True
+    return "run_on_gpu" in sig.parameters
+
+
+def _ensure_run_on_gpu_kw(fn: Callable[..., Any]) -> Callable[..., Any]:
+    """Return a callable that accepts run_on_gpu (even if fn doesn't)."""
+    if _fn_accepts_run_on_gpu(fn):
+        return fn
+
+    @functools.wraps(fn)
+    def wrapped(*args: Any, run_on_gpu: bool = False, **kwargs: Any):
+        return fn(*args, **kwargs)
+
+    return wrapped
 
 
 '''
