@@ -9,7 +9,7 @@ from harpy.image import add_image_layer, add_labels_layer
 from harpy.table._table import add_table_layer
 from harpy.table.featurization._featurize import extract_instances, featurize
 from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY
-from harpy.utils.utils import _dummy_embedding
+from harpy.utils.utils import _dummy_embedding, _to_numpy
 
 
 def test_extract_instances_sdata(sdata_transcripts_no_backed: SpatialData):
@@ -50,6 +50,8 @@ def test_extract_instances_sdata(sdata_transcripts_no_backed: SpatialData):
     assert out[1].shape == (657, 6, 1, 75, 75)
 
     mask_instances, image_instances = dask.compute(*out)
+    mask_instances = _to_numpy(mask_instances)
+    image_instances = _to_numpy(image_instances)
 
     assert image_instances.shape == (657, 6, 1, 75, 75)
     assert mask_instances.shape == (657, 1, 1, 75, 75)

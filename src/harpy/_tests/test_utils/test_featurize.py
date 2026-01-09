@@ -78,8 +78,8 @@ def test_extract_instances(sdata_transcripts_no_backed, extract_mask):
     if extract_mask:
         mask_instances, image_instances = dask.compute(*out)
     else:
-        image_instances = dask.compute(*out)
-    # put it on cpu
+        (image_instances,) = dask.compute(out)
+
     image_instances = _to_numpy(image_instances)
 
     assert image_instances.dtype == image.dtype
