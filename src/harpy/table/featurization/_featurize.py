@@ -67,8 +67,7 @@ def extract_instances(
         window are set to background (e.g., zero) so that only the object remains
         inside the cutout. If ``False``, the entire window content is kept.
     extract_mask
-        If `True`, the corresponding mask (extracted from the `labels_layer`)
-        will be added at channel index 0 for each extracted instance tensor.
+        If `True`, the corresponding per instance mask will be extracted.
     zarr_output_path
         If a filesystem path (string or ``Path``) is provided, the extracted
         instances are **computed** and materialized to a Zarr store at that
@@ -106,10 +105,10 @@ def extract_instances(
             not guaranteed to be sorted.
 
         - Extracted instance windows.
-            - If exactly one of ``extract_mask`` or ``extract_image`` is ``True``,
-            this is a single Dask array with shape ``(i, c, z, y, x)``.
+            - If ``extract_mask`` is ``False``,
+            this is a single Dask array of shape ``(i, c, z, y, x)``.
 
-            - If both ``extract_mask`` and ``extract_image`` are ``True``,
+            - If both ``extract_mask`` is ``True``,
             this is a 2-tuple ``(mask_instances, image_instances)`` where:
 
                 * ``mask_instances`` has shape ``(i, 1, z, y, x)`` and contains

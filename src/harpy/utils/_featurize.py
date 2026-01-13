@@ -637,7 +637,8 @@ class Featurizer:
 
             - Extracted instance windows.
                 - If exactly one of ``extract_mask`` or ``extract_image`` is ``True``,
-                this is a single Dask array with shape ``(i, c, z, y, x)``.
+                this is a single Dask array with shape ``(i, c, z, y, x)`` if ``extract_image`` is `True`
+                and of shape ``(i, 1, z, y, x)`` if ``extract_mask`` is `True`.
 
                 - If both ``extract_mask`` and ``extract_image`` are ``True``,
                 this is a 2-tuple ``(mask_instances, image_instances)`` where:
@@ -655,7 +656,6 @@ class Featurizer:
                 The returned Dask arrays are lazy unless ``zarr_output_path`` is
                 specified, in which case the data are written to disk and reloaded
                 as Dask arrays backed by Zarr.
-
 
         Examples
         --------
