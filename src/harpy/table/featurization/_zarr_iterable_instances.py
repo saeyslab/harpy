@@ -1,11 +1,19 @@
+from __future__ import annotations
+
 import math
 import multiprocessing as mp
 
 import numpy as np
-import torch
 import zarr
+from loguru import logger as log
 from numpy.typing import NDArray
-from torch.utils.data import DataLoader, IterableDataset, get_worker_info
+
+try:
+    import torch
+    from torch.utils.data import DataLoader, IterableDataset, get_worker_info
+
+except ImportError:
+    log.warning("'torch' not installed, to use 'harpy.tb.ZarrIterableInstances' please install this library.")
 
 
 class ZarrIterableInstances(IterableDataset):
@@ -13,7 +21,7 @@ class ZarrIterableInstances(IterableDataset):
     Chunk-wise iterable dataset for:
 
       - iterates chunk-by-chunk
-      - shuffles chunks deterministically
+      - shuffles chunks deterministically for every epoch
       - partitions chunks across DDP ranks and dataloader workers
       - supervised training (labels provided): yields (x, y) or (x, y, instance_id, row_idx)
       - inference (no labels): yields (x, instance_id, row_idx)
@@ -37,6 +45,48 @@ class ZarrIterableInstances(IterableDataset):
         drop_unlabeled: bool = True,  # will drop labels that are <1 only relevant if labels is not None, otherwise ignored
         allowed_chunk_indexes: NDArray = None,  # optionally restrict to a chunk subset (train/test split)
     ):
+        """
+        Initialize a chunk-wise iterable dataset over a Zarr array of instances.
+
+        Parameters
+        ----------
+        zarr_path
+            Path to a Zarr array of shape ``(i, c, z, y, x)`` where ``i`` indexes
+            instances.
+        instance_ids
+            One-dimensional array of length ``i`` with the instance identifier
+            per row in the Zarr array.
+        labels
+            Optional one-dimensional array of length ``i`` with supervised labels.
+            If ``None``, the dataset operates in inference mode.
+        chunk_i
+            Chunk size along the instance axis. If ``None``, uses the Zarr chunk
+            size for axis 0.
+        shuffle_chunks
+            If ``True``, shuffle chunk order deterministically by ``chunk_seed``.
+        chunk_seed
+            Base seed used for shuffling chunks. Combined with epoch when
+            ``shuffle_chunks`` is ``True``.
+        shuffle_within_chunk
+            If ``True``, shuffle rows within each chunk.
+        buffer_seed
+            Base seed for within-chunk shuffling. If ``None``, within-chunk
+            shuffling is non-deterministic.
+        normalize
+            Normalization mode for each instance tensor. Supported values are
+            ``"minmax01"``, ``"unit"``, ``None`` or ``"none"``.
+        x_dtype
+            Output dtype for returned tensors.
+        return_instance_id
+            If ``True``, append the instance id to each output tuple.
+        return_row_index
+            If ``True``, append the global row index (=instance id index) to each output tuple.
+        drop_unlabeled
+            If ``True`` and ``labels`` is provided, drop rows with label < 0.
+        allowed_chunk_indexes
+            Optional subset of chunk indices to iterate, e.g. for train/test
+            splits.
+        """
         self.zarr_path = zarr_path
         self.instance_ids = np.asarray(instance_ids).astype(np.int64)
         self.labels_all = None if labels is None else np.asarray(labels).astype(np.int64)
@@ -237,6 +287,9 @@ class ZarrDataLoader(DataLoader):
         it = super().__iter__()
         self._epoch += 1
         return it
+
+    def _get_epoch(self):
+        return self._epoch
 
 
 def _ddp_info():
