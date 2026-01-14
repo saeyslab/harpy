@@ -20,9 +20,10 @@ Explore how to use Harpy for segmentation, shallow and deep feature extraction, 
 
 ---
 
-- **🔬 Cell Segmentation**
+- **✂️ Cell Segmentation**
 
   Explore segmentation workflows in `Harpy` using different tools:
+
   - With [**Instanseg**](https://github.com/instanseg/instanseg) 👉 [Tutorial](../docs/tutorials/general//Harpy_instanseg.ipynb)
 
   - With [**Cellpose**](https://github.com/MouseLand/cellpose) 👉 [Tutorial ](../docs/tutorials/general/Harpy_feature_calculation.ipynb)
@@ -32,9 +33,15 @@ Explore how to use Harpy for segmentation, shallow and deep feature extraction, 
 
 ---
 
+- **🧪 Single-cell representations from highly multiplexed images and downstream use with [PyTorch](https://pytorch.org/)**
+
+  Learn how single-cell representations can be generated from highly multiplexed images. These representations can then be used downstream to train classifiers in PyTorch. 👉 [Tutorial](../docs/tutorials/general/generate_single_cell_representations.ipynb)
+
+---
+
 - **🧠 Deep Feature Extraction**
 
-  Discover how `Harpy` enables fast, scalable extraction of deep, cell-level features from multiplex imaging data with the [**KRONOS**](https://github.com/mahmoodlab/KRONOS) foundation model for proteomics. 👉 [Tutorial](../docs/tutorials/general/Featurize_with_kronos.ipynb)
+  Discover how `Harpy` enables fast, scalable extraction of deep, cell-level features from highly multiplex imaging data with the [**KRONOS**](https://github.com/mahmoodlab/KRONOS) foundation model for proteomics. 👉 [Tutorial](../docs/tutorials/general/Featurize_with_kronos.ipynb)
 
   💡 Want us to add support for another deep feature extraction method?
   👉 [Open an issue](https://github.com/saeyslab/harpy/issues) and let us know!

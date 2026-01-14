@@ -100,33 +100,34 @@ def extract_instances(
 
     Returns
     -------
-    tuple:
+    A 2-tuple ``(instance_ids, instances)`` where:
 
-        - One-dimensional NumPy array of shape ``(i,)`` containing the labels
-            of the extracted instances. The value ``i`` is the total number of
-            non-zero labels in the input mask. The order of ``instance_ids`` is
-            not guaranteed to be sorted.
+        - ``instance_ids`` is a one-dimensional NumPy array of shape ``(i,)``
+          containing the labels of the extracted instances. The value ``i`` is
+          the total number of non-zero labels in the input mask. The order of
+          ``instance_ids`` is not guaranteed to be sorted.
 
-        - Extracted instance windows.
-            - If ``extract_mask`` is ``False``,
-            this is a single Dask array of shape ``(i, c, z, y, x)``.
+        - ``instances`` contains the extracted instance windows.
 
-            - If both ``extract_mask`` is ``True``,
-            this is a 2-tuple ``(mask_instances, image_instances)`` where:
+          - If ``extract_mask`` is ``False``, this is a single Dask array of
+            shape ``(i, c, z, y, x)``.
 
-                * ``mask_instances`` has shape ``(i, 1, z, y, x)`` and contains
-                the extracted instance masks.
+          - If ``extract_mask`` is ``True``, this is a 2-tuple
+            ``(mask_instances, image_instances)`` where:
 
-                * ``image_instances`` has shape ``(i, c, z, y, x)`` and contains
-                the extracted instance image windows.
+            - ``mask_instances`` has shape ``(i, 1, z, y, x)`` and contains
+              the extracted instance masks.
 
-            Here, ``c`` is the number of image channels, ``z`` is the number of
-            planes in the z-dimension, and ``y`` and ``x`` are equal to
-            ``diameter``.
+            - ``image_instances`` has shape ``(i, c, z, y, x)`` and contains
+              the extracted instance image windows.
 
-            The returned Dask arrays are lazy unless ``zarr_output_path`` is
-            specified, in which case the data are written to disk and reloaded
-            as Dask arrays backed by Zarr.
+          Here, ``c`` is the number of image channels, ``z`` is the number of
+          planes in the z-dimension, and ``y`` and ``x`` are equal to
+          ``diameter``.
+
+          The returned Dask arrays are lazy unless ``zarr_output_path`` is
+          specified, in which case the data are written to disk and reloaded
+          as Dask arrays backed by Zarr.
 
     Examples
     --------

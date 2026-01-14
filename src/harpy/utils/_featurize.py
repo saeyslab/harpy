@@ -627,34 +627,36 @@ class Featurizer:
 
         Returns
         -------
-        tuple:
+        A 2-tuple ``(instance_ids, instances)`` where:
 
-            - One-dimensional NumPy array of shape ``(i,)`` containing the labels
-              of the extracted instances. The value ``i`` is the total number of
-              non-zero labels in the input mask. The order of ``instance_ids`` is
-              not guaranteed to be sorted.
+        - ``instance_ids`` is a one-dimensional NumPy array of shape ``(i,)``
+          containing the labels of the extracted instances. The value ``i`` is
+          the total number of non-zero labels in the input mask. The order of
+          ``instance_ids`` is not guaranteed to be sorted.
 
-            - Extracted instance windows.
-                - If exactly one of ``extract_mask`` or ``extract_image`` is ``True``,
-                this is a single Dask array with shape ``(i, c, z, y, x)`` if ``extract_image`` is `True`
-                and of shape ``(i, 1, z, y, x)`` if ``extract_mask`` is `True`.
+        - ``instances`` contains the extracted instance windows.
 
-                - If both ``extract_mask`` and ``extract_image`` are ``True``,
-                this is a 2-tuple ``(mask_instances, image_instances)`` where:
+          - If exactly one of ``extract_mask`` or ``extract_image`` is ``True``,
+            this is a single Dask array with shape ``(i, c, z, y, x)`` if
+            ``extract_image`` is `True` and of shape ``(i, 1, z, y, x)`` if
+            ``extract_mask`` is `True`.
 
-                    * ``mask_instances`` has shape ``(i, 1, z, y, x)`` and contains
-                    the extracted instance masks.
+          - If both ``extract_mask`` and ``extract_image`` are ``True``, this is
+            a 2-tuple ``(mask_instances, image_instances)`` where:
 
-                    * ``image_instances`` has shape ``(i, c, z, y, x)`` and contains
-                    the extracted instance image windows.
+            - ``mask_instances`` has shape ``(i, 1, z, y, x)`` and contains
+              the extracted instance masks.
 
-                Here, ``c`` is the number of image channels, ``z`` is the number of
-                planes in the z-dimension, and ``y`` and ``x`` are equal to
-                ``diameter``.
+            - ``image_instances`` has shape ``(i, c, z, y, x)`` and contains
+              the extracted instance image windows.
 
-                The returned Dask arrays are lazy unless ``zarr_output_path`` is
-                specified, in which case the data are written to disk and reloaded
-                as Dask arrays backed by Zarr.
+          Here, ``c`` is the number of image channels, ``z`` is the number of
+          planes in the z-dimension, and ``y`` and ``x`` are equal to
+          ``diameter``.
+
+          The returned Dask arrays are lazy unless ``zarr_output_path`` is
+          specified, in which case the data are written to disk and reloaded
+          as Dask arrays backed by Zarr.
 
         Examples
         --------
@@ -1060,9 +1062,8 @@ class Featurizer:
             Filesystem path (string or ``Path``) where the feature Dask array is
             written as a Zarr store. If provided, the Dask graph is **computed**
             and the data are materialized to disk at this location. The returned
-            object is still a Dask array backed by the written data.
-
-            If ``None`` (default), no data are written and the method returns a
+            object is still a Dask array backed by the written data. If ``None``
+            (default), no data are written and the method returns a
             **lazy** (not yet computed) Dask array.
         store_intermediate
             If `True`, intermediate `.zarr` data will be written to disk to reduce peak RAM usage.
@@ -1082,16 +1083,15 @@ class Featurizer:
 
         Returns
         -------
-        quantiles : list[pandas.DataFrame] or tuple[numpy.ndarray, dask.array.Array]
-            If ``zarr_output_path`` is ``None``, returns a list of pandas DataFrames,
-            one per requested quantile. Each DataFrame contains per-instance quantile
-            values and is indexed by the instance identifier.
+        If ``zarr_output_path`` is ``None``, returns a list of pandas DataFrames,
+        one per requested quantile. Each DataFrame contains per-instance quantile
+        values and is indexed by the instance identifier.
 
-            If ``zarr_output_path`` is specified, returns a tuple
-            ``(instance_ids, quantiles)``, where ``instance_ids`` is a NumPy array
-            of instance identifiers and ``quantiles`` is a Dask array backed by the
-            written Zarr store. In this case, all computations required to populate
-            the Zarr store are executed.
+        If ``zarr_output_path`` is specified, returns a tuple
+        ``(instance_ids, quantiles)``, where ``instance_ids`` is a NumPy array of
+        instance identifiers and ``quantiles`` is a Dask array backed by the
+        written Zarr store. In this case, all computations required to populate
+        the Zarr store are executed.
 
         Notes
         -----
