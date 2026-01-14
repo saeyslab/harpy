@@ -34,6 +34,7 @@ def extract_instances(
     name_instances_mask: str = "mask.zarr",
     batch_size: int | None = None,
     to_coordinate_system: str = "global",
+    run_on_gpu: bool = False,
     overwrite: bool = False,
 ) -> tuple[NDArray, da.Array | tuple[da.Array, da.Array]]:
     """
@@ -87,6 +88,8 @@ def extract_instances(
         Chunksize of the resulting dask array in the `i` dimension.
     to_coordinate_system
         The coordinate system that holds `img_layer` and `labels_layer`.
+    run_on_gpu
+        If True and 'cupy' is installed, the extraction step runs on the GPU.
     overwrite
         Whether to overwrite existing Zarr stores at the target locations.
         If ``True``, any existing Zarr store at
@@ -201,7 +204,7 @@ def extract_instances(
     image_array = image_array[:, None, ...] if image_array.ndim == 3 else image_array
     mask_array = mask_array[None, ...] if mask_array.ndim == 2 else mask_array
 
-    featurizer = Featurizer(mask_dask_array=mask_array, image_dask_array=image_array)
+    featurizer = Featurizer(mask_dask_array=mask_array, image_dask_array=image_array, run_on_gpu=run_on_gpu)
 
     instances_ids, instances = featurizer.extract_instances(
         depth=depth,
