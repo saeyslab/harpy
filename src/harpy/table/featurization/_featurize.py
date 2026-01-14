@@ -30,9 +30,13 @@ def extract_instances(
     remove_background: bool = True,
     extract_mask: bool = False,
     zarr_output_path: str | Path | None = None,
+    name_instances_image: str = "image.zarr",
+    name_instances_mask: str = "mask.zarr",
     batch_size: int | None = None,
     to_coordinate_system: str = "global",
-) -> tuple[NDArray, da.Array]:
+    run_on_gpu: bool = False,
+    overwrite: bool = False,
+) -> tuple[NDArray, da.Array | tuple[da.Array, da.Array]]:
     """
     Extract per-label instance windows from `img_layer`/`labels_layer` of size `diameter` in `y` and `x` using :func:`dask.array.map_overlap` and :func:`dask.array.map_blocks`.
 
@@ -64,8 +68,7 @@ def extract_instances(
         window are set to background (e.g., zero) so that only the object remains
         inside the cutout. If ``False``, the entire window content is kept.
     extract_mask
-        If `True`, the corresponding mask (extracted from the `labels_layer`)
-        will be added at channel index 0 for each extracted instance tensor.
+        If `True`, the corresponding per instance mask will be extracted.
     zarr_output_path
         If a filesystem path (string or ``Path``) is provided, the extracted
         instances are **computed** and materialized to a Zarr store at that
@@ -73,25 +76,58 @@ def extract_instances(
         written data, but all computations necessary to populate the store will
         have been executed. If `None` (default), no data are written and the
         method returns a **lazy** (not yet computed) Dask array.
+    name_instances_image
+        Name of the Zarr store created under ``zarr_output_path`` for extracted
+        image instances. Ignored if ``zarr_output_path`` is ``None`` or
+        ``extract_image`` is ``False``.
+    name_instances_mask
+        Name of the Zarr store created under ``zarr_output_path`` for extracted
+        mask instances. Ignored if ``zarr_output_path`` is ``None`` or
+        ``extract_mask`` is ``False``.
     batch_size
         Chunksize of the resulting dask array in the `i` dimension.
     to_coordinate_system
         The coordinate system that holds `img_layer` and `labels_layer`.
+    run_on_gpu
+        If True and 'cupy' is installed, the extraction step runs on the GPU.
+    overwrite
+        Whether to overwrite existing Zarr stores at the target locations.
+        If ``True``, any existing Zarr store at
+        ``zarr_output_path / name_instances_image`` and/or
+        ``zarr_output_path / name_instances_mask`` will be replaced.
+        If ``False`` (default), an error is raised if a target store already exists.
+        Ignored if ``zarr_output_path`` is ``None``.
 
     Returns
     -------
-    tuple:
+    A 2-tuple ``(instance_ids, instances)`` where:
 
-        - a Numpy array containing indices of extracted labels, shape ``(i,)``.
-            Dimension of ``i`` will be equal to the total number of non-zero
-            labels in the mask.
+        - ``instance_ids`` is a one-dimensional NumPy array of shape ``(i,)``
+          containing the labels of the extracted instances. The value ``i`` is
+          the total number of non-zero labels in the input mask. The order of
+          ``instance_ids`` is not guaranteed to be sorted.
 
-        - a Dask array of dimension ``(i, c+1, z, y, x)`` or
-            ``(i, c, z, y, x)``, with dimension of ``c`` the number of channels
-            in ``img_layer``. At channel index 0 of each instance, is the
-            corresponding mask if ``add_mask`` is set to ``True``. Dimension
-            of ``y`` and ``x`` are equal to ``diameter``, or ``2 * depth`` if
-            ``diameter`` is not specified.
+        - ``instances`` contains the extracted instance windows.
+
+          - If ``extract_mask`` is ``False``, this is a single Dask array of
+            shape ``(i, c, z, y, x)``.
+
+          - If ``extract_mask`` is ``True``, this is a 2-tuple
+            ``(mask_instances, image_instances)`` where:
+
+            - ``mask_instances`` has shape ``(i, 1, z, y, x)`` and contains
+              the extracted instance masks.
+
+            - ``image_instances`` has shape ``(i, c, z, y, x)`` and contains
+              the extracted instance image windows.
+
+          Here, ``c`` is the number of image channels, ``z`` is the number of
+          planes in the z-dimension, and ``y`` and ``x`` are equal to
+          ``diameter``.
+
+          The returned Dask arrays are lazy unless ``zarr_output_path`` is
+          specified, in which case the data are written to disk and reloaded
+          as Dask arrays backed by Zarr.
 
     Examples
     --------
@@ -116,15 +152,14 @@ def extract_instances(
             diameter=40,
             remove_background=True,
             extract_mask=False,
-            zarr_output_path="instances.zarr",
+            zarr_output_path="instances",
+            name_instances_image="image_instances.zarr",
             batch_size=64,
             to_coordinate_system="fov0",
         )
 
-        mask_array = sdata[labels_layer].data[None, ...]
-
         instance_id = 23
-        channel_idx = 20
+        channel_idx = 19
 
         array = instances[instance_ids == instance_id][0][channel_idx][0]
         plt.imshow(array)
@@ -170,7 +205,7 @@ def extract_instances(
     image_array = image_array[:, None, ...] if image_array.ndim == 3 else image_array
     mask_array = mask_array[None, ...] if mask_array.ndim == 2 else mask_array
 
-    featurizer = Featurizer(mask_dask_array=mask_array, image_dask_array=image_array)
+    featurizer = Featurizer(mask_dask_array=mask_array, image_dask_array=image_array, run_on_gpu=run_on_gpu)
 
     instances_ids, instances = featurizer.extract_instances(
         depth=depth,
@@ -178,7 +213,10 @@ def extract_instances(
         remove_background=remove_background,
         extract_mask=extract_mask,
         zarr_output_path=zarr_output_path,
+        name_instances_image=name_instances_image,
+        name_instances_mask=name_instances_mask,
         batch_size=batch_size,
+        overwrite=overwrite,
     )
 
     return instances_ids, instances

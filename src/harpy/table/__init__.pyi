@@ -11,6 +11,7 @@ from .cell_clustering._clustering import flowsom
 from .cell_clustering._preprocess import cell_clustering_preprocess
 from .cell_clustering._weighted_channel_expression import weighted_channel_expression
 from .featurization._featurize import extract_instances, featurize
+from .featurization._zarr_iterable_instances import ZarrDataLoader, ZarrIterableInstances
 from .pixel_clustering._cluster_intensity import cluster_intensity_SOM
 from .pixel_clustering._neighbors import spatial_pixel_neighbors
 
@@ -18,6 +19,8 @@ __all__ = [
     "add_table_layer",
     "correct_marker_genes",
     "extract_instances",
+    "ZarrIterableInstances",
+    "ZarrDataLoader",
     "featurize",
     "filter_on_size",
     "flowsom",

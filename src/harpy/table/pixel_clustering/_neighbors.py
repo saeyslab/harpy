@@ -197,6 +197,7 @@ def _get_values_grid_most_frequent(
     featurizer = Featurizer(
         mask_dask_array=mask_grid,
         image_dask_array=mask_pixel_clusters,
+        run_on_gpu=False,
     )
 
     def _most_frequent(array: NDArray):

@@ -80,7 +80,7 @@ class RasterAggregator:
     def __init__(
         self,
         mask_dask_array: da.Array,
-        image_dask_array: da.Array | None,
+        image_dask_array: da.Array | None = None,
         instance_key: str = _INSTANCE_KEY,
         instance_size_key: str = _CELLSIZE_KEY,
         run_on_gpu: bool = True,
@@ -106,7 +106,8 @@ class RasterAggregator:
                 _ = cupy
             except ImportError:
                 log.warning(
-                    "Parameter 'run_on_gpu' was set to True, while 'cupy' is not installed. Setting 'run_on_gpu' to False."
+                    "Parameter 'run_on_gpu' was set to True, but 'cupy' is not installed. "
+                    "Falling back to CPU execution. Please install 'cupy' to enable GPU support."
                 )
                 run_on_gpu = False
 
@@ -347,8 +348,6 @@ class RasterAggregator:
     def center_of_mass(self, index: NDArray | None = None) -> pd.DataFrame:
         """
         Computes the center of mass for each labeled region in the mask.
-
-        Note that we use scipy.ndimage.center_of_mass, which loads the mask into memory.
 
         Parameters
         ----------
@@ -883,7 +882,6 @@ class RasterAggregator:
         self._count = xp.asarray(self._count)
 
         def _calculate_mass_moment_vector_chunk(mask_block: NDArray, block_info) -> NDArray:
-            # for safety
             _, is_cupy_index = _get_xp(index, run_on_gpu=self._run_on_gpu)
             xp, is_cupy_mask = _get_xp(mask_block, run_on_gpu=self._run_on_gpu)
             if len({is_cupy_mask, is_cupy_index}) != 1:
