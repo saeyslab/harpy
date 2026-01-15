@@ -122,6 +122,10 @@ Explore how to use Harpy for segmentation, shallow and deep feature extraction, 
 
 📚 For a complete list of tutorials, visit the [**Harpy documentation**](https://harpy.readthedocs.io/en/latest/tutorials).
 
+## Computational benchmark
+
+Explore the benchmark performance of **Harpy** on a large MACSima tonsil proteomics dataset. 👉 [Results](./docs/tutorials/general/benchmark.ipynb)
+
 ## Usage
 
 [Learn](https://github.com/saeyslab/harpy/blob/main/docs/usage.md) how `Harpy` can be integrated into your workflow.

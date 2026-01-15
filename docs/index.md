@@ -90,6 +90,13 @@ Explore how to use Harpy for segmentation, shallow and deep feature extraction, 
 
     Tutorials to help you get up to speed with Harpy.
 
+.. card:: Computational Benchmark
+    :link: tutorials/general/benchmark
+    :link-type: doc
+
+    Explore Harpy's benchmark performance.
+
+
 .. card:: Usage
     :link: usage
     :link-type: doc
@@ -136,6 +143,7 @@ For spatial transcriptomics analysis, see the [SPArrOW preprint](https://www.bio
 installation.md
 usage.md
 tutorials/index.md
+tutorials/general/benchmark
 api.md
 contributing.md
 ```
