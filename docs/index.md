@@ -23,6 +23,7 @@ Explore how to use Harpy for segmentation, shallow and deep feature extraction, 
 - **✂️ Cell Segmentation**
 
   Explore segmentation workflows in `Harpy` using different tools:
+
   - With [**Instanseg**](https://github.com/instanseg/instanseg) 👉 [Tutorial](../docs/tutorials/general//Harpy_instanseg.ipynb)
 
   - With [**Cellpose**](https://github.com/MouseLand/cellpose) 👉 [Tutorial ](../docs/tutorials/general/Harpy_feature_calculation.ipynb)
@@ -90,6 +91,13 @@ Explore how to use Harpy for segmentation, shallow and deep feature extraction, 
 
     Tutorials to help you get up to speed with Harpy.
 
+.. card:: Computational Benchmark
+    :link: tutorials/general/benchmark
+    :link-type: doc
+
+    Explore Harpy's benchmark performance.
+
+
 .. card:: Usage
     :link: usage
     :link-type: doc
@@ -136,6 +144,7 @@ For spatial transcriptomics analysis, see the [SPArrOW preprint](https://www.bio
 installation.md
 usage.md
 tutorials/index.md
+tutorials/general/benchmark
 api.md
 contributing.md
 ```
