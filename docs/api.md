@@ -260,6 +260,7 @@ Dataset loaders.
     datasets.xenium_human_lung_cancer
     datasets.xenium_human_ovarian_cancer
     datasets.visium_hd_example
+    datasets.visium_hd_example_custom_binning
     datasets.get_registry
     datasets.get_spatialdata_registry
 ```
