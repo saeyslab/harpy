@@ -16,7 +16,7 @@ Explore how to use Harpy for segmentation, shallow and deep feature extraction, 
 
 - **🔧 Technology specific advice**
 
-  Learn which technologies Harpy supports 👉 [Notebook](../docs/tutorials/general/techno_specific.ipynb)
+  Learn which technologies Harpy supports. 👉 [Notebook](../docs/tutorials/general/techno_specific.ipynb)
 
 ---
 
@@ -29,6 +29,7 @@ Explore how to use Harpy for segmentation, shallow and deep feature extraction, 
 - **✂️ Cell Segmentation**
 
   Explore segmentation workflows in `Harpy` using different tools:
+
   - With [**Instanseg**](https://github.com/instanseg/instanseg) 👉 [Tutorial](../docs/tutorials/general//Harpy_instanseg.ipynb)
 
   - With [**Cellpose**](https://github.com/MouseLand/cellpose) 👉 [Tutorial ](../docs/tutorials/general/Harpy_feature_calculation.ipynb)
