@@ -80,6 +80,42 @@ def macsima_tonsil(filter_regex: str | None = "None|FITC|PE|APC", path: str | Pa
     return sdata
 
 
+def macsima_tonsil_benchmark(path: str | Path | None = None) -> SpatialData:
+    """
+    Tonsil proteomics dataset acquired with the MACSima platform and used for benchmarking Harpy.
+
+    The image layer under the key ``"image_tiled"`` was obtained by artificially
+    tiling the ``"ROI1_image"`` output of
+    :func:`harpy.datasets.macsima_tonsil()` into a 3D image layout with dimensions
+    (c, y, x) = (100, 20000, 20000).
+
+    The cell segmentation mask stored under the key ``"labels_cells_harpy"`` was
+    generated using Cellpose (version 4.0) applied to the ``"image_tiled"`` image
+    layer.
+
+    Parameters
+    ----------
+    path
+        If ``None``, the example data will be downloaded into the default cache
+        directory for your OS. Provide a custom path to change this behavior.
+
+    Returns
+    -------
+    A :class:`spatialdata.SpatialData` object containing the MACSima
+    imaging data.
+
+    See Also
+    --------
+    harpy.dataset.macsima_tonsil : MACSima data.
+    """
+    # Fetch and unzip the file
+    registry = get_registry(path)
+    unzip_path = registry.fetch("proteomics/macsima/sdata_tonsil.zarr.zip", processor=pooch.Unzip())
+    sdata = read_zarr(os.path.commonpath(unzip_path))
+    sdata.path = None
+    return sdata
+
+
 def macsima_colorectal_carcinoma(subset: bool = True, path: str | Path | None = None, **kwargs) -> SpatialData:
     """
     Load the Colorectal Carcinoma MACSima dataset as a :class:`spatialdata.SpatialData` object.

@@ -59,6 +59,12 @@ Explore how to use Harpy for segmentation, shallow and deep feature extraction, 
 
 ---
 
+- **🔧 Technology specific advice**
+
+  Learn which technologies Harpy supports. 👉 [Notebook](./docs/tutorials/general/techno_specific.ipynb)
+
+---
+
 - **🧩 Pixel and Cell Clustering**
 
   Learn how to perform unsupervised pixel- and cell-level clustering using `Harpy` together with [**FlowSOM**](https://github.com/saeyslab/FlowSOM_Python). 👉 [Tutorial](./docs/tutorials/general/FlowSOM_for_pixel_and_cell_clustering.ipynb)
@@ -121,6 +127,10 @@ Explore how to use Harpy for segmentation, shallow and deep feature extraction, 
 ---
 
 📚 For a complete list of tutorials, visit the [**Harpy documentation**](https://harpy.readthedocs.io/en/latest/tutorials).
+
+## Computational benchmark
+
+Explore the benchmark performance of **Harpy** on a large MACSima tonsil proteomics dataset. 👉 [Results](./docs/tutorials/general/benchmark.ipynb)
 
 ## Usage
 

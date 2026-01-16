@@ -5,6 +5,7 @@ from .proteomics import (
     macsima_colorectal_carcinoma,
     macsima_example,
     macsima_tonsil,
+    macsima_tonsil_benchmark,
     mibi_example,
     vectra_example,
 )
@@ -26,6 +27,7 @@ __all__ = [
     "pixie_example",
     "macsima_example",
     "macsima_tonsil",
+    "macsima_tonsil_benchmark",
     "codex_example",
     "macsima_colorectal_carcinoma",
     "mibi_example",

@@ -7,6 +7,7 @@ from ._transcripts import (
     read_stereoseq_transcripts,
     read_transcripts,
 )
+from ._visium import visium
 from ._visium_hd import visium_hd
 from ._xenium import xenium
 
@@ -19,5 +20,6 @@ __all__ = [
     "read_stereoseq_transcripts",
     "read_transcripts",
     "visium_hd",
+    "visium",
     "xenium",
 ]
