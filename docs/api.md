@@ -24,6 +24,7 @@ I/O.
     io.macsima
     io.merscope
     io.xenium
+    io.visium
     io.visium_hd
     io.read_transcripts
     io.read_resolve_transcripts
@@ -251,6 +252,7 @@ Dataset loaders.
     datasets.macsima_example
     datasets.macsima_colorectal_carcinoma
     datasets.macsima_tonsil
+    datasets.codex_example
     datasets.mibi_example
     datasets.vectra_example
     datasets.resolve_example
@@ -258,6 +260,7 @@ Dataset loaders.
     datasets.xenium_human_lung_cancer
     datasets.xenium_human_ovarian_cancer
     datasets.visium_hd_example
+    datasets.visium_hd_example_custom_binning
     datasets.get_registry
     datasets.get_spatialdata_registry
 ```
