@@ -897,6 +897,674 @@ class Featurizer:
                 log.warning("read_from_zarr=True uses CPU extraction; forcing CPU execution.")
 
             mask_zarr = zarr.open(str(mask_zarr_path), mode="r")
+            mask_has_z = mask_zarr.ndim == 3
+            if mask_zarr.ndim not in (2, 3):
+                raise ValueError("mask_zarr_path must point to a 2D or 3D Zarr array.")
+            mask_shape = (1,) + mask_zarr.shape if mask_has_z else (1,) + (1,) + mask_zarr.shape
+            if mask_shape != array_mask.shape:
+                raise ValueError(
+                    f"mask_zarr_path shape {mask_shape} does not match mask array shape {array_mask.shape}."
+                )
+            mask_chunks = _expand_regular_chunks(
+                mask_shape,
+                (1) + mask_zarr.chunks if mask_has_z else (1,) + (1,) + mask_zarr.chunks,
+            )
+            if mask_chunks != _chunks_without_depth_added:
+                raise ValueError("mask_zarr_path chunking must match mask array chunking when read_from_zarr=True.")
+            if len(mask_chunks[1]) != 1:
+                raise ValueError("Zarr mask must not be chunked in z when read_from_zarr=True.")
+
+            if extract_image and image_zarr_path is not None:
+                image_zarr = zarr.open(str(image_zarr_path), mode="r")
+                if image_zarr.ndim not in (3, 4):
+                    raise ValueError("image_zarr_path must point to a 3D or 4D Zarr array.")
+                image_has_z = image_zarr.ndim == 4
+                assert image_has_z == mask_has_z  # if mask has z, image must have z
+                image_shape = (
+                    image_zarr.shape
+                    if image_has_z
+                    else (
+                        image_zarr.shape[0],
+                        1,
+                        image_zarr.shape[1],
+                        image_zarr.shape[2],
+                    )
+                )  # TODO: need to check for fix for case where user would send image with z dimension inconsistent with image
+
+                if image_shape != array_image.shape:
+                    raise ValueError(
+                        f"image_zarr_path shape {image_zarr.shape} does not match image array shape {array_image.shape}."
+                    )
+                image_chunks = _expand_regular_chunks(
+                    image_shape,
+                    image_zarr.chunks
+                    if image_has_z
+                    else (
+                        image_zarr.chunks[0],
+                        1,
+                        image_zarr.chunks[1],
+                        image_zarr.chunks[2],
+                    ),
+                )
+                if image_chunks[1:] != mask_chunks[1:]:
+                    raise ValueError("Zarr image and mask chunking must match for z/y/x axes.")
+            else:
+                image_zarr = None
+        else:
+            array_mask = overlap(
+                array_mask,
+                depth=_depth,
+                allow_rechunk=False,
+                boundary=0,
+            )
+
+            if array_image is not None:
+                array_image = _rechunk_overlap(x=array_image, depth=_depth, chunks=None, allow_adjust_depth=False)
+                array_image = overlap(
+                    array_image,
+                    depth=_depth,
+                    allow_rechunk=False,
+                    boundary=0,
+                )
+            image_zarr = None
+
+        # substract global start from the centers and add the depth -> this will get you the correct ofset
+        def _chunk_global_start(chunks, chunk_id):
+            return tuple(int(np.sum(axis_chunks[:i])) for axis_chunks, i in zip(chunks, chunk_id, strict=True))
+
+        # all chunk_ids
+        chunk_ids = list(np.ndindex(tuple(len(axis_chunks) for axis_chunks in mask_chunks)))
+
+        centroids = []
+        chunk_to_labels = {}
+        for _chunk_id in chunk_ids:
+            chunk_global_start_position = _chunk_global_start(
+                chunks=mask_chunks,
+                chunk_id=(_chunk_id[0], _chunk_id[1], _chunk_id[2], _chunk_id[3]),
+            )
+            _df = center_of_mass[
+                (center_of_mass["z_chunk"] == _chunk_id[1])
+                & (center_of_mass["y_chunk"] == _chunk_id[2])
+                & (center_of_mass["x_chunk"] == _chunk_id[3])
+            ]
+            if _df.empty:
+                chunk_to_labels[_chunk_id] = np.array([], dtype=array_mask.dtype)
+                continue
+            chunk_to_labels[_chunk_id] = _df[_INSTANCE_KEY].values
+            chunk_global_start_position = _chunk_global_start(
+                chunks=mask_chunks,
+                chunk_id=(_chunk_id[0], _chunk_id[1], _chunk_id[2], _chunk_id[3]),
+            )
+            # convert centroids from global position to position in the chunk
+            centroids.append(
+                (_df[["z", "y", "x"]].values - np.asarray(chunk_global_start_position[1:]))
+                + np.asarray([0, depth, depth])
+            )
+
+        centroids = np.concatenate(centroids, axis=0)
+        centroid_map = dict(zip(instance_ids.tolist(), centroids, strict=True))
+
+        center_of_mass.drop(
+            columns=[
+                "z",
+                "y",
+                "x",
+            ],
+            inplace=True,
+        )
+        del center_of_mass
+
+        # persisting speeds up processing, when we do not persist, it gets slower
+        if not read_from_zarr:
+            (array_mask,) = dask.persist(array_mask)
+
+        instances = []
+        mask_instances = []
+        # For now we do not allow chunking in z, but to support chunking in z, only thing that needs to be updated is this line,
+        # where we get the chunksize in z from the chunks.
+        size = (array_mask.shape[1], diameter, diameter)
+
+        if read_from_zarr:
+            _extract_func = _extract_instance_patches_sliced
+        else:
+            _extract_func = _extract_instance_patches if self._run_on_gpu else _extract_instance_patches_sliced
+
+        def _chunk_slices_and_pad(
+            chunks: tuple[tuple[int, ...], ...],
+            chunk_id: tuple[int, ...],
+            shape: tuple[int, ...],
+            depth: int,
+            halo_axes: tuple[int, ...],
+        ) -> tuple[list[slice], list[tuple[int, int]]]:
+            slices = []
+            pad_width = []
+            for axis, axis_chunks in enumerate(chunks):
+                start = int(np.sum(axis_chunks[: chunk_id[axis]]))
+                end = start + int(axis_chunks[chunk_id[axis]])
+                if axis in halo_axes:
+                    start_h = start - depth
+                    end_h = end + depth
+                    start_c = max(0, start_h)
+                    end_c = min(shape[axis], end_h)
+                    pad_before = start_c - start_h
+                    pad_after = end_h - end_c
+                    slices.append(slice(start_c, end_c))
+                    pad_width.append((pad_before, pad_after))
+                else:
+                    slices.append(slice(start, end))
+                    pad_width.append((0, 0))
+            return slices, pad_width
+
+        def _read_zarr_chunk(
+            zarr_path: str | Path,
+            chunk_id: tuple[int, ...],
+            chunks: tuple[tuple[int, ...], ...],
+            shape: tuple[int, ...],
+            depth: int,
+            halo_axes: tuple[int, ...],
+            mask: bool,
+            add_z: bool,
+        ) -> NDArray:
+            z = zarr.open(str(zarr_path), mode="r")
+            slices, pad_width = _chunk_slices_and_pad(chunks, chunk_id, shape, depth, halo_axes)
+            # correct for mask
+            if mask:
+                slices = slices[1:]  # discard the c
+                pad_width = pad_width[1:]
+            # correct for z
+            if add_z:  # this is case where zarr array on disk has no z dimension
+                if mask:
+                    slices = slices[1:]  # discard the z
+                    pad_width = pad_width[1:]
+                else:
+                    slices = [slices[i] for i in [0, 2, 3]]  # discard the z
+                    pad_width = [pad_width[i] for i in [0, 2, 3]]
+            # now we can slice z
+            arr = z[tuple(slices)]
+            # now add z and c back, we want c,z,y,x in all cases for convenience
+            if mask:
+                arr = arr[None, ...]  # add the c
+                pad_width = [(0, 0)] + pad_width  # add the c
+            if add_z:
+                if mask:
+                    arr = arr[:, None, ...]  # add the z
+                    pad_width[:1] + [(0, 0)] + pad_width[1:]
+                else:
+                    arr = arr[:, None, ...]
+                    pad_width = pad_width[:1] + [(0, 0)] + pad_width[1:]
+            if any(pad_before or pad_after for pad_before, pad_after in pad_width):
+                arr = np.pad(arr, pad_width, mode="constant", constant_values=0)
+            return arr
+
+        if read_from_zarr:
+            # mask_shape = (1,) + mask_zarr.shape if mask_has_z else (1,) + (1,) + mask_zarr.shape
+            mask_blocks: dict[tuple[int, ...], Any] = {}
+            for _chunk_id in chunk_ids:
+                instance_ids_chunk = chunk_to_labels[_chunk_id]
+                if len(instance_ids_chunk) == 0:
+                    continue
+                mask_blocks[_chunk_id] = delayed(_read_zarr_chunk)(
+                    zarr_path=mask_zarr_path,
+                    chunk_id=_chunk_id,
+                    chunks=mask_chunks,
+                    shape=mask_shape,
+                    depth=depth,
+                    halo_axes=(2, 3),
+                    add_z=not mask_has_z,  # mask has channel->always False, -> add channel is always true
+                    mask=True,
+                )
+
+            if extract_image and image_zarr is not None:
+                c_chunks = image_chunks[0]
+                for c_block_idx, c_chunk in enumerate(c_chunks):
+                    instances_c = []
+                    for _chunk_id in chunk_ids:
+                        instance_ids_chunk = chunk_to_labels[_chunk_id]
+                        if len(instance_ids_chunk) == 0:
+                            continue
+                        _image_chunk_id = (c_block_idx, _chunk_id[1], _chunk_id[2], _chunk_id[3])
+                        _image_chunk = delayed(_read_zarr_chunk)(
+                            zarr_path=image_zarr_path,
+                            chunk_id=_image_chunk_id,
+                            chunks=image_chunks,
+                            shape=image_shape,
+                            depth=depth,
+                            halo_axes=(2, 3),
+                            add_z=not mask_has_z,
+                            mask=False,  # now we run on the image
+                        )
+                        _instances_chunk = delayed(_extract_func)(
+                            mask=mask_blocks[_chunk_id],
+                            image=_image_chunk,
+                            size=size,
+                            centroids=np.stack([centroid_map[i] for i in instance_ids_chunk], axis=0),
+                            instance_ids=instance_ids_chunk,
+                            remove_background=remove_background,
+                        )
+                        _instances_chunk = da.from_delayed(
+                            _instances_chunk,
+                            shape=(len(instance_ids_chunk), c_chunk, size[0], size[1], size[2]),
+                            dtype=array_image.dtype,
+                        )
+                        instances_c.append(_instances_chunk)
+                    if instances_c:
+                        instances.append(da.concatenate(instances_c, axis=0))
+                if instances:
+                    instances = da.concatenate(instances, axis=1)
+
+            if extract_mask:
+                for _chunk_id in chunk_ids:
+                    instance_ids_chunk = chunk_to_labels[_chunk_id]
+                    if len(instance_ids_chunk) == 0:
+                        continue
+                    _instances_chunk = delayed(_extract_func)(
+                        mask=mask_blocks[_chunk_id],
+                        image=None,
+                        size=size,
+                        centroids=np.stack([centroid_map[i] for i in instance_ids_chunk], axis=0),
+                        instance_ids=instance_ids_chunk,
+                        remove_background=remove_background,
+                    )
+                    _instances_chunk = da.from_delayed(
+                        _instances_chunk,
+                        shape=(len(instance_ids_chunk), 1, size[0], size[1], size[2]),
+                        dtype=array_mask.dtype,
+                    )
+                    mask_instances.append(_instances_chunk)
+                if mask_instances:
+                    mask_instances = da.concatenate(mask_instances, axis=0)
+        else:
+            if extract_image:
+                if array_image is not None:
+                    c_chunks = array_image.chunks[0]
+                    for i, (c_block_image_array, _c_chunks) in enumerate(
+                        zip(array_image.to_delayed(), c_chunks, strict=True)
+                    ):
+                        instances_c = []
+                        for _chunk_id, _mask_chunk, _image_chunk in zip(
+                            chunk_ids,
+                            array_mask.to_delayed().flatten(),
+                            c_block_image_array.flatten(),
+                            strict=True,
+                        ):
+                            instance_ids_chunk = chunk_to_labels[_chunk_id]
+                            if len(instance_ids_chunk) == 0:
+                                continue
+                            _instances_chunk = delayed(_extract_func)(
+                                mask=_mask_chunk,
+                                image=_image_chunk,
+                                size=size,
+                                centroids=np.stack([centroid_map[i] for i in instance_ids_chunk], axis=0),
+                                instance_ids=instance_ids_chunk,
+                                remove_background=remove_background,
+                            )
+                            _instances_chunk = da.from_delayed(
+                                _instances_chunk,
+                                shape=(
+                                    len(instance_ids_chunk),
+                                    _c_chunks,
+                                    size[0],
+                                    size[1],
+                                    size[2],
+                                ),
+                                dtype=array_image.dtype,
+                            )
+                            instances_c.append(_instances_chunk)
+                        instances.append(da.concatenate(instances_c, axis=0))
+                    instances = da.concatenate(instances, axis=1)
+            if extract_mask:
+                c_chunks = (1,)
+                # extract the mask
+                for _chunk_id, _mask_chunk in zip(
+                    chunk_ids,
+                    array_mask.to_delayed().flatten(),
+                    strict=True,
+                ):
+                    instance_ids_chunk = chunk_to_labels[_chunk_id]
+                    if len(instance_ids_chunk) == 0:
+                        continue
+                    _instances_chunk = delayed(_extract_func)(
+                        mask=_mask_chunk,
+                        image=None,
+                        size=size,
+                        centroids=np.stack([centroid_map[i] for i in instance_ids_chunk], axis=0),
+                        instance_ids=instance_ids_chunk,
+                        remove_background=remove_background,
+                    )
+                    _instances_chunk = da.from_delayed(
+                        _instances_chunk,
+                        shape=(len(instance_ids_chunk), c_chunks[0], size[0], size[1], size[2]),
+                        dtype=array_mask.dtype,
+                    )
+                    mask_instances.append(_instances_chunk)
+                mask_instances = da.concatenate(mask_instances, axis=0)
+
+        out = [mask_instances, instances]
+        out_names = [name_instances_mask, name_instances_image]
+        for i, (_instances, _name) in enumerate(zip(out, out_names, strict=True)):
+            if len(_instances):
+                chunksize_instances = _instances.chunksize
+                if batch_size is not None:
+                    chunksize_instances = (
+                        batch_size,
+                        chunksize_instances[1],
+                        chunksize_instances[2],
+                        chunksize_instances[3],
+                        chunksize_instances[4],
+                    )
+                # rechunk, because chunks have irregular chunksize
+                _instances = _instances.rechunk(chunksize_instances)
+                if zarr_output_path is not None:
+                    # put back on cpu if we write to zarr
+                    if self._run_on_gpu:
+                        _instances = _to_numpy_dask_array(_instances)
+                    _instances.to_zarr(os.path.join(zarr_output_path, _name), overwrite=overwrite)
+                    _instances = da.from_zarr(os.path.join(zarr_output_path, _name))
+                out[i] = _instances
+
+        # Note that instance_ids are not sorted.
+        # It is recommended not to do so (otherwise the instances array needs to be sorted, which is not optimal)
+        if extract_image and extract_mask:
+            return instance_ids, tuple(out)
+
+        if extract_image:
+            return instance_ids, out[1]
+
+        if extract_mask:
+            return instance_ids, out[0]
+
+    def extract_instances_co(
+        self,
+        diameter: int,  # will be dimension of resulting chunks in y and x. Can be set to value < max_diameter to optimize performance
+        depth: int | None,  # ~max_diameter/2, depth in y and x,
+        remove_background: bool = True,
+        extract_mask: bool = False,
+        extract_image: bool = True,
+        zarr_output_path: str
+        | Path
+        | None = None,  # if zarr_output_path is specified, we compute the graph, otherwise we return a non-computed graph, recommend specifying an output path FIXME: also support h5ad format.
+        read_from_zarr: bool = False,
+        mask_zarr_path: str | Path | None = None,
+        image_zarr_path: str | Path | None = None,
+        name_instances_image: str = "image.zarr",  # ignored if extract_image is False
+        name_instances_mask: str = "mask.zarr",  # ignored if extract_mask is False
+        batch_size: int | None = None,  # FIXME: currently ignored if zarr_output_path is None
+        overwrite: bool = False,
+    ) -> tuple[NDArray, da.Array | tuple[da.Array, da.Array]]:
+        """
+        Extract per-label instance windows from the mask and image of size ``diameter`` in ``y`` and ``x`` using :func:`dask.array.map_overlap` and :func:`dask.array.map_blocks`.
+
+        If ``read_from_zarr`` is ``True``, chunks are read directly from Zarr with
+        halo padding, bypassing :func:`dask.array.overlap`. This requires
+        ``mask_zarr_path`` (and ``image_zarr_path`` when ``extract_image`` is
+        ``True``).
+
+        See :func:`harpy.tb.extract_instances` for a full description.
+
+        Returns
+        -------
+        A 2-tuple ``(instance_ids, instances)`` where:
+
+        - ``instance_ids`` is a one-dimensional NumPy array of shape ``(i,)``
+          containing the labels of the extracted instances. The value ``i`` is
+          the total number of non-zero labels in the input mask. The order of
+          ``instance_ids`` is not guaranteed to be sorted.
+
+        - ``instances`` contains the extracted instance windows.
+
+          - If exactly one of ``extract_mask`` or ``extract_image`` is ``True``,
+            this is a single Dask array with shape ``(i, c, z, y, x)`` if
+            ``extract_image`` is `True` and of shape ``(i, 1, z, y, x)`` if
+            ``extract_mask`` is `True`.
+
+          - If both ``extract_mask`` and ``extract_image`` are ``True``, this is
+            a 2-tuple ``(mask_instances, image_instances)`` where:
+
+            - ``mask_instances`` has shape ``(i, 1, z, y, x)`` and contains
+              the extracted instance masks.
+
+            - ``image_instances`` has shape ``(i, c, z, y, x)`` and contains
+              the extracted instance image windows.
+
+          Here, ``c`` is the number of image channels, ``z`` is the number of
+          planes in the z-dimension, and ``y`` and ``x`` are equal to
+          ``diameter``.
+
+          The returned Dask arrays are lazy unless ``zarr_output_path`` is
+          specified, in which case the data are written to disk and reloaded
+          as Dask arrays backed by Zarr.
+
+        Examples
+        --------
+        Basic usage:
+
+        .. code-block:: python
+
+            import harpy as hp
+
+            sdata = hp.datasets.pixie_example()
+
+            img_layer = "raw_image_fov0"
+            labels_layer = "label_whole_fov0"
+
+            mask_array = (
+                sdata[labels_layer]
+                .data[None, ...]
+                .rechunk(1024)
+            )
+
+            image_array = (
+                sdata[img_layer]
+                .data[:, None, ...]
+                .rechunk(1024)
+            )
+
+            fe = hp.utils.Featurizer(
+                mask_dask_array=mask_array,
+                image_dask_array=image_array,
+            )
+
+            # Lazy Dask graph
+            instance_ids, instances = fe.extract_instances(
+                depth=100,
+                diameter=75,
+            )
+
+            # Inspect shape and chunking
+            instances
+
+            # Persist to Zarr on disk (computes instances)
+            instance_ids, instances = fe.extract_instances(
+                depth=100,
+                diameter=75,
+                zarr_output_path="instances.zarr",
+            )
+
+            # Keep full window content instead of masking to the instance
+            instance_ids, instances = fe.extract_instances(
+                depth=100,
+                diameter=75,
+                remove_background=False,
+            )
+
+        Visual sanity check of extracted instances:
+
+        .. code-block:: python
+
+            import dask
+            import dask.array as da
+            import matplotlib.pyplot as plt
+            import harpy as hp
+
+            sdata = hp.datasets.pixie_example()
+
+            labels_layer = "label_whole_fov0"
+            mask_array = sdata[labels_layer].data[None, ...]
+
+            fe = hp.utils.Featurizer(
+                mask_dask_array=mask_array,
+                image_dask_array=None,
+            )
+
+            instance_ids, instances = fe.extract_instances(
+                depth=50,
+                diameter=75,
+                batch_size=500,
+                extract_mask=True,
+                extract_image=True,
+            )
+
+            instances = instances.compute()
+
+            instance_id = 23
+            mask = instances[instance_ids == instance_id][0][0][0]
+            plt.imshow(mask)
+            plt.show()
+
+            mask_array_remove = da.where(mask_array == instance_id, mask_array, 0)
+
+            _, y_, x_ = da.where(mask_array == instance_id)
+            y_, x_ = dask.compute(y_, x_)
+
+            plt.imshow(
+                mask_array_remove[
+                    0,
+                    y_.min():y_.max(),
+                    x_.min():x_.max(),
+                ]
+            )
+            plt.show()
+
+        See Also
+        --------
+        harpy.tb.extract_instances : Extract instance windows from a labels layer and (optionally) an image layer.
+        """
+        if depth is None:
+            depth = (diameter // 2) + 1
+        if depth < diameter // 2:
+            raise ValueError("Depth is set to a value smaller than diameter//2. This is not allowed.")
+        _depth = {0: 0, 1: 0, 2: depth, 3: depth}
+        if not extract_image and not extract_mask:
+            raise ValueError("Please either set 'extract_image' or 'extract_mask' to True.")
+        # sanity checks on extract_mask and extract_image parameters
+        if self._image is None and not extract_mask:
+            log.info(
+                "No image available and 'extract_mask' is False; forcing 'extract_mask=True' since nothing can be extracted otherwise."
+            )
+            extract_mask = True
+        if self._image is None and extract_image:
+            log.info("No image available and 'extract_image' is True; forcing 'extract_image=False'.")
+            extract_image = False
+
+        _, is_cupy = _get_xp(getattr(self._mask, "_meta", None), run_on_gpu=self._run_on_gpu)
+        if self._image is not None:
+            _, is_cupy_image = _get_xp(getattr(self._image, "_meta", None), run_on_gpu=self._run_on_gpu)
+            if len({is_cupy, is_cupy_image}) != 1:
+                raise ValueError("Mask and image should be on the same backend.")
+
+        array_mask = self._mask[None, ...]  # add trivial channel dimension
+        array_image = self._image if extract_image else None
+
+        if array_image is not None and array_image.numblocks[1] != 1:
+            raise ValueError("Currently we do not allow chunking in z dimension.")
+
+        log.info("Calculating center of mass for each instance.")
+        aggregator = RasterAggregator(
+            mask_dask_array=array_mask.squeeze(0),
+            image_dask_array=None,
+            instance_key=_INSTANCE_KEY,
+            run_on_gpu=self._run_on_gpu,
+        )
+        center_of_mass = aggregator.center_of_mass(index=self._labels[self._labels != 0])
+        log.info("Finished calculating center of mass for each instance.")
+
+        # now want to obtain the chunk id to which each center of mass belongs
+        center_of_mass = center_of_mass.rename(columns={0: "z", 1: "y", 2: "x"}).copy()
+
+        # rechunk overlap allows to send allow_rechunk to False
+        # this is basically the same as settting allow_rechunk to True, but now we have more control over the chunk sizes
+        # to read from zarr do:
+
+        # import zarr
+
+        # z=zarr.open( "/Users/arnedf/VIB/DATA/test_data/sdata_resolve.zarr/images", mode="r" )
+        # z[ "raw_image" ][ "0" ][ 0,10:20 ]
+        if read_from_zarr:
+            z_chunks = array_mask.chunks[1]
+            y_chunks = array_mask.chunks[2]
+            x_chunks = array_mask.chunks[3]
+        else:
+            array_mask = _rechunk_overlap(x=array_mask, depth=_depth, chunks=None, allow_adjust_depth=False)
+            z_chunks = array_mask.chunks[1]
+            y_chunks = array_mask.chunks[2]
+            x_chunks = array_mask.chunks[3]
+
+        z_starts = np.r_[0, np.cumsum(z_chunks)[:-1]]
+        y_starts = np.r_[0, np.cumsum(y_chunks)[:-1]]
+        x_starts = np.r_[0, np.cumsum(x_chunks)[:-1]]
+
+        nz, ny, nx = len(z_chunks), len(y_chunks), len(x_chunks)
+
+        def coord_to_chunk(coord, starts, n_chunks):
+            # exact boundary goes to the next chunk
+            idx = np.searchsorted(starts, coord, side="right") - 1
+            return np.clip(idx, 0, n_chunks - 1)
+
+        valid = center_of_mass["z"].notna() & center_of_mass["y"].notna() & center_of_mass["x"].notna()
+
+        center_of_mass["z_chunk"] = np.nan
+        center_of_mass["y_chunk"] = np.nan
+        center_of_mass["x_chunk"] = np.nan
+
+        center_of_mass.loc[valid, "z_chunk"] = coord_to_chunk(center_of_mass.loc[valid, "z"].to_numpy(), z_starts, nz)
+        center_of_mass.loc[valid, "y_chunk"] = coord_to_chunk(center_of_mass.loc[valid, "y"].to_numpy(), y_starts, ny)
+        center_of_mass.loc[valid, "x_chunk"] = coord_to_chunk(center_of_mass.loc[valid, "x"].to_numpy(), x_starts, nx)
+
+        # we do not need this chunk_id
+        # center_of_mass["chunk_id"] = list(
+        #    zip(
+        #        center_of_mass["z_chunk"].fillna(-1).astype(int),
+        #        center_of_mass["y_chunk"].fillna(-1).astype(int),
+        #        center_of_mass["x_chunk"].fillna(-1).astype(int),
+        #        strict=True,
+        #    )
+        # )
+        # if we sort on this chunk_idx, center_of_mass will be in the order array_mask.to_delayed().flatten() will be
+        # -> important for extracting the instance ids
+        center_of_mass["chunk_idx"] = (
+            (center_of_mass["z_chunk"].astype(int) * (ny * nx))
+            + (center_of_mass["y_chunk"].astype(int) * nx)
+            + center_of_mass["x_chunk"].astype(int)
+        )
+        center_of_mass.sort_values(["chunk_idx", _INSTANCE_KEY], inplace=True)
+        instance_ids = center_of_mass[_INSTANCE_KEY].values
+
+        def _expand_regular_chunks(shape: tuple[int, ...], chunk_size: tuple[int, ...]) -> tuple[tuple[int, ...], ...]:
+            expanded = []
+            for axis, axis_chunk in enumerate(chunk_size):
+                n_full = shape[axis] // axis_chunk
+                remainder = shape[axis] % axis_chunk
+                axis_chunks = (axis_chunk,) * n_full + ((remainder,) if remainder else ())
+                if not axis_chunks:
+                    axis_chunks = (shape[axis],)
+                expanded.append(axis_chunks)
+            return tuple(expanded)
+
+        _chunks_without_depth_added = array_mask.chunks
+        mask_chunks = _chunks_without_depth_added
+        image_chunks = array_image.chunks if array_image is not None else None
+
+        if read_from_zarr:
+            import zarr
+
+            if mask_zarr_path is None:
+                raise ValueError("mask_zarr_path is required when read_from_zarr=True.")
+            if extract_image and image_zarr_path is None:
+                raise ValueError("image_zarr_path is required when read_from_zarr=True and extract_image=True.")
+            if self._run_on_gpu:
+                log.warning("read_from_zarr=True uses CPU extraction; forcing CPU execution.")
+
+            mask_zarr = zarr.open(str(mask_zarr_path), mode="r")
             mask_has_channel = mask_zarr.ndim == 4
             if mask_zarr.ndim not in (3, 4):
                 raise ValueError("mask_zarr_path must point to a 3D or 4D Zarr array.")
