@@ -1088,7 +1088,7 @@ class Featurizer:
             if add_z:
                 if mask:
                     arr = arr[:, None, ...]  # add the z
-                    pad_width[:1] + [(0, 0)] + pad_width[1:]
+                    pad_width = pad_width[:1] + [(0, 0)] + pad_width[1:]
                 else:
                     arr = arr[:, None, ...]
                     pad_width = pad_width[:1] + [(0, 0)] + pad_width[1:]
