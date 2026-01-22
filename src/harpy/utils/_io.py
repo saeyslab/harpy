@@ -31,8 +31,8 @@ def _incremental_io_on_disk(
     try:
         sdata.write_element(new_output_layer)
     except Exception as e:
-        if new_output_layer in sdata[new_output_layer]:
-            del sdata[new_output_layer]
+        # if new_output_layer in sdata[new_output_layer]:
+        #    del sdata[new_output_layer]
         raise e
     # a2. remove the in-memory copy from the SpatialData object (note,
     # at this point the backup copy still exists on-disk)

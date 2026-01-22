@@ -38,6 +38,7 @@ def allocate_intensity(
     spatial_key: str = _SPATIAL,
     instance_size_key: str = _CELLSIZE_KEY,
     cell_index_name: str = _CELL_INDEX,
+    run_on_gpu: bool = False,
     overwrite: bool = True,
 ) -> SpatialData:
     """
@@ -98,6 +99,8 @@ def allocate_intensity(
         The key in the :class:`~anndata.AnnData` table `.obs` that will hold the size of the instances. Ignored if "count" not in `obs_stats`.
     cell_index_name
         The name of the index of the resulting :class:`~anndata.AnnData` table.
+    run_on_gpu
+        Whether to run on gpu. If no installation of cupy could be detected, will fall back to cpu.
     overwrite
         If `True`, overwrites the `output_layer` if it already exists in `sdata`.
 
@@ -236,6 +239,7 @@ def allocate_intensity(
         mask_dask_array=_array_mask_rechunked,
         instance_key=instance_key,
         instance_size_key=instance_size_key,
+        run_on_gpu=run_on_gpu,
     )
     index = da.unique(_array_mask_rechunked).compute()
 
