@@ -107,6 +107,12 @@ class ZarrIterableInstances(IterableDataset):
         self._epoch = mp.Value("i", 0)  # initial value 0
 
         arr = zarr.open(self.zarr_path, mode="r")
+        if arr.ndim != 5:
+            raise ValueError(
+                f"Expected Zarr array at '{self.zarr_path}' to have 5 dimensions, "
+                f"but got ndim={arr.ndim} with shape={getattr(arr, 'shape', None)}. "
+                "Please check that you are opening the correct dataset/group and that it matches the expected layout."
+            )
         self.N = arr.shape[0]
         self.chunk_i = arr.chunks[0] if chunk_i is None else int(chunk_i)  # e.g. self.chunk_i = 500
 
@@ -250,7 +256,7 @@ class ZarrIterableInstances(IterableDataset):
                 elif self.normalize in (None, "none"):
                     x = x.to(torch.float32)
                 else:
-                    raise ValueError(f"Unknown normalize mode: {self.normalize}")
+                    raise ValueError(f"Unknown normalize mode: {self.normalize}.")
 
                 x = x.to(self.x_dtype)
 
