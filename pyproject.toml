@@ -60,12 +60,15 @@ cellpose = [
 segmentation = [
     "harpy-analysis[cellpose]"
 ]
+# installation basicpy broken https://github.com/peng-lab/BaSiCPy/issues/162 fix:
 basic = [
+    "jax>=0.4.6,<=0.4.23; python_version <= '3.11'",
+    "jaxlib>=0.4.6,<=0.4.23; python_version <= '3.11'",
+    "basicpy==1.0.0; python_version <= '3.11'",
+    "numpy<2; python_version <= '3.11'",
     # For more information, see https://basicpy.readthedocs.io/en/latest/installation.html
-    "jax>=0.4.6",
-    "jaxlib>=0.4.6",
-    "basicpy>=1.0.0",
 ]
+
 opencv = [
     "opencv-python",
 ]
