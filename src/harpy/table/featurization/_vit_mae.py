@@ -98,7 +98,7 @@ def train_autoencoder(
         weight_decay=cfg.weight_decay,
     )
 
-    scaler = torch.amp.GradScaler(device, enabled=cfg.amp)
+    scaler = torch.amp.GradScaler(device.type, enabled=cfg.amp)
 
     # 2) Create the DataLoaders.
 
@@ -180,7 +180,7 @@ def train_autoencoder(
         num_workers=num_workers,
         pin_memory=(device.type == "cuda"),
         persistent_workers=num_workers > 0,  # persistent workers will fail if num_workers == 0
-        prefetch_factor=4,
+        prefetch_factor=4 if num_workers > 0 else None,
         start_epoch=0,
     )
 
@@ -191,7 +191,7 @@ def train_autoencoder(
         num_workers=num_workers,
         pin_memory=(device.type == "cuda"),
         persistent_workers=num_workers > 0,
-        prefetch_factor=4,
+        prefetch_factor=4 if num_workers > 0 else None,
     )
 
     test_loader = DataLoader(  # do not increase epoch index if run on val_loader or test_loader, so we use DataLoader
@@ -201,7 +201,7 @@ def train_autoencoder(
         num_workers=num_workers,
         pin_memory=(device.type == "cuda"),
         persistent_workers=num_workers > 0,
-        prefetch_factor=4,
+        prefetch_factor=4 if num_workers > 0 else None,
     )
 
     log.info("Start training the model.")
@@ -488,7 +488,8 @@ def mae_embedding(
     pool: str = "mean_patches",  # "mean_all" or "mean_patches" or "cls"
 ) -> NDArray:
     """Returns embedding: torch.Tensor shape (768,)"""
-    assert array.ndim == 5  # (i,3,1,D,D)
+    if array.ndim != 5:  # (i,3,1,D,D)
+        raise ValueError(f"Expected array with 5 dimensions (i,3,1,H,W), got shape {tuple(array.shape)}.")
     if array.shape[2] != 1:
         raise ValueError("Currently only arrays with Z-dimension equal to 1 are supported.")
     if array.shape[1] != 3:
