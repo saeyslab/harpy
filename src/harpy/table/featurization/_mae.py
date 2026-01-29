@@ -241,7 +241,6 @@ class TrainCfg:
     betas: tuple[float, float] = (0.9, 0.95)
     num_workers: int = 8
     mask_ratio: float = 0.75
-    # crop_size: int = 128
     image_size: int = 224
     keep_channels: tuple[int, int, int] = (0, 1, 2)
     use_imagenet_norm: bool = False  # already in 0,1, range
@@ -280,17 +279,6 @@ def _get_default_device() -> torch.device:
         return torch.device("cpu")
 
 
-def center_crop(x: torch.Tensor, crop: int) -> torch.Tensor:
-    # x: (C,H,W)
-    C, H, W = x.shape
-    if H < crop or W < crop:
-        # if smaller, just resize later (or pad if you prefer)
-        return x
-    top = (H - crop) // 2
-    left = (W - crop) // 2
-    return x[:, top : top + crop, left : left + crop]
-
-
 def preprocess_batch(
     batch: list[torch.Tensor | tuple],
     cfg: TrainCfg,
@@ -313,6 +301,11 @@ def preprocess_batch(
             raise ValueError(f"Expected (C,H,W) after squeeze, got {tuple(x.shape)}")
 
         # select channels (expects len(cfg.keep_channels)==3)
+        if x.shape[0] < 3:
+            raise ValueError(f"Expected at least 3 channels, but got {x.shape[0]}.")
+
+        if x.shape[0] > 3:
+            log.info(f"Input has {x.shape[0]} channels; keeping channels with indices {cfg.keep_channels}.")
         assert len(cfg.keep_channels) == 3
         x = x[list(cfg.keep_channels), :, :]  # (3,H,W)
         xs.append(x)
@@ -335,48 +328,6 @@ def preprocess_batch(
         x = (x - image_mean) / image_std
 
     return x
-
-
-'''
-def preprocess_batch(
-    batch: list[torch.Tensor | tuple],
-    cfg: TrainCfg,
-    device: torch.device,
-    image_mean: torch.Tensor | None = None,
-    image_std: torch.Tensor | None = None,
-) -> torch.Tensor:
-    """Preprocess a batch."""
-    xs = []
-    for item in batch:
-        x = item[0] if isinstance(item, (tuple, list)) else item  # dataset may yield (x, id, row) or just x
-        # x is (C,Z,H,W) or (C,H,W)
-        if x.ndim == 4:
-            assert x.shape[1] == 1, "Currently we only support z dimension equal to 1."
-            x = x[:, 0]  # squeeze Z=1 -> (C,H,W)
-        if x.ndim != 3:
-            raise ValueError(f"Expected (C,H,W) after squeeze, got {tuple(x.shape)}")
-
-        # select 3 channels
-        x = x[list(cfg.keep_channels), :, :]  # (3,H,W)
-
-        # center crop then resize
-        # x = center_crop(x, cfg.crop_size)
-        assert x.shape[1] == 128
-        assert x.shape[2] == 128
-        x = x.unsqueeze(0)  # (1,3,h,w)
-        x = F.interpolate(x, size=(cfg.image_size, cfg.image_size), mode="bilinear", align_corners=False)
-        x = x.squeeze(0)  # (3,224,224) # input to the autoencoder is (3,224,224)
-
-        # normalization
-        if cfg.use_imagenet_norm:
-            # expects x roughly in [0,1]
-            x = (x - image_mean) / image_std
-
-        xs.append(x)
-
-    pixel_values = torch.stack(xs, dim=0).to(device, non_blocking=True)  # (B,3,224,224)
-    return pixel_values
-'''
 
 
 def make_chunk_splits(all_chunk_indexes: NDArray, seed: int = 0, n_train: float = 0.9):
@@ -687,7 +638,7 @@ def visualize_mae_reconstructions(
         imgs = x.reshape(B, C, img_size, img_size)
         return imgs
 
-    # FIXME: now the batch selected from the val loader is not really random. Fix it, so this batch is random.
+    # TODO: now the batch selected from the val loader is not really random. Fix it, so this batch is random.
     model.eval()
 
     batch = next(iter(val_loader))
@@ -700,8 +651,8 @@ def visualize_mae_reconstructions(
     if not hasattr(outputs, "mask"):
         raise TypeError("This model does not output `mask`. For reconstructions you need ViTMAEForPreTraining.")
 
-    pred_patches = outputs.logits  # (B, L, p*p*3) :contentReference[oaicite:1]{index=1}
-    mask = outputs.mask  # (B, L), 1 = masked, 0 = keep :contentReference[oaicite:2]{index=2}
+    pred_patches = outputs.logits  # (B, L, p*p*3)
+    mask = outputs.mask  # (B, L), 1 = masked, 0 = keep
 
     p = model.config.patch_size
     img_size = model.config.image_size
@@ -760,19 +711,3 @@ def visualize_mae_reconstructions(
 
     plt.tight_layout()
     plt.show()
-
-
-"""
-def _preprocess_batch_fn(batch):
-    return preprocess_batch(batch, cfg, image_mean, image_std, device)
-
-
-visualize_mae_reconstructions(
-    model=model,
-    val_loader=val_loader,
-    preprocess_batch_fn=preprocess_batch,
-    device=device,
-    n_show=4,
-    denorm_fn=None,  # set if you used ImageNet norm
-)
-"""

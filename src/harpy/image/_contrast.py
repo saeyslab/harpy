@@ -13,6 +13,8 @@ from harpy.image._map import map_image
 
 try:
     import cv2
+
+    _ = cv2
 except ImportError:
     log.warning("'OpenCV (cv2)' not installed, to use 'harpy.im.enhance_contrast' please install this library.")
 

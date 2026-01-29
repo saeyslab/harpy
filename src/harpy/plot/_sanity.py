@@ -4,7 +4,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
-from dask.dataframe.core import DataFrame as DaskDataFrame
+from dask.dataframe import DataFrame as DaskDataFrame
 from loguru import logger as log
 from shapely.affinity import translate
 from spatialdata import SpatialData
