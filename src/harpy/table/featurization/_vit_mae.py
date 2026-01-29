@@ -34,12 +34,43 @@ def train_autoencoder(
     num_workers: int = 4,  # number of workers for dataloader
     n_train: float = 0.9,
 ):
+    """
+    Train a ViT-MAE autoencoder on Zarr instances and save the best checkpoint.
+
+    Uses a chunk-level train/val/test split, logs losses, and optionally
+    visualizes reconstructions after training.
+
+    Parameters
+    ----------
+    instance_ids
+        One-dimensional array of instance identifiers aligned to the first
+        dimension of the Zarr array.
+    instances_path
+        Path to the Zarr array of instances with shape ``(i, c, z, y, x)``.
+        Currently only ``c,z,y,x == 3,1,128,128`` is supported.
+        Input intensities are expected to be scaled to ``[0, 1]``.
+    output_dir
+        Directory where the best checkpoint and processor are saved.
+    visualize_reconstruction
+        If ``True``, show a reconstruction panel from the validation loader
+        after training.
+    epochs
+        Number of training epochs.
+    batch_size
+        Batch size for training/evaluation.
+    num_workers
+        Number of dataloader workers.
+    n_train
+        Fraction of chunks used for training (remainder is split equally
+        between validation and test).
+    """
     cfg = TrainCfg(
         model_name="facebook/vit-mae-base",  # hard code this for now, as we only support vit-mae-base at this point
         output_dir=output_dir,  # "/data/groups/technologies/spatial.catalyst/Arne/xenium_human_ovarian_cancer_model",
         epochs=epochs,
         batch_size=batch_size,
         n_train=n_train,
+        use_imagenet_norm=False,
     )
     set_seed(cfg.seed)
 
