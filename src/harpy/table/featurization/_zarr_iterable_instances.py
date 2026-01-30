@@ -18,14 +18,60 @@ except ImportError:
 
 class ZarrIterableInstances(IterableDataset):
     """
-    Chunk-wise iterable dataset for:
+    Chunk-wise iterable dataset that:
 
-      - iterates chunk-by-chunk
-      - shuffles chunks deterministically for every epoch
-      - partitions chunks across DDP ranks and dataloader workers
-      - supervised training (labels provided): yields (x, y) or (x, y, instance_id, row_idx)
-      - inference (no labels): yields (x, instance_id, row_idx)
-    inspired on https://gitlab.in2p3.fr/ipsl/espri/espri-ia/projects/zarr-torch-dataset
+    - iterates chunk-by-chunk
+    - optionally shuffles chunks deterministically per epoch
+    - partitions chunks across DDP ranks and dataloader workers
+    - supervised training (labels provided): yields (x, y) with optional instance_id/row_idx
+    - inference (no labels): yields x with optional instance_id/row_idx
+
+    Inspired by https://gitlab.in2p3.fr/ipsl/espri/espri-ia/projects/zarr-torch-dataset
+
+    Parameters
+    ----------
+    zarr_path
+        Path to a Zarr array of shape ``(i, c, z, y, x)`` where ``i`` indexes
+        instances.
+    instance_ids
+        One-dimensional array of length ``i`` with the instance identifier
+        per row in the Zarr array.
+    labels
+        Optional one-dimensional array of length ``i`` with supervised labels.
+        If ``None``, the dataset operates in inference mode.
+    chunk_i
+        Chunk size along the instance axis. If ``None``, uses the Zarr chunk
+        size for axis 0.
+    shuffle_chunks
+        If ``True``, shuffle chunk order deterministically by ``chunk_seed``.
+    chunk_seed
+        Base seed used for shuffling chunks. Combined with epoch when
+        ``shuffle_chunks`` is ``True``.
+    shuffle_within_chunk
+        If ``True``, shuffle rows within each chunk.
+    buffer_seed
+        Base seed for within-chunk shuffling. If ``None``, within-chunk
+        shuffling is non-deterministic.
+    normalize
+        Normalization mode for each instance tensor. Supported values are
+        ``"minmax01"``, ``"unit"``, ``None`` or ``"none"``.
+    x_dtype
+        Output dtype for returned tensors.
+    return_instance_id
+        If ``True``, append the instance id to each output tuple.
+    return_row_index
+        If ``True``, append the global row index (=instance id index) to each output tuple.
+    drop_unlabeled
+        If ``True`` and ``labels`` is provided, drop rows with label < 0.
+    allowed_chunk_indexes
+        Optional subset of chunk indices to iterate, e.g. for train/test
+        splits.
+
+
+    See Also
+    --------
+    harpy.tb.extract_instances
+        Function to create the Zarr instances consumed by this dataset.
     """
 
     def __init__(
@@ -42,51 +88,9 @@ class ZarrIterableInstances(IterableDataset):
         x_dtype: torch.dtype = torch.float32,
         return_instance_id: bool = True,  # for inference
         return_row_index: bool = True,  # for inference
-        drop_unlabeled: bool = True,  # will drop labels that are <1 only relevant if labels is not None, otherwise ignored
+        drop_unlabeled: bool = True,  # will drop labels that are <0 only relevant if labels is not None, otherwise ignored
         allowed_chunk_indexes: NDArray = None,  # optionally restrict to a chunk subset (train/test split)
     ):
-        """
-        Initialize a chunk-wise iterable dataset over a Zarr array of instances.
-
-        Parameters
-        ----------
-        zarr_path
-            Path to a Zarr array of shape ``(i, c, z, y, x)`` where ``i`` indexes
-            instances.
-        instance_ids
-            One-dimensional array of length ``i`` with the instance identifier
-            per row in the Zarr array.
-        labels
-            Optional one-dimensional array of length ``i`` with supervised labels.
-            If ``None``, the dataset operates in inference mode.
-        chunk_i
-            Chunk size along the instance axis. If ``None``, uses the Zarr chunk
-            size for axis 0.
-        shuffle_chunks
-            If ``True``, shuffle chunk order deterministically by ``chunk_seed``.
-        chunk_seed
-            Base seed used for shuffling chunks. Combined with epoch when
-            ``shuffle_chunks`` is ``True``.
-        shuffle_within_chunk
-            If ``True``, shuffle rows within each chunk.
-        buffer_seed
-            Base seed for within-chunk shuffling. If ``None``, within-chunk
-            shuffling is non-deterministic.
-        normalize
-            Normalization mode for each instance tensor. Supported values are
-            ``"minmax01"``, ``"unit"``, ``None`` or ``"none"``.
-        x_dtype
-            Output dtype for returned tensors.
-        return_instance_id
-            If ``True``, append the instance id to each output tuple.
-        return_row_index
-            If ``True``, append the global row index (=instance id index) to each output tuple.
-        drop_unlabeled
-            If ``True`` and ``labels`` is provided, drop rows with label < 0.
-        allowed_chunk_indexes
-            Optional subset of chunk indices to iterate, e.g. for train/test
-            splits.
-        """
         self.zarr_path = zarr_path
         self.instance_ids = np.asarray(instance_ids).astype(np.int64)
         self.labels_all = None if labels is None else np.asarray(labels).astype(np.int64)
@@ -107,6 +111,12 @@ class ZarrIterableInstances(IterableDataset):
         self._epoch = mp.Value("i", 0)  # initial value 0
 
         arr = zarr.open(self.zarr_path, mode="r")
+        if arr.ndim != 5:
+            raise ValueError(
+                f"Expected Zarr array at '{self.zarr_path}' to have 5 dimensions, "
+                f"but got ndim={arr.ndim} with shape={getattr(arr, 'shape', None)}. "
+                "Please check that you are opening the correct dataset/group and that it matches the expected layout."
+            )
         self.N = arr.shape[0]
         self.chunk_i = arr.chunks[0] if chunk_i is None else int(chunk_i)  # e.g. self.chunk_i = 500
 
@@ -250,7 +260,7 @@ class ZarrIterableInstances(IterableDataset):
                 elif self.normalize in (None, "none"):
                     x = x.to(torch.float32)
                 else:
-                    raise ValueError(f"Unknown normalize mode: {self.normalize}")
+                    raise ValueError(f"Unknown normalize mode: {self.normalize}.")
 
                 x = x.to(self.x_dtype)
 
@@ -276,6 +286,29 @@ class ZarrIterableInstances(IterableDataset):
 
 
 class ZarrDataLoader(DataLoader):
+    """
+    DataLoader that increments epoch and forwards it to epoch-aware datasets.
+
+    This wrapper around ``torch.utils.data.DataLoader`` maintains an internal
+    epoch counter and, at the start of each iteration, calls ``set_epoch(epoch)``
+    on the underlying dataset when available. This is intended for
+    ``ZarrIterableInstances`` (and similar datasets) that need deterministic,
+    epoch-dependent shuffling while also supporting multi-worker and DDP use.
+
+    Parameters
+    ----------
+    *args, **kwargs
+        Passed through to ``torch.utils.data.DataLoader``.
+    start_epoch
+        Initial epoch counter value. The current epoch is applied on the first
+        call to ``__iter__`` and then incremented after the iterator is created.
+
+    Notes
+    -----
+    The current epoch can be read via ``_get_epoch()``. This class does not
+    override any other ``DataLoader`` behavior.
+    """
+
     def __init__(self, *args, start_epoch: int = 0, **kwargs):
         super().__init__(*args, **kwargs)
         self._epoch = int(start_epoch)

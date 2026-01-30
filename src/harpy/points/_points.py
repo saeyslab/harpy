@@ -1,5 +1,5 @@
 import spatialdata
-from dask.dataframe.core import DataFrame as DaskDataFrame
+from dask.dataframe import DataFrame as DaskDataFrame
 from spatialdata import SpatialData, read_zarr
 from spatialdata.models._utils import MappingToCoordinateSystem_t
 

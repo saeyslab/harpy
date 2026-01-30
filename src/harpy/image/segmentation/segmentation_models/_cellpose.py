@@ -45,7 +45,7 @@ def cellpose_callable(
     max_size_fraction: float = 0.4,
     niter: int | None = None,
     pretrained_model: str | Path = "nuclei",
-    device: str | None = None,
+    device: str | torch.device | None = None,
 ) -> NDArray:
     """
     Perform cell segmentation using the Cellpose model.
@@ -117,19 +117,30 @@ def cellpose_callable(
     if not CELLPOSE_AVAILABLE:
         raise RuntimeError("Module 'cellpose' is not available. Please install it to use this function.")
 
+    cellpose_version = version.parse(cellpose.version)
+
+    # Normalize: allow device to be None, a string, or a torch.device
+    if isinstance(device, torch.device):
+        # Preserve index if present (e.g. cuda:1)
+        device = f"{device.type}:{device.index}" if device.index is not None else device.type
+
     # Auto-select device per worker
     if device is None:
         if torch.cuda.is_available():
-            torch.cuda.set_device(0)
             device = "cuda:0"
-        elif torch.backends.mps.is_available():
+            # torch.cuda.set_device(0)  # optional
+        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
             device = "mps"
         else:
             device = "cpu"
 
-    cellpose_version = version.parse(cellpose.version)
+    # Disable MPS for older Cellpose versions
+    if device == "mps" and cellpose_version < version.parse("3.1.1"):
+        log.warning("mps is disabled for Cellpose version < 3.1.1. Running on 'cpu'.")
+        device = "cpu"
 
-    gpu = torch.cuda.is_available() or torch.backends.mps.is_available()
+    # gpu flag based on the *selected* device
+    gpu = device.startswith("cuda") or device == "mps"
 
     model = models.CellposeModel(gpu=gpu, pretrained_model=pretrained_model, device=torch.device(device))
 
@@ -177,10 +188,10 @@ def cellpose_callable(
     }
 
     # Add version-specific arguments
-    if cellpose_version >= version.parse("3.1.1.1"):
-        common_args["flow3D_smooth"] = flow3D_smooth
-    else:
+    if cellpose_version < version.parse("3.1.1"):
         common_args["dP_smooth"] = flow3D_smooth
+    else:
+        common_args["flow3D_smooth"] = flow3D_smooth
 
     results = model.eval(**common_args)
 

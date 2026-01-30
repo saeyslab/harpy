@@ -241,6 +241,7 @@ def featurize(
     region_key: str = _REGION_KEY,
     cell_index_name: str = _CELL_INDEX,
     dtype: np.dtype = np.float32,
+    run_on_gpu: bool = False,
     overwrite: bool = False,
     **kwargs: Any,
 ) -> SpatialData:
@@ -327,6 +328,8 @@ def featurize(
         Ignored if `table_layer` is not None.
     dtype
         Output dtype of `model`.
+    run_on_gpu
+        If True and 'cupy' is installed, the instance extraction step runs on the GPU.
     overwrite
         If `True`, overwrites the `output_layer` if it already exists in `sdata`.
     **kwargs
@@ -430,7 +433,11 @@ def featurize(
         image_array = image_array[:, None, ...] if image_array.ndim == 3 else image_array
         mask_array = mask_array[None, ...] if mask_array.ndim == 2 else mask_array
 
-        featurizer = Featurizer(mask_dask_array=mask_array, image_dask_array=image_array)
+        featurizer = Featurizer(
+            mask_dask_array=mask_array,
+            image_dask_array=image_array,
+            run_on_gpu=run_on_gpu,
+        )
 
         instances_ids, features = featurizer.featurize(
             depth=depth,

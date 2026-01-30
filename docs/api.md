@@ -111,6 +111,8 @@ Operations on table (`AnnData` object) layers.
     tb.allocate_intensity
     tb.add_regionprop_features
     tb.extract_instances
+    tb.ZarrIterableInstances
+    tb.ZarrDataLoader
     tb.featurize
     tb.preprocess_transcriptomics
     tb.preprocess_proteomics
@@ -154,66 +156,64 @@ Plotting functions.
 ```{eval-rst}
 
 .. module:: harpy.pl
-.. currentmodule:: harpy
+.. currentmodule:: harpy.pl
 
 .. autosummary::
     :toctree: generated
 
-    pl.plot_sdata
-    pl.plot_sdata_genes
-    pl.plot_image
-    pl.plot_shapes
-    pl.plot_labels
-    pl.histogram
-    pl.tiling_correction
-    pl.flatfield
-    pl.segment
+    plot_sdata
+    plot_sdata_genes
+    plot_image
+    plot_shapes
+    plot_labels
+    histogram
+    tiling_correction
+    flatfield
+    segment
 ```
 
 ### Proteomics plots
 
 ```{eval-rst}
 
-.. module:: harpy.pl
-.. currentmodule:: harpy
+.. currentmodule:: harpy.pl
 
 .. autosummary::
     :toctree: generated
 
-    pl.cluster_intensity_heatmap
+    cluster_intensity_heatmap
 
-    pl.pixel_clusters
-    pl.pixel_clusters_heatmap
+    pixel_clusters
+    pixel_clusters_heatmap
 
-    pl.snr_ratio
-    pl.group_snr_ratio
-    pl.snr_clustermap
-    pl.signal_clustermap
-    pl.clustermap
+    snr_ratio
+    group_snr_ratio
+    snr_clustermap
+    signal_clustermap
+    clustermap
 
-    pl.segmentation_coverage
-    pl.segmentation_size_boxplot
-    pl.segments_per_area
+    segmentation_coverage
+    segmentation_size_boxplot
+    segments_per_area
 ```
 
 ### Transcriptomics plots
 
 ```{eval-rst}
 
-.. module:: harpy.pl
-.. currentmodule:: harpy
+.. currentmodule:: harpy.pl
 
 .. autosummary::
     :toctree: generated
 
-    pl.sanity
-    pl.analyse_genes_left_out
-    pl.transcript_density
-    pl.preprocess_transcriptomics
-    pl.cluster
-    pl.score_genes
-    pl.cluster_cleanliness
-    pl.nhood_enrichment
+    sanity
+    analyse_genes_left_out
+    transcript_density
+    preprocess_transcriptomics
+    cluster
+    score_genes
+    cluster_cleanliness
+    nhood_enrichment
 ```
 
 ## Utils

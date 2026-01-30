@@ -1,10 +1,8 @@
 {{ fullname | escape | underline}}
 
-.. currentmodule:: {{ module }}
-
 .. add toctree option to make autodoc generate the pages
 
-.. autoclass:: {{ objname }}
+.. autoclass:: {{ fullname }}
 
 {% block attributes %}
 {% if attributes %}
@@ -45,7 +43,7 @@ Attributes
 
 {% for item in attributes %}
 
-.. autoattribute:: {{ [objname, item] | join(".") }}
+.. autoattribute:: {{ fullname }}.{{ item }}
 
 {%- endfor %}
 
@@ -60,7 +58,7 @@ Methods
 {% for item in methods %}
 {%- if item != '__init__' %}
 
-.. automethod:: {{ [objname, item] | join(".") }}
+.. automethod:: {{ fullname }}.{{ item }}
 
 {%- endif -%}
 {%- endfor %}

@@ -2,15 +2,30 @@
 
 import importlib.metadata
 import os
+from importlib.metadata import PackageNotFoundError, version
+
+from packaging.version import Version
 
 __version__ = importlib.metadata.version("harpy-analysis")
 
 # see geopandas https://geopandas.org/en/stable/ and https://github.com/geopandas/geopandas/releases/tag/v1.0.0
 # removing this could mean only supporting gepandas >=1.0.0 and shapely 2
 os.environ["USE_PYGEOS"] = "0"
-os.environ["DASK_DATAFRAME__QUERY_PLANNING"] = (
-    "False"  # avoid newer dataframe backends, see  https://github.com/dask/dask/issues/11146
-)
+
+
+DASK_THRESHOLD = Version("2024.11.2")
+
+try:
+    dask_ver = Version(version("dask"))
+except PackageNotFoundError:
+    dask_ver = None
+
+if dask_ver is not None and dask_ver > DASK_THRESHOLD:
+    os.environ["DASK_DATAFRAME__QUERY_PLANNING"] = "True"
+else:
+    os.environ["DASK_DATAFRAME__QUERY_PLANNING"] = (
+        "False"  # avoid newer dataframe backends, see  https://github.com/dask/dask/issues/11146
+    )
 
 loglevel = os.environ.get("LOGLEVEL")
 if loglevel is None or loglevel.upper() != "DEBUG":
