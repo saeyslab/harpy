@@ -7,7 +7,7 @@ Goldsborough, T. et al. (2024) ‘A novel channel invariant architecture for the
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from loguru import logger as log
 from numpy.typing import NDArray
@@ -21,6 +21,7 @@ except ImportError:
     log.warning(
         "Module 'instanseg' not installed, please install 'instanseg' (https://github.com/instanseg/instanseg) if you want to use the callable 'harpy.im.instanseg_callable' as model for 'harpy.im.segment'."
     )
+    InstanSeg = Any  # type: ignore[assignment]
 
 
 def instanseg_callable(

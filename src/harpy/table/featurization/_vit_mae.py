@@ -35,7 +35,7 @@ def train_autoencoder(
     n_train: float = 0.9,
 ):
     """
-    Train a ViT-MAE autoencoder on Zarr instances and save the best checkpoint.
+    Train a ViT-MAE autoencoder on single-cell instances (obtained using :func:`harpy.tb.extract_instances`) and save the best checkpoint.
 
     Uses a chunk-level train/val/test split, logs losses, and optionally
     visualizes reconstructions after training.
@@ -63,6 +63,13 @@ def train_autoencoder(
     n_train
         Fraction of chunks used for training (remainder is split equally
         between validation and test).
+
+    See Also
+    --------
+    harpy.tb.extract_instances
+        Helper to create the single cell instances consumed by this function.
+    harpy.tb.ZarrIterableInstances
+        Dataset used to stream instances during training.
     """
     cfg = TrainCfg(
         model_name="facebook/vit-mae-base",  # hard code this for now, as we only support vit-mae-base at this point
