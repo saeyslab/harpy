@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## 0.3.0 - 2026-02-05
 
 ### Added
+
 - Scalable extraction of single cell instances from multiplex images, and integration with PyTorch (PRs [#178](https://github.com/saeyslab/harpy/pull/178), [#180](https://github.com/saeyslab/harpy/pull/180), [#181](https://github.com/saeyslab/harpy/pull/181)).
 - Deep feature extraction (PRs [#178](https://github.com/saeyslab/harpy/pull/178), [#180](https://github.com/saeyslab/harpy/pull/180), [#181](https://github.com/saeyslab/harpy/pull/181)).
 - Chunk-wise streaming for integration in PyTorch (PR [#181](https://github.com/saeyslab/harpy/pull/181)).
@@ -22,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pooch env-var handling for datasets (PR [#150](https://github.com/saeyslab/harpy/pull/150)).
 
 ### Changed
+
 - Improved shallow feature extraction and scaling and support for cupy (PR [#180](https://github.com/saeyslab/harpy/pull/180)).
 - Cluster-intensity visualization and plotting (PR [#163](https://github.com/saeyslab/harpy/pull/163)).
 - Standardized keys across IO/plot/table/shape modules (PR [#170](https://github.com/saeyslab/harpy/pull/170)).
@@ -29,16 +31,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed the `datasets` dependency and updated the registry/benchmarks accordingly (PR [#148](https://github.com/saeyslab/harpy/pull/148)).
 
 ### Fixed
+
 - Preserved point metadata through Dask operations; fixed MACSima IO naming/docs (PR [#187](https://github.com/saeyslab/harpy/pull/187)).
 - Fixed MERSCOPE transcript IO bug (PR [#149](https://github.com/saeyslab/harpy/pull/149)).
 - Fixed SpatialData chunk creation bug (PR [#152](https://github.com/saeyslab/harpy/pull/152)).
 
 ### Documentation
+
 - Added documentation figures (PR [#185](https://github.com/saeyslab/harpy/pull/185)).
 - Added/updated benchmark and technical-specs notebooks (PRs [#182](https://github.com/saeyslab/harpy/pull/182), [#183](https://github.com/saeyslab/harpy/pull/183), [#184](https://github.com/saeyslab/harpy/pull/184)).
 - Updated installation instructions; removed `nptyping` (PR [#145](https://github.com/saeyslab/harpy/pull/145)).
 - General docs refresh (PRs [#153](https://github.com/saeyslab/harpy/pull/153), [#165](https://github.com/saeyslab/harpy/pull/165)).
-
 
 <details>
 <summary>Merged pull requests</summary>
