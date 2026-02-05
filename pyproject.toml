@@ -4,7 +4,7 @@ requires = [ "hatchling" ]
 
 [project]
 name = "harpy-analysis"
-version = "0.2.0"
+version = "0.3.0"
 description = "single-cell spatial proteomics analysis that makes you happy"
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
