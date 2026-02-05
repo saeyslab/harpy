@@ -397,6 +397,8 @@ def plot_sdata_genes(
     ... )
     """
     df = sdata.points[points_layer]
+    # Dask dataframe operations can drop attrs; keep a copy to restore later.
+    points_attrs = dict(df.attrs)
     if img_layer is not None:
         se = sdata.images[img_layer]
     else:
@@ -415,6 +417,7 @@ def plot_sdata_genes(
             f"this will not affect the underlying zarr store, only the in-memory representation of 'sdata.points[{points_layer}][{name_gene_column}]'."
         )
         df = df.categorize(columns=[name_gene_column])
+        df.attrs.update(points_attrs)
         # sdata[points_layer] = df
     # if genes is None, we want the name_gene_column to NOT be plot as categorical (otherwise all genes are plot as categories, resulting in hundreds of categories,)
     if genes is None and df[name_gene_column].dtype == "category":
@@ -424,6 +427,7 @@ def plot_sdata_genes(
             f"this will not affect the underlying zarr store, only the in-memory representation of 'sdata.points[{points_layer}][{name_gene_column}]'."
         )
         df[name_gene_column] = df[name_gene_column].astype(str)
+        df.attrs.update(points_attrs)
         # sdata[points_layer] = df
 
     # we work with the palette, to prevent spatialdata-plot to calculate color from total number of categories in the dask dataframe, which can be hundreds,
@@ -462,15 +466,22 @@ def plot_sdata_genes(
     sdata_to_plot = SpatialData()
 
     # Note, we sample, before query.
+    # Dask can drop .attrs (including transform metadata) during query/sample operations,
+    # so we keep a copy and restore it if needed.
+    df_attrs = dict(df.attrs)
     if frac is not None:
         if frac < 0 or frac > 1:
             raise ValueError(f"Please set 'frac' to a value between 0 and 1; received {frac}.")
         df = df.sample(frac=frac, random_state=42)
+        df.attrs.update(df_attrs)
+        df.attrs.update(points_attrs)
 
     if crd is not None:
         # query the points
         # we do not use bounding_box_query of spatialdata, because querying of points is slow in spatialdata
         coords = np.array([[crd[0], crd[2]], [crd[1], crd[3]]])
+        # Ensure transformations metadata is present for get_transformation().
+        df.attrs.update(points_attrs)
         transform_matrix = (
             get_transformation(df, to_coordinate_system=to_coordinate_system)
             .inverse()
@@ -485,6 +496,8 @@ def plot_sdata_genes(
         query = f"{y_query} and {x_query}"
 
         df = df.query(query)
+        df.attrs.update(df_attrs)
+        df.attrs.update(points_attrs)
         if len(df) == 0:
             raise ValueError(
                 f"After applying the bounding-box query with coordinates {crd!r} "
