@@ -131,7 +131,12 @@ def _nonzero_nonnan_percentile(
 
     array = da.compress(non_zero_non_nan_mask, array)
 
-    return da.percentile(array, q=q, internal_method=internal_method).astype(dtype)[0]
+    result = da.percentile(array, q=q, internal_method=internal_method).astype(dtype)
+    # Dask returns a 0-D array for scalar q in newer versions and a length-1
+    # array in older versions; support both without indexing errors.
+    if result.ndim == 0:
+        return result
+    return result[0]
 
 
 def _nonzero_nonnan_percentile_axis_0(arr: da.Array, q: float, internal_method: str = "tdigest", dtype=np.float32):

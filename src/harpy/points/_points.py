@@ -42,9 +42,12 @@ def add_points_layer(
     """
     points = spatialdata.models.PointsModel.parse(ddf, coordinates=coordinates, transformations=transformations)
 
-    # we persist points if sdata is not backed.
+    # We persist points if sdata is not backed, but Dask does not carry .attrs through persist().
+    # Keep a copy of attrs (includes SpatialData transform metadata) and restore it safely after persist.
     if not sdata.is_backed():
+        attrs = dict(points.attrs)
         points = points.persist()
+        points.attrs.update(attrs)
 
     if output_layer in [*sdata.points]:
         if sdata.is_backed():
