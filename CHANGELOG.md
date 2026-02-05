@@ -17,6 +17,7 @@ Notes: Merge PRs (#136, #145) do not expose detailed file lists in the merge com
 - Improved cluster-intensity visualization and plotting (PR #163).
 
 **Merged PRs**
+- PR [#187](https://github.com/saeyslab/harpy/pull/187) - 2026-02-05 — Fix MACSima IO naming/docs and preserve point metadata through Dask ops (#188)
 - PR [#186](https://github.com/saeyslab/harpy/pull/186) — 2026-01-30 — Sc 88 xenium — Adds ViT-MAE featurization utilities/tests and Xenium-related updates, plus related pipeline/segmentation adjustments.
 - PR [#185](https://github.com/saeyslab/harpy/pull/185) — 2026-01-20 — docs — Adds extract_instances documentation figures.
 - PR [#184](https://github.com/saeyslab/harpy/pull/184) — 2026-01-20 — Sc 87 benchmark — Updates benchmark notebook.
