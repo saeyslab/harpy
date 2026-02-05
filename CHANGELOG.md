@@ -1,22 +1,48 @@
 # Changelog
 
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
 ## 0.3.0 - 2026-02-05
 
-Notes: Merge PRs (#136, #145) do not expose detailed file lists in the merge commit.
+### Added
+- Scalable extraction of single cell instances from multiplex images, and integration with PyTorch (PRs [#178](https://github.com/saeyslab/harpy/pull/178), [#180](https://github.com/saeyslab/harpy/pull/180), [#181](https://github.com/saeyslab/harpy/pull/181)).
+- Deep feature extraction (PRs [#178](https://github.com/saeyslab/harpy/pull/178), [#180](https://github.com/saeyslab/harpy/pull/180), [#181](https://github.com/saeyslab/harpy/pull/181)).
+- Chunk-wise streaming for integration in PyTorch (PR [#181](https://github.com/saeyslab/harpy/pull/181)).
+- ViT-MAE deep feature extraction utilities for instance-level representation learning (PR [#186](https://github.com/saeyslab/harpy/pull/186)).
+- Expanded MERSCOPE IO and plotting support (PRs [#166](https://github.com/saeyslab/harpy/pull/166), [#173](https://github.com/saeyslab/harpy/pull/173), [#174](https://github.com/saeyslab/harpy/pull/174)).
+- Expanded MACSima IO support (PR [#167](https://github.com/saeyslab/harpy/pull/167)).
+- Expanded Xenium IO support (PR [#169](https://github.com/saeyslab/harpy/pull/169)).
+- Regionprops utilities (PR [#171](https://github.com/saeyslab/harpy/pull/171)).
+- CUDA cluster support for Cellpose (PR [#155](https://github.com/saeyslab/harpy/pull/155)).
+- Pooch env-var handling for datasets (PR [#150](https://github.com/saeyslab/harpy/pull/150)).
 
-**Highlights**
-- `harpy.tb.extract_instances`, for integration with PyTorch (PRs #178, #180, #181).
-- `harpy.tb.featurize`, for extracting single cell instances and building per-instance tensors (PRs #178, #180, #181).
-- `harpy.utils.RasterAggregator`. Improved shallow feature extraction and scaling to terrapixel-scale datasets (PR #180).
-- Add chunk-wise streaming (`harpy.tb.ZarrIterableInstances`) for intergration with PyTorch (PR #181).
-- Added ViT-MAE deep feature extraction utilities for instance-level representation learning (PR #186).
-- Expanded MERSCOPE IO and plotting support (PRs #166, #173, #174).
-- Expanded MACSIMA IO support (PR #167).
-- Expanded Xenium IO support (PR #169).
-- Added regionprops utilities (PR #171).
-- Improved cluster-intensity visualization and plotting (PR #163).
+### Changed
+- Improved shallow feature extraction and scaling and support for cupy (PR [#180](https://github.com/saeyslab/harpy/pull/180)).
+- Cluster-intensity visualization and plotting (PR [#163](https://github.com/saeyslab/harpy/pull/163)).
+- Standardized keys across IO/plot/table/shape modules (PR [#170](https://github.com/saeyslab/harpy/pull/170)).
+- Simplified the aggregate/featurization paths (PR [#177](https://github.com/saeyslab/harpy/pull/177)).
+- Removed the `datasets` dependency and updated the registry/benchmarks accordingly (PR [#148](https://github.com/saeyslab/harpy/pull/148)).
 
-**Merged PRs**
+### Fixed
+- Preserved point metadata through Dask operations; fixed MACSima IO naming/docs (PR [#187](https://github.com/saeyslab/harpy/pull/187)).
+- Fixed MERSCOPE transcript IO bug (PR [#149](https://github.com/saeyslab/harpy/pull/149)).
+- Fixed SpatialData chunk creation bug (PR [#152](https://github.com/saeyslab/harpy/pull/152)).
+
+### Documentation
+- Added documentation figures (PR [#185](https://github.com/saeyslab/harpy/pull/185)).
+- Added/updated benchmark and technical-specs notebooks (PRs [#182](https://github.com/saeyslab/harpy/pull/182), [#183](https://github.com/saeyslab/harpy/pull/183), [#184](https://github.com/saeyslab/harpy/pull/184)).
+- Updated installation instructions; removed `nptyping` (PR [#145](https://github.com/saeyslab/harpy/pull/145)).
+- General docs refresh (PRs [#153](https://github.com/saeyslab/harpy/pull/153), [#165](https://github.com/saeyslab/harpy/pull/165)).
+
+
+<details>
+<summary>Merged pull requests</summary>
+
 - PR [#187](https://github.com/saeyslab/harpy/pull/187) - 2026-02-05 — Fix MACSima IO naming/docs and preserve point metadata through Dask ops
 - PR [#186](https://github.com/saeyslab/harpy/pull/186) — 2026-01-30 — Sc 88 xenium — Adds ViT-MAE featurization utilities/tests and Xenium-related updates, plus related pipeline/segmentation adjustments.
 - PR [#185](https://github.com/saeyslab/harpy/pull/185) — 2026-01-20 — docs — Adds extract_instances documentation figures.
@@ -53,3 +79,5 @@ Notes: Merge PRs (#136, #145) do not expose detailed file lists in the merge com
 - PR [#145](https://github.com/saeyslab/harpy/pull/145) — 2025-08-20 — update_installation — Updates installation instructions; removes `nptyping`.
 - PR [#136](https://github.com/saeyslab/harpy/pull/136) — 2025-08-05 — development merge — Brings in development changes including SNR QC plot fixes and pre-commit cleanups.
 - PR [#124](https://github.com/saeyslab/harpy/pull/124) — 2025-09-16 — pre-commit autoupdate — Tooling updates.
+
+</details>
