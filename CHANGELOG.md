@@ -5,9 +5,9 @@
 Notes: Merge PRs (#136, #145) do not expose detailed file lists in the merge commit.
 
 **Highlights**
-- `harpy.tb.extract_instances` for integration with PyTorch (PRs #178, #180, #181).
-- `harpy.tb.featurize` for extracting single cell instances and building per-instance tensors (PRs #178, #180, #181).
-- Improved shallow feature extraction and scaling to terrapixel-scale datasets (PR #180).
+- `harpy.tb.extract_instances`, for integration with PyTorch (PRs #178, #180, #181).
+- `harpy.tb.featurize`, for extracting single cell instances and building per-instance tensors (PRs #178, #180, #181).
+- `harpy.utils.RasterAggregator`. Improved shallow feature extraction and scaling to terrapixel-scale datasets (PR #180).
 - Add chunk-wise streaming (`harpy.tb.ZarrIterableInstances`) for intergration with PyTorch (PR #181).
 - Added ViT-MAE deep feature extraction utilities for instance-level representation learning (PR #186).
 - Expanded MERSCOPE IO and plotting support (PRs #166, #173, #174).
