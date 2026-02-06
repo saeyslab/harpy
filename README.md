@@ -59,7 +59,6 @@ Checkout the docs for [installation instructions](https://github.com/saeyslab/ha
 
 See the short, runnable [guide](./docs/quickstart.md).
 
-
 ## 🧭 Tutorials and Guides
 
 Explore how to use Harpy for segmentation, shallow and deep feature extraction, clustering, and spatial analysis of gigapixel-scale multiplexed data with these step-by-step notebooks:
@@ -67,6 +66,7 @@ Explore how to use Harpy for segmentation, shallow and deep feature extraction, 
 - **🚀 Basic Usage of Harpy**
 
   Learn how to read in data, perform **tiled segmentation** using [**Cellpose**](https://github.com/MouseLand/cellpose) and [**Dask-CUDA**](https://docs.rapids.ai/api/dask-cuda/stable/), extract features, and carry out clustering. 👉 [Tutorial](./docs/tutorials/general/Harpy_feature_calculation.ipynb)
+
 - **🔧 Technology-specific advice**
 
   Learn which technologies Harpy supports. 👉 [Notebook](./docs/tutorials/general/techno_specific.ipynb)
