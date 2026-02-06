@@ -90,6 +90,12 @@ Explore how to use Harpy for segmentation, shallow and deep feature extraction, 
 
     Learn how to install Harpy.
 
+.. card:: Quickstart
+    :link: quickstart
+    :link-type: doc
+
+    Run a short, end-to-end example.
+
 .. card:: Tutorials
     :link: tutorials/index
     :link-type: doc
@@ -145,6 +151,7 @@ For spatial transcriptomics analysis, see the [SPArrOW preprint](https://www.bio
 :maxdepth: 2
 
 installation.md
+quickstart.md
 usage.md
 tutorials/index.md
 api.md

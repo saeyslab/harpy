@@ -5,13 +5,17 @@
 [![napari hub](https://img.shields.io/endpoint?url=https://api.napari-hub.org/shields/harpy)](https://napari-hub.org/plugins/harpy)
 -->
 
-# **Harpy: single-cell spatial proteomics analysis that makes you happy** <img src="./docs/_static/img/logo.png" align ="right" alt="" width ="150"/>
+<div align="center">
+  <img src="./docs/_static/img/logo.png" alt="Harpy logo" width="160" />
+  <h1>Harpy</h1>
+  <p><strong>Single-cell spatial omics analysis that makes you happy.</strong></p>
+</div>
 
 [![PyPI](https://img.shields.io/pypi/v/harpy-analysis.svg)](https://pypi.org/project/harpy-analysis)
 [![Downloads](https://static.pepy.tech/badge/harpy-analysis)](https://pepy.tech/project/harpy-analysis)
-[![Build Status](https://github.com//saeyslab/harpy/actions/workflows/build.yaml/badge.svg)](https://github.com//saeyslab/harpy/actions/)
+[![Build Status](https://github.com/saeyslab/harpy/actions/workflows/build.yaml/badge.svg)](https://github.com/saeyslab/harpy/actions/)
 [![documentation badge](https://readthedocs.org/projects/harpy/badge/?version=latest)](https://harpy.readthedocs.io/en/latest/)
-[![Test Status](https://github.com//saeyslab/harpy/actions/workflows/run_tests.yml/badge.svg)](https://github.com//saeyslab/harpy/actions/)
+[![Test Status](https://github.com/saeyslab/harpy/actions/workflows/run_tests.yml/badge.svg)](https://github.com/saeyslab/harpy/actions/)
 [![codecov](https://codecov.io/gh/saeyslab/harpy/branch/main/graph/badge.svg)](https://codecov.io/gh/saeyslab/harpy)
 [![License](https://img.shields.io/badge/license-Academic%20Non--commercial-blue)](./LICENSE)
 ![GitHub repo size](https://img.shields.io/github/repo-size/saeyslab/harpy)
@@ -20,74 +24,71 @@
 
 > 💫 **If you find Harpy useful, please give us a [⭐](https://github.com/saeyslab/harpy)!** It helps others discover the project and supports continued development.
 
+## Why Harpy?
+
+- **Scales to (very) large images** (tiled workflows; optional GPU acceleration).
+- **End-to-end workflows** for segmentation, feature extraction, clustering, and spatial analysis.
+- **Multi-platform support** for spatial transcriptomics and proteomics data.
+- **Interoperable outputs** built on [SpatialData](https://github.com/scverse/spatialdata).
+
 ## Installation
 
-**Recommended** for end-users.
-
-<!--Install the latest `harpy-analysis` [PyPI package](https://pypi.org/project/harpy-analysis) with the `extra` dependencies in a local Python environment.-->
+**Recommended** for end-users (Python `>=3.10`).
 
 ```bash
-uv venv --python=3.12 # set python version
-source .venv/bin/activate # activate the virtual environment
-uv pip install "git+https://github.com/saeyslab/harpy.git#egg=harpy-analysis[extra]" # use uv to pip install dependencies
-python -c 'import harpy; print(harpy.__version__)' # check if the package is installed
+uv venv --python=3.12  # set python version
+source .venv/bin/activate  # activate the virtual environment
+uv pip install "harpy-analysis[extra]"  # use uv to pip install dependencies
+python -c 'import harpy; print(harpy.__version__)'  # check if the package is installed
 ```
 
 **Only for developers.** Clone this repository locally, install the `.[dev]` instead of the `[extra]` dependencies and read the contribution guide.
 
 ```bash
 # Clone repository from GitHub
-uv venv --python=3.12 # set python version
-source .venv/bin/activate # activate the virtual environment
-uv pip install -e '.[dev]' # use uv to pip install dependencies
-python -c 'import harpy; print(harpy.__version__)' # check if the package is installed
+uv venv --python=3.12  # set python version
+source .venv/bin/activate  # activate the virtual environment
+uv pip install -e '.[dev]'  # editable install with dev tooling
+python -c 'import harpy; print(harpy.__version__)'  # check if the package is installed
 # make changes
-python -m pytest # run the tests
+python -m pytest  # run the tests
 ```
 
 Checkout the docs for [installation instructions](https://github.com/saeyslab/harpy/blob/main/docs/installation.md) using [conda](https://github.com/conda/conda).
+
+## Quickstart
+
+See the short, runnable [guide](./docs/quickstart.md).
+
 
 ## 🧭 Tutorials and Guides
 
 Explore how to use Harpy for segmentation, shallow and deep feature extraction, clustering, and spatial analysis of gigapixel-scale multiplexed data with these step-by-step notebooks:
 
----
-
 - **🚀 Basic Usage of Harpy**
 
   Learn how to read in data, perform **tiled segmentation** using [**Cellpose**](https://github.com/MouseLand/cellpose) and [**Dask-CUDA**](https://docs.rapids.ai/api/dask-cuda/stable/), extract features, and carry out clustering. 👉 [Tutorial](./docs/tutorials/general/Harpy_feature_calculation.ipynb)
-
----
-
-- **🔧 Technology specific advice**
+- **🔧 Technology-specific advice**
 
   Learn which technologies Harpy supports. 👉 [Notebook](./docs/tutorials/general/techno_specific.ipynb)
-
----
 
 - **🧩 Pixel and Cell Clustering**
 
   Learn how to perform unsupervised pixel- and cell-level clustering using `Harpy` together with [**FlowSOM**](https://github.com/saeyslab/FlowSOM_Python). 👉 [Tutorial](./docs/tutorials/general/FlowSOM_for_pixel_and_cell_clustering.ipynb)
 
----
-
 - **✂️ Cell Segmentation**
 
   Explore segmentation workflows in `Harpy` using different tools:
-  - With [**Instanseg**](https://github.com/instanseg/instanseg) 👉 [Tutorial](./docs/tutorials/general//Harpy_instanseg.ipynb)
+  - With [**Instanseg**](https://github.com/instanseg/instanseg) 👉 [Tutorial](./docs/tutorials/general/Harpy_instanseg.ipynb)
 
-  - With [**Cellpose**](https://github.com/MouseLand/cellpose) 👉 [Tutorial ](./docs/tutorials/general/Harpy_feature_calculation.ipynb)
+  - With [**Cellpose**](https://github.com/MouseLand/cellpose) 👉 [Tutorial](./docs/tutorials/general/Harpy_feature_calculation.ipynb)
 
   💡 Want us to add support for another segmentation method?
   👉 [Open an issue](https://github.com/saeyslab/harpy/issues) and let us know!
 
----
-
 - **🧪 Single-cell representations from highly multiplexed images and downstream use with [PyTorch](https://pytorch.org/)**
 
   Learn how single-cell representations can be generated from highly multiplexed images. These representations can then be used downstream to train classifiers in PyTorch. 👉 [Tutorial](./docs/tutorials/general/generate_single_cell_representations.ipynb)
-
----
 
 - **🧠 Deep Feature Extraction**
 
@@ -96,13 +97,9 @@ Explore how to use Harpy for segmentation, shallow and deep feature extraction, 
   💡 Want us to add support for another deep feature extraction method?
   👉 [Open an issue](https://github.com/saeyslab/harpy/issues) and let us know!
 
----
-
 - **🔬 Shallow Feature Extraction**
 
   Learn to extract shallow features—such as **mean**, **median**, and **standard deviation** of intensities—from multiplex imaging data with `Harpy`. 👉 [Tutorial](./docs/tutorials/advanced/Harpy_aggregate_rasters.ipynb)
-
----
 
 - **🧬 Spatial Transcriptomics**
 
@@ -116,7 +113,7 @@ Explore how to use Harpy for segmentation, shallow and deep feature extraction, 
 
 - **🌐 Multiple samples and coordinate systems**
 
-  Learn how to work with multiple samples, instrinsic and micron coordinates. 👉 [Tutorial](./docs/tutorials/advanced/coordinate_systems.ipynb)
+  Learn how to work with multiple samples, intrinsic and micron coordinates. 👉 [Tutorial](./docs/tutorials/advanced/coordinate_systems.ipynb)
 
 ---
 
@@ -153,7 +150,6 @@ For commercial usage, please contact Saeyslab.
 
 If you encounter any problems, please [file an issue] along with a detailed description.
 
-[napari]: https://github.com/napari/napari
 [Cookiecutter]: https://github.com/audreyr/cookiecutter
 [BSD-3]: http://opensource.org/licenses/BSD-3-Clause
 [cookiecutter-napari-plugin]: https://github.com/napari/cookiecutter-napari-plugin
