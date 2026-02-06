@@ -7,7 +7,7 @@
 
 <div align="center">
   <img src="./docs/_static/img/logo.png" alt="Harpy logo" width="200" />
-  <p><strong>Single-cell spatial omics analysis that makes you happy.</strong></p>
+  <p><strong><span style="font-size:1.1em;">Single-cell spatial omics analysis that makes you happy.</span></strong></p>
 </div>
 
 [![PyPI](https://img.shields.io/pypi/v/harpy-analysis.svg)](https://pypi.org/project/harpy-analysis)

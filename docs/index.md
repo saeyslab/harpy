@@ -1,6 +1,6 @@
 <div align="center">
   <img src="_static/img/logo.png" alt="Harpy logo" width="200" />
-  <p><strong>Single-cell spatial omics analysis that makes you happy.</strong></p>
+  <p><strong><span style="font-size:1.1em;">Single-cell spatial omics analysis that makes you happy.</span></strong></p>
 </div>
 
 > 💫 **If you find Harpy useful, please give us a [⭐ on GitHub](https://github.com/saeyslab/harpy)!** It helps others discover the project and supports continued development.
