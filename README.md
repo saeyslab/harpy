@@ -6,8 +6,7 @@
 -->
 
 <div align="center">
-  <img src="./docs/_static/img/logo.png" alt="Harpy logo" width="160" />
-  <h1>Harpy</h1>
+  <img src="./docs/_static/img/logo.png" alt="Harpy logo" width="200" />
   <p><strong>Single-cell spatial omics analysis that makes you happy.</strong></p>
 </div>
 
@@ -26,10 +25,10 @@
 
 ## Why Harpy?
 
-- **Scales to (very) large images** (tiled workflows; optional GPU acceleration).
-- **End-to-end workflows** for segmentation, feature extraction, clustering, and spatial analysis.
 - **Multi-platform support** for spatial transcriptomics and proteomics data.
 - **Interoperable outputs** built on [SpatialData](https://github.com/scverse/spatialdata).
+- **Scales to (very) large images**: tiled workflows with [Dask](https://www.dask.org/); optional GPU acceleration with [CuPy](https://cupy.dev/) and [PyTorch](https://pytorch.org/).
+- **End-to-end workflows** for segmentation, feature extraction, clustering, and spatial analysis.
 
 ## Installation
 

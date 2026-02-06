@@ -1,8 +1,18 @@
-# Harpy: single-cell spatial proteomics analysis that makes you happy
+<div align="center">
+  <img src="_static/img/logo.png" alt="Harpy logo" width="200" />
+  <p><strong>Single-cell spatial omics analysis that makes you happy.</strong></p>
+</div>
 
 > 💫 **If you find Harpy useful, please give us a [⭐ on GitHub](https://github.com/saeyslab/harpy)!** It helps others discover the project and supports continued development.
 
-Harpy is a library for highly-multiplexed microscopy image analysis with single-cell resolution.
+Why Harpy?
+
+- **Multi-platform support** for spatial transcriptomics and proteomics data.
+- **Interoperable outputs** built on [SpatialData](https://github.com/scverse/spatialdata).
+- **Scales to (very) large images**: tiled workflows with [Dask](https://www.dask.org/); optional GPU acceleration with [CuPy](https://cupy.dev/) and [PyTorch](https://pytorch.org/).
+- **End-to-end workflows** for segmentation, feature extraction, clustering, and spatial analysis.
+
+---
 
 Explore how to use Harpy for segmentation, shallow and deep feature extraction, clustering, and spatial analysis of gigapixel-scale multiplexed data with these step-by-step notebooks:
 
