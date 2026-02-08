@@ -1,3 +1,11 @@
+# Harpy
+
+<style>
+section#harpy > h1 {
+  display: none;
+}
+</style>
+
 <div align="center">
   <img src="_static/img/logo.png" alt="Harpy logo" width="220" />
   <p><strong><span style="font-size:1.8em;">Single-cell spatial omics analysis that makes you happy.</span></strong></p>
