@@ -28,6 +28,7 @@ classifiers = [
 ]
 dependencies = [
     "spatialdata>=0.4.0",
+    "setuptools<82", # wait for next spatialdata release
     "distributed",
     "scanpy>=1.9.1",
     "voronoi-diagram-for-polygons>=0.1.6",
