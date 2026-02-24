@@ -217,13 +217,16 @@ def _macsima(
             )
 
     if remove_dapi:
+        def _is_dapi_channel(channel_name: str | None) -> bool:
+            return channel_name == "DAPI" or (channel_name is not None and channel_name.startswith("DAPI "))
+
         metadata_imgs = [
             (m, i)
             for m, i in zip(metadata, imgs, strict=True)
             if m[2] is None
             or m[0] is None
-            or m[2] != "DAPI"
-            or (m[2] == "DAPI" and m[0] == "0")  # we keep only first round DAPI
+            or not _is_dapi_channel(m[2])
+            or (_is_dapi_channel(m[2]) and m[0] == "0")  # we keep only first round DAPI
         ]
         metadata, imgs = zip(*metadata_imgs, strict=True) if metadata_imgs else ([], [])
         if not metadata:
