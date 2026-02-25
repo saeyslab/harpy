@@ -5,18 +5,17 @@ requires = [ "hatchling" ]
 [project]
 name = "harpy-analysis"
 version = "0.3.0"
-description = "single-cell spatial proteomics analysis that makes you happy"
+description = "single-cell spatial omics analysis that makes you happy"
 readme = "README.md"
-requires-python = ">=3.10,<3.13"
+requires-python = ">=3.10,<3.15"
 license = { file = "LICENSE" }
 authors = [
     { name = "dambi" }
 ]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
-    "Framework :: napari",
-    "Intended Audience :: Developers",
-    "License :: OSI Approved :: BSD License",
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: Other/Proprietary License",
     "Operating System :: OS Independent",
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
@@ -24,6 +23,8 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Software Development :: Testing"
 ]
 dependencies = [
@@ -101,14 +102,15 @@ notebook = [
 extra = [
     # do not support basic tiling correction, and squidpy installation in default PyPI install
     # squidpy should be installed from the main branch (zarr 3), pip install git+https://github.com/scverse/squidpy@main
-    "harpy-analysis[napari,cli,segmentation,opencv,clustering,notebook]",
+    # removed napari from extra, because can give issues on centOS or python3.14
+    "harpy-analysis[cli,segmentation,opencv,clustering,notebook]",
 ]
 # dev dependencies
 test = [
     "opencv-python",
     "pytest",
     "pytest-cov",
-    "pytest-qt",
+    #"pytest-qt", # only necessary for unit testing deprecated plugin
     "tox",
 ]
 docs = [
