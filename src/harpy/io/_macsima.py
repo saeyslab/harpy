@@ -217,6 +217,7 @@ def _macsima(
             )
 
     if remove_dapi:
+
         def _is_dapi_channel(channel_name: str | None) -> bool:
             return channel_name == "DAPI" or (channel_name is not None and channel_name.startswith("DAPI "))
 
