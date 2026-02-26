@@ -4854,7 +4854,7 @@ wheels = [
 
 [[package]]
 name = "spatialdata-plot"
-version = "0.2.8"
+version = "0.2.14"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "matplotlib" },
@@ -4863,9 +4863,9 @@ dependencies = [
     { name = "scikit-learn" },
     { name = "spatialdata" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e9/a3/ae5d8593eecfb5c34c9c6a9572f826c30f68c12e836bf11cc7542ff6eb6e/spatialdata_plot-0.2.8.tar.gz", hash = "sha256:55a60ddf77bb0d5ef3ef6233173052b9a2d210a6e7929eb1278688c784798caf", size = 7813845, upload-time = "2024-11-26T18:09:35.451Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/df/79/06391031a7f282fb70ea8b2288365a1270d35a3ecc4149cb03915f51daf7/spatialdata_plot-0.2.14.tar.gz", hash = "sha256:31a186b1222660aeeaab7a14934b6016fe110277d0428712c00c98271d3dac79", size = 12906293, upload-time = "2026-01-30T13:04:32.795Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/09/d8/d556fbf4e1417fb0bbca3014a45476a67774f3ad49ef827669eb393ea5c3/spatialdata_plot-0.2.8-py3-none-any.whl", hash = "sha256:55a2e6bcbc4aee62e2a9a5454ecaf44d31538c966253600516d97c4f172b0f67", size = 43873, upload-time = "2024-11-26T18:09:33.446Z" },
+    { url = "https://files.pythonhosted.org/packages/d0/d8/62051dccf6010cf7d342510b1e37ec0f748d980914fdbf2b81a1e184f25f/spatialdata_plot-0.2.14-py3-none-any.whl", hash = "sha256:871bb46e8485526d03fd4dd87800103f724e5b5411d1c366c4fc22bf4fc32a46", size = 62031, upload-time = "2026-01-30T13:04:31.527Z" },
 ]
 
 [[package]]
