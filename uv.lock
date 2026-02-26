@@ -155,20 +155,22 @@ wheels = [
 
 [[package]]
 name = "anndata"
-version = "0.11.4"
+version = "0.12.10"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "array-api-compat" },
     { name = "h5py" },
+    { name = "legacy-api-wrap" },
     { name = "natsort" },
     { name = "numpy" },
     { name = "packaging" },
     { name = "pandas" },
     { name = "scipy" },
+    { name = "zarr" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/6e/bb/895fa2e9f8cd6d1c058aa90759da715037d0f11e23713e692537555549d7/anndata-0.11.4.tar.gz", hash = "sha256:4ce08d09d2ccb5f37d32790363bbcc7fc1b79863842296ae4badfaf48c736e24", size = 541143, upload-time = "2025-03-26T11:38:54.566Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/84/81/29809c5710123bb37ea9d9de9da0e83dda5be9d8419cce256e4406b37c44/anndata-0.12.10.tar.gz", hash = "sha256:73a73c99ca50400eb9dc7f2fdd400cf677ea4bb9ef1f7c04691c0fc557e43d7f", size = 2254675, upload-time = "2026-02-06T14:02:24.716Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/0a/4b/ab615fea52e34579d5c6c7dba86b4f9d7f3cdb6a170b348ec49f34cf4355/anndata-0.11.4-py3-none-any.whl", hash = "sha256:fefebb1480316dfa5a23924aa9f74781d447484421bb0c788b0b2ca5e3b339d2", size = 144472, upload-time = "2025-03-26T11:38:52.547Z" },
+    { url = "https://files.pythonhosted.org/packages/4c/f4/4d0193dc5bab3af74e9560a8b45830d88ac707467d15ceff7e3df17adc41/anndata-0.12.10-py3-none-any.whl", hash = "sha256:e3d940d8e34373dc250f998c1011c1da52721f980de9d83a0599daa2baa286e5", size = 176574, upload-time = "2026-02-06T14:02:23.097Z" },
 ]
 
 [[package]]
