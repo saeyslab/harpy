@@ -70,7 +70,7 @@ segmentation = [
 #]
 
 opencv = [
-    "opencv-python",
+    "opencv-python-headless",
 ]
 clustering = [
     "flowsom",
@@ -106,7 +106,7 @@ extra = [
 ]
 # dev dependencies
 test = [
-    "opencv-python",
+    "opencv-python-headless",
     "pytest",
     "pytest-cov",
     #"pytest-qt", # only necessary for unit testing deprecated plugin
