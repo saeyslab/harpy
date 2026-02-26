@@ -181,6 +181,9 @@ def correct_marker_genes(
     Corrects celltype scores (found in `.obs` attribute of the :class:`~anndata.AnnData` table) that are higher expessed by dividing them by a value if they exceed a certain threshold.
     The `celltype_correction_dict` has as keys the celltypes that should be corrected and as values the threshold and the divider.
 
+    .. deprecated:: 0.3.0
+       `harpy.tb.correct_marker_genes` is deprecated and may be removed in a future release.
+
     Parameters
     ----------
     sdata

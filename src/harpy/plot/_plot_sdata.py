@@ -192,6 +192,13 @@ def plot_sdata(
     show_kwargs = deepcopy(show_kwargs)  # otherwise inplace updsate of show_kwargs
     show_kwargs["coordinate_systems"] = [to_coordinate_system]
 
+    transformations = get_transformation(sdata.images[img_layer], get_all=True)
+    _valid_coordinate_systems = list(transformations.keys())
+    if to_coordinate_system not in _valid_coordinate_systems:
+        raise ValueError(
+            f"Unknown coordinate system '{to_coordinate_system}', valid choices are: {_valid_coordinate_systems}"
+        )
+
     # we remove points from sdata, because a potential bounding box query on points is slow
     sdata_to_plot = sdata.subset(element_names=[*sdata.images] + [*sdata.labels] + [*sdata.tables])
     queried = False
@@ -397,6 +404,14 @@ def plot_sdata_genes(
     ... )
     """
     df = sdata.points[points_layer]
+
+    transformations = get_transformation(sdata.points[points_layer], get_all=True)
+    _valid_coordinate_systems = list(transformations.keys())
+    if to_coordinate_system not in _valid_coordinate_systems:
+        raise ValueError(
+            f"Unknown coordinate system '{to_coordinate_system}', valid choices are: {_valid_coordinate_systems}"
+        )
+
     # Dask dataframe operations can drop attrs; keep a copy to restore later.
     points_attrs = dict(df.attrs)
     if img_layer is not None:

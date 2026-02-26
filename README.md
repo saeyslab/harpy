@@ -10,6 +10,8 @@
   <h2>Single-cell spatial omics analysis that makes you happy.</h2>
 </div>
 
+<div align="center">
+
 [![PyPI](https://img.shields.io/pypi/v/harpy-analysis.svg)](https://pypi.org/project/harpy-analysis)
 [![Downloads](https://static.pepy.tech/badge/harpy-analysis)](https://pepy.tech/project/harpy-analysis)
 [![Build Status](https://github.com/saeyslab/harpy/actions/workflows/build.yaml/badge.svg)](https://github.com/saeyslab/harpy/actions/)
@@ -20,6 +22,18 @@
 ![GitHub repo size](https://img.shields.io/github/repo-size/saeyslab/harpy)
 [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+
+</div>
+
+<p align="center">
+  <a href="https://harpy.readthedocs.io/en/latest/">Documentation</a>
+  ·
+  <a href="https://harpy.readthedocs.io/en/latest/quickstart.html">Quick Start</a>
+  ·
+  <a href="https://harpy.readthedocs.io/en/latest/tutorials/index.html">Tutorials</a>
+  ·
+  <a href="https://github.com/vibspatial/harpy_vitessce">Harpy Vitessce</a>
+</p>
 
 > 💫 **If you find Harpy useful, please give us a [⭐](https://github.com/saeyslab/harpy)!** It helps others discover the project and supports continued development.
 
@@ -32,7 +46,7 @@
 
 ## Installation
 
-**Recommended** for end-users (Python `>=3.10`).
+**Recommended** for end-users (Python `>=3.11`).
 
 ```bash
 uv venv --python=3.12  # set python version

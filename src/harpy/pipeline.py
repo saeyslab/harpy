@@ -56,10 +56,11 @@ class HarpyPipeline:
             sdata = self.annotate(sdata)
             log.info("Annotation step finished.")
 
-            # Visualize
-            log.info("Visualization step started.")
-            sdata = self.visualize(sdata)
-            log.info("Visualization step finished.")
+            if False:
+                # Visualize ->removed, uses deprecated code
+                log.info("Visualization step started.")
+                sdata = self.visualize(sdata)
+                log.info("Visualization step finished.")
 
         return sdata
 
@@ -523,7 +524,12 @@ class HarpyPipeline:
         return sdata
 
     def visualize(self, sdata: SpatialData) -> SpatialData:
-        """Visualisation step, the sixth and final step of the pipeline, checks the cluster cleanliness and performs nhood enrichement before saving the data as SpatialData object."""
+        """
+        Visualisation step, the sixth and final step of the pipeline, checks the cluster cleanliness and performs nhood enrichement before saving the data as SpatialData object.
+
+        .. deprecated:: 0.3.0
+           `Pipeline.visualize` is deprecated and may be removed in a future release.
+        """
         # Perform correction for transcripts (and corresponding celltypes) that occur in all cells and are overexpressed
         if "correct_marker_genes_dict" in self.cfg.visualize:
             sdata = harpy.tb.correct_marker_genes(
