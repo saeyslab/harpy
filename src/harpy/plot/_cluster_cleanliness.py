@@ -25,6 +25,9 @@ def cluster_cleanliness(
     - a UMAP with cells colored by cell type;
     - an image of the tissue with cells colored by cell type.
 
+    .. deprecated:: 0.3.0
+       `harpy.pl.cluster_cleanliness` is deprecated and may be removed in a future release.
+
     Parameters
     ----------
     sdata

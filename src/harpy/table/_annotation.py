@@ -666,6 +666,9 @@ def cluster_cleanliness(
     Celltypes can also be grouped together via the celltype_indexes parameter.
     Returns a `SpatialData` object alongside a dictionary mapping cell types to colors.
 
+    .. deprecated:: 0.3.0
+       `harpy.tb.cluster_cleanliness` is deprecated and may be removed in a future release.
+
     Parameters
     ----------
     sdata
