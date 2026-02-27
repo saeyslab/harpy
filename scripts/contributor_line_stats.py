@@ -10,7 +10,6 @@ import sys
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 
-
 COMMIT_MARKER = "@@COMMIT@@"
 CO_AUTHOR_RE = re.compile(r"^Co-authored-by:\s*([^<]+)<[^>]+>\s*$", re.IGNORECASE | re.MULTILINE)
 AUTHOR_ALIASES = {
@@ -32,10 +31,7 @@ class LineStats:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description=(
-            "Show number of lines contributed per author in Python files, "
-            "split by core and _tests."
-        )
+        description=("Show number of lines contributed per author in Python files, split by core and _tests.")
     )
     parser.add_argument(
         "--root",
@@ -229,11 +225,7 @@ def main() -> None:
 
         categories = ["core", "_tests"]
         for category in categories:
-            rows = [
-                (author, lines)
-                for (cat, author), lines in blame_stats.items()
-                if cat == category
-            ]
+            rows = [(author, lines) for (cat, author), lines in blame_stats.items() if cat == category]
             rows.sort(key=lambda row: (row[1], row[0].lower()), reverse=True)
             print_blame_table(f"{category} (.py files, current lines)", rows)
 
@@ -270,10 +262,7 @@ def main() -> None:
         totals[author].added += line_stats.added
         totals[author].deleted += line_stats.deleted
 
-    total_rows = [
-        (author, s.added, s.deleted, s.net)
-        for author, s in totals.items()
-    ]
+    total_rows = [(author, s.added, s.deleted, s.net) for author, s in totals.items()]
     total_rows.sort(key=lambda row: (row[1], row[3], row[0].lower()), reverse=True)
     suffix = " (includes co-authors)" if not args.no_coauthors else ""
     print_table(f"total (.py files){suffix}", total_rows)
