@@ -1,0 +1,15 @@
+# 1) Create env
+uv venv .venv_some_name --python 3.12
+source .venv_some_name/bin/activate
+
+# 2) Sync env from lockfile (incl. dev deps)
+uv sync --locked --extra dev --active
+
+# 3) Re-sync env after lockfile changes
+uv sync --locked --extra dev --active
+
+# 4) Upgrade a package in uv.lock
+uv lock --upgrade-package <package_name>
+
+# Optional: upgrade to a specific version
+uv lock --upgrade-package "<package_name>==<version>"
