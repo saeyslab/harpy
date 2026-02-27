@@ -6,7 +6,7 @@
 -->
 
 <div align="center">
-  <img src="./docs/_static/img/logo.png" alt="Harpy logo" width="200" />
+  <img src="https://raw.githubusercontent.com/saeyslab/harpy/main/docs/_static/img/logo.png" alt="Harpy logo" width="200" />
   <h2>Single-cell spatial omics analysis that makes you happy.</h2>
 </div>
 
