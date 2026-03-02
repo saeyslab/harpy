@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import dask
 import dask.array as da
 import numpy as np
@@ -181,3 +183,59 @@ def test_featurize_sdata_blobs(sdata: SpatialData):
 
     assert embedding_obsm_key in sdata[output_layer].obsm
     assert sdata[output_layer].obsm[embedding_obsm_key].shape == (sdata[table_layer].shape[0], embedding_dim)
+
+
+def test_featurize_sdata_store_intermediate_raises_if_not_backed(sdata_transcripts_no_backed: SpatialData):
+    with pytest.raises(
+        ValueError, match="store_intermediate=True' is only supported for backed SpatialData"
+    ):
+        _ = featurize(
+            sdata_transcripts_no_backed,
+            img_layer="raw_image",
+            labels_layer="segmentation_mask",
+            table_layer=None,
+            output_layer="table_transcriptomics_embedding",
+            depth=100,
+            diameter=75,
+            embedding_dimension=16,
+            model=_dummy_embedding,
+            store_intermediate=True,
+            overwrite=True,
+        )
+
+
+def test_featurize_sdata_store_intermediate_uses_backed_temp_path_and_cleans(
+    sdata_transcripts: SpatialData, monkeypatch: pytest.MonkeyPatch
+):
+    captured_paths: list[Path] = []
+
+    def _fake_featurize(self, *args, **kwargs):  # noqa: ANN001
+        zarr_output_path = kwargs["zarr_output_path"]
+        store_intermediate = kwargs["store_intermediate"]
+        if store_intermediate:
+            assert zarr_output_path is not None
+            _path = Path(zarr_output_path)
+            _path.mkdir(parents=True, exist_ok=False)
+            captured_paths.append(_path)
+        return np.array([1], dtype=np.int64), da.from_array(np.ones((1, 8), dtype=np.float32), chunks=(1, 8))
+
+    monkeypatch.setattr("harpy.table.featurization._featurize.Featurizer.featurize", _fake_featurize)
+
+    sdata_out = featurize(
+        sdata_transcripts,
+        img_layer="raw_image",
+        labels_layer="segmentation_mask",
+        table_layer=None,
+        output_layer="table_transcriptomics_embedding_tmp",
+        depth=100,
+        diameter=75,
+        embedding_dimension=8,
+        model=_dummy_embedding,
+        store_intermediate=True,
+        overwrite=True,
+    )
+
+    assert "table_transcriptomics_embedding_tmp" in [*sdata_out.tables]
+    assert len(captured_paths) == 1
+    assert captured_paths[0].parent == Path(sdata_transcripts.path).parent
+    assert not captured_paths[0].exists()
