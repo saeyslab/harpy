@@ -4,7 +4,7 @@ import dask
 import dask.array as da
 import numpy as np
 import pytest
-from spatialdata import SpatialData
+from spatialdata import SpatialData, read_zarr
 from spatialdata.models import TableModel
 
 from harpy.image import add_image_layer, add_labels_layer
@@ -131,7 +131,15 @@ def test_featurize_sdata(sdata_transcripts_no_backed: SpatialData, table_layer):
         )
 
 
-def test_featurize_sdata_blobs(sdata: SpatialData):
+@pytest.mark.parametrize(
+    ("store_intermediate", "backed"),
+    [
+        (False, False),
+        (True, True),
+        (True, False),
+    ],
+)
+def test_featurize_sdata_blobs(sdata: SpatialData, tmp_path: Path, store_intermediate: bool, backed: bool):
     img_layer = "blobs_image"
     labels_layer = "blobs_labels"
     table_layer = "table"
@@ -139,6 +147,11 @@ def test_featurize_sdata_blobs(sdata: SpatialData):
 
     embedding_dim = 20
     embedding_obsm_key = "embedding_sdata"
+
+    if backed:
+        backed_path = tmp_path / "sdata_blobs.zarr"
+        sdata.write(backed_path)
+        sdata = read_zarr(backed_path)
 
     sdata = add_image_layer(
         sdata,
@@ -167,6 +180,24 @@ def test_featurize_sdata_blobs(sdata: SpatialData):
         overwrite=True,
     )
 
+    if store_intermediate and not backed:
+        with pytest.raises(ValueError, match="store_intermediate=True' is only supported for backed SpatialData"):
+            _ = featurize(
+                sdata,
+                img_layer=img_layer,
+                labels_layer=labels_layer,
+                table_layer=table_layer,
+                output_layer=output_layer,
+                diameter=1000,
+                embedding_dimension=embedding_dim,
+                model=_dummy_embedding,
+                batch_size=250,
+                embedding_obsm_key=embedding_obsm_key,
+                store_intermediate=store_intermediate,
+                overwrite=True,
+            )
+        return
+
     sdata = featurize(
         sdata,
         img_layer=img_layer,
@@ -178,64 +209,9 @@ def test_featurize_sdata_blobs(sdata: SpatialData):
         model=_dummy_embedding,
         batch_size=250,
         embedding_obsm_key=embedding_obsm_key,
+        store_intermediate=store_intermediate,
         overwrite=True,
     )
 
     assert embedding_obsm_key in sdata[output_layer].obsm
     assert sdata[output_layer].obsm[embedding_obsm_key].shape == (sdata[table_layer].shape[0], embedding_dim)
-
-
-def test_featurize_sdata_store_intermediate_raises_if_not_backed(sdata_transcripts_no_backed: SpatialData):
-    with pytest.raises(
-        ValueError, match="store_intermediate=True' is only supported for backed SpatialData"
-    ):
-        _ = featurize(
-            sdata_transcripts_no_backed,
-            img_layer="raw_image",
-            labels_layer="segmentation_mask",
-            table_layer=None,
-            output_layer="table_transcriptomics_embedding",
-            depth=100,
-            diameter=75,
-            embedding_dimension=16,
-            model=_dummy_embedding,
-            store_intermediate=True,
-            overwrite=True,
-        )
-
-
-def test_featurize_sdata_store_intermediate_uses_backed_temp_path_and_cleans(
-    sdata_transcripts: SpatialData, monkeypatch: pytest.MonkeyPatch
-):
-    captured_paths: list[Path] = []
-
-    def _fake_featurize(self, *args, **kwargs):  # noqa: ANN001
-        zarr_output_path = kwargs["zarr_output_path"]
-        store_intermediate = kwargs["store_intermediate"]
-        if store_intermediate:
-            assert zarr_output_path is not None
-            _path = Path(zarr_output_path)
-            _path.mkdir(parents=True, exist_ok=False)
-            captured_paths.append(_path)
-        return np.array([1], dtype=np.int64), da.from_array(np.ones((1, 8), dtype=np.float32), chunks=(1, 8))
-
-    monkeypatch.setattr("harpy.table.featurization._featurize.Featurizer.featurize", _fake_featurize)
-
-    sdata_out = featurize(
-        sdata_transcripts,
-        img_layer="raw_image",
-        labels_layer="segmentation_mask",
-        table_layer=None,
-        output_layer="table_transcriptomics_embedding_tmp",
-        depth=100,
-        diameter=75,
-        embedding_dimension=8,
-        model=_dummy_embedding,
-        store_intermediate=True,
-        overwrite=True,
-    )
-
-    assert "table_transcriptomics_embedding_tmp" in [*sdata_out.tables]
-    assert len(captured_paths) == 1
-    assert captured_paths[0].parent == Path(sdata_transcripts.path).parent
-    assert not captured_paths[0].exists()
