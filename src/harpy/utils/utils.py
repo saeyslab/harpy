@@ -177,8 +177,8 @@ def _dummy_embedding(array: NDArray, embedding_dimension: int, seed: int = 42) -
     return random_array
 
 
-def _make_list(item: str | Iterable[str]) -> list[str]:
-    if isinstance(item, str) or not isinstance(item, Iterable):
+def _make_list(item: Any | Iterable[Any]) -> list[Any]:
+    if isinstance(item, (str, bytes, bytearray)) or not isinstance(item, Iterable):
         return [item]
     return list(item)
 
