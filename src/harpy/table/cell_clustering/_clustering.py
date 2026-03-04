@@ -44,41 +44,55 @@ def flowsom(
     **kwargs,  # keyword arguments for _flowsom
 ) -> tuple[SpatialData, fs.FlowSOM]:
     """
-    Prepares the data obtained from pixel clustering for cell clustering (see docstring of `harpy.tb.cell_clustering_preprocess`) and then executes the FlowSOM clustering algorithm on the resulting table layer (`output_layer`) of the SpatialData object.
+    Run FlowSOM cell clustering on pixel-cluster-derived cell features.
 
-    This function applies the FlowSOM clustering algorithm (via :func:`flowsom.FlowSOM`) on spatial data contained in a SpatialData object.
+    Prepare the data obtained from pixel clustering for cell clustering (see
+    :func:`~harpy.tb.cell_clustering_preprocess`) and execute FlowSOM on the
+    resulting table layer (`output_layer`) of the SpatialData object.
+
+    This function applies the FlowSOM clustering algorithm (via
+    :class:`flowsom.FlowSOM`) on spatial data contained in a SpatialData object.
     The algorithm organizes data into self-organizing maps and then clusters these maps, grouping them into `n_clusters`.
     The results of this clustering are added to a table layer in the `sdata` object.
 
-    Typically one would first process `sdata` via `harpy.im.pixel_clustering_preprocess` and `harpy.im.flowsom` before using this function.
+    Typically, one would first process `sdata` via
+    :func:`~harpy.im.pixel_clustering_preprocess` and :func:`~harpy.im.flowsom`
+    before using this function.
 
     Parameters
     ----------
     sdata
         The input SpatialData object.
     labels_layer_cells
-        The labels layer(s) in `sdata` that contain cell segmentation masks. These masks should be previously generated using `harpy.im.segment`.
+        The labels layer(s) in `sdata` that contain cell segmentation masks.
+        These masks should be previously generated using :func:`~harpy.im.segment`.
         If a list of labels layers is provided, they will be clustered together (e.g. multiple samples).
     labels_layer_clusters
-        The labels layer(s) in `sdata` that contain metacluster or SOM cluster masks. These should be obtained via `harpy.im.flowsom`.
+        The labels layer(s) in `sdata` that contain metacluster or SOM cluster masks.
+        These should be obtained via :func:`~harpy.im.flowsom`.
     output_layer
         The output table layer in `sdata` where results of the clustering and metaclustering will be stored.
     q
-        Quantile used for normalization. If specified, each pixel SOM/meta cluster column in `output_layer` is normalized by this quantile prior to flowsom clustering. Values are multiplied by 100 after normalization.
+        Quantile used for normalization. If specified, each pixel SOM/meta
+        cluster column in `output_layer` is normalized by this quantile prior
+        to FlowSOM clustering. Values are multiplied by 100 after normalization.
     chunks
         Chunk sizes for processing the data. If provided as a tuple, it should detail chunk sizes for each dimension `(z)`, `y`, `x`.
     n_clusters
         The number of metaclusters to form from the self-organizing maps.
     index_names_var
-        Specifies the variable names to be used from `sdata.tables[table_layer].var` for clustering. If None, `index_positions_var` will be used if not None.
+        Specifies the variable names to be used from `sdata.tables[output_layer].var`
+        for clustering. If `None`, `index_positions_var` is used if not `None`.
     index_positions_var
-        Specifies the positions of variables to be used from `sdata.tables[table_layer].var` for clustering. Used if `index_names_var` is None.
+        Specifies the positions of variables to be used from
+        `sdata.tables[output_layer].var`. Used if `index_names_var` is `None`.
     random_state
         A random state for reproducibility of the clustering.
     instance_key
         Instance key. The name of the column in :class:`~anndata.AnnData` table `.obs` that will hold the instance ids.
     region_key
-        Region key. The name of the column in  :class:`~anndata.AnnData` table `.obs` that will hold the name of the element(s) that are annotated by the resulting table.
+        Region key. The name of the column in :class:`~anndata.AnnData` table `.obs`
+        that will hold the name of the element(s) that are annotated by the resulting table.
     cell_index_name
         The name of the index of the resulting :class:`~anndata.AnnData` table.
     instance_size_key
@@ -88,7 +102,7 @@ def flowsom(
     overwrite
         If True, overwrites the existing data in `output_layer` if it already exists.
     **kwargs
-        Additional keyword arguments passed to the `fs.FlowSOM` clustering algorithm.
+        Additional keyword arguments passed to :class:`flowsom.FlowSOM`.
 
     Returns
     -------
@@ -96,12 +110,12 @@ def flowsom(
 
         - The updated `sdata` with the clustering results added.
 
-        - An instance of :func:`flowsom.FlowSOM` containing the trained FlowSOM model.
+        - An instance of :class:`flowsom.FlowSOM` containing the trained FlowSOM model.
 
     See Also
     --------
-    harpy.im.flowsom : flowsom pixel clustering
-    harpy.tb.cell_clustering_preprocess : prepares data for cell clustering.
+    :func:`~harpy.im.flowsom` : FlowSOM pixel clustering.
+    :func:`~harpy.tb.cell_clustering_preprocess` : Prepare data for cell clustering.
     """
     # first do preprocessing (this creates an AnnData table)
     sdata = cell_clustering_preprocess(
