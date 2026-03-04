@@ -1,8 +1,10 @@
+from pathlib import Path
+
 import dask
 import dask.array as da
 import numpy as np
 import pytest
-from spatialdata import SpatialData
+from spatialdata import SpatialData, read_zarr
 from spatialdata.models import TableModel
 
 from harpy.image import add_image_layer, add_labels_layer
@@ -129,7 +131,15 @@ def test_featurize_sdata(sdata_transcripts_no_backed: SpatialData, table_layer):
         )
 
 
-def test_featurize_sdata_blobs(sdata: SpatialData):
+@pytest.mark.parametrize(
+    ("store_intermediate", "backed"),
+    [
+        (False, False),
+        (True, True),
+        (True, False),
+    ],
+)
+def test_featurize_sdata_blobs(sdata: SpatialData, tmp_path: Path, store_intermediate: bool, backed: bool):
     img_layer = "blobs_image"
     labels_layer = "blobs_labels"
     table_layer = "table"
@@ -137,6 +147,11 @@ def test_featurize_sdata_blobs(sdata: SpatialData):
 
     embedding_dim = 20
     embedding_obsm_key = "embedding_sdata"
+
+    if backed:
+        backed_path = tmp_path / "sdata_blobs.zarr"
+        sdata.write(backed_path)
+        sdata = read_zarr(backed_path)
 
     sdata = add_image_layer(
         sdata,
@@ -165,6 +180,24 @@ def test_featurize_sdata_blobs(sdata: SpatialData):
         overwrite=True,
     )
 
+    if store_intermediate and not backed:
+        with pytest.raises(ValueError, match="store_intermediate=True' is only supported for backed SpatialData"):
+            _ = featurize(
+                sdata,
+                img_layer=img_layer,
+                labels_layer=labels_layer,
+                table_layer=table_layer,
+                output_layer=output_layer,
+                diameter=1000,
+                embedding_dimension=embedding_dim,
+                model=_dummy_embedding,
+                batch_size=250,
+                embedding_obsm_key=embedding_obsm_key,
+                store_intermediate=store_intermediate,
+                overwrite=True,
+            )
+        return
+
     sdata = featurize(
         sdata,
         img_layer=img_layer,
@@ -176,6 +209,7 @@ def test_featurize_sdata_blobs(sdata: SpatialData):
         model=_dummy_embedding,
         batch_size=250,
         embedding_obsm_key=embedding_obsm_key,
+        store_intermediate=store_intermediate,
         overwrite=True,
     )
 

@@ -61,9 +61,9 @@ def kronos_embedding(
         KRONOS channel set. It must contain at least the following columns (names configurable
         via arguments below):
 
-        - `channel_id_pretrained_name` (default: `"marker_id"`): identifier used by the
+        - `channel_id_pretrained_name` (default: `"marker_id_pretrained"`): identifier used by the
           pre-trained checkpoint (ordering reference).
-        - `channel_id_data_specific_name` (default: `"channel_id"`): channel id of `array`
+        - `channel_id_data_specific_name` (default: `"marker_id"`): channel id of `array`
           (the channels present in your data).
         - `channel_mean_name` (default: `"marker_mean"`): per-channel mean used for
           standardization.
@@ -95,16 +95,13 @@ def kronos_embedding(
         (e.g., 255 for 8-bit, 65535 for 16-bit, or 1 for floating-point data already in range).
     channel_id_pretrained_name
         Column name in `matched_channels` that encodes the pre-trained channel IDs.
-        Default `"marker_id"`.
     channel_id_data_specific_name
         Column name in `matched_channels` that encodes the dataset-specific channel IDs
-        Default `"channel_id"`.
     channel_mean_name
         Column name in `matched_channels` holding per-channel means used for standardization.
-        Default `"marker_mean"`.
     channel_std_name
         Column name in `matched_channels` holding per-channel standard deviations used for
-        standardization. Default `"marker_std"`.
+        standardization..
 
     Returns
     -------

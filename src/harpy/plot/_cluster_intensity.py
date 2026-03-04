@@ -6,6 +6,7 @@ from types import MappingProxyType
 from typing import Any
 
 import matplotlib.pyplot as plt
+import numpy as np
 import seaborn as sns
 from matplotlib.axes import Axes
 from scipy.cluster.hierarchy import dendrogram, ward
@@ -68,7 +69,7 @@ def cluster_intensity_heatmap(
     fig_kwargs
         Additional keyword arguments passed to :func:`matplotlib.pyplot.figure`, such as `dpi`. Ignored if `ax` is `None`.
     **kwargs
-        Additional keyword arguments passed to :func:`seaborn.heatmap`, such as `annot`, `cmap`, or `cbar_kws`.
+        Additional keyword arguments passed to :func:`seaborn.heatmap`, such as `annot`, `cmap`, `linewidths` or `cbar_kws`.
 
     Returns
     -------
@@ -189,26 +190,50 @@ def cluster_intensity_heatmap(
 
     # Create a heatmap
     annot = kwargs.pop("annot", False)
-    cmap = kwargs.pop("cmap", "coolwarm")
+    cmap = kwargs.pop("cmap", "RdBu_r" if z_score else "viridis")
     fmt = kwargs.pop("fmt", ".2f")
     _label = "Mean Intensity (z-score)" if z_score else "Mean Intensity"
-    cbar_kws = kwargs.pop("cbar_kws", {"label": _label})
+    cbar_kws_default = {"label": _label, "shrink": 0.8, "aspect": 30, "pad": 0.02}
+    cbar_kws = {**cbar_kws_default, **kwargs.pop("cbar_kws", {})}
+    linewidths = kwargs.pop("linewidths", 0.35)
+    linecolor = kwargs.pop("linecolor", "white")
+
+    if z_score:
+        kwargs.setdefault("center", 0)
+        if "vmin" not in kwargs and "vmax" not in kwargs:
+            _finite_values = np.asarray(df.values, dtype=float)
+            _finite_values = _finite_values[np.isfinite(_finite_values)]
+            if _finite_values.size > 0:
+                _abs_max = float(np.max(np.abs(_finite_values)))
+                if _abs_max > 0:
+                    kwargs["vmin"] = -_abs_max
+                    kwargs["vmax"] = _abs_max
+
     ax = sns.heatmap(
         df.transpose(),
         annot=annot,
         cmap=cmap,
         fmt=fmt,
         cbar_kws=cbar_kws,
+        linewidths=linewidths,
+        linecolor=linecolor,
         ax=ax,
         **kwargs,
     )
-    ax.set_title(f"Mean Channel Intensity per {cluster_key} cluster")
-    _x_label = f"{cluster_key} cluster"
-
-    ax.set_ylabel("Channel")
-    ax.set_xlabel(_x_label)
+    ax.set_title(f"Mean Channel Intensity per {cluster_key} cluster", fontsize=12, pad=10)
+    ax.set_ylabel("Channel", fontsize=11)
+    ax.set_xlabel(f"{cluster_key} cluster", fontsize=11)
+    ax.tick_params(axis="x", labelrotation=0, labelsize=10)
+    ax.tick_params(axis="y", labelrotation=0, labelsize=10)
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+    if ax.collections:
+        colorbar = ax.collections[0].colorbar
+        if colorbar is not None:
+            colorbar.ax.tick_params(labelsize=10)
+            colorbar.set_label(_label, size=10)
 
     if output is not None:
-        ax.figure.savefig(output)
+        ax.figure.savefig(output, bbox_inches="tight")
 
     return ax

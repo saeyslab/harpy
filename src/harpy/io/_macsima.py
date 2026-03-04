@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import glob
 import re
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from enum import unique
 from pathlib import Path
 from types import MappingProxyType
@@ -10,6 +10,7 @@ from typing import Any
 
 import dask.array as da
 import numpy as np
+from loguru import logger as log
 from numpy.typing import NDArray
 from spatialdata import SpatialData, read_zarr
 from spatialdata._logging import logger
@@ -63,6 +64,8 @@ class MacsimaKeys(ModeEnum):
 
 def macsima(
     path: str | Path | list[str] | list[Path],
+    img_layer: str | Iterable[str] | None = None,
+    to_coordinate_system: str | Iterable[str] | None = None,
     c_subset: list[str] = None,
     remove_bleached: bool = True,
     remove_dapi: bool = True,
@@ -81,10 +84,11 @@ def macsima(
     **cycle_scantype_channelname_roiid_reagent** (or
     **cycle_scantype_channelname_reagent** if `include_roi_id_in_channel_name=False`).
 
-    The pixel coordinate system is added as **global_roiid**, while the
-    micron coordinate system is added as **global_roiid_micron**. Both
-    coordinate systems are available to all spatial elements within the
-    resulting SpatialData object.
+    The pixel coordinate system is added as either the provided
+    `to_coordinate_system` or, by default, **global_roiid** (if ROI metadata is
+    available) or **global** (if ROI metadata is not available). The micron
+    coordinate system is always added as the pixel coordinate system with suffix
+    **_micron**.
 
     .. seealso::
 
@@ -103,6 +107,14 @@ def macsima(
         (or `cycle_scantype_channelname_reagent` if `include_roi_id_in_channel_name=False`).
         E.g if `c_subset=['DAPI']` and  `cycle_scantype_channelname_roiid_reagent = 01_B_DAPI_001_DAPI`,
         then channel `01_B_DAPI_001_DAPI` will be retained.
+    img_layer
+        Name of the resulting image layer. If `None`, the name is inferred from OME metadata.
+        If `path` contains multiple entries, `img_layer` must be a list with the same length.
+    to_coordinate_system
+        Target coordinate system name(s) for the resulting image layer(s). If `None`,
+        defaults to `global_<roi_id>` when ROI metadata is available, otherwise `global`.
+        If `path` contains multiple entries, `to_coordinate_system` must be a list with
+        the same length.
     remove_bleached
         If set to `True` will remove all channels of scantype `'B'` (=bleached).
     remove_dapi
@@ -149,10 +161,34 @@ def macsima(
             "Please install it with `pip install bioio bioio-ome-tiff`."
         ) from e
     path = _make_list(path)
+    if img_layer is None:
+        img_layer_list = [None] * len(path)
+    else:
+        img_layer_list = _make_list(img_layer)
+        if len(img_layer_list) != len(path):
+            raise ValueError(
+                f"'img_layer' must have same length as 'path' (got {len(img_layer_list)} and {len(path)})."
+            )
+        if len(set(img_layer_list)) != len(img_layer_list):
+            raise ValueError("'img_layer' entries must be unique.")
+    if to_coordinate_system is None:
+        to_coordinate_system_list = [None] * len(path)
+    else:
+        to_coordinate_system_list = _make_list(to_coordinate_system)
+        if len(to_coordinate_system_list) != len(path):
+            raise ValueError(
+                "'to_coordinate_system' must have same length as 'path' "
+                f"(got {len(to_coordinate_system_list)} and {len(path)})."
+            )
+        if len(set(to_coordinate_system_list)) != len(to_coordinate_system_list):
+            raise ValueError("'to_coordinate_system' entries must be unique.")
+
     sdata = SpatialData()
-    for _path in path:
+    for _path, _img_layer, _to_coordinate_system in zip(path, img_layer_list, to_coordinate_system_list, strict=True):
         image_name, se = _macsima(
             _path,
+            img_layer=_img_layer,
+            to_coordinate_system=_to_coordinate_system,
             c_subset=c_subset,
             remove_bleached=remove_bleached,
             remove_dapi=remove_dapi,
@@ -171,6 +207,8 @@ def macsima(
 
 def _macsima(
     path: str | Path,
+    img_layer: str | None = None,
+    to_coordinate_system: str | None = None,
     c_subset: list[str] = None,
     remove_bleached: bool = True,
     remove_dapi: bool = True,
@@ -189,19 +227,35 @@ def _macsima(
         raise ValueError(f"Cannot determine data set, expecting '*{MacsimaKeys.IMAGE_OMETIF}' files in {path}.")
     imgs = [BioImage(img_path, **imread_kwargs) for img_path in path_list]
 
-    image_name = imgs[0].ome_metadata.experiments[0].description
+    if img_layer is None:
+        image_name = imgs[0].ome_metadata.experiments[0].description
+        log.info(f"'img_layer' not provided; metadata-derived base image layer name: {image_name}")
+    else:
+        image_name = img_layer
 
     metadata = [_get_metadata(_img) for _img in imgs]
     roi = [item[3] for item in metadata]
-    if roi[0] is not None:
-        assert all(x == roi[0] for x in roi), (
-            f"Extracted ROI ID not equal for all '{MacsimaKeys.IMAGE_OMETIF}' files found in '{path}'."
-        )
+    if to_coordinate_system is None and roi[0] is not None:
+        if not all(x == roi[0] for x in roi):
+            raise ValueError(
+                f"Extracted ROI ID not equal for all '{MacsimaKeys.IMAGE_OMETIF}' files found in '{path}'."
+            )
         roi_id = roi[0]
-        to_coordinate_system = f"global_{roi_id}"
-        image_name = f"{image_name}_{roi_id}"
+        to_coordinate_system_name = f"global_{roi_id}"
+        log.info(
+            "'to_coordinate_system' not provided; ROI metadata found, "
+            f"falling back to coordinate system: {to_coordinate_system_name}"
+        )
+        if img_layer is None:
+            image_name = f"{image_name}_{roi_id}"
+            log.info(f"'img_layer' not provided; appending ROI id, final image layer name: {image_name}")
+    elif to_coordinate_system is not None:
+        to_coordinate_system_name = to_coordinate_system
     else:
-        to_coordinate_system = "global"
+        to_coordinate_system_name = "global"
+        log.info(
+            "'to_coordinate_system' not provided and no ROI metadata found, falling back to coordinate system: global"
+        )
 
     if remove_bleached:
         metadata_imgs = [
@@ -320,7 +374,10 @@ def _macsima(
         array,
         dims=["c", "y", "x"],
         c_coords=names,
-        transformations={to_coordinate_system: Identity(), f"{to_coordinate_system}_micron": pixels_to_microns},
+        transformations={
+            to_coordinate_system_name: Identity(),
+            f"{to_coordinate_system_name}_micron": pixels_to_microns,
+        },
         **image_models_kwargs,
     )
 

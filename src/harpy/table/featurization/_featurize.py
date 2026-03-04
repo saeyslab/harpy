@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import shutil
+import uuid
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from types import MappingProxyType
@@ -242,6 +244,7 @@ def featurize(
     cell_index_name: str = _CELL_INDEX,
     dtype: np.dtype = np.float32,
     run_on_gpu: bool = False,
+    store_intermediate: bool = False,
     overwrite: bool = False,
     **kwargs: Any,
 ) -> SpatialData:
@@ -330,6 +333,10 @@ def featurize(
         Output dtype of `model`.
     run_on_gpu
         If True and 'cupy' is installed, the instance extraction step runs on the GPU.
+    store_intermediate
+        If `True`, intermediate and temporary feature stores are written to disk during featurization.
+        This is only supported for backed `SpatialData`; if `sdata.is_backed()` is `False`, a
+        `ValueError` is raised.
     overwrite
         If `True`, overwrites the `output_layer` if it already exists in `sdata`.
     **kwargs
@@ -417,6 +424,9 @@ def featurize(
     instances_ids_list = []
     features_list = []
 
+    if store_intermediate and not sdata.is_backed():
+        raise ValueError("Parameter 'store_intermediate=True' is only supported for backed SpatialData.")
+
     for _img_layer, _labels_layer, _to_coordinate_system in zip(
         img_layer, labels_layer, to_coordinate_system, strict=True
     ):
@@ -439,21 +449,32 @@ def featurize(
             run_on_gpu=run_on_gpu,
         )
 
-        instances_ids, features = featurizer.featurize(
-            depth=depth,
-            embedding_dimension=embedding_dimension,
-            remove_background=remove_background,
-            diameter=diameter,
-            zarr_output_path=None,
-            store_intermediate=False,
-            model=model,
-            batch_size=batch_size,
-            model_kwargs=model_kwargs,
-            dtype=dtype,
-            **kwargs,
-        )
+        zarr_output_path = None
+        if store_intermediate:
+            if sdata.path is None:
+                raise ValueError("Backed SpatialData does not expose a valid 'path'.")
+            zarr_output_path = Path(sdata.path).parent / f"featurize_embeddings_{uuid.uuid4()}.zarr"
 
-        features = features.compute()
+        try:
+            instances_ids, features = featurizer.featurize(
+                depth=depth,
+                embedding_dimension=embedding_dimension,
+                remove_background=remove_background,
+                diameter=diameter,
+                zarr_output_path=zarr_output_path,
+                store_intermediate=store_intermediate,
+                model=model,
+                batch_size=batch_size,
+                model_kwargs=model_kwargs,
+                dtype=dtype,
+                **kwargs,
+            )
+
+            features = features.compute()
+        finally:
+            if store_intermediate and zarr_output_path is not None and zarr_output_path.suffix == ".zarr":
+                shutil.rmtree(zarr_output_path, ignore_errors=True)
+
         # sanity check
         if features.shape[0] != instances_ids.shape[0]:
             raise RuntimeError(
