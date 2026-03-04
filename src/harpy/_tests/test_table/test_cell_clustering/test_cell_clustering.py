@@ -2,10 +2,15 @@ import importlib
 
 import dask
 import dask.array as da
+import numpy as np
 import pandas as pd
 import pytest
+from loguru import logger
+from spatialdata.transformations import get_transformation
 
-from harpy.utils._keys import ClusteringKey
+from harpy.image._image import add_labels_layer
+from harpy.table.cell_clustering._preprocess import cell_clustering_preprocess
+from harpy.utils._keys import _INSTANCE_KEY, ClusteringKey
 
 
 @pytest.mark.skipif(not importlib.util.find_spec("flowsom"), reason="requires the flowSOM library")
@@ -107,3 +112,60 @@ def test_cell_clustering(sdata_blobs):
         f"{ClusteringKey._METACLUSTERING_KEY.value}_{sdata_blobs[table_layer_intensity].var_names.name}"
         in sdata_blobs.tables[table_layer].uns
     )
+
+
+def test_cell_clustering_preprocess_logs_removed_no_overlap_cells(sdata_blobs):
+    labels_layer_cells = "blobs_labels"
+    labels_layer_clusters = "blobs_metaclusters_for_logging_test"
+    output_layer = "table_cell_clustering_logging_test"
+
+    labels = np.asarray(sdata_blobs[labels_layer_cells].data)
+    unique_labels = np.unique(labels)
+    unique_labels = unique_labels[unique_labels != 0]
+    dropped_instance_id = int(unique_labels[0])
+
+    # Make one cell overlap only with background/unassigned cluster id 0.
+    # clusters is a dummy pixel cluster labels layer we create, for which instance with instance id 1 has no overlap with any pixel cluster.
+    clusters = da.from_array(
+        np.where((labels != 0) & (labels != dropped_instance_id), 1, 0).astype(np.uint32),
+        chunks=labels.shape,
+    )
+    transformations = get_transformation(sdata_blobs[labels_layer_cells], get_all=True)
+    sdata_blobs = add_labels_layer(
+        sdata_blobs,
+        arr=clusters,
+        output_layer=labels_layer_clusters,
+        transformations=transformations,
+        overwrite=True,
+    )
+
+    records = []
+    sink_id = logger.add(
+        records.append,
+        format="{message}",
+        filter=lambda record: record["name"] == "harpy.table.cell_clustering._preprocess",
+    )
+    try:
+        sdata_blobs = cell_clustering_preprocess(
+            sdata_blobs,
+            labels_layer_cells=[labels_layer_cells],
+            labels_layer_clusters=[labels_layer_clusters],
+            output_layer=output_layer,
+            q=None,
+            overwrite=True,
+        )
+    finally:
+        logger.remove(sink_id)
+
+    messages = [record.record["message"] for record in records]
+
+    assert any(
+        msg == f"Removing 1 cells with no overlap with any pixel cluster from table '{output_layer}'."
+        for msg in messages
+    )
+    assert any(
+        msg == (f"Removed 1 no-overlap cells for region 'blobs_labels' (instance ids: [{dropped_instance_id}]).")
+        for msg in messages
+    )
+
+    assert dropped_instance_id not in sdata_blobs.tables[output_layer].obs[_INSTANCE_KEY].values

@@ -7,6 +7,7 @@ import dask.array as da
 import numpy as np
 import pandas as pd
 from anndata import AnnData
+from loguru import logger as log
 from numpy.typing import NDArray
 from spatialdata import SpatialData
 from spatialdata.transformations import get_transformation
@@ -190,7 +191,26 @@ def cell_clustering_preprocess(
     adata = adata[:, ~adata.var_names.isin(["0"])].copy()
 
     # remove cells with no overlap with any pixel cluster
-    adata = adata[~(adata.X == 0).all(axis=1)].copy()
+    no_overlap_mask = np.asarray((adata.X == 0).all(axis=1)).ravel()
+    if no_overlap_mask.any():
+        removed_cells = adata.obs.loc[no_overlap_mask, [instance_key, region_key]].copy()
+        removed_cells[instance_key] = removed_cells[instance_key].astype(int)
+        log.info(
+            f"Removing {int(no_overlap_mask.sum())} cells with no overlap with any pixel cluster from table '{output_layer}'."
+        )
+
+        removed_per_region = removed_cells.groupby(region_key, observed=True)[instance_key].apply(list)
+        for _region, _instance_ids in removed_per_region.items():
+            if len(_instance_ids) <= 50:
+                _instance_ids_str = ", ".join(str(_id) for _id in _instance_ids)
+            else:
+                _instance_ids_str = (
+                    ", ".join(str(_id) for _id in _instance_ids[:50]) + f", ... ({len(_instance_ids) - 50} more)"
+                )
+            log.info(
+                f"Removed {len(_instance_ids)} no-overlap cells for region '{_region}' (instance ids: [{_instance_ids_str}])."
+            )
+    adata = adata[~no_overlap_mask].copy()
 
     sdata = add_table_layer(
         sdata,
