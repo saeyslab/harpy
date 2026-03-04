@@ -162,7 +162,9 @@ def xenium_human_lung_cancer(output: str | Path | None = None, path: str | Path 
     return sdata
 
 
-def xenium_human_ovarian_cancer(output: str | Path = None, path: str | Path | None = None) -> SpatialData:
+def xenium_human_ovarian_cancer(
+    subset: bool = True, output: str | Path | None = None, path: str | Path | None = None
+) -> SpatialData:
     """
     Example transcriptomics dataset
 
@@ -174,6 +176,9 @@ def xenium_human_ovarian_cancer(output: str | Path = None, path: str | Path | No
 
     Parameters
     ----------
+    subset
+        Whether to load a pre-defined subset of the dataset (~1 GB). Set to
+        ``False`` to load the full dataset (~100 GB).
     output
         The path where the resulting `SpatialData` object will be backed. If `None`, it will not be backed to a Zarr store.
         We recommend specifying `output`.
@@ -185,10 +190,22 @@ def xenium_human_ovarian_cancer(output: str | Path = None, path: str | Path | No
     -------
     A SpatialData object.
     """
-    to_coordinate_system = "global_ROI1"
-
     # fetch the data
     registry = get_registry(path)
+    if subset:
+        unzip_path = registry.fetch(
+            "transcriptomics/xenium/Xenium_human_ovarian_cancer/training_march_2026/sdata_cropped.zarr.zip",
+            processor=pooch.Unzip(),
+        )
+        sdata = read_zarr(os.path.commonpath(unzip_path))
+        sdata.path = None
+        if output is not None:
+            sdata.write(output)
+            sdata = read_zarr(output)
+            return sdata
+        return sdata
+    to_coordinate_system = "global_ROI1"
+
     path_unzipped = registry.fetch(
         "transcriptomics/xenium/Xenium_human_ovarian_cancer/Xenium_Prime_Ovarian_Cancer_FFPE_XRrun_outs.zip",
         processor=pooch.Unzip(extract_dir="."),
