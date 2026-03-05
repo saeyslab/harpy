@@ -1,5 +1,7 @@
+import numpy as np
 import spatialdata
 from anndata import AnnData
+from loguru import logger as log
 from spatialdata import SpatialData, read_zarr
 from spatialdata.models import TableModel
 
@@ -79,4 +81,33 @@ class TableLayerManager:
                 sdata[output_layer] = sdata_temp[output_layer]
                 del sdata_temp
 
+        # If reading from the zarr store, colors are saved as Numpy StringDtype color arrays.
+        # Leading to .copy() failing. Therefore, as a temporary workaround we cast to a safer dtype.
+        _cast_colors_sdata(sdata)
+
         return sdata
+
+
+def _cast_colors_sdata(sdata, target_dtype="U7"):
+    """Normalize NumPy StringDType color arrays in all sdata tables to copy-safe dtype."""
+    target_dtype = np.dtype(target_dtype)
+    target_len = target_dtype.itemsize // np.dtype("U1").itemsize if target_dtype.kind == "U" else None
+
+    for _, adata in sdata.tables.items():
+        for key, value in list(adata.uns.items()):
+            if key.endswith("_colors") and isinstance(value, np.ndarray):
+                dt = value.dtype
+                if "StringDType" in str(dt) or getattr(dt, "kind", None) == "T":
+                    value_list = value.tolist()
+                    flat_values = np.asarray(value_list, dtype=object).ravel()
+                    required_len = max((len(str(v)) for v in flat_values), default=1)
+
+                    if target_len is not None and required_len > target_len:
+                        cast_dtype = np.dtype(f"U{required_len}")
+                        log.info(f"Casting key {key} to '{cast_dtype}' to avoid truncation.")
+                    else:
+                        cast_dtype = target_dtype
+                        log.info(f"Casting key {key} to '{cast_dtype}'.")
+
+                    adata.uns[key] = np.asarray(value_list, dtype=cast_dtype)
+    return

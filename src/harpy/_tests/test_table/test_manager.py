@@ -1,7 +1,9 @@
+import numpy as np
 import pytest
 from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
+from harpy.table._manager import _cast_colors_sdata
 from harpy.table._table import add_table_layer
 from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY
 
@@ -106,3 +108,34 @@ def test_add_table_layer_not_annotating(sdata_transcripts: SpatialData, is_backe
     )
 
     assert TableModel.ATTRS_KEY not in sdata_transcripts["table_transcriptomics"].uns
+
+
+def _string_dtype_array(values: list[str]) -> np.ndarray:
+    if not hasattr(np, "dtypes") or not hasattr(np.dtypes, "StringDType"):
+        pytest.skip("NumPy StringDType is not available in this NumPy version.")
+    return np.asarray(values, dtype=np.dtypes.StringDType())
+
+
+def test_cast_colors_sdata_keeps_u7_when_values_fit(sdata_transcripts_no_backed: SpatialData):
+    key = "category_colors"
+    sdata_transcripts_no_backed["table_transcriptomics"].uns[key] = _string_dtype_array(["#112233", "#aabbcc"])
+
+    _cast_colors_sdata(sdata_transcripts_no_backed, target_dtype="U7")
+
+    colors = sdata_transcripts_no_backed["table_transcriptomics"].uns[key]
+    assert isinstance(colors, np.ndarray)
+    assert colors.dtype == np.dtype("U7")
+    assert colors.tolist() == ["#112233", "#aabbcc"]
+
+
+def test_cast_colors_sdata_avoids_truncation_when_values_exceed_u7(sdata_transcripts_no_backed: SpatialData):
+    key = "category_colors"
+    sdata_transcripts_no_backed["table_transcriptomics"].uns[key] = _string_dtype_array(["#11223344", "darkgreen"])
+
+    _cast_colors_sdata(sdata_transcripts_no_backed, target_dtype="U7")
+
+    colors = sdata_transcripts_no_backed["table_transcriptomics"].uns[key]
+    assert isinstance(colors, np.ndarray)
+    assert colors.dtype.kind == "U"
+    assert (colors.dtype.itemsize // np.dtype("U1").itemsize) > 7
+    assert colors.tolist() == ["#11223344", "darkgreen"]

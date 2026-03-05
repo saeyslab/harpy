@@ -163,7 +163,7 @@ def xenium_human_lung_cancer(output: str | Path | None = None, path: str | Path 
 
 
 def xenium_human_ovarian_cancer(
-    subset: bool = True, output: str | Path | None = None, path: str | Path | None = None
+    subset: bool = True, processed: bool = False, output: str | Path | None = None, path: str | Path | None = None
 ) -> SpatialData:
     """
     Example transcriptomics dataset
@@ -179,6 +179,10 @@ def xenium_human_ovarian_cancer(
     subset
         Whether to load a pre-defined subset of the dataset (~1 GB). Set to
         ``False`` to load the full dataset (~100 GB).
+    processed
+        Only used when ``subset=True``. If ``True``, load the processed subset
+        (analysed experiment); if ``False``, load the raw subset. This argument
+        is ignored when ``subset=False``.
     output
         The path where the resulting `SpatialData` object will be backed. If `None`, it will not be backed to a Zarr store.
         We recommend specifying `output`.
@@ -193,10 +197,16 @@ def xenium_human_ovarian_cancer(
     # fetch the data
     registry = get_registry(path)
     if subset:
-        unzip_path = registry.fetch(
-            "transcriptomics/xenium/Xenium_human_ovarian_cancer/training_march_2026/sdata_cropped.zarr.zip",
-            processor=pooch.Unzip(),
-        )
+        if processed:
+            unzip_path = registry.fetch(
+                "transcriptomics/xenium/Xenium_human_ovarian_cancer/training_march_2026/sdata_cropped_analysis.zarr.zip",
+                processor=pooch.Unzip(),
+            )
+        else:
+            unzip_path = registry.fetch(
+                "transcriptomics/xenium/Xenium_human_ovarian_cancer/training_march_2026/sdata_cropped.zarr.zip",
+                processor=pooch.Unzip(),
+            )
         sdata = read_zarr(os.path.commonpath(unzip_path))
         sdata.path = None
         if output is not None:
@@ -204,6 +214,9 @@ def xenium_human_ovarian_cancer(
             sdata = read_zarr(output)
             return sdata
         return sdata
+    if processed:
+        log.warning("Parameter `processed` is ignored when `subset=False`.")
+
     to_coordinate_system = "global_ROI1"
 
     path_unzipped = registry.fetch(
