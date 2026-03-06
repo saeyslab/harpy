@@ -199,7 +199,7 @@ def xenium_human_ovarian_cancer(
     if subset:
         if processed:
             unzip_path = registry.fetch(
-                "transcriptomics/xenium/Xenium_human_ovarian_cancer/training_march_2026/sdata_cropped_analysis.zarr.zip",
+                "transcriptomics/xenium/Xenium_human_ovarian_cancer/training_march_2026/sdata_cropped_analysis_6_3_26.zarr.zip",
                 processor=pooch.Unzip(),
             )
         else:
