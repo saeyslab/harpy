@@ -17,7 +17,7 @@ from matplotlib.axes import Axes
 from spatialdata import SpatialData
 
 from harpy.image import normalize
-from harpy.image._image import _get_spatial_element
+from harpy.image._image import get_dataarray
 
 try:
     import textalloc as ta
@@ -91,7 +91,7 @@ def histogram(
     ... )
     """
     assert img_layer in sdata.images, f"'{img_layer}' not found in 'sdata.images'."
-    se = _get_spatial_element(sdata, layer=img_layer)
+    se = get_dataarray(sdata, layer=img_layer)
 
     array = se.data[se.c.data.tolist().index(channel)]
 

@@ -148,6 +148,7 @@ def preprocess_proteomics(
     labels_layer: str | Iterable[str],
     table_layer: str,
     output_layer: str,
+    calculate_cell_size: bool = True,
     size_norm: bool = True,
     library_norm: bool = False,
     log1p: bool = True,
@@ -182,6 +183,9 @@ def preprocess_proteomics(
         It is an AnnData object containing total intensities per cell in `.obs` (rows) and per channel in `.var` (columns).
     output_layer
         The output table layer in `sdata` to which preprocessed table layer will be written.
+    calculate_cell_size
+        If `True`, calculates cell sizes from `labels_layer` and stores them in `.obs[instance_size_key]`.
+        Set this to `False` when cell sizes are not needed or are already present and should be preserved.
     size_norm
         If `True`, normalization is based on the size of the nucleus/cell. Resulting values are multiplied by 100 after normalization.
     library_norm
@@ -203,8 +207,8 @@ def preprocess_proteomics(
     n_comps
         Number of principal components to calculate. Ignored if `calculate_pca` is False.
     instance_size_key
-        The key in the :class:`~anndata.AnnData` table `.obs` that holds the size of the instances. If `instance_size_key` is not found in `.obs` it will be calculated from the `labels_layer`.
-        Ignored if `size_norm` is `False`.
+        The key in the :class:`~anndata.AnnData` table `.obs` that holds the size of the instances. When `size_norm` is `True`,
+        this column must either already exist in `.obs` or `calculate_cell_size` must be `True`.
     raw_counts_key
         Name of the :class:`~anndata.AnnData` layer where the non-preprocessed intensities will be stored.
         This parameter is ignored if no preprocessing is applied (i.e. `size_norm`, `library_norm`, `log1p`, `scale` are all `False` and q is `None`).
@@ -241,7 +245,7 @@ def preprocess_proteomics(
         calculate_qc_metrics=False,
         filter_cells=False,
         filter_genes=False,
-        calculate_cell_size=True,
+        calculate_cell_size=calculate_cell_size,
         size_norm=size_norm,
         library_norm=library_norm,
         log1p=log1p,
@@ -342,6 +346,12 @@ class Preprocess(ProcessTable):
         if size_norm and library_norm:
             raise ValueError(
                 "Both 'size_norm' and 'library_norm' were set to True. Please set only one of them to True."
+            )
+
+        if size_norm and (instance_size_key not in adata.obs.columns) and not calculate_cell_size:
+            raise ValueError(
+                f"'size_norm=True' requires '.obs[{instance_size_key!r}]' to be present when "
+                "'calculate_cell_size=False'."
             )
 
         if size_norm:
