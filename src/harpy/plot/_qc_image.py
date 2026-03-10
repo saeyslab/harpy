@@ -1,6 +1,6 @@
 """Calculate various image quality metrics"""
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
@@ -38,6 +38,13 @@ def histogram(
     output: str | Path = None,
     fig_kwargs: dict[str, Any] = MappingProxyType({}),  # kwargs passed to plt.figure, e.g. dpi, figsize
     bar_kwargs: Mapping[str, Any] = MappingProxyType({}),  # kwargs passed to ax.bar, e.g. color and alpha
+    density: bool = False,
+    log_y: bool = False,
+    percentile_lines: Sequence[float] | None = None,
+    kind: str = "hist",
+    exclude_zeros: bool = True,
+    exclude_nan: bool = True,
+    title: str | None = None,
     **kwargs,
 ) -> Axes:
     """
@@ -65,8 +72,22 @@ def histogram(
         An existing axes object to plot the histogram. If `None`, a new figure and axes will be created.
     output
         The path to save the generated plot. If `None`, the plot will not be saved.
+    density
+        If `True`, normalize the histogram to a density instead of plotting raw counts.
+    log_y
+        If `True`, use a logarithmic scale for the y-axis.
+    percentile_lines
+        Percentile values in the interval `[0, 100]` to visualize as vertical guide lines.
+    kind
+        Plot kind. Choose between `"hist"` for a histogram and `"ecdf"` for an empirical cumulative distribution plot.
+    exclude_zeros
+        If `True`, exclude zero-valued pixels before plotting and before computing percentile guide lines.
+    exclude_nan
+        If `True`, exclude NaN values before plotting and before computing percentile guide lines.
+    title
+        Custom plot title. Defaults to the channel name.
     **kwargs
-        Additional keyword arguments passed to :func:`dask.array.histogram`.
+        Additional keyword arguments passed to :func:`dask.array.histogram` when `kind="hist"`.
 
     Returns
     -------
@@ -85,6 +106,10 @@ def histogram(
     ...     channel="Anti Rabbit (PE C1)",
     ...     bins=100,
     ...     range=(0, 1.0),
+    ...     density=True,
+    ...     log_y=False,
+    ...     exclude_zeros=True,
+    ...     percentile_lines=[0.1, 99.9],
     ...     fig_kwargs={"figsize": (5, 5)},
     ...     bar_kwargs={"color": "blue", "alpha": 0.7},
     ...     output="histogram.png"
@@ -93,35 +118,93 @@ def histogram(
     assert img_layer in sdata.images, f"'{img_layer}' not found in 'sdata.images'."
     se = get_dataarray(sdata, layer=img_layer)
 
-    array = se.data[se.c.data.tolist().index(channel)]
+    if kind not in {"hist", "ecdf"}:
+        raise ValueError(f"Unknown 'kind': {kind}. Expected one of ['hist', 'ecdf'].")
+
+    array = se.data[se.c.data.tolist().index(channel)].ravel()
+    array = _filter_image_values(array, exclude_zeros=exclude_zeros, exclude_nan=exclude_nan)
 
     if range is None:
-        range = (da.nanmin(array), da.nanmax(array))
-
-    hist, bin_edges = da.histogram(array, bins=bins, range=range, **kwargs)
-
-    hist, bin_edges = dask.compute(hist, bin_edges)
+        range = tuple(dask.compute(da.nanmin(array), da.nanmax(array)))
 
     # Create axes if not provided
+    fig_kwargs = dict(fig_kwargs)
     if ax is None:
+        fig_kwargs.setdefault("figsize", (6, 4))
         fig, ax = plt.subplots(**fig_kwargs)
+    else:
+        fig = ax.figure
 
     # Plot
     bar_kwargs = dict(bar_kwargs)
-    fig_kwargs = dict(fig_kwargs)
-    color = bar_kwargs.pop("color", "blue")
-    alpha = bar_kwargs.pop("alpha", 0.7)
+    color = bar_kwargs.pop("color", sns.color_palette("deep")[0])
+    alpha = bar_kwargs.pop("alpha", bar_kwargs.pop("ahlpa", 0.8))
     align = bar_kwargs.pop("align", "edge")
+    linewidth = bar_kwargs.pop("linewidth", 0)
 
-    ax.bar(bin_edges[:-1], hist, width=(bin_edges[1] - bin_edges[0]), align=align, alpha=alpha, color=color)
+    if kind == "hist":
+        hist, bin_edges = da.histogram(array, bins=bins, range=range, density=density, **kwargs)
+        hist, bin_edges = dask.compute(hist, bin_edges)
+        ax.bar(
+            bin_edges[:-1],
+            hist,
+            width=(bin_edges[1] - bin_edges[0]),
+            align=align,
+            alpha=alpha,
+            color=color,
+            linewidth=linewidth,
+        )
+        ax.set_ylabel("Density" if density else "Frequency")
+    else:
+        values = np.sort(array.compute())
+        y = np.arange(1, len(values) + 1) / len(values)
+        ax.step(values, y, where="post", color=color, alpha=alpha, linewidth=max(linewidth, 1.5))
+        ax.set_ylabel("Cumulative fraction")
+
+    if percentile_lines is not None:
+        percentile_values = da.percentile(array, q=list(percentile_lines)).compute()
+        percentile_values = np.atleast_1d(percentile_values)
+        for percentile, value in zip(percentile_lines, percentile_values, strict=True):
+            ax.axvline(value, color=color, linestyle="--", linewidth=1, alpha=0.6)
+            ax.text(
+                value,
+                0.98,
+                f"q{percentile:g}",
+                transform=ax.get_xaxis_transform(),
+                rotation=90,
+                va="top",
+                ha="right",
+                color=color,
+                alpha=0.8,
+            )
+
     ax.set_xlabel("Intensity")
-    ax.set_ylabel("Frequency")
-    ax.set_title(channel)
+    ax.set_title(channel if title is None else title)
+
+    if log_y:
+        ax.set_yscale("log")
+
+    sns.despine(ax=ax)
 
     if output is not None:
         fig.savefig(output)
 
     return ax
+
+
+def _filter_image_values(array: da.Array, *, exclude_zeros: bool, exclude_nan: bool) -> da.Array:
+    if not exclude_nan and not exclude_zeros:
+        return array
+
+    mask = da.ones(array.shape, dtype=bool, chunks=array.chunks)
+    if exclude_nan:
+        mask &= ~da.isnan(array)
+    if exclude_zeros:
+        mask &= array != 0
+    array = da.compress(mask, array)
+    if any(np.isnan(c).any() for c in array.chunks):
+        array = array.compute_chunk_sizes()
+    return array
 
 
 def calculate_snr(img, nbins=65536):
