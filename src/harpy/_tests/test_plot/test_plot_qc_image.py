@@ -78,6 +78,24 @@ def test_plot_histogram_ecdf_and_guides(sdata_blobs, tmp_path):
     fig.savefig(os.path.join(tmp_path, "histogram_ecdf"))
 
 
+def test_plot_histogram_multiple_channels(sdata_blobs, tmp_path):
+    matplotlib.use("Agg")
+
+    axes = histogram(
+        sdata_blobs,
+        img_layer="blobs_image",
+        channel=["lineage_1", 2, "lineage_3"],
+        bins=50,
+        density=True,
+        exclude_zeros=True,
+        fig_kwargs={"figsize": (9, 6)},
+        output=os.path.join(tmp_path, "histogram_multi"),
+    )
+
+    assert axes.size >= 3
+    assert axes.ravel()[0].get_title() == "lineage_1"
+
+
 def test_plot_snr_ratio(sdata_blobs, tmp_path):
     # matplotlib.use("Agg") # What is this for?
 

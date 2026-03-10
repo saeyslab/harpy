@@ -31,10 +31,10 @@ except ImportError:
 def histogram(
     sdata: SpatialData,
     img_layer: str,
-    channel: str,
+    channel: str | int | Sequence[str | int],
     bins: int,
     range: tuple[float, float] | None = None,
-    ax: Axes = None,
+    ax: Axes | np.ndarray | None = None,
     output: str | Path = None,
     fig_kwargs: dict[str, Any] = MappingProxyType({}),  # kwargs passed to plt.figure, e.g. dpi, figsize
     bar_kwargs: Mapping[str, Any] = MappingProxyType({}),  # kwargs passed to ax.bar, e.g. color and alpha
@@ -45,8 +45,11 @@ def histogram(
     exclude_zeros: bool = True,
     exclude_nan: bool = True,
     title: str | None = None,
+    ncols: int = 3,
+    sharex: bool = False,
+    sharey: bool = False,
     **kwargs,
-) -> Axes:
+) -> Axes | np.ndarray:
     """
     Generate and visualize a histogram for a specified image channel within an image of a `SpatialData` object.
 
@@ -57,7 +60,8 @@ def histogram(
     img_layer
         The name of the image layer within `sdata` to analyze.
     channel
-        The specific channel of the image data to use for the histogram.
+        The specific channel of the image data to use for the histogram. Can be a single channel name or index,
+        or a sequence of channel names and/or indices.
     bins
         The number of bins for the histogram.
     range
@@ -85,13 +89,19 @@ def histogram(
     exclude_nan
         If `True`, exclude NaN values before plotting and before computing percentile guide lines.
     title
-        Custom plot title. Defaults to the channel name.
+        Custom plot title. Defaults to the channel name. Only applied directly in the single-channel case.
+    ncols
+        Number of subplot columns to use when plotting multiple channels.
+    sharex
+        Whether to share the x-axis across subplots when plotting multiple channels.
+    sharey
+        Whether to share the y-axis across subplots when plotting multiple channels.
     **kwargs
         Additional keyword arguments passed to :func:`dask.array.histogram` when `kind="hist"`.
 
     Returns
     -------
-        The axes object containing the histogram plot.
+        The axes object containing the histogram plot, or an array of axes when multiple channels are provided.
 
     Raises
     ------
@@ -117,7 +127,95 @@ def histogram(
     """
     assert img_layer in sdata.images, f"'{img_layer}' not found in 'sdata.images'."
     se = get_dataarray(sdata, layer=img_layer)
+    channel_names = _resolve_channels(se.c.data.tolist(), channel)
 
+    if len(channel_names) == 1:
+        axis = ax if isinstance(ax, Axes) or ax is None else np.asarray(ax).ravel()[0]
+        channel_title = title if title is not None else channel_names[0]
+        result_ax = _plot_histogram_for_channel(
+            se=se,
+            channel=channel_names[0],
+            bins=bins,
+            range=range,
+            ax=axis,
+            fig_kwargs=fig_kwargs,
+            bar_kwargs=bar_kwargs,
+            density=density,
+            log_y=log_y,
+            percentile_lines=percentile_lines,
+            kind=kind,
+            exclude_zeros=exclude_zeros,
+            exclude_nan=exclude_nan,
+            title=channel_title,
+            **kwargs,
+        )
+        if output is not None:
+            result_ax.figure.savefig(output)
+        return result_ax
+
+    if title is not None:
+        log.warning("Parameter 'title' is ignored when plotting multiple channels.")
+
+    fig_kwargs = dict(fig_kwargs)
+    fig_kwargs.setdefault(
+        "figsize", (4 * min(ncols, len(channel_names)), 3.5 * int(np.ceil(len(channel_names) / ncols)))
+    )
+    fig, axes = _prepare_histogram_axes(
+        n_plots=len(channel_names),
+        ncols=ncols,
+        ax=ax,
+        fig_kwargs=fig_kwargs,
+        sharex=sharex,
+        sharey=sharey,
+    )
+
+    axes_flat = axes.ravel()
+    axes_in_use = axes_flat[: len(channel_names)]
+    for axis, channel_name in zip(axes_in_use, channel_names, strict=True):
+        _plot_histogram_for_channel(
+            se=se,
+            channel=channel_name,
+            bins=bins,
+            range=range,
+            ax=axis,
+            fig_kwargs=fig_kwargs,
+            bar_kwargs=bar_kwargs,
+            density=density,
+            log_y=log_y,
+            percentile_lines=percentile_lines,
+            kind=kind,
+            exclude_zeros=exclude_zeros,
+            exclude_nan=exclude_nan,
+            title=channel_name,
+            **kwargs,
+        )
+
+    for axis in axes_flat[len(channel_names) :]:
+        fig.delaxes(axis)
+
+    fig.tight_layout()
+    if output is not None:
+        fig.savefig(output)
+    return axes
+
+
+def _plot_histogram_for_channel(
+    se,
+    channel: str,
+    bins: int,
+    range: tuple[float, float] | None,
+    ax: Axes | None,
+    fig_kwargs: Mapping[str, Any],
+    bar_kwargs: Mapping[str, Any],
+    density: bool,
+    log_y: bool,
+    percentile_lines: Sequence[float] | None,
+    kind: str,
+    exclude_zeros: bool,
+    exclude_nan: bool,
+    title: str,
+    **kwargs,
+) -> Axes:
     if kind not in {"hist", "ecdf"}:
         raise ValueError(f"Unknown 'kind': {kind}. Expected one of ['hist', 'ecdf'].")
 
@@ -131,9 +229,9 @@ def histogram(
     fig_kwargs = dict(fig_kwargs)
     if ax is None:
         fig_kwargs.setdefault("figsize", (6, 4))
-        fig, ax = plt.subplots(**fig_kwargs)
+        _, ax = plt.subplots(**fig_kwargs)
     else:
-        fig = ax.figure
+        _ = ax.figure
 
     # Plot
     bar_kwargs = dict(bar_kwargs)
@@ -179,17 +277,52 @@ def histogram(
             )
 
     ax.set_xlabel("Intensity")
-    ax.set_title(channel if title is None else title)
+    ax.set_title(title)
 
     if log_y:
         ax.set_yscale("log")
 
     sns.despine(ax=ax)
 
-    if output is not None:
-        fig.savefig(output)
-
     return ax
+
+
+def _resolve_channels(channel_names: list[str], channel: str | int | Sequence[str | int]) -> list[str]:
+    if isinstance(channel, (str, int, np.integer)):
+        return [_resolve_channel_name(channel_names, channel)]
+    return [_resolve_channel_name(channel_names, item) for item in channel]
+
+
+def _resolve_channel_name(channel_names: list[str], channel: str | int) -> str:
+    if isinstance(channel, str):
+        if channel not in channel_names:
+            raise ValueError(f"Channel '{channel}' not found in image layer.")
+        return channel
+    if isinstance(channel, (int, np.integer)):
+        return channel_names[channel]
+    raise TypeError(f"Unsupported channel type: {type(channel)!r}.")
+
+
+def _prepare_histogram_axes(
+    n_plots: int,
+    ncols: int,
+    ax: Axes | np.ndarray | None,
+    fig_kwargs: Mapping[str, Any],
+    sharex: bool,
+    sharey: bool,
+) -> tuple[plt.Figure, np.ndarray]:
+    ncols = max(1, min(ncols, n_plots))
+    nrows = int(np.ceil(n_plots / ncols))
+
+    if ax is None:
+        fig, axes = plt.subplots(nrows=nrows, ncols=ncols, sharex=sharex, sharey=sharey, **fig_kwargs)
+        return fig, np.atleast_1d(axes)
+
+    axes = np.atleast_1d(ax)
+    if axes.size < n_plots:
+        raise ValueError(f"Provided 'ax' contains {axes.size} axes, but {n_plots} channels were requested.")
+    first_axis = axes.ravel()[0]
+    return first_axis.figure, axes
 
 
 def _filter_image_values(array: da.Array, *, exclude_zeros: bool, exclude_nan: bool) -> da.Array:
