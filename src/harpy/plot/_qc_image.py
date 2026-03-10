@@ -46,6 +46,8 @@ def histogram(
     exclude_nan: bool = True,
     title: str | None = None,
     ncols: int = 3,
+    subplot_width: float = 4,
+    subplot_height: float = 3.5,
     sharex: bool = False,
     sharey: bool = False,
     **kwargs,
@@ -67,9 +69,11 @@ def histogram(
     range
         The range of values for the histogram as `(min, max)`.
         If not provided, range is simply `(dask.array.nanmin(...), dask.array.nanmax(...))` thus excluding NaN.
-        Values outside the range are ignored.
+        For `kind="hist"`, values outside the range are ignored. For `kind="ecdf"`, the range is used to set the
+        x-axis limits only.
     fig_kwargs
-        Additional keyword arguments passed to `plt.figure`, such as `dpi` or `figsize`. Ignored if `ax` is `None`.
+        Additional keyword arguments passed to `plt.subplots`, such as `dpi` or `figsize`, when `ax=None`
+        (and this function therefore creates the subplot(s)). Ignored if `ax` is provided.
     bar_kwargs
         Additional keyword arguments passed to `ax.bar`, such as `color` or `alpha`.
     ax
@@ -92,6 +96,12 @@ def histogram(
         Custom plot title. Defaults to the channel name. Only applied directly in the single-channel case.
     ncols
         Number of subplot columns to use when plotting multiple channels.
+    subplot_width
+        Width of each subplot column when plotting multiple channels and no explicit `figsize` is provided in
+        `fig_kwargs`.
+    subplot_height
+        Height of each subplot row when plotting multiple channels and no explicit `figsize` is provided in
+        `fig_kwargs`.
     sharex
         Whether to share the x-axis across subplots when plotting multiple channels.
     sharey
@@ -158,7 +168,11 @@ def histogram(
 
     fig_kwargs = dict(fig_kwargs)
     fig_kwargs.setdefault(
-        "figsize", (4 * min(ncols, len(channel_names)), 3.5 * int(np.ceil(len(channel_names) / ncols)))
+        "figsize",
+        (
+            subplot_width * min(ncols, len(channel_names)),
+            subplot_height * int(np.ceil(len(channel_names) / ncols)),
+        ),
     )
     fig, axes = _prepare_histogram_axes(
         n_plots=len(channel_names),
@@ -258,6 +272,8 @@ def _plot_histogram_for_channel(
         y = np.arange(1, len(values) + 1) / len(values)
         ax.step(values, y, where="post", color=color, alpha=alpha, linewidth=max(linewidth, 1.5))
         ax.set_ylabel("Cumulative fraction")
+        if range is not None:
+            ax.set_xlim(range)
 
     if percentile_lines is not None:
         percentile_values = da.percentile(array, q=list(percentile_lines)).compute()
