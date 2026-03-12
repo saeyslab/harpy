@@ -72,7 +72,7 @@ def get_registry(path: str | Path | None = None) -> Pooch:
             "transcriptomics/xenium/Xenium_human_ovarian_cancer/training_march_2026/smooth_muscle.geojson": "c96f28785cfa4b814bb68829eb1aa6edf01a8b4119dba856351e9df085bb2d60",
             "transcriptomics/xenium/Xenium_human_ovarian_cancer/training_march_2026/sdata_cropped.zarr.zip": "0c9a5c665862d6daf2aca3a3619d57142cb2dd093804951ca92abd738ab8b42f",
             "transcriptomics/xenium/Xenium_human_ovarian_cancer/training_march_2026/sdata_cropped_analysis_6_3_26.zarr.zip": "464f89c415f2066c008b9ed24f577d2d57b6b71ab1f239196670ae5188279534",
-            "proteomics/pixie/sdata_pixie.zarr.zip": "cdcb17e4e18165d5cfca2c07a899a0e5b19efea26c25826370ef2bf77ea6ad13",
+            "proteomics/pixie/sdata.zarr.zip": "567b5dcfffab37a93a4daed110876e440d1267fb5627efdd31d8174873563c1d",
             "proteomics/mibi_tof/sdata_multi_channel.zarr.zip": "930fd2574666b90d5d6660ad8b52d47afffc9522704b9e6fef39d11c9cfff06e",
             "proteomics/macsima/sdata_multi_channel.zarr.zip": "26187fe62b75c3411f948cbcea52abd24b318992509e768c2ed2f55ddcb99f28",
             "proteomics/macsima/tonsil_all.zarr.zip": "f3444332c9decb318c6eff03e719ee35df6d7399da2a04a17dbed5833bfd9ed7",

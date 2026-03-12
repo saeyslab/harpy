@@ -115,20 +115,25 @@ def histogram(
 
     Examples
     --------
-    >>> ax = histogram(
-    ...     sdata,
-    ...     img_layer="raw_image_crop_preprocessed",
-    ...     channel="Anti Rabbit (PE C1)",
-    ...     bins=100,
-    ...     range=(0, 1.0),
-    ...     density=True,
-    ...     log_y=False,
-    ...     exclude_zeros=True,
-    ...     percentile_lines=[0.1, 99.9],
-    ...     fig_kwargs={"figsize": (5, 5)},
-    ...     bar_kwargs={"color": "blue", "alpha": 0.7},
-    ...     output="histogram.png"
-    ... )
+    ```python
+    sdata = hp.datasets.pixie_example()
+
+    ax = hp.pl.histogram(
+        sdata,
+        img_layer="raw_image_fov0",
+        channel=hp.im.get_dataarray(sdata, layer="raw_image_fov0").c.data,
+        percentile_lines=[0.1, 99.9],
+        kind="hist",
+        ncols=5,
+        subplot_height=3,
+        subplot_width=3,
+        log_y=False,
+        exclude_nan=True,
+        exclude_zeros=True,
+        density=False,
+        bins=100,
+    )
+    ```
     """
     assert img_layer in sdata.images, f"'{img_layer}' not found in 'sdata.images'."
     if scale is not None and not isinstance(sdata.images[img_layer], DataTree):
@@ -279,7 +284,7 @@ def _plot_histogram_for_channel(
             ax.text(
                 value,
                 0.98,
-                f"q{percentile:g}",
+                f"p{percentile:g}",
                 transform=ax.get_xaxis_transform(),
                 rotation=90,
                 va="top",
