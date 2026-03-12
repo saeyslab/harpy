@@ -178,9 +178,7 @@ def get_dataarray(sdata: SpatialData, layer: str, scale: str | None = None) -> D
     if isinstance(si, DataTree):
         scale_key = "scale0" if scale is None else scale
         if scale_key not in si:
-            raise ValueError(
-                f"Scale '{scale_key}' not found in layer '{layer}'. Available scales are: {[*si]}."
-            )
+            raise ValueError(f"Scale '{scale_key}' not found in layer '{layer}'. Available scales are: {[*si]}.")
         name = si[scale_key].__iter__().__next__()
         return si[scale_key][name]
     raise ValueError(f"Not implemented for layer '{layer}' of type {type(si)}.")
