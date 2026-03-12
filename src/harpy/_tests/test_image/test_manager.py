@@ -1,7 +1,7 @@
 import pytest
 from spatialdata import SpatialData
 
-from harpy.image._image import _get_spatial_element, add_image_layer, add_labels_layer
+from harpy.image._image import _get_spatial_element, add_image_layer, add_labels_layer, get_dataarray
 
 
 @pytest.mark.parametrize(
@@ -195,3 +195,24 @@ def test_add_labels_layer_no_backed(
     se = _get_spatial_element(sdata_no_backed, layer=new_name)
     for _, layer in se.data.__dask_graph__().layers.items():
         assert layer.is_materialized()
+
+
+def test_get_dataarray_scale_parameter(sdata):
+    se_scale0 = get_dataarray(sdata, layer="blobs_multiscale_image")
+    se_scale2 = get_dataarray(sdata, layer="blobs_multiscale_image", scale="scale2")
+
+    assert se_scale0.shape != se_scale2.shape
+    assert se_scale0.sizes["x"] > se_scale2.sizes["x"]
+    assert se_scale0.sizes["y"] > se_scale2.sizes["y"]
+
+
+def test_get_dataarray_scale_ignored_for_dataarray(sdata_blobs):
+    se_default = get_dataarray(sdata_blobs, layer="blobs_image")
+    se_scaled = get_dataarray(sdata_blobs, layer="blobs_image", scale="scale3")
+
+    assert se_default.identical(se_scaled)
+
+
+def test_get_dataarray_scale_raises_for_missing_scale(sdata):
+    with pytest.raises(ValueError, match="Scale 'scale9' not found"):
+        get_dataarray(sdata, layer="blobs_multiscale_image", scale="scale9")

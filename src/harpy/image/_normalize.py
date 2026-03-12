@@ -126,7 +126,7 @@ def _nonzero_nonnan_percentile(
     array: da.Array, q: float, internal_method: str = "tdigest", dtype=np.float32
 ) -> da.Array:
     """Computes the percentile of a dask array excluding all zeros and nans."""
-    array = array.flatten()
+    array = array.ravel()
     non_zero_non_nan_mask = (array != 0) & (~da.isnan(array))
 
     array = da.compress(non_zero_non_nan_mask, array)
