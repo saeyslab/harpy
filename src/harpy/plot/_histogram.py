@@ -13,6 +13,7 @@ import seaborn as sns
 from loguru import logger as log
 from matplotlib.axes import Axes
 from spatialdata import SpatialData
+from xarray import DataTree
 
 from harpy.image._image import get_dataarray
 
@@ -22,6 +23,7 @@ def histogram(
     img_layer: str,
     channel: str | int | Sequence[str | int],
     bins: int,
+    scale: str | None = None,
     range: tuple[float, float] | None = None,
     ax: Axes | np.ndarray | None = None,
     output: str | Path = None,
@@ -55,6 +57,10 @@ def histogram(
         or a sequence of channel names and/or indices.
     bins
         The number of bins for the histogram.
+    scale
+        Pyramid level to use when ``img_layer`` is multiscale. If ``None``,
+        the histogram is computed from ``"scale0"``. Using a lower-resolution
+        scale provides a faster but approximate histogram.
     range
         The range of values for the histogram as `(min, max)`.
         If not provided, range is simply `(dask.array.nanmin(...), dask.array.nanmax(...))` thus excluding NaN.
@@ -125,7 +131,12 @@ def histogram(
     ... )
     """
     assert img_layer in sdata.images, f"'{img_layer}' not found in 'sdata.images'."
-    se = get_dataarray(sdata, layer=img_layer)
+    if scale is not None and not isinstance(sdata.images[img_layer], DataTree):
+        log.warning(
+            f"Parameter 'scale={scale}' was ignored for image layer '{img_layer}' because it is not multiscale; "
+            "histogram will be computed at full resolution."
+        )
+    se = get_dataarray(sdata, layer=img_layer, scale=scale)
     channel_names = _resolve_channels(se.c.data.tolist(), channel)
 
     if len(channel_names) == 1:

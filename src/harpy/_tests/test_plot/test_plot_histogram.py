@@ -94,3 +94,16 @@ def test_plot_histogram_multiple_channels(sdata_blobs, tmp_path):
 
     assert axes.size >= 3
     assert axes.ravel()[0].get_title() == "lineage_1"
+
+
+def test_plot_histogram_scale_parameter(sdata, tmp_path):
+    matplotlib.use("Agg")
+
+    histogram(
+        sdata,
+        img_layer="blobs_multiscale_image",
+        channel=0,
+        bins=25,
+        scale="scale2",
+        output=os.path.join(tmp_path, "histogram_scale2"),
+    )

@@ -135,13 +135,15 @@ def _unapply_transform(se: DataArray, x_coords: np.ndarray, y_coords: np.ndarray
     return se
 
 
-def get_dataarray(sdata: SpatialData, layer: str) -> DataArray:
+def get_dataarray(sdata: SpatialData, layer: str, scale: str | None = None) -> DataArray:
     """
     Retrieve the highest-resolution :class:`xarray.DataArray` from a layer in ``sdata.images`` or ``sdata.labels``.
 
     If ``sdata.images[layer]`` or ``sdata.labels[layer]`` is a
-    :class:`xarray.DataTree`, this function returns the highest-resolution
-    (base-scale) :class:`xarray.DataArray`, else it returns ``sdata.images[layer]`` or ``sdata.labels[layer]``.
+    :class:`xarray.DataTree`, this function returns the requested pyramid
+    :class:`xarray.DataArray`. If ``scale`` is ``None``, the base scale
+    (``"scale0"``) is returned. If the layer is already a :class:`xarray.DataArray`,
+    ``scale`` is ignored.
 
     Parameters
     ----------
@@ -149,6 +151,9 @@ def get_dataarray(sdata: SpatialData, layer: str) -> DataArray:
         The SpatialData object containing image and/or labels layers.
     layer : str
         The name of the layer to retrieve.
+    scale : str | None
+        Pyramid level to retrieve when the layer is stored as a multiscale
+        :class:`xarray.DataTree`. If ``None``, ``"scale0"`` is used.
 
     Returns
     -------
@@ -161,7 +166,24 @@ def get_dataarray(sdata: SpatialData, layer: str) -> DataArray:
     ValueError
         If the layer exists but is stored in an unsupported format.
     """
-    return _get_spatial_element(sdata, layer=layer)
+    if layer in sdata.images:
+        si = sdata.images[layer]
+    elif layer in sdata.labels:
+        si = sdata.labels[layer]
+    else:
+        raise KeyError(f"'{layer}' not found in 'sdata.images' or 'sdata.labels'")
+
+    if isinstance(si, DataArray):
+        return si
+    if isinstance(si, DataTree):
+        scale_key = "scale0" if scale is None else scale
+        if scale_key not in si:
+            raise ValueError(
+                f"Scale '{scale_key}' not found in layer '{layer}'. Available scales are: {[*si]}."
+            )
+        name = si[scale_key].__iter__().__next__()
+        return si[scale_key][name]
+    raise ValueError(f"Not implemented for layer '{layer}' of type {type(si)}.")
 
 
 def _get_spatial_element(sdata: SpatialData, layer: str) -> DataArray:
