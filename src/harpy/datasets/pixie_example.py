@@ -143,7 +143,7 @@ def pixie_example() -> SpatialData:
     """
     # Fetch and unzip the file
     registry = get_registry()
-    unzip_path = registry.fetch("proteomics/pixie/sdata_pixie.zarr.zip", processor=pooch.Unzip())
+    unzip_path = registry.fetch("proteomics/pixie/sdata.zarr.zip", processor=pooch.Unzip())
     sdata = read_zarr(os.path.commonpath(unzip_path))
     sdata.path = None
     return sdata
