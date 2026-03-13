@@ -95,15 +95,20 @@ def plot_density(
         )
 
     df = ddf.compute()
+    ddf.attrs.update(points_attrs)
+    transform_matrix = get_transformation(ddf, to_coordinate_system=to_coordinate_system).to_affine_matrix(
+        input_axes=["x", "y"], output_axes=["x", "y"]
+    )
+    transformed_coords = _affine_transform(df[[name_x, name_y]].to_numpy(), transform_matrix=transform_matrix)
 
     if crd is not None:
         xmin, xmax, ymin, ymax = crd
     else:
-        xmin, xmax = df[name_x].min(), df[name_x].max()
-        ymin, ymax = df[name_y].min(), df[name_y].max()
+        xmin, xmax = transformed_coords[:, 0].min(), transformed_coords[:, 0].max()
+        ymin, ymax = transformed_coords[:, 1].min(), transformed_coords[:, 1].max()
 
-    x = df[name_x].to_numpy()
-    y = df[name_y].to_numpy()
+    x = transformed_coords[:, 0]
+    y = transformed_coords[:, 1]
 
     label = "Transcript Count"
     title = "Transcript Density"
