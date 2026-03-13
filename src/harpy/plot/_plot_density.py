@@ -29,6 +29,48 @@ def plot_density(
     to_coordinate_system: str = "global",  # only relevant for crd
     ax: Axes | None = None,
 ) -> Axes:
+    """
+    Plot a transcript density heatmap from a :class:`~spatialdata.SpatialData` object.
+
+    Parameters
+    ----------
+    sdata
+        :class:`~spatialdata.SpatialData` object.
+    bin_size
+        Width of a histogram bin in the units of ``to_coordinate_system``.
+    points_layer
+        Points layer to plot from ``sdata.points``.
+    name_gene_column
+        Column in the ``points_layer`` that stores gene identities.
+    genes
+        Gene or list of genes to visualize. If ``None``, all points are used.
+    z_plane
+        If provided, filter the points layer to rows with ``z == z_plane``.
+        This requires a ``"z"`` column on the points layer.
+    smooth_sigma
+        Gaussian smoothing sigma applied to the histogram. If ``None``, no smoothing is applied.
+    cmap
+        Colormap passed to :func:`matplotlib.axes.Axes.imshow`.
+    frac
+        Fraction of points to randomly sample for plotting. If ``None``, all
+        points in ``points_layer`` are visualized.
+    figsize
+        Figure size used when ``ax`` is not provided.
+    crd
+        The coordinates for the region of interest in the format
+        ``(xmin, xmax, ymin, ymax)``, in the coordinate system
+        ``to_coordinate_system``.
+    to_coordinate_system
+        Coordinate system in which ``crd``, ``bin_size``, and the plotted axes
+        are interpreted.
+    ax
+        :class:`matplotlib.axes.Axes` object to plot on. If ``None``, a new axes is created via
+        :func:`matplotlib.pyplot.subplots`.
+
+    Returns
+    -------
+    :class:`matplotlib.axes.Axes` object.
+    """
     ddf = sdata.points[points_layer]
     # Dask dataframe operations can drop SpatialData metadata stored in .attrs.
     points_attrs = dict(ddf.attrs)
