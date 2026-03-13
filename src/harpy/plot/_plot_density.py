@@ -20,6 +20,7 @@ def plot_density(
     points_layer: str,
     name_gene_column: str | None = _GENES_KEY,
     genes: str | list[str] | None = None,
+    z_plane: int | float | None = None,
     smooth_sigma: float | None = None,
     cmap: str = "viridis",
     frac: float | None = None,
@@ -33,6 +34,9 @@ def plot_density(
     points_attrs = dict(ddf.attrs)
     ddf_attrs = dict(ddf.attrs)
 
+    name_x = "x"  # NOTE: spatialdata always uses the names "x" and "y" as the name of the coordinates for points
+    name_y = "y"
+
     if genes is not None:
         if name_gene_column is None:
             raise ValueError("name_gene_column must be provided if filtering genes.")
@@ -41,6 +45,14 @@ def plot_density(
             genes = [genes]
 
         ddf = ddf[ddf[name_gene_column].isin(genes)]
+        ddf.attrs.update(points_attrs)
+
+    if z_plane is not None:
+        if "z" not in ddf.columns:
+            raise ValueError(
+                f"Parameter 'z_plane' was set to {z_plane}, but points layer '{points_layer}' does not contain a 'z' column."
+            )
+        ddf = ddf[ddf["z"] == z_plane]
         ddf.attrs.update(points_attrs)
 
     if frac is not None:
@@ -59,8 +71,6 @@ def plot_density(
             .to_affine_matrix(input_axes=["x", "y"], output_axes=["x", "y"])
         )
         coords = _affine_transform(coords=coords, transform_matrix=transform_matrix)
-        name_x = "x"  # NOTE: spatialdata always uses the names "x" and "y" as the name of the coordinates for points
-        name_y = "y"
         x_query = f"{coords[0, 0].item()} <={name_x} < {coords[1, 0]}"
         y_query = f"{coords[0, 1].item()} <={name_y} < {coords[1, 1]}"
         ddf = ddf.query(f"{y_query} and {x_query}")
