@@ -5,8 +5,10 @@ from loguru import logger as log
 from matplotlib.axes import Axes
 from scipy.ndimage import gaussian_filter
 from spatialdata import SpatialData
+from spatialdata.transformations import get_transformation
 
 from harpy.utils._keys import _GENES_KEY
+from harpy.utils.utils import _affine_transform
 
 _MAX_POINTS_IN_MEMORY = 1_000_000
 _MAX_HEATMAP_CELLS = 1_000_000
@@ -16,8 +18,6 @@ def plot_density(
     sdata: SpatialData,
     bin_size: float,
     points_layer: str,
-    name_x: str = "x",
-    name_y: str = "y",
     name_gene_column: str | None = _GENES_KEY,
     genes: str | list[str] | None = None,
     smooth_sigma: float | None = None,
@@ -31,6 +31,7 @@ def plot_density(
     ddf = sdata.points[points_layer]
     # Dask dataframe operations can drop SpatialData metadata stored in .attrs.
     points_attrs = dict(ddf.attrs)
+    ddf_attrs = dict(ddf.attrs)
 
     if genes is not None:
         if name_gene_column is None:
@@ -49,11 +50,35 @@ def plot_density(
         ddf.attrs.update(points_attrs)
 
     if crd is not None:
-        xmin, xmax, ymin, ymax = crd
-        ddf = ddf[(ddf[name_x] >= xmin) & (ddf[name_x] <= xmax) & (ddf[name_y] >= ymin) & (ddf[name_y] <= ymax)]
+        # Query points in the intrinsic point coordinate system after mapping the requested box back.
+        coords = np.array([[crd[0], crd[2]], [crd[1], crd[3]]])
+        ddf.attrs.update(points_attrs)
+        transform_matrix = (
+            get_transformation(ddf, to_coordinate_system=to_coordinate_system)
+            .inverse()
+            .to_affine_matrix(input_axes=["x", "y"], output_axes=["x", "y"])
+        )
+        coords = _affine_transform(coords=coords, transform_matrix=transform_matrix)
+        name_x = "x"  # NOTE: spatialdata always uses the names "x" and "y" as the name of the coordinates for points
+        name_y = "y"
+        x_query = f"{coords[0, 0].item()} <={name_x} < {coords[1, 0]}"
+        y_query = f"{coords[0, 1].item()} <={name_y} < {coords[1, 1]}"
+        ddf = ddf.query(f"{y_query} and {x_query}")
+        ddf.attrs.update(ddf_attrs)
         ddf.attrs.update(points_attrs)
 
     n_points = len(ddf)
+    if n_points == 0:
+        if genes is not None:
+            raise ValueError("No transcripts found for specified gene(s).")
+        if crd is not None:
+            raise ValueError(
+                f"After applying the bounding-box query with coordinates {crd!r} "
+                f"(xmin, xmax, ymin, ymax), the points layer '{points_layer}' is no longer present "
+                "in the resulting SpatialData object. Please try different parameters for 'crd'."
+            )
+        raise ValueError("No data available for plotting.")
+
     if n_points > _MAX_POINTS_IN_MEMORY:
         log.warning(
             f"Computing {n_points} points into memory for plotting; consider using 'genes', 'frac', or 'crd' to reduce this.",
@@ -61,12 +86,8 @@ def plot_density(
 
     df = ddf.compute()
 
-    if genes is not None and df.empty:
-        raise ValueError("No transcripts found for specified gene(s).")
-
     if crd is not None:
-        if df.empty:
-            raise ValueError("No data found in specified region.")
+        xmin, xmax, ymin, ymax = crd
     else:
         xmin, xmax = df[name_x].min(), df[name_x].max()
         ymin, ymax = df[name_y].min(), df[name_y].max()
