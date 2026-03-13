@@ -27,6 +27,7 @@ def plot_density(
     figsize: tuple = (8, 8),
     crd: tuple[int, int, int, int] | None = None,
     to_coordinate_system: str = "global",  # only relevant for crd
+    colorbar: bool = True,
     ax: Axes | None = None,
 ) -> Axes:
     """
@@ -63,6 +64,8 @@ def plot_density(
     to_coordinate_system
         Coordinate system in which ``crd``, ``bin_size``, and the plotted axes
         are interpreted.
+    colorbar
+        If ``True``, add a colorbar to the figure.
     ax
         :class:`matplotlib.axes.Axes` object to plot on. If ``None``, a new axes is created via
         :func:`matplotlib.pyplot.subplots`.
@@ -153,7 +156,6 @@ def plot_density(
     y = transformed_coords[:, 1]
 
     label = "Transcript Count"
-    title = "Transcript Density"
 
     # Create 2D histogram
     x_edges = np.arange(xmin, xmax + bin_size, bin_size)
@@ -185,10 +187,10 @@ def plot_density(
         extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]],
     )
 
-    cbar = fig.colorbar(im, ax=ax, shrink=0.75)
-    cbar.set_label(label, fontsize=12)
-
-    ax.set_title(title, fontsize=14)
+    if colorbar:
+        cbar = fig.colorbar(im, ax=ax, shrink=0.75)
+        cbar.set_label(label, fontsize=12)
+    # TODO: font size should scale with figure size
     ax.set_xlabel("x", fontsize=12)
     ax.set_ylabel("y", fontsize=12)
     ax.set_aspect("equal")

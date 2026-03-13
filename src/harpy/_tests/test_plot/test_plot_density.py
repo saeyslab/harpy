@@ -102,6 +102,22 @@ def test_plot_density_invalid_frac_raises(sdata_transcripts_no_backed, frac):
         )
 
 
+def test_plot_density_without_colorbar(sdata_transcripts_no_backed):
+    fig, ax = plt.subplots()
+    try:
+        plot_density(
+            sdata_transcripts_no_backed,
+            bin_size=100,
+            points_layer="transcripts",
+            frac=0.1,
+            colorbar=False,
+            ax=ax,
+        )
+        assert len(fig.axes) == 1
+    finally:
+        plt.close(fig)
+
+
 def test_plot_density_filters_requested_z_plane(tmp_path):
     sdata = SpatialData()
     ddf = dd.from_pandas(
