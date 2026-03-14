@@ -177,8 +177,10 @@ def plot_density(
 
     if ax is None:
         fig, ax = plt.subplots(figsize=figsize)
+        created_ax = True
     else:
         fig = ax.figure
+        created_ax = False
 
     im = ax.imshow(
         heatmap.T,
@@ -190,13 +192,13 @@ def plot_density(
     if colorbar:
         cbar = fig.colorbar(im, ax=ax, shrink=0.75)
         cbar.set_label(label, fontsize=12)
-    # TODO: font size should scale with figure size
     ax.set_xlabel("x", fontsize=12)
     ax.set_ylabel("y", fontsize=12)
     ax.set_aspect("equal")
     ax.invert_yaxis()
 
-    fig.tight_layout()
+    if created_ax:
+        fig.tight_layout()
     return ax
 
 
