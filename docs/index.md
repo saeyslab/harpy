@@ -155,13 +155,13 @@ Explore how to use Harpy for segmentation, shallow and deep feature extraction, 
 
 ```
 
-The Harpy Python package described here builds on the spatial transcriptomics analysis tool [SPArrOW](https://github.com/saeyslab/napari-sparrow).
-
-For spatial proteomics analysis, please cite:
+If you use Harpy for spatial proteomics analysis, please cite:
 
 > Benjamin Rombaut, Arne Defauw, Frank Vernaillen, Julien Mortier, Evelien Van Hamme, Sofie Van Gassen, Ruth Seurinck, Yvan Saeys. *Scalable analysis of whole slide spatial proteomics with Harpy*. *Bioinformatics* (2026), btag122. [https://doi.org/10.1093/bioinformatics/btag122](https://doi.org/10.1093/bioinformatics/btag122)
 
-For spatial transcriptomics analysis, see the [SPArrOW preprint](https://www.biorxiv.org/content/10.1101/2024.07.04.601829v1) for citation and to learn more.
+If you use Harpy for spatial transcriptomics analysis, please cite:
+
+> Lotte Pollaris, Bavo Vanneste, Benjamin Rombaut, Arne Defauw, Frank Vernaillen, Julien Mortier, Wout Vanhenden, Liesbet Martens, Tinne Thone, Jean-Francois Hastir, Anna Bujko, Wouter Saelens, Jean-Christophe Marine, Hilde Nelissen, Evelien Van Hamme, Ruth Seurinck, Charlotte L. Scott, Martin Guilliams, Yvan Saeys. *SPArrOW: a flexible, interactive and scalable pipeline for spatial transcriptomics analysis*. [https://doi.org/10.1101/2024.07.04.601829](https://doi.org/10.1101/2024.07.04.601829)
 
 
 ```{toctree}
