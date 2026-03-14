@@ -284,7 +284,8 @@ def plot_instance_density(
     -------
     :class:`matplotlib.axes.Axes` object.
     """
-    adata = ProcessTable(sdata, labels_layer=labels_layer, table_layer=table_layer)._get_adata()
+    process_table = ProcessTable(sdata, labels_layer=labels_layer, table_layer=table_layer)
+    adata = sdata.tables[table_layer]
 
     if spatial_key not in adata.obsm:
         raise ValueError(
@@ -292,7 +293,14 @@ def plot_instance_density(
             f"Choose from {list(adata.obsm.keys())}."
         )
 
-    coords = np.asarray(adata.obsm[spatial_key])
+    # Avoid ProcessTable._get_adata() here because it makes a full AnnData copy,
+    # while this plotting path only needs the selected coordinates from .obsm.
+    coords = adata.obsm[spatial_key]
+    if process_table.labels_layer is not None:
+        mask = adata.obs[process_table.region_key].isin(process_table.labels_layer).to_numpy()
+        coords = coords[mask]
+
+    coords = np.asarray(coords)
 
     if coords.shape[0] == 0:
         raise ValueError("No instances found for the specified labels layer(s).")
