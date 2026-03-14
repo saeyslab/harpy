@@ -7,11 +7,83 @@ from scipy.ndimage import gaussian_filter
 from spatialdata import SpatialData
 from spatialdata.transformations import get_transformation
 
-from harpy.utils._keys import _GENES_KEY
+from harpy.table._table import ProcessTable
+from harpy.utils._keys import _GENES_KEY, _SPATIAL
 from harpy.utils.utils import _affine_transform
 
 _MAX_POINTS_IN_MEMORY = 1_000_000
 _MAX_HEATMAP_CELLS = 1_000_000
+
+
+def _plot_density_from_coordinates(
+    coords: np.ndarray,
+    bin_size: float,
+    extent: tuple[float, float, float, float] | None = None,
+    smooth_sigma: float | None = None,
+    cmap: str = "viridis",
+    figsize: tuple = (8, 8),
+    colorbar: bool = True,
+    ax: Axes | None = None,
+    label: str = "Count",
+    heatmap_warning_suffix: str = "",
+) -> Axes:
+    if coords.shape[0] == 0:
+        raise ValueError("No data available for plotting.")
+
+    if coords.ndim != 2 or coords.shape[1] < 2:
+        raise ValueError("Coordinates must be a 2D array with at least two columns for x and y.")
+
+    x = coords[:, 0]
+    y = coords[:, 1]
+
+    if extent is not None:
+        xmin, xmax, ymin, ymax = extent
+    else:
+        xmin, xmax = x.min(), x.max()
+        ymin, ymax = y.min(), y.max()
+
+    x_edges = np.arange(xmin, xmax + bin_size, bin_size)
+    y_edges = np.arange(ymin, ymax + bin_size, bin_size)
+    n_x_bins = len(x_edges) - 1
+    n_y_bins = len(y_edges) - 1
+    n_heatmap_cells = n_x_bins * n_y_bins
+
+    if n_heatmap_cells > _MAX_HEATMAP_CELLS:
+        log.warning(
+            f"Creating a density grid with {n_x_bins} x-bins and {n_y_bins} y-bins ({n_heatmap_cells} total cells); "
+            f"consider increasing 'bin_size'{heatmap_warning_suffix}.",
+        )
+
+    heatmap, xedges, yedges = np.histogram2d(x, y, bins=[x_edges, y_edges])
+
+    if smooth_sigma is not None:
+        heatmap = gaussian_filter(heatmap, sigma=smooth_sigma)
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=figsize)
+        created_ax = True
+    else:
+        fig = ax.figure
+        created_ax = False
+
+    im = ax.imshow(
+        heatmap.T,
+        origin="lower",
+        cmap=cmap,
+        extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]],
+    )
+
+    if colorbar:
+        cbar = fig.colorbar(im, ax=ax, shrink=0.75)
+        cbar.set_label(label, fontsize=12)
+    ax.set_xlabel("x", fontsize=12)
+    ax.set_ylabel("y", fontsize=12)
+    ax.set_aspect("equal")
+    ax.invert_yaxis()
+
+    if created_ax:
+        fig.tight_layout()
+    return ax
 
 
 def plot_transcript_density(
@@ -155,51 +227,87 @@ def plot_transcript_density(
     x = transformed_coords[:, 0]
     y = transformed_coords[:, 1]
 
-    label = "Transcript Count"
-
-    # Create 2D histogram
-    x_edges = np.arange(xmin, xmax + bin_size, bin_size)
-    y_edges = np.arange(ymin, ymax + bin_size, bin_size)
-    n_x_bins = len(x_edges) - 1
-    n_y_bins = len(y_edges) - 1
-    n_heatmap_cells = n_x_bins * n_y_bins
-
-    if n_heatmap_cells > _MAX_HEATMAP_CELLS:
-        log.warning(
-            f"Creating a density grid with {n_x_bins} x-bins and {n_y_bins} y-bins ({n_heatmap_cells} total cells); "
-            "consider increasing 'bin_size' or restricting 'crd'.",
-        )
-
-    heatmap, xedges, yedges = np.histogram2d(x, y, bins=[x_edges, y_edges])
-
-    if smooth_sigma is not None:
-        heatmap = gaussian_filter(heatmap, sigma=smooth_sigma)
-
-    if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
-        created_ax = True
-    else:
-        fig = ax.figure
-        created_ax = False
-
-    im = ax.imshow(
-        heatmap.T,
-        origin="lower",
+    return _plot_density_from_coordinates(
+        coords=np.column_stack([x, y]),
+        bin_size=bin_size,
+        extent=(xmin, xmax, ymin, ymax),
+        smooth_sigma=smooth_sigma,
         cmap=cmap,
-        extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]],
+        figsize=figsize,
+        colorbar=colorbar,
+        ax=ax,
+        label="Transcript Count",
+        heatmap_warning_suffix=" or restricting 'crd'",
     )
 
-    if colorbar:
-        cbar = fig.colorbar(im, ax=ax, shrink=0.75)
-        cbar.set_label(label, fontsize=12)
-    ax.set_xlabel("x", fontsize=12)
-    ax.set_ylabel("y", fontsize=12)
-    ax.set_aspect("equal")
-    ax.invert_yaxis()
 
-    if created_ax:
-        fig.tight_layout()
-    return ax
+def plot_instance_density(
+    sdata: SpatialData,
+    labels_layer: str | list[str] | None,
+    table_layer: str,
+    spatial_key: str = _SPATIAL,
+    bin_size: float = 100,
+    smooth_sigma: float | None = None,
+    cmap: str = "viridis",
+    figsize: tuple = (8, 8),
+    colorbar: bool = True,
+    ax: Axes | None = None,
+) -> Axes:
+    """
+    Plot an instance density heatmap from centroids stored in ``sdata.tables[table_layer].obsm[spatial_key]``.
+
+    Parameters
+    ----------
+    sdata
+        :class:`~spatialdata.SpatialData` object.
+    labels_layer
+        Labels layer(s) used to select the instances from ``table_layer`` via the table region key.
+        If ``None``, all observations from ``table_layer`` are used.
+    table_layer
+        Table layer to plot from ``sdata.tables``.
+    spatial_key
+        Key in ``adata.obsm`` containing instance centroid coordinates.
+    bin_size
+        Width of a histogram bin in the coordinate units stored in ``adata.obsm[spatial_key]``.
+    smooth_sigma
+        Gaussian smoothing sigma applied to the histogram. If ``None``, no smoothing is applied.
+    cmap
+        Colormap passed to :func:`matplotlib.axes.Axes.imshow`.
+    figsize
+        Figure size used when ``ax`` is not provided.
+    colorbar
+        If ``True``, add a colorbar to the figure.
+    ax
+        :class:`matplotlib.axes.Axes` object to plot on. If ``None``, a new axes is created via
+        :func:`matplotlib.pyplot.subplots`.
+
+    Returns
+    -------
+    :class:`matplotlib.axes.Axes` object.
+    """
+    adata = ProcessTable(sdata, labels_layer=labels_layer, table_layer=table_layer)._get_adata()
+
+    if spatial_key not in adata.obsm:
+        raise ValueError(
+            f"Key '{spatial_key}' not found in 'sdata.tables[\"{table_layer}\"].obsm'. "
+            f"Choose from {list(adata.obsm.keys())}."
+        )
+
+    coords = np.asarray(adata.obsm[spatial_key])
+
+    if coords.shape[0] == 0:
+        raise ValueError("No instances found for the specified labels layer(s).")
+
+    return _plot_density_from_coordinates(
+        coords=coords,
+        bin_size=bin_size,
+        smooth_sigma=smooth_sigma,
+        cmap=cmap,
+        figsize=figsize,
+        colorbar=colorbar,
+        ax=ax,
+        label="Instance Count",
+    )
 
 
 def plot_density_deprecated(

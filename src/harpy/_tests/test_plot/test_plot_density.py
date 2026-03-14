@@ -1,5 +1,8 @@
+import anndata as ad
+import dask.array as da
 import dask.dataframe as dd
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import pytest
 from loguru import logger
@@ -7,9 +10,57 @@ from matplotlib.axes import Axes
 from spatialdata import SpatialData
 from spatialdata.transformations import Identity, Scale
 
-from harpy.plot._plot_density import plot_transcript_density
+from harpy.image._image import add_labels_layer
+from harpy.plot._plot_density import plot_instance_density, plot_transcript_density
 from harpy.points._points import add_points_layer
-from harpy.utils._keys import _GENES_KEY
+from harpy.table._table import add_table_layer
+from harpy.utils._keys import _GENES_KEY, _INSTANCE_KEY, _REGION_KEY, _SPATIAL
+
+
+@pytest.fixture
+def sdata_instances():
+    sdata = SpatialData()
+    labels = da.from_array(np.array([[1, 0], [0, 2]], dtype=np.uint16), chunks=(2, 2))
+    sdata = add_labels_layer(
+        sdata,
+        arr=labels,
+        output_layer="labels_a",
+        transformations={"global": Identity()},
+    )
+    sdata = add_labels_layer(
+        sdata,
+        arr=labels,
+        output_layer="labels_b",
+        transformations={"global": Identity()},
+    )
+
+    adata = ad.AnnData(X=np.zeros((4, 0)))
+    adata.obs[_INSTANCE_KEY] = [1, 2, 1, 2]
+    adata.obs[_REGION_KEY] = pd.Categorical(["labels_a", "labels_a", "labels_b", "labels_b"])
+    adata.obsm[_SPATIAL] = np.array(
+        [
+            [0.0, 0.0],
+            [1.0, 1.0],
+            [10.0, 10.0],
+            [11.0, 11.0],
+        ]
+    )
+    adata.obsm["centroids"] = np.array(
+        [
+            [0.0, 0.0],
+            [2.0, 2.0],
+            [20.0, 20.0],
+            [22.0, 22.0],
+        ]
+    )
+
+    sdata = add_table_layer(
+        sdata,
+        adata=adata,
+        output_layer="table_instances",
+        region=["labels_a", "labels_b"],
+    )
+    return sdata
 
 
 def _get_test_gene(sdata_transcripts_no_backed) -> str:
@@ -32,6 +83,26 @@ def test_plot_transcript_density_returns_input_ax(sdata_transcripts_no_backed, t
         assert result is ax
         assert isinstance(result, Axes)
         fig.savefig(tmp_path / "plot_density_returns_input_ax.png")
+    finally:
+        plt.close(fig)
+
+
+def test_plot_instance_density_returns_input_ax(sdata_instances, tmp_path):
+    fig, ax = plt.subplots()
+    try:
+        result = plot_instance_density(
+            sdata_instances,
+            labels_layer="labels_a",
+            table_layer="table_instances",
+            spatial_key=_SPATIAL,
+            bin_size=1,
+            ax=ax,
+        )
+
+        assert result is ax
+        assert isinstance(result, Axes)
+        assert ax.images[0].get_array().sum() == 2
+        fig.savefig(tmp_path / "plot_instance_density_returns_input_ax.png")
     finally:
         plt.close(fig)
 

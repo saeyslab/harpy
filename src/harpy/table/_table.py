@@ -326,33 +326,39 @@ def add_table_layer(
     overwrite: bool = False,
 ) -> SpatialData:
     """
-    Add a table layer to a :class:`~spatialdata.SpatialData` object.
+    Add an :class:`~anndata.AnnData` object as a table layer to a :class:`~spatialdata.SpatialData` object.
 
-    This function allows you to add a table layer to `sdata`.
-    If `sdata` is backed by a zarr store, the resulting table layer will be backed to the zarr store.
+    This function stores the provided :class:`~anndata.AnnData` object in ``sdata.tables[output_layer]``.
+    When ``region`` is provided, the table is parsed as a SpatialData table and linked to one or more
+    spatial elements via ``region_key`` and ``instance_key``. If ``region`` is ``None``, the AnnData
+    object is added as a regular table without region annotations.
+
+    If ``sdata`` is backed by a zarr store, the resulting table layer is also written to that store.
 
     Parameters
     ----------
     sdata
         The :class:`~spatialdata.SpatialData` object to which the new table layer will be added.
     adata
-        The :class:`~anndata.AnnData` object containing the table data to be added. If `region` is not None, it should contain `region_key` and `instance_key` in `adata.obs`.
+        The :class:`~anndata.AnnData` object to add. If ``region`` is not ``None``, ``adata.obs``
+        must contain the columns specified by ``region_key`` and ``instance_key``.
     output_layer
-        The name of the output layer where the table data will be stored.
+        Name of the output table layer in ``sdata.tables``.
     region
-        A list of regions to associate with the table data. Typically this is all unique elements in `adata.obs[region_key]`.
+        Regions annotated by the table. Typically this is the list of unique values in
+        ``adata.obs[region_key]``. Set to ``None`` if the table should not annotate any spatial element.
     instance_key
-        Instance key. The name of the column in `adata.obs` that holds the instance ids.
-        Ignored if `region` is None.
+        Name of the column in ``adata.obs`` that stores instance ids.
+        Ignored if ``region`` is ``None``.
     region_key
-        Region key. The name of the column in `adata.obs` that holds the name of the elements (`region`) that are annotated by the table layer.
-        Ignored if `region` is None.
+        Name of the column in ``adata.obs`` that stores the region labels annotated by the table.
+        Ignored if ``region`` is ``None``.
     overwrite
-        If True, overwrites the output layer if it already exists in `sdata`.
+        If ``True``, overwrite ``output_layer`` if it already exists in ``sdata``.
 
     Returns
     -------
-    The updated `sdata` object.
+    The updated :class:`~spatialdata.SpatialData` object.
     """
     manager = TableLayerManager()
     sdata = manager.add_table(
