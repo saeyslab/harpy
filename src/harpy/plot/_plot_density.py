@@ -14,7 +14,7 @@ _MAX_POINTS_IN_MEMORY = 1_000_000
 _MAX_HEATMAP_CELLS = 1_000_000
 
 
-def plot_density(
+def plot_transcript_density(
     sdata: SpatialData,
     bin_size: float,
     points_layer: str,

@@ -7,7 +7,7 @@ from matplotlib.axes import Axes
 from spatialdata import SpatialData
 from spatialdata.transformations import Identity, Scale
 
-from harpy.plot._plot_density import plot_density
+from harpy.plot._plot_density import plot_transcript_density
 from harpy.points._points import add_points_layer
 from harpy.utils._keys import _GENES_KEY
 
@@ -16,11 +16,11 @@ def _get_test_gene(sdata_transcripts_no_backed) -> str:
     return sdata_transcripts_no_backed.points["transcripts"].head(1)[_GENES_KEY].iloc[0]
 
 
-def test_plot_density_returns_input_ax(sdata_transcripts_no_backed, tmp_path):
+def test_plot_transcript_density_returns_input_ax(sdata_transcripts_no_backed, tmp_path):
     fig, ax = plt.subplots()
     gene = _get_test_gene(sdata_transcripts_no_backed)
     try:
-        result = plot_density(
+        result = plot_transcript_density(
             sdata_transcripts_no_backed,
             bin_size=100,
             points_layer="transcripts",
@@ -36,7 +36,7 @@ def test_plot_density_returns_input_ax(sdata_transcripts_no_backed, tmp_path):
         plt.close(fig)
 
 
-def test_plot_density_warns_when_computing_many_points(monkeypatch, sdata_transcripts_no_backed):
+def test_plot_transcript_density_warns_when_computing_many_points(monkeypatch, sdata_transcripts_no_backed):
     # this sets the constant _MAX_POINTS_IN_MEMORY to 1; otherwise we would need to use a points layer with > MAX_POINTS_IN_MEMORY for the unit test
     monkeypatch.setattr("harpy.plot._plot_density._MAX_POINTS_IN_MEMORY", 1)
     gene = _get_test_gene(sdata_transcripts_no_backed)
@@ -45,7 +45,7 @@ def test_plot_density_warns_when_computing_many_points(monkeypatch, sdata_transc
 
     fig, ax = plt.subplots()
     try:
-        plot_density(
+        plot_transcript_density(
             sdata_transcripts_no_backed,
             bin_size=100,
             points_layer="transcripts",
@@ -59,7 +59,7 @@ def test_plot_density_warns_when_computing_many_points(monkeypatch, sdata_transc
     plt.close(fig)
 
 
-def test_plot_density_warns_when_creating_large_grid(monkeypatch, sdata_transcripts_no_backed):
+def test_plot_transcript_density_warns_when_creating_large_grid(monkeypatch, sdata_transcripts_no_backed):
     monkeypatch.setattr("harpy.plot._plot_density._MAX_HEATMAP_CELLS", 1)
     gene = _get_test_gene(sdata_transcripts_no_backed)
     messages: list[str] = []
@@ -67,7 +67,7 @@ def test_plot_density_warns_when_creating_large_grid(monkeypatch, sdata_transcri
 
     fig, ax = plt.subplots()
     try:
-        plot_density(
+        plot_transcript_density(
             sdata_transcripts_no_backed,
             bin_size=1,
             points_layer="transcripts",
@@ -81,9 +81,9 @@ def test_plot_density_warns_when_creating_large_grid(monkeypatch, sdata_transcri
     plt.close(fig)
 
 
-def test_plot_density_gene_subset_empty_raises(sdata_transcripts_no_backed):
+def test_plot_transcript_density_gene_subset_empty_raises(sdata_transcripts_no_backed):
     with pytest.raises(ValueError, match="No transcripts found for specified gene"):
-        plot_density(
+        plot_transcript_density(
             sdata_transcripts_no_backed,
             bin_size=100,
             points_layer="transcripts",
@@ -92,9 +92,9 @@ def test_plot_density_gene_subset_empty_raises(sdata_transcripts_no_backed):
 
 
 @pytest.mark.parametrize("frac", [-0.1, 1.1])
-def test_plot_density_invalid_frac_raises(sdata_transcripts_no_backed, frac):
+def test_plot_transcript_density_invalid_frac_raises(sdata_transcripts_no_backed, frac):
     with pytest.raises(ValueError, match="Please set 'frac' to a value between 0 and 1"):
-        plot_density(
+        plot_transcript_density(
             sdata_transcripts_no_backed,
             bin_size=100,
             points_layer="transcripts",
@@ -102,10 +102,10 @@ def test_plot_density_invalid_frac_raises(sdata_transcripts_no_backed, frac):
         )
 
 
-def test_plot_density_without_colorbar(sdata_transcripts_no_backed):
+def test_plot_transcript_density_without_colorbar(sdata_transcripts_no_backed):
     fig, ax = plt.subplots()
     try:
-        plot_density(
+        plot_transcript_density(
             sdata_transcripts_no_backed,
             bin_size=100,
             points_layer="transcripts",
@@ -118,7 +118,7 @@ def test_plot_density_without_colorbar(sdata_transcripts_no_backed):
         plt.close(fig)
 
 
-def test_plot_density_filters_requested_z_plane(tmp_path):
+def test_plot_transcript_density_filters_requested_z_plane(tmp_path):
     sdata = SpatialData()
     ddf = dd.from_pandas(
         pd.DataFrame(
@@ -141,7 +141,7 @@ def test_plot_density_filters_requested_z_plane(tmp_path):
 
     fig, ax = plt.subplots()
     try:
-        plot_density(
+        plot_transcript_density(
             sdata,
             bin_size=1,
             points_layer="transcripts",
@@ -157,7 +157,7 @@ def test_plot_density_filters_requested_z_plane(tmp_path):
         plt.close(fig)
 
 
-def test_plot_density_z_plane_without_z_column_raises():
+def test_plot_transcript_density_z_plane_without_z_column_raises():
     sdata = SpatialData()
     ddf = dd.from_pandas(
         pd.DataFrame(
@@ -178,7 +178,7 @@ def test_plot_density_z_plane_without_z_column_raises():
     )
 
     with pytest.raises(ValueError, match="does not contain a 'z' column"):
-        plot_density(
+        plot_transcript_density(
             sdata,
             bin_size=1,
             points_layer="transcripts",
@@ -186,7 +186,7 @@ def test_plot_density_z_plane_without_z_column_raises():
         )
 
 
-def test_plot_density_bin_size_in_target_coordinate_system(tmp_path):
+def test_plot_transcript_density_bin_size_in_target_coordinate_system(tmp_path):
     sdata = SpatialData()
     ddf = dd.from_pandas(
         pd.DataFrame(
@@ -211,7 +211,7 @@ def test_plot_density_bin_size_in_target_coordinate_system(tmp_path):
 
     fig, ax = plt.subplots()
     try:
-        plot_density(
+        plot_transcript_density(
             sdata,
             bin_size=1,
             points_layer="transcripts",
