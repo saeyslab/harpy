@@ -6,6 +6,7 @@ from ._enrichment import nhood_enrichment
 from ._flowsom import pixel_clusters, pixel_clusters_heatmap
 from ._histogram import histogram
 from ._plot import plot, plot_image, plot_labels, plot_shapes
+from ._plot_density import plot_instance_density, plot_transcript_density
 from ._plot_sdata import plot_sdata, plot_sdata_genes
 from ._preprocess import preprocess_transcriptomics
 from ._qc_cells import plot_adata, ridgeplot_channel, ridgeplot_channel_sample
@@ -46,8 +47,10 @@ __all__ = [
     "plot_image",
     "plot_labels",
     "plot_shapes",
+    "plot_instance_density",
     "plot_sdata",
     "plot_sdata_genes",
+    "plot_transcript_density",
     "preprocess_transcriptomics",
     "plot_adata",
     "ridgeplot_channel",
