@@ -60,7 +60,7 @@ pip install "harpy-analysis[extra]"
 
 - Segmentation: `cellpose`
 - OpenCV support: `opencv-python-headless`
-- FlowSOM Clustering: `flowsom`, `scikit-learn`
+- FlowSOM Clustering: `flowsom`
 - Notebook workflows: `ipywidgets`, `tqdm`, `bokeh`, `textalloc`, `joypy`, `supervenn`, `nbconvert`, `ipython`
 - CLI workflows: `hydra-core`
 
