@@ -1,5 +1,11 @@
 # https://docs.readthedocs.io/en/stable/config-file/v2.html
 version: 2
+
+submodules:
+  include: all
+  # recursive: true  # only needed if harpy_notebooks itself has submodules
+
+
 build:
   os: ubuntu-24.04
   tools:
