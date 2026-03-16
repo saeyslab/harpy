@@ -34,7 +34,7 @@ Explore how to use Harpy for segmentation, shallow and deep feature extraction, 
 
 ---
 
-- **🔧 Technology specific advice**
+- **🔧 Technology-specific advice**
 
   Learn which technologies Harpy supports. 👉 [Notebook](../docs/tutorials/general/techno_specific.ipynb)
 
@@ -49,9 +49,9 @@ Explore how to use Harpy for segmentation, shallow and deep feature extraction, 
 - **✂️ Cell Segmentation**
 
   Explore segmentation workflows in `Harpy` using different tools:
-  - With [**Instanseg**](https://github.com/instanseg/instanseg) 👉 [Tutorial](../docs/tutorials/general//Harpy_instanseg.ipynb)
+  - With [**Instanseg**](https://github.com/instanseg/instanseg) 👉 [Tutorial](../docs/tutorials/general/Harpy_instanseg.ipynb)
 
-  - With [**Cellpose**](https://github.com/MouseLand/cellpose) 👉 [Tutorial ](../docs/tutorials/general/Harpy_feature_calculation.ipynb)
+  - With [**Cellpose**](https://github.com/MouseLand/cellpose) 👉 [Tutorial](../docs/tutorials/general/Harpy_feature_calculation.ipynb)
 
   💡 Want us to add support for another segmentation method?
   👉 [Open an issue](https://github.com/saeyslab/harpy/issues) and let us know!
@@ -91,7 +91,7 @@ Explore how to use Harpy for segmentation, shallow and deep feature extraction, 
 
 - **🌐 Multiple samples and coordinate systems**
 
-  Learn how to work with multiple samples, instrinsic and micron coordinates. 👉 [Tutorial](../docs/tutorials/advanced/coordinate_systems.ipynb)
+  Learn how to work with multiple samples, intrinsic and micron coordinates. 👉 [Tutorial](../docs/tutorials/advanced/coordinate_systems.ipynb)
 
 ---
 

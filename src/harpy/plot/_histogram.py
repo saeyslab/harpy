@@ -44,12 +44,12 @@ def histogram(
     **kwargs,
 ) -> Axes | np.ndarray:
     """
-    Generate and visualize a histogram for a specified image channel within an image of a `SpatialData` object.
+    Generate and visualize a histogram for a specified image channel within an image of a ``SpatialData`` object.
 
     Parameters
     ----------
     sdata
-        The input `SpatialData` object containing the image data.
+        The input ``SpatialData`` object containing the image data.
     img_layer
         The name of the image layer within `sdata` to analyze.
     channel
@@ -62,78 +62,77 @@ def histogram(
         the histogram is computed from ``"scale0"``. Using a lower-resolution
         scale provides a faster but approximate histogram.
     range
-        The range of values for the histogram as `(min, max)`.
-        If not provided, range is simply `(dask.array.nanmin(...), dask.array.nanmax(...))` thus excluding NaN.
-        For `kind="hist"`, values outside the range are ignored. For `kind="ecdf"`, the range is used to set the
+        The range of values for the histogram as ``(min, max)``.
+        If not provided, range is simply ``(dask.array.nanmin(...), dask.array.nanmax(...))``, thus excluding NaN.
+        For ``kind="hist"``, values outside the range are ignored. For ``kind="ecdf"``, the range is used to set the
         x-axis limits only.
     fig_kwargs
-        Additional keyword arguments passed to `plt.subplots`, such as `dpi` or `figsize`, when `ax=None`
-        (and this function therefore creates the subplot(s)). Ignored if `ax` is provided.
+        Additional keyword arguments passed to ``plt.subplots``, such as ``dpi`` or ``figsize``, when ``ax=None``
+        (and this function therefore creates the subplot(s)). Ignored if ``ax`` is provided.
     bar_kwargs
-        Additional keyword arguments passed to `ax.bar`, such as `color` or `alpha`.
+        Additional keyword arguments passed to ``ax.bar``, such as ``color`` or ``alpha``.
     ax
-        An existing axes object to plot the histogram. If `None`, a new figure and axes will be created.
+        An existing axes object to plot the histogram. If ``None``, a new figure and axes will be created.
     output
-        The path to save the generated plot. If `None`, the plot will not be saved.
+        The path to save the generated plot. If ``None``, the plot will not be saved.
     density
-        If `True`, normalize the histogram to a density instead of plotting raw counts.
+        If ``True``, normalize the histogram to a density instead of plotting raw counts.
     log_y
-        If `True`, use a logarithmic scale for the y-axis.
+        If ``True``, use a logarithmic scale for the y-axis.
     percentile_lines
-        Percentile values in the interval `[0, 100]` to visualize as vertical guide lines.
+        Percentile values in the interval ``[0, 100]`` to visualize as vertical guide lines.
     kind
-        Plot kind. Choose between `"hist"` for a histogram and `"ecdf"` for an empirical cumulative distribution plot.
+        Plot kind. Choose between ``"hist"`` for a histogram and ``"ecdf"`` for an empirical cumulative
+        distribution plot.
     exclude_zeros
-        If `True`, exclude zero-valued pixels before plotting and before computing percentile guide lines.
+        If ``True``, exclude zero-valued pixels before plotting and before computing percentile guide lines.
     exclude_nan
-        If `True`, exclude NaN values before plotting and before computing percentile guide lines.
+        If ``True``, exclude NaN values before plotting and before computing percentile guide lines.
     title
         Custom plot title. Defaults to the channel name. Only applied directly in the single-channel case.
     ncols
         Number of subplot columns to use when plotting multiple channels.
     subplot_width
-        Width of each subplot column when plotting multiple channels and no explicit `figsize` is provided in
-        `fig_kwargs`. Ignored when `fig_kwargs` contains `figsize`.
+        Width of each subplot column when plotting multiple channels and no explicit ``figsize`` is provided in
+        ``fig_kwargs``. Ignored when ``fig_kwargs`` contains ``figsize``.
     subplot_height
-        Height of each subplot row when plotting multiple channels and no explicit `figsize` is provided in
-        `fig_kwargs`. Ignored when `fig_kwargs` contains `figsize`.
+        Height of each subplot row when plotting multiple channels and no explicit ``figsize`` is provided in
+        ``fig_kwargs``. Ignored when ``fig_kwargs`` contains ``figsize``.
     sharex
         Whether to share the x-axis across subplots when plotting multiple channels.
     sharey
         Whether to share the y-axis across subplots when plotting multiple channels.
     **kwargs
-        Additional keyword arguments passed to :func:`dask.array.histogram` when `kind="hist"`.
-
-    Returns
-    -------
-        The axes object containing the histogram plot, or an array of axes when multiple channels are provided.
+        Additional keyword arguments passed to :func:`dask.array.histogram` when ``kind="hist"``.
 
     Raises
     ------
     AssertionError
-        If `img_layer` is not found in `sdata.images`.
+        If ``img_layer`` is not found in ``sdata.images``.
 
     Examples
     --------
-    ```python
-    sdata = hp.datasets.pixie_example()
+    .. code-block:: python
 
-    ax = hp.pl.histogram(
-        sdata,
-        img_layer="raw_image_fov0",
-        channel=hp.im.get_dataarray(sdata, layer="raw_image_fov0").c.data,
-        percentile_lines=[0.1, 99.9],
-        kind="hist",
-        ncols=5,
-        subplot_height=3,
-        subplot_width=3,
-        log_y=False,
-        exclude_nan=True,
-        exclude_zeros=True,
-        density=False,
-        bins=100,
-    )
-    ```
+        import harpy as hp
+
+        sdata = hp.datasets.pixie_example()
+
+        ax = hp.pl.histogram(
+            sdata,
+            img_layer="raw_image_fov0",
+            channel=hp.im.get_dataarray(sdata, layer="raw_image_fov0").c.data,
+            percentile_lines=[0.1, 99.9],
+            kind="hist",
+            ncols=5,
+            subplot_height=3,
+            subplot_width=3,
+            log_y=False,
+            exclude_nan=True,
+            exclude_zeros=True,
+            density=False,
+            bins=100,
+        )
     """
     assert img_layer in sdata.images, f"'{img_layer}' not found in 'sdata.images'."
     if scale is not None and not isinstance(sdata.images[img_layer], DataTree):

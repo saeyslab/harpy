@@ -1,35 +1,49 @@
 # Installation
 
-We recommend using [uv](https://github.com/astral-sh/uv) to install Harpy.
-
-## Installation using uv.
-
-**Recommended** for end-users.
-
-<!-- Install the latest `harpy-analysis` [PyPI package](https://pypi.org/project/harpy-analysis) with the `extra` dependencies in a local Python environment. -->
-
 ```bash
-uv venv --python=3.12 # set python version
-source .venv/bin/activate # activate the virtual environment
-uv pip install "harpy-analysis[extra]"  # use uv to pip install dependencies
-python -c 'import harpy; print(harpy.__version__)' # check if the package is installed
+pip install harpy-analysis
 ```
 
-**Only for developers.** Clone this repository locally, install the `.[dev]` instead of the `[extra]` dependencies and read the contribution guide.
+**With extras**
+
+```bash
+pip install "harpy-analysis[extra]"
+```
+
+`[extra]` installs optional dependencies for:
+
+- Segmentation: `cellpose`
+- OpenCV support: `opencv-python-headless`
+- FlowSOM Clustering: `flowsom`, `scikit-learn`
+- Notebook workflows: `ipywidgets`, `tqdm`, `bokeh`, `textalloc`, `joypy`, `supervenn`, `nbconvert`, `ipython`
+- CLI workflows: `hydra-core`, `hydra-colorlog`, `submitit`, `hydra-submitit-launcher`
+
+**With extras and napari**
+
+```bash
+pip install "harpy-analysis[extra,napari]"
+```
+
+`[napari]` adds:
+
+- `napari[all]`
+- `napari-spatialdata`
+
+**Only for developers.** Clone this repository locally, install the `.[dev]` instead of the `.[extra]` dependencies and read the [contribution guide](contributing.md).
 
 ```bash
 # Clone repository from GitHub
-uv venv --python=3.12 # set python version
-source .venv/bin/activate # activate the virtual environment
-uv pip install -e '.[dev]' # use uv to pip install dependencies
-python -c 'import harpy; print(harpy.__version__)' # check if the package is installed
+uv venv --python=3.12  # create venv using uv, set python version (>=3.11)
+source .venv/bin/activate  # activate the virtual environment
+uv pip install -e '.[dev]'  # editable install with dev tooling
+python -c 'import harpy; print(harpy.__version__)'  # check if the package is installed
 # make changes
-python -m pytest # run the tests
+python -m pytest  # run the tests
 ```
 
-## Installation using conda.
+## Installation using conda
 
-It is possible to install Harpy using Anaconda, and we provide an [`environment.yml`](../environment.yml).
+It is possible to install Harpy using Anaconda although we recommend [uv](https://github.com/astral-sh/uv), and we provide an [`environment.yml`](../environment.yml).
 
 ### 1. Create the conda environment:
 

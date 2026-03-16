@@ -134,7 +134,7 @@ dev = [
 
 [project.urls]
 "Bug Tracker" = "https://github.com/saeyslab/harpy/issues"
-"Documentation" = "https://github.com/saeyslab/harpy#README.md"
+"Documentation" = "https://harpy.readthedocs.io/en/latest/"
 "Source Code" = "https://github.com/saeyslab/harpy"
 "User Support" = "https://github.com/saeyslab/harpy/issues"
 
