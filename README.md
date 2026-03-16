@@ -46,20 +46,40 @@
 
 ## Installation
 
-**Recommended** for end-users (Python `>=3.11`).
-
 ```bash
-uv venv --python=3.12  # set python version
-source .venv/bin/activate  # activate the virtual environment
-uv pip install "harpy-analysis[extra]"  # use uv to pip install dependencies
-python -c 'import harpy; print(harpy.__version__)'  # check if the package is installed
+pip install harpy-analysis
 ```
 
-**Only for developers.** Clone this repository locally, install the `.[dev]` instead of the `[extra]` dependencies and read the contribution guide.
+**With extras**
+
+```bash
+pip install "harpy-analysis[extra]"
+```
+
+`[extra]` installs optional dependencies for:
+
+- Segmentation: `cellpose`
+- OpenCV support: `opencv-python-headless`
+- FlowSOM Clustering: `flowsom`, `scikit-learn`
+- Notebook workflows: `ipywidgets`, `tqdm`, `bokeh`, `textalloc`, `joypy`, `supervenn`, `nbconvert`, `ipython`
+- CLI workflows: `hydra-core`
+
+**With extras and napari**
+
+```bash
+pip install "harpy-analysis[extra,napari]"
+```
+
+`[napari]` adds:
+
+- `napari[all]`
+- `napari-spatialdata`
+
+**Only for developers.** Clone this repository locally, install the `.[dev]` instead of the `[extra]` dependencies and read the [contribution guide](https://harpy.readthedocs.io/en/latest/contributing.html).
 
 ```bash
 # Clone repository from GitHub
-uv venv --python=3.12  # set python version
+uv venv --python=3.12  # create venv, set python version (>=3.11)
 source .venv/bin/activate  # activate the virtual environment
 uv pip install -e '.[dev]'  # editable install with dev tooling
 python -c 'import harpy; print(harpy.__version__)'  # check if the package is installed
@@ -67,7 +87,7 @@ python -c 'import harpy; print(harpy.__version__)'  # check if the package is in
 python -m pytest  # run the tests
 ```
 
-Checkout the docs for [installation instructions](https://github.com/saeyslab/harpy/blob/main/docs/installation.md) using [conda](https://github.com/conda/conda).
+It is possible to install Harpy using Anaconda although we recommend [uv](https://github.com/astral-sh/uv), see the [installation guide](./docs/installation.md).
 
 ## Quickstart
 
@@ -144,7 +164,7 @@ Explore the benchmark performance of **Harpy** on a large MACSima tonsil proteom
 
 ## Contributing
 
-See [here](https://github.com/saeyslab/harpy/blob/main/docs/contributing.md) for info on how to contribute to Harpy.
+See the [contribution guide](https://harpy.readthedocs.io/en/latest/contributing.html) for info on how to contribute to Harpy.
 
 ## Citation
 
