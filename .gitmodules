@@ -1,0 +1,4 @@
+[submodule "docs/tutorials"]
+	path = docs/tutorials
+	url = git@github.com:vibspatial/harpy_notebooks.git
+	branch = main
