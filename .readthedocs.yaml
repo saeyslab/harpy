@@ -5,7 +5,6 @@ submodules:
   include: all
   # recursive: true  # only needed if harpy_notebooks itself has submodules
 
-
 build:
   os: ubuntu-24.04
   tools:
