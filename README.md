@@ -41,8 +41,6 @@
 
 Harpy is a spatial omics analysis library for spatial transcriptomics and proteomics data. Within the [`scverse`](https://scverse.org/) stack, it sits between [`SpatialData`](https://spatialdata.scverse.org/) and downstream analysis tools such as [`AnnData`](https://anndata.readthedocs.io/), [`Scanpy`](https://scanpy.readthedocs.io/), and [`Squidpy`](https://squidpy.readthedocs.io/): Harpy handles the scalable image- and geometry-aware computation needed to turn raw spatial data into analysis-ready representations. The library emphasizes interoperability and scalability, making it well suited for workflows involving large images and complex spatial datasets.
 
-A helpful way to think about Harpy is as a scalable computational layer on top of `SpatialData`: `SpatialData` organizes and stores the spatial elements, while Harpy performs the heavy computation on them and returns results in standard data structures that integrate well with the broader Python single-cell and spatial analysis stack.
-
 In practice, Harpy provides fast, out-of-core image preprocessing and tiled segmentation, along with efficient aggregation workflows to generate `AnnData` tables and compute per-cell features from images, segmentation masks, and transcript coordinates. It also supports deep feature extraction, pixel- and cell-level clustering, and the generation of single-cell representations from highly multiplexed images.
 
 - **Multi-platform support** for spatial transcriptomics and proteomics data.
