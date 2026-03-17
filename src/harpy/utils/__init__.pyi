@@ -1,4 +1,4 @@
-from ._aggregate import RasterAggregator
+from ._aggregate import RasterAggregator, get_instance_size
 from ._featurize import Featurizer
 from ._kronos import kronos_embedding
 from ._query import bounding_box_query
@@ -12,6 +12,7 @@ ALLOCATION = "allocation"
 
 __all__ = [
     "RasterAggregator",
+    "get_instance_size",
     "Featurizer",
     "bounding_box_query",
     "kronos_embedding",

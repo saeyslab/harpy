@@ -29,15 +29,16 @@ def transcript_density(
     overwrite: bool = False,
 ) -> SpatialData:
     """
-    Calculate the transcript density using gaussian filter and add it to the provided spatial data.
+    Calculate the transcript density using a Gaussian filter and add it to the provided :class:`spatialdata.SpatialData` object.
 
-    This function computes the density of transcripts in the spatial data, scales and smooths it,
-    and then adds the resulting density image to the spatial data object.
+    This function computes the density of transcripts in the
+    :class:`spatialdata.SpatialData` object, scales and smooths it, and then adds the
+    resulting density image to the same :class:`spatialdata.SpatialData` object.
 
     Parameters
     ----------
     sdata
-        Data containing spatial information.
+        :class:`spatialdata.SpatialData` object containing spatial information.
     img_layer
         The layer of the SpatialData object used for determining image boundary.
         `img_layer` and `points_layer` should be registered in coordinate system `to_coordinate_system`.
@@ -65,14 +66,15 @@ def transcript_density(
     scale_factors
         Scale factors to apply for multiscale.
     output_layer
-        The name of the output image layer in the SpatialData where the transcript density will be added,
-        by default "transcript_density".
+        The name of the output image layer in the :class:`spatialdata.SpatialData` object
+        where the transcript density will be added, by default "transcript_density".
     overwrite
         If True overwrites the element if it already exists.
 
     Returns
     -------
-    Updated spatial data object with the added transcript density layer as an image layer.
+    Updated :class:`spatialdata.SpatialData` object with the added transcript density layer
+    as an image layer.
 
     Examples
     --------
