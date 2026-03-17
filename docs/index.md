@@ -89,7 +89,7 @@ Explore how to use Harpy for segmentation, shallow and deep feature extraction, 
 
 - **🧬 Spatial Transcriptomics**
 
-  Learn how to analyze spatial transcriptomics data with `Harpy`. For detailed information, refer to the [**SPArrOW documentation**](https://sparrow-pipeline.readthedocs.io/en/latest).
+  Learn how to analyze spatial transcriptomics data with `Harpy`. We also refer to the [**SPArrOW documentation**](https://sparrow-pipeline.readthedocs.io/en/latest).
 
   👉 [Tutorial (Mouse Liver, Resolve Molecular Cartography)](../docs/tutorials/advanced/Harpy_transcriptomics.ipynb)
 
