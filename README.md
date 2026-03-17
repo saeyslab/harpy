@@ -105,9 +105,9 @@ Explore how to use Harpy for segmentation, shallow and deep feature extraction, 
 
     Learn how to read in data, perform **tiled segmentation** using [**Cellpose**](https://github.com/MouseLand/cellpose) and [**Dask-CUDA**](https://docs.rapids.ai/api/dask-cuda/stable/), extract features, perform QC and carry out clustering. 
 
-    👉 [Tutorial proteomics, MACSima](https://github.com/vibspatial/harpy_notebooks/blob/main/general/Harpy_feature_calculation.ipynb)
-
     👉 [Tutorial image based transcriptomics, Human Ovarian Cancer, Xenium 10x Genomics](https://github.com/vibspatial/harpy_notebooks/blob/main/general/Harpy_xenium_transcriptomics_subset.ipynb)
+
+    👉 [Tutorial proteomics, MACSima](https://github.com/vibspatial/harpy_notebooks/blob/main/general/Harpy_feature_calculation.ipynb)
 
 - **🔧 Technology-specific advice**
 
