@@ -17,10 +17,14 @@ For interactive visualization of `Harpy` outputs using [Vitessce](https://github
 
 Why Harpy?
 
+Harpy is a spatial omics analysis library for spatial transcriptomics and proteomics data. Within the [`scverse`](https://scverse.org/) stack, it sits between [`SpatialData`](https://spatialdata.scverse.org/) and downstream analysis tools such as [`AnnData`](https://anndata.readthedocs.io/), [`Scanpy`](https://scanpy.readthedocs.io/), and [`Squidpy`](https://squidpy.readthedocs.io/): Harpy handles the scalable image- and geometry-aware computation needed to turn raw spatial data into analysis-ready representations. The library emphasizes interoperability and scalability, making it well suited for workflows involving large images and complex spatial datasets.
+
+In practice, Harpy provides fast, out-of-core image preprocessing and tiled segmentation, along with efficient aggregation workflows to generate `AnnData` tables and compute per-cell features from images, segmentation masks, and transcript coordinates. It also supports deep feature extraction, pixel- and cell-level clustering, and the generation of single-cell representations from highly multiplexed images.
+
 - **Multi-platform support** for spatial transcriptomics and proteomics data.
 - **Interoperable outputs** built on [SpatialData](https://github.com/scverse/spatialdata).
 - **Scales to (very) large images**: tiled workflows with [Dask](https://www.dask.org/); optional GPU acceleration with [CuPy](https://cupy.dev/) and [PyTorch](https://pytorch.org/).
-- **End-to-end workflows** for segmentation, feature extraction, clustering, and spatial analysis.
+- **Scalable computational building blocks** for segmentation, feature extraction, clustering, and spatial analysis.
 
 ---
 
@@ -30,7 +34,11 @@ Explore how to use Harpy for segmentation, shallow and deep feature extraction, 
 
 - **🚀 Basic Usage of Harpy**
 
-  Learn how to read in data, perform **tiled segmentation** using [**Cellpose**](https://github.com/MouseLand/cellpose) and [**Dask-CUDA**](https://docs.rapids.ai/api/dask-cuda/stable/), extract features, and carry out clustering. 👉 [Tutorial](../docs/tutorials/general/Harpy_feature_calculation.ipynb)
+  Learn how to read in data, perform **tiled segmentation** using [**Cellpose**](https://github.com/MouseLand/cellpose) and [**Dask-CUDA**](https://docs.rapids.ai/api/dask-cuda/stable/), extract features, perform QC and carry out clustering. 
+
+  👉 [Tutorial image based transcriptomics, Human Ovarian Cancer, Xenium 10x Genomics](../docs/tutorials/general/Harpy_xenium_transcriptomics_subset.ipynb)
+
+  👉 [Tutorial proteomics, MACSima](../docs/tutorials/general/Harpy_feature_calculation.ipynb)
 
 ---
 
