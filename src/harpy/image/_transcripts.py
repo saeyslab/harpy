@@ -9,7 +9,7 @@ from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import Translation
 
-from harpy.image._image import _get_boundary, _get_spatial_element, add_image_layer
+from harpy.image._image import _get_boundary, add_image_layer, get_dataarray
 from harpy.utils._transformations import _identity_check_transformations_points
 
 
@@ -116,7 +116,7 @@ def transcript_density(
     if img_layer is None:
         img_layer = [*sdata.images][-1]
 
-    se = _get_spatial_element(sdata, layer=img_layer)
+    se = get_dataarray(sdata, layer=img_layer)
 
     img_boundary = _get_boundary(se, to_coordinate_system=to_coordinate_system)
 
