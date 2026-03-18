@@ -65,4 +65,4 @@ sdata = hp.tb.allocate_intensity(
 )
 ```
 
-Next, explore the introductory tutorials for [transcriptomics](https://harpy.readthedocs.io/en/latest/tutorials/general/Harpy_xenium_transcriptomics_subset.html) and [proteomics](https://harpy.readthedocs.io/en/latest/tutorials/general/Harpy_feature_calculation.html).
+Next, explore the introductory tutorials for [transcriptomics](./tutorials/general/Harpy_xenium_transcriptomics_subset.ipynb) and [proteomics](./tutorials/general/Harpy_feature_calculation.ipynb).
