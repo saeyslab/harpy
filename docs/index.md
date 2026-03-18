@@ -13,7 +13,6 @@ section#harpy > h1 {
 
 > 💫 **If you find Harpy useful, please give us a [⭐ on GitHub](https://github.com/saeyslab/harpy)!** It helps others discover the project and supports continued development.
 
-For interactive visualization of `Harpy` outputs using [Vitessce](https://github.com/vitessce/vitessce), see the [harpy_vitessce](https://github.com/vibspatial/harpy_vitessce) package.
 
 Why Harpy?
 
@@ -25,6 +24,8 @@ In practice, Harpy offers fast, out-of-core image preprocessing, tiled segmentat
 - **Interoperable outputs** built on [SpatialData](https://github.com/scverse/spatialdata).
 - **Scales to (very) large images**: tiled workflows with [Dask](https://www.dask.org/); optional GPU acceleration with [CuPy](https://cupy.dev/) and [PyTorch](https://pytorch.org/).
 - **Scalable computational building blocks** for segmentation, feature extraction, clustering, and spatial analysis.
+
+For interactive visualization of `Harpy` outputs using [Vitessce](https://github.com/vitessce/vitessce), see the [harpy_vitessce](https://github.com/vibspatial/harpy_vitessce) package.
 
 ---
 
