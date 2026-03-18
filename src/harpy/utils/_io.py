@@ -31,9 +31,17 @@ def _incremental_io_on_disk(
     try:
         sdata.write_element(new_output_layer)
     except Exception as e:
-        # if new_output_layer in sdata[new_output_layer]:
-        #    del sdata[new_output_layer]
-        raise e
+        log.warning(
+            f"Writing temporary layer '{new_output_layer}' failed with error: {e}. "
+            "Attempting best-effort cleanup before re-raising."
+        )
+        if sdata.get(new_output_layer) is not None:
+            del sdata[new_output_layer]
+        try:
+            sdata.delete_element_from_disk(new_output_layer)
+        except Exception as e:  # noqa: BLE001
+            log.warning(f"Best-effort cleanup failed for temporary layer '{new_output_layer}': {e}")
+        raise
     # a2. remove the in-memory copy from the SpatialData object (note,
     # at this point the backup copy still exists on-disk)
     del sdata[new_output_layer]
@@ -51,7 +59,19 @@ def _incremental_io_on_disk(
     sdata.delete_element_from_disk(output_layer)
     sdata[output_layer] = sdata_copy[new_output_layer]
     log.warning(f"layer with name '{output_layer}' already exists. Overwriting...")
-    sdata.write_element(output_layer)
+    try:
+        sdata.write_element(output_layer)
+    except Exception as e:
+        log.warning(
+            f"Writing layer '{output_layer}' failed with error: {e}. Attempting best-effort cleanup before re-raising."
+        )
+        if sdata.get(output_layer) is not None:
+            del sdata[output_layer]
+        try:
+            sdata.delete_element_from_disk(output_layer)
+        except Exception as e:  # noqa: BLE001
+            log.warning(f"Best-effort cleanup failed for layer '{output_layer}': {e}")
+        raise
     # b2. reload the new data into memory (because it has been written but in-memory it still points
     # from the backup location)
     del sdata[output_layer]

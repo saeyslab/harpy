@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import dask.array as da
 import numpy as np
+from dask import delayed
 from loguru import logger as log
 from scipy.ndimage import gaussian_filter
 from spatialdata import SpatialData
@@ -10,6 +11,20 @@ from spatialdata.transformations import Translation
 
 from harpy.image._image import _get_boundary, _get_spatial_element, add_image_layer
 from harpy.utils._transformations import _identity_check_transformations_points
+
+
+def _build_density_chunk(
+    x_values: np.ndarray,
+    y_values: np.ndarray,
+    values: np.ndarray,
+    x_offset: int,
+    y_offset: int,
+    shape: tuple[int, int],
+) -> np.ndarray:
+    """Build a single dense chunk from local transcript coordinates."""
+    block = np.zeros(shape, dtype=np.int32)
+    block[x_values - x_offset, y_values - y_offset] = values
+    return block
 
 
 def transcript_density(
@@ -92,10 +107,10 @@ def transcript_density(
 
     _identity_check_transformations_points(ddf, to_coordinate_system=to_coordinate_system)
 
-    ddf[name_x] = ddf[name_x].round().astype(int)
-    ddf[name_y] = ddf[name_y].round().astype(int)
+    ddf[name_x] = np.floor(ddf[name_x]).astype(int)
+    ddf[name_y] = np.floor(ddf[name_y]).astype(int)
     if name_z is not None:
-        ddf[name_z] = ddf[name_z].round().astype(int)
+        ddf[name_z] = np.floor(ddf[name_z]).astype(int)
 
     # get image boundary from last image layer if img_layer is None
     if img_layer is None:
@@ -136,41 +151,84 @@ def transcript_density(
             ddf = ddf.sample(frac=fraction)
             log.info("sampling finished")
 
-    counts_location_transcript = ddf.groupby([name_x, name_y]).size().reset_index().rename(columns={0: "__count__"})
+    counts_location_transcript = (
+        ddf.groupby([name_x, name_y]).size().reset_index().rename(columns={0: "__count__"}).compute()
+    )
 
     # crd is set to img boundary if None
     counts_location_transcript[name_x] = counts_location_transcript[name_x] - crd[0]
     counts_location_transcript[name_y] = counts_location_transcript[name_y] - crd[2]
 
     chunks = (chunks, chunks)
-    image = da.zeros((crd[1] - crd[0], crd[3] - crd[2]), chunks=chunks, dtype=np.int32)
+    width = crd[1] - crd[0]
+    height = crd[3] - crd[2]
 
-    def populate_chunk(block, block_info=None, x=None, y=None, values=None):
-        # Extract the indices of the current block
-        x_start, x_stop = block_info[0]["array-location"][0]
-        y_start, y_stop = block_info[0]["array-location"][1]
+    if counts_location_transcript.empty:
+        image = da.zeros((width, height), chunks=chunks, dtype=np.int32)
+    else:
+        x_values = counts_location_transcript[name_x].to_numpy(dtype=np.int64, copy=False)
+        y_values = counts_location_transcript[name_y].to_numpy(dtype=np.int64, copy=False)
+        values = counts_location_transcript["__count__"].to_numpy(dtype=np.int32, copy=False)
 
-        # Find the overlapping indices
-        mask = (x >= x_start) & (x < x_stop) & (y >= y_start) & (y < y_stop)
-        relevant_x = x[mask] - x_start
-        relevant_y = y[mask] - y_start
-        relevant_values = values[mask]
+        chunk_x, chunk_y = chunks
+        nblocks_x = (width + chunk_x - 1) // chunk_x
+        nblocks_y = (height + chunk_y - 1) // chunk_y
 
-        # Populate the block + create copy of the block, so we can modify it.
-        block_copy = block.copy()
+        block_x = x_values // chunk_x
+        block_y = y_values // chunk_y
+        block_ids = block_x * nblocks_y + block_y
 
-        block_copy[relevant_x, relevant_y] = relevant_values
-        return block_copy
+        order = np.argsort(block_ids, kind="mergesort")
+        x_values = x_values[order]
+        y_values = y_values[order]
+        values = values[order]
+        block_ids = block_ids[order]
 
-    x_values = counts_location_transcript[name_x].values
-    y_values = counts_location_transcript[name_y].values
-    values = counts_location_transcript["__count__"].values
+        unique_ids, start_idx = np.unique(block_ids, return_index=True)
+        stop_idx = np.append(start_idx[1:], len(block_ids))
 
-    image = image.map_blocks(
-        populate_chunk, x=x_values, y=y_values, values=values, dtype=np.int32
-    )  # we assume never more than np.iinfo(np.int32).max transcripts per pixel
+        non_empty_blocks: dict[int, da.Array] = {}
+        for block_id, start, stop in zip(unique_ids.tolist(), start_idx.tolist(), stop_idx.tolist(), strict=False):
+            bx = block_id // nblocks_y
+            by = block_id % nblocks_y
+            x_offset = bx * chunk_x
+            y_offset = by * chunk_y
+            shape = (min(chunk_x, width - x_offset), min(chunk_y, height - y_offset))
 
-    image = image / da.max(image)
+            non_empty_blocks[block_id] = da.from_delayed(
+                delayed(_build_density_chunk)(
+                    np.ascontiguousarray(x_values[start:stop]),
+                    np.ascontiguousarray(y_values[start:stop]),
+                    np.ascontiguousarray(values[start:stop]),
+                    x_offset,
+                    y_offset,
+                    shape,
+                ),
+                shape=shape,
+                dtype=np.int32,
+            )
+
+        image = da.block(
+            [
+                [
+                    non_empty_blocks.get(
+                        bx * nblocks_y + by,
+                        da.zeros(
+                            (min(chunk_x, width - bx * chunk_x), min(chunk_y, height - by * chunk_y)),
+                            chunks=(
+                                min(chunk_x, width - bx * chunk_x),
+                                min(chunk_y, height - by * chunk_y),
+                            ),
+                            dtype=np.int32,
+                        ),
+                    )
+                    for by in range(nblocks_y)
+                ]
+                for bx in range(nblocks_x)
+            ]
+        )  # we assume never more than np.iinfo(np.int32).max transcripts per pixel
+
+    image = image / da.maximum(da.max(image), 1)
     image = image.astype(np.float32)  # some small precision loss by casting
 
     sigma = 7
