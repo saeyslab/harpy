@@ -65,4 +65,4 @@ sdata = hp.tb.allocate_intensity(
 )
 ```
 
-Next steps: explore the [tutorials](tutorials/index.md) for end-to-end pipelines.
+Next, explore the introductory tutorials for [transcriptomics](tutorials/general/Harpy_xenium_transcriptomics_subset.ipynb) and [proteomics](tutorials/general/Harpy_feature_calculation.ipynb).

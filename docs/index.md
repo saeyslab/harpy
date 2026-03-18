@@ -13,14 +13,18 @@ section#harpy > h1 {
 
 > 💫 **If you find Harpy useful, please give us a [⭐ on GitHub](https://github.com/saeyslab/harpy)!** It helps others discover the project and supports continued development.
 
-For interactive visualization of `Harpy` outputs using [Vitessce](https://github.com/vitessce/vitessce), see the [harpy_vitessce](https://github.com/vibspatial/harpy_vitessce) package.
-
 Why Harpy?
+
+Harpy is a spatial omics analysis library for spatial transcriptomics and proteomics. Within the [`scverse`](https://scverse.org/) stack, it bridges [`SpatialData`](https://spatialdata.scverse.org/) and downstream analysis tools such as [`AnnData`](https://anndata.readthedocs.io/), [`Scanpy`](https://scanpy.readthedocs.io/), and [`Squidpy`](https://squidpy.readthedocs.io/). It provides scalable, image- and geometry-aware computation to transform raw spatial data into analysis-ready representations, with a strong emphasis on interoperability and large-scale workflows.
+
+In practice, Harpy offers fast, out-of-core image preprocessing, tiled segmentation, and efficient aggregation workflows to generate `AnnData` tables and compute per-cell features from images, segmentation masks, and transcript coordinates. It also supports deep feature extraction, pixel- and cell-level clustering, and the construction of single-cell representations from highly multiplexed images.
 
 - **Multi-platform support** for spatial transcriptomics and proteomics data.
 - **Interoperable outputs** built on [SpatialData](https://github.com/scverse/spatialdata).
 - **Scales to (very) large images**: tiled workflows with [Dask](https://www.dask.org/); optional GPU acceleration with [CuPy](https://cupy.dev/) and [PyTorch](https://pytorch.org/).
-- **End-to-end workflows** for segmentation, feature extraction, clustering, and spatial analysis.
+- **Scalable computational building blocks** for segmentation, feature extraction, clustering, and spatial analysis.
+
+For interactive visualization of `Harpy` outputs using [Vitessce](https://github.com/vitessce/vitessce), see the [harpy_vitessce](https://github.com/vibspatial/harpy_vitessce) package.
 
 ---
 
@@ -30,7 +34,11 @@ Explore how to use Harpy for segmentation, shallow and deep feature extraction, 
 
 - **🚀 Basic Usage of Harpy**
 
-  Learn how to read in data, perform **tiled segmentation** using [**Cellpose**](https://github.com/MouseLand/cellpose) and [**Dask-CUDA**](https://docs.rapids.ai/api/dask-cuda/stable/), extract features, and carry out clustering. 👉 [Tutorial](../docs/tutorials/general/Harpy_feature_calculation.ipynb)
+  Learn how to read in data, perform **tiled segmentation** using [**Cellpose**](https://github.com/MouseLand/cellpose) and [**Dask-CUDA**](https://docs.rapids.ai/api/dask-cuda/stable/), extract features, perform QC and analyze results downstream with `Scanpy` and `Squidpy`.
+
+  👉 [Tutorial image based transcriptomics, Human Ovarian Cancer, Xenium 10x Genomics](../docs/tutorials/general/Harpy_xenium_transcriptomics_subset.ipynb)
+
+  👉 [Tutorial proteomics, MACSima](../docs/tutorials/general/Harpy_feature_calculation.ipynb)
 
 ---
 
@@ -81,7 +89,7 @@ Explore how to use Harpy for segmentation, shallow and deep feature extraction, 
 
 - **🧬 Spatial Transcriptomics**
 
-  Learn how to analyze spatial transcriptomics data with `Harpy`. For detailed information, refer to the [**SPArrOW documentation**](https://sparrow-pipeline.readthedocs.io/en/latest).
+  Learn how to analyze spatial transcriptomics data with `Harpy`. We also refer to the [**SPArrOW documentation**](https://sparrow-pipeline.readthedocs.io/en/latest).
 
   👉 [Tutorial (Mouse Liver, Resolve Molecular Cartography)](../docs/tutorials/advanced/Harpy_transcriptomics.ipynb)
 

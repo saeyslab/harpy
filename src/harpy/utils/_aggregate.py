@@ -1121,6 +1121,44 @@ def _get_mask_area(
     return pd.DataFrame({instance_key: _to_numpy(index), instance_size_key: _to_numpy(_result.ravel())})
 
 
+def get_instance_size(
+    mask: da.Array,
+    index: NDArray | None = None,
+    instance_key: str = _INSTANCE_KEY,
+    instance_size_key: str = _CELLSIZE_KEY,
+    run_on_gpu: bool = True,
+) -> pd.DataFrame:
+    """
+    Calculate the size of labeled instances in a mask.
+
+    Parameters
+    ----------
+    mask
+        A 3D labels mask with dimensions ``('z', 'y', 'x')``.
+    index
+        Optional subset of instance ids for which to calculate the size. If `None`, all
+        instance ids in `mask` are used.
+    instance_key
+        Name of the output column containing the instance ids.
+    instance_size_key
+        Name of the output column containing the instance sizes.
+    run_on_gpu
+        If `True`, use the GPU backend when available.
+
+    Returns
+    -------
+    A :class:`~pandas.DataFrame` with one row per instance and a column containing the
+    instance size.
+    """
+    return _get_mask_area(
+        mask=mask,
+        index=index,
+        instance_key=instance_key,
+        instance_size_key=instance_size_key,
+        run_on_gpu=run_on_gpu,
+    )
+
+
 def _calculate_area(mask: da.Array, index: NDArray | None = None, run_on_gpu: bool = True) -> NDArray:
     assert mask.ndim == 3, "Currently only 3D masks are supported ('z','y','x')."
     xp, _ = _get_xp(getattr(mask, "_meta", None), run_on_gpu=run_on_gpu)

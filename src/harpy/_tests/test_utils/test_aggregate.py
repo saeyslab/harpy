@@ -5,6 +5,7 @@ from scipy import ndimage
 from scipy.stats import kurtosis, skew
 from xrspatial import zonal_stats
 
+from harpy.utils import get_instance_size
 from harpy.utils._aggregate import RasterAggregator, _get_mask_area
 from harpy.utils._keys import _CELLSIZE_KEY, _INSTANCE_KEY
 
@@ -410,6 +411,16 @@ def test_get_mask_area_subset(sdata):
     area = ndimage.sum_labels(input=np.ones(mask_compute.shape), labels=mask_compute, index=subset_index)
 
     assert np.array_equal(df[_CELLSIZE_KEY].values, area)
+
+
+def test_get_instance_size_public_alias(sdata):
+    se_labels = sdata["blobs_labels"]
+    mask = se_labels.data[None, ...].rechunk(512)
+
+    df_public = get_instance_size(mask, instance_size_key=_CELLSIZE_KEY, run_on_gpu=False)
+    df_private = _get_mask_area(mask, instance_size_key=_CELLSIZE_KEY, run_on_gpu=False)
+
+    assert df_public.equals(df_private)
 
 
 def test_get_center_of_mask(sdata):
