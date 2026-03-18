@@ -11,7 +11,7 @@ from spatialdata.models._utils import MappingToCoordinateSystem_t
 from spatialdata.models.models import ScaleFactors_t
 from xarray import DataArray, DataTree
 
-from harpy.utils._io import _incremental_io_on_disk
+from harpy.utils._io import _incremental_io_on_disk, _write_element_with_cleanup
 
 
 class LayerManager(ABC):
@@ -152,7 +152,7 @@ class ImageLayerManager(LayerManager):
             sdata[output_layer] = spatial_element
             if sdata.is_backed():
                 # to make sdata point to layer that is materialized, and keep object id.
-                sdata.write_element(output_layer)
+                _write_element_with_cleanup(sdata, output_layer)
                 del sdata[output_layer]
                 sdata_temp = read_zarr(sdata.path, selection=["images"])
                 sdata[output_layer] = sdata_temp[output_layer]
@@ -222,7 +222,7 @@ class LabelLayerManager(LayerManager):
         else:
             sdata[output_layer] = spatial_element
             if sdata.is_backed():
-                sdata.write_element(output_layer)
+                _write_element_with_cleanup(sdata, output_layer)
                 del sdata[output_layer]
                 sdata_temp = read_zarr(sdata.path, selection=["labels"])
                 sdata[output_layer] = sdata_temp[output_layer]

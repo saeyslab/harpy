@@ -12,6 +12,23 @@ from spatialdata import SpatialData, read_zarr
 from xarray import DataArray, DataTree
 
 
+def _write_element_with_cleanup(sdata: SpatialData, output_layer: str) -> None:
+    """Write an already-attached element and remove partial state if the write fails."""
+    try:
+        sdata.write_element(output_layer)
+    except Exception as e:
+        log.warning(
+            f"Writing layer '{output_layer}' failed with error: {e}. Attempting best-effort cleanup before re-raising."
+        )
+        if sdata.get(output_layer) is not None:
+            del sdata[output_layer]
+        try:
+            sdata.delete_element_from_disk(output_layer)
+        except Exception as e:  # noqa: BLE001
+            log.warning(f"Best-effort cleanup failed for layer '{output_layer}': {e}")
+        raise
+
+
 def _incremental_io_on_disk(
     sdata: SpatialData,
     output_layer: str,
@@ -59,19 +76,7 @@ def _incremental_io_on_disk(
     sdata.delete_element_from_disk(output_layer)
     sdata[output_layer] = sdata_copy[new_output_layer]
     log.warning(f"layer with name '{output_layer}' already exists. Overwriting...")
-    try:
-        sdata.write_element(output_layer)
-    except Exception as e:
-        log.warning(
-            f"Writing layer '{output_layer}' failed with error: {e}. Attempting best-effort cleanup before re-raising."
-        )
-        if sdata.get(output_layer) is not None:
-            del sdata[output_layer]
-        try:
-            sdata.delete_element_from_disk(output_layer)
-        except Exception as e:  # noqa: BLE001
-            log.warning(f"Best-effort cleanup failed for layer '{output_layer}': {e}")
-        raise
+    _write_element_with_cleanup(sdata, output_layer)
     # b2. reload the new data into memory (because it has been written but in-memory it still points
     # from the backup location)
     del sdata[output_layer]
