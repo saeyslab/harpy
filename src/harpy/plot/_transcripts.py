@@ -116,7 +116,10 @@ def analyse_genes_left_out(
 
     ddf = ddf.query(f"{crd[0]} <= {name_x} < {crd[1]} and {crd[2]} <= {name_y} < {crd[3]}")
 
-    _raw_counts = ddf.groupby(name_gene_column).size().compute()
+    # The transcripts reader stores genes as categorical. With Dask, grouping a categorical
+    # column with the default observed=False can yield repeated category rows with zero counts
+    # (one per partition/category combination) instead of a single row per observed gene.
+    _raw_counts = ddf.groupby(name_gene_column, observed=True).size().compute()
 
     missing_indices = adata.var.index.difference(_raw_counts.index)
 
