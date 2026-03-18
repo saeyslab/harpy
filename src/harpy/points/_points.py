@@ -3,7 +3,7 @@ from dask.dataframe import DataFrame as DaskDataFrame
 from spatialdata import SpatialData, read_zarr
 from spatialdata.models._utils import MappingToCoordinateSystem_t
 
-from harpy.utils._io import _incremental_io_on_disk
+from harpy.utils._io import _incremental_io_on_disk, _write_element_with_cleanup
 
 
 def add_points_layer(
@@ -63,7 +63,7 @@ def add_points_layer(
     else:
         sdata[output_layer] = points
         if sdata.is_backed():
-            sdata.write_element(output_layer)
+            _write_element_with_cleanup(sdata, output_layer)
             del sdata[output_layer]
             sdata_temp = read_zarr(sdata.path, selection=["points"])
             sdata[output_layer] = sdata_temp[output_layer]

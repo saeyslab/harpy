@@ -5,7 +5,7 @@ from loguru import logger as log
 from spatialdata import SpatialData, read_zarr
 from spatialdata.models import TableModel
 
-from harpy.utils._io import _incremental_io_on_disk
+from harpy.utils._io import _incremental_io_on_disk, _write_element_with_cleanup
 from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY
 
 
@@ -75,7 +75,7 @@ class TableLayerManager:
         else:
             sdata[output_layer] = adata
             if sdata.is_backed():
-                sdata.write_element(output_layer)
+                _write_element_with_cleanup(sdata, output_layer)
                 del sdata[output_layer]
                 sdata_temp = read_zarr(sdata.path, selection=["tables"])
                 sdata[output_layer] = sdata_temp[output_layer]

@@ -95,7 +95,7 @@ It is possible to install Harpy using Anaconda although we recommend [uv](https:
 
 ## Quickstart
 
-See the short, runnable [guide](./docs/quickstart.md).
+See the short, runnable [guide](https://harpy.readthedocs.io/en/latest/quickstart.html).
 
 ## 🧭 Tutorials and Guides
 
