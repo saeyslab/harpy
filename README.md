@@ -39,9 +39,9 @@
 
 ## Why Harpy?
 
-Harpy is a spatial omics analysis library for spatial transcriptomics and proteomics data. Within the [`scverse`](https://scverse.org/) stack, it sits between [`SpatialData`](https://spatialdata.scverse.org/) and downstream analysis tools such as [`AnnData`](https://anndata.readthedocs.io/), [`Scanpy`](https://scanpy.readthedocs.io/), and [`Squidpy`](https://squidpy.readthedocs.io/): Harpy handles the scalable image- and geometry-aware computation needed to turn raw spatial data into analysis-ready representations. The library emphasizes interoperability and scalability, making it well suited for workflows involving large images and complex spatial datasets.
+Harpy is a spatial omics analysis library for spatial transcriptomics and proteomics. Within the [`scverse`](https://scverse.org/) stack, it bridges [`SpatialData`](https://spatialdata.scverse.org/) and downstream analysis tools such as [`AnnData`](https://anndata.readthedocs.io/), [`Scanpy`](https://scanpy.readthedocs.io/), and [`Squidpy`](https://squidpy.readthedocs.io/). It provides scalable, image- and geometry-aware computation to transform raw spatial data into analysis-ready representations, with a strong emphasis on interoperability and large-scale workflows.
 
-In practice, Harpy provides fast, out-of-core image preprocessing and tiled segmentation, along with efficient aggregation workflows to generate `AnnData` tables and compute per-cell features from images, segmentation masks, and transcript coordinates. It also supports deep feature extraction, pixel- and cell-level clustering, and the generation of single-cell representations from highly multiplexed images.
+In practice, Harpy offers fast, out-of-core image preprocessing, tiled segmentation, along with efficient aggregation workflows to generate `AnnData` tables and compute per-cell features from images, segmentation masks, and transcript coordinates. It also supports deep feature extraction, pixel- and cell-level clustering, and the construction of single-cell representations from highly multiplexed images.
 
 - **Multi-platform support** for spatial transcriptomics and proteomics data.
 - **Interoperable outputs** built on [SpatialData](https://github.com/scverse/spatialdata).
@@ -103,7 +103,7 @@ Explore how to use Harpy for segmentation, shallow and deep feature extraction, 
 
 - **🚀 Basic Usage of Harpy**
 
-    Learn how to read in data, perform **tiled segmentation** using [**Cellpose**](https://github.com/MouseLand/cellpose) and [**Dask-CUDA**](https://docs.rapids.ai/api/dask-cuda/stable/), extract features, perform QC and carry out clustering. 
+    Learn how to read in data, perform **tiled segmentation** using [**Cellpose**](https://github.com/MouseLand/cellpose) and [**Dask-CUDA**](https://docs.rapids.ai/api/dask-cuda/stable/), extract features, perform QC and analyze results downstream with `Scanpy` and `Squidpy`.
 
     👉 [Tutorial image based transcriptomics, Human Ovarian Cancer, Xenium 10x Genomics](https://github.com/vibspatial/harpy_notebooks/blob/main/general/Harpy_xenium_transcriptomics_subset.ipynb)
 
