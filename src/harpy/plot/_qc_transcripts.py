@@ -33,6 +33,7 @@ def qc_metric_histogram(
     dataframe: Literal["obs", "var", "auto"] = "auto",
     ax: Axes | None = None,
     bins: int | None = 50,
+    range: tuple[float, float] | None = None,
     histplot_kwargs: Mapping[str, Any] = MappingProxyType({}),
     median_line_kwargs: Mapping[str, Any] = MappingProxyType({}),
     median_text_kwargs: Mapping[str, Any] = MappingProxyType({}),
@@ -40,6 +41,7 @@ def qc_metric_histogram(
     title: str | None = None,
     color: str | None = None,
     show_median: bool = True,
+    show_std: bool = True,
     ylabel: str | None = None,
 ) -> Axes:
     """
@@ -68,6 +70,9 @@ def qc_metric_histogram(
         Matplotlib axes to draw on. If ``None``, a new figure and axes are created.
     bins
         Number of histogram bins. If ``None``, seaborn chooses the bins automatically.
+    range
+        Lower and upper bounds of the histogram x-axis. Values outside this range are excluded from the plotted
+        histogram, but are still included when calculating the median and standard deviation annotations.
     histplot_kwargs
         Keyword arguments passed to :func:`seaborn.histplot`.
     median_line_kwargs
@@ -81,7 +86,9 @@ def qc_metric_histogram(
     color
         Histogram color. If ``None``, a metric-specific default is used when available.
     show_median
-        If ``True``, add a dashed median line and annotate its value.
+        If ``True``, add a dashed median line and annotate the median.
+    show_std
+        If ``True``, include the standard deviation in the annotation box.
     ylabel
         Y-axis label. If ``None``, a label is chosen based on the selected dataframe.
 
@@ -115,6 +122,13 @@ def qc_metric_histogram(
     values = values.dropna()
     if values.empty:
         raise ValueError(f"Column '{column}' in 'adata.{resolved_dataframe}' does not contain any non-null values.")
+    values_for_plot = values
+    if range is not None:
+        values_for_plot = values[(values >= range[0]) & (values <= range[1])]
+        if values_for_plot.empty:
+            raise ValueError(
+                f"No values remaining in column '{column}' after applying range {range!r} for plotting."
+            )
 
     display_name = display_column if display_column is not None else _format_display_name(column)
 
@@ -130,8 +144,10 @@ def qc_metric_histogram(
     histplot_kwargs.setdefault("color", color if color is not None else _DEFAULT_COLUMN_COLORS.get(column, "#4C78A8"))
     if bins is not None:
         histplot_kwargs.setdefault("bins", bins)
+    if range is not None:
+        histplot_kwargs.setdefault("binrange", range)
 
-    sns.histplot(values, ax=ax, **histplot_kwargs)
+    sns.histplot(values_for_plot, ax=ax, **histplot_kwargs)
 
     if show_median:
         median_value = float(values.median())
@@ -150,7 +166,16 @@ def qc_metric_histogram(
             "bbox",
             {"boxstyle": "round,pad=0.3", "facecolor": "white", "edgecolor": "none", "alpha": 0.8},
         )
-        ax.text(0.98, 0.95, f"Median: {_format_metric_value(median_value)}", **text_kwargs)
+        annotation_text = f"Median: {_format_metric_value(median_value)}"
+        if show_std:
+            std_value = float(values.std())
+            annotation_text += f"\nSD: {_format_metric_value(std_value)}"
+        ax.text(
+            0.98,
+            0.95,
+            annotation_text,
+            **text_kwargs,
+        )
 
     if title is not None:
         ax.set_title(title, weight="bold")
