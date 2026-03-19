@@ -34,8 +34,8 @@ def test_qc_obs_scatter(sdata_transcripts_no_backed, tmp_path):
         result = hp.pl.qc_obs_scatter(
             sdata_transcripts_no_backed,
             table_layer="table_transcriptomics_preprocessed",
-            instance_size_key="shapeSize",
-            column="total_counts",
+            column_x="shapeSize",
+            column_y="total_counts",
             ax=ax,
         )
 

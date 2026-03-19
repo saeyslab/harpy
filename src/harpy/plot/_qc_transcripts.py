@@ -12,7 +12,7 @@ from matplotlib.axes import Axes
 from spatialdata import SpatialData
 
 from harpy.table._table import ProcessTable
-from harpy.utils._keys import _INSTANCE_KEY
+from harpy.utils._keys import _CELLSIZE_KEY
 
 _DEFAULT_COLUMN_COLORS = {
     "log1p_total_counts": "#577590",
@@ -355,19 +355,19 @@ def qc_obs_scatter(
     sdata: SpatialData,
     table_layer: str,
     labels_layer: str | Iterable[str] | None = None,
-    column: str = "total_counts",
-    instance_size_key: str = _INSTANCE_KEY,
+    column_x: str = _CELLSIZE_KEY,
+    column_y: str = "total_counts",
     ax: Axes | None = None,
     figsize: tuple[float, float] = (6, 4),
     title: str | None = None,
-    display_column: str | None = None,
-    display_instance_size_key: str | None = None,
-    cmap: str | None = "flare",
+    display_column_x: str | None = None,
+    display_column_y: str | None = None,
+    cmap: str | None = None,
     histplot_kwargs: Mapping[str, Any] = MappingProxyType({}),
     regplot_kwargs: Mapping[str, Any] = MappingProxyType({}),
 ) -> Axes:
     """
-    Plot an observation-level QC metric against instance size.
+    Plot the relationship between two observation-level columns.
 
     Parameters
     ----------
@@ -378,20 +378,20 @@ def qc_obs_scatter(
     labels_layer
         Label layer or layers used to subset the selected table via :class:`~harpy.table._table.ProcessTable`.
         If ``None``, all observations in ``table_layer`` are used.
-    column
-        Observation-level metric in ``adata.obs`` to plot on the y-axis.
-    instance_size_key
-        Observation-level size column in ``adata.obs`` to plot on the x-axis.
+    column_x
+        Observation-level column in ``adata.obs`` to plot on the x-axis.
+    column_y
+        Observation-level column in ``adata.obs`` to plot on the y-axis.
     ax
         Matplotlib axes to draw on. If ``None``, a new figure and axes are created.
     figsize
         Figure size used when ``ax`` is ``None``.
     title
-        Plot title. Defaults to ``"{instance size} vs {metric}"``.
-    display_column
-        Display label for ``column``. If ``None``, a readable label is inferred from the column name.
-    display_instance_size_key
-        Display label for ``instance_size_key``. If ``None``, a readable label is inferred from the column name.
+        Plot title. Defaults to ``"{x column} vs {y column}"``.
+    display_column_x
+        Display label for ``column_x``. If ``None``, a readable label is inferred from the column name.
+    display_column_y
+        Display label for ``column_y``. If ``None``, a readable label is inferred from the column name.
     cmap
         Colormap passed to :func:`seaborn.histplot`. If ``None``, seaborn's default is used.
     histplot_kwargs
@@ -407,13 +407,13 @@ def qc_obs_scatter(
     process_table = ProcessTable(sdata, labels_layer=labels_layer, table_layer=table_layer)
     adata = sdata.tables[table_layer]
 
-    for obs_column in (instance_size_key, column):
+    for obs_column in (column_x, column_y):
         if obs_column not in adata.obs.columns:
             raise ValueError(f"Column '{obs_column}' not found in 'adata.obs'.")
         if not pd.api.types.is_numeric_dtype(adata.obs[obs_column]):
             raise TypeError(f"Column '{obs_column}' in 'adata.obs' is not numeric and cannot be visualized.")
 
-    values = adata.obs[[instance_size_key, column]].copy()
+    values = adata.obs[[column_x, column_y]].copy()
     if process_table.labels_layer is not None:
         obs_mask = adata.obs[process_table.region_key].isin(process_table.labels_layer).to_numpy()
         values = values.loc[obs_mask]
@@ -421,13 +421,11 @@ def qc_obs_scatter(
     values = values.dropna()
     if values.empty:
         raise ValueError(
-            f"Columns '{instance_size_key}' and '{column}' in 'adata.obs' do not contain any paired non-null values."
+            f"Columns '{column_x}' and '{column_y}' in 'adata.obs' do not contain any paired non-null values."
         )
 
-    x_label = (
-        display_instance_size_key if display_instance_size_key is not None else _format_display_name(instance_size_key)
-    )
-    y_label = display_column if display_column is not None else _format_display_name(column)
+    x_label = display_column_x if display_column_x is not None else _format_display_name(column_x)
+    y_label = display_column_y if display_column_y is not None else _format_display_name(column_y)
 
     if ax is None:
         _, ax = plt.subplots(figsize=figsize)
@@ -438,13 +436,13 @@ def qc_obs_scatter(
     histplot_kwargs.setdefault("pmax", 0.98)
     if cmap is not None:
         histplot_kwargs.setdefault("cmap", cmap)
-    sns.histplot(x=values[instance_size_key], y=values[column], ax=ax, **histplot_kwargs)
+    sns.histplot(x=values[column_x], y=values[column_y], ax=ax, **histplot_kwargs)
 
     regplot_kwargs = dict(regplot_kwargs)
     regplot_kwargs.setdefault("scatter", False)
     regplot_kwargs.setdefault("lowess", True)
     regplot_kwargs.setdefault("line_kws", {"color": "#1F3B4D", "lw": 1.5})
-    sns.regplot(x=values[instance_size_key], y=values[column], ax=ax, **regplot_kwargs)
+    sns.regplot(x=values[column_x], y=values[column_y], ax=ax, **regplot_kwargs)
 
     if title is not None:
         ax.set_title(title, weight="bold")

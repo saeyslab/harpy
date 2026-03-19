@@ -18,6 +18,9 @@ def preprocess_transcriptomics(
     """
     Plot transcriptomics preprocessing QC figures.
 
+    This function is read-only and expects QC metrics to already be present on the selected table,
+    typically after running :func:`scanpy.pp.calculate_qc_metrics` during preprocessing.
+
     Parameters
     ----------
     sdata
@@ -72,10 +75,10 @@ def preprocess_transcriptomics(
     qc_obs_scatter(
         sdata,
         table_layer=table_layer,
-        instance_size_key=instance_size_key,
-        column="total_counts",
-        display_column="Total Counts",
-        display_instance_size_key=instance_size_key,
+        column_x=instance_size_key,
+        column_y="total_counts",
+        display_column_x=instance_size_key,
+        display_column_y="Total Counts",
     )
     plt.tight_layout()
     if output:
