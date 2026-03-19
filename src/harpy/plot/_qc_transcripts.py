@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from types import MappingProxyType
 from typing import Any, Literal
 
@@ -200,6 +200,139 @@ def qc_metric_histogram(
     ax.set_ylabel(ylabel if ylabel is not None else _default_ylabel(resolved_dataframe))
     _style_qc_axis(ax)
     return ax
+
+
+def qc_metrics(
+    sdata: SpatialData,
+    table_layer: str,
+    labels_layer: str | Iterable[str] | None = None,
+    metrics: Sequence[tuple[Literal["obs", "var"], str]] = (
+        ("obs", "log1p_total_counts"),
+        ("obs", "total_counts"),
+        ("obs", "n_genes_by_counts"),
+        ("var", "log1p_total_counts"),
+        ("var", "n_cells_by_counts"),
+        ("var", "mean_counts"),
+    ),
+    ax: np.ndarray | Sequence[Axes] | None = None,
+    bins: int | str = "auto",
+    range: tuple[float, float] | None = None,
+    quantile_range: tuple[float, float] | None = None,
+    histplot_kwargs: Mapping[str, Any] = MappingProxyType({}),
+    median_line_kwargs: Mapping[str, Any] = MappingProxyType({}),
+    median_text_kwargs: Mapping[str, Any] = MappingProxyType({}),
+    figsize: tuple[float, float] | None = None,
+    ncols: int = 3,
+    subplot_width: float = 5.5,
+    subplot_height: float = 4.5,
+    sharex: bool = False,
+    sharey: bool = False,
+    title: str | None = None,
+    color: str | None = None,
+    show_median: bool = True,
+    show_std: bool = True,
+) -> np.ndarray:
+    """
+    Plot a standard panel of QC metric histograms for an :class:`~anndata.AnnData` table.
+
+    Parameters
+    ----------
+    sdata
+        :class:`~spatialdata.SpatialData` object containing the table.
+    table_layer
+        Table layer in ``sdata.tables``.
+    labels_layer
+        Label layer or layers used to subset the selected table via :class:`~harpy.table._table.ProcessTable`.
+    metrics
+        Sequence of ``(dataframe, column)`` tuples to plot. Defaults to a standard transcript QC panel.
+    ax
+        Array-like collection of axes to draw on. If ``None``, subplot axes are created.
+    bins
+        Histogram bin specification passed to :func:`seaborn.histplot`.
+    range
+        Lower and upper bounds of the histogram x-axis applied to all panels.
+    quantile_range
+        Quantile interval used to derive the histogram x-axis automatically when ``range`` is ``None``.
+    histplot_kwargs
+        Keyword arguments passed to :func:`seaborn.histplot`.
+    median_line_kwargs
+        Keyword arguments passed to :meth:`matplotlib.axes.Axes.axvline`.
+    median_text_kwargs
+        Keyword arguments passed to :meth:`matplotlib.axes.Axes.text`.
+    figsize
+        Figure size used when ``ax`` is ``None``. If ``None``, a size is inferred from ``ncols`` and the number of metrics.
+    ncols
+        Number of subplot columns when ``ax`` is ``None``.
+    subplot_width
+        Width of each subplot when ``figsize`` is not provided.
+    subplot_height
+        Height of each subplot when ``figsize`` is not provided.
+    sharex
+        Whether to share x-axes across subplots when ``ax`` is ``None``.
+    sharey
+        Whether to share y-axes across subplots when ``ax`` is ``None``.
+    title
+        Figure title applied when ``ax`` is ``None``.
+    color
+        Histogram color override applied to all panels.
+    show_median
+        If ``True``, add a dashed median line and annotate the median.
+    show_std
+        If ``True``, include the standard deviation in the annotation box.
+
+    Returns
+    -------
+    :class:`numpy.ndarray`
+        Array of axes containing the histograms.
+    """
+    if len(metrics) == 0:
+        raise ValueError("Parameter 'metrics' must contain at least one (dataframe, column) tuple.")
+
+    if ax is None:
+        nrows = int(np.ceil(len(metrics) / ncols))
+        if figsize is None:
+            figsize = (subplot_width * min(ncols, len(metrics)), subplot_height * nrows)
+        fig, axes = plt.subplots(nrows, ncols, figsize=figsize, sharex=sharex, sharey=sharey)
+        axes = np.asarray(axes)
+    else:
+        axes = np.asarray(ax)
+        fig = np.ravel(axes)[0].figure
+
+    axes_flat = np.ravel(axes)
+    if len(axes_flat) < len(metrics):
+        raise ValueError(
+            f"Received {len(axes_flat)} axes for {len(metrics)} metrics. Please provide enough axes or set 'ax=None'."
+        )
+
+    for axis, (dataframe, column) in zip(axes_flat[: len(metrics)], metrics, strict=True):
+        qc_metric_histogram(
+            sdata=sdata,
+            table_layer=table_layer,
+            labels_layer=labels_layer,
+            column=column,
+            dataframe=dataframe,
+            ax=axis,
+            bins=bins,
+            range=range,
+            quantile_range=quantile_range,
+            histplot_kwargs=histplot_kwargs,
+            median_line_kwargs=median_line_kwargs,
+            median_text_kwargs=median_text_kwargs,
+            color=color,
+            show_median=show_median,
+            show_std=show_std,
+        )
+
+    for axis in axes_flat[len(metrics) :]:
+        fig.delaxes(axis)
+
+    if title is not None:
+        fig.suptitle(title, weight="bold")
+        fig.tight_layout(rect=(0, 0, 1, 0.97))
+    else:
+        fig.tight_layout()
+
+    return axes
 
 
 def _resolve_dataframe(adata, column: str, dataframe: Literal["obs", "var", "auto"]) -> Literal["obs", "var"]:
