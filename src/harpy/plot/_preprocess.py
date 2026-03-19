@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from spatialdata import SpatialData
 
+from harpy.plot._qc_transcripts import qc_metric_histogram
 from harpy.utils._keys import _CELLSIZE_KEY
 
 
@@ -11,7 +12,7 @@ def preprocess_transcriptomics(
     sdata: SpatialData,
     table_layer: str = "table_transcriptomics",
     instance_size_key: str = _CELLSIZE_KEY,
-    bins_total_counts: int | None = None,
+    bins_total_counts: int | None = 55,
     bins_n_genes_by_counts: int | None = 55,
     output: str | None = None,
 ) -> None:
@@ -38,26 +39,30 @@ def preprocess_transcriptomics(
     harpy.tb.preprocess_transcriptomics: preprocess.
     """
     _, axs = plt.subplots(1, 2, figsize=(10, 4))
-    total_counts_histplot_kwargs = {"kde": False, "ax": axs[0]}
-    if bins_total_counts is not None:
-        total_counts_histplot_kwargs["bins"] = bins_total_counts
-    sns.histplot(
-        sdata.tables[table_layer].obs["total_counts"],
-        **total_counts_histplot_kwargs,
+    qc_metric_histogram(
+        sdata,
+        table_layer=table_layer,
+        column="total_counts",
+        display_column="Total Counts per Cell",
+        ax=axs[0],
+        bins=bins_total_counts,
+        dataframe="obs",
+        histplot_kwargs={"kde": False},
+        title=None,
+        show_median=True,
     )
-    axs[0].set_title("Total counts")
-    axs[0].set_xlabel("Total counts")
-    axs[0].set_ylabel("Count")
-    n_genes_histplot_kwargs = {"kde": False, "ax": axs[1]}
-    if bins_n_genes_by_counts is not None:
-        n_genes_histplot_kwargs["bins"] = bins_n_genes_by_counts
-    sns.histplot(
-        sdata.tables[table_layer].obs["n_genes_by_counts"],
-        **n_genes_histplot_kwargs,
+    qc_metric_histogram(
+        sdata,
+        table_layer=table_layer,
+        column="n_genes_by_counts",
+        display_column="Detected Genes per Cell",
+        dataframe="obs",
+        ax=axs[1],
+        bins=bins_n_genes_by_counts,
+        histplot_kwargs={"kde": False},
+        show_median=True,
+        title=None,
     )
-    axs[1].set_title("Genes by counts")
-    axs[1].set_xlabel("Genes by counts")
-    axs[1].set_ylabel("Count")
     plt.tight_layout()
     if output:
         plt.savefig(output + "_histogram.png")
