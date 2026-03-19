@@ -12,6 +12,7 @@ from matplotlib.axes import Axes
 from spatialdata import SpatialData
 
 from harpy.table._table import ProcessTable
+from harpy.utils._keys import _INSTANCE_KEY
 
 _DEFAULT_COLUMN_COLORS = {
     "log1p_total_counts": "#577590",
@@ -348,6 +349,109 @@ def qc_metrics_histogram(
         fig.tight_layout()
 
     return axes
+
+
+def qc_obs_scatter(
+    sdata: SpatialData,
+    table_layer: str,
+    labels_layer: str | Iterable[str] | None = None,
+    column: str = "total_counts",
+    instance_size_key: str = _INSTANCE_KEY,
+    ax: Axes | None = None,
+    figsize: tuple[float, float] = (6, 4),
+    title: str | None = None,
+    display_column: str | None = None,
+    display_instance_size_key: str | None = None,
+    cmap: str | None = "flare",
+    histplot_kwargs: Mapping[str, Any] = MappingProxyType({}),
+    regplot_kwargs: Mapping[str, Any] = MappingProxyType({}),
+) -> Axes:
+    """
+    Plot an observation-level QC metric against instance size.
+
+    Parameters
+    ----------
+    sdata
+        :class:`~spatialdata.SpatialData` object containing the table.
+    table_layer
+        Table layer in ``sdata.tables``.
+    labels_layer
+        Label layer or layers used to subset the selected table via :class:`~harpy.table._table.ProcessTable`.
+        If ``None``, all observations in ``table_layer`` are used.
+    column
+        Observation-level metric in ``adata.obs`` to plot on the y-axis.
+    instance_size_key
+        Observation-level size column in ``adata.obs`` to plot on the x-axis.
+    ax
+        Matplotlib axes to draw on. If ``None``, a new figure and axes are created.
+    figsize
+        Figure size used when ``ax`` is ``None``.
+    title
+        Plot title. Defaults to ``"{instance size} vs {metric}"``.
+    display_column
+        Display label for ``column``. If ``None``, a readable label is inferred from the column name.
+    display_instance_size_key
+        Display label for ``instance_size_key``. If ``None``, a readable label is inferred from the column name.
+    cmap
+        Colormap passed to :func:`seaborn.histplot`. If ``None``, seaborn's default is used.
+    histplot_kwargs
+        Keyword arguments passed to :func:`seaborn.histplot`.
+    regplot_kwargs
+        Keyword arguments passed to :func:`seaborn.regplot`.
+
+    Returns
+    -------
+    :class:`matplotlib.axes.Axes`
+        Axes containing the relationship plot.
+    """
+    process_table = ProcessTable(sdata, labels_layer=labels_layer, table_layer=table_layer)
+    adata = sdata.tables[table_layer]
+
+    for obs_column in (instance_size_key, column):
+        if obs_column not in adata.obs.columns:
+            raise ValueError(f"Column '{obs_column}' not found in 'adata.obs'.")
+        if not pd.api.types.is_numeric_dtype(adata.obs[obs_column]):
+            raise TypeError(f"Column '{obs_column}' in 'adata.obs' is not numeric and cannot be visualized.")
+
+    values = adata.obs[[instance_size_key, column]].copy()
+    if process_table.labels_layer is not None:
+        obs_mask = adata.obs[process_table.region_key].isin(process_table.labels_layer).to_numpy()
+        values = values.loc[obs_mask]
+
+    values = values.dropna()
+    if values.empty:
+        raise ValueError(
+            f"Columns '{instance_size_key}' and '{column}' in 'adata.obs' do not contain any paired non-null values."
+        )
+
+    x_label = (
+        display_instance_size_key if display_instance_size_key is not None else _format_display_name(instance_size_key)
+    )
+    y_label = display_column if display_column is not None else _format_display_name(column)
+
+    if ax is None:
+        _, ax = plt.subplots(figsize=figsize)
+
+    histplot_kwargs = dict(histplot_kwargs)
+    histplot_kwargs.setdefault("bins", 60)
+    histplot_kwargs.setdefault("cbar", True)
+    histplot_kwargs.setdefault("pmax", 0.98)
+    if cmap is not None:
+        histplot_kwargs.setdefault("cmap", cmap)
+    sns.histplot(x=values[instance_size_key], y=values[column], ax=ax, **histplot_kwargs)
+
+    regplot_kwargs = dict(regplot_kwargs)
+    regplot_kwargs.setdefault("scatter", False)
+    regplot_kwargs.setdefault("lowess", True)
+    regplot_kwargs.setdefault("line_kws", {"color": "#1F3B4D", "lw": 1.5})
+    sns.regplot(x=values[instance_size_key], y=values[column], ax=ax, **regplot_kwargs)
+
+    if title is not None:
+        ax.set_title(title, weight="bold")
+    ax.set_xlabel(x_label)
+    ax.set_ylabel(y_label)
+    _style_qc_axis(ax)
+    return ax
 
 
 def _resolve_dataframe(adata, column: str, dataframe: Literal["obs", "var", "auto"]) -> Literal["obs", "var"]:

@@ -30,7 +30,7 @@ from ._qc_segmentation import (
     segmentation_size_boxplot,
     segments_per_area,
 )
-from ._qc_transcripts import qc_metric_histogram, qc_metrics_histogram
+from ._qc_transcripts import qc_metric_histogram, qc_metrics_histogram, qc_obs_scatter
 from ._sanity import sanity
 from ._segmentation import segment
 from ._tiling_correction import flatfield, tiling_correction
@@ -75,6 +75,7 @@ __all__ = [
     "segments_per_area",
     "qc_metric_histogram",
     "qc_metrics_histogram",
+    "qc_obs_scatter",
     "sanity",
     "segment",
     "flatfield",

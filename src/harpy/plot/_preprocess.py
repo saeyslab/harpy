@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import matplotlib.pyplot as plt
-import seaborn as sns
 from spatialdata import SpatialData
 
-from harpy.plot._qc_transcripts import qc_metric_histogram
+from harpy.plot._qc_transcripts import qc_metric_histogram, qc_obs_scatter
 from harpy.utils._keys import _CELLSIZE_KEY
 
 
@@ -70,19 +69,14 @@ def preprocess_transcriptomics(
         plt.show()
     plt.close()
 
-    _, ax = plt.subplots(figsize=(6, 4))
-    sns.scatterplot(
-        x=sdata.tables[table_layer].obs[instance_size_key],
-        y=sdata.tables[table_layer].obs["total_counts"],
-        s=8,
-        alpha=0.2,
-        linewidth=0,
-        ax=ax,
+    qc_obs_scatter(
+        sdata,
+        table_layer=table_layer,
+        instance_size_key=instance_size_key,
+        column="total_counts",
+        display_column="Total Counts",
+        display_instance_size_key=instance_size_key,
     )
-    ax.set_title(f"{instance_size_key} vs total counts", fontsize=14)
-    ax.set_xlabel(instance_size_key)
-    ax.set_ylabel("Total counts")
-    sns.despine()
     plt.tight_layout()
     if output:
         plt.savefig(output + "_size_count.png")
