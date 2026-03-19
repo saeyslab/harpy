@@ -156,6 +156,8 @@ Repository = "https://github.com/saeyslab/harpy"
 Issues = "https://github.com/saeyslab/harpy/issues"
 Changelog = "https://github.com/saeyslab/harpy/releases"
 Paper = "https://doi.org/10.1093/bioinformatics/btag122"
+SaeysLab = "https://saeyslab.sites.vib.be/en"
+VIBSpatialCatalyst = "https://vib.be/en/technologies/technology-portfolio/spatial-catalyst"
 
 
 [tool.coverage.run]
