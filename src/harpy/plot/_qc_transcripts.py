@@ -203,7 +203,7 @@ def qc_metric_histogram(
     return ax
 
 
-def qc_metrics(
+def qc_metrics_histogram(
     sdata: SpatialData,
     table_layer: str,
     labels_layer: str | Iterable[str] | None = None,
@@ -235,6 +235,9 @@ def qc_metrics(
 ) -> np.ndarray:
     """
     Plot a standard panel of QC metric histograms for an :class:`~anndata.AnnData` table.
+
+    This function is read-only and expects QC metrics to already be present on the selected table,
+    typically after running :func:`scanpy.pp.calculate_qc_metrics` during preprocessing.
 
     Parameters
     ----------
