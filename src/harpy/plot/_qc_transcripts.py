@@ -215,7 +215,7 @@ def qc_metrics(
         ("var", "mean_counts"),
     ),
     ax: np.ndarray | Sequence[Axes] | None = None,
-    bins: int | str = "auto",
+    bins: int | str | Sequence[int | str] = "auto",
     range: tuple[float, float] | None = None,
     quantile_range: tuple[float, float] | None = None,
     histplot_kwargs: Mapping[str, Any] = MappingProxyType({}),
@@ -249,6 +249,8 @@ def qc_metrics(
         Array-like collection of axes to draw on. If ``None``, subplot axes are created.
     bins
         Histogram bin specification passed to :func:`seaborn.histplot`.
+        If a sequence is provided, it must match the length of ``metrics`` and each value is applied to the
+        corresponding panel.
     range
         Lower and upper bounds of the histogram x-axis applied to all panels.
     quantile_range
@@ -288,6 +290,15 @@ def qc_metrics(
     if len(metrics) == 0:
         raise ValueError("Parameter 'metrics' must contain at least one (dataframe, column) tuple.")
 
+    if isinstance(bins, Sequence) and not isinstance(bins, str):
+        bins_per_metric = list(bins)
+        if len(bins_per_metric) != len(metrics):
+            raise ValueError(
+                f"Parameter 'bins' has length {len(bins_per_metric)}, but 'metrics' has length {len(metrics)}."
+            )
+    else:
+        bins_per_metric = [bins] * len(metrics)
+
     if ax is None:
         nrows = int(np.ceil(len(metrics) / ncols))
         if figsize is None:
@@ -304,7 +315,7 @@ def qc_metrics(
             f"Received {len(axes_flat)} axes for {len(metrics)} metrics. Please provide enough axes or set 'ax=None'."
         )
 
-    for axis, (dataframe, column) in zip(axes_flat[: len(metrics)], metrics, strict=True):
+    for axis, (dataframe, column), bins_value in zip(axes_flat[: len(metrics)], metrics, bins_per_metric, strict=True):
         qc_metric_histogram(
             sdata=sdata,
             table_layer=table_layer,
@@ -312,7 +323,7 @@ def qc_metrics(
             column=column,
             dataframe=dataframe,
             ax=axis,
-            bins=bins,
+            bins=bins_value,
             range=range,
             quantile_range=quantile_range,
             histplot_kwargs=histplot_kwargs,
