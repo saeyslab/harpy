@@ -364,6 +364,7 @@ def qc_obs_scatter(
     display_column_y: str | None = None,
     cmap: str | None = None,
     histplot_kwargs: Mapping[str, Any] = MappingProxyType({}),
+    show_regplot: bool = True,
     regplot_kwargs: Mapping[str, Any] = MappingProxyType({}),
 ) -> Axes:
     """
@@ -396,8 +397,10 @@ def qc_obs_scatter(
         Colormap passed to :func:`seaborn.histplot`. If ``None``, seaborn's default is used.
     histplot_kwargs
         Keyword arguments passed to :func:`seaborn.histplot`.
+    show_regplot
+        Whether to overlay :func:`seaborn.regplot`. Enabled by default.
     regplot_kwargs
-        Keyword arguments passed to :func:`seaborn.regplot`.
+        Keyword arguments passed to :func:`seaborn.regplot` when ``show_regplot=True``.
 
     Returns
     -------
@@ -438,11 +441,12 @@ def qc_obs_scatter(
         histplot_kwargs.setdefault("cmap", cmap)
     sns.histplot(x=values[column_x], y=values[column_y], ax=ax, **histplot_kwargs)
 
-    regplot_kwargs = dict(regplot_kwargs)
-    regplot_kwargs.setdefault("scatter", False)
-    regplot_kwargs.setdefault("lowess", True)
-    regplot_kwargs.setdefault("line_kws", {"color": "#1F3B4D", "lw": 1.5})
-    sns.regplot(x=values[column_x], y=values[column_y], ax=ax, **regplot_kwargs)
+    if show_regplot:
+        regplot_kwargs = dict(regplot_kwargs)
+        regplot_kwargs.setdefault("scatter", False)
+        regplot_kwargs.setdefault("lowess", True)
+        regplot_kwargs.setdefault("line_kws", {"color": "#1F3B4D", "lw": 1.5})
+        sns.regplot(x=values[column_x], y=values[column_y], ax=ax, **regplot_kwargs)
 
     if title is not None:
         ax.set_title(title, weight="bold")

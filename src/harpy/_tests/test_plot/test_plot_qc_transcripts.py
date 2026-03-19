@@ -45,3 +45,24 @@ def test_qc_obs_scatter(sdata_transcripts_no_backed, tmp_path):
         fig.savefig(tmp_path / "qc_obs_scatter.png")
     finally:
         plt.close(fig)
+
+
+def test_qc_obs_scatter_without_regplot(sdata_transcripts_no_backed, tmp_path):
+    matplotlib.use("Agg")
+
+    fig, ax = plt.subplots()
+    try:
+        result = hp.pl.qc_obs_scatter(
+            sdata_transcripts_no_backed,
+            table_layer="table_transcriptomics_preprocessed",
+            column_x="shapeSize",
+            column_y="total_counts",
+            ax=ax,
+            show_regplot=False,
+        )
+
+        assert result is ax
+        assert len(ax.lines) == 0
+        fig.savefig(tmp_path / "qc_obs_scatter_without_regplot.png")
+    finally:
+        plt.close(fig)
