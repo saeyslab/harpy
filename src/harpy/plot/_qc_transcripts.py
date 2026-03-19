@@ -14,6 +14,7 @@ from spatialdata import SpatialData
 from harpy.table._table import ProcessTable
 
 _DEFAULT_COLUMN_COLORS = {
+    "log1p_total_counts": "#577590",
     "total_counts": "#4C78A8",
     "n_genes_by_counts": "#F58518",
     "pct_counts_in_top_2_genes": "#54A24B",
