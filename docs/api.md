@@ -163,13 +163,8 @@ Plotting functions.
 
     plot_sdata
     plot_sdata_genes
-    plot_image
-    plot_shapes
-    plot_labels
+    plot_instance_density
     histogram
-    tiling_correction
-    flatfield
-    segment
 ```
 
 ### Proteomics plots
@@ -206,14 +201,11 @@ Plotting functions.
 .. autosummary::
     :toctree: generated
 
-    sanity
+    qc_obs_scatter
+    qc_metric_histogram
+    qc_metrics_histogram
+    plot_transcript_density
     analyse_genes_left_out
-    transcript_density
-    preprocess_transcriptomics
-    cluster
-    score_genes
-    cluster_cleanliness
-    nhood_enrichment
 ```
 
 ## Utils

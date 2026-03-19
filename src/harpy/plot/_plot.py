@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from types import MappingProxyType
@@ -36,6 +37,10 @@ def plot_image(
 ) -> None:
     """
     Plot an image based on given parameters.
+
+    .. deprecated:: 0.3.0
+       `harpy.pl.plot_image` is deprecated and will be removed in 0.4.0.
+       Prefer `harpy.pl.plot_sdata`.
 
     Parameters
     ----------
@@ -85,6 +90,10 @@ def plot_labels(
 ) -> None:
     """
     Plot a labels layer (masks) based on given parameters.
+
+    .. deprecated:: 0.3.0
+       `harpy.pl.plot_labels` is deprecated and will be removed in 0.4.0.
+       Prefer `harpy.pl.plot_sdata`.
 
     Parameters
     ----------
@@ -153,6 +162,10 @@ def plot_shapes(
 ) -> None:
     """
     Plots a SpatialData object.
+
+    .. deprecated:: 0.3.0
+       `harpy.pl.plot_shapes` is deprecated and will be removed in 0.4.0.
+       Prefer `harpy.pl.plot_sdata`.
 
     This function support plotting of a raster (`img_layer` or `labels_layer`), together with a `shapes_layer` respresenting (cell) boundaries.
     These shapes can be colored if a `table_layer` and a `column` is specified.
@@ -447,6 +460,10 @@ def plot(
     """
     Plots a SpatialData object.
 
+    .. deprecated:: 0.3.0
+    `harpy.pl.plot` is deprecated and will be removed in 0.4.0.
+    Prefer `harpy.pl.plot_sdata`.
+
     This function support plotting of a raster (`img_layer` or `labels_layer`), together with a `shapes_layer` respresenting (cell) boundaries.
     These shapes can be colored if a `table_layer` and a `column` is specified.
 
@@ -541,6 +558,10 @@ def plot(
     -----
     The function supports various visualization options such as image layers, shape layers, channels, color mapping, and custom regions.
     """
+    msg = "'harpy.pl.plot' is deprecated and may be removed in a future release. Prefer 'harpy.pl.plot_sdata'."
+    warnings.warn(msg, DeprecationWarning, stacklevel=2)
+    log.warning(msg)
+
     if img_layer is not None and labels_layer is not None:
         raise ValueError(
             "Both img_layer and labels_layer is not None. Please specify either img_layer or labels_layer, not both."
