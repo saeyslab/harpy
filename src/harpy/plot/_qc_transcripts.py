@@ -208,9 +208,9 @@ def qc_metrics_histogram(
     table_layer: str,
     labels_layer: str | Iterable[str] | None = None,
     metrics: Sequence[tuple[Literal["obs", "var"], str]] = (
-        ("obs", "log1p_total_counts"),
         ("obs", "total_counts"),
         ("obs", "n_genes_by_counts"),
+        ("var", "total_counts"),
         ("var", "log1p_total_counts"),
         ("var", "n_cells_by_counts"),
         ("var", "mean_counts"),
