@@ -38,6 +38,10 @@ def plot_image(
     """
     Plot an image based on given parameters.
 
+    .. deprecated:: 0.3.0
+       `harpy.pl.plot_image` is deprecated and will be removed in 0.4.0.
+       Prefer `harpy.pl.plot_sdata`.
+
     Parameters
     ----------
     sdata
@@ -86,6 +90,10 @@ def plot_labels(
 ) -> None:
     """
     Plot a labels layer (masks) based on given parameters.
+
+    .. deprecated:: 0.3.0
+       `harpy.pl.plot_labels` is deprecated and will be removed in 0.4.0.
+       Prefer `harpy.pl.plot_sdata`.
 
     Parameters
     ----------
@@ -154,6 +162,10 @@ def plot_shapes(
 ) -> None:
     """
     Plots a SpatialData object.
+
+    .. deprecated:: 0.3.0
+       `harpy.pl.plot_shapes` is deprecated and will be removed in 0.4.0.
+       Prefer `harpy.pl.plot_sdata`.
 
     This function support plotting of a raster (`img_layer` or `labels_layer`), together with a `shapes_layer` respresenting (cell) boundaries.
     These shapes can be colored if a `table_layer` and a `column` is specified.

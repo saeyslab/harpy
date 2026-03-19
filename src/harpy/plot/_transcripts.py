@@ -185,6 +185,10 @@ def transcript_density(
     """
     Visualize the transcript density layer.
 
+    .. deprecated:: 0.3.0
+       `harpy.pl.transcript_density` is deprecated and will be removed in 0.4.0.
+       Prefer `harpy.pl.plot_sdata`.
+
     This function wraps around the :func:`harpy.pl.plot_shapes` function to showcase transcript density.
 
     Parameters
