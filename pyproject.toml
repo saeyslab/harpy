@@ -4,17 +4,32 @@ requires = [ "hatchling" ]
 
 [project]
 name = "harpy-analysis"
-version = "0.3.4"
-description = "single-cell spatial omics analysis that makes you happy"
+version = "0.3.5"
+description = "single-cell spatial omics analysis that makes you happy."
 readme = "README.md"
 requires-python = ">=3.11,<3.15"
 license = { file = "LICENSE" }
 authors = [
-    { name = "dambi" }
+    { name = "Saeys Lab, VIB spatial catalyst" }
 ]
+
+keywords = [
+    "spatial-omics",
+    "spatial-transcriptomics",
+    "spatial-proteomics",
+    "bioinformatics",
+    "single-cell",
+    "image-analysis",
+    "spatialdata",
+    "anndata",
+    "scanpy",
+    "scverse",
+]
+
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
+    "Intended Audience :: Developers",
     "License :: Other/Proprietary License",
     "Operating System :: OS Independent",
     "Programming Language :: Python",
@@ -24,8 +39,10 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
-    "Topic :: Software Development :: Testing"
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Topic :: Scientific/Engineering :: Image Processing",
 ]
+
 dependencies = [
     "spatialdata>=0.4.0",
     "distributed",
@@ -133,16 +150,15 @@ dev = [
 ]
 
 [project.urls]
-"Bug Tracker" = "https://github.com/saeyslab/harpy/issues"
-"Documentation" = "https://harpy.readthedocs.io/en/latest/"
-"Source Code" = "https://github.com/saeyslab/harpy"
-"User Support" = "https://github.com/saeyslab/harpy/issues"
+Homepage = "https://github.com/saeyslab/harpy"
+Documentation = "https://harpy.readthedocs.io/en/latest/"
+Repository = "https://github.com/saeyslab/harpy"
+Issues = "https://github.com/saeyslab/harpy/issues"
+Changelog = "https://github.com/saeyslab/harpy/releases"
+Paper = "https://doi.org/10.1093/bioinformatics/btag122"
+SaeysLab = "https://saeyslab.sites.vib.be/en"
+VIBSpatialCatalyst = "https://vib.be/en/technologies/technology-portfolio/spatial-catalyst"
 
-[project.scripts]
-harpy = "harpy.single:main"
-
-[project.entry-points."napari.manifest"]
-harpy = "harpy:napari.yaml"
 
 [tool.coverage.run]
 source = ["harpy"]
