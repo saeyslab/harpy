@@ -160,19 +160,20 @@ def qc_metric_histogram(
 
         text_kwargs = dict(median_text_kwargs)
         text_kwargs.setdefault("transform", ax.transAxes)
-        text_kwargs.setdefault("ha", "right")
+        text_kwargs.setdefault("ha", "left")
         text_kwargs.setdefault("va", "top")
         text_kwargs.setdefault("fontsize", 10)
+        text_kwargs.setdefault("family", "monospace")
         text_kwargs.setdefault(
             "bbox",
             {"boxstyle": "round,pad=0.3", "facecolor": "white", "edgecolor": "none", "alpha": 0.8},
         )
-        annotation_text = f"Median: {_format_metric_value(median_value)}"
+        annotation_text = f"{'Median':<6}: {_format_metric_value(median_value)}"
         if show_std:
             std_value = float(values.std())
-            annotation_text += f"\nSD: {_format_metric_value(std_value)}"
+            annotation_text += f"\n{'SD':<6}: {_format_metric_value(std_value)}"
         ax.text(
-            0.98,
+            0.02,
             0.95,
             annotation_text,
             **text_kwargs,
