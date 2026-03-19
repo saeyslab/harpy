@@ -34,6 +34,7 @@ def qc_metric_histogram(
     ax: Axes | None = None,
     bins: int | str = "auto",
     range: tuple[float, float] | None = None,
+    quantile_range: tuple[float, float] | None = None,
     histplot_kwargs: Mapping[str, Any] = MappingProxyType({}),
     median_line_kwargs: Mapping[str, Any] = MappingProxyType({}),
     median_text_kwargs: Mapping[str, Any] = MappingProxyType({}),
@@ -74,6 +75,10 @@ def qc_metric_histogram(
     range
         Lower and upper bounds of the histogram x-axis. Values outside this range are excluded from the plotted
         histogram, but are still included when calculating the median and standard deviation annotations.
+    quantile_range
+        Quantile interval used to derive the histogram x-axis automatically when ``range`` is ``None``.
+        Values outside this interval are excluded from the plotted histogram, but are still included when
+        calculating the median and standard deviation annotations.
     histplot_kwargs
         Keyword arguments passed to :func:`seaborn.histplot`.
     median_line_kwargs
@@ -123,12 +128,22 @@ def qc_metric_histogram(
     values = values.dropna()
     if values.empty:
         raise ValueError(f"Column '{column}' in 'adata.{resolved_dataframe}' does not contain any non-null values.")
+    plot_range = range
+    if plot_range is None and quantile_range is not None:
+        qmin, qmax = quantile_range
+        if not 0 <= qmin <= qmax <= 1:
+            raise ValueError(
+                f"Parameter 'quantile_range' must satisfy 0 <= qmin <= qmax <= 1; received {quantile_range!r}."
+            )
+        lower, upper = values.quantile([qmin, qmax]).to_numpy()
+        plot_range = (float(lower), float(upper))
+
     values_for_plot = values
-    if range is not None:
-        values_for_plot = values[(values >= range[0]) & (values <= range[1])]
+    if plot_range is not None:
+        values_for_plot = values[(values >= plot_range[0]) & (values <= plot_range[1])]
         if values_for_plot.empty:
             raise ValueError(
-                f"No values remaining in column '{column}' after applying range {range!r} for plotting."
+                f"No values remaining in column '{column}' after applying range {plot_range!r} for plotting."
             )
 
     display_name = display_column if display_column is not None else _format_display_name(column)
@@ -145,8 +160,8 @@ def qc_metric_histogram(
     histplot_kwargs.setdefault("color", color if color is not None else _DEFAULT_COLUMN_COLORS.get(column, "#4C78A8"))
     if bins is not None:
         histplot_kwargs.setdefault("bins", bins)
-    if range is not None:
-        histplot_kwargs.setdefault("binrange", range)
+    if plot_range is not None:
+        histplot_kwargs.setdefault("binrange", plot_range)
 
     sns.histplot(values_for_plot, ax=ax, **histplot_kwargs)
 
