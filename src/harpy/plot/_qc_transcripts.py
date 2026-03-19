@@ -32,7 +32,7 @@ def qc_metric_histogram(
     display_column: str | None = None,
     dataframe: Literal["obs", "var", "auto"] = "auto",
     ax: Axes | None = None,
-    bins: int | None = 50,
+    bins: int | str = "auto",
     range: tuple[float, float] | None = None,
     histplot_kwargs: Mapping[str, Any] = MappingProxyType({}),
     median_line_kwargs: Mapping[str, Any] = MappingProxyType({}),
@@ -69,7 +69,8 @@ def qc_metric_histogram(
     ax
         Matplotlib axes to draw on. If ``None``, a new figure and axes are created.
     bins
-        Number of histogram bins. If ``None``, seaborn chooses the bins automatically.
+        Histogram bin specification passed to :func:`seaborn.histplot`.
+        The default ``"auto"`` uses NumPy's automatic bin estimator.
     range
         Lower and upper bounds of the histogram x-axis. Values outside this range are excluded from the plotted
         histogram, but are still included when calculating the median and standard deviation annotations.
