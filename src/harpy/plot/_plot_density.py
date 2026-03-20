@@ -257,8 +257,8 @@ def plot_transcript_density(
 
 def plot_instance_density(
     sdata: SpatialData,
-    labels_layer: str | list[str] | None,
     table_layer: str,
+    labels_layer: str | list[str] | None = None,
     spatial_key: str = _SPATIAL,
     bin_size: float = 100,
     smooth_sigma: float | None = None,
@@ -274,11 +274,11 @@ def plot_instance_density(
     ----------
     sdata
         :class:`~spatialdata.SpatialData` object.
+    table_layer
+        Table layer to plot from ``sdata.tables``.
     labels_layer
         Labels layer(s) used to select the instances from ``table_layer`` via the table region key.
         If ``None``, all observations from ``table_layer`` are used.
-    table_layer
-        Table layer to plot from ``sdata.tables``.
     spatial_key
         Key in ``adata.obsm`` containing instance centroid coordinates.
     bin_size

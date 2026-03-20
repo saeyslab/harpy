@@ -100,6 +100,26 @@ def qc_metric_histogram(
     ylabel
         Y-axis label. If ``None``, a label is chosen based on the selected dataframe.
 
+    Examples
+    --------
+    ```python
+    import harpy as hp
+
+    sdata = hp.datasets.xenium_human_ovarian_cancer(
+        subset=True,
+        processed=True,
+    )
+
+    hp.pl.qc_metric_histogram(
+        sdata,
+        table_layer="table_transcriptomics_preprocessed",
+        labels_layer="nucleus_segmentation_mask",
+        column="total_counts",
+        dataframe="obs",
+        quantile_range=(0.1, 0.99),
+    )
+    ```
+
     Returns
     -------
     :class:`matplotlib.axes.Axes`
@@ -287,6 +307,24 @@ def qc_metrics_histogram(
     show_std
         If ``True``, include the standard deviation in the annotation box.
 
+    Examples
+    --------
+    ```python
+    import harpy as hp
+
+    sdata = hp.datasets.xenium_human_ovarian_cancer(
+        subset=True,
+        processed=True,
+    )
+
+    hp.pl.qc_metrics_histogram(
+        sdata,
+        table_layer="table_transcriptomics_preprocessed",
+        labels_layer="nucleus_segmentation_mask",
+        quantile_range=(0.1, 0.99),
+    )
+    ```
+
     Returns
     -------
     :class:`numpy.ndarray`
@@ -401,6 +439,24 @@ def qc_obs_scatter(
         Whether to overlay :func:`seaborn.regplot`. Enabled by default.
     regplot_kwargs
         Keyword arguments passed to :func:`seaborn.regplot` when ``show_regplot=True``.
+
+    Examples
+    --------
+    ```python
+    import harpy as hp
+
+    sdata = hp.datasets.xenium_human_ovarian_cancer(
+        subset=True,
+        processed=True,
+    )
+
+    hp.pl.qc_obs_scatter(
+        sdata,
+        table_layer="table_transcriptomics_preprocessed",
+        column_x="shapeSize",
+        column_y="total_counts",
+    )
+    ```
 
     Returns
     -------
