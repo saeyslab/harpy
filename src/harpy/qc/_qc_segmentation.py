@@ -16,11 +16,47 @@ from harpy.utils._keys import _CELLSIZE_KEY, _INSTANCE_KEY
 from harpy.utils.utils import _da_unique
 
 
-def qc_segmentation_coverage(
+def segmentation_coverage(
     sdata: SpatialData,
     labels_layer: str,
     microns_per_pixel: float = 1,
 ) -> pd.DataFrame:
+    """
+    Calculate coverage statistics for a segmentation labels layer.
+
+    This function summarizes how much of the image area is covered by labeled pixels and
+    how many segmented instances are present in the selected labels layer.
+
+    Parameters
+    ----------
+    sdata
+        SpatialData object containing the segmentation labels layer.
+    labels_layer
+        Name of the labels layer in ``sdata`` for which coverage statistics are computed.
+    microns_per_pixel
+        Pixel size used to convert areas from pixels to square microns. When set to ``1``,
+        area values are reported in pixels.
+
+    Returns
+    -------
+    pd.DataFrame
+        A one-row dataframe containing the labels layer name, the total number of instances,
+        the total image area, the covered area, and the covered area percentage.
+
+    Examples
+    --------
+    ```python
+    import harpy as hp
+
+    sdata = hp.datasets.pixie_example()
+
+    hp.qc.segmentation_coverage(
+        sdata,
+        labels_layer="label_nuclear_fov0",
+        microns_per_pixel=1,
+    )
+    ```
+    """
     array = get_dataarray(sdata, layer=labels_layer).data
     array = array[None, ...] if array.ndim == 2 else array
 
@@ -43,7 +79,7 @@ def qc_segmentation_coverage(
     )
 
 
-def qc_segmentation_histogram(
+def segmentation_histogram(
     sdata: SpatialData,
     labels_layer: str,
     microns_per_pixel: float = 1,
@@ -59,7 +95,69 @@ def qc_segmentation_histogram(
     show_std: bool = True,
     ylabel: str | None = None,
 ) -> Axes:
+    """
+    Plot a histogram of segmented instance sizes for a labels layer.
 
+    The histogram is computed from per-instance areas extracted from the selected segmentation
+    mask. Areas can be reported either in pixels or in square microns depending on
+    ``microns_per_pixel``.
+
+    Parameters
+    ----------
+    sdata
+        SpatialData object containing the segmentation labels layer.
+    labels_layer
+        Name of the labels layer in ``sdata`` for which instance sizes are visualized.
+    microns_per_pixel
+        Pixel size used to convert areas from pixels to square microns. When set to ``1``,
+        instance sizes are reported in pixels.
+    ax
+        Matplotlib axes to draw on. If ``None``, a new figure and axes are created.
+    bins
+        Histogram bin specification passed to :func:`seaborn.histplot`.
+    histplot_kwargs
+        Keyword arguments passed to :func:`seaborn.histplot`.
+    median_line_kwargs
+        Keyword arguments passed to :meth:`matplotlib.axes.Axes.axvline` for the median guide line.
+    median_text_kwargs
+        Keyword arguments passed to :meth:`matplotlib.axes.Axes.text` for the median annotation.
+    figsize
+        Figure size used when ``ax`` is ``None``.
+    title
+        Plot title. If ``None``, no title is added.
+    color
+        Histogram color. If ``None``, a default color is used.
+    show_median
+        If ``True``, add a dashed median line and annotate the median.
+    show_std
+        If ``True``, include the standard deviation in the annotation box.
+    ylabel
+        Y-axis label. If ``None``, ``"Number of instances"`` is used.
+
+    Returns
+    -------
+    matplotlib.axes.Axes
+        Axes containing the histogram.
+
+    Raises
+    ------
+    ValueError
+        If the selected labels layer does not contain any labeled instances.
+
+    Examples
+    --------
+    ```python
+    import harpy as hp
+
+    sdata = hp.datasets.pixie_example()
+
+    hp.qc.segmentation_histogram(
+        sdata,
+        labels_layer="label_nuclear_fov0",
+        microns_per_pixel=1,
+    )
+    ```
+    """
     array = get_dataarray(sdata, layer=labels_layer).data
     array = array[None, ...] if array.ndim == 2 else array
 

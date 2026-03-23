@@ -26,7 +26,7 @@ _DEFAULT_COLUMN_COLORS = {
 }
 
 
-def qc_metric_histogram(
+def metric_histogram(
     sdata: SpatialData,
     table_layer: str,
     labels_layer: str | Iterable[str] | None = None,
@@ -110,7 +110,7 @@ def qc_metric_histogram(
         processed=True,
     )
 
-    hp.pl.qc_metric_histogram(
+    hp.qc.metric_histogram(
         sdata,
         table_layer="table_transcriptomics_preprocessed",
         labels_layer="nucleus_segmentation_mask",
@@ -224,7 +224,7 @@ def qc_metric_histogram(
     return ax
 
 
-def qc_metrics_histogram(
+def metrics_histogram(
     sdata: SpatialData,
     table_layer: str,
     labels_layer: str | Iterable[str] | None = None,
@@ -269,7 +269,7 @@ def qc_metrics_histogram(
     labels_layer
         Label layer or layers used to subset the selected table via :class:`~harpy.table._table.ProcessTable`.
     metrics
-        Sequence of ``(dataframe, column)`` tuples to plot. Defaults to a standard transcript QC panel.
+        Sequence of ``(dataframe, column)`` tuples to plot. Defaults to a standard transcript QC panel obtained through :func:`scanpy.pp.calculate_qc_metrics`.
     ax
         Array-like collection of axes to draw on. If ``None``, subplot axes are created.
     bins
@@ -317,7 +317,7 @@ def qc_metrics_histogram(
         processed=True,
     )
 
-    hp.pl.qc_metrics_histogram(
+    hp.qc.metrics_histogram(
         sdata,
         table_layer="table_transcriptomics_preprocessed",
         labels_layer="nucleus_segmentation_mask",
@@ -359,7 +359,7 @@ def qc_metrics_histogram(
         )
 
     for axis, (dataframe, column), bins_value in zip(axes_flat[: len(metrics)], metrics, bins_per_metric, strict=True):
-        qc_metric_histogram(
+        metric_histogram(
             sdata=sdata,
             table_layer=table_layer,
             labels_layer=labels_layer,
@@ -389,7 +389,7 @@ def qc_metrics_histogram(
     return axes
 
 
-def qc_obs_scatter(
+def obs_scatter(
     sdata: SpatialData,
     table_layer: str,
     labels_layer: str | Iterable[str] | None = None,
@@ -450,7 +450,7 @@ def qc_obs_scatter(
         processed=True,
     )
 
-    hp.pl.qc_obs_scatter(
+    hp.qc.obs_scatter(
         sdata,
         table_layer="table_transcriptomics_preprocessed",
         column_x="shapeSize",
