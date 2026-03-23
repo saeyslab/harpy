@@ -5,7 +5,7 @@ from ._cluster_intensity import cluster_intensity
 from ._clustering import kmeans, leiden
 from ._enrichment import nhood_enrichment
 from ._preprocess import preprocess_proteomics, preprocess_transcriptomics
-from ._regionprops import add_regionprop_features
+from ._regionprops import add_regionprop_features, add_regionprops
 from ._table import add_table_layer, correct_marker_genes, filter_on_size
 from .cell_clustering._clustering import flowsom
 from .cell_clustering._preprocess import cell_clustering_preprocess
@@ -36,6 +36,7 @@ __all__ = [
     "nhood_enrichment",
     "preprocess_proteomics",
     "preprocess_transcriptomics",
+    "add_regionprops",
     "add_regionprop_features",
     "cluster_cleanliness",
     "score_genes",

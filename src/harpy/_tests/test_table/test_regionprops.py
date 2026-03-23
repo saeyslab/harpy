@@ -3,7 +3,7 @@ import pytest
 from spatialdata.models import TableModel
 
 from harpy.image._image import add_labels_layer
-from harpy.table._regionprops import add_regionprop_features
+from harpy.table._regionprops import add_regionprop_features, add_regionprops
 from harpy.table._table import add_table_layer
 
 ALL_REGIONPROPS = [
@@ -30,10 +30,10 @@ ALL_REGIONPROPS = [
         ["area"],
     ],
 )
-def test_add_regionprop_features(sdata_pixie_intensities, properties_to_calculate):
+def test_add_regionprops(sdata_pixie_intensities, properties_to_calculate):
     table_layer = "table_intensities"
 
-    sdata_pixie_intensities = add_regionprop_features(
+    sdata_pixie_intensities = add_regionprops(
         sdata_pixie_intensities,
         labels_layer=["label_whole_fov0", "label_whole_fov1"],
         table_layer=table_layer,
@@ -61,7 +61,7 @@ def test_add_regionprop_features(sdata_pixie_intensities, properties_to_calculat
 
 # test if ValueErrors raised correctly
 # test case where labels layer not annotated by the table layer
-def test_add_regionprop_features_raises(sdata_pixie_intensities):
+def test_add_regionprops_raises(sdata_pixie_intensities):
     table_layer = "table_intensities"
     labels_layer = "label_whole_fov0"
 
@@ -77,7 +77,7 @@ def test_add_regionprop_features_raises(sdata_pixie_intensities):
         ValueError,
         match=f"labels layer '{labels_layer}_not_annotated' not annotated by table layer '{table_layer}'",
     ):
-        sdata_pixie_intensities = add_regionprop_features(
+        sdata_pixie_intensities = add_regionprops(
             sdata_pixie_intensities,
             labels_layer=f"{labels_layer}_not_annotated",
             table_layer=table_layer,
@@ -91,7 +91,7 @@ def test_add_regionprop_features_raises(sdata_pixie_intensities):
         ValueError,
         match=f"Cell property {property_not_supported} is not supported. Please choose properties from the following list",
     ):
-        sdata_pixie_intensities = add_regionprop_features(
+        sdata_pixie_intensities = add_regionprops(
             sdata_pixie_intensities,
             labels_layer=labels_layer,
             table_layer=table_layer,
@@ -122,7 +122,7 @@ ALL_REGIONPROPS_3D = [
         ["area"],
     ],
 )
-def test_add_regionprop_features_3D(sdata_pixie_intensities, properties_to_calculate):
+def test_add_regionprops_3D(sdata_pixie_intensities, properties_to_calculate):
     table_layer = "table_intensities"
     labels_layer = "label_whole_fov0"
 
@@ -150,7 +150,7 @@ def test_add_regionprop_features_3D(sdata_pixie_intensities, properties_to_calcu
         overwrite=True,
     )
 
-    sdata_pixie_intensities = add_regionprop_features(
+    sdata_pixie_intensities = add_regionprops(
         sdata_pixie_intensities,
         labels_layer=["label_whole_fov0_3D"],
         table_layer=table_layer,
@@ -174,3 +174,7 @@ def test_add_regionprop_features_3D(sdata_pixie_intensities, properties_to_calcu
             )
         else:
             assert _prop in sdata_pixie_intensities[table_layer].obs.columns
+
+
+def test_add_regionprop_features_alias():
+    assert add_regionprop_features is add_regionprops
