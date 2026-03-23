@@ -46,7 +46,7 @@ def analyse_genes_left_out(
     output: str | Path | None = None,
 ) -> pd.DataFrame:
     """
-    Analyse and visualize the proportion of genes that could not be assigned to a cell during allocation step.
+    Analyse and visualize the proportion of genes that could not be assigned to an instance during allocation step.
 
     Parameters
     ----------
@@ -73,6 +73,20 @@ def analyse_genes_left_out(
         The column name representing the gene name in `points_layer`.
     output
         The path to save the generated plots. If None, plots will be shown directly using plt.show().
+
+    Examples
+    --------
+    .. code-block:: python
+
+        import harpy as hp
+
+        sdata = hp.datasets.xenium_human_ovarian_cancer(subset=True)
+        hp.qc.analyse_genes_left_out(
+            sdata,
+            labels_layer="cell_labels_global",
+            points_layer="transcripts_global",
+            table_layer="table_global",
+        )
 
     Returns
     -------
