@@ -1,4 +1,5 @@
 # Custom
+scripts/code_ownership.py
 configs/allocate/*
 configs/annotate/*
 configs/clean/*

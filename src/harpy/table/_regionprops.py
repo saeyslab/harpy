@@ -16,7 +16,7 @@ from harpy.utils._keys import _INSTANCE_KEY
 from harpy.utils.utils import _make_list
 
 
-def add_regionprop_features(
+def add_regionprops(
     sdata: SpatialData,
     labels_layer: str | list[str],
     table_layer: str,
@@ -90,39 +90,41 @@ def add_regionprop_features(
 
     Example
     -------
-    >>> import harpy as hp
-    >>>
-    >>> sdata = hp.datasets.pixie_example()
-    >>>
-    >>> sdata = hp.tb.allocate_intensity(
-    ...     sdata,
-    ...     img_layer="raw_image_fov0",
-    ...     labels_layer="label_whole_fov0",
-    ...     to_coordinate_system="fov0",
-    ...     mode="sum",
-    ...     output_layer="table_intensities",
-    ...     overwrite=True,
-    ... )
-    >>>
-    >>> sdata = hp.tb.allocate_intensity(
-    ...     sdata,
-    ...     img_layer="raw_image_fov1",
-    ...     labels_layer="label_whole_fov1",
-    ...     to_coordinate_system="fov1",
-    ...     mode="sum",
-    ...     output_layer="table_intensities",
-    ...     append=True,
-    ...     overwrite=True,
-    ... )
-    >>>
-    >>> sdata = hp.tb.add_regionprop_features(
-    ...     sdata,
-    ...     labels_layer=["label_whole_fov0", "label_whole_fov1"],
-    ...     table_layer="table_intensities",
-    ...     output_layer="table_intensities",
-    ...     properties=["perimeter", "equivalent_diameter"],
-    ...     overwrite=True,
-    ... )
+    .. code-block:: python
+
+        import harpy as hp
+
+        sdata = hp.datasets.pixie_example()
+
+        sdata = hp.tb.allocate_intensity(
+            sdata,
+            img_layer="raw_image_fov0",
+            labels_layer="label_whole_fov0",
+            to_coordinate_system="fov0",
+            mode="sum",
+            output_layer="table_intensities",
+            overwrite=True,
+        )
+
+        sdata = hp.tb.allocate_intensity(
+            sdata,
+            img_layer="raw_image_fov1",
+            labels_layer="label_whole_fov1",
+            to_coordinate_system="fov1",
+            mode="sum",
+            output_layer="table_intensities",
+            append=True,
+            overwrite=True,
+        )
+
+        sdata = hp.tb.add_regionprops(
+            sdata,
+            labels_layer=["label_whole_fov0", "label_whole_fov1"],
+            table_layer="table_intensities",
+            output_layer="table_intensities",
+            properties=["perimeter", "equivalent_diameter"],
+            overwrite=True,
+        )
     """
     if labels_layer is None:
         labels_layer = sdata[table_layer].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY]
@@ -222,6 +224,9 @@ def add_regionprop_features(
         overwrite=overwrite,
     )
     return sdata
+
+
+add_regionprop_features = add_regionprops
 
 
 def _calculate_regionprop_features(

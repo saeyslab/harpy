@@ -107,6 +107,24 @@ def test_plot_instance_density_returns_input_ax(sdata_instances, tmp_path):
         plt.close(fig)
 
 
+def test_plot_instance_density_uses_all_observations_when_labels_layer_is_none(sdata_instances):
+    fig, ax = plt.subplots()
+    try:
+        result = plot_instance_density(
+            sdata_instances,
+            table_layer="table_instances",
+            spatial_key=_SPATIAL,
+            bin_size=1,
+            ax=ax,
+        )
+
+        assert result is ax
+        assert isinstance(result, Axes)
+        assert ax.images[0].get_array().sum() == 4
+    finally:
+        plt.close(fig)
+
+
 def test_plot_transcript_density_warns_when_computing_many_points(monkeypatch, sdata_transcripts_no_backed):
     # this sets the constant _MAX_POINTS_IN_MEMORY to 1; otherwise we would need to use a points layer with > MAX_POINTS_IN_MEMORY for the unit test
     monkeypatch.setattr("harpy.plot._plot_density._MAX_POINTS_IN_MEMORY", 1)

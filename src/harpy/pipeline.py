@@ -348,7 +348,7 @@ class HarpyPipeline:
             output=self.cfg.paths.polygons,
         )
 
-        harpy.pl.analyse_genes_left_out(
+        harpy.qc.analyse_genes_left_out(
             sdata,
             labels_layer=self.labels_layer_name,
             table_layer=self.cfg.allocate.table_layer_name,

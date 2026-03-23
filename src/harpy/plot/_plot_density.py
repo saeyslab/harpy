@@ -75,8 +75,6 @@ def _plot_density_from_coordinates(
     if colorbar:
         cbar = fig.colorbar(im, ax=ax, shrink=0.75)
         cbar.set_label(label, fontsize=12)
-    ax.set_xlabel("x", fontsize=12)
-    ax.set_ylabel("y", fontsize=12)
     ax.set_aspect("equal")
     ax.invert_yaxis()
 
@@ -93,7 +91,7 @@ def plot_transcript_density(
     genes: str | list[str] | None = None,
     z_plane: int | float | None = None,
     smooth_sigma: float | None = None,
-    cmap: str = "viridis",
+    cmap: str = "cividis",
     frac: float | None = None,
     figsize: tuple = (8, 8),
     crd: tuple[int, int, int, int] | None = None,
@@ -144,6 +142,19 @@ def plot_transcript_density(
     Returns
     -------
     :class:`matplotlib.axes.Axes` object.
+
+    Examples
+    --------
+    >>> import harpy as hp
+    >>> sdata = hp.datasets.xenium_human_ovarian_cancer(
+    ...     subset=True,
+    ... )
+    >>> hp.pl.plot_transcript_density(
+    ...     sdata,
+    ...     points_layer="transcripts_global",
+    ...     to_coordinate_system="global_micron",
+    ...     bin_size=10,
+    ... )
     """
     ddf = sdata.points[points_layer]
     # Dask dataframe operations can drop SpatialData metadata stored in .attrs.
@@ -242,12 +253,12 @@ def plot_transcript_density(
 
 def plot_instance_density(
     sdata: SpatialData,
-    labels_layer: str | list[str] | None,
     table_layer: str,
+    labels_layer: str | list[str] | None = None,
     spatial_key: str = _SPATIAL,
     bin_size: float = 100,
     smooth_sigma: float | None = None,
-    cmap: str = "viridis",
+    cmap: str = "cividis",
     figsize: tuple = (8, 8),
     colorbar: bool = True,
     ax: Axes | None = None,
@@ -259,11 +270,11 @@ def plot_instance_density(
     ----------
     sdata
         :class:`~spatialdata.SpatialData` object.
+    table_layer
+        Table layer to plot from ``sdata.tables``.
     labels_layer
         Labels layer(s) used to select the instances from ``table_layer`` via the table region key.
         If ``None``, all observations from ``table_layer`` are used.
-    table_layer
-        Table layer to plot from ``sdata.tables``.
     spatial_key
         Key in ``adata.obsm`` containing instance centroid coordinates.
     bin_size
@@ -283,6 +294,18 @@ def plot_instance_density(
     Returns
     -------
     :class:`matplotlib.axes.Axes` object.
+
+    Examples
+    --------
+    >>> import harpy as hp
+    >>> sdata = hp.datasets.xenium_human_ovarian_cancer(
+    ...     subset=True,
+    ... )
+    >>> hp.pl.plot_instance_density(
+    ...     sdata,
+    ...     labels_layer="cell_labels_global",
+    ...     table_layer="table_global",
+    ... )
     """
     process_table = ProcessTable(sdata, labels_layer=labels_layer, table_layer=table_layer)
     adata = sdata.tables[table_layer]

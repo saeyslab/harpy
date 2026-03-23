@@ -4,7 +4,6 @@ from ._cluster_intensity import cluster_intensity_heatmap
 from ._clustering import cluster
 from ._enrichment import nhood_enrichment
 from ._flowsom import pixel_clusters, pixel_clusters_heatmap
-from ._histogram import histogram
 from ._plot import plot, plot_image, plot_labels, plot_shapes
 from ._plot_density import plot_instance_density, plot_transcript_density
 from ._plot_sdata import plot_sdata, plot_sdata_genes
@@ -23,18 +22,10 @@ from ._qc_image import (
     snr_ratio,
     supervenn_of_images,
 )
-from ._qc_segmentation import (
-    calculate_segmentation_coverage,
-    calculate_segments_per_area,
-    segmentation_coverage,
-    segmentation_size_boxplot,
-    segments_per_area,
-)
-from ._qc_transcripts import qc_metric_histogram, qc_metrics_histogram, qc_obs_scatter
 from ._sanity import sanity
 from ._segmentation import segment
 from ._tiling_correction import flatfield, tiling_correction
-from ._transcripts import analyse_genes_left_out, transcript_density
+from ._transcripts import transcript_density
 
 __all__ = [
     "score_genes",
@@ -61,25 +52,15 @@ __all__ = [
     "clustermap",
     "get_hexes",
     "group_snr_ratio",
-    "histogram",
     "make_cols_colors",
     "marker_supervenn",
     "signal_clustermap",
     "snr_clustermap",
     "snr_ratio",
     "supervenn_of_images",
-    "calculate_segmentation_coverage",
-    "calculate_segments_per_area",
-    "segmentation_coverage",
-    "segmentation_size_boxplot",
-    "segments_per_area",
-    "qc_metric_histogram",
-    "qc_metrics_histogram",
-    "qc_obs_scatter",
     "sanity",
     "segment",
     "flatfield",
     "tiling_correction",
-    "analyse_genes_left_out",
     "transcript_density",
 ]

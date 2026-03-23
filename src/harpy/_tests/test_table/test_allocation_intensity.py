@@ -9,7 +9,7 @@ from harpy.image.segmentation._align_masks import align_labels_layers
 from harpy.table._allocation_intensity import (
     allocate_intensity,
 )
-from harpy.table._regionprops import add_regionprop_features
+from harpy.table._regionprops import add_regionprops
 
 
 def test_integration_allocate_intensity(sdata_multi_c_no_backed: SpatialData):
@@ -51,7 +51,7 @@ def test_integration_allocate_intensity(sdata_multi_c_no_backed: SpatialData):
         overwrite=True,
     )
 
-    sdata_multi_c_no_backed = add_regionprop_features(
+    sdata_multi_c_no_backed = add_regionprops(
         sdata_multi_c_no_backed,
         labels_layer=["masks_whole", "masks_nuclear_aligned"],
         table_layer="table_intensities",

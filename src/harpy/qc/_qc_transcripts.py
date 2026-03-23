@@ -1,18 +1,24 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
+from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from loguru import logger as log
 from matplotlib.axes import Axes
+from scipy.stats import pearsonr
 from spatialdata import SpatialData
+from spatialdata.models import TableModel
 
+from harpy.image._image import _get_boundary, _get_spatial_element
 from harpy.table._table import ProcessTable
-from harpy.utils._keys import _CELLSIZE_KEY
+from harpy.utils._keys import _CELLSIZE_KEY, _GENES_KEY, _RAW_COUNTS_KEY
+from harpy.utils._transformations import _identity_check_transformations_points
 
 _DEFAULT_COLUMN_COLORS = {
     "log1p_total_counts": "#577590",
@@ -25,8 +31,165 @@ _DEFAULT_COLUMN_COLORS = {
     "pct_dropout_by_counts": "#FF9DA6",
 }
 
+_T = TypeVar("_T")
 
-def qc_metric_histogram(
+
+def analyse_genes_left_out(
+    sdata: SpatialData,
+    labels_layer: str,
+    table_layer: str,
+    points_layer: str = "transcripts",
+    to_coordinate_system: str = "global",
+    name_x: str = "x",
+    name_y: str = "y",
+    name_gene_column: str = _GENES_KEY,
+    output: str | Path | None = None,
+) -> pd.DataFrame:
+    """
+    Analyse and visualize the proportion of genes that could not be assigned to an instance during allocation step.
+
+    Parameters
+    ----------
+    sdata
+        Data containing spatial information for plotting.
+    labels_layer
+        The layer in `sdata` that contains the segmentation masks.
+        This layer is used to calculate the crd (region of interest) that was used in the segmentation step,
+        otherwise transcript counts in `points_layer` of `sdata` (containing all transcripts)
+        and the counts obtained via `sdata.tables[ table_layer ]` are not comparable.
+        It is also used to select the cells in `sdata.tables[table_layer]` that are linked to this `labels_layer` via the region key.
+    table_layer
+        The table layer in `sdata` on which to perform analysis.
+    points_layer
+        The layer in `sdata` containing transcript information.
+    to_coordinate_system
+        The coordinate system that holds `labels_layer` and `points_layer`.
+        This should be the intrinsic coordinate system in pixels.
+    name_x
+        The column name representing the x-coordinate in `points_layer`.
+    name_y
+        The column name representing the y-coordinate in `points_layer`.
+    name_gene_column
+        The column name representing the gene name in `points_layer`.
+    output
+        The path to save the generated plots. If None, plots will be shown directly using plt.show().
+
+    Returns
+    -------
+    :class:`pandas.DataFrame` containing information about the proportion of transcripts kept for each gene,
+    raw counts (i.e. obtained from `points_layer` of `sdata`), and the log of raw counts.
+
+    Raises
+    ------
+    AttributeError
+        If the provided `sdata` does not contain the necessary attributes (i.e., 'labels' or 'points').
+
+    Notes
+    -----
+    This function produces two plots:
+        - A scatter plot of the log of raw gene counts vs. the proportion of transcripts kept.
+        - A regression plot for the same data with Pearson correlation coefficients.
+
+    The function also prints the ten genes with the highest proportion of transcripts filtered out.
+
+    See Also
+    --------
+    harpy.tb.allocate
+
+    Examples
+    --------
+    .. code-block:: python
+
+        import harpy as hp
+
+        sdata = hp.datasets.xenium_human_ovarian_cancer(subset=True)
+        hp.qc.analyse_genes_left_out(
+            sdata,
+            labels_layer="cell_labels_global",
+            points_layer="transcripts_global",
+            table_layer="table_global",
+        )
+    """
+    if not hasattr(sdata, "labels"):
+        raise AttributeError(
+            "Provided SpatialData object does not have the attribute 'labels', please run segmentation step before using this function."
+        )
+
+    if not hasattr(sdata, "points"):
+        raise AttributeError(
+            "Provided SpatialData object does not have the attribute 'points', please run allocation step before using this function."
+        )
+
+    if not np.issubdtype(sdata.tables[table_layer].X.dtype, np.integer):
+        log.warning(
+            f"The count matrix of the provided table layer '{table_layer}', seems to be of type '{sdata.tables[table_layer].X.dtype}', "
+            "which could indicate that the analysis is being run on normalized counts, "
+            "please consider running this analysis before the counts in the AnnData object "
+            "are normalized (i.e. on the raw counts)."
+        )
+
+    if labels_layer not in [*sdata.labels]:
+        raise ValueError(f"labels_layer '{labels_layer}' is not a labels layer in `sdata`.")
+
+    se = _get_spatial_element(sdata, layer=labels_layer)
+    crd = _get_boundary(se, to_coordinate_system=to_coordinate_system)
+
+    region_key = sdata.tables[table_layer].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]
+    adata = sdata.tables[table_layer][sdata.tables[table_layer].obs[region_key] == labels_layer]
+
+    ddf = sdata.points[points_layer]
+    _identity_check_transformations_points(ddf, to_coordinate_system=to_coordinate_system)
+    ddf = ddf.query(f"{crd[0]} <= {name_x} < {crd[1]} and {crd[2]} <= {name_y} < {crd[3]}")
+
+    _raw_counts = ddf.groupby(name_gene_column, observed=True).size().compute()
+    missing_indices = adata.var.index.difference(_raw_counts.index)
+
+    if not missing_indices.empty:
+        raise ValueError(
+            f"There are genes found in '.var' of table layer '{table_layer}' that are not found in the points layer '{points_layer}'. Please verify that allocation '(harpy.tb.allocation)' is performed using the correct points layer."
+        )
+
+    raw_counts = _raw_counts[adata.var.index]
+
+    filtered = pd.DataFrame(np.array(adata.X.sum(axis=0)).flatten() / raw_counts)
+    filtered = filtered.rename(columns={0: "proportion_kept"})
+    filtered[_RAW_COUNTS_KEY] = raw_counts
+    filtered[f"log_{_RAW_COUNTS_KEY}"] = np.log(filtered[_RAW_COUNTS_KEY])
+
+    sns.scatterplot(data=filtered, y="proportion_kept", x=f"log_{_RAW_COUNTS_KEY}")
+    plt.axvline(filtered[f"log_{_RAW_COUNTS_KEY}"].median(), color="green", linestyle="dashed")
+    plt.axhline(filtered["proportion_kept"].median(), color="red", linestyle="dashed")
+    plt.xlim(left=-0.5, right=filtered[f"log_{_RAW_COUNTS_KEY}"].quantile(0.99))
+
+    if output:
+        plt.savefig(f"{output}_0", bbox_inches="tight")
+    else:
+        plt.show()
+    plt.close()
+
+    r, p = pearsonr(filtered[f"log_{_RAW_COUNTS_KEY}"], filtered["proportion_kept"])
+    sns.regplot(x=f"log_{_RAW_COUNTS_KEY}", y="proportion_kept", data=filtered)
+    ax = plt.gca()
+    ax.text(0.7, 0.9, f"r={r:.2f}, p={p:.2g}", transform=ax.transAxes)
+    plt.axvline(filtered[f"log_{_RAW_COUNTS_KEY}"].median(), color="green", linestyle="dashed")
+    plt.axhline(filtered["proportion_kept"].median(), color="red", linestyle="dashed")
+
+    if output:
+        plt.savefig(f"{output}_1", bbox_inches="tight")
+    else:
+        plt.show()
+    plt.close()
+
+    log.info(
+        f"The ten genes with the highest proportion of transcripts filtered out in the "
+        f"region of interest ([x_min,x_max,y_min,y_max]={crd}):\n"
+        f"{filtered.sort_values(by='proportion_kept').iloc[0:10, 0:2]}"
+    )
+
+    return filtered
+
+
+def metric_histogram(
     sdata: SpatialData,
     table_layer: str,
     labels_layer: str | Iterable[str] | None = None,
@@ -102,8 +265,27 @@ def qc_metric_histogram(
 
     Returns
     -------
-    :class:`matplotlib.axes.Axes`
-        Axes containing the histogram.
+    :class:`matplotlib.axes.Axes` containing the histogram.
+
+    Examples
+    --------
+    .. code-block:: python
+
+        import harpy as hp
+
+        sdata = hp.datasets.xenium_human_ovarian_cancer(
+            subset=True,
+            processed=True,
+        )
+
+        hp.qc.metric_histogram(
+            sdata,
+            table_layer="table_transcriptomics_preprocessed",
+            labels_layer="nucleus_segmentation_mask",
+            column="total_counts",
+            dataframe="obs",
+            quantile_range=(0.1, 0.99),
+        )
     """
     process_table = ProcessTable(sdata, labels_layer=labels_layer, table_layer=table_layer)
     adata = sdata.tables[table_layer]
@@ -204,7 +386,7 @@ def qc_metric_histogram(
     return ax
 
 
-def qc_metrics_histogram(
+def metrics_histogram(
     sdata: SpatialData,
     table_layer: str,
     labels_layer: str | Iterable[str] | None = None,
@@ -230,7 +412,8 @@ def qc_metrics_histogram(
     sharex: bool = False,
     sharey: bool = False,
     title: str | None = None,
-    color: str | None = None,
+    display_column: str | Sequence[str | None] | None = None,
+    color: str | Sequence[str] | None = None,
     show_median: bool = True,
     show_std: bool = True,
 ) -> np.ndarray:
@@ -249,7 +432,7 @@ def qc_metrics_histogram(
     labels_layer
         Label layer or layers used to subset the selected table via :class:`~harpy.table._table.ProcessTable`.
     metrics
-        Sequence of ``(dataframe, column)`` tuples to plot. Defaults to a standard transcript QC panel.
+        Sequence of ``(dataframe, column)`` tuples to plot. Defaults to a standard transcript QC panel obtained through :func:`scanpy.pp.calculate_qc_metrics`.
     ax
         Array-like collection of axes to draw on. If ``None``, subplot axes are created.
     bins
@@ -280,8 +463,13 @@ def qc_metrics_histogram(
         Whether to share y-axes across subplots when ``ax`` is ``None``.
     title
         Figure title applied when ``ax`` is ``None``.
+    display_column
+        Display name override for the plotted metrics. If a single string is provided, it is applied to all panels.
+        If a sequence is provided, it must match the length of ``metrics`` and each value is applied to the
+        corresponding panel. Entries set to ``None`` fall back to a readable label derived from the metric name.
     color
-        Histogram color override applied to all panels.
+        Histogram color override. If a single string is provided, it is applied to all panels. If a sequence is
+        provided, it must match the length of ``metrics`` and each value is applied to the corresponding panel.
     show_median
         If ``True``, add a dashed median line and annotate the median.
     show_std
@@ -289,8 +477,25 @@ def qc_metrics_histogram(
 
     Returns
     -------
-    :class:`numpy.ndarray`
-        Array of axes containing the histograms.
+    :class:`numpy.ndarray` containing the histogram axes.
+
+    Examples
+    --------
+    .. code-block:: python
+
+        import harpy as hp
+
+        sdata = hp.datasets.xenium_human_ovarian_cancer(
+            subset=True,
+            processed=True,
+        )
+
+        hp.qc.metrics_histogram(
+            sdata,
+            table_layer="table_transcriptomics_preprocessed",
+            labels_layer="nucleus_segmentation_mask",
+            quantile_range=(0.1, 0.99),
+        )
     """
     if len(metrics) == 0:
         raise ValueError("Parameter 'metrics' must contain at least one (dataframe, column) tuple.")
@@ -303,6 +508,17 @@ def qc_metrics_histogram(
             )
     else:
         bins_per_metric = [bins] * len(metrics)
+
+    display_columns_per_metric = _expand_per_metric_option(
+        display_column,
+        n_metrics=len(metrics),
+        parameter_name="display_column",
+    )
+    colors_per_metric = _expand_per_metric_option(
+        color,
+        n_metrics=len(metrics),
+        parameter_name="color",
+    )
 
     if ax is None:
         nrows = int(np.ceil(len(metrics) / ncols))
@@ -320,13 +536,21 @@ def qc_metrics_histogram(
             f"Received {len(axes_flat)} axes for {len(metrics)} metrics. Please provide enough axes or set 'ax=None'."
         )
 
-    for axis, (dataframe, column), bins_value in zip(axes_flat[: len(metrics)], metrics, bins_per_metric, strict=True):
-        qc_metric_histogram(
+    for axis, (dataframe, column), bins_value, display_column_value, color_value in zip(
+        axes_flat[: len(metrics)],
+        metrics,
+        bins_per_metric,
+        display_columns_per_metric,
+        colors_per_metric,
+        strict=True,
+    ):
+        metric_histogram(
             sdata=sdata,
             table_layer=table_layer,
             labels_layer=labels_layer,
             column=column,
             dataframe=dataframe,
+            display_column=display_column_value,
             ax=axis,
             bins=bins_value,
             range=range,
@@ -334,7 +558,7 @@ def qc_metrics_histogram(
             histplot_kwargs=histplot_kwargs,
             median_line_kwargs=median_line_kwargs,
             median_text_kwargs=median_text_kwargs,
-            color=color,
+            color=color_value,
             show_median=show_median,
             show_std=show_std,
         )
@@ -351,7 +575,7 @@ def qc_metrics_histogram(
     return axes
 
 
-def qc_obs_scatter(
+def obs_scatter(
     sdata: SpatialData,
     table_layer: str,
     labels_layer: str | Iterable[str] | None = None,
@@ -404,8 +628,25 @@ def qc_obs_scatter(
 
     Returns
     -------
-    :class:`matplotlib.axes.Axes`
-        Axes containing the relationship plot.
+    :class:`matplotlib.axes.Axes` containing the relationship plot.
+
+    Examples
+    --------
+    .. code-block:: python
+
+        import harpy as hp
+
+        sdata = hp.datasets.xenium_human_ovarian_cancer(
+            subset=True,
+            processed=True,
+        )
+
+        hp.qc.obs_scatter(
+            sdata,
+            table_layer="table_transcriptomics_preprocessed",
+            column_x="shapeSize",
+            column_y="total_counts",
+        )
     """
     process_table = ProcessTable(sdata, labels_layer=labels_layer, table_layer=table_layer)
     adata = sdata.tables[table_layer]
@@ -454,6 +695,22 @@ def qc_obs_scatter(
     ax.set_ylabel(y_label)
     _style_qc_axis(ax)
     return ax
+
+
+def _expand_per_metric_option(
+    value: _T | Sequence[_T] | None,
+    *,
+    n_metrics: int,
+    parameter_name: str,
+) -> list[_T | None]:
+    if isinstance(value, Sequence) and not isinstance(value, str):
+        values = list(value)
+        if len(values) != n_metrics:
+            raise ValueError(
+                f"Parameter '{parameter_name}' has length {len(values)}, but 'metrics' has length {n_metrics}."
+            )
+        return values
+    return [value] * n_metrics
 
 
 def _resolve_dataframe(adata, column: str, dataframe: Literal["obs", "var", "auto"]) -> Literal["obs", "var"]:

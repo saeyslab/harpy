@@ -14,7 +14,7 @@ from spatialdata._types import ArrayLike
 from spatialdata.models import Image2DModel, Labels2DModel, PointsModel, TableModel
 from spatialdata.transformations import Identity
 
-from harpy.table import add_regionprop_features
+from harpy.table import add_regionprops
 from harpy.utils._keys import _CELL_INDEX, _INSTANCE_KEY, _REGION_KEY
 
 
@@ -130,7 +130,7 @@ def cluster_blobs(
         tables={table_name: table} if table_name is not None else None,
     )
     if table_name is not None:
-        add_regionprop_features(
+        add_regionprops(
             sdata,
             labels_layer=labels_name,
             table_layer=table_name,

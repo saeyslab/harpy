@@ -45,6 +45,7 @@ from harpy import datasets  # noqa: E402
 from harpy import image as im  # noqa: E402
 from harpy import plot as pl  # noqa: E402
 from harpy import points as pt  # noqa: E402
+from harpy import qc  # noqa: E402
 from harpy import shape as sh  # noqa: E402
 from harpy import table as tb  # noqa: E402
 # isort: on
@@ -56,6 +57,7 @@ __all__ = [
     "im",
     "pl",
     "pt",
+    "qc",
     "sh",
     "tb",
     "__version__",
