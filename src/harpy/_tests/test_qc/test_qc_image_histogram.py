@@ -3,13 +3,13 @@ import os
 import matplotlib
 import matplotlib.pyplot as plt
 
-from harpy.plot._histogram import histogram
+from harpy.qc._qc_image_histogram import image_histogram
 
 
-def test_plot_histogram(sdata_blobs, tmp_path):
+def test_image_histogram(sdata_blobs, tmp_path):
     matplotlib.use("Agg")
 
-    histogram(
+    image_histogram(
         sdata_blobs,
         img_layer="blobs_image",
         channel="lineage_1",
@@ -24,7 +24,7 @@ def test_plot_histogram(sdata_blobs, tmp_path):
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
-    histogram(
+    image_histogram(
         sdata_blobs,
         img_layer="blobs_image",
         channel="lineage_2",
@@ -34,7 +34,7 @@ def test_plot_histogram(sdata_blobs, tmp_path):
         bar_kwargs={"ahlpa": 0.1, "color": "red"},
     )
 
-    histogram(
+    image_histogram(
         sdata_blobs,
         img_layer="blobs_image",
         channel="lineage_3",
@@ -47,12 +47,12 @@ def test_plot_histogram(sdata_blobs, tmp_path):
     fig.savefig(os.path.join(tmp_path, "histogram_2_3"))
 
 
-def test_plot_histogram_ecdf_and_guides(sdata_blobs, tmp_path):
+def test_image_histogram_ecdf_and_guides(sdata_blobs, tmp_path):
     matplotlib.use("Agg")
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
-    histogram(
+    image_histogram(
         sdata_blobs,
         img_layer="blobs_image",
         channel="lineage_1",
@@ -64,7 +64,7 @@ def test_plot_histogram_ecdf_and_guides(sdata_blobs, tmp_path):
         percentile_lines=[0.1, 99.9],
     )
 
-    histogram(
+    image_histogram(
         sdata_blobs,
         img_layer="blobs_image",
         channel="lineage_2",
@@ -78,10 +78,10 @@ def test_plot_histogram_ecdf_and_guides(sdata_blobs, tmp_path):
     fig.savefig(os.path.join(tmp_path, "histogram_ecdf"))
 
 
-def test_plot_histogram_multiple_channels(sdata_blobs, tmp_path):
+def test_image_histogram_multiple_channels(sdata_blobs, tmp_path):
     matplotlib.use("Agg")
 
-    axes = histogram(
+    axes = image_histogram(
         sdata_blobs,
         img_layer="blobs_image",
         channel=["lineage_1", 2, "lineage_3"],
@@ -96,10 +96,10 @@ def test_plot_histogram_multiple_channels(sdata_blobs, tmp_path):
     assert axes.ravel()[0].get_title() == "lineage_1"
 
 
-def test_plot_histogram_scale_parameter(sdata, tmp_path):
+def test_image_histogram_scale_parameter(sdata, tmp_path):
     matplotlib.use("Agg")
 
-    histogram(
+    image_histogram(
         sdata,
         img_layer="blobs_multiscale_image",
         channel=0,

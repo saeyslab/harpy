@@ -18,7 +18,7 @@ from xarray import DataTree
 from harpy.image._image import get_dataarray
 
 
-def histogram(
+def image_histogram(
     sdata: SpatialData,
     img_layer: str,
     channel: str | int | Sequence[str | int],
@@ -118,7 +118,7 @@ def histogram(
 
         sdata = hp.datasets.pixie_example()
 
-        ax = hp.pl.histogram(
+        ax = hp.qc.image_histogram(
             sdata,
             img_layer="raw_image_fov0",
             channel=hp.im.get_dataarray(sdata, layer="raw_image_fov0").c.data,
