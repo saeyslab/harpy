@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 from spatialdata import SpatialData
 
 from harpy.plot import plot_shapes

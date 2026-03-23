@@ -168,7 +168,6 @@ Quality control functions.
     obs_scatter
 ```
 
-
 ## Plotting
 
 Plotting functions.
