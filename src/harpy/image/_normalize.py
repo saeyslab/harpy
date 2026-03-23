@@ -16,8 +16,8 @@ def normalize(
     sdata: SpatialData,
     img_layer: str,
     output_layer: str,
-    q_min: float | list[float] = 5.0,
-    q_max: float | list[float] = 95.0,
+    p_min: float | list[float] = 5.0,
+    p_max: float | list[float] = 95.0,
     eps: float = 1e-20,
     internal_method: str = "tdigest",
     scale_factors: ScaleFactors_t | None = None,
@@ -26,7 +26,7 @@ def normalize(
     """
     Normalize the intensity of an image layer in a SpatialData object using specified percentiles.
 
-    The normalization can be applied globally or individually to each channel, depending on whether `q_min` and `q_max`
+    The normalization can be applied globally or individually to each channel, depending on whether `p_min` and `p_max`
     are provided as single values or as lists. This allows for flexible intensity scaling across multiple channels.
 
     Parameters
@@ -37,10 +37,10 @@ def normalize(
         The image layer in `sdata` to normalize.
     output_layer
         The name of the output layer where the normalized image will be stored.
-    q_min
+    p_min
         The lower percentile for normalization. If provided as a list, the length
         must match the number of channels.
-    q_max
+    p_max
         The upper percentile for normalization. If provided as a list, the length
         must match the number of channels.
     eps : float, optional
@@ -59,30 +59,30 @@ def normalize(
     Raises
     ------
     ValueError
-        If `q_min` and `q_max` are provided as lists and their lengths do not match the number of channels.
+        If `p_min` and `p_max` are provided as lists and their lengths do not match the number of channels.
 
     Examples
     --------
     Normalize using a single percentile range for all channels:
 
-    >>> sdata = normalize(sdata, img_layer='my_image', output_layer='normalized_image', q_min=5, q_max=95)
+    >>> sdata = normalize(sdata, img_layer='my_image', output_layer='normalized_image', p_min=5, p_max=95)
 
     Normalize using different percentile ranges for each channel:
 
-    >>> sdata = normalize(sdata, img_layer='my_image', output_layer='normalized_image', q_min=[5, 10, 15], q_max=[95, 90, 85])
+    >>> sdata = normalize(sdata, img_layer='my_image', output_layer='normalized_image', p_min=[5, 10, 15], p_max=[95, 90, 85])
     """
     se = _get_spatial_element(sdata, img_layer)
 
-    # if q_min is Iterable, we apply q_min, q_max normalization to each channel individually
-    if isinstance(q_min, Iterable):
-        if not isinstance(q_max, Iterable):
-            raise ValueError("'q_min' must be an iterable if `q_max` is an iterable.")
-        assert len(q_min) == len(q_max) == len(se.c.data), (
-            f"If 'q_min' and 'q_max' is provided as a list, it should match the number of channels in '{se}' ({len(se.c.data)})"
+    # if p_min is Iterable, we apply p_min, p_max normalization to each channel individually
+    if isinstance(p_min, Iterable):
+        if not isinstance(p_max, Iterable):
+            raise ValueError("'p_min' must be an iterable if `p_max` is an iterable.")
+        assert len(p_min) == len(p_max) == len(se.c.data), (
+            f"If 'p_min' and 'p_max' is provided as a list, it should match the number of channels in '{se}' ({len(se.c.data)})"
         )
         fn_kwargs = {
-            key: {"q_min": q_min_value, "q_max": q_max_value, "eps": eps, "internal_method": internal_method}
-            for (key, q_min_value, q_max_value) in zip(se.c.data, q_min, q_max, strict=True)
+            key: {"p_min": p_min_value, "p_max": p_max_value, "eps": eps, "internal_method": internal_method}
+            for (key, p_min_value, p_max_value) in zip(se.c.data, p_min, p_max, strict=True)
         }
         sdata = map_image(
             sdata,
@@ -96,7 +96,7 @@ def normalize(
         )
 
     else:
-        arr = _normalize(se.data, q_min=q_min, q_max=q_max, eps=eps, internal_method=internal_method)
+        arr = _normalize(se.data, p_min=p_min, p_max=p_max, eps=eps, internal_method=internal_method)
         sdata = add_image_layer(
             sdata,
             arr=arr,
@@ -111,10 +111,10 @@ def normalize(
 
 
 def _normalize(
-    arr: da.Array, q_min: float, q_max: float, eps: float = 1e-20, internal_method: str = "tdigest", dtype=np.float32
+    arr: da.Array, p_min: float, p_max: float, eps: float = 1e-20, internal_method: str = "tdigest", dtype=np.float32
 ) -> da.Array:
-    mi = _nonzero_nonnan_percentile(arr, q=q_min, internal_method=internal_method, dtype=dtype)
-    ma = _nonzero_nonnan_percentile(arr, q=q_max, internal_method=internal_method, dtype=dtype)
+    mi = _nonzero_nonnan_percentile(arr, q=p_min, internal_method=internal_method, dtype=dtype)
+    ma = _nonzero_nonnan_percentile(arr, q=p_max, internal_method=internal_method, dtype=dtype)
     eps = da.asarray(eps, dtype=dtype)
 
     arr = (arr - mi) / (ma - mi + eps)
