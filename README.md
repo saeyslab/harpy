@@ -20,8 +20,8 @@
 [![codecov](https://codecov.io/gh/saeyslab/harpy/branch/main/graph/badge.svg)](https://codecov.io/gh/saeyslab/harpy)
 [![License](https://img.shields.io/badge/license-Academic%20Non--commercial-blue)](./LICENSE)
 ![GitHub repo size](https://img.shields.io/github/repo-size/saeyslab/harpy)
-[![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
-[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![Zenodo](https://zenodo.org/badge/DOI/10.5281/zenodo.19106220.svg)](https://zenodo.org/records/19106220)
+[![DOI](https://img.shields.io/badge/DOI-10.1093%2Fbioinformatics%2Fbtag122-blue)](https://doi.org/10.1093/bioinformatics/btag122)
 
 </div>
 
