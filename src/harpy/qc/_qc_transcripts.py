@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from types import MappingProxyType
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -24,6 +24,8 @@ _DEFAULT_COLUMN_COLORS = {
     "mean_counts": "#B279A2",
     "pct_dropout_by_counts": "#FF9DA6",
 }
+
+_T = TypeVar("_T")
 
 
 def metric_histogram(
@@ -250,7 +252,8 @@ def metrics_histogram(
     sharex: bool = False,
     sharey: bool = False,
     title: str | None = None,
-    color: str | None = None,
+    display_column: str | Sequence[str | None] | None = None,
+    color: str | Sequence[str] | None = None,
     show_median: bool = True,
     show_std: bool = True,
 ) -> np.ndarray:
@@ -300,8 +303,13 @@ def metrics_histogram(
         Whether to share y-axes across subplots when ``ax`` is ``None``.
     title
         Figure title applied when ``ax`` is ``None``.
+    display_column
+        Display name override for the plotted metrics. If a single string is provided, it is applied to all panels.
+        If a sequence is provided, it must match the length of ``metrics`` and each value is applied to the
+        corresponding panel. Entries set to ``None`` fall back to a readable label derived from the metric name.
     color
-        Histogram color override applied to all panels.
+        Histogram color override. If a single string is provided, it is applied to all panels. If a sequence is
+        provided, it must match the length of ``metrics`` and each value is applied to the corresponding panel.
     show_median
         If ``True``, add a dashed median line and annotate the median.
     show_std
@@ -342,6 +350,17 @@ def metrics_histogram(
     else:
         bins_per_metric = [bins] * len(metrics)
 
+    display_columns_per_metric = _expand_per_metric_option(
+        display_column,
+        n_metrics=len(metrics),
+        parameter_name="display_column",
+    )
+    colors_per_metric = _expand_per_metric_option(
+        color,
+        n_metrics=len(metrics),
+        parameter_name="color",
+    )
+
     if ax is None:
         nrows = int(np.ceil(len(metrics) / ncols))
         if figsize is None:
@@ -358,13 +377,21 @@ def metrics_histogram(
             f"Received {len(axes_flat)} axes for {len(metrics)} metrics. Please provide enough axes or set 'ax=None'."
         )
 
-    for axis, (dataframe, column), bins_value in zip(axes_flat[: len(metrics)], metrics, bins_per_metric, strict=True):
+    for axis, (dataframe, column), bins_value, display_column_value, color_value in zip(
+        axes_flat[: len(metrics)],
+        metrics,
+        bins_per_metric,
+        display_columns_per_metric,
+        colors_per_metric,
+        strict=True,
+    ):
         metric_histogram(
             sdata=sdata,
             table_layer=table_layer,
             labels_layer=labels_layer,
             column=column,
             dataframe=dataframe,
+            display_column=display_column_value,
             ax=axis,
             bins=bins_value,
             range=range,
@@ -372,7 +399,7 @@ def metrics_histogram(
             histplot_kwargs=histplot_kwargs,
             median_line_kwargs=median_line_kwargs,
             median_text_kwargs=median_text_kwargs,
-            color=color,
+            color=color_value,
             show_median=show_median,
             show_std=show_std,
         )
@@ -510,6 +537,22 @@ def obs_scatter(
     ax.set_ylabel(y_label)
     _style_qc_axis(ax)
     return ax
+
+
+def _expand_per_metric_option(
+    value: _T | Sequence[_T] | None,
+    *,
+    n_metrics: int,
+    parameter_name: str,
+) -> list[_T | None]:
+    if isinstance(value, Sequence) and not isinstance(value, str):
+        values = list(value)
+        if len(values) != n_metrics:
+            raise ValueError(
+                f"Parameter '{parameter_name}' has length {len(values)}, but 'metrics' has length {n_metrics}."
+            )
+        return values
+    return [value] * n_metrics
 
 
 def _resolve_dataframe(adata, column: str, dataframe: Literal["obs", "var", "auto"]) -> Literal["obs", "var"]:
