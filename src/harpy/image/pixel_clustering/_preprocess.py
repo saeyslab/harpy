@@ -24,9 +24,9 @@ def pixel_clustering_preprocess(
     img_layer: str | Iterable[str],
     output_layer: str | Iterable[str],
     channels: int | str | Iterable[int] | Iterable[str] | None = None,
-    q: float | None = 99,
-    q_sum: float | None = 5,
-    q_post: float = 99.9,
+    p: float | None = 99,
+    p_sum: float | None = 5,
+    p_post: float = 99.9,
     sigma: float | Iterable[float] | None = 2,
     norm_sum: bool = True,
     cap_max: float | None = None,
@@ -37,7 +37,7 @@ def pixel_clustering_preprocess(
     overwrite: bool = False,
 ) -> SpatialData:
     """
-    Preprocess image layers specified in `img_layer`. Normalizes and blurs the images based on various quantile and gaussian blur parameters. The results are added to `sdata` as specified in `output_layer`.
+    Preprocess image layers specified in `img_layer`. Normalizes and blurs the images based on various percentile and gaussian blur parameters. The results are added to `sdata` as specified in `output_layer`.
 
     Preprocessing function specifically designed for preprocessing images before using `harpy.im.flowsom`.
 
@@ -51,14 +51,14 @@ def pixel_clustering_preprocess(
         The preprocessed images are saved under this layer in `sdata`.
     channels
         Specifies the channels to be included in the processing.
-    q
-        Quantile used for normalization. If specified, pixel values are normalized by this quantile across the specified channels.
-        Each channel is normalized by its own calculated quantile.
-    q_sum
-        If the sum of the channel values at a pixel is below this quantile, the pixel values across all channels are set to NaN.
-    q_post
-        Quantile used for normalization after other preprocessing steps (`q`, `q_sum`, `norm_sum` normalization and Gaussian blurring) are performed. If specified, pixel values are normalized by this quantile across the specified channels.
-        Each channel is normalized by its own calculated quantile.
+    p
+        Percentile used for normalization. If specified, pixel values are normalized by this percentile across the specified channels.
+        Each channel is normalized by its own calculated percentile.
+    p_sum
+        If the sum of the channel values at a pixel is below this percentile, the pixel values across all channels are set to NaN.
+    p_post
+        Percentile used for normalization after other preprocessing steps (`p`, `p_sum`, `norm_sum` normalization and Gaussian blurring) are performed. If specified, pixel values are normalized by this percentile across the specified channels.
+        Each channel is normalized by its own calculated percentile.
     sigma
         Gaussian blur parameter for each channel. Use `0` to omit blurring for specific channels or `None` to skip blurring altogether.
     norm_sum
@@ -78,15 +78,15 @@ def pixel_clustering_preprocess(
         Ignored if `sdata` is not backed by a zarr store, or if there is only one element in `img_layer`.
     cast_dtype
         Image data in `img_layer` will be casted to `dtype` before preprocessing starts. If set to None, and input image is of integer type, normalizations will lead to
-        data of type `numpy.float64` due to quantile normalizations, leading to increased memory usage.
+        data of type `numpy.float64` due to percentile normalizations, leading to increased memory usage.
     overwrite
         If `True`, overwrites existing data in `output_layer`.
 
     Notes
     -----
     To avoid data leakage:
-     - in the single fov case (one image layer provided), to prevent data leakage between channels, one should set `q_sum=None` and `norm_sum=False`, the only normalization that will be performed will then be a division by the `q` and `q_post` quantile values per channel.
-     - in the multiple fov case (multiple image layers provided), both `q_sum`, `norm_sum`, `q` and `q_post` should be set to None to prevent data leakage both between channels and between images.
+     - in the single fov case (one image layer provided), to prevent data leakage between channels, one should set `p_sum=None` and `norm_sum=False`, the only normalization that will be performed will then be a division by the `p` and `p_post` percentile values per channel.
+     - in the multiple fov case (multiple image layers provided), both `p_sum`, `norm_sum`, `p` and `p_post` should be set to None to prevent data leakage both between channels and between images.
 
     Returns
     -------
@@ -97,7 +97,7 @@ def pixel_clustering_preprocess(
     harpy.im.flowsom : flowsom pixel clustering on image layers.
 
     """
-    # setting q_sum =None, and norm_sum=False -> then there will be no data leakage in single fov case.
+    # setting p_sum=None, and norm_sum=False prevents data leakage in the single-fov case.
     img_layer = list(img_layer) if isinstance(img_layer, Iterable) and not isinstance(img_layer, str) else [img_layer]
     output_layer = (
         list(output_layer)
@@ -140,11 +140,11 @@ def pixel_clustering_preprocess(
             arr = arr.astype(cast_dtype)
         _arr_list.append(arr)
 
-    if q is not None:
+    if p is not None:
         results_arr_percentile = []
         for _arr in _arr_list:
             # 1) calculate percentiles (excluding nan and 0 from calculation)
-            arr_percentile = _nonzero_nonnan_percentile_axis_0(_arr, q=q, dtype=_arr.dtype)
+            arr_percentile = _nonzero_nonnan_percentile_axis_0(_arr, q=p, dtype=_arr.dtype)
             results_arr_percentile.append(arr_percentile)
         arr_percentile = da.stack(results_arr_percentile, axis=0)
         arr_percentile_mean = da.mean(arr_percentile, axis=0)  # mean over all images
@@ -153,7 +153,7 @@ def pixel_clustering_preprocess(
 
     # 2) calculate norm sum percentile for img_layer
     # now normalize by percentile (percentile for each channel separate)
-    if q is not None:
+    if p is not None:
         for i in range(len(_arr_list)):
             _arr_list[i] = _arr_list[i] / da.asarray(arr_percentile_mean[..., None, None, None])
 
@@ -161,14 +161,14 @@ def pixel_clustering_preprocess(
     _arr_sum_list = []
     for _arr in _arr_list:
         _arr_sum_list.append(da.sum(_arr, axis=0))
-    # norm_sum_percentile = da.percentile(arr_norm_sum.flatten(), q=q_norm_sum)
+    # norm_sum_percentile = da.percentile(arr_norm_sum.flatten(), q=p_sum)
     # in ark_analysis, np.quantile is used, which uses 0's for quantile computation, so equivalent would be da.percentile, not sure if we should also use it instead of _nonzeropercentile
-    if q_sum is not None:
+    if p_sum is not None:
         results_norm_sum_percentile = []
         for _arr_sum in _arr_sum_list:
             # using da.percentile reproduces exactly results of ark, but nonzero_nonnan feels like a better choice (i.e. case where there is a lot of zero in image)
-            # norm_sum_percentile = da.percentile(_arr_sum.flatten(), q=q_sum)
-            norm_sum_percentile = _nonzero_nonnan_percentile(_arr_sum, q=q_sum, dtype=_arr_sum.dtype)
+            # norm_sum_percentile = da.percentile(_arr_sum.flatten(), q=p_sum)
+            norm_sum_percentile = _nonzero_nonnan_percentile(_arr_sum, q=p_sum, dtype=_arr_sum.dtype)
             results_norm_sum_percentile.append(norm_sum_percentile)
         # pixel_thresh_val in ark analysis, if multiple images, we take average over all norm_sum_percentile for all images, and we use that value later on.
         norm_sum_percentile = da.stack(results_norm_sum_percentile, axis=0)
@@ -198,7 +198,7 @@ def pixel_clustering_preprocess(
 
         # 4) normalize
         # set pixel values for which sum over all channels are below norm_sum_percentile to NaN
-        if q_sum is not None:
+        if p_sum is not None:
             _arr_list[i] = da.where(_arr_sum_list[i] > norm_sum_percentile, _arr_list[i], np.nan)
         if norm_sum:
             # recompute the sum (previous step puts all pixel positions below threshold to nan), discard the nans for the sum
@@ -206,20 +206,20 @@ def pixel_clustering_preprocess(
             # for each pixel position, divide by its sum over all channels, if sum is 0 (i.e. if all channels give zero at this pixel position, set it to nan)
             _arr_list[i] = da.where(_arr_sum > 0, _arr_list[i] / _arr_sum, np.nan)
 
-        if q_post is not None:
+        if p_post is not None:
             arr_percentile_post_norm = _nonzero_nonnan_percentile_axis_0(
-                _arr_list[i], q=q_post, dtype=_arr_list[i].dtype
+                _arr_list[i], q=p_post, dtype=_arr_list[i].dtype
             )
             results_arr_percentile_post_norm.append(arr_percentile_post_norm)
 
-    if q_post is not None:
+    if p_post is not None:
         arr_percentile_post_norm = da.stack(results_arr_percentile_post_norm, axis=0)
         arr_percentile_post_norm_mean = da.mean(
             arr_percentile_post_norm, axis=0
         )  # arr_percentil_post_mean is of shape (#n_channels,)
 
     # Now normalize each image layer by arr_percentile_post_norm and add to spatialdata object
-    if q_post is not None:
+    if p_post is not None:
         for i in range(len(_arr_list)):
             _arr_list[i] = _arr_list[i] / da.asarray(arr_percentile_post_norm_mean[..., None, None, None])
 
