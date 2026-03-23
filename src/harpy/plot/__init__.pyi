@@ -25,7 +25,7 @@ from ._qc_image import (
 from ._sanity import sanity
 from ._segmentation import segment
 from ._tiling_correction import flatfield, tiling_correction
-from ._transcripts import analyse_genes_left_out, transcript_density
+from ._transcripts import transcript_density
 
 __all__ = [
     "score_genes",
@@ -62,6 +62,5 @@ __all__ = [
     "segment",
     "flatfield",
     "tiling_correction",
-    "analyse_genes_left_out",
     "transcript_density",
 ]

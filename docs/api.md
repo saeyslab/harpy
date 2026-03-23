@@ -162,6 +162,7 @@ Quality control functions.
     image_histogram
     segmentation_coverage
     segmentation_histogram
+    analyse_genes_left_out
     metric_histogram
     metrics_histogram
     obs_scatter
@@ -218,7 +219,6 @@ Plotting functions.
     :toctree: generated
 
     plot_transcript_density
-    analyse_genes_left_out
 ```
 
 ## Utils
