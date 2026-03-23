@@ -102,23 +102,23 @@ def metric_histogram(
 
     Examples
     --------
-    ```python
-    import harpy as hp
+    .. code-block:: python
 
-    sdata = hp.datasets.xenium_human_ovarian_cancer(
-        subset=True,
-        processed=True,
-    )
+        import harpy as hp
 
-    hp.qc.metric_histogram(
-        sdata,
-        table_layer="table_transcriptomics_preprocessed",
-        labels_layer="nucleus_segmentation_mask",
-        column="total_counts",
-        dataframe="obs",
-        quantile_range=(0.1, 0.99),
-    )
-    ```
+        sdata = hp.datasets.xenium_human_ovarian_cancer(
+            subset=True,
+            processed=True,
+        )
+
+        hp.qc.metric_histogram(
+            sdata,
+            table_layer="table_transcriptomics_preprocessed",
+            labels_layer="nucleus_segmentation_mask",
+            column="total_counts",
+            dataframe="obs",
+            quantile_range=(0.1, 0.99),
+        )
 
     Returns
     -------
@@ -309,21 +309,21 @@ def metrics_histogram(
 
     Examples
     --------
-    ```python
-    import harpy as hp
+    .. code-block:: python
 
-    sdata = hp.datasets.xenium_human_ovarian_cancer(
-        subset=True,
-        processed=True,
-    )
+        import harpy as hp
 
-    hp.qc.metrics_histogram(
-        sdata,
-        table_layer="table_transcriptomics_preprocessed",
-        labels_layer="nucleus_segmentation_mask",
-        quantile_range=(0.1, 0.99),
-    )
-    ```
+        sdata = hp.datasets.xenium_human_ovarian_cancer(
+            subset=True,
+            processed=True,
+        )
+
+        hp.qc.metrics_histogram(
+            sdata,
+            table_layer="table_transcriptomics_preprocessed",
+            labels_layer="nucleus_segmentation_mask",
+            quantile_range=(0.1, 0.99),
+        )
 
     Returns
     -------
@@ -442,21 +442,21 @@ def obs_scatter(
 
     Examples
     --------
-    ```python
-    import harpy as hp
+    .. code-block:: python
 
-    sdata = hp.datasets.xenium_human_ovarian_cancer(
-        subset=True,
-        processed=True,
-    )
+        import harpy as hp
 
-    hp.qc.obs_scatter(
-        sdata,
-        table_layer="table_transcriptomics_preprocessed",
-        column_x="shapeSize",
-        column_y="total_counts",
-    )
-    ```
+        sdata = hp.datasets.xenium_human_ovarian_cancer(
+            subset=True,
+            processed=True,
+        )
+
+        hp.qc.obs_scatter(
+            sdata,
+            table_layer="table_transcriptomics_preprocessed",
+            column_x="shapeSize",
+            column_y="total_counts",
+        )
 
     Returns
     -------

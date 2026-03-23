@@ -45,17 +45,17 @@ def segmentation_coverage(
 
     Examples
     --------
-    ```python
-    import harpy as hp
+    .. code-block:: python
 
-    sdata = hp.datasets.pixie_example()
+        import harpy as hp
 
-    hp.qc.segmentation_coverage(
-        sdata,
-        labels_layer="label_nuclear_fov0",
-        microns_per_pixel=1,
-    )
-    ```
+        sdata = hp.datasets.pixie_example()
+
+        hp.qc.segmentation_coverage(
+            sdata,
+            labels_layer="label_nuclear_fov0",
+            microns_per_pixel=1,
+        )
     """
     array = get_dataarray(sdata, layer=labels_layer).data
     array = array[None, ...] if array.ndim == 2 else array
@@ -146,17 +146,17 @@ def segmentation_histogram(
 
     Examples
     --------
-    ```python
-    import harpy as hp
+    .. code-block:: python
 
-    sdata = hp.datasets.pixie_example()
+        import harpy as hp
 
-    hp.qc.segmentation_histogram(
-        sdata,
-        labels_layer="label_nuclear_fov0",
-        microns_per_pixel=1,
-    )
-    ```
+        sdata = hp.datasets.pixie_example()
+
+        hp.qc.segmentation_histogram(
+            sdata,
+            labels_layer="label_nuclear_fov0",
+            microns_per_pixel=1,
+        )
     """
     array = get_dataarray(sdata, layer=labels_layer).data
     array = array[None, ...] if array.ndim == 2 else array
