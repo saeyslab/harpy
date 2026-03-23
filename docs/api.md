@@ -147,6 +147,27 @@ Operations on points (`Dask` `DataFrame` object) layers.
     pt.add_points_layer
 ```
 
+## Quality Control
+
+Quality control functions.
+
+```{eval-rst}
+
+.. module:: harpy.qc
+.. currentmodule:: harpy.qc
+
+.. autosummary::
+    :toctree: generated
+
+    image_histogram
+    segmentation_coverage
+    segmentation_histogram
+    metric_histogram
+    metrics_histogram
+    obs_scatter
+```
+
+
 ## Plotting
 
 Plotting functions.
@@ -164,7 +185,6 @@ Plotting functions.
     plot_sdata
     plot_sdata_genes
     plot_instance_density
-    histogram
 ```
 
 ### Proteomics plots
@@ -186,10 +206,6 @@ Plotting functions.
     snr_clustermap
     signal_clustermap
     clustermap
-
-    segmentation_coverage
-    segmentation_size_boxplot
-    segments_per_area
 ```
 
 ### Transcriptomics plots
@@ -201,9 +217,6 @@ Plotting functions.
 .. autosummary::
     :toctree: generated
 
-    qc_obs_scatter
-    qc_metric_histogram
-    qc_metrics_histogram
     plot_transcript_density
     analyse_genes_left_out
 ```
