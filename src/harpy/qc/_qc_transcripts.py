@@ -74,23 +74,9 @@ def analyse_genes_left_out(
     output
         The path to save the generated plots. If None, plots will be shown directly using plt.show().
 
-    Examples
-    --------
-    .. code-block:: python
-
-        import harpy as hp
-
-        sdata = hp.datasets.xenium_human_ovarian_cancer(subset=True)
-        hp.qc.analyse_genes_left_out(
-            sdata,
-            labels_layer="cell_labels_global",
-            points_layer="transcripts_global",
-            table_layer="table_global",
-        )
-
     Returns
     -------
-    A :class:`pandas.DataFrame` containing information about the proportion of transcripts kept for each gene,
+    :class:`pandas.DataFrame` containing information about the proportion of transcripts kept for each gene,
     raw counts (i.e. obtained from `points_layer` of `sdata`), and the log of raw counts.
 
     Raises
@@ -109,6 +95,20 @@ def analyse_genes_left_out(
     See Also
     --------
     harpy.tb.allocate
+
+    Examples
+    --------
+    .. code-block:: python
+
+        import harpy as hp
+
+        sdata = hp.datasets.xenium_human_ovarian_cancer(subset=True)
+        hp.qc.analyse_genes_left_out(
+            sdata,
+            labels_layer="cell_labels_global",
+            points_layer="transcripts_global",
+            table_layer="table_global",
+        )
     """
     if not hasattr(sdata, "labels"):
         raise AttributeError(
@@ -263,6 +263,10 @@ def metric_histogram(
     ylabel
         Y-axis label. If ``None``, a label is chosen based on the selected dataframe.
 
+    Returns
+    -------
+    :class:`matplotlib.axes.Axes` containing the histogram.
+
     Examples
     --------
     .. code-block:: python
@@ -282,11 +286,6 @@ def metric_histogram(
             dataframe="obs",
             quantile_range=(0.1, 0.99),
         )
-
-    Returns
-    -------
-    :class:`matplotlib.axes.Axes`
-        Axes containing the histogram.
     """
     process_table = ProcessTable(sdata, labels_layer=labels_layer, table_layer=table_layer)
     adata = sdata.tables[table_layer]
@@ -476,6 +475,10 @@ def metrics_histogram(
     show_std
         If ``True``, include the standard deviation in the annotation box.
 
+    Returns
+    -------
+    :class:`numpy.ndarray` containing the histogram axes.
+
     Examples
     --------
     .. code-block:: python
@@ -493,11 +496,6 @@ def metrics_histogram(
             labels_layer="nucleus_segmentation_mask",
             quantile_range=(0.1, 0.99),
         )
-
-    Returns
-    -------
-    :class:`numpy.ndarray`
-        Array of axes containing the histograms.
     """
     if len(metrics) == 0:
         raise ValueError("Parameter 'metrics' must contain at least one (dataframe, column) tuple.")
@@ -628,6 +626,10 @@ def obs_scatter(
     regplot_kwargs
         Keyword arguments passed to :func:`seaborn.regplot` when ``show_regplot=True``.
 
+    Returns
+    -------
+    :class:`matplotlib.axes.Axes` containing the relationship plot.
+
     Examples
     --------
     .. code-block:: python
@@ -645,11 +647,6 @@ def obs_scatter(
             column_x="shapeSize",
             column_y="total_counts",
         )
-
-    Returns
-    -------
-    :class:`matplotlib.axes.Axes`
-        Axes containing the relationship plot.
     """
     process_table = ProcessTable(sdata, labels_layer=labels_layer, table_layer=table_layer)
     adata = sdata.tables[table_layer]

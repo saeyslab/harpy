@@ -39,9 +39,8 @@ def segmentation_coverage(
 
     Returns
     -------
-    pd.DataFrame
-        A one-row dataframe containing the labels layer name, the total number of instances,
-        the total image area, the covered area, and the covered area percentage.
+    :class:`pandas.DataFrame` containing the labels layer name, the total number of instances,
+    the total image area, the covered area, and the covered area percentage.
 
     Examples
     --------
@@ -136,8 +135,7 @@ def segmentation_histogram(
 
     Returns
     -------
-    matplotlib.axes.Axes
-        Axes containing the histogram.
+    :class:`matplotlib.axes.Axes` containing the histogram.
 
     Raises
     ------

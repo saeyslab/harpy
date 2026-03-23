@@ -145,20 +145,16 @@ def plot_transcript_density(
 
     Examples
     --------
-    ```python
-    import harpy as hp
-
-    sdata = hp.datasets.xenium_human_ovarian_cancer(
-        subset=True,
-    )
-
-    hp.pl.plot_transcript_density(
-        sdata,
-        points_layer="transcripts_global",
-        to_coordinate_system="global_micron",
-        bin_size=10,  # bin size in micron
-    )
-    ```
+    >>> import harpy as hp
+    >>> sdata = hp.datasets.xenium_human_ovarian_cancer(
+    ...     subset=True,
+    ... )
+    >>> hp.pl.plot_transcript_density(
+    ...     sdata,
+    ...     points_layer="transcripts_global",
+    ...     to_coordinate_system="global_micron",
+    ...     bin_size=10,
+    ... )
     """
     ddf = sdata.points[points_layer]
     # Dask dataframe operations can drop SpatialData metadata stored in .attrs.
@@ -301,19 +297,15 @@ def plot_instance_density(
 
     Examples
     --------
-    ```python
-    import harpy as hp
-
-    sdata = hp.datasets.xenium_human_ovarian_cancer(
-        subset=True,
-    )
-
-    hp.pl.plot_instance_density(
-        sdata,
-        labels_layer="cell_labels_global",
-        table_layer="table_global",
-    )
-    ```
+    >>> import harpy as hp
+    >>> sdata = hp.datasets.xenium_human_ovarian_cancer(
+    ...     subset=True,
+    ... )
+    >>> hp.pl.plot_instance_density(
+    ...     sdata,
+    ...     labels_layer="cell_labels_global",
+    ...     table_layer="table_global",
+    ... )
     """
     process_table = ProcessTable(sdata, labels_layer=labels_layer, table_layer=table_layer)
     adata = sdata.tables[table_layer]
