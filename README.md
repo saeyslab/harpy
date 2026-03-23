@@ -21,7 +21,7 @@
 [![License](https://img.shields.io/badge/license-Academic%20Non--commercial-blue)](./LICENSE)
 ![GitHub repo size](https://img.shields.io/github/repo-size/saeyslab/harpy)
 [![Zenodo](https://zenodo.org/badge/DOI/10.5281/zenodo.19106220.svg)](https://zenodo.org/records/19106220)
-[![DOI](https://img.shields.io/badge/DOI-10.1093%2Fbioinformatics%2Fbtag122-blue)](https://doi.org/10.1093/bioinformatics/btag122)
+[![Paper](https://img.shields.io/badge/Paper-Bioinformatics%20btag122-blue)](https://doi.org/10.1093/bioinformatics/btag122)
 
 </div>
 
