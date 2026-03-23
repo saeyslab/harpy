@@ -18,10 +18,10 @@
 [![documentation badge](https://readthedocs.org/projects/harpy/badge/?version=latest)](https://harpy.readthedocs.io/en/latest/)
 [![Test Status](https://github.com/saeyslab/harpy/actions/workflows/run_tests.yml/badge.svg)](https://github.com/saeyslab/harpy/actions/)
 [![codecov](https://codecov.io/gh/saeyslab/harpy/branch/main/graph/badge.svg)](https://codecov.io/gh/saeyslab/harpy)
-[![License](https://img.shields.io/badge/license-Academic%20Non--commercial-2e8b57)](./LICENSE)
-![GitHub repo size](https://img.shields.io/github/repo-size/saeyslab/harpy?color=9aa0a6)
+[![License](https://img.shields.io/badge/license-Academic%20Non--commercial-blue)](./LICENSE)
+![GitHub repo size](https://img.shields.io/github/repo-size/saeyslab/harpy)
 [![Zenodo](https://zenodo.org/badge/DOI/10.5281/zenodo.19106220.svg)](https://zenodo.org/records/19106220)
-[![Paper](https://img.shields.io/badge/Paper-Bioinformatics%20btag122-c46b2a)](https://doi.org/10.1093/bioinformatics/btag122)
+[![Paper](https://img.shields.io/badge/Paper-Bioinformatics%20btag122-blue)](https://doi.org/10.1093/bioinformatics/btag122)
 
 </div>
 
