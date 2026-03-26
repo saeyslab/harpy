@@ -13,14 +13,16 @@
 <div align="center">
 
 [![PyPI](https://img.shields.io/pypi/v/harpy-analysis.svg)](https://pypi.org/project/harpy-analysis)
-[![Downloads](https://static.pepy.tech/badge/harpy-analysis)](https://pepy.tech/project/harpy-analysis)
+[![Release Status](https://github.com/saeyslab/harpy/actions/workflows/release.yaml/badge.svg)](https://github.com/saeyslab/harpy/actions/workflows/release.yaml)
 [![Build Status](https://github.com/saeyslab/harpy/actions/workflows/build.yaml/badge.svg)](https://github.com/saeyslab/harpy/actions/)
-[![documentation badge](https://readthedocs.org/projects/harpy/badge/?version=latest)](https://harpy.readthedocs.io/en/latest/)
 [![Test Status](https://github.com/saeyslab/harpy/actions/workflows/run_tests.yml/badge.svg)](https://github.com/saeyslab/harpy/actions/)
+[![pre-commit.ci status](https://results.pre-commit.ci/badge/github/saeyslab/harpy/main.svg)](https://results.pre-commit.ci/latest/github/saeyslab/harpy/main)
+[![documentation badge](https://readthedocs.org/projects/harpy/badge/?version=latest)](https://harpy.readthedocs.io/en/latest/)
 [![codecov](https://codecov.io/gh/saeyslab/harpy/branch/main/graph/badge.svg)](https://codecov.io/gh/saeyslab/harpy)
+[![Downloads](https://static.pepy.tech/badge/harpy-analysis)](https://pepy.tech/project/harpy-analysis)
 [![License](https://img.shields.io/badge/license-Academic%20Non--commercial-blue)](./LICENSE)
 ![GitHub repo size](https://img.shields.io/github/repo-size/saeyslab/harpy)
-[![Zenodo](https://zenodo.org/badge/latestdoi/763481288.svg)](https://zenodo.org/badge/latestdoi/763481288)
+[![Zenodo](https://zenodo.org/badge/763481288.svg)](https://zenodo.org/badge/latestdoi/763481288)
 [![Paper](https://img.shields.io/badge/Paper-Bioinformatics%20btag122-blue)](https://doi.org/10.1093/bioinformatics/btag122)
 
 </div>
