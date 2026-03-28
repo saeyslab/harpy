@@ -134,7 +134,7 @@ def nhood_kmeans(
     labels_full[mask_valid] = kmeans.labels_
     adata.obs[key_added] = pd.Categorical(labels_full)
 
-    # TODO -> clean up
+    # TODO -> clean up -> do we need to keep all of this data?
     adata.uns[key_added] = {
         "instance_type_key": instance_type_key,
         "connectivity_key": adata.uns[composition_key]["connectivity_key"],

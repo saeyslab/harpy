@@ -50,8 +50,8 @@ def _compute_nhood_composition(
             f"Connectivity matrix '{resolved_connectivity_key}' in `adata.obsp` must be sparse and support `.tocsr()`."
         )
 
-    cell_types = adata.obs[instance_type_key].astype("category")
-    if cell_types.isna().any():
+    instance_types = adata.obs[instance_type_key].astype("category")
+    if instance_types.isna().any():
         raise ValueError(
             f"Instance type key '{instance_type_key}' contains missing values. "
             "Please assign all cells to a category before calculating neighborhood composition."
@@ -64,7 +64,7 @@ def _compute_nhood_composition(
         )
 
     connectivities = connectivities.tocsr()
-    onehot = pd.get_dummies(cell_types, sparse=True)
+    onehot = pd.get_dummies(instance_types, sparse=True)
     onehot_mat = onehot.sparse.to_coo().tocsr()
 
     counts = connectivities.dot(onehot_mat)
@@ -80,7 +80,7 @@ def _compute_nhood_composition(
     adata.uns[composition_key] = {
         "instance_type_key": instance_type_key,
         "connectivity_key": resolved_connectivity_key,
-        "columns": _to_fixed_unicode_array(cell_types.cat.categories.to_list()),
+        "columns": _to_fixed_unicode_array(instance_types.cat.categories.to_list()),
     }
 
     return fractions, neigh_totals
