@@ -26,7 +26,7 @@ def _resolve_connectivity_key(adata: AnnData, connectivity_key: str) -> str:
 
 def _compute_nhood_composition(
     adata: AnnData,
-    cell_type_column: str,
+    instance_type_key: str,
     connectivity_key: str = "spatial_connectivities",
     composition_key: str = "nhood_composition",  # TODO -> clean up
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -36,9 +36,9 @@ def _compute_nhood_composition(
     The resulting dense matrix is stored in `adata.obsm[composition_key]`, while
     the associated metadata is stored in `adata.uns[composition_key]`.
     """
-    if cell_type_column not in adata.obs.columns:
+    if instance_type_key not in adata.obs.columns:
         raise KeyError(
-            f"Cell type column '{cell_type_column}' not found in `adata.obs`. "
+            f"Instance type key '{instance_type_key}' not found in `adata.obs`. "
             f"Available columns: {adata.obs.columns.to_list()}."
         )
 
@@ -50,10 +50,10 @@ def _compute_nhood_composition(
             f"Connectivity matrix '{resolved_connectivity_key}' in `adata.obsp` must be sparse and support `.tocsr()`."
         )
 
-    cell_types = adata.obs[cell_type_column].astype("category")
+    cell_types = adata.obs[instance_type_key].astype("category")
     if cell_types.isna().any():
         raise ValueError(
-            f"Cell type column '{cell_type_column}' contains missing values. "
+            f"Instance type key '{instance_type_key}' contains missing values. "
             "Please assign all cells to a category before calculating neighborhood composition."
         )
 
@@ -78,7 +78,7 @@ def _compute_nhood_composition(
 
     adata.obsm[composition_key] = fractions
     adata.uns[composition_key] = {
-        "cell_type_column": cell_type_column,
+        "instance_type_key": instance_type_key,
         "connectivity_key": resolved_connectivity_key,
         "columns": _to_fixed_unicode_array(cell_types.cat.categories.to_list()),
     }

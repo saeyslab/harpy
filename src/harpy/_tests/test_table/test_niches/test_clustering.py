@@ -26,7 +26,7 @@ def test_nhood_kmeans(sdata_transcripts_no_backed):
         labels_layer="segmentation_mask",
         table_layer=table_layer,
         output_layer=output_layer,
-        cell_type_column=_ANNOTATION_KEY,
+        instance_type_key=_ANNOTATION_KEY,
         connectivity_key="radius_test",
         n_clusters=2,
         overwrite=True,
@@ -42,7 +42,7 @@ def test_nhood_kmeans(sdata_transcripts_no_backed):
     assert np.allclose(result.obsm["nhood_composition"][0], [0.0, 1.0])
     assert np.allclose(result.obsm["nhood_composition"][1], [1.0, 0.0])
 
-    assert result.uns["nhood_composition"]["cell_type_column"] == _ANNOTATION_KEY
+    assert result.uns["nhood_composition"]["instance_type_key"] == _ANNOTATION_KEY
     assert result.uns["nhood_composition"]["connectivity_key"] == "radius_test_connectivities"
     assert result.uns["nhood_composition"]["columns"].tolist() == ["even", "odd"]
 
@@ -65,10 +65,10 @@ def test_nhood_kmeans_labels_isolated_cells(sdata_transcripts_no_backed):
         labels_layer="segmentation_mask",
         table_layer=table_layer,
         output_layer=output_layer,
-        cell_type_column=_ANNOTATION_KEY,
+        instance_type_key=_ANNOTATION_KEY,
         connectivity_key="manual_connectivities",
         composition_key="manual_nhood_composition",
-        output_column="manual_nhood_kmeans",
+        key_added="manual_nhood_kmeans",
         n_clusters=2,
         nan_label="isolated",
         overwrite=True,
@@ -91,7 +91,7 @@ def test_nhood_kmeans_requires_existing_connectivity_key(sdata_transcripts_no_ba
             labels_layer="segmentation_mask",
             table_layer="table_transcriptomics",
             output_layer="table_transcriptomics_niches",
-            cell_type_column=_ANNOTATION_KEY,
+            instance_type_key=_ANNOTATION_KEY,
             connectivity_key="missing_graph",
             overwrite=True,
         )

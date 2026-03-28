@@ -19,11 +19,11 @@ def nhood_kmeans(
     sdata: SpatialData,
     table_layer: str,
     output_layer: str,
-    cell_type_column: str = _ANNOTATION_KEY,
+    instance_type_key: str = _ANNOTATION_KEY,
     labels_layer: str | Iterable[str] | None = None,
     connectivity_key: str = "spatial_connectivities",
     composition_key: str = "nhood_composition",
-    output_column: str = "nhood_kmeans",
+    key_added: str = "nhood_kmeans",
     n_clusters: int = 5,
     random_state: int = 100,
     nan_label: int | str | None = -1,
@@ -48,23 +48,37 @@ def nhood_kmeans(
     output_layer
         The output table layer in `sdata` to which the updated table layer will
         be written.
-    cell_type_column
-        Column in `adata.obs` containing the cell type annotations used to build
+    instance_type_key
+        Key in `adata.obs` containing the instance type annotations used to build
         the neighborhood composition.
     labels_layer
         Optional labels layer or layers used to subset the table before
         clustering. If provided, only observations linked to these labels layers
         are considered.
     connectivity_key
-        Key pointing to the connectivity matrix in `adata.obsp`. If the exact
-        key is not found, `{connectivity_key}_connectivities` is tried as a
-        convenience for graphs created with `squidpy.gr.spatial_neighbors(...,
-        key_added=...)`.
+        Key pointing to the cell-cell connectivity matrix in `adata.obsp`,
+        with shape `(n_cells, n_cells)`. If the exact key is not found,
+        `{connectivity_key}_connectivities` is tried as a convenience for
+        graphs created with `squidpy.gr.spatial_neighbors(..., key_added=...)`.
     composition_key
-        Key used to store the computed neighborhood composition matrix in
-        `adata.obsm` and its metadata in `adata.uns`.
-    output_column
-        Column in `adata.obs` where the niche labels are written. # TODO -> better name
+        Key used to store the computed neighborhood composition. The dense
+        neighborhood-fraction matrix is written to
+        `adata.obsm[composition_key]` with shape `(n_cells, n_instance_types)`,
+        where each row contains, for one cell, the fraction of neighbors that
+        belong to each category in `instance_type_key`. Related metadata is stored
+        under `adata.uns[composition_key]`, including the instance type key that
+        was used, the resolved connectivity key from `adata.obsp`,
+        and the ordered instance type labels corresponding to the columns of
+        `adata.obsm[composition_key]`. Using the same `composition_key` in both
+        places keeps the feature matrix and its column definitions linked and
+        makes it easier to reuse the computed neighborhood features in
+        downstream analyses. For example, `adata.obsm[composition_key]` could
+        look like `[[0.75, 0.25, 0.00], [0.00, 0.50, 0.50]]`, meaning that the
+        first cell has neighbors composed of 75% of the first cell type and 25%
+        of the second, while `adata.uns[composition_key]["columns"]` would store
+        the ordered labels for those columns.
+    key_added
+        Key in `adata.obs` where the niche labels are written.
     n_clusters
         Number of KMeans clusters to compute.
     random_state
@@ -83,12 +97,12 @@ def nhood_kmeans(
     process_table_instance = ProcessTable(sdata, labels_layer=labels_layer, table_layer=table_layer)
     adata = process_table_instance._get_adata()
 
-    if output_column in adata.obs.columns:
-        log.warning(f"The column '{output_column}' already exists in the AnnData object. Proceeding to overwrite it.")
+    if key_added in adata.obs.columns:
+        log.warning(f"The column '{key_added}' already exists in the AnnData object. Proceeding to overwrite it.")
 
     fractions, neigh_totals = _compute_nhood_composition(
         adata,
-        cell_type_column=cell_type_column,
+        instance_type_key=instance_type_key,
         connectivity_key=connectivity_key,
         composition_key=composition_key,
     )
@@ -118,11 +132,11 @@ def nhood_kmeans(
 
     labels_full = np.full(adata.shape[0], nan_label, dtype=object)
     labels_full[mask_valid] = kmeans.labels_
-    adata.obs[output_column] = pd.Categorical(labels_full)
+    adata.obs[key_added] = pd.Categorical(labels_full)
 
     # TODO -> clean up
-    adata.uns[output_column] = {
-        "cell_type_column": cell_type_column,
+    adata.uns[key_added] = {
+        "instance_type_key": instance_type_key,
         "connectivity_key": adata.uns[composition_key]["connectivity_key"],
         "composition_key": composition_key,
         "n_clusters": n_clusters,
