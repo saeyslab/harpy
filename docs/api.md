@@ -124,6 +124,7 @@ Operations on table (`AnnData` object) layers.
     tb.correct_marker_genes
     tb.cluster_cleanliness
     tb.nhood_enrichment
+    tb.nhood_kmeans
     tb.cluster_intensity
     tb.cluster_intensity_SOM
     tb.spatial_pixel_neighbors

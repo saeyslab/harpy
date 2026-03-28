@@ -13,6 +13,7 @@ from .cell_clustering._weighted_channel_expression import weighted_channel_expre
 from .featurization._featurize import extract_instances, featurize
 from .featurization._vit_mae import train_autoencoder
 from .featurization._zarr_iterable_instances import ZarrDataLoader, ZarrIterableInstances
+from .niches._clustering import nhood_kmeans
 from .pixel_clustering._cluster_intensity import cluster_intensity_SOM
 from .pixel_clustering._neighbors import spatial_pixel_neighbors
 
@@ -34,6 +35,7 @@ __all__ = [
     "kmeans",
     "leiden",
     "nhood_enrichment",
+    "nhood_kmeans",
     "preprocess_proteomics",
     "preprocess_transcriptomics",
     "add_regionprops",

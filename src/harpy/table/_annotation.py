@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import warnings
 from collections.abc import Mapping
 from itertools import chain
 from pathlib import Path
@@ -31,7 +32,7 @@ def score_genes(
     repl_columns: dict[str, str] | None = None,
     del_celltypes: list[str] | None = None,
     input_dict: bool = False,
-    celltype_column: str = _ANNOTATION_KEY,
+    key_added: str = _ANNOTATION_KEY,
     unknown_celltype_key: str = _UNKNOWN_CELLTYPE_KEY,
     cleanliness_key: str = _CLEANLINESS_KEY,
     overwrite: bool = False,
@@ -75,7 +76,7 @@ def score_genes(
         If True, the marker gene list from the CSV file is treated as a dictionary with the first column being
         the cell type names and the subsequent columns being the marker genes for those cell types. Default is False.
         This parameter is deprecated, and will be removed in a future version.
-    celltype_column
+    key_added
         The column name in the `.obs` attribute of the :class:`anndata.AnnData` table where the predicted cell type will be saved.
     unknown_celltype_key
         The name reserved for cells that could not be assigned a specific cell type.
@@ -90,7 +91,7 @@ def score_genes(
     -------
     tuple:
 
-        - Updated `sdata` with in `sdata.tables[output_layer].obs` an extra column `celltype_column`.
+        - Updated `sdata` with in `sdata.tables[output_layer].obs` an extra column `key_added`.
 
         - list of strings, with all celltypes that are scored (but are not in the del_celltypes list).
 
@@ -99,11 +100,19 @@ def score_genes(
     Notes
     -----
     The cell type `unknown_celltype_key` is reserved for cells that could not be assigned a specific cell type.
+    The deprecated keyword argument `celltype_column` is still accepted for backward compatibility;
+    use `key_added` instead.
 
     See Also
     --------
     harpy.tb.score_genes_iter : iterative scoring algorithm.
     """
+    key_added = _resolve_key_added(
+        key_added=key_added,
+        kwargs=kwargs,
+        func_name="score_genes",
+    )
+
     process_table_instance = ProcessTable(sdata, labels_layer=labels_layer, table_layer=table_layer)
     adata = process_table_instance._get_adata()
     # Load marker genes from csv
@@ -172,13 +181,13 @@ def score_genes(
         adata=adata,
         celltypes=df_markers.columns,
         row_norm=row_norm,
-        celltype_column=celltype_column,
+        celltype_column=key_added,
         unknown_celltype_key=unknown_celltype_key,
         cleanliness_key=cleanliness_key,
     )
 
     # add unknown_celltype_key to the list of celltypes if it is detected.
-    if unknown_celltype_key in adata.obs[celltype_column].cat.categories:
+    if unknown_celltype_key in adata.obs[key_added].cat.categories:
         genes_dict[unknown_celltype_key] = []
 
     celltypes_all = list(genes_dict.keys())
@@ -219,10 +228,11 @@ def score_genes_iter(
     neigbors_kwargs: Mapping[str, Any] = MappingProxyType({}),
     umap_kwargs: Mapping[str, Any] = MappingProxyType({}),
     output_dir=None,
-    celltype_column: str = _ANNOTATION_KEY,
+    key_added: str = _ANNOTATION_KEY,
     unknown_celltype_key: str = _UNKNOWN_CELLTYPE_KEY,
     cleanliness_key: str = _CLEANLINESS_KEY,
     overwrite: bool = False,
+    **kwargs: Any,
 ) -> tuple[SpatialData, list[str], list[str]]:
     """
     Iterative annotation algorithm.
@@ -281,7 +291,7 @@ def score_genes_iter(
         Keyword arguments passed to :func:`~scanpy.pp.neighbors`. Ignored if `calculate_umap` is `False` or if `calculate_neighbors` is set to `False` and "neighbors" already in `.uns.keys()`.
     output_dir
         If specified, figures with umaps will be saved in this directory after each iteration. If None, the plots will be displayed directly without saving.
-    celltype_column
+    key_added
         The column name in the `.obs` attribute of the :class:`anndata.AnnData` table where the predicted cell type will be saved.
     unknown_celltype_key
         The name reserved for cells that could not be assigned a specific cell type.
@@ -300,10 +310,24 @@ def score_genes_iter(
 
         - list of strings, with all celltypes, some of which may not be scored, because their corresponding transcripts do not appear in the region of interest. _UNKNOWN_CELLTYPE_KEY, is also added if it is detected.
 
+    Notes
+    -----
+    The deprecated keyword argument `celltype_column` is still accepted for backward compatibility;
+    use `key_added` instead.
+
     See Also
     --------
     harpy.tb.score_genes : score genes using :func:`~scanpy.tl.score_genes`.
     """
+    key_added = _resolve_key_added(
+        key_added=key_added,
+        kwargs=kwargs,
+        func_name="score_genes_iter",
+    )
+    if kwargs:
+        unexpected = ", ".join(sorted(kwargs))
+        raise TypeError(f"score_genes_iter() got unexpected keyword argument(s): {unexpected}")
+
     kwargs = {}
     kwargs["min_score"] = min_score
     kwargs["min_score_p"] = min_score_p
@@ -323,7 +347,7 @@ def score_genes_iter(
         neigbors_kwargs=neigbors_kwargs,
         umap_kwargs=umap_kwargs,
         output_dir=output_dir,
-        celltype_column=celltype_column,
+        celltype_column=key_added,
         unknown_celltype_key=unknown_celltype_key,
         cleanliness_key=cleanliness_key,
         **kwargs,  # keyword arguments passed to _annotate_celltype_weighted
@@ -340,6 +364,27 @@ def score_genes_iter(
     )
 
     return sdata, celltypes_scored, celltypes_all
+
+
+def _resolve_key_added(key_added: str, kwargs: dict[str, Any], func_name: str) -> str:
+    deprecated_key = kwargs.pop("celltype_column", None)
+    if deprecated_key is None:
+        return key_added
+
+    warnings.warn(
+        f"`celltype_column` is deprecated in `harpy.tb.{func_name}` and will be removed in a future release. "
+        "Use `key_added` instead.",
+        FutureWarning,
+        stacklevel=3,
+    )
+
+    if key_added != _ANNOTATION_KEY and key_added != deprecated_key:
+        raise ValueError(
+            f"Received both `key_added='{key_added}'` and deprecated `celltype_column='{deprecated_key}'` "
+            f"in `harpy.tb.{func_name}`. Please use only `key_added`."
+        )
+
+    return deprecated_key
 
 
 def _annotate_celltype_iter(
