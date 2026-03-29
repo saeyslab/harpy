@@ -156,9 +156,9 @@ def nhood_kmeans(
         sdata,
         adata=adata,
         output_layer=output_layer,
-        region=sdata["table_transcriptomics_annotated"].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY],
-        instance_key=sdata["table_transcriptomics_annotated"].uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY],
-        region_key=sdata["table_transcriptomics_annotated"].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY],
+        region=sdata[table_layer].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY],
+        instance_key=sdata[table_layer].uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY],
+        region_key=sdata[table_layer].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY],
         overwrite=overwrite,
     )
 
