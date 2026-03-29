@@ -28,13 +28,13 @@ def _compute_nhood_composition(
     adata: AnnData,
     instance_type_key: str,
     connectivity_key: str = "spatial_connectivities",
-    composition_key: str = "nhood_composition",  # TODO -> clean up
+    key_added: str = "nhood_composition",
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     Compute per-cell neighborhood cell-type fractions from an existing spatial graph.
 
-    The resulting dense matrix is stored in `adata.obsm[composition_key]`, while
-    the associated metadata is stored in `adata.uns[composition_key]`.
+    The resulting dense matrix is stored in `adata.obsm[key_added]`, while
+    the associated metadata is stored in `adata.uns[key_added]`.
     """
     if instance_type_key not in adata.obs.columns:
         raise KeyError(
@@ -57,9 +57,9 @@ def _compute_nhood_composition(
             "Please assign all cells to a category before calculating neighborhood composition."
         )
 
-    if composition_key in adata.obsm or composition_key in adata.uns:
+    if key_added in adata.obsm or key_added in adata.uns:
         log.warning(
-            f"Neighborhood composition key '{composition_key}' already exists in the AnnData object. "
+            f"Neighborhood composition key '{key_added}' already exists in the AnnData object. "
             "Proceeding to overwrite it."
         )
 
@@ -76,11 +76,11 @@ def _compute_nhood_composition(
     fractions = np.asarray(fractions, dtype=np.float32)
     fractions[~np.isfinite(fractions)] = 0.0
 
-    adata.obsm[composition_key] = fractions
-    adata.uns[composition_key] = {
+    adata.obsm[key_added] = fractions
+    adata.uns[key_added] = {
         "instance_type_key": instance_type_key,
         "connectivity_key": resolved_connectivity_key,
-        "columns": _to_fixed_unicode_array(instance_types.cat.categories.to_list()),
+        "instance_type_categories": _to_fixed_unicode_array(instance_types.cat.categories.to_list()),
     }
 
     return fractions, neigh_totals

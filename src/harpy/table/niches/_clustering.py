@@ -31,7 +31,7 @@ def nhood_kmeans(
     **kwargs: Any,
 ) -> SpatialData:
     """
-    Cluster cells based on neighborhood cell-type composition using KMeans.
+    Cluster cells (instances) based on neighborhood cell-type composition using KMeans.
 
     This function expects a precomputed spatial connectivity matrix in
     `sdata.tables[table_layer].obsp[connectivity_key]` and does not calculate
@@ -81,7 +81,8 @@ def nhood_kmeans(
         downstream analyses. For example, `adata.obsm[composition_key]` could
         look like `[[0.75, 0.25, 0.00], [0.00, 0.50, 0.50]]`, meaning that the
         first cell has neighbors composed of 75% of the first cell type and 25%
-        of the second, while `adata.uns[composition_key]["columns"]` would store
+        of the second, while
+        `adata.uns[composition_key]["instance_type_categories"]` would store
         the ordered labels for those columns.
     key_added
         Key in `adata.obs` where the resulting niche labels are written.
@@ -110,7 +111,7 @@ def nhood_kmeans(
         adata,
         instance_type_key=instance_type_key,
         connectivity_key=connectivity_key,
-        composition_key=composition_key,
+        key_added=composition_key,
     )
 
     mask_valid = neigh_totals > 0

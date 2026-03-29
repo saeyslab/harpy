@@ -44,7 +44,7 @@ def test_nhood_kmeans(sdata_transcripts_no_backed):
 
     assert result.uns["nhood_composition"]["instance_type_key"] == _ANNOTATION_KEY
     assert result.uns["nhood_composition"]["connectivity_key"] == "radius_test_connectivities"
-    assert result.uns["nhood_composition"]["columns"].tolist() == ["even", "odd"]
+    assert result.uns["nhood_composition"]["instance_type_categories"].tolist() == ["even", "odd"]
 
     assert result.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY] == ["segmentation_mask"]
 
