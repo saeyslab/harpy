@@ -34,10 +34,15 @@ def nhood_kmeans(
     Cluster cells based on neighborhood cell-type composition using KMeans.
 
     This function expects a precomputed spatial connectivity matrix in
-    `sdata.tables[table_layer].obsp` and does not calculate neighbors itself.
-    Neighborhood cell-type fractions are computed from that graph, stored in
-    `adata.obsm[composition_key]`, and then used as the feature matrix for
-    :class:`~sklearn.cluster.KMeans`.
+    `sdata.tables[table_layer].obsp[connectivity_key]` and does not calculate
+    neighbors itself.
+    For example, the graph can be computed beforehand with
+    :func:`squidpy.gr.spatial_neighbors` and stored in
+    `sdata.tables[table_layer].obsp[connectivity_key]`. Neighborhood
+    cell-type fractions are then computed from that graph, stored in
+    `adata.obsm[composition_key]`, and used as the feature matrix for
+    :class:`~sklearn.cluster.KMeans`. The resulting niche assignments are
+    written to `adata.obs[key_added]`.
 
     Parameters
     ----------
@@ -59,7 +64,8 @@ def nhood_kmeans(
         Key pointing to the cell-cell connectivity matrix in `adata.obsp`,
         with shape `(n_cells, n_cells)`. If the exact key is not found,
         `{connectivity_key}_connectivities` is tried as a convenience for
-        graphs created with `squidpy.gr.spatial_neighbors(..., key_added=...)`.
+        graphs created with :func:`squidpy.gr.spatial_neighbors` using
+        `key_added=...`.
     composition_key
         Key used to store the computed neighborhood composition. The dense
         neighborhood-fraction matrix is written to
@@ -78,7 +84,7 @@ def nhood_kmeans(
         of the second, while `adata.uns[composition_key]["columns"]` would store
         the ordered labels for those columns.
     key_added
-        Key in `adata.obs` where the niche labels are written.
+        Key in `adata.obs` where the resulting niche labels are written.
     n_clusters
         Number of KMeans clusters to compute.
     random_state
