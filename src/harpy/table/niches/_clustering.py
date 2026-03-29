@@ -9,10 +9,11 @@ from anndata import AnnData
 from loguru import logger as log
 from sklearn.cluster import KMeans
 from spatialdata import SpatialData
+from spatialdata.models import TableModel
 
 from harpy.table._table import ProcessTable, add_table_layer
 from harpy.table.niches._composition import _compute_nhood_composition
-from harpy.utils._keys import _ANNOTATION_KEY, _INSTANCE_KEY, _REGION_KEY
+from harpy.utils._keys import _ANNOTATION_KEY
 
 
 def nhood_kmeans(
@@ -107,12 +108,14 @@ def nhood_kmeans(
     if key_added in adata.obs.columns:
         log.warning(f"The column '{key_added}' already exists in the AnnData object. Proceeding to overwrite it.")
 
-    fractions, neigh_totals = _compute_nhood_composition(
+    _compute_nhood_composition(
         adata,
         instance_type_key=instance_type_key,
         connectivity_key=connectivity_key,
         key_added=composition_key,
     )
+    fractions = adata.obsm[composition_key]
+    neigh_totals = np.asarray(adata.obsp[adata.uns[composition_key]["connectivity_key"]].sum(axis=1)).ravel()
 
     mask_valid = neigh_totals > 0
     n_valid = int(mask_valid.sum())
@@ -141,7 +144,6 @@ def nhood_kmeans(
     labels_full[mask_valid] = kmeans.labels_
     adata.obs[key_added] = pd.Categorical(labels_full)
 
-    # TODO -> clean up -> do we need to keep all of this data?
     adata.uns[key_added] = {
         "instance_type_key": instance_type_key,
         "connectivity_key": adata.uns[composition_key]["connectivity_key"],
@@ -154,9 +156,9 @@ def nhood_kmeans(
         sdata,
         adata=adata,
         output_layer=output_layer,
-        region=_get_output_regions(adata, process_table_instance),  # TODO -> clean up, fetch it from the table
-        instance_key=process_table_instance.instance_key or _INSTANCE_KEY,
-        region_key=process_table_instance.region_key or _REGION_KEY,
+        region=sdata["table_transcriptomics_annotated"].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY],
+        instance_key=sdata["table_transcriptomics_annotated"].uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY],
+        region_key=sdata["table_transcriptomics_annotated"].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY],
         overwrite=overwrite,
     )
 

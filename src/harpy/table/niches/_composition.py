@@ -29,7 +29,7 @@ def _compute_nhood_composition(
     instance_type_key: str,
     connectivity_key: str = "spatial_connectivities",
     key_added: str = "nhood_composition",
-) -> tuple[np.ndarray, np.ndarray]:
+) -> None:
     """
     Compute per-cell neighborhood cell-type fractions from an existing spatial graph.
 
@@ -83,4 +83,4 @@ def _compute_nhood_composition(
         "instance_type_categories": _to_fixed_unicode_array(instance_types.cat.categories.to_list()),
     }
 
-    return fractions, neigh_totals
+    return None
