@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import pandas as pd
 from anndata import AnnData
@@ -10,6 +12,14 @@ def _to_fixed_unicode_array(values: list[str]) -> np.ndarray:
     """Return a fixed-width unicode array to avoid StringDType in `.uns`."""
     max_len = max((len(v) for v in values), default=1)
     return np.asarray(values, dtype=f"U{max_len}")
+
+
+def _serialize_cluster_categories(values: list[str]) -> str | np.ndarray:
+    """Serialize cluster categories safely across NumPy versions affected by gh-28609."""
+    if np.lib.NumpyVersion(np.__version__) < np.lib.NumpyVersion("2.2.5"):
+        # Upstream NumPy issue: https://github.com/numpy/numpy/issues/28609
+        return json.dumps(values)
+    return _to_fixed_unicode_array(values)
 
 
 def _resolve_connectivity_key(adata: AnnData, connectivity_key: str) -> str:
@@ -26,7 +36,7 @@ def _resolve_connectivity_key(adata: AnnData, connectivity_key: str) -> str:
 
 def _compute_nhood_composition(
     adata: AnnData,
-    instance_type_key: str,
+    cluster_key: str,
     connectivity_key: str = "spatial_connectivities",
     key_added: str = "nhood_composition",
 ) -> None:
@@ -36,10 +46,9 @@ def _compute_nhood_composition(
     The resulting dense matrix is stored in `adata.obsm[key_added]`, while
     the associated metadata is stored in `adata.uns[key_added]`.
     """
-    if instance_type_key not in adata.obs.columns:
+    if cluster_key not in adata.obs.columns:
         raise KeyError(
-            f"Instance type key '{instance_type_key}' not found in `adata.obs`. "
-            f"Available columns: {adata.obs.columns.to_list()}."
+            f"Cluster key '{cluster_key}' not found in `adata.obs`. Available columns: {adata.obs.columns.to_list()}."
         )
 
     resolved_connectivity_key = _resolve_connectivity_key(adata, connectivity_key)
@@ -50,10 +59,10 @@ def _compute_nhood_composition(
             f"Connectivity matrix '{resolved_connectivity_key}' in `adata.obsp` must be sparse and support `.tocsr()`."
         )
 
-    instance_types = adata.obs[instance_type_key].astype("category")
+    instance_types = adata.obs[cluster_key].astype("category")
     if instance_types.isna().any():
         raise ValueError(
-            f"Instance type key '{instance_type_key}' contains missing values. "
+            f"Cluster key '{cluster_key}' contains missing values. "
             "Please assign all cells to a category before calculating neighborhood composition."
         )
 
@@ -77,10 +86,12 @@ def _compute_nhood_composition(
     fractions[~np.isfinite(fractions)] = 0.0
 
     adata.obsm[key_added] = fractions
+    cluster_categories = instance_types.cat.categories.to_list()
     adata.uns[key_added] = {
-        "instance_type_key": instance_type_key,
+        "cluster_key": cluster_key,
         "connectivity_key": resolved_connectivity_key,
-        "instance_type_categories": _to_fixed_unicode_array(instance_types.cat.categories.to_list()),
+        # Older NumPy releases have upstream StringDType copy issues after zarr round-trips.
+        "cluster_categories": _serialize_cluster_categories(cluster_categories),
     }
 
     return None
