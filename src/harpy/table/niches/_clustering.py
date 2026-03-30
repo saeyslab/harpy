@@ -82,7 +82,7 @@ def nhood_kmeans(
         look like `[[0.75, 0.25, 0.00], [0.00, 0.50, 0.50]]`, meaning that the
         first cell has neighbors composed of 75% of the first cell type and 25%
         of the second, while
-        `adata.uns[composition_key]["cluster_categories"]` would store
+        `adata.uns[composition_key]["cluster_categories"]` stores
         the ordered labels for those columns.
     key_added
         Key in `adata.obs` where the resulting niche labels are written.

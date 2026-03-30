@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import pandas as pd
 from anndata import AnnData
@@ -10,6 +12,14 @@ def _to_fixed_unicode_array(values: list[str]) -> np.ndarray:
     """Return a fixed-width unicode array to avoid StringDType in `.uns`."""
     max_len = max((len(v) for v in values), default=1)
     return np.asarray(values, dtype=f"U{max_len}")
+
+
+def _serialize_cluster_categories(values: list[str]) -> str | np.ndarray:
+    """Serialize cluster categories safely across NumPy versions affected by gh-28609."""
+    if np.lib.NumpyVersion(np.__version__) < np.lib.NumpyVersion("2.2.5"):
+        # Upstream NumPy issue: https://github.com/numpy/numpy/issues/28609
+        return json.dumps(values)
+    return _to_fixed_unicode_array(values)
 
 
 def _resolve_connectivity_key(adata: AnnData, connectivity_key: str) -> str:
@@ -77,10 +87,12 @@ def _compute_nhood_composition(
     fractions[~np.isfinite(fractions)] = 0.0
 
     adata.obsm[key_added] = fractions
+    cluster_categories = instance_types.cat.categories.to_list()
     adata.uns[key_added] = {
         "cluster_key": cluster_key,
         "connectivity_key": resolved_connectivity_key,
-        "cluster_categories": _to_fixed_unicode_array(instance_types.cat.categories.to_list()),
+        # Older NumPy releases have upstream StringDType copy issues after zarr round-trips.
+        "cluster_categories": _serialize_cluster_categories(cluster_categories),
     }
 
     return None

@@ -1,3 +1,5 @@
+import json
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -106,7 +108,11 @@ def test_nhood_kmeans(sdata_transcripts_no_backed):
 
     assert result.uns["nhood_composition"]["cluster_key"] == _ANNOTATION_KEY
     assert result.uns["nhood_composition"]["connectivity_key"] == "radius_test_connectivities"
-    assert result.uns["nhood_composition"]["cluster_categories"].tolist() == ["even", "odd"]
+    cluster_categories = result.uns["nhood_composition"]["cluster_categories"]
+    if np.lib.NumpyVersion(np.__version__) < np.lib.NumpyVersion("2.2.5"):
+        assert json.loads(cluster_categories) == ["even", "odd"]
+    else:
+        assert cluster_categories.tolist() == ["even", "odd"]
 
     assert result.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY] == ["segmentation_mask"]
 
