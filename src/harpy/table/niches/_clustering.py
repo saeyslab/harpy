@@ -5,7 +5,6 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from anndata import AnnData
 from loguru import logger as log
 from sklearn.cluster import KMeans
 from spatialdata import SpatialData
@@ -163,17 +162,3 @@ def nhood_kmeans(
     )
 
     return sdata
-
-
-def _get_output_regions(adata: AnnData, process_table_instance: ProcessTable) -> list[str] | None:
-    if process_table_instance.labels_layer is not None:
-        return process_table_instance.labels_layer
-
-    if process_table_instance.region_key is None or process_table_instance.region_key not in adata.obs.columns:
-        return None
-
-    region_obs = adata.obs[process_table_instance.region_key]
-    if hasattr(region_obs, "cat"):
-        return region_obs.cat.categories.to_list()
-
-    return pd.Index(region_obs).unique().to_list()
