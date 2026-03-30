@@ -48,8 +48,7 @@ def _compute_nhood_composition(
     """
     if cluster_key not in adata.obs.columns:
         raise KeyError(
-            f"Cluster key '{cluster_key}' not found in `adata.obs`. "
-            f"Available columns: {adata.obs.columns.to_list()}."
+            f"Cluster key '{cluster_key}' not found in `adata.obs`. Available columns: {adata.obs.columns.to_list()}."
         )
 
     resolved_connectivity_key = _resolve_connectivity_key(adata, connectivity_key)
