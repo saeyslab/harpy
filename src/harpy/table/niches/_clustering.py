@@ -19,7 +19,7 @@ def nhood_kmeans(
     sdata: SpatialData,
     table_layer: str,
     output_layer: str,
-    instance_type_key: str = _ANNOTATION_KEY,
+    cluster_key: str = _ANNOTATION_KEY,
     labels_layer: str | Iterable[str] | None = None,
     connectivity_key: str = "spatial_connectivities",
     composition_key: str = "nhood_composition",
@@ -53,8 +53,8 @@ def nhood_kmeans(
     output_layer
         The output table layer in `sdata` to which the updated table layer will
         be written.
-    instance_type_key
-        Key in `adata.obs` containing the instance type annotations used to build
+    cluster_key
+        Key in `adata.obs` containing the cluster annotations used to build
         the neighborhood composition.
     labels_layer
         Optional labels layer or layers used to subset the table before
@@ -69,12 +69,12 @@ def nhood_kmeans(
     composition_key
         Key used to store the computed neighborhood composition. The dense
         neighborhood-fraction matrix is written to
-        `adata.obsm[composition_key]` with shape `(n_cells, n_instance_types)`,
+        `adata.obsm[composition_key]` with shape `(n_cells, n_categories)`,
         where each row contains, for one cell, the fraction of neighbors that
-        belong to each category in `instance_type_key`. Related metadata is stored
-        under `adata.uns[composition_key]`, including the instance type key that
+        belong to each category in `cluster_key`. Related metadata is stored
+        under `adata.uns[composition_key]`, including the cluster key that
         was used, the resolved connectivity key from `adata.obsp`,
-        and the ordered instance type labels corresponding to the columns of
+        and the ordered cluster labels corresponding to the columns of
         `adata.obsm[composition_key]`. Using the same `composition_key` in both
         places keeps the feature matrix and its column definitions linked and
         makes it easier to reuse the computed neighborhood features in
@@ -82,7 +82,7 @@ def nhood_kmeans(
         look like `[[0.75, 0.25, 0.00], [0.00, 0.50, 0.50]]`, meaning that the
         first cell has neighbors composed of 75% of the first cell type and 25%
         of the second, while
-        `adata.uns[composition_key]["instance_type_categories"]` would store
+        `adata.uns[composition_key]["cluster_categories"]` would store
         the ordered labels for those columns.
     key_added
         Key in `adata.obs` where the resulting niche labels are written.
@@ -109,7 +109,7 @@ def nhood_kmeans(
 
     _compute_nhood_composition(
         adata,
-        instance_type_key=instance_type_key,
+        cluster_key=cluster_key,
         connectivity_key=connectivity_key,
         key_added=composition_key,
     )
@@ -144,7 +144,7 @@ def nhood_kmeans(
     adata.obs[key_added] = pd.Categorical(labels_full)
 
     adata.uns[key_added] = {
-        "instance_type_key": instance_type_key,
+        "cluster_key": cluster_key,
         "connectivity_key": adata.uns[composition_key]["connectivity_key"],
         "composition_key": composition_key,
         "n_clusters": n_clusters,
