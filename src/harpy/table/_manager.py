@@ -2,10 +2,14 @@ import numpy as np
 import spatialdata
 from anndata import AnnData
 from loguru import logger as log
-from spatialdata import SpatialData, read_zarr
+from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
-from harpy.utils._io import _incremental_io_on_disk, _write_element_with_cleanup
+from harpy.utils._io import (
+    _incremental_io_on_disk,
+    _read_zarr_with_annotating_table_warning_suppressed,
+    _write_element_with_cleanup,
+)
 from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY
 
 
@@ -77,7 +81,7 @@ class TableLayerManager:
             if sdata.is_backed():
                 _write_element_with_cleanup(sdata, output_layer)
                 del sdata[output_layer]
-                sdata_temp = read_zarr(sdata.path, selection=["tables"])
+                sdata_temp = _read_zarr_with_annotating_table_warning_suppressed(sdata.path, selection=["tables"])
                 sdata[output_layer] = sdata_temp[output_layer]
                 del sdata_temp
 

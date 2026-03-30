@@ -110,6 +110,28 @@ def test_add_table_layer_not_annotating(sdata_transcripts: SpatialData, is_backe
     assert TableModel.ATTRS_KEY not in sdata_transcripts["table_transcriptomics"].uns
 
 
+def test_add_new_backed_table_layer_does_not_warn_about_missing_regions(sdata_transcripts: SpatialData, recwarn):
+    adata = sdata_transcripts["table_transcriptomics"].copy()
+
+    sdata_transcripts = add_table_layer(
+        sdata_transcripts,
+        adata=adata,
+        output_layer="table_transcriptomics_copy",
+        instance_key=_INSTANCE_KEY,
+        region_key=_REGION_KEY,
+        region=adata.obs[_REGION_KEY].cat.categories.to_list(),
+        overwrite=False,
+    )
+
+    assert "table_transcriptomics_copy" in sdata_transcripts.tables
+
+    userwarning_msg = (
+        f"The table is annotating {adata.obs[_REGION_KEY].cat.categories.to_list()[0]!r}, "
+        "which is not present in the SpatialData object."
+    )
+    assert not any(isinstance(w.message, UserWarning) and str(w.message) == userwarning_msg for w in recwarn.list)
+
+
 def _string_dtype_array(values: list[str]) -> np.ndarray:
     if not hasattr(np, "dtypes") or not hasattr(np.dtypes, "StringDType"):
         pytest.skip("NumPy StringDType is not available in this NumPy version.")

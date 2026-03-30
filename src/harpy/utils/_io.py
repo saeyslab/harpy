@@ -29,6 +29,21 @@ def _write_element_with_cleanup(sdata: SpatialData, output_layer: str) -> None:
         raise
 
 
+def _read_zarr_with_annotating_table_warning_suppressed(
+    path: str,
+    selection: list[str],
+) -> SpatialData:
+    """Read a partial SpatialData selection without surfacing expected table-target warnings."""
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            category=UserWarning,
+            message="The table is annotating",
+            module="spatialdata._core.spatialdata",
+        )
+        return read_zarr(path, selection=selection)
+
+
 def _incremental_io_on_disk(
     sdata: SpatialData,
     output_layer: str,
@@ -64,14 +79,7 @@ def _incremental_io_on_disk(
     del sdata[new_output_layer]
     del sdata[output_layer]
     # a3 load the backup copy into memory
-    with warnings.catch_warnings():
-        warnings.filterwarnings(
-            "ignore",
-            category=UserWarning,
-            message="The table is annotating",
-            module="spatialdata._core.spatialdata",
-        )
-        sdata_copy = read_zarr(sdata.path, selection=[element_type])
+    sdata_copy = _read_zarr_with_annotating_table_warning_suppressed(sdata.path, selection=[element_type])
     # b1. rewrite the original data
     sdata.delete_element_from_disk(output_layer)
     sdata[output_layer] = sdata_copy[new_output_layer]
@@ -80,14 +88,7 @@ def _incremental_io_on_disk(
     # b2. reload the new data into memory (because it has been written but in-memory it still points
     # from the backup location)
     del sdata[output_layer]
-    with warnings.catch_warnings():
-        warnings.filterwarnings(
-            "ignore",
-            category=UserWarning,
-            message="The table is annotating",
-            module="spatialdata._core.spatialdata",
-        )
-        sdata_materialized = read_zarr(sdata.path, selection=[element_type])
+    sdata_materialized = _read_zarr_with_annotating_table_warning_suppressed(sdata.path, selection=[element_type])
     # to make sdata point to layer that is materialized, and keep object id.
     sdata[output_layer] = sdata_materialized[output_layer]
     # c. remove the backup copy

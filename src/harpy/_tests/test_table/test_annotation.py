@@ -14,7 +14,7 @@ def test_score_genes(sdata_transcripts_no_backed, path_dataset_markers):
         marker_genes=path_dataset_markers,
         delimiter=",",
         row_norm=False,
-        celltype_column=_ANNOTATION_KEY,
+        key_added=_ANNOTATION_KEY,
         del_celltypes=["dummy_20"],  # celltypes that will not be considered for annotation.
         overwrite=True,
     )
@@ -50,7 +50,7 @@ def test_score_genes_iter(sdata_transcripts_no_backed, path_dataset_markers, tmp
         delimiter=",",
         overwrite=True,
         output_dir=tmpdir,
-        celltype_column=_ANNOTATION_KEY,
+        key_added=_ANNOTATION_KEY,
         n_iter=5,
     )
 
