@@ -117,7 +117,9 @@ def test_nhood_kmeans_labels_isolated_cells(sdata_transcripts_no_backed):
     Starting from the same chain graph as in ``test_nhood_kmeans``, this test
     removes the edge between cells 0 and 1 by setting entries ``(0, 1)`` and
     ``(1, 0)`` to zero. Cell 0 then has no neighbors at all, while cell 1
-    remains connected to cell 2. The updated graph is
+    remains connected to cell 2. Both entries are cleared to keep the
+    connectivity matrix symmetric, since the graph is treated as an undirected
+    neighbor graph. The updated graph is
 
     ``[[0, 0, 0, 0, 0],``
     `` [0, 0, 1, 0, 0],``
