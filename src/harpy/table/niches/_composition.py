@@ -67,7 +67,9 @@ def _compute_nhood_counts(
         )
 
     if key_added in adata.obsm or key_added in adata.uns:
-        log.warning(f"Neighborhood feature key '{key_added}' already exists in the AnnData object. Proceeding to overwrite it.")
+        log.warning(
+            f"Neighborhood feature key '{key_added}' already exists in the AnnData object. Proceeding to overwrite it."
+        )
 
     connectivities = connectivities.tocsr()
     onehot = pd.get_dummies(instance_types, sparse=True)
