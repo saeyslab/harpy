@@ -204,6 +204,41 @@ def test_nhood_kmeans_requires_existing_connectivity_key(sdata_blobs):
 
 
 def test_nhood_lda(sdata_blobs):
+    """Test LDA niche modeling on a simple chain graph with alternating labels.
+
+    The same chain graph as in ``test_nhood_kmeans``
+
+    ``[[0, 1, 0, 0, 0],``
+    `` [1, 0, 1, 0, 0],``
+    `` [0, 1, 0, 1, 0],``
+    `` [0, 0, 1, 0, 1],``
+    `` [0, 0, 0, 1, 0]]``
+
+    is multiplied by the one-hot encoded cell-type matrix
+
+    ``[[1, 0],``
+    `` [0, 1],``
+    `` [1, 0],``
+    `` [0, 1],``
+    `` [1, 0]]``
+
+    for alternating ``even``/``odd`` labels and the categories ``[even, odd]``.
+
+    by that one-hot matrix gives neighbor counts
+
+    ``[[0, 1],``
+    `` [2, 0],``
+    `` [0, 2],``
+    `` [2, 0],``
+    `` [0, 1]]``.
+
+    LDA is then fit on this non-negative count matrix with ``n_topics=2``.
+    Because rows 0, 2, and 4 have the same neighborhood pattern up to scale,
+    while rows 1 and 3 share the complementary pattern, the inferred dominant
+    topics should split the cells into these two repeating groups. The test
+    therefore checks both the neighborhood counts and the symmetry of the
+    resulting topic assignments.
+    """
     table_layer = "table"
     output_layer = "table_niches"
     adata = sdata_blobs.tables[table_layer]
@@ -249,6 +284,42 @@ def test_nhood_lda(sdata_blobs):
 
 
 def test_nhood_lda_labels_isolated_cells(sdata_blobs):
+    """Test that isolated cells keep zero neighborhood counts and topic weights.
+
+    Starting from the same chain graph as in ``test_nhood_lda``, this test
+    removes the edge between cells 0 and 1 by setting entries ``(0, 1)`` and
+    ``(1, 0)`` to zero. Cell 0 then has no neighbors at all, while cell 1
+    remains connected to cell 2. The updated graph is
+
+    ``[[0, 0, 0, 0, 0],``
+    `` [0, 0, 1, 0, 0],``
+    `` [0, 1, 0, 1, 0],``
+    `` [0, 0, 1, 0, 1],``
+    `` [0, 0, 0, 1, 0]]``.
+
+    Multiplying this graph by the one-hot encoded cell-type matrix
+
+    ``[[1, 0],``
+    `` [0, 1],``
+    `` [1, 0],``
+    `` [0, 1],``
+    `` [1, 0]]``
+
+    for alternating ``even``/``odd`` labels gives neighbor counts
+
+    ``[[0, 0],``
+    `` [1, 0],``
+    `` [0, 2],``
+    `` [2, 0],``
+    `` [0, 1]]``.
+
+    With alternating ``even``/``odd`` labels, the neighborhood count vector for
+    cell 0 is therefore ``[0, 0]``. Since LDA is fit only on cells with at
+    least one neighbor, the isolated cell should not contribute to the model
+    fit and should retain an all-zero topic vector in
+    ``manual_nhood_lda_topics`` while receiving the configured
+    ``nan_label='isolated'`` in ``manual_nhood_lda``.
+    """
     table_layer = "table"
     output_layer = "table_niches"
     adata = sdata_blobs.tables[table_layer]
