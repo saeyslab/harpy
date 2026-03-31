@@ -34,14 +34,14 @@ def _resolve_connectivity_key(adata: AnnData, connectivity_key: str) -> str:
     raise KeyError(f"Connectivity key '{connectivity_key}' not found in `adata.obsp`. Available keys: {available}.")
 
 
-def _compute_nhood_composition(
+def _compute_nhood_counts(
     adata: AnnData,
     cluster_key: str,
     connectivity_key: str = "spatial_connectivities",
-    key_added: str = "nhood_composition",
+    key_added: str = "nhood_counts",
 ) -> None:
     """
-    Compute per-cell neighborhood cell-type fractions from an existing spatial graph.
+    Compute per-cell neighborhood cell-type counts from an existing spatial graph.
 
     The resulting dense matrix is stored in `adata.obsm[key_added]`, while
     the associated metadata is stored in `adata.uns[key_added]`.
@@ -67,25 +67,17 @@ def _compute_nhood_composition(
         )
 
     if key_added in adata.obsm or key_added in adata.uns:
-        log.warning(
-            f"Neighborhood composition key '{key_added}' already exists in the AnnData object. "
-            "Proceeding to overwrite it."
-        )
+        log.warning(f"Neighborhood feature key '{key_added}' already exists in the AnnData object. Proceeding to overwrite it.")
 
     connectivities = connectivities.tocsr()
     onehot = pd.get_dummies(instance_types, sparse=True)
     onehot_mat = onehot.sparse.to_coo().tocsr()
 
     counts = connectivities.dot(onehot_mat)
-    neigh_totals = np.asarray(connectivities.sum(axis=1)).ravel()
+    counts = np.asarray(counts.toarray(), dtype=np.float32)
+    counts[~np.isfinite(counts)] = 0.0
 
-    with np.errstate(divide="ignore", invalid="ignore"):
-        fractions = counts.multiply(1 / neigh_totals[:, None]).toarray()
-
-    fractions = np.asarray(fractions, dtype=np.float32)
-    fractions[~np.isfinite(fractions)] = 0.0
-
-    adata.obsm[key_added] = fractions
+    adata.obsm[key_added] = counts
     cluster_categories = instance_types.cat.categories.to_list()
     adata.uns[key_added] = {
         "cluster_key": cluster_key,
@@ -93,5 +85,37 @@ def _compute_nhood_composition(
         # Older NumPy releases have upstream StringDType copy issues after zarr round-trips.
         "cluster_categories": _serialize_cluster_categories(cluster_categories),
     }
+
+    return None
+
+
+def _compute_nhood_composition(
+    adata: AnnData,
+    cluster_key: str,
+    connectivity_key: str = "spatial_connectivities",
+    key_added: str = "nhood_composition",
+) -> None:
+    """
+    Compute per-cell neighborhood cell-type fractions from an existing spatial graph.
+
+    The resulting dense matrix is stored in `adata.obsm[key_added]`, while
+    the associated metadata is stored in `adata.uns[key_added]`.
+    """
+    _compute_nhood_counts(
+        adata,
+        cluster_key=cluster_key,
+        connectivity_key=connectivity_key,
+        key_added=key_added,
+    )
+
+    counts = adata.obsm[key_added]
+    neigh_totals = counts.sum(axis=1)
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        fractions = counts / neigh_totals[:, None]
+
+    fractions = np.asarray(fractions, dtype=np.float32)
+    fractions[~np.isfinite(fractions)] = 0.0
+    adata.obsm[key_added] = fractions
 
     return None

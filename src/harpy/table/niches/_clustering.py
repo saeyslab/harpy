@@ -7,11 +7,12 @@ import numpy as np
 import pandas as pd
 from loguru import logger as log
 from sklearn.cluster import KMeans
+from sklearn.decomposition import LatentDirichletAllocation
 from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
 from harpy.table._table import ProcessTable, add_table_layer
-from harpy.table.niches._composition import _compute_nhood_composition
+from harpy.table.niches._composition import _compute_nhood_composition, _compute_nhood_counts
 from harpy.utils._keys import _ANNOTATION_KEY
 
 
@@ -114,7 +115,9 @@ def nhood_kmeans(
         key_added=composition_key,
     )
     fractions = adata.obsm[composition_key]
-    neigh_totals = np.asarray(adata.obsp[adata.uns[composition_key]["connectivity_key"]].sum(axis=1)).ravel()
+    # Calculating neigh_totals from the fractions is sufficient to detect isolated cells: normalized composition rows
+    # sum to 1 for non-isolated cells and to 0 for isolated cells.
+    neigh_totals = fractions.sum(axis=1)
 
     mask_valid = neigh_totals > 0
     n_valid = int(mask_valid.sum())
@@ -149,6 +152,170 @@ def nhood_kmeans(
         "composition_key": composition_key,
         "n_clusters": n_clusters,
         "random_state": random_state,
+    }
+
+    sdata = add_table_layer(
+        sdata,
+        adata=adata,
+        output_layer=output_layer,
+        region=sdata[table_layer].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY],
+        instance_key=sdata[table_layer].uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY],
+        region_key=sdata[table_layer].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY],
+        overwrite=overwrite,
+    )
+
+    return sdata
+
+
+def nhood_lda(
+    sdata: SpatialData,
+    table_layer: str,
+    output_layer: str,
+    cluster_key: str = _ANNOTATION_KEY,
+    labels_layer: str | Iterable[str] | None = None,
+    connectivity_key: str = "spatial_connectivities",
+    counts_key: str = "nhood_counts",
+    topic_key: str = "nhood_lda_topics",
+    key_added: str = "nhood_lda",
+    n_topics: int = 5,
+    random_state: int = 100,
+    nan_label: int | str | None = -1,
+    overwrite: bool = False,
+    **kwargs: Any,
+) -> SpatialData:
+    """
+    Cluster cells (instances) into niche topics using LDA on neighborhood cell-type counts.
+
+    This function expects a precomputed spatial connectivity matrix in
+    `sdata.tables[table_layer].obsp[connectivity_key]` and does not calculate
+    neighbors itself.
+    For example, the graph can be computed beforehand with
+    :func:`squidpy.gr.spatial_neighbors` and stored in
+    `sdata.tables[table_layer].obsp[connectivity_key]`.
+    For each cell, the neighborhood graph is used to compute
+    counts of neighboring cell types defined by `cluster_key`. These counts are
+    treated as a non-negative "document-term" matrix and used to fit
+    :class:`~sklearn.decomposition.LatentDirichletAllocation`. The dominant
+    topic per cell is written to `adata.obs[key_added]`, while the full topic
+    mixture per cell is stored in `adata.obsm[topic_key]`. This matrix has shape
+    `(n_cells, n_topics)` and can be interpreted as `P(topic | cell)`, where
+    each row gives, for one cell, the topic proportions of its neighborhood.
+    Related metadata is stored in `adata.uns[key_added]`, including the
+    clustering inputs and parameters together with
+    `topic_celltype_distribution`, a matrix of shape
+    `(n_topics, n_cell_types)` that can be interpreted as `P(cell_type | topic)`.
+    Each row describes the cell-type composition of one latent niche topic, with
+    columns aligned to the ordered cell-type categories stored in
+    `adata.uns[counts_key]["cluster_categories"]`.
+
+    Parameters
+    ----------
+    sdata
+        The input SpatialData object.
+    table_layer
+        The table layer in `sdata` on which to perform niche clustering.
+    output_layer
+        The output table layer in `sdata` to which the updated table layer will
+        be written.
+    cluster_key
+        Key in `adata.obs` containing the cluster annotations used to build
+        the neighborhood count matrix.
+    labels_layer
+        Optional labels layer or layers used to subset the table before
+        clustering. If provided, only observations linked to these labels layers
+        are considered.
+    connectivity_key
+        Key pointing to the cell-cell connectivity matrix in `adata.obsp`,
+        with shape `(n_cells, n_cells)`. If the exact key is not found,
+        `{connectivity_key}_connectivities` is tried as a convenience for
+        graphs created with :func:`squidpy.gr.spatial_neighbors` using
+        `key_added=...`.
+    counts_key
+        Key used to store the computed neighborhood count matrix in
+        `adata.obsm[counts_key]` and related metadata in `adata.uns[counts_key]`.
+    topic_key
+        Key in `adata.obsm` where the per-cell topic probabilities are stored.
+        The matrix has shape `(n_cells, n_topics)` and can be interpreted as
+        `P(topic | cell)`.
+    key_added
+        Key in `adata.obs` where the resulting dominant niche topic labels are
+        written. Related metadata is stored in `adata.uns[key_added]`, including
+        the resolved connectivity key, the neighborhood-count key, the topic key,
+        the number of topics, the random state, and
+        `topic_celltype_distribution`, which summarizes the inferred
+        `P(cell_type | topic)` distributions.
+    n_topics
+        Number of latent topics to infer.
+    random_state
+        Random state used for reproducible clustering.
+    nan_label
+        Label assigned to isolated cells with zero graph degree.
+    overwrite
+        If `True`, overwrite `output_layer` if it already exists in `sdata`.
+    **kwargs
+        Additional keyword arguments passed to
+        :class:`~sklearn.decomposition.LatentDirichletAllocation`.
+
+    Returns
+    -------
+    The updated SpatialData object.
+    """
+    process_table_instance = ProcessTable(sdata, labels_layer=labels_layer, table_layer=table_layer)
+    adata = process_table_instance._get_adata()
+
+    if key_added in adata.obs.columns:
+        log.warning(f"The column '{key_added}' already exists in the AnnData object. Proceeding to overwrite it.")
+    if topic_key in adata.obsm:
+        log.warning(f"The key '{topic_key}' already exists in `adata.obsm`. Proceeding to overwrite it.")
+
+    _compute_nhood_counts(
+        adata,
+        cluster_key=cluster_key,
+        connectivity_key=connectivity_key,
+        key_added=counts_key,
+    )
+    counts = adata.obsm[counts_key]
+    neigh_totals = counts.sum(axis=1)
+
+    mask_valid = neigh_totals > 0
+    n_valid = int(mask_valid.sum())
+
+    if n_valid == 0:
+        raise ValueError(
+            "No cells have neighbors in the provided connectivity graph. "
+            "Please provide a graph with at least one non-isolated observation."
+        )
+
+    if n_valid < n_topics:
+        raise ValueError(f"Cannot fit LDA with n_topics={n_topics} on only {n_valid} cells with at least one neighbor.")
+
+    lda_kwargs = {
+        "n_components": n_topics,
+        "random_state": random_state,
+        "learning_method": "batch",
+    }
+    lda_kwargs.update(kwargs)
+
+    lda = LatentDirichletAllocation(**lda_kwargs)
+    topic_probabilities_valid = lda.fit_transform(counts[mask_valid])
+
+    labels_full = np.full(adata.shape[0], nan_label, dtype=object)
+    labels_full[mask_valid] = topic_probabilities_valid.argmax(axis=1)
+    adata.obs[key_added] = pd.Categorical(labels_full)
+
+    topic_probabilities = np.zeros((adata.shape[0], n_topics), dtype=np.float32)
+    topic_probabilities[mask_valid] = topic_probabilities_valid.astype(np.float32)
+    adata.obsm[topic_key] = topic_probabilities
+
+    topic_celltype_distribution = lda.components_ / lda.components_.sum(axis=1, keepdims=True)
+    adata.uns[key_added] = {
+        "cluster_key": cluster_key,
+        "connectivity_key": adata.uns[counts_key]["connectivity_key"],
+        "counts_key": counts_key,
+        "topic_key": topic_key,
+        "n_topics": n_topics,
+        "random_state": random_state,
+        "topic_celltype_distribution": np.asarray(topic_celltype_distribution, dtype=np.float32),
     }
 
     sdata = add_table_layer(
