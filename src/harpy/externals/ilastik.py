@@ -30,10 +30,16 @@ def _resolve_ilastik_executable(path_to_ilastik_executable: str | Path) -> Path:
 
 def _check_backed_zarr_2(sdata: SpatialData) -> Path:
     if not sdata.is_backed() or sdata.path is None:
-        raise ValueError("`run_object_classification()` requires a backed SpatialData object.")
+        raise ValueError(
+            "`run_object_classification()` requires a backed SpatialData object. "
+            "Write `sdata` to disk first and, if needed, convert it with `harpy.io.convert_to_zarr_2()`."
+        )
 
     if _get_backing_zarr_format(sdata) != 2:
-        raise ValueError("`run_object_classification()` requires `sdata` to be backed by a Zarr v2 store.")
+        raise ValueError(
+            "`run_object_classification()` requires `sdata` to be backed by a Zarr v2 store. "
+            "Convert the backing store with `harpy.io.convert_to_zarr_2()`."
+        )
 
     return Path(sdata.path).resolve()
 
