@@ -10,10 +10,12 @@ from ._transcripts import (
 from ._visium import visium
 from ._visium_hd import visium_hd
 from ._xenium import xenium
+from ._zarr import convert_to_zarr_2
 
 __all__ = [
     "macsima",
     "merscope",
+    "convert_to_zarr_2",
     "create_sdata",
     "read_merscope_transcripts",
     "read_resolve_transcripts",

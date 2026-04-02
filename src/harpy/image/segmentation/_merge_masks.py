@@ -330,6 +330,7 @@ def mask_to_original(
     This function is designed to facilitate the comparison or integration of segmentation results by mapping mask
     labels back to their original labels.
     """
+    # TODO - > rewrite so it uses np.bincount inside the dask loop (as in harpy.utils.RasterAggregator)
     labels_arrays = [sdata.labels[labels_layer].data]
 
     cell_ids = unique(labels_arrays[0]).compute()
