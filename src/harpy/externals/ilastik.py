@@ -8,8 +8,11 @@ import tempfile
 from pathlib import Path
 from typing import Literal
 
+import dask.array as da
 import h5py
 import numpy as np
+import pandas as pd
+from anndata import AnnData
 from loguru import logger as log
 from spatialdata import SpatialData
 from spatialdata.models import TableModel
@@ -17,6 +20,9 @@ from spatialdata.models import TableModel
 from harpy.image._image import get_dataarray
 from harpy.io._zarr import _get_backing_zarr_format
 from harpy.table._table import ProcessTable, add_table_layer
+from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY
+
+_VALID_EXPORT_SOURCES = ("Blockwise Object Predictions", "Object Predictions")
 
 
 def _resolve_ilastik_executable(path_to_ilastik_executable: str | Path) -> Path:
@@ -91,16 +97,39 @@ def _map_instance_ids_to_prediction_label(segmentation: np.ndarray, predictions:
     }
 
 
+def _create_adata_from_labels_layer(
+    sdata: SpatialData,
+    labels_layer: str,
+    instance_key: str,
+    region_key: str,
+) -> AnnData:
+    instance_ids = da.unique(get_dataarray(sdata, layer=labels_layer).data)
+    instance_ids = np.asarray(instance_ids.compute())
+    instance_ids = instance_ids[instance_ids != 0]
+
+    obs = pd.DataFrame(
+        {
+            instance_key: instance_ids.astype(np.int64),
+            region_key: pd.Categorical([labels_layer] * len(instance_ids)),
+        }
+    )
+    obs.index = obs[instance_key].astype(str)
+
+    return AnnData(obs=obs)
+
+
 def run_object_classification(
     sdata: SpatialData,
     img_layer: str,
     labels_layer: str,
-    table_layer: str,
+    table_layer: str | None,
     output_layer: str,
     path_to_classifier: str | Path,
     path_to_ilastik_executable: str | Path,
     obs_key: str = "ilastik_label",
     export_source: Literal["Blockwise Object Predictions", "Object Predictions"] = "Object Predictions",
+    instance_key: str = _INSTANCE_KEY,
+    region_key: str = _REGION_KEY,
     overwrite: bool = False,
     output_dir: str | Path | None = None,
     runtime_dir: str | Path | None = None,
@@ -119,7 +148,8 @@ def run_object_classification(
     labels_layer
         Labels layer used as ilastik segmentation input and to map predictions back to table instances.
     table_layer
-        Table layer from which the annotated cells are selected.
+        Table layer from which the annotated cells are selected. If `None`, a new table is created
+        from the non-zero instance ids in `labels_layer`.
     output_layer
         Output table layer receiving the predicted ilastik labels in ``adata.obs[obs_key]``.
     path_to_classifier
@@ -127,11 +157,15 @@ def run_object_classification(
     path_to_ilastik_executable
         Path to the ilastik executable, or to the app directory containing the executable.
         Example:
-        ``".../ilastik-1.4.2b10-arm64-OSX.app/Contents/MacOS/ilastik"``.
+        ``".../ilastik"``.
     obs_key
         Column name added to ``adata.obs`` with the predicted ilastik labels.
     export_source
         ilastik export source passed to ``--export_source``.
+    instance_key
+        Name of the instance id column in ``adata.obs``. Only used if ``table_layer`` is `None`.
+    region_key
+        Name of the region column in ``adata.obs``. Only used if ``table_layer`` is `None`.
     overwrite
         Whether to overwrite ``output_layer`` if it already exists.
     output_dir
@@ -153,9 +187,24 @@ def run_object_classification(
         raise ValueError(f"Image layer '{img_layer}' not found in 'sdata.images'.")
     if labels_layer not in sdata.labels:
         raise ValueError(f"Labels layer '{labels_layer}' not found in 'sdata.labels'.")
+    if export_source not in _VALID_EXPORT_SOURCES:
+        raise ValueError(
+            f"Invalid 'export_source': {export_source!r}. Expected one of {list(_VALID_EXPORT_SOURCES)}."
+        )
 
-    process_table_instance = ProcessTable(sdata, labels_layer=labels_layer, table_layer=table_layer)
-    adata = process_table_instance._get_adata()
+    if table_layer is not None:
+        adata = ProcessTable(sdata, labels_layer=labels_layer, table_layer=table_layer)._get_adata()
+        region = sdata[table_layer].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY]
+        instance_key = sdata[table_layer].uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY]
+        region_key = sdata[table_layer].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]
+    else:
+        adata = _create_adata_from_labels_layer(
+            sdata=sdata,
+            labels_layer=labels_layer,
+            instance_key=instance_key,
+            region_key=region_key,
+        )
+        region = [labels_layer]
 
     path_to_classifier = Path(path_to_classifier).expanduser().resolve()
     ilastik_executable = _resolve_ilastik_executable(path_to_ilastik_executable).expanduser().resolve()
@@ -228,24 +277,20 @@ def run_object_classification(
     segmentation = np.asarray(get_dataarray(sdata, layer=labels_layer).data.compute()).squeeze()
     instance_to_prediction = _map_instance_ids_to_prediction_label(segmentation, predictions)
 
-    adata.obs[obs_key] = (
-        adata.obs[process_table_instance.instance_key].map(instance_to_prediction).fillna(0).astype("int64")
-    ).astype("category")
+    adata.obs[obs_key] = adata.obs[instance_key].map(instance_to_prediction).fillna(0).astype("int64").astype("category")
 
     sdata = add_table_layer(
         sdata,
         adata=adata,
         output_layer=output_layer,
-        region=sdata[table_layer].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY],
-        instance_key=sdata[table_layer].uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY],
-        region_key=sdata[table_layer].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY],
+        region=region,
+        instance_key=instance_key,
+        region_key=region_key,
         overwrite=overwrite,
     )
 
     if cleanup_output_dir:
         shutil.rmtree(output_dir)
-
     if cleanup_runtime_dir:
         shutil.rmtree(runtime_dir)
-
     return sdata
