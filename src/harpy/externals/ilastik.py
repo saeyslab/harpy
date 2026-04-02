@@ -5,6 +5,7 @@ import shlex
 import shutil
 import subprocess
 import tempfile
+import uuid
 from pathlib import Path
 from typing import Literal
 
@@ -113,7 +114,9 @@ def _create_adata_from_labels_layer(
             region_key: pd.Categorical([labels_layer] * len(instance_ids)),
         }
     )
-    obs.index = obs[instance_key].astype(str)
+    _uuid_value = str(uuid.uuid4())[:8]
+    obs.index = obs[instance_key].map(lambda x: f"{x}_{labels_layer}_{_uuid_value}")
+    obs.index.name = None
 
     return AnnData(obs=obs)
 
