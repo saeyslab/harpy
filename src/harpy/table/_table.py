@@ -110,6 +110,9 @@ class ProcessTable:
             adata = self._subset_adata_var(
                 adata, index_names_var=index_names_var, index_positions_var=index_positions_var
             )
+        # TODO: `adata.copy()` can be expensive when callers only need to update `.obs`.
+        # Consider supporting a lighter-weight path in the future for table operations
+        # that preserve the selected rows and only modify metadata columns.
         adata = adata.copy()
         if self.labels_layer is not None:
             adata.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY] = self.labels_layer

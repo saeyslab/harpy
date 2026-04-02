@@ -162,7 +162,7 @@ VIBSpatialCatalyst = "https://vib.be/en/technologies/technology-portfolio/spatia
 
 [tool.coverage.run]
 source = ["harpy"]
-omit = ["src/harpy/_tests/*", "experiments/*", "src/harpy/widgets/*", "docs/*" ]
+omit = ["src/harpy/_tests/*", "experiments/*", "src/harpy/widgets/*", "src/harpy/externals/*", "docs/*" ]
 
 [tool.ruff]
 src = ["src"]

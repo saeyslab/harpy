@@ -21,11 +21,7 @@ from harpy.table._table import ProcessTable, add_table_layer
 
 def _resolve_ilastik_executable(path_to_ilastik_executable: str | Path) -> Path:
     path_to_ilastik_executable = Path(path_to_ilastik_executable)
-    return (
-        path_to_ilastik_executable / "ilastik"
-        if path_to_ilastik_executable.is_dir()
-        else path_to_ilastik_executable
-    )
+    return path_to_ilastik_executable / "ilastik" if path_to_ilastik_executable.is_dir() else path_to_ilastik_executable
 
 
 def _check_backed_zarr_2(sdata: SpatialData) -> Path:
@@ -130,6 +126,8 @@ def run_object_classification(
         Path to the ilastik project ``.ilp`` file.
     path_to_ilastik_executable
         Path to the ilastik executable, or to the app directory containing the executable.
+        Example:
+        ``".../ilastik-1.4.2b10-arm64-OSX.app/Contents/MacOS/ilastik"``.
     obs_key
         Column name added to ``adata.obs`` with the predicted ilastik labels.
     export_source
