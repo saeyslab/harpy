@@ -50,7 +50,6 @@ def test_mask_to_original(sdata_multi_c_no_backed: SpatialData):
         sdata_multi_c_no_backed,
         labels_layer="masks_whole",
         original_labels_layers=["masks_nuclear"],
-        depth=100,
         chunks=256,
     )
 

@@ -440,7 +440,6 @@ def mask_to_original(
     sdata: SpatialData,
     labels_layer: str,
     original_labels_layers: list[str],
-    depth: tuple[int, int] | int = 400,
     chunks: str | int | tuple[int, int] | None = None,
 ) -> DataFrame:
     """
@@ -468,10 +467,6 @@ def mask_to_original(
     original_labels_layers
         Names of the original labels layers against which overlap is computed.
         One output column is produced for each layer in the order provided.
-    depth
-        Kept for backward compatibility. The optimized implementation aggregates
-        overlap counts directly from aligned chunks and therefore does not
-        require overlap halos.
     chunks
         Chunk specification used when rechunking the label arrays before the
         overlap computation. If a tuple is provided, it is interpreted as the
@@ -492,9 +487,6 @@ def mask_to_original(
     ------
     AssertionError
         If the provided labels layers do not all have the same shape.
-    AssertionError
-        If `depth` is provided as a tuple but does not match the `(y, x)`
-        dimensions.
     AssertionError
         If `chunks` is provided as a tuple but does not match the `(y, x)`
         dimensions.
@@ -524,9 +516,6 @@ def mask_to_original(
             _labels_arrays.append(x_label[None, ...])
         else:
             _labels_arrays.append(x_label)
-
-    if not isinstance(depth, int):
-        assert len(depth) == _labels_arrays[0].ndim - 1, "Please (only) provide depth for ( 'y', 'x')."
 
     if chunks is not None:
         if not isinstance(chunks, int | str):
