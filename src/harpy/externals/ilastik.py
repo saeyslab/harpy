@@ -504,6 +504,7 @@ def run_object_classification(
     log.info(f"Mapping instance ids from labels layer '{labels_layer}' to ilastik prediction labels.")
     segmentation = get_dataarray(sdata, layer=labels_layer).data.squeeze()
     predictions_np = _read_ilastik_predictions(prediction_path)
+    # to speed things up for large matrices, we do the remap using Dask.
     predictions = da.from_array(predictions_np, chunks=segmentation.chunks)
     instance_to_prediction = _map_instance_ids_to_prediction_label(
         segmentation,
