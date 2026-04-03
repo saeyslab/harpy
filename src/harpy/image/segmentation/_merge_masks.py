@@ -339,8 +339,8 @@ def _map_mask_ids_to_original_labels(
 
     Overlaps are accumulated chunk by chunk. Each chunk returns a local dense
     overlap table of shape `(n_mask_ids_in_chunk, n_original_ids_in_chunk)`,
-    and these local tables are merged into one global count matrix using the
-    actual label ids as row and column keys.
+    and these local tables are merged into a sparse Python accumulator keyed by
+    actual `(mask_id, original_id)` pairs, avoiding a huge dense global matrix.
     """
     if not isinstance(mask, da.Array):
         mask = np.asarray(mask)
@@ -363,27 +363,23 @@ def _map_mask_ids_to_original_labels(
     if mask_da.chunks != original_da.chunks:
         original_da = original_da.rechunk(mask_da.chunks)
 
-    if mask_ids is None:
-        mask_ids_global = np.asarray(da.unique(mask_da).compute(), dtype=np.int64)
-    else:
-        mask_ids_global = np.asarray(mask_ids, dtype=np.int64)
-    mask_ids_global = np.unique(mask_ids_global)
-    mask_ids_global = mask_ids_global[mask_ids_global != 0]
+    mask_ids_allowed: set[int] | None = None
+    if mask_ids is not None:
+        mask_ids_array = np.asarray(mask_ids, dtype=np.int64)
+        mask_ids_array = np.unique(mask_ids_array)
+        mask_ids_array = mask_ids_array[mask_ids_array != 0]
+        if mask_ids_array.size == 0:
+            return {}
+        mask_ids_allowed = {int(mask_id) for mask_id in mask_ids_array}
 
-    if mask_ids_global.size == 0:
-        return {}
-
-    if original_ids is None:
-        original_ids_global = np.asarray(da.unique(original_da).compute(), dtype=np.int64)
-    else:
-        original_ids_global = np.asarray(original_ids, dtype=np.int64)
-    original_ids_global = np.unique(original_ids_global)
-    original_ids_global = original_ids_global[original_ids_global != 0]
-
-    if original_ids_global.size == 0:
-        return {}
-
-    global_counts = np.zeros((mask_ids_global.size, original_ids_global.size), dtype=np.uint64)
+    original_ids_allowed: set[int] | None = None
+    if original_ids is not None:
+        original_ids_array = np.asarray(original_ids, dtype=np.int64)
+        original_ids_array = np.unique(original_ids_array)
+        original_ids_array = original_ids_array[original_ids_array != 0]
+        if original_ids_array.size == 0:
+            return {}
+        original_ids_allowed = {int(original_id) for original_id in original_ids_array}
 
     mask_blocks = mask_da.to_delayed().ravel()
     original_blocks = original_da.to_delayed().ravel()
@@ -395,36 +391,41 @@ def _map_mask_ids_to_original_labels(
         for mask_block_delayed, original_block_delayed in zip(mask_blocks, original_blocks, strict=True)
     ]
 
+    # Sparse global overlap accumulator:
+    # `global_counts[mask_id][original_id] = total_overlap_pixels`
+    # This avoids allocating a dense `(n_mask_ids_global, n_original_ids_global)` matrix.
+    global_counts: dict[int, dict[int, int]] = {}
+
     for local_mask_ids, local_original_ids, local_counts in dask.compute(*chunk_tasks):
         if local_mask_ids.size == 0 or local_original_ids.size == 0:
             continue
 
-        global_rows = np.searchsorted(mask_ids_global, local_mask_ids)
-        global_cols = np.searchsorted(original_ids_global, local_original_ids)
-        global_rows_safe = np.where(global_rows >= mask_ids_global.size, 0, global_rows)
-        global_cols_safe = np.where(global_cols >= original_ids_global.size, 0, global_cols)
-        found_rows = mask_ids_global[global_rows_safe] == local_mask_ids
-        found_cols = original_ids_global[global_cols_safe] == local_original_ids
-        if not np.any(found_rows) or not np.any(found_cols):
+        nonzero_rows, nonzero_cols = np.nonzero(local_counts)
+        if nonzero_rows.size == 0:
             continue
 
-        row_idx = np.flatnonzero(found_rows)
-        col_idx = np.flatnonzero(found_cols)
-        global_counts[np.ix_(global_rows_safe[row_idx], global_cols_safe[col_idx])] += local_counts[
-            np.ix_(row_idx, col_idx)
-        ]
+        for row_idx, col_idx in zip(nonzero_rows, nonzero_cols, strict=True):
+            mask_id = int(local_mask_ids[row_idx])
+            original_id = int(local_original_ids[col_idx])
+            if mask_ids_allowed is not None and mask_id not in mask_ids_allowed:
+                continue
+            if original_ids_allowed is not None and original_id not in original_ids_allowed:
+                continue
 
-    valid_mask_ids = global_counts.sum(axis=1) > 0
-    if not np.any(valid_mask_ids):
+            if mask_id not in global_counts:
+                global_counts[mask_id] = {}
+
+            if original_id not in global_counts[mask_id]:
+                global_counts[mask_id][original_id] = 0
+
+            global_counts[mask_id][original_id] += int(local_counts[row_idx, col_idx])
+
+    if not global_counts:
         return {}
 
-    winner_idx = global_counts[valid_mask_ids].argmax(axis=1)
-    winner_original_ids = original_ids_global[winner_idx]
-    winner_mask_ids = mask_ids_global[valid_mask_ids]
-
     return {
-        int(mask_id): int(original_id)
-        for mask_id, original_id in zip(winner_mask_ids, winner_original_ids, strict=True)
+        int(mask_id): int(min(overlap_counts.items(), key=lambda item: (-item[1], item[0]))[0])
+        for mask_id, overlap_counts in sorted(global_counts.items())
     }
 
 

@@ -100,6 +100,20 @@ def test_map_mask_ids_to_original_labels_breaks_ties_by_smallest_label() -> None
     assert result == {1: 2}
 
 
+def test_map_mask_ids_to_original_labels_uses_subset_filters() -> None:
+    mask = da.from_array(np.array([[1, 1, 2, 2], [3, 3, 2, 2]]), chunks=(1, 2))
+    original = da.from_array(np.array([[5, 5, 7, 7], [9, 9, 7, 8]]), chunks=(1, 2))
+
+    result = _map_mask_ids_to_original_labels(
+        mask=mask,
+        original=original,
+        mask_ids=np.array([2, 99]),
+        original_ids=np.array([7, 8]),
+    )
+
+    assert result == {2: 7}
+
+
 def test_mask_to_original_small_sdata() -> None:
     sdata = SpatialData()
     mask = da.from_array(np.array([[1, 1, 2, 2], [1, 0, 2, 3]], dtype=np.uint32), chunks=(1, 2))
