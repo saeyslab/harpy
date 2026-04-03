@@ -47,6 +47,34 @@ def _check_backed_zarr_2(sdata: SpatialData) -> Path:
     return Path(sdata.path).resolve()
 
 
+def _validate_ilastik_input_layers(sdata: SpatialData, img_layer: str, labels_layer: str) -> None:
+    image = get_dataarray(sdata, layer=img_layer)
+    labels = get_dataarray(sdata, layer=labels_layer)
+
+    image_dims = tuple(str(dim) for dim in image.dims)
+    labels_dims = tuple(str(dim) for dim in labels.dims)
+
+    if image_dims not in (("y", "x"), ("c", "y", "x")):
+        raise ValueError(
+            f"Image layer '{img_layer}' must have dims ('y', 'x') or ('c', 'y', 'x') for ilastik, "
+            f"but found {image_dims}."
+        )
+
+    if labels_dims != ("y", "x"):
+        raise ValueError(
+            f"Labels layer '{labels_layer}' must have dims ('y', 'x') for ilastik, but found {labels_dims}."
+        )
+
+    image_spatial_shape = tuple(int(image.sizes[dim]) for dim in ("y", "x"))
+    labels_spatial_shape = tuple(int(labels.sizes[dim]) for dim in ("y", "x"))
+
+    if image_spatial_shape != labels_spatial_shape:
+        raise ValueError(
+            f"Image layer '{img_layer}' and labels layer '{labels_layer}' must have the same spatial shape for ilastik, "
+            f"but found {image_spatial_shape} and {labels_spatial_shape}."
+        )
+
+
 def _get_layer_path(store_path: Path, element_type: str, layer: str) -> Path:
     layer_path = store_path / element_type / layer
     scale_zero_path = layer_path / "0"
@@ -164,7 +192,9 @@ def run_object_classification(
     obs_key
         Column name added to ``adata.obs`` with the predicted ilastik labels.
     export_source
-        ilastik export source passed to ``--export_source``.
+        ilastik export source passed to ``--export_source``. This must match the export source
+        configured in the ilastik GUI/project, i.e. choose either ``"Blockwise Object Predictions"``
+        or ``"Object Predictions"`` consistently in both places.
     instance_key
         Name of the instance id column in ``adata.obs``. Only used if ``table_layer`` is `None`.
     region_key
@@ -190,10 +220,9 @@ def run_object_classification(
         raise ValueError(f"Image layer '{img_layer}' not found in 'sdata.images'.")
     if labels_layer not in sdata.labels:
         raise ValueError(f"Labels layer '{labels_layer}' not found in 'sdata.labels'.")
+    _validate_ilastik_input_layers(sdata=sdata, img_layer=img_layer, labels_layer=labels_layer)
     if export_source not in _VALID_EXPORT_SOURCES:
-        raise ValueError(
-            f"Invalid 'export_source': {export_source!r}. Expected one of {list(_VALID_EXPORT_SOURCES)}."
-        )
+        raise ValueError(f"Invalid 'export_source': {export_source!r}. Expected one of {list(_VALID_EXPORT_SOURCES)}.")
 
     if table_layer is not None:
         adata = ProcessTable(sdata, labels_layer=labels_layer, table_layer=table_layer)._get_adata()
@@ -232,6 +261,7 @@ def run_object_classification(
     if runtime_dir is None:
         runtime_dir = Path(tempfile.mkdtemp(prefix="harpy_ilastik_runtime_"))
         cleanup_runtime_dir = True
+        log.info(f"Created temporary ilastik runtime directory at '{runtime_dir}'.")
     else:
         runtime_dir = Path(runtime_dir).expanduser().resolve()
         runtime_dir.mkdir(parents=True, exist_ok=True)
@@ -271,16 +301,21 @@ def run_object_classification(
             f"Ilastik log path: {log_path}"
         ) from e
 
+    log.info(f"Ilastik prediction finished. Prediction file expected at '{prediction_path}'.")
+
     if not prediction_path.exists():
         raise FileNotFoundError(
             f"ilastik completed without creating the expected prediction file at '{prediction_path}'."
         )
 
+    log.info(f"Mapping instance ids from labels layer '{labels_layer}' to ilastik prediction labels.")
     predictions = _read_ilastik_predictions(prediction_path)
     segmentation = np.asarray(get_dataarray(sdata, layer=labels_layer).data.compute()).squeeze()
     instance_to_prediction = _map_instance_ids_to_prediction_label(segmentation, predictions)
 
-    adata.obs[obs_key] = adata.obs[instance_key].map(instance_to_prediction).fillna(0).astype("int64").astype("category")
+    adata.obs[obs_key] = (
+        adata.obs[instance_key].map(instance_to_prediction).fillna(0).astype("int64").astype("category")
+    )
 
     sdata = add_table_layer(
         sdata,
