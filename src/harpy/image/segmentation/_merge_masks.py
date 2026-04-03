@@ -423,10 +423,15 @@ def _map_mask_ids_to_original_labels(
     if not global_counts:
         return {}
 
-    return {
-        int(mask_id): int(min(overlap_counts.items(), key=lambda item: (-item[1], item[0]))[0])
-        for mask_id, overlap_counts in sorted(global_counts.items())
-    }
+    result: dict[int, int] = {}
+    for mask_id, overlap_counts in sorted(global_counts.items()):
+        best_original_id, _ = min(
+            overlap_counts.items(),
+            key=lambda item: (-item[1], item[0]),
+        )
+        result[int(mask_id)] = int(best_original_id)
+
+    return result
 
 
 def mask_to_original(
