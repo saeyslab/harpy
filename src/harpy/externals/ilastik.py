@@ -258,6 +258,12 @@ def _map_instance_ids_to_prediction_label(
         )
     ]
 
+    # Each delayed task consumes one segmentation/prediction chunk pair and returns:
+    #   1. `local_instance_ids`: the sorted instance ids present in that chunk only
+    #   2. `local_counts`: a dense vote matrix of shape
+    #      `(n_instances_in_chunk, n_global_prediction_labels)`
+    # So we materialize one small chunk-local contingency table per chunk rather
+    # than a single full-image `(n_global_instances, n_global_prediction_labels)` table.
     for local_instance_ids, local_counts in dask.compute(*chunk_tasks):
         if local_instance_ids.size == 0:
             continue
@@ -419,7 +425,7 @@ def run_object_classification(
 
     if table_layer is not None:
         adata = ProcessTable(sdata, labels_layer=labels_layer, table_layer=table_layer)._get_adata()
-        region = sdata[table_layer].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY]
+        region = adata.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY]
         instance_key = sdata[table_layer].uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY]
         region_key = sdata[table_layer].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]
     else:
@@ -484,55 +490,55 @@ def run_object_classification(
     env.setdefault("LAZYFLOW_TOTAL_RAM_MB", str(lazyflow_total_ram_mb))
 
     try:
-        subprocess.run(cmd, env=env, check=True, capture_output=True, text=True)
-    except subprocess.CalledProcessError as e:
-        raise RuntimeError(
-            "ilastik headless object classification failed.\n"
-            f"Command: {shlex.join(cmd)}\n"
-            f"STDOUT:\n{e.stdout}\n"
-            f"STDERR:\n{e.stderr}\n"
-            f"Ilastik log path: {log_path}"
-        ) from e
+        try:
+            subprocess.run(cmd, env=env, check=True, capture_output=True, text=True)
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(
+                "ilastik headless object classification failed.\n"
+                f"Command: {shlex.join(cmd)}\n"
+                f"STDOUT:\n{e.stdout}\n"
+                f"STDERR:\n{e.stderr}\n"
+                f"Ilastik log path: {log_path}"
+            ) from e
 
-    log.info(f"Ilastik prediction finished. Prediction file expected at '{prediction_path}'.")
+        log.info(f"Ilastik prediction finished. Prediction file expected at '{prediction_path}'.")
 
-    if not prediction_path.exists():
-        raise FileNotFoundError(
-            f"ilastik completed without creating the expected prediction file at '{prediction_path}'."
+        if not prediction_path.exists():
+            raise FileNotFoundError(
+                f"ilastik completed without creating the expected prediction file at '{prediction_path}'."
+            )
+
+        log.info(f"Mapping instance ids from labels layer '{labels_layer}' to ilastik prediction labels.")
+        segmentation = get_dataarray(sdata, layer=labels_layer).data.squeeze()
+        predictions_np = _read_ilastik_predictions(prediction_path)
+        # to speed things up for large matrices, we do the remap using Dask.
+        predictions = da.from_array(predictions_np, chunks=segmentation.chunks)
+        instance_to_prediction = _map_instance_ids_to_prediction_label(
+            segmentation,
+            predictions,
+            instance_ids=adata.obs[instance_key].to_numpy(dtype=np.int64, copy=False),
+            prediction_labels=np.unique(predictions_np.astype(np.int64, copy=False)),
         )
 
-    log.info(f"Mapping instance ids from labels layer '{labels_layer}' to ilastik prediction labels.")
-    segmentation = get_dataarray(sdata, layer=labels_layer).data.squeeze()
-    predictions_np = _read_ilastik_predictions(prediction_path)
-    # to speed things up for large matrices, we do the remap using Dask.
-    predictions = da.from_array(predictions_np, chunks=segmentation.chunks)
-    instance_to_prediction = _map_instance_ids_to_prediction_label(
-        segmentation,
-        predictions,
-        instance_ids=adata.obs[instance_key].to_numpy(dtype=np.int64, copy=False),
-        prediction_labels=np.unique(predictions_np.astype(np.int64, copy=False)),
-    )
+        adata.obs[obs_key] = _map_instance_predictions_to_obs(
+            adata=adata,
+            instance_key=instance_key,
+            instance_to_prediction=instance_to_prediction,
+            unmapped_label=unmapped_label,
+            raise_on_unmapped_instance=raise_on_unmapped_instance,
+        )
 
-    adata.obs[obs_key] = _map_instance_predictions_to_obs(
-        adata=adata,
-        instance_key=instance_key,
-        instance_to_prediction=instance_to_prediction,
-        unmapped_label=unmapped_label,
-        raise_on_unmapped_instance=raise_on_unmapped_instance,
-    )
-
-    sdata = add_table_layer(
-        sdata,
-        adata=adata,
-        output_layer=output_layer,
-        region=region,
-        instance_key=instance_key,
-        region_key=region_key,
-        overwrite=overwrite,
-    )
-
-    if cleanup_output_dir:
-        shutil.rmtree(output_dir)
-    if cleanup_runtime_dir:
-        shutil.rmtree(runtime_dir)
-    return sdata
+        return add_table_layer(
+            sdata,
+            adata=adata,
+            output_layer=output_layer,
+            region=region,
+            instance_key=instance_key,
+            region_key=region_key,
+            overwrite=overwrite,
+        )
+    finally:
+        if cleanup_output_dir:
+            shutil.rmtree(output_dir, ignore_errors=True)
+        if cleanup_runtime_dir:
+            shutil.rmtree(runtime_dir, ignore_errors=True)
