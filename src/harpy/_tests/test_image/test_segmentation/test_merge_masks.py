@@ -1,5 +1,6 @@
 import dask.array as da
 import numpy as np
+import pytest
 from pandas import DataFrame
 from spatialdata import SpatialData
 
@@ -136,3 +137,46 @@ def test_mask_to_original_small_sdata() -> None:
         columns=["original_1", "original_2"],
     )
     assert result.equals(expected)
+
+
+def test_mask_to_original_small_sdata_applies_overlap_threshold() -> None:
+    sdata = SpatialData()
+    mask = da.from_array(np.array([[1, 1, 2, 2], [1, 0, 2, 3]], dtype=np.uint32), chunks=(1, 2))
+    original_1 = da.from_array(np.array([[5, 5, 7, 7], [0, 0, 8, 0]], dtype=np.uint32), chunks=(1, 2))
+    original_2 = da.from_array(np.array([[10, 10, 0, 0], [10, 0, 0, 20]], dtype=np.uint32), chunks=(1, 2))
+
+    sdata = add_labels_layer(sdata, arr=mask, output_layer="mask", overwrite=True)
+    sdata = add_labels_layer(sdata, arr=original_1, output_layer="original_1", overwrite=True)
+    sdata = add_labels_layer(sdata, arr=original_2, output_layer="original_2", overwrite=True)
+
+    result = mask_to_original(
+        sdata,
+        labels_layer="mask",
+        original_labels_layers=["original_1", "original_2"],
+        chunks=2,
+        threshold=0.7,
+    )
+
+    expected = DataFrame(
+        np.array([[0, 10], [0, 0], [0, 20]], dtype=np.uint32),
+        index=["1", "2", "3"],
+        columns=["original_1", "original_2"],
+    )
+    assert result.equals(expected)
+
+
+def test_mask_to_original_raises_for_invalid_threshold() -> None:
+    sdata = SpatialData()
+    mask = da.from_array(np.array([[1, 1]], dtype=np.uint32), chunks=(1, 2))
+    original = da.from_array(np.array([[5, 5]], dtype=np.uint32), chunks=(1, 2))
+
+    sdata = add_labels_layer(sdata, arr=mask, output_layer="mask", overwrite=True)
+    sdata = add_labels_layer(sdata, arr=original, output_layer="original", overwrite=True)
+
+    with pytest.raises(ValueError, match="threshold"):
+        mask_to_original(
+            sdata,
+            labels_layer="mask",
+            original_labels_layers=["original"],
+            threshold=1.5,
+        )

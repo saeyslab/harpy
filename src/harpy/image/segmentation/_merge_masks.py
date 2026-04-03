@@ -13,6 +13,7 @@ from spatialdata.models.models import ScaleFactors_t
 from harpy.image._image import get_dataarray
 from harpy.image.segmentation._map import map_labels
 from harpy.image.segmentation._utils import _SEG_DTYPE
+from harpy.utils._aggregate import get_instance_size
 
 
 def merge_labels_layers(
@@ -328,21 +329,22 @@ def _accumulate_mask_to_original_overlap_counts_chunk(
     return mask_ids, original_ids, counts.astype(np.uint64, copy=False)
 
 
-def _map_mask_ids_to_original_labels(
+def _get_mask_ids_to_original_best_matches(
     mask: np.ndarray | da.Array,
     original: np.ndarray | da.Array,
     mask_ids: np.ndarray | None = None,
     original_ids: np.ndarray | None = None,
-) -> dict[int, int]:
+) -> dict[int, tuple[int, int]]:
     """
-    Map each non-zero mask id to the non-zero original label with maximum overlap.
+    Map each non-zero mask id to the best-overlapping non-zero original label.
 
     Overlaps are accumulated chunk by chunk. Each chunk returns a local dense
     overlap table of shape `(n_mask_ids_in_chunk, n_original_ids_in_chunk)`,
     and these local tables are merged into a sparse Python accumulator keyed by
     actual `(mask_id, original_id)` pairs, avoiding a huge dense global matrix.
     Mask ids that overlap only with background label `0` in `original` are not
-    included in the returned mapping.
+    included in the returned mapping. The returned value stores
+    `(best_original_id, overlap_pixel_count)` for each mask id.
     """
     if not isinstance(mask, da.Array):
         mask = np.asarray(mask)
@@ -425,15 +427,39 @@ def _map_mask_ids_to_original_labels(
     if not global_counts:
         return {}
 
-    result: dict[int, int] = {}
+    result: dict[int, tuple[int, int]] = {}
     for mask_id, overlap_counts in sorted(global_counts.items()):
-        best_original_id, _ = min(
+        best_original_id, best_overlap = min(
             overlap_counts.items(),
             key=lambda item: (-item[1], item[0]),
         )
-        result[int(mask_id)] = int(best_original_id)
+        result[int(mask_id)] = (int(best_original_id), int(best_overlap))
 
     return result
+
+
+def _map_mask_ids_to_original_labels(
+    mask: np.ndarray | da.Array,
+    original: np.ndarray | da.Array,
+    mask_ids: np.ndarray | None = None,
+    original_ids: np.ndarray | None = None,
+) -> dict[int, int]:
+    """
+    Map each non-zero mask id to the non-zero original label with maximum overlap.
+
+    Mask ids that overlap only with background label `0` in `original` are not
+    included in the returned mapping.
+    """
+    best_matches = _get_mask_ids_to_original_best_matches(
+        mask=mask,
+        original=original,
+        mask_ids=mask_ids,
+        original_ids=original_ids,
+    )
+    return {
+        int(mask_id): int(best_original_id)
+        for mask_id, (best_original_id, _) in best_matches.items()
+    }
 
 
 def mask_to_original(
@@ -441,6 +467,7 @@ def mask_to_original(
     labels_layer: str,
     original_labels_layers: list[str],
     chunks: str | int | tuple[int, int] | None = None,
+    threshold: float = 0.0,
 ) -> DataFrame:
     """
     Map mask labels to original labels based on maximum overlap.
@@ -473,6 +500,12 @@ def mask_to_original(
         desired `(y, x)` chunk size. If set to `"auto"`, Dask determines the
         chunking. Smaller spatial chunks can improve performance by reducing the
         size of the per-chunk overlap tables.
+    threshold
+        Minimum required overlap fraction between a mask label and its
+        best-overlapping original label. The overlap fraction is computed as
+        `overlap_pixels / area_mask_label`. If this fraction is not strictly
+        greater than `threshold`, the mapping is discarded and the output value
+        is set to `0`. Must lie between 0 and 1.
 
     Returns
     -------
@@ -492,6 +525,8 @@ def mask_to_original(
         dimensions.
     AssertionError
         If any rechunked array has more than one chunk along the z dimension.
+    ValueError
+        If `threshold` is outside the interval `[0, 1]`.
 
     Notes
     -----
@@ -499,6 +534,9 @@ def mask_to_original(
     output value `0` indicates that a mask label has no non-zero overlap with
     the corresponding original labels layer.
     """
+    if not 0 <= threshold <= 1:
+        raise ValueError(f"'threshold' must be between 0 and 1, found {threshold}.")
+
     labels_arrays = [get_dataarray(sdata, layer=labels_layer).data]
 
     for _labels_layer in original_labels_layers:
@@ -537,16 +575,43 @@ def mask_to_original(
     cell_ids = cell_ids[cell_ids != 0]
 
     result = np.zeros((cell_ids.size, len(original_labels_layers)), dtype=_SEG_DTYPE)
+    if threshold > 0:
+        instance_sizes = get_instance_size(
+            mask=rechunked_arrays[0],
+            index=cell_ids,
+            instance_key="instance_id",
+            instance_size_key="instance_size",
+            run_on_gpu=False,
+        )
+        area_by_cell_id = {
+            int(cell_id): int(area)
+            for cell_id, area in zip(instance_sizes["instance_id"], instance_sizes["instance_size"], strict=True)
+        }
+    else:
+        area_by_cell_id = {}
 
     for index, original_array in enumerate(rechunked_arrays[1:]):
-        mapping = _map_mask_ids_to_original_labels(
+        best_matches = _get_mask_ids_to_original_best_matches(
             mask=rechunked_arrays[0],
             original=original_array,
             mask_ids=cell_ids,
         )
-        # Missing entries in `mapping` mean that the mask label overlapped only
-        # with background (`0`) in this original labels layer, so we encode the
-        # no-overlap case as `0` in the output table.
-        result[:, index] = np.asarray([mapping.get(int(cell_id), 0) for cell_id in cell_ids], dtype=_SEG_DTYPE)
+        mapped_labels = []
+        for cell_id in cell_ids:
+            match = best_matches.get(int(cell_id))
+            if match is None:
+                mapped_labels.append(0)
+                continue
+
+            best_original_id, overlap_pixels = match
+            if threshold > 0:
+                overlap_fraction = overlap_pixels / area_by_cell_id[int(cell_id)]
+                if overlap_fraction <= threshold:
+                    mapped_labels.append(0)
+                    continue
+
+            mapped_labels.append(best_original_id)
+
+        result[:, index] = np.asarray(mapped_labels, dtype=_SEG_DTYPE)
 
     return pd.DataFrame(result, index=cell_ids.astype(str), columns=original_labels_layers)
