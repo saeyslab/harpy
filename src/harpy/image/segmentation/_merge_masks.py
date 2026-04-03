@@ -341,6 +341,8 @@ def _map_mask_ids_to_original_labels(
     overlap table of shape `(n_mask_ids_in_chunk, n_original_ids_in_chunk)`,
     and these local tables are merged into a sparse Python accumulator keyed by
     actual `(mask_id, original_id)` pairs, avoiding a huge dense global matrix.
+    Mask ids that overlap only with background label `0` in `original` are not
+    included in the returned mapping.
     """
     if not isinstance(mask, da.Array):
         mask = np.asarray(mask)
@@ -442,49 +444,68 @@ def mask_to_original(
     chunks: str | int | tuple[int, int] | None = None,
 ) -> DataFrame:
     """
-    Map to original.
+    Map mask labels to original labels based on maximum overlap.
 
-    Maps labels from a labels layer (`labels_layer`) to their corresponding labels in original labels layers within a SpatialData object.
-    The labels in `labels_layer` will be mapped to the label of the labels layers in `original_labels_layers`
-    with which it has maximum overlap.
+    For each non-zero label in `labels_layer`, this function determines, for
+    every labels layer in `original_labels_layers`, which non-zero original
+    label overlaps it in the largest number of pixels. The result is returned as
+    a :class:`~pandas.DataFrame` indexed by the mask labels, with one column per
+    original labels layer.
+
+    Overlap counts are accumulated chunk by chunk using a local dense overlap
+    table per chunk pair and a sparse global accumulator across chunks. This
+    keeps the implementation suitable for large label images without requiring a
+    dense global `(n_mask_labels, n_original_labels)` overlap matrix.
 
     Parameters
     ----------
     sdata
-        Spatialdata object containing the mask and original labels layers.
+        The input SpatialData object containing the mask layer and the original
+        labels layers.
     labels_layer
-        The name of the labels layer used as a mask for mapping.
+        Name of the labels layer whose non-zero labels are mapped back to the
+        original labels layers.
     original_labels_layers
-        The names of the original labels layers to which the mask labels are mapped.
+        Names of the original labels layers against which overlap is computed.
+        One output column is produced for each layer in the order provided.
     depth
         Kept for backward compatibility. The optimized implementation aggregates
-        per-chunk overlap counts directly and therefore does not require overlap halos.
+        overlap counts directly from aligned chunks and therefore does not
+        require overlap halos.
     chunks
-        Specification for rechunking the data before applying the function. If chunks is a Tuple, they should contain
-        desired chunk size for 'y', 'x'. 'auto' allows the function to determine optimal chunking. Setting chunks to a
-        relative small size (~1000) will significantly speed up the computations.
+        Chunk specification used when rechunking the label arrays before the
+        overlap computation. If a tuple is provided, it is interpreted as the
+        desired `(y, x)` chunk size. If set to `"auto"`, Dask determines the
+        chunking. Smaller spatial chunks can improve performance by reducing the
+        size of the per-chunk overlap tables.
 
     Returns
     -------
-        A pandas DataFrame where each row corresponds to a unique cell id from the mask layer, and columns correspond
-        to the original labels layers. Each cell in the DataFrame contains the label from the original layer that
-        overlaps most with the mask label.
+    A pandas DataFrame where each row corresponds to a non-zero label from
+    `labels_layer` and each column corresponds to one layer in
+    `original_labels_layers`. Every value contains the non-zero original label
+    with maximum overlap for that mask label. If a mask label has no non-zero
+    overlap with a given original labels layer, the corresponding output value
+    is `0`.
 
     Raises
     ------
     AssertionError
-        If arrays from different labels layers do not have the same shape.
+        If the provided labels layers do not all have the same shape.
     AssertionError
-        If depth is provided as a Tuple but does not match (y, x) dimensions.
+        If `depth` is provided as a tuple but does not match the `(y, x)`
+        dimensions.
     AssertionError
-        If chunks is a Tuple, and does not match (y, x) dimensions.
+        If `chunks` is provided as a tuple but does not match the `(y, x)`
+        dimensions.
     AssertionError
-        If the number of blocks in the z-dimension is not equal to 1.
+        If any rechunked array has more than one chunk along the z dimension.
 
     Notes
     -----
-    This function is designed to facilitate the comparison or integration of segmentation results by mapping mask
-    labels back to their original labels.
+    Background label `0` is ignored when computing overlaps. As a result,
+    output value `0` indicates that a mask label has no non-zero overlap with
+    the corresponding original labels layer.
     """
     labels_arrays = [sdata.labels[labels_layer].data]
 
@@ -534,6 +555,9 @@ def mask_to_original(
             original=original_array,
             mask_ids=cell_ids,
         )
+        # Missing entries in `mapping` mean that the mask label overlapped only
+        # with background (`0`) in this original labels layer, so we encode the
+        # no-overlap case as `0` in the output table.
         result[:, index] = np.asarray([mapping.get(int(cell_id), 0) for cell_id in cell_ids], dtype=_SEG_DTYPE)
 
     return pd.DataFrame(result, index=cell_ids.astype(str), columns=original_labels_layers)
