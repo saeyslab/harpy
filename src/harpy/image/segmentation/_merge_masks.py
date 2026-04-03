@@ -10,7 +10,7 @@ from skimage.segmentation import relabel_sequential
 from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 
-from harpy.image._image import _get_spatial_element
+from harpy.image._image import get_dataarray
 from harpy.image.segmentation._map import map_labels
 from harpy.image.segmentation._utils import _SEG_DTYPE
 
@@ -181,8 +181,8 @@ def merge_labels_layers_nuclei(
         if layer not in [*sdata.labels]:
             raise ValueError(f"Layer '{layer}' not found in available label layers '{[*sdata.labels]}' of sdata.")
 
-    se_nuclei_expanded = _get_spatial_element(sdata, labels_layer_nuclei_expanded)
-    se_nuclei = _get_spatial_element(sdata, labels_layer_nuclei)
+    se_nuclei_expanded = get_dataarray(sdata, labels_layer_nuclei_expanded)
+    se_nuclei = get_dataarray(sdata, labels_layer_nuclei)
 
     (
         np.array_equal(da.unique(se_nuclei_expanded.data), da.unique(se_nuclei.data)),
@@ -499,10 +499,10 @@ def mask_to_original(
     output value `0` indicates that a mask label has no non-zero overlap with
     the corresponding original labels layer.
     """
-    labels_arrays = [sdata.labels[labels_layer].data]
+    labels_arrays = [get_dataarray(sdata, layer=labels_layer).data]
 
     for _labels_layer in original_labels_layers:
-        labels_arrays.append(sdata.labels[_labels_layer].data)
+        labels_arrays.append(get_dataarray(sdata, layer=_labels_layer).data)
 
     # Check for consistent shapes
     first_shape = labels_arrays[0].shape
