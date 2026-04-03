@@ -307,6 +307,33 @@ def _create_adata_from_labels_layer(
     return AnnData(obs=obs)
 
 
+def _map_instance_predictions_to_obs(
+    adata: AnnData,
+    instance_key: str,
+    instance_to_prediction: dict[int, int],
+    unmapped_label: int = 0,
+    raise_on_unmapped_instance: bool = False,
+) -> pd.Series:
+    mapped_predictions = adata.obs[instance_key].map(instance_to_prediction)
+
+    if mapped_predictions.isna().any():
+        unmapped_instance_ids = np.unique(
+            adata.obs.loc[mapped_predictions.isna(), instance_key].to_numpy(dtype=np.int64, copy=False)
+        )
+        if raise_on_unmapped_instance:
+            preview = ", ".join(str(instance_id) for instance_id in unmapped_instance_ids[:10])
+            if unmapped_instance_ids.size > 10:
+                preview = f"{preview}, ..."
+            raise ValueError(
+                "Found table instance ids without an ilastik prediction mapping: "
+                f"[{preview}]. These ids are present in the table but not in the segmentation mask."
+            )
+
+        mapped_predictions = mapped_predictions.fillna(unmapped_label)
+
+    return mapped_predictions.astype("int64").astype("category")
+
+
 def run_object_classification(
     sdata: SpatialData,
     img_layer: str,
@@ -324,6 +351,8 @@ def run_object_classification(
     runtime_dir: str | Path | None = None,
     lazyflow_threads: int = 8,
     lazyflow_total_ram_mb: int = 16000,
+    unmapped_label: int = 0,
+    raise_on_unmapped_instance: bool = False,
 ) -> SpatialData:
     """
     Run ilastik headless object classification and add predicted labels to a table layer.
@@ -367,6 +396,12 @@ def run_object_classification(
         Value for the ``LAZYFLOW_THREADS`` environment variable.
     lazyflow_total_ram_mb
         Value for the ``LAZYFLOW_TOTAL_RAM_MB`` environment variable.
+    unmapped_label
+        Label assigned to table rows whose ``instance_key`` is not present in the segmentation-to-prediction mapping.
+        This only applies when ``raise_on_unmapped_instance`` is ``False``.
+    raise_on_unmapped_instance
+        If ``True``, raise when a table instance id is not present in the segmentation mask instead of assigning
+        ``unmapped_label``.
 
     Returns
     -------
@@ -477,8 +512,12 @@ def run_object_classification(
         prediction_labels=np.unique(predictions_np.astype(np.int64, copy=False)),
     )
 
-    adata.obs[obs_key] = (
-        adata.obs[instance_key].map(instance_to_prediction).fillna(0).astype("int64").astype("category")
+    adata.obs[obs_key] = _map_instance_predictions_to_obs(
+        adata=adata,
+        instance_key=instance_key,
+        instance_to_prediction=instance_to_prediction,
+        unmapped_label=unmapped_label,
+        raise_on_unmapped_instance=raise_on_unmapped_instance,
     )
 
     sdata = add_table_layer(
