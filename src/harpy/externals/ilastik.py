@@ -9,6 +9,7 @@ import uuid
 from pathlib import Path
 from typing import Literal
 
+import dask
 import dask.array as da
 import h5py
 import numpy as np
@@ -90,7 +91,10 @@ def _read_ilastik_predictions(prediction_path: str | Path) -> np.ndarray:
         return np.asarray(f["exported_data"][...]).squeeze()
 
 
-def _map_instance_ids_to_prediction_label(segmentation: np.ndarray, predictions: np.ndarray) -> dict[int, int]:
+def _map_instance_ids_to_prediction_label_numpy(
+    segmentation: np.ndarray,
+    predictions: np.ndarray,
+) -> dict[int, int]:
     segmentation = np.asarray(segmentation)
     predictions = np.asarray(predictions)
 
@@ -123,6 +127,160 @@ def _map_instance_ids_to_prediction_label(segmentation: np.ndarray, predictions:
     return {
         int(instance_id): int(prediction_label)
         for instance_id, prediction_label in zip(instance_ids, winner_labels, strict=True)
+    }
+
+
+def _accumulate_instance_prediction_counts_chunk(
+    segmentation_block: np.ndarray,
+    predictions_block: np.ndarray,
+    prediction_labels: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Aggregate one chunk into a dense local `(n_instances_in_chunk, n_labels)` vote table.
+
+    Foreground pixels are selected with `segmentation_block > 0`. Their
+    instance ids are remapped to a dense local range with `np.unique(...,
+    return_inverse=True)`. Prediction values are mapped to dense columns using
+    the sorted global `prediction_labels` axis so the chunk can be reduced with
+    a single `np.bincount`.
+
+    The returned tuple contains the sorted local `instance_ids` and a dense
+    count matrix where `counts[i, j]` is the number of pixels in that chunk
+    belonging to local instance `i` and prediction-label column `j`.
+    """
+    segmentation_block = np.asarray(segmentation_block)
+    predictions_block = np.asarray(predictions_block)
+    prediction_labels = np.asarray(prediction_labels, dtype=np.int64)
+
+    mask = segmentation_block > 0
+    if not np.any(mask):
+        return np.empty((0,), dtype=np.int64), np.empty((0, prediction_labels.size), dtype=np.uint64)
+
+    segmentation_values = segmentation_block[mask].astype(np.int64, copy=False)
+    prediction_values = predictions_block[mask].astype(np.int64, copy=False)
+    prediction_columns = np.searchsorted(prediction_labels, prediction_values)
+    prediction_columns_safe = np.where(prediction_columns >= prediction_labels.size, 0, prediction_columns)
+    found_prediction_labels = prediction_labels[prediction_columns_safe] == prediction_values
+    if not np.all(found_prediction_labels):
+        raise ValueError("Encountered prediction labels that are not present in the global prediction-label index.")
+
+    instance_ids, segmentation_dense = np.unique(segmentation_values, return_inverse=True)
+    n_instances = instance_ids.size
+    counts = np.bincount(
+        segmentation_dense * prediction_labels.size + prediction_columns_safe,
+        minlength=n_instances * prediction_labels.size,
+    ).reshape(n_instances, prediction_labels.size)
+
+    return instance_ids, counts.astype(np.uint64, copy=False)
+
+
+def _map_instance_ids_to_prediction_label(
+    segmentation: np.ndarray | da.Array,
+    predictions: np.ndarray | da.Array,
+    instance_ids: np.ndarray | None = None,
+    prediction_labels: np.ndarray | None = None,
+) -> dict[int, int]:
+    """
+    Map each non-zero instance id to the prediction label with the most pixels.
+
+    For eager NumPy inputs this falls back to eager in-memory
+    contingency-table implementation via np.bin_counts. For Dask-backed inputs, the arrays are
+    processed chunk by chunk: each chunk is reduced to a local dense
+    `(n_instances_in_chunk, n_prediction_labels)` vote table using
+    `np.bincount`, then accumulated into a single global `(I, L)` matrix.
+
+    When available, `instance_ids` and `prediction_labels` can be passed in as
+    precomputed global axes to avoid extra global `unique` passes over the
+    chunked arrays.
+    """
+    if not isinstance(segmentation, da.Array):
+        segmentation = np.asarray(segmentation)
+    if not isinstance(predictions, da.Array):
+        predictions = np.asarray(predictions)
+
+    if segmentation.shape != predictions.shape:
+        raise ValueError(
+            f"Segmentation shape {segmentation.shape} does not match ilastik prediction shape {predictions.shape}."
+        )
+
+    if not isinstance(segmentation, da.Array) and not isinstance(predictions, da.Array):
+        return _map_instance_ids_to_prediction_label_numpy(segmentation=segmentation, predictions=predictions)
+
+    if isinstance(segmentation, da.Array):
+        segmentation_da = segmentation
+    else:
+        segmentation_da = da.from_array(
+            segmentation,
+            chunks=predictions.chunks if isinstance(predictions, da.Array) else segmentation.shape,
+        )
+
+    if isinstance(predictions, da.Array):
+        predictions_da = predictions
+    else:
+        predictions_da = da.from_array(predictions, chunks=segmentation_da.chunks)
+
+    if segmentation_da.chunks != predictions_da.chunks:
+        predictions_da = predictions_da.rechunk(segmentation_da.chunks)
+
+    if instance_ids is None:
+        instance_ids_global = np.asarray(da.unique(segmentation_da).compute(), dtype=np.int64)
+    else:
+        instance_ids_global = np.asarray(instance_ids, dtype=np.int64)
+    instance_ids_global = np.unique(instance_ids_global)
+    instance_ids_global = instance_ids_global[instance_ids_global != 0]
+
+    if instance_ids_global.size == 0:
+        return {}
+
+    if prediction_labels is None:
+        prediction_labels_global = np.asarray(da.unique(predictions_da).compute(), dtype=np.int64)
+    else:
+        prediction_labels_global = np.asarray(prediction_labels, dtype=np.int64)
+    prediction_labels_global = np.unique(prediction_labels_global)
+
+    if prediction_labels_global.size == 0:
+        return {}
+
+    global_counts = np.zeros((instance_ids_global.size, prediction_labels_global.size), dtype=np.uint64)
+
+    segmentation_blocks = segmentation_da.to_delayed().ravel()
+    predictions_blocks = predictions_da.to_delayed().ravel()
+    chunk_tasks = [
+        dask.delayed(_accumulate_instance_prediction_counts_chunk)(
+            segmentation_block=segmentation_block_delayed,
+            predictions_block=predictions_block_delayed,
+            prediction_labels=prediction_labels_global,
+        )
+        for segmentation_block_delayed, predictions_block_delayed in zip(
+            segmentation_blocks,
+            predictions_blocks,
+            strict=True,
+        )
+    ]
+
+    for local_instance_ids, local_counts in dask.compute(*chunk_tasks):
+        if local_instance_ids.size == 0:
+            continue
+
+        global_rows = np.searchsorted(instance_ids_global, local_instance_ids)
+        global_rows_safe = np.where(global_rows >= instance_ids_global.size, 0, global_rows)
+        found_instances = instance_ids_global[global_rows_safe] == local_instance_ids
+        if not np.any(found_instances):
+            continue
+
+        global_counts[global_rows_safe[found_instances]] += local_counts[found_instances]
+
+    valid_instances = global_counts.sum(axis=1) > 0
+    if not np.any(valid_instances):
+        return {}
+
+    winner_idx = global_counts[valid_instances].argmax(axis=1)
+    winner_labels = prediction_labels_global[winner_idx]
+    winner_instance_ids = instance_ids_global[valid_instances]
+
+    return {
+        int(instance_id): int(prediction_label)
+        for instance_id, prediction_label in zip(winner_instance_ids, winner_labels, strict=True)
     }
 
 
@@ -309,9 +467,15 @@ def run_object_classification(
         )
 
     log.info(f"Mapping instance ids from labels layer '{labels_layer}' to ilastik prediction labels.")
-    predictions = _read_ilastik_predictions(prediction_path)
-    segmentation = np.asarray(get_dataarray(sdata, layer=labels_layer).data.compute()).squeeze()
-    instance_to_prediction = _map_instance_ids_to_prediction_label(segmentation, predictions)
+    segmentation = get_dataarray(sdata, layer=labels_layer).data.squeeze()
+    predictions_np = _read_ilastik_predictions(prediction_path)
+    predictions = da.from_array(predictions_np, chunks=segmentation.chunks)
+    instance_to_prediction = _map_instance_ids_to_prediction_label(
+        segmentation,
+        predictions,
+        instance_ids=adata.obs[instance_key].to_numpy(dtype=np.int64, copy=False),
+        prediction_labels=np.unique(predictions_np.astype(np.int64, copy=False)),
+    )
 
     adata.obs[obs_key] = (
         adata.obs[instance_key].map(instance_to_prediction).fillna(0).astype("int64").astype("category")
