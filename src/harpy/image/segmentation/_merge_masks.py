@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from typing import Literal
+
 import dask
 import dask.array as da
 import numpy as np
 import pandas as pd
+from loguru import logger as log
 from numpy.typing import NDArray
 from pandas import DataFrame
 from skimage.segmentation import relabel_sequential
@@ -456,10 +459,7 @@ def _map_mask_ids_to_original_labels(
         mask_ids=mask_ids,
         original_ids=original_ids,
     )
-    return {
-        int(mask_id): int(best_original_id)
-        for mask_id, (best_original_id, _) in best_matches.items()
-    }
+    return {int(mask_id): int(best_original_id) for mask_id, (best_original_id, _) in best_matches.items()}
 
 
 def mask_to_original(
@@ -468,6 +468,7 @@ def mask_to_original(
     original_labels_layers: list[str],
     chunks: str | int | tuple[int, int] | None = None,
     threshold: float = 0.0,
+    overlap_metric: Literal["mask_fraction", "original_fraction", "iou"] = "mask_fraction",
 ) -> DataFrame:
     """
     Map mask labels to original labels based on maximum overlap.
@@ -503,9 +504,20 @@ def mask_to_original(
     threshold
         Minimum required overlap fraction between a mask label and its
         best-overlapping original label. The overlap fraction is computed as
-        `overlap_pixels / area_mask_label`. If this fraction is not strictly
+        a score controlled by `overlap_metric`. If this score is not strictly
         greater than `threshold`, the mapping is discarded and the output value
         is set to `0`. Must lie between 0 and 1.
+    overlap_metric
+        Metric used when applying `threshold` to the best-overlapping original
+        label. Supported values are:
+
+        - `"mask_fraction"`: `overlap_pixels / area_mask_label`
+        - `"original_fraction"`: `overlap_pixels / area_original_label`
+        - `"iou"`: `overlap_pixels / (area_mask_label + area_original_label - overlap_pixels)`
+
+        The winning original label is still selected by maximum overlap in
+        pixels; `overlap_metric` only controls thresholding of that winning
+        match.
 
     Returns
     -------
@@ -527,6 +539,9 @@ def mask_to_original(
         If any rechunked array has more than one chunk along the z dimension.
     ValueError
         If `threshold` is outside the interval `[0, 1]`.
+    ValueError
+        If `overlap_metric` is not one of `"mask_fraction"`,
+        `"original_fraction"`, or `"iou"`.
 
     Notes
     -----
@@ -536,6 +551,10 @@ def mask_to_original(
     """
     if not 0 <= threshold <= 1:
         raise ValueError(f"'threshold' must be between 0 and 1, found {threshold}.")
+    if overlap_metric not in {"mask_fraction", "original_fraction", "iou"}:
+        raise ValueError(
+            f"'overlap_metric' must be one of 'mask_fraction', 'original_fraction', or 'iou', found {overlap_metric!r}."
+        )
 
     labels_arrays = [get_dataarray(sdata, layer=labels_layer).data]
 
@@ -575,7 +594,8 @@ def mask_to_original(
     cell_ids = cell_ids[cell_ids != 0]
 
     result = np.zeros((cell_ids.size, len(original_labels_layers)), dtype=_SEG_DTYPE)
-    if threshold > 0:
+    if threshold > 0 and overlap_metric in {"mask_fraction", "iou"}:
+        log.info(f"Calculating instance sizes for labels layer '{labels_layer}'.")
         instance_sizes = get_instance_size(
             mask=rechunked_arrays[0],
             index=cell_ids,
@@ -596,6 +616,27 @@ def mask_to_original(
             original=original_array,
             mask_ids=cell_ids,
         )
+        if threshold > 0 and overlap_metric in {"original_fraction", "iou"} and best_matches:
+            log.info(f"Calculating instance sizes for original labels layer '{original_labels_layers[index]}'.")
+            winner_original_ids = np.unique(
+                np.asarray([best_original_id for best_original_id, _ in best_matches.values()], dtype=np.int64)
+            )
+            original_sizes = get_instance_size(
+                mask=original_array,
+                index=winner_original_ids,
+                instance_key="instance_id",
+                instance_size_key="instance_size",
+                run_on_gpu=False,
+            )
+            area_by_original_id = {
+                int(original_id): int(area)
+                for original_id, area in zip(
+                    original_sizes["instance_id"], original_sizes["instance_size"], strict=True
+                )
+            }
+        else:
+            area_by_original_id = {}
+
         mapped_labels = []
         for cell_id in cell_ids:
             match = best_matches.get(int(cell_id))
@@ -605,8 +646,16 @@ def mask_to_original(
 
             best_original_id, overlap_pixels = match
             if threshold > 0:
-                overlap_fraction = overlap_pixels / area_by_cell_id[int(cell_id)]
-                if overlap_fraction <= threshold:
+                if overlap_metric == "mask_fraction":
+                    overlap_score = overlap_pixels / area_by_cell_id[int(cell_id)]
+                elif overlap_metric == "original_fraction":
+                    overlap_score = overlap_pixels / area_by_original_id[int(best_original_id)]
+                else:
+                    mask_area = area_by_cell_id[int(cell_id)]
+                    original_area = area_by_original_id[int(best_original_id)]
+                    overlap_score = overlap_pixels / (mask_area + original_area - overlap_pixels)
+
+                if overlap_score <= threshold:
                     mapped_labels.append(0)
                     continue
 

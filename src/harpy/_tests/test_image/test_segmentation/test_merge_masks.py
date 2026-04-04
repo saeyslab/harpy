@@ -165,6 +165,56 @@ def test_mask_to_original_small_sdata_applies_overlap_threshold() -> None:
     assert result.equals(expected)
 
 
+def test_mask_to_original_small_sdata_supports_overlap_metrics() -> None:
+    sdata = SpatialData()
+    mask = da.from_array(np.array([[1, 1, 0, 0], [1, 0, 0, 0]], dtype=np.uint32), chunks=(1, 2))
+    original = da.from_array(np.array([[5, 5, 5, 5], [0, 0, 5, 0]], dtype=np.uint32), chunks=(1, 2))
+
+    # For mask label 1 and original label 5:
+    # - mask area = 3
+    # - original area = 5
+    # - non-background overlap = 2
+    # The pixel where mask == 1 and original == 0 contributes to the mask area
+    # but not to the overlap. This gives:
+    # - mask_fraction = 2 / 3 = 0.666...
+    # - original_fraction = 2 / 5 = 0.4
+    # - iou = 2 / (3 + 5 - 2) = 2 / 6 = 0.333...
+    # With threshold = 0.5, only mask_fraction keeps label 5.
+    sdata = add_labels_layer(sdata, arr=mask, output_layer="mask", overwrite=True)
+    sdata = add_labels_layer(sdata, arr=original, output_layer="original", overwrite=True)
+
+    result_mask_fraction = mask_to_original(
+        sdata,
+        labels_layer="mask",
+        original_labels_layers=["original"],
+        chunks=2,
+        threshold=0.5,
+        overlap_metric="mask_fraction",
+    )
+    result_original_fraction = mask_to_original(
+        sdata,
+        labels_layer="mask",
+        original_labels_layers=["original"],
+        chunks=2,
+        threshold=0.5,
+        overlap_metric="original_fraction",
+    )
+    result_iou = mask_to_original(
+        sdata,
+        labels_layer="mask",
+        original_labels_layers=["original"],
+        chunks=2,
+        threshold=0.5,
+        overlap_metric="iou",
+    )
+
+    assert result_mask_fraction.equals(DataFrame(np.array([[5]], dtype=np.uint32), index=["1"], columns=["original"]))
+    assert result_original_fraction.equals(
+        DataFrame(np.array([[0]], dtype=np.uint32), index=["1"], columns=["original"])
+    )
+    assert result_iou.equals(DataFrame(np.array([[0]], dtype=np.uint32), index=["1"], columns=["original"]))
+
+
 def test_mask_to_original_raises_for_invalid_threshold() -> None:
     sdata = SpatialData()
     mask = da.from_array(np.array([[1, 1]], dtype=np.uint32), chunks=(1, 2))
@@ -179,4 +229,21 @@ def test_mask_to_original_raises_for_invalid_threshold() -> None:
             labels_layer="mask",
             original_labels_layers=["original"],
             threshold=1.5,
+        )
+
+
+def test_mask_to_original_raises_for_invalid_overlap_metric() -> None:
+    sdata = SpatialData()
+    mask = da.from_array(np.array([[1, 1]], dtype=np.uint32), chunks=(1, 2))
+    original = da.from_array(np.array([[5, 5]], dtype=np.uint32), chunks=(1, 2))
+
+    sdata = add_labels_layer(sdata, arr=mask, output_layer="mask", overwrite=True)
+    sdata = add_labels_layer(sdata, arr=original, output_layer="original", overwrite=True)
+
+    with pytest.raises(ValueError, match="overlap_metric"):
+        mask_to_original(
+            sdata,
+            labels_layer="mask",
+            original_labels_layers=["original"],
+            overlap_metric="dice",  # type: ignore[arg-type]
         )
