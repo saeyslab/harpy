@@ -6,7 +6,7 @@ from spatialdata import SpatialData
 
 from harpy.image._image import add_labels_layer
 from harpy.image.segmentation._merge_masks import (
-    _map_mask_ids_to_original_labels,
+    _get_mask_ids_to_original_overlap_counts,
     mask_to_original,
     merge_labels_layers,
     merge_labels_layers_nuclei,
@@ -58,7 +58,7 @@ def test_mask_to_original(sdata_multi_c_no_backed: SpatialData):
     assert isinstance(df, DataFrame)
 
 
-def test_map_mask_ids_to_original_labels_dask_matches_numpy() -> None:
+def test_get_mask_ids_to_original_overlap_counts() -> None:
     mask = np.array(
         [
             [0, 1, 1, 2],
@@ -74,44 +74,44 @@ def test_map_mask_ids_to_original_labels_dask_matches_numpy() -> None:
         ]
     )
 
-    result = _map_mask_ids_to_original_labels(
+    result = _get_mask_ids_to_original_overlap_counts(
         mask=da.from_array(mask, chunks=(2, 2)),
         original=original,
     )
 
-    assert result == {1: 5, 2: 7, 3: 1, 4: 2}
+    assert result == {1: {5: 2}, 2: {7: 2, 8: 2}, 3: {1: 2}, 4: {2: 2, 3: 1}}
 
 
-def test_map_mask_ids_to_original_labels_ignores_background_only_overlap() -> None:
+def test_get_mask_ids_to_original_overlap_counts_ignores_background_only_overlap() -> None:
     mask = da.from_array(np.array([[1, 1, 2, 2]]), chunks=(1, 2))
     original = da.from_array(np.array([[0, 0, 5, 5]]), chunks=(1, 2))
 
-    result = _map_mask_ids_to_original_labels(mask=mask, original=original)
+    result = _get_mask_ids_to_original_overlap_counts(mask=mask, original=original)
 
-    assert result == {2: 5}
+    assert result == {2: {5: 2}}
 
 
-def test_map_mask_ids_to_original_labels_breaks_ties_by_smallest_label() -> None:
+def test_get_mask_ids_to_original_overlap_counts_keeps_tied_candidates() -> None:
     mask = da.from_array(np.array([[1, 1, 1, 1]]), chunks=(1, 2))
     original = da.from_array(np.array([[7, 2, 2, 7]]), chunks=(1, 2))
 
-    result = _map_mask_ids_to_original_labels(mask=mask, original=original)
+    result = _get_mask_ids_to_original_overlap_counts(mask=mask, original=original)
 
-    assert result == {1: 2}
+    assert result == {1: {2: 2, 7: 2}}
 
 
-def test_map_mask_ids_to_original_labels_uses_subset_filters() -> None:
+def test_get_mask_ids_to_original_overlap_counts_uses_subset_filters() -> None:
     mask = da.from_array(np.array([[1, 1, 2, 2], [3, 3, 2, 2]]), chunks=(1, 2))
     original = da.from_array(np.array([[5, 5, 7, 7], [9, 9, 7, 8]]), chunks=(1, 2))
 
-    result = _map_mask_ids_to_original_labels(
+    result = _get_mask_ids_to_original_overlap_counts(
         mask=mask,
         original=original,
         mask_ids=np.array([2, 99]),
         original_ids=np.array([7, 8]),
     )
 
-    assert result == {2: 7}
+    assert result == {2: {7: 3, 8: 1}}
 
 
 def test_mask_to_original_small_sdata() -> None:
