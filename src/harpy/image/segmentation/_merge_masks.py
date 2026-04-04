@@ -332,22 +332,35 @@ def _accumulate_mask_to_original_overlap_counts_chunk(
     return mask_ids, original_ids, counts.astype(np.uint64, copy=False)
 
 
-def _get_mask_ids_to_original_best_matches(
+def _get_mask_ids_to_original_overlap_counts(
     mask: np.ndarray | da.Array,
     original: np.ndarray | da.Array,
     mask_ids: np.ndarray | None = None,
     original_ids: np.ndarray | None = None,
-) -> dict[int, tuple[int, int]]:
+) -> dict[int, dict[int, int]]:
     """
-    Map each non-zero mask id to the best-overlapping non-zero original label.
+    Accumulate sparse overlap counts between non-zero mask ids and original ids.
 
     Overlaps are accumulated chunk by chunk. Each chunk returns a local dense
     overlap table of shape `(n_mask_ids_in_chunk, n_original_ids_in_chunk)`,
     and these local tables are merged into a sparse Python accumulator keyed by
     actual `(mask_id, original_id)` pairs, avoiding a huge dense global matrix.
     Mask ids that overlap only with background label `0` in `original` are not
-    included in the returned mapping. The returned value stores
-    `(best_original_id, overlap_pixel_count)` for each mask id.
+    included in the returned mapping.
+
+    The returned object is a nested dictionary of the form
+    `overlap_counts_by_mask[mask_id][original_id] = overlap_pixels`.
+
+    For example, if mask label `1` overlaps original label `5` in `12` pixels
+    and original label `7` in `3` pixels, and mask label `2` overlaps original
+    label `8` in `20` pixels, the function returns:
+
+    `{1: {5: 12, 7: 3}, 2: {8: 20}}`
+
+    This means:
+
+    - mask label `1` has two candidate matches, with `5` being the stronger one
+    - mask label `2` overlaps only original label `8`
     """
     if not isinstance(mask, da.Array):
         mask = np.asarray(mask)
@@ -427,11 +440,33 @@ def _get_mask_ids_to_original_best_matches(
 
             global_counts[mask_id][original_id] += int(local_counts[row_idx, col_idx])
 
+    return {int(mask_id): overlap_counts for mask_id, overlap_counts in sorted(global_counts.items())}
+
+
+def _get_mask_ids_to_original_best_matches(
+    mask: np.ndarray | da.Array,
+    original: np.ndarray | da.Array,
+    mask_ids: np.ndarray | None = None,
+    original_ids: np.ndarray | None = None,
+) -> dict[int, tuple[int, int]]:
+    """
+    Map each non-zero mask id to the best-overlapping non-zero original label.
+
+    The best match is selected by maximum overlap pixels, with ties broken by
+    choosing the smaller original label.
+    # TODO -> remove, this code is not used
+    """
+    global_counts = _get_mask_ids_to_original_overlap_counts(
+        mask=mask,
+        original=original,
+        mask_ids=mask_ids,
+        original_ids=original_ids,
+    )
     if not global_counts:
         return {}
 
     result: dict[int, tuple[int, int]] = {}
-    for mask_id, overlap_counts in sorted(global_counts.items()):
+    for mask_id, overlap_counts in global_counts.items():
         best_original_id, best_overlap = min(
             overlap_counts.items(),
             key=lambda item: (-item[1], item[0]),
@@ -452,6 +487,8 @@ def _map_mask_ids_to_original_labels(
 
     Mask ids that overlap only with background label `0` in `original` are not
     included in the returned mapping.
+
+    TODO: remove -> this code is not used
     """
     best_matches = _get_mask_ids_to_original_best_matches(
         mask=mask,
@@ -471,11 +508,11 @@ def mask_to_original(
     overlap_metric: Literal["mask_fraction", "original_fraction", "iou"] = "mask_fraction",
 ) -> DataFrame:
     """
-    Map mask labels to original labels based on maximum overlap.
+    Map mask labels to original labels based on an overlap score.
 
     For each non-zero label in `labels_layer`, this function determines, for
     every labels layer in `original_labels_layers`, which non-zero original
-    label overlaps it in the largest number of pixels. The result is returned as
+    label best matches it according to `overlap_metric`. The result is returned as
     a :class:`~pandas.DataFrame` indexed by the mask labels, with one column per
     original labels layer.
 
@@ -508,23 +545,23 @@ def mask_to_original(
         greater than `threshold`, the mapping is discarded and the output value
         is set to `0`. Must lie between 0 and 1.
     overlap_metric
-        Metric used when applying `threshold` to the best-overlapping original
-        label. Supported values are:
+        Metric used both to select the winning original label and to apply
+        `threshold` to that winning match. Supported values are:
 
         - `"mask_fraction"`: `overlap_pixels / area_mask_label`
         - `"original_fraction"`: `overlap_pixels / area_original_label`
         - `"iou"`: `overlap_pixels / (area_mask_label + area_original_label - overlap_pixels)`
 
-        The winning original label is still selected by maximum overlap in
-        pixels; `overlap_metric` only controls thresholding of that winning
-        match.
+        For `"mask_fraction"`, selecting the winner is equivalent to selecting
+        the label with the largest number of overlapping pixels, because
+        `area_mask_label` is constant across candidates for the same mask id.
 
     Returns
     -------
     A pandas DataFrame where each row corresponds to a non-zero label from
     `labels_layer` and each column corresponds to one layer in
     `original_labels_layers`. Every value contains the non-zero original label
-    with maximum overlap for that mask label. If a mask label has no non-zero
+    selected for that mask label according to `overlap_metric`. If a mask label has no non-zero
     overlap with a given original labels layer, the corresponding output value
     is `0`.
 
@@ -594,7 +631,7 @@ def mask_to_original(
     cell_ids = cell_ids[cell_ids != 0]
 
     result = np.zeros((cell_ids.size, len(original_labels_layers)), dtype=_SEG_DTYPE)
-    if threshold > 0 and overlap_metric in {"mask_fraction", "iou"}:
+    if overlap_metric == "iou" or (threshold > 0 and overlap_metric == "mask_fraction"):
         log.info(f"Calculating instance sizes for labels layer '{labels_layer}'.")
         instance_sizes = get_instance_size(
             mask=rechunked_arrays[0],
@@ -611,19 +648,26 @@ def mask_to_original(
         area_by_cell_id = {}
 
     for index, original_array in enumerate(rechunked_arrays[1:]):
-        best_matches = _get_mask_ids_to_original_best_matches(
+        overlap_counts_by_mask = _get_mask_ids_to_original_overlap_counts(
             mask=rechunked_arrays[0],
             original=original_array,
             mask_ids=cell_ids,
         )
-        if threshold > 0 and overlap_metric in {"original_fraction", "iou"} and best_matches:
+        if overlap_metric in {"original_fraction", "iou"} and overlap_counts_by_mask:
             log.info(f"Calculating instance sizes for original labels layer '{original_labels_layers[index]}'.")
-            winner_original_ids = np.unique(
-                np.asarray([best_original_id for best_original_id, _ in best_matches.values()], dtype=np.int64)
+            candidate_original_ids = np.unique(
+                np.asarray(
+                    [
+                        original_id
+                        for overlap_counts in overlap_counts_by_mask.values()
+                        for original_id in overlap_counts
+                    ],
+                    dtype=np.int64,
+                )
             )
             original_sizes = get_instance_size(
                 mask=original_array,
-                index=winner_original_ids,
+                index=candidate_original_ids,
                 instance_key="instance_id",
                 instance_size_key="instance_size",
                 run_on_gpu=False,
@@ -639,21 +683,38 @@ def mask_to_original(
 
         mapped_labels = []
         for cell_id in cell_ids:
-            match = best_matches.get(int(cell_id))
-            if match is None:
+            overlap_counts = overlap_counts_by_mask.get(int(cell_id))
+            if overlap_counts is None:
                 mapped_labels.append(0)
                 continue
 
-            best_original_id, overlap_pixels = match
+            best_original_id = 0
+            best_overlap_pixels = 0
+            best_score = -1.0
+            for original_id, overlap_pixels in overlap_counts.items():
+                if overlap_metric == "mask_fraction":
+                    score = overlap_pixels
+                elif overlap_metric == "original_fraction":
+                    score = overlap_pixels / area_by_original_id[int(original_id)]
+                else:
+                    mask_area = area_by_cell_id[int(cell_id)]
+                    original_area = area_by_original_id[int(original_id)]
+                    score = overlap_pixels / (mask_area + original_area - overlap_pixels)
+
+                if score > best_score or (score == best_score and original_id < best_original_id):
+                    best_original_id = int(original_id)
+                    best_overlap_pixels = int(overlap_pixels)
+                    best_score = float(score)
+
             if threshold > 0:
                 if overlap_metric == "mask_fraction":
-                    overlap_score = overlap_pixels / area_by_cell_id[int(cell_id)]
+                    overlap_score = best_overlap_pixels / area_by_cell_id[int(cell_id)]
                 elif overlap_metric == "original_fraction":
-                    overlap_score = overlap_pixels / area_by_original_id[int(best_original_id)]
+                    overlap_score = best_overlap_pixels / area_by_original_id[int(best_original_id)]
                 else:
                     mask_area = area_by_cell_id[int(cell_id)]
                     original_area = area_by_original_id[int(best_original_id)]
-                    overlap_score = overlap_pixels / (mask_area + original_area - overlap_pixels)
+                    overlap_score = best_overlap_pixels / (mask_area + original_area - best_overlap_pixels)
 
                 if overlap_score <= threshold:
                     mapped_labels.append(0)

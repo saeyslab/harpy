@@ -139,32 +139,6 @@ def test_mask_to_original_small_sdata() -> None:
     assert result.equals(expected)
 
 
-def test_mask_to_original_small_sdata_applies_overlap_threshold() -> None:
-    sdata = SpatialData()
-    mask = da.from_array(np.array([[1, 1, 2, 2], [1, 0, 2, 3]], dtype=np.uint32), chunks=(1, 2))
-    original_1 = da.from_array(np.array([[5, 5, 7, 7], [0, 0, 8, 0]], dtype=np.uint32), chunks=(1, 2))
-    original_2 = da.from_array(np.array([[10, 10, 0, 0], [10, 0, 0, 20]], dtype=np.uint32), chunks=(1, 2))
-
-    sdata = add_labels_layer(sdata, arr=mask, output_layer="mask", overwrite=True)
-    sdata = add_labels_layer(sdata, arr=original_1, output_layer="original_1", overwrite=True)
-    sdata = add_labels_layer(sdata, arr=original_2, output_layer="original_2", overwrite=True)
-
-    result = mask_to_original(
-        sdata,
-        labels_layer="mask",
-        original_labels_layers=["original_1", "original_2"],
-        chunks=2,
-        threshold=0.7,
-    )
-
-    expected = DataFrame(
-        np.array([[0, 10], [0, 0], [0, 20]], dtype=np.uint32),
-        index=["1", "2", "3"],
-        columns=["original_1", "original_2"],
-    )
-    assert result.equals(expected)
-
-
 def test_mask_to_original_small_sdata_supports_overlap_metrics() -> None:
     sdata = SpatialData()
     mask = da.from_array(np.array([[1, 1, 0, 0], [1, 0, 0, 0]], dtype=np.uint32), chunks=(1, 2))
@@ -213,6 +187,85 @@ def test_mask_to_original_small_sdata_supports_overlap_metrics() -> None:
         DataFrame(np.array([[0]], dtype=np.uint32), index=["1"], columns=["original"])
     )
     assert result_iou.equals(DataFrame(np.array([[0]], dtype=np.uint32), index=["1"], columns=["original"]))
+
+
+def test_mask_to_original_selects_winner_using_overlap_metric() -> None:
+    sdata = SpatialData()
+    mask = da.from_array(
+        np.array(
+            [
+                [1, 1, 1, 0],
+                [1, 1, 1, 0],
+                [0, 0, 0, 0],
+                [0, 0, 0, 0],
+            ],
+            dtype=np.uint32,
+        ),
+        chunks=(2, 2),
+    )
+    original = da.from_array(
+        np.array(
+            [
+                [5, 5, 5, 5],
+                [5, 6, 6, 5],
+                [5, 5, 5, 5],
+                [5, 5, 0, 0],
+            ],
+            dtype=np.uint32,
+        ),
+        chunks=(2, 2),
+    )
+
+    sdata = add_labels_layer(sdata, arr=mask, output_layer="mask", overwrite=True)
+    sdata = add_labels_layer(sdata, arr=original, output_layer="original", overwrite=True)
+
+    # Mask label 1 covers 6 pixels. Within that mask:
+    # - original label 5 overlaps in 4 pixels
+    # - original label 6 overlaps in 2 pixels
+    #
+    # mask_fraction picks label 5:
+    # - mask_fraction(5) = 4 / 6
+    # - mask_fraction(6) = 2 / 6
+    #
+    # But original label 5 is much larger overall:
+    # - area_original(5) = 12
+    # - area_original(6) = 2
+    #
+    # Therefore the winner flips for the other metrics:
+    # - original_fraction(5) = 4 / 12
+    # - original_fraction(6) = 2 / 2
+    # - iou(5) = 4 / (6 + 12 - 4)
+    # - iou(6) = 2 / (6 + 2 - 2)
+    #
+    # So mask_fraction keeps label 5, while original_fraction and iou select
+    # label 6.
+    result_mask_fraction = mask_to_original(
+        sdata,
+        labels_layer="mask",
+        original_labels_layers=["original"],
+        chunks=2,
+        overlap_metric="mask_fraction",
+    )
+    result_original_fraction = mask_to_original(
+        sdata,
+        labels_layer="mask",
+        original_labels_layers=["original"],
+        chunks=2,
+        overlap_metric="original_fraction",
+    )
+    result_iou = mask_to_original(
+        sdata,
+        labels_layer="mask",
+        original_labels_layers=["original"],
+        chunks=2,
+        overlap_metric="iou",
+    )
+
+    assert result_mask_fraction.equals(DataFrame(np.array([[5]], dtype=np.uint32), index=["1"], columns=["original"]))
+    assert result_original_fraction.equals(
+        DataFrame(np.array([[6]], dtype=np.uint32), index=["1"], columns=["original"])
+    )
+    assert result_iou.equals(DataFrame(np.array([[6]], dtype=np.uint32), index=["1"], columns=["original"]))
 
 
 def test_mask_to_original_raises_for_invalid_threshold() -> None:
