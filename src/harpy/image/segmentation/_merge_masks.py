@@ -575,6 +575,13 @@ def match_labels_to_reference_layers(
     source_ids = np.asarray(da.unique(rechunked_arrays[0]).compute(), dtype=np.int64)
     source_ids = source_ids[source_ids != 0]
 
+    if source_ids.size == 0:
+        return pd.DataFrame(
+            np.empty((0, len(reference_labels_layers)), dtype=_SEG_DTYPE),
+            index=pd.Index([], dtype=str),
+            columns=reference_labels_layers,
+        )
+
     result = np.zeros((source_ids.size, len(reference_labels_layers)), dtype=_SEG_DTYPE)
     if overlap_metric == "iou" or (threshold > 0 and overlap_metric == "source_fraction"):
         log.info(f"Calculating instance sizes for source labels layer '{source_labels_layer}'.")

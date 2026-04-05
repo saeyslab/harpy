@@ -1137,7 +1137,8 @@ def get_instance_size(
         A 3D labels mask with dimensions ``('z', 'y', 'x')``.
     index
         Optional subset of instance ids for which to calculate the size. If `None`, all
-        instance ids in `mask` are used.
+        instance ids in `mask` are used. If an empty index is provided, an empty
+        DataFrame is returned.
     instance_key
         Name of the output column containing the instance ids.
     instance_size_key
@@ -1168,6 +1169,8 @@ def _calculate_area(mask: da.Array, index: NDArray | None = None, run_on_gpu: bo
 
     # put on correct backend
     index = xp.asarray(index)
+    if index.size == 0:
+        return xp.empty((0, 1), dtype=xp.float32)
 
     def _calculate_count_per_chunk(mask_block: NDArray) -> NDArray:
         # for safety

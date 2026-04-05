@@ -423,6 +423,17 @@ def test_get_instance_size_public_alias(sdata):
     assert df_public.equals(df_private)
 
 
+def test_get_instance_size_empty_index_returns_empty_dataframe(sdata):
+    se_labels = sdata["blobs_labels"]
+    mask = se_labels.data[None, ...].rechunk(512)
+    empty_index = np.array([], dtype=np.int64)
+
+    df_public = get_instance_size(mask, index=empty_index, instance_size_key=_CELLSIZE_KEY, run_on_gpu=False)
+
+    assert df_public.empty
+    assert list(df_public.columns) == [_INSTANCE_KEY, _CELLSIZE_KEY]
+
+
 def test_get_center_of_mask(sdata):
     se_labels = sdata["blobs_labels"]
     mask = se_labels.data[None, ...].rechunk(512)

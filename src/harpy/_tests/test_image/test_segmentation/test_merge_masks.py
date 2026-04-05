@@ -139,6 +139,37 @@ def test_match_labels_to_reference_layers_small_sdata() -> None:
     assert result.equals(expected)
 
 
+@pytest.mark.parametrize(
+    ("overlap_metric", "threshold"),
+    [
+        ("source_fraction", 0.5),
+        ("iou", 0.5),
+    ],
+)
+def test_match_labels_to_reference_layers_empty_source_returns_empty_dataframe(
+    overlap_metric: str, threshold: float
+) -> None:
+    sdata = SpatialData()
+    source = da.from_array(np.zeros((2, 2), dtype=np.uint32), chunks=(1, 2))
+    reference = da.from_array(np.array([[5, 5], [0, 0]], dtype=np.uint32), chunks=(1, 2))
+
+    sdata = add_labels_layer(sdata, arr=source, output_layer="source", overwrite=True)
+    sdata = add_labels_layer(sdata, arr=reference, output_layer="reference", overwrite=True)
+
+    result = match_labels_to_reference_layers(
+        sdata,
+        source_labels_layer="source",
+        reference_labels_layers=["reference"],
+        chunks=2,
+        threshold=threshold,
+        overlap_metric=overlap_metric,  # type: ignore[arg-type]
+    )
+
+    assert result.empty
+    assert result.shape == (0, 1)
+    assert list(result.columns) == ["reference"]
+
+
 def test_match_labels_to_reference_layers_supports_overlap_metrics() -> None:
     sdata = SpatialData()
     mask = da.from_array(np.array([[1, 1, 0, 0], [1, 0, 0, 0]], dtype=np.uint32), chunks=(1, 2))
