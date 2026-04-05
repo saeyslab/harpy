@@ -281,25 +281,25 @@ def _merge_masks_nuclei_block(array_1: NDArray, array_2: NDArray, array_3: NDArr
     return array_1
 
 
-def _accumulate_mask_to_original_overlap_counts_chunk(
-    mask_block: NDArray,
-    original_block: NDArray,
+def _accumulate_source_to_reference_overlap_counts_chunk(
+    source_block: NDArray,
+    reference_block: NDArray,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Reduce one chunk pair to a dense local overlap table.
 
-    The rows correspond to mask labels present in this chunk, the columns to
-    original labels present in this chunk, and each entry counts the number of
-    overlapping pixels. Background label `0` from the original mask is ignored,
+    The rows correspond to source labels present in this chunk, the columns to
+    reference labels present in this chunk, and each entry counts the number of
+    overlapping pixels. Background label `0` from the reference labels is ignored,
     so labels with only background overlap are omitted from the result.
     """
-    mask_block = np.asarray(mask_block)
-    original_block = np.asarray(original_block)
+    source_block = np.asarray(source_block)
+    reference_block = np.asarray(reference_block)
 
-    if mask_block.shape != original_block.shape:
-        raise ValueError(f"Chunk shape mismatch: {mask_block.shape} != {original_block.shape}.")
+    if source_block.shape != reference_block.shape:
+        raise ValueError(f"Chunk shape mismatch: {source_block.shape} != {reference_block.shape}.")
 
-    foreground = mask_block > 0
+    foreground = source_block > 0
     if not np.any(foreground):
         return (
             np.empty((0,), dtype=np.int64),
@@ -307,117 +307,117 @@ def _accumulate_mask_to_original_overlap_counts_chunk(
             np.empty((0, 0), dtype=np.uint64),
         )
 
-    mask_values = mask_block[foreground].astype(np.int64, copy=False)
-    original_values = original_block[foreground].astype(np.int64, copy=False)
+    source_values = source_block[foreground].astype(np.int64, copy=False)
+    reference_values = reference_block[foreground].astype(np.int64, copy=False)
 
-    nonzero_original = original_values > 0
-    if not np.any(nonzero_original):
+    nonzero_reference = reference_values > 0
+    if not np.any(nonzero_reference):
         return (
             np.empty((0,), dtype=np.int64),
             np.empty((0,), dtype=np.int64),
             np.empty((0, 0), dtype=np.uint64),
         )
 
-    mask_values = mask_values[nonzero_original]
-    original_values = original_values[nonzero_original]
+    source_values = source_values[nonzero_reference]
+    reference_values = reference_values[nonzero_reference]
 
-    mask_ids, mask_dense = np.unique(mask_values, return_inverse=True)
-    original_ids, original_dense = np.unique(original_values, return_inverse=True)
+    source_ids, source_dense = np.unique(source_values, return_inverse=True)
+    reference_ids, reference_dense = np.unique(reference_values, return_inverse=True)
 
     counts = np.bincount(
-        mask_dense * original_ids.size + original_dense,
-        minlength=mask_ids.size * original_ids.size,
-    ).reshape(mask_ids.size, original_ids.size)
+        source_dense * reference_ids.size + reference_dense,
+        minlength=source_ids.size * reference_ids.size,
+    ).reshape(source_ids.size, reference_ids.size)
 
-    return mask_ids, original_ids, counts.astype(np.uint64, copy=False)
+    return source_ids, reference_ids, counts.astype(np.uint64, copy=False)
 
 
-def _get_mask_ids_to_original_overlap_counts(
-    mask: np.ndarray | da.Array,
-    original: np.ndarray | da.Array,
-    mask_ids: np.ndarray | None = None,
-    original_ids: np.ndarray | None = None,
+def _get_source_ids_to_reference_overlap_counts(
+    source: np.ndarray | da.Array,
+    reference: np.ndarray | da.Array,
+    source_ids: np.ndarray | None = None,
+    reference_ids: np.ndarray | None = None,
 ) -> dict[int, dict[int, int]]:
     """
-    Accumulate sparse overlap counts between non-zero mask ids and original ids.
+    Accumulate sparse overlap counts between non-zero source ids and reference ids.
 
     Overlaps are accumulated chunk by chunk. Each chunk returns a local dense
-    overlap table of shape `(n_mask_ids_in_chunk, n_original_ids_in_chunk)`,
+    overlap table of shape `(n_source_ids_in_chunk, n_reference_ids_in_chunk)`,
     and these local tables are merged into a sparse Python accumulator keyed by
-    actual `(mask_id, original_id)` pairs, avoiding a huge dense global matrix.
-    Mask ids that overlap only with background label `0` in `original` are not
+    actual `(source_id, reference_id)` pairs, avoiding a huge dense global matrix.
+    Source ids that overlap only with background label `0` in `reference` are not
     included in the returned mapping.
 
     The returned object is a nested dictionary of the form
-    `overlap_counts_by_mask[mask_id][original_id] = overlap_pixels`.
+    `overlap_counts_by_source[source_id][reference_id] = overlap_pixels`.
 
-    For example, if mask label `1` overlaps original label `5` in `12` pixels
-    and original label `7` in `3` pixels, and mask label `2` overlaps original
+    For example, if source label `1` overlaps reference label `5` in `12` pixels
+    and reference label `7` in `3` pixels, and source label `2` overlaps reference
     label `8` in `20` pixels, the function returns:
 
     `{1: {5: 12, 7: 3}, 2: {8: 20}}`
 
     This means:
 
-    - mask label `1` has two candidate matches, with `5` being the stronger one
-    - mask label `2` overlaps only original label `8`
+    - source label `1` has two candidate matches, with `5` being the stronger one
+    - source label `2` overlaps only reference label `8`
     """
-    if not isinstance(mask, da.Array):
-        mask = np.asarray(mask)
-    if not isinstance(original, da.Array):
-        original = np.asarray(original)
+    if not isinstance(source, da.Array):
+        source = np.asarray(source)
+    if not isinstance(reference, da.Array):
+        reference = np.asarray(reference)
 
-    if mask.shape != original.shape:
-        raise ValueError(f"Mask shape {mask.shape} does not match original mask shape {original.shape}.")
+    if source.shape != reference.shape:
+        raise ValueError(f"Source shape {source.shape} does not match reference shape {reference.shape}.")
 
-    if isinstance(mask, da.Array):
-        mask_da = mask
+    if isinstance(source, da.Array):
+        source_da = source
     else:
-        mask_da = da.from_array(mask, chunks=original.chunks if isinstance(original, da.Array) else mask.shape)
+        source_da = da.from_array(source, chunks=reference.chunks if isinstance(reference, da.Array) else source.shape)
 
-    if isinstance(original, da.Array):
-        original_da = original
+    if isinstance(reference, da.Array):
+        reference_da = reference
     else:
-        original_da = da.from_array(original, chunks=mask_da.chunks)
+        reference_da = da.from_array(reference, chunks=source_da.chunks)
 
-    if mask_da.chunks != original_da.chunks:
-        original_da = original_da.rechunk(mask_da.chunks)
+    if source_da.chunks != reference_da.chunks:
+        reference_da = reference_da.rechunk(source_da.chunks)
 
-    mask_ids_allowed: set[int] | None = None
-    if mask_ids is not None:
-        mask_ids_array = np.asarray(mask_ids, dtype=np.int64)
-        mask_ids_array = np.unique(mask_ids_array)
-        mask_ids_array = mask_ids_array[mask_ids_array != 0]
-        if mask_ids_array.size == 0:
+    source_ids_allowed: set[int] | None = None
+    if source_ids is not None:
+        source_ids_array = np.asarray(source_ids, dtype=np.int64)
+        source_ids_array = np.unique(source_ids_array)
+        source_ids_array = source_ids_array[source_ids_array != 0]
+        if source_ids_array.size == 0:
             return {}
-        mask_ids_allowed = {int(mask_id) for mask_id in mask_ids_array}
+        source_ids_allowed = {int(source_id) for source_id in source_ids_array}
 
-    original_ids_allowed: set[int] | None = None
-    if original_ids is not None:
-        original_ids_array = np.asarray(original_ids, dtype=np.int64)
-        original_ids_array = np.unique(original_ids_array)
-        original_ids_array = original_ids_array[original_ids_array != 0]
-        if original_ids_array.size == 0:
+    reference_ids_allowed: set[int] | None = None
+    if reference_ids is not None:
+        reference_ids_array = np.asarray(reference_ids, dtype=np.int64)
+        reference_ids_array = np.unique(reference_ids_array)
+        reference_ids_array = reference_ids_array[reference_ids_array != 0]
+        if reference_ids_array.size == 0:
             return {}
-        original_ids_allowed = {int(original_id) for original_id in original_ids_array}
+        reference_ids_allowed = {int(reference_id) for reference_id in reference_ids_array}
 
-    mask_blocks = mask_da.to_delayed().ravel()
-    original_blocks = original_da.to_delayed().ravel()
+    source_blocks = source_da.to_delayed().ravel()
+    reference_blocks = reference_da.to_delayed().ravel()
     chunk_tasks = [
-        dask.delayed(_accumulate_mask_to_original_overlap_counts_chunk)(
-            mask_block=mask_block_delayed,
-            original_block=original_block_delayed,
+        dask.delayed(_accumulate_source_to_reference_overlap_counts_chunk)(
+            source_block=source_block_delayed,
+            reference_block=reference_block_delayed,
         )
-        for mask_block_delayed, original_block_delayed in zip(mask_blocks, original_blocks, strict=True)
+        for source_block_delayed, reference_block_delayed in zip(source_blocks, reference_blocks, strict=True)
     ]
 
     # Sparse global overlap accumulator:
-    # `global_counts[mask_id][original_id] = total_overlap_pixels`
-    # This avoids allocating a dense `(n_mask_ids_global, n_original_ids_global)` matrix.
+    # `global_counts[source_id][reference_id] = total_overlap_pixels`
+    # This avoids allocating a dense `(n_source_ids_global, n_reference_ids_global)` matrix.
     global_counts: dict[int, dict[int, int]] = {}
 
-    for local_mask_ids, local_original_ids, local_counts in dask.compute(*chunk_tasks):
-        if local_mask_ids.size == 0 or local_original_ids.size == 0:
+    for local_source_ids, local_reference_ids, local_counts in dask.compute(*chunk_tasks):
+        if local_source_ids.size == 0 or local_reference_ids.size == 0:
             continue
 
         nonzero_rows, nonzero_cols = np.nonzero(local_counts)
@@ -425,61 +425,61 @@ def _get_mask_ids_to_original_overlap_counts(
             continue
 
         for row_idx, col_idx in zip(nonzero_rows, nonzero_cols, strict=True):
-            mask_id = int(local_mask_ids[row_idx])
-            original_id = int(local_original_ids[col_idx])
-            if mask_ids_allowed is not None and mask_id not in mask_ids_allowed:
+            source_id = int(local_source_ids[row_idx])
+            reference_id = int(local_reference_ids[col_idx])
+            if source_ids_allowed is not None and source_id not in source_ids_allowed:
                 continue
-            if original_ids_allowed is not None and original_id not in original_ids_allowed:
+            if reference_ids_allowed is not None and reference_id not in reference_ids_allowed:
                 continue
 
-            if mask_id not in global_counts:
-                global_counts[mask_id] = {}
+            if source_id not in global_counts:
+                global_counts[source_id] = {}
 
-            if original_id not in global_counts[mask_id]:
-                global_counts[mask_id][original_id] = 0
+            if reference_id not in global_counts[source_id]:
+                global_counts[source_id][reference_id] = 0
 
-            global_counts[mask_id][original_id] += int(local_counts[row_idx, col_idx])
+            global_counts[source_id][reference_id] += int(local_counts[row_idx, col_idx])
 
-    return {int(mask_id): overlap_counts for mask_id, overlap_counts in sorted(global_counts.items())}
+    return {int(source_id): overlap_counts for source_id, overlap_counts in sorted(global_counts.items())}
 
 
-def mask_to_original(
+def match_labels_to_reference_layers(
     sdata: SpatialData,
-    labels_layer: str,
-    original_labels_layers: list[str],
+    source_labels_layer: str,
+    reference_labels_layers: list[str],
     chunks: str | int | tuple[int, int] | None = None,
     threshold: float = 0.0,
-    overlap_metric: Literal["mask_fraction", "original_fraction", "iou"] = "mask_fraction",
+    overlap_metric: Literal["source_fraction", "reference_fraction", "iou"] = "source_fraction",
 ) -> DataFrame:
     """
-    Map mask labels to original labels based on an overlap score.
+    Match source labels to reference labels based on an overlap score.
 
-    For each non-zero label in `labels_layer`, this function determines, for
-    every labels layer in `original_labels_layers`, which non-zero original
+    For each non-zero label in `source_labels_layer`, this function determines, for
+    every labels layer in `reference_labels_layers`, which non-zero reference
     label best matches it according to `overlap_metric`. The result is returned as
-    a :class:`~pandas.DataFrame` indexed by the mask labels, with one column per
-    original labels layer.
+    a :class:`~pandas.DataFrame` indexed by the source labels, with one column per
+    reference labels layer.
 
     With the default parameters `threshold=0` and
-    `overlap_metric="mask_fraction"`, the function effectively
-    assigns each mask label to the original label with the largest
+    `overlap_metric="source_fraction"`, the function effectively
+    assigns each source label to the reference label with the largest
     non-zero overlap.
 
     Overlap counts are accumulated chunk by chunk using a local dense overlap
     table per chunk pair and a sparse global accumulator across chunks. This
     keeps the implementation suitable for large label images without requiring a
-    dense global `(n_mask_labels, n_original_labels)` overlap matrix.
+    dense global `(n_source_labels, n_reference_labels)` overlap matrix.
 
     Parameters
     ----------
     sdata
-        The input SpatialData object containing the mask layer and the original
+        The input SpatialData object containing the source labels layer and the reference
         labels layers.
-    labels_layer
-        Name of the labels layer whose non-zero labels are mapped back to the
-        original labels layers.
-    original_labels_layers
-        Names of the original labels layers against which overlap is computed.
+    source_labels_layer
+        Name of the labels layer whose non-zero labels are matched to the
+        reference labels layers.
+    reference_labels_layers
+        Names of the reference labels layers against which overlap is computed.
         One output column is produced for each layer in the order provided.
     chunks
         Chunk specification used when rechunking the label arrays before the
@@ -488,26 +488,26 @@ def mask_to_original(
         chunking. Smaller spatial chunks can improve performance by reducing the
         size of the per-chunk overlap tables.
     threshold
-        Minimum required overlap fraction between a mask label and its
-        best-overlapping original label. The overlap fraction is computed as
+        Minimum required overlap fraction between a source label and its
+        best-matching reference label. The overlap fraction is computed as
         a score controlled by `overlap_metric`. If this score is not strictly
         greater than `threshold`, the mapping is discarded and the output value
         is set to `0`. Must lie between 0 and 1.
     overlap_metric
-        Metric used both to select the winning original label and to apply
+        Metric used both to select the winning reference label and to apply
         `threshold` to that winning match. Supported values are:
 
-        - `"mask_fraction"`: `overlap_pixels / area_mask_label`
-        - `"original_fraction"`: `overlap_pixels / area_original_label`
-        - `"iou"`: `overlap_pixels / (area_mask_label + area_original_label - overlap_pixels)`
+        - `"source_fraction"`: `overlap_pixels / area_source_label`
+        - `"reference_fraction"`: `overlap_pixels / area_reference_label`
+        - `"iou"`: `overlap_pixels / (area_source_label + area_reference_label - overlap_pixels)`
 
     Returns
     -------
     A pandas DataFrame where each row corresponds to a non-zero label from
-    `labels_layer` and each column corresponds to one layer in
-    `original_labels_layers`. Every value contains the non-zero original label
-    selected for that mask label according to `overlap_metric`. If a mask label has no non-zero
-    overlap with a given original labels layer, the corresponding output value
+    `source_labels_layer` and each column corresponds to one layer in
+    `reference_labels_layers`. Every value contains the non-zero reference label
+    selected for that source label according to `overlap_metric`. If a source label has no non-zero
+    overlap with a given reference labels layer, the corresponding output value
     is `0`.
 
     Raises
@@ -522,35 +522,35 @@ def mask_to_original(
     ValueError
         If `threshold` is outside the interval `[0, 1]`.
     ValueError
-        If `overlap_metric` is not one of `"mask_fraction"`,
-        `"original_fraction"`, or `"iou"`.
+        If `overlap_metric` is not one of `"source_fraction"`,
+        `"reference_fraction"`, or `"iou"`.
 
     Notes
     -----
     Background label `0` is ignored when computing overlaps. As a result,
-    output value `0` indicates that a mask label has no non-zero overlap with
-    the corresponding original labels layer.
+    output value `0` indicates that a source label has no non-zero overlap with
+    the corresponding reference labels layer.
     """
     if not 0 <= threshold <= 1:
         raise ValueError(f"'threshold' must be between 0 and 1, found {threshold}.")
-    if overlap_metric not in {"mask_fraction", "original_fraction", "iou"}:
+    if overlap_metric not in {"source_fraction", "reference_fraction", "iou"}:
         raise ValueError(
-            f"'overlap_metric' must be one of 'mask_fraction', 'original_fraction', or 'iou', found {overlap_metric!r}."
+            f"'overlap_metric' must be one of 'source_fraction', 'reference_fraction', or 'iou', found {overlap_metric!r}."
         )
 
-    labels_arrays = [get_dataarray(sdata, layer=labels_layer).data]
+    label_arrays = [get_dataarray(sdata, layer=source_labels_layer).data]
 
-    for _labels_layer in original_labels_layers:
-        labels_arrays.append(get_dataarray(sdata, layer=_labels_layer).data)
+    for _labels_layer in reference_labels_layers:
+        label_arrays.append(get_dataarray(sdata, layer=_labels_layer).data)
 
     # Check for consistent shapes
-    first_shape = labels_arrays[0].shape
-    for x_label in labels_arrays:
+    first_shape = label_arrays[0].shape
+    for x_label in label_arrays:
         assert x_label.shape == first_shape, "Only arrays with same shape are currently supported."
 
     # First make dimension uniform (z,y,x) and keep z unchunked.
     _labels_arrays = []
-    for x_label in labels_arrays:
+    for x_label in label_arrays:
         if x_label.ndim == 2:
             _labels_arrays.append(x_label[None, ...])
         else:
@@ -572,101 +572,101 @@ def mask_to_original(
         )
         rechunked_arrays.append(x_label)
 
-    cell_ids = np.asarray(da.unique(rechunked_arrays[0]).compute(), dtype=np.int64)
-    cell_ids = cell_ids[cell_ids != 0]
+    source_ids = np.asarray(da.unique(rechunked_arrays[0]).compute(), dtype=np.int64)
+    source_ids = source_ids[source_ids != 0]
 
-    result = np.zeros((cell_ids.size, len(original_labels_layers)), dtype=_SEG_DTYPE)
-    if overlap_metric == "iou" or (threshold > 0 and overlap_metric == "mask_fraction"):
-        log.info(f"Calculating instance sizes for labels layer '{labels_layer}'.")
+    result = np.zeros((source_ids.size, len(reference_labels_layers)), dtype=_SEG_DTYPE)
+    if overlap_metric == "iou" or (threshold > 0 and overlap_metric == "source_fraction"):
+        log.info(f"Calculating instance sizes for source labels layer '{source_labels_layer}'.")
         instance_sizes = get_instance_size(
             mask=rechunked_arrays[0],
-            index=cell_ids,
+            index=source_ids,
             instance_key="instance_id",
             instance_size_key="instance_size",
             run_on_gpu=False,
         )
-        area_by_cell_id = {
-            int(cell_id): int(area)
-            for cell_id, area in zip(instance_sizes["instance_id"], instance_sizes["instance_size"], strict=True)
+        area_by_source_id = {
+            int(source_id): int(area)
+            for source_id, area in zip(instance_sizes["instance_id"], instance_sizes["instance_size"], strict=True)
         }
     else:
-        area_by_cell_id = {}
+        area_by_source_id = {}
 
-    for index, original_array in enumerate(rechunked_arrays[1:]):
-        overlap_counts_by_mask = _get_mask_ids_to_original_overlap_counts(
-            mask=rechunked_arrays[0],
-            original=original_array,
-            mask_ids=cell_ids,
+    for index, reference_array in enumerate(rechunked_arrays[1:]):
+        overlap_counts_by_source = _get_source_ids_to_reference_overlap_counts(
+            source=rechunked_arrays[0],
+            reference=reference_array,
+            source_ids=source_ids,
         )
-        if overlap_metric in {"original_fraction", "iou"} and overlap_counts_by_mask:
-            log.info(f"Calculating instance sizes for original labels layer '{original_labels_layers[index]}'.")
-            candidate_original_ids = np.unique(
+        if overlap_metric in {"reference_fraction", "iou"} and overlap_counts_by_source:
+            log.info(f"Calculating instance sizes for reference labels layer '{reference_labels_layers[index]}'.")
+            candidate_reference_ids = np.unique(
                 np.asarray(
                     [
-                        original_id
-                        for overlap_counts in overlap_counts_by_mask.values()
-                        for original_id in overlap_counts
+                        reference_id
+                        for overlap_counts in overlap_counts_by_source.values()
+                        for reference_id in overlap_counts
                     ],
                     dtype=np.int64,
                 )
             )
-            original_sizes = get_instance_size(
-                mask=original_array,
-                index=candidate_original_ids,
+            reference_sizes = get_instance_size(
+                mask=reference_array,
+                index=candidate_reference_ids,
                 instance_key="instance_id",
                 instance_size_key="instance_size",
                 run_on_gpu=False,
             )
-            area_by_original_id = {
-                int(original_id): int(area)
-                for original_id, area in zip(
-                    original_sizes["instance_id"], original_sizes["instance_size"], strict=True
+            area_by_reference_id = {
+                int(reference_id): int(area)
+                for reference_id, area in zip(
+                    reference_sizes["instance_id"], reference_sizes["instance_size"], strict=True
                 )
             }
         else:
-            area_by_original_id = {}
+            area_by_reference_id = {}
 
         mapped_labels = []
-        for cell_id in cell_ids:
-            overlap_counts = overlap_counts_by_mask.get(int(cell_id))
+        for source_id in source_ids:
+            overlap_counts = overlap_counts_by_source.get(int(source_id))
             if overlap_counts is None:
                 mapped_labels.append(0)
                 continue
 
-            best_original_id = 0
+            best_reference_id = 0
             best_overlap_pixels = 0
             best_score = -1.0
-            for original_id, overlap_pixels in overlap_counts.items():
-                if overlap_metric == "mask_fraction":
+            for reference_id, overlap_pixels in overlap_counts.items():
+                if overlap_metric == "source_fraction":
                     score = overlap_pixels
-                elif overlap_metric == "original_fraction":
-                    score = overlap_pixels / area_by_original_id[int(original_id)]
+                elif overlap_metric == "reference_fraction":
+                    score = overlap_pixels / area_by_reference_id[int(reference_id)]
                 else:
-                    mask_area = area_by_cell_id[int(cell_id)]
-                    original_area = area_by_original_id[int(original_id)]
-                    score = overlap_pixels / (mask_area + original_area - overlap_pixels)
+                    source_area = area_by_source_id[int(source_id)]
+                    reference_area = area_by_reference_id[int(reference_id)]
+                    score = overlap_pixels / (source_area + reference_area - overlap_pixels)
 
-                if score > best_score or (score == best_score and original_id < best_original_id):
-                    best_original_id = int(original_id)
+                if score > best_score or (score == best_score and reference_id < best_reference_id):
+                    best_reference_id = int(reference_id)
                     best_overlap_pixels = int(overlap_pixels)
                     best_score = float(score)
 
             if threshold > 0:
-                if overlap_metric == "mask_fraction":
-                    overlap_score = best_overlap_pixels / area_by_cell_id[int(cell_id)]
-                elif overlap_metric == "original_fraction":
-                    overlap_score = best_overlap_pixels / area_by_original_id[int(best_original_id)]
+                if overlap_metric == "source_fraction":
+                    overlap_score = best_overlap_pixels / area_by_source_id[int(source_id)]
+                elif overlap_metric == "reference_fraction":
+                    overlap_score = best_overlap_pixels / area_by_reference_id[int(best_reference_id)]
                 else:
-                    mask_area = area_by_cell_id[int(cell_id)]
-                    original_area = area_by_original_id[int(best_original_id)]
-                    overlap_score = best_overlap_pixels / (mask_area + original_area - best_overlap_pixels)
+                    source_area = area_by_source_id[int(source_id)]
+                    reference_area = area_by_reference_id[int(best_reference_id)]
+                    overlap_score = best_overlap_pixels / (source_area + reference_area - best_overlap_pixels)
 
                 if overlap_score <= threshold:
                     mapped_labels.append(0)
                     continue
 
-            mapped_labels.append(best_original_id)
+            mapped_labels.append(best_reference_id)
 
         result[:, index] = np.asarray(mapped_labels, dtype=_SEG_DTYPE)
 
-    return pd.DataFrame(result, index=cell_ids.astype(str), columns=original_labels_layers)
+    return pd.DataFrame(result, index=source_ids.astype(str), columns=reference_labels_layers)

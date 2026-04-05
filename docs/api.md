@@ -70,7 +70,7 @@ Operations on image and labels layers.
     im.merge_labels_layers
     im.merge_labels_layers_nuclei
     im.rasterize
-    im.mask_to_original
+    im.match_labels_to_reference_layers
     im.pixel_clustering_preprocess
     im.flowsom
 ```

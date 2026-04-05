@@ -15,7 +15,7 @@ from .segmentation._filter_masks import filter_labels_layer
 from .segmentation._grid import add_grid_labels_layer
 from .segmentation._map import map_labels
 from .segmentation._merge_masks import (
-    mask_to_original,
+    match_labels_to_reference_layers,
     merge_labels_layers,
     merge_labels_layers_nuclei,
 )
@@ -38,7 +38,7 @@ __all__ = [
     "get_dataarray",
     "map_image",
     "map_labels",
-    "mask_to_original",
+    "match_labels_to_reference_layers",
     "merge_labels_layers",
     "merge_labels_layers_nuclei",
     "min_max_filtering",
