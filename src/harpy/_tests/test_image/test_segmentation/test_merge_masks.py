@@ -4,7 +4,7 @@ import pytest
 from pandas import DataFrame
 from spatialdata import SpatialData
 
-from harpy.image._image import add_labels_layer
+from harpy.image._image import add_labels_layer, get_dataarray
 from harpy.image.segmentation._merge_masks import (
     _get_source_ids_to_reference_overlap_counts,
     match_labels_to_reference_layers,
@@ -16,13 +16,12 @@ from harpy.image.segmentation._merge_masks import (
 def test_merge_labels_layers(sdata_multi_c_no_backed: SpatialData):
     sdata_multi_c_no_backed = merge_labels_layers(
         sdata_multi_c_no_backed,
-        labels_layer_1="masks_nuclear",
-        labels_layer_2="masks_whole",
+        candidate_labels_layer="masks_whole",
+        priority_labels_layer="masks_nuclear",
         output_labels_layer="masks_merged",
         output_shapes_layer=None,
         overwrite=True,
         chunks=256,
-        depth=100,
     )
 
     assert "masks_merged" in sdata_multi_c_no_backed.labels
@@ -44,6 +43,55 @@ def test_merge_labels_layers_nuclei(sdata_multi_c_no_backed: SpatialData):
 
     assert "masks_merged_nuclear" in sdata_multi_c_no_backed.labels
     assert isinstance(sdata_multi_c_no_backed, SpatialData)
+
+
+def test_merge_labels_layers_small_sdata_keeps_no_overlap_candidates() -> None:
+    sdata = SpatialData()
+    candidate = da.from_array(np.array([[1, 1, 2, 2], [1, 1, 2, 0]], dtype=np.uint32), chunks=(1, 2))
+    priority = da.from_array(np.array([[5, 5, 0, 0], [5, 5, 0, 0]], dtype=np.uint32), chunks=(1, 2))
+
+    sdata = add_labels_layer(sdata, arr=candidate, output_layer="candidate", overwrite=True)
+    sdata = add_labels_layer(sdata, arr=priority, output_layer="priority", overwrite=True)
+
+    sdata = merge_labels_layers(
+        sdata,
+        candidate_labels_layer="candidate",
+        priority_labels_layer="priority",
+        output_labels_layer="merged",
+        overwrite=True,
+        chunks=2,
+        threshold=0.5,
+    )
+
+    result = get_dataarray(sdata, layer="merged").data.compute()
+    expected = np.array([[5, 5, 6, 6], [5, 5, 6, 0]], dtype=np.uint32)
+    assert np.array_equal(result, expected)
+
+
+def test_merge_labels_layers_uses_global_candidate_fraction_across_chunks() -> None:
+    sdata = SpatialData()
+    candidate = da.from_array(np.array([[1, 1, 1, 1, 2, 2]], dtype=np.uint32), chunks=(1, 2))
+    priority = da.from_array(np.array([[5, 5, 0, 0, 0, 0]], dtype=np.uint32), chunks=(1, 2))
+
+    sdata = add_labels_layer(sdata, arr=candidate, output_layer="candidate", overwrite=True)
+    sdata = add_labels_layer(sdata, arr=priority, output_layer="priority", overwrite=True)
+
+    sdata = merge_labels_layers(
+        sdata,
+        candidate_labels_layer="candidate",
+        priority_labels_layer="priority",
+        output_labels_layer="merged",
+        overwrite=True,
+        chunks=2,
+        threshold=0.4,
+    )
+
+    # Candidate label 1 spans two chunks and overlaps the priority layer in 2 of
+    # its 4 pixels, so its global candidate_fraction is 2 / 4 = 0.5 and it is
+    # rejected for threshold 0.4. Candidate label 2 has no overlap and is kept.
+    result = get_dataarray(sdata, layer="merged").data.compute()
+    expected = np.array([[5, 5, 0, 0, 6, 6]], dtype=np.uint32)
+    assert np.array_equal(result, expected)
 
 
 def test_match_labels_to_reference_layers(sdata_multi_c_no_backed: SpatialData):

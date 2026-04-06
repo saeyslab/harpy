@@ -12,53 +12,62 @@ from pandas import DataFrame
 from skimage.segmentation import relabel_sequential
 from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
+from spatialdata.transformations import get_transformation
 
-from harpy.image._image import get_dataarray
+from harpy.image._image import add_labels_layer, get_dataarray
 from harpy.image.segmentation._map import map_labels
 from harpy.image.segmentation._utils import _SEG_DTYPE
+from harpy.shape._shape import add_shapes_layer
 from harpy.utils._aggregate import get_instance_size
 
 
 def merge_labels_layers(
     sdata: SpatialData,
-    labels_layer_1: str,
-    labels_layer_2: str,
+    candidate_labels_layer: str,
+    priority_labels_layer: str,
     threshold: float = 0.5,
-    depth: tuple[int, int] | int = 100,
     chunks: str | int | tuple[int, int] | None = None,
     output_labels_layer: str | None = None,
     output_shapes_layer: str | None = None,
     scale_factors: ScaleFactors_t | None = None,
     overwrite: bool = False,
-    iou_depth: tuple[int, int] | int = 2,
-    iou_threshold: float = 0.7,
 ) -> SpatialData:
     """
-    Merges two labels layers within a SpatialData object based on a specified threshold.
+    Merge two labels layers using a global object-level overlap rule.
 
-    This function applies a merge operation between two specified labels layers (`labels_layer_1` and `labels_layer_2`)
-    in a SpatialData object. The function will copy all labels from `labels_layer_1` to `output_labels_layer`, and for all labels
-    in `labels_layer_2` it will check if they have less than `threshold` overlap with labels from `labels_layer_1`, if so,
-    label in `labels_layer_2` will be copied to `output_labels_layer` at locations where 'labels_layer_1' is 0.
+    This function treats `priority_labels_layer` as the authoritative segmentation
+    and `candidate_labels_layer` as a layer that can fill uncovered regions. For
+    each non-zero candidate object, overlaps with all non-zero priority objects
+    are accumulated globally across the full image. A candidate object is kept if:
+
+    `candidate_fraction = overlap_with_any_priority / area_candidate <= threshold`
+
+    Candidate objects with no overlap with the priority segmentation therefore
+    have `candidate_fraction = 0` and are kept. Accepted candidate objects are
+    written only at pixels where the priority segmentation is `0`.
+
+    Accepted candidate labels are relabeled above the existing priority labels to
+    avoid label-id collisions in the merged result.
 
     Parameters
     ----------
     sdata
         The SpatialData object containing the labels layers to be merged.
-    labels_layer_1
-        The name of the first labels layer. This layer will get priority.
-    labels_layer_2
-        The name of the second labels layer to be merged in `labels_layer_1`.
+    candidate_labels_layer
+        The name of the labels layer containing candidate objects to add to the
+        merged result when they satisfy the overlap rule.
+    priority_labels_layer
+        The name of the labels layer that takes precedence in the merged result.
     threshold
-        The threshold value to control the merging of labels. This value determines how the merge operation is
-        conducted based on the overlap between the labels in `labels_layer_1` and `labels_layer_2`.
-    depth
-        The depth around the boundary of each block to load when the array is split into blocks
-        (for alignment). This ensures that the split isn't causing misalignment along the edges.
-        Please set depth>cell diameter + distance to avoid chunking effects.
+        Maximum allowed `candidate_fraction` for keeping a candidate object.
+        Must lie between 0 and 1. A value of `0` keeps only candidates with no
+        overlap with the priority segmentation. A value of `1` keeps all
+        candidate objects.
     chunks
-        Specification for rechunking the data before applying the merge operation. This parameter defines how the data
-        is divided into chunks for processing.
+        Chunk specification used when rechunking the label arrays before overlap
+        accumulation and rendering. If a tuple is provided, it is interpreted as
+        the desired `(y, x)` chunk size. If set to `"auto"`, Dask determines the
+        chunking.
     output_labels_layer
         The name of the output labels layer where the merged results will be stored.
     output_shapes_layer
@@ -67,10 +76,6 @@ def merge_labels_layers(
         Scale factors to apply for multiscale processing.
     overwrite
         If True, overwrites the output layer if it already exists in `sdata`.
-    iou_depth
-        iou depth used for linking labels.
-    iou_threshold
-        iou threshold used for linking labels.
 
     Returns
     -------
@@ -80,29 +85,139 @@ def merge_labels_layers(
     Raises
     ------
     ValueError
-        If any of the specified labels layers cannot be found in `sdata`.
+        If the provided labels layers do not have the same shape or transformations.
+    ValueError
+        If `threshold` is outside the interval `[0, 1]`.
+    ValueError
+        If candidate label ids can not be relabeled safely into `_SEG_DTYPE`
+        without colliding with priority label ids.
 
-    Notes
-    -----
-    This function leverages dask for potential parallelism and out-of-core computation, enabling the processing of large
-    datasets that may not fit entirely in memory. It is particularly useful in scenarios where two segmentation results
-    need to be combined to achieve a more accurate or comprehensive segmentation outcome.
+    See Also
+    --------
+    harpy.im.match_labels_to_reference_layers : map labels from a merged or processed layer back to labels in one or more reference layers.
+
     """
-    sdata = map_labels(
+    if output_labels_layer is None:
+        raise ValueError("Please specify a name for the output layer.")
+    if not 0 <= threshold <= 1:
+        raise ValueError(f"'threshold' must be between 0 and 1, found {threshold}.")
+
+    candidate_da = get_dataarray(sdata, layer=candidate_labels_layer)
+    priority_da = get_dataarray(sdata, layer=priority_labels_layer)
+    candidate_transformations = get_transformation(candidate_da, get_all=True)
+    priority_transformations = get_transformation(priority_da, get_all=True)
+
+    if candidate_da.shape != priority_da.shape:
+        raise ValueError(
+            "Only arrays with same shape are currently supported, "
+            f"but candidate labels layer '{candidate_labels_layer}' has shape {candidate_da.shape}, "
+            f"while priority labels layer '{priority_labels_layer}' has shape {priority_da.shape}."
+        )
+    if candidate_transformations != priority_transformations:
+        raise ValueError(
+            f"Provided labels layers '{candidate_labels_layer}' and '{priority_labels_layer}' "
+            "should have the same transformations defined on them."
+        )
+
+    candidate_array = candidate_da.data
+    priority_array = priority_da.data
+
+    if not isinstance(candidate_array, da.Array):
+        candidate_array = da.from_array(candidate_array, chunks=candidate_array.shape)
+    if not isinstance(priority_array, da.Array):
+        priority_array = da.from_array(priority_array, chunks=priority_array.shape)
+
+    if chunks is not None:
+        if not isinstance(chunks, int | str):
+            expected_dims = candidate_array.ndim if candidate_array.ndim == 2 else candidate_array.ndim - 1
+            if len(chunks) != expected_dims:
+                raise ValueError("Please (only) provide chunks for ('y', 'x').")
+            if candidate_array.ndim == 3:
+                chunks = (candidate_array.shape[0], chunks[0], chunks[1])
+        candidate_array = candidate_array.rechunk(chunks)
+        priority_array = priority_array.rechunk(candidate_array.chunks)
+    elif candidate_array.chunks != priority_array.chunks:
+        priority_array = priority_array.rechunk(candidate_array.chunks)
+
+    candidate_ids = np.asarray(da.unique(candidate_array).compute(), dtype=np.int64)
+    candidate_ids = candidate_ids[candidate_ids != 0]
+
+    overlap_counts_by_candidate = _get_source_ids_to_reference_overlap_counts(
+        source=candidate_array,
+        reference=priority_array,
+        source_ids=candidate_ids,
+    )
+
+    if candidate_array.ndim == 2:
+        candidate_area_array = candidate_array[None, ...]
+    else:
+        candidate_area_array = candidate_array
+
+    candidate_sizes = get_instance_size(
+        mask=candidate_area_array,
+        index=candidate_ids,
+        instance_key="instance_id",
+        instance_size_key="instance_size",
+        run_on_gpu=False,
+    )
+    area_by_candidate_id = {
+        int(candidate_id): int(area)
+        for candidate_id, area in zip(candidate_sizes["instance_id"], candidate_sizes["instance_size"], strict=True)
+    }
+
+    kept_candidate_ids: list[int] = []
+    for candidate_id in candidate_ids:
+        overlap_with_priority = sum(overlap_counts_by_candidate.get(int(candidate_id), {}).values())
+        candidate_fraction = overlap_with_priority / area_by_candidate_id[int(candidate_id)]
+        if candidate_fraction <= threshold:
+            kept_candidate_ids.append(int(candidate_id))
+
+    kept_candidate_ids_array = np.asarray(kept_candidate_ids, dtype=np.int64)
+    priority_max = int(da.max(priority_array).compute())
+    max_output_value = priority_max + kept_candidate_ids_array.size
+    if max_output_value > np.iinfo(_SEG_DTYPE).max:
+        raise ValueError(
+            f"Relabeling accepted candidate objects would overflow dtype {_SEG_DTYPE} "
+            f"(required max label {max_output_value})."
+        )
+
+    if kept_candidate_ids_array.size == 0:
+        merged_array = priority_array.astype(_SEG_DTYPE)
+    else:
+        kept_candidate_output_ids = np.arange(
+            priority_max + 1,
+            priority_max + 1 + kept_candidate_ids_array.size,
+            dtype=np.int64,
+        )
+        merged_array = da.map_blocks(
+            _merge_candidate_into_priority_block,
+            priority_array,
+            candidate_array,
+            dtype=_SEG_DTYPE,
+            kept_candidate_ids=kept_candidate_ids_array,
+            kept_candidate_output_ids=kept_candidate_output_ids,
+        )
+
+    sdata = add_labels_layer(
         sdata,
-        func=_merge_masks_block,
-        labels_layers=[labels_layer_1, labels_layer_2],
-        depth=depth,
+        merged_array,
+        output_layer=output_labels_layer,
         chunks=chunks,
-        output_labels_layer=output_labels_layer,
-        output_shapes_layer=output_shapes_layer,
+        transformations=priority_transformations,
         scale_factors=scale_factors,
         overwrite=overwrite,
-        relabel_chunks=True,
-        threshold=threshold,
-        iou_depth=iou_depth,
-        iou_threshold=iou_threshold,
     )
+
+    if output_shapes_layer is not None:
+        se_labels = get_dataarray(sdata, layer=output_labels_layer)
+        sdata = add_shapes_layer(
+            sdata,
+            input=se_labels.data,
+            output_layer=output_shapes_layer,
+            transformations=priority_transformations,
+            overwrite=overwrite,
+        )
+
     return sdata
 
 
@@ -211,28 +326,86 @@ def merge_labels_layers_nuclei(
     return sdata
 
 
-def _merge_masks_block(
-    array_1: NDArray,  # array_1 gets priority
-    array_2: NDArray,
-    threshold: float = 0.5,
+def _merge_candidate_into_priority_block(
+    priority_block: NDArray,
+    candidate_block: NDArray,
+    kept_candidate_ids: np.ndarray,
+    kept_candidate_output_ids: np.ndarray,
 ) -> NDArray:
-    # this is func for merging of arrays.
-    # we need to relabel to avoid collisions in the merged_masks.
-    array_1, _, _ = relabel_sequential(array_1)
-    array_2, _, _ = relabel_sequential(array_2, offset=array_1.max() + 1)
+    """
+    Merge one candidate chunk into one priority chunk using globally accepted ids.
 
-    merged_masks = array_1
-    unique_labels_2 = np.unique(array_2[array_2 > 0])  # Get unique labels from array_2, excluding zero.
-    for label in unique_labels_2:
-        area_2 = np.sum(array_2 == label)
-        # Calculate the overlap area of array_2's label with array_1
-        overlap_area = np.sum((array_2 == label) & (array_1 > 0))
-        # Check if more than thresh of the overlap area ( e.g., if thresh==0.5 ->half of the area ) is not in array_1
-        if overlap_area <= area_2 * threshold:
-            # Find the corresponding area in array_2 and merge it into array_1 (only at places where array_1==0)
-            merge_condition = (array_2 == label) & (array_1 == 0)
-            array_1[merge_condition] = label
-    return merged_masks
+    The merge is hierarchical: priority labels are copied first, and accepted
+    candidate labels are only written at pixels where the priority chunk is `0`.
+    Candidate ids are remapped to `kept_candidate_output_ids` so the merged
+    result does not collide with existing priority label ids.
+
+    The `searchsorted` section below works as follows:
+
+    1. Extract candidate ids at writable pixels.
+    2. Look up where those ids would appear in the sorted array
+       `kept_candidate_ids`.
+    3. Make those positions safe for indexing.
+    4. Compare the looked-up values to the original candidate ids to determine
+       which ids were actually accepted.
+
+    This works because for a sorted array:
+
+    - if a value is present, `searchsorted` points to that value
+    - if a value is absent, `searchsorted` points to the insertion position
+    - the equality check then distinguishes a real match from an insertion point
+
+    For example, if:
+
+    - `candidate_values = [2, 7, 9, 5]`
+    - `kept_candidate_ids = [2, 5, 8]`
+
+    then:
+
+    - `searchsorted(...) -> [0, 2, 3, 1]`
+    - safe indexing positions -> `[0, 2, 0, 1]`
+    - `kept_candidate_ids[...] -> [2, 8, 2, 5]`
+    - comparing back to `candidate_values` gives
+      `found_candidates = [True, False, False, True]`
+    - if `kept_candidate_output_ids = [6, 7, 8]`, then the accepted positions
+      map to `kept_candidate_output_ids[[0, 1]] = [6, 7]`
+    - `mapped_values` therefore becomes `[6, 0, 0, 7]`
+
+    So candidate ids `2` and `5` are accepted in this block, while `7` and `9`
+    are ignored, and only the accepted ones will be written into the writable
+    pixels of the result block.
+    """
+    priority_block = np.asarray(priority_block)
+    candidate_block = np.asarray(candidate_block)
+
+    if priority_block.shape != candidate_block.shape:
+        raise ValueError(f"Block shape mismatch: {priority_block.shape} != {candidate_block.shape}.")
+
+    result = priority_block.astype(_SEG_DTYPE, copy=True)
+    if kept_candidate_ids.size == 0:
+        return result
+
+    write_mask = (result == 0) & (candidate_block > 0)
+    if not np.any(write_mask):
+        return result
+
+    candidate_values = candidate_block[write_mask].astype(np.int64, copy=False)
+    candidate_positions = np.searchsorted(kept_candidate_ids, candidate_values)
+    candidate_positions_safe = np.where(
+        candidate_positions >= kept_candidate_ids.size,
+        0,
+        candidate_positions,
+    )
+    found_candidates = kept_candidate_ids[candidate_positions_safe] == candidate_values
+
+    mapped_values = np.zeros(candidate_values.shape, dtype=_SEG_DTYPE)
+    if np.any(found_candidates):
+        mapped_values[found_candidates] = kept_candidate_output_ids[candidate_positions_safe[found_candidates]].astype(
+            _SEG_DTYPE, copy=False
+        )
+
+    result[write_mask] = mapped_values
+    return result
 
 
 def _merge_masks_nuclei_block(array_1: NDArray, array_2: NDArray, array_3: NDArray, threshold: float = 0.5):
