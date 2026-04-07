@@ -68,9 +68,8 @@ Operations on image and labels layers.
     im.map_labels
     im.filter_labels_layer
     im.merge_labels_layers
-    im.merge_labels_layers_nuclei
-    im.rasterize
     im.match_labels_to_reference_layers
+    im.rasterize
     im.pixel_clustering_preprocess
     im.flowsom
 ```

@@ -96,6 +96,23 @@ def merge_labels_layers(
     --------
     harpy.im.match_labels_to_reference_layers : map labels from a merged or processed layer back to labels in one or more reference layers.
 
+    Example
+    --------
+    .. code-block:: python
+
+        sdata = hp.datasets.mibi_example()
+
+        sdata = hp.im.merge_labels_layers(
+            sdata,
+            candidate_labels_layer="masks_whole",
+            priority_labels_layer="masks_nuclear",
+            threshold=0.5,
+            chunks=256,
+            output_labels_layer="masks_merged",
+            output_shapes_layer="masks_merged_boundaries",
+            overwrite=True,
+        )
+
     """
     if output_labels_layer is None:
         raise ValueError("Please specify a name for the output layer.")
@@ -703,6 +720,19 @@ def match_labels_to_reference_layers(
     Background label `0` is ignored when computing overlaps. As a result,
     output value `0` indicates that a source label has no non-zero overlap with
     the corresponding reference labels layer.
+
+    Example
+    --------
+    .. code-block:: python
+
+        sdata = hp.datasets.mibi_example()
+
+        matched = hp.im.match_labels_to_reference_layers(
+            sdata,
+            source_labels_layer="masks_whole",
+            reference_labels_layers=["masks_nuclear"],
+            chunks=256,
+        )
     """
     if not 0 <= threshold <= 1:
         raise ValueError(f"'threshold' must be between 0 and 1, found {threshold}.")

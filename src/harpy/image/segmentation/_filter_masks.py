@@ -78,16 +78,20 @@ def filter_labels_layer(
     not fit into memory.
 
 
-    Examples
+    Example
     --------
-    >>> sdata = filter_labels_layer(
+    .. code-block:: python
+
+        sdata = hp.datasets.mibi_example()
+
+        sdata = hp.im.filter_labels_layer(
             sdata,
-            labels_layer='layer',
+            labels_layer="masks_whole",
             min_size=100,
             max_size=1000,
-            chunks=(1024, 1024),
-            output_labels_layer='layer_filtered',
-            output_shapes_layer='layer_filtered_boundaries',
+            chunks=256,
+            output_labels_layer="masks_whole_filtered",
+            output_shapes_layer="masks_whole_filtered_boundaries",
             overwrite=True,
         )
     """
