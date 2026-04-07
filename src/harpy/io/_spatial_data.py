@@ -33,6 +33,12 @@ def create_sdata(
     """
     Convert input images or arrays into a SpatialData object with the image added as an image layer with name `img_layer`.
 
+    .. deprecated::
+        `harpy.io.create_sdata` is deprecated. Prefer constructing a
+        :class:`spatialdata.SpatialData` object directly, writing it to disk,
+        reopening it with :func:`spatialdata.read_zarr`, and then adding layers
+        with :func:`harpy.im.add_image_layer`.
+
     This function allows you to ingest various input formats of images or data arrays,
     convert them into a unified SpatialData format and write them out to a specified
     path (zarr store) if needed. It provides flexibility in how you define the source data as well
@@ -108,6 +114,22 @@ def create_sdata(
     -----
     If `crd` is specified and some of its values are None, the function infers the missing
     values based on the input image's shape.
+
+    Example
+    --------
+    .. code-block:: python
+
+        from spatialdata import SpatialData, read_zarr
+
+        sdata = SpatialData()
+        sdata.write("my_data.zarr")
+        sdata = read_zarr(sdata.path)
+
+        sdata = hp.im.add_image_layer(
+            sdata,
+            arr=image,
+            output_layer="raw_image",
+        )
     """
     with tempfile.TemporaryDirectory() as tmp_dir:
         # tmp_dir is used to write results for each channel out to separate zarr store,

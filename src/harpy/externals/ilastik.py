@@ -517,7 +517,10 @@ def run_object_classification(
             segmentation,
             predictions,
             instance_ids=adata.obs[instance_key].to_numpy(dtype=np.int64, copy=False),
-            prediction_labels=np.unique(predictions_np.astype(np.int64, copy=False)),
+            prediction_labels=np.asarray(da.unique(predictions).compute(), dtype=np.int64),
+        )
+        log.info(
+            f"Finished mapping instance ids to ilastik prediction labels. Adding predictions to adata.obs['{obs_key}']."
         )
 
         adata.obs[obs_key] = _map_instance_predictions_to_obs(
@@ -528,6 +531,7 @@ def run_object_classification(
             raise_on_unmapped_instance=raise_on_unmapped_instance,
         )
 
+        log.info(f"Writing updated table layer '{output_layer}' with ilastik predictions in adata.obs['{obs_key}'].")
         return add_table_layer(
             sdata,
             adata=adata,

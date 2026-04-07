@@ -30,7 +30,7 @@ I/O.
     io.read_resolve_transcripts
     io.read_merscope_transcripts
     io.read_stereoseq_transcripts
-    io.create_sdata
+    io.convert_to_zarr_2
 
 ```
 
@@ -145,6 +145,21 @@ Operations on points (`Dask` `DataFrame` object) layers.
     :toctree: generated
 
     pt.add_points_layer
+```
+
+## Externals
+
+External integrations.
+
+```{eval-rst}
+
+.. module:: harpy.externals
+.. currentmodule:: harpy
+
+.. autosummary::
+    :toctree: generated
+
+    externals.ilastik.run_object_classification
 ```
 
 ## Quality Control
