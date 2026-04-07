@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import dask.array as da
 import numpy as np
 from numpy.typing import NDArray
 from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
+from spatialdata.transformations import get_transformation
 
-from harpy.image.segmentation._map import map_labels
+from harpy.image._image import add_labels_layer, get_dataarray
+from harpy.image.segmentation._utils import _SEG_DTYPE
+from harpy.shape._shape import add_shapes_layer
+from harpy.utils._aggregate import get_instance_size
 
 
 def filter_labels_layer(
@@ -13,7 +18,6 @@ def filter_labels_layer(
     labels_layer: str,
     min_size: int = 10,
     max_size: int = 100000,
-    depth: tuple[int, int] | int = 100,
     chunks: str | int | tuple[int, int] | None = None,
     output_labels_layer: str | None = None,
     output_shapes_layer: str | None = None,
@@ -21,7 +25,12 @@ def filter_labels_layer(
     overwrite: bool = False,
 ) -> SpatialData:
     """
-    Filter labels in labels layer `labels_layer` of Spatialdata object that have a size less than `min_size` or size greater than `max_size`.
+    Filter labels in a labels layer by global object size.
+
+    Labels in `labels_layer` whose total size across the full image is smaller
+    than `min_size` or larger than `max_size` are set to `0` in the output.
+    Size is computed per object globally, so labels that span multiple chunks
+    are filtered consistently.
 
     Parameters
     ----------
@@ -33,10 +42,6 @@ def filter_labels_layer(
         labels in `labels_layer` with size smaller than `min_size` will be set to 0.
     max_size
         labels in `labels_layer` with size larger than `max_size` will be set to 0.
-    depth
-        The depth around the boundary of each block to load when the array is split into blocks
-        (for alignment). This ensures that the split isn't causing misalignment along the edges.
-        Default is 100. Please set depth>cell diameter to avoid chunking effects.
     chunks
         The desired chunk size for the Dask computation, or "auto" to allow the function to
         choose an optimal chunk size based on the data.
@@ -54,67 +59,136 @@ def filter_labels_layer(
     -------
     The modified spatial data object with the filtered labels layers.
 
+    Raises
+    ------
+    ValueError
+        If `output_labels_layer` is not provided.
+    ValueError
+        If `min_size` or `max_size` is negative.
+    ValueError
+        If `min_size` is larger than `max_size`.
+
+    See Also
+    --------
+    harpy.utils.get_instance_size : compute global object sizes for a labels mask.
+
     Notes
     -----
-    The function works with Dask arrays and can handle large datasets that don't fit into memory.
+    The function works with Dask arrays and can handle large datasets that do
+    not fit into memory.
 
 
     Examples
     --------
-    >>> sdata = expand_labels_layer(
+    >>> sdata = filter_labels_layer(
             sdata,
             labels_layer='layer',
-            distance=10,
-            depth=(100, 100),
+            min_size=100,
+            max_size=1000,
             chunks=(1024, 1024),
-            output_labels_layer='layer_expanded',
-            output_shapes_layer='layer_expanded_boundaries',
+            output_labels_layer='layer_filtered',
+            output_shapes_layer='layer_filtered_boundaries',
             overwrite=True,
         )
     """
-    sdata = map_labels(
+    if output_labels_layer is None:
+        raise ValueError("Please specify a name for the output layer.")
+    if min_size < 0 or max_size < 0:
+        raise ValueError(f"'min_size' and 'max_size' must be non-negative, found {min_size} and {max_size}.")
+    if min_size > max_size:
+        raise ValueError(f"'min_size' must be <= 'max_size', found {min_size} > {max_size}.")
+
+    se_labels = get_dataarray(sdata, layer=labels_layer)
+    labels_array = se_labels.data
+    transformations = get_transformation(se_labels, get_all=True)
+
+    if not isinstance(labels_array, da.Array):
+        labels_array = da.from_array(labels_array, chunks=labels_array.shape)
+
+    if chunks is not None:
+        if not isinstance(chunks, int | str):
+            expected_dims = labels_array.ndim if labels_array.ndim == 2 else labels_array.ndim - 1
+            if len(chunks) != expected_dims:
+                raise ValueError("Please (only) provide chunks for ('y', 'x').")
+            if labels_array.ndim == 3:
+                chunks = (labels_array.shape[0], chunks[0], chunks[1])
+        labels_array = labels_array.rechunk(chunks)
+    elif labels_array.ndim == 3 and labels_array.numblocks[0] != 1:
+        labels_array = labels_array.rechunk((labels_array.shape[0], *labels_array.chunksize[1:]))
+
+    label_ids = np.asarray(da.unique(labels_array).compute(), dtype=np.int64)
+    label_ids = label_ids[label_ids != 0]
+
+    if label_ids.size == 0:
+        filtered_array = labels_array.astype(_SEG_DTYPE)
+    else:
+        area_array = labels_array[None, ...] if labels_array.ndim == 2 else labels_array
+        instance_sizes = get_instance_size(
+            mask=area_array,
+            index=label_ids,
+            instance_key="instance_id",
+            instance_size_key="instance_size",
+            run_on_gpu=False,
+        )
+        kept_label_ids = instance_sizes.loc[
+            instance_sizes["instance_size"].between(min_size, max_size, inclusive="both"),
+            "instance_id",
+        ].to_numpy(dtype=np.int64, copy=False)
+        kept_label_ids = np.unique(kept_label_ids)
+
+        filtered_array = da.map_blocks(
+            _filter_labels_block_by_size,
+            labels_array,
+            dtype=_SEG_DTYPE,
+            kept_label_ids=kept_label_ids,
+        )
+
+    sdata = add_labels_layer(
         sdata,
-        labels_layers=[labels_layer],
-        func=_filter_labels_block,
-        depth=depth,
+        filtered_array,
+        output_layer=output_labels_layer,
         chunks=chunks,
-        output_labels_layer=output_labels_layer,
-        output_shapes_layer=output_shapes_layer,
+        transformations=transformations,
         scale_factors=scale_factors,
         overwrite=overwrite,
-        relabel_chunks=False,
-        trim=True,
-        min_size=min_size,
-        max_size=max_size,
-        _depth=depth,
     )
+
+    if output_shapes_layer is not None:
+        se_result = get_dataarray(sdata, layer=output_labels_layer)
+        sdata = add_shapes_layer(
+            sdata,
+            input=se_result.data,
+            output_layer=output_shapes_layer,
+            transformations=transformations,
+            overwrite=overwrite,
+        )
 
     return sdata
 
 
-def _filter_labels_block(
-    x_label: NDArray,
-    min_size: int,
-    max_size: int,
-    _depth: tuple[int, ...] | int = 100,
+def _filter_labels_block_by_size(
+    labels_block: NDArray,
+    kept_label_ids: np.ndarray,
 ) -> NDArray:
-    # input and output is numpy array of shape (z,y,x)
-    assert x_label.ndim == 3
-    if isinstance(_depth, int):
-        _depth = {0: 0, 1: _depth, 2: _depth}
-    else:
-        assert len(_depth) == x_label.ndim - 1, "Please (only) provide depth for ( 'y', 'x')."
-        # set depth for every dimension
-        depth2 = {0: 0, 1: _depth[0], 2: _depth[1]}
-        _depth = depth2
-    # get the labels that are (at least partially) inside the chunk
-    labels_inside_original_chunk = np.unique(x_label[:, _depth[1] : -_depth[1], _depth[2] : -_depth[2]])
-    for label in labels_inside_original_chunk:
-        if label == 0:
-            continue
-        position = x_label == label
-        size = np.sum(position)
+    labels_block = np.asarray(labels_block)
+    result = labels_block.astype(_SEG_DTYPE, copy=True)
 
-        if size < min_size or size > max_size:
-            x_label[position] = 0
-    return x_label
+    if kept_label_ids.size == 0:
+        result[labels_block > 0] = 0
+        return result
+
+    foreground = labels_block > 0
+    if not np.any(foreground):
+        return result
+
+    label_values = labels_block[foreground].astype(np.int64, copy=False)
+    label_positions = np.searchsorted(kept_label_ids, label_values)
+    label_positions_safe = np.where(label_positions >= kept_label_ids.size, 0, label_positions)
+    found_labels = kept_label_ids[label_positions_safe] == label_values
+
+    filtered_values = np.zeros(label_values.shape, dtype=_SEG_DTYPE)
+    if np.any(found_labels):
+        filtered_values[found_labels] = label_values[found_labels].astype(_SEG_DTYPE, copy=False)
+
+    result[foreground] = filtered_values
+    return result
