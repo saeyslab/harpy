@@ -40,6 +40,7 @@ if loglevel is None or loglevel.upper() != "DEBUG":
 # use aliases from more convenient names
 # isort: off
 from harpy import utils  # noqa: E402
+from harpy import externals  # noqa: E402
 from harpy import io  # noqa: E402
 from harpy import datasets  # noqa: E402
 from harpy import image as im  # noqa: E402
@@ -52,6 +53,7 @@ from harpy import table as tb  # noqa: E402
 
 __all__ = [
     "utils",
+    "externals",
     "io",
     "datasets",
     "im",

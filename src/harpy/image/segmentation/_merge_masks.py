@@ -1,60 +1,73 @@
 from __future__ import annotations
 
+from typing import Literal
+
+import dask
 import dask.array as da
 import numpy as np
 import pandas as pd
-from dask.array import unique
+from loguru import logger as log
 from numpy.typing import NDArray
 from pandas import DataFrame
 from skimage.segmentation import relabel_sequential
 from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
+from spatialdata.transformations import get_transformation
 
-from harpy.image._image import _get_spatial_element
+from harpy.image._image import add_labels_layer, get_dataarray
 from harpy.image.segmentation._map import map_labels
-from harpy.image.segmentation._utils import _SEG_DTYPE, _rechunk_overlap
+from harpy.image.segmentation._utils import _SEG_DTYPE
+from harpy.shape._shape import add_shapes_layer
+from harpy.utils._aggregate import get_instance_size
 
 
 def merge_labels_layers(
     sdata: SpatialData,
-    labels_layer_1: str,
-    labels_layer_2: str,
+    candidate_labels_layer: str,
+    priority_labels_layer: str,
     threshold: float = 0.5,
-    depth: tuple[int, int] | int = 100,
     chunks: str | int | tuple[int, int] | None = None,
     output_labels_layer: str | None = None,
     output_shapes_layer: str | None = None,
     scale_factors: ScaleFactors_t | None = None,
     overwrite: bool = False,
-    iou_depth: tuple[int, int] | int = 2,
-    iou_threshold: float = 0.7,
 ) -> SpatialData:
     """
-    Merges two labels layers within a SpatialData object based on a specified threshold.
+    Merge two labels layers using a global object-level overlap rule.
 
-    This function applies a merge operation between two specified labels layers (`labels_layer_1` and `labels_layer_2`)
-    in a SpatialData object. The function will copy all labels from `labels_layer_1` to `output_labels_layer`, and for all labels
-    in `labels_layer_2` it will check if they have less than `threshold` overlap with labels from `labels_layer_1`, if so,
-    label in `labels_layer_2` will be copied to `output_labels_layer` at locations where 'labels_layer_1' is 0.
+    This function treats `priority_labels_layer` as the authoritative segmentation
+    and `candidate_labels_layer` as a layer that can fill uncovered regions. For
+    each non-zero candidate object, overlaps with all non-zero priority objects
+    are accumulated globally across the full image. A candidate object is kept if:
+
+    `candidate_fraction = overlap_with_any_priority / area_candidate <= threshold`
+
+    Candidate objects with no overlap with the priority segmentation therefore
+    have `candidate_fraction = 0` and are kept. Accepted candidate objects are
+    written only at pixels where the priority segmentation is `0`.
+
+    Accepted candidate labels are relabeled above the existing priority labels to
+    avoid label-id collisions in the merged result.
 
     Parameters
     ----------
     sdata
         The SpatialData object containing the labels layers to be merged.
-    labels_layer_1
-        The name of the first labels layer. This layer will get priority.
-    labels_layer_2
-        The name of the second labels layer to be merged in `labels_layer_1`.
+    candidate_labels_layer
+        The name of the labels layer containing candidate objects to add to the
+        merged result when they satisfy the overlap rule.
+    priority_labels_layer
+        The name of the labels layer that takes precedence in the merged result.
     threshold
-        The threshold value to control the merging of labels. This value determines how the merge operation is
-        conducted based on the overlap between the labels in `labels_layer_1` and `labels_layer_2`.
-    depth
-        The depth around the boundary of each block to load when the array is split into blocks
-        (for alignment). This ensures that the split isn't causing misalignment along the edges.
-        Please set depth>cell diameter + distance to avoid chunking effects.
+        Maximum allowed `candidate_fraction` for keeping a candidate object.
+        Must lie between 0 and 1. A value of `0` keeps only candidates with no
+        overlap with the priority segmentation. A value of `1` keeps all
+        candidate objects.
     chunks
-        Specification for rechunking the data before applying the merge operation. This parameter defines how the data
-        is divided into chunks for processing.
+        Chunk specification used when rechunking the label arrays before overlap
+        accumulation and rendering. If a tuple is provided, it is interpreted as
+        the desired `(y, x)` chunk size. If set to `"auto"`, Dask determines the
+        chunking.
     output_labels_layer
         The name of the output labels layer where the merged results will be stored.
     output_shapes_layer
@@ -63,10 +76,6 @@ def merge_labels_layers(
         Scale factors to apply for multiscale processing.
     overwrite
         If True, overwrites the output layer if it already exists in `sdata`.
-    iou_depth
-        iou depth used for linking labels.
-    iou_threshold
-        iou threshold used for linking labels.
 
     Returns
     -------
@@ -76,29 +85,156 @@ def merge_labels_layers(
     Raises
     ------
     ValueError
-        If any of the specified labels layers cannot be found in `sdata`.
+        If the provided labels layers do not have the same shape or transformations.
+    ValueError
+        If `threshold` is outside the interval `[0, 1]`.
+    ValueError
+        If candidate label ids can not be relabeled safely into `_SEG_DTYPE`
+        without colliding with priority label ids.
 
-    Notes
-    -----
-    This function leverages dask for potential parallelism and out-of-core computation, enabling the processing of large
-    datasets that may not fit entirely in memory. It is particularly useful in scenarios where two segmentation results
-    need to be combined to achieve a more accurate or comprehensive segmentation outcome.
+    See Also
+    --------
+    harpy.im.match_labels_to_reference_layers : map labels from a merged or processed layer back to labels in one or more reference layers.
+
+    Example
+    --------
+    .. code-block:: python
+
+        sdata = hp.datasets.mibi_example()
+
+        sdata = hp.im.merge_labels_layers(
+            sdata,
+            candidate_labels_layer="masks_whole",
+            priority_labels_layer="masks_nuclear",
+            threshold=0.5,
+            chunks=256,
+            output_labels_layer="masks_merged",
+            output_shapes_layer="masks_merged_boundaries",
+            overwrite=True,
+        )
+
     """
-    sdata = map_labels(
+    if output_labels_layer is None:
+        raise ValueError("Please specify a name for the output layer.")
+    if not 0 <= threshold <= 1:
+        raise ValueError(f"'threshold' must be between 0 and 1, found {threshold}.")
+
+    candidate_da = get_dataarray(sdata, layer=candidate_labels_layer)
+    priority_da = get_dataarray(sdata, layer=priority_labels_layer)
+    candidate_transformations = get_transformation(candidate_da, get_all=True)
+    priority_transformations = get_transformation(priority_da, get_all=True)
+
+    if candidate_da.shape != priority_da.shape:
+        raise ValueError(
+            "Only arrays with same shape are currently supported, "
+            f"but candidate labels layer '{candidate_labels_layer}' has shape {candidate_da.shape}, "
+            f"while priority labels layer '{priority_labels_layer}' has shape {priority_da.shape}."
+        )
+    if candidate_transformations != priority_transformations:
+        raise ValueError(
+            f"Provided labels layers '{candidate_labels_layer}' and '{priority_labels_layer}' "
+            "should have the same transformations defined on them."
+        )
+
+    candidate_array = candidate_da.data
+    priority_array = priority_da.data
+
+    if not isinstance(candidate_array, da.Array):
+        candidate_array = da.from_array(candidate_array, chunks=candidate_array.shape)
+    if not isinstance(priority_array, da.Array):
+        priority_array = da.from_array(priority_array, chunks=priority_array.shape)
+
+    if chunks is not None:
+        if not isinstance(chunks, int | str):
+            expected_dims = candidate_array.ndim if candidate_array.ndim == 2 else candidate_array.ndim - 1
+            if len(chunks) != expected_dims:
+                raise ValueError("Please (only) provide chunks for ('y', 'x').")
+            if candidate_array.ndim == 3:
+                chunks = (candidate_array.shape[0], chunks[0], chunks[1])
+        candidate_array = candidate_array.rechunk(chunks)
+        priority_array = priority_array.rechunk(candidate_array.chunks)
+    elif candidate_array.chunks != priority_array.chunks:
+        priority_array = priority_array.rechunk(candidate_array.chunks)
+
+    candidate_ids = np.asarray(da.unique(candidate_array).compute(), dtype=np.int64)
+    candidate_ids = candidate_ids[candidate_ids != 0]
+
+    overlap_counts_by_candidate = _get_source_ids_to_reference_overlap_counts(
+        source=candidate_array,
+        reference=priority_array,
+        source_ids=candidate_ids,
+    )
+
+    if candidate_array.ndim == 2:
+        candidate_area_array = candidate_array[None, ...]
+    else:
+        candidate_area_array = candidate_array
+
+    candidate_sizes = get_instance_size(
+        mask=candidate_area_array,
+        index=candidate_ids,
+        instance_key="instance_id",
+        instance_size_key="instance_size",
+        run_on_gpu=False,
+    )
+    area_by_candidate_id = {
+        int(candidate_id): int(area)
+        for candidate_id, area in zip(candidate_sizes["instance_id"], candidate_sizes["instance_size"], strict=True)
+    }
+
+    kept_candidate_ids: list[int] = []
+    for candidate_id in candidate_ids:
+        overlap_with_priority = sum(overlap_counts_by_candidate.get(int(candidate_id), {}).values())
+        candidate_fraction = overlap_with_priority / area_by_candidate_id[int(candidate_id)]
+        if candidate_fraction <= threshold:
+            kept_candidate_ids.append(int(candidate_id))
+
+    kept_candidate_ids_array = np.asarray(kept_candidate_ids, dtype=np.int64)
+    priority_max = int(da.max(priority_array).compute())
+    max_output_value = priority_max + kept_candidate_ids_array.size
+    if max_output_value > np.iinfo(_SEG_DTYPE).max:
+        raise ValueError(
+            f"Relabeling accepted candidate objects would overflow dtype {_SEG_DTYPE} "
+            f"(required max label {max_output_value})."
+        )
+
+    if kept_candidate_ids_array.size == 0:
+        merged_array = priority_array.astype(_SEG_DTYPE)
+    else:
+        kept_candidate_output_ids = np.arange(
+            priority_max + 1,
+            priority_max + 1 + kept_candidate_ids_array.size,
+            dtype=np.int64,
+        )
+        merged_array = da.map_blocks(
+            _merge_candidate_into_priority_block,
+            priority_array,
+            candidate_array,
+            dtype=_SEG_DTYPE,
+            kept_candidate_ids=kept_candidate_ids_array,
+            kept_candidate_output_ids=kept_candidate_output_ids,
+        )
+
+    sdata = add_labels_layer(
         sdata,
-        func=_merge_masks_block,
-        labels_layers=[labels_layer_1, labels_layer_2],
-        depth=depth,
+        merged_array,
+        output_layer=output_labels_layer,
         chunks=chunks,
-        output_labels_layer=output_labels_layer,
-        output_shapes_layer=output_shapes_layer,
+        transformations=priority_transformations,
         scale_factors=scale_factors,
         overwrite=overwrite,
-        relabel_chunks=True,
-        threshold=threshold,
-        iou_depth=iou_depth,
-        iou_threshold=iou_threshold,
     )
+
+    if output_shapes_layer is not None:
+        se_labels = get_dataarray(sdata, layer=output_labels_layer)
+        sdata = add_shapes_layer(
+            sdata,
+            input=se_labels.data,
+            output_layer=output_shapes_layer,
+            transformations=priority_transformations,
+            overwrite=overwrite,
+        )
+
     return sdata
 
 
@@ -181,8 +317,8 @@ def merge_labels_layers_nuclei(
         if layer not in [*sdata.labels]:
             raise ValueError(f"Layer '{layer}' not found in available label layers '{[*sdata.labels]}' of sdata.")
 
-    se_nuclei_expanded = _get_spatial_element(sdata, labels_layer_nuclei_expanded)
-    se_nuclei = _get_spatial_element(sdata, labels_layer_nuclei)
+    se_nuclei_expanded = get_dataarray(sdata, labels_layer_nuclei_expanded)
+    se_nuclei = get_dataarray(sdata, labels_layer_nuclei)
 
     (
         np.array_equal(da.unique(se_nuclei_expanded.data), da.unique(se_nuclei.data)),
@@ -207,28 +343,86 @@ def merge_labels_layers_nuclei(
     return sdata
 
 
-def _merge_masks_block(
-    array_1: NDArray,  # array_1 gets priority
-    array_2: NDArray,
-    threshold: float = 0.5,
+def _merge_candidate_into_priority_block(
+    priority_block: NDArray,
+    candidate_block: NDArray,
+    kept_candidate_ids: np.ndarray,
+    kept_candidate_output_ids: np.ndarray,
 ) -> NDArray:
-    # this is func for merging of arrays.
-    # we need to relabel to avoid collisions in the merged_masks.
-    array_1, _, _ = relabel_sequential(array_1)
-    array_2, _, _ = relabel_sequential(array_2, offset=array_1.max() + 1)
+    """
+    Merge one candidate chunk into one priority chunk using globally accepted ids.
 
-    merged_masks = array_1
-    unique_labels_2 = np.unique(array_2[array_2 > 0])  # Get unique labels from array_2, excluding zero.
-    for label in unique_labels_2:
-        area_2 = np.sum(array_2 == label)
-        # Calculate the overlap area of array_2's label with array_1
-        overlap_area = np.sum((array_2 == label) & (array_1 > 0))
-        # Check if more than thresh of the overlap area ( e.g., if thresh==0.5 ->half of the area ) is not in array_1
-        if overlap_area <= area_2 * threshold:
-            # Find the corresponding area in array_2 and merge it into array_1 (only at places where array_1==0)
-            merge_condition = (array_2 == label) & (array_1 == 0)
-            array_1[merge_condition] = label
-    return merged_masks
+    The merge is hierarchical: priority labels are copied first, and accepted
+    candidate labels are only written at pixels where the priority chunk is `0`.
+    Candidate ids are remapped to `kept_candidate_output_ids` so the merged
+    result does not collide with existing priority label ids.
+
+    The `searchsorted` section below works as follows:
+
+    1. Extract candidate ids at writable pixels.
+    2. Look up where those ids would appear in the sorted array
+       `kept_candidate_ids`.
+    3. Make those positions safe for indexing.
+    4. Compare the looked-up values to the original candidate ids to determine
+       which ids were actually accepted.
+
+    This works because for a sorted array:
+
+    - if a value is present, `searchsorted` points to that value
+    - if a value is absent, `searchsorted` points to the insertion position
+    - the equality check then distinguishes a real match from an insertion point
+
+    For example, if:
+
+    - `candidate_values = [2, 7, 9, 5]`
+    - `kept_candidate_ids = [2, 5, 8]`
+
+    then:
+
+    - `searchsorted(...) -> [0, 2, 3, 1]`
+    - safe indexing positions -> `[0, 2, 0, 1]`
+    - `kept_candidate_ids[...] -> [2, 8, 2, 5]`
+    - comparing back to `candidate_values` gives
+      `found_candidates = [True, False, False, True]`
+    - if `kept_candidate_output_ids = [6, 7, 8]`, then the accepted positions
+      map to `kept_candidate_output_ids[[0, 1]] = [6, 7]`
+    - `mapped_values` therefore becomes `[6, 0, 0, 7]`
+
+    So candidate ids `2` and `5` are accepted in this block, while `7` and `9`
+    are ignored, and only the accepted ones will be written into the writable
+    pixels of the result block.
+    """
+    priority_block = np.asarray(priority_block)
+    candidate_block = np.asarray(candidate_block)
+
+    if priority_block.shape != candidate_block.shape:
+        raise ValueError(f"Block shape mismatch: {priority_block.shape} != {candidate_block.shape}.")
+
+    result = priority_block.astype(_SEG_DTYPE, copy=True)
+    if kept_candidate_ids.size == 0:
+        return result
+
+    write_mask = (result == 0) & (candidate_block > 0)
+    if not np.any(write_mask):
+        return result
+
+    candidate_values = candidate_block[write_mask].astype(np.int64, copy=False)
+    candidate_positions = np.searchsorted(kept_candidate_ids, candidate_values)
+    candidate_positions_safe = np.where(
+        candidate_positions >= kept_candidate_ids.size,
+        0,
+        candidate_positions,
+    )
+    found_candidates = kept_candidate_ids[candidate_positions_safe] == candidate_values
+
+    mapped_values = np.zeros(candidate_values.shape, dtype=_SEG_DTYPE)
+    if np.any(found_candidates):
+        mapped_values[found_candidates] = kept_candidate_output_ids[candidate_positions_safe[found_candidates]].astype(
+            _SEG_DTYPE, copy=False
+        )
+
+    result[write_mask] = mapped_values
+    return result
 
 
 def _merge_masks_nuclei_block(array_1: NDArray, array_2: NDArray, array_3: NDArray, threshold: float = 0.5):
@@ -277,197 +471,412 @@ def _merge_masks_nuclei_block(array_1: NDArray, array_2: NDArray, array_3: NDArr
     return array_1
 
 
-def mask_to_original(
+def _accumulate_source_to_reference_overlap_counts_chunk(
+    source_block: NDArray,
+    reference_block: NDArray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Reduce one chunk pair to a dense local overlap table.
+
+    The rows correspond to source labels present in this chunk, the columns to
+    reference labels present in this chunk, and each entry counts the number of
+    overlapping pixels. Background label `0` from the reference labels is ignored,
+    so labels with only background overlap are omitted from the result.
+    """
+    source_block = np.asarray(source_block)
+    reference_block = np.asarray(reference_block)
+
+    if source_block.shape != reference_block.shape:
+        raise ValueError(f"Chunk shape mismatch: {source_block.shape} != {reference_block.shape}.")
+
+    foreground = source_block > 0
+    if not np.any(foreground):
+        return (
+            np.empty((0,), dtype=np.int64),
+            np.empty((0,), dtype=np.int64),
+            np.empty((0, 0), dtype=np.uint64),
+        )
+
+    source_values = source_block[foreground].astype(np.int64, copy=False)
+    reference_values = reference_block[foreground].astype(np.int64, copy=False)
+
+    nonzero_reference = reference_values > 0
+    if not np.any(nonzero_reference):
+        return (
+            np.empty((0,), dtype=np.int64),
+            np.empty((0,), dtype=np.int64),
+            np.empty((0, 0), dtype=np.uint64),
+        )
+
+    source_values = source_values[nonzero_reference]
+    reference_values = reference_values[nonzero_reference]
+
+    source_ids, source_dense = np.unique(source_values, return_inverse=True)
+    reference_ids, reference_dense = np.unique(reference_values, return_inverse=True)
+
+    counts = np.bincount(
+        source_dense * reference_ids.size + reference_dense,
+        minlength=source_ids.size * reference_ids.size,
+    ).reshape(source_ids.size, reference_ids.size)
+
+    return source_ids, reference_ids, counts.astype(np.uint64, copy=False)
+
+
+def _get_source_ids_to_reference_overlap_counts(
+    source: np.ndarray | da.Array,
+    reference: np.ndarray | da.Array,
+    source_ids: np.ndarray | None = None,
+    reference_ids: np.ndarray | None = None,
+) -> dict[int, dict[int, int]]:
+    """
+    Accumulate sparse overlap counts between non-zero source ids and reference ids.
+
+    Overlaps are accumulated chunk by chunk. Each chunk returns a local dense
+    overlap table of shape `(n_source_ids_in_chunk, n_reference_ids_in_chunk)`,
+    and these local tables are merged into a sparse Python accumulator keyed by
+    actual `(source_id, reference_id)` pairs, avoiding a huge dense global matrix.
+    Source ids that overlap only with background label `0` in `reference` are not
+    included in the returned mapping.
+
+    The returned object is a nested dictionary of the form
+    `overlap_counts_by_source[source_id][reference_id] = overlap_pixels`.
+
+    For example, if source label `1` overlaps reference label `5` in `12` pixels
+    and reference label `7` in `3` pixels, and source label `2` overlaps reference
+    label `8` in `20` pixels, the function returns:
+
+    `{1: {5: 12, 7: 3}, 2: {8: 20}}`
+
+    This means:
+
+    - source label `1` has two candidate matches, with `5` being the stronger one
+    - source label `2` overlaps only reference label `8`
+    """
+    if not isinstance(source, da.Array):
+        source = np.asarray(source)
+    if not isinstance(reference, da.Array):
+        reference = np.asarray(reference)
+
+    if source.shape != reference.shape:
+        raise ValueError(f"Source shape {source.shape} does not match reference shape {reference.shape}.")
+
+    if isinstance(source, da.Array):
+        source_da = source
+    else:
+        source_da = da.from_array(source, chunks=reference.chunks if isinstance(reference, da.Array) else source.shape)
+
+    if isinstance(reference, da.Array):
+        reference_da = reference
+    else:
+        reference_da = da.from_array(reference, chunks=source_da.chunks)
+
+    if source_da.chunks != reference_da.chunks:
+        reference_da = reference_da.rechunk(source_da.chunks)
+
+    source_ids_allowed: set[int] | None = None
+    if source_ids is not None:
+        source_ids_array = np.asarray(source_ids, dtype=np.int64)
+        source_ids_array = np.unique(source_ids_array)
+        source_ids_array = source_ids_array[source_ids_array != 0]
+        if source_ids_array.size == 0:
+            return {}
+        source_ids_allowed = {int(source_id) for source_id in source_ids_array}
+
+    reference_ids_allowed: set[int] | None = None
+    if reference_ids is not None:
+        reference_ids_array = np.asarray(reference_ids, dtype=np.int64)
+        reference_ids_array = np.unique(reference_ids_array)
+        reference_ids_array = reference_ids_array[reference_ids_array != 0]
+        if reference_ids_array.size == 0:
+            return {}
+        reference_ids_allowed = {int(reference_id) for reference_id in reference_ids_array}
+
+    source_blocks = source_da.to_delayed().ravel()
+    reference_blocks = reference_da.to_delayed().ravel()
+    chunk_tasks = [
+        dask.delayed(_accumulate_source_to_reference_overlap_counts_chunk)(
+            source_block=source_block_delayed,
+            reference_block=reference_block_delayed,
+        )
+        for source_block_delayed, reference_block_delayed in zip(source_blocks, reference_blocks, strict=True)
+    ]
+
+    # Sparse global overlap accumulator:
+    # `global_counts[source_id][reference_id] = total_overlap_pixels`
+    # This avoids allocating a dense `(n_source_ids_global, n_reference_ids_global)` matrix.
+    global_counts: dict[int, dict[int, int]] = {}
+
+    for local_source_ids, local_reference_ids, local_counts in dask.compute(*chunk_tasks):
+        if local_source_ids.size == 0 or local_reference_ids.size == 0:
+            continue
+
+        nonzero_rows, nonzero_cols = np.nonzero(local_counts)
+        if nonzero_rows.size == 0:
+            continue
+
+        for row_idx, col_idx in zip(nonzero_rows, nonzero_cols, strict=True):
+            source_id = int(local_source_ids[row_idx])
+            reference_id = int(local_reference_ids[col_idx])
+            if source_ids_allowed is not None and source_id not in source_ids_allowed:
+                continue
+            if reference_ids_allowed is not None and reference_id not in reference_ids_allowed:
+                continue
+
+            if source_id not in global_counts:
+                global_counts[source_id] = {}
+
+            if reference_id not in global_counts[source_id]:
+                global_counts[source_id][reference_id] = 0
+
+            global_counts[source_id][reference_id] += int(local_counts[row_idx, col_idx])
+
+    return {int(source_id): overlap_counts for source_id, overlap_counts in sorted(global_counts.items())}
+
+
+def match_labels_to_reference_layers(
     sdata: SpatialData,
-    labels_layer: str,
-    original_labels_layers: list[str],
-    depth: tuple[int, int] | int = 400,
+    source_labels_layer: str,
+    reference_labels_layers: list[str],
     chunks: str | int | tuple[int, int] | None = None,
+    threshold: float = 0.0,
+    overlap_metric: Literal["source_fraction", "reference_fraction", "iou"] = "source_fraction",
 ) -> DataFrame:
     """
-    Map to original.
+    Match source labels to reference labels based on an overlap score.
 
-    Maps labels from a labels layer (`labels_layer`) to their corresponding labels in original labels layers within a SpatialData object.
-    The labels in `labels_layers` will be mapped to the label of the labels layers in `original_labels_layers`
-    with which it has maximum overlap.
+    For each non-zero label in `source_labels_layer`, this function determines, for
+    every labels layer in `reference_labels_layers`, which non-zero reference
+    label best matches it according to `overlap_metric`. The result is returned as
+    a :class:`~pandas.DataFrame` indexed by the source labels, with one column per
+    reference labels layer.
+
+    With the default parameters `threshold=0` and
+    `overlap_metric="source_fraction"`, the function effectively
+    assigns each source label to the reference label with the largest
+    non-zero overlap.
+
+    Overlap counts are accumulated chunk by chunk using a local dense overlap
+    table per chunk pair and a sparse global accumulator across chunks. This
+    keeps the implementation suitable for large label images without requiring a
+    dense global `(n_source_labels, n_reference_labels)` overlap matrix.
 
     Parameters
     ----------
     sdata
-        Spatialdata object containing the mask and original labels layers.
-    labels_layer
-        The name of the labels layer used as a mask for mapping.
-    original_labels_layers
-        The names of the original labels layers to which the mask labels are mapped.
-    depth
-        The depth around the boundary of each block to load when the array is split into blocks. This ensures
-        that the split doesn't cause misalignment along the edges. Default is 400. Set depth larger than the maximum
-        cell diameter to avoid chunking effects.
+        The input SpatialData object containing the source labels layer and the reference
+        labels layers.
+    source_labels_layer
+        Name of the labels layer whose non-zero labels are matched to the
+        reference labels layers.
+    reference_labels_layers
+        Names of the reference labels layers against which overlap is computed.
+        One output column is produced for each layer in the order provided.
     chunks
-        Specification for rechunking the data before applying the function. If chunks is a Tuple, they should contain
-        desired chunk size for 'y', 'x'. 'auto' allows the function to determine optimal chunking. Setting chunks to a
-        relative small size (~1000) will significantly speed up the computations.
+        Chunk specification used when rechunking the label arrays before the
+        overlap computation. If a tuple is provided, it is interpreted as the
+        desired `(y, x)` chunk size. If set to `"auto"`, Dask determines the
+        chunking. Smaller spatial chunks can improve performance by reducing the
+        size of the per-chunk overlap tables.
+    threshold
+        Minimum required overlap fraction between a source label and its
+        best-matching reference label. The overlap fraction is computed as
+        a score controlled by `overlap_metric`. If this score is not strictly
+        greater than `threshold`, the mapping is discarded and the output value
+        is set to `0`. Must lie between 0 and 1.
+    overlap_metric
+        Metric used both to select the winning reference label and to apply
+        `threshold` to that winning match. Supported values are:
+
+        - `"source_fraction"`: `overlap_pixels / area_source_label`
+        - `"reference_fraction"`: `overlap_pixels / area_reference_label`
+        - `"iou"`: `overlap_pixels / (area_source_label + area_reference_label - overlap_pixels)`
 
     Returns
     -------
-        A pandas DataFrame where each row corresponds to a unique cell id from the mask layer, and columns correspond
-        to the original labels layers. Each cell in the DataFrame contains the label from the original layer that
-        overlaps most with the mask label.
+    A pandas DataFrame where each row corresponds to a non-zero label from
+    `source_labels_layer` and each column corresponds to one layer in
+    `reference_labels_layers`. Every value contains the non-zero reference label
+    selected for that source label according to `overlap_metric`. If a source label has no non-zero
+    overlap with a given reference labels layer, the corresponding output value
+    is `0`.
 
     Raises
     ------
     AssertionError
-        If arrays from different labels layers do not have the same shape.
+        If the provided labels layers do not all have the same shape.
     AssertionError
-        If depth is provided as a Tuple but does not match (y, x) dimensions.
+        If `chunks` is provided as a tuple but does not match the `(y, x)`
+        dimensions.
     AssertionError
-        If chunks is a Tuple, and does not match (y, x) dimensions.
-    AssertionError
-        If the number of blocks in the z-dimension is not equal to 1.
+        If any rechunked array has more than one chunk along the z dimension.
+    ValueError
+        If `threshold` is outside the interval `[0, 1]`.
+    ValueError
+        If `overlap_metric` is not one of `"source_fraction"`,
+        `"reference_fraction"`, or `"iou"`.
 
     Notes
     -----
-    This function is designed to facilitate the comparison or integration of segmentation results by mapping mask
-    labels back to their original labels.
+    Background label `0` is ignored when computing overlaps. As a result,
+    output value `0` indicates that a source label has no non-zero overlap with
+    the corresponding reference labels layer.
+
+    Example
+    --------
+    .. code-block:: python
+
+        sdata = hp.datasets.mibi_example()
+
+        matched = hp.im.match_labels_to_reference_layers(
+            sdata,
+            source_labels_layer="masks_whole",
+            reference_labels_layers=["masks_nuclear"],
+            chunks=256,
+        )
     """
-    labels_arrays = [sdata.labels[labels_layer].data]
+    if not 0 <= threshold <= 1:
+        raise ValueError(f"'threshold' must be between 0 and 1, found {threshold}.")
+    if overlap_metric not in {"source_fraction", "reference_fraction", "iou"}:
+        raise ValueError(
+            f"'overlap_metric' must be one of 'source_fraction', 'reference_fraction', or 'iou', found {overlap_metric!r}."
+        )
 
-    cell_ids = unique(labels_arrays[0]).compute()
+    label_arrays = [get_dataarray(sdata, layer=source_labels_layer).data]
 
-    for _labels_layer in original_labels_layers:
-        labels_arrays.append(sdata.labels[_labels_layer].data)
+    for _labels_layer in reference_labels_layers:
+        label_arrays.append(get_dataarray(sdata, layer=_labels_layer).data)
 
     # Check for consistent shapes
-    first_shape = labels_arrays[0].shape
-    for x_label in labels_arrays:
+    first_shape = label_arrays[0].shape
+    for x_label in label_arrays:
         assert x_label.shape == first_shape, "Only arrays with same shape are currently supported."
 
-    # First make dimension uniform (z,y,x).
+    # First make dimension uniform (z,y,x) and keep z unchunked.
     _labels_arrays = []
-    for x_label in labels_arrays:
+    for x_label in label_arrays:
         if x_label.ndim == 2:
             _labels_arrays.append(x_label[None, ...])
         else:
             _labels_arrays.append(x_label)
 
-    _x_label = _labels_arrays[0]
-
-    if isinstance(depth, int):
-        depth = {0: 0, 1: depth, 2: depth}
-    else:
-        assert len(depth) == _x_label.ndim - 1, "Please (only) provide depth for ( 'y', 'x')."
-        # set depth for every dimension
-        depth2 = {0: 0, 1: depth[0], 2: depth[1]}
-        depth = depth2
-
     if chunks is not None:
         if not isinstance(chunks, int | str):
-            assert len(chunks) == _x_label.ndim - 1, "Please (only) provide chunks for ( 'y', 'x')."
-            chunks = (_x_label.shape[0], chunks[0], chunks[1])
+            assert len(chunks) == _labels_arrays[0].ndim - 1, "Please (only) provide chunks for ( 'y', 'x')."
+            chunks = (_labels_arrays[0].shape[0], chunks[0], chunks[1])
 
     rechunked_arrays = []
     for x_label in _labels_arrays:
-        #  rechunk so that we ensure minimum chunksize, in order to control output_chunks sizes.
-        x_label = _rechunk_overlap(x_label, depth=depth, chunks=chunks)
+        if chunks is not None:
+            x_label = x_label.rechunk(chunks)
+        elif x_label.numblocks[0] != 1:
+            x_label = x_label.rechunk((x_label.shape[0], *x_label.chunksize[1:]))
         assert x_label.numblocks[0] == 1, (
             f"Expected the number of blocks in the Z-dimension to be `1`, found `{x_label.numblocks[0]}`."
         )
         rechunked_arrays.append(x_label)
 
-    def _mask_to_original_chunks(
-        x_labels_gs: NDArray,
-        *arrays: tuple[NDArray],
-        block_info,
-        _depth: dict[int, int],
-    ):
-        def _zero_non_max(list_1, list_2):
-            if not list_1 or not list_2 or len(list_1) != len(list_2):
-                raise ValueError("Lists should be non-empty and of the same length.")
-            max_value = max(list_1)
-            for i in range(len(list_1)):
-                if list_1[i] != max_value:
-                    list_2[i] = 0
-            return list_2
+    source_ids = np.asarray(da.unique(rechunked_arrays[0]).compute(), dtype=np.int64)
+    source_ids = source_ids[source_ids != 0]
 
-        total_blocks = block_info[0]["num-chunks"]
-        assert total_blocks[0] == 1, (
-            "Dask arrays chunked in z dimension are not supported. Please only chunk in y and x dimensions."
+    if source_ids.size == 0:
+        return pd.DataFrame(
+            np.empty((0, len(reference_labels_layers)), dtype=_SEG_DTYPE),
+            index=pd.Index([], dtype=str),
+            columns=reference_labels_layers,
         )
-        assert depth[0] == 0, "Depth not equal to 0 in z dimension is currently not supported."
-        assert len(depth) == 3, "Please provide depth values for z,y and x."
 
-        # x_labels_gs, gold standard labels
-        labels_gs = np.unique(x_labels_gs[:, _depth[1] : -_depth[1], _depth[2] : -_depth[2]])
+    result = np.zeros((source_ids.size, len(reference_labels_layers)), dtype=_SEG_DTYPE)
+    if overlap_metric == "iou" or (threshold > 0 and overlap_metric == "source_fraction"):
+        log.info(f"Calculating instance sizes for source labels layer '{source_labels_layer}'.")
+        instance_sizes = get_instance_size(
+            mask=rechunked_arrays[0],
+            index=source_ids,
+            instance_key="instance_id",
+            instance_size_key="instance_size",
+            run_on_gpu=False,
+        )
+        area_by_source_id = {
+            int(source_id): int(area)
+            for source_id, area in zip(instance_sizes["instance_id"], instance_sizes["instance_size"], strict=True)
+        }
+    else:
+        area_by_source_id = {}
 
-        result = np.zeros((cell_ids.shape[0], len(arrays)), dtype=_SEG_DTYPE)
-
-        for label in labels_gs:
-            if label == 0:
-                continue
-            max_label_list = []
-            max_area_list = []
-
-            for _array in arrays:
-                positions = np.where(x_labels_gs == label)
-                overlapping_labels = _array[positions]
-
-                label_areas = {lbl: np.sum(overlapping_labels == lbl) for lbl in np.unique(overlapping_labels)}
-                label_areas.pop(0, None)
-
-                # Find the label with the maximum area
-                if label_areas:
-                    max_label = max(label_areas, key=label_areas.get)
-                    max_area = label_areas[max_label]
-                else:
-                    max_label = 0  # Set to 0 if there's no overlap
-                    max_area = 0
-
-                max_label_list.append(max_label)
-                max_area_list.append(max_area)
-
-            max_overlap = _zero_non_max(max_area_list, max_label_list)
-
-            index = np.where(cell_ids == label)[0][0]
-            result[index] = max_overlap
-
-        return result
-
-    result = da.map_overlap(
-        lambda *arrays, block_info=None, _depth=depth: _mask_to_original_chunks(
-            *arrays, block_info=block_info, _depth=_depth
-        ),  # Unpack and pass all arrays to _mask_to_original_chunks
-        *rechunked_arrays,  # Unpack the list of Dask arrays as individual arguments
-        dtype=_SEG_DTYPE,
-        drop_axis=0,
-        depth=depth,
-        trim=False,
-        boundary=0,
-        chunks=(len(cell_ids), len(original_labels_layers)),
-    )
-
-    result_of_chunks = da.zeros((len(cell_ids), len(original_labels_layers)), dtype=result.dtype)
-
-    num_chunks = result.numblocks
-
-    # sum the result for each chunk
-    for i in range(num_chunks[0]):
-        for j in range(num_chunks[1]):
-            current_chunk = result.blocks[i, j]
-            condition = result_of_chunks == 0
-            result_of_chunks = da.where(
-                condition,
-                current_chunk,  # if equal to zero, overwrite, else, keep old value
-                result_of_chunks,
+    for index, reference_array in enumerate(rechunked_arrays[1:]):
+        overlap_counts_by_source = _get_source_ids_to_reference_overlap_counts(
+            source=rechunked_arrays[0],
+            reference=reference_array,
+            source_ids=source_ids,
+        )
+        if overlap_metric in {"reference_fraction", "iou"} and overlap_counts_by_source:
+            log.info(f"Calculating instance sizes for reference labels layer '{reference_labels_layers[index]}'.")
+            candidate_reference_ids = np.unique(
+                np.asarray(
+                    [
+                        reference_id
+                        for overlap_counts in overlap_counts_by_source.values()
+                        for reference_id in overlap_counts
+                    ],
+                    dtype=np.int64,
+                )
             )
+            reference_sizes = get_instance_size(
+                mask=reference_array,
+                index=candidate_reference_ids,
+                instance_key="instance_id",
+                instance_size_key="instance_size",
+                run_on_gpu=False,
+            )
+            area_by_reference_id = {
+                int(reference_id): int(area)
+                for reference_id, area in zip(
+                    reference_sizes["instance_id"], reference_sizes["instance_size"], strict=True
+                )
+            }
+        else:
+            area_by_reference_id = {}
 
-    result_computed = result_of_chunks.compute()
-    df = pd.DataFrame(
-        result_computed,
-        index=cell_ids,
-        columns=original_labels_layers,
-    )
+        mapped_labels = []
+        for source_id in source_ids:
+            overlap_counts = overlap_counts_by_source.get(int(source_id))
+            if overlap_counts is None:
+                mapped_labels.append(0)
+                continue
 
-    df.drop(0, inplace=True, axis=0)
-    df.index = df.index.astype(str)
+            best_reference_id = 0
+            best_overlap_pixels = 0
+            best_score = -1.0
+            for reference_id, overlap_pixels in overlap_counts.items():
+                if overlap_metric == "source_fraction":
+                    score = overlap_pixels
+                elif overlap_metric == "reference_fraction":
+                    score = overlap_pixels / area_by_reference_id[int(reference_id)]
+                else:
+                    source_area = area_by_source_id[int(source_id)]
+                    reference_area = area_by_reference_id[int(reference_id)]
+                    score = overlap_pixels / (source_area + reference_area - overlap_pixels)
 
-    return df
+                if score > best_score or (score == best_score and reference_id < best_reference_id):
+                    best_reference_id = int(reference_id)
+                    best_overlap_pixels = int(overlap_pixels)
+                    best_score = float(score)
+
+            if threshold > 0:
+                if overlap_metric == "source_fraction":
+                    overlap_score = best_overlap_pixels / area_by_source_id[int(source_id)]
+                elif overlap_metric == "reference_fraction":
+                    overlap_score = best_overlap_pixels / area_by_reference_id[int(best_reference_id)]
+                else:
+                    source_area = area_by_source_id[int(source_id)]
+                    reference_area = area_by_reference_id[int(best_reference_id)]
+                    overlap_score = best_overlap_pixels / (source_area + reference_area - best_overlap_pixels)
+
+                if overlap_score <= threshold:
+                    mapped_labels.append(0)
+                    continue
+
+            mapped_labels.append(best_reference_id)
+
+        result[:, index] = np.asarray(mapped_labels, dtype=_SEG_DTYPE)
+
+    return pd.DataFrame(result, index=source_ids.astype(str), columns=reference_labels_layers)
