@@ -7,9 +7,22 @@ from harpy.image._image import add_labels_layer, get_dataarray
 from harpy.image.segmentation._filter_masks import (
     filter_labels_layer,
 )
+from harpy.utils._aggregate import get_instance_size
+from harpy.utils._keys import _INSTANCE_KEY
 
 
 def test_filter_labels_layers(sdata_multi_c_no_backed: SpatialData):
+    instance_key = _INSTANCE_KEY
+    instance_size_key = "instance_size"
+    df = get_instance_size(
+        sdata_multi_c_no_backed["masks_whole"].data[None, ...],
+        run_on_gpu=False,
+        instance_key=instance_key,
+        instance_size_key=instance_size_key,
+    )
+    df = df[df[instance_key] != 0]
+    filtered_df = df[(100 < df[instance_size_key]) & (df[instance_size_key] < 1000)]
+
     sdata_multi_c_no_backed = filter_labels_layer(
         sdata_multi_c_no_backed,
         labels_layer="masks_whole",
@@ -22,11 +35,12 @@ def test_filter_labels_layers(sdata_multi_c_no_backed: SpatialData):
     )
 
     assert "masks_whole_filtered" in sdata_multi_c_no_backed.labels
-    assert (
-        len(da.unique(sdata_multi_c_no_backed.labels["masks_whole"].data).compute())
-        - len(da.unique(sdata_multi_c_no_backed.labels["masks_whole_filtered"].data).compute())
-        == 55
-    )
+    filtered_label_ids = np.asarray(da.unique(sdata_multi_c_no_backed.labels["masks_whole_filtered"].data).compute())
+    filtered_label_ids = np.sort(filtered_label_ids[filtered_label_ids != 0])
+    expected_label_ids = np.sort(filtered_df[instance_key].to_numpy())
+
+    assert len(filtered_df) == 641
+    assert np.array_equal(filtered_label_ids, expected_label_ids)
     assert isinstance(sdata_multi_c_no_backed, SpatialData)
 
 
