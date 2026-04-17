@@ -24,6 +24,8 @@ In practice, Harpy offers fast, out-of-core image preprocessing, tiled segmentat
 - **Scales to (very) large images**: tiled workflows with [Dask](https://www.dask.org/); optional GPU acceleration with [CuPy](https://cupy.dev/) and [PyTorch](https://pytorch.org/).
 - **Scalable computational building blocks** for segmentation, feature extraction, clustering, and spatial analysis.
 
+For interactive object classification in [Napari](https://napari.org/stable/) using shallow or deep features extraced using `Harpy`, see the [napari-harpy](https://github.com/vibspatial/napari-harpy) package.
+
 For interactive visualization of `Harpy` outputs using [Vitessce](https://github.com/vitessce/vitessce), see the [harpy_vitessce](https://github.com/vibspatial/harpy_vitessce) package.
 
 ---

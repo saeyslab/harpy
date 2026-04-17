@@ -1,3 +1,4 @@
+from ._add_feature_matrix import add_feature_matrix
 from ._allocation import allocate, bin_counts
 from ._allocation_intensity import allocate_intensity
 from ._annotation import cluster_cleanliness, score_genes, score_genes_iter
@@ -32,6 +33,7 @@ __all__ = [
     "cluster_intensity",
     "cluster_intensity_SOM",
     "spatial_pixel_neighbors",
+    "add_feature_matrix",
     "kmeans",
     "leiden",
     "nhood_enrichment",

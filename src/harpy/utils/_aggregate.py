@@ -18,7 +18,7 @@ from harpy.utils.utils import _da_unique, _get_xp, _to_cupy_dask_array, _to_nump
 
 class RasterAggregator:
     """
-    Helper class to calulate aggregated 'sum', 'mean', 'var', 'kurtosis', 'skew', 'area', 'min', 'max', 'center of mass', 'radii' or 'principal_axes' of image and labels using Dask.
+    Helper class to calulate aggregated 'sum', 'mean', 'var', 'kurtosis', 'skew', 'area', 'min', 'max' and 'center of mass' of image and labels using Dask.
 
     Parameters
     ----------
@@ -101,7 +101,7 @@ class RasterAggregator:
 
         if run_on_gpu:
             try:
-                import cupy
+                import cupy  # type: ignore
 
                 _ = cupy
             except ImportError:
@@ -646,7 +646,12 @@ class RasterAggregator:
                 #    * n_unique,  # NOTE: specifying minlength not really necessary here, keep it for documentation
                 # ).reshape(C, n_unique)
 
-                mean_per_pixel = mean_found.T[
+                # Build a chunk-local label -> mean lookup because `new_labels`
+                # indexes the dense labels present in this block, while
+                # `mean_found` only contains the requested labels found here.
+                mean_per_label = xp.zeros((C, n_unique), dtype=self._mean.dtype)
+                mean_per_label[:, idxs[found]] = mean_found.T
+                mean_per_pixel = mean_per_label[
                     :, new_labels
                 ]  # creates an array of shape (c,image_block.shape[1]*image_block.shape[2]*image_block.shape[3])
                 centered_weights = (image_block.reshape(C, -1) - mean_per_pixel) ** n

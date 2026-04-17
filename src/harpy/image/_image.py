@@ -51,11 +51,6 @@ def _get_boundary(spatial_image: DataArray, to_coordinate_system: str = "global"
 
 def _get_translation(spatial_image: DataArray, to_coordinate_system: str = "global") -> tuple[float, float]:
     transformations = get_transformation(spatial_image, get_all=True)
-    if len(transformations) > 1:
-        log.info(
-            f"There seems to be more than one coordinate system defined on the provided spatial element ('{[*transformations]}'). "
-            f"We only consider the coordinate sytem specified via parameter 'to_coordinate_system': '{to_coordinate_system}'."
-        )
     if to_coordinate_system not in [*transformations]:
         raise ValueError(
             f"Coordinate system '{to_coordinate_system}' does not appear to be a coordinate system of the spatial element. "

@@ -109,6 +109,7 @@ Operations on table (`AnnData` object) layers.
     tb.bin_counts
     tb.allocate_intensity
     tb.add_regionprops
+    tb.add_feature_matrix
     tb.extract_instances
     tb.ZarrIterableInstances
     tb.ZarrDataLoader
