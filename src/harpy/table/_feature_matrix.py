@@ -68,10 +68,91 @@ def feature_matrix(
     run_on_gpu: bool = False,
 ) -> SpatialData:
     """
-    Compute object features from labels and optional image data, and write them into ``adata.obsm``.
+    Compute per-instance feature matrices from labels and optional image data.
 
-    The result is stored in ``adata.obsm[feature_key]`` and accompanied by metadata in
-    ``adata.uns["harpy_feature_matrices"][feature_key]``.
+    This function computes requested object-level features from one or more
+    labels layers and writes the resulting numeric matrix into
+    `adata.obsm[feature_key]` of a target table. Companion metadata describing
+    the matrix schema and inputs is stored in
+    `adata.uns["harpy_feature_matrices"][feature_key]`.
+
+    Features are aligned onto table rows by `(region_key, instance_key)`, not
+    by row order. This makes the resulting matrix immediately reusable in
+    downstream workflows that expect feature matrices in `.obsm`.
+
+    The function supports two modes:
+
+    - If `table_layer is None`, a new annotated table is created first and
+      `output_layer` is required.
+    - If `table_layer` is provided, the existing table is updated in place by
+      writing or replacing `obsm[feature_key]` for the selected labels layer or
+      layers.
+
+    Supported intensity features are `"sum"`, `"mean"`, `"var"`, `"min"`,
+    `"max"`, `"kurtosis"`, and `"skew"`. Supported morphology features are
+    `"area"`, `"eccentricity"`, `"major_axis_length"`,
+    `"minor_axis_length"`, `"perimeter"`, `"convex_area"`,
+    `"equivalent_diameter"`, `"major_minor_axis_ratio"`,
+    `"perim_square_over_area"`, `"major_axis_equiv_diam_ratio"`,
+    `"convex_hull_resid"`, and `"centroid_dif"`.
+
+    Parameters
+    ----------
+    sdata
+        The input SpatialData object.
+    labels_layer
+        Labels layer or layers from which object features are computed. When a
+        list is provided, one feature matrix block is computed per labels layer
+        and aligned onto the target table using `region_key` and
+        `instance_key`.
+    img_layer
+        Image layer or layers used for intensity-derived features. This is
+        required if any requested feature is intensity-derived. If a list is
+        provided, it must either have length 1 or match `labels_layer`. If only
+        morphology features are requested, a provided `img_layer` is ignored.
+    table_layer
+        Existing table layer in `sdata.tables` to update. If `None`, a new
+        annotated table is created and written to `output_layer`.
+    output_layer
+        Name of the output table layer to create when `table_layer is None`.
+        This parameter is not allowed when updating an existing table.
+    feature_key
+        Key used to store the computed feature matrix in `adata.obsm`.
+    features
+        Requested feature names. Duplicate names are ignored while preserving
+        order.
+    channels
+        Channel selection for intensity-derived features. Channels can be given
+        by index, by name, or as a list of indices or names. If `None`, all
+        channels of the image layer are used.
+    overwrite_output_layer
+        If `True`, overwrite `output_layer` when creating a new table.
+    overwrite_feature_key
+        If `True`, replace an existing `adata.obsm[feature_key]` when updating
+        an existing table.
+    to_coordinate_system
+        Coordinate system or systems used when pairing image and labels layers.
+        If a list is provided, it must either have length 1 or match
+        `labels_layer`.
+    region_key
+        Column name in `adata.obs` identifying the source labels layer. This is
+        used when creating a new table and for aligning computed rows onto a
+        target table.
+    instance_key
+        Column name in `adata.obs` identifying the instance id. This is used
+        when creating a new table and for aligning computed rows onto a target
+        table.
+    chunks
+        Optional chunk specification used to rechunk image and labels arrays
+        during feature extraction. Rechunking on disk ahead of time is often
+        more efficient.
+    run_on_gpu
+        Whether to use GPU-backed execution where supported. If GPU execution is
+        requested but CuPy is not available, Harpy falls back to CPU execution.
+
+    Returns
+    -------
+    The updated SpatialData object.
     """
     requested_features = _normalize_requested_features(features)
     intensity_features = [feature for feature in requested_features if feature in _INTENSITY_FEATURES]
