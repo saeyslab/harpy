@@ -275,7 +275,9 @@ def test_aggregate_stats_with_missing_global_index_label(sdata):
         mask_dask_array=mask.rechunk(512),
         image_dask_array=image.rechunk(512),
     )
-    df_sum, df_mean, df_count, df_var = aggregator.aggregate_stats(stats_funcs=("sum", "mean", "count", "var"), index=index)
+    df_sum, df_mean, df_count, df_var = aggregator.aggregate_stats(
+        stats_funcs=("sum", "mean", "count", "var"), index=index
+    )
 
     sum_row = df_sum[df_sum[_INSTANCE_KEY] == missing_label].iloc[0]
     mean_row = df_mean[df_mean[_INSTANCE_KEY] == missing_label].iloc[0]
