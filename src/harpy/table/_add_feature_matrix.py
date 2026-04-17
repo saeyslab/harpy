@@ -45,7 +45,7 @@ class _FeaturePair:
     coordinate_system: str
 
 
-def feature_matrix(
+def add_feature_matrix(
     sdata: SpatialData,
     labels_layer: str | list[str],
     img_layer: str | list[str] | None,
@@ -154,6 +154,13 @@ def feature_matrix(
     -------
     The updated SpatialData object.
 
+    See Also
+    --------
+    harpy.tb.allocate_intensity
+        Allocate intensity-derived features into a table.
+    harpy.tb.add_regionprops
+        Add morphology features to table observations.
+
     Examples
     --------
     .. code-block:: python
@@ -165,7 +172,7 @@ def feature_matrix(
             processed=False,
         )
 
-        sdata = hp.tb.feature_matrix(
+        sdata = hp.tb.add_feature_matrix(
             sdata,
             labels_layer="cell_labels_global",
             img_layer="morphology_focus_global",
@@ -222,7 +229,7 @@ def feature_matrix(
         if output_layer is not None:
             raise ValueError(
                 "Parameter 'output_layer' can only be used when 'table_layer' is None, "
-                "because that is the mode where 'feature_matrix' creates a new table."
+                "because that is the mode where 'add_feature_matrix' creates a new table."
             )
         if overwrite_output_layer:
             raise ValueError(
@@ -379,7 +386,7 @@ def _normalize_feature_pairs(
     if not labels_layers:
         raise ValueError("Parameter 'labels_layer' must contain at least one labels layer.")
     if len(set(labels_layers)) != len(labels_layers):
-        raise ValueError("Duplicate labels layers are not supported in a single 'feature_matrix' call.")
+        raise ValueError("Duplicate labels layers are not supported in a single 'add_feature_matrix' call.")
 
     coordinate_systems = _broadcast_parameter(
         to_coordinate_system,

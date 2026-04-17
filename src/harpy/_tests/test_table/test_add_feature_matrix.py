@@ -1,11 +1,11 @@
 import numpy as np
 from spatialdata import read_zarr
 
-from harpy.table._feature_matrix import feature_matrix
+from harpy.table._add_feature_matrix import add_feature_matrix
 
 
-def test_feature_matrix_creates_new_table(sdata_multi_c_no_backed):
-    sdata_multi_c_no_backed = feature_matrix(
+def test_add_feature_matrix_creates_new_table(sdata_multi_c_no_backed):
+    sdata_multi_c_no_backed = add_feature_matrix(
         sdata_multi_c_no_backed,
         labels_layer="masks_whole",
         img_layer="raw_image",
@@ -31,8 +31,8 @@ def test_feature_matrix_creates_new_table(sdata_multi_c_no_backed):
     assert metadata["source_image"] == "raw_image"
 
 
-def test_feature_matrix_creates_intensity_stats_table(sdata_multi_c_no_backed):
-    sdata_multi_c_no_backed = feature_matrix(
+def test_add_feature_matrix_creates_intensity_stats_table(sdata_multi_c_no_backed):
+    sdata_multi_c_no_backed = add_feature_matrix(
         sdata_multi_c_no_backed,
         labels_layer="masks_whole",
         img_layer="raw_image",
@@ -51,8 +51,8 @@ def test_feature_matrix_creates_intensity_stats_table(sdata_multi_c_no_backed):
     assert adata.uns["feature_matrices"]["intensity_stats"]["feature_columns"] == ["mean__0", "var__0"]
 
 
-def test_feature_matrix_supports_custom_metadata_key(sdata_multi_c_no_backed):
-    sdata_multi_c_no_backed = feature_matrix(
+def test_add_feature_matrix_supports_custom_metadata_key(sdata_multi_c_no_backed):
+    sdata_multi_c_no_backed = add_feature_matrix(
         sdata_multi_c_no_backed,
         labels_layer="masks_whole",
         img_layer=None,
@@ -71,8 +71,8 @@ def test_feature_matrix_supports_custom_metadata_key(sdata_multi_c_no_backed):
     assert adata.uns["custom_feature_matrices"]["area_features"]["feature_columns"] == ["area"]
 
 
-def test_feature_matrix_existing_table_preserves_other_regions(sdata_pixie_intensities):
-    sdata_pixie_intensities = feature_matrix(
+def test_add_feature_matrix_existing_table_preserves_other_regions(sdata_pixie_intensities):
+    sdata_pixie_intensities = add_feature_matrix(
         sdata_pixie_intensities,
         labels_layer="label_whole_fov0",
         img_layer=None,
@@ -82,7 +82,7 @@ def test_feature_matrix_existing_table_preserves_other_regions(sdata_pixie_inten
         to_coordinate_system="fov0",
         overwrite_feature_key=True,
     )
-    sdata_pixie_intensities = feature_matrix(
+    sdata_pixie_intensities = add_feature_matrix(
         sdata_pixie_intensities,
         labels_layer="label_whole_fov1",
         img_layer=None,
@@ -105,8 +105,8 @@ def test_feature_matrix_existing_table_preserves_other_regions(sdata_pixie_inten
     assert adata.uns["feature_matrices"]["morphology_features"]["feature_columns"] == ["area"]
 
 
-def test_feature_matrix_persists_backed_updates(sdata_multi_c):
-    sdata_multi_c = feature_matrix(
+def test_add_feature_matrix_persists_backed_updates(sdata_multi_c):
+    sdata_multi_c = add_feature_matrix(
         sdata_multi_c,
         labels_layer="masks_whole",
         img_layer=None,
