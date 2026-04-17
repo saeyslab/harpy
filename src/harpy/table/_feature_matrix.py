@@ -189,7 +189,7 @@ def feature_matrix(
             feature_matrices = adata.uns.get(_HARPY_FEATURE_MATRICES_KEY, {})
             if isinstance(feature_matrices, dict) and feature_key in feature_matrices:
                 existing_metadata = feature_matrices[feature_key]
-                existing_columns = existing_metadata.get("columns") if isinstance(existing_metadata, dict) else None
+                existing_columns = existing_metadata.get("feature_columns") if isinstance(existing_metadata, dict) else None
                 if existing_columns is not None:
                     schema_matches = [str(column) for column in list(existing_columns)] == [
                         str(column) for column in columns
@@ -210,7 +210,7 @@ def feature_matrix(
     source_images = [pair.img_layer for pair in pair_specs]
     coordinate_systems = [pair.coordinate_system for pair in pair_specs]
     metadata = {
-        "columns": list(columns),
+        "feature_columns": list(columns),
         "schema_version": 1,
         "backend": "numpy",
         "dtype": str(matrix.dtype),
