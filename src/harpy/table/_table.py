@@ -27,7 +27,7 @@ class ProcessTable:
 
         Parameters
         ----------
-        spatial_data: SpatialData
+        sdata: SpatialData
             The SpatialData object containing spatial data.
         table_layer: str
             The table layer to use.
