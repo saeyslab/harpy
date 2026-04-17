@@ -16,7 +16,7 @@ from spatialdata.models import TableModel
 from harpy.image._image import _get_translation, _precondition, get_dataarray
 from harpy.table._regionprops import _calculate_regionprop_features
 from harpy.table._table import ProcessTable, add_table_layer
-from harpy.utils._aggregate import RasterAggregator
+from harpy.utils._aggregate import RasterAggregator, _get_mask_area
 from harpy.utils._keys import _CELL_INDEX, _INSTANCE_KEY, _REGION_KEY
 from harpy.utils.utils import _da_unique, _make_list
 
@@ -582,15 +582,38 @@ def _compute_morphology_feature_frame(
         if unsupported:
             raise ValueError(f"Morphology feature(s) {unsupported} are not supported for 3D labels data.")
 
-    masks = labels_array.compute()
-    frame = _calculate_regionprop_features(
-        masks=masks,
-        properties=tuple(morphology_features),
-        instance_key=instance_key,
-    )
-    result = frame.loc[:, [instance_key, *morphology_features]].copy()
-    result[instance_key] = result[instance_key].astype(int, copy=False)
-    return result
+    result_frames: list[pd.DataFrame] = []
+
+    if "area" in morphology_features:
+        mask_for_area = labels_array if labels_array.ndim == 3 else labels_array[None, ...]
+        area_frame = _get_mask_area(
+            mask_for_area,
+            index=None,
+            instance_key=instance_key,
+            instance_size_key="area",
+            run_on_gpu=False,
+        )
+        area_frame = area_frame[area_frame[instance_key] != 0].copy()
+        area_frame[instance_key] = area_frame[instance_key].astype(int, copy=False)
+        result_frames.append(area_frame.loc[:, [instance_key, "area"]])
+
+    other_morphology_features = [feature for feature in morphology_features if feature != "area"]
+    if other_morphology_features:
+        masks = labels_array.compute()
+        frame = _calculate_regionprop_features(
+            masks=masks,
+            properties=tuple(other_morphology_features),
+            instance_key=instance_key,
+        )
+        other_frame = frame.loc[:, [instance_key, *other_morphology_features]].copy()
+        other_frame[instance_key] = other_frame[instance_key].astype(int, copy=False)
+        result_frames.append(other_frame)
+
+    result = result_frames[0]
+    for frame in result_frames[1:]:
+        result = result.merge(frame, how="outer", on=instance_key)
+
+    return result.loc[:, [instance_key, *morphology_features]]
 
 
 def _format_channel_name(channel_name: object, index: int) -> str:
