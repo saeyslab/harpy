@@ -89,7 +89,7 @@ def feature_matrix(
         to_coordinate_system=to_coordinate_system,
         needs_image=bool(intensity_features),
     )
-    selected_labels = [pair.labels_layer for pair in pair_specs]
+    labels_layers = [pair.labels_layer for pair in pair_specs]
 
     if table_layer is None:
         if output_layer is None:
@@ -106,7 +106,7 @@ def feature_matrix(
             )
         sdata = _create_empty_feature_table(
             sdata,
-            labels_layers=selected_labels,
+            labels_layers=labels_layers,
             output_layer=output_layer,
             region_key=region_key,
             instance_key=instance_key,
@@ -127,7 +127,7 @@ def feature_matrix(
         target_table_layer = table_layer
         # Validate that the target table exists, annotates the requested labels layers,
         # and uses unique instance ids within each selected region.
-        ProcessTable(sdata, table_layer=target_table_layer, labels_layer=selected_labels)
+        ProcessTable(sdata, table_layer=target_table_layer, labels_layer=labels_layers)
         adata = sdata.tables[target_table_layer]
         region_key = adata.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]
         instance_key = adata.uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY]
@@ -174,7 +174,7 @@ def feature_matrix(
             f"alignment ambiguous. Examples: {duplicates.to_dict(orient='records')}"
         )
 
-    selected_mask = adata.obs[region_key].isin(selected_labels).to_numpy()
+    selected_mask = adata.obs[region_key].isin(labels_layers).to_numpy()
     selected_keys = adata.obs.loc[selected_mask, [region_key, instance_key]]
     aligned = computed_features.set_index([region_key, instance_key]).reindex(pd.MultiIndex.from_frame(selected_keys))
     aligned_values = aligned.loc[:, columns].to_numpy(dtype=np.float64)
