@@ -24,7 +24,7 @@ def test_feature_matrix_creates_new_table(sdata_multi_c_no_backed):
     assert adata.obsm["cell_features"].shape == (adata.n_obs, 3)
     assert np.isfinite(adata.obsm["cell_features"]).all()
 
-    metadata = adata.uns["harpy_feature_matrices"]["cell_features"]
+    metadata = adata.uns["feature_matrices"]["cell_features"]
     assert metadata["features"] == ["mean", "area"]
     assert metadata["feature_columns"] == ["mean__0", "mean__4", "area"]
     assert metadata["source_label"] == "masks_whole"
@@ -48,7 +48,27 @@ def test_feature_matrix_creates_intensity_stats_table(sdata_multi_c_no_backed):
 
     assert adata.obsm["intensity_stats"].shape == (adata.n_obs, 2)
     assert np.isfinite(adata.obsm["intensity_stats"]).all()
-    assert adata.uns["harpy_feature_matrices"]["intensity_stats"]["feature_columns"] == ["mean__0", "var__0"]
+    assert adata.uns["feature_matrices"]["intensity_stats"]["feature_columns"] == ["mean__0", "var__0"]
+
+
+def test_feature_matrix_supports_custom_metadata_key(sdata_multi_c_no_backed):
+    sdata_multi_c_no_backed = feature_matrix(
+        sdata_multi_c_no_backed,
+        labels_layer="masks_whole",
+        img_layer=None,
+        table_layer=None,
+        output_layer="table_custom_metadata",
+        feature_key="area_features",
+        features=["area"],
+        feature_matrices_key="custom_feature_matrices",
+        overwrite_output_layer=True,
+    )
+
+    adata = sdata_multi_c_no_backed.tables["table_custom_metadata"]
+
+    assert "custom_feature_matrices" in adata.uns
+    assert "feature_matrices" not in adata.uns
+    assert adata.uns["custom_feature_matrices"]["area_features"]["feature_columns"] == ["area"]
 
 
 def test_feature_matrix_existing_table_preserves_other_regions(sdata_pixie_intensities):
@@ -82,7 +102,7 @@ def test_feature_matrix_existing_table_preserves_other_regions(sdata_pixie_inten
 
     assert np.isfinite(matrix[fov0_mask]).all()
     assert np.isfinite(matrix[fov1_mask]).all()
-    assert adata.uns["harpy_feature_matrices"]["morphology_features"]["feature_columns"] == ["area"]
+    assert adata.uns["feature_matrices"]["morphology_features"]["feature_columns"] == ["area"]
 
 
 def test_feature_matrix_persists_backed_updates(sdata_multi_c):
@@ -102,4 +122,4 @@ def test_feature_matrix_persists_backed_updates(sdata_multi_c):
 
     assert "area_features" in adata.obsm
     assert adata.obsm["area_features"].shape == (adata.n_obs, 1)
-    assert adata.uns["harpy_feature_matrices"]["area_features"]["feature_columns"].tolist() == ["area"]
+    assert adata.uns["feature_matrices"]["area_features"]["feature_columns"].tolist() == ["area"]

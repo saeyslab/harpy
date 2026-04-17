@@ -17,12 +17,10 @@ from harpy.image._image import _get_translation, _precondition, get_dataarray
 from harpy.table._regionprops import _calculate_regionprop_features
 from harpy.table._table import ProcessTable, add_table_layer
 from harpy.utils._aggregate import RasterAggregator, _get_mask_area
-from harpy.utils._keys import _CELL_INDEX, _INSTANCE_KEY, _REGION_KEY
+from harpy.utils._keys import _CELL_INDEX, _FEATURE_MATRICES_KEY, _INSTANCE_KEY, _REGION_KEY
 from harpy.utils.utils import _da_unique, _make_list
 
 # clean up code
-
-_HARPY_FEATURE_MATRICES_KEY = "harpy_feature_matrices"
 
 _INTENSITY_FEATURES = ("sum", "mean", "var", "min", "max", "kurtosis", "skew")
 _MORPHOLOGY_FEATURES = (
@@ -64,6 +62,7 @@ def feature_matrix(
     to_coordinate_system: str | list[str] = "global",
     region_key: str = _REGION_KEY,
     instance_key: str = _INSTANCE_KEY,
+    feature_matrices_key: str = _FEATURE_MATRICES_KEY,
     chunks: str | int | tuple[int, ...] | None = None,
     run_on_gpu: bool = False,
 ) -> SpatialData:
@@ -72,9 +71,9 @@ def feature_matrix(
 
     This function computes requested object-level features from one or more
     labels layers and writes the resulting numeric matrix into
-    `adata.obsm[feature_key]` of a target table. Companion metadata describing
+    `.obsm[feature_key]` of a target table. Companion metadata describing
     the matrix schema and inputs is stored in
-    `adata.uns["harpy_feature_matrices"][feature_key]`.
+    `.uns[feature_matrices_key][feature_key]`.
 
     Features are aligned onto table rows by `(region_key, instance_key)`, not
     by row order. This makes the resulting matrix immediately reusable in
@@ -142,6 +141,9 @@ def feature_matrix(
         Column name in `adata.obs` identifying the instance id. This is used
         when creating a new table and for aligning computed rows onto a target
         table.
+    feature_matrices_key
+        Key in `adata.uns` under which metadata for computed feature matrices is
+        stored.
     chunks
         Optional chunk specification used to rechunk image and labels arrays
         during feature extraction. Rechunking on disk ahead of time is often
@@ -153,6 +155,30 @@ def feature_matrix(
     Returns
     -------
     The updated SpatialData object.
+
+    Examples
+    --------
+    .. code-block:: python
+
+        import harpy as hp
+
+        sdata = hp.datasets.xenium_human_ovarian_cancer(
+            subset=True,
+            processed=False,
+        )
+
+        sdata = hp.tb.feature_matrix(
+            sdata,
+            labels_layer="cell_labels_global",
+            img_layer="morphology_focus_global",
+            table_layer=None,
+            output_layer="table_cell_features",
+            feature_key="cell_features",
+            features=["mean", "area"],
+            overwrite_output_layer=True,
+        )
+
+        sdata["table_cell_features"].obsm["cell_features"].shape
     """
     requested_features = _normalize_requested_features(features)
     intensity_features = [feature for feature in requested_features if feature in _INTENSITY_FEATURES]
@@ -267,10 +293,12 @@ def feature_matrix(
         schema_matches = False
         existing = np.asarray(adata.obsm[feature_key])
         if existing.ndim == 2 and existing.shape[0] == adata.n_obs and existing.shape[1] == len(columns):
-            feature_matrices = adata.uns.get(_HARPY_FEATURE_MATRICES_KEY, {})
+            feature_matrices = adata.uns.get(feature_matrices_key, {})
             if isinstance(feature_matrices, dict) and feature_key in feature_matrices:
                 existing_metadata = feature_matrices[feature_key]
-                existing_columns = existing_metadata.get("feature_columns") if isinstance(existing_metadata, dict) else None
+                existing_columns = (
+                    existing_metadata.get("feature_columns") if isinstance(existing_metadata, dict) else None
+                )
                 if existing_columns is not None:
                     schema_matches = [str(column) for column in list(existing_columns)] == [
                         str(column) for column in columns
@@ -302,11 +330,11 @@ def feature_matrix(
     }
 
     adata.obsm[feature_key] = matrix
-    existing_metadata = adata.uns.get(_HARPY_FEATURE_MATRICES_KEY, {})
+    existing_metadata = adata.uns.get(feature_matrices_key, {})
     if not isinstance(existing_metadata, dict):
         existing_metadata = dict(existing_metadata)
     existing_metadata[feature_key] = metadata
-    adata.uns[_HARPY_FEATURE_MATRICES_KEY] = existing_metadata
+    adata.uns[feature_matrices_key] = existing_metadata
 
     if sdata.is_backed() and sdata.path is not None:
         root = zarr.open_group(sdata.path, mode="r+", use_consolidated=False)
@@ -314,9 +342,9 @@ def feature_matrix(
         write_elem(table_group["obsm"], feature_key, matrix)
 
         uns_group = table_group["uns"]
-        if _HARPY_FEATURE_MATRICES_KEY not in uns_group:
-            write_elem(uns_group, _HARPY_FEATURE_MATRICES_KEY, {})
-        write_elem(uns_group[_HARPY_FEATURE_MATRICES_KEY], feature_key, metadata)
+        if feature_matrices_key not in uns_group:
+            write_elem(uns_group, feature_matrices_key, {})
+        write_elem(uns_group[feature_matrices_key], feature_key, metadata)
         zarr.consolidate_metadata(sdata.path)
 
     return sdata
