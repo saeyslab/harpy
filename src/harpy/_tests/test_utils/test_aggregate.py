@@ -225,6 +225,42 @@ def test_aggregate_var(sdata):
     assert np.allclose(df_var[2].values, scipy_var, rtol=0, atol=1e-5)
 
 
+def test_aggregate_stats_without_background_index(sdata):
+    se_image = sdata["blobs_image"]
+    se_labels = sdata["blobs_labels"]
+
+    image = se_image.data[:, None, ...]
+    mask = se_labels.data[None, ...]
+    index = da.unique(mask).compute()
+    index = index[index != 0]
+
+    aggregator = RasterAggregator(
+        mask_dask_array=mask.rechunk(512),
+        image_dask_array=image.rechunk(512),
+    )
+    df_mean, df_var = aggregator.aggregate_stats(stats_funcs=("mean", "var"), index=index)
+
+    assert np.array_equal(df_mean[_INSTANCE_KEY].to_numpy(), index)
+    assert np.array_equal(df_var[_INSTANCE_KEY].to_numpy(), index)
+
+    scipy_mean = ndimage.labeled_comprehension(
+        input=image[0].compute(),
+        labels=mask.compute(),
+        index=index,
+        func=np.mean,
+        out_dtype=image.dtype,
+        default=0,
+    )
+    scipy_var = ndimage.variance(
+        input=image[0].compute(),
+        labels=mask.compute(),
+        index=index,
+    )
+
+    assert np.allclose(df_mean[0].values, scipy_mean, rtol=0, atol=1e-5)
+    assert np.allclose(df_var[0].values, scipy_var, rtol=0, atol=1e-5)
+
+
 def test_aggregate_kurtosis(sdata):
     se_image = sdata["blobs_image"]
     se_labels = sdata["blobs_labels"]
