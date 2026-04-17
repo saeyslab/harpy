@@ -646,6 +646,9 @@ class RasterAggregator:
                 #    * n_unique,  # NOTE: specifying minlength not really necessary here, keep it for documentation
                 # ).reshape(C, n_unique)
 
+                # Build a chunk-local label -> mean lookup because `new_labels`
+                # indexes the dense labels present in this block, while
+                # `mean_found` only contains the requested labels found here.
                 mean_per_label = xp.zeros((C, n_unique), dtype=self._mean.dtype)
                 mean_per_label[:, idxs[found]] = mean_found.T
                 mean_per_pixel = mean_per_label[

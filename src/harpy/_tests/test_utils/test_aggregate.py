@@ -261,6 +261,33 @@ def test_aggregate_stats_without_background_index(sdata):
     assert np.allclose(df_var[0].values, scipy_var, rtol=0, atol=1e-5)
 
 
+def test_aggregate_stats_with_missing_global_index_label(sdata):
+    se_image = sdata["blobs_image"]
+    se_labels = sdata["blobs_labels"]
+
+    image = se_image.data[:, None, ...]
+    mask = se_labels.data[None, ...]
+    index = da.unique(mask).compute()
+    missing_label = int(index.max()) + 1
+    index = np.append(index, missing_label)
+
+    aggregator = RasterAggregator(
+        mask_dask_array=mask.rechunk(512),
+        image_dask_array=image.rechunk(512),
+    )
+    df_sum, df_mean, df_count, df_var = aggregator.aggregate_stats(stats_funcs=("sum", "mean", "count", "var"), index=index)
+
+    sum_row = df_sum[df_sum[_INSTANCE_KEY] == missing_label].iloc[0]
+    mean_row = df_mean[df_mean[_INSTANCE_KEY] == missing_label].iloc[0]
+    count_row = df_count[df_count[_INSTANCE_KEY] == missing_label].iloc[0]
+    var_row = df_var[df_var[_INSTANCE_KEY] == missing_label].iloc[0]
+
+    assert np.allclose(sum_row.drop(labels=_INSTANCE_KEY).to_numpy(dtype=float), 0)
+    assert np.allclose(count_row.drop(labels=_INSTANCE_KEY).to_numpy(dtype=float), 0)
+    assert np.isnan(mean_row.drop(labels=_INSTANCE_KEY).to_numpy(dtype=float)).all()
+    assert np.isnan(var_row.drop(labels=_INSTANCE_KEY).to_numpy(dtype=float)).all()
+
+
 def test_aggregate_kurtosis(sdata):
     se_image = sdata["blobs_image"]
     se_labels = sdata["blobs_labels"]
