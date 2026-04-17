@@ -101,7 +101,7 @@ class RasterAggregator:
 
         if run_on_gpu:
             try:
-                import cupy
+                import cupy  # type: ignore
 
                 _ = cupy
             except ImportError:
