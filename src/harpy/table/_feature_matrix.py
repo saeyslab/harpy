@@ -181,6 +181,7 @@ def feature_matrix(
 
     shape = (adata.n_obs, len(columns))
     matrix = np.full(shape, np.nan, dtype=np.float64)
+    non_selected_count = int((~selected_mask).sum())
     if feature_key in adata.obsm and overwrite_feature_key:
         schema_matches = False
         existing = np.asarray(adata.obsm[feature_key])
@@ -198,6 +199,11 @@ def feature_matrix(
             existing = np.asarray(adata.obsm[feature_key], dtype=np.float64)
             if existing.shape == shape:
                 matrix = existing.copy()
+        elif non_selected_count > 0:
+            log.warning(
+                "The schema of the existing feature matrix does not match the requested features. "
+                "Values for non-selected rows will be replaced with NaN."
+            )
     matrix[selected_mask] = aligned_values
 
     source_labels = [pair.labels_layer for pair in pair_specs]
