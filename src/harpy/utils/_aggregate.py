@@ -18,7 +18,7 @@ from harpy.utils.utils import _da_unique, _get_xp, _to_cupy_dask_array, _to_nump
 
 class RasterAggregator:
     """
-    Helper class to calulate aggregated 'sum', 'mean', 'var', 'kurtosis', 'skew', 'area', 'min', 'max', 'center of mass', 'radii' or 'principal_axes' of image and labels using Dask.
+    Helper class to calulate aggregated 'sum', 'mean', 'var', 'kurtosis', 'skew', 'area', 'min', 'max' and 'center of mass' of image and labels using Dask.
 
     Parameters
     ----------
