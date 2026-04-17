@@ -386,25 +386,35 @@ def _compute_pair_feature_frame(
         )
         channel_names, channel_indices = _resolve_channels(image, channels)
         image_array, labels_array = _prepare_raster_arrays(image.data, labels.data, chunks=chunks)
+        ordered_columns.extend(_ordered_intensity_columns(intensity_features, channel_names))
+    else:
+        labels_array = labels.data
 
+    mask_for_instances = labels_array if labels_array.ndim == 3 else labels_array[None, ...]
+    # Keep shared instance ids on CPU; downstream intensity/area helpers move them
+    # to the appropriate backend internally when needed.
+    instance_ids = np.asarray(_da_unique(mask_for_instances, run_on_gpu=False))
+    instance_ids = instance_ids[instance_ids != 0].astype(int, copy=False)
+
+    if intensity_features:
         intensity_frame = _compute_intensity_feature_frame(
             image_array=image_array[channel_indices],
             labels_array=labels_array,
             intensity_features=intensity_features,
             channel_names=channel_names,
             instance_key=instance_key,
+            instance_ids=instance_ids,
             run_on_gpu=run_on_gpu,
         )
         feature_frames.append(intensity_frame)
-        ordered_columns.extend(_ordered_intensity_columns(intensity_features, channel_names))
-    else:
-        labels_array = labels.data
 
     if morphology_features:
         morphology_frame = _compute_morphology_feature_frame(
             labels_array=labels_array,
             morphology_features=morphology_features,
             instance_key=instance_key,
+            instance_ids=instance_ids,
+            run_on_gpu=run_on_gpu,
         )
         feature_frames.append(morphology_frame)
         ordered_columns.extend(morphology_features)
@@ -513,10 +523,9 @@ def _compute_intensity_feature_frame(
     intensity_features: Sequence[str],
     channel_names: Sequence[str],
     instance_key: str,
+    instance_ids: np.ndarray,
     run_on_gpu: bool,
 ) -> pd.DataFrame:
-    instance_ids = np.asarray(_da_unique(labels_array, run_on_gpu=run_on_gpu))
-    instance_ids = instance_ids[instance_ids != 0].astype(int, copy=False)
     result = pd.DataFrame({instance_key: instance_ids})
 
     aggregator = RasterAggregator(
@@ -535,15 +544,17 @@ def _compute_intensity_feature_frame(
             renamed_frames[feature] = _rename_intensity_columns(frame, feature, channel_names, instance_key)
 
     if "max" in intensity_features:
+        frame = aggregator.aggregate_max(index=instance_ids)
         renamed_frames["max"] = _rename_intensity_columns(
-            aggregator.aggregate_max(index=instance_ids),
+            frame,
             "max",
             channel_names,
             instance_key,
         )
     if "min" in intensity_features:
+        frame = aggregator.aggregate_min(index=instance_ids)
         renamed_frames["min"] = _rename_intensity_columns(
-            aggregator.aggregate_min(index=instance_ids),
+            frame,
             "min",
             channel_names,
             instance_key,
@@ -551,6 +562,14 @@ def _compute_intensity_feature_frame(
 
     for feature in intensity_features:
         result = result.merge(renamed_frames[feature], how="outer", on=instance_key)
+
+    # sanity checks
+    assert result[instance_key].is_unique, (
+        f"Expected '{instance_key}' to remain unique after merging intensity features."
+    )
+    assert set(result[instance_key].to_numpy()) == set(instance_ids.tolist()), (
+        f"Expected merged intensity result to contain exactly the provided '{instance_key}' values."
+    )
 
     return result
 
@@ -576,6 +595,8 @@ def _compute_morphology_feature_frame(
     labels_array,
     morphology_features: Sequence[str],
     instance_key: str,
+    instance_ids: np.ndarray,
+    run_on_gpu: bool,
 ) -> pd.DataFrame:
     if labels_array.ndim == 3:
         unsupported = [feature for feature in morphology_features if feature in _UNSUPPORTED_3D_MORPHOLOGY_FEATURES]
@@ -586,14 +607,14 @@ def _compute_morphology_feature_frame(
 
     if "area" in morphology_features:
         mask_for_area = labels_array if labels_array.ndim == 3 else labels_array[None, ...]
+        # Only the area fast path honors run_on_gpu; skimage regionprops remains CPU-only.
         area_frame = _get_mask_area(
             mask_for_area,
-            index=None,
+            index=instance_ids,
             instance_key=instance_key,
             instance_size_key="area",
-            run_on_gpu=False,
+            run_on_gpu=run_on_gpu,
         )
-        area_frame = area_frame[area_frame[instance_key] != 0].copy()
         area_frame[instance_key] = area_frame[instance_key].astype(int, copy=False)
         result_frames.append(area_frame.loc[:, [instance_key, "area"]])
 
