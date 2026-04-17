@@ -4,7 +4,6 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-import dask.array as da
 import numpy as np
 import pandas as pd
 import zarr
@@ -19,7 +18,7 @@ from harpy.table._regionprops import _calculate_regionprop_features
 from harpy.table._table import ProcessTable, add_table_layer
 from harpy.utils._aggregate import RasterAggregator
 from harpy.utils._keys import _CELL_INDEX, _INSTANCE_KEY, _REGION_KEY
-from harpy.utils.utils import _make_list
+from harpy.utils.utils import _da_unique, _make_list
 
 # clean up code
 
@@ -323,7 +322,7 @@ def _create_empty_feature_table(
 
     for labels in labels_layers:
         data = get_dataarray(sdata, layer=labels).data
-        instance_ids = np.asarray(da.unique(data).compute())
+        instance_ids = np.asarray(_da_unique(data, run_on_gpu=False))
         instance_ids = instance_ids[instance_ids != 0].astype(int, copy=False)
 
         obs = pd.DataFrame(
@@ -516,7 +515,7 @@ def _compute_intensity_feature_frame(
     instance_key: str,
     run_on_gpu: bool,
 ) -> pd.DataFrame:
-    instance_ids = np.asarray(da.unique(labels_array).compute())
+    instance_ids = np.asarray(_da_unique(labels_array, run_on_gpu=run_on_gpu))
     instance_ids = instance_ids[instance_ids != 0].astype(int, copy=False)
     result = pd.DataFrame({instance_key: instance_ids})
 
@@ -530,11 +529,9 @@ def _compute_intensity_feature_frame(
     aggregated_features = [feature for feature in intensity_features if feature not in {"max", "min"}]
     renamed_frames: dict[str, pd.DataFrame] = {}
     if aggregated_features:
-        for feature, frame in zip(
-            aggregated_features,
-            aggregator.aggregate_stats(stats_funcs=tuple(aggregated_features), index=instance_ids),
-            strict=True,
-        ):
+        stats_funcs = tuple(aggregated_features)
+        stats_frames = aggregator.aggregate_stats(stats_funcs=stats_funcs, index=instance_ids)
+        for feature, frame in zip(stats_funcs, stats_frames, strict=True):
             renamed_frames[feature] = _rename_intensity_columns(frame, feature, channel_names, instance_key)
 
     if "max" in intensity_features:
@@ -566,8 +563,8 @@ def _rename_intensity_columns(
 ) -> pd.DataFrame:
     rename_map = {index: f"{prefix}__{channel_name}" for index, channel_name in enumerate(channel_names)}
     renamed = frame.rename(columns=rename_map)
-    if instance_key in renamed.columns:
-        renamed[instance_key] = renamed[instance_key].astype(int, copy=False)
+    assert instance_key in renamed.columns, f"Expected aggregated intensity frame to contain '{instance_key}'."
+    renamed[instance_key] = renamed[instance_key].astype(int, copy=False)
     return renamed
 
 
