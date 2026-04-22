@@ -2,9 +2,9 @@ import dask.array as da
 import pytest
 from spatialdata.models import TableModel
 
-from harpy.image._image import add_labels_layer
+from harpy.image._image import add_labels
 from harpy.table._regionprops import add_regionprop_features, add_regionprops
-from harpy.table._table import add_table_layer
+from harpy.table._table import add_table
 
 ALL_REGIONPROPS = [
     "area",
@@ -65,7 +65,7 @@ def test_add_regionprops_raises(sdata_pixie_intensities):
     table_name = "table_intensities"
     labels_name = "label_whole_fov0"
 
-    sdata_pixie_intensities = add_labels_layer(
+    sdata_pixie_intensities = add_labels(
         sdata_pixie_intensities,
         arr=sdata_pixie_intensities[labels_name].data,
         output_labels_name=f"{labels_name}_not_annotated",
@@ -129,7 +129,7 @@ def test_add_regionprops_3D(sdata_pixie_intensities, properties_to_calculate):
     array = da.stack([sdata_pixie_intensities[labels_name].data, sdata_pixie_intensities[labels_name].data])
 
     # add artificial 3D labels layer
-    sdata_pixie_intensities = add_labels_layer(
+    sdata_pixie_intensities = add_labels(
         sdata_pixie_intensities,
         arr=array,
         output_labels_name="label_whole_fov0_3D",
@@ -142,7 +142,7 @@ def test_add_regionprops_3D(sdata_pixie_intensities, properties_to_calculate):
     adata.obs[region_key] = "label_whole_fov0_3D"
     adata.uns.pop(TableModel.ATTRS_KEY)
 
-    sdata_pixie_intensities = add_table_layer(
+    sdata_pixie_intensities = add_table(
         sdata_pixie_intensities,
         adata=adata,
         region=["label_whole_fov0_3D"],

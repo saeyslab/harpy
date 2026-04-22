@@ -10,7 +10,7 @@ from numpy.typing import NDArray
 from spatialdata import SpatialData
 from spatialdata.transformations import Affine, Identity, Scale
 
-from harpy.points._points import add_points_layer
+from harpy.points._points import add_points
 from harpy.utils._keys import _GENES_KEY
 
 
@@ -374,7 +374,7 @@ def read_transcripts(
     if crd is not None:
         transformed_ddf = transformed_ddf.query(f"{crd[0]} <= pixel_x < {crd[1]} and {crd[2]} <= pixel_y < {crd[3]}")
 
-    sdata = add_points_layer(
+    sdata = add_points(
         sdata,
         ddf=transformed_ddf,
         output_points_name=output_points_name,

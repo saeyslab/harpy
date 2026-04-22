@@ -13,7 +13,7 @@ from spatialdata import SpatialData
 
 from harpy.image._image import get_dataarray
 from harpy.shape._shape import filter_shapes_layer
-from harpy.table._table import ProcessTable, add_table_layer
+from harpy.table._table import ProcessTable, add_table
 from harpy.utils._aggregate import _get_mask_area
 from harpy.utils._keys import _CELLSIZE_KEY, _RAW_COUNTS_KEY
 
@@ -412,7 +412,7 @@ class Preprocess(ProcessTable):
             self._type_check_before_pca(adata)
             sc.pp.pca(adata, copy=False, n_comps=n_comps, **pca_kwargs)
 
-        self.sdata = add_table_layer(
+        self.sdata = add_table(
             self.sdata,
             adata=adata,
             output_table_name=output_table_name,

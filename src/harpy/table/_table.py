@@ -226,7 +226,7 @@ def correct_marker_genes(
             adata.obs[celltype],
         )
 
-    sdata = add_table_layer(
+    sdata = add_table(
         sdata,
         adata=adata,
         output_table_name=output_table_name,
@@ -259,21 +259,21 @@ def filter_on_size(
     sdata
         The SpatialData object.
     labels_name
-        The labels layer(s) of `sdata` used to select the cells via the region key  in `sdata.tables[table_name].obs`.
+        The labels element(s) of `sdata` used to select the cells via the region key in `sdata.tables[table_name].obs`.
         Note that if `output_table_name` is equal to `table_name` and overwrite is True,
         cells in `sdata.tables[table_name]` linked to other `labels_name` (via the region key), will be removed from `sdata.tables[table_name]`
         (also from the backing zarr store if it is backed).
     table_name
-        The table layer in `sdata`.
+        The table element in `sdata`.
     output_table_name
-        The output table layer in `sdata`.
+        The output table element in `sdata`.
     min_size
         minimum size in pixels.
     max_size
         maximum size in pixels.
     update_shapes_layers
-        Whether to filter the shapes layers associated with `labels_name`.
-        If set to `True`, cells that do not appear in resulting `output_table_name` (with region key equal to `labels_name`) will be removed from the shapes layers (via instance key) in the `sdata` object.
+        Whether to filter the shapes elements associated with `labels_name`.
+        If set to `True`, cells that do not appear in resulting `output_table_name` (with region key equal to `labels_name`) will be removed from the shapes elements (via instance key) in the `sdata` object.
         Filtered shapes will be added to `sdata` with prefix 'filtered_size'.
         This parameter is deprecated, and will be removed in a future version.
     instance_size_key
@@ -290,11 +290,11 @@ def filter_on_size(
     start = adata.shape[0]
 
     # Filter cells based on size and distance
-    # need to do the copy because we pop the spatialdata_attrs in add_table_layer, otherwise it would not be updated inplace
+    # need to do the copy because we pop the spatialdata_attrs in add_table, otherwise it would not be updated inplace
     adata = adata[adata.obs[instance_size_key] < max_size, :].copy()
     adata = adata[adata.obs[instance_size_key] > min_size, :].copy()
 
-    sdata = add_table_layer(
+    sdata = add_table(
         sdata,
         adata=adata,
         output_table_name=output_table_name,
@@ -319,7 +319,7 @@ def filter_on_size(
     return sdata
 
 
-def add_table_layer(
+def add_table(
     sdata: SpatialData,
     adata: AnnData,
     output_table_name: str,
@@ -329,24 +329,24 @@ def add_table_layer(
     overwrite: bool = False,
 ) -> SpatialData:
     """
-    Add an :class:`~anndata.AnnData` object as a table layer to a :class:`~spatialdata.SpatialData` object.
+    Add an :class:`~anndata.AnnData` object as a table element to a :class:`~spatialdata.SpatialData` object.
 
     This function stores the provided :class:`~anndata.AnnData` object in ``sdata.tables[output_table_name]``.
     When ``region`` is provided, the table is parsed as a SpatialData table and linked to one or more
     spatial elements via ``region_key`` and ``instance_key``. If ``region`` is ``None``, the AnnData
     object is added as a regular table without region annotations.
 
-    If ``sdata`` is backed by a zarr store, the resulting table layer is also written to that store.
+    If ``sdata`` is backed by a zarr store, the resulting table element is also written to that store.
 
     Parameters
     ----------
     sdata
-        The :class:`~spatialdata.SpatialData` object to which the new table layer will be added.
+        The :class:`~spatialdata.SpatialData` object to which the new table element will be added.
     adata
         The :class:`~anndata.AnnData` object to add. If ``region`` is not ``None``, ``adata.obs``
         must contain the columns specified by ``region_key`` and ``instance_key``.
     output_table_name
-        Name of the output table layer in ``sdata.tables``.
+        Name of the output table element in ``sdata.tables``.
     region
         Regions annotated by the table. Typically this is the list of unique values in
         ``adata.obs[region_key]``. Set to ``None`` if the table should not annotate any spatial element.

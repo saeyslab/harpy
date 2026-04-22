@@ -11,8 +11,8 @@ from spatialdata import bounding_box_query as bounding_box_query_spatialdata
 from spatialdata.models import TableModel
 from spatialdata.transformations import get_transformation
 
-from harpy.image._image import add_labels_layer, get_dataarray
-from harpy.table._table import add_table_layer
+from harpy.image._image import add_labels, get_dataarray
+from harpy.table._table import add_table
 
 
 def bounding_box_query(
@@ -103,7 +103,7 @@ def bounding_box_query(
             )
         else:
             labels_ids.append(da.unique(se_queried.data).compute())
-            sdata_queried = add_labels_layer(
+            sdata_queried = add_labels(
                 sdata_queried,
                 arr=se_queried.data.rechunk(
                     se_queried.data.chunksize
@@ -126,7 +126,7 @@ def bounding_box_query(
             log.info(
                 f"table_name={_table_layer} does not annotate any spatial element — adding data as such to the resulting SpatialData object."
             )
-            sdata_queried = add_table_layer(
+            sdata_queried = add_table(
                 sdata_queried,
                 adata=adata.copy(),
                 output_table_name=_table_layer,
@@ -164,7 +164,7 @@ def bounding_box_query(
         # subset
         adata = adata[~remove].copy()
         # add subsetted adata to sdata
-        sdata_queried = add_table_layer(
+        sdata_queried = add_table(
             sdata_queried,
             adata=adata,
             output_table_name=_table_layer,

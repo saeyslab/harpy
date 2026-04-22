@@ -8,7 +8,7 @@ from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import get_transformation
 
-from harpy.image._image import _get_spatial_element, add_image_layer
+from harpy.image._image import _get_spatial_element, add_image
 from harpy.image._map import map_image
 
 
@@ -97,7 +97,7 @@ def normalize(
 
     else:
         arr = _normalize(se.data, p_min=p_min, p_max=p_max, eps=eps, internal_method=internal_method)
-        sdata = add_image_layer(
+        sdata = add_image(
             sdata,
             arr=arr,
             output_image_name=output_image_name,

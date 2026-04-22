@@ -241,7 +241,7 @@ def _fix_dimensions(
     return array
 
 
-def add_image_layer(
+def add_image(
     sdata: SpatialData,
     arr: Array,
     output_image_name: str,
@@ -253,16 +253,16 @@ def add_image_layer(
     overwrite: bool = False,
 ) -> SpatialData:
     """
-    Add an image layer to a SpatialData object.
+    Add an image element to a SpatialData object.
 
-    This function allows you to add an image layer to `sdata`.
-    If `sdata` is backed by a zarr store, the resulting image layer will be backed to the zarr store, otherwise `arr` will be persisted in memory.
-    All layers of the Dask graph associated with `arr` will therefore be materialized upon calling `add_image_layer`.
+    This function allows you to add an image element to `sdata`.
+    If `sdata` is backed by a zarr store, the resulting image element will be backed to the zarr store, otherwise `arr` will be persisted in memory.
+    All layers of the Dask graph associated with `arr` will therefore be materialized upon calling `add_image`.
 
     Parameters
     ----------
     sdata
-        The SpatialData object to which the new image layer will be added.
+        The SpatialData object to which the new image element will be added.
     arr
         The array containing the image data to be added.
     output_image_name
@@ -278,11 +278,11 @@ def add_image_layer(
     c_coords
         Names of the channels. If None, channel names will be named sequentially as 0,1,...
     overwrite
-        If True, overwrites the output layer if it already exists in `sdata`.
+        If True, overwrites `output_image_name` if it already exists in `sdata`.
 
     Returns
     -------
-    The `sdata` object with the image layer added.
+    The `sdata` object with the image element added.
     """
     manager = ImageLayerManager()
     sdata = manager.add_layer(
@@ -300,7 +300,7 @@ def add_image_layer(
     return sdata
 
 
-def add_labels_layer(
+def add_labels(
     sdata: SpatialData,
     arr: Array,
     output_labels_name: str,
@@ -311,16 +311,16 @@ def add_labels_layer(
     overwrite: bool = False,
 ) -> SpatialData:
     """
-    Add a labels layer to a SpatialData object.
+    Add a labels element to a SpatialData object.
 
-    This function allows you to add a labels layer to `sdata`.
-    If `sdata` is backed by a zarr store, the resulting labels layer will be backed to the zarr store, otherwise `arr` will be persisted in memory.
-    All layers of the Dask graph associated with `arr` will therefore be materialized upon calling `add_labels_layer`.
+    This function allows you to add a labels element to `sdata`.
+    If `sdata` is backed by a zarr store, the resulting labels element will be backed to the zarr store, otherwise `arr` will be persisted in memory.
+    All layers of the Dask graph associated with `arr` will therefore be materialized upon calling `add_labels`.
 
     Parameters
     ----------
     sdata
-        The SpatialData object to which the new labels layer will be added.
+        The SpatialData object to which the new labels element will be added.
     arr
         The array containing the labels data to be added. Should be of type int.
     output_labels_name
@@ -338,7 +338,7 @@ def add_labels_layer(
 
     Returns
     -------
-    The `sdata` object with the labels layer added.
+    The `sdata` object with the labels element added.
     """
     manager = LabelLayerManager()
     sdata = manager.add_layer(

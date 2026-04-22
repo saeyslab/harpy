@@ -19,7 +19,7 @@ import harpy as hp
 sdata = hp.datasets.macsima_example()
 
 # Get the DAPI stain, and add it to a new slot.
-sdata = hp.im.add_image_layer(
+sdata = hp.im.add_image(
     sdata,
     arr=sdata["HumanLiverH35"].sel(c="R0_DAPI").data[None, ...],
     output_image_name="image",

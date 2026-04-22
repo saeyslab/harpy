@@ -3,7 +3,7 @@ import numpy as np
 import pytest
 from spatialdata import SpatialData
 
-from harpy.image._image import add_labels_layer, get_dataarray
+from harpy.image._image import add_labels, get_dataarray
 from harpy.image.segmentation._filter_masks import (
     filter_labels_layer,
 )
@@ -48,7 +48,7 @@ def test_filter_labels_layer_uses_global_label_size_across_chunks() -> None:
     sdata = SpatialData()
     labels = da.from_array(np.array([[1, 1, 1, 1, 2, 2]], dtype=np.uint32), chunks=(1, 2))
 
-    sdata = add_labels_layer(sdata, arr=labels, output_labels_name="labels", overwrite=True)
+    sdata = add_labels(sdata, arr=labels, output_labels_name="labels", overwrite=True)
 
     sdata = filter_labels_layer(
         sdata,
@@ -71,7 +71,7 @@ def test_filter_labels_layer_raises_for_invalid_size_bounds() -> None:
     sdata = SpatialData()
     labels = da.from_array(np.array([[1, 1], [0, 2]], dtype=np.uint32), chunks=(1, 2))
 
-    sdata = add_labels_layer(sdata, arr=labels, output_labels_name="labels", overwrite=True)
+    sdata = add_labels(sdata, arr=labels, output_labels_name="labels", overwrite=True)
 
     with pytest.raises(ValueError, match="'min_size' must be <= 'max_size'"):
         filter_labels_layer(

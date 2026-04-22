@@ -7,7 +7,7 @@ from loguru import logger as log
 from spatialdata import SpatialData
 
 from harpy.image._image import _get_spatial_element
-from harpy.table._table import ProcessTable, add_table_layer
+from harpy.table._table import ProcessTable, add_table
 from harpy.utils._aggregate import _get_mask_area
 from harpy.utils._keys import _CELLSIZE_KEY
 from harpy.utils.utils import _make_list
@@ -136,7 +136,7 @@ def cluster_intensity(
 
     adata.uns[cluster_key_uns] = df
 
-    sdata = add_table_layer(
+    sdata = add_table(
         sdata,
         adata=adata,
         output_table_name=output_table_name,

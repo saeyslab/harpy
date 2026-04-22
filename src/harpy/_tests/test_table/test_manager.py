@@ -4,7 +4,7 @@ from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
 from harpy.table._manager import _cast_stringdtype_uns_sdata
-from harpy.table._table import add_table_layer
+from harpy.table._table import add_table
 from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY
 
 
@@ -17,7 +17,7 @@ def test_add_table_layer(sdata_transcripts: SpatialData, recwarn, is_backed):
 
     adata = sdata_transcripts["table_transcriptomics"]
 
-    sdata_transcripts = add_table_layer(
+    sdata_transcripts = add_table(
         sdata_transcripts,
         adata=adata,
         output_table_name="table_transcriptomics",
@@ -62,7 +62,7 @@ def test_add_table_layer_change_region_instance_keys(sdata_transcripts: SpatialD
     # need to pop the spatialdata_attrs, otherwise harpy will complain that new region key does not match the old region key
     adata.uns.pop(TableModel.ATTRS_KEY, None)
 
-    sdata_transcripts = add_table_layer(
+    sdata_transcripts = add_table(
         sdata_transcripts,
         adata=adata,
         output_table_name="table_transcriptomics",
@@ -99,7 +99,7 @@ def test_add_table_layer_not_annotating(sdata_transcripts: SpatialData, is_backe
 
     adata = sdata_transcripts["table_transcriptomics"]
 
-    sdata_transcripts = add_table_layer(
+    sdata_transcripts = add_table(
         sdata_transcripts,
         adata=adata,
         output_table_name="table_transcriptomics",
@@ -113,7 +113,7 @@ def test_add_table_layer_not_annotating(sdata_transcripts: SpatialData, is_backe
 def test_add_new_backed_table_layer_does_not_warn_about_missing_regions(sdata_transcripts: SpatialData, recwarn):
     adata = sdata_transcripts["table_transcriptomics"].copy()
 
-    sdata_transcripts = add_table_layer(
+    sdata_transcripts = add_table(
         sdata_transcripts,
         adata=adata,
         output_table_name="table_transcriptomics_copy",

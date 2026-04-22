@@ -17,7 +17,7 @@ from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import get_transformation
 
-from harpy.image._image import add_labels_layer
+from harpy.image._image import add_labels
 from harpy.utils._keys import _INSTANCE_KEY
 from harpy.utils.utils import _get_uint_dtype
 
@@ -194,7 +194,7 @@ def rasterize(
     # rechunk to avoid irregular chunksize after padding
     arr = arr.rechunk(rechunksize)
 
-    sdata = add_labels_layer(
+    sdata = add_labels(
         sdata,
         arr=arr,
         output_labels_name=output_labels_name,

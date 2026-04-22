@@ -20,7 +20,7 @@ from xarray import DataArray
 
 from harpy.image._image import _get_spatial_element, _get_translation
 from harpy.shape._shape import filter_shapes_layer
-from harpy.table._table import add_table_layer
+from harpy.table._table import add_table
 from harpy.table._utils import _sanity_check_append_region
 from harpy.utils._keys import _CELL_INDEX, _GENES_KEY, _INSTANCE_KEY, _REGION_KEY, _SPATIAL
 from harpy.utils._transformations import _identity_check_transformations_points
@@ -63,7 +63,7 @@ def allocate(
         The coordinate system that holds `labels_name` and `points_name`.
         This should be the intrinsic coordinate system in pixels.
     chunks
-        Chunk size for processing. Consider setting 'chunks' to 'None' and rechunk the 'labels_name' to the desired chunk size on disk, e.g. with :func:`harpy.im.add_labels_layer`.
+        Chunk size for processing. Consider setting 'chunks' to 'None' and rechunk the 'labels_name' to the desired chunk size on disk, e.g. with :func:`harpy.im.add_labels`.
     name_gene_column
         Column name in the `points_name` representing gene information.
     append
@@ -213,7 +213,7 @@ def allocate(
     else:
         region = [labels_name]
 
-    sdata = add_table_layer(
+    sdata = add_table(
         sdata,
         adata=adata,
         output_table_name=output_table_name,
@@ -421,7 +421,7 @@ def bin_counts(
     else:
         region = [labels_name]
 
-    sdata = add_table_layer(
+    sdata = add_table(
         sdata,
         adata=adata,
         output_table_name=output_table_name,

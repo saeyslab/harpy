@@ -26,7 +26,7 @@ from harpy.image._image import (
     _fix_dimensions,
     _get_spatial_element,
     _get_translation,
-    add_labels_layer,
+    add_labels,
 )
 from harpy.image.segmentation._align_masks import align_labels_layers
 from harpy.image.segmentation._utils import (
@@ -42,8 +42,8 @@ from harpy.image.segmentation._utils import (
 )
 from harpy.image.segmentation.segmentation_models._baysor import baysor_callable as _model_points
 from harpy.image.segmentation.segmentation_models._cellpose import cellpose_callable as _model
-from harpy.points._points import add_points_layer
-from harpy.shape._shape import add_shapes_layer
+from harpy.points._points import add_points
+from harpy.shape._shape import add_shapes
 from harpy.utils._keys import _GENES_KEY
 from harpy.utils._transformations import _identity_check_transformations_points
 
@@ -471,7 +471,7 @@ class SegmentationModel(ABC):
                 _scale_factors = None
             else:
                 _scale_factors = scale_factors
-            sdata = add_labels_layer(
+            sdata = add_labels(
                 sdata,
                 arr=_x_labels,
                 output_labels_name=_output_labels_name,
@@ -517,7 +517,7 @@ class SegmentationModel(ABC):
                 se_labels = _get_spatial_element(sdata, layer=_output_labels_name)
                 _output_shapes_name = output_shapes_name[i]
                 # convert the labels to polygons and add them as shapes layer to sdata
-                sdata = add_shapes_layer(
+                sdata = add_shapes(
                     sdata,
                     input=se_labels.data,
                     output_shapes_name=_output_shapes_name,
@@ -933,7 +933,7 @@ class SegmentationModelPoints(SegmentationModel):
             # otherwise we would need to do this query again for every chunk we process later on
             _crd_points_name = f"{points_name}_{'_'.join(str(int(item)) for item in _crd_points)}"
 
-            sdata = add_points_layer(
+            sdata = add_points(
                 sdata,
                 ddf=_ddf,
                 output_points_name=_crd_points_name,

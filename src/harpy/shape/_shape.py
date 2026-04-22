@@ -20,9 +20,9 @@ def vectorize(
     overwrite: bool = False,
 ) -> SpatialData:
     """
-    Vectorize a labels layer.
+    Vectorize a labels element.
 
-    Convert a labels layer to a shapes layer with name `output_shapes_name`.
+    Convert a labels element to a shapes element with name `output_shapes_name`.
     If the `rasterio` library is installed will use implementation based on `rasterio`, else will use implementation based on `skimage`.
     We recommend installing `rasterio` for increased performance and more precise vectorization.
 
@@ -34,23 +34,23 @@ def vectorize(
     Parameters
     ----------
     sdata
-        The SpatialData object to which the new shapes layer will be added.
+        The SpatialData object to which the new shapes element will be added.
     labels_name
-        The labels layer to vectorize.
+        The labels element to vectorize.
     output_shapes_name
-        The name of the output layer where the shapes data will be stored.
+        The name of the output shapes element where the shapes data will be stored.
     instance_key
         Name of the resulting index of the GeoDataFrame.
         The user can set this to any value, it will only be used to name the index.
     overwrite
-        If True, overwrites the output layer if it already exists in `sdata`.
+        If True, overwrites `output_shapes_name` if it already exists in `sdata`.
 
     Returns
     -------
-    The `sdata` object with the shapes layer added.
+    The `sdata` object with the shapes element added.
     """
     se = _get_spatial_element(sdata, layer=labels_name)
-    sdata = add_shapes_layer(
+    sdata = add_shapes(
         sdata,
         input=se.data,
         output_shapes_name=output_shapes_name,
@@ -61,7 +61,7 @@ def vectorize(
     return sdata
 
 
-def add_shapes_layer(
+def add_shapes(
     sdata: SpatialData,
     input: Array | GeoDataFrame,
     output_shapes_name: str,
@@ -70,31 +70,31 @@ def add_shapes_layer(
     overwrite: bool = False,
 ) -> SpatialData:
     """
-    Add a shapes layer to a SpatialData object.
+    Add a shapes element to a SpatialData object.
 
-    This function allows you to add a shapes layer to `sdata`.
-    The shapes layer can be derived from a Dask array or a GeoDataFrame.
-    If `sdata` is backed by a zarr store, the resulting shapes layer will be backed to the zarr store.
+    This function allows you to add a shapes element to `sdata`.
+    The shapes element can be derived from a Dask array or a GeoDataFrame.
+    If `sdata` is backed by a zarr store, the resulting shapes element will be backed to the zarr store.
 
     Parameters
     ----------
     sdata
-        The SpatialData object to which the new shapes layer will be added.
+        The SpatialData object to which the new shapes element will be added.
     input
         The input data containing the shapes, either as an array (i.e. segmentation masks) or a GeoDataFrame.
     output_shapes_name
-        The name of the output layer where the shapes data will be stored.
+        The name of the output shapes element where the shapes data will be stored.
     transformations
         Transformations that will be added to the resulting `output_shapes_name`.
     instance_key
         Name of the resulting index of the GeoDataFrame.
         The user can set this to any value, it will only be used to name the index.
     overwrite
-        If True, overwrites the output layer if it already exists in `sdata`.
+        If True, overwrites `output_shapes_name` if it already exists in `sdata`.
 
     Returns
     -------
-    The `sdata` object with the shapes layer added.
+    The `sdata` object with the shapes element added.
     """
     manager = ShapesLayerManager()
     sdata = manager.add_shapes(
@@ -118,20 +118,20 @@ def filter_shapes_layer(
     """
     Filter shapes in a SpatialData object.
 
-    Instances that do not appear in `table_name` (with region key equal to `labels_name`) will be removed from the shapes layers, via the instance key of `sdata.tables[table_name].obs`) and the index of the shapes layers in the `sdata` object.
-    Only shapes layers of `sdata` in same coordinate system as the `labels_name` will be considered.
-    Polygons that are filtered out from a shapes layer (e.g. with name "shapes_example") will be added as a new shapes layer with name `prefix_filtered_shapes_name` + "_" + "shapes_example".
+    Instances that do not appear in `table_name` (with region key equal to `labels_name`) will be removed from the shapes elements, via the instance key of `sdata.tables[table_name].obs`) and the index of the shapes elements in the `sdata` object.
+    Only shapes elements of `sdata` in same coordinate system as the `labels_name` will be considered.
+    Polygons that are filtered out from a shapes element (e.g. with name "shapes_example") will be added as a new shapes element with name `prefix_filtered_shapes_name` + "_" + "shapes_example".
 
     Parameters
     ----------
     sdata
         The SpatialData object,
     table_name
-        The name of the table layer.
+        The name of the table element.
     labels_name
-        The name of the labels layer.
+        The name of the labels element.
     prefix_filtered_shapes_name
-        The prefix for the name of the new shapes layer consisting of the polygons that where filtered out from a shapes layer.
+        The prefix for the name of the new shapes element consisting of the polygons that where filtered out from a shapes element.
 
     Returns
     -------

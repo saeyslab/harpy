@@ -11,7 +11,7 @@ from harpy.image._image import (
     _get_spatial_element,
     _get_translation,
     _substract_translation_crd,
-    add_image_layer,
+    add_image,
 )
 
 try:
@@ -207,7 +207,7 @@ def tiling_correction(
         translation = None
         transformations = get_transformation(se, get_all=True)
 
-    sdata = add_image_layer(
+    sdata = add_image(
         sdata,
         arr=result,
         output_image_name=output_image_name,

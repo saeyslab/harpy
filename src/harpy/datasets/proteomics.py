@@ -11,7 +11,7 @@ from spatialdata import SpatialData, read_zarr
 from spatialdata.transformations import get_transformation
 
 from harpy.datasets.registry import get_ome_registry, get_registry, get_spatialdata_registry
-from harpy.image._image import add_image_layer
+from harpy.image._image import add_image
 from harpy.io._macsima import macsima
 
 
@@ -44,7 +44,7 @@ def macsima_example() -> SpatialData:
             counts[name] = 0
             new_c_coords.append(name)
     new_c_coords = [_name.replace(" ", "_") for _name in new_c_coords]  # remove the " "
-    sdata = add_image_layer(
+    sdata = add_image(
         sdata,
         arr=sdata["HumanLiverH35"].data,
         output_image_name="HumanLiverH35",

@@ -6,10 +6,10 @@ import numpy as np
 import pytest
 import scanpy as sc
 
-from harpy.image._image import add_image_layer, add_labels_layer
+from harpy.image._image import add_image, add_labels
 from harpy.plot._plot import plot_image, plot_labels, plot_shapes
 from harpy.plot._sanity import sanity
-from harpy.shape._shape import add_shapes_layer
+from harpy.shape._shape import add_shapes
 
 
 def test_plot_labels(sdata_multi_c_no_backed, tmp_path):
@@ -134,7 +134,7 @@ def test_plot_shapes_transcriptomics(sdata_transcripts_no_backed, tmp_path):
     gdf = sdata_transcripts_no_backed["segmentation_mask_boundaries"]
     circles = gpd.GeoDataFrame({"geometry": gdf.geometry.centroid})
     circles["radius"] = 100
-    sdata_transcripts_no_backed = add_shapes_layer(
+    sdata_transcripts_no_backed = add_shapes(
         sdata_transcripts_no_backed,
         input=circles,
         output_shapes_name="circles",
@@ -180,7 +180,7 @@ def test_plot_shapes_3D(sdata_transcripts_no_backed, tmp_path):
         [sdata_transcripts_no_backed["raw_image"].data, sdata_transcripts_no_backed["raw_image"].data], axis=1
     )
 
-    sdata_transcripts_no_backed = add_image_layer(
+    sdata_transcripts_no_backed = add_image(
         sdata_transcripts_no_backed,
         arr=arr_image,
         output_image_name="raw_image_z",
@@ -192,14 +192,14 @@ def test_plot_shapes_3D(sdata_transcripts_no_backed, tmp_path):
         axis=0,
     )
 
-    sdata_transcripts_no_backed = add_labels_layer(
+    sdata_transcripts_no_backed = add_labels(
         sdata_transcripts_no_backed,
         arr=arr_labels,
         output_labels_name="segmentation_mask_z",
         overwrite=True,
     )
 
-    sdata_transcripts_no_backed = add_shapes_layer(
+    sdata_transcripts_no_backed = add_shapes(
         sdata_transcripts_no_backed,
         input=sdata_transcripts_no_backed.labels["segmentation_mask_z"].data,
         output_shapes_name="segmentation_mask_boundaries_z",

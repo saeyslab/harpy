@@ -20,7 +20,7 @@ from spatialdata.models import Image3DModel
 from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import get_transformation
 
-from harpy.image._image import _get_spatial_element, add_labels_layer
+from harpy.image._image import _get_spatial_element, add_labels
 from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY, _SPATIAL, ClusteringKey
 from harpy.utils.utils import _get_uint_dtype
 
@@ -249,7 +249,7 @@ def flowsom(
         )
 
         # write to intermediate zarr slot or persist, otherwise dask will run the flowsom inference two times (once for clusters, once for metaclusters),
-        # once for each time we call add_labels_layer.
+        # once for each time we call add_labels.
         if sdata.is_backed() and not persist_intermediate:
             se_intermediate = Image3DModel.parse(_labels_flowsom)
             _labels_flowsom_name = f"labels_flowsom_{uuid.uuid4()}"
@@ -266,7 +266,7 @@ def flowsom(
         _labels_flowsom_clusters, _labels_flowsom_metaclusters = _labels_flowsom
 
         # save the predicted clusters and metaclusters as a labels layer
-        sdata = add_labels_layer(
+        sdata = add_labels(
             sdata,
             arr=_labels_flowsom_clusters.squeeze(0) if to_squeeze else _labels_flowsom_clusters,
             output_labels_name=output_cluster_labels_name[i],
@@ -275,7 +275,7 @@ def flowsom(
             overwrite=overwrite,
         )
 
-        sdata = add_labels_layer(
+        sdata = add_labels(
             sdata,
             arr=_labels_flowsom_metaclusters.squeeze(0) if to_squeeze else _labels_flowsom_metaclusters,
             output_labels_name=output_metacluster_labels_name[i],

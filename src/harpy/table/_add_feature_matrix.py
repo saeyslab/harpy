@@ -15,7 +15,7 @@ from spatialdata.models import TableModel
 
 from harpy.image._image import _get_translation, _precondition, get_dataarray
 from harpy.table._regionprops import _calculate_regionprop_features
-from harpy.table._table import ProcessTable, add_table_layer
+from harpy.table._table import ProcessTable, add_table
 from harpy.utils._aggregate import RasterAggregator, _get_mask_area
 from harpy.utils._keys import _CELL_INDEX, _FEATURE_MATRICES_KEY, _INSTANCE_KEY, _REGION_KEY
 from harpy.utils.utils import _da_unique, _make_list
@@ -468,7 +468,7 @@ def _create_empty_feature_table(
     table_obs[region_key] = pd.Categorical(table_obs[region_key], categories=list(labels_layers))
     adata = AnnData(obs=table_obs)
 
-    return add_table_layer(
+    return add_table(
         sdata,
         adata=adata,
         output_table_name=output_table_name,

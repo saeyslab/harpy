@@ -98,7 +98,7 @@ def visium(
 
         radius = sdata.shapes[dataset_id]["radius"].mean()
         polygons = sdata.shapes[dataset_id].buffer(radius, cap_style="round")
-        sdata = hp.sh.add_shapes_layer(
+        sdata = hp.sh.add_shapes(
             sdata, gpd.GeoDataFrame(geometry=polygons), output_shapes_name=dataset_id, overwrite=True
         )
 

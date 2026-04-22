@@ -12,7 +12,7 @@ from spatialdata.models._utils import MappingToCoordinateSystem_t
 from spatialdata.models.models import ScaleFactors_t
 
 from harpy.image._rasterize import rasterize
-from harpy.shape._shape import add_shapes_layer
+from harpy.shape._shape import add_shapes
 
 
 def add_grid_labels_layer(
@@ -86,7 +86,7 @@ def add_grid_labels_layer(
     if grid_type == "square":
         polygons = _create_square_shapes(shape, square_size=size, offset=offset)
 
-    sdata = add_shapes_layer(
+    sdata = add_shapes(
         sdata=sdata,
         input=polygons,
         output_shapes_name=output_shapes_name,

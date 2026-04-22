@@ -222,7 +222,7 @@ def _mock_segment(sdata: SpatialData, labels_layer: str, chunks: int):
 
     coordinates = {"x": "x", "y": "y"}
 
-    sdata = hp.pt.add_points_layer(
+    sdata = hp.pt.add_points(
         sdata,
         ddf=ddf,
         output_layer="dummy_transcripts",

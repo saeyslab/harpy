@@ -1,7 +1,7 @@
 from ._combine import combine
 from ._contrast import enhance_contrast
 from ._filters import gaussian_filtering, min_max_filtering
-from ._image import add_image_layer, add_labels_layer, get_dataarray
+from ._image import add_image, add_labels, get_dataarray
 from ._map import _precondition, map_image
 from ._normalize import normalize
 from ._rasterize import rasterize
@@ -26,8 +26,8 @@ from .segmentation.segmentation_models._instanseg import instanseg_callable
 
 __all__ = [
     "add_grid_labels_layer",
-    "add_image_layer",
-    "add_labels_layer",
+    "add_image",
+    "add_labels",
     "align_labels_layers",
     "combine",
     "enhance_contrast",

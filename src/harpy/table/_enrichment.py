@@ -1,7 +1,7 @@
 from loguru import logger as log
 from spatialdata import SpatialData
 
-from harpy.table._table import ProcessTable, add_table_layer
+from harpy.table._table import ProcessTable, add_table
 from harpy.utils._keys import _ANNOTATION_KEY
 
 try:
@@ -53,7 +53,7 @@ def nhood_enrichment(
     sq.gr.spatial_neighbors(adata, coord_type="generic")
     sq.gr.nhood_enrichment(adata, cluster_key=celltype_column, seed=seed)
 
-    sdata = add_table_layer(
+    sdata = add_table(
         sdata,
         adata=adata,
         output_table_name=output_table_name,

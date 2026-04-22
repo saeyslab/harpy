@@ -15,7 +15,7 @@ from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
 from harpy.image._image import _get_translation, get_dataarray
-from harpy.table._table import add_table_layer
+from harpy.table._table import add_table
 from harpy.table._utils import _sanity_check_append_region
 from harpy.utils._aggregate import RasterAggregator
 from harpy.utils._keys import _CELL_INDEX, _CELLSIZE_KEY, _INSTANCE_KEY, _REGION_KEY, _SPATIAL
@@ -370,7 +370,7 @@ def allocate_intensity(
     else:
         region = [labels_name]
 
-    sdata = add_table_layer(
+    sdata = add_table(
         sdata,
         adata=adata,
         output_table_name=output_table_name,

@@ -15,7 +15,7 @@ from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import Identity, Translation
 
-from harpy.image._image import _fix_dimensions, add_image_layer
+from harpy.image._image import _fix_dimensions, add_image
 
 
 def create_sdata(
@@ -37,7 +37,7 @@ def create_sdata(
         `harpy.io.create_sdata` is deprecated. Prefer constructing a
         :class:`spatialdata.SpatialData` object directly, writing it to disk,
         reopening it with :func:`spatialdata.read_zarr`, and then adding layers
-        with :func:`harpy.im.add_image_layer`.
+        with :func:`harpy.im.add_image`.
 
     This function allows you to ingest various input formats of images or data arrays,
     convert them into a unified SpatialData format and write them out to a specified
@@ -125,7 +125,7 @@ def create_sdata(
         sdata.write("my_data.zarr")
         sdata = read_zarr(sdata.path)
 
-        sdata = hp.im.add_image_layer(
+        sdata = hp.im.add_image(
             sdata,
             arr=image,
             output_image_name="raw_image",
@@ -174,7 +174,7 @@ def create_sdata(
         else:
             transformation = Identity()
 
-        sdata = add_image_layer(
+        sdata = add_image(
             sdata,
             arr=dask_array,
             output_image_name=image_name,

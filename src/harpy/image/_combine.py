@@ -12,7 +12,7 @@ from xarray import DataArray
 
 from harpy.image._image import (
     _get_spatial_element,
-    add_image_layer,
+    add_image,
 )
 
 
@@ -140,7 +140,7 @@ def combine(
             f"(currently set to: {nuc_channels}) or mem_channels (currently set to {mem_channels})."
         )
 
-    sdata = add_image_layer(
+    sdata = add_image(
         sdata,
         arr=arr,
         output_image_name=output_image_name,

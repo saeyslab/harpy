@@ -8,7 +8,7 @@ import pytest
 from loguru import logger
 from spatialdata.transformations import get_transformation
 
-from harpy.image._image import add_labels_layer
+from harpy.image._image import add_labels
 from harpy.table.cell_clustering._preprocess import cell_clustering_preprocess
 from harpy.utils._keys import _INSTANCE_KEY, ClusteringKey
 
@@ -131,7 +131,7 @@ def test_cell_clustering_preprocess_logs_removed_no_overlap_cells(sdata_blobs):
         chunks=labels.shape,
     )
     transformations = get_transformation(sdata_blobs[cells_labels_name], get_all=True)
-    sdata_blobs = add_labels_layer(
+    sdata_blobs = add_labels(
         sdata_blobs,
         arr=clusters,
         output_labels_name=cluster_labels_name,

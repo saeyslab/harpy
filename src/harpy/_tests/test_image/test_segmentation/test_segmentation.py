@@ -13,7 +13,7 @@ from harpy.image._image import _get_spatial_element
 from harpy.image.segmentation._segmentation import segment, segment_points
 from harpy.image.segmentation.segmentation_models._baysor import _dummy
 from harpy.image.segmentation.segmentation_models._cellpose import cellpose_callable
-from harpy.points._points import add_points_layer
+from harpy.points._points import add_points
 
 
 @pytest.mark.skipif(not importlib.util.find_spec("cellpose"), reason="requires the cellpose library")
@@ -122,7 +122,7 @@ def test_segment_points(sdata_multi_c_no_backed: SpatialData):
 
     coordinates = {"x": "x", "y": "y"}
 
-    sdata_multi_c_no_backed = add_points_layer(
+    sdata_multi_c_no_backed = add_points(
         sdata_multi_c_no_backed,
         ddf=ddf,
         output_points_name="transcripts",

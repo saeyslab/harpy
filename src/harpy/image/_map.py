@@ -14,7 +14,7 @@ from spatialdata.transformations import get_transformation
 
 from harpy.image._image import (
     _get_spatial_element,
-    add_image_layer,
+    add_image,
 )
 
 
@@ -206,7 +206,7 @@ def map_image(
     # rechunk, otherwise could have issues with irregular chunking when saving to zarr
     se_result = se_result.chunk(se_result.data.chunksize)
 
-    sdata = add_image_layer(
+    sdata = add_image(
         sdata,
         arr=se_result.data,
         output_image_name=output_image_name,

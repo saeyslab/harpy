@@ -27,8 +27,8 @@ from spatialdata_io._constants._constants import MerscopeKeys
 from harpy.image._image import _get_spatial_element
 from harpy.image._rasterize import rasterize
 from harpy.io._transcripts import read_transcripts
-from harpy.shape import add_shapes_layer
-from harpy.table._table import add_table_layer
+from harpy.shape import add_shapes
+from harpy.table._table import add_table
 from harpy.utils._keys import _CELL_INDEX, _INSTANCE_KEY, _REGION_KEY, _SPATIAL
 from harpy.utils.utils import _affine_transform
 
@@ -397,7 +397,7 @@ def merscope(
                 log.info(
                     f"Adding AnnData table with non normalized counts as '{dataset_id}_{_to_coordinate_system}_table'."
                 )
-                sdata = add_table_layer(
+                sdata = add_table(
                     sdata,
                     adata=adata,
                     output_table_name=f"{dataset_id}_{_to_coordinate_system}_table",
@@ -484,7 +484,7 @@ def merscope(
                     f"Adding preprocessed AnnData table with normalized counts and leiden cluster ID's as "
                     f"'{dataset_id}_{_to_coordinate_system}_preprocessed_table'."
                 )
-                sdata = add_table_layer(
+                sdata = add_table(
                     sdata,
                     adata=adata_preprocessed,
                     output_table_name=f"{dataset_id}_{_to_coordinate_system}_preprocessed_table",
@@ -610,7 +610,7 @@ def _add_shapes(
 
     log.info(f"Saving cell boundaries for z stack '{z_layer}' as '{output_shapes_name}'.")
     log.info(f"Adding micron coordinate system for cell boundaries: '{to_micron_coordinate_system}'.")
-    sdata = add_shapes_layer(
+    sdata = add_shapes(
         sdata,
         input=gdf,
         output_shapes_name=output_shapes_name,

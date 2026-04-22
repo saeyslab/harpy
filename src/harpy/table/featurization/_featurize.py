@@ -17,7 +17,7 @@ from scipy.sparse import csr_matrix
 from spatialdata import SpatialData
 
 from harpy.image._image import _precondition
-from harpy.table._table import ProcessTable, add_table_layer
+from harpy.table._table import ProcessTable, add_table
 from harpy.utils._featurize import Featurizer
 from harpy.utils._keys import _CELL_INDEX, _INSTANCE_KEY, _REGION_KEY
 from harpy.utils.utils import _dummy_embedding, _make_list
@@ -524,7 +524,7 @@ def featurize(
         features_list[i] = features
     adata.obsm[embedding_obsm_key] = np.concatenate(features_list, axis=0)
 
-    sdata = add_table_layer(
+    sdata = add_table(
         sdata,
         adata=adata,
         output_table_name=output_table_name,

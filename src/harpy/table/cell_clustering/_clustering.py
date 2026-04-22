@@ -8,7 +8,7 @@ from anndata import AnnData
 from loguru import logger as log
 from spatialdata import SpatialData
 
-from harpy.table._table import ProcessTable, add_table_layer
+from harpy.table._table import ProcessTable, add_table
 from harpy.table.cell_clustering._preprocess import cell_clustering_preprocess
 from harpy.table.cell_clustering._utils import _get_mapping
 from harpy.utils._keys import _CELL_INDEX, _CELLSIZE_KEY, _INSTANCE_KEY, _RAW_COUNTS_KEY, _REGION_KEY, ClusteringKey
@@ -166,7 +166,7 @@ def flowsom(
         log.info(f"Adding mean cluster intensity to '.uns['{_key}']'")
         adata.uns[_key] = df
 
-    sdata = add_table_layer(
+    sdata = add_table(
         sdata,
         adata=adata,
         output_table_name=output_table_name,

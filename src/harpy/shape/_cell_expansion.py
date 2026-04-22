@@ -9,7 +9,7 @@ from shapely.geometry import Polygon
 from spatialdata import SpatialData
 from spatialdata.transformations import get_transformation
 
-from harpy.shape._shape import add_shapes_layer
+from harpy.shape._shape import add_shapes
 
 
 def create_voronoi_boundaries(
@@ -83,10 +83,10 @@ def create_voronoi_boundaries(
 
     gdf.geometry = intersected
 
-    # sanity check. If this sanity check would fail in spatialdata at some point, then pass transformation to transformations parameter of add_shapes_layer.
+    # sanity check. If this sanity check would fail in spatialdata at some point, then pass transformation to transformations parameter of add_shapes.
     assert get_transformation(gdf, get_all=True) == get_transformation(sdata[shapes_name], get_all=True)
 
-    sdata = add_shapes_layer(
+    sdata = add_shapes(
         sdata,
         input=gdf,
         output_shapes_name=output_shapes_name,

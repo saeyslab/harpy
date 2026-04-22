@@ -1,7 +1,7 @@
 import pytest
 from spatialdata import SpatialData
 
-from harpy.image._image import _get_spatial_element, add_image_layer, add_labels_layer, get_dataarray
+from harpy.image._image import _get_spatial_element, add_image, add_labels, get_dataarray
 
 
 @pytest.mark.parametrize(
@@ -26,7 +26,7 @@ def test_add_image_layer_backed(
     arr = arr + 1
 
     # Add the image layer
-    sdata_multi_c = add_image_layer(
+    sdata_multi_c = add_image(
         sdata_multi_c,
         arr=arr,
         output_image_name=new_name,
@@ -69,7 +69,7 @@ def test_add_image_layer_no_backed(
     # create an sdata that is not backed
     sdata_no_backed = SpatialData()
 
-    sdata_no_backed = add_image_layer(
+    sdata_no_backed = add_image(
         sdata_no_backed,
         arr=sdata_multi_c[name].data,
         output_image_name=name,
@@ -84,7 +84,7 @@ def test_add_image_layer_no_backed(
     arr = se.data
     arr = arr + 1
 
-    sdata_no_backed = add_image_layer(
+    sdata_no_backed = add_image(
         sdata_no_backed,
         arr=arr,
         output_image_name=new_name,
@@ -123,7 +123,7 @@ def test_add_labels_layer_backed(
 
     arr = _get_spatial_element(sdata_multi_c, layer=name).data
     arr = arr + 1
-    sdata_multi_c = add_labels_layer(
+    sdata_multi_c = add_labels(
         sdata_multi_c,
         arr=arr,
         output_labels_name=new_name,
@@ -166,7 +166,7 @@ def test_add_labels_layer_no_backed(
     # create an sdata that is not backed
     sdata_no_backed = SpatialData()
 
-    sdata_no_backed = add_labels_layer(
+    sdata_no_backed = add_labels(
         sdata_no_backed,
         arr=_get_spatial_element(sdata_multi_c, layer=name).data,
         output_labels_name=name,
@@ -180,7 +180,7 @@ def test_add_labels_layer_no_backed(
     arr = _get_spatial_element(sdata_no_backed, layer=name).data
     arr = arr + 1
 
-    sdata_no_backed = add_labels_layer(
+    sdata_no_backed = add_labels(
         sdata_no_backed,
         arr=arr,
         output_labels_name=new_name,

@@ -15,7 +15,7 @@ from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import get_transformation
 
-from harpy.image._image import _get_spatial_element, add_image_layer
+from harpy.image._image import _get_spatial_element, add_image
 from harpy.image._normalize import _nonzero_nonnan_percentile, _nonzero_nonnan_percentile_axis_0
 
 
@@ -249,7 +249,7 @@ def pixel_clustering_preprocess(
 
     # save the preprocessed images, in this way we get the preprocessed images from which we sample
     for i in range(len(_arr_list)):
-        sdata = add_image_layer(
+        sdata = add_image(
             sdata,
             arr=_arr_list[i].squeeze(1) if to_squeeze else _arr_list[i],
             output_image_name=output_image_name[i],

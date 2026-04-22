@@ -1,11 +1,11 @@
 import numpy as np
 
 from harpy.image import rasterize
-from harpy.shape import add_shapes_layer
+from harpy.shape import add_shapes
 
 
 def test_rasterize(sdata_multi_c_no_backed):
-    sdata_multi_c_no_backed = add_shapes_layer(
+    sdata_multi_c_no_backed = add_shapes(
         sdata_multi_c_no_backed,
         input=sdata_multi_c_no_backed["masks_whole"].data,
         output_shapes_name="masks_whole_boundaries_unit_test",
@@ -33,7 +33,7 @@ def test_rasterize(sdata_multi_c_no_backed):
 def test_rasterize_blobs(sdata):
     # note that this tests the case when there are labels that are not connected.
     # i.e. in this example label==1 will results in two separate polygons, but still the test passes.
-    sdata = add_shapes_layer(
+    sdata = add_shapes(
         sdata,
         input=sdata["blobs_labels"].data,
         output_shapes_name="blobs_labels_boundaries",

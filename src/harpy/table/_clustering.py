@@ -11,7 +11,7 @@ from loguru import logger as log
 from sklearn.cluster import KMeans
 from spatialdata import SpatialData
 
-from harpy.table._table import ProcessTable, add_table_layer
+from harpy.table._table import ProcessTable, add_table
 
 
 def kmeans(
@@ -299,7 +299,7 @@ class Cluster(ProcessTable):
         if rank_genes:
             sc.tl.rank_genes_groups(adata, copy=False, layer=None, groupby=key_added, method="wilcoxon")
 
-        self.sdata = add_table_layer(
+        self.sdata = add_table(
             self.sdata,
             adata=adata,
             output_table_name=output_table_name,

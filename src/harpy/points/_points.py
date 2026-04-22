@@ -6,7 +6,7 @@ from spatialdata.models._utils import MappingToCoordinateSystem_t
 from harpy.utils._io import _incremental_io_on_disk, _write_element_with_cleanup
 
 
-def add_points_layer(
+def add_points(
     sdata: SpatialData,
     ddf: DaskDataFrame,
     output_points_name: str,
@@ -15,16 +15,16 @@ def add_points_layer(
     overwrite: bool = True,
 ) -> SpatialData:
     """
-    Add a points layer to a SpatialData object.
+    Add a points element to a SpatialData object.
 
-    This function allows you to add a points layer to `sdata`.
-    The points layer is derived from a `Dask` `DataFrame`.
-    If `sdata` is backed by a zarr store, the resulting points layer will be backed to the zarr store, otherwise `ddf` will be persisted in memory.
+    This function allows you to add a points element to `sdata`.
+    The points element is derived from a `Dask` `DataFrame`.
+    If `sdata` is backed by a zarr store, the resulting points element will be backed to the zarr store, otherwise `ddf` will be persisted in memory.
 
     Parameters
     ----------
     sdata
-        The SpatialData object to which the new points layer will be added.
+        The SpatialData object to which the new points element will be added.
     ddf
         The DaskDataFrame containing the points data to be added.
     output_points_name
@@ -38,7 +38,7 @@ def add_points_layer(
 
     Returns
     -------
-    The `sdata` object with the points layer added.
+    The `sdata` object with the points element added.
     """
     points = spatialdata.models.PointsModel.parse(ddf, coordinates=coordinates, transformations=transformations)
 

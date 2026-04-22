@@ -14,10 +14,10 @@ from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import get_transformation
 
-from harpy.image._image import add_labels_layer, get_dataarray
+from harpy.image._image import add_labels, get_dataarray
 from harpy.image.segmentation._map import map_labels
 from harpy.image.segmentation._utils import _SEG_DTYPE
-from harpy.shape._shape import add_shapes_layer
+from harpy.shape._shape import add_shapes
 from harpy.utils._aggregate import get_instance_size
 
 
@@ -215,7 +215,7 @@ def merge_labels_layers(
             kept_candidate_output_ids=kept_candidate_output_ids,
         )
 
-    sdata = add_labels_layer(
+    sdata = add_labels(
         sdata,
         merged_array,
         output_labels_name=output_labels_name,
@@ -227,7 +227,7 @@ def merge_labels_layers(
 
     if output_shapes_name is not None:
         se_labels = get_dataarray(sdata, layer=output_labels_name)
-        sdata = add_shapes_layer(
+        sdata = add_shapes(
             sdata,
             input=se_labels.data,
             output_shapes_name=output_shapes_name,

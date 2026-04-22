@@ -11,7 +11,7 @@ from sklearn.decomposition import LatentDirichletAllocation
 from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
-from harpy.table._table import ProcessTable, add_table_layer
+from harpy.table._table import ProcessTable, add_table
 from harpy.table.niches._composition import _compute_nhood_composition, _compute_nhood_counts
 from harpy.utils._keys import _ANNOTATION_KEY
 
@@ -154,7 +154,7 @@ def nhood_kmeans(
         "random_state": random_state,
     }
 
-    sdata = add_table_layer(
+    sdata = add_table(
         sdata,
         adata=adata,
         output_table_name=output_table_name,
@@ -318,7 +318,7 @@ def nhood_lda(
         "topic_celltype_distribution": np.asarray(topic_celltype_distribution, dtype=np.float32),
     }
 
-    sdata = add_table_layer(
+    sdata = add_table(
         sdata,
         adata=adata,
         output_table_name=output_table_name,

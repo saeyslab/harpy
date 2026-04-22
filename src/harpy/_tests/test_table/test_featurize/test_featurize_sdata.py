@@ -7,8 +7,8 @@ import pytest
 from spatialdata import SpatialData, read_zarr
 from spatialdata.models import TableModel
 
-from harpy.image import add_image_layer, add_labels_layer
-from harpy.table._table import add_table_layer
+from harpy.image import add_image, add_labels
+from harpy.table._table import add_table
 from harpy.table.featurization._featurize import extract_instances, featurize
 from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY
 from harpy.utils.utils import _dummy_embedding, _to_numpy
@@ -23,14 +23,14 @@ def test_extract_instances_sdata(sdata_transcripts_no_backed: SpatialData):
 
     image = sdata[image_name].data
 
-    sdata = add_image_layer(
+    sdata = add_image(
         sdata,
         arr=da.concatenate([image] * 6, axis=0).rechunk((3, chunksize_spatial, chunksize_spatial)),
         output_image_name=image_name,
         overwrite=True,
     )
 
-    sdata = add_labels_layer(
+    sdata = add_labels(
         sdata,
         arr=sdata[labels_name].data.rechunk(chunksize_spatial),
         output_labels_name=labels_name,
@@ -89,14 +89,14 @@ def test_featurize_sdata(sdata_transcripts_no_backed: SpatialData, table_name):
 
     image = sdata[image_name].data
 
-    sdata = add_image_layer(
+    sdata = add_image(
         sdata,
         arr=da.concatenate([image] * 6, axis=0).rechunk((3, chunksize_spatial, chunksize_spatial)),
         output_image_name=image_name,
         overwrite=True,
     )
 
-    sdata = add_labels_layer(
+    sdata = add_labels(
         sdata,
         arr=sdata[labels_name].data.rechunk(chunksize_spatial),
         output_labels_name=labels_name,
@@ -153,14 +153,14 @@ def test_featurize_sdata_blobs(sdata: SpatialData, tmp_path: Path, store_interme
         sdata.write(backed_path)
         sdata = read_zarr(backed_path)
 
-    sdata = add_image_layer(
+    sdata = add_image(
         sdata,
         arr=sdata[image_name].data.astype(np.float32).rechunk(512),
         output_image_name=image_name,
         overwrite=True,
     )
 
-    sdata = add_labels_layer(
+    sdata = add_labels(
         sdata,
         arr=sdata[labels_name].data.rechunk(512),
         output_labels_name=labels_name,
@@ -170,7 +170,7 @@ def test_featurize_sdata_blobs(sdata: SpatialData, tmp_path: Path, store_interme
     sdata[table_name]
     sdata[table_name].obs.rename(columns={"instance_id": _INSTANCE_KEY, "region": _REGION_KEY}, inplace=True)
 
-    sdata = add_table_layer(
+    sdata = add_table(
         sdata,
         adata=sdata[table_name],
         output_table_name=table_name,

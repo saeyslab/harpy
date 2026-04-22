@@ -15,7 +15,7 @@ from spatialdata import SpatialData
 from harpy.image._image import _get_spatial_element
 from harpy.table._allocation_intensity import allocate_intensity
 from harpy.table._preprocess import preprocess_proteomics
-from harpy.table._table import add_table_layer
+from harpy.table._table import add_table
 from harpy.utils._keys import _RAW_COUNTS_KEY, ClusteringKey
 
 
@@ -211,7 +211,7 @@ def cluster_intensity_SOM(
 
     adata.uns[f"{ClusteringKey._METACLUSTERING_KEY.value}"] = df
 
-    sdata = add_table_layer(
+    sdata = add_table(
         sdata,
         adata=adata,
         output_table_name=output_table_name,

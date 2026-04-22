@@ -11,7 +11,7 @@ from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
 from harpy.image._image import get_dataarray
-from harpy.table._table import ProcessTable, add_table_layer
+from harpy.table._table import ProcessTable, add_table
 from harpy.utils._keys import _INSTANCE_KEY
 from harpy.utils.utils import _make_list
 
@@ -214,7 +214,7 @@ def add_regionprops(
     adata.obs.index = old_index
     adata.obs.index.name = old_index_name
 
-    sdata = add_table_layer(
+    sdata = add_table(
         sdata,
         adata=adata,
         output_table_name=output_table_name,

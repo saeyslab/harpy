@@ -17,7 +17,7 @@ from anndata import AnnData
 from loguru import logger as log
 from spatialdata import SpatialData
 
-from harpy.table._table import ProcessTable, add_table_layer
+from harpy.table._table import ProcessTable, add_table
 from harpy.utils._keys import _ANNOTATION_KEY, _CLEANLINESS_KEY, _UNKNOWN_CELLTYPE_KEY
 
 
@@ -192,7 +192,7 @@ def score_genes(
 
     celltypes_all = list(genes_dict.keys())
 
-    sdata = add_table_layer(
+    sdata = add_table(
         sdata,
         adata=adata,
         output_table_name=output_table_name,
@@ -353,7 +353,7 @@ def score_genes_iter(
         **kwargs,  # keyword arguments passed to _annotate_celltype_weighted
     )
 
-    sdata = add_table_layer(
+    sdata = add_table(
         sdata,
         adata=adata,
         output_table_name=output_table_name,
@@ -812,7 +812,7 @@ def cluster_cleanliness(
         color_dict[name] = colors[i]
     adata.uns[f"{celltype_column}_colors"] = list(map(color_dict.get, adata.obs[celltype_column].cat.categories.values))
 
-    sdata = add_table_layer(
+    sdata = add_table(
         sdata,
         adata=adata,
         output_table_name=output_table_name,

@@ -10,10 +10,10 @@ from matplotlib.axes import Axes
 from spatialdata import SpatialData
 from spatialdata.transformations import Identity, Scale
 
-from harpy.image._image import add_labels_layer
+from harpy.image._image import add_labels
 from harpy.plot._plot_density import plot_instance_density, plot_transcript_density
-from harpy.points._points import add_points_layer
-from harpy.table._table import add_table_layer
+from harpy.points._points import add_points
+from harpy.table._table import add_table
 from harpy.utils._keys import _GENES_KEY, _INSTANCE_KEY, _REGION_KEY, _SPATIAL
 
 
@@ -21,13 +21,13 @@ from harpy.utils._keys import _GENES_KEY, _INSTANCE_KEY, _REGION_KEY, _SPATIAL
 def sdata_instances():
     sdata = SpatialData()
     labels = da.from_array(np.array([[1, 0], [0, 2]], dtype=np.uint16), chunks=(2, 2))
-    sdata = add_labels_layer(
+    sdata = add_labels(
         sdata,
         arr=labels,
         output_labels_name="labels_a",
         transformations={"global": Identity()},
     )
-    sdata = add_labels_layer(
+    sdata = add_labels(
         sdata,
         arr=labels,
         output_labels_name="labels_b",
@@ -54,7 +54,7 @@ def sdata_instances():
         ]
     )
 
-    sdata = add_table_layer(
+    sdata = add_table(
         sdata,
         adata=adata,
         output_table_name="table_instances",
@@ -220,7 +220,7 @@ def test_plot_transcript_density_filters_requested_z_plane(tmp_path):
         ),
         npartitions=1,
     )
-    sdata = add_points_layer(
+    sdata = add_points(
         sdata,
         ddf=ddf,
         output_points_name="transcripts",
@@ -258,7 +258,7 @@ def test_plot_transcript_density_z_plane_without_z_column_raises():
         ),
         npartitions=1,
     )
-    sdata = add_points_layer(
+    sdata = add_points(
         sdata,
         ddf=ddf,
         output_points_name="transcripts",
@@ -290,7 +290,7 @@ def test_plot_transcript_density_bin_size_in_target_coordinate_system(tmp_path):
         ),
         npartitions=1,
     )
-    sdata = add_points_layer(
+    sdata = add_points(
         sdata,
         ddf=ddf,
         output_points_name="transcripts",
