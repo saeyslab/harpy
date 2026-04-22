@@ -492,6 +492,7 @@ def _compute_pair_feature_frame(
 ) -> tuple[pd.DataFrame, list[str]]:
     labels = get_dataarray(sdata, layer=pair.labels_layer)
     _ = _get_translation(labels, to_coordinate_system=pair.coordinate_system)
+    source_labels_ndim = labels.data.ndim
 
     feature_frames: list[pd.DataFrame] = []
     ordered_columns: list[str] = []
@@ -529,8 +530,14 @@ def _compute_pair_feature_frame(
         feature_frames.append(intensity_frame)
 
     if morphology_features:
+        # 2D intensity extraction adds a singleton z-axis for RasterAggregator.
+        # Remove it again before calling skimage regionprops so 2D-only features
+        # such as eccentricity still work.
+        morphology_labels_array = (
+            labels_array[0] if source_labels_ndim == 2 and labels_array.ndim == 3 else labels_array
+        )
         morphology_frame = _compute_morphology_feature_frame(
-            labels_array=labels_array,
+            labels_array=morphology_labels_array,
             morphology_features=morphology_features,
             instance_key=instance_key,
             instance_ids=instance_ids,
