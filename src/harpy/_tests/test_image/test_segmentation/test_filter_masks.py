@@ -25,12 +25,12 @@ def test_filter_labels_layers(sdata_multi_c_no_backed: SpatialData):
 
     sdata_multi_c_no_backed = filter_labels_layer(
         sdata_multi_c_no_backed,
-        labels_layer="masks_whole",
+        labels_name="masks_whole",
         min_size=100,
         max_size=1000,
         chunks=256,
-        output_labels_layer="masks_whole_filtered",
-        output_shapes_layer="masks_whole_filtered_boundaries",
+        output_labels_name="masks_whole_filtered",
+        output_shapes_name="masks_whole_filtered_boundaries",
         overwrite=True,
     )
 
@@ -48,15 +48,15 @@ def test_filter_labels_layer_uses_global_label_size_across_chunks() -> None:
     sdata = SpatialData()
     labels = da.from_array(np.array([[1, 1, 1, 1, 2, 2]], dtype=np.uint32), chunks=(1, 2))
 
-    sdata = add_labels_layer(sdata, arr=labels, output_layer="labels", overwrite=True)
+    sdata = add_labels_layer(sdata, arr=labels, output_labels_name="labels", overwrite=True)
 
     sdata = filter_labels_layer(
         sdata,
-        labels_layer="labels",
+        labels_name="labels",
         min_size=3,
         max_size=10,
         chunks=2,
-        output_labels_layer="labels_filtered",
+        output_labels_name="labels_filtered",
         overwrite=True,
     )
 
@@ -71,14 +71,14 @@ def test_filter_labels_layer_raises_for_invalid_size_bounds() -> None:
     sdata = SpatialData()
     labels = da.from_array(np.array([[1, 1], [0, 2]], dtype=np.uint32), chunks=(1, 2))
 
-    sdata = add_labels_layer(sdata, arr=labels, output_layer="labels", overwrite=True)
+    sdata = add_labels_layer(sdata, arr=labels, output_labels_name="labels", overwrite=True)
 
     with pytest.raises(ValueError, match="'min_size' must be <= 'max_size'"):
         filter_labels_layer(
             sdata,
-            labels_layer="labels",
+            labels_name="labels",
             min_size=5,
             max_size=4,
-            output_labels_layer="labels_filtered",
+            output_labels_name="labels_filtered",
             overwrite=True,
         )

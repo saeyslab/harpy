@@ -18,29 +18,29 @@ def test_extract_instances_sdata(sdata_transcripts_no_backed: SpatialData):
     sdata = sdata_transcripts_no_backed
 
     chunksize_spatial = 2048
-    img_layer = "raw_image"
-    labels_layer = "segmentation_mask"
+    image_name = "raw_image"
+    labels_name = "segmentation_mask"
 
-    image = sdata[img_layer].data
+    image = sdata[image_name].data
 
     sdata = add_image_layer(
         sdata,
         arr=da.concatenate([image] * 6, axis=0).rechunk((3, chunksize_spatial, chunksize_spatial)),
-        output_layer=img_layer,
+        output_image_name=image_name,
         overwrite=True,
     )
 
     sdata = add_labels_layer(
         sdata,
-        arr=sdata[labels_layer].data.rechunk(chunksize_spatial),
-        output_layer=labels_layer,
+        arr=sdata[labels_name].data.rechunk(chunksize_spatial),
+        output_labels_name=labels_name,
         overwrite=True,
     )
 
     instances_ids, out = extract_instances(
         sdata,
-        img_layer=img_layer,
-        labels_layer=labels_layer,
+        image_name=image_name,
+        labels_name=labels_name,
         depth=100,
         diameter=75,
         zarr_output_path=None,
@@ -73,42 +73,42 @@ def test_extract_instances_sdata(sdata_transcripts_no_backed: SpatialData):
 
 
 @pytest.mark.parametrize(
-    "table_layer",
+    "table_name",
     ["table_transcriptomics", None],
 )
-def test_featurize_sdata(sdata_transcripts_no_backed: SpatialData, table_layer):
+def test_featurize_sdata(sdata_transcripts_no_backed: SpatialData, table_name):
     sdata = sdata_transcripts_no_backed
 
     chunksize_spatial = 2048
     embedding_dim = 384
     embedding_obsm_key = "embedding_dummy"
 
-    img_layer = "raw_image"
-    labels_layer = "segmentation_mask"
-    output_layer = "table_transcriptomics_embedding"
+    image_name = "raw_image"
+    labels_name = "segmentation_mask"
+    output_table_name = "table_transcriptomics_embedding"
 
-    image = sdata[img_layer].data
+    image = sdata[image_name].data
 
     sdata = add_image_layer(
         sdata,
         arr=da.concatenate([image] * 6, axis=0).rechunk((3, chunksize_spatial, chunksize_spatial)),
-        output_layer=img_layer,
+        output_image_name=image_name,
         overwrite=True,
     )
 
     sdata = add_labels_layer(
         sdata,
-        arr=sdata[labels_layer].data.rechunk(chunksize_spatial),
-        output_layer=labels_layer,
+        arr=sdata[labels_name].data.rechunk(chunksize_spatial),
+        output_labels_name=labels_name,
         overwrite=True,
     )
 
     sdata = featurize(
         sdata,
-        img_layer=img_layer,
-        labels_layer=labels_layer,
-        table_layer=table_layer,
-        output_layer=output_layer,
+        image_name=image_name,
+        labels_name=labels_name,
+        table_name=table_name,
+        output_table_name=output_table_name,
         depth=100,
         diameter=75,
         embedding_dimension=embedding_dim,
@@ -118,15 +118,15 @@ def test_featurize_sdata(sdata_transcripts_no_backed: SpatialData, table_layer):
         overwrite=True,
     )
 
-    assert embedding_obsm_key in sdata[output_layer].obsm
-    if table_layer is None:
-        assert sdata[output_layer].obsm[embedding_obsm_key].shape == (
-            da.unique(sdata[labels_layer].data).compute().size - 1,
+    assert embedding_obsm_key in sdata[output_table_name].obsm
+    if table_name is None:
+        assert sdata[output_table_name].obsm[embedding_obsm_key].shape == (
+            da.unique(sdata[labels_name].data).compute().size - 1,
             embedding_dim,
         )
     else:
-        assert sdata[output_layer].obsm[embedding_obsm_key].shape == (
-            sdata[table_layer].shape[0],
+        assert sdata[output_table_name].obsm[embedding_obsm_key].shape == (
+            sdata[table_name].shape[0],
             embedding_dim,
         )
 
@@ -140,10 +140,10 @@ def test_featurize_sdata(sdata_transcripts_no_backed: SpatialData, table_layer):
     ],
 )
 def test_featurize_sdata_blobs(sdata: SpatialData, tmp_path: Path, store_intermediate: bool, backed: bool):
-    img_layer = "blobs_image"
-    labels_layer = "blobs_labels"
-    table_layer = "table"
-    output_layer = "table_embedding"
+    image_name = "blobs_image"
+    labels_name = "blobs_labels"
+    table_name = "table"
+    output_table_name = "table_embedding"
 
     embedding_dim = 20
     embedding_obsm_key = "embedding_sdata"
@@ -155,26 +155,26 @@ def test_featurize_sdata_blobs(sdata: SpatialData, tmp_path: Path, store_interme
 
     sdata = add_image_layer(
         sdata,
-        arr=sdata[img_layer].data.astype(np.float32).rechunk(512),
-        output_layer=img_layer,
+        arr=sdata[image_name].data.astype(np.float32).rechunk(512),
+        output_image_name=image_name,
         overwrite=True,
     )
 
     sdata = add_labels_layer(
         sdata,
-        arr=sdata[labels_layer].data.rechunk(512),
-        output_layer=labels_layer,
+        arr=sdata[labels_name].data.rechunk(512),
+        output_labels_name=labels_name,
         overwrite=True,
     )
-    sdata[table_layer].uns.pop(TableModel.ATTRS_KEY)
-    sdata[table_layer]
-    sdata[table_layer].obs.rename(columns={"instance_id": _INSTANCE_KEY, "region": _REGION_KEY}, inplace=True)
+    sdata[table_name].uns.pop(TableModel.ATTRS_KEY)
+    sdata[table_name]
+    sdata[table_name].obs.rename(columns={"instance_id": _INSTANCE_KEY, "region": _REGION_KEY}, inplace=True)
 
     sdata = add_table_layer(
         sdata,
-        adata=sdata[table_layer],
-        output_layer=table_layer,
-        region=[labels_layer],
+        adata=sdata[table_name],
+        output_table_name=table_name,
+        region=[labels_name],
         instance_key=_INSTANCE_KEY,
         region_key=_REGION_KEY,
         overwrite=True,
@@ -184,10 +184,10 @@ def test_featurize_sdata_blobs(sdata: SpatialData, tmp_path: Path, store_interme
         with pytest.raises(ValueError, match="store_intermediate=True' is only supported for backed SpatialData"):
             _ = featurize(
                 sdata,
-                img_layer=img_layer,
-                labels_layer=labels_layer,
-                table_layer=table_layer,
-                output_layer=output_layer,
+                image_name=image_name,
+                labels_name=labels_name,
+                table_name=table_name,
+                output_table_name=output_table_name,
                 diameter=1000,
                 embedding_dimension=embedding_dim,
                 model=_dummy_embedding,
@@ -200,10 +200,10 @@ def test_featurize_sdata_blobs(sdata: SpatialData, tmp_path: Path, store_interme
 
     sdata = featurize(
         sdata,
-        img_layer=img_layer,
-        labels_layer=labels_layer,
-        table_layer=table_layer,
-        output_layer=output_layer,
+        image_name=image_name,
+        labels_name=labels_name,
+        table_name=table_name,
+        output_table_name=output_table_name,
         diameter=1000,
         embedding_dimension=embedding_dim,
         model=_dummy_embedding,
@@ -213,5 +213,5 @@ def test_featurize_sdata_blobs(sdata: SpatialData, tmp_path: Path, store_interme
         overwrite=True,
     )
 
-    assert embedding_obsm_key in sdata[output_layer].obsm
-    assert sdata[output_layer].obsm[embedding_obsm_key].shape == (sdata[table_layer].shape[0], embedding_dim)
+    assert embedding_obsm_key in sdata[output_table_name].obsm
+    assert sdata[output_table_name].obsm[embedding_obsm_key].shape == (sdata[table_name].shape[0], embedding_dim)

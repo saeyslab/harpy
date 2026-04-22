@@ -156,11 +156,11 @@ class RasterAggregator:
             # Load example dataset
             sdata = hp.datasets.pixie_example()
 
-            img_layer = "raw_image_fov0"
-            labels_layer = "label_whole_fov0"
+            image_name = "raw_image_fov0"
+            labels_name = "label_whole_fov0"
 
-            image_array = hp.im.get_dataarray(sdata, layer=img_layer).data
-            mask_array = hp.im.get_dataarray(sdata, layer=labels_layer).data
+            image_array = hp.im.get_dataarray(sdata, layer=image_name).data
+            mask_array = hp.im.get_dataarray(sdata, layer=labels_name).data
 
             # Add dummy z dimension
             image_array = image_array[:, None, ...]

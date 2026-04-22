@@ -50,11 +50,11 @@ from harpy.utils._transformations import _identity_check_transformations_points
 
 def segment(
     sdata: SpatialData,
-    img_layer: str,
+    image_name: str,
     model: Callable[..., NDArray] = _model,
-    output_labels_layer: str | list[str] = "segmentation_mask",
-    output_shapes_layer: str | list[str] | None = "segmentation_mask_boundaries",
-    labels_layer_align: str | None = None,
+    output_labels_name: str | list[str] = "segmentation_mask",
+    output_shapes_name: str | list[str] | None = "segmentation_mask_boundaries",
+    labels_name_align: str | None = None,
     depth: tuple[int, int] | int = 100,
     chunks: str | int | tuple[int, int] | None = None,
     boundary: str = "reflect",
@@ -75,21 +75,21 @@ def segment(
     ----------
     sdata
         The SpatialData object containing the image layer to segment.
-    img_layer
+    image_name
         The image layer in `sdata` to be segmented.
     model
         The segmentation model function used to process the images.
         Callable should take as input numpy arrays of dimension `(z,y,x,c)` and return labels of dimension `(z,y,x,c)`. It can have an arbitrary number of other parameters.
-    output_labels_layer
+    output_labels_name
         Name of the label layer in which segmentation results will be stored in `sdata`.
         Can be a list of strings, if `model` returns multi channel mask.
         If provided as a list, its length should match the `c` dimension of the output of `model`.
-    output_shapes_layer
-        Name of the shapes layer where boundaries obtained output_labels_layer will be stored. If set to None, shapes won't be stored.
+    output_shapes_name
+        Name of the shapes layer where boundaries obtained output_labels_name will be stored. If set to None, shapes won't be stored.
         Can be a list of strings, if `model` returns multi channel mask.
         If provided as a list, its length should match the `c` dimension of the output of `model`.
-    labels_layer_align
-        Name of the labels layer in `output_labels_layer` to align to if `model` retuns multi channel mask.
+    labels_name_align
+        Name of the labels layer in `output_labels_name` to align to if `model` retuns multi channel mask.
     depth
         The depth in `y` and x dimension. The depth parameter is passed to `dask.array.map_overlap`. If trim is set to `False`,
         it's recommended to set the depth to a value greater than twice the estimated diameter of the cells/nulcei.
@@ -106,9 +106,9 @@ def segment(
         If set to `True`, will try to harmonize labels across chunks using a label adjacency graph with an iou threshold (see `harpy.image.segmentation.utils._link_labels`). If set to `False`, conflicts will be resolved using an algorithm that only retains masks with the center in the chunk.
         Setting `iou` to `False` gives good results if there is reasonable agreement of the predicted labels across adjacent chunks.
     iou_depth
-        iou depth used for harmonizing labels across chunks. Note that if `labels_layer_align` is specified, `iou_depth` will also be used for harmonizing labels between different chunks.
+        iou depth used for harmonizing labels across chunks. Note that if `labels_name_align` is specified, `iou_depth` will also be used for harmonizing labels between different chunks.
     iou_threshold
-        iou threshold used for harmonizing labels across chunks. Note that if `labels_layer_align` is specified, `iou_threshold` will also be used for harmonizing labels between different chunks.
+        iou threshold used for harmonizing labels across chunks. Note that if `labels_name_align` is specified, `iou_threshold` will also be used for harmonizing labels between different chunks.
     crd
         The coordinates specifying the region of the image to be segmented. Defines the bounds `(x_min, x_max, y_min, y_max)`.
     to_coordinate_system
@@ -158,10 +158,10 @@ def segment(
 
         sdata = hp.im.segment(
             sdata,
-            img_layer="raw_image",
+            image_name="raw_image",
             crd=[1000, 2000, 3000, 4000],  # only segment a crop
-            output_labels_layer="segmentation_mask_computed",
-            output_shapes_layer=None,
+            output_labels_name="segmentation_mask_computed",
+            output_shapes_name=None,
             model=hp.im.cellpose_callable,
             # Keyword arguments passed to the model
             flow_threshold=0.8,
@@ -171,8 +171,8 @@ def segment(
 
         hp.pl.plot_sdata(
             sdata,
-            img_layer="raw_image",
-            labels_layer="segmentation_mask_computed",
+            image_name="raw_image",
+            labels_name="segmentation_mask_computed",
             crd=[1000, 2000, 3000, 4000],
         )
     """
@@ -195,10 +195,10 @@ def segment(
 
     sdata = segmentation_model._segment_layer(
         sdata,
-        img_layer=img_layer,
-        output_labels_layer=output_labels_layer,
-        output_shapes_layer=output_shapes_layer,
-        labels_layer_align=labels_layer_align,
+        image_name=image_name,
+        output_labels_name=output_labels_name,
+        output_shapes_name=output_shapes_name,
+        labels_name_align=labels_name_align,
         crd=crd,
         to_coordinate_system=to_coordinate_system,
         scale_factors=scale_factors,
@@ -211,15 +211,15 @@ def segment(
 
 def segment_points(
     sdata: SpatialData,
-    labels_layer: str,  # the prior
-    points_layer: str,
+    labels_name: str,  # the prior
+    points_name: str,
     name_x: str = "x",
     name_y: str = "y",
     name_gene: str = _GENES_KEY,
     model: Callable[..., NDArray] = _model_points,
-    output_labels_layer: str | list[str] = "segmentation_mask",
-    output_shapes_layer: str | list[str] | None = "segmentation_mask_boundaries",
-    labels_layer_align: str | None = None,
+    output_labels_name: str | list[str] = "segmentation_mask",
+    output_shapes_name: str | list[str] | None = "segmentation_mask_boundaries",
+    labels_name_align: str | None = None,
     depth: tuple[int, int] | int = 100,
     chunks: str | int | tuple[int, int] | None = None,
     boundary: str = "reflect",
@@ -234,25 +234,25 @@ def segment_points(
     **kwargs: Any,
 ) -> SpatialData:
     """
-    Segment images using a `points_layer` and a prior (`labels_layer`) and add segmentation results (labels layer and shapes layer) to the SpatialData object.
+    Segment images using a `points_name` and a prior (`labels_name`) and add segmentation results (labels layer and shapes layer) to the SpatialData object.
 
-    Currently only segmentation using a prior is supported (i.e. `labels_layer` should be provided).
-    The `points_layer` and the `labels_layer` should be registered (i.e. same coordinate space in `sdata`).
+    Currently only segmentation using a prior is supported (i.e. `labels_name` should be provided).
+    The `points_name` and the `labels_name` should be registered (i.e. same coordinate space in `sdata`).
 
     Parameters
     ----------
     sdata
         The SpatialData object containing the image layer to segment.
-    labels_layer
+    labels_name
         The labels layer in `sdata` to be used as a prior.
-    points_layer
+    points_name
         The points layer in `sdata` to be used for segmentation.
     name_x
         Column name for x-coordinates of the transcripts in the points layer, by default "x".
     name_y
         Column name for y-coordinates of the transcripts in the points layer, by default "y".
     name_gene
-        Column name in the points_layer representing gene information.
+        Column name in the points_name representing gene information.
     model
         The segmentation model function used to process the images.
         Callable should take as input numpy arrays of dimension `(z,y,x,c)`, a pandas dataframe with the transcripts,
@@ -260,16 +260,16 @@ def segment_points(
         name for the transcripts. It should return labels of dimension `(z,y,x,c)`.
         Currently only 2D segmentation is supported `(y,x)`.
         It can have an arbitrary number of other parameters.
-    output_labels_layer
+    output_labels_name
         Name of the labels layer in which segmentation results will be stored in `sdata`.
         Can be a list of strings, if `model` returns multi channel mask.
         If provided as a list, its length should match the `c` dimension of the output of `model`.
-    output_shapes_layer
-        Name of the shapes layer where boundaries obtained output_labels_layer will be stored. If set to None, shapes won't be stored.
+    output_shapes_name
+        Name of the shapes layer where boundaries obtained output_labels_name will be stored. If set to None, shapes won't be stored.
         Can be a list of strings, if `model` returns multi channel mask.
         If provided as a list, its length should match the `c` dimension of the output of `model`.
-    labels_layer_align
-        Name of the labels layer in `output_labels_layer` to align to if `model` retuns multi channel mask.
+    labels_name_align
+        Name of the labels layer in `output_labels_name` to align to if `model` retuns multi channel mask.
     depth
         The depth in `y` and `x` dimension. The depth parameter is passed to `dask.array.map_overlap`. If trim is set to `False`,
         it's recommended to set the depth to a value greater than twice the estimated diameter of the cells/nulcei.
@@ -286,9 +286,9 @@ def segment_points(
         If set to True, will try to harmonize labels across chunks using a label adjacency graph with an iou threshold (see `harpy.image.segmentation.utils._link_labels`). If set to False, conflicts will be resolved using an algorithm that only retains masks with the center in the chunk.
         Setting `iou` to False gives good results if there is reasonable agreement of the predicted labels accross adjacent chunks.
     iou_depth
-        iou depth used for harmonizing labels across chunks. Note that if `labels_layer_align` is specified, `iou_depth` will also be used for harmonizing labels between different chunks.
+        iou depth used for harmonizing labels across chunks. Note that if `labels_name_align` is specified, `iou_depth` will also be used for harmonizing labels between different chunks.
     iou_threshold
-        iou threshold used for harmonizing labels across chunks. Note that if `labels_layer_align` is specified, `iou_threshold` will also be used for harmonizing labels between different chunks.
+        iou threshold used for harmonizing labels across chunks. Note that if `labels_name_align` is specified, `iou_threshold` will also be used for harmonizing labels between different chunks.
     crd
         The coordinates specifying the region of the image to be segmented. Defines the bounds `(x_min, x_max, y_min, y_max)`.
     to_coordinate_system
@@ -328,14 +328,14 @@ def segment_points(
 
     sdata = segmentation_model._segment_layer(
         sdata,
-        labels_layer=labels_layer,
-        points_layer=points_layer,
+        labels_name=labels_name,
+        points_name=points_name,
         name_x=name_x,
         name_y=name_y,
         name_gene=name_gene,
-        output_labels_layer=output_labels_layer,
-        output_shapes_layer=output_shapes_layer,
-        labels_layer_align=labels_layer_align,
+        output_labels_name=output_labels_name,
+        output_shapes_name=output_shapes_name,
+        labels_name_align=labels_name_align,
         crd=crd,
         to_coordinate_system=to_coordinate_system,
         scale_factors=scale_factors,
@@ -360,23 +360,23 @@ class SegmentationModel(ABC):
         pass
 
     def _precondition_output_layers_name(
-        self, output_labels_layer: str | list[str] | None, output_shapes_layer: str | list[str] | None
+        self, output_labels_name: str | list[str] | None, output_shapes_name: str | list[str] | None
     ) -> tuple[list[str] | None, list[str] | None]:
         def _fix_name(name: str | Iterable[str]):
             return list(name) if isinstance(name, Iterable) and not isinstance(name, str) else [name]
 
-        if output_labels_layer is not None:
-            output_labels_layer = _fix_name(output_labels_layer)
+        if output_labels_name is not None:
+            output_labels_name = _fix_name(output_labels_name)
 
-        if output_shapes_layer is not None:
-            output_shapes_layer = _fix_name(output_shapes_layer)
+        if output_shapes_name is not None:
+            output_shapes_name = _fix_name(output_shapes_name)
 
-        if output_labels_layer is not None and output_shapes_layer is not None:
-            assert len(output_labels_layer) == len(output_shapes_layer), (
-                "It 'output_labels_layer' or 'output_shapes_layer' is provided as a list, they should be of the same length."
+        if output_labels_name is not None and output_shapes_name is not None:
+            assert len(output_labels_name) == len(output_shapes_name), (
+                "It 'output_labels_name' or 'output_shapes_name' is provided as a list, they should be of the same length."
             )
 
-        return output_labels_layer, output_shapes_layer
+        return output_labels_name, output_shapes_name
 
     def _precondition(self, se: DataArray, kwargs: dict[Any, Any]) -> tuple[Array, dict[Any, Any]]:
         # take dask array and put channel dimension last,
@@ -442,9 +442,9 @@ class SegmentationModel(ABC):
         self,
         sdata: SpatialData,
         x_labels: Array,  # z,y,x,c
-        output_labels_layer: list[str],
-        output_shapes_layer: list[str] | None,
-        labels_layer_align: str | None = None,
+        output_labels_name: list[str],
+        output_shapes_name: list[str] | None,
+        labels_name_align: str | None = None,
         transformations: MappingToCoordinateSystem_t | None = None,
         scale_factors: ScaleFactors_t | None = None,
         overwrite: bool = False,
@@ -452,9 +452,9 @@ class SegmentationModel(ABC):
     ) -> SpatialData:
         # x_labels c dimension should be equal to the number of labels layers specified.
         # note that this assert will never fail due to how chunks parameter works in map_overlap.
-        # i.e. we set chunks=(,...(len( output_labels_layer ),).
-        assert x_labels.shape[-1] == len(output_labels_layer), (
-            f"Expected {len(output_labels_layer)} segmentation masks (based on 'output_labels_layer'), "
+        # i.e. we set chunks=(,...(len( output_labels_name ),).
+        assert x_labels.shape[-1] == len(output_labels_name), (
+            f"Expected {len(output_labels_name)} segmentation masks (based on 'output_labels_name'), "
             f"but got {x_labels.shape[-1]} masks from the segmentation model."
         )
         # squeeze the z-dim if it is 1 (i.e. case where you did not do 3D segmentation),
@@ -465,37 +465,37 @@ class SegmentationModel(ABC):
         # now iterate over x_labels and add to sdata
         for c_index in range(x_labels.shape[-1]):
             _x_labels = x_labels[..., c_index]
-            _output_labels_layer = output_labels_layer[c_index]
+            _output_labels_name = output_labels_name[c_index]
             # do not write to multiscale if we have to align afterwards, would be waste of write operations.
-            if labels_layer_align is not None and _output_labels_layer != labels_layer_align:
+            if labels_name_align is not None and _output_labels_name != labels_name_align:
                 _scale_factors = None
             else:
                 _scale_factors = scale_factors
             sdata = add_labels_layer(
                 sdata,
                 arr=_x_labels,
-                output_layer=_output_labels_layer,
+                output_labels_name=_output_labels_name,
                 chunks=_x_labels.chunksize,
                 transformations=transformations,
                 scale_factors=_scale_factors,
                 overwrite=overwrite,
             )
 
-        # align the labels layers if labels_layer_align is specified, and if there is more than one labels layer.
-        if labels_layer_align is not None and len(output_labels_layer) > 1:
-            log.info(f"Aligning labels layers: {output_labels_layer}")
+        # align the labels layers if labels_name_align is specified, and if there is more than one labels layer.
+        if labels_name_align is not None and len(output_labels_name) > 1:
+            log.info(f"Aligning labels layers: {output_labels_name}")
             depth = kwargs["depth"]
             iou_depth = kwargs["iou_depth"]
             chunks = kwargs["chunks"]
 
-            for _output_labels_layer in output_labels_layer:
-                if _output_labels_layer == labels_layer_align:
-                    # we do not need to align labels_layer_align with labels_layer_align
+            for _output_labels_name in output_labels_name:
+                if _output_labels_name == labels_name_align:
+                    # we do not need to align labels_name_align with labels_name_align
                     continue
                 sdata = align_labels_layers(
                     sdata,
-                    labels_layer_1=_output_labels_layer,
-                    labels_layer_2=labels_layer_align,
+                    labels_name_1=_output_labels_name,
+                    labels_name_2=labels_name_align,
                     depth=(
                         depth[1],
                         depth[2],
@@ -505,22 +505,22 @@ class SegmentationModel(ABC):
                     else (chunks[1], chunks[2]),  # get this from kwargs. Make a copy of kwargs before it is popped
                     iou_depth=(iou_depth[1], iou_depth[2]),
                     iou_threshold=kwargs["iou_threshold"],
-                    output_labels_layer=_output_labels_layer,
-                    output_shapes_layer=None,
+                    output_labels_name=_output_labels_name,
+                    output_shapes_name=None,
                     scale_factors=scale_factors,
                     overwrite=True,
                 )
 
         # only calculate shapes layer if it is specified
-        if output_shapes_layer is not None:
-            for i, _output_labels_layer in enumerate(output_labels_layer):
-                se_labels = _get_spatial_element(sdata, layer=_output_labels_layer)
-                _output_shapes_layer = output_shapes_layer[i]
+        if output_shapes_name is not None:
+            for i, _output_labels_name in enumerate(output_labels_name):
+                se_labels = _get_spatial_element(sdata, layer=_output_labels_name)
+                _output_shapes_name = output_shapes_name[i]
                 # convert the labels to polygons and add them as shapes layer to sdata
                 sdata = add_shapes_layer(
                     sdata,
                     input=se_labels.data,
-                    output_layer=_output_shapes_layer,
+                    output_shapes_name=_output_shapes_name,
                     transformations=transformations,
                     overwrite=overwrite,
                 )
@@ -756,10 +756,10 @@ class SegmentationModelStains(SegmentationModel):
     def _segment_layer(
         self,
         sdata: SpatialData,
-        img_layer: str,
-        output_labels_layer: str | list[str] = "segmentation_mask",
-        output_shapes_layer: str | list[str] | None = "segmentation_mask_boundaries",
-        labels_layer_align: str | None = None,
+        image_name: str,
+        output_labels_name: str | list[str] = "segmentation_mask",
+        output_shapes_name: str | list[str] | None = "segmentation_mask_boundaries",
+        labels_name_align: str | None = None,
         crd: tuple[int, int, int, int] | None = None,
         to_coordinate_system: str = "global",
         scale_factors: ScaleFactors_t | None = None,
@@ -767,16 +767,16 @@ class SegmentationModelStains(SegmentationModel):
         fn_kwargs: Mapping[str, Any] = MappingProxyType({}),
         **kwargs: Any,
     ) -> SpatialData:
-        output_labels_layer, output_shapes_layer = self._precondition_output_layers_name(
-            output_labels_layer, output_shapes_layer
+        output_labels_name, output_shapes_name = self._precondition_output_layers_name(
+            output_labels_name, output_shapes_name
         )
-        if labels_layer_align is not None and labels_layer_align not in output_labels_layer:
+        if labels_name_align is not None and labels_name_align not in output_labels_name:
             raise ValueError(
-                f"'labels_layer_align' ('{labels_layer_align}') should be one of the values in 'output_labels_layer' ({output_labels_layer})."
+                f"'labels_name_align' ('{labels_name_align}') should be one of the values in 'output_labels_name' ({output_labels_name})."
             )
-        c_dim_output_labels = len(output_labels_layer)
+        c_dim_output_labels = len(output_labels_name)
 
-        se = _get_spatial_element(sdata, layer=img_layer)
+        se = _get_spatial_element(sdata, layer=image_name)
         se_crop = None
         if crd is not None:
             se_crop = bounding_box_query(
@@ -815,9 +815,9 @@ class SegmentationModelStains(SegmentationModel):
         sdata = self._add_to_sdata(
             sdata,
             x_labels,
-            output_labels_layer=output_labels_layer,
-            output_shapes_layer=output_shapes_layer,
-            labels_layer_align=labels_layer_align,
+            output_labels_name=output_labels_name,
+            output_shapes_name=output_shapes_name,
+            labels_name_align=labels_name_align,
             transformations=get_transformation(se, get_all=True),
             scale_factors=scale_factors,
             overwrite=overwrite,
@@ -853,14 +853,14 @@ class SegmentationModelPoints(SegmentationModel):
     def _segment_layer(
         self,
         sdata: SpatialData,
-        labels_layer: str,  # prior, required for now
-        points_layer: str,
+        labels_name: str,  # prior, required for now
+        points_name: str,
         name_x: str = "x",
         name_y: str = "y",
         name_gene: str = _GENES_KEY,
-        output_labels_layer: str | list[str] = "segmentation_mask",
-        output_shapes_layer: str | list[str] | None = "segmentation_mask_boundaries",
-        labels_layer_align: str | None = None,
+        output_labels_name: str | list[str] = "segmentation_mask",
+        output_shapes_name: str | list[str] | None = "segmentation_mask_boundaries",
+        labels_name_align: str | None = None,
         crd: tuple[int, int, int, int] | None = None,
         to_coordinate_system: str = "global",
         scale_factors: ScaleFactors_t | None = None,
@@ -872,22 +872,22 @@ class SegmentationModelPoints(SegmentationModel):
         fn_kwargs["name_y"] = name_y
         fn_kwargs["name_gene"] = name_gene
 
-        output_labels_layer, output_shapes_layer = self._precondition_output_layers_name(
-            output_labels_layer, output_shapes_layer
+        output_labels_name, output_shapes_name = self._precondition_output_layers_name(
+            output_labels_name, output_shapes_name
         )
-        if labels_layer_align is not None and labels_layer_align not in output_labels_layer:
+        if labels_name_align is not None and labels_name_align not in output_labels_name:
             raise ValueError(
-                f"'labels_layer_align' ('{labels_layer_align}') should be one of the values in 'output_labels_layer' ({output_labels_layer})."
+                f"'labels_name_align' ('{labels_name_align}') should be one of the values in 'output_labels_name' ({output_labels_name})."
             )
-        c_dim_output_labels = len(output_labels_layer)
+        c_dim_output_labels = len(output_labels_name)
 
-        se = _get_spatial_element(sdata, layer=labels_layer)
+        se = _get_spatial_element(sdata, layer=labels_name)
 
         # Now we check that there are no scaling and rotations defined on se; and that points layer has identiy transformation associated.
         # We do not allow a transformation other than translation in y and x defined on labels layer.
         _get_translation(se, to_coordinate_system=to_coordinate_system)
         # We do not allow that a transformation other than identity is defined on points layer.
-        _identity_check_transformations_points(sdata.points[points_layer], to_coordinate_system=to_coordinate_system)
+        _identity_check_transformations_points(sdata.points[points_name], to_coordinate_system=to_coordinate_system)
 
         se_crop = None
         if crd is not None:
@@ -924,28 +924,28 @@ class SegmentationModelPoints(SegmentationModel):
         if _crd_points is not None:
             # need to account for fact that there can be a translation defined on the labels layer
             # query the dask dataframe. We use this query, because spatialdata query pulls query in memory.
-            _ddf = sdata.points[points_layer].query(
+            _ddf = sdata.points[points_name].query(
                 f"{_crd_points[0]} <= {name_x} < {_crd_points[1]} and {_crd_points[2]} <= {name_y} < {_crd_points[3]}"
             )
             coordinates = {name_x: name_x, name_y: name_y}
 
             # we write to points layer,
             # otherwise we would need to do this query again for every chunk we process later on
-            _crd_points_layer = f"{points_layer}_{'_'.join(str(int(item)) for item in _crd_points)}"
+            _crd_points_name = f"{points_name}_{'_'.join(str(int(item)) for item in _crd_points)}"
 
             sdata = add_points_layer(
                 sdata,
                 ddf=_ddf,
-                output_layer=_crd_points_layer,
+                output_points_name=_crd_points_name,
                 coordinates=coordinates,
                 overwrite=True,
             )
 
-            self._ddf = sdata.points[_crd_points_layer]
+            self._ddf = sdata.points[_crd_points_name]
 
         else:
-            # or do sdata.points[ points_layer ].to_delayed() # and then apply everything on this.
-            self._ddf = sdata.points[points_layer]
+            # or do sdata.points[ points_name ].to_delayed() # and then apply everything on this.
+            self._ddf = sdata.points[points_name]
 
         # need this original crd for when we do the query
         self._crd_points = _crd_points
@@ -966,9 +966,9 @@ class SegmentationModelPoints(SegmentationModel):
         sdata = self._add_to_sdata(
             sdata,
             x_labels,
-            output_labels_layer=output_labels_layer,
-            output_shapes_layer=output_shapes_layer,
-            labels_layer_align=labels_layer_align,
+            output_labels_name=output_labels_name,
+            output_shapes_name=output_shapes_name,
+            labels_name_align=labels_name_align,
             transformations=get_transformation(se, get_all=True),
             scale_factors=scale_factors,
             overwrite=overwrite,

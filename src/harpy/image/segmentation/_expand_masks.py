@@ -10,25 +10,25 @@ from harpy.image.segmentation._map import map_labels
 
 def expand_labels_layer(
     sdata: SpatialData,
-    labels_layer: str,
+    labels_name: str,
     distance: int = 10,
     depth: tuple[int, int] | int = 100,
     chunks: str | int | tuple[int, int] | None = None,
-    output_labels_layer: str | None = None,
-    output_shapes_layer: str | None = None,
+    output_labels_name: str | None = None,
+    output_shapes_name: str | None = None,
     scale_factors: ScaleFactors_t | None = None,
     overwrite: bool = False,
     iou_depth: tuple[int, int] | int = 2,
     iou_threshold: float = 0.7,
 ) -> SpatialData:
     """
-    Expand cells in labels layer `labels_layer` of Spatialdata object with `distance`, using `skimage.segmentation.expand_labels`.
+    Expand cells in labels layer `labels_name` of Spatialdata object with `distance`, using `skimage.segmentation.expand_labels`.
 
     Parameters
     ----------
     sdata
         The spatialdata object containing the labels layer to be expanded.
-    labels_layer
+    labels_name
         The name of the labels layer to be expanded.
     distance
         distance passed to skimage.segmentation.expand_labels.
@@ -39,9 +39,9 @@ def expand_labels_layer(
     chunks
         The desired chunk size for the Dask computation, or "auto" to allow the function to
         choose an optimal chunk size based on the data. Default is "auto".
-    output_labels_layer
+    output_labels_name
         The name of the output labels layer where results will be stored. This must be specified.
-    output_shapes_layer
+    output_shapes_name
         The name for the new shapes layer generated from the aligned labels layer. If None, no shapes
         layer is created. Default is None.
     scale_factors
@@ -65,23 +65,23 @@ def expand_labels_layer(
     --------
     >>> sdata = expand_labels_layer(
             sdata,
-            labels_layer='layer',
+            labels_name='layer',
             distance=10,
             depth=(100, 100),
             chunks=(1024, 1024),
-            output_labels_layer='layer_expanded',
-            output_shapes_layer='layer_expanded_boundaries',
+            output_labels_name='layer_expanded',
+            output_shapes_name='layer_expanded_boundaries',
             overwrite=True,
         )
     """
     sdata = map_labels(
         sdata,
-        labels_layers=[labels_layer],
+        labels_layers=[labels_name],
         func=_expand_cells,
         depth=depth,
         chunks=chunks,
-        output_labels_layer=output_labels_layer,
-        output_shapes_layer=output_shapes_layer,
+        output_labels_name=output_labels_name,
+        output_shapes_name=output_shapes_name,
         scale_factors=scale_factors,
         overwrite=overwrite,
         relabel_chunks=False,

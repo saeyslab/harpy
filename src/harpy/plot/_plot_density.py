@@ -86,7 +86,7 @@ def _plot_density_from_coordinates(
 def plot_transcript_density(
     sdata: SpatialData,
     bin_size: float,
-    points_layer: str,
+    points_name: str,
     name_gene_column: str | None = _GENES_KEY,
     genes: str | list[str] | None = None,
     z_plane: int | float | None = None,
@@ -108,10 +108,10 @@ def plot_transcript_density(
         :class:`~spatialdata.SpatialData` object.
     bin_size
         Width of a histogram bin in the units of ``to_coordinate_system``.
-    points_layer
+    points_name
         Points layer to plot from ``sdata.points``.
     name_gene_column
-        Column in the ``points_layer`` that stores gene identities.
+        Column in the ``points_name`` that stores gene identities.
     genes
         Gene or list of genes to visualize. If ``None``, all points are used.
     z_plane
@@ -123,7 +123,7 @@ def plot_transcript_density(
         Colormap passed to :func:`matplotlib.axes.Axes.imshow`.
     frac
         Fraction of points to randomly sample for plotting. If ``None``, all
-        points in ``points_layer`` are visualized.
+        points in ``points_name`` are visualized.
     figsize
         Figure size used when ``ax`` is not provided.
     crd
@@ -151,12 +151,12 @@ def plot_transcript_density(
     ... )
     >>> hp.pl.plot_transcript_density(
     ...     sdata,
-    ...     points_layer="transcripts_global",
+    ...     points_name="transcripts_global",
     ...     to_coordinate_system="global_micron",
     ...     bin_size=10,
     ... )
     """
-    ddf = sdata.points[points_layer]
+    ddf = sdata.points[points_name]
     # Dask dataframe operations can drop SpatialData metadata stored in .attrs.
     points_attrs = dict(ddf.attrs)
     ddf_attrs = dict(ddf.attrs)
@@ -177,7 +177,7 @@ def plot_transcript_density(
     if z_plane is not None:
         if "z" not in ddf.columns:
             raise ValueError(
-                f"Parameter 'z_plane' was set to {z_plane}, but points layer '{points_layer}' does not contain a 'z' column."
+                f"Parameter 'z_plane' was set to {z_plane}, but points layer '{points_name}' does not contain a 'z' column."
             )
         ddf = ddf[ddf["z"] == z_plane]
         ddf.attrs.update(points_attrs)
@@ -211,7 +211,7 @@ def plot_transcript_density(
         if crd is not None:
             raise ValueError(
                 f"After applying the bounding-box query with coordinates {crd!r} "
-                f"(xmin, xmax, ymin, ymax), the points layer '{points_layer}' is no longer present "
+                f"(xmin, xmax, ymin, ymax), the points layer '{points_name}' is no longer present "
                 "in the resulting SpatialData object. Please try different parameters for 'crd'."
             )
         raise ValueError("No data available for plotting.")
@@ -253,8 +253,8 @@ def plot_transcript_density(
 
 def plot_instance_density(
     sdata: SpatialData,
-    table_layer: str,
-    labels_layer: str | list[str] | None = None,
+    table_name: str,
+    labels_name: str | list[str] | None = None,
     spatial_key: str = _SPATIAL,
     bin_size: float = 100,
     smooth_sigma: float | None = None,
@@ -264,17 +264,17 @@ def plot_instance_density(
     ax: Axes | None = None,
 ) -> Axes:
     """
-    Plot an instance density heatmap from centroids stored in ``sdata.tables[table_layer].obsm[spatial_key]``.
+    Plot an instance density heatmap from centroids stored in ``sdata.tables[table_name].obsm[spatial_key]``.
 
     Parameters
     ----------
     sdata
         :class:`~spatialdata.SpatialData` object.
-    table_layer
+    table_name
         Table layer to plot from ``sdata.tables``.
-    labels_layer
-        Labels layer(s) used to select the instances from ``table_layer`` via the table region key.
-        If ``None``, all observations from ``table_layer`` are used.
+    labels_name
+        Labels layer(s) used to select the instances from ``table_name`` via the table region key.
+        If ``None``, all observations from ``table_name`` are used.
     spatial_key
         Key in ``adata.obsm`` containing instance centroid coordinates.
     bin_size
@@ -303,24 +303,24 @@ def plot_instance_density(
     ... )
     >>> hp.pl.plot_instance_density(
     ...     sdata,
-    ...     labels_layer="cell_labels_global",
-    ...     table_layer="table_global",
+    ...     labels_name="cell_labels_global",
+    ...     table_name="table_global",
     ... )
     """
-    process_table = ProcessTable(sdata, labels_layer=labels_layer, table_layer=table_layer)
-    adata = sdata.tables[table_layer]
+    process_table = ProcessTable(sdata, labels_name=labels_name, table_name=table_name)
+    adata = sdata.tables[table_name]
 
     if spatial_key not in adata.obsm:
         raise ValueError(
-            f"Key '{spatial_key}' not found in 'sdata.tables[\"{table_layer}\"].obsm'. "
+            f"Key '{spatial_key}' not found in 'sdata.tables[\"{table_name}\"].obsm'. "
             f"Choose from {list(adata.obsm.keys())}."
         )
 
     # Avoid ProcessTable._get_adata() here because it makes a full AnnData copy,
     # while this plotting path only needs the selected coordinates from .obsm.
     coords = adata.obsm[spatial_key]
-    if process_table.labels_layer is not None:
-        mask = adata.obs[process_table.region_key].isin(process_table.labels_layer).to_numpy()
+    if process_table.labels_name is not None:
+        mask = adata.obs[process_table.region_key].isin(process_table.labels_name).to_numpy()
         coords = coords[mask]
 
     coords = np.asarray(coords)

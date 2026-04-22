@@ -280,7 +280,7 @@ def merscope(
             # if merscope would provide us with real 3D, we should iterate over z_layers, and construct a 3D labels layer if do_3D is True.
             z_layers_to_iterate = z_layers if len(z_layers) == 1 else [z_layers[len(z_layers) // 2]]
             for _z_layer in z_layers_to_iterate:
-                sdata, _output_shapes_layer = _add_shapes(
+                sdata, _output_shapes_name = _add_shapes(
                     sdata,
                     gdf=gdf,
                     path=_path,
@@ -307,15 +307,15 @@ def merscope(
                         scale_factors = image_models_kwargs["scale_factors"]
                     else:
                         scale_factors = [2, 2, 2, 2]
-                    _output_labels_layer = f"{dataset_id}_z{_z_layer}_{_to_coordinate_system}_labels"
-                    log.info(f"Saving cell masks for z stack '{_z_layer}' as '{_output_labels_layer}'.")
+                    _output_labels_name = f"{dataset_id}_z{_z_layer}_{_to_coordinate_system}_labels"
+                    log.info(f"Saving cell masks for z stack '{_z_layer}' as '{_output_labels_name}'.")
                     log.info(
                         f"Adding micron coordinate system for cell masks: '{_to_coordinate_system}_micron'."
                     )  # coordinate system of shapes is copied to labels via hp.im.rasterize
                     sdata = rasterize(
                         sdata,
-                        shapes_layer=_output_shapes_layer,
-                        output_layer=_output_labels_layer,
+                        shapes_name=_output_shapes_name,
+                        output_labels_name=_output_labels_name,
                         out_shape=out_shape,
                         chunks=_chunks,
                         scale_factors=scale_factors,
@@ -332,7 +332,7 @@ def merscope(
                     output_axes=("x", "y"),
                 )
 
-                shapes = sdata.shapes[_output_shapes_layer]
+                shapes = sdata.shapes[_output_shapes_name]
                 # 1) read the raw unprocessed counts
                 count_path = os.path.join(_path, MerscopeKeys.COUNTS_FILE)
                 obs_path = os.path.join(_path, MerscopeKeys.CELL_METADATA_FILE)
@@ -377,12 +377,12 @@ def merscope(
                 # set adata.obs.index in same way as we set it in hp.tb.allocate, for consistency
                 _uuid_value = str(uuid.uuid4())[:8]
                 adata.obs.index = adata.obs.index.map(
-                    lambda x, layer=_output_labels_layer, uid=_uuid_value: f"{str(x)}_{layer}_{uid}"
+                    lambda x, layer=_output_labels_name, uid=_uuid_value: f"{str(x)}_{layer}_{uid}"
                 )
                 adata.obs.index.name = cell_index_name
 
                 adata.obs[region_key] = pd.Series(
-                    _output_labels_layer, index=adata.obs_names, dtype="category"
+                    _output_labels_name, index=adata.obs_names, dtype="category"
                 )  # we annotate with the labels layer
 
                 data.index = adata.obs.index
@@ -400,8 +400,8 @@ def merscope(
                 sdata = add_table_layer(
                     sdata,
                     adata=adata,
-                    output_layer=f"{dataset_id}_{_to_coordinate_system}_table",
-                    region=[_output_labels_layer],
+                    output_table_name=f"{dataset_id}_{_to_coordinate_system}_table",
+                    region=[_output_labels_name],
                     instance_key=instance_key,
                     region_key=region_key,
                     overwrite=False,
@@ -473,12 +473,12 @@ def merscope(
                 )
                 # set adata.obs.index in same way as we set it in hp.tb.allocate, just for consistency
                 adata_preprocessed.obs.index = adata_preprocessed.obs.index.map(
-                    lambda x, layer=_output_labels_layer, uid=_uuid_value: f"{str(x)}_{layer}_{uid}"
+                    lambda x, layer=_output_labels_name, uid=_uuid_value: f"{str(x)}_{layer}_{uid}"
                 )
                 adata_preprocessed.obs.index.name = cell_index_name
 
                 adata_preprocessed.obs[region_key] = pd.Series(
-                    _output_labels_layer, index=adata_preprocessed.obs_names, dtype="category"
+                    _output_labels_name, index=adata_preprocessed.obs_names, dtype="category"
                 )  # we annotate with the labels layer
                 log.info(
                     f"Adding preprocessed AnnData table with normalized counts and leiden cluster ID's as "
@@ -487,8 +487,8 @@ def merscope(
                 sdata = add_table_layer(
                     sdata,
                     adata=adata_preprocessed,
-                    output_layer=f"{dataset_id}_{_to_coordinate_system}_preprocessed_table",
-                    region=[_output_labels_layer],
+                    output_table_name=f"{dataset_id}_{_to_coordinate_system}_preprocessed_table",
+                    region=[_output_labels_name],
                     instance_key=instance_key,
                     region_key=region_key,
                     overwrite=False,
@@ -509,8 +509,8 @@ def merscope(
             column_z = table.columns.get_loc(column_z_name)
             column_gene = table.columns.get_loc(column_gene_name)
 
-            output_layer = f"{dataset_id}_{_to_coordinate_system}_points"
-            log.info(f"Saving transcripts as {output_layer}")
+            output_points_name = f"{dataset_id}_{_to_coordinate_system}_points"
+            log.info(f"Saving transcripts as {output_points_name}")
             sdata = read_transcripts(
                 sdata,
                 path_count_matrix=os.path.join(_path, MerscopeKeys.TRANSCRIPTS_FILE),
@@ -520,7 +520,7 @@ def merscope(
                 column_z=column_z if do_3D else None,
                 column_gene=column_gene,
                 header=0,
-                output_layer=output_layer,
+                output_points_name=output_points_name,
                 to_coordinate_system=_to_coordinate_system,
                 to_micron_coordinate_system=f"{_to_coordinate_system}_micron",
                 filter_gene_names=filter_gene_names,
@@ -606,14 +606,14 @@ def _add_shapes(
 
     gdf.geometry = gdf.geometry.apply(lambda geom: affine_transform(geom, params))
 
-    output_layer = f"{dataset_id}_z{z_layer}_{to_coordinate_system}_shapes"
+    output_shapes_name = f"{dataset_id}_z{z_layer}_{to_coordinate_system}_shapes"
 
-    log.info(f"Saving cell boundaries for z stack '{z_layer}' as '{output_layer}'.")
+    log.info(f"Saving cell boundaries for z stack '{z_layer}' as '{output_shapes_name}'.")
     log.info(f"Adding micron coordinate system for cell boundaries: '{to_micron_coordinate_system}'.")
     sdata = add_shapes_layer(
         sdata,
         input=gdf,
-        output_layer=output_layer,
+        output_shapes_name=output_shapes_name,
         transformations={
             to_coordinate_system: Identity(),
             f"{to_micron_coordinate_system}": pixels_to_micron,
@@ -622,7 +622,7 @@ def _add_shapes(
         overwrite=False,
     )
 
-    return sdata, output_layer
+    return sdata, output_shapes_name
 
 
 def _merge_adata_and_shapes(adata: ad.AnnData, shapes: gpd.GeoDataFrame, instance_key: str = _INSTANCE_KEY):

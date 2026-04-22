@@ -245,7 +245,7 @@ def xenium(
             sdata,
             path_count_matrix=os.path.join(_path, XeniumKeys.TRANSCRIPTS_FILE),
             transform_matrix=affine_matrix,
-            output_layer=f"transcripts_{_to_coordinate_system}",
+            output_points_name=f"transcripts_{_to_coordinate_system}",
             column_x=column_x,
             column_y=column_y,
             column_z=None,

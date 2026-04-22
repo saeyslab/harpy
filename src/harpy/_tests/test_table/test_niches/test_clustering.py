@@ -78,25 +78,25 @@ def test_nhood_kmeans(sdata_blobs):
     Cells 0 and 1 therefore have neighborhood compositions ``[0.0, 1.0]`` and
     ``[1.0, 0.0]``, respectively, which are asserted below.
     """
-    table_layer = "table"
-    output_layer = "table_niches"
-    adata = sdata_blobs.tables[table_layer]
+    table_name = "table"
+    output_table_name = "table_niches"
+    adata = sdata_blobs.tables[table_name]
 
     adata.obs[_ANNOTATION_KEY] = pd.Categorical(np.where(np.arange(adata.n_obs) % 2 == 0, "even", "odd"))
     adata.obsp["radius_test_connectivities"] = _chain_graph(adata.n_obs)
 
     sdata_blobs = nhood_kmeans(
         sdata=sdata_blobs,
-        labels_layer="blobs_labels",
-        table_layer=table_layer,
-        output_layer=output_layer,
+        labels_name="blobs_labels",
+        table_name=table_name,
+        output_table_name=output_table_name,
         cluster_key=_ANNOTATION_KEY,
         connectivity_key="radius_test",
         n_clusters=2,
         overwrite=True,
     )
 
-    result = sdata_blobs.tables[output_layer]
+    result = sdata_blobs.tables[output_table_name]
 
     assert "nhood_kmeans" in result.obs.columns
     assert isinstance(result.obs["nhood_kmeans"].dtype, pd.CategoricalDtype)
@@ -156,9 +156,9 @@ def test_nhood_kmeans_labels_isolated_cells(sdata_blobs):
     behaviors: cell 0 is labeled ``"isolated"`` and its neighborhood
     composition remains all zeros.
     """
-    table_layer = "table"
-    output_layer = "table_niches"
-    adata = sdata_blobs.tables[table_layer]
+    table_name = "table"
+    output_table_name = "table_niches"
+    adata = sdata_blobs.tables[table_name]
 
     adata.obs[_ANNOTATION_KEY] = pd.Categorical(np.where(np.arange(adata.n_obs) % 2 == 0, "even", "odd"))
     graph = _chain_graph(adata.n_obs).tolil()
@@ -168,9 +168,9 @@ def test_nhood_kmeans_labels_isolated_cells(sdata_blobs):
 
     sdata_blobs = nhood_kmeans(
         sdata=sdata_blobs,
-        labels_layer="blobs_labels",
-        table_layer=table_layer,
-        output_layer=output_layer,
+        labels_name="blobs_labels",
+        table_name=table_name,
+        output_table_name=output_table_name,
         cluster_key=_ANNOTATION_KEY,
         connectivity_key="manual_connectivities",
         composition_key="manual_nhood_composition",
@@ -180,7 +180,7 @@ def test_nhood_kmeans_labels_isolated_cells(sdata_blobs):
         overwrite=True,
     )
 
-    result = sdata_blobs.tables[output_layer]
+    result = sdata_blobs.tables[output_table_name]
 
     assert result.obs["manual_nhood_kmeans"].iloc[0] == "isolated"
     assert np.allclose(result.obsm["manual_nhood_composition"][0], [0.0, 0.0])
@@ -194,9 +194,9 @@ def test_nhood_kmeans_requires_existing_connectivity_key(sdata_blobs):
     with pytest.raises(KeyError, match="Connectivity key 'missing_graph' not found"):
         nhood_kmeans(
             sdata=sdata_blobs,
-            labels_layer="blobs_labels",
-            table_layer="table",
-            output_layer="table_niches",
+            labels_name="blobs_labels",
+            table_name="table",
+            output_table_name="table_niches",
             cluster_key=_ANNOTATION_KEY,
             connectivity_key="missing_graph",
             overwrite=True,
@@ -239,25 +239,25 @@ def test_nhood_lda(sdata_blobs):
     therefore checks both the neighborhood counts and the symmetry of the
     resulting topic assignments.
     """
-    table_layer = "table"
-    output_layer = "table_niches"
-    adata = sdata_blobs.tables[table_layer]
+    table_name = "table"
+    output_table_name = "table_niches"
+    adata = sdata_blobs.tables[table_name]
 
     adata.obs[_ANNOTATION_KEY] = pd.Categorical(np.where(np.arange(adata.n_obs) % 2 == 0, "even", "odd"))
     adata.obsp["radius_test_connectivities"] = _chain_graph(adata.n_obs)
 
     sdata_blobs = nhood_lda(
         sdata=sdata_blobs,
-        labels_layer="blobs_labels",
-        table_layer=table_layer,
-        output_layer=output_layer,
+        labels_name="blobs_labels",
+        table_name=table_name,
+        output_table_name=output_table_name,
         cluster_key=_ANNOTATION_KEY,
         connectivity_key="radius_test",
         n_topics=2,
         overwrite=True,
     )
 
-    result = sdata_blobs.tables[output_layer]
+    result = sdata_blobs.tables[output_table_name]
 
     assert "nhood_lda" in result.obs.columns
     assert isinstance(result.obs["nhood_lda"].dtype, pd.CategoricalDtype)
@@ -320,9 +320,9 @@ def test_nhood_lda_labels_isolated_cells(sdata_blobs):
     ``manual_nhood_lda_topics`` while receiving the configured
     ``nan_label='isolated'`` in ``manual_nhood_lda``.
     """
-    table_layer = "table"
-    output_layer = "table_niches"
-    adata = sdata_blobs.tables[table_layer]
+    table_name = "table"
+    output_table_name = "table_niches"
+    adata = sdata_blobs.tables[table_name]
 
     adata.obs[_ANNOTATION_KEY] = pd.Categorical(np.where(np.arange(adata.n_obs) % 2 == 0, "even", "odd"))
     graph = _chain_graph(adata.n_obs).tolil()
@@ -332,9 +332,9 @@ def test_nhood_lda_labels_isolated_cells(sdata_blobs):
 
     sdata_blobs = nhood_lda(
         sdata=sdata_blobs,
-        labels_layer="blobs_labels",
-        table_layer=table_layer,
-        output_layer=output_layer,
+        labels_name="blobs_labels",
+        table_name=table_name,
+        output_table_name=output_table_name,
         cluster_key=_ANNOTATION_KEY,
         connectivity_key="manual_connectivities",
         counts_key="manual_nhood_counts",
@@ -345,7 +345,7 @@ def test_nhood_lda_labels_isolated_cells(sdata_blobs):
         overwrite=True,
     )
 
-    result = sdata_blobs.tables[output_layer]
+    result = sdata_blobs.tables[output_table_name]
 
     assert result.obs["manual_nhood_lda"].iloc[0] == "isolated"
     assert np.allclose(result.obsm["manual_nhood_counts"][0], [0.0, 0.0])

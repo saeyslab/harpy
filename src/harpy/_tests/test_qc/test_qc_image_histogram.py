@@ -11,7 +11,7 @@ def test_image_histogram(sdata_blobs, tmp_path):
 
     image_histogram(
         sdata_blobs,
-        img_layer="blobs_image",
+        image_name="blobs_image",
         channel="lineage_1",
         bins=100,
         range=(0, 50),
@@ -26,7 +26,7 @@ def test_image_histogram(sdata_blobs, tmp_path):
 
     image_histogram(
         sdata_blobs,
-        img_layer="blobs_image",
+        image_name="blobs_image",
         channel="lineage_2",
         bins=100,
         range=(0, 50),
@@ -36,7 +36,7 @@ def test_image_histogram(sdata_blobs, tmp_path):
 
     image_histogram(
         sdata_blobs,
-        img_layer="blobs_image",
+        image_name="blobs_image",
         channel="lineage_3",
         bins=100,
         range=(0, 50),
@@ -54,7 +54,7 @@ def test_image_histogram_ecdf_and_guides(sdata_blobs, tmp_path):
 
     image_histogram(
         sdata_blobs,
-        img_layer="blobs_image",
+        image_name="blobs_image",
         channel="lineage_1",
         bins=100,
         ax=axes[0],
@@ -66,7 +66,7 @@ def test_image_histogram_ecdf_and_guides(sdata_blobs, tmp_path):
 
     image_histogram(
         sdata_blobs,
-        img_layer="blobs_image",
+        image_name="blobs_image",
         channel="lineage_2",
         bins=100,
         ax=axes[1],
@@ -83,7 +83,7 @@ def test_image_histogram_multiple_channels(sdata_blobs, tmp_path):
 
     axes = image_histogram(
         sdata_blobs,
-        img_layer="blobs_image",
+        image_name="blobs_image",
         channel=["lineage_1", 2, "lineage_3"],
         bins=50,
         density=True,
@@ -101,7 +101,7 @@ def test_image_histogram_scale_parameter(sdata, tmp_path):
 
     image_histogram(
         sdata,
-        img_layer="blobs_multiscale_image",
+        image_name="blobs_multiscale_image",
         channel=0,
         bins=25,
         scale="scale2",

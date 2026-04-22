@@ -27,7 +27,7 @@ except ImportError:
 
 def spatial_pixel_neighbors(
     sdata: SpatialData,
-    labels_layer: str,
+    labels_name: str,
     size: int = 20,
     mode: Literal["most_frequent", "center"] = "most_frequent",
     grid_type: Literal["hexagon", "square"] = "hexagon",  # ignored if mode is 'most_frequent'
@@ -53,7 +53,7 @@ def spatial_pixel_neighbors(
     ----------
     sdata
         The input SpatialData object containing spatial data.
-    labels_layer
+    labels_name
         The key in `sdata.labels` from which the cluster label data is extracted.
         This labels layer is typically obtained using `harpy.im.flowsom`.
     size
@@ -71,11 +71,11 @@ def spatial_pixel_neighbors(
         When using `"most_frequent"`, the `grid_type` parameter determines whether a hexagonal or square
         grid is used for sampling. If `"center"` is selected, `grid_type` is ignored.
     grid_type
-        The type of grid used when extracting pixel cluster labels from `labels_layer`. Can be either `"hexagon"` or `"square"`.
+        The type of grid used when extracting pixel cluster labels from `labels_name`. Can be either `"hexagon"` or `"square"`.
         This parameter is only relevant when `mode="most_frequent"` and is ignored when `mode="center"`.
         Passed to `harpy.im.add_grid_labels_layer`.
     subset
-        A list of labels to subset the analysis to, or `None` to include all labels in `labels_layer`.
+        A list of labels to subset the analysis to, or `None` to include all labels in `labels_name`.
     spatial_neighbors_kwargs
         Additional keyword arguments to be passed to :func:`squidpy.gr.spatial_neighbors`.
     nhood_enrichment_kwargs
@@ -97,11 +97,11 @@ def spatial_pixel_neighbors(
     harpy.im.add_grid_labels_layer : construct a grid.
     """
     if mode == "center":
-        array = sdata.labels[labels_layer].data.compute()
+        array = sdata.labels[labels_name].data.compute()
         cluster_ids, coordinates = _get_values_grid_center(array=array, size=size, subset=subset)
     elif mode == "most_frequent":
         cluster_ids, coordinates = _get_values_grid_most_frequent(
-            sdata, labels_layer=labels_layer, size=size, grid_type=grid_type, subset=subset
+            sdata, labels_name=labels_name, size=size, grid_type=grid_type, subset=subset
         )
     else:
         raise ValueError("Please set 'mode' to either 'center' or 'most_frequent'.")
@@ -164,29 +164,29 @@ def _get_values_grid_center(
 
 def _get_values_grid_most_frequent(
     sdata: SpatialData,
-    labels_layer: str,
+    labels_name: str,
     size: int = 20,
     grid_type: str = "hexagon",
     subset: list[int] | None = None,
 ) -> tuple[NDArray, NDArray]:
-    assert get_dataarray(sdata, layer=labels_layer).data.ndim == 2, "Currently only support for 2D ('y','x')."
+    assert get_dataarray(sdata, layer=labels_name).data.ndim == 2, "Currently only support for 2D ('y','x')."
     _uuid = uuid.uuid4()
     # Make a grid, either hexagons or squares.
     sdata = add_grid_labels_layer(
         sdata,
-        shape=sdata.labels[labels_layer].shape,
+        shape=sdata.labels[labels_name].shape,
         size=size,
-        output_labels_layer=f"labels_grid_{_uuid}",
-        output_shapes_layer=f"shapes_grid_{_uuid}",
+        output_labels_name=f"labels_grid_{_uuid}",
+        output_shapes_name=f"shapes_grid_{_uuid}",
         grid_type=grid_type,
-        chunks=get_dataarray(sdata, layer=labels_layer).data.chunksize[
+        chunks=get_dataarray(sdata, layer=labels_name).data.chunksize[
             -1
         ],  # if chunksize in y would be different than in x, we rechunk, see below
-        transformations=get_transformation(sdata[labels_layer], get_all=True),
+        transformations=get_transformation(sdata[labels_name], get_all=True),
         overwrite=True,
     )
     mask_grid = get_dataarray(sdata, layer=f"labels_grid_{_uuid}").data
-    mask_pixel_clusters = get_dataarray(sdata, layer=labels_layer).data
+    mask_pixel_clusters = get_dataarray(sdata, layer=labels_name).data
 
     if mask_grid.chunksize != mask_pixel_clusters.chunksize:
         mask_pixel_clusters.rechunk(mask_grid.chunksize)
@@ -220,7 +220,7 @@ def _get_values_grid_most_frequent(
 
     # most_frequent_lazy is of shape (i,1,statistic_dimension=1)
     most_frequent = most_frequent_lazy.squeeze(1).compute()
-    most_frequent = most_frequent.astype(get_dataarray(sdata, layer=labels_layer).dtype)
+    most_frequent = most_frequent.astype(get_dataarray(sdata, layer=labels_name).dtype)
     df_most_frequent = pd.DataFrame(most_frequent)
     df_most_frequent[_INSTANCE_KEY] = instance_ids
     if not df_most_frequent[_INSTANCE_KEY].is_unique:
@@ -252,7 +252,7 @@ def _get_values_grid_most_frequent(
     if subset is not None:
         mask = np.isin(values, subset).flatten()
         if not mask.any():
-            raise ValueError(f"None of the cluster id's in '{labels_layer}' match any element in 'subset'.")
+            raise ValueError(f"None of the cluster id's in '{labels_name}' match any element in 'subset'.")
         values = values[mask]
         coordinates = coordinates[mask]
 

@@ -24,7 +24,7 @@ class TableLayerManager:
         self,
         sdata: SpatialData,
         adata: AnnData,
-        output_layer: str,
+        output_table_name: str,
         region: list[str] | None,  # list of labels_layers
         instance_key: str = _INSTANCE_KEY,  # ignored if region is None
         region_key: str = _REGION_KEY,  # ignored if region is None
@@ -70,25 +70,25 @@ class TableLayerManager:
                 adata,
             )
 
-        if output_layer in [*sdata.tables]:
+        if output_table_name in [*sdata.tables]:
             if sdata.is_backed():
                 if overwrite:
                     sdata = _incremental_io_on_disk(
-                        sdata, output_layer=output_layer, element=adata, element_type="tables"
+                        sdata, element_name=output_table_name, element=adata, element_type="tables"
                     )
                 else:
                     raise ValueError(
-                        f"Attempting to overwrite 'sdata.tables[\"{output_layer}\"]', but overwrite is set to False. Set overwrite to True to overwrite the .zarr store."
+                        f"Attempting to overwrite 'sdata.tables[\"{output_table_name}\"]', but overwrite is set to False. Set overwrite to True to overwrite the .zarr store."
                     )
             else:
-                sdata[output_layer] = adata
+                sdata[output_table_name] = adata
         else:
-            sdata[output_layer] = adata
+            sdata[output_table_name] = adata
             if sdata.is_backed():
-                _write_element_with_cleanup(sdata, output_layer)
-                del sdata[output_layer]
+                _write_element_with_cleanup(sdata, output_table_name)
+                del sdata[output_table_name]
                 sdata_temp = _read_zarr_with_annotating_table_warning_suppressed(sdata.path, selection=["tables"])
-                sdata[output_layer] = sdata_temp[output_layer]
+                sdata[output_table_name] = sdata_temp[output_table_name]
                 del sdata_temp
 
         # If reading from the zarr store, string metadata in `uns` may be saved as

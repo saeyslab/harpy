@@ -23,20 +23,20 @@ from harpy.utils._aggregate import get_instance_size
 
 def merge_labels_layers(
     sdata: SpatialData,
-    candidate_labels_layer: str,
-    priority_labels_layer: str,
+    candidate_labels_name: str,
+    priority_labels_name: str,
     threshold: float = 0.5,
     chunks: str | int | tuple[int, int] | None = None,
-    output_labels_layer: str | None = None,
-    output_shapes_layer: str | None = None,
+    output_labels_name: str | None = None,
+    output_shapes_name: str | None = None,
     scale_factors: ScaleFactors_t | None = None,
     overwrite: bool = False,
 ) -> SpatialData:
     """
     Merge two labels layers using a global object-level overlap rule.
 
-    This function treats `priority_labels_layer` as the authoritative segmentation
-    and `candidate_labels_layer` as a layer that can fill uncovered regions. For
+    This function treats `priority_labels_name` as the authoritative segmentation
+    and `candidate_labels_name` as a layer that can fill uncovered regions. For
     each non-zero candidate object, overlaps with all non-zero priority objects
     are accumulated globally across the full image. A candidate object is kept if:
 
@@ -53,10 +53,10 @@ def merge_labels_layers(
     ----------
     sdata
         The SpatialData object containing the labels layers to be merged.
-    candidate_labels_layer
+    candidate_labels_name
         The name of the labels layer containing candidate objects to add to the
         merged result when they satisfy the overlap rule.
-    priority_labels_layer
+    priority_labels_name
         The name of the labels layer that takes precedence in the merged result.
     threshold
         Maximum allowed `candidate_fraction` for keeping a candidate object.
@@ -68,9 +68,9 @@ def merge_labels_layers(
         accumulation and rendering. If a tuple is provided, it is interpreted as
         the desired `(y, x)` chunk size. If set to `"auto"`, Dask determines the
         chunking.
-    output_labels_layer
+    output_labels_name
         The name of the output labels layer where the merged results will be stored.
-    output_shapes_layer
+    output_shapes_name
         The name of the output shapes layer where results will be stored if shape data is produced from the merge operation.
     scale_factors
         Scale factors to apply for multiscale processing.
@@ -79,7 +79,7 @@ def merge_labels_layers(
 
     Returns
     -------
-    The `sdata` object with the merged labels layer added to the specified output layer. If `output_shapes_layer` is
+    The `sdata` object with the merged labels layer added to the specified output layer. If `output_shapes_name` is
     provided, a shapes layer will be created corresponding to this labels layer.
 
     Raises
@@ -104,35 +104,35 @@ def merge_labels_layers(
 
         sdata = hp.im.merge_labels_layers(
             sdata,
-            candidate_labels_layer="masks_whole",
-            priority_labels_layer="masks_nuclear",
+            candidate_labels_name="masks_whole",
+            priority_labels_name="masks_nuclear",
             threshold=0.5,
             chunks=256,
-            output_labels_layer="masks_merged",
-            output_shapes_layer="masks_merged_boundaries",
+            output_labels_name="masks_merged",
+            output_shapes_name="masks_merged_boundaries",
             overwrite=True,
         )
 
     """
-    if output_labels_layer is None:
+    if output_labels_name is None:
         raise ValueError("Please specify a name for the output layer.")
     if not 0 <= threshold <= 1:
         raise ValueError(f"'threshold' must be between 0 and 1, found {threshold}.")
 
-    candidate_da = get_dataarray(sdata, layer=candidate_labels_layer)
-    priority_da = get_dataarray(sdata, layer=priority_labels_layer)
+    candidate_da = get_dataarray(sdata, layer=candidate_labels_name)
+    priority_da = get_dataarray(sdata, layer=priority_labels_name)
     candidate_transformations = get_transformation(candidate_da, get_all=True)
     priority_transformations = get_transformation(priority_da, get_all=True)
 
     if candidate_da.shape != priority_da.shape:
         raise ValueError(
             "Only arrays with same shape are currently supported, "
-            f"but candidate labels layer '{candidate_labels_layer}' has shape {candidate_da.shape}, "
-            f"while priority labels layer '{priority_labels_layer}' has shape {priority_da.shape}."
+            f"but candidate labels layer '{candidate_labels_name}' has shape {candidate_da.shape}, "
+            f"while priority labels layer '{priority_labels_name}' has shape {priority_da.shape}."
         )
     if candidate_transformations != priority_transformations:
         raise ValueError(
-            f"Provided labels layers '{candidate_labels_layer}' and '{priority_labels_layer}' "
+            f"Provided labels layers '{candidate_labels_name}' and '{priority_labels_name}' "
             "should have the same transformations defined on them."
         )
 
@@ -218,19 +218,19 @@ def merge_labels_layers(
     sdata = add_labels_layer(
         sdata,
         merged_array,
-        output_layer=output_labels_layer,
+        output_labels_name=output_labels_name,
         chunks=chunks,
         transformations=priority_transformations,
         scale_factors=scale_factors,
         overwrite=overwrite,
     )
 
-    if output_shapes_layer is not None:
-        se_labels = get_dataarray(sdata, layer=output_labels_layer)
+    if output_shapes_name is not None:
+        se_labels = get_dataarray(sdata, layer=output_labels_name)
         sdata = add_shapes_layer(
             sdata,
             input=se_labels.data,
-            output_layer=output_shapes_layer,
+            output_shapes_name=output_shapes_name,
             transformations=priority_transformations,
             overwrite=overwrite,
         )
@@ -240,14 +240,14 @@ def merge_labels_layers(
 
 def merge_labels_layers_nuclei(
     sdata: SpatialData,
-    labels_layer: str,
-    labels_layer_nuclei_expanded: str,
-    labels_layer_nuclei: str,
+    labels_name: str,
+    labels_name_nuclei_expanded: str,
+    labels_name_nuclei: str,
     threshold: float = 0.5,
     depth: tuple[int, int] | int = 100,
     chunks: str | int | tuple[int, int] | None = None,
-    output_labels_layer: str | None = None,
-    output_shapes_layer: str | None = None,
+    output_labels_name: str | None = None,
+    output_shapes_name: str | None = None,
     scale_factors: ScaleFactors_t | None = None,
     overwrite: bool = False,
     iou_depth: tuple[int, int] | int = 2,
@@ -256,24 +256,24 @@ def merge_labels_layers_nuclei(
     """
     Merge labels layers using nuclei segmentation.
 
-    Given a labels layer obtained from nuclei segmentation (`labels_layer_nuclei`),
-    and corresponding expanded nuclei (`labels_layer_nuclei_expanded`), e.g. obtained through `harpy.im.expand_labels_layer`,
-    this function merges labels in labels layer `labels_layer_nuclei_expanded` with `labels_layer` in the SpatialData object,
-    if corresponding nuclei in `labels_layer_nuclei` have less than `threshold` overlap with labels from `labels_layer`.
+    Given a labels layer obtained from nuclei segmentation (`labels_name_nuclei`),
+    and corresponding expanded nuclei (`labels_name_nuclei_expanded`), e.g. obtained through `harpy.im.expand_labels_layer`,
+    this function merges labels in labels layer `labels_name_nuclei_expanded` with `labels_name` in the SpatialData object,
+    if corresponding nuclei in `labels_name_nuclei` have less than `threshold` overlap with labels from `labels_name`.
 
     Parameters
     ----------
     sdata
         The SpatialData object containing the labels layers.
-    labels_layer
+    labels_name
         The name of the labels layer to merge with nuclei labels.
-    labels_layer_nuclei_expanded
+    labels_name_nuclei_expanded
         The name of the expanded nuclei labels layer.
-    labels_layer_nuclei
+    labels_name_nuclei
         The name of the nuclei labels layer.
     threshold
         The threshold value to control the merging of labels. This value determines how the merge operation is
-        conducted based on the overlap between the labels in `labels_layer_nuclei` and `labels_layer`.
+        conducted based on the overlap between the labels in `labels_name_nuclei` and `labels_name`.
     depth
         The depth around the boundary of each block to load when the array is split into blocks
         (for alignment). This ensures that the split isn't causing misalignment along the edges.
@@ -281,9 +281,9 @@ def merge_labels_layers_nuclei(
     chunks
         Specification for rechunking the data before applying the merge operation. This parameter defines how the data
         is divided into chunks for processing. If 'auto', the chunking strategy is determined automatically.
-    output_labels_layer
+    output_labels_name
         The name of the output labels layer where the merged results will be stored.
-    output_shapes_layer
+    output_shapes_name
         The name of the output shapes layer where results will be stored if shape data is produced from the merge operation.
     scale_factors
         Scale factors to apply for multiscale processing.
@@ -297,14 +297,14 @@ def merge_labels_layers_nuclei(
     Returns
     -------
     The `sdata` object with the merged labels layer added to the specified output layer.
-    If `output_shapes_layer` is provided, a shapes layer will be created corresponding to this labels layer.
+    If `output_shapes_name` is provided, a shapes layer will be created corresponding to this labels layer.
 
     Raises
     ------
     ValueError
         If any of the specified labels layers cannot be found in `sdata`.
     ValueError
-        If the labels in `labels_layer_nuclei_expanded` do not match the labels in `labels_layer_nuclei`.
+        If the labels in `labels_name_nuclei_expanded` do not match the labels in `labels_name_nuclei`.
 
     Notes
     -----
@@ -312,17 +312,17 @@ def merge_labels_layers_nuclei(
     object.
     It leverages dask for potential parallelism and out-of-core computation.
     """
-    labels_layers = [labels_layer, labels_layer_nuclei_expanded, labels_layer_nuclei]
+    labels_layers = [labels_name, labels_name_nuclei_expanded, labels_name_nuclei]
     for layer in labels_layers:
         if layer not in [*sdata.labels]:
             raise ValueError(f"Layer '{layer}' not found in available label layers '{[*sdata.labels]}' of sdata.")
 
-    se_nuclei_expanded = get_dataarray(sdata, labels_layer_nuclei_expanded)
-    se_nuclei = get_dataarray(sdata, labels_layer_nuclei)
+    se_nuclei_expanded = get_dataarray(sdata, labels_name_nuclei_expanded)
+    se_nuclei = get_dataarray(sdata, labels_name_nuclei)
 
     (
         np.array_equal(da.unique(se_nuclei_expanded.data), da.unique(se_nuclei.data)),
-        f"Labels layer '{labels_layer_nuclei_expanded}' should contain same labels as '{labels_layer_nuclei}'.",
+        f"Labels layer '{labels_name_nuclei_expanded}' should contain same labels as '{labels_name_nuclei}'.",
     )
 
     sdata = map_labels(
@@ -331,8 +331,8 @@ def merge_labels_layers_nuclei(
         labels_layers=labels_layers,
         depth=depth,
         chunks=chunks,
-        output_labels_layer=output_labels_layer,
-        output_shapes_layer=output_shapes_layer,
+        output_labels_name=output_labels_name,
+        output_shapes_name=output_shapes_name,
         scale_factors=scale_factors,
         overwrite=overwrite,
         relabel_chunks=True,
@@ -635,7 +635,7 @@ def _get_source_ids_to_reference_overlap_counts(
 
 def match_labels_to_reference_layers(
     sdata: SpatialData,
-    source_labels_layer: str,
+    source_labels_name: str,
     reference_labels_layers: list[str],
     chunks: str | int | tuple[int, int] | None = None,
     threshold: float = 0.0,
@@ -644,7 +644,7 @@ def match_labels_to_reference_layers(
     """
     Match source labels to reference labels based on an overlap score.
 
-    For each non-zero label in `source_labels_layer`, this function determines, for
+    For each non-zero label in `source_labels_name`, this function determines, for
     every labels layer in `reference_labels_layers`, which non-zero reference
     label best matches it according to `overlap_metric`. The result is returned as
     a :class:`~pandas.DataFrame` indexed by the source labels, with one column per
@@ -665,7 +665,7 @@ def match_labels_to_reference_layers(
     sdata
         The input SpatialData object containing the source labels layer and the reference
         labels layers.
-    source_labels_layer
+    source_labels_name
         Name of the labels layer whose non-zero labels are matched to the
         reference labels layers.
     reference_labels_layers
@@ -694,7 +694,7 @@ def match_labels_to_reference_layers(
     Returns
     -------
     A pandas DataFrame where each row corresponds to a non-zero label from
-    `source_labels_layer` and each column corresponds to one layer in
+    `source_labels_name` and each column corresponds to one layer in
     `reference_labels_layers`. Every value contains the non-zero reference label
     selected for that source label according to `overlap_metric`. If a source label has no non-zero
     overlap with a given reference labels layer, the corresponding output value
@@ -729,7 +729,7 @@ def match_labels_to_reference_layers(
 
         matched = hp.im.match_labels_to_reference_layers(
             sdata,
-            source_labels_layer="masks_whole",
+            source_labels_name="masks_whole",
             reference_labels_layers=["masks_nuclear"],
             chunks=256,
         )
@@ -741,7 +741,7 @@ def match_labels_to_reference_layers(
             f"'overlap_metric' must be one of 'source_fraction', 'reference_fraction', or 'iou', found {overlap_metric!r}."
         )
 
-    label_arrays = [get_dataarray(sdata, layer=source_labels_layer).data]
+    label_arrays = [get_dataarray(sdata, layer=source_labels_name).data]
 
     for _labels_layer in reference_labels_layers:
         label_arrays.append(get_dataarray(sdata, layer=_labels_layer).data)
@@ -787,7 +787,7 @@ def match_labels_to_reference_layers(
 
     result = np.zeros((source_ids.size, len(reference_labels_layers)), dtype=_SEG_DTYPE)
     if overlap_metric == "iou" or (threshold > 0 and overlap_metric == "source_fraction"):
-        log.info(f"Calculating instance sizes for source labels layer '{source_labels_layer}'.")
+        log.info(f"Calculating instance sizes for source labels layer '{source_labels_name}'.")
         instance_sizes = get_instance_size(
             mask=rechunked_arrays[0],
             index=source_ids,

@@ -18,7 +18,7 @@ class HarpyPipeline:
         self.cfg = cfg
         self.loaded_image_name = image_name
         self.cleaned_image_name = self.loaded_image_name
-        self.shapes_layer_name = self.cfg.segmentation.output_shapes_layer
+        self.shapes_name = self.cfg.segmentation.output_shapes_name
 
     def run_pipeline(self) -> SpatialData:
         """Run the pipeline."""
@@ -95,7 +95,7 @@ class HarpyPipeline:
             sdata = harpy.io.create_sdata(
                 input=filename_pattern,
                 output_path=self.cfg.paths.sdata,
-                img_layer=self.loaded_image_name,
+                image_name=self.loaded_image_name,
                 crd=self.cfg.dataset.crop_param,
                 chunks=self.cfg.dataset.chunks,
                 scale_factors=self.cfg.dataset.scale_factors,
@@ -111,7 +111,7 @@ class HarpyPipeline:
             sdata=sdata,
             output=os.path.join(self.cfg.paths.output_dir, "original"),
             crd=self.cfg.clean.small_size_vis,
-            img_layer=self.loaded_image_name,
+            image_name=self.loaded_image_name,
         )
 
         self.cleaned_image_name = self.loaded_image_name
@@ -120,19 +120,19 @@ class HarpyPipeline:
         if self.cfg.clean.tilingCorrection:
             log.info("Start tiling correction.")
 
-            output_layer = self.cfg.clean.output_img_layer_tiling_correction
+            output_image_name = self.cfg.clean.output_image_name_tiling_correction
 
             sdata, flatfields = harpy.im.tiling_correction(
                 sdata=sdata,
-                img_layer=self.cleaned_image_name,
+                image_name=self.cleaned_image_name,
                 crd=self.cfg.clean.crop_param if self.cfg.clean.crop_param is not None else None,
                 scale_factors=self.cfg.dataset.scale_factors,
                 tile_size=self.cfg.clean.tile_size,
-                output_layer=output_layer,
+                output_image_name=output_image_name,
                 overwrite=self.cfg.clean.overwrite,
             )
 
-            self.cleaned_image_name = output_layer
+            self.cleaned_image_name = output_image_name
 
             log.info("Tiling correction finished.")
 
@@ -141,7 +141,7 @@ class HarpyPipeline:
                 log.info(f"Writing tiling correction plot to {self.cfg.paths.tiling_correction}")
                 harpy.pl.tiling_correction(
                     sdata=sdata,
-                    img_layer=[self.loaded_image_name, self.cleaned_image_name],
+                    image_name=[self.loaded_image_name, self.cleaned_image_name],
                     crd=self.cfg.clean.small_size_vis if self.cfg.clean.small_size_vis is not None else None,
                     output=self.cfg.paths.tiling_correction,
                 )
@@ -157,7 +157,7 @@ class HarpyPipeline:
                 sdata=sdata,
                 output=os.path.join(self.cfg.paths.output_dir, self.cleaned_image_name),
                 crd=self.cfg.clean.small_size_vis,
-                img_layer=self.cleaned_image_name,
+                image_name=self.cleaned_image_name,
             )
 
         # min max filtering
@@ -165,21 +165,21 @@ class HarpyPipeline:
         if self.cfg.clean.minmaxFiltering:
             log.info("Start min max filtering.")
 
-            output_layer = self.cfg.clean.output_img_layer_min_max_filtering
+            output_image_name = self.cfg.clean.output_image_name_min_max_filtering
 
             sdata = harpy.im.min_max_filtering(
                 sdata=sdata,
-                img_layer=self.cleaned_image_name,
+                image_name=self.cleaned_image_name,
                 crd=self.cfg.clean.crop_param if self.cfg.clean.crop_param is not None else None,
                 size_min_max_filter=list(self.cfg.clean.size_min_max_filter)
                 if isinstance(self.cfg.clean.size_min_max_filter, ListConfig)
                 else self.cfg.clean.size_min_max_filter,
                 scale_factors=self.cfg.dataset.scale_factors,
-                output_layer=output_layer,
+                output_image_name=output_image_name,
                 overwrite=self.cfg.clean.overwrite,
             )
 
-            self.cleaned_image_name = output_layer
+            self.cleaned_image_name = output_image_name
 
             log.info("Min max filtering finished.")
 
@@ -187,7 +187,7 @@ class HarpyPipeline:
                 sdata=sdata,
                 output=os.path.join(self.cfg.paths.output_dir, self.cleaned_image_name),
                 crd=self.cfg.clean.small_size_vis,
-                img_layer=self.cleaned_image_name,
+                image_name=self.cleaned_image_name,
             )
 
         # contrast enhancement
@@ -195,23 +195,23 @@ class HarpyPipeline:
         if self.cfg.clean.contrastEnhancing:
             log.info("Start contrast enhancing.")
 
-            output_layer = self.cfg.clean.output_img_layer_clahe
+            output_image_name = self.cfg.clean.output_image_name_clahe
 
             sdata = harpy.im.enhance_contrast(
                 sdata=sdata,
-                img_layer=self.cleaned_image_name,
+                image_name=self.cleaned_image_name,
                 crd=self.cfg.clean.crop_param if self.cfg.clean.crop_param is not None else None,
                 contrast_clip=list(self.cfg.clean.contrast_clip)
                 if isinstance(self.cfg.clean.contrast_clip, ListConfig)
                 else self.cfg.clean.contrast_clip,
                 chunks=self.cfg.clean.chunksize_clahe,
                 depth=self.cfg.clean.depth,
-                output_layer=output_layer,
+                output_image_name=output_image_name,
                 scale_factors=self.cfg.dataset.scale_factors,
                 overwrite=self.cfg.clean.overwrite,
             )
 
-            self.cleaned_image_name = output_layer
+            self.cleaned_image_name = output_image_name
 
             log.info("Contrast enhancing finished.")
 
@@ -219,7 +219,7 @@ class HarpyPipeline:
                 sdata=sdata,
                 output=os.path.join(self.cfg.paths.output_dir, self.cleaned_image_name),
                 crd=self.cfg.clean.small_size_vis,
-                img_layer=self.cleaned_image_name,
+                image_name=self.cleaned_image_name,
             )
 
         return sdata
@@ -238,8 +238,8 @@ class HarpyPipeline:
             )
             depth = 2 * self.cfg.segmentation.diameter
 
-        self.shapes_layer_name = self.cfg.segmentation.output_shapes_layer
-        self.labels_layer_name = self.cfg.segmentation.output_labels_layer
+        self.shapes_name = self.cfg.segmentation.output_shapes_name
+        self.labels_name = self.cfg.segmentation.output_labels_name
 
         # Perform segmentation
         client = Client(n_workers=self.cfg.n_workers, threads_per_worker=1, processes=True)
@@ -248,9 +248,9 @@ class HarpyPipeline:
 
         sdata = harpy.im.segment(
             sdata=sdata,
-            img_layer=self.cleaned_image_name,
-            output_labels_layer=self.labels_layer_name,
-            output_shapes_layer=self.shapes_layer_name,
+            image_name=self.cleaned_image_name,
+            output_labels_name=self.labels_name,
+            output_shapes_name=self.shapes_name,
             depth=depth,
             chunks=self.cfg.segmentation.chunks,
             trim=self.cfg.segmentation.trim,
@@ -278,33 +278,33 @@ class HarpyPipeline:
             crd=self.cfg.segmentation.small_size_vis
             if self.cfg.segmentation.small_size_vis is not None
             else self.cfg.clean.small_size_vis,
-            img_layer=self.cleaned_image_name,
-            shapes_layer=self.shapes_layer_name,
+            image_name=self.cleaned_image_name,
+            shapes_name=self.shapes_name,
             output=self.cfg.paths.segmentation,
         )
 
         if self.cfg.segmentation.expand_radius:
             sdata = harpy.im.expand_labels_layer(
                 sdata,
-                labels_layer=self.labels_layer_name,
+                labels_name=self.labels_name,
                 distance=self.cfg.segmentation.expand_radius,
                 chunks=self.cfg.segmentation.chunks,
-                output_labels_layer=f"expanded_cells_labels_{self.cfg.segmentation.expand_radius}",
-                output_shapes_layer=f"expanded_cells_shapes_{self.cfg.segmentation.expand_radius}",
+                output_labels_name=f"expanded_cells_labels_{self.cfg.segmentation.expand_radius}",
+                output_shapes_name=f"expanded_cells_shapes_{self.cfg.segmentation.expand_radius}",
                 overwrite=True,
             )
 
             # update current shapes layer name
-            self.shapes_layer_name = f"expanded_cells_shapes_{self.cfg.segmentation.expand_radius}"
-            self.labels_layer_name = f"expanded_cells_labels_{self.cfg.segmentation.expand_radius}"
+            self.shapes_name = f"expanded_cells_shapes_{self.cfg.segmentation.expand_radius}"
+            self.labels_name = f"expanded_cells_labels_{self.cfg.segmentation.expand_radius}"
 
             harpy.pl.segment(
                 sdata=sdata,
                 crd=self.cfg.segmentation.small_size_vis
                 if self.cfg.segmentation.small_size_vis is not None
                 else self.cfg.clean.small_size_vis,
-                img_layer=self.cleaned_image_name,
-                shapes_layer=self.shapes_layer_name,
+                image_name=self.cleaned_image_name,
+                shapes_name=self.shapes_name,
                 output=f"{self.cfg.paths.segmentation}_expanded_cells_{self.cfg.segmentation.expand_radius}",
             )
 
@@ -316,7 +316,7 @@ class HarpyPipeline:
             sdata,
             path_count_matrix=self.cfg.dataset.coords,
             transform_matrix=self.cfg.dataset.transform_matrix,
-            output_layer=self.cfg.allocate.points_layer_name,
+            output_points_name=self.cfg.allocate.points_name,
             overwrite=self.cfg.allocate.overwrite,
             delimiter=self.cfg.allocate.delimiter,
             header=self.cfg.allocate.header,
@@ -331,8 +331,8 @@ class HarpyPipeline:
 
         sdata = harpy.tb.allocate(
             sdata=sdata,
-            labels_layer=self.labels_layer_name,
-            output_layer=self.cfg.allocate.table_layer_name,
+            labels_name=self.labels_name,
+            output_table_name=self.cfg.allocate.table_name,
             overwrite=self.cfg.allocate.overwrite,
         )
 
@@ -340,8 +340,8 @@ class HarpyPipeline:
 
         harpy.pl.plot_shapes(
             sdata,
-            img_layer=self.cleaned_image_name,
-            shapes_layer=self.shapes_layer_name,
+            image_name=self.cleaned_image_name,
+            shapes_name=self.shapes_name,
             crd=self.cfg.segmentation.small_size_vis
             if self.cfg.segmentation.small_size_vis is not None
             else self.cfg.clean.small_size_vis,
@@ -350,8 +350,8 @@ class HarpyPipeline:
 
         harpy.qc.analyse_genes_left_out(
             sdata,
-            labels_layer=self.labels_layer_name,
-            table_layer=self.cfg.allocate.table_layer_name,
+            labels_name=self.labels_name,
+            table_name=self.cfg.allocate.table_name,
             output=self.cfg.paths.analyse_genes_left_out,
         )
 
@@ -360,9 +360,9 @@ class HarpyPipeline:
         # Perform preprocessing.
         sdata = harpy.tb.preprocess_transcriptomics(
             sdata,
-            labels_layer=self.labels_layer_name,
-            table_layer=self.cfg.allocate.table_layer_name,
-            output_layer=self.cfg.allocate.table_layer_name,
+            labels_name=self.labels_name,
+            table_name=self.cfg.allocate.table_name,
+            output_table_name=self.cfg.allocate.table_name,
             min_counts=self.cfg.allocate.min_counts,
             min_cells=self.cfg.allocate.min_cells,
             size_norm=self.cfg.allocate.size_norm,
@@ -374,15 +374,15 @@ class HarpyPipeline:
 
         harpy.pl.preprocess_transcriptomics(
             sdata,
-            table_layer=self.cfg.allocate.table_layer_name,
+            table_name=self.cfg.allocate.table_name,
             output=self.cfg.paths.preprocess_adata,
         )
 
         harpy.pl.plot_shapes(
             sdata,
-            img_layer=self.cleaned_image_name,
-            shapes_layer=self.shapes_layer_name,
-            table_layer=self.cfg.allocate.table_layer_name,
+            image_name=self.cleaned_image_name,
+            shapes_name=self.shapes_name,
+            table_name=self.cfg.allocate.table_name,
             crd=self.cfg.segmentation.small_size_vis
             if self.cfg.segmentation.small_size_vis is not None
             else self.cfg.clean.small_size_vis,
@@ -395,9 +395,9 @@ class HarpyPipeline:
         # Filter all cells based on size and distance
         sdata = harpy.tb.filter_on_size(
             sdata,
-            labels_layer=self.labels_layer_name,
-            table_layer=self.cfg.allocate.table_layer_name,
-            output_layer=self.cfg.allocate.table_layer_name,
+            labels_name=self.labels_name,
+            table_name=self.cfg.allocate.table_name,
+            output_table_name=self.cfg.allocate.table_name,
             min_size=self.cfg.allocate.min_size,
             max_size=self.cfg.allocate.max_size,
             overwrite=True,
@@ -405,9 +405,9 @@ class HarpyPipeline:
 
         harpy.pl.plot_shapes(
             sdata,
-            img_layer=self.cleaned_image_name,
-            shapes_layer=self.shapes_layer_name,
-            table_layer=self.cfg.allocate.table_layer_name,
+            image_name=self.cleaned_image_name,
+            shapes_name=self.shapes_name,
+            table_name=self.cfg.allocate.table_name,
             crd=self.cfg.segmentation.small_size_vis
             if self.cfg.segmentation.small_size_vis is not None
             else self.cfg.clean.small_size_vis,
@@ -421,9 +421,9 @@ class HarpyPipeline:
 
         sdata = harpy.tb.leiden(
             sdata,
-            labels_layer=self.labels_layer_name,
-            table_layer=self.cfg.allocate.table_layer_name,
-            output_layer=self.cfg.allocate.table_layer_name,
+            labels_name=self.labels_name,
+            table_name=self.cfg.allocate.table_name,
+            output_table_name=self.cfg.allocate.table_name,
             calculate_umap=True,
             calculate_neighbors=True,
             n_pcs=self.cfg.allocate.pcs,
@@ -438,16 +438,16 @@ class HarpyPipeline:
 
         harpy.pl.cluster(
             sdata,
-            table_layer=self.cfg.allocate.table_layer_name,
+            table_name=self.cfg.allocate.table_name,
             key_added="leiden",
             output=self.cfg.paths.cluster,
         )
 
         harpy.pl.plot_shapes(
             sdata,
-            img_layer=self.cleaned_image_name,
-            shapes_layer=self.shapes_layer_name,
-            table_layer=self.cfg.allocate.table_layer_name,
+            image_name=self.cleaned_image_name,
+            shapes_name=self.shapes_name,
+            table_name=self.cfg.allocate.table_name,
             column=self.cfg.allocate.leiden_column,
             cmap=self.cfg.allocate.leiden_cmap,
             alpha=self.cfg.allocate.leiden_alpha,
@@ -461,18 +461,18 @@ class HarpyPipeline:
             # calculate transcript density
             sdata = harpy.im.transcript_density(
                 sdata,
-                img_layer=self.cleaned_image_name,
+                image_name=self.cleaned_image_name,
                 crd=self.cfg.segmentation.crop_param,
                 scale_factors=self.cfg.dataset.scale_factors,
-                output_layer=self.cfg.allocate.transcripts_density_img_layer_name,
+                output_image_name=self.cfg.allocate.transcripts_density_image_name,
                 overwrite=self.cfg.allocate.overwrite,
             )
 
             harpy.pl.transcript_density(
                 sdata,
-                img_layer=[
+                image_name=[
                     self.cleaned_image_name,
-                    self.cfg.allocate.transcripts_density_img_layer_name,
+                    self.cfg.allocate.transcripts_density_image_name,
                 ],
                 crd=self.cfg.segmentation.small_size_vis
                 if self.cfg.segmentation.small_size_vis is not None
@@ -494,9 +494,9 @@ class HarpyPipeline:
 
         sdata, celltypes_scored, celltypes_all = harpy.tb.score_genes(
             sdata=sdata,
-            labels_layer=self.labels_layer_name,
-            table_layer=self.cfg.allocate.table_layer_name,
-            output_layer=self.cfg.allocate.table_layer_name,
+            labels_name=self.labels_name,
+            table_name=self.cfg.allocate.table_name,
+            output_table_name=self.cfg.allocate.table_name,
             marker_genes=self.cfg.dataset.markers,
             delimiter=self.cfg.annotate.delimiter,
             row_norm=self.cfg.annotate.row_norm,
@@ -511,10 +511,10 @@ class HarpyPipeline:
 
         harpy.pl.score_genes(
             sdata=sdata,
-            table_layer=self.cfg.allocate.table_layer_name,
+            table_name=self.cfg.allocate.table_name,
             celltypes=celltypes_scored,  # celltypes_scored, is a list of all celltypes that are scored.
-            shapes_layer=self.shapes_layer_name,
-            img_layer=self.cleaned_image_name,
+            shapes_name=self.shapes_name,
+            image_name=self.cleaned_image_name,
             output=self.cfg.paths.score_genes,
             crd=self.cfg.segmentation.small_size_vis
             if self.cfg.segmentation.small_size_vis is not None
@@ -534,9 +534,9 @@ class HarpyPipeline:
         if "correct_marker_genes_dict" in self.cfg.visualize:
             sdata = harpy.tb.correct_marker_genes(
                 sdata,
-                labels_layer=self.labels_layer_name,
-                table_layer=self.cfg.allocate.table_layer_name,
-                output_layer=self.cfg.allocate.table_layer_name,
+                labels_name=self.labels_name,
+                table_name=self.cfg.allocate.table_name,
+                output_table_name=self.cfg.allocate.table_name,
                 celltype_correction_dict=self.cfg.visualize.correct_marker_genes_dict,
                 overwrite=True,
             )
@@ -548,9 +548,9 @@ class HarpyPipeline:
         # Check cluster cleanliness
         sdata, color_dict = harpy.tb.cluster_cleanliness(
             sdata,
-            labels_layer=self.labels_layer_name,
-            table_layer=self.cfg.allocate.table_layer_name,
-            output_layer=self.cfg.allocate.table_layer_name,
+            labels_name=self.labels_name,
+            table_name=self.cfg.allocate.table_name,
+            output_table_name=self.cfg.allocate.table_name,
             celltypes=self._celltypes,
             celltype_indexes=celltype_indexes,
             colors=colors,
@@ -559,9 +559,9 @@ class HarpyPipeline:
 
         harpy.pl.cluster_cleanliness(
             sdata=sdata,
-            table_layer=self.cfg.allocate.table_layer_name,
-            img_layer=self.cleaned_image_name,
-            shapes_layer=self.shapes_layer_name,
+            table_name=self.cfg.allocate.table_name,
+            image_name=self.cleaned_image_name,
+            shapes_name=self.shapes_name,
             crd=self.cfg.segmentation.small_size_vis
             if self.cfg.segmentation.small_size_vis is not None
             else self.cfg.clean.small_size_vis,
@@ -574,14 +574,14 @@ class HarpyPipeline:
             # calculate nhood enrichment
             sdata = harpy.tb.nhood_enrichment(
                 sdata,
-                labels_layer=self.labels_layer_name,
-                table_layer=self.cfg.allocate.table_layer_name,
-                output_layer=self.cfg.allocate.table_layer_name,
+                labels_name=self.labels_name,
+                table_name=self.cfg.allocate.table_name,
+                output_table_name=self.cfg.allocate.table_name,
                 overwrite=True,
             )
             harpy.pl.nhood_enrichment(
                 sdata,
-                table_layer=self.cfg.allocate.table_layer_name,
+                table_name=self.cfg.allocate.table_name,
                 output=self.cfg.paths.nhood,
             )
         except Exception as e:  # noqa: BLE001

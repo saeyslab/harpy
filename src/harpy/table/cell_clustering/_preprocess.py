@@ -20,9 +20,9 @@ from harpy.utils._keys import _CELL_INDEX, _CELLSIZE_KEY, _INSTANCE_KEY, _RAW_CO
 
 def cell_clustering_preprocess(
     sdata: SpatialData,
-    labels_layer_cells: str | Iterable[str],
-    labels_layer_clusters: str | Iterable[str],
-    output_layer: str,
+    cells_labels_name: str | Iterable[str],
+    cluster_labels_name: str | Iterable[str],
+    output_table_name: str,
     q: float | None = 0.999,
     chunks: str | int | tuple[int, ...] | None = None,
     region_key: str = _REGION_KEY,
@@ -36,21 +36,21 @@ def cell_clustering_preprocess(
     Preprocesses spatial data for cell clustering.
 
     This function prepares a SpatialData object for cell clustering by integrating cell segmentation masks (obtained via e.g. `harpy.im.segment`) and SOM pixel/meta cluster (obtained via e.g. `harpy.im.flosom`).
-    The function calculates the cluster count (clusters provided via `labels_layer_clusters`) for each cell in `labels_layer_cells`, normalized by cell size, and optionally by quantile normalization if `q` is provided.
+    The function calculates the cluster count (clusters provided via `cluster_labels_name`) for each cell in `cells_labels_name`, normalized by cell size, and optionally by quantile normalization if `q` is provided.
     The results are stored in a specified table layer within the `sdata` object of shape (#cells, #clusters).
 
     Parameters
     ----------
     sdata
         The input SpatialData object containing the spatial proteomics data.
-    labels_layer_cells
+    cells_labels_name
         The labels layer(s) in `sdata` that contain cell segmentation masks. These masks should be previously generated using `harpy.im.segment`.
-    labels_layer_clusters
+    cluster_labels_name
         The labels layer(s) in `sdata` that contain metacluster or cluster masks. These should be derived from `harpy.im.flowsom`.
-    output_layer
+    output_table_name
         The name of the table layer within `sdata` where the preprocessed data will be stored.
     q
-        Quantile used for normalization. If specified, each pixel SOM/meta cluster column in `output_layer` is normalized by this quantile. Values are multiplied by 100 after normalization.
+        Quantile used for normalization. If specified, each pixel SOM/meta cluster column in `output_table_name` is normalized by this quantile. Values are multiplied by 100 after normalization.
     chunks
         Chunk sizes for processing the data. If provided as a tuple, it should detail chunk sizes for each dimension `(z)`, `y`, `x`.
     instance_key
@@ -60,58 +60,58 @@ def cell_clustering_preprocess(
     cell_index_name
         The name of the index of the resulting :class:`~anndata.AnnData` table.
     instance_size_key
-        The key in the :class:`~anndata.AnnData` table `.obs` that will hold the size of the instances (obtained from `labels_layer_cells`).
+        The key in the :class:`~anndata.AnnData` table `.obs` that will hold the size of the instances (obtained from `cells_labels_name`).
     raw_counts_key
         Name of the :class:`~anndata.AnnData` layer where the non-preprocessed counts will be stored.
     overwrite
-        If True, overwrites the existing data in the specified `output_layer` if it already exists.
+        If True, overwrites the existing data in the specified `output_table_name` if it already exists.
 
     Returns
     -------
-    The input `sdata` with a table layer added (`output_layer`).
+    The input `sdata` with a table layer added (`output_table_name`).
 
     See Also
     --------
     harpy.im.flowsom : flowsom pixel clustering.
     harpy.tb.flowsom : flowsom cell clustering.
     """
-    labels_layer_cells = (
-        list(labels_layer_cells)
-        if isinstance(labels_layer_cells, Iterable) and not isinstance(labels_layer_cells, str)
-        else [labels_layer_cells]
+    cells_labels_name = (
+        list(cells_labels_name)
+        if isinstance(cells_labels_name, Iterable) and not isinstance(cells_labels_name, str)
+        else [cells_labels_name]
     )
-    labels_layer_clusters = (
-        list(labels_layer_clusters)
-        if isinstance(labels_layer_clusters, Iterable) and not isinstance(labels_layer_clusters, str)
-        else [labels_layer_clusters]
+    cluster_labels_name = (
+        list(cluster_labels_name)
+        if isinstance(cluster_labels_name, Iterable) and not isinstance(cluster_labels_name, str)
+        else [cluster_labels_name]
     )
 
-    assert len(labels_layer_cells) == len(labels_layer_clusters), (
-        "The number of 'labels_layer_cells' specified should be the equal to the the number of 'labels_layer_clusters' specified."
+    assert len(cells_labels_name) == len(cluster_labels_name), (
+        "The number of 'cells_labels_name' specified should be the equal to the the number of 'cluster_labels_name' specified."
     )
 
     # first get total number of unique labels and total number of unique cluster id's over all FOV's
     _arr_list_labels = []
     _arr_list_clusters = []
-    for i, (_labels_layer_cells, _labels_layer_clusters) in enumerate(
-        zip(labels_layer_cells, labels_layer_clusters, strict=True)
+    for i, (_cells_labels_name, _cluster_labels_name) in enumerate(
+        zip(cells_labels_name, cluster_labels_name, strict=True)
     ):
-        se_labels = _get_spatial_element(sdata, layer=_labels_layer_cells)
-        se_clusters = _get_spatial_element(sdata, layer=_labels_layer_clusters)
+        se_labels = _get_spatial_element(sdata, layer=_cells_labels_name)
+        se_clusters = _get_spatial_element(sdata, layer=_cluster_labels_name)
 
         assert se_labels.shape == se_clusters.shape, (
-            f"Provided labels layers '{_labels_layer_cells}' and '{_labels_layer_clusters}' do not have the same shape."
+            f"Provided labels layers '{_cells_labels_name}' and '{_cluster_labels_name}' do not have the same shape."
         )
 
         assert get_transformation(se_labels, get_all=True) == get_transformation(se_clusters, get_all=True), (
-            f"Transformation on provided labels layers '{_labels_layer_cells}' and '{_labels_layer_clusters}' are not equal. This is currently not supported."
+            f"Transformation on provided labels layers '{_cells_labels_name}' and '{_cluster_labels_name}' are not equal. This is currently not supported."
         )
 
         if i == 0:
             _array_dim = se_labels.ndim
         else:
             assert _array_dim == se_labels.ndim == se_clusters.ndim, (
-                "Labels layer specified in 'labels_layer_cells' and 'labels_layer_cluster' should all have same number of dimensions."
+                "Labels layer specified in 'cells_labels_name' and 'cluster_labels_name' should all have same number of dimensions."
             )
 
         _array_labels = se_labels.data
@@ -129,7 +129,8 @@ def cell_clustering_preprocess(
         _arr_list_clusters.append(_array_clusters)
 
     # should map on the same clusters, because predicted via same flowsom model,
-    # but _labels_layer_clusters of one FOV could contain cluster ID's that is not in other _labels_layer_clusters correponding to other FOV, therefore get all cluster ID's across all FOVs
+    # but _cluster_labels_name of one FOV could contain cluster IDs that are not in other
+    # _cluster_labels_name values corresponding to other FOVs, therefore get all cluster IDs across all FOVs
     _unique_clusters = da.unique(da.hstack([da.unique(_arr) for _arr in _arr_list_clusters])).compute()
 
     _results_sum_of_chunks = []
@@ -140,7 +141,7 @@ def cell_clustering_preprocess(
         _array_clusters = _arr_list_clusters[i]
 
         assert _array_labels.numblocks == _array_clusters.numblocks, (
-            f"Provided labels layers '{labels_layer_cells[i]}' and '{labels_layer_clusters[i]}' have different chunk sizes. Set 'chunk' parameter to fix this issue."
+            f"Provided labels layers '{cells_labels_name[i]}' and '{cluster_labels_name[i]}' have different chunk sizes. Set 'chunk' parameter to fix this issue."
         )
 
         _unique_mask = da.unique(_array_labels).compute()
@@ -166,7 +167,7 @@ def cell_clustering_preprocess(
 
         _cells_id.append(_unique_mask.reshape(-1, 1))
         _results_sum_of_chunks.append(sum_of_chunks)
-        _region_keys.extend(_unique_mask.shape[0] * [labels_layer_cells[i]])
+        _region_keys.extend(_unique_mask.shape[0] * [cells_labels_name[i]])
 
     sum_of_chunks = np.vstack(_results_sum_of_chunks)
     _cells_id = np.vstack(_cells_id)
@@ -196,7 +197,7 @@ def cell_clustering_preprocess(
         removed_cells = adata.obs.loc[no_overlap_mask, [instance_key, region_key]].copy()
         removed_cells[instance_key] = removed_cells[instance_key].astype(int)
         log.info(
-            f"Removing {int(no_overlap_mask.sum())} cells with no overlap with any pixel cluster from table '{output_layer}'."
+            f"Removing {int(no_overlap_mask.sum())} cells with no overlap with any pixel cluster from table '{output_table_name}'."
         )
 
         removed_per_region = removed_cells.groupby(region_key, observed=True)[instance_key].apply(list)
@@ -215,8 +216,8 @@ def cell_clustering_preprocess(
     sdata = add_table_layer(
         sdata,
         adata=adata,
-        output_layer=output_layer,
-        region=labels_layer_cells,
+        output_table_name=output_table_name,
+        region=cells_labels_name,
         instance_key=instance_key,
         region_key=region_key,
         overwrite=overwrite,
@@ -225,9 +226,9 @@ def cell_clustering_preprocess(
     # for size normalization of counts by size of the labels; and quantile normalization
     sdata = preprocess_proteomics(
         sdata,
-        labels_layer=labels_layer_cells,
-        table_layer=output_layer,
-        output_layer=output_layer,
+        labels_name=cells_labels_name,
+        table_name=output_table_name,
+        output_table_name=output_table_name,
         size_norm=True,
         log1p=False,
         scale=False,

@@ -22,9 +22,9 @@ from harpy.utils._keys import _RAW_COUNTS_KEY, ClusteringKey
 def cluster_intensity_SOM(
     sdata: SpatialData,
     mapping: pd.Series,  # pandas series with at the index the clusters and as values the metaclusters # TODO maybe should also allow passing None, and calculate mapping from provided som labels layer and meta cluster labels layer
-    img_layer: str | Iterable[str],
-    labels_layer: str | Iterable[str],
-    output_layer: str,
+    image_name: str | Iterable[str],
+    labels_name: str | Iterable[str],
+    output_table_name: str,
     to_coordinate_system: str | Iterable[str] = "global",
     channels: int | str | Iterable[int] | Iterable[str] | None = None,
     chunks: str | int | tuple[int, ...] | None = 10000,
@@ -34,10 +34,10 @@ def cluster_intensity_SOM(
     overwrite=False,
 ) -> SpatialData:
     """
-    Calculates average intensity of each channel in `img_layer` per SOM cluster as available in the `labels_layer`, and saves it as a table layer in `sdata` as `output_layer`. Average intensity per metacluster is calculated using the `mapping`.
+    Calculates average intensity of each channel in `image_name` per SOM cluster as available in the `labels_name`, and saves it as a table layer in `sdata` as `output_table_name`. Average intensity per metacluster is calculated using the `mapping`.
 
-    This function computes average intensity for each SOM cluster identified in the `labels_layer` and stores the results in a new table layer (`output_layer`).
-    Average intensity per metacluster is added to `sdata.tables[output_layer].uns`.
+    This function computes average intensity for each SOM cluster identified in the `labels_name` and stores the results in a new table layer (`output_table_name`).
+    Average intensity per metacluster is added to `sdata.tables[output_table_name].uns`.
     The intensity calculation can be subset by channels and adjusted for chunk size for efficient processing. SOM clusters can be calculated using `harpy.im.flowsom`.
 
     Parameters
@@ -46,16 +46,16 @@ def cluster_intensity_SOM(
         The input SpatialData object.
     mapping
         A pandas Series mapping SOM cluster IDs (index) to metacluster IDs (values).
-    img_layer
+    image_name
         The image layer of `sdata` from which the intensity is calculated.
-    labels_layer
-        The labels layer in `sdata` that contains the SOM cluster IDs. I.e. the `output_layer_clusters` labels layer obtained through `harpy.im.flowsom`.
-    output_layer
+    labels_name
+        The labels layer in `sdata` that contains the SOM cluster IDs. I.e. the `output_cluster_labels_name` labels layer obtained through `harpy.im.flowsom`.
+    output_table_name
         The output table layer in `sdata` where results are stored.
     to_coordinate_system
-        The coordinate system that holds `img_layer` and `labels_layer`.
-        If `img_layer` and `labels_layer` are provided as a list,
-        elements in `to_coordinate_system` are the respective coordinate systems that holds the elements in `img_layer` and `labels_layer`.
+        The coordinate system that holds `image_name` and `labels_name`.
+        If `image_name` and `labels_name` are provided as a list,
+        elements in `to_coordinate_system` are the respective coordinate systems that holds the elements in `image_name` and `labels_name`.
     channels
         Specifies the channels to be included in the intensity calculation.
     chunks
@@ -67,7 +67,7 @@ def cluster_intensity_SOM(
     index_name
         The name of the index of the resulting :class:`~anndata.AnnData` table.
     overwrite
-        If True, overwrites the `output_layer` if it already exists in `sdata`.
+        If True, overwrites the `output_table_name` if it already exists in `sdata`.
 
     Returns
     -------
@@ -76,19 +76,19 @@ def cluster_intensity_SOM(
     Raises
     ------
     AssertionError
-        If number of provided `img_layer`, `labels_layer` and `to_coordinate_system` is not equal.
+        If number of provided `image_name`, `labels_name` and `to_coordinate_system` is not equal.
     AssertionError
-        If some labels in `labels_layer` are not found in the provided mapping pandas Series.
+        If some labels in `labels_name` are not found in the provided mapping pandas Series.
 
     See Also
     --------
     harpy.im.flowsom : flowsom pixel clustering.
     """
-    img_layer = list(img_layer) if isinstance(img_layer, Iterable) and not isinstance(img_layer, str) else [img_layer]
-    labels_layer = (
-        list(labels_layer)
-        if isinstance(labels_layer, Iterable) and not isinstance(labels_layer, str)
-        else [labels_layer]
+    image_name = list(image_name) if isinstance(image_name, Iterable) and not isinstance(image_name, str) else [image_name]
+    labels_name = (
+        list(labels_name)
+        if isinstance(labels_name, Iterable) and not isinstance(labels_name, str)
+        else [labels_name]
     )
     to_coordinate_system = (
         list(to_coordinate_system)
@@ -96,12 +96,12 @@ def cluster_intensity_SOM(
         else [to_coordinate_system]
     )
 
-    assert len(img_layer) == len(labels_layer) == len(to_coordinate_system), (
-        "The number of provided 'img_layer', 'labels_layer' and 'to_coordinate_system' should be equal."
+    assert len(image_name) == len(labels_name) == len(to_coordinate_system), (
+        "The number of provided 'image_name', 'labels_name' and 'to_coordinate_system' should be equal."
     )
 
     for i, (_img_layer, _labels_layer, _to_coordinate_system) in enumerate(
-        zip(img_layer, labels_layer, to_coordinate_system, strict=True)
+        zip(image_name, labels_name, to_coordinate_system, strict=True)
     ):
         se = _get_spatial_element(sdata, layer=_labels_layer)
 
@@ -122,9 +122,9 @@ def cluster_intensity_SOM(
         )
         sdata = allocate_intensity(
             sdata,
-            img_layer=_img_layer,
-            labels_layer=_labels_layer,
-            output_layer=output_layer,
+            image_name=_img_layer,
+            labels_name=_labels_layer,
+            output_table_name=output_table_name,
             channels=channels,
             mode="sum",
             to_coordinate_system=_to_coordinate_system,
@@ -145,9 +145,9 @@ def cluster_intensity_SOM(
     # note, we could also have done allocate_intensity( mode="sum", obs_stats="counts"), instead of also having to run preprocess_proteomics.
     sdata = preprocess_proteomics(
         sdata,
-        labels_layer=labels_layer,
-        table_layer=output_layer,
-        output_layer=output_layer,
+        labels_name=labels_name,
+        table_name=output_table_name,
+        output_table_name=output_table_name,
         size_norm=True,
         log1p=False,
         scale=False,
@@ -159,23 +159,23 @@ def cluster_intensity_SOM(
     log.info("End preprocessing.")
 
     # we are interested in the non-normalized counts (to account for multiple fov's)
-    array = sdata.tables[output_layer].layers[_RAW_COUNTS_KEY]
+    array = sdata.tables[output_table_name].layers[_RAW_COUNTS_KEY]
     df = pd.DataFrame(array)
-    df[instance_key] = sdata.tables[output_layer].obs[instance_key].values
+    df[instance_key] = sdata.tables[output_table_name].obs[instance_key].values
     df = df.groupby(instance_key).sum()
     df.sort_index(inplace=True)
-    df_obs = sdata.tables[output_layer].obs.copy()
+    df_obs = sdata.tables[output_table_name].obs.copy()
     df_obs = df_obs.groupby(instance_key).sum(instance_size_key)
     df_obs.sort_index(inplace=True)
     df = df * (100 / df_obs.values)
 
-    var = pd.DataFrame(index=sdata[output_layer].var_names)
+    var = pd.DataFrame(index=sdata[output_table_name].var_names)
     var.index = var.index.map(str)
     var.index.name = "channels"
 
     cells = pd.DataFrame(index=df.index)
     _uuid_value = str(uuid.uuid4())[:8]
-    cells.index = cells.index.map(lambda x: f"{x}_{output_layer}_{_uuid_value}")
+    cells.index = cells.index.map(lambda x: f"{x}_{output_table_name}_{_uuid_value}")
     cells.index.name = index_name
     adata = AnnData(X=df.values, obs=cells, var=var)
     adata.obs[instance_key] = df.index
@@ -214,7 +214,7 @@ def cluster_intensity_SOM(
     sdata = add_table_layer(
         sdata,
         adata=adata,
-        output_layer=output_layer,
+        output_table_name=output_table_name,
         region=None,  # can not be linked to a region, because it contains average over multiple labels layers (ID of the SOM clusters) in multiple fov scenario
         overwrite=True,
     )

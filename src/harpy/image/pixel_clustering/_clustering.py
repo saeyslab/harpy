@@ -36,9 +36,9 @@ except ImportError:
 
 def flowsom(
     sdata: SpatialData,
-    img_layer: str | Iterable[str],
-    output_layer_clusters: str | Iterable[str],  # these are labels layers containing predicted clusters
-    output_layer_metaclusters: str | Iterable[str],
+    image_name: str | Iterable[str],
+    output_cluster_labels_name: str | Iterable[str],  # these are labels layers containing predicted clusters
+    output_metacluster_labels_name: str | Iterable[str],
     channels: int | str | Iterable[int] | Iterable[str] | None = None,
     fraction: float | None = 0.1,
     n_clusters: int = 5,
@@ -58,17 +58,17 @@ def flowsom(
     Applies flowsom clustering on image layer(s) of a SpatialData object.
 
     This function executes the flowsom clustering algorithm (via `fs.FlowSOM`) on spatial data encapsulated by a SpatialData object.
-    The predited clusters and metaclusters are added as a labels layer to respectively `sdata.labels[output_layer_clusters]` and `sdata.labels[output_layer_metaclusters]`.
+    The predited clusters and metaclusters are added as a labels layer to respectively `sdata.labels[output_cluster_labels_name]` and `sdata.labels[output_metacluster_labels_name]`.
 
     Parameters
     ----------
     sdata
         The input SpatialData object.
-    img_layer
+    image_name
         The image layer(s) of `sdata` on which flowsom is run. It is recommended to preprocess the data with :func:`harpy.im.pixel_clustering_preprocess`.
-    output_layer_clusters
+    output_cluster_labels_name
         The output labels layer in `sdata` to which labels layer with predicted flowsom SOM clusters are saved.
-    output_layer_metaclusters
+    output_metacluster_labels_name
         The output labels layer in `sdata` to which labels layer with predicted flowsom metaclusters are saved.
     channels
         Specifies the channels to be included in the pixel clustering.
@@ -79,7 +79,7 @@ def flowsom(
     random_state
         A random state for reproducibility of the clustering and sampling.
     chunks
-        Chunk sizes used for flowsom inference step on `img_layer`. If provided as a tuple, it should contain chunk sizes for `c`, `(z)`, `y`, `x`.
+        Chunk sizes used for flowsom inference step on `image_name`. If provided as a tuple, it should contain chunk sizes for `c`, `(z)`, `y`, `x`.
     scale_factors
         Scale factors to apply for multiscale
     client
@@ -87,13 +87,13 @@ def flowsom(
         This reduces the size of the task graph and can improve performance by minimizing data transfer overhead during computation.
         If not specified, Dask will use the default scheduler as configured on your system (e.g., single-threaded, multithreaded, or a global client if one is running).
     persist_intermediate
-        If set to `True` will persit intermediate computation in memory. If `img_layer`, or one of the elements in `img_layer` is large, this could lead to increased ram usage.
+        If set to `True` will persit intermediate computation in memory. If `image_name`, or one of the elements in `image_name` is large, this could lead to increased ram usage.
         Set to `False` to write to intermediate zarr store instead, which will reduce ram usage, but will increase computation time slightly.
         We advice to set `persist_intermediate` to `True`, as it will only persist an array of dimension `(2,z,y,x)`, of dtype `numpy.uint8`.
         Ignored if `sdata` is not backed by a Zarr store.
     write_intermediate
-        If set to `True`, an intermediate Zarr store will be used during sampling from `img_layer` for flowsom training.
-        Enable this option to reduce RAM usage, especially if `img_layer` or any of its components is large.
+        If set to `True`, an intermediate Zarr store will be used during sampling from `image_name` for flowsom training.
+        Enable this option to reduce RAM usage, especially if `image_name` or any of its components is large.
         Ignored if `sdata` is not backed by a Zarr store.
     instance_key
         Instance key. The name of the column in the `.obs` attribute of the :class:`~anndata.AnnData` table at slot "cell_data"
@@ -107,7 +107,7 @@ def flowsom(
         of the :class:`mudata.MuData` object (which is an attribute of the returned :class:`flowsom.FlowSOM` object)
         that will hold the (z),y,x coordinate of the pixel.
     overwrite
-        If `True`, overwrites the `output_layer_cluster` and/or `output_layer_metacluster` if it already exists in `sdata`.
+        If `True`, overwrites the `output_cluster_labels_name` and/or `output_metacluster_labels_name` if it already exists in `sdata`.
     **kwargs
         Additional keyword arguments passed to `fs.FlowSOM`.
 
@@ -117,7 +117,7 @@ def flowsom(
 
         - The input `sdata` with the clustering results added.
 
-        - FlowSOM object containing a `MuData` object and a trained `fs.models.FlowSOMEstimator`. `MuData` object will only contain the fraction (via the `fraction` parameter) of the data sampled from the `img_layer` on which the FlowSOM model is trained.
+        - FlowSOM object containing a `MuData` object and a trained `fs.models.FlowSOMEstimator`. `MuData` object will only contain the fraction (via the `fraction` parameter) of the data sampled from the `image_name` on which the FlowSOM model is trained.
 
         - A pandas Series object containing a mapping between the clusters and the metaclusters.
 
@@ -129,22 +129,22 @@ def flowsom(
     --------
     - The function is intended for use with spatial proteomics data. Input data should be appropriately preprocessed
       (e.g. via :func:`harpy.im.pixel_clustering_preprocess`) to ensure meaningful clustering results.
-    - The cluster and metacluster ID's found in `output_layer_clusters` and `output_layer_metaclusters` count from 1, while they count from 0 in the `FlowSOM` object.
+    - The cluster and metacluster ID's found in `output_cluster_labels_name` and `output_metacluster_labels_name` count from 1, while they count from 0 in the `FlowSOM` object.
     """
     assert 0 < fraction <= 1, "Value must be between 0 and 1"
 
     def _fix_name(layer: str | Iterable[str]):
         return list(layer) if isinstance(layer, Iterable) and not isinstance(layer, str) else [layer]
 
-    img_layer = _fix_name(img_layer)
-    output_layer_clusters = _fix_name(output_layer_clusters)
-    output_layer_metaclusters = _fix_name(output_layer_metaclusters)
+    image_name = _fix_name(image_name)
+    output_cluster_labels_name = _fix_name(output_cluster_labels_name)
+    output_metacluster_labels_name = _fix_name(output_metacluster_labels_name)
 
-    assert len(output_layer_clusters) == len(output_layer_metaclusters) == len(img_layer), (
-        "The number of 'output_layer_clusters' and 'output_layer_metaclusters' specified should be the equal to the the number of 'img_layer' specified."
+    assert len(output_cluster_labels_name) == len(output_metacluster_labels_name) == len(image_name), (
+        "The number of 'output_cluster_labels_name' and 'output_metacluster_labels_name' specified should be the equal to the the number of 'image_name' specified."
     )
 
-    se_image = _get_spatial_element(sdata, layer=img_layer[0])
+    se_image = _get_spatial_element(sdata, layer=image_name[0])
 
     if channels is not None:
         channels = _fix_name(channels)
@@ -158,7 +158,7 @@ def flowsom(
     _transformations = []
     _region_keys = []
     log.info("Extracting random sample for FlowSOM training.")
-    for i, _img_layer in enumerate(img_layer):
+    for i, _img_layer in enumerate(image_name):
         se_image = _get_spatial_element(sdata, layer=_img_layer)
         _transformations.append(get_transformation(se_image, get_all=True))
         arr = se_image.sel(c=channels).data
@@ -166,7 +166,7 @@ def flowsom(
             _array_dim = arr.ndim
         else:
             assert _array_dim == arr.ndim, (
-                "Image layers specified via parameter `img_layer` should all have same number of dimensions."
+                "Image layers specified via parameter `image_name` should all have same number of dimensions."
             )
 
         to_squeeze = False
@@ -186,7 +186,7 @@ def flowsom(
             _arr_list[i], fraction=fraction, remove_nan_columns=True, seed=random_state, temp_path=_temp_path
         )
         results_arr_sampled.append(_arr_sampled)
-        _region_keys.extend(_arr_sampled.shape[0] * [img_layer[i]])
+        _region_keys.extend(_arr_sampled.shape[0] * [image_name[i]])
 
         # clean up
         if sdata.is_backed() and write_intermediate:
@@ -226,7 +226,7 @@ def flowsom(
     else:
         fsom_model_future = fsom_model
 
-    assert len(img_layer) == len(_arr_list)
+    assert len(image_name) == len(_arr_list)
     # 2) apply fsom on all data
     for i, _array in enumerate(_arr_list):
         if chunks is not None:
@@ -269,7 +269,7 @@ def flowsom(
         sdata = add_labels_layer(
             sdata,
             arr=_labels_flowsom_clusters.squeeze(0) if to_squeeze else _labels_flowsom_clusters,
-            output_layer=output_layer_clusters[i],
+            output_labels_name=output_cluster_labels_name[i],
             transformations=_transformations[i],
             scale_factors=scale_factors,
             overwrite=overwrite,
@@ -278,7 +278,7 @@ def flowsom(
         sdata = add_labels_layer(
             sdata,
             arr=_labels_flowsom_metaclusters.squeeze(0) if to_squeeze else _labels_flowsom_metaclusters,
-            output_layer=output_layer_metaclusters[i],
+            output_labels_name=output_metacluster_labels_name[i],
             transformations=_transformations[i],
             scale_factors=scale_factors,
             overwrite=overwrite,

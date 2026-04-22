@@ -35,12 +35,12 @@ except ImportError:
 
 def tiling_correction(
     sdata: SpatialData,
-    img_layer: str | None = None,
+    image_name: str | None = None,
     tile_size: int = 2144,
     crd: tuple[int, int, int, int] | None = None,
     to_coordinate_system: str = "global",
     scale_factors: ScaleFactors_t | None = None,
-    output_layer: str = "tiling_correction",
+    output_image_name: str = "tiling_correction",
     overwrite: bool = False,
 ) -> tuple[SpatialData, list[np.ndarray]]:
     """
@@ -52,7 +52,7 @@ def tiling_correction(
     ----------
     sdata
         The SpatialData object containing the image data to correct.
-    img_layer
+    image_name
         The image layer in `sdata` to be corrected for tiling effects. If not provided, the last image layer in `sdata` is used.
     tile_size
         The size of the tiles in the image.
@@ -60,10 +60,10 @@ def tiling_correction(
         Coordinates defining the region of the image to correct. It defines the bounds (x_min, x_max, y_min, y_max).
     to_coordinate_system
         The coordinate system to which the `crd` is specified. Ignored if `crd` is None.
-        If a `crd` is specified, only the coordinate system defined here will be kept in `output_layer`.
+        If a `crd` is specified, only the coordinate system defined here will be kept in `output_image_name`.
     scale_factors
         Scale factors to apply for multiscale.
-    output_layer
+    output_image_name
         Name of the image layer where the corrected image will be stored in the `sdata` object.
     overwrite
         If True overwrites the element if it already exists.
@@ -85,24 +85,24 @@ def tiling_correction(
     to stitch tiles together. It manages the pre- and post-processing of data, translation of coordinates,
     and addition of corrected image results back to the `sdata` object.
     """
-    if img_layer is None:
-        img_layer = [*sdata.images][-1]
+    if image_name is None:
+        image_name = [*sdata.images][-1]
         log.warning(
             f"No image layer specified. "
-            f"Applying image processing on the last image layer '{img_layer}' of the provided SpatialData object."
+            f"Applying image processing on the last image layer '{image_name}' of the provided SpatialData object."
         )
 
-    se = _get_spatial_element(sdata, layer=img_layer)
+    se = _get_spatial_element(sdata, layer=image_name)
 
     if se.dims != ("c", "y", "x"):
         raise ValueError(
             "Tiling correction is only supported for images with 2 spatial dimensions, "
-            f"while provided image layer ({img_layer}) has dimensions {se.ndim}."
+            f"while provided image layer ({image_name}) has dimensions {se.ndim}."
         )
 
     if se.sizes["x"] % tile_size or se.sizes["y"] % tile_size:
         raise ValueError(
-            f"Spatial Dimension of image layer '{img_layer}' ({se.shape}) on which to run the "
+            f"Spatial Dimension of image layer '{image_name}' ({se.shape}) on which to run the "
             f"tilingCorrection is not a multiple of the given tile size ({tile_size})."
         )
 
@@ -118,10 +118,10 @@ def tiling_correction(
 
     for channel in se.c.data:
         channel_idx = list(se.c.data).index(channel)
-        ic = sq.im.ImageContainer(se.isel(c=channel_idx), layer=img_layer)
+        ic = sq.im.ImageContainer(se.isel(c=channel_idx), layer=image_name)
 
         # Create the tiles
-        tiles = ic.generate_equal_crops(size=tile_size, as_array=img_layer)
+        tiles = ic.generate_equal_crops(size=tile_size, as_array=image_name)
         tiles = np.array([tile + 1 if ~np.any(tile) else tile for tile in tiles])
         black = np.array([1 if ~np.any(tile - 1) else 0 for tile in tiles])
 
@@ -161,7 +161,7 @@ def tiling_correction(
             ]
         ).astype(np.uint16)
 
-        ic = sq.im.ImageContainer(i_new, layer=img_layer)
+        ic = sq.im.ImageContainer(i_new, layer=image_name)
 
         ic.add_img(
             i_mask.astype(np.uint8),
@@ -178,10 +178,10 @@ def tiling_correction(
         # Perform inpainting
         ic.apply(
             {"0": cv2.inpaint},
-            layer=img_layer,
+            layer=image_name,
             drop=False,
             channel=0,
-            new_layer=output_layer,
+            new_layer=output_image_name,
             copy=False,
             # chunks=10,
             fn_kwargs={
@@ -192,7 +192,7 @@ def tiling_correction(
         )
 
         # result for each channel
-        result_list.append(ic[output_layer].data)
+        result_list.append(ic[output_image_name].data)
 
     # make one dask array of shape (c,y,x)
     result = da.concatenate(result_list, axis=-1).transpose(3, 0, 1, 2).squeeze(-1)
@@ -210,7 +210,7 @@ def tiling_correction(
     sdata = add_image_layer(
         sdata,
         arr=result,
-        output_layer=output_layer,
+        output_image_name=output_image_name,
         chunks=result.chunksize,
         transformations={to_coordinate_system: translation} if translation is not None else transformations,
         scale_factors=scale_factors,

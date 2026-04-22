@@ -9,14 +9,14 @@ from harpy.table._add_feature_matrix import add_feature_matrix
 def test_add_feature_matrix_creates_new_table(sdata_multi_c_no_backed):
     sdata_multi_c_no_backed = add_feature_matrix(
         sdata_multi_c_no_backed,
-        labels_layer="masks_whole",
-        img_layer="raw_image",
-        table_layer=None,
-        output_layer="table_features",
+        labels_name="masks_whole",
+        image_name="raw_image",
+        table_name=None,
+        output_table_name="table_features",
         feature_key="cell_features",
         features=["mean", "area"],
         channels=[0, 4],
-        overwrite_output_layer=True,
+        overwrite_output_table=True,
     )
 
     adata = sdata_multi_c_no_backed.tables["table_features"]
@@ -36,14 +36,14 @@ def test_add_feature_matrix_creates_new_table(sdata_multi_c_no_backed):
 def test_add_feature_matrix_creates_intensity_stats_table(sdata_multi_c_no_backed):
     sdata_multi_c_no_backed = add_feature_matrix(
         sdata_multi_c_no_backed,
-        labels_layer="masks_whole",
-        img_layer="raw_image",
-        table_layer=None,
-        output_layer="table_intensity_stats",
+        labels_name="masks_whole",
+        image_name="raw_image",
+        table_name=None,
+        output_table_name="table_intensity_stats",
         feature_key="intensity_stats",
         features=["mean", "var"],
         channels=[0],
-        overwrite_output_layer=True,
+        overwrite_output_table=True,
     )
 
     adata = sdata_multi_c_no_backed.tables["table_intensity_stats"]
@@ -56,14 +56,14 @@ def test_add_feature_matrix_creates_intensity_stats_table(sdata_multi_c_no_backe
 def test_add_feature_matrix_supports_2d_eccentricity_with_intensity_features(sdata_multi_c_no_backed):
     sdata_multi_c_no_backed = add_feature_matrix(
         sdata_multi_c_no_backed,
-        labels_layer="masks_whole",
-        img_layer="raw_image",
-        table_layer=None,
-        output_layer="table_mixed_features",
+        labels_name="masks_whole",
+        image_name="raw_image",
+        table_name=None,
+        output_table_name="table_mixed_features",
         feature_key="mixed_features",
         features=["mean", "eccentricity"],
         channels=[0],
-        overwrite_output_layer=True,
+        overwrite_output_table=True,
     )
 
     adata = sdata_multi_c_no_backed.tables["table_mixed_features"]
@@ -88,14 +88,14 @@ def test_add_feature_matrix_supports_2d_eccentricity_with_intensity_features(sda
 def test_add_feature_matrix_supports_custom_metadata_key(sdata_multi_c_no_backed):
     sdata_multi_c_no_backed = add_feature_matrix(
         sdata_multi_c_no_backed,
-        labels_layer="masks_whole",
-        img_layer=None,
-        table_layer=None,
-        output_layer="table_custom_metadata",
+        labels_name="masks_whole",
+        image_name=None,
+        table_name=None,
+        output_table_name="table_custom_metadata",
         feature_key="area_features",
         features=["area"],
         feature_matrices_key="custom_feature_matrices",
-        overwrite_output_layer=True,
+        overwrite_output_table=True,
     )
 
     adata = sdata_multi_c_no_backed.tables["table_custom_metadata"]
@@ -108,9 +108,9 @@ def test_add_feature_matrix_supports_custom_metadata_key(sdata_multi_c_no_backed
 def test_add_feature_matrix_existing_table_preserves_other_regions(sdata_pixie_intensities):
     sdata_pixie_intensities = add_feature_matrix(
         sdata_pixie_intensities,
-        labels_layer="label_whole_fov0",
-        img_layer=None,
-        table_layer="table_intensities",
+        labels_name="label_whole_fov0",
+        image_name=None,
+        table_name="table_intensities",
         feature_key="morphology_features",
         features=["area"],
         to_coordinate_system="fov0",
@@ -118,9 +118,9 @@ def test_add_feature_matrix_existing_table_preserves_other_regions(sdata_pixie_i
     )
     sdata_pixie_intensities = add_feature_matrix(
         sdata_pixie_intensities,
-        labels_layer="label_whole_fov1",
-        img_layer=None,
-        table_layer="table_intensities",
+        labels_name="label_whole_fov1",
+        image_name=None,
+        table_name="table_intensities",
         feature_key="morphology_features",
         features=["area"],
         to_coordinate_system="fov1",
@@ -142,13 +142,13 @@ def test_add_feature_matrix_existing_table_preserves_other_regions(sdata_pixie_i
 def test_add_feature_matrix_persists_backed_updates(sdata_multi_c):
     sdata_multi_c = add_feature_matrix(
         sdata_multi_c,
-        labels_layer="masks_whole",
-        img_layer=None,
-        table_layer=None,
-        output_layer="table_feature_matrix",
+        labels_name="masks_whole",
+        image_name=None,
+        table_name=None,
+        output_table_name="table_feature_matrix",
         feature_key="area_features",
         features=["area"],
-        overwrite_output_layer=True,
+        overwrite_output_table=True,
     )
 
     reloaded = read_zarr(sdata_multi_c.path)

@@ -19,7 +19,7 @@ class LayerManager(ABC):
         self,
         sdata: SpatialData,
         arr: Array,
-        output_layer: str,
+        element_name: str,
         dims: tuple[str, ...] | None = None,
         chunks: str | tuple[int, ...] | int | None = None,
         transformations: MappingToCoordinateSystem_t | None = None,
@@ -44,11 +44,11 @@ class LayerManager(ABC):
             **kwargs,
         )
 
-        log.info(f"Writing results to layer '{output_layer}'")
+        log.info(f"Writing results to element '{element_name}'")
 
         sdata = self.add_to_sdata(
             sdata,
-            output_layer=output_layer,
+            element_name=element_name,
             spatial_element=spatial_element,
             overwrite=overwrite,
         )
@@ -74,7 +74,7 @@ class LayerManager(ABC):
     def add_to_sdata(
         self,
         sdata: SpatialData,
-        output_layer: str,
+        element_name: str,
         spatial_element: DataArray | DataTree,
         overwrite: bool = False,
     ) -> SpatialData:
@@ -130,32 +130,30 @@ class ImageLayerManager(LayerManager):
     def add_to_sdata(
         self,
         sdata: SpatialData,
-        output_layer: str,
+        element_name: str,
         spatial_element: DataArray | DataTree,
         overwrite: bool = False,
     ) -> SpatialData:
         # given a spatial_element with some graph defined on it.
-        if output_layer in [*sdata.images]:
+        if element_name in [*sdata.images]:
             if sdata.is_backed():
                 if overwrite:
-                    sdata = _incremental_io_on_disk(
-                        sdata, output_layer=output_layer, element=spatial_element, element_type="images"
-                    )
+                    sdata = _incremental_io_on_disk(sdata, element_name=element_name, element=spatial_element, element_type="images")
                 else:
                     raise ValueError(
-                        f"Attempting to overwrite 'sdata.images[\"{output_layer}\"]', but overwrite is set to False. Set overwrite to True to overwrite the .zarr store."
+                        f"Attempting to overwrite 'sdata.images[\"{element_name}\"]', but overwrite is set to False. Set overwrite to True to overwrite the .zarr store."
                     )
             else:
-                sdata[output_layer] = spatial_element
+                sdata[element_name] = spatial_element
 
         else:
-            sdata[output_layer] = spatial_element
+            sdata[element_name] = spatial_element
             if sdata.is_backed():
                 # to make sdata point to layer that is materialized, and keep object id.
-                _write_element_with_cleanup(sdata, output_layer)
-                del sdata[output_layer]
+                _write_element_with_cleanup(sdata, element_name)
+                del sdata[element_name]
                 sdata_temp = read_zarr(sdata.path, selection=["images"])
-                sdata[output_layer] = sdata_temp[output_layer]
+                sdata[element_name] = sdata_temp[element_name]
                 del sdata_temp
 
         return sdata
@@ -202,30 +200,28 @@ class LabelLayerManager(LayerManager):
     def add_to_sdata(
         self,
         sdata: SpatialData,
-        output_layer: str,
+        element_name: str,
         spatial_element: DataArray | DataTree,
         overwrite: bool = False,
     ) -> SpatialData:
         # given a spatial_element with some graph defined on it.
-        if output_layer in [*sdata.labels]:
+        if element_name in [*sdata.labels]:
             if sdata.is_backed():
                 if overwrite:
-                    sdata = _incremental_io_on_disk(
-                        sdata, output_layer=output_layer, element=spatial_element, element_type="labels"
-                    )
+                    sdata = _incremental_io_on_disk(sdata, element_name=element_name, element=spatial_element, element_type="labels")
                 else:
                     raise ValueError(
-                        f"Attempting to overwrite 'sdata.labels[\"{output_layer}\"]', but overwrite is set to False. Set overwrite to True to overwrite the .zarr store."
+                        f"Attempting to overwrite 'sdata.labels[\"{element_name}\"]', but overwrite is set to False. Set overwrite to True to overwrite the .zarr store."
                     )
             else:
-                sdata[output_layer] = spatial_element
+                sdata[element_name] = spatial_element
         else:
-            sdata[output_layer] = spatial_element
+            sdata[element_name] = spatial_element
             if sdata.is_backed():
-                _write_element_with_cleanup(sdata, output_layer)
-                del sdata[output_layer]
+                _write_element_with_cleanup(sdata, element_name)
+                del sdata[element_name]
                 sdata_temp = read_zarr(sdata.path, selection=["labels"])
-                sdata[output_layer] = sdata_temp[output_layer]
+                sdata[element_name] = sdata_temp[element_name]
                 del sdata_temp
 
         return sdata

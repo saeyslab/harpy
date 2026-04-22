@@ -29,10 +29,10 @@ except ImportError:
 
 def plot_sdata(
     sdata: SpatialData,
-    img_layer: str,
+    image_name: str,
     channel: str | list[str] | None = None,
-    labels_layer: str | None = None,
-    table_layer: str | None = None,
+    labels_name: str | None = None,
+    table_name: str | None = None,
     color: str | None = None,
     crd: tuple[int, int, int, int] | None = None,
     to_coordinate_system: str = "global",
@@ -48,20 +48,20 @@ def plot_sdata(
     ----------
     sdata
         :class:`~spatialdata.SpatialData` object.
-    img_layer
+    image_name
         Image layer to plot from `sdata.images`.
     channel
         Channel(s) to visualize, passed to `.pl.render_images()`.
-    labels_layer
+    labels_name
         Labels layer to plot from `sdata.labels`.
-    table_layer
-        :class:`anndata.AnnData` table from `sdata.tables` used to color instances of the `labels_layer`.
-        If specified, the labels layer at `labels_layer` should be annotated by `table_layer`.
+    table_name
+        :class:`anndata.AnnData` table from `sdata.tables` used to color instances of the `labels_name`.
+        If specified, the labels layer at `labels_name` should be annotated by `table_name`.
         Ignored if `color` is `None`.
     color
-        Column from `sdata[table_layer].obs` or name from `sdata[table_layer].var_names` to color the instances from `labels_layer`.
-        A ValueError is raised when `color` is specified and `table_layer` is `None`.
-        Set to `None` if you do not want to color the labels, and only want to visualise the labels in `labels_layer`.
+        Column from `sdata[table_name].obs` or name from `sdata[table_name].var_names` to color the instances from `labels_name`.
+        A ValueError is raised when `color` is specified and `table_name` is `None`.
+        Set to `None` if you do not want to color the labels, and only want to visualise the labels in `labels_name`.
     crd
         The coordinates for the region of interest in the format `(xmin, xmax, ymin, ymax)`, in the coordinate system `to_coordinate_system`.
     to_coordinate_system
@@ -70,7 +70,7 @@ def plot_sdata(
         Keyword arguments passed to `.pl.render_images()`.
     render_labels_kwargs
         Keyword arguments passed to `.pl.render_labels()`.
-        Ignored if `labels_layer` is `None`.
+        Ignored if `labels_name` is `None`.
     show_kwargs
         Keyword arguments passed to `.pl.show()`.
     ax:
@@ -84,9 +84,9 @@ def plot_sdata(
     Raises
     ------
     ValueError
-        If `table_layer` is not None and `labels_layer` is None.
+        If `table_name` is not None and `labels_name` is None.
     ValueError
-        If `color` is not None and `table_layer` is None.
+        If `color` is not None and `table_name` is None.
     ValueError
         If `coordinate_systems`in `show_kwargs`. Please pass coordinate system to plot via `to_coordinate_system`.
 
@@ -123,10 +123,10 @@ def plot_sdata(
     >>> # Plot multichannel image with labels and table annotations
     >>> hp.pl.plot_sdata(
     ...     sdata,
-    ...     img_layer="blobs_multiscale_image",
+    ...     image_name="blobs_multiscale_image",
     ...     channel=[0, 1, 2],
-    ...     labels_layer="blobs_labels",
-    ...     table_layer="table",
+    ...     labels_name="blobs_labels",
+    ...     table_name="table",
     ...     color="channel_1_sum",
     ...     render_images_kwargs=render_images_kwargs,
     ...     render_labels_kwargs=render_labels_kwargs,
@@ -150,7 +150,7 @@ def plot_sdata(
     >>>
     >>> hp.pl.plot_sdata(
     ...     sdata,
-    ...     img_layer="blobs_multiscale_image",
+    ...     image_name="blobs_multiscale_image",
     ...     channel=1,
     ...     crd=[100, 300, 100, 300],
     ...     render_images_kwargs=render_images_kwargs,
@@ -159,24 +159,24 @@ def plot_sdata(
     ...     ax=ax[1],
     ... )
     """
-    if table_layer is not None and labels_layer is None:
+    if table_name is not None and labels_name is None:
         raise ValueError(
-            f"Please specify a labels layer (which is annotated by the table layer '{table_layer}') if 'table_layer' is specified."
+            f"Please specify a labels layer (which is annotated by the table layer '{table_name}') if 'table_name' is specified."
         )
-    if color is not None and table_layer is None:
+    if color is not None and table_name is None:
         raise ValueError(
-            f"Please specify a 'table_layer' if 'color' is specified. "
-            f"Choose from {[*sdata.tables]}, and make sure the table layer annotates the labels layer '{labels_layer}'."
+            f"Please specify a 'table_name' if 'color' is specified. "
+            f"Choose from {[*sdata.tables]}, and make sure the table layer annotates the labels layer '{labels_name}'."
         )
 
-    if table_layer is not None:
-        adata = sdata.tables[table_layer]
+    if table_name is not None:
+        adata = sdata.tables[table_name]
         region_key = adata.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]
         # sanity check
-        mask = adata.obs[region_key] == labels_layer
+        mask = adata.obs[region_key] == labels_name
         if not mask.any():
             raise ValueError(
-                f"The labels layer '{labels_layer}' does not seem to be annotated by the table layer '{table_layer}'."
+                f"The labels layer '{labels_name}' does not seem to be annotated by the table layer '{table_name}'."
             )
 
     if "coordinate_systems" in show_kwargs.keys():
@@ -192,7 +192,7 @@ def plot_sdata(
     show_kwargs = deepcopy(show_kwargs)  # otherwise inplace updsate of show_kwargs
     show_kwargs["coordinate_systems"] = [to_coordinate_system]
 
-    transformations = get_transformation(sdata.images[img_layer], get_all=True)
+    transformations = get_transformation(sdata.images[image_name], get_all=True)
     _valid_coordinate_systems = list(transformations.keys())
     if to_coordinate_system not in _valid_coordinate_systems:
         raise ValueError(
@@ -211,25 +211,25 @@ def plot_sdata(
             max_coordinate=[crd[1], crd[3]],
             target_coordinate_system=to_coordinate_system,
             filter_table=True
-            if table_layer is not None
+            if table_name is not None
             else False,  # table do not need to be filtered if table layer is not specified
         )
-        if img_layer not in sdata_to_plot.images:
+        if image_name not in sdata_to_plot.images:
             raise ValueError(
                 f"After applying the bounding-box query with coordinates {crd!r} "
-                f"'(xmin, xmax, ymin, ymax)', the image layer '{img_layer}' is no longer present "
+                f"'(xmin, xmax, ymin, ymax)', the image layer '{image_name}' is no longer present "
                 "in the resulting SpatialData object. Please try different parameters for 'crd'."
             )
-        if labels_layer is not None and labels_layer not in sdata_to_plot.labels:
+        if labels_name is not None and labels_name not in sdata_to_plot.labels:
             raise ValueError(
                 f"After applying the bounding-box query with coordinates {crd!r} "
-                f"'(xmin, xmax, ymin, ymax)', the labels layer '{labels_layer}' is no longer present "
+                f"'(xmin, xmax, ymin, ymax)', the labels layer '{labels_name}' is no longer present "
                 "in the resulting SpatialData object. Please try different parameters for 'crd'."
             )
 
-    if labels_layer is None:
+    if labels_name is None:
         ax = sdata_to_plot.pl.render_images(
-            img_layer,
+            image_name,
             channel=channel,
             **render_images_kwargs,
         ).pl.show(
@@ -241,7 +241,7 @@ def plot_sdata(
     else:
         if "table_name" in render_labels_kwargs.keys():
             raise ValueError(
-                "Please specify 'table_name' via the keyword argument 'table_layer' of 'hp.pl.plot_sdata.'"
+                "Please specify 'table_name' via the keyword argument 'table_name' of 'hp.pl.plot_sdata.'"
             )
         if "color" in render_labels_kwargs.keys():
             raise ValueError("Please specify 'color' via the keyword argument 'color' of 'hp.pl.plot_sdata.'")
@@ -253,22 +253,22 @@ def plot_sdata(
         if queried:
             if (
                 color is not None
-                and color in sdata_to_plot[table_layer].obs
-                and pd.api.types.is_categorical_dtype(sdata_to_plot[table_layer].obs[color])
+                and color in sdata_to_plot[table_name].obs
+                and pd.api.types.is_categorical_dtype(sdata_to_plot[table_name].obs[color])
             ):
-                sdata_to_plot[table_layer].obs[color] = (
-                    sdata_to_plot[table_layer].obs[color].cat.remove_unused_categories()
+                sdata_to_plot[table_name].obs[color] = (
+                    sdata_to_plot[table_name].obs[color].cat.remove_unused_categories()
                 )
 
         ax = (
             sdata_to_plot.pl.render_images(
-                img_layer,
+                image_name,
                 channel=channel,
                 **render_images_kwargs,
             )
             .pl.render_labels(
-                labels_layer,
-                table_name=table_layer,
+                labels_name,
+                table_name=table_name,
                 color=color,
                 **render_labels_kwargs,
             )
@@ -284,9 +284,9 @@ def plot_sdata(
 
 def plot_sdata_genes(
     sdata: SpatialData,
-    points_layer: str,
-    img_layer: str | None = None,
-    channel: str | list[str] | None = None,  # ignored if img_layer is None
+    points_name: str,
+    image_name: str | None = None,
+    channel: str | list[str] | None = None,  # ignored if image_name is None
     name_gene_column: str | None = _GENES_KEY,
     genes: str | list[str] = None,  #
     palette: str | list[str] | None = None,
@@ -307,21 +307,21 @@ def plot_sdata_genes(
     ----------
     sdata
         :class:`~spatialdata.SpatialData` object.
-    points_layer
+    points_name
         Points layer to plot from ``sdata.points``. The associated :class:`~dask.dataframe.DataFrame` is expected
         to contain gene information in ``name_gene_column``.
-    img_layer
+    image_name
         Optional image layer to plot from ``sdata.images`` as background.
         If ``None``, no image is rendered and ``channel`` is ignored.
     channel
-        Channel(s) of ``img_layer`` to visualize, passed to ``.pl.render_images()``.
-        Ignored if ``img_layer`` is ``None``.
+        Channel(s) of ``image_name`` to visualize, passed to ``.pl.render_images()``.
+        Ignored if ``image_name`` is ``None``.
     name_gene_column
-        Column in the ``points_layer`` that stores the gene
+        Column in the ``points_name`` that stores the gene
         names for each point (e.g. ``"gene"``).
     genes
         Gene or list of genes to visualize.
-        * If a list is provided, only points in ``points_layer`` from this list (via ``name_gene_column``) are plotted
+        * If a list is provided, only points in ``points_name`` from this list (via ``name_gene_column``) are plotted
         (as categories).
         * If ``None``, points are plotted without gene-specific coloring and
         ``color`` is used instead.
@@ -333,7 +333,7 @@ def plot_sdata_genes(
         ``genes`` is not ``None``.
     frac
         Fraction of points to randomly sample for plotting. If ``None``, all points
-        in ``points_layer`` are visualized.
+        in ``points_name`` are visualized.
     size
         Size of the points.
     alpha
@@ -346,7 +346,7 @@ def plot_sdata_genes(
         Coordinate system to plot.
     render_images_kwargs
         Keyword arguments passed to ``.pl.render_images()`` for rendering
-        ``img_layer``.
+        ``image_name``.
     show_kwargs
         Keyword arguments passed to ``.pl.show()``.
     ax
@@ -370,8 +370,8 @@ def plot_sdata_genes(
     >>>
     >>> hp.pl.plot_sdata_genes(
     ...     sdata,
-    ...     points_layer="blobs_points",
-    ...     img_layer="blobs_image",
+    ...     points_name="blobs_points",
+    ...     image_name="blobs_image",
     ...     name_gene_column="genes",
     ...     genes=["gene_b", "gene_a"],
     ...     ax=ax,
@@ -382,8 +382,8 @@ def plot_sdata_genes(
     >>> fig, ax = plt.subplots()
     >>> hp.pl.plot_sdata_genes(
     ...     sdata,
-    ...     points_layer="blobs_points",
-    ...     img_layer="blobs_image",
+    ...     points_name="blobs_points",
+    ...     image_name="blobs_image",
     ...     name_gene_column="genes",
     ...     genes="gene_b",
     ...     ax=ax,
@@ -394,8 +394,8 @@ def plot_sdata_genes(
     >>> fig, ax = plt.subplots()
     >>> hp.pl.plot_sdata_genes(
     ...     sdata,
-    ...     points_layer="blobs_points",
-    ...     img_layer="blobs_image",
+    ...     points_name="blobs_points",
+    ...     image_name="blobs_image",
     ...     name_gene_column="genes",
     ...     frac=0.5,
     ...     genes=None,
@@ -403,9 +403,9 @@ def plot_sdata_genes(
     ...     ax=ax,
     ... )
     """
-    df = sdata.points[points_layer]
+    df = sdata.points[points_name]
 
-    transformations = get_transformation(sdata.points[points_layer], get_all=True)
+    transformations = get_transformation(sdata.points[points_name], get_all=True)
     _valid_coordinate_systems = list(transformations.keys())
     if to_coordinate_system not in _valid_coordinate_systems:
         raise ValueError(
@@ -414,36 +414,36 @@ def plot_sdata_genes(
 
     # Dask dataframe operations can drop attrs; keep a copy to restore later.
     points_attrs = dict(df.attrs)
-    if img_layer is not None:
-        se = sdata.images[img_layer]
+    if image_name is not None:
+        se = sdata.images[image_name]
     else:
         se = None
     if name_gene_column not in df.columns:
         raise ValueError(
-            f"Column '{name_gene_column}' not found in 'sdata.points[{points_layer}].columns'. "
+            f"Column '{name_gene_column}' not found in 'sdata.points[{points_name}].columns'. "
             "Please specify the column in the points layer that contains the gene name via "
             "the parameter 'name_gene_column'."
         )
     # if genes is not None, we want the name_gene_column to be ploth as categorical.
     if genes is not None and df[name_gene_column].dtype != "category":
         log.info(
-            f"Column '{name_gene_column}' of 'sdata.points[{points_layer}]' is not of dtype categorical, while 'genes' is not 'None'. "
+            f"Column '{name_gene_column}' of 'sdata.points[{points_name}]' is not of dtype categorical, while 'genes' is not 'None'. "
             "We proceed with categorizing the column, so spatialdata-plot can plot the genes as categories. In case of a backed SpatialData object, "
-            f"this will not affect the underlying zarr store, only the in-memory representation of 'sdata.points[{points_layer}][{name_gene_column}]'."
+            f"this will not affect the underlying zarr store, only the in-memory representation of 'sdata.points[{points_name}][{name_gene_column}]'."
         )
         df = df.categorize(columns=[name_gene_column])
         df.attrs.update(points_attrs)
-        # sdata[points_layer] = df
+        # sdata[points_name] = df
     # if genes is None, we want the name_gene_column to NOT be plot as categorical (otherwise all genes are plot as categories, resulting in hundreds of categories,)
     if genes is None and df[name_gene_column].dtype == "category":
         log.info(
-            f"Column '{name_gene_column}' of 'sdata.points[{points_layer}]' is of dtype categorical, while 'genes' is 'None'. "
+            f"Column '{name_gene_column}' of 'sdata.points[{points_name}]' is of dtype categorical, while 'genes' is 'None'. "
             "We proceed with converting to dtype object, to prevent spatialdata-plot to plot all genes as categories. In case of a backed SpatialData object, "
-            f"this will not affect the underlying zarr store, only the in-memory representation of 'sdata.points[{points_layer}][{name_gene_column}]'."
+            f"this will not affect the underlying zarr store, only the in-memory representation of 'sdata.points[{points_name}][{name_gene_column}]'."
         )
         df[name_gene_column] = df[name_gene_column].astype(str)
         df.attrs.update(points_attrs)
-        # sdata[points_layer] = df
+        # sdata[points_name] = df
 
     # we work with the palette, to prevent spatialdata-plot to calculate color from total number of categories in the dask dataframe, which can be hundreds,
     # which results in spatialdata-plot setting all genes to grey (if nr of categories >= 103)
@@ -516,7 +516,7 @@ def plot_sdata_genes(
         if len(df) == 0:
             raise ValueError(
                 f"After applying the bounding-box query with coordinates {crd!r} "
-                f"(xmin, xmax, ymin, ymax), the points layer '{points_layer}' is no longer present "
+                f"(xmin, xmax, ymin, ymax), the points layer '{points_name}' is no longer present "
                 "in the resulting SpatialData object. Please try different parameters for 'crd'."
             )
 
@@ -531,19 +531,19 @@ def plot_sdata_genes(
             if se is None:
                 raise ValueError(
                     f"After applying the bounding-box query with coordinates {crd!r} "
-                    f"(xmin, xmax, ymin, ymax), the image layer '{img_layer}' is no longer present "
+                    f"(xmin, xmax, ymin, ymax), the image layer '{image_name}' is no longer present "
                     "in the resulting SpatialData object. Please try different parameters for 'crd'."
                 )
     if se is not None:
-        sdata_to_plot.images[img_layer] = se
-    sdata_to_plot.points[points_layer] = df
+        sdata_to_plot.images[image_name] = se
+    sdata_to_plot.points[points_name] = df
 
     if genes is not None:
-        log.info(f"Plotting column {name_gene_column} of 'sdata.points[{points_layer}]' as categorical.")
+        log.info(f"Plotting column {name_gene_column} of 'sdata.points[{points_name}]' as categorical.")
         color = name_gene_column
-    if img_layer is None:
+    if image_name is None:
         ax = sdata_to_plot.pl.render_points(
-            points_layer,
+            points_name,
             color=color,
             alpha=alpha,
             palette=palette,
@@ -557,12 +557,12 @@ def plot_sdata_genes(
     else:
         ax = (
             sdata_to_plot.pl.render_images(
-                img_layer,
+                image_name,
                 channel=channel,
                 **render_images_kwargs,
             )
             .pl.render_points(
-                points_layer,
+                points_name,
                 color=color,
                 alpha=alpha,
                 palette=palette,

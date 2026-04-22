@@ -48,22 +48,22 @@ def _check_backed_zarr_2(sdata: SpatialData) -> Path:
     return Path(sdata.path).resolve()
 
 
-def _validate_ilastik_input_layers(sdata: SpatialData, img_layer: str, labels_layer: str) -> None:
-    image = get_dataarray(sdata, layer=img_layer)
-    labels = get_dataarray(sdata, layer=labels_layer)
+def _validate_ilastik_input_layers(sdata: SpatialData, image_name: str, labels_name: str) -> None:
+    image = get_dataarray(sdata, layer=image_name)
+    labels = get_dataarray(sdata, layer=labels_name)
 
     image_dims = tuple(str(dim) for dim in image.dims)
     labels_dims = tuple(str(dim) for dim in labels.dims)
 
     if image_dims not in (("y", "x"), ("c", "y", "x")):
         raise ValueError(
-            f"Image layer '{img_layer}' must have dims ('y', 'x') or ('c', 'y', 'x') for ilastik, "
+            f"Image layer '{image_name}' must have dims ('y', 'x') or ('c', 'y', 'x') for ilastik, "
             f"but found {image_dims}."
         )
 
     if labels_dims != ("y", "x"):
         raise ValueError(
-            f"Labels layer '{labels_layer}' must have dims ('y', 'x') for ilastik, but found {labels_dims}."
+            f"Labels layer '{labels_name}' must have dims ('y', 'x') for ilastik, but found {labels_dims}."
         )
 
     image_spatial_shape = tuple(int(image.sizes[dim]) for dim in ("y", "x"))
@@ -71,7 +71,7 @@ def _validate_ilastik_input_layers(sdata: SpatialData, img_layer: str, labels_la
 
     if image_spatial_shape != labels_spatial_shape:
         raise ValueError(
-            f"Image layer '{img_layer}' and labels layer '{labels_layer}' must have the same spatial shape for ilastik, "
+            f"Image layer '{image_name}' and labels layer '{labels_name}' must have the same spatial shape for ilastik, "
             f"but found {image_spatial_shape} and {labels_spatial_shape}."
         )
 
@@ -292,22 +292,22 @@ def _map_instance_ids_to_prediction_label(
 
 def _create_adata_from_labels_layer(
     sdata: SpatialData,
-    labels_layer: str,
+    labels_name: str,
     instance_key: str,
     region_key: str,
 ) -> AnnData:
-    instance_ids = da.unique(get_dataarray(sdata, layer=labels_layer).data)
+    instance_ids = da.unique(get_dataarray(sdata, layer=labels_name).data)
     instance_ids = np.asarray(instance_ids.compute())
     instance_ids = instance_ids[instance_ids != 0]
 
     obs = pd.DataFrame(
         {
             instance_key: instance_ids.astype(np.int64),
-            region_key: pd.Categorical([labels_layer] * len(instance_ids)),
+            region_key: pd.Categorical([labels_name] * len(instance_ids)),
         }
     )
     _uuid_value = str(uuid.uuid4())[:8]
-    obs.index = obs[instance_key].map(lambda x: f"{x}_{labels_layer}_{_uuid_value}")
+    obs.index = obs[instance_key].map(lambda x: f"{x}_{labels_name}_{_uuid_value}")
     obs.index.name = None
 
     return AnnData(obs=obs)
@@ -342,10 +342,10 @@ def _map_instance_predictions_to_obs(
 
 def run_object_classification(
     sdata: SpatialData,
-    img_layer: str,
-    labels_layer: str,
-    table_layer: str | None,
-    output_layer: str,
+    image_name: str,
+    labels_name: str,
+    table_name: str | None,
+    output_table_name: str,
     path_to_classifier: str | Path,
     path_to_ilastik_executable: str | Path,
     obs_key: str = "ilastik_label",
@@ -367,14 +367,14 @@ def run_object_classification(
     ----------
     sdata
         Backed SpatialData object stored as a Zarr v2 store.
-    img_layer
+    image_name
         Image layer used as ilastik raw input.
-    labels_layer
+    labels_name
         Labels layer used as ilastik segmentation input and to map predictions back to table instances.
-    table_layer
+    table_name
         Table layer from which the annotated cells are selected. If `None`, a new table is created
-        from the non-zero instance ids in `labels_layer`.
-    output_layer
+        from the non-zero instance ids in `labels_name`.
+    output_table_name
         Output table layer receiving the predicted ilastik labels in ``adata.obs[obs_key]``.
     path_to_classifier
         Path to the ilastik project ``.ilp`` file.
@@ -389,11 +389,11 @@ def run_object_classification(
         configured in the ilastik GUI/project, i.e. choose either ``"Blockwise Object Predictions"``
         or ``"Object Predictions"`` consistently in both places.
     instance_key
-        Name of the instance id column in ``adata.obs``. Only used if ``table_layer`` is `None`.
+        Name of the instance id column in ``adata.obs``. Only used if ``table_name`` is `None`.
     region_key
-        Name of the region column in ``adata.obs``. Only used if ``table_layer`` is `None`.
+        Name of the region column in ``adata.obs``. Only used if ``table_name`` is `None`.
     overwrite
-        Whether to overwrite ``output_layer`` if it already exists.
+        Whether to overwrite ``output_table_name`` if it already exists.
     output_dir
         Directory for ilastik exported files. If ``None``, a temporary directory is created.
     runtime_dir
@@ -415,32 +415,32 @@ def run_object_classification(
     """
     store_path = _check_backed_zarr_2(sdata)
 
-    if img_layer not in sdata.images:
-        raise ValueError(f"Image layer '{img_layer}' not found in 'sdata.images'.")
-    if labels_layer not in sdata.labels:
-        raise ValueError(f"Labels layer '{labels_layer}' not found in 'sdata.labels'.")
-    _validate_ilastik_input_layers(sdata=sdata, img_layer=img_layer, labels_layer=labels_layer)
+    if image_name not in sdata.images:
+        raise ValueError(f"Image layer '{image_name}' not found in 'sdata.images'.")
+    if labels_name not in sdata.labels:
+        raise ValueError(f"Labels layer '{labels_name}' not found in 'sdata.labels'.")
+    _validate_ilastik_input_layers(sdata=sdata, image_name=image_name, labels_name=labels_name)
     if export_source not in _VALID_EXPORT_SOURCES:
         raise ValueError(f"Invalid 'export_source': {export_source!r}. Expected one of {list(_VALID_EXPORT_SOURCES)}.")
 
-    if table_layer is not None:
-        adata = ProcessTable(sdata, labels_layer=labels_layer, table_layer=table_layer)._get_adata()
+    if table_name is not None:
+        adata = ProcessTable(sdata, labels_name=labels_name, table_name=table_name)._get_adata()
         region = adata.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY]
-        instance_key = sdata[table_layer].uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY]
-        region_key = sdata[table_layer].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]
+        instance_key = sdata[table_name].uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY]
+        region_key = sdata[table_name].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]
     else:
         adata = _create_adata_from_labels_layer(
             sdata=sdata,
-            labels_layer=labels_layer,
+            labels_name=labels_name,
             instance_key=instance_key,
             region_key=region_key,
         )
-        region = [labels_layer]
+        region = [labels_name]
 
     path_to_classifier = Path(path_to_classifier).expanduser().resolve()
     ilastik_executable = _resolve_ilastik_executable(path_to_ilastik_executable).expanduser().resolve()
-    path_to_image = _get_layer_path(store_path, "images", img_layer)
-    path_to_segmentation = _get_layer_path(store_path, "labels", labels_layer)
+    path_to_image = _get_layer_path(store_path, "images", image_name)
+    path_to_segmentation = _get_layer_path(store_path, "labels", labels_name)
 
     for path in (ilastik_executable, path_to_classifier, path_to_image, path_to_segmentation):
         if not path.exists():
@@ -468,7 +468,7 @@ def run_object_classification(
     session_log_dir = runtime_dir / "Logs" / "ilastik"
     session_log_dir.mkdir(parents=True, exist_ok=True)
 
-    prediction_path = output_dir / f"{img_layer}_{labels_layer}_object_predictions" / "exported_data.h5"
+    prediction_path = output_dir / f"{image_name}_{labels_name}_object_predictions" / "exported_data.h5"
     prediction_path.parent.mkdir(parents=True, exist_ok=True)
     log_path = runtime_dir / "ilastik.log"
 
@@ -508,8 +508,8 @@ def run_object_classification(
                 f"ilastik completed without creating the expected prediction file at '{prediction_path}'."
             )
 
-        log.info(f"Mapping instance ids from labels layer '{labels_layer}' to ilastik prediction labels.")
-        segmentation = get_dataarray(sdata, layer=labels_layer).data.squeeze()
+        log.info(f"Mapping instance ids from labels layer '{labels_name}' to ilastik prediction labels.")
+        segmentation = get_dataarray(sdata, layer=labels_name).data.squeeze()
         predictions_np = _read_ilastik_predictions(prediction_path)
         # to speed things up for large matrices, we do the remap using Dask.
         predictions = da.from_array(predictions_np, chunks=segmentation.chunks)
@@ -531,11 +531,13 @@ def run_object_classification(
             raise_on_unmapped_instance=raise_on_unmapped_instance,
         )
 
-        log.info(f"Writing updated table layer '{output_layer}' with ilastik predictions in adata.obs['{obs_key}'].")
+        log.info(
+            f"Writing updated table layer '{output_table_name}' with ilastik predictions in adata.obs['{obs_key}']."
+        )
         return add_table_layer(
             sdata,
             adata=adata,
-            output_layer=output_layer,
+            output_table_name=output_table_name,
             region=region,
             instance_key=instance_key,
             region_key=region_key,

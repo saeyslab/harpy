@@ -47,7 +47,7 @@ def macsima_example() -> SpatialData:
     sdata = add_image_layer(
         sdata,
         arr=sdata["HumanLiverH35"].data,
-        output_layer="HumanLiverH35",
+        output_image_name="HumanLiverH35",
         c_coords=new_c_coords,
         transformations=get_transformation(sdata["HumanLiverH35"], get_all=True),
         overwrite=True,

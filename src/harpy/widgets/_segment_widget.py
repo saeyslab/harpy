@@ -152,11 +152,11 @@ def segment_widget(
             log.info(f"Adding {layer_name}")
 
         if pipeline.cfg.segmentation.expand_radius:
-            shapes_layer = f"expanded_cells_shapes_{pipeline.cfg.segmentation.expand_radius}"
+            shapes_name = f"expanded_cells_shapes_{pipeline.cfg.segmentation.expand_radius}"
         else:
-            shapes_layer = pipeline.cfg.segmentation.output_shapes_layer
+            shapes_name = pipeline.cfg.segmentation.output_shapes_name
 
-        polygons = _translate_polygons(sdata.shapes[shapes_layer].copy(), to_coordinate_system="global")
+        polygons = _translate_polygons(sdata.shapes[shapes_name].copy(), to_coordinate_system="global")
 
         polygons = utils._get_polygons_in_napari_format(df=polygons)
 

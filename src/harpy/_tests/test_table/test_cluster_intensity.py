@@ -8,20 +8,20 @@ from harpy.utils._keys import _CELLSIZE_KEY
 def test_cluster_intensity(sdata_pixie):
     sdata = sdata_pixie
 
-    img_layer = ["raw_image_fov0", "raw_image_fov1"]
-    labels_layer = ["label_whole_fov0", "label_whole_fov1"]
-    table_layer = "table_intensities"
+    image_name = ["raw_image_fov0", "raw_image_fov1"]
+    labels_name = ["label_whole_fov0", "label_whole_fov1"]
+    table_name = "table_intensities"
     to_coordinate_system = ["fov0", "fov1"]
     cluster_key = "cluster_id"
 
     for _img_layer, _labels_layer, _to_coordinate_system in zip(
-        img_layer, labels_layer, to_coordinate_system, strict=True
+        image_name, labels_name, to_coordinate_system, strict=True
     ):
         sdata = allocate_intensity(
             sdata,
-            img_layer=_img_layer,
-            labels_layer=_labels_layer,
-            output_layer=table_layer,
+            image_name=_img_layer,
+            labels_name=_labels_layer,
+            output_table_name=table_name,
             mode="mean",
             to_coordinate_system=_to_coordinate_system,
             append=True,
@@ -29,36 +29,36 @@ def test_cluster_intensity(sdata_pixie):
         )
 
     # add a dummy cluster id
-    n_obs = sdata[table_layer].shape[0]
+    n_obs = sdata[table_name].shape[0]
     RNG = np.random.default_rng(seed=42)
-    sdata[table_layer].obs[cluster_key] = RNG.choice(range(10), size=n_obs)
-    sdata[table_layer].obs[cluster_key] = sdata[table_layer].obs[cluster_key].astype("category")
+    sdata[table_name].obs[cluster_key] = RNG.choice(range(10), size=n_obs)
+    sdata[table_name].obs[cluster_key] = sdata[table_name].obs[cluster_key].astype("category")
 
     sdata = cluster_intensity(
         sdata,
-        table_layer=table_layer,
-        labels_layer=labels_layer,
+        table_name=table_name,
+        labels_name=labels_name,
         cluster_key=cluster_key,
         cluster_key_uns=f"{cluster_key}_weighted_intensity",
-        output_layer=table_layer,
+        output_table_name=table_name,
         instance_size_key=_CELLSIZE_KEY,
     )
 
-    assert f"{cluster_key}_weighted_intensity" in sdata[table_layer].uns
+    assert f"{cluster_key}_weighted_intensity" in sdata[table_name].uns
 
-    df_calculated = sdata[table_layer].uns[f"{cluster_key}_weighted_intensity"]
+    df_calculated = sdata[table_name].uns[f"{cluster_key}_weighted_intensity"]
 
-    expected_columns = set(sdata[table_layer].var_names) | {cluster_key}
+    expected_columns = set(sdata[table_name].var_names) | {cluster_key}
     assert set(df_calculated.columns) == expected_columns
     assert df_calculated.shape == (
-        sdata[table_layer].obs[cluster_key].cat.categories.size,
-        sdata[table_layer].shape[1] + 1,  # +1 because cluster id also in columns
+        sdata[table_name].obs[cluster_key].cat.categories.size,
+        sdata[table_name].shape[1] + 1,  # +1 because cluster id also in columns
     )
 
     # check if we calculated weighted average correctly
-    df_test = sdata[table_layer].to_df()
-    df_test[_CELLSIZE_KEY] = sdata[table_layer].obs[_CELLSIZE_KEY]
-    df_test[cluster_key] = sdata[table_layer].obs[cluster_key]
+    df_test = sdata[table_name].to_df()
+    df_test[_CELLSIZE_KEY] = sdata[table_name].obs[_CELLSIZE_KEY]
+    df_test[cluster_key] = sdata[table_name].obs[cluster_key]
     data = df_test[df_test[cluster_key] == 5]["HLADR"].values
     weight = df_test[df_test[cluster_key] == 5][_CELLSIZE_KEY].values
 
@@ -71,7 +71,7 @@ def test_cluster_intensity(sdata_pixie):
 
     hp.pl.cluster_intensity_heatmap(
         sdata,
-        table_layer=table_layer,
+        table_name=table_name,
         cluster_key=cluster_key,
         z_score=True,
         figsize=(10, 6),

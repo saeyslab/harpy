@@ -68,25 +68,25 @@ def _get_translation(spatial_image: DataArray, to_coordinate_system: str = "glob
 
 
 def _precondition(
-    sdata, img_layer: str, labels_layer: str, to_coordinate_system: str = "global"
+    sdata, image_name: str, labels_name: str, to_coordinate_system: str = "global"
 ) -> tuple[DataArray, DataArray]:
-    """Helper function that gets highest resolution `img_layer` and `labels_layer`, and checks that `img_layer` and `labels_layer` are co-registered."""
-    if img_layer not in sdata.images:
+    """Helper function that gets highest resolution `image_name` and `labels_name`, and checks that `image_name` and `labels_name` are co-registered."""
+    if image_name not in sdata.images:
         raise ValueError(
-            f"image layer with name '{img_layer}' not found in sdata.images. Please choose from: {[*sdata.images]}."
+            f"image layer with name '{image_name}' not found in sdata.images. Please choose from: {[*sdata.images]}."
         )
-    if labels_layer not in sdata.labels:
+    if labels_name not in sdata.labels:
         raise ValueError(
-            f"labels layer with name '{labels_layer}' not found in sdata.labels. Please choose from: {[*sdata.labels]}."
+            f"labels layer with name '{labels_name}' not found in sdata.labels. Please choose from: {[*sdata.labels]}."
         )
-    se_image = _get_spatial_element(sdata, layer=img_layer)
-    se_labels = _get_spatial_element(sdata, layer=labels_layer)
+    se_image = _get_spatial_element(sdata, layer=image_name)
+    se_labels = _get_spatial_element(sdata, layer=labels_name)
 
     if se_image.data.shape[1:] != se_labels.data.shape:
         raise ValueError(
             "Only arrays with same spatial shape are currently supported, "
-            f"but image layer with name {img_layer} has shape {se_image.data.shape}, "
-            f"while labels layer with name {labels_layer} has shape {se_labels.data.shape}."
+            f"but image layer with name {image_name} has shape {se_image.data.shape}, "
+            f"while labels layer with name {labels_name} has shape {se_labels.data.shape}."
         )
 
     t1x, t1y = _get_translation(se_image, to_coordinate_system=to_coordinate_system)
@@ -94,8 +94,8 @@ def _precondition(
 
     if (t1x, t1y) != (t2x, t2y):
         raise ValueError(
-            f"image layer with name {img_layer} should "
-            f"be registered to labels layer with name {labels_layer} in coordinate system {to_coordinate_system}."
+            f"image layer with name {image_name} should "
+            f"be registered to labels layer with name {labels_name} in coordinate system {to_coordinate_system}."
         )
     return se_image, se_labels
 
@@ -244,7 +244,7 @@ def _fix_dimensions(
 def add_image_layer(
     sdata: SpatialData,
     arr: Array,
-    output_layer: str,
+    output_image_name: str,
     dims: tuple[str, ...] | None = None,
     chunks: str | tuple[int, ...] | int | None = None,
     transformations: MappingToCoordinateSystem_t | None = None,
@@ -265,16 +265,16 @@ def add_image_layer(
         The SpatialData object to which the new image layer will be added.
     arr
         The array containing the image data to be added.
-    output_layer
-        The name of the output layer where the image data will be stored.
+    output_image_name
+        The name of the output image element where the image data will be stored.
     dims
         A tuple specifying the dimensions of the image data (e.g., ("c", "z", "y", "x")). If None, defaults will be inferred.
     chunks
         Specification for chunking the data.
     transformations
-        Transformations that will be added to resulting `output_layer`.
+        Transformations that will be added to resulting `output_image_name`.
     scale_factors
-        Scale factors to apply for multiscale data. If specified `output_layer` will be multiscale.
+        Scale factors to apply for multiscale data. If specified `output_image_name` will be multiscale.
     c_coords
         Names of the channels. If None, channel names will be named sequentially as 0,1,...
     overwrite
@@ -288,7 +288,7 @@ def add_image_layer(
     sdata = manager.add_layer(
         sdata,
         arr=arr,
-        output_layer=output_layer,
+        element_name=output_image_name,
         dims=dims,
         chunks=chunks,
         transformations=transformations,
@@ -303,7 +303,7 @@ def add_image_layer(
 def add_labels_layer(
     sdata: SpatialData,
     arr: Array,
-    output_layer: str,
+    output_labels_name: str,
     dims: tuple[str, ...] | None = None,
     chunks: str | tuple[int, ...] | int | None = None,
     transformations: MappingToCoordinateSystem_t | None = None,
@@ -323,18 +323,18 @@ def add_labels_layer(
         The SpatialData object to which the new labels layer will be added.
     arr
         The array containing the labels data to be added. Should be of type int.
-    output_layer
-        The name of the output layer where the labels data will be stored.
+    output_labels_name
+        The name of the output labels element where the labels data will be stored.
     dims
         A tuple specifying the dimensions of the labels data (e.g., (""z", "y", "x")). If None, defaults will be inferred.
     chunks
         Specification for chunking the data.
     transformations
-        Transformations that will be added to resulting `output_layer`.
+        Transformations that will be added to resulting `output_labels_name`.
     scale_factors
-        Scale factors to apply for multiscale data. If specified `output_layer` will be multiscale
+        Scale factors to apply for multiscale data. If specified `output_labels_name` will be multiscale
     overwrite
-        If True, overwrites the `output_layer` if it already exists in `sdata`.
+        If True, overwrites the `output_labels_name` if it already exists in `sdata`.
 
     Returns
     -------
@@ -344,7 +344,7 @@ def add_labels_layer(
     sdata = manager.add_layer(
         sdata,
         arr=arr,
-        output_layer=output_layer,
+        element_name=output_labels_name,
         dims=dims,
         chunks=chunks,
         transformations=transformations,

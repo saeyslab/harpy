@@ -12,7 +12,7 @@ from harpy.plot import plot_shapes
 
 def tiling_correction(
     sdata: SpatialData,
-    img_layer: tuple[str, str] = ["raw_image", "tiling_correction"],
+    image_name: tuple[str, str] = ["raw_image", "tiling_correction"],
     channel: int | Iterable[int] | None = None,
     crd: tuple[int, int, int, int] | None = None,
     figsize: tuple[int, int] | None = None,
@@ -31,7 +31,7 @@ def tiling_correction(
     ----------
     sdata
         Data containing spatial information for plotting.
-    img_layer
+    image_name
         Tuple where the first string represents the layer name for the uncorrected image and the second string
         represents the layer name for the tiling corrected image. Default is ["raw_image", "tiling_correction"].
         Images will be plotted next to each other.
@@ -57,7 +57,7 @@ def tiling_correction(
     Examples
     --------
     >>> sdata = SpatialData(...)
-    >>> tiling_correction(sdata, img_layer=["original", "corrected"], crd=(2000, 4000, 2000, 4000))
+    >>> tiling_correction(sdata, image_name=["original", "corrected"], crd=(2000, 4000, 2000, 4000))
 
     See Also
     --------
@@ -65,8 +65,8 @@ def tiling_correction(
     """
     plot_shapes(
         sdata,
-        img_layer=img_layer,
-        shapes_layer=None,
+        image_name=image_name,
+        shapes_name=None,
         channel=channel,
         crd=crd,
         figsize=figsize,

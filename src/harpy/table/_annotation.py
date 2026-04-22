@@ -23,9 +23,9 @@ from harpy.utils._keys import _ANNOTATION_KEY, _CLEANLINESS_KEY, _UNKNOWN_CELLTY
 
 def score_genes(
     sdata: SpatialData,
-    labels_layer: list[str],
-    table_layer: str,
-    output_layer: str,
+    labels_name: list[str],
+    table_name: str,
+    output_table_name: str,
     marker_genes: str | Path | pd.DataFrame,
     delimiter=",",
     row_norm: bool = False,
@@ -49,14 +49,14 @@ def score_genes(
     ----------
     sdata
         The SpatialData object.
-    labels_layer
-        The labels layer(s) of `sdata` used to select the cells via the region key in `sdata.tables[table_layer].obs`.
-        Note that if `output_layer` is equal to `table_layer` and overwrite is True,
-        cells in `sdata.tables[table_layer]` linked to other `labels_layer` (via the region key), will be removed from `sdata.tables[table_layer]`.
+    labels_name
+        The labels layer(s) of `sdata` used to select the cells via the region key in `sdata.tables[table_name].obs`.
+        Note that if `output_table_name` is equal to `table_name` and overwrite is True,
+        cells in `sdata.tables[table_name]` linked to other `labels_name` (via the region key), will be removed from `sdata.tables[table_name]`.
         If a list of labels layers is provided, they will therefore be scored together (e.g. multiple samples).
-    table_layer
+    table_name
         The table layer in `sdata` on which to perform annotation on.
-    output_layer
+    output_table_name
         The output table layer in `sdata` to which table layer with results of annotation will be written.
     marker_genes
         Path to a CSV file, or a :class:`~pandas.DataFrame` containing the marker genes.
@@ -83,7 +83,7 @@ def score_genes(
     cleanliness_key
         The column name in the `.obs` attribute of the :class:`anndata.AnnData` where we will store a score for the cleanliness of the predicted cell type.
     overwrite
-        If True, overwrites the `output_layer` if it already exists in `sdata`.
+        If True, overwrites the `output_table_name` if it already exists in `sdata`.
     **kwargs
         Additional keyword arguments passed to :func:`~scanpy.tl.score_genes`.
 
@@ -91,7 +91,7 @@ def score_genes(
     -------
     tuple:
 
-        - Updated `sdata` with in `sdata.tables[output_layer].obs` an extra column `key_added`.
+        - Updated `sdata` with in `sdata.tables[output_table_name].obs` an extra column `key_added`.
 
         - list of strings, with all celltypes that are scored (but are not in the del_celltypes list).
 
@@ -113,7 +113,7 @@ def score_genes(
         func_name="score_genes",
     )
 
-    process_table_instance = ProcessTable(sdata, labels_layer=labels_layer, table_layer=table_layer)
+    process_table_instance = ProcessTable(sdata, labels_name=labels_name, table_name=table_name)
     adata = process_table_instance._get_adata()
     # Load marker genes from csv
     if input_dict:
@@ -159,7 +159,7 @@ def score_genes(
     unique_genes = {item for sublist in genes_dict.values() for item in sublist}
     if not set(adata.var.index).intersection(unique_genes):
         raise ValueError(
-            f"No genes in provided marker genes file at '{marker_genes}' where found in attribute .var of the table layer '{table_layer}'."
+            f"No genes in provided marker genes file at '{marker_genes}' where found in attribute .var of the table layer '{table_name}'."
         )
 
     # Score all cells for all celltypes
@@ -195,8 +195,8 @@ def score_genes(
     sdata = add_table_layer(
         sdata,
         adata=adata,
-        output_layer=output_layer,
-        region=process_table_instance.labels_layer,
+        output_table_name=output_table_name,
+        region=process_table_instance.labels_name,
         instance_key=process_table_instance.instance_key,
         region_key=process_table_instance.region_key,
         overwrite=overwrite,
@@ -207,9 +207,9 @@ def score_genes(
 
 def score_genes_iter(
     sdata: SpatialData,
-    labels_layer: list[str],
-    table_layer: str,
-    output_layer: str,
+    labels_name: list[str],
+    table_name: str,
+    output_table_name: str,
     marker_genes: str | Path | pd.DataFrame,
     delimiter: str = ",",
     min_score: Literal["Zero", "Quantile", None] = "Zero",
@@ -255,15 +255,15 @@ def score_genes_iter(
     ----------
     sdata
         The :class:`~SpatialData` object.
-    labels_layer
-        The labels layer(s) of `sdata` used to select the cells via the region key in `sdata.tables[table_layer].obs`.
-        Note that if `output_layer` is equal to `table_layer` and overwrite is True,
-        cells in `sdata.tables[table_layer]` linked to other `labels_layer` (via the region key), will be removed from `sdata.tables[table_layer]`.
+    labels_name
+        The labels layer(s) of `sdata` used to select the cells via the region key in `sdata.tables[table_name].obs`.
+        Note that if `output_table_name` is equal to `table_name` and overwrite is True,
+        cells in `sdata.tables[table_name]` linked to other `labels_name` (via the region key), will be removed from `sdata.tables[table_name]`.
         If a list of labels layers is provided, they will therefore be scored together (e.g. multiple samples).
-    table_layer
+    table_name
         The table layer in `sdata` on which to perform annotation on. We assume the data is already preprocessed by e.g. :func:`~harpy.tb.preprocess_transcriptomics`.
         Features should all have approximately same variance.
-    output_layer
+    output_table_name
         The output table layer in `sdata` to which table layer with results of annotation will be written.
     marker_genes
         Path to the CSV file containing the marker genes or a pandas dataframe.
@@ -298,7 +298,7 @@ def score_genes_iter(
     cleanliness_key
         The column name in the `.obs` attribute of the :class:`anndata.AnnData` where we will store a score for the cleanliness of the predicted cell type.
     overwrite
-        If True, overwrites the `output_layer` if it already exists in `sdata`.
+        If True, overwrites the `output_table_name` if it already exists in `sdata`.
 
     Returns
     -------
@@ -334,7 +334,7 @@ def score_genes_iter(
     kwargs["scaling"] = scaling
     kwargs["scale_score_p"] = scale_score_p
 
-    process_table_instance = ProcessTable(sdata, labels_layer=labels_layer, table_layer=table_layer)
+    process_table_instance = ProcessTable(sdata, labels_name=labels_name, table_name=table_name)
     adata = process_table_instance._get_adata()
 
     adata, celltypes_scored, celltypes_all = _annotate_celltype_iter(
@@ -356,8 +356,8 @@ def score_genes_iter(
     sdata = add_table_layer(
         sdata,
         adata=adata,
-        output_layer=output_layer,
-        region=process_table_instance.labels_layer,
+        output_table_name=output_table_name,
+        region=process_table_instance.labels_name,
         instance_key=process_table_instance.instance_key,
         region_key=process_table_instance.region_key,
         overwrite=overwrite,
@@ -694,9 +694,9 @@ def _annotate_celltype_weighted(
 
 def cluster_cleanliness(
     sdata: SpatialData,
-    labels_layer: list[str],
-    table_layer: str,
-    output_layer: str,
+    labels_name: list[str],
+    table_name: str,
+    output_table_name: str,
     celltypes: list[str],
     celltype_indexes: dict[str, int] | None = None,
     colors: list[str] | None = None,
@@ -718,14 +718,14 @@ def cluster_cleanliness(
     ----------
     sdata
         Data containing spatial information.
-    labels_layer
-        The labels layer(s) of `sdata` used to select the cells via the region key in `sdata.tables[table_layer].obs`.
-        Note that if `output_layer` is equal to `table_layer` and overwrite is True,
-        cells in `sdata.tables[table_layer]` linked to other `labels_layer` (via the region key), will be removed from `sdata.tables[table_layer]`.
+    labels_name
+        The labels layer(s) of `sdata` used to select the cells via the region key in `sdata.tables[table_name].obs`.
+        Note that if `output_table_name` is equal to `table_name` and overwrite is True,
+        cells in `sdata.tables[table_name]` linked to other `labels_name` (via the region key), will be removed from `sdata.tables[table_name]`.
         If a list of labels layers is provided, they will therefore be scored together (e.g. multiple samples).
-    table_layer
+    table_name
         The table layer in `sdata` on which to perform cleaning on.
-    output_layer
+    output_table_name
         The output table layer in `sdata` to which table layer with results of cleaned annotations will be written.
     celltypes
         List of celltypes that you want to use for annotation, can be a subset of what is available in the `.obs` attribute of the corresponding table.
@@ -746,7 +746,7 @@ def cluster_cleanliness(
     cleanliness_key
         The column name in the `.obs` attribute of the :class:`anndata.AnnData` where we will store a score for the cleanliness of the predicted cell type.
     overwrite
-        If True, overwrites the `output_layer` if it already exists in `sdata`.
+        If True, overwrites the `output_table_name` if it already exists in `sdata`.
 
     Returns
     -------
@@ -760,7 +760,7 @@ def cluster_cleanliness(
     --------
     harpy.tb.score_genes : score genes using :func:`~scanpy.tl.score_genes`.
     """
-    process_table_instance = ProcessTable(sdata, labels_layer=labels_layer, table_layer=table_layer)
+    process_table_instance = ProcessTable(sdata, labels_name=labels_name, table_name=table_name)
     adata = process_table_instance._get_adata()
     celltypes = np.array(sorted(celltypes), dtype=str)
     color_dict = None
@@ -815,8 +815,8 @@ def cluster_cleanliness(
     sdata = add_table_layer(
         sdata,
         adata=adata,
-        output_layer=output_layer,
-        region=process_table_instance.labels_layer,
+        output_table_name=output_table_name,
+        region=process_table_instance.labels_name,
         instance_key=process_table_instance.instance_key,
         region_key=process_table_instance.region_key,
         overwrite=overwrite,

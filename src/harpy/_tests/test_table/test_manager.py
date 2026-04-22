@@ -20,7 +20,7 @@ def test_add_table_layer(sdata_transcripts: SpatialData, recwarn, is_backed):
     sdata_transcripts = add_table_layer(
         sdata_transcripts,
         adata=adata,
-        output_layer="table_transcriptomics",
+        output_table_name="table_transcriptomics",
         instance_key=_INSTANCE_KEY,
         region_key=_REGION_KEY,
         region=adata.obs[_REGION_KEY].cat.categories.to_list(),
@@ -65,7 +65,7 @@ def test_add_table_layer_change_region_instance_keys(sdata_transcripts: SpatialD
     sdata_transcripts = add_table_layer(
         sdata_transcripts,
         adata=adata,
-        output_layer="table_transcriptomics",
+        output_table_name="table_transcriptomics",
         instance_key=new_instance_key,
         region_key=new_region_key,
         region=adata.obs[new_region_key].cat.categories.to_list(),
@@ -102,7 +102,7 @@ def test_add_table_layer_not_annotating(sdata_transcripts: SpatialData, is_backe
     sdata_transcripts = add_table_layer(
         sdata_transcripts,
         adata=adata,
-        output_layer="table_transcriptomics",
+        output_table_name="table_transcriptomics",
         region=None,  # table is not annotating a region
         overwrite=True,
     )
@@ -116,7 +116,7 @@ def test_add_new_backed_table_layer_does_not_warn_about_missing_regions(sdata_tr
     sdata_transcripts = add_table_layer(
         sdata_transcripts,
         adata=adata,
-        output_layer="table_transcriptomics_copy",
+        output_table_name="table_transcriptomics_copy",
         instance_key=_INSTANCE_KEY,
         region_key=_REGION_KEY,
         region=adata.obs[_REGION_KEY].cat.categories.to_list(),

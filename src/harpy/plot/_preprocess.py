@@ -9,7 +9,7 @@ from harpy.utils._keys import _CELLSIZE_KEY
 
 def preprocess_transcriptomics(
     sdata: SpatialData,
-    table_layer: str = "table_transcriptomics",
+    table_name: str = "table_transcriptomics",
     instance_size_key: str = _CELLSIZE_KEY,
     bins_total_counts: int | None = 55,
     bins_n_genes_by_counts: int | None = 55,
@@ -25,7 +25,7 @@ def preprocess_transcriptomics(
     ----------
     sdata
         SpatialData object containing the spatial data and annotations.
-    table_layer
+    table_name
         The table layer in `sdata`.
     instance_size_key
         The key in the :class:`~anndata.AnnData` table `.obs` that holds the size of the instances.
@@ -43,7 +43,7 @@ def preprocess_transcriptomics(
     _, axs = plt.subplots(1, 2, figsize=(10, 4))
     metric_histogram(
         sdata,
-        table_layer=table_layer,
+        table_name=table_name,
         column="total_counts",
         display_column="Total Counts per Cell",
         ax=axs[0],
@@ -55,7 +55,7 @@ def preprocess_transcriptomics(
     )
     metric_histogram(
         sdata,
-        table_layer=table_layer,
+        table_name=table_name,
         column="n_genes_by_counts",
         display_column="Detected Genes per Cell",
         dataframe="obs",
@@ -74,7 +74,7 @@ def preprocess_transcriptomics(
 
     obs_scatter(
         sdata,
-        table_layer=table_layer,
+        table_name=table_name,
         column_x=instance_size_key,
         column_y="total_counts",
         display_column_x=instance_size_key,

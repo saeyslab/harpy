@@ -12,9 +12,9 @@ from harpy.utils._keys import _CELLSIZE_KEY, _RAW_COUNTS_KEY, ClusteringKey
 
 def weighted_channel_expression(
     sdata: SpatialData,
-    table_layer_cell_clustering: str,
-    table_layer_pixel_cluster_intensity: str,
-    output_layer: str,
+    cell_clustering_table_name: str,
+    table_name_pixel_cluster_intensity: str,
+    output_table_name: str,
     clustering_key: ClusteringKey = ClusteringKey._METACLUSTERING_KEY,
     instance_size_key: str = _CELLSIZE_KEY,
     raw_counts_key: str = _RAW_COUNTS_KEY,
@@ -24,11 +24,11 @@ def weighted_channel_expression(
     """
     Calculation of weighted channel expression in the context of cell clustering.
 
-    Calculates the average channel expression (via `table_layer_pixel_cluster_intensity`) for each cell weighted by pixel SOM/META cluster count (via `table_layer_cell_clustering`).
+    Calculates the average channel expression (via `table_name_pixel_cluster_intensity`) for each cell weighted by pixel SOM/META cluster count (via `cell_clustering_table_name`).
     Values are normalized by the size of the cell.
 
-    Average marker expression for each cell weighted by pixel cluster count is added to `sdata.tables[output_layer].obs`.
-    Mean over the obtained cell clusters (both SOM and meta clusters) of the average marker expression for each cell weighted by pixel cluster count is added to `sdata.tables[output_layer].uns`.
+    Average marker expression for each cell weighted by pixel cluster count is added to `sdata.tables[output_table_name].obs`.
+    Mean over the obtained cell clusters (both SOM and meta clusters) of the average marker expression for each cell weighted by pixel cluster count is added to `sdata.tables[output_table_name].uns`.
 
     This function should be run after running `harpy.tb.flowsom` and `harpy.tb.cluster_intensity`.
 
@@ -36,26 +36,26 @@ def weighted_channel_expression(
     ----------
     sdata
         The input SpatialData object containing the necessary data tables.
-    table_layer_cell_clustering
+    cell_clustering_table_name
         The name of the table layer in `sdata` where FlowSOM cell clustering results are stored (obtained via 'harpy.tb.flowsom').
         This layer should contain the cell cluster labels derived from the FlowSOM clustering algorithm and the non-normalized pixel cluster counts in `.layers[raw_counts_key]`, as obtained after running `harpy.tb.flowsom`.
-    table_layer_pixel_cluster_intensity
+    table_name_pixel_cluster_intensity
         The name of the table layer in `sdata` containing pixel cluster intensity values as obtained by running `harpy.tb.cluster_intensity`.
         These intensities are used to calculate the weighted expression of each channel for the cell clusters.
-    output_layer
+    output_table_name
         The name of the output table layer in `sdata` where the results of the weighted channel expression computation will be stored.
     clustering_key
         Specifies the key that was used for pixel clustering, indicating whether metaclustering or SOM clustering labels were used as input for flowsom cell clustering (`harpy.tb.flowsom`).
     instance_size_key
-        The key in the `.obs` attribute of the :class:`~anndata.AnnData` table at slot 'table_layer_cell_clustering' that holds the size of the instances.
+        The key in the `.obs` attribute of the :class:`~anndata.AnnData` table at slot 'cell_clustering_table_name' that holds the size of the instances.
     raw_counts_key
-        The name of the :class:`~anndata.AnnData` layer, at slot 'table_layer_cell_clustering' of `sdata`, where the non-preprocessed counts are stored, see :func:`~harpy.tb.flowsom`.
+        The name of the :class:`~anndata.AnnData` layer, at slot 'cell_clustering_table_name' of `sdata`, where the non-preprocessed counts are stored, see :func:`~harpy.tb.flowsom`.
     overwrite
-        If True, overwrites any existing data in the `output_layer` if it already exists.
+        If True, overwrites any existing data in the `output_table_name` if it already exists.
 
     Returns
     -------
-    The updated `sdata` object with the results of the weighted channel expression added to the specified `output_layer`.
+    The updated `sdata` object with the results of the weighted channel expression added to the specified `output_table_name`.
 
     See Also
     --------
@@ -63,12 +63,12 @@ def weighted_channel_expression(
     harpy.tb.flowsom : flowsom cell clustering
     harpy.tb.cluster_intensity : calculates average intensity SOM/meta cluster (pixel clusters).
     """
-    # subset over all _labels_layer in 'table_layer_cell_clustering'
-    _labels_layer = sdata[table_layer_cell_clustering].uns[TableModel.ATTRS_KEY][
+    # subset over all _labels_layer in 'cell_clustering_table_name'
+    _labels_name = sdata[cell_clustering_table_name].uns[TableModel.ATTRS_KEY][
         TableModel.REGION_KEY
     ]  # this is always a list
     process_table_clustering = ProcessTable(
-        sdata, labels_layer=_labels_layer, table_layer=table_layer_cell_clustering
+        sdata, labels_name=_labels_name, table_name=cell_clustering_table_name
     )  # get all of the labels layers, to keep API not too complex, do not allow subsetting labels layers
     adata_cell_clustering = process_table_clustering._get_adata()
     missing_keys = [
@@ -78,14 +78,14 @@ def weighted_channel_expression(
     ]
     assert not missing_keys, (
         "Please first run 'harpy.tb.flosom' before running this function. "
-        f"Missing keys in '.obs' of table layer '{table_layer_cell_clustering}' are: {', '.join(missing_keys)}."
+        f"Missing keys in '.obs' of table layer '{cell_clustering_table_name}' are: {', '.join(missing_keys)}."
     )
     index_columns = adata_cell_clustering.to_df().columns.astype(int)
     index_columns.name = None
 
     cell_counts_matrix = adata_cell_clustering.layers[raw_counts_key]
 
-    process_table_intensity = ProcessTable(sdata, labels_layer=None, table_layer=table_layer_pixel_cluster_intensity)
+    process_table_intensity = ProcessTable(sdata, labels_name=None, table_name=table_name_pixel_cluster_intensity)
     adata_cluster_intensity = process_table_intensity._get_adata()
 
     if clustering_key.value == ClusteringKey._METACLUSTERING_KEY.value:
@@ -102,7 +102,7 @@ def weighted_channel_expression(
         )
 
     assert df_intensity.shape[0] == cell_counts_matrix.shape[1], (
-        f"Average intensities for {clustering_key} provided via table '{table_layer_pixel_cluster_intensity}' should contain as many rows as there are columns in table '{table_layer_cell_clustering}'."
+        f"Average intensities for {clustering_key} provided via table '{table_name_pixel_cluster_intensity}' should contain as many rows as there are columns in table '{cell_clustering_table_name}'."
     )
     df_intensity.index.name = None
     assert_index_equal(df_intensity.index.sort_values(), index_columns.sort_values())
@@ -127,20 +127,20 @@ def weighted_channel_expression(
             df_cluster_mean = pd.merge(df_cluster_mean, mapping, how="left", left_index=True, right_index=True)
         _uns_name = f"{_key}_{adata_cluster_intensity.var_names.name}"
         log.info(
-            f"Adding mean over obtained cell clusters '({_key})' of the average marker expression for each cell weighted by pixel cluster count to '.uns[ '{_uns_name}' ]' of table layer '{output_layer}'"
+            f"Adding mean over obtained cell clusters '({_key})' of the average marker expression for each cell weighted by pixel cluster count to '.uns[ '{_uns_name}' ]' of table layer '{output_table_name}'"
         )
         adata_cell_clustering.uns[_uns_name] = df_cluster_mean
 
     log.info(
-        f"Adding average marker expression for each cell weighted by pixel cluster count to '.obs' of table layer '{output_layer}'"
+        f"Adding average marker expression for each cell weighted by pixel cluster count to '.obs' of table layer '{output_table_name}'"
     )
     adata_cell_clustering.obs = pd.concat([adata_cell_clustering.obs, df], axis=1)
 
     sdata = add_table_layer(
         sdata,
         adata=adata_cell_clustering,
-        output_layer=output_layer,
-        region=process_table_clustering.labels_layer,
+        output_table_name=output_table_name,
+        region=process_table_clustering.labels_name,
         instance_key=process_table_clustering.instance_key,
         region_key=process_table_clustering.region_key,
         overwrite=overwrite,

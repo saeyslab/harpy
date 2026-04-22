@@ -25,7 +25,7 @@ def test_featurize(sdata_transcripts_no_backed: SpatialData):
     sdata = add_image_layer(
         sdata,
         arr=da.concatenate([image, image, image, image], axis=0),
-        output_layer="raw_image",
+        output_image_name="raw_image",
         overwrite=True,
     )
     image = sdata["raw_image"].data[:, None, ...].rechunk((3, 1, chunksize_spatial, chunksize_spatial))
@@ -61,7 +61,7 @@ def test_extract_instances(sdata_transcripts_no_backed, extract_mask):
     sdata = add_image_layer(
         sdata,
         arr=da.concatenate([image, image, image, image], axis=0),
-        output_layer="raw_image",
+        output_image_name="raw_image",
         overwrite=True,
     )
     image = sdata["raw_image"].data[:, None, ...].rechunk((3, 1, chunksize_spatial, chunksize_spatial))

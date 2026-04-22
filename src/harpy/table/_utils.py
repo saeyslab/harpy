@@ -20,5 +20,5 @@ def _sanity_check_append_region(adata: AnnData, region_key: str, instance_key: s
     if region in adata.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY]:
         raise ValueError(
             f"'{region}' already exists as a region in the AnnData object you wish to append to. "
-            "Please choose a different labels layer, choose a different 'output_layer' or set append to False and overwrite to True to overwrite the existing table."
+            "Please choose a different labels layer, choose a different 'output_table_name' or set append to False and overwrite to True to overwrite the existing table."
         )

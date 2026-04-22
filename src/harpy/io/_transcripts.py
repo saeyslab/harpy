@@ -17,7 +17,7 @@ from harpy.utils._keys import _GENES_KEY
 def read_resolve_transcripts(
     sdata: SpatialData,
     path_count_matrix: str | Path,
-    output_layer: str = "transcripts",
+    output_points_name: str = "transcripts",
     to_coordinate_system: str = "global",
     to_micron_coordinate_system: str | None = "micron",
     pixel_size: float | None = 0.138,
@@ -33,17 +33,17 @@ def read_resolve_transcripts(
     path_count_matrix
         Path to the file containing the transcripts information specific to Resolve.
         Expected to contain x, y coordinates and a gene name.
-    output_layer: str, default='transcripts'.
+    output_points_name: str, default='transcripts'.
         Name of the points layer of the SpatialData object to which the transcripts will be added.
     to_coordinate_system
-        Pixel coordinate system to which `output_layer` will be added.
+        Pixel coordinate system to which `output_points_name` will be added.
     to_micron_coordinate_system
-        Micron coordinate system to which `output_layer` will be added.
+        Micron coordinate system to which `output_points_name` will be added.
     pixel_size
         Size of the pixels in micron. Transcripts from Resolve Molecular Cartography are in pixels.
         By specifying 'pixel_size', we can add the micron coordinate system 'to_micron_coordinate_system'.
     overwrite
-        If True overwrites the `output_layer` (a points layer) if it already exists.
+        If True overwrites the `output_points_name` (a points layer) if it already exists.
 
     Returns
     -------
@@ -57,7 +57,7 @@ def read_resolve_transcripts(
         "delimiter": "\t",
         "header": None,
         "overwrite": overwrite,
-        "output_layer": output_layer,
+        "output_points_name": output_points_name,
         "to_coordinate_system": to_coordinate_system,
         "to_micron_coordinate_system": to_micron_coordinate_system if pixel_size is not None else None,
         "pixel_size": pixel_size,
@@ -71,7 +71,7 @@ def read_merscope_transcripts(
     sdata: SpatialData,
     path_count_matrix: str | Path,
     transform_matrix: str | Path,
-    output_layer: str = "transcripts",
+    output_points_name: str = "transcripts",
     to_coordinate_system: str = "global",
     to_micron_coordinate_system: str = "micron",
     overwrite: bool = False,
@@ -86,16 +86,16 @@ def read_merscope_transcripts(
     path_count_matrix
         Path to the file containing the transcripts information specific to Vizgen.
         Expected to contain x, y coordinates and a gene name.
-    output_layer: str, default='transcripts'.
+    output_points_name: str, default='transcripts'.
         Name of the points layer of the SpatialData object to which the transcripts will be added.
     to_coordinate_system
-        Pixel coordinate system to which `output_layer` will be added.
+        Pixel coordinate system to which `output_points_name` will be added.
     to_micron_coordinate_system
-        Micron coordinate system to which `output_layer` will be added.
+        Micron coordinate system to which `output_points_name` will be added.
     transform_matrix
         Path to the transformation matrix for the affine transformation.
     overwrite: bool, default=False
-        If True overwrites the `output_layer` (a points layer) if it already exists.
+        If True overwrites the `output_points_name` (a points layer) if it already exists.
 
     Returns
     -------
@@ -109,7 +109,7 @@ def read_merscope_transcripts(
         "delimiter": ",",
         "header": 0,
         "overwrite": overwrite,
-        "output_layer": output_layer,
+        "output_points_name": output_points_name,
         "to_coordinate_system": to_coordinate_system,
         "to_micron_coordinate_system": to_micron_coordinate_system,
     }
@@ -121,7 +121,7 @@ def read_merscope_transcripts(
 def read_stereoseq_transcripts(
     sdata: SpatialData,
     path_count_matrix: str | Path,
-    output_layer: str = "transcripts",
+    output_points_name: str = "transcripts",
     to_coordinate_system: str = "global",
     overwrite: bool = False,
 ) -> SpatialData:
@@ -135,12 +135,12 @@ def read_stereoseq_transcripts(
     path_count_matrix
         Path to the file containing the transcripts information specific to Stereoseq.
         Expected to contain x, y coordinates, gene name, and a midcount column.
-    output_layer: str, default='transcripts'.
+    output_points_name: str, default='transcripts'.
         Name of the points layer of the SpatialData object to which the transcripts will be added.
     to_coordinate_system
-        Coordinate system to which `output_layer` will be added.
+        Coordinate system to which `output_points_name` will be added.
     overwrite: bool, default=False
-        If True overwrites the `output_layer` (a points layer) if it already exists.
+        If True overwrites the `output_points_name` (a points layer) if it already exists.
 
     Returns
     -------
@@ -155,7 +155,7 @@ def read_stereoseq_transcripts(
         "delimiter": ",",
         "header": 0,
         "overwrite": overwrite,
-        "output_layer": output_layer,
+        "output_points_name": output_points_name,
         "to_coordinate_system": to_coordinate_system,
     }
 
@@ -168,7 +168,7 @@ def read_transcripts(
     path_count_matrix: str | Path,
     transform_matrix: str | Path | NDArray | None = None,
     pixel_size: int | None = None,
-    output_layer: str = "transcripts",
+    output_points_name: str = "transcripts",
     overwrite: bool = False,
     column_x: int = 0,
     column_y: int = 1,
@@ -189,7 +189,7 @@ def read_transcripts(
 
     If a transform matrix is provided an affine transformation from micron to pixels is applied to the coordinates of the transcripts.
     The transformation is applied to the dask dataframe before adding it to `sdata`.
-    The SpatialData object is augmented with a points layer named `output_layer` that contains the transcripts.
+    The SpatialData object is augmented with a points layer named `output_points_name` that contains the transcripts.
 
     Parameters
     ----------
@@ -218,10 +218,10 @@ def read_transcripts(
     pixel_size
         Size of the pixels in micron. This can only be specified if 'transform_matrix' is equal to the identity matrix or 'None' (i.e. transcripts are already in pixels).
         If 'to_micron_coordinate_system' is specified, a micron coordinate system will be added, otherwise this parameter will be ignored.
-    output_layer
+    output_points_name
         Name of the points layer of the SpatialData object to which the transcripts will be added.
     overwrite
-        If True overwrites the `output_layer` (a points layer) if it already exists.
+        If True overwrites the `output_points_name` (a points layer) if it already exists.
     column_x
         Column index of the X coordinate in the count matrix.
     column_y
@@ -246,16 +246,16 @@ def read_transcripts(
         The coordinates (in pixels) for the region of interest in the format (xmin, xmax, ymin, ymax).
         If `None`, all transcripts are considered.
     to_coordinate_system
-        Intrinsic pixel coordinate system to which `output_layer` will be added.
+        Intrinsic pixel coordinate system to which `output_points_name` will be added.
         This is the pixel coordinate system.
     to_micron_coordinate_system
-        Micron coordinate system to which `output_layer` will be added, if 'transform_matrix' is not the identity matrix, or 'pixel_size' is not 'None'.
+        Micron coordinate system to which `output_points_name` will be added, if 'transform_matrix' is not the identity matrix, or 'pixel_size' is not 'None'.
         This is the micron coordinate system.
     filter_gene_names
         Gene names that need to be filtered out (via `str.contains`), mostly control genes that were added, and which you don't want to use.
         Filtering is case insensitive.
     blocksize
-        Block size of the partions of the dask dataframe stored as `points_layer` in `sdata`.
+        Block size of the partions of the dask dataframe stored as `points_name` in `sdata`.
 
     Raises
     ------
@@ -377,7 +377,7 @@ def read_transcripts(
     sdata = add_points_layer(
         sdata,
         ddf=transformed_ddf,
-        output_layer=output_layer,
+        output_points_name=output_points_name,
         coordinates=coordinates,
         transformations={to_coordinate_system: Identity(), f"{to_micron_coordinate_system}": pixels_to_micron}
         if pixels_to_micron is not None

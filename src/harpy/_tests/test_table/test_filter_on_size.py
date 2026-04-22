@@ -5,17 +5,17 @@ from harpy.table._table import filter_on_size
 def test_filter_on_size(sdata_multi_c_no_backed):
     sdata_multi_c_no_backed = preprocess_proteomics(
         sdata_multi_c_no_backed,
-        labels_layer=["masks_whole", "masks_nuclear_aligned"],
-        table_layer="table_intensities",
-        output_layer="table_intensities_preprocessed",
+        labels_name=["masks_whole", "masks_nuclear_aligned"],
+        table_name="table_intensities",
+        output_table_name="table_intensities_preprocessed",
         overwrite=True,
     )
 
     sdata_multi_c_no_backed = filter_on_size(
         sdata_multi_c_no_backed,
-        table_layer="table_intensities_preprocessed",
-        labels_layer=["masks_whole"],
-        output_layer="table_intensities_filter",
+        table_name="table_intensities_preprocessed",
+        labels_name=["masks_whole"],
+        output_table_name="table_intensities_filter",
         min_size=100,
         max_size=100000,
         overwrite=True,
@@ -25,9 +25,9 @@ def test_filter_on_size(sdata_multi_c_no_backed):
 
     sdata_multi_c_no_backed = filter_on_size(
         sdata_multi_c_no_backed,
-        table_layer="table_intensities_preprocessed",
-        labels_layer=["masks_whole", "masks_nuclear_aligned"],
-        output_layer="table_intensities_filter",
+        table_name="table_intensities_preprocessed",
+        labels_name=["masks_whole", "masks_nuclear_aligned"],
+        output_table_name="table_intensities_filter",
         min_size=100,
         max_size=100000,
         overwrite=True,

@@ -21,7 +21,7 @@ from harpy.image._image import _fix_dimensions, add_image_layer
 def create_sdata(
     input: str | Path | np.ndarray | da.Array | list[str] | list[Path] | list[np.ndarray] | list[da.Array],
     output_path: str | Path | None = None,
-    img_layer: str = "raw_image",
+    image_name: str = "raw_image",
     chunks: str | tuple[int, int, int, int] | int | None = None,
     dims: list[str] | None = None,
     crd: tuple[int, int, int, int] | None = None,
@@ -31,7 +31,7 @@ def create_sdata(
     z_projection: bool = True,
 ) -> SpatialData:
     """
-    Convert input images or arrays into a SpatialData object with the image added as an image layer with name `img_layer`.
+    Convert input images or arrays into a SpatialData object with the image added as an image layer with name `image_name`.
 
     .. deprecated::
         `harpy.io.create_sdata` is deprecated. Prefer constructing a
@@ -85,7 +85,7 @@ def create_sdata(
         Input can also be a numpy array. In that case the dims parameter should be specified.
     output_path
         If specified, the resulting SpatialData object will be written to this path as a zarr.
-    img_layer
+    image_name
         The name of the image layer to be created in the SpatialData object.
     chunks
         If specified, the underlying dask array will be rechunked to this size.
@@ -98,7 +98,7 @@ def create_sdata(
         If specified, this region is cropped from the image, and added as image layer to the
         SpatialData object.
     to_coordinate_system
-        Coordinate system to which `img_layer` will be added.
+        Coordinate system to which `image_name` will be added.
     scale_factors
         Scale factors to apply for multiscale.
     c_coords
@@ -108,7 +108,7 @@ def create_sdata(
 
     Returns
     -------
-    The constructed SpatialData object containing image layer with name `img_layer` and dimension (c,(z),y,x)
+    The constructed SpatialData object containing image layer with name `image_name` and dimension (c,(z),y,x)
 
     Notes
     -----
@@ -128,7 +128,7 @@ def create_sdata(
         sdata = hp.im.add_image_layer(
             sdata,
             arr=image,
-            output_layer="raw_image",
+            output_image_name="raw_image",
         )
     """
     with tempfile.TemporaryDirectory() as tmp_dir:
@@ -177,7 +177,7 @@ def create_sdata(
         sdata = add_image_layer(
             sdata,
             arr=dask_array,
-            output_layer=img_layer,
+            output_image_name=image_name,
             chunks=None,  # already rechunked in previous step. Also due to possible z projection the 'chunks' dimension can mismatch 'dims' parameter
             transformations={to_coordinate_system: transformation},
             scale_factors=scale_factors,

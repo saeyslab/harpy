@@ -291,13 +291,13 @@ def xenium_human_ovarian_cancer(
 
     # 3. add cell and gene groups to the AnnData table
 
-    table_layer = f"table_{to_coordinate_system}"  # default table name when calling hp.io.xenium
+    table_name = f"table_{to_coordinate_system}"  # default table name when calling hp.io.xenium
 
     # index of adata is XeniumKeys.CELL_ID
-    adata = sdata[table_layer]
+    adata = sdata[table_name]
     if adata.obs.index.name != XeniumKeys.CELL_ID:
         raise ValueError(
-            f"Name of the index of the AnnData table with name '{table_layer}' should be {XeniumKeys.CELL_ID}, please report this bug."
+            f"Name of the index of the AnnData table with name '{table_name}' should be {XeniumKeys.CELL_ID}, please report this bug."
         )
     adata.obs.reset_index(inplace=True)
 
@@ -337,7 +337,7 @@ def xenium_human_ovarian_cancer(
     sdata = hp.tb.add_table_layer(
         sdata,
         adata=adata,
-        output_layer=table_layer,
+        output_table_name=table_name,
         region=region,
         overwrite=True,
     )

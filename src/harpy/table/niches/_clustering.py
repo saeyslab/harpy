@@ -18,10 +18,10 @@ from harpy.utils._keys import _ANNOTATION_KEY
 
 def nhood_kmeans(
     sdata: SpatialData,
-    table_layer: str,
-    output_layer: str,
+    table_name: str,
+    output_table_name: str,
     cluster_key: str = _ANNOTATION_KEY,
-    labels_layer: str | Iterable[str] | None = None,
+    labels_name: str | Iterable[str] | None = None,
     connectivity_key: str = "spatial_connectivities",
     composition_key: str = "nhood_composition",
     key_added: str = "nhood_kmeans",
@@ -35,11 +35,11 @@ def nhood_kmeans(
     Cluster cells (instances) based on neighborhood cell-type composition using KMeans.
 
     This function expects a precomputed spatial connectivity matrix in
-    `sdata.tables[table_layer].obsp[connectivity_key]` and does not calculate
+    `sdata.tables[table_name].obsp[connectivity_key]` and does not calculate
     neighbors itself.
     For example, the graph can be computed beforehand with
     :func:`squidpy.gr.spatial_neighbors` and stored in
-    `sdata.tables[table_layer].obsp[connectivity_key]`. Neighborhood
+    `sdata.tables[table_name].obsp[connectivity_key]`. Neighborhood
     cell-type fractions are then computed from that graph, stored in
     `adata.obsm[composition_key]`, and used as the feature matrix for
     :class:`~sklearn.cluster.KMeans`. The resulting niche assignments are
@@ -49,15 +49,15 @@ def nhood_kmeans(
     ----------
     sdata
         The input SpatialData object.
-    table_layer
+    table_name
         The table layer in `sdata` on which to perform niche clustering.
-    output_layer
+    output_table_name
         The output table layer in `sdata` to which the updated table layer will
         be written.
     cluster_key
         Key in `adata.obs` containing the cluster annotations used to build
         the neighborhood composition.
-    labels_layer
+    labels_name
         Optional labels layer or layers used to subset the table before
         clustering. If provided, only observations linked to these labels layers
         are considered.
@@ -94,7 +94,7 @@ def nhood_kmeans(
     nan_label
         Label assigned to isolated cells with zero graph degree.
     overwrite
-        If `True`, overwrite `output_layer` if it already exists in `sdata`.
+        If `True`, overwrite `output_table_name` if it already exists in `sdata`.
     **kwargs
         Additional keyword arguments passed to :class:`~sklearn.cluster.KMeans`.
 
@@ -102,7 +102,7 @@ def nhood_kmeans(
     -------
     The updated SpatialData object.
     """
-    process_table_instance = ProcessTable(sdata, labels_layer=labels_layer, table_layer=table_layer)
+    process_table_instance = ProcessTable(sdata, labels_name=labels_name, table_name=table_name)
     adata = process_table_instance._get_adata()
 
     if key_added in adata.obs.columns:
@@ -157,10 +157,10 @@ def nhood_kmeans(
     sdata = add_table_layer(
         sdata,
         adata=adata,
-        output_layer=output_layer,
-        region=sdata[table_layer].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY],
-        instance_key=sdata[table_layer].uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY],
-        region_key=sdata[table_layer].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY],
+        output_table_name=output_table_name,
+        region=sdata[table_name].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY],
+        instance_key=sdata[table_name].uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY],
+        region_key=sdata[table_name].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY],
         overwrite=overwrite,
     )
 
@@ -169,10 +169,10 @@ def nhood_kmeans(
 
 def nhood_lda(
     sdata: SpatialData,
-    table_layer: str,
-    output_layer: str,
+    table_name: str,
+    output_table_name: str,
     cluster_key: str = _ANNOTATION_KEY,
-    labels_layer: str | Iterable[str] | None = None,
+    labels_name: str | Iterable[str] | None = None,
     connectivity_key: str = "spatial_connectivities",
     counts_key: str = "nhood_counts",
     topic_key: str = "nhood_lda_topics",
@@ -187,11 +187,11 @@ def nhood_lda(
     Cluster cells (instances) into niche topics using LDA on neighborhood cell-type counts.
 
     This function expects a precomputed spatial connectivity matrix in
-    `sdata.tables[table_layer].obsp[connectivity_key]` and does not calculate
+    `sdata.tables[table_name].obsp[connectivity_key]` and does not calculate
     neighbors itself.
     For example, the graph can be computed beforehand with
     :func:`squidpy.gr.spatial_neighbors` and stored in
-    `sdata.tables[table_layer].obsp[connectivity_key]`.
+    `sdata.tables[table_name].obsp[connectivity_key]`.
     For each cell, the neighborhood graph is used to compute
     counts of neighboring cell types defined by `cluster_key`. These counts are
     treated as a non-negative "document-term" matrix and used to fit
@@ -212,15 +212,15 @@ def nhood_lda(
     ----------
     sdata
         The input SpatialData object.
-    table_layer
+    table_name
         The table layer in `sdata` on which to perform niche clustering.
-    output_layer
+    output_table_name
         The output table layer in `sdata` to which the updated table layer will
         be written.
     cluster_key
         Key in `adata.obs` containing the cluster annotations used to build
         the neighborhood count matrix.
-    labels_layer
+    labels_name
         Optional labels layer or layers used to subset the table before
         clustering. If provided, only observations linked to these labels layers
         are considered.
@@ -251,7 +251,7 @@ def nhood_lda(
     nan_label
         Label assigned to isolated cells with zero graph degree.
     overwrite
-        If `True`, overwrite `output_layer` if it already exists in `sdata`.
+        If `True`, overwrite `output_table_name` if it already exists in `sdata`.
     **kwargs
         Additional keyword arguments passed to
         :class:`~sklearn.decomposition.LatentDirichletAllocation`.
@@ -260,7 +260,7 @@ def nhood_lda(
     -------
     The updated SpatialData object.
     """
-    process_table_instance = ProcessTable(sdata, labels_layer=labels_layer, table_layer=table_layer)
+    process_table_instance = ProcessTable(sdata, labels_name=labels_name, table_name=table_name)
     adata = process_table_instance._get_adata()
 
     if key_added in adata.obs.columns:
@@ -321,10 +321,10 @@ def nhood_lda(
     sdata = add_table_layer(
         sdata,
         adata=adata,
-        output_layer=output_layer,
-        region=sdata[table_layer].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY],
-        instance_key=sdata[table_layer].uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY],
-        region_key=sdata[table_layer].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY],
+        output_table_name=output_table_name,
+        region=sdata[table_name].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY],
+        instance_key=sdata[table_name].uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY],
+        region_key=sdata[table_name].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY],
         overwrite=overwrite,
     )
 

@@ -28,9 +28,9 @@ from harpy.utils._transformations import _identity_check_transformations_points
 
 def allocate(
     sdata: SpatialData,
-    labels_layer: str,
-    points_layer: str = "transcripts",
-    output_layer: str = "table_transcriptomics",
+    labels_name: str,
+    points_name: str = "transcripts",
+    output_table_name: str = "table_transcriptomics",
     to_coordinate_system: str = "global",
     chunks: str | tuple[int, ...] | int | None = None,
     name_gene_column: str = _GENES_KEY,
@@ -43,36 +43,36 @@ def allocate(
     overwrite: bool = False,
 ) -> SpatialData:
     """
-    Allocates transcripts to instances via provided `labels_layer` and `points_layer` and returns updated SpatialData object with a table layer (`sdata.tables[output_layer]`) holding the :class:`anndata.AnnData` object with transcript counts.
+    Allocates transcripts to instances via provided `labels_name` and `points_name` and returns updated SpatialData object with a table layer (`sdata.tables[output_table_name]`) holding the :class:`anndata.AnnData` object with transcript counts.
 
-    It requires that `labels_layer` and `points_layer` are registered.
-    Relation between `to_coordinate_system` and `points_layer` should be a `spatialdata.transformations.Identity` transformation.
-    Relation between `to_coordinate_system` and `labels_layer` can be a `spatialdata.transformations.Identity`, `spatialdata.transformations.Translation`, or a `spatialdata.transformation.Sequence` of translations.
+    It requires that `labels_name` and `points_name` are registered.
+    Relation between `to_coordinate_system` and `points_name` should be a `spatialdata.transformations.Identity` transformation.
+    Relation between `to_coordinate_system` and `labels_name` can be a `spatialdata.transformations.Identity`, `spatialdata.transformations.Translation`, or a `spatialdata.transformation.Sequence` of translations.
 
     Parameters
     ----------
     sdata
         The SpatialData object.
-    labels_layer
+    labels_name
         The labels layer (i.e. segmentation mask) in `sdata` to be used to allocate the transcripts to cells.
-    points_layer
+    points_name
         The points layer in `sdata` that contains the transcripts.
-    output_layer
+    output_table_name
         The table layer in `sdata` in which to save the AnnData object with the transcripts counts per cell.
     to_coordinate_system
-        The coordinate system that holds `labels_layer` and `points_layer`.
+        The coordinate system that holds `labels_name` and `points_name`.
         This should be the intrinsic coordinate system in pixels.
     chunks
-        Chunk size for processing. Consider setting 'chunks' to 'None' and rechunk the 'labels_layer' to the desired chunk size on disk, e.g. with :func:`harpy.im.add_labels_layer`.
+        Chunk size for processing. Consider setting 'chunks' to 'None' and rechunk the 'labels_name' to the desired chunk size on disk, e.g. with :func:`harpy.im.add_labels_layer`.
     name_gene_column
-        Column name in the `points_layer` representing gene information.
+        Column name in the `points_name` representing gene information.
     append
-        If set to True, and the `labels_layer` does not yet exist as a `region_key` in `sdata.tables[output_layer].obs`,
+        If set to True, and the `labels_name` does not yet exist as a `region_key` in `sdata.tables[output_table_name].obs`,
         the transcripts counts obtained during the current function call will be appended (along axis=0) to any existing transcript count values.
-        within the SpatialData object's table attribute. If False, and overwrite is set to True any existing data in `sdata.tables[output_layer]` will be overwritten by the newly extracted transcripts counts.
+        within the SpatialData object's table attribute. If False, and overwrite is set to True any existing data in `sdata.tables[output_table_name]` will be overwritten by the newly extracted transcripts counts.
     update_shapes_layers
-        Whether to filter the shapes layers associated with `labels_layer`.
-        If set to `True`, cells that do not appear in resulting `output_layer` (with `region_key` equal to `labels_layer`) will be removed from the shapes layers (via `instance_key`) in the `sdata` object.
+        Whether to filter the shapes layers associated with `labels_name`.
+        If set to `True`, cells that do not appear in resulting `output_table_name` (with `region_key` equal to `labels_name`) will be removed from the shapes layers (via `instance_key`) in the `sdata` object.
         Filtered shapes will be added to `sdata` with prefix 'filtered_segmentation'.
         This parameter is deprecated, and will be removed in a future version.
     instance_key
@@ -85,11 +85,11 @@ def allocate(
     cell_index_name
         The name of the index of the resulting :class:`~anndata.AnnData` table.
     overwrite
-        If True, overwrites the `output_layer` if it already exists in `sdata`.
+        If True, overwrites the `output_table_name` if it already exists in `sdata`.
 
     Returns
     -------
-    An updated SpatialData object with an AnnData table added to `sdata.tables` at slot `output_layer`.
+    An updated SpatialData object with an AnnData table added to `sdata.tables` at slot `output_table_name`.
 
     Example
     --------
@@ -100,9 +100,9 @@ def allocate(
         # Create an AnnData table with transcript count per cell with name 'my_table'
         sdata = hp.tb.allocate(
             sdata,
-            labels_layer="labels_a1_1",
-            points_layer="points_a1_1",
-            output_layer="my_table",
+            labels_name="labels_a1_1",
+            points_name="points_a1_1",
+            output_table_name="my_table",
             to_coordinate_system="a1_1",
             overwrite=True,
         )
@@ -110,21 +110,21 @@ def allocate(
         # Append transcript count per cell from different sample to 'my_table'
         sdata = hp.tb.allocate(
             sdata,
-            labels_layer="labels_a1_2",
-            points_layer="points_a1_2",
-            output_layer="my_table",
+            labels_name="labels_a1_2",
+            points_name="points_a1_2",
+            output_table_name="my_table",
             to_coordinate_system="a1_2",
             append=True,
             overwrite=True,
         )
     """
-    if labels_layer not in [*sdata.labels]:
+    if labels_name not in [*sdata.labels]:
         raise ValueError(
-            f"Provided labels layer '{labels_layer}' not in 'sdata', please specify a labels layer from '{[*sdata.labels]}'"
+            f"Provided labels layer '{labels_name}' not in 'sdata', please specify a labels layer from '{[*sdata.labels]}'"
         )
-    ddf = sdata.points[points_layer]
+    ddf = sdata.points[points_name]
 
-    se = _get_spatial_element(sdata, layer=labels_layer)
+    se = _get_spatial_element(sdata, layer=labels_name)
 
     combined_partitions = _aggregate(
         se=se,
@@ -192,31 +192,31 @@ def allocate(
 
     adata.obs[instance_key] = adata.obs.index.astype(int)
 
-    adata.obs[region_key] = pd.Categorical([labels_layer] * len(adata.obs))
+    adata.obs[region_key] = pd.Categorical([labels_name] * len(adata.obs))
 
     _uuid_value = str(uuid.uuid4())[:8]
-    adata.obs.index = adata.obs.index.map(lambda x: f"{x}_{labels_layer}_{_uuid_value}")
+    adata.obs.index = adata.obs.index.map(lambda x: f"{x}_{labels_name}_{_uuid_value}")
 
     adata.obs.index.name = cell_index_name
 
     if append:
         region = []
-        if output_layer in [*sdata.tables]:
+        if output_table_name in [*sdata.tables]:
             _sanity_check_append_region(
-                adata=sdata.tables[output_layer], region_key=region_key, instance_key=instance_key, region=labels_layer
+                adata=sdata.tables[output_table_name], region_key=region_key, instance_key=instance_key, region=labels_name
             )
-            adata = ad.concat([sdata.tables[output_layer], adata], axis=0)
+            adata = ad.concat([sdata.tables[output_table_name], adata], axis=0)
             # get the regions already in sdata, and append the new one
-            region = sdata.tables[output_layer].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY]
-        region.append(labels_layer)
+            region = sdata.tables[output_table_name].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY]
+        region.append(labels_name)
 
     else:
-        region = [labels_layer]
+        region = [labels_name]
 
     sdata = add_table_layer(
         sdata,
         adata=adata,
-        output_layer=output_layer,
+        output_table_name=output_table_name,
         region=region,
         instance_key=instance_key,
         region_key=region_key,
@@ -226,9 +226,9 @@ def allocate(
     if update_shapes_layers:
         sdata = filter_shapes_layer(
             sdata,
-            table_layer=output_layer,
-            labels_layer=labels_layer,
-            prefix_filtered_shapes_layer="filtered_segmentation",
+            table_name=output_table_name,
+            labels_name=labels_name,
+            prefix_filtered_shapes_name="filtered_segmentation",
         )
 
     return sdata
@@ -236,9 +236,9 @@ def allocate(
 
 def bin_counts(
     sdata: SpatialData,
-    table_layer: str,
-    labels_layer: str,
-    output_layer: str,
+    table_name: str,
+    labels_name: str,
+    output_table_name: str,
     to_coordinate_system: str = "global",
     chunks: str | tuple[int, ...] | int | None = 10000,
     append: bool = True,
@@ -249,30 +249,30 @@ def bin_counts(
     overwrite: bool = False,
 ) -> SpatialData:
     """
-    Bins gene counts from barcodes to cells or regions defined in `labels_layer` and returns an updated SpatialData object with a table layer (`sdata.tables[output_layer]`) holding an AnnData object with the binned counts per cell or region.
+    Bins gene counts from barcodes to cells or regions defined in `labels_name` and returns an updated SpatialData object with a table layer (`sdata.tables[output_table_name]`) holding an AnnData object with the binned counts per cell or region.
 
     Parameters
     ----------
     sdata
         The SpatialData object.
-    table_layer
+    table_name
         The table layer holding the counts. E.g. obtained using :func:`harpy.io.visium_hd`.
-        We assume that `sdata[table_layer].obsm[spatial_key]` contains a numpy array holding the barcode coordinates ('x', 'y').
-        The relation of `sdata[table_layer].obsm[spatial_key]` to `to_coordinate_system` should be an identity transformation.
-    labels_layer
-        The labels layer (e.g., segmentation mask, or a grid generated by :func:`harpy.im.add_grid_labels_layer`) in `sdata` used to bin barcodes (as specified via `table_layer`) into cells or regions.
-    output_layer
-        The table layer in `sdata` in which to save the AnnData object with the binned counts per cell or region defined by `labels_layer`.
+        We assume that `sdata[table_name].obsm[spatial_key]` contains a numpy array holding the barcode coordinates ('x', 'y').
+        The relation of `sdata[table_name].obsm[spatial_key]` to `to_coordinate_system` should be an identity transformation.
+    labels_name
+        The labels layer (e.g., segmentation mask, or a grid generated by :func:`harpy.im.add_grid_labels_layer`) in `sdata` used to bin barcodes (as specified via `table_name`) into cells or regions.
+    output_table_name
+        The table layer in `sdata` in which to save the AnnData object with the binned counts per cell or region defined by `labels_name`.
     to_coordinate_system
-        The coordinate system that holds `labels_layer`.
+        The coordinate system that holds `labels_name`.
     chunks
         Chunk sizes for processing. Can be a string, integer, or tuple of integers.
         Consider setting the chunks to a relatively high value to speed up processing,
         taking into account the available memory of your system.
     append
-        If set to `True`, and the `labels_layer` does not yet exist as a `region_key` in `sdata.tables[output_layer].obs`,
-        the binned counts obtained during the current function call will be appended (along axis=0) to `output_layer`.
-        If `False`, and `overwrite` is set to `True`, any existing data in `sdata.tables[output_layer]` will be overwritten by the newly binned counts.
+        If set to `True`, and the `labels_name` does not yet exist as a `region_key` in `sdata.tables[output_table_name].obs`,
+        the binned counts obtained during the current function call will be appended (along axis=0) to `output_table_name`.
+        If `False`, and `overwrite` is set to `True`, any existing data in `sdata.tables[output_table_name]` will be overwritten by the newly binned counts.
     instance_key
         Instance key. The name of the column in :class:`~anndata.AnnData` table `.obs` that will hold the instance ids.
     region_key
@@ -283,11 +283,11 @@ def bin_counts(
     cell_index_name
         The name of the index of the resulting :class:`~anndata.AnnData` table.
     overwrite
-        If `True`, overwrites the `output_layer` if it already exists in `sdata`.
+        If `True`, overwrites the `output_table_name` if it already exists in `sdata`.
 
     Returns
     -------
-    An updated SpatialData object with an AnnData table added to `sdata.tables` at slot `output_layer`.
+    An updated SpatialData object with an AnnData table added to `sdata.tables` at slot `output_table_name`.
 
     Example
     --------
@@ -297,33 +297,33 @@ def bin_counts(
 
         sdata_bin = hp.datasets.visium_hd_example_custom_binning()
 
-        table_layer_bins = "square_002um"
-        labels_layer = (
-            "square_labels_32"  # custom grid to bin the counts of table_layer_bins; can be any segmentation mask
+        table_name_bins = "square_002um"
+        labels_name = (
+            "square_labels_32"  # custom grid to bin the counts of table_name_bins; can be any segmentation mask
         )
-        table_layer = "table_custom_bin_32"
-        output_table_layer = f"{table_layer}_reproduce"
+        table_name = "table_custom_bin_32"
+        output_table_name = f"{table_name}_reproduce"
 
-        # Check that barcodes are unique in table_layer_bins of sdata_bin
-        assert sdata_bin.tables[table_layer_bins].obs.index.is_unique
+        # Check that barcodes are unique in table_name_bins of sdata_bin
+        assert sdata_bin.tables[table_name_bins].obs.index.is_unique
 
         sdata_bin = hp.tb.bin_counts(
             sdata_bin,
-            table_layer=table_layer_bins,
-            labels_layer=labels_layer,
-            output_layer=output_table_layer,
+            table_name=table_name_bins,
+            labels_name=labels_name,
+            output_table_name=output_table_name,
             overwrite=True,
             append=False,
         )
     """
-    se = _get_spatial_element(sdata, layer=labels_layer)
+    se = _get_spatial_element(sdata, layer=labels_name)
 
-    # sdata[table_layer].obsm[spatial_key] contains the positions of the barcodes if visium reader is used 'harpy.io.visium_hd'
+    # sdata[table_name].obsm[spatial_key] contains the positions of the barcodes if visium reader is used 'harpy.io.visium_hd'
     name_x = "x"
     name_y = "y"
-    df = pd.DataFrame(sdata[table_layer].obsm[spatial_key], columns=[name_x, name_y])
+    df = pd.DataFrame(sdata[table_name].obsm[spatial_key], columns=[name_x, name_y])
     name_barcode_id = "barcode_id"
-    df[name_barcode_id] = sdata[table_layer].obs.index
+    df[name_barcode_id] = sdata[table_name].obs.index
 
     ddf = PointsModel.parse(
         df,
@@ -352,7 +352,7 @@ def bin_counts(
     # Sanity check that every barcode that could be assigned to a bin is assigned exactly ones to a bin.
     _mask = cell_counts == 1
     assert _mask.all(), (
-        f"Some spots, given by 'sdata.tables[{table_layer}].obsm[{spatial_key}]', where assigned to more than one cell defined in '{labels_layer}'."
+        f"Some spots, given by 'sdata.tables[{table_name}].obsm[{spatial_key}]', where assigned to more than one cell defined in '{labels_name}'."
     )
     cell_counts = cell_counts.reset_index(level=cell_index_name)
     assert cell_counts.index.is_unique, "Spots should not be assigned to more than one cell."
@@ -362,10 +362,10 @@ def bin_counts(
     df = pd.DataFrame(value_counts_sorted, columns=["Number of spots per bin", "Frequency"])
     log.info(f"\n{df.to_string(index=False)}")
     # get adata
-    adata_in = sdata.tables[table_layer].copy()  # should we do a copy here? otherwise in memory adata will be changed
+    adata_in = sdata.tables[table_name].copy()  # should we do a copy here? otherwise in memory adata will be changed
     merged = pd.merge(adata_in.obs, cell_counts[cell_index_name], left_index=True, right_index=True, how="inner")
     assert merged.shape[0] != 0, (
-        "Result after merging AnnData object, passed via 'table_layer' parameter with aggregated spots is empty."
+        "Result after merging AnnData object, passed via 'table_name' parameter with aggregated spots is empty."
     )
     adata_in = adata_in[merged.index]
     adata_in.obs = merged
@@ -396,10 +396,10 @@ def bin_counts(
         X=summed_counts, obs=pd.DataFrame(unique_labels, columns=[instance_key], index=unique_labels), var=adata_in.var
     )
 
-    adata.obs[region_key] = pd.Categorical([labels_layer] * len(adata.obs))
+    adata.obs[region_key] = pd.Categorical([labels_name] * len(adata.obs))
 
     _uuid_value = str(uuid.uuid4())[:8]
-    adata.obs.index = adata.obs.index.map(lambda x: f"{x}_{labels_layer}_{_uuid_value}")
+    adata.obs.index = adata.obs.index.map(lambda x: f"{x}_{labels_name}_{_uuid_value}")
     adata.obs.index.name = cell_index_name
 
     # now add the coordinates
@@ -409,22 +409,22 @@ def bin_counts(
 
     if append:
         region = []
-        if output_layer in [*sdata.tables]:
+        if output_table_name in [*sdata.tables]:
             _sanity_check_append_region(
-                adata=sdata.tables[output_layer], region_key=region_key, instance_key=instance_key, region=labels_layer
+                adata=sdata.tables[output_table_name], region_key=region_key, instance_key=instance_key, region=labels_name
             )
-            adata = ad.concat([sdata.tables[output_layer], adata], axis=0)
+            adata = ad.concat([sdata.tables[output_table_name], adata], axis=0)
             # get the regions already in sdata, and append the new one
-            region = sdata.tables[output_layer].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY]
-        region.append(labels_layer)
+            region = sdata.tables[output_table_name].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY]
+        region.append(labels_name)
 
     else:
-        region = [labels_layer]
+        region = [labels_name]
 
     sdata = add_table_layer(
         sdata,
         adata=adata,
-        output_layer=output_layer,
+        output_table_name=output_table_name,
         region=region,
         instance_key=instance_key,
         region_key=region_key,

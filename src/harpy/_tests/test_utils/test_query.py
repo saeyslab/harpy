@@ -11,11 +11,11 @@ from harpy.utils._query import bounding_box_query
 
 @pytest.mark.parametrize("crd", [[2000, 3000, 3000, 4000], None])
 def test_bounding_box_query(sdata_transcripts, tmpdir, crd):
-    labels_layer = "segmentation_mask"
+    labels_name = "segmentation_mask"
 
     sdata_transcripts_queried = bounding_box_query(
         sdata_transcripts,
-        labels_layer=labels_layer,
+        labels_name=labels_name,
         to_coordinate_system=None,
         crd=crd,
         output=os.path.join(tmpdir, "sdata_queried.zarr"),
@@ -25,32 +25,32 @@ def test_bounding_box_query(sdata_transcripts, tmpdir, crd):
         adata = sdata_transcripts_queried.tables[_table_name]
         region_key = adata.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]
         instance_key = adata.uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY]
-        ids = adata[adata.obs[region_key] == labels_layer].obs[instance_key].values
-        labels_queried = da.unique(sdata_transcripts_queried.labels[labels_layer].data).compute()
+        ids = adata[adata.obs[region_key] == labels_name].obs[instance_key].values
+        labels_queried = da.unique(sdata_transcripts_queried.labels[labels_name].data).compute()
         labels_queried = labels_queried[labels_queried != 0]
 
         assert np.all(np.isin(ids, labels_queried))
 
 
 def test_bounding_box_query_no_annotate(sdata_transcripts, tmpdir):
-    labels_layer = "segmentation_mask_expanded"
+    labels_name = "segmentation_mask_expanded"
 
     sdata_transcripts_queried = bounding_box_query(
         sdata_transcripts,
-        labels_layer=labels_layer,
+        labels_name=labels_name,
         to_coordinate_system=None,
         crd=None,
         output=os.path.join(tmpdir, "sdata_queried.zarr"),
     )
     assert isinstance(sdata_transcripts_queried, SpatialData)
-    assert labels_layer in [*sdata_transcripts_queried.labels]
+    assert labels_name in [*sdata_transcripts_queried.labels]
     # because "segmentation_mask_expanded" does not annotate any tables, no tables will be present in resulting spatialdata object.
     assert not sdata_transcripts_queried.tables
 
 
 @pytest.mark.parametrize("backed", [True, False])
 def test_bounding_box_query_multiple_coordinate_systems(sdata_transcripts_mul_coord, tmpdir, backed):
-    labels_layer = [
+    labels_name = [
         "labels_a1_1",
         "labels_a1_2",
     ]
@@ -65,14 +65,14 @@ def test_bounding_box_query_multiple_coordinate_systems(sdata_transcripts_mul_co
 
     sdata_transcripts_queried = bounding_box_query(
         sdata_transcripts_mul_coord,
-        labels_layer=labels_layer,
+        labels_name=labels_name,
         to_coordinate_system=to_coordinate_system,
         crd=crd,
         output=os.path.join(tmpdir, "sdata_queried.zarr") if backed else None,
     )
 
     assert isinstance(sdata_transcripts_queried, SpatialData)
-    for _labels_layer in labels_layer:
+    for _labels_layer in labels_name:
         for _table_name in [*sdata_transcripts_queried.tables]:
             adata = sdata_transcripts_queried.tables[_table_name]
             region_key = adata.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]
@@ -85,7 +85,7 @@ def test_bounding_box_query_multiple_coordinate_systems(sdata_transcripts_mul_co
 
 
 def test_bounding_box_query_multiple_coordinate_systems_crd_none(sdata_transcripts_mul_coord, tmpdir):
-    labels_layer = [
+    labels_name = [
         "labels_a1_1",
         "labels_a1_2",
     ]
@@ -99,13 +99,13 @@ def test_bounding_box_query_multiple_coordinate_systems_crd_none(sdata_transcrip
             50,
             0,
             50,
-        ),  # Query will be empty for this crd for labels_layer 'labels_a1_1' -> so all elements that are annoted by labels_a1_1  will be removed from resulting sdata tables.
+        ),  # Query will be empty for this crd for labels_name 'labels_a1_1' -> so all elements that are annoted by labels_a1_1  will be removed from resulting sdata tables.
         None,  # keep all elements annotated by 'labels_a1_2'
     ]
 
     sdata_transcripts_queried = bounding_box_query(
         sdata_transcripts_mul_coord,
-        labels_layer=labels_layer,
+        labels_name=labels_name,
         to_coordinate_system=to_coordinate_system,
         crd=crd,
         output=os.path.join(tmpdir, "sdata_queried.zarr"),

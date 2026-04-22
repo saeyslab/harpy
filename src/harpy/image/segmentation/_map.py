@@ -36,8 +36,8 @@ def map_labels(
     sdata: SpatialData,
     func: Callable[..., NDArray | Array],
     labels_layers: list[str] | str,
-    output_labels_layer: str | None = None,
-    output_shapes_layer: str | None = None,
+    output_labels_name: str | None = None,
+    output_shapes_name: str | None = None,
     depth: tuple[int, int] | int = 100,
     chunks: str | int | tuple[int, int] | None = None,
     scale_factors: ScaleFactors_t | None = None,
@@ -59,9 +59,9 @@ def map_labels(
         The Callable to apply to the labels layer.
     labels_layers
         The labels layer(s) in `sdata` to process.
-    output_labels_layer
+    output_labels_name
         The name of the output labels layer where results will be stored. This must be specified.
-    output_shapes_layer
+    output_shapes_name
         The name of the output shapes layer where results will be stored.
     depth
         The overlapping depth used in `dask.array.map_overlap`.
@@ -91,13 +91,13 @@ def map_labels(
 
     Returns
     -------
-    The `sdata` object with the processed labels layer added to the specified `output_labels_layer`.
-    If `output_shapes_layer` is provided, a shapes layer will be created corresponding to this labels layer.
+    The `sdata` object with the processed labels layer added to the specified `output_labels_name`.
+    If `output_shapes_name` is provided, a shapes layer will be created corresponding to this labels layer.
 
     Raises
     ------
     ValueError
-        If `output_labels_layer` is not provided.
+        If `output_labels_name` is not provided.
     ValueError
         If `chunks` is a Tuple, and does not match (y,x).
     ValueError
@@ -105,7 +105,7 @@ def map_labels(
     ValueError
         If `iou_depth` is a Tuple, and does not match (y,x).
     ValueError
-        If a label layer in `labels_layer` can not be found.
+        If a label layer in `labels_name` can not be found.
     ValueError
         If number of blocks in z-dimension is not equal to 1.
 
@@ -122,7 +122,7 @@ def map_labels(
         else [labels_layers]
     )
 
-    if output_labels_layer is None:
+    if output_labels_name is None:
         raise ValueError("Please specify a name for the output layer.")
 
     # first do the precondition.
@@ -194,7 +194,7 @@ def map_labels(
     sdata = add_labels_layer(
         sdata,
         array,
-        output_layer=output_labels_layer,
+        output_labels_name=output_labels_name,
         chunks=chunks,
         transformations=transformations,
         scale_factors=scale_factors,
@@ -202,14 +202,14 @@ def map_labels(
     )
 
     # only calculate shapes layer if it is specified
-    if output_shapes_layer is not None:
-        se_labels = _get_spatial_element(sdata, layer=output_labels_layer)
+    if output_shapes_name is not None:
+        se_labels = _get_spatial_element(sdata, layer=output_labels_name)
 
         # convert the labels to polygons and add them as shapes layer to sdata
         sdata = add_shapes_layer(
             sdata,
             input=se_labels.data,
-            output_layer=output_shapes_layer,
+            output_shapes_name=output_shapes_name,
             transformations=transformations,
             overwrite=overwrite,
         )

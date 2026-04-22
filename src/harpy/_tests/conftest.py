@@ -150,20 +150,20 @@ def sdata_pixie_intensities():
     sdata = pixie_example()
     sdata = allocate_intensity(
         sdata,
-        img_layer="raw_image_fov0",
-        labels_layer="label_whole_fov0",
+        image_name="raw_image_fov0",
+        labels_name="label_whole_fov0",
         to_coordinate_system="fov0",
         mode="sum",
-        output_layer="table_intensities",
+        output_table_name="table_intensities",
         overwrite=True,
     )
     sdata = allocate_intensity(
         sdata,
-        img_layer="raw_image_fov1",
-        labels_layer="label_whole_fov1",
+        image_name="raw_image_fov1",
+        labels_name="label_whole_fov1",
         to_coordinate_system="fov1",
         mode="sum",
-        output_layer="table_intensities",
+        output_table_name="table_intensities",
         append=True,
         overwrite=True,
     )

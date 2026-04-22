@@ -29,7 +29,7 @@ def test_add_image_layer_backed(
     sdata_multi_c = add_image_layer(
         sdata_multi_c,
         arr=arr,
-        output_layer=new_name,
+        output_image_name=new_name,
         scale_factors=scale_factors,
         overwrite=True,
     )
@@ -72,7 +72,7 @@ def test_add_image_layer_no_backed(
     sdata_no_backed = add_image_layer(
         sdata_no_backed,
         arr=sdata_multi_c[name].data,
-        output_layer=name,
+        output_image_name=name,
         scale_factors=scale_factors,
         overwrite=True,
     )
@@ -87,7 +87,7 @@ def test_add_image_layer_no_backed(
     sdata_no_backed = add_image_layer(
         sdata_no_backed,
         arr=arr,
-        output_layer=new_name,
+        output_image_name=new_name,
         scale_factors=scale_factors,
         overwrite=True,
     )
@@ -126,7 +126,7 @@ def test_add_labels_layer_backed(
     sdata_multi_c = add_labels_layer(
         sdata_multi_c,
         arr=arr,
-        output_layer=new_name,
+        output_labels_name=new_name,
         scale_factors=scale_factors,
         overwrite=True,
     )
@@ -169,7 +169,7 @@ def test_add_labels_layer_no_backed(
     sdata_no_backed = add_labels_layer(
         sdata_no_backed,
         arr=_get_spatial_element(sdata_multi_c, layer=name).data,
-        output_layer=name,
+        output_labels_name=name,
         scale_factors=scale_factors,
         overwrite=True,
     )
@@ -183,7 +183,7 @@ def test_add_labels_layer_no_backed(
     sdata_no_backed = add_labels_layer(
         sdata_no_backed,
         arr=arr,
-        output_layer=new_name,
+        output_labels_name=new_name,
         scale_factors=scale_factors,
         overwrite=True,
     )

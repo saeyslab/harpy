@@ -21,11 +21,11 @@ except ImportError:
 
 def enhance_contrast(
     sdata: SpatialData,
-    img_layer: str | None = None,
+    image_name: str | None = None,
     contrast_clip: float | list[float] = 3.5,
     chunks: str | tuple[int, ...] | int | None = 10000,
     depth: tuple[int, ...] | dict[int, int] | int = 3000,
-    output_layer: str = "clahe",
+    output_image_name: str = "clahe",
     crd: tuple[int, int, int, int] | None = None,
     to_coordinate_system: str = "global",
     scale_factors: ScaleFactors_t | None = None,
@@ -41,7 +41,7 @@ def enhance_contrast(
     ----------
     sdata
         The SpatialData object containing the image to enhance.
-    img_layer
+    image_name
         The image layer in `sdata` on which the enhance_contrast function will be applied.
         If not provided, the last image layer in `sdata` is used.
     contrast_clip
@@ -54,7 +54,7 @@ def enhance_contrast(
     depth
         The overlapping depth used in `dask.array.map_overlap`.
         If specified as a tuple or dict, it contains the depth used in 'y' and 'x' dimension.
-    output_layer
+    output_image_name
         The name of the image layer where the enhanced image will be stored.
         The default value is "clahe".
     crd
@@ -73,7 +73,7 @@ def enhance_contrast(
     Raises
     ------
     ValueError
-        If the dimensions in `img_layer` of `sdata` is not equal to (c,(z),y,x)
+        If the dimensions in `image_name` of `sdata` is not equal to (c,(z),y,x)
 
     Notes
     -----
@@ -114,14 +114,14 @@ def enhance_contrast(
 
         return image
 
-    if img_layer is None:
-        img_layer = [*sdata.images][-1]
+    if image_name is None:
+        image_name = [*sdata.images][-1]
         log.warning(
             f"No image layer specified. "
-            f"Applying image processing on the last image layer '{img_layer}' of the provided SpatialData object."
+            f"Applying image processing on the last image layer '{image_name}' of the provided SpatialData object."
         )
 
-    se = _get_spatial_element(sdata, img_layer)
+    se = _get_spatial_element(sdata, image_name)
 
     supported_dtypes = ["uint8", "uint16"]
     if se.dtype not in supported_dtypes:
@@ -140,8 +140,8 @@ def enhance_contrast(
 
     sdata = map_image(
         sdata,
-        img_layer=img_layer,
-        output_layer=output_layer,
+        image_name=image_name,
+        output_image_name=output_image_name,
         func=_apply_clahe,
         fn_kwargs=fn_kwargs,
         chunks=chunks,

@@ -14,8 +14,8 @@ from harpy.shape._shape import add_shapes_layer
 
 def create_voronoi_boundaries(
     sdata: SpatialData,
-    shapes_layer: str = "segmentation_mask_boundaries",
-    output_layer: str | None = None,
+    shapes_name: str = "segmentation_mask_boundaries",
+    output_shapes_name: str | None = None,
     radius: int = 0,
     overwrite: bool = False,
 ) -> SpatialData:
@@ -29,17 +29,17 @@ def create_voronoi_boundaries(
     ----------
     sdata
         The spatial data object on which Voronoi boundaries will be created.
-    shapes_layer
+    shapes_name
         The name of the layer in `sdata` representing shapes used to derive
         Voronoi boundaries. Default is "segmentation_mask_boundaries".
-    output_layer
+    output_shapes_name
         Name of the resulting shapes layer that will be added to `sdata`.
     radius
         The expansion radius for the Voronoi boundaries, by default 0.
         If provided, Voronoi boundaries will be expanded by this radius.
         Must be non-negative.
     overwrite
-        If True, overwrites the `output_layer` if it already exists in `sdata`.
+        If True, overwrites the `output_shapes_name` if it already exists in `sdata`.
 
     Returns
     -------
@@ -54,11 +54,11 @@ def create_voronoi_boundaries(
     if radius < 0:
         raise ValueError(f"radius should be >0, provided value for radius is '{radius}'")
 
-    if output_layer is None:
-        output_layer = f"expanded_cells{radius}"
-        log.info(f"Name of the output layer is not provided. Setting to '{output_layer}'.")
+    if output_shapes_name is None:
+        output_shapes_name = f"expanded_cells{radius}"
+        log.info(f"Name of the output layer is not provided. Setting to '{output_shapes_name}'.")
 
-    x_min, y_min, x_max, y_max = sdata[shapes_layer].geometry.total_bounds
+    x_min, y_min, x_max, y_max = sdata[shapes_name].geometry.total_bounds
 
     boundary = Polygon(
         [
@@ -69,7 +69,7 @@ def create_voronoi_boundaries(
         ]
     )
 
-    gdf = sdata[shapes_layer].copy()
+    gdf = sdata[shapes_name].copy()
     gdf["geometry"] = gdf.simplify(2)
 
     vd = voronoiDiagram4plg(gdf, boundary)
@@ -84,12 +84,12 @@ def create_voronoi_boundaries(
     gdf.geometry = intersected
 
     # sanity check. If this sanity check would fail in spatialdata at some point, then pass transformation to transformations parameter of add_shapes_layer.
-    assert get_transformation(gdf, get_all=True) == get_transformation(sdata[shapes_layer], get_all=True)
+    assert get_transformation(gdf, get_all=True) == get_transformation(sdata[shapes_name], get_all=True)
 
     sdata = add_shapes_layer(
         sdata,
         input=gdf,
-        output_layer=output_layer,
+        output_shapes_name=output_shapes_name,
         transformations=None,
         overwrite=overwrite,
     )

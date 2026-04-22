@@ -18,9 +18,9 @@ from harpy.utils.utils import _make_list
 
 def add_regionprops(
     sdata: SpatialData,
-    labels_layer: str | list[str],
-    table_layer: str,
-    output_layer: str,
+    labels_name: str | list[str],
+    table_name: str,
+    output_table_name: str,
     properties: str | tuple[str] = (
         "area",
         "eccentricity",
@@ -58,7 +58,7 @@ def add_regionprops(
         - **convex_hull_resid**
         - **centroid_dif**
 
-    These features are added to the `.obs` attribute of the :class:`anndata.AnnData` table at slot `output_layer`.
+    These features are added to the `.obs` attribute of the :class:`anndata.AnnData` table at slot `output_table_name`.
 
     Note that calculation of **perimeter** and **perim_square_over_area** is not supported for 3D labels layers.
 
@@ -66,13 +66,13 @@ def add_regionprops(
     ----------
     sdata
         The SpatialData object.
-    labels_layer
+    labels_name
         The name of the layer in `sdata` that contains the labeled regions, typically derived from a segmentation
         process. Each distinct label corresponds to a different instance, and properties will be calculated for these
         labeled regions.
-    table_layer
+    table_name
         The table layer in `sdata.tables` that annotates the labels layer, and to which the calculated features will be added.
-    output_layer
+    output_table_name
         Output table layer.
     properties
         The properties to calculate.
@@ -98,39 +98,39 @@ def add_regionprops(
 
         sdata = hp.tb.allocate_intensity(
             sdata,
-            img_layer="raw_image_fov0",
-            labels_layer="label_whole_fov0",
+            image_name="raw_image_fov0",
+            labels_name="label_whole_fov0",
             to_coordinate_system="fov0",
             mode="sum",
-            output_layer="table_intensities",
+            output_table_name="table_intensities",
             overwrite=True,
         )
 
         sdata = hp.tb.allocate_intensity(
             sdata,
-            img_layer="raw_image_fov1",
-            labels_layer="label_whole_fov1",
+            image_name="raw_image_fov1",
+            labels_name="label_whole_fov1",
             to_coordinate_system="fov1",
             mode="sum",
-            output_layer="table_intensities",
+            output_table_name="table_intensities",
             append=True,
             overwrite=True,
         )
 
         sdata = hp.tb.add_regionprops(
             sdata,
-            labels_layer=["label_whole_fov0", "label_whole_fov1"],
-            table_layer="table_intensities",
-            output_layer="table_intensities",
+            labels_name=["label_whole_fov0", "label_whole_fov1"],
+            table_name="table_intensities",
+            output_table_name="table_intensities",
             properties=["perimeter", "equivalent_diameter"],
             overwrite=True,
         )
     """
-    if labels_layer is None:
-        labels_layer = sdata[table_layer].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY]
-    labels_layer = _make_list(labels_layer)
+    if labels_name is None:
+        labels_name = sdata[table_name].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY]
+    labels_name = _make_list(labels_name)
     properties = _make_list(properties)
-    table_processor = ProcessTable(sdata, labels_layer=labels_layer, table_layer=table_layer)
+    table_processor = ProcessTable(sdata, labels_name=labels_name, table_name=table_name)
     adata = table_processor._get_adata()
     instance_key = table_processor.instance_key
     region_key = table_processor.region_key
@@ -146,7 +146,7 @@ def add_regionprops(
             )
         ):
             log.warning(
-                f"Cell property '{_property}' already exists in '.obs' attribute of table layer '{table_layer}'. "
+                f"Cell property '{_property}' already exists in '.obs' attribute of table layer '{table_name}'. "
                 "Skipping recomputation. Remove the column to trigger recalculation."
             )
         else:
@@ -154,7 +154,7 @@ def add_regionprops(
     properties = tuple(new_properties)
 
     cell_props = []
-    for _labels_layer in labels_layer:
+    for _labels_layer in labels_name:
         se = get_dataarray(sdata, layer=_labels_layer)
         # pull masks in in memory. skimage.measure.regionprops does not work with lazy objects.
         masks = se.data.compute()
@@ -167,7 +167,7 @@ def add_regionprops(
         assert region_key not in _cell_props.columns, f"'cell_props' should not contain '{region_key}' columns."
         if _labels_layer not in adata.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY]:
             raise ValueError(
-                f"The labels layer '{_labels_layer}' does not seem to be annotated by the table layer {table_layer}."
+                f"The labels layer '{_labels_layer}' does not seem to be annotated by the table layer {table_name}."
             )
 
         _cell_props[region_key] = pd.Categorical([_labels_layer] * len(_cell_props))
@@ -175,7 +175,7 @@ def add_regionprops(
     cell_props = pd.concat(cell_props)
 
     # Sanity checks before merging cell_props and adata.obs.
-    for _labels_layer in labels_layer:
+    for _labels_layer in labels_name:
         _cell_props = cell_props[cell_props[region_key] == _labels_layer]
         adata_view = adata[adata.obs[region_key] == _labels_layer]
         # 1) check that all cells in adata_view.obs could be matched to _cell_props
@@ -194,8 +194,8 @@ def add_regionprops(
         extra_cells = sum(~_cell_props[instance_key].isin(adata_view.obs[instance_key].values))
         if extra_cells:
             log.warning(
-                f"Calculated properties of '{extra_cells}' instances obtained from labels layer '{labels_layer}' "
-                f"will not be added to 'sdata.tables[{table_layer}].obs', because their instance IDs ('{instance_key}') are not in 'sdata.tables[{table_layer}].obs.[{instance_key}]'. "
+                f"Calculated properties of '{extra_cells}' instances obtained from labels layer '{labels_name}' "
+                f"will not be added to 'sdata.tables[{table_name}].obs', because their instance IDs ('{instance_key}') are not in 'sdata.tables[{table_name}].obs.[{instance_key}]'. "
                 "This can happen if some instances in the table were filtered prior to calling this function."
                 "If they should be included, then first append their intensities with the 'harpy.tb.allocate_intensity' function."
             )
@@ -217,7 +217,7 @@ def add_regionprops(
     sdata = add_table_layer(
         sdata,
         adata=adata,
-        output_layer=output_layer,
+        output_table_name=output_table_name,
         region=adata.obs[region_key].cat.categories.to_list(),
         instance_key=instance_key,
         region_key=region_key,

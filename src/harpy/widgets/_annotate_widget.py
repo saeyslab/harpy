@@ -96,7 +96,7 @@ def annotate_widget(
 
         viewer.layers[layer_name].metadata["pipeline"] = pipeline
         viewer.layers[layer_name].metadata["adata"] = sdata.tables[
-            pipeline.cfg.allocate.table_layer_name
+            pipeline.cfg.allocate.table_name
         ]  # spatialdata plugin uses this
 
         utils._export_config(

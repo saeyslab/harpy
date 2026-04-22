@@ -8,14 +8,14 @@ def test_rasterize(sdata_multi_c_no_backed):
     sdata_multi_c_no_backed = add_shapes_layer(
         sdata_multi_c_no_backed,
         input=sdata_multi_c_no_backed["masks_whole"].data,
-        output_layer="masks_whole_boundaries_unit_test",
+        output_shapes_name="masks_whole_boundaries_unit_test",
         overwrite=True,
     )
 
     sdata_multi_c_no_backed = rasterize(
         sdata_multi_c_no_backed,
-        shapes_layer="masks_whole_boundaries_unit_test",
-        output_layer="masks_whole_unit_test",
+        shapes_name="masks_whole_boundaries_unit_test",
+        output_labels_name="masks_whole_unit_test",
         chunks=512,
         overwrite=True,
     )
@@ -36,14 +36,14 @@ def test_rasterize_blobs(sdata):
     sdata = add_shapes_layer(
         sdata,
         input=sdata["blobs_labels"].data,
-        output_layer="blobs_labels_boundaries",
+        output_shapes_name="blobs_labels_boundaries",
         overwrite=True,
     )
 
     sdata = rasterize(
         sdata,
-        shapes_layer="blobs_labels_boundaries",
-        output_layer="blobs_labels_unit_test",
+        shapes_name="blobs_labels_boundaries",
+        output_labels_name="blobs_labels_unit_test",
         chunks=512,
         overwrite=True,
     )
@@ -55,8 +55,8 @@ def test_rasterize_blobs(sdata):
     out_shape = (200, 200)
     sdata = rasterize(
         sdata,
-        shapes_layer="blobs_labels_boundaries",
-        output_layer="blobs_labels_unit_test",
+        shapes_name="blobs_labels_boundaries",
+        output_labels_name="blobs_labels_unit_test",
         chunks=512,
         out_shape=out_shape,
         overwrite=True,

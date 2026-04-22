@@ -15,9 +15,9 @@ from harpy.utils.utils import _make_list
 
 def cluster_intensity(
     sdata: SpatialData,
-    table_layer: str,
-    labels_layer: str | Iterable[str],
-    output_layer: str,
+    table_name: str,
+    labels_name: str | Iterable[str],
+    output_table_name: str,
     cluster_key: str,
     cluster_key_uns: str | None = None,
     layer_mean_intensities: str | None = None,
@@ -27,42 +27,42 @@ def cluster_intensity(
     """
     Calculates weighted (by instance size) average intensity per cluster.
 
-    Calculates weighted average intensity for each cluster, and stores the result in `sdata.tables[output_layer].uns[cluster_key_uns]`.
-    The intensities in `sdata.tables[table_layer].X` or `sdata.tables[table_layer].layers[layer_mean_intensities]`
-    should contain the mean (by instance size) intensities for each label in `labels_layer`.
+    Calculates weighted average intensity for each cluster, and stores the result in `sdata.tables[output_table_name].uns[cluster_key_uns]`.
+    The intensities in `sdata.tables[table_name].X` or `sdata.tables[table_name].layers[layer_mean_intensities]`
+    should contain the mean (by instance size) intensities for each label in `labels_name`.
 
     Parameters
     ----------
     sdata
         SpatialData object.
-    table_layer
-        The table layer containing the mean intensities per instance in 'sdata.tables[table_layer].X' or
-        'sdata.tables[table_layer].layers[layer_mean_intensities]' if `layer_mean_intensities` is not `None`; and the `cluster_key` in `sdata.tables[table_layer].obs`.
+    table_name
+        The table layer containing the mean intensities per instance in 'sdata.tables[table_name].X' or
+        'sdata.tables[table_name].layers[layer_mean_intensities]' if `layer_mean_intensities` is not `None`; and the `cluster_key` in `sdata.tables[table_name].obs`.
         Mean intensities can be calculated using `harpy.tb.allocate_intensity(..., mode="mean",...)`.
         See docstring of `harpy.pl.cluster_intensity_heatmap` for an example.
-    labels_layer
-        The labels layer(s) of `sdata` used to select the instances via the `region_key` in `sdata.tables[table_layer].obs`.
-        Note that if `output_layer` is equal to `table_layer` and `overwrite` is `True`,
-        instances in `sdata.tables[table_layer]` linked to other `labels_layer` (via the `region_key`), will be removed from `sdata.tables[table_layer]`.
+    labels_name
+        The labels layer(s) of `sdata` used to select the instances via the `region_key` in `sdata.tables[table_name].obs`.
+        Note that if `output_table_name` is equal to `table_name` and `overwrite` is `True`,
+        instances in `sdata.tables[table_name]` linked to other `labels_name` (via the `region_key`), will be removed from `sdata.tables[table_name]`.
         If a list of labels layers is provided, intensities per cluster will be calculated over all labels layers, which is usefull in the multi-sample scenario.
     layer_mean_intensities
-        Layer of `sdata.tables[table_layer]` holding the mean intensities per instance. If not specified, it is assumed 'sdata.tables[table_layer].X' holds the mean intensity values per instance.
-    output_layer
+        Layer of `sdata.tables[table_name]` holding the mean intensities per instance. If not specified, it is assumed 'sdata.tables[table_name].X' holds the mean intensity values per instance.
+    output_table_name
         The output table layer in `sdata` where results are stored.
     cluster_key
-        The cluster key in `sdata.tables[table_layer].obs`.
+        The cluster key in `sdata.tables[table_name].obs`.
     cluster_key_uns
-        The key in `sdata.tables[table_layer].uns` where the weighted mean intensities per cluster will be stored.
+        The key in `sdata.tables[table_name].uns` where the weighted mean intensities per cluster will be stored.
         If not provided `cluster_key_uns` is set to `{cluster_key}_weighted_intensity`.
     instance_size_key
-        The key in `sdata.tables[table_layer].obs` that holds instance size.
-        Instance sizes will be calculated from `labels_layer` if not found in `.obs`.
+        The key in `sdata.tables[table_name].obs` that holds instance size.
+        Instance sizes will be calculated from `labels_name` if not found in `.obs`.
     overwrite
-        If `True`, overwrites the `output_layer` if it already exists in `sdata`.
+        If `True`, overwrites the `output_table_name` if it already exists in `sdata`.
 
     Returns
     -------
-    SpatialData object with `output_layer` containing weighted mean intensity per cluster at `.uns[cluster_key_uns]`.
+    SpatialData object with `output_table_name` containing weighted mean intensity per cluster at `.uns[cluster_key_uns]`.
 
     Examples
     --------
@@ -79,20 +79,20 @@ def cluster_intensity(
         cluster_key_uns = f"{cluster_key}_weighted_intensity"
     log.info(
         f"Weighted (by instance size) average intensity per cluster (cluster key: '{cluster_key}') "
-        f"will be stored in 'sdata[{output_layer}].uns[{cluster_key_uns}]'."
+        f"will be stored in 'sdata[{output_table_name}].uns[{cluster_key_uns}]'."
     )
-    labels_layer = _make_list(labels_layer)
+    labels_name = _make_list(labels_name)
     # get the adata
-    process_table_instance = ProcessTable(sdata, labels_layer=labels_layer, table_layer=table_layer)
+    process_table_instance = ProcessTable(sdata, labels_name=labels_name, table_name=table_name)
     adata = process_table_instance._get_adata()
     instance_key = process_table_instance.instance_key
     region_key = process_table_instance.region_key
 
     if cluster_key not in adata.obs.columns:
-        raise ValueError(f"Cluster key '{cluster_key}' not found in 'sdata[{table_layer}].obs'.")
+        raise ValueError(f"Cluster key '{cluster_key}' not found in 'sdata[{table_name}].obs'.")
     if cluster_key_uns in adata.uns.keys():
         log.warning(
-            f"Key '{cluster_key_uns}' found in sdata[{table_layer}].uns. Object at that location will be removed and recalculated."
+            f"Key '{cluster_key_uns}' found in sdata[{table_name}].uns. Object at that location will be removed and recalculated."
         )
         adata.uns.pop(cluster_key_uns)
 
@@ -101,10 +101,10 @@ def cluster_intensity(
     index_name = adata.obs.index.name or "index"
     if instance_size_key not in adata.obs.columns:
         log.warning(
-            f"Column with name '{instance_size_key}' not found in 'sdata[{table_layer}].obs', "
-            f"calculating instance size for all instances in {labels_layer}."
+            f"Column with name '{instance_size_key}' not found in 'sdata[{table_name}].obs', "
+            f"calculating instance size for all instances in {labels_name}."
         )
-        for i, _labels_layer in enumerate(process_table_instance.labels_layer):
+        for i, _labels_layer in enumerate(process_table_instance.labels_name):
             log.info(f"Calculating instance size from provided labels layer '{_labels_layer}'")
             se = _get_spatial_element(sdata, layer=_labels_layer)
             _shapesize = _get_mask_area(
@@ -139,7 +139,7 @@ def cluster_intensity(
     sdata = add_table_layer(
         sdata,
         adata=adata,
-        output_layer=output_layer,
+        output_table_name=output_table_name,
         region=adata.obs[region_key].cat.categories.to_list(),
         instance_key=instance_key,
         region_key=region_key,

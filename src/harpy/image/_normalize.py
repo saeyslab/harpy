@@ -14,8 +14,8 @@ from harpy.image._map import map_image
 
 def normalize(
     sdata: SpatialData,
-    img_layer: str,
-    output_layer: str,
+    image_name: str,
+    output_image_name: str,
     p_min: float | list[float] = 5.0,
     p_max: float | list[float] = 95.0,
     eps: float = 1e-20,
@@ -33,9 +33,9 @@ def normalize(
     ----------
     sdata
         SpatialData object.
-    img_layer
+    image_name
         The image layer in `sdata` to normalize.
-    output_layer
+    output_image_name
         The name of the output layer where the normalized image will be stored.
     p_min
         The lower percentile for normalization. If provided as a list, the length
@@ -65,13 +65,13 @@ def normalize(
     --------
     Normalize using a single percentile range for all channels:
 
-    >>> sdata = normalize(sdata, img_layer='my_image', output_layer='normalized_image', p_min=5, p_max=95)
+    >>> sdata = normalize(sdata, image_name='my_image', output_image_name='normalized_image', p_min=5, p_max=95)
 
     Normalize using different percentile ranges for each channel:
 
-    >>> sdata = normalize(sdata, img_layer='my_image', output_layer='normalized_image', p_min=[5, 10, 15], p_max=[95, 90, 85])
+    >>> sdata = normalize(sdata, image_name='my_image', output_image_name='normalized_image', p_min=[5, 10, 15], p_max=[95, 90, 85])
     """
-    se = _get_spatial_element(sdata, img_layer)
+    se = _get_spatial_element(sdata, image_name)
 
     # if p_min is Iterable, we apply p_min, p_max normalization to each channel individually
     if isinstance(p_min, Iterable):
@@ -86,8 +86,8 @@ def normalize(
         }
         sdata = map_image(
             sdata,
-            img_layer=img_layer,
-            output_layer=output_layer,
+            image_name=image_name,
+            output_image_name=output_image_name,
             func=_normalize,
             fn_kwargs=fn_kwargs,
             blockwise=False,
@@ -100,7 +100,7 @@ def normalize(
         sdata = add_image_layer(
             sdata,
             arr=arr,
-            output_layer=output_layer,
+            output_image_name=output_image_name,
             transformations=get_transformation(se, get_all=True),
             scale_factors=scale_factors,
             c_coords=se.c.data,

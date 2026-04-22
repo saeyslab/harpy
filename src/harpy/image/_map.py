@@ -20,8 +20,8 @@ from harpy.image._image import (
 
 def map_image(
     sdata: SpatialData,
-    img_layer: str,
-    output_layer: str,
+    image_name: str,
+    output_image_name: str,
     func: Callable[..., NDArray | Array] | Mapping[str, Any],
     fn_kwargs: Mapping[str, Any] = MappingProxyType({}),
     chunks: str | int | tuple[int, ...] | None = None,
@@ -42,9 +42,9 @@ def map_image(
     ----------
     sdata
         Spatial data object containing the image to be processed.
-    img_layer
+    image_name
         The image layer in `sdata` to process.
-    output_layer
+    output_image_name
         The name of the output layer where results will be stored.
     func
         The Callable to apply to the image.
@@ -99,12 +99,12 @@ def map_image(
     >>> def my_function( image, parameter ):
     ...    return image*parameter
     >>> fn_kwargs={ 0: { "parameter": 2 }, 1: { "parameter": 3 } }
-    >>> sdata = apply(sdata, img_layer="raw_image", output_layer="processed_image", func=my_function, fn_kwargs=fn_kwargs,)
+    >>> sdata = apply(sdata, image_name="raw_image", output_image_name="processed_image", func=my_function, fn_kwargs=fn_kwargs,)
 
     Apply the same function to all channels of the image with the same parameters:
 
     >>> fn_kwargs={ "parameter": 2 }
-    >>> sdata = apply(sdata, img_layer="raw_image", output_layer="processed_image", func=my_function, fn_kwargs=fn_kwargs,)
+    >>> sdata = apply(sdata, image_name="raw_image", output_image_name="processed_image", func=my_function, fn_kwargs=fn_kwargs,)
 
     Apply a custom function `my_function` to all z slices of an image layer using different parameters for each z slice
     (we assume sdata[ "raw_image" ] has 2 z slices at 0.5 and 1.5, and has dimensions c,z,y,x ):
@@ -112,7 +112,7 @@ def map_image(
     >>> def my_function( image, parameter ):
     ...    return image*parameter
     >>> fn_kwargs={ 0.5: { "parameter": 2 }, 1.5: { "parameter": 3 } }
-    >>> sdata = apply(sdata, img_layer="raw_image", output_layer="processed_image", func=my_function, fn_kwargs=fn_kwargs,)
+    >>> sdata = apply(sdata, image_name="raw_image", output_image_name="processed_image", func=my_function, fn_kwargs=fn_kwargs,)
 
     Apply a custom function `my_function` to all z slices and channels of an image layer using different parameters for each z slice
     and channel.
@@ -121,9 +121,9 @@ def map_image(
     >>> def my_function( image, parameter ):
     ...    return image*parameter
     >>> fn_kwargs={ 0: {  0.5: { "parameter": 2 }, 1.5: { "parameter": 3 } }, 1: {  0.5: { "parameter": 4 }, 1.5: { "parameter": 5 } }  }
-    >>> sdata = apply(sdata, img_layer="raw_image", output_layer="processed_image", func=my_function, fn_kwargs=fn_kwargs,)
+    >>> sdata = apply(sdata, image_name="raw_image", output_image_name="processed_image", func=my_function, fn_kwargs=fn_kwargs,)
     """
-    se = _get_spatial_element(sdata, img_layer)
+    se = _get_spatial_element(sdata, image_name)
 
     if crd is not None:
         se_crop = bounding_box_query(
@@ -209,7 +209,7 @@ def map_image(
     sdata = add_image_layer(
         sdata,
         arr=se_result.data,
-        output_layer=output_layer,
+        output_image_name=output_image_name,
         chunks=se_result.data.chunksize,
         transformations=get_transformation(se_result, get_all=True),
         scale_factors=scale_factors,

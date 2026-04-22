@@ -174,17 +174,17 @@ class Featurizer:
 
             sdata = hp.datasets.pixie_example()
 
-            img_layer = "raw_image_fov0"
-            labels_layer = "label_whole_fov0"
+            image_name = "raw_image_fov0"
+            labels_name = "label_whole_fov0"
 
             mask_array = (
-                sdata[labels_layer]
+                sdata[labels_name]
                 .data[None, ...]
                 .rechunk(1024)
             )
 
             image_array = (
-                sdata[img_layer]
+                sdata[image_name]
                 .data[:, None, ...]
                 .rechunk(1024)
             )
@@ -668,17 +668,17 @@ class Featurizer:
 
             sdata = hp.datasets.pixie_example()
 
-            img_layer = "raw_image_fov0"
-            labels_layer = "label_whole_fov0"
+            image_name = "raw_image_fov0"
+            labels_name = "label_whole_fov0"
 
             mask_array = (
-                sdata[labels_layer]
+                sdata[labels_name]
                 .data[None, ...]
                 .rechunk(1024)
             )
 
             image_array = (
-                sdata[img_layer]
+                sdata[image_name]
                 .data[:, None, ...]
                 .rechunk(1024)
             )
@@ -722,8 +722,8 @@ class Featurizer:
 
             sdata = hp.datasets.pixie_example()
 
-            labels_layer = "label_whole_fov0"
-            mask_array = sdata[labels_layer].data[None, ...]
+            labels_name = "label_whole_fov0"
+            mask_array = sdata[labels_name].data[None, ...]
 
             fe = hp.utils.Featurizer(
                 mask_dask_array=mask_array,

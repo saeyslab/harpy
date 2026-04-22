@@ -291,8 +291,8 @@ def test_apply(sdata_multi_c_no_backed: SpatialData):
 
     sdata_multi_c_no_backed = map_image(
         sdata_multi_c_no_backed,
-        img_layer="combine_z",
-        output_layer="combine_z_apply",
+        image_name="combine_z",
+        output_image_name="combine_z_apply",
         func=func,
         fn_kwargs=fn_kwargs,
         chunks=212,

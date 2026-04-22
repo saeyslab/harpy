@@ -21,8 +21,8 @@ from harpy.image._normalize import _nonzero_nonnan_percentile, _nonzero_nonnan_p
 
 def pixel_clustering_preprocess(
     sdata: SpatialData,
-    img_layer: str | Iterable[str],
-    output_layer: str | Iterable[str],
+    image_name: str | Iterable[str],
+    output_image_name: str | Iterable[str],
     channels: int | str | Iterable[int] | Iterable[str] | None = None,
     p: float | None = 99,
     p_sum: float | None = 5,
@@ -37,7 +37,7 @@ def pixel_clustering_preprocess(
     overwrite: bool = False,
 ) -> SpatialData:
     """
-    Preprocess image layers specified in `img_layer`. Normalizes and blurs the images based on various percentile and gaussian blur parameters. The results are added to `sdata` as specified in `output_layer`.
+    Preprocess image layers specified in `image_name`. Normalizes and blurs the images based on various percentile and gaussian blur parameters. The results are added to `sdata` as specified in `output_image_name`.
 
     Preprocessing function specifically designed for preprocessing images before using `harpy.im.flowsom`.
 
@@ -45,9 +45,9 @@ def pixel_clustering_preprocess(
     ----------
     sdata
         The SpatialData object containing the image data.
-    img_layer
+    image_name
         The image layer(s) from `sdata` to process. This can be a single layer or a list of layers, e.g., when multiple fields of view are available.
-    output_layer
+    output_image_name
         The preprocessed images are saved under this layer in `sdata`.
     channels
         Specifies the channels to be included in the processing.
@@ -71,16 +71,16 @@ def pixel_clustering_preprocess(
     scale_factors
         Scale factors to apply for multiscale
     persist_intermediate
-        If set to `True` will persist all preprocessed elements in `img_layer` in memory.
-        If the elements in `img_layer` are large, this could lead to increased ram usage.
+        If set to `True` will persist all preprocessed elements in `image_name` in memory.
+        If the elements in `image_name` are large, this could lead to increased ram usage.
         Set to `False` to write to intermediate zarr store instead, which will reduce ram usage, but will increase computation time slightly.
-        Persist or writing to intermediate zarr store is needed, otherwise Dask will not be able to optimize the computation graph for the multiple `img_layer` use case.
-        Ignored if `sdata` is not backed by a zarr store, or if there is only one element in `img_layer`.
+        Persist or writing to intermediate zarr store is needed, otherwise Dask will not be able to optimize the computation graph for the multiple `image_name` use case.
+        Ignored if `sdata` is not backed by a zarr store, or if there is only one element in `image_name`.
     cast_dtype
-        Image data in `img_layer` will be casted to `dtype` before preprocessing starts. If set to None, and input image is of integer type, normalizations will lead to
+        Image data in `image_name` will be casted to `dtype` before preprocessing starts. If set to None, and input image is of integer type, normalizations will lead to
         data of type `numpy.float64` due to percentile normalizations, leading to increased memory usage.
     overwrite
-        If `True`, overwrites existing data in `output_layer`.
+        If `True`, overwrites existing data in `output_image_name`.
 
     Notes
     -----
@@ -98,17 +98,17 @@ def pixel_clustering_preprocess(
 
     """
     # setting p_sum=None, and norm_sum=False prevents data leakage in the single-fov case.
-    img_layer = list(img_layer) if isinstance(img_layer, Iterable) and not isinstance(img_layer, str) else [img_layer]
-    output_layer = (
-        list(output_layer)
-        if isinstance(output_layer, Iterable) and not isinstance(output_layer, str)
-        else [output_layer]
+    image_name = list(image_name) if isinstance(image_name, Iterable) and not isinstance(image_name, str) else [image_name]
+    output_image_name = (
+        list(output_image_name)
+        if isinstance(output_image_name, Iterable) and not isinstance(output_image_name, str)
+        else [output_image_name]
     )
-    assert len(output_layer) == len(img_layer), (
-        "The number of 'output_layer' specified should be the equal to the the number of 'img_layer' specified."
+    assert len(output_image_name) == len(image_name), (
+        "The number of 'output_image_name' specified should be the equal to the the number of 'image_name' specified."
     )
 
-    se_image = _get_spatial_element(sdata, layer=img_layer[0])
+    se_image = _get_spatial_element(sdata, layer=image_name[0])
 
     if channels is not None:
         channels = list(channels) if isinstance(channels, Iterable) and not isinstance(channels, str) else [channels]
@@ -118,7 +118,7 @@ def pixel_clustering_preprocess(
 
     _arr_list = []
     _transformations = []
-    for i, _img_layer in enumerate(img_layer):
+    for i, _img_layer in enumerate(image_name):
         se_image = _get_spatial_element(sdata, layer=_img_layer)
         _transformations.append(get_transformation(se_image, get_all=True))
         arr = se_image.sel(c=channels).data
@@ -126,7 +126,7 @@ def pixel_clustering_preprocess(
             _array_dim = arr.ndim
         else:
             assert _array_dim == arr.ndim, (
-                "Image layers specified via parameter `img_layer` should all have same number of dimensions."
+                "Image layers specified via parameter `image_name` should all have same number of dimensions."
             )
         if chunks is not None:
             arr = arr.rechunk(chunks)
@@ -149,9 +149,9 @@ def pixel_clustering_preprocess(
         arr_percentile = da.stack(results_arr_percentile, axis=0)
         arr_percentile_mean = da.mean(arr_percentile, axis=0)  # mean over all images
         # arr_percentile_mean has shape (#n_channels,)
-        # for multiple img_layer, in ark one uses np.mean( arr_percentile ) as the percentile to normalize
+        # for multiple image_name, in ark one uses np.mean( arr_percentile ) as the percentile to normalize
 
-    # 2) calculate norm sum percentile for img_layer
+    # 2) calculate norm sum percentile for image_name
     # now normalize by percentile (percentile for each channel separate)
     if p is not None:
         for i in range(len(_arr_list)):
@@ -189,7 +189,7 @@ def pixel_clustering_preprocess(
             _arr_sum_list.append(da.sum(_arr, axis=0))
 
     # sanity check
-    assert len(_arr_sum_list) == len(_arr_list) == len(img_layer)
+    assert len(_arr_sum_list) == len(_arr_list) == len(image_name)
     results_arr_percentile_post_norm = []
     for i in range(len(_arr_list)):
         # sanity update to make sure that if pixel at certain location in a channel is nan, all pixels at that location for all channels are set to nan.
@@ -252,7 +252,7 @@ def pixel_clustering_preprocess(
         sdata = add_image_layer(
             sdata,
             arr=_arr_list[i].squeeze(1) if to_squeeze else _arr_list[i],
-            output_layer=output_layer[i],
+            output_image_name=output_image_name[i],
             transformations=_transformations[i],
             scale_factors=scale_factors,
             c_coords=channels,

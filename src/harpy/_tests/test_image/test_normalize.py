@@ -9,8 +9,8 @@ def test_normalize(sdata_blobs):
     p_max = 95
     sdata_blobs = normalize(
         sdata_blobs,
-        img_layer="blobs_image",
-        output_layer="blobs_image_normalized",
+        image_name="blobs_image",
+        output_image_name="blobs_image_normalized",
         p_min=p_min,
         p_max=p_max,
         eps=eps,
@@ -32,8 +32,8 @@ def test_normalize_channels(sdata_blobs):
     p_max = 95
     sdata_blobs = normalize(
         sdata_blobs,
-        img_layer="blobs_image",
-        output_layer="blobs_image_normalized",
+        image_name="blobs_image",
+        output_image_name="blobs_image_normalized",
         p_min=sdata_blobs["blobs_image"].c.data.shape[0] * [p_min],
         p_max=sdata_blobs["blobs_image"].c.data.shape[0] * [p_max],
     )

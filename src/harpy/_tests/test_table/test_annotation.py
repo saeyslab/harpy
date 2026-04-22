@@ -8,9 +8,9 @@ from harpy.utils._keys import _ANNOTATION_KEY
 def test_score_genes(sdata_transcripts_no_backed, path_dataset_markers):
     sdata_transcripts_no_backed, celltypes_scored, celltypes_all = score_genes(
         sdata=sdata_transcripts_no_backed,
-        labels_layer="segmentation_mask",
-        table_layer="table_transcriptomics_cluster",
-        output_layer="table_transcriptomics_score_genes",
+        labels_name="segmentation_mask",
+        table_name="table_transcriptomics_cluster",
+        output_table_name="table_transcriptomics_score_genes",
         marker_genes=path_dataset_markers,
         delimiter=",",
         row_norm=False,
@@ -43,9 +43,9 @@ def test_score_genes(sdata_transcripts_no_backed, path_dataset_markers):
 def test_score_genes_iter(sdata_transcripts_no_backed, path_dataset_markers, tmpdir):
     sdata_transcripts_no_backed, celltypes_scored, celltypes_all = score_genes_iter(
         sdata=sdata_transcripts_no_backed,
-        labels_layer="segmentation_mask",
-        table_layer="table_transcriptomics_cluster",
-        output_layer="table_transcriptomics_score_genes",
+        labels_name="segmentation_mask",
+        table_name="table_transcriptomics_cluster",
+        output_table_name="table_transcriptomics_score_genes",
         marker_genes=path_dataset_markers,
         delimiter=",",
         overwrite=True,

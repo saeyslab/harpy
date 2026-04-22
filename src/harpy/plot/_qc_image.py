@@ -216,7 +216,7 @@ def calculate_mean_norm(sdata, overwrite=False, c_mask=None, key="normalized_", 
     for image_name in [x for x in sdata.images if key not in x]:
         norm_image_name = key + image_name
         if overwrite or norm_image_name not in sdata.images:
-            normalize(sdata, image_name, output_layer=norm_image_name, overwrite=True, **kwargs)
+            normalize(sdata, image_name, output_image_name=norm_image_name, overwrite=True, **kwargs)
         # caluculate the mean of the normalized image for each channel
         c_means = sdata[norm_image_name].mean(["x", "y"]).compute().data
         data.append(c_means)

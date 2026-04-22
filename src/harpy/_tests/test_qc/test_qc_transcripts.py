@@ -11,7 +11,7 @@ def test_metrics_histogram(sdata_transcripts_no_backed, tmp_path):
     try:
         axes = hp.qc.metrics_histogram(
             sdata_transcripts_no_backed,
-            table_layer="table_transcriptomics_preprocessed",
+            table_name="table_transcriptomics_preprocessed",
             quantile_range=(0.1, 0.95),
         )
 
@@ -33,7 +33,7 @@ def test_obs_scatter(sdata_transcripts_no_backed, tmp_path):
     try:
         result = hp.qc.obs_scatter(
             sdata_transcripts_no_backed,
-            table_layer="table_transcriptomics_preprocessed",
+            table_name="table_transcriptomics_preprocessed",
             column_x="shapeSize",
             column_y="total_counts",
             ax=ax,
@@ -54,7 +54,7 @@ def test_obs_scatter_without_regplot(sdata_transcripts_no_backed, tmp_path):
     try:
         result = hp.qc.obs_scatter(
             sdata_transcripts_no_backed,
-            table_layer="table_transcriptomics_preprocessed",
+            table_name="table_transcriptomics_preprocessed",
             column_x="shapeSize",
             column_y="total_counts",
             ax=ax,

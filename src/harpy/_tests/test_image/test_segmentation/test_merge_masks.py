@@ -16,10 +16,10 @@ from harpy.image.segmentation._merge_masks import (
 def test_merge_labels_layers(sdata_multi_c_no_backed: SpatialData):
     sdata_multi_c_no_backed = merge_labels_layers(
         sdata_multi_c_no_backed,
-        candidate_labels_layer="masks_whole",
-        priority_labels_layer="masks_nuclear",
-        output_labels_layer="masks_merged",
-        output_shapes_layer=None,
+        candidate_labels_name="masks_whole",
+        priority_labels_name="masks_nuclear",
+        output_labels_name="masks_merged",
+        output_shapes_name=None,
         overwrite=True,
         chunks=256,
     )
@@ -31,11 +31,11 @@ def test_merge_labels_layers(sdata_multi_c_no_backed: SpatialData):
 def test_merge_labels_layers_nuclei(sdata_multi_c_no_backed: SpatialData):
     sdata_multi_c_no_backed = merge_labels_layers_nuclei(
         sdata_multi_c_no_backed,
-        labels_layer="masks_whole",
-        labels_layer_nuclei_expanded="masks_nuclear",
-        labels_layer_nuclei="masks_nuclear",
-        output_labels_layer="masks_merged_nuclear",
-        output_shapes_layer=None,
+        labels_name="masks_whole",
+        labels_name_nuclei_expanded="masks_nuclear",
+        labels_name_nuclei="masks_nuclear",
+        output_labels_name="masks_merged_nuclear",
+        output_shapes_name=None,
         overwrite=True,
         chunks=256,
         depth=100,
@@ -50,14 +50,14 @@ def test_merge_labels_layers_small_sdata_keeps_no_overlap_candidates() -> None:
     candidate = da.from_array(np.array([[1, 1, 2, 2], [1, 1, 2, 0]], dtype=np.uint32), chunks=(1, 2))
     priority = da.from_array(np.array([[5, 5, 0, 0], [5, 5, 0, 0]], dtype=np.uint32), chunks=(1, 2))
 
-    sdata = add_labels_layer(sdata, arr=candidate, output_layer="candidate", overwrite=True)
-    sdata = add_labels_layer(sdata, arr=priority, output_layer="priority", overwrite=True)
+    sdata = add_labels_layer(sdata, arr=candidate, output_labels_name="candidate", overwrite=True)
+    sdata = add_labels_layer(sdata, arr=priority, output_labels_name="priority", overwrite=True)
 
     sdata = merge_labels_layers(
         sdata,
-        candidate_labels_layer="candidate",
-        priority_labels_layer="priority",
-        output_labels_layer="merged",
+        candidate_labels_name="candidate",
+        priority_labels_name="priority",
+        output_labels_name="merged",
         overwrite=True,
         chunks=2,
         threshold=0.5,
@@ -73,14 +73,14 @@ def test_merge_labels_layers_uses_global_candidate_fraction_across_chunks() -> N
     candidate = da.from_array(np.array([[1, 1, 1, 1, 2, 2]], dtype=np.uint32), chunks=(1, 2))
     priority = da.from_array(np.array([[5, 5, 0, 0, 0, 0]], dtype=np.uint32), chunks=(1, 2))
 
-    sdata = add_labels_layer(sdata, arr=candidate, output_layer="candidate", overwrite=True)
-    sdata = add_labels_layer(sdata, arr=priority, output_layer="priority", overwrite=True)
+    sdata = add_labels_layer(sdata, arr=candidate, output_labels_name="candidate", overwrite=True)
+    sdata = add_labels_layer(sdata, arr=priority, output_labels_name="priority", overwrite=True)
 
     sdata = merge_labels_layers(
         sdata,
-        candidate_labels_layer="candidate",
-        priority_labels_layer="priority",
-        output_labels_layer="merged",
+        candidate_labels_name="candidate",
+        priority_labels_name="priority",
+        output_labels_name="merged",
         overwrite=True,
         chunks=2,
         threshold=0.4,
@@ -97,7 +97,7 @@ def test_merge_labels_layers_uses_global_candidate_fraction_across_chunks() -> N
 def test_match_labels_to_reference_layers(sdata_multi_c_no_backed: SpatialData):
     df = match_labels_to_reference_layers(
         sdata_multi_c_no_backed,
-        source_labels_layer="masks_whole",
+        source_labels_name="masks_whole",
         reference_labels_layers=["masks_nuclear"],
         chunks=256,
     )
@@ -168,13 +168,13 @@ def test_match_labels_to_reference_layers_small_sdata() -> None:
     original_1 = da.from_array(np.array([[5, 5, 7, 7], [0, 0, 8, 0]], dtype=np.uint32), chunks=(1, 2))
     original_2 = da.from_array(np.array([[10, 10, 0, 0], [10, 0, 0, 20]], dtype=np.uint32), chunks=(1, 2))
 
-    sdata = add_labels_layer(sdata, arr=mask, output_layer="mask", overwrite=True)
-    sdata = add_labels_layer(sdata, arr=original_1, output_layer="original_1", overwrite=True)
-    sdata = add_labels_layer(sdata, arr=original_2, output_layer="original_2", overwrite=True)
+    sdata = add_labels_layer(sdata, arr=mask, output_labels_name="mask", overwrite=True)
+    sdata = add_labels_layer(sdata, arr=original_1, output_labels_name="original_1", overwrite=True)
+    sdata = add_labels_layer(sdata, arr=original_2, output_labels_name="original_2", overwrite=True)
 
     result = match_labels_to_reference_layers(
         sdata,
-        source_labels_layer="mask",
+        source_labels_name="mask",
         reference_labels_layers=["original_1", "original_2"],
         chunks=2,
     )
@@ -201,12 +201,12 @@ def test_match_labels_to_reference_layers_empty_source_returns_empty_dataframe(
     source = da.from_array(np.zeros((2, 2), dtype=np.uint32), chunks=(1, 2))
     reference = da.from_array(np.array([[5, 5], [0, 0]], dtype=np.uint32), chunks=(1, 2))
 
-    sdata = add_labels_layer(sdata, arr=source, output_layer="source", overwrite=True)
-    sdata = add_labels_layer(sdata, arr=reference, output_layer="reference", overwrite=True)
+    sdata = add_labels_layer(sdata, arr=source, output_labels_name="source", overwrite=True)
+    sdata = add_labels_layer(sdata, arr=reference, output_labels_name="reference", overwrite=True)
 
     result = match_labels_to_reference_layers(
         sdata,
-        source_labels_layer="source",
+        source_labels_name="source",
         reference_labels_layers=["reference"],
         chunks=2,
         threshold=threshold,
@@ -233,12 +233,12 @@ def test_match_labels_to_reference_layers_supports_overlap_metrics() -> None:
     # - reference_fraction = 2 / 5 = 0.4
     # - iou = 2 / (3 + 5 - 2) = 2 / 6 = 0.333...
     # With threshold = 0.5, only source_fraction keeps label 5.
-    sdata = add_labels_layer(sdata, arr=mask, output_layer="mask", overwrite=True)
-    sdata = add_labels_layer(sdata, arr=original, output_layer="original", overwrite=True)
+    sdata = add_labels_layer(sdata, arr=mask, output_labels_name="mask", overwrite=True)
+    sdata = add_labels_layer(sdata, arr=original, output_labels_name="original", overwrite=True)
 
     result_source_fraction = match_labels_to_reference_layers(
         sdata,
-        source_labels_layer="mask",
+        source_labels_name="mask",
         reference_labels_layers=["original"],
         chunks=2,
         threshold=0.5,
@@ -246,7 +246,7 @@ def test_match_labels_to_reference_layers_supports_overlap_metrics() -> None:
     )
     result_reference_fraction = match_labels_to_reference_layers(
         sdata,
-        source_labels_layer="mask",
+        source_labels_name="mask",
         reference_labels_layers=["original"],
         chunks=2,
         threshold=0.5,
@@ -254,7 +254,7 @@ def test_match_labels_to_reference_layers_supports_overlap_metrics() -> None:
     )
     result_iou = match_labels_to_reference_layers(
         sdata,
-        source_labels_layer="mask",
+        source_labels_name="mask",
         reference_labels_layers=["original"],
         chunks=2,
         threshold=0.5,
@@ -295,8 +295,8 @@ def test_match_labels_to_reference_layers_selects_winner_using_overlap_metric() 
         chunks=(2, 2),
     )
 
-    sdata = add_labels_layer(sdata, arr=mask, output_layer="mask", overwrite=True)
-    sdata = add_labels_layer(sdata, arr=original, output_layer="original", overwrite=True)
+    sdata = add_labels_layer(sdata, arr=mask, output_labels_name="mask", overwrite=True)
+    sdata = add_labels_layer(sdata, arr=original, output_labels_name="original", overwrite=True)
 
     # Mask label 1 covers 6 pixels. Within that mask:
     # - original label 5 overlaps in 4 pixels
@@ -320,21 +320,21 @@ def test_match_labels_to_reference_layers_selects_winner_using_overlap_metric() 
     # label 6.
     result_source_fraction = match_labels_to_reference_layers(
         sdata,
-        source_labels_layer="mask",
+        source_labels_name="mask",
         reference_labels_layers=["original"],
         chunks=2,
         overlap_metric="source_fraction",
     )
     result_reference_fraction = match_labels_to_reference_layers(
         sdata,
-        source_labels_layer="mask",
+        source_labels_name="mask",
         reference_labels_layers=["original"],
         chunks=2,
         overlap_metric="reference_fraction",
     )
     result_iou = match_labels_to_reference_layers(
         sdata,
-        source_labels_layer="mask",
+        source_labels_name="mask",
         reference_labels_layers=["original"],
         chunks=2,
         overlap_metric="iou",
@@ -352,13 +352,13 @@ def test_match_labels_to_reference_layers_raises_for_invalid_threshold() -> None
     mask = da.from_array(np.array([[1, 1]], dtype=np.uint32), chunks=(1, 2))
     original = da.from_array(np.array([[5, 5]], dtype=np.uint32), chunks=(1, 2))
 
-    sdata = add_labels_layer(sdata, arr=mask, output_layer="mask", overwrite=True)
-    sdata = add_labels_layer(sdata, arr=original, output_layer="original", overwrite=True)
+    sdata = add_labels_layer(sdata, arr=mask, output_labels_name="mask", overwrite=True)
+    sdata = add_labels_layer(sdata, arr=original, output_labels_name="original", overwrite=True)
 
     with pytest.raises(ValueError, match="threshold"):
         match_labels_to_reference_layers(
             sdata,
-            source_labels_layer="mask",
+            source_labels_name="mask",
             reference_labels_layers=["original"],
             threshold=1.5,
         )
@@ -369,13 +369,13 @@ def test_match_labels_to_reference_layers_raises_for_invalid_overlap_metric() ->
     mask = da.from_array(np.array([[1, 1]], dtype=np.uint32), chunks=(1, 2))
     original = da.from_array(np.array([[5, 5]], dtype=np.uint32), chunks=(1, 2))
 
-    sdata = add_labels_layer(sdata, arr=mask, output_layer="mask", overwrite=True)
-    sdata = add_labels_layer(sdata, arr=original, output_layer="original", overwrite=True)
+    sdata = add_labels_layer(sdata, arr=mask, output_labels_name="mask", overwrite=True)
+    sdata = add_labels_layer(sdata, arr=original, output_labels_name="original", overwrite=True)
 
     with pytest.raises(ValueError, match="overlap_metric"):
         match_labels_to_reference_layers(
             sdata,
-            source_labels_layer="mask",
+            source_labels_name="mask",
             reference_labels_layers=["original"],
             overlap_metric="dice",  # type: ignore[arg-type]
         )

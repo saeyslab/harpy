@@ -18,10 +18,10 @@ def test_integration_allocate_intensity(sdata_multi_c_no_backed: SpatialData):
 
     sdata_multi_c_no_backed = align_labels_layers(
         sdata_multi_c_no_backed,
-        labels_layer_1="masks_nuclear",
-        labels_layer_2="masks_whole",
-        output_labels_layer="masks_nuclear_aligned",
-        output_shapes_layer=None,
+        labels_name_1="masks_nuclear",
+        labels_name_2="masks_whole",
+        output_labels_name="masks_nuclear_aligned",
+        output_shapes_name=None,
         overwrite=True,
         chunks=256,
         depth=100,
@@ -31,9 +31,9 @@ def test_integration_allocate_intensity(sdata_multi_c_no_backed: SpatialData):
 
     sdata_multi_c_no_backed = allocate_intensity(
         sdata_multi_c_no_backed,
-        img_layer="raw_image",
-        labels_layer="masks_whole",
-        output_layer="table_intensities",
+        image_name="raw_image",
+        labels_name="masks_whole",
+        output_table_name="table_intensities",
         obs_stats=("max"),
         chunks=100,
         append=False,
@@ -42,9 +42,9 @@ def test_integration_allocate_intensity(sdata_multi_c_no_backed: SpatialData):
 
     sdata_multi_c_no_backed = allocate_intensity(
         sdata_multi_c_no_backed,
-        img_layer="raw_image",
-        labels_layer="masks_nuclear_aligned",
-        output_layer="table_intensities",
+        image_name="raw_image",
+        labels_name="masks_nuclear_aligned",
+        output_table_name="table_intensities",
         obs_stats=("max"),
         chunks=100,
         append=True,
@@ -53,9 +53,9 @@ def test_integration_allocate_intensity(sdata_multi_c_no_backed: SpatialData):
 
     sdata_multi_c_no_backed = add_regionprops(
         sdata_multi_c_no_backed,
-        labels_layer=["masks_whole", "masks_nuclear_aligned"],
-        table_layer="table_intensities",
-        output_layer="table_intensities",
+        labels_name=["masks_whole", "masks_nuclear_aligned"],
+        table_name="table_intensities",
+        output_table_name="table_intensities",
         overwrite=True,
     )
 
@@ -72,9 +72,9 @@ def test_integration_allocate_intensity(sdata_multi_c_no_backed: SpatialData):
 def test_allocate_intensity(sdata_multi_c_no_backed: SpatialData):
     sdata_multi_c_no_backed = allocate_intensity(
         sdata_multi_c_no_backed,
-        img_layer="raw_image",
-        labels_layer="masks_whole",
-        output_layer="table_intensities",
+        image_name="raw_image",
+        labels_name="masks_whole",
+        output_table_name="table_intensities",
         mode="mean",
         chunks=100,
         append=False,
@@ -99,9 +99,9 @@ def test_allocate_intensity(sdata_multi_c_no_backed: SpatialData):
 def test_allocate_intensity_overwrite(sdata_multi_c: SpatialData):
     sdata_multi_c = allocate_intensity(
         sdata_multi_c,
-        img_layer="raw_image",
-        labels_layer="masks_whole",
-        output_layer="table_intensities",
+        image_name="raw_image",
+        labels_name="masks_whole",
+        output_table_name="table_intensities",
         append=False,
         overwrite=True,
     )
@@ -114,9 +114,9 @@ def test_allocate_intensity_overwrite(sdata_multi_c: SpatialData):
         # unit test with append to True, and overwrite to False, which should not be allowed
         sdata_multi_c = allocate_intensity(
             sdata_multi_c,
-            img_layer="raw_image",
-            labels_layer="masks_nuclear_aligned",
-            output_layer="table_intensities",
+            image_name="raw_image",
+            labels_name="masks_nuclear_aligned",
+            output_table_name="table_intensities",
             chunks=512,
             append=True,
             overwrite=False,
@@ -129,10 +129,10 @@ def test_allocate_intensity_raises_instance_key(sdata_pixie: SpatialData):
     instance_size_key = "instance_size"
     sdata_pixie = allocate_intensity(
         sdata_pixie,
-        img_layer="raw_image_fov0",
-        labels_layer="label_whole_fov0",
+        image_name="raw_image_fov0",
+        labels_name="label_whole_fov0",
         to_coordinate_system="fov0",
-        output_layer="my_table",
+        output_table_name="my_table",
         mode="sum",
         obs_stats="count",
         region_key=region_key,
@@ -153,10 +153,10 @@ def test_allocate_intensity_raises_instance_key(sdata_pixie: SpatialData):
     ):
         sdata_pixie = allocate_intensity(
             sdata_pixie,
-            img_layer="raw_image_fov1",
-            labels_layer="label_whole_fov1",
+            image_name="raw_image_fov1",
+            labels_name="label_whole_fov1",
             to_coordinate_system="fov1",
-            output_layer="my_table",
+            output_table_name="my_table",
             mode="sum",
             obs_stats="count",
             region_key=region_key,
@@ -172,10 +172,10 @@ def test_allocate_intensity_raises_region_key(sdata_pixie: SpatialData):
     instance_size_key = "instance_size"
     sdata_pixie = allocate_intensity(
         sdata_pixie,
-        img_layer="raw_image_fov0",
-        labels_layer="label_whole_fov0",
+        image_name="raw_image_fov0",
+        labels_name="label_whole_fov0",
         to_coordinate_system="fov0",
-        output_layer="my_table",
+        output_table_name="my_table",
         mode="sum",
         obs_stats="count",
         region_key=region_key,
@@ -196,10 +196,10 @@ def test_allocate_intensity_raises_region_key(sdata_pixie: SpatialData):
     ):
         sdata_pixie = allocate_intensity(
             sdata_pixie,
-            img_layer="raw_image_fov1",
-            labels_layer="label_whole_fov1",
+            image_name="raw_image_fov1",
+            labels_name="label_whole_fov1",
             to_coordinate_system="fov1",
-            output_layer="my_table",
+            output_table_name="my_table",
             mode="sum",
             obs_stats="count",
             region_key=region_key,

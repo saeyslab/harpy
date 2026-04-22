@@ -17,12 +17,12 @@ from harpy.table._table import add_table_layer
 
 def bounding_box_query(
     sdata: SpatialData,
-    labels_layer: str | Iterable[str],
+    labels_name: str | Iterable[str],
     to_coordinate_system: str | Iterable[str] | None,
     crd: tuple[int, int, int, int] | Iterable[tuple[int, int, int, int] | None] | None,
-    copy_img_layer: bool = True,
-    copy_shapes_layer: bool = True,
-    copy_points_layer: bool = True,
+    copy_image: bool = True,
+    copy_shapes: bool = True,
+    copy_points: bool = True,
     output: str | Path | None = None,
 ) -> SpatialData:
     """
@@ -32,19 +32,19 @@ def bounding_box_query(
     ----------
     sdata
         The SpatialData object to query.
-    labels_layer
+    labels_name
         The labels layer(s) to query, which can be a single string or an iterable of strings.
     to_coordinate_system
         The coordinate system(s) to which the query provided via `crd` is defined. If `None`, will use 'global'.
     crd
         Coordinates defining the bounding box, specified as a tuple of four integers (x_min, y_min, x_max, y_max), or an iterable of such tuples.
         Setting `crd` to `None` can be usefull if you want to filter elments in tables layers that are annotated by specific labels layers.
-        E.g. setting `labels_layer=layer_1` and `crd=None`, will result in AnnData objects in `sdata.tables` containing only instances annotated by `layer_1`.
-    copy_img_layer
+        E.g. setting `labels_name=layer_1` and `crd=None`, will result in AnnData objects in `sdata.tables` containing only instances annotated by `layer_1`.
+    copy_image
         Whether to copy all image layers to the new SpatialData object. If set to `False`, image layers will not be included in the result.
-    copy_shapes_layer
+    copy_shapes
         Whether to copy all shapes layers to the new SpatialData object. If set to `False`, shapes layers will not be included in the result.
-    copy_points_layer
+    copy_points
         Whether to copy all points layers to the new SpatialData object. If set to `False`, points layers will not be included in the result.
     output
         Path to the zarr store where the resulting SpatialData object will be backed.
@@ -57,18 +57,18 @@ def bounding_box_query(
     Raises
     ------
     AssertionError
-        If the number of provided `labels_layer`, `crd` and `to_coordinate_system` is not equal.
+        If the number of provided `labels_name`, `crd` and `to_coordinate_system` is not equal.
     """
 
     def _fix_name(name: str | Iterable[str]):
         return list(name) if isinstance(name, Iterable) and not isinstance(name, str) else [name]
 
     # make all input iterables
-    labels_layer = _fix_name(labels_layer)
+    labels_name = _fix_name(labels_name)
     crd = _crd_to_iterable_of_iterables(crd)
     to_coordinate_system = _fix_name(to_coordinate_system)
-    assert len(labels_layer) == len(crd) == len(to_coordinate_system), (
-        "The number of 'labels_layer', 'crd' and 'to_coordinate_system' specified should all be equal."
+    assert len(labels_name) == len(crd) == len(to_coordinate_system), (
+        "The number of 'labels_name', 'crd' and 'to_coordinate_system' specified should all be equal."
     )
 
     sdata_queried = SpatialData()
@@ -78,8 +78,8 @@ def bounding_box_query(
 
     # first add queried labels layer to sdata, so we do not have to query them + calculate unique labels in them len[*sdata.tables] times.
     labels_ids = []
-    # labels_layer_queried=[]
-    for _labels_layer, _crd, _to_coordinate_system in zip(labels_layer, crd, to_coordinate_system, strict=True):
+    # labels_name_queried=[]
+    for _labels_layer, _crd, _to_coordinate_system in zip(labels_name, crd, to_coordinate_system, strict=True):
         se = get_dataarray(sdata, layer=_labels_layer)
 
         if _crd is None:
@@ -97,9 +97,9 @@ def bounding_box_query(
             # set labels_id to empty array, so for this labels layer, all instances will be removed from table.
             labels_ids.append(np.array([]))
             log.warning(
-                f"query with crd {crd} to coordinate system '{to_coordinate_system}' for labels layer '{labels_layer}' resulted in empty labels layer."
-                f"Therefore labels layer '{labels_layer}' will not be present in resulting spatialdata object. "
-                f"Instances in tables annotated by '{labels_layer}' will also be removed from the tables."
+                f"query with crd {crd} to coordinate system '{to_coordinate_system}' for labels layer '{labels_name}' resulted in empty labels layer."
+                f"Therefore labels layer '{labels_name}' will not be present in resulting spatialdata object. "
+                f"Instances in tables annotated by '{labels_name}' will also be removed from the tables."
             )
         else:
             labels_ids.append(da.unique(se_queried.data).compute())
@@ -108,7 +108,7 @@ def bounding_box_query(
                 arr=se_queried.data.rechunk(
                     se_queried.data.chunksize
                 ),  # rechunk to avoid irregular chunks when writing to zarr store.
-                output_layer=_labels_layer,
+                output_labels_name=_labels_layer,
                 transformations=get_transformation(se_queried, get_all=True),
                 # note that if labels layer was multiscale, it will now not be multiscale.
             )
@@ -124,18 +124,18 @@ def bounding_box_query(
         else:
             # do not query the table layers that do not annotate any region
             log.info(
-                f"table_layer={_table_layer} does not annotate any spatial element — adding data as such to the resulting SpatialData object."
+                f"table_name={_table_layer} does not annotate any spatial element — adding data as such to the resulting SpatialData object."
             )
             sdata_queried = add_table_layer(
                 sdata_queried,
                 adata=adata.copy(),
-                output_layer=_table_layer,
+                output_table_name=_table_layer,
                 region=None,
             )
             continue
 
         for _labels_layer, _crd, _to_coordinate_system, _labels_id in zip(
-            labels_layer,
+            labels_name,
             crd,
             to_coordinate_system,
             labels_ids,
@@ -167,7 +167,7 @@ def bounding_box_query(
         sdata_queried = add_table_layer(
             sdata_queried,
             adata=adata,
-            output_layer=_table_layer,
+            output_table_name=_table_layer,
             region=region,
             instance_key=instance_key,
             region_key=region_key,
@@ -176,11 +176,11 @@ def bounding_box_query(
     # now copy image, shapes and points layer if copy is True.
     layers_to_copy = []
 
-    if copy_img_layer:
+    if copy_image:
         layers_to_copy.extend([*sdata.images])
-    if copy_shapes_layer:
+    if copy_shapes:
         layers_to_copy.extend([*sdata.shapes])
-    if copy_points_layer:
+    if copy_points:
         layers_to_copy.extend(*[sdata.points])
 
     for _layer_to_copy in layers_to_copy:

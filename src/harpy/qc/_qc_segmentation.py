@@ -18,7 +18,7 @@ from harpy.utils.utils import _da_unique
 
 def segmentation_coverage(
     sdata: SpatialData,
-    labels_layer: str,
+    labels_name: str,
     microns_per_pixel: float = 1,
 ) -> pd.DataFrame:
     """
@@ -31,7 +31,7 @@ def segmentation_coverage(
     ----------
     sdata
         SpatialData object containing the segmentation labels layer.
-    labels_layer
+    labels_name
         Name of the labels layer in ``sdata`` for which coverage statistics are computed.
     microns_per_pixel
         Pixel size used to convert areas from pixels to square microns. When set to ``1``,
@@ -52,11 +52,11 @@ def segmentation_coverage(
 
         hp.qc.segmentation_coverage(
             sdata,
-            labels_layer="label_nuclear_fov0",
+            labels_name="label_nuclear_fov0",
             microns_per_pixel=1,
         )
     """
-    array = get_dataarray(sdata, layer=labels_layer).data
+    array = get_dataarray(sdata, layer=labels_name).data
     array = array[None, ...] if array.ndim == 2 else array
 
     total_instances = _da_unique(array, run_on_gpu=False)
@@ -69,7 +69,7 @@ def segmentation_coverage(
     unit = "μm²" if microns_per_pixel != 1 else "pixels"
     return pd.DataFrame(
         {
-            "labels_layer": [labels_layer],
+            "labels_name": [labels_name],
             "total_instances": [total_instances],
             f"total_area_{unit}": [total_area],
             f"covered_area_{unit}": [covered_area],
@@ -80,7 +80,7 @@ def segmentation_coverage(
 
 def segmentation_histogram(
     sdata: SpatialData,
-    labels_layer: str,
+    labels_name: str,
     microns_per_pixel: float = 1,
     ax: Axes | None = None,
     bins: int | str = "auto",
@@ -105,7 +105,7 @@ def segmentation_histogram(
     ----------
     sdata
         SpatialData object containing the segmentation labels layer.
-    labels_layer
+    labels_name
         Name of the labels layer in ``sdata`` for which instance sizes are visualized.
     microns_per_pixel
         Pixel size used to convert areas from pixels to square microns. When set to ``1``,
@@ -152,14 +152,14 @@ def segmentation_histogram(
 
         hp.qc.segmentation_histogram(
             sdata,
-            labels_layer="label_nuclear_fov0",
+            labels_name="label_nuclear_fov0",
             microns_per_pixel=1,
         )
     """
-    array = get_dataarray(sdata, layer=labels_layer).data
+    array = get_dataarray(sdata, layer=labels_name).data
     array = array[None, ...] if array.ndim == 2 else array
 
-    log.info(f"Calculating cell size for labels layer '{labels_layer}'.")
+    log.info(f"Calculating cell size for labels layer '{labels_name}'.")
     instance_sizes = get_instance_size(mask=array, run_on_gpu=False)
     instance_sizes = instance_sizes.loc[instance_sizes[_INSTANCE_KEY] != 0, _CELLSIZE_KEY].dropna()
     if microns_per_pixel != 1:
@@ -168,7 +168,7 @@ def segmentation_histogram(
     unit = "μm²" if microns_per_pixel != 1 else "pixels"
 
     if instance_sizes.empty:
-        raise ValueError(f"No labeled instances found in labels layer '{labels_layer}'.")
+        raise ValueError(f"No labeled instances found in labels layer '{labels_name}'.")
 
     median_size = float(instance_sizes.median())
     std_size = float(instance_sizes.std())

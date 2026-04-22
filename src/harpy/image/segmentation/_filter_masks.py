@@ -15,19 +15,19 @@ from harpy.utils._aggregate import get_instance_size
 
 def filter_labels_layer(
     sdata: SpatialData,
-    labels_layer: str,
+    labels_name: str,
     min_size: int = 10,
     max_size: int = 100000,
     chunks: str | int | tuple[int, int] | None = None,
-    output_labels_layer: str | None = None,
-    output_shapes_layer: str | None = None,
+    output_labels_name: str | None = None,
+    output_shapes_name: str | None = None,
     scale_factors: ScaleFactors_t | None = None,
     overwrite: bool = False,
 ) -> SpatialData:
     """
     Filter labels in a labels layer by global object size.
 
-    Labels in `labels_layer` whose total size across the full image is smaller
+    Labels in `labels_name` whose total size across the full image is smaller
     than `min_size` or larger than `max_size` are set to `0` in the output.
     Size is computed per object globally, so labels that span multiple chunks
     are filtered consistently.
@@ -36,18 +36,18 @@ def filter_labels_layer(
     ----------
     sdata
         The spatialdata object containing the labels layer to be filtered.
-    labels_layer
+    labels_name
         The name of the labels layer to be filtered.
     min_size
-        labels in `labels_layer` with size smaller than `min_size` will be set to 0.
+        labels in `labels_name` with size smaller than `min_size` will be set to 0.
     max_size
-        labels in `labels_layer` with size larger than `max_size` will be set to 0.
+        labels in `labels_name` with size larger than `max_size` will be set to 0.
     chunks
         The desired chunk size for the Dask computation, or "auto" to allow the function to
         choose an optimal chunk size based on the data.
-    output_labels_layer
+    output_labels_name
         The name of the output labels layer where results will be stored. This must be specified.
-    output_shapes_layer
+    output_shapes_name
         The name for the new shapes layer generated from the aligned labels layer. If None, no shapes
         layer is created. Default is None.
     scale_factors
@@ -62,7 +62,7 @@ def filter_labels_layer(
     Raises
     ------
     ValueError
-        If `output_labels_layer` is not provided.
+        If `output_labels_name` is not provided.
     ValueError
         If `min_size` or `max_size` is negative.
     ValueError
@@ -86,23 +86,23 @@ def filter_labels_layer(
 
         sdata = hp.im.filter_labels_layer(
             sdata,
-            labels_layer="masks_whole",
+            labels_name="masks_whole",
             min_size=100,
             max_size=1000,
             chunks=256,
-            output_labels_layer="masks_whole_filtered",
-            output_shapes_layer="masks_whole_filtered_boundaries",
+            output_labels_name="masks_whole_filtered",
+            output_shapes_name="masks_whole_filtered_boundaries",
             overwrite=True,
         )
     """
-    if output_labels_layer is None:
+    if output_labels_name is None:
         raise ValueError("Please specify a name for the output layer.")
     if min_size < 0 or max_size < 0:
         raise ValueError(f"'min_size' and 'max_size' must be non-negative, found {min_size} and {max_size}.")
     if min_size > max_size:
         raise ValueError(f"'min_size' must be <= 'max_size', found {min_size} > {max_size}.")
 
-    se_labels = get_dataarray(sdata, layer=labels_layer)
+    se_labels = get_dataarray(sdata, layer=labels_name)
     labels_array = se_labels.data
     transformations = get_transformation(se_labels, get_all=True)
 
@@ -150,19 +150,19 @@ def filter_labels_layer(
     sdata = add_labels_layer(
         sdata,
         filtered_array,
-        output_layer=output_labels_layer,
+        output_labels_name=output_labels_name,
         chunks=chunks,
         transformations=transformations,
         scale_factors=scale_factors,
         overwrite=overwrite,
     )
 
-    if output_shapes_layer is not None:
-        se_result = get_dataarray(sdata, layer=output_labels_layer)
+    if output_shapes_name is not None:
+        se_result = get_dataarray(sdata, layer=output_labels_name)
         sdata = add_shapes_layer(
             sdata,
             input=se_result.data,
-            output_layer=output_shapes_layer,
+            output_shapes_name=output_shapes_name,
             transformations=transformations,
             overwrite=overwrite,
         )

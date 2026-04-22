@@ -22,20 +22,20 @@ sdata = hp.datasets.macsima_example()
 sdata = hp.im.add_image_layer(
     sdata,
     arr=sdata["HumanLiverH35"].sel(c="R0_DAPI").data[None, ...],
-    output_layer="image",
+    output_image_name="image",
     overwrite=True
 )
 
 # Segment the DAPI stain with Cellpose, or any segmentation model of choice.
 sdata = hp.im.segment(
     sdata,
-    img_layer="image",
+    image_name="image",
     model = hp.im.cellpose_callable,
     # keywords passed to Cellpose
     diameter=50,
     flow_threshold=0.8,
     cellprob_threshold=-4,
-    output_labels_layer="segmentation_mask",
+    output_labels_name="segmentation_mask",
     )
 
 channel = "R0_DAPI"
@@ -46,9 +46,9 @@ show_kwargs = {"title": channel, "colorbar": False}
 # Visualize
 hp.pl.plot_sdata(
     sdata,
-    img_layer="HumanLiverH35",
+    image_name="HumanLiverH35",
     channel=channel,
-    labels_layer="segmentation_mask",
+    labels_name="segmentation_mask",
     show_kwargs=show_kwargs,
     render_images_kwargs=render_images_kwargs,
     render_labels_kwargs=render_labels_kwargs,
@@ -57,9 +57,9 @@ hp.pl.plot_sdata(
 # Create the AnnData table
 sdata = hp.tb.allocate_intensity(
     sdata,
-    img_layer="HumanLiverH35",
-    labels_layer="segmentation_mask",
-    output_layer="table_intensities",
+    image_name="HumanLiverH35",
+    labels_name="segmentation_mask",
+    output_table_name="table_intensities",
     mode="mean",
     obs_stats="var",
 )

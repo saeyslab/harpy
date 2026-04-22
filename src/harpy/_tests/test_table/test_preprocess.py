@@ -9,9 +9,9 @@ from harpy.utils._keys import _CELLSIZE_KEY, _RAW_COUNTS_KEY
 def test_preprocess_proteomics(sdata_multi_c_no_backed, q):
     sdata_multi_c_no_backed = preprocess_proteomics(
         sdata_multi_c_no_backed,
-        labels_layer="masks_whole",
-        table_layer="table_intensities",
-        output_layer="table_intensities_preprocessed",
+        labels_name="masks_whole",
+        table_name="table_intensities",
+        output_table_name="table_intensities_preprocessed",
         q=q,
         instance_size_key=_CELLSIZE_KEY,
         overwrite=True,
@@ -30,14 +30,14 @@ def test_preprocess_proteomics(sdata_multi_c_no_backed, q):
 
 
 def test_preprocess_proteomics_multiple_samples(sdata_multi_c_no_backed):
-    # instead of one labels layer, user could give up multiple labels layers (linked to sdata.tables[table_layer] via the region key),
+    # instead of one labels layer, user could give up multiple labels layers (linked to sdata.tables[table_name] via the region key),
     # which could represent multiple samples that need to be preprocessed together.
     # in this dummy example, we preprocess cell masks and corresponding nuclear masks together, which does not make much sense in practice.
     sdata_multi_c_no_backed = preprocess_proteomics(
         sdata_multi_c_no_backed,
-        labels_layer=["masks_whole", "masks_nuclear_aligned"],
-        table_layer="table_intensities",
-        output_layer="table_intensities_preprocessed",
+        labels_name=["masks_whole", "masks_nuclear_aligned"],
+        table_name="table_intensities",
+        output_table_name="table_intensities_preprocessed",
         instance_size_key=_CELLSIZE_KEY,
         overwrite=True,
     )
@@ -57,13 +57,13 @@ def test_preprocess_proteomics_multiple_samples(sdata_multi_c_no_backed):
 def test_preprocess_proteomics_overwrite(sdata_multi_c_no_backed):
     sdata_multi_c_no_backed = preprocess_proteomics(
         sdata_multi_c_no_backed,
-        labels_layer="masks_whole",
-        table_layer="table_intensities",
-        output_layer="table_intensities",
+        labels_name="masks_whole",
+        table_name="table_intensities",
+        output_table_name="table_intensities",
         instance_size_key=_CELLSIZE_KEY,
         overwrite=True,
     )
-    # running preprocess takes cells corresponding to certain labels_layer from sdata.tables[table_layer].
+    # running preprocess takes cells corresponding to certain labels_name from sdata.tables[table_name].
     adata = sdata_multi_c_no_backed.tables["table_intensities"]
     region_key = adata.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]
     assert adata.shape == (674, 22)
@@ -78,9 +78,9 @@ def test_preprocess_proteomics_overwrite(sdata_multi_c_no_backed):
 def test_preprocess_transcriptomics(sdata_transcripts_no_backed, highly_variable_genes, size_norm):
     sdata_transcripts_no_backed = preprocess_transcriptomics(
         sdata_transcripts_no_backed,
-        labels_layer="segmentation_mask",
-        table_layer="table_transcriptomics",
-        output_layer="table_transcriptomics",
+        labels_name="segmentation_mask",
+        table_name="table_transcriptomics",
+        output_table_name="table_transcriptomics",
         highly_variable_genes=highly_variable_genes,
         size_norm=size_norm,
         library_norm=not size_norm,

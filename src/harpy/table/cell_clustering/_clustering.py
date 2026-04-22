@@ -26,9 +26,9 @@ except ImportError:
 
 def flowsom(
     sdata: SpatialData,
-    labels_layer_cells: str | Iterable[str],
-    labels_layer_clusters: str | Iterable[str],
-    output_layer: str,
+    cells_labels_name: str | Iterable[str],
+    cluster_labels_name: str | Iterable[str],
+    output_table_name: str,
     q: float | None = 0.999,
     chunks: str | int | tuple[int, ...] | None = None,
     n_clusters: int = 20,
@@ -48,7 +48,7 @@ def flowsom(
 
     Prepare the data obtained from pixel clustering for cell clustering (see
     :func:`~harpy.tb.cell_clustering_preprocess`) and execute FlowSOM on the
-    resulting table layer (`output_layer`) of the SpatialData object.
+    resulting table layer (`output_table_name`) of the SpatialData object.
 
     This function applies the FlowSOM clustering algorithm (via
     :class:`flowsom.FlowSOM`) on spatial data contained in a SpatialData object.
@@ -63,29 +63,29 @@ def flowsom(
     ----------
     sdata
         The input SpatialData object.
-    labels_layer_cells
+    cells_labels_name
         The labels layer(s) in `sdata` that contain cell segmentation masks.
         These masks should be previously generated using :func:`~harpy.im.segment`.
         If a list of labels layers is provided, they will be clustered together (e.g. multiple samples).
-    labels_layer_clusters
+    cluster_labels_name
         The labels layer(s) in `sdata` that contain metacluster or SOM cluster masks.
         These should be obtained via :func:`~harpy.im.flowsom`.
-    output_layer
+    output_table_name
         The output table layer in `sdata` where results of the clustering and metaclustering will be stored.
     q
         Quantile used for normalization. If specified, each pixel SOM/meta
-        cluster column in `output_layer` is normalized by this quantile prior
+        cluster column in `output_table_name` is normalized by this quantile prior
         to FlowSOM clustering. Values are multiplied by 100 after normalization.
     chunks
         Chunk sizes for processing the data. If provided as a tuple, it should detail chunk sizes for each dimension `(z)`, `y`, `x`.
     n_clusters
         The number of metaclusters to form from the self-organizing maps.
     index_names_var
-        Specifies the variable names to be used from `sdata.tables[output_layer].var`
+        Specifies the variable names to be used from `sdata.tables[output_table_name].var`
         for clustering. If `None`, `index_positions_var` is used if not `None`.
     index_positions_var
         Specifies the positions of variables to be used from
-        `sdata.tables[output_layer].var`. Used if `index_names_var` is `None`.
+        `sdata.tables[output_table_name].var`. Used if `index_names_var` is `None`.
     random_state
         A random state for reproducibility of the clustering.
     instance_key
@@ -96,11 +96,11 @@ def flowsom(
     cell_index_name
         The name of the index of the resulting :class:`~anndata.AnnData` table.
     instance_size_key
-        The key in the :class:`~anndata.AnnData` table `.obs` that will hold the size of the instances (obtained from `labels_layer_cells`).
+        The key in the :class:`~anndata.AnnData` table `.obs` that will hold the size of the instances (obtained from `cells_labels_name`).
     raw_counts_key
         Name of the :class:`~anndata.AnnData` layer where the non-preprocessed counts will be stored.
     overwrite
-        If True, overwrites the existing data in `output_layer` if it already exists.
+        If True, overwrites the existing data in `output_table_name` if it already exists.
     **kwargs
         Additional keyword arguments passed to :class:`flowsom.FlowSOM`.
 
@@ -120,9 +120,9 @@ def flowsom(
     # first do preprocessing (this creates an AnnData table)
     sdata = cell_clustering_preprocess(
         sdata,
-        labels_layer_cells=labels_layer_cells,
-        labels_layer_clusters=labels_layer_clusters,
-        output_layer=output_layer,
+        cells_labels_name=cells_labels_name,
+        cluster_labels_name=cluster_labels_name,
+        output_table_name=output_table_name,
         q=q,
         chunks=chunks,
         region_key=region_key,
@@ -133,7 +133,7 @@ def flowsom(
         overwrite=overwrite,
     )
 
-    process_table_instance = ProcessTable(sdata, labels_layer=labels_layer_cells, table_layer=output_layer)
+    process_table_instance = ProcessTable(sdata, labels_name=cells_labels_name, table_name=output_table_name)
     adata = process_table_instance._get_adata(index_names_var=index_names_var, index_positions_var=index_positions_var)
 
     adata, fsom = _flowsom(
@@ -169,8 +169,8 @@ def flowsom(
     sdata = add_table_layer(
         sdata,
         adata=adata,
-        output_layer=output_layer,
-        region=process_table_instance.labels_layer,
+        output_table_name=output_table_name,
+        region=process_table_instance.labels_name,
         instance_key=process_table_instance.instance_key,
         region_key=process_table_instance.region_key,
         overwrite=overwrite,
