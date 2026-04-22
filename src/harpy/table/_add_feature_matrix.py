@@ -533,7 +533,9 @@ def _compute_pair_feature_frame(
         # 2D intensity extraction adds a singleton z-axis for RasterAggregator.
         # Remove it again before calling skimage regionprops so 2D-only features
         # such as eccentricity still work.
-        morphology_labels_array = labels_array[0] if source_labels_ndim == 2 and labels_array.ndim == 3 else labels_array
+        morphology_labels_array = (
+            labels_array[0] if source_labels_ndim == 2 and labels_array.ndim == 3 else labels_array
+        )
         morphology_frame = _compute_morphology_feature_frame(
             labels_array=morphology_labels_array,
             morphology_features=morphology_features,
