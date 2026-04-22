@@ -1,4 +1,6 @@
 import numpy as np
+import pandas as pd
+from skimage.measure import regionprops_table
 from spatialdata import read_zarr
 
 from harpy.table._add_feature_matrix import add_feature_matrix
@@ -49,6 +51,38 @@ def test_add_feature_matrix_creates_intensity_stats_table(sdata_multi_c_no_backe
     assert adata.obsm["intensity_stats"].shape == (adata.n_obs, 2)
     assert np.isfinite(adata.obsm["intensity_stats"]).all()
     assert adata.uns["feature_matrices"]["intensity_stats"]["feature_columns"] == ["mean__0", "var__0"]
+
+
+def test_add_feature_matrix_supports_2d_eccentricity_with_intensity_features(sdata_multi_c_no_backed):
+    sdata_multi_c_no_backed = add_feature_matrix(
+        sdata_multi_c_no_backed,
+        labels_layer="masks_whole",
+        img_layer="raw_image",
+        table_layer=None,
+        output_layer="table_mixed_features",
+        feature_key="mixed_features",
+        features=["mean", "eccentricity"],
+        channels=[0],
+        overwrite_output_layer=True,
+    )
+
+    adata = sdata_multi_c_no_backed.tables["table_mixed_features"]
+    instance_key = adata.uns["spatialdata_attrs"]["instance_key"]
+    feature_columns = adata.uns["feature_matrices"]["mixed_features"]["feature_columns"]
+
+    expected = pd.DataFrame(
+        regionprops_table(
+            label_image=sdata_multi_c_no_backed["masks_whole"].data.compute(),
+            properties=["label", "eccentricity"],
+        )
+    )
+    expected[instance_key] = expected["label"].astype(int)
+    expected = expected.set_index(instance_key).loc[adata.obs[instance_key], "eccentricity"].to_numpy()
+
+    assert adata.obsm["mixed_features"].shape == (adata.n_obs, 2)
+    assert feature_columns == ["mean__0", "eccentricity"]
+    eccentricity_index = feature_columns.index("eccentricity")
+    assert np.allclose(adata.obsm["mixed_features"][:, eccentricity_index], expected)
 
 
 def test_add_feature_matrix_supports_custom_metadata_key(sdata_multi_c_no_backed):
