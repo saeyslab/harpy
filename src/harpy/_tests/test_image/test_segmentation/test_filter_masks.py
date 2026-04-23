@@ -44,7 +44,7 @@ def test_filter_labels(sdata_multi_c_no_backed: SpatialData):
     assert isinstance(sdata_multi_c_no_backed, SpatialData)
 
 
-def test_filter_labels_layer_uses_global_label_size_across_chunks() -> None:
+def test_filter_labels_uses_global_label_size_across_chunks() -> None:
     sdata = SpatialData()
     labels = da.from_array(np.array([[1, 1, 1, 1, 2, 2]], dtype=np.uint32), chunks=(1, 2))
 
@@ -67,7 +67,7 @@ def test_filter_labels_layer_uses_global_label_size_across_chunks() -> None:
     assert np.array_equal(result, expected)
 
 
-def test_filter_labels_layer_raises_for_invalid_size_bounds() -> None:
+def test_filter_labels_raises_for_invalid_size_bounds() -> None:
     sdata = SpatialData()
     labels = da.from_array(np.array([[1, 1], [0, 2]], dtype=np.uint32), chunks=(1, 2))
 

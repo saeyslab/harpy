@@ -107,7 +107,7 @@ def test_plot_instance_density_returns_input_ax(sdata_instances, tmp_path):
         plt.close(fig)
 
 
-def test_plot_instance_density_uses_all_observations_when_labels_layer_is_none(sdata_instances):
+def test_plot_instance_density_uses_all_observations_when_labels_name_is_none(sdata_instances):
     fig, ax = plt.subplots()
     try:
         result = plot_instance_density(

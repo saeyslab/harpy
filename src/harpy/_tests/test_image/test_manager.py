@@ -13,7 +13,7 @@ from harpy.image._image import _get_spatial_element, add_image, add_labels, get_
         ([2, 2, 2, 2], False),
     ],
 )
-def test_add_image_layer_backed(
+def test_add_image_backed(
     sdata_multi_c,
     scale_factors,
     overwrite,
@@ -58,7 +58,7 @@ def test_add_image_layer_backed(
         ([2, 2, 2, 2], False),
     ],
 )
-def test_add_image_layer_no_backed(
+def test_add_image_no_backed(
     sdata_multi_c,
     scale_factors,
     overwrite,
@@ -113,7 +113,7 @@ def test_add_image_layer_no_backed(
         ([2, 2, 2, 2], False),
     ],
 )
-def test_add_labels_layer_backed(
+def test_add_labels_backed(
     sdata_multi_c,
     scale_factors,
     overwrite,
@@ -155,7 +155,7 @@ def test_add_labels_layer_backed(
         ([2, 2, 2, 2], False),
     ],
 )
-def test_add_labels_layer_no_backed(
+def test_add_labels_no_backed(
     sdata_multi_c,
     scale_factors,
     overwrite,

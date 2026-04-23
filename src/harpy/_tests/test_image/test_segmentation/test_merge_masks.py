@@ -28,7 +28,7 @@ def test_merge_labels(sdata_multi_c_no_backed: SpatialData):
     assert isinstance(sdata_multi_c_no_backed, SpatialData)
 
 
-def test_merge_labels_layers_nuclei(sdata_multi_c_no_backed: SpatialData):
+def test_merge_labels_nuclei(sdata_multi_c_no_backed: SpatialData):
     sdata_multi_c_no_backed = merge_labels_nuclei(
         sdata_multi_c_no_backed,
         labels_name="masks_whole",
@@ -45,7 +45,7 @@ def test_merge_labels_layers_nuclei(sdata_multi_c_no_backed: SpatialData):
     assert isinstance(sdata_multi_c_no_backed, SpatialData)
 
 
-def test_merge_labels_layers_small_sdata_keeps_no_overlap_candidates() -> None:
+def test_merge_labels_small_sdata_keeps_no_overlap_candidates() -> None:
     sdata = SpatialData()
     candidate = da.from_array(np.array([[1, 1, 2, 2], [1, 1, 2, 0]], dtype=np.uint32), chunks=(1, 2))
     priority = da.from_array(np.array([[5, 5, 0, 0], [5, 5, 0, 0]], dtype=np.uint32), chunks=(1, 2))
@@ -68,7 +68,7 @@ def test_merge_labels_layers_small_sdata_keeps_no_overlap_candidates() -> None:
     assert np.array_equal(result, expected)
 
 
-def test_merge_labels_layers_uses_global_candidate_fraction_across_chunks() -> None:
+def test_merge_labels_uses_global_candidate_fraction_across_chunks() -> None:
     sdata = SpatialData()
     candidate = da.from_array(np.array([[1, 1, 1, 1, 2, 2]], dtype=np.uint32), chunks=(1, 2))
     priority = da.from_array(np.array([[5, 5, 0, 0, 0, 0]], dtype=np.uint32), chunks=(1, 2))
@@ -162,7 +162,7 @@ def test_get_source_ids_to_reference_overlap_counts_uses_subset_filters() -> Non
     assert result == {2: {7: 3, 8: 1}}
 
 
-def test_match_labels_to_reference_layers_small_sdata() -> None:
+def test_match_labels_to_reference_small_sdata() -> None:
     sdata = SpatialData()
     mask = da.from_array(np.array([[1, 1, 2, 2], [1, 0, 2, 3]], dtype=np.uint32), chunks=(1, 2))
     original_1 = da.from_array(np.array([[5, 5, 7, 7], [0, 0, 8, 0]], dtype=np.uint32), chunks=(1, 2))
@@ -194,7 +194,7 @@ def test_match_labels_to_reference_layers_small_sdata() -> None:
         ("iou", 0.5),
     ],
 )
-def test_match_labels_to_reference_layers_empty_source_returns_empty_dataframe(
+def test_match_labels_to_reference_empty_source_returns_empty_dataframe(
     overlap_metric: str, threshold: float
 ) -> None:
     sdata = SpatialData()
@@ -218,7 +218,7 @@ def test_match_labels_to_reference_layers_empty_source_returns_empty_dataframe(
     assert list(result.columns) == ["reference"]
 
 
-def test_match_labels_to_reference_layers_supports_overlap_metrics() -> None:
+def test_match_labels_to_reference_supports_overlap_metrics() -> None:
     sdata = SpatialData()
     mask = da.from_array(np.array([[1, 1, 0, 0], [1, 0, 0, 0]], dtype=np.uint32), chunks=(1, 2))
     original = da.from_array(np.array([[5, 5, 5, 5], [0, 0, 5, 0]], dtype=np.uint32), chunks=(1, 2))
@@ -268,7 +268,7 @@ def test_match_labels_to_reference_layers_supports_overlap_metrics() -> None:
     assert result_iou.equals(DataFrame(np.array([[0]], dtype=np.uint32), index=["1"], columns=["original"]))
 
 
-def test_match_labels_to_reference_layers_selects_winner_using_overlap_metric() -> None:
+def test_match_labels_to_reference_selects_winner_using_overlap_metric() -> None:
     sdata = SpatialData()
     mask = da.from_array(
         np.array(
@@ -347,7 +347,7 @@ def test_match_labels_to_reference_layers_selects_winner_using_overlap_metric() 
     assert result_iou.equals(DataFrame(np.array([[6]], dtype=np.uint32), index=["1"], columns=["original"]))
 
 
-def test_match_labels_to_reference_layers_raises_for_invalid_threshold() -> None:
+def test_match_labels_to_reference_raises_for_invalid_threshold() -> None:
     sdata = SpatialData()
     mask = da.from_array(np.array([[1, 1]], dtype=np.uint32), chunks=(1, 2))
     original = da.from_array(np.array([[5, 5]], dtype=np.uint32), chunks=(1, 2))
@@ -364,7 +364,7 @@ def test_match_labels_to_reference_layers_raises_for_invalid_threshold() -> None
         )
 
 
-def test_match_labels_to_reference_layers_raises_for_invalid_overlap_metric() -> None:
+def test_match_labels_to_reference_raises_for_invalid_overlap_metric() -> None:
     sdata = SpatialData()
     mask = da.from_array(np.array([[1, 1]], dtype=np.uint32), chunks=(1, 2))
     original = da.from_array(np.array([[5, 5]], dtype=np.uint32), chunks=(1, 2))

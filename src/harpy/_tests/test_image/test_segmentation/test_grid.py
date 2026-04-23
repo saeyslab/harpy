@@ -6,7 +6,7 @@ from harpy.image.segmentation._grid import add_grid_labels
 
 
 @pytest.mark.parametrize("hex_size", [5, 13, 24, 27, 30])
-def test_add_grid_labels_layer_hexagon(hex_size):
+def test_add_grid_labels_hexagon(hex_size):
     sdata = SpatialData()
 
     output_shapes_name = "hexagonal_shapes"
@@ -41,7 +41,7 @@ def test_add_grid_labels_layer_hexagon(hex_size):
 
 
 @pytest.mark.parametrize("square_size", [5, 13, 24, 27, 30])
-def test_add_grid_labels_layer_square(square_size):
+def test_add_grid_labels_square(square_size):
     sdata = SpatialData()
 
     output_shapes_name = "hexagonal_shapes"
