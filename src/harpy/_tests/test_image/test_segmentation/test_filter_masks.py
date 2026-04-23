@@ -5,13 +5,13 @@ from spatialdata import SpatialData
 
 from harpy.image._image import add_labels, get_dataarray
 from harpy.image.segmentation._filter_masks import (
-    filter_labels_layer,
+    filter_labels,
 )
 from harpy.utils._aggregate import get_instance_size
 from harpy.utils._keys import _INSTANCE_KEY
 
 
-def test_filter_labels_layers(sdata_multi_c_no_backed: SpatialData):
+def test_filter_labels(sdata_multi_c_no_backed: SpatialData):
     instance_key = _INSTANCE_KEY
     instance_size_key = "instance_size"
     df = get_instance_size(
@@ -23,7 +23,7 @@ def test_filter_labels_layers(sdata_multi_c_no_backed: SpatialData):
     df = df[df[instance_key] != 0]
     filtered_df = df[(100 < df[instance_size_key]) & (df[instance_size_key] < 1000)]
 
-    sdata_multi_c_no_backed = filter_labels_layer(
+    sdata_multi_c_no_backed = filter_labels(
         sdata_multi_c_no_backed,
         labels_name="masks_whole",
         min_size=100,
@@ -50,7 +50,7 @@ def test_filter_labels_layer_uses_global_label_size_across_chunks() -> None:
 
     sdata = add_labels(sdata, arr=labels, output_labels_name="labels", overwrite=True)
 
-    sdata = filter_labels_layer(
+    sdata = filter_labels(
         sdata,
         labels_name="labels",
         min_size=3,
@@ -74,7 +74,7 @@ def test_filter_labels_layer_raises_for_invalid_size_bounds() -> None:
     sdata = add_labels(sdata, arr=labels, output_labels_name="labels", overwrite=True)
 
     with pytest.raises(ValueError, match="'min_size' must be <= 'max_size'"):
-        filter_labels_layer(
+        filter_labels(
             sdata,
             labels_name="labels",
             min_size=5,

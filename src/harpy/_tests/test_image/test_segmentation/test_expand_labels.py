@@ -1,10 +1,10 @@
 from spatialdata import SpatialData
 
-from harpy.image.segmentation._expand_masks import expand_labels_layer
+from harpy.image.segmentation._expand_masks import expand_labels
 
 
-def test_expand_labels_layer(sdata_multi_c_no_backed: SpatialData):
-    sdata_multi_c_no_backed = expand_labels_layer(
+def test_expand_labels(sdata_multi_c_no_backed: SpatialData):
+    sdata_multi_c_no_backed = expand_labels(
         sdata_multi_c_no_backed,
         labels_name="masks_cellpose_3D",
         distance=10,
@@ -20,7 +20,7 @@ def test_expand_labels_layer(sdata_multi_c_no_backed: SpatialData):
 
     assert isinstance(sdata_multi_c_no_backed, SpatialData)
 
-    sdata_multi_c_no_backed = expand_labels_layer(
+    sdata_multi_c_no_backed = expand_labels(
         sdata_multi_c_no_backed,
         labels_name="masks_nuclear",
         distance=10,

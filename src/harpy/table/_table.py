@@ -8,7 +8,7 @@ from loguru import logger as log
 from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
-from harpy.shape._shape import filter_shapes_layer
+from harpy.shape._shape import filter_shapes
 from harpy.table._manager import TableLayerManager
 from harpy.utils._keys import _CELLSIZE_KEY, _INSTANCE_KEY, _REGION_KEY
 
@@ -306,7 +306,7 @@ def filter_on_size(
 
     if update_shapes_layers:
         for _labels_layer in process_table_instance.labels_name:
-            sdata = filter_shapes_layer(
+            sdata = filter_shapes(
                 sdata,
                 table_name=output_table_name,
                 labels_name=_labels_layer,

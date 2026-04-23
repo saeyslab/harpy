@@ -5,7 +5,7 @@ from spatialdata import SpatialData
 from spatialdata.models import TableModel
 from xrspatial import zonal_stats
 
-from harpy.image.segmentation._align_masks import align_labels_layers
+from harpy.image.segmentation._align_masks import align_labels
 from harpy.table._allocation_intensity import (
     allocate_intensity,
 )
@@ -16,7 +16,7 @@ def test_integration_allocate_intensity(sdata_multi_c_no_backed: SpatialData):
     # integration test for process of aligning masks, allocate intensities and add regionprop features to
     # sdata.tables["table_intensities"].obs
 
-    sdata_multi_c_no_backed = align_labels_layers(
+    sdata_multi_c_no_backed = align_labels(
         sdata_multi_c_no_backed,
         labels_name_1="masks_nuclear",
         labels_name_2="masks_whole",

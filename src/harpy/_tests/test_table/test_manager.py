@@ -9,7 +9,7 @@ from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY
 
 
 @pytest.mark.parametrize("is_backed", [True, False])
-def test_add_table_layer(sdata_transcripts: SpatialData, recwarn, is_backed):
+def test_add_table(sdata_transcripts: SpatialData, recwarn, is_backed):
     assert sdata_transcripts.is_backed()
 
     if not is_backed:

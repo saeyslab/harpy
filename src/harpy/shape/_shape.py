@@ -109,7 +109,7 @@ def add_shapes(
     return sdata
 
 
-def filter_shapes_layer(
+def filter_shapes(
     sdata: SpatialData,
     table_name: str,
     labels_name: str,

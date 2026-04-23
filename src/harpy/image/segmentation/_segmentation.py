@@ -28,7 +28,7 @@ from harpy.image._image import (
     _get_translation,
     add_labels,
 )
-from harpy.image.segmentation._align_masks import align_labels_layers
+from harpy.image.segmentation._align_masks import align_labels
 from harpy.image.segmentation._utils import (
     _SEG_DTYPE,
     _add_depth_to_chunks_size,
@@ -492,7 +492,7 @@ class SegmentationModel(ABC):
                 if _output_labels_name == labels_name_align:
                     # we do not need to align labels_name_align with labels_name_align
                     continue
-                sdata = align_labels_layers(
+                sdata = align_labels(
                     sdata,
                     labels_name_1=_output_labels_name,
                     labels_name_2=labels_name_align,

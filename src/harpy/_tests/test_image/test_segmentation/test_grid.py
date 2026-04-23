@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 from spatialdata import SpatialData
 
-from harpy.image.segmentation._grid import add_grid_labels_layer
+from harpy.image.segmentation._grid import add_grid_labels
 
 
 @pytest.mark.parametrize("hex_size", [5, 13, 24, 27, 30])
@@ -14,7 +14,7 @@ def test_add_grid_labels_layer_hexagon(hex_size):
     shape = (1100, 1000)
     offset = (80, 70)
 
-    sdata = add_grid_labels_layer(
+    sdata = add_grid_labels(
         sdata,
         shape=shape,
         offset=offset,  # not recommended to add offset, better to add offset via a translation
@@ -49,7 +49,7 @@ def test_add_grid_labels_layer_square(square_size):
     shape = (1100, 1000)
     offset = (80, 70)
 
-    sdata = add_grid_labels_layer(
+    sdata = add_grid_labels(
         sdata,
         shape=shape,
         offset=offset,

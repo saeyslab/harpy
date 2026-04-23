@@ -48,7 +48,7 @@ def _check_backed_zarr_2(sdata: SpatialData) -> Path:
     return Path(sdata.path).resolve()
 
 
-def _validate_ilastik_input_layers(sdata: SpatialData, image_name: str, labels_name: str) -> None:
+def _validate_ilastik_inputs(sdata: SpatialData, image_name: str, labels_name: str) -> None:
     image = get_dataarray(sdata, layer=image_name)
     labels = get_dataarray(sdata, layer=labels_name)
 
@@ -290,7 +290,7 @@ def _map_instance_ids_to_prediction_label(
     }
 
 
-def _create_adata_from_labels_layer(
+def _create_adata_from_labels(
     sdata: SpatialData,
     labels_name: str,
     instance_key: str,
@@ -419,7 +419,7 @@ def run_object_classification(
         raise ValueError(f"Image layer '{image_name}' not found in 'sdata.images'.")
     if labels_name not in sdata.labels:
         raise ValueError(f"Labels layer '{labels_name}' not found in 'sdata.labels'.")
-    _validate_ilastik_input_layers(sdata=sdata, image_name=image_name, labels_name=labels_name)
+    _validate_ilastik_inputs(sdata=sdata, image_name=image_name, labels_name=labels_name)
     if export_source not in _VALID_EXPORT_SOURCES:
         raise ValueError(f"Invalid 'export_source': {export_source!r}. Expected one of {list(_VALID_EXPORT_SOURCES)}.")
 
@@ -429,7 +429,7 @@ def run_object_classification(
         instance_key = sdata[table_name].uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY]
         region_key = sdata[table_name].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]
     else:
-        adata = _create_adata_from_labels_layer(
+        adata = _create_adata_from_labels(
             sdata=sdata,
             labels_name=labels_name,
             instance_key=instance_key,

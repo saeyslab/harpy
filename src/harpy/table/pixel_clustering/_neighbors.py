@@ -14,7 +14,7 @@ from spatialdata import SpatialData
 from spatialdata.transformations import get_transformation
 
 from harpy.image._image import get_dataarray
-from harpy.image.segmentation._grid import add_grid_labels_layer
+from harpy.image.segmentation._grid import add_grid_labels
 from harpy.utils._aggregate import RasterAggregator
 from harpy.utils._featurize import Featurizer
 from harpy.utils._keys import _INSTANCE_KEY, _SPATIAL
@@ -60,7 +60,7 @@ def spatial_pixel_neighbors(
         If `mode` is `"center"`, `size` determines the sampling interval for constructing the spatial grid.
         This value determines the distance (in pixels) between consecutive grid points along each axis. A smaller value produces a denser grid (higher resolution),
         while a larger value yields a sparser grid.
-        If `mode` is `"most_frequent"`, this value is passed to :func:`harpy.im.add_grid_labels_layer`.
+        If `mode` is `"most_frequent"`, this value is passed to :func:`harpy.im.add_grid_labels`.
     mode
         The method used to extract grid-based pixel cluster labels. Can be either `"most_frequent"` or `"center"`.
         - `"most_frequent"`: Assigns each grid point the most frequently occurring label within the surrounding
@@ -73,7 +73,7 @@ def spatial_pixel_neighbors(
     grid_type
         The type of grid used when extracting pixel cluster labels from `labels_name`. Can be either `"hexagon"` or `"square"`.
         This parameter is only relevant when `mode="most_frequent"` and is ignored when `mode="center"`.
-        Passed to `harpy.im.add_grid_labels_layer`.
+        Passed to `harpy.im.add_grid_labels`.
     subset
         A list of labels to subset the analysis to, or `None` to include all labels in `labels_name`.
     spatial_neighbors_kwargs
@@ -94,7 +94,7 @@ def spatial_pixel_neighbors(
     See Also
     --------
     harpy.im.flowsom : flowsom pixel clustering on image layers.
-    harpy.im.add_grid_labels_layer : construct a grid.
+    harpy.im.add_grid_labels : construct a grid.
     """
     if mode == "center":
         array = sdata.labels[labels_name].data.compute()
@@ -172,7 +172,7 @@ def _get_values_grid_most_frequent(
     assert get_dataarray(sdata, layer=labels_name).data.ndim == 2, "Currently only support for 2D ('y','x')."
     _uuid = uuid.uuid4()
     # Make a grid, either hexagons or squares.
-    sdata = add_grid_labels_layer(
+    sdata = add_grid_labels(
         sdata,
         shape=sdata.labels[labels_name].shape,
         size=size,

@@ -12,7 +12,7 @@ from scipy.sparse import issparse
 from spatialdata import SpatialData
 
 from harpy.image._image import get_dataarray
-from harpy.shape._shape import filter_shapes_layer
+from harpy.shape._shape import filter_shapes
 from harpy.table._table import ProcessTable, add_table
 from harpy.utils._aggregate import _get_mask_area
 from harpy.utils._keys import _CELLSIZE_KEY, _RAW_COUNTS_KEY
@@ -424,7 +424,7 @@ class Preprocess(ProcessTable):
 
         if update_shapes_layers:
             for _labels_layer in self.labels_name:
-                self.sdata = filter_shapes_layer(
+                self.sdata = filter_shapes(
                     self.sdata,
                     table_name=output_table_name,
                     labels_name=_labels_layer,

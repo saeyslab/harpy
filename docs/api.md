@@ -62,13 +62,13 @@ Operations on image and labels elements.
     im.cellpose_callable
     im.instanseg_callable
     im.baysor_callable
-    im.add_grid_labels_layer
-    im.expand_labels_layer
-    im.align_labels_layers
+    im.add_grid_labels
+    im.expand_labels
+    im.align_labels
     im.map_labels
-    im.filter_labels_layer
-    im.merge_labels_layers
-    im.match_labels_to_reference_layers
+    im.filter_labels
+    im.merge_labels
+    im.match_labels_to_reference
     im.rasterize
     im.pixel_clustering_preprocess
     im.flowsom
@@ -88,7 +88,7 @@ Operations on shapes (polygons) elements.
 
     sh.vectorize
     sh.add_shapes
-    sh.filter_shapes_layer
+    sh.filter_shapes
     sh.create_voronoi_boundaries
 ```
 

@@ -284,7 +284,7 @@ class HarpyPipeline:
         )
 
         if self.cfg.segmentation.expand_radius:
-            sdata = harpy.im.expand_labels_layer(
+            sdata = harpy.im.expand_labels(
                 sdata,
                 labels_name=self.labels_name,
                 distance=self.cfg.segmentation.expand_radius,

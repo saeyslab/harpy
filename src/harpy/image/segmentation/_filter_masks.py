@@ -13,7 +13,7 @@ from harpy.shape._shape import add_shapes
 from harpy.utils._aggregate import get_instance_size
 
 
-def filter_labels_layer(
+def filter_labels(
     sdata: SpatialData,
     labels_name: str,
     min_size: int = 10,
@@ -25,7 +25,7 @@ def filter_labels_layer(
     overwrite: bool = False,
 ) -> SpatialData:
     """
-    Filter labels in a labels layer by global object size.
+    Filter labels in a labels element by global object size.
 
     Labels in `labels_name` whose total size across the full image is smaller
     than `min_size` or larger than `max_size` are set to `0` in the output.
@@ -35,9 +35,9 @@ def filter_labels_layer(
     Parameters
     ----------
     sdata
-        The spatialdata object containing the labels layer to be filtered.
+        The SpatialData object containing the labels element to be filtered.
     labels_name
-        The name of the labels layer to be filtered.
+        The name of the labels element to be filtered.
     min_size
         labels in `labels_name` with size smaller than `min_size` will be set to 0.
     max_size
@@ -46,18 +46,18 @@ def filter_labels_layer(
         The desired chunk size for the Dask computation, or "auto" to allow the function to
         choose an optimal chunk size based on the data.
     output_labels_name
-        The name of the output labels layer where results will be stored. This must be specified.
+        The name of the output labels element where results will be stored. This must be specified.
     output_shapes_name
-        The name for the new shapes layer generated from the aligned labels layer. If None, no shapes
-        layer is created. Default is None.
+        The name for the new shapes element generated from the filtered labels element. If None, no shapes
+        element is created. Default is None.
     scale_factors
         Scale factors to apply for multiscale.
     overwrite
-        If True, overwrites the output layer if it already exists in `sdata`.
+        If True, overwrites `output_labels_name` or `output_shapes_name` if they already exist in `sdata`.
 
     Returns
     -------
-    The modified spatial data object with the filtered labels layers.
+    The modified SpatialData object with the filtered labels element.
 
     Raises
     ------
@@ -84,7 +84,7 @@ def filter_labels_layer(
 
         sdata = hp.datasets.mibi_example()
 
-        sdata = hp.im.filter_labels_layer(
+        sdata = hp.im.filter_labels(
             sdata,
             labels_name="masks_whole",
             min_size=100,
@@ -96,7 +96,7 @@ def filter_labels_layer(
         )
     """
     if output_labels_name is None:
-        raise ValueError("Please specify a name for the output layer.")
+        raise ValueError("Please specify a name for the output labels element.")
     if min_size < 0 or max_size < 0:
         raise ValueError(f"'min_size' and 'max_size' must be non-negative, found {min_size} and {max_size}.")
     if min_size > max_size:

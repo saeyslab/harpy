@@ -15,11 +15,11 @@ from harpy.image._rasterize import rasterize
 from harpy.shape._shape import add_shapes
 
 
-def add_grid_labels_layer(
+def add_grid_labels(
     sdata,
-    shape: tuple[int, int],  # shape of the resulting labels layer, shape y, x
+    shape: tuple[int, int],  # shape of the resulting labels element, shape y, x
     size: int,  # radius of the hexagon, or size length of the square.
-    output_shapes_name: str,  # shapes layer corresponding to the labels layer
+    output_shapes_name: str,  # shapes element corresponding to the labels element
     output_labels_name: str,
     grid_type: Literal["hexagon", "square"] = "hexagon",  # can be either "hexagon" or "square".
     offset: tuple[int, int] = (0, 0),  # we recommend setting a non-zero offset via a translation.
@@ -30,29 +30,29 @@ def add_grid_labels_layer(
     overwrite: bool = False,
 ) -> SpatialData:
     """
-    Adds a grid-based labels layer to the SpatialData object using either a hexagonal or square grid.
+    Adds a grid-based labels element to the SpatialData object using either a hexagonal or square grid.
 
-    The function creates a corresponding shapes layer based on the specified grid type and parameters.
+    The function creates a corresponding shapes element based on the specified grid type and parameters.
 
     Parameters
     ----------
     sdata
-        The SpatialData object to which the new grid-based labels layer and shapes layer will be added.
+        The SpatialData object to which the new grid-based labels and shapes elements will be added.
     shape
-        The (y, x) shape of the resulting labels layer. This defines the grid's size in terms of height (y) and width (x).
+        The `(y, x)` shape of the resulting labels element. This defines the grid's size in terms of height (`y`) and width (`x`).
     size
         The size of the grid cells. For a hexagonal grid, this is the radius of the hexagons; for a square grid, this is the side length of the squares.
     output_shapes_name
-        The name of the shapes layer that corresponds to the generated grid. This layer will contain the polygons representing the grid's shapes.
+        The name of the shapes element that corresponds to the generated grid. This element will contain the polygons representing the grid.
     output_labels_name
-        The name of the labels layer that corresponds to the generated grid. This layer will contain the labels generated from the shapes.
+        The name of the labels element that corresponds to the generated grid. This element will contain the labels generated from the shapes.
     grid_type
         The type of grid to create. Can be either `"hexagon"` for a hexagonal grid or `"square"` for a square grid. The default is `"hexagon"`.
     offset
         An optional translation offset applied to the grid. This is a tuple `(y_offset, x_offset)` that can shift the grid. Default is `(0, 0)`,
         but it is recommended to use a zero offset, and specify the offset via passing a `spatialdata.transformations.Translation` to `transformations`.
     chunks
-        Specifies the chunk size for Dask arrays when calculating the labels layer.
+        Specifies the chunk size for Dask arrays when calculating the labels element.
     client
         A Dask `Client` instance, which will be passed to 'harpy.im.rasterize' (function which rasterizes the generated `output_shapes_name`) if specified.
         Refer to the 'harpy.im.rasterize' docstring for further details.
@@ -65,7 +65,7 @@ def add_grid_labels_layer(
 
     Returns
     -------
-    The updated SpatialData object with the newly added grid-based shapes and labels layers.
+    The updated SpatialData object with the newly added grid-based shapes and labels elements.
 
     Raises
     ------
@@ -75,7 +75,7 @@ def add_grid_labels_layer(
     Notes
     -----
     The function first generates a grid of shapes (either hexagons or squares) based on the specified grid type and parameters. These shapes are added as
-    a new shapes layer in `sdata`. Then, a corresponding labels layer is generated from the shapes layer. The labels layer has the same spatial
+    a new shapes element in `sdata`. Then, a corresponding labels element is generated from the shapes element. The labels element has the same spatial
     dimensions as specified in `shape`.
     """
     grid_type_supported = ["hexagon", "square"]
