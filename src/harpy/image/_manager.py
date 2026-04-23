@@ -138,7 +138,9 @@ class ImageElementManager(ElementManager):
         if element_name in [*sdata.images]:
             if sdata.is_backed():
                 if overwrite:
-                    sdata = _incremental_io_on_disk(sdata, element_name=element_name, element=spatial_element, element_type="images")
+                    sdata = _incremental_io_on_disk(
+                        sdata, element_name=element_name, element=spatial_element, element_type="images"
+                    )
                 else:
                     raise ValueError(
                         f"Attempting to overwrite 'sdata.images[\"{element_name}\"]', but overwrite is set to False. Set overwrite to True to overwrite the .zarr store."
@@ -208,7 +210,9 @@ class LabelsElementManager(ElementManager):
         if element_name in [*sdata.labels]:
             if sdata.is_backed():
                 if overwrite:
-                    sdata = _incremental_io_on_disk(sdata, element_name=element_name, element=spatial_element, element_type="labels")
+                    sdata = _incremental_io_on_disk(
+                        sdata, element_name=element_name, element=spatial_element, element_type="labels"
+                    )
                 else:
                     raise ValueError(
                         f"Attempting to overwrite 'sdata.labels[\"{element_name}\"]', but overwrite is set to False. Set overwrite to True to overwrite the .zarr store."

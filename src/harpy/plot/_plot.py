@@ -332,9 +332,7 @@ def plot_shapes(
         list(raster_name) if isinstance(raster_name, Iterable) and not isinstance(raster_name, str) else [raster_name]
     )
     shapes_name = (
-        list(shapes_name)
-        if isinstance(shapes_name, Iterable) and not isinstance(shapes_name, str)
-        else [shapes_name]
+        list(shapes_name) if isinstance(shapes_name, Iterable) and not isinstance(shapes_name, str) else [shapes_name]
     )
     if channel is not None:
         channel = list(channel) if isinstance(channel, Iterable) and not isinstance(channel, str) else [channel]
@@ -827,7 +825,9 @@ def plot(
                     ]
                     polygons = sdata.shapes[i].cx[_crd_shapes[0] : _crd_shapes[1], _crd_shapes[2] : _crd_shapes[3]]
                     if x_translation != 0 or y_translation != 0:
-                        polygons = polygons.copy()  # copy is necessary, we do not want to alter in memory shapes element
+                        polygons = (
+                            polygons.copy()
+                        )  # copy is necessary, we do not want to alter in memory shapes element
                         polygons["geometry"] = polygons["geometry"].apply(
                             lambda geom, x_trans=x_translation, y_trans=y_translation: translate(
                                 geom, xoff=x_trans, yoff=y_trans

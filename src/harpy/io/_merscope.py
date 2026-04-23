@@ -227,7 +227,10 @@ def merscope(
                 dims = get_axes_names(_get_spatial_element(sdata, first_image_name))
 
                 arr = da.stack(
-                    [_get_spatial_element(sdata, element_name=f"{root_image_name}{z_layer}").data for z_layer in z_layers],
+                    [
+                        _get_spatial_element(sdata, element_name=f"{root_image_name}{z_layer}").data
+                        for z_layer in z_layers
+                    ],
                     axis=1,
                 )
 
@@ -297,9 +300,9 @@ def merscope(
                         "cell boundaries will therefore not be rasterized."
                     )
                 if mosaic_images and rasterize_cell_boundaries:
-                    _mosaic_name = [
-                        *sdata.filter_by_coordinate_system(coordinate_system=_to_coordinate_system).images
-                    ][0]
+                    _mosaic_name = [*sdata.filter_by_coordinate_system(coordinate_system=_to_coordinate_system).images][
+                        0
+                    ]
                     se = _get_spatial_element(sdata, element_name=_mosaic_name)
                     out_shape = se.data.shape[-2:]
                     _chunks = se.data.chunksize[-1]

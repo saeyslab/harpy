@@ -117,9 +117,7 @@ def map_labels(
     fn_kwargs = kwargs
 
     labels_name = (
-        list(labels_name)
-        if isinstance(labels_name, Iterable) and not isinstance(labels_name, str)
-        else [labels_name]
+        list(labels_name) if isinstance(labels_name, Iterable) and not isinstance(labels_name, str) else [labels_name]
     )
 
     if output_labels_name is None:

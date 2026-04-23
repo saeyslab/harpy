@@ -18,9 +18,7 @@ class ProcessTable:
         self,
         sdata: SpatialData,
         table_name: str,
-        labels_name: str
-        | Iterable[str]
-        | None = None,  # TODO: replace with region, and also support shapes and points
+        labels_name: str | Iterable[str] | None = None,  # TODO: replace with region, and also support shapes and points
     ):
         """
         Base class for implementation of processing on tables.
@@ -74,7 +72,8 @@ class ProcessTable:
                 raise ValueError(f"{element_type} element '{element_name}' not in 'sdata.{element_type}'.")
             if (
                 element_name not in self.sdata.tables[self.table_name].obs[self.region_key].cat.categories
-                or element_name not in self.sdata.tables[self.table_name].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY]
+                or element_name
+                not in self.sdata.tables[self.table_name].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY]
             ):
                 raise ValueError(
                     f"{element_type} element '{element_name}' not annotated by table element '{self.table_name}'."

@@ -84,11 +84,11 @@ def cluster_intensity_SOM(
     --------
     harpy.im.flowsom : flowsom pixel clustering.
     """
-    image_name = list(image_name) if isinstance(image_name, Iterable) and not isinstance(image_name, str) else [image_name]
+    image_name = (
+        list(image_name) if isinstance(image_name, Iterable) and not isinstance(image_name, str) else [image_name]
+    )
     labels_name = (
-        list(labels_name)
-        if isinstance(labels_name, Iterable) and not isinstance(labels_name, str)
-        else [labels_name]
+        list(labels_name) if isinstance(labels_name, Iterable) and not isinstance(labels_name, str) else [labels_name]
     )
     to_coordinate_system = (
         list(to_coordinate_system)

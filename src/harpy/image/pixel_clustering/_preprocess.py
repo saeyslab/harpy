@@ -98,7 +98,9 @@ def pixel_clustering_preprocess(
 
     """
     # setting p_sum=None, and norm_sum=False prevents data leakage in the single-fov case.
-    image_name = list(image_name) if isinstance(image_name, Iterable) and not isinstance(image_name, str) else [image_name]
+    image_name = (
+        list(image_name) if isinstance(image_name, Iterable) and not isinstance(image_name, str) else [image_name]
+    )
     output_image_name = (
         list(output_image_name)
         if isinstance(output_image_name, Iterable) and not isinstance(output_image_name, str)

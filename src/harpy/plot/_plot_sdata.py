@@ -240,9 +240,7 @@ def plot_sdata(
 
     else:
         if "table_name" in render_labels_kwargs.keys():
-            raise ValueError(
-                "Please specify 'table_name' via the keyword argument 'table_name' of 'hp.pl.plot_sdata.'"
-            )
+            raise ValueError("Please specify 'table_name' via the keyword argument 'table_name' of 'hp.pl.plot_sdata.'")
         if "color" in render_labels_kwargs.keys():
             raise ValueError("Please specify 'color' via the keyword argument 'color' of 'hp.pl.plot_sdata.'")
         # workaround for https://github.com/scverse/spatialdata-plot/issues/414, also see

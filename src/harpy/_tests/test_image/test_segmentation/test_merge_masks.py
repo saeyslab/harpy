@@ -194,9 +194,7 @@ def test_match_labels_to_reference_small_sdata() -> None:
         ("iou", 0.5),
     ],
 )
-def test_match_labels_to_reference_empty_source_returns_empty_dataframe(
-    overlap_metric: str, threshold: float
-) -> None:
+def test_match_labels_to_reference_empty_source_returns_empty_dataframe(overlap_metric: str, threshold: float) -> None:
     sdata = SpatialData()
     source = da.from_array(np.zeros((2, 2), dtype=np.uint32), chunks=(1, 2))
     reference = da.from_array(np.array([[5, 5], [0, 0]], dtype=np.uint32), chunks=(1, 2))

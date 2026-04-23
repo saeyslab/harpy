@@ -158,9 +158,7 @@ def test_bin_counts(
     sdata_bin,
 ):
     table_name_bins = "square_002um"
-    labels_name = (
-        "square_labels_32"  # custom grid to bin the counts of table_name_bins, can be any segmentation mask.
-    )
+    labels_name = "square_labels_32"  # custom grid to bin the counts of table_name_bins, can be any segmentation mask.
     table_name = "table_custom_bin_32"
     output_table_name = f"{table_name}_reproduce"
 

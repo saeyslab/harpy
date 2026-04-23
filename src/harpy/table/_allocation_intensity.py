@@ -353,7 +353,10 @@ def allocate_intensity(
         region = []
         if output_table_name in [*sdata.tables]:
             _sanity_check_append_region(
-                adata=sdata.tables[output_table_name], region_key=region_key, instance_key=instance_key, region=labels_name
+                adata=sdata.tables[output_table_name],
+                region_key=region_key,
+                instance_key=instance_key,
+                region=labels_name,
             )
             adata = ad.concat(
                 [
