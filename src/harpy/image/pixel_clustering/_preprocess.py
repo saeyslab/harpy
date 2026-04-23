@@ -108,7 +108,7 @@ def pixel_clustering_preprocess(
         "The number of 'output_image_name' specified should be the equal to the the number of 'image_name' specified."
     )
 
-    se_image = _get_spatial_element(sdata, layer=image_name[0])
+    se_image = _get_spatial_element(sdata, element_name=image_name[0])
 
     if channels is not None:
         channels = list(channels) if isinstance(channels, Iterable) and not isinstance(channels, str) else [channels]
@@ -119,7 +119,7 @@ def pixel_clustering_preprocess(
     _arr_list = []
     _transformations = []
     for i, _img_layer in enumerate(image_name):
-        se_image = _get_spatial_element(sdata, layer=_img_layer)
+        se_image = _get_spatial_element(sdata, element_name=_img_layer)
         _transformations.append(get_transformation(se_image, get_all=True))
         arr = se_image.sel(c=channels).data
         if i == 0:

@@ -352,7 +352,7 @@ def plot_shapes(
     if is_image:
         # if channel is None, get the number of channels from the first image_name given, maybe print a message about this.
         if channel is None:
-            se = _get_spatial_element(sdata, layer=layer[0])
+            se = _get_spatial_element(sdata, element_name=layer[0])
             channels = se.c.data
         else:
             channels = channel
@@ -600,7 +600,7 @@ def plot(
             else [filtered_shapes_name]
         )
 
-    se = _get_spatial_element(sdata, layer=layer)
+    se = _get_spatial_element(sdata, element_name=layer)
 
     # Update coords
     se, x_coords_orig, y_coords_orig = _apply_transform(se, to_coordinate_system=to_coordinate_system)

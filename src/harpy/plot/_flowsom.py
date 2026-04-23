@@ -79,7 +79,7 @@ def pixel_clusters(
     --------
     harpy.im.flowsom
     """
-    se = _get_spatial_element(sdata, layer=labels_name)
+    se = _get_spatial_element(sdata, element_name=labels_name)
 
     unique_values = da.unique(se.data).compute()
     labels = unique_values[unique_values != 0]

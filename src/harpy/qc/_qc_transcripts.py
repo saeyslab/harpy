@@ -131,7 +131,7 @@ def analyse_genes_left_out(
     if labels_name not in [*sdata.labels]:
         raise ValueError(f"labels_name '{labels_name}' is not a labels layer in `sdata`.")
 
-    se = _get_spatial_element(sdata, layer=labels_name)
+    se = _get_spatial_element(sdata, element_name=labels_name)
     crd = _get_boundary(se, to_coordinate_system=to_coordinate_system)
 
     region_key = sdata.tables[table_name].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]

@@ -92,7 +92,7 @@ def tiling_correction(
             f"Applying image processing on the last image layer '{image_name}' of the provided SpatialData object."
         )
 
-    se = _get_spatial_element(sdata, layer=image_name)
+    se = _get_spatial_element(sdata, element_name=image_name)
 
     if se.dims != ("c", "y", "x"):
         raise ValueError(

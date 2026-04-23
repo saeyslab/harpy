@@ -102,7 +102,7 @@ def filter_labels(
     if min_size > max_size:
         raise ValueError(f"'min_size' must be <= 'max_size', found {min_size} > {max_size}.")
 
-    se_labels = get_dataarray(sdata, layer=labels_name)
+    se_labels = get_dataarray(sdata, element_name=labels_name)
     labels_array = se_labels.data
     transformations = get_transformation(se_labels, get_all=True)
 
@@ -158,7 +158,7 @@ def filter_labels(
     )
 
     if output_shapes_name is not None:
-        se_result = get_dataarray(sdata, layer=output_labels_name)
+        se_result = get_dataarray(sdata, element_name=output_labels_name)
         sdata = add_shapes(
             sdata,
             input=se_result.data,

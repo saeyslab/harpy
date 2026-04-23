@@ -103,7 +103,7 @@ def cluster_intensity_SOM(
     for i, (_img_layer, _labels_layer, _to_coordinate_system) in enumerate(
         zip(image_name, labels_name, to_coordinate_system, strict=True)
     ):
-        se = _get_spatial_element(sdata, layer=_labels_layer)
+        se = _get_spatial_element(sdata, element_name=_labels_layer)
 
         labels = da.unique(se.data).compute()
 

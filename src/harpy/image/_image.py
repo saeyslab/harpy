@@ -79,8 +79,8 @@ def _precondition(
         raise ValueError(
             f"labels layer with name '{labels_name}' not found in sdata.labels. Please choose from: {[*sdata.labels]}."
         )
-    se_image = _get_spatial_element(sdata, layer=image_name)
-    se_labels = _get_spatial_element(sdata, layer=labels_name)
+    se_image = _get_spatial_element(sdata, element_name=image_name)
+    se_labels = _get_spatial_element(sdata, element_name=labels_name)
 
     if se_image.data.shape[1:] != se_labels.data.shape:
         raise ValueError(
@@ -130,62 +130,64 @@ def _unapply_transform(se: DataArray, x_coords: np.ndarray, y_coords: np.ndarray
     return se
 
 
-def get_dataarray(sdata: SpatialData, layer: str, scale: str | None = None) -> DataArray:
+def get_dataarray(sdata: SpatialData, element_name: str, scale: str | None = None) -> DataArray:
     """
-    Retrieve the highest-resolution :class:`xarray.DataArray` from a layer in ``sdata.images`` or ``sdata.labels``.
+    Retrieve the highest-resolution :class:`xarray.DataArray` from an element in ``sdata.images`` or ``sdata.labels``.
 
-    If ``sdata.images[layer]`` or ``sdata.labels[layer]`` is a
+    If ``sdata.images[element_name]`` or ``sdata.labels[element_name]`` is a
     :class:`xarray.DataTree`, this function returns the requested pyramid
     :class:`xarray.DataArray`. If ``scale`` is ``None``, the base scale
-    (``"scale0"``) is returned. If the layer is already a :class:`xarray.DataArray`,
+    (``"scale0"``) is returned. If the element is already a :class:`xarray.DataArray`,
     ``scale`` is ignored.
 
     Parameters
     ----------
     sdata : SpatialData
-        The SpatialData object containing image and/or labels layers.
-    layer : str
-        The name of the layer to retrieve.
+        The SpatialData object containing image and/or labels elements.
+    element_name : str
+        The name of the element to retrieve.
     scale : str | None
-        Pyramid level to retrieve when the layer is stored as a multiscale
+        Pyramid level to retrieve when the element is stored as a multiscale
         :class:`xarray.DataTree`. If ``None``, ``"scale0"`` is used.
 
     Returns
     -------
-    The resolved :class:`xarray.DataArray` corresponding to the requested layer.
+    The resolved :class:`xarray.DataArray` corresponding to the requested element.
 
     Raises
     ------
     KeyError
-        If the layer does not exist in ``sdata.images`` or ``sdata.labels``.
+        If the element does not exist in ``sdata.images`` or ``sdata.labels``.
     ValueError
-        If the layer exists but is stored in an unsupported format.
+        If the element exists but is stored in an unsupported format.
     """
-    if layer in sdata.images:
-        si = sdata.images[layer]
-    elif layer in sdata.labels:
-        si = sdata.labels[layer]
+    if element_name in sdata.images:
+        si = sdata.images[element_name]
+    elif element_name in sdata.labels:
+        si = sdata.labels[element_name]
     else:
-        raise KeyError(f"'{layer}' not found in 'sdata.images' or 'sdata.labels'")
+        raise KeyError(f"'{element_name}' not found in 'sdata.images' or 'sdata.labels'")
 
     if isinstance(si, DataArray):
         return si
     if isinstance(si, DataTree):
         scale_key = "scale0" if scale is None else scale
         if scale_key not in si:
-            raise ValueError(f"Scale '{scale_key}' not found in layer '{layer}'. Available scales are: {[*si]}.")
+            raise ValueError(
+                f"Scale '{scale_key}' not found in element '{element_name}'. Available scales are: {[*si]}."
+            )
         name = si[scale_key].__iter__().__next__()
         return si[scale_key][name]
-    raise ValueError(f"Not implemented for layer '{layer}' of type {type(si)}.")
+    raise ValueError(f"Not implemented for element '{element_name}' of type {type(si)}.")
 
 
-def _get_spatial_element(sdata: SpatialData, layer: str) -> DataArray:
-    if layer in sdata.images:
-        si = sdata.images[layer]
-    elif layer in sdata.labels:
-        si = sdata.labels[layer]
+def _get_spatial_element(sdata: SpatialData, element_name: str) -> DataArray:
+    if element_name in sdata.images:
+        si = sdata.images[element_name]
+    elif element_name in sdata.labels:
+        si = sdata.labels[element_name]
     else:
-        raise KeyError(f"'{layer}' not found in 'sdata.images' or 'sdata.labels'")
+        raise KeyError(f"'{element_name}' not found in 'sdata.images' or 'sdata.labels'")
     if isinstance(si, DataArray):
         return si
     elif isinstance(si, DataTree):
@@ -194,7 +196,7 @@ def _get_spatial_element(sdata: SpatialData, layer: str) -> DataArray:
         name = si[scale_0].__iter__().__next__()
         return si[scale_0][name]
     else:
-        raise ValueError(f"Not implemented for layer '{layer}' of type {type(si)}.")
+        raise ValueError(f"Not implemented for element '{element_name}' of type {type(si)}.")
 
 
 def _fix_dimensions(

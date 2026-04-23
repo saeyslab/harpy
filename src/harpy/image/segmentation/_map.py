@@ -140,12 +140,12 @@ def map_labels(
         labels_data = []
 
         # Initial checks for the first layer to set a reference for comparison
-        first_se = _get_spatial_element(sdata, layer=labels_layers[0])
+        first_se = _get_spatial_element(sdata, element_name=labels_layers[0])
         first_x_label = first_se.data
         first_transformations = get_transformation(first_se, get_all=True)
 
         for layer in labels_layers:
-            se = _get_spatial_element(sdata, layer=layer)
+            se = _get_spatial_element(sdata, element_name=layer)
             x_label = se.data
             transformations = get_transformation(se, get_all=True)
 
@@ -203,7 +203,7 @@ def map_labels(
 
     # only calculate shapes layer if it is specified
     if output_shapes_name is not None:
-        se_labels = _get_spatial_element(sdata, layer=output_labels_name)
+        se_labels = _get_spatial_element(sdata, element_name=output_labels_name)
 
         # convert the labels to polygons and add them as shapes layer to sdata
         sdata = add_shapes(

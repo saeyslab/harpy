@@ -62,7 +62,7 @@ def test_plot_sdata_image(sdata: SpatialData, tmp_path):
     # 1) plot one channel
     channel_name = 0  # plot channel with name 0
 
-    se = _get_spatial_element(sdata, layer=image_name)
+    se = _get_spatial_element(sdata, element_name=image_name)
     channels = se.c.data
 
     c_id = np.where(channels == channel_name)[0].item()

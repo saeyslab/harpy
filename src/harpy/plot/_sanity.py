@@ -145,7 +145,7 @@ def sanity(
             f"Plotting last image layer {layer} of the provided SpatialData object."
         )
 
-    se = _get_spatial_element(sdata, layer=layer)
+    se = _get_spatial_element(sdata, element_name=layer)
 
     _, ax = plt.subplots(figsize=(10, 10) if figsize is None else figsize)
 

@@ -80,7 +80,7 @@ def combine(
 
     >>> sdata = combine(sdata, image_name="raw_image", output_image_name="nuc_combined", nuc_channels=[0,1])
     """
-    se = _get_spatial_element(sdata, layer=image_name)
+    se = _get_spatial_element(sdata, element_name=image_name)
 
     if crd is not None:
         se_crop = bounding_box_query(

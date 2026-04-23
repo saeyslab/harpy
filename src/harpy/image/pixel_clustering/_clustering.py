@@ -144,7 +144,7 @@ def flowsom(
         "The number of 'output_cluster_labels_name' and 'output_metacluster_labels_name' specified should be the equal to the the number of 'image_name' specified."
     )
 
-    se_image = _get_spatial_element(sdata, layer=image_name[0])
+    se_image = _get_spatial_element(sdata, element_name=image_name[0])
 
     if channels is not None:
         channels = _fix_name(channels)
@@ -159,7 +159,7 @@ def flowsom(
     _region_keys = []
     log.info("Extracting random sample for FlowSOM training.")
     for i, _img_layer in enumerate(image_name):
-        se_image = _get_spatial_element(sdata, layer=_img_layer)
+        se_image = _get_spatial_element(sdata, element_name=_img_layer)
         _transformations.append(get_transformation(se_image, get_all=True))
         arr = se_image.sel(c=channels).data
         if i == 0:
@@ -259,7 +259,7 @@ def flowsom(
             sdata_temp = read_zarr(sdata.path, selection=["images"])
             sdata[_labels_flowsom_name] = sdata_temp[_labels_flowsom_name]
             del sdata_temp
-            _labels_flowsom = _get_spatial_element(sdata, layer=_labels_flowsom_name).data
+            _labels_flowsom = _get_spatial_element(sdata, element_name=_labels_flowsom_name).data
         else:
             _labels_flowsom = _labels_flowsom.persist()
 

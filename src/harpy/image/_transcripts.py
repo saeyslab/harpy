@@ -116,7 +116,7 @@ def transcript_density(
     if image_name is None:
         image_name = [*sdata.images][-1]
 
-    se = get_dataarray(sdata, layer=image_name)
+    se = get_dataarray(sdata, element_name=image_name)
 
     img_boundary = _get_boundary(se, to_coordinate_system=to_coordinate_system)
 

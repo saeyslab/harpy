@@ -80,7 +80,7 @@ def bounding_box_query(
     labels_ids = []
     # labels_name_queried=[]
     for _labels_layer, _crd, _to_coordinate_system in zip(labels_name, crd, to_coordinate_system, strict=True):
-        se = get_dataarray(sdata, layer=_labels_layer)
+        se = get_dataarray(sdata, element_name=_labels_layer)
 
         if _crd is None:
             se_queried = se

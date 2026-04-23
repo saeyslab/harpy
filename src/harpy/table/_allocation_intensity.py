@@ -181,8 +181,8 @@ def allocate_intensity(
 
     # currently this function will only work if image_name and labels_name have the same shape.
     # And are in same position, i.e. if one is translated, other should be translated with same offset
-    se_image = get_dataarray(sdata, layer=image_name)
-    se_labels = get_dataarray(sdata, layer=labels_name)
+    se_image = get_dataarray(sdata, element_name=image_name)
+    se_labels = get_dataarray(sdata, element_name=labels_name)
 
     if se_image.data.shape[1:] != se_labels.data.shape:
         raise ValueError(

@@ -169,7 +169,7 @@ def _get_values_grid_most_frequent(
     grid_type: str = "hexagon",
     subset: list[int] | None = None,
 ) -> tuple[NDArray, NDArray]:
-    assert get_dataarray(sdata, layer=labels_name).data.ndim == 2, "Currently only support for 2D ('y','x')."
+    assert get_dataarray(sdata, element_name=labels_name).data.ndim == 2, "Currently only support for 2D ('y','x')."
     _uuid = uuid.uuid4()
     # Make a grid, either hexagons or squares.
     sdata = add_grid_labels(
@@ -179,14 +179,14 @@ def _get_values_grid_most_frequent(
         output_labels_name=f"labels_grid_{_uuid}",
         output_shapes_name=f"shapes_grid_{_uuid}",
         grid_type=grid_type,
-        chunks=get_dataarray(sdata, layer=labels_name).data.chunksize[
+        chunks=get_dataarray(sdata, element_name=labels_name).data.chunksize[
             -1
         ],  # if chunksize in y would be different than in x, we rechunk, see below
         transformations=get_transformation(sdata[labels_name], get_all=True),
         overwrite=True,
     )
-    mask_grid = get_dataarray(sdata, layer=f"labels_grid_{_uuid}").data
-    mask_pixel_clusters = get_dataarray(sdata, layer=labels_name).data
+    mask_grid = get_dataarray(sdata, element_name=f"labels_grid_{_uuid}").data
+    mask_pixel_clusters = get_dataarray(sdata, element_name=labels_name).data
 
     if mask_grid.chunksize != mask_pixel_clusters.chunksize:
         mask_pixel_clusters.rechunk(mask_grid.chunksize)
@@ -220,7 +220,7 @@ def _get_values_grid_most_frequent(
 
     # most_frequent_lazy is of shape (i,1,statistic_dimension=1)
     most_frequent = most_frequent_lazy.squeeze(1).compute()
-    most_frequent = most_frequent.astype(get_dataarray(sdata, layer=labels_name).dtype)
+    most_frequent = most_frequent.astype(get_dataarray(sdata, element_name=labels_name).dtype)
     df_most_frequent = pd.DataFrame(most_frequent)
     df_most_frequent[_INSTANCE_KEY] = instance_ids
     if not df_most_frequent[_INSTANCE_KEY].is_unique:

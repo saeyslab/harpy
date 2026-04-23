@@ -441,7 +441,7 @@ def _create_empty_feature_table(
     uuid_value = str(uuid.uuid4())[:8]
 
     for labels in labels_layers:
-        data = get_dataarray(sdata, layer=labels).data
+        data = get_dataarray(sdata, element_name=labels).data
         instance_ids = np.asarray(_da_unique(data, run_on_gpu=False))
         instance_ids = instance_ids[instance_ids != 0].astype(int, copy=False)
 
@@ -490,7 +490,7 @@ def _compute_pair_feature_frame(
     chunks: str | int | tuple[int, ...] | None,
     run_on_gpu: bool,
 ) -> tuple[pd.DataFrame, list[str]]:
-    labels = get_dataarray(sdata, layer=pair.labels_name)
+    labels = get_dataarray(sdata, element_name=pair.labels_name)
     _ = _get_translation(labels, to_coordinate_system=pair.coordinate_system)
     source_labels_ndim = labels.data.ndim
 

@@ -49,8 +49,8 @@ def _check_backed_zarr_2(sdata: SpatialData) -> Path:
 
 
 def _validate_ilastik_inputs(sdata: SpatialData, image_name: str, labels_name: str) -> None:
-    image = get_dataarray(sdata, layer=image_name)
-    labels = get_dataarray(sdata, layer=labels_name)
+    image = get_dataarray(sdata, element_name=image_name)
+    labels = get_dataarray(sdata, element_name=labels_name)
 
     image_dims = tuple(str(dim) for dim in image.dims)
     labels_dims = tuple(str(dim) for dim in labels.dims)
@@ -76,14 +76,14 @@ def _validate_ilastik_inputs(sdata: SpatialData, image_name: str, labels_name: s
         )
 
 
-def _get_layer_path(store_path: Path, element_type: str, layer: str) -> Path:
-    layer_path = store_path / element_type / layer
-    scale_zero_path = layer_path / "0"
-    if not layer_path.exists():
-        raise FileNotFoundError(layer_path)
+def _get_layer_path(store_path: Path, element_type: str, element_name: str) -> Path:
+    element_path = store_path / element_type / element_name
+    scale_zero_path = element_path / "0"
+    if not element_path.exists():
+        raise FileNotFoundError(element_path)
     if not scale_zero_path.exists():
         raise FileNotFoundError(scale_zero_path)
-    return layer_path
+    return element_path
 
 
 def _read_ilastik_predictions(prediction_path: str | Path) -> np.ndarray:
@@ -296,7 +296,7 @@ def _create_adata_from_labels(
     instance_key: str,
     region_key: str,
 ) -> AnnData:
-    instance_ids = da.unique(get_dataarray(sdata, layer=labels_name).data)
+    instance_ids = da.unique(get_dataarray(sdata, element_name=labels_name).data)
     instance_ids = np.asarray(instance_ids.compute())
     instance_ids = instance_ids[instance_ids != 0]
 
@@ -509,7 +509,7 @@ def run_object_classification(
             )
 
         log.info(f"Mapping instance ids from labels layer '{labels_name}' to ilastik prediction labels.")
-        segmentation = get_dataarray(sdata, layer=labels_name).data.squeeze()
+        segmentation = get_dataarray(sdata, element_name=labels_name).data.squeeze()
         predictions_np = _read_ilastik_predictions(prediction_path)
         # to speed things up for large matrices, we do the remap using Dask.
         predictions = da.from_array(predictions_np, chunks=segmentation.chunks)

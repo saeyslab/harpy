@@ -316,7 +316,7 @@ class Preprocess(ProcessTable):
                 adata.obs = adata.obs.drop(columns=instance_size_key)
             for i, _labels_layer in enumerate(self.labels_name):
                 log.info(f"Calculating cell size from provided labels_name '{_labels_layer}'")
-                se = get_dataarray(self.sdata, layer=_labels_layer)
+                se = get_dataarray(self.sdata, element_name=_labels_layer)
                 _shapesize = _get_mask_area(
                     se.data if se.data.ndim == 3 else se.data[None, ...],
                     instance_key=self.instance_key,

@@ -214,5 +214,5 @@ def test_segment_instanseg(sdata_multi_c_no_backed: SpatialData):
         assert _output_shapes_name in sdata_multi_c_no_backed.shapes
 
     for _output_labels_name in output_labels_name:
-        se = _get_spatial_element(sdata_multi_c_no_backed, layer=output_labels_name[0])
+        se = _get_spatial_element(sdata_multi_c_no_backed, element_name=output_labels_name[0])
         assert da.any(se.data).compute()

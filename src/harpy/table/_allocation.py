@@ -124,7 +124,7 @@ def allocate(
         )
     ddf = sdata.points[points_name]
 
-    se = _get_spatial_element(sdata, layer=labels_name)
+    se = _get_spatial_element(sdata, element_name=labels_name)
 
     combined_partitions = _aggregate(
         se=se,
@@ -316,7 +316,7 @@ def bin_counts(
             append=False,
         )
     """
-    se = _get_spatial_element(sdata, layer=labels_name)
+    se = _get_spatial_element(sdata, element_name=labels_name)
 
     # sdata[table_name].obsm[spatial_key] contains the positions of the barcodes if visium reader is used 'harpy.io.visium_hd'
     name_x = "x"

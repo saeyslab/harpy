@@ -106,7 +106,7 @@ def cluster_intensity(
         )
         for i, _labels_layer in enumerate(process_table_instance.labels_name):
             log.info(f"Calculating instance size from provided labels layer '{_labels_layer}'")
-            se = _get_spatial_element(sdata, layer=_labels_layer)
+            se = _get_spatial_element(sdata, element_name=_labels_layer)
             _shapesize = _get_mask_area(
                 se.data if se.data.ndim == 3 else se.data[None, ...],
                 instance_key=instance_key,

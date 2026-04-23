@@ -96,8 +96,8 @@ def cell_clustering_preprocess(
     for i, (_cells_labels_name, _cluster_labels_name) in enumerate(
         zip(cells_labels_name, cluster_labels_name, strict=True)
     ):
-        se_labels = _get_spatial_element(sdata, layer=_cells_labels_name)
-        se_clusters = _get_spatial_element(sdata, layer=_cluster_labels_name)
+        se_labels = _get_spatial_element(sdata, element_name=_cells_labels_name)
+        se_clusters = _get_spatial_element(sdata, element_name=_cluster_labels_name)
 
         assert se_labels.shape == se_clusters.shape, (
             f"Provided labels layers '{_cells_labels_name}' and '{_cluster_labels_name}' do not have the same shape."

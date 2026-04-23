@@ -48,7 +48,7 @@ def test_macsima_colorectal_carcinoma_full():
     )
     assert "REAscreen_IO_CRC_1" in sdata.images
     assert len(get_pyramid_levels(sdata["REAscreen_IO_CRC_1"])) == len(scale_factors) + 1
-    se = get_dataarray(sdata, layer="REAscreen_IO_CRC_1")
+    se = get_dataarray(sdata, element_name="REAscreen_IO_CRC_1")
     assert se.data.chunksize == chunks
 
 
@@ -75,7 +75,7 @@ def test_macsima_colorectal_carcinoma(backed, remove_dapi, chunks, tmp_path):
     assert sdata.is_backed() == backed
     assert "REAscreen_IO_CRC_1" in sdata.images
     assert len(get_pyramid_levels(sdata["REAscreen_IO_CRC_1"])) == len(scale_factors) + 1
-    se = get_dataarray(sdata, layer="REAscreen_IO_CRC_1")
+    se = get_dataarray(sdata, element_name="REAscreen_IO_CRC_1")
     assert len(se.c.data) == (4 if remove_dapi else 5)
     assert se.data.chunksize == chunks
     # check transformations
@@ -108,7 +108,7 @@ def test_macsima_colorectal_carcinoma_c_subset():
     )
     assert "REAscreen_IO_CRC_1" in sdata.images
     assert len(get_pyramid_levels(sdata["REAscreen_IO_CRC_1"])) == len(scale_factors) + 1
-    se = get_dataarray(sdata, layer="REAscreen_IO_CRC_1")
+    se = get_dataarray(sdata, element_name="REAscreen_IO_CRC_1")
     assert np.array_equal(np.array(["0_DAPI_1_DAPI", "4_CD15_1_CD15__VIMC6"], dtype="<U20"), se.c.data)
     assert se.data.chunksize == chunks
     # check transformations

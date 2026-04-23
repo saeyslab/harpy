@@ -119,8 +119,8 @@ def merge_labels(
     if not 0 <= threshold <= 1:
         raise ValueError(f"'threshold' must be between 0 and 1, found {threshold}.")
 
-    candidate_da = get_dataarray(sdata, layer=candidate_labels_name)
-    priority_da = get_dataarray(sdata, layer=priority_labels_name)
+    candidate_da = get_dataarray(sdata, element_name=candidate_labels_name)
+    priority_da = get_dataarray(sdata, element_name=priority_labels_name)
     candidate_transformations = get_transformation(candidate_da, get_all=True)
     priority_transformations = get_transformation(priority_da, get_all=True)
 
@@ -226,7 +226,7 @@ def merge_labels(
     )
 
     if output_shapes_name is not None:
-        se_labels = get_dataarray(sdata, layer=output_labels_name)
+        se_labels = get_dataarray(sdata, element_name=output_labels_name)
         sdata = add_shapes(
             sdata,
             input=se_labels.data,
@@ -741,10 +741,10 @@ def match_labels_to_reference(
             f"'overlap_metric' must be one of 'source_fraction', 'reference_fraction', or 'iou', found {overlap_metric!r}."
         )
 
-    label_arrays = [get_dataarray(sdata, layer=source_labels_name).data]
+    label_arrays = [get_dataarray(sdata, element_name=source_labels_name).data]
 
     for _labels_layer in reference_labels_name:
-        label_arrays.append(get_dataarray(sdata, layer=_labels_layer).data)
+        label_arrays.append(get_dataarray(sdata, element_name=_labels_layer).data)
 
     # Check for consistent shapes
     first_shape = label_arrays[0].shape

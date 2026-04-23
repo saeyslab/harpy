@@ -514,7 +514,7 @@ class SegmentationModel(ABC):
         # only calculate shapes layer if it is specified
         if output_shapes_name is not None:
             for i, _output_labels_name in enumerate(output_labels_name):
-                se_labels = _get_spatial_element(sdata, layer=_output_labels_name)
+                se_labels = _get_spatial_element(sdata, element_name=_output_labels_name)
                 _output_shapes_name = output_shapes_name[i]
                 # convert the labels to polygons and add them as shapes layer to sdata
                 sdata = add_shapes(
@@ -776,7 +776,7 @@ class SegmentationModelStains(SegmentationModel):
             )
         c_dim_output_labels = len(output_labels_name)
 
-        se = _get_spatial_element(sdata, layer=image_name)
+        se = _get_spatial_element(sdata, element_name=image_name)
         se_crop = None
         if crd is not None:
             se_crop = bounding_box_query(
@@ -881,7 +881,7 @@ class SegmentationModelPoints(SegmentationModel):
             )
         c_dim_output_labels = len(output_labels_name)
 
-        se = _get_spatial_element(sdata, layer=labels_name)
+        se = _get_spatial_element(sdata, element_name=labels_name)
 
         # Now we check that there are no scaling and rotations defined on se; and that points layer has identiy transformation associated.
         # We do not allow a transformation other than translation in y and x defined on labels layer.

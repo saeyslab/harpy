@@ -62,7 +62,7 @@ def test_filter_labels_layer_uses_global_label_size_across_chunks() -> None:
 
     # Label 1 spans two chunks but has global size 4, so it is kept. Label 2
     # has global size 2 and is filtered out.
-    result = get_dataarray(sdata, layer="labels_filtered").data.compute()
+    result = get_dataarray(sdata, element_name="labels_filtered").data.compute()
     expected = np.array([[1, 1, 1, 1, 0, 0]], dtype=np.uint32)
     assert np.array_equal(result, expected)
 

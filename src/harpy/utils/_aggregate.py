@@ -159,8 +159,8 @@ class RasterAggregator:
             image_name = "raw_image_fov0"
             labels_name = "label_whole_fov0"
 
-            image_array = hp.im.get_dataarray(sdata, layer=image_name).data
-            mask_array = hp.im.get_dataarray(sdata, layer=labels_name).data
+            image_array = hp.im.get_dataarray(sdata, element_name=image_name).data
+            mask_array = hp.im.get_dataarray(sdata, element_name=labels_name).data
 
             # Add dummy z dimension
             image_array = image_array[:, None, ...]

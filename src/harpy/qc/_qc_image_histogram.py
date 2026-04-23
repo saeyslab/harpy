@@ -121,7 +121,7 @@ def image_histogram(
         ax = hp.qc.image_histogram(
             sdata,
             image_name="raw_image_fov0",
-            channel=hp.im.get_dataarray(sdata, layer="raw_image_fov0").c.data,
+            channel=hp.im.get_dataarray(sdata, element_name="raw_image_fov0").c.data,
             percentile_lines=[0.1, 99.9],
             kind="hist",
             ncols=5,
@@ -140,7 +140,7 @@ def image_histogram(
             f"Parameter 'scale={scale}' was ignored for image layer '{image_name}' because it is not multiscale; "
             "histogram will be computed at full resolution."
         )
-    se = get_dataarray(sdata, layer=image_name, scale=scale)
+    se = get_dataarray(sdata, element_name=image_name, scale=scale)
     channel_names = _resolve_channels(se.c.data.tolist(), channel)
 
     if len(channel_names) == 1:

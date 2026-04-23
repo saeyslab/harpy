@@ -49,7 +49,7 @@ def vectorize(
     -------
     The `sdata` object with the shapes element added.
     """
-    se = _get_spatial_element(sdata, layer=labels_name)
+    se = _get_spatial_element(sdata, element_name=labels_name)
     sdata = add_shapes(
         sdata,
         input=se.data,

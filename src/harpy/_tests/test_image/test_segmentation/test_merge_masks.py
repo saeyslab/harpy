@@ -63,7 +63,7 @@ def test_merge_labels_layers_small_sdata_keeps_no_overlap_candidates() -> None:
         threshold=0.5,
     )
 
-    result = get_dataarray(sdata, layer="merged").data.compute()
+    result = get_dataarray(sdata, element_name="merged").data.compute()
     expected = np.array([[5, 5, 6, 6], [5, 5, 6, 0]], dtype=np.uint32)
     assert np.array_equal(result, expected)
 
@@ -89,7 +89,7 @@ def test_merge_labels_layers_uses_global_candidate_fraction_across_chunks() -> N
     # Candidate label 1 spans two chunks and overlaps the priority layer in 2 of
     # its 4 pixels, so its global candidate_fraction is 2 / 4 = 0.5 and it is
     # rejected for threshold 0.4. Candidate label 2 has no overlap and is kept.
-    result = get_dataarray(sdata, layer="merged").data.compute()
+    result = get_dataarray(sdata, element_name="merged").data.compute()
     expected = np.array([[5, 5, 0, 0, 6, 6]], dtype=np.uint32)
     assert np.array_equal(result, expected)
 

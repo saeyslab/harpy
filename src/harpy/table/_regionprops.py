@@ -155,7 +155,7 @@ def add_regionprops(
 
     cell_props = []
     for _labels_layer in labels_name:
-        se = get_dataarray(sdata, layer=_labels_layer)
+        se = get_dataarray(sdata, element_name=_labels_layer)
         # pull masks in in memory. skimage.measure.regionprops does not work with lazy objects.
         masks = se.data.compute()
         _cell_props = _calculate_regionprop_features(

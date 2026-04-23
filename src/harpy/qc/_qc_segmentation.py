@@ -56,7 +56,7 @@ def segmentation_coverage(
             microns_per_pixel=1,
         )
     """
-    array = get_dataarray(sdata, layer=labels_name).data
+    array = get_dataarray(sdata, element_name=labels_name).data
     array = array[None, ...] if array.ndim == 2 else array
 
     total_instances = _da_unique(array, run_on_gpu=False)
@@ -156,7 +156,7 @@ def segmentation_histogram(
             microns_per_pixel=1,
         )
     """
-    array = get_dataarray(sdata, layer=labels_name).data
+    array = get_dataarray(sdata, element_name=labels_name).data
     array = array[None, ...] if array.ndim == 2 else array
 
     log.info(f"Calculating cell size for labels layer '{labels_name}'.")
