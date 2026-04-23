@@ -39,7 +39,7 @@ class ShapesLayerManager:
 
         if polygons.empty:
             log.warning(
-                f"GeoDataFrame contains no polygons. Skipping addition of shapes layer '{output_shapes_name}' to sdata."
+                f"GeoDataFrame contains no polygons. Skipping addition of shapes element '{output_shapes_name}' to sdata."
             )
             return sdata
 
@@ -78,7 +78,7 @@ class ShapesLayerManager:
         for _shapes_layer in [*sdata.shapes]:
             polygons = self.retrieve_data_from_sdata(sdata, name=_shapes_layer)
             polygons = self.get_polygons_from_input(polygons, instance_key=instance_key)
-            # only filter shapes that are in same coordinate system as the labels layer
+            # only filter shapes that are in same coordinate system as the labels element
             if not set(coordinate_systems_labels_layer).intersection({*get_transformation(polygons, get_all=True)}):
                 continue
 
@@ -97,8 +97,8 @@ class ShapesLayerManager:
                 # this is case where there are no polygons filtered out, so no
                 # output_filtered_shapes_name should be created
                 log.warning(
-                    f"No polygons filtered out for shapes layer '{_shapes_layer}'. As a result, "
-                    f"shapes layer '{output_filtered_shapes_name}' will not be created. This is "
+                    f"No polygons filtered out for shapes element '{_shapes_layer}'. As a result, "
+                    f"shapes element '{output_filtered_shapes_name}' will not be created. This is "
                     f"expected if 'indexes_to_keep' matches '{_shapes_layer}' indexes."
                 )
 
@@ -107,8 +107,8 @@ class ShapesLayerManager:
             filtered_polygons = self.retrieve_data_from_sdata(sdata, name=_shapes_layer)[~bool_to_keep]
 
             log.info(
-                f"Filtering {len(set(filtered_polygons.index))} cells from shapes layer '{_shapes_layer}'. "
-                f"Adding new shapes layer '{output_filtered_shapes_name}' containing these filtered out polygons."
+                f"Filtering {len(set(filtered_polygons.index))} cells from shapes element '{_shapes_layer}'. "
+                f"Adding new shapes element '{output_filtered_shapes_name}' containing these filtered out polygons."
             )
 
             # if this assert would break in future spatialdata, then pass transformations of polygons to .parse
@@ -173,7 +173,7 @@ class ShapesLayerManager:
         assert len(input.shape) in [
             2,
             3,
-        ], "Only 2D (y,x) and 3D (z,y,x) labels layers are supported."
+        ], "Only 2D (y,x) and 3D (z,y,x) labels elements are supported."
 
         return len(input.shape)
 

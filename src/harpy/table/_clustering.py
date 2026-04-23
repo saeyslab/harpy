@@ -44,14 +44,14 @@ def kmeans(
     sdata
         The input SpatialData object.
     labels_name
-        The labels layer(s) of `sdata` used to select the cells via the region key in `sdata.tables[table_name].obs`.
+        The labels element(s) of `sdata` used to select the cells via the region key in `sdata.tables[table_name].obs`.
         Note that if `output_table_name` is equal to `table_name` and overwrite is True,
         cells in `sdata.tables[table_name]` linked to other `labels_name` (via the region key), will be removed from `sdata.tables[table_name]`.
-        If a list of labels layers is provided, they will therefore be clustered together (e.g. multiple samples).
+        If a list of labels elements is provided, they will therefore be clustered together (e.g. multiple samples).
     table_name
-        The table layer in `sdata` on which to perform clustering.
+        The table element in `sdata` on which to perform clustering.
     output_table_name
-        The output table layer in `sdata` to which table layer with results of clustering will be written.
+        The output table element in `sdata` to which table element with results of clustering will be written.
     calculate_umap
         If `True`, calculates a UMAP via :func:`~scanpy.tl.umap` for visualization of computed clusters.
     rank_genes
@@ -82,7 +82,7 @@ def kmeans(
 
     Notes
     -----
-    - The function adds a table layer, adding clustering labels, and optionally UMAP coordinates
+    - The function adds a table element, adding clustering labels, and optionally UMAP coordinates
       and gene rankings, facilitating downstream analyses and visualization.
     - Gene ranking based on cluster contributions is intended for identifying marker genes that characterize each cluster.
 
@@ -149,14 +149,14 @@ def leiden(
     sdata
         The input SpatialData object.
     labels_name
-        The labels layer(s) of `sdata` used to select the cells via the region key in `sdata.tables[table_name].obs`.
+        The labels element(s) of `sdata` used to select the cells via the region key in `sdata.tables[table_name].obs`.
         Note that if `output_table_name` is equal to `table_name` and `overwrite` is `True`,
         cells in `sdata.tables[table_name]` linked to other `labels_name` (via the region key), will be removed from `sdata.tables[table_name]`.
-        If a list of labels layers is provided, they will therefore be clustered together (e.g. multiple samples).
+        If a list of labels elements is provided, they will therefore be clustered together (e.g. multiple samples).
     table_name:
-        The table layer in `sdata` on which to perform clustering on.
+        The table element in `sdata` on which to perform clustering on.
     output_table_name
-        The output table layer in `sdata` to which table layer with results of clustering will be written.
+        The output table element in `sdata` to which table element with results of clustering will be written.
     calculate_umap
         If `True`, calculates a UMAP via :func:`~scanpy.tl.umap` for visualization of computed clusters.
     calculate_neighbors

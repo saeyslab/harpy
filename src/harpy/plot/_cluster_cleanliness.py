@@ -33,11 +33,11 @@ def cluster_cleanliness(
     sdata
         SpatialData object containing the spatial data and annotations.
     table_name
-        The table layer in `sdata` to visualize.
+        The table element in `sdata` to visualize.
     image_name
-        Name of the imgage layer in `sdata` (default is None).
+        Name of the image element in `sdata` (default is None).
     shapes_name
-        Name of the shapes layer in `sdata` object (default is "segmentation_mask_boundaries").
+        Name of the shapes element in `sdata` object (default is "segmentation_mask_boundaries").
     crd
         An optional rectangle [xmin, xmax, ymin, ymax] (default is None).
         If specified, the tissue image will be cropped to this rectangle,

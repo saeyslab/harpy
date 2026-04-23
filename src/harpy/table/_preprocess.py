@@ -32,7 +32,7 @@ def preprocess_transcriptomics(
     highly_variable_genes_kwargs: Mapping[str, Any] = MappingProxyType({}),
     max_value_scale: float | None = 10,
     n_comps: int = 50,
-    update_shapes_layers: bool = True,
+    update_shapes_elements: bool = True,
     instance_size_key: str = _CELLSIZE_KEY,
     raw_counts_key: str = _RAW_COUNTS_KEY,
     overwrite: bool = False,
@@ -77,7 +77,7 @@ def preprocess_transcriptomics(
         The maximum value to which data will be scaled, when scaling the data to have zero mean and a variance of one, using :func:`~scanpy.pp.scale`.
     n_comps
         Number of principal components to calculate.
-    update_shapes_layers
+    update_shapes_elements
         Whether to filter the shapes elements associated with `labels_name`.
         If set to `True`, cells that do not appear in resulting `output_table_name` (with the region key equal to `labels_name`) will be removed from the shapes elements (via region key) in the `sdata` object.
         Filtered shapes will be added to `sdata` with prefix 'filtered_low_counts'.
@@ -131,7 +131,7 @@ def preprocess_transcriptomics(
         scale=True,
         max_value_scale=max_value_scale,
         calculate_pca=True,
-        update_shapes_layers=update_shapes_layers,
+        update_shapes_elements=update_shapes_elements,
         qc_kwargs={"percent_top": percent_top},
         filter_cells_kwargs={"min_counts": min_counts},
         filter_genes_kwargs={"min_cells": min_cells},
@@ -255,7 +255,7 @@ def preprocess_proteomics(
         max_value_q=max_value_q,
         highly_variable_genes=False,
         calculate_pca=calculate_pca,
-        update_shapes_layers=False,
+        update_shapes_elements=False,
         pca_kwargs={"n_comps": n_comps},
         instance_size_key=instance_size_key,
         raw_counts_key=raw_counts_key,
@@ -281,7 +281,7 @@ class Preprocess(ProcessTable):
         max_value_q: float | None = 1,  # ignored if q is None
         highly_variable_genes: bool = False,
         calculate_pca: bool = True,
-        update_shapes_layers: bool = True,  # whether to update the shapes element based on the items filtered out in sdata.tables[self.table_name].
+        update_shapes_elements: bool = True,  # whether to update the shapes element based on the items filtered out in sdata.tables[self.table_name].
         qc_kwargs: Mapping[str, Any] = MappingProxyType({}),  # keyword arguments passed to sc.pp.calculate_qc_metrics
         filter_cells_kwargs: Mapping[str, Any] = MappingProxyType({}),  # keyword arguments passed to sc.pp.filter_cells
         filter_genes_kwargs: Mapping[str, Any] = MappingProxyType({}),  # keyword arguments passed to sc.pp.filter_genes
@@ -422,7 +422,7 @@ class Preprocess(ProcessTable):
             overwrite=overwrite,
         )
 
-        if update_shapes_layers:
+        if update_shapes_elements:
             for _labels_layer in self.labels_name:
                 self.sdata = filter_shapes(
                     self.sdata,

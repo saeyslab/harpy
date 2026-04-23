@@ -60,7 +60,7 @@ def test_add_regionprops(sdata_pixie_intensities, properties_to_calculate):
 
 
 # test if ValueErrors raised correctly
-# test case where labels layer not annotated by the table layer
+# test case where labels layer not annotated by the table element
 def test_add_regionprops_raises(sdata_pixie_intensities):
     table_name = "table_intensities"
     labels_name = "label_whole_fov0"
@@ -75,7 +75,7 @@ def test_add_regionprops_raises(sdata_pixie_intensities):
     # labels layer not annotated by the table layer
     with pytest.raises(
         ValueError,
-        match=f"labels layer '{labels_name}_not_annotated' not annotated by table layer '{table_name}'",
+        match=f"labels element '{labels_name}_not_annotated' not annotated by table element '{table_name}'",
     ):
         sdata_pixie_intensities = add_regionprops(
             sdata_pixie_intensities,

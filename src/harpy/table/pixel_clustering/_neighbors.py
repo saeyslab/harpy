@@ -41,7 +41,7 @@ def spatial_pixel_neighbors(
     """
     Computes spatial pixel neighbors and performs neighborhood enrichment analysis.
 
-    This function extracts grid-based cluster labels from the specified labels layer of a SpatialData object,
+    This function extracts grid-based cluster labels from the specified labels element of a SpatialData object,
     subdivides the spatial domain into a grid using a specified sampling interval, and computes spatial neighbors along with
     neighborhood enrichment statistics. The resulting AnnData object stores the cluster labels as a categorical
     observation (under the key provided by `key_added`) and the corresponding spatial coordinates in its `.obsm`
@@ -55,7 +55,7 @@ def spatial_pixel_neighbors(
         The input SpatialData object containing spatial data.
     labels_name
         The key in `sdata.labels` from which the cluster label data is extracted.
-        This labels layer is typically obtained using `harpy.im.flowsom`.
+        This labels element is typically obtained using `harpy.im.flowsom`.
     size
         If `mode` is `"center"`, `size` determines the sampling interval for constructing the spatial grid.
         This value determines the distance (in pixels) between consecutive grid points along each axis. A smaller value produces a denser grid (higher resolution),
@@ -93,7 +93,7 @@ def spatial_pixel_neighbors(
 
     See Also
     --------
-    harpy.im.flowsom : flowsom pixel clustering on image layers.
+    harpy.im.flowsom : flowsom pixel clustering on image elements.
     harpy.im.add_grid_labels : construct a grid.
     """
     if mode == "center":

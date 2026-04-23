@@ -48,7 +48,7 @@ def xenium(
     (ii) loading multiple samples into a single SpatialData object.
 
     This function reads images, transcripts, masks (cell and nuclei) and tables, so it can be used for analysis.
-    The resulting :class:`~anndata.AnnData` table will be annotated by a labels layer.
+    The resulting :class:`~anndata.AnnData` table will be annotated by a labels element.
 
     The micron coordinate system is added as '{to_coordinate_system}_micron' and is available to all spatial elements within the resulting SpatialData object.
 
@@ -92,7 +92,7 @@ def xenium(
     cells_table
         Whether to read the cell annotations in the `AnnData` table.
         Will be added to the `f"table_{to_coordinate_system}"` slot in `sdata.tables`, or  f"table_{to_coordinate_system[i]}" if `to_coordinate_system` is a list.
-        If `True`, labels layer annotating the table will also be added to `sdata`.
+        If `True`, labels element annotating the table will also be added to `sdata`.
     filter_gene_names
         Gene names that need to be filtered out (via `str.contains`), mostly control genes that were added, and which you don't want to use.
         Filtering is case insensitive. Also see :func:`harpy.read_transcripts`.
@@ -121,7 +121,7 @@ def xenium(
     AssertionError
         If elements in `to_coordinate_system` are not unique.
     AssertionError
-        If `cells_table` is `True`, but the labels layer annotating the table is not found.
+        If `cells_table` is `True`, but the labels element annotating the table is not found.
 
     Returns
     -------
@@ -140,7 +140,7 @@ def xenium(
         "All elements specified via 'to_coordinate_system' should be unique."
     )
     if cells_table and not cells_labels:
-        log.info("Setting 'cell_labels' to 'True' to allow annotation of the table with the associated labels layer.")
+        log.info("Setting 'cell_labels' to 'True' to allow annotation of the table with the associated labels element.")
         cells_labels = True
 
     sdata = SpatialData()
@@ -189,7 +189,7 @@ def xenium(
         if cells_table:
             adata = _sdata["table"]
             assert f"cell_labels_{_to_coordinate_system}" in [*_sdata.labels], (
-                "labels layer annotating the table is not found in SpatialData object."
+                "labels element annotating the table is not found in SpatialData object."
             )
             # set "cell_id" column in table as index, because anndata does not allow both "cell_id" and "cell_ID" (=_INSTANCE_KEY) as columns in obs.
             if XeniumKeys.CELL_ID in adata.obs.columns:

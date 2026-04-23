@@ -18,20 +18,20 @@ def segment(
     **kwargs: dict[str, Any],
 ) -> None:
     """
-    Visualize obtained shapes layer (i.e. segmentation mask boundaries) from a SpatialData object.
+    Visualize obtained shapes element (i.e. segmentation mask boundaries) from a SpatialData object.
 
     This function utilizes the `plot_shapes` method to display the segmentation results from the provided SpatialData object.
-    Final plot will contain tow subplots, left the image without provided shapes layer overlay, and the right subplot with
-    shapes layer overlay.
+    Final plot will contain tow subplots, left the image without provided shapes element overlay, and the right subplot with
+    shapes element overlay.
 
     Parameters
     ----------
     sdata
         Data containing spatial information for plotting.
     image_name
-        Name of the image layer to be visualized, by default "raw_image".
+        Name of the image element to be visualized, by default "raw_image".
     shapes_name
-        Name of the layer containing segmentation mask boundaries, by default "segmentation_mask_boundaries".
+        Name of the shapes element containing segmentation mask boundaries, by default "segmentation_mask_boundaries".
     channel
         The channel(s) of the image to be visualized. If None, all channels are considered, by default None.
     crd

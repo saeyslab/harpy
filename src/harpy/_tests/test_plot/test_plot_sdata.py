@@ -392,7 +392,7 @@ def test_plot_sdata_raises(
     with pytest.raises(
         ValueError,
         match=re.escape(
-            f"Please specify a labels layer (which is annotated by the table layer '{table_name}') if 'table_name' is specified."
+            f"Please specify a labels element (which is annotated by the table element '{table_name}') if 'table_name' is specified."
         ),
     ):
         plot_sdata(
@@ -465,7 +465,7 @@ def test_plot_sdata_raises(
     table_name = "table"
     with pytest.raises(
         ValueError,
-        match=f"The labels layer '{labels_name}' does not seem to be annotated by the table layer '{table_name}'",
+        match=f"The labels element '{labels_name}' does not seem to be annotated by the table element '{table_name}'",
     ):
         plot_sdata(
             sdata,

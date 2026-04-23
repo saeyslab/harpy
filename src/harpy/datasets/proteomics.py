@@ -84,14 +84,14 @@ def macsima_tonsil_benchmark(path: str | Path | None = None) -> SpatialData:
     """
     Tonsil proteomics dataset acquired with the MACSima platform and used for benchmarking Harpy.
 
-    The image layer under the key ``"image_tiled"`` was obtained by artificially
+    The image element under the key ``"image_tiled"`` was obtained by artificially
     tiling the ``"ROI1_image"`` output of
     :func:`harpy.datasets.macsima_tonsil()` into a 3D image layout with dimensions
     (c, y, x) = (100, 20000, 20000).
 
     The cell segmentation mask stored under the key ``"labels_cells_harpy"`` was
     generated using Cellpose (version 4.0) applied to the ``"image_tiled"`` image
-    layer.
+    element.
 
     Parameters
     ----------

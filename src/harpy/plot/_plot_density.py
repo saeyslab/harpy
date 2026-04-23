@@ -109,14 +109,14 @@ def plot_transcript_density(
     bin_size
         Width of a histogram bin in the units of ``to_coordinate_system``.
     points_name
-        Points layer to plot from ``sdata.points``.
+        Points element to plot from ``sdata.points``.
     name_gene_column
         Column in the ``points_name`` that stores gene identities.
     genes
         Gene or list of genes to visualize. If ``None``, all points are used.
     z_plane
-        If provided, filter the points layer to rows with ``z == z_plane``.
-        This requires a ``"z"`` column on the points layer.
+        If provided, filter the points element to rows with ``z == z_plane``.
+        This requires a ``"z"`` column on the points element.
     smooth_sigma
         Gaussian smoothing sigma applied to the histogram. If ``None``, no smoothing is applied.
     cmap
@@ -177,7 +177,7 @@ def plot_transcript_density(
     if z_plane is not None:
         if "z" not in ddf.columns:
             raise ValueError(
-                f"Parameter 'z_plane' was set to {z_plane}, but points layer '{points_name}' does not contain a 'z' column."
+                f"Parameter 'z_plane' was set to {z_plane}, but points element '{points_name}' does not contain a 'z' column."
             )
         ddf = ddf[ddf["z"] == z_plane]
         ddf.attrs.update(points_attrs)
@@ -211,7 +211,7 @@ def plot_transcript_density(
         if crd is not None:
             raise ValueError(
                 f"After applying the bounding-box query with coordinates {crd!r} "
-                f"(xmin, xmax, ymin, ymax), the points layer '{points_name}' is no longer present "
+                f"(xmin, xmax, ymin, ymax), the points element '{points_name}' is no longer present "
                 "in the resulting SpatialData object. Please try different parameters for 'crd'."
             )
         raise ValueError("No data available for plotting.")
@@ -271,9 +271,9 @@ def plot_instance_density(
     sdata
         :class:`~spatialdata.SpatialData` object.
     table_name
-        Table layer to plot from ``sdata.tables``.
+        Table element to plot from ``sdata.tables``.
     labels_name
-        Labels layer(s) used to select the instances from ``table_name`` via the table region key.
+        Labels element(s) used to select the instances from ``table_name`` via the table region key.
         If ``None``, all observations from ``table_name`` are used.
     spatial_key
         Key in ``adata.obsm`` containing instance centroid coordinates.
@@ -326,7 +326,7 @@ def plot_instance_density(
     coords = np.asarray(coords)
 
     if coords.shape[0] == 0:
-        raise ValueError("No instances found for the specified labels layer(s).")
+        raise ValueError("No instances found for the specified labels element(s).")
 
     return _plot_density_from_coordinates(
         coords=coords,

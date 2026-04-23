@@ -44,7 +44,7 @@ def cluster_intensity_heatmap(
     sdata
         SpatialData object.
     table_name
-        The table layer containing the weighted mean intensities per cluster in `sdata[table_name].uns[cluster_key_uns]`.
+        The table element containing the weighted mean intensities per cluster in `sdata[table_name].uns[cluster_key_uns]`.
     cluster_key
         The cluster key in `sdata.tables[table_name].obs`.
     cluster_key_uns
@@ -89,7 +89,7 @@ def cluster_intensity_heatmap(
     >>> to_coordinate_system = "fov0"
     >>> cluster_key = "cluster_id"
     >>>
-    >>> # Calculate total intensity values for each label in label_layer, for each channel in image_name
+    >>> # Calculate total intensity values for each label in labels_name, for each channel in image_name
     >>> sdata = hp.tb.allocate_intensity(
     ...     sdata,
     ...     image_name=image_name,

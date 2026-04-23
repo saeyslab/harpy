@@ -203,7 +203,7 @@ def _dummy(
         img,
     )
     img = [img] * c_dim
-    # dummy points segmentation, just return c_dims times the labels layer
+    # dummy points segmentation, just return c_dims times the labels element
     # (used for benchmarking, and unit tests)
     return np.concatenate(img, axis=-1)
 

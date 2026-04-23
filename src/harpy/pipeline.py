@@ -78,10 +78,10 @@ class HarpyPipeline:
                 img_layers = [*sdata.images]
                 if self.loaded_image_name not in img_layers:
                     raise ValueError(
-                        f"Provided image layer '{self.loaded_image_name}' not in SpatialData object loaded from zarr."
+                        f"Provided image element '{self.loaded_image_name}' not in SpatialData object loaded from zarr."
                     )
                 log.info(
-                    f"Applying HarpyPipeline on '{self.loaded_image_name}' image layer in provided SpatialData object."
+                    f"Applying HarpyPipeline on '{self.loaded_image_name}' image element in provided SpatialData object."
                 )
                 if self.cfg.dataset.image != self.cfg.paths.sdata:
                     # changing backing directory
@@ -294,7 +294,7 @@ class HarpyPipeline:
                 overwrite=True,
             )
 
-            # update current shapes layer name
+            # update current shapes element name
             self.shapes_name = f"expanded_cells_shapes_{self.cfg.segmentation.expand_radius}"
             self.labels_name = f"expanded_cells_labels_{self.cfg.segmentation.expand_radius}"
 

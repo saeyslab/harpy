@@ -36,19 +36,19 @@ def cluster_intensity(
     sdata
         SpatialData object.
     table_name
-        The table layer containing the mean intensities per instance in 'sdata.tables[table_name].X' or
+        The table element containing the mean intensities per instance in 'sdata.tables[table_name].X' or
         'sdata.tables[table_name].layers[layer_mean_intensities]' if `layer_mean_intensities` is not `None`; and the `cluster_key` in `sdata.tables[table_name].obs`.
         Mean intensities can be calculated using `harpy.tb.allocate_intensity(..., mode="mean",...)`.
         See docstring of `harpy.pl.cluster_intensity_heatmap` for an example.
     labels_name
-        The labels layer(s) of `sdata` used to select the instances via the `region_key` in `sdata.tables[table_name].obs`.
+        The labels element(s) of `sdata` used to select the instances via the `region_key` in `sdata.tables[table_name].obs`.
         Note that if `output_table_name` is equal to `table_name` and `overwrite` is `True`,
         instances in `sdata.tables[table_name]` linked to other `labels_name` (via the `region_key`), will be removed from `sdata.tables[table_name]`.
-        If a list of labels layers is provided, intensities per cluster will be calculated over all labels layers, which is usefull in the multi-sample scenario.
+        If a list of labels elements is provided, intensities per cluster will be calculated over all labels elements, which is usefull in the multi-sample scenario.
     layer_mean_intensities
         Layer of `sdata.tables[table_name]` holding the mean intensities per instance. If not specified, it is assumed 'sdata.tables[table_name].X' holds the mean intensity values per instance.
     output_table_name
-        The output table layer in `sdata` where results are stored.
+        The output table element in `sdata` where results are stored.
     cluster_key
         The cluster key in `sdata.tables[table_name].obs`.
     cluster_key_uns
@@ -105,7 +105,7 @@ def cluster_intensity(
             f"calculating instance size for all instances in {labels_name}."
         )
         for i, _labels_layer in enumerate(process_table_instance.labels_name):
-            log.info(f"Calculating instance size from provided labels layer '{_labels_layer}'")
+            log.info(f"Calculating instance size from provided labels element '{_labels_layer}'")
             se = _get_spatial_element(sdata, element_name=_labels_layer)
             _shapesize = _get_mask_area(
                 se.data if se.data.ndim == 3 else se.data[None, ...],

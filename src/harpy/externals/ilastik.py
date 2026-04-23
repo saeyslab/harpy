@@ -57,13 +57,13 @@ def _validate_ilastik_inputs(sdata: SpatialData, image_name: str, labels_name: s
 
     if image_dims not in (("y", "x"), ("c", "y", "x")):
         raise ValueError(
-            f"Image layer '{image_name}' must have dims ('y', 'x') or ('c', 'y', 'x') for ilastik, "
+            f"Image element '{image_name}' must have dims ('y', 'x') or ('c', 'y', 'x') for ilastik, "
             f"but found {image_dims}."
         )
 
     if labels_dims != ("y", "x"):
         raise ValueError(
-            f"Labels layer '{labels_name}' must have dims ('y', 'x') for ilastik, but found {labels_dims}."
+            f"Labels element '{labels_name}' must have dims ('y', 'x') for ilastik, but found {labels_dims}."
         )
 
     image_spatial_shape = tuple(int(image.sizes[dim]) for dim in ("y", "x"))
@@ -71,7 +71,7 @@ def _validate_ilastik_inputs(sdata: SpatialData, image_name: str, labels_name: s
 
     if image_spatial_shape != labels_spatial_shape:
         raise ValueError(
-            f"Image layer '{image_name}' and labels layer '{labels_name}' must have the same spatial shape for ilastik, "
+            f"Image element '{image_name}' and labels element '{labels_name}' must have the same spatial shape for ilastik, "
             f"but found {image_spatial_shape} and {labels_spatial_shape}."
         )
 
@@ -361,21 +361,21 @@ def run_object_classification(
     raise_on_unmapped_instance: bool = False,
 ) -> SpatialData:
     """
-    Run ilastik headless object classification and add predicted labels to a table layer.
+    Run ilastik headless object classification and add predicted labels to a table element.
 
     Parameters
     ----------
     sdata
         Backed SpatialData object stored as a Zarr v2 store.
     image_name
-        Image layer used as ilastik raw input.
+        Image element used as ilastik raw input.
     labels_name
-        Labels layer used as ilastik segmentation input and to map predictions back to table instances.
+        Labels element used as ilastik segmentation input and to map predictions back to table instances.
     table_name
-        Table layer from which the annotated cells are selected. If `None`, a new table is created
+        Table element from which the annotated cells are selected. If `None`, a new table is created
         from the non-zero instance ids in `labels_name`.
     output_table_name
-        Output table layer receiving the predicted ilastik labels in ``adata.obs[obs_key]``.
+        Output table element receiving the predicted ilastik labels in ``adata.obs[obs_key]``.
     path_to_classifier
         Path to the ilastik project ``.ilp`` file.
     path_to_ilastik_executable
@@ -416,9 +416,9 @@ def run_object_classification(
     store_path = _check_backed_zarr_2(sdata)
 
     if image_name not in sdata.images:
-        raise ValueError(f"Image layer '{image_name}' not found in 'sdata.images'.")
+        raise ValueError(f"Image element '{image_name}' not found in 'sdata.images'.")
     if labels_name not in sdata.labels:
-        raise ValueError(f"Labels layer '{labels_name}' not found in 'sdata.labels'.")
+        raise ValueError(f"Labels element '{labels_name}' not found in 'sdata.labels'.")
     _validate_ilastik_inputs(sdata=sdata, image_name=image_name, labels_name=labels_name)
     if export_source not in _VALID_EXPORT_SOURCES:
         raise ValueError(f"Invalid 'export_source': {export_source!r}. Expected one of {list(_VALID_EXPORT_SOURCES)}.")
@@ -508,7 +508,7 @@ def run_object_classification(
                 f"ilastik completed without creating the expected prediction file at '{prediction_path}'."
             )
 
-        log.info(f"Mapping instance ids from labels layer '{labels_name}' to ilastik prediction labels.")
+        log.info(f"Mapping instance ids from labels element '{labels_name}' to ilastik prediction labels.")
         segmentation = get_dataarray(sdata, element_name=labels_name).data.squeeze()
         predictions_np = _read_ilastik_predictions(prediction_path)
         # to speed things up for large matrices, we do the remap using Dask.
@@ -532,7 +532,7 @@ def run_object_classification(
         )
 
         log.info(
-            f"Writing updated table layer '{output_table_name}' with ilastik predictions in adata.obs['{obs_key}']."
+            f"Writing updated table element '{output_table_name}' with ilastik predictions in adata.obs['{obs_key}']."
         )
         return add_table(
             sdata,

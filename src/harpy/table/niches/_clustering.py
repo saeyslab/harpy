@@ -50,16 +50,16 @@ def nhood_kmeans(
     sdata
         The input SpatialData object.
     table_name
-        The table layer in `sdata` on which to perform niche clustering.
+        The table element in `sdata` on which to perform niche clustering.
     output_table_name
-        The output table layer in `sdata` to which the updated table layer will
+        The output table element in `sdata` to which the updated table element will
         be written.
     cluster_key
         Key in `adata.obs` containing the cluster annotations used to build
         the neighborhood composition.
     labels_name
-        Optional labels layer or layers used to subset the table before
-        clustering. If provided, only observations linked to these labels layers
+        Optional labels element or elements used to subset the table before
+        clustering. If provided, only observations linked to these labels elements
         are considered.
     connectivity_key
         Key pointing to the cell-cell connectivity matrix in `adata.obsp`,
@@ -213,16 +213,16 @@ def nhood_lda(
     sdata
         The input SpatialData object.
     table_name
-        The table layer in `sdata` on which to perform niche clustering.
+        The table element in `sdata` on which to perform niche clustering.
     output_table_name
-        The output table layer in `sdata` to which the updated table layer will
+        The output table element in `sdata` to which the updated table element will
         be written.
     cluster_key
         Key in `adata.obs` containing the cluster annotations used to build
         the neighborhood count matrix.
     labels_name
-        Optional labels layer or layers used to subset the table before
-        clustering. If provided, only observations linked to these labels layers
+        Optional labels element or elements used to subset the table before
+        clustering. If provided, only observations linked to these labels elements
         are considered.
     connectivity_key
         Key pointing to the cell-cell connectivity matrix in `adata.obsp`,

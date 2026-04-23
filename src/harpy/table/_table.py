@@ -30,9 +30,9 @@ class ProcessTable:
         sdata: SpatialData
             The SpatialData object containing spatial data.
         table_name: str
-            The table layer to use.
+            The table element to use.
         labels_name : str or Iterable[str] or None
-            The label layer(s) to use.
+            The labels element(s) to use.
         """
         if sdata.tables == {}:
             raise ValueError(
@@ -44,7 +44,7 @@ class ProcessTable:
             if sdata.labels == {}:
                 raise ValueError(
                     "Provided SpatialData object 'sdata' does not contain 'labels'. "
-                    "Please create a labels layer via e.g. 'harpy.im.segment'."
+                    "Please create a labels element via e.g. 'harpy.im.segment'."
                 )
             labels_name = (
                 list(labels_name)
@@ -68,15 +68,15 @@ class ProcessTable:
         #    self._validate()
 
     def _validate_layer(self, layer_list, layer_type="labels"):
-        """Generic layer validation helper to reduce code duplication."""
+        """Generic element validation helper to reduce code duplication."""
         for _layer in layer_list:
             if _layer not in [*getattr(self.sdata, layer_type)]:
-                raise ValueError(f"{layer_type} layer '{_layer}' not in 'sdata.{layer_type}'.")
+                raise ValueError(f"{layer_type} element '{_layer}' not in 'sdata.{layer_type}'.")
             if (
                 _layer not in self.sdata.tables[self.table_name].obs[self.region_key].cat.categories
                 or _layer not in self.sdata.tables[self.table_name].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY]
             ):
-                raise ValueError(f"{layer_type} layer '{_layer}' not annotated by table layer '{self.table_name}'.")
+                raise ValueError(f"{layer_type} element '{_layer}' not annotated by table element '{self.table_name}'.")
             # Check for uniqueness of instance keys
             assert (
                 self.sdata.tables[self.table_name]
@@ -92,14 +92,14 @@ class ProcessTable:
         )
 
     def _validated_table_layer(self):
-        """Validate if the specified table layer exists in the SpatialData object."""
+        """Validate if the specified table element exists in the SpatialData object."""
         if self.table_name not in [*self.sdata.tables]:
-            raise ValueError(f"table layer '{self.table_name}' not in 'sdata.tables'.")
+            raise ValueError(f"table element '{self.table_name}' not in 'sdata.tables'.")
 
     def _get_adata(
         self, index_names_var: Iterable[str] | None = None, index_positions_var: Iterable[int] | None = None
     ) -> AnnData:
-        """Preprocess the data by filtering based on the table layer and setting spatialdata attributes."""
+        """Preprocess the data by filtering based on the table element and setting spatialdata attributes."""
         if self.labels_name is not None:
             adata = self.sdata.tables[self.table_name][
                 self.sdata.tables[self.table_name].obs[self.region_key].isin(self.labels_name)
@@ -192,14 +192,14 @@ def correct_marker_genes(
     sdata
         The :class:`~spatialdata.SpatialData` object.
     labels_name
-        The labels layer(s) of `sdata` used to select the cells via the region key in `sdata.tables[table_name].obs`.
+        The labels element(s) of `sdata` used to select the cells via the region key in `sdata.tables[table_name].obs`.
         Note that if `output_table_name` is equal to `table_name` and overwrite is True,
         cells in `sdata.tables[table_name]` linked to other `labels_name` (via the region key), will be removed from `sdata.tables[table_name]`
         (also from the backing Zarr store if it is backed).
     table_name
-        The table layer in `sdata`.
+        The table element in `sdata`.
     output_table_name
-        The output table layer in `sdata`.
+        The output table element in `sdata`.
     celltype_correction_dict
         The `celltype_correction_dict` has as keys the celltypes that should be corrected and as values the threshold and the divider.
 
@@ -246,7 +246,7 @@ def filter_on_size(
     output_table_name: str,
     min_size: int = 100,
     max_size: int = 100000,
-    update_shapes_layers: bool = True,
+    update_shapes_elements: bool = True,
     instance_size_key: str = _CELLSIZE_KEY,
     overwrite: bool = False,
 ) -> SpatialData:
@@ -271,7 +271,7 @@ def filter_on_size(
         minimum size in pixels.
     max_size
         maximum size in pixels.
-    update_shapes_layers
+    update_shapes_elements
         Whether to filter the shapes elements associated with `labels_name`.
         If set to `True`, cells that do not appear in resulting `output_table_name` (with region key equal to `labels_name`) will be removed from the shapes elements (via instance key) in the `sdata` object.
         Filtered shapes will be added to `sdata` with prefix 'filtered_size'.
@@ -304,7 +304,7 @@ def filter_on_size(
         overwrite=overwrite,
     )
 
-    if update_shapes_layers:
+    if update_shapes_elements:
         for _labels_layer in process_table_instance.labels_name:
             sdata = filter_shapes(
                 sdata,

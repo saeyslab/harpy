@@ -16,7 +16,7 @@ def transcript_density(
     output: str | Path | None = None,
 ) -> None:
     """
-    Visualize the transcript density layer.
+    Visualize the transcript density image element.
 
     .. deprecated:: 0.3.0
        `harpy.pl.transcript_density` is deprecated and will be removed in 0.4.0.
@@ -29,7 +29,7 @@ def transcript_density(
     sdata
         Data containing spatial information for plotting.
     image_name
-        A tuple where the first element indicates the base image layer and
+        A tuple where the first element indicates the base image element and
         the second element indicates the transcript density.
     channel
         The channel of the image to be visualized.

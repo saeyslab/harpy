@@ -53,15 +53,15 @@ def analyse_genes_left_out(
     sdata
         Data containing spatial information for plotting.
     labels_name
-        The layer in `sdata` that contains the segmentation masks.
-        This layer is used to calculate the crd (region of interest) that was used in the segmentation step,
+        The labels element in `sdata` that contains the segmentation masks.
+        This labels element is used to calculate the crd (region of interest) that was used in the segmentation step,
         otherwise transcript counts in `points_name` of `sdata` (containing all transcripts)
         and the counts obtained via `sdata.tables[ table_name ]` are not comparable.
         It is also used to select the cells in `sdata.tables[table_name]` that are linked to this `labels_name` via the region key.
     table_name
-        The table layer in `sdata` on which to perform analysis.
+        The table element in `sdata` on which to perform analysis.
     points_name
-        The layer in `sdata` containing transcript information.
+        The points element in `sdata` containing transcript information.
     to_coordinate_system
         The coordinate system that holds `labels_name` and `points_name`.
         This should be the intrinsic coordinate system in pixels.
@@ -122,14 +122,14 @@ def analyse_genes_left_out(
 
     if not np.issubdtype(sdata.tables[table_name].X.dtype, np.integer):
         log.warning(
-            f"The count matrix of the provided table layer '{table_name}', seems to be of type '{sdata.tables[table_name].X.dtype}', "
+            f"The count matrix of the provided table element '{table_name}', seems to be of type '{sdata.tables[table_name].X.dtype}', "
             "which could indicate that the analysis is being run on normalized counts, "
             "please consider running this analysis before the counts in the AnnData object "
             "are normalized (i.e. on the raw counts)."
         )
 
     if labels_name not in [*sdata.labels]:
-        raise ValueError(f"labels_name '{labels_name}' is not a labels layer in `sdata`.")
+        raise ValueError(f"labels_name '{labels_name}' is not a labels element in `sdata`.")
 
     se = _get_spatial_element(sdata, element_name=labels_name)
     crd = _get_boundary(se, to_coordinate_system=to_coordinate_system)
@@ -146,7 +146,7 @@ def analyse_genes_left_out(
 
     if not missing_indices.empty:
         raise ValueError(
-            f"There are genes found in '.var' of table layer '{table_name}' that are not found in the points layer '{points_name}'. Please verify that allocation '(harpy.tb.allocation)' is performed using the correct points layer."
+            f"There are genes found in '.var' of table element '{table_name}' that are not found in the points element '{points_name}'. Please verify that allocation '(harpy.tb.allocation)' is performed using the correct points element."
         )
 
     raw_counts = _raw_counts[adata.var.index]
@@ -221,9 +221,9 @@ def metric_histogram(
     sdata
         :class:`~spatialdata.SpatialData` object containing the table.
     table_name
-        Table layer in ``sdata.tables``.
+        Table element in ``sdata.tables``.
     labels_name
-        Label layer or layers used to subset the selected table via :class:`~harpy.table._table.ProcessTable`.
+        Labels element or elements used to subset the selected table via :class:`~harpy.table._table.ProcessTable`.
         If ``None``, all observations in ``table_name`` are used.
     column
         QC metric column to plot. The column is searched in ``.obs`` and/or ``.var`` depending on ``dataframe``.
@@ -297,7 +297,7 @@ def metric_histogram(
     if resolved_dataframe == "var" and obs_mask is not None and not obs_mask.all():
         raise ValueError(
             "Plotting '.var' QC metrics for a subset of 'labels_name' is not supported without recomputing QC metrics. "
-            "Please plot a table layer that already contains the desired subset-specific QC metrics, or use dataframe='obs'."
+            "Please plot a table element that already contains the desired subset-specific QC metrics, or use dataframe='obs'."
         )
 
     values = getattr(adata, resolved_dataframe)[column]
@@ -428,9 +428,9 @@ def metrics_histogram(
     sdata
         :class:`~spatialdata.SpatialData` object containing the table.
     table_name
-        Table layer in ``sdata.tables``.
+        Table element in ``sdata.tables``.
     labels_name
-        Label layer or layers used to subset the selected table via :class:`~harpy.table._table.ProcessTable`.
+        Labels element or elements used to subset the selected table via :class:`~harpy.table._table.ProcessTable`.
     metrics
         Sequence of ``(dataframe, column)`` tuples to plot. Defaults to a standard transcript QC panel obtained through :func:`scanpy.pp.calculate_qc_metrics`.
     ax
@@ -599,9 +599,9 @@ def obs_scatter(
     sdata
         :class:`~spatialdata.SpatialData` object containing the table.
     table_name
-        Table layer in ``sdata.tables``.
+        Table element in ``sdata.tables``.
     labels_name
-        Label layer or layers used to subset the selected table via :class:`~harpy.table._table.ProcessTable`.
+        Labels element or elements used to subset the selected table via :class:`~harpy.table._table.ProcessTable`.
         If ``None``, all observations in ``table_name`` are used.
     column_x
         Observation-level column in ``adata.obs`` to plot on the x-axis.

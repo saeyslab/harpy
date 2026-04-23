@@ -42,9 +42,9 @@ def allocate_intensity(
     overwrite: bool = True,
 ) -> SpatialData:
     """
-    Allocates intensity values from a specified image layer to corresponding cells in a SpatialData object and returns an updated SpatialData object augmented with a table layer (`sdata.tables[output_table_name]`) :class:`~anndata.AnnData` object with intensity values for each cell and each (specified) channel.
+    Allocates intensity values from a specified image element to corresponding cells in a SpatialData object and returns an updated SpatialData object augmented with a table element (`sdata.tables[output_table_name]`) :class:`~anndata.AnnData` object with intensity values for each cell and each (specified) channel.
 
-    It requires that the image layer and the labels layer have the same shape and alignment.
+    It requires that the image element and the labels element have the same shape and alignment.
 
     Internally this function uses :func:`harpy.utils.RasterAggregator`.
 
@@ -53,18 +53,18 @@ def allocate_intensity(
     sdata
         The SpatialData object containing spatial information about cells.
     image_name
-        The name of the layer in `sdata` that contains the image data from which to extract intensity information.
+        The name of the image element in `sdata` that contains the image data from which to extract intensity information.
         Both the `image_name` and `labels_name` should have the same shape and alignment. If not provided,
         will use last image_name.
     labels_name
-        The name of the layer in `sdata` containing the labels (segmentation) used to define the boundaries of cells.
+        The name of the labels element in `sdata` containing the labels (segmentation) used to define the boundaries of cells.
         These labels correspond with regions in the `image_name`. If not provided, will use last labels_name.
     output_table_name: str, optional
-        The table layer in `sdata` in which to save the :class:`~anndata.AnnData` object with the intensity values per cell.
+        The table element in `sdata` in which to save the :class:`~anndata.AnnData` object with the intensity values per cell.
     channels
         Specifies the channels to be considered when extracting intensity information from the `image_name`.
         This parameter can take a single integer or string or an iterable of integers or strings representing specific channels.
-        If set to None (the default), intensity data will be aggregated from all available channels within the image layer.
+        If set to None (the default), intensity data will be aggregated from all available channels within the image element.
     mode
         When mode is set to `"sum"`, the total intensity for each label will be added to `.X` of the resulting `output_table_name`; if set to `"mean"`, it calculates the average intensity per label.
     obs_stats
@@ -106,7 +106,7 @@ def allocate_intensity(
 
     Returns
     -------
-    An updated version of the input SpatialData object augmented with a table layer (`sdata.tables[output_table_name]`) :class:`~anndata.AnnData` object.
+    An updated version of the input SpatialData object augmented with a table element (`sdata.tables[output_table_name]`) :class:`~anndata.AnnData` object.
 
     Notes
     -----
@@ -165,15 +165,15 @@ def allocate_intensity(
     if image_name is None:
         image_name = [*sdata.images][-1]
         log.warning(
-            f"No image layer specified. "
-            f"Extracting intensities from the last image layer '{image_name}' of the provided SpatialData object."
+            f"No image element specified. "
+            f"Extracting intensities from the last image element '{image_name}' of the provided SpatialData object."
         )
 
     if labels_name is None:
         labels_name = [*sdata.labels][-1]
         log.warning(
-            f"No labels layer specified. "
-            f"Using mask from labels layer '{labels_name}' of the provided SpatialData object."
+            f"No labels element specified. "
+            f"Using mask from labels element '{labels_name}' of the provided SpatialData object."
         )
 
     if channels is not None:
@@ -187,8 +187,8 @@ def allocate_intensity(
     if se_image.data.shape[1:] != se_labels.data.shape:
         raise ValueError(
             "Only arrays with same spatial shape are currently supported, "
-            f"but image layer with name {image_name} has shape {se_image.data.shape}, "
-            f"while labels layer with name {labels_name} has shape {se_labels.data.shape}."
+            f"but image element with name {image_name} has shape {se_image.data.shape}, "
+            f"while labels element with name {labels_name} has shape {se_labels.data.shape}."
         )
 
     t1x, t1y = _get_translation(se_image, to_coordinate_system=to_coordinate_system)
@@ -196,8 +196,8 @@ def allocate_intensity(
 
     if (t1x, t1y) != (t2x, t2y):
         raise ValueError(
-            f"image layer with name {image_name} should "
-            f"be registered to labels layer with name {labels_name} in coordinate system {to_coordinate_system}."
+            f"image element with name {image_name} should "
+            f"be registered to labels element with name {labels_name} in coordinate system {to_coordinate_system}."
         )
 
     if channels is None:
@@ -230,7 +230,7 @@ def allocate_intensity(
     _array_mask_rechunked = _array_mask.rechunk(chunks_masks) if chunks_masks is not None else _array_mask
 
     assert all(element in se_image.c.data for element in channels), (
-        f"Some channels specified via 'channels' could not be found in image layer '{image_name}'. Please choose 'channels' from '{list(se_image.c.data)}'."
+        f"Some channels specified via 'channels' could not be found in image element '{image_name}'. Please choose 'channels' from '{list(se_image.c.data)}'."
     )
     channel_indices = [list(se_image.c.data).index(channel) for channel in channels]
     _array_img = _array_img[channel_indices]

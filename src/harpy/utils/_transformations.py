@@ -25,7 +25,7 @@ def _get_translation_values(translation: Affine | Sequence | Translation | Ident
 
 
 def _identity_check_transformations_points(ddf: DataFrame, to_coordinate_system: str = "global"):
-    """Check that the points layer has no transformations associated with it other than an Identity transformation in `to_coordinate_system`."""
+    """Check that the points element has no transformations associated with it other than an Identity transformation in `to_coordinate_system`."""
     transformations = get_transformation(ddf, get_all=True)
 
     if to_coordinate_system not in [*transformations]:
@@ -38,5 +38,5 @@ def _identity_check_transformations_points(ddf: DataFrame, to_coordinate_system:
     if not isinstance(transformation, Identity):
         raise ValueError(
             f"Currently we do not provide support for defining transformations "
-            f"other than the Identity transformation on a points layer for coordinate system {to_coordinate_system}."
+            f"other than the Identity transformation on a points element for coordinate system {to_coordinate_system}."
         )

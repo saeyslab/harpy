@@ -53,7 +53,7 @@ def tiling_correction(
     sdata
         The SpatialData object containing the image data to correct.
     image_name
-        The image layer in `sdata` to be corrected for tiling effects. If not provided, the last image layer in `sdata` is used.
+        The image element in `sdata` to be corrected for tiling effects. If not provided, the last image element in `sdata` is used.
     tile_size
         The size of the tiles in the image.
     crd
@@ -64,7 +64,7 @@ def tiling_correction(
     scale_factors
         Scale factors to apply for multiscale.
     output_image_name
-        Name of the image layer where the corrected image will be stored in the `sdata` object.
+        Name of the image element where the corrected image will be stored in the `sdata` object.
     overwrite
         If True overwrites the element if it already exists.
 
@@ -75,9 +75,9 @@ def tiling_correction(
     Raises
     ------
     ValueError
-        If the image layer does not contain exactly 2 spatial dimensions.
+        If the image element does not contain exactly 2 spatial dimensions.
     ValueError
-        If the dimensions of the image layer are not multiples of the given tile size.
+        If the dimensions of the image element are not multiples of the given tile size.
 
     Notes
     -----
@@ -88,8 +88,8 @@ def tiling_correction(
     if image_name is None:
         image_name = [*sdata.images][-1]
         log.warning(
-            f"No image layer specified. "
-            f"Applying image processing on the last image layer '{image_name}' of the provided SpatialData object."
+            f"No image element specified. "
+            f"Applying image processing on the last image element '{image_name}' of the provided SpatialData object."
         )
 
     se = _get_spatial_element(sdata, element_name=image_name)
@@ -97,12 +97,12 @@ def tiling_correction(
     if se.dims != ("c", "y", "x"):
         raise ValueError(
             "Tiling correction is only supported for images with 2 spatial dimensions, "
-            f"while provided image layer ({image_name}) has dimensions {se.ndim}."
+            f"while provided image element ({image_name}) has dimensions {se.ndim}."
         )
 
     if se.sizes["x"] % tile_size or se.sizes["y"] % tile_size:
         raise ValueError(
-            f"Spatial Dimension of image layer '{image_name}' ({se.shape}) on which to run the "
+            f"Spatial Dimension of image element '{image_name}' ({se.shape}) on which to run the "
             f"tilingCorrection is not a multiple of the given tile size ({tile_size})."
         )
 

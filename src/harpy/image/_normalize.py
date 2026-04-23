@@ -24,7 +24,7 @@ def normalize(
     overwrite: bool = False,
 ) -> SpatialData:
     """
-    Normalize the intensity of an image layer in a SpatialData object using specified percentiles.
+    Normalize the intensity of an image element in a SpatialData object using specified percentiles.
 
     The normalization can be applied globally or individually to each channel, depending on whether `p_min` and `p_max`
     are provided as single values or as lists. This allows for flexible intensity scaling across multiple channels.
@@ -34,9 +34,9 @@ def normalize(
     sdata
         SpatialData object.
     image_name
-        The image layer in `sdata` to normalize.
+        The image element in `sdata` to normalize.
     output_image_name
-        The name of the output layer where the normalized image will be stored.
+        The name of the output element where the normalized image will be stored.
     p_min
         The lower percentile for normalization. If provided as a list, the length
         must match the number of channels.

@@ -20,7 +20,7 @@ def create_voronoi_boundaries(
     overwrite: bool = False,
 ) -> SpatialData:
     """
-    Create Voronoi boundaries from the shapes layer of the provided SpatialData object.
+    Create Voronoi boundaries from the shapes element of the provided SpatialData object.
 
     Given a SpatialData object and a radius, this function calculates Voronoi boundaries
     and expands these boundaries based on the radius.
@@ -30,10 +30,10 @@ def create_voronoi_boundaries(
     sdata
         The spatial data object on which Voronoi boundaries will be created.
     shapes_name
-        The name of the layer in `sdata` representing shapes used to derive
+        The name of the shapes element in `sdata` used to derive
         Voronoi boundaries. Default is "segmentation_mask_boundaries".
     output_shapes_name
-        Name of the resulting shapes layer that will be added to `sdata`.
+        Name of the resulting shapes element that will be added to `sdata`.
     radius
         The expansion radius for the Voronoi boundaries, by default 0.
         If provided, Voronoi boundaries will be expanded by this radius.
@@ -56,7 +56,7 @@ def create_voronoi_boundaries(
 
     if output_shapes_name is None:
         output_shapes_name = f"expanded_cells{radius}"
-        log.info(f"Name of the output layer is not provided. Setting to '{output_shapes_name}'.")
+        log.info(f"Name of the output element is not provided. Setting to '{output_shapes_name}'.")
 
     x_min, y_min, x_max, y_max = sdata[shapes_name].geometry.total_bounds
 

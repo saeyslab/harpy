@@ -73,11 +73,11 @@ def _precondition(
     """Helper function that gets highest resolution `image_name` and `labels_name`, and checks that `image_name` and `labels_name` are co-registered."""
     if image_name not in sdata.images:
         raise ValueError(
-            f"image layer with name '{image_name}' not found in sdata.images. Please choose from: {[*sdata.images]}."
+            f"image element with name '{image_name}' not found in sdata.images. Please choose from: {[*sdata.images]}."
         )
     if labels_name not in sdata.labels:
         raise ValueError(
-            f"labels layer with name '{labels_name}' not found in sdata.labels. Please choose from: {[*sdata.labels]}."
+            f"labels element with name '{labels_name}' not found in sdata.labels. Please choose from: {[*sdata.labels]}."
         )
     se_image = _get_spatial_element(sdata, element_name=image_name)
     se_labels = _get_spatial_element(sdata, element_name=labels_name)
@@ -85,8 +85,8 @@ def _precondition(
     if se_image.data.shape[1:] != se_labels.data.shape:
         raise ValueError(
             "Only arrays with same spatial shape are currently supported, "
-            f"but image layer with name {image_name} has shape {se_image.data.shape}, "
-            f"while labels layer with name {labels_name} has shape {se_labels.data.shape}."
+            f"but image element with name {image_name} has shape {se_image.data.shape}, "
+            f"while labels element with name {labels_name} has shape {se_labels.data.shape}."
         )
 
     t1x, t1y = _get_translation(se_image, to_coordinate_system=to_coordinate_system)
@@ -94,8 +94,8 @@ def _precondition(
 
     if (t1x, t1y) != (t2x, t2y):
         raise ValueError(
-            f"image layer with name {image_name} should "
-            f"be registered to labels layer with name {labels_name} in coordinate system {to_coordinate_system}."
+            f"image element with name {image_name} should "
+            f"be registered to labels element with name {labels_name} in coordinate system {to_coordinate_system}."
         )
     return se_image, se_labels
 

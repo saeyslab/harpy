@@ -22,24 +22,24 @@ def segmentation_coverage(
     microns_per_pixel: float = 1,
 ) -> pd.DataFrame:
     """
-    Calculate coverage statistics for a segmentation labels layer.
+    Calculate coverage statistics for a segmentation labels element.
 
     This function summarizes how much of the image area is covered by labeled pixels and
-    how many segmented instances are present in the selected labels layer.
+    how many segmented instances are present in the selected labels element.
 
     Parameters
     ----------
     sdata
-        SpatialData object containing the segmentation labels layer.
+        SpatialData object containing the segmentation labels element.
     labels_name
-        Name of the labels layer in ``sdata`` for which coverage statistics are computed.
+        Name of the labels element in ``sdata`` for which coverage statistics are computed.
     microns_per_pixel
         Pixel size used to convert areas from pixels to square microns. When set to ``1``,
         area values are reported in pixels.
 
     Returns
     -------
-    :class:`pandas.DataFrame` containing the labels layer name, the total number of instances,
+    :class:`pandas.DataFrame` containing the labels element name, the total number of instances,
     the total image area, the covered area, and the covered area percentage.
 
     Examples
@@ -95,7 +95,7 @@ def segmentation_histogram(
     ylabel: str | None = None,
 ) -> Axes:
     """
-    Plot a histogram of segmented instance sizes for a labels layer.
+    Plot a histogram of segmented instance sizes for a labels element.
 
     The histogram is computed from per-instance areas extracted from the selected segmentation
     mask. Areas can be reported either in pixels or in square microns depending on
@@ -104,9 +104,9 @@ def segmentation_histogram(
     Parameters
     ----------
     sdata
-        SpatialData object containing the segmentation labels layer.
+        SpatialData object containing the segmentation labels element.
     labels_name
-        Name of the labels layer in ``sdata`` for which instance sizes are visualized.
+        Name of the labels element in ``sdata`` for which instance sizes are visualized.
     microns_per_pixel
         Pixel size used to convert areas from pixels to square microns. When set to ``1``,
         instance sizes are reported in pixels.
@@ -140,7 +140,7 @@ def segmentation_histogram(
     Raises
     ------
     ValueError
-        If the selected labels layer does not contain any labeled instances.
+        If the selected labels element does not contain any labeled instances.
 
     Examples
     --------
@@ -159,7 +159,7 @@ def segmentation_histogram(
     array = get_dataarray(sdata, element_name=labels_name).data
     array = array[None, ...] if array.ndim == 2 else array
 
-    log.info(f"Calculating cell size for labels layer '{labels_name}'.")
+    log.info(f"Calculating cell size for labels element '{labels_name}'.")
     instance_sizes = get_instance_size(mask=array, run_on_gpu=False)
     instance_sizes = instance_sizes.loc[instance_sizes[_INSTANCE_KEY] != 0, _CELLSIZE_KEY].dropna()
     if microns_per_pixel != 1:
@@ -168,7 +168,7 @@ def segmentation_histogram(
     unit = "μm²" if microns_per_pixel != 1 else "pixels"
 
     if instance_sizes.empty:
-        raise ValueError(f"No labeled instances found in labels layer '{labels_name}'.")
+        raise ValueError(f"No labeled instances found in labels element '{labels_name}'.")
 
     median_size = float(instance_sizes.median())
     std_size = float(instance_sizes.std())

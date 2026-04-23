@@ -36,7 +36,7 @@ def merge_labels(
     Merge two labels elements using a global object-level overlap rule.
 
     This function treats `priority_labels_name` as the authoritative segmentation
-    and `candidate_labels_name` as a layer that can fill uncovered regions. For
+    and `candidate_labels_name` as a labels element that can fill uncovered regions. For
     each non-zero candidate object, overlaps with all non-zero priority objects
     are accumulated globally across the full image. A candidate object is kept if:
 
@@ -312,10 +312,12 @@ def merge_labels_nuclei(
     object.
     It leverages dask for potential parallelism and out-of-core computation.
     """
-    labels_layers = [labels_name, labels_name_nuclei_expanded, labels_name_nuclei]
-    for layer in labels_layers:
-        if layer not in [*sdata.labels]:
-            raise ValueError(f"Labels element '{layer}' not found in available labels elements '{[*sdata.labels]}' of sdata.")
+    labels_names = [labels_name, labels_name_nuclei_expanded, labels_name_nuclei]
+    for labels_element_name in labels_names:
+        if labels_element_name not in [*sdata.labels]:
+            raise ValueError(
+                f"Labels element '{labels_element_name}' not found in available labels elements '{[*sdata.labels]}' of sdata."
+            )
 
     se_nuclei_expanded = get_dataarray(sdata, labels_name_nuclei_expanded)
     se_nuclei = get_dataarray(sdata, labels_name_nuclei)
@@ -328,7 +330,7 @@ def merge_labels_nuclei(
     sdata = map_labels(
         sdata,
         func=_merge_masks_nuclei_block,
-        labels_layers=labels_layers,
+        labels_name=labels_names,
         depth=depth,
         chunks=chunks,
         output_labels_name=output_labels_name,

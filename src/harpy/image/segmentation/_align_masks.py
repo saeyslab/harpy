@@ -80,19 +80,19 @@ def align_labels(
     - The function works with Dask arrays and can handle large datasets that don't fit into memory.
     - Only arrays with the same shape are supported for alignment. Misaligned arrays could be due to
       various reasons, including errors in previous processing steps or physical shifts in the samples.
-    - The alignment respects the original labelling but ensures that corresponding areas in both layers
+    - The alignment respects the original labelling but ensures that corresponding areas in both labels elements
       match after the process.
 
     Examples
     --------
-    >>> sdata = align_labels(sdata, 'layer_1', 'layer_2', depth=(50, 50), overwrite=True)
+    >>> sdata = align_labels(sdata, "labels_a", "labels_b", depth=(50, 50), overwrite=True)
     """
     assert 0 <= threshold <= 1, "Threshold must be between 0 and 1 (inclusive)."
     sdata = map_labels(
         sdata,
         func=_relabel_array_1_to_array_2_per_chunk,
         threshold=threshold,
-        labels_layers=[labels_name_1, labels_name_2],
+        labels_name=[labels_name_1, labels_name_2],
         depth=depth,
         chunks=chunks,
         output_labels_name=output_labels_name,

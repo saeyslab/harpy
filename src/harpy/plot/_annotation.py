@@ -39,13 +39,13 @@ def score_genes(
     sdata
         Data containing spatial information for plotting.
     table_name
-        The table layer in `sdata` to visualize.
+        The table element in `sdata` to visualize.
     celltypes: list[str]
         list of celltypes to plot.
     image_name
-        Image layer to be plotted. If not provided, the last image layer in `sdata` will be used.
+        Image element to be plotted. If not provided, the last image element in `sdata` will be used.
     shapes_name
-        Name of the layer containing segmentation mask boundaries, by default "segmentation_mask_boundaries".
+        Name of the shapes element containing segmentation mask boundaries, by default "segmentation_mask_boundaries".
     crd
         The coordinates for a region of interest in the format (xmin, xmax, ymin, ymax). Only used for plotting purposes.
     filter_index

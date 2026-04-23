@@ -35,7 +35,7 @@ from harpy.shape._shape import add_shapes
 def map_labels(
     sdata: SpatialData,
     func: Callable[..., NDArray | Array],
-    labels_layers: list[str] | str,
+    labels_name: list[str] | str,
     output_labels_name: str | None = None,
     output_shapes_name: str | None = None,
     depth: tuple[int, int] | int = 100,
@@ -49,20 +49,20 @@ def map_labels(
     **kwargs: Any,  # keyword arguments to be passed to func
 ) -> SpatialData:
     """
-    Apply a specified function to a labels layer in a SpatialData object.
+    Apply a specified function to a labels element in a SpatialData object.
 
     Parameters
     ----------
     sdata
-        Spatial data object containing the labels layer to be processed.
+        Spatial data object containing the labels element to be processed.
     func
-        The Callable to apply to the labels layer.
-    labels_layers
-        The labels layer(s) in `sdata` to process.
+        The Callable to apply to the labels element.
+    labels_name
+        The labels element(s) in `sdata` to process.
     output_labels_name
-        The name of the output labels layer where results will be stored. This must be specified.
+        The name of the output labels element where results will be stored. This must be specified.
     output_shapes_name
-        The name of the output shapes layer where results will be stored.
+        The name of the output shapes element where results will be stored.
     depth
         The overlapping depth used in `dask.array.map_overlap`.
         If specified as a tuple or dict, it contains the depth used in 'y' and 'x' dimension.
@@ -75,7 +75,7 @@ def map_labels(
     scale_factors
         Scale factors to apply for multiscale.
     overwrite
-        If True, overwrites the output layer if it already exists in `sdata`.
+        If True, overwrites the output element if it already exists in `sdata`.
     relabel_chunks
         Whether to relabel the labels of each chunk after being processed by func. If set to True, a bit shift will be applied, ensuring no collisions.
     trim
@@ -91,8 +91,8 @@ def map_labels(
 
     Returns
     -------
-    The `sdata` object with the processed labels layer added to the specified `output_labels_name`.
-    If `output_shapes_name` is provided, a shapes layer will be created corresponding to this labels layer.
+    The `sdata` object with the processed labels element added to the specified `output_labels_name`.
+    If `output_shapes_name` is provided, a shapes element will be created corresponding to this labels element.
 
     Raises
     ------
@@ -105,67 +105,69 @@ def map_labels(
     ValueError
         If `iou_depth` is a Tuple, and does not match (y,x).
     ValueError
-        If a label layer in `labels_name` can not be found.
+        If a labels element in `labels_name` can not be found.
     ValueError
         If number of blocks in z-dimension is not equal to 1.
 
     Notes
     -----
-    This function is designed for processing labels layers stored in a SpatialData object using dask for potential
+    This function is designed for processing labels elements stored in a SpatialData object using dask for potential
     parallelism and out-of-core computation. It takes care of relabeling across chunks, to avoid collisions.
     """
     fn_kwargs = kwargs
 
-    labels_layers = (
-        list(labels_layers)
-        if isinstance(labels_layers, Iterable) and not isinstance(labels_layers, str)
-        else [labels_layers]
+    labels_name = (
+        list(labels_name)
+        if isinstance(labels_name, Iterable) and not isinstance(labels_name, str)
+        else [labels_name]
     )
 
     if output_labels_name is None:
-        raise ValueError("Please specify a name for the output layer.")
+        raise ValueError("Please specify a name for the output element.")
 
     # first do the precondition.
-    def _get_layers(sdata: SpatialData, labels_layers: list[str]) -> tuple[list[Array], Translation]:
+    def _get_labels_elements(sdata: SpatialData, labels_name: list[str]) -> tuple[list[Array], Translation]:
         """
-        Get layers.
+        Get labels elements.
 
-        Process multiple labels layers and return the label data (list of dask arrays)
+        Process multiple labels elements and return the label data (list of dask arrays)
         and the translation associated with the dask arrays.
         """
         # sanity check
-        for layer in labels_layers:
-            if layer not in [*sdata.labels]:
-                raise ValueError(f"Layer '{layer}' not found in available label layers '{[*sdata.labels]}' of sdata.")
+        for element_name in labels_name:
+            if element_name not in [*sdata.labels]:
+                raise ValueError(
+                    f"Labels element '{element_name}' not found in available labels elements '{[*sdata.labels]}' of sdata."
+                )
         labels_data = []
 
-        # Initial checks for the first layer to set a reference for comparison
-        first_se = _get_spatial_element(sdata, element_name=labels_layers[0])
+        # Initial checks for the first labels element to set a reference for comparison
+        first_se = _get_spatial_element(sdata, element_name=labels_name[0])
         first_x_label = first_se.data
         first_transformations = get_transformation(first_se, get_all=True)
 
-        for layer in labels_layers:
-            se = _get_spatial_element(sdata, element_name=layer)
+        for element_name in labels_name:
+            se = _get_spatial_element(sdata, element_name=element_name)
             x_label = se.data
             transformations = get_transformation(se, get_all=True)
 
-            # Ensure the shape is the same as the first label layer
+            # Ensure the shape is the same as the first labels element
             assert x_label.shape == first_x_label.shape, (
                 f"Only arrays with same shape are currently supported, "
-                f"but labels layer with name {layer} has shape {x_label.shape}, "
-                f"while the first labels layer has shape {first_x_label.shape}"
+                f"but labels element with name {element_name} has shape {x_label.shape}, "
+                f"while the first labels element has shape {first_x_label.shape}"
             )
 
-            # Ensure the translation is the same as the first label layer
+            # Ensure the translation is the same as the first labels element
             assert transformations == first_transformations, (
-                f"Provided labels layers '{labels_layers}' should all have the same transformations defined on them."
+                f"Provided labels elements '{labels_name}' should all have the same transformations defined on them."
             )
 
             labels_data.append(x_label)
 
         return labels_data, first_transformations
 
-    labels_arrays, transformations = _get_layers(sdata, labels_layers=labels_layers)
+    labels_arrays, transformations = _get_labels_elements(sdata, labels_name=labels_name)
 
     # kwargs to be passed to map_overlap/map_blocks
     kwargs = {}
@@ -201,11 +203,11 @@ def map_labels(
         overwrite=overwrite,
     )
 
-    # only calculate shapes layer if it is specified
+    # only calculate shapes element if it is specified
     if output_shapes_name is not None:
         se_labels = _get_spatial_element(sdata, element_name=output_labels_name)
 
-        # convert the labels to polygons and add them as shapes layer to sdata
+        # convert the labels to polygons and add them as shapes element to sdata
         sdata = add_shapes(
             sdata,
             input=se_labels.data,

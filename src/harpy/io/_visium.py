@@ -25,7 +25,7 @@ def visium(
     """
     Read *10x Genomics* Visium formatted dataset.
 
-    Wrapper around `spatialdata.io.readers.visium.visium`, but with the resulting table annotated by a labels layer.
+    Wrapper around `spatialdata.io.readers.visium.visium`, but with the resulting table annotated by a labels element.
 
     .. see also::
 
@@ -78,7 +78,7 @@ def visium(
         )
 
         assert len(sdata.shapes[dataset_id]) == len(adata), (
-            f"Shapes layer '{dataset_id}' and corresponding table '{table_name}' should have same length."
+            f"Shapes element '{dataset_id}' and corresponding table '{table_name}' should have same length."
         )
 
         sdata.shapes[dataset_id].index = (
@@ -94,7 +94,7 @@ def visium(
 
         # Convert Points to Polygons
         if "radius" not in sdata.shapes[dataset_id].columns:
-            raise ValueError("Shapes layer is missing 'radius' column required for polygon buffering.")
+            raise ValueError("Shapes element is missing 'radius' column required for polygon buffering.")
 
         radius = sdata.shapes[dataset_id]["radius"].mean()
         polygons = sdata.shapes[dataset_id].buffer(radius, cap_style="round")
@@ -102,7 +102,7 @@ def visium(
             sdata, gpd.GeoDataFrame(geometry=polygons), output_shapes_name=dataset_id, overwrite=True
         )
 
-        # Create labels layer
+        # Create labels element
         sdata = hp.im.rasterize(
             sdata,
             shapes_name=dataset_id,

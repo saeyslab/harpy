@@ -47,7 +47,7 @@ def plot_image(
     sdata
         Data containing spatial information for plotting.
     image_name
-        Image layer to be plotted. Default is "raw_image".
+        Image element to be plotted. Default is "raw_image".
     channel
         Channel(s) to be displayed from the image.
     z_slice
@@ -89,7 +89,7 @@ def plot_labels(
     **kwargs: dict[str, Any],
 ) -> None:
     """
-    Plot a labels layer (masks) based on given parameters.
+    Plot a labels element (masks) based on given parameters.
 
     .. deprecated:: 0.3.0
        `harpy.pl.plot_labels` is deprecated and will be removed in 0.4.0.
@@ -100,7 +100,7 @@ def plot_labels(
     sdata
         Data containing spatial information for plotting.
     labels_name
-        Labels layer to be plotted. Default is "segmentation_mask".
+        Labels element to be plotted. Default is "segmentation_mask".
     z_slice
         The z_slice to visualize in case of 3D (c,z,y,x) labels.
     crd
@@ -206,10 +206,10 @@ def plot_shapes(
     sdata
         Data containing spatial information for plotting.
     image_name
-        Image layer(s) to be plotted. If not provided, and labels_name is also not provided, the last added image layer is plotted.
+        Image element(s) to be plotted. If not provided, and labels_name is also not provided, the last added image element is plotted.
         Displayed as columns in the plot, if multiple are provided.
     labels_name
-        Labels layer(s) to be plotted.
+        Labels element(s) to be plotted.
         Displayed as columns in the plot, if multiple are provided.
     shapes_name
         Specifies which shapes to plot. Default is 'segmentation_mask_boundaries'. If set to None, no shapes_name is plot.
@@ -218,7 +218,7 @@ def plot_shapes(
         `sdata.tables[table_name].obs[region_key]` equals `region` (if `region` is not `None`).
         `instance_key` and `region_key` are read from `sdata.tables[table_name].uns[TableModel.ATTRS_KEY]`.
     table_name
-        Table layer to be plotted (i.e. to base cell colors on) if `column` is specified.
+        Table element to be plotted (i.e. to base cell colors on) if `column` is specified.
     column
         Column in `sdata.tables[table_name].obs` or name in `sdata.tables[table_name].var.index` to base cell colors on. If none provided, default color is used.
     region
@@ -226,7 +226,7 @@ def plot_shapes(
     cmap
         Colormap for column. Ignored if column is None, or if column + "_colors" is in `sdata.tables[table_name].uns`.
     linewidth
-        linewidth of the shapes layer to be plotted.
+        linewidth of the shapes element to be plotted.
     channel
         Channel(s) to be displayed from the image. Displayed as rows in the plot.
         If channel is None, get the number of channels from the first image_name given as input.
@@ -257,11 +257,11 @@ def plot_shapes(
     colorbar
         Whether to add a colorbar for raster data.
     filtered_shapes_name
-        Extra shapes layers to plot. E.g. shapes filtered out in previous preprocessing steps.
+        Extra shapes elements to plot. E.g. shapes filtered out in previous preprocessing steps.
     img_title
-        A flag indicating whether the image layer's name should be added to the title of the plot.
+        A flag indicating whether the image element's name should be added to the title of the plot.
     shapes_title
-        A flag indicating whether the shapes layer's name should be added to the title of the plot.
+        A flag indicating whether the shapes element's name should be added to the title of the plot.
     channel_title
         A flag indicating whether the channel's name should be added to the title of the plot.
         Ignored if image_name is None and labels_name is specified.
@@ -293,7 +293,7 @@ def plot_shapes(
 
     Notes
     -----
-    - This function offers advanced visualization options for `sdata` with support for multiple image layers, labels layers, shape layers, and channels.
+    - This function offers advanced visualization options for `sdata` with support for multiple image elements, labels elements, shapes elements, and channels.
     - Either `image_name` or `labels_name` should be specified, not both.
 
     See Also
@@ -308,7 +308,7 @@ def plot_shapes(
     if column is not None and table_name is None:
         raise ValueError("Please specify a 'table_name' if a 'column' is specified.")
 
-    # Choose the appropriate layer or default to the last image layer if none is specified.
+    # Choose the appropriate layer or default to the last image element if none is specified.
     if image_name is not None:
         layer = image_name
         is_image = True
@@ -319,13 +319,13 @@ def plot_shapes(
         layer = [*sdata.images][-1]
         is_image = True
         log.warning(
-            f"No image layer or labels layer specified. "
-            f"Plotting last image layer '{layer}' of the provided SpatialData object."
+            f"No image element or labels element specified. "
+            f"Plotting last image element '{layer}' of the provided SpatialData object."
         )
 
     if table_name is not None:
         if table_name not in [*sdata.tables]:
-            raise ValueError(f"table layer '{table_name}' not found in 'sdata.tables'")
+            raise ValueError(f"table element '{table_name}' not found in 'sdata.tables'")
 
     # Make code also work if user would provide another iterable than List
     layer = list(layer) if isinstance(layer, Iterable) and not isinstance(layer, str) else [layer]
@@ -474,9 +474,9 @@ def plot(
     ax
        Matplotlib axes object to plot on.
     image_name
-        Image layer to be plotted. By default, the last added image layer is plotted.
+        Image element to be plotted. By default, the last added image element is plotted.
     labels_name
-        Labels layer to be plotted.
+        Labels element to be plotted.
     shapes_name
         Specifies which shapes to plot. Default is 'segmentation_mask_boundaries'. If set to None, no shapes_name is plot.
         Can be colored by `column` in `sdata.tables[table_name].obs` or `sdata.tables[table_name].var`.
@@ -484,7 +484,7 @@ def plot(
         `sdata.tables[table_name].obs[region_key]` equals `region` (if `region` is not `None`).
         `instance_key` and `region_key` are read from `sdata.tables[table_name].uns[TableModel.ATTRS_KEY]`.
     table_name
-        Table layer to be plotted (i.e. to base cell colors on) if `column` is specified.
+        Table element to be plotted (i.e. to base cell colors on) if `column` is specified.
     column
         Column in `sdata.tables[table_name].obs` or name in `sdata.tables[table_name].var.index` to base cell colors on. If none provided, default color is used for plotting shapes.
     region
@@ -492,7 +492,7 @@ def plot(
     cmap
         Colormap for column. Ignored if column is None, or if column + "_colors" is in `sdata.tables[table_name].uns`.
     linewidth
-        linewidth of the shapes layer to be plotted.
+        linewidth of the shapes element to be plotted.
     channel
         Channel to display from the image. If none provided, or if provided channel could not be found, first channel is plot.
         Ignored if image_name is None and labels_name is specified.
@@ -522,11 +522,11 @@ def plot(
     colorbar
         Whether to add a colorbar for raster data.
     filtered_shapes_name
-        Extra shapes layers to plot. E.g. shapes filtered out in previous preprocessing steps.
+        Extra shapes elements to plot. E.g. shapes filtered out in previous preprocessing steps.
     img_title
-        A flag indicating whether the image layer's name should be added to the title of the plot.
+        A flag indicating whether the image element's name should be added to the title of the plot.
     shapes_title
-        A flag indicating whether the shapes layer's name should be added to the title of the plot.
+        A flag indicating whether the shapes element's name should be added to the title of the plot.
     channel_title
         A flag indicating whether the channel's name should be added to the title of the plot.
         Ignored if image_name is None and labels_name is specified.
@@ -556,7 +556,7 @@ def plot(
 
     Notes
     -----
-    The function supports various visualization options such as image layers, shape layers, channels, color mapping, and custom regions.
+    The function supports various visualization options such as image elements, shapes elements, channels, color mapping, and custom regions.
     """
     msg = "'harpy.pl.plot' is deprecated and may be removed in a future release. Prefer 'harpy.pl.plot_sdata'."
     warnings.warn(msg, DeprecationWarning, stacklevel=2)
@@ -570,28 +570,28 @@ def plot(
     if column is not None and table_name is None:
         raise ValueError("Please specify a 'table_name' if a 'column' is specified.")
 
-    # Choose the appropriate layer or default to the last image layer if none is specified.
+    # Choose the appropriate layer or default to the last image element if none is specified.
     if image_name is not None:
         layer = image_name
         if layer not in sdata.images:
-            raise ValueError(f"Provided layer '{layer}' is not an image layer in 'sdata'.")
+            raise ValueError(f"Provided layer '{layer}' is not an image element in 'sdata'.")
         is_image = True
     elif labels_name is not None:
         layer = labels_name
         is_image = False
         if layer not in sdata.labels:
-            raise ValueError(f"Provided layer '{layer}' is not a labels layer in 'sdata'.")
+            raise ValueError(f"Provided layer '{layer}' is not a labels element in 'sdata'.")
     else:
         layer = [*sdata.images][-1]
         is_image = True
         log.warning(
-            f"No image layer or labels layer specified. "
-            f"Plotting last image layer '{layer}' of the provided SpatialData object."
+            f"No image element or labels element specified. "
+            f"Plotting last image element '{layer}' of the provided SpatialData object."
         )
 
     if table_name is not None:
         if table_name not in [*sdata.tables]:
-            raise ValueError(f"table layer '{table_name}' not found in 'sdata.tables'")
+            raise ValueError(f"table element '{table_name}' not found in 'sdata.tables'")
 
     if filtered_shapes_name is not None:
         filtered_shapes_name = (
@@ -638,7 +638,7 @@ def plot(
                 polygons["geometry"] = polygons.geometry.buffer(polygons[radius])
             else:
                 log.warning(
-                    f"radius parameter was specified as '{radius}', but could not be found as a column of shapes layer '{shapes_name}'. Will proceed "
+                    f"radius parameter was specified as '{radius}', but could not be found as a column of shapes element '{shapes_name}'. Will proceed "
                     "plotting while ignoring radius parameter."
                 )
         x_translation, y_translation = _get_translation_values_shapes(
@@ -729,12 +729,12 @@ def plot(
                 )
 
                 assert np.array_equal(adata_view.obs[instance_key].values, polygons.index.values), (
-                    f"'{instance_key}'s of shapes layer 'sdata.shapes[{shapes_name}]' are not the same as "
+                    f"'{instance_key}'s of shapes element 'sdata.shapes[{shapes_name}]' are not the same as "
                     f"the '{instance_key}'s in 'sdata.tables[{table_name}].obs' (for which 'sdata.tables[{table_name}].obs[ {region_key} ] == {region}')."
                 )
 
         else:
-            log.warning(f"Shapes layer '{shapes_name}' was empty for crd {crd}.")
+            log.warning(f"Shapes element '{shapes_name}' was empty for crd {crd}.")
     else:
         cmap = None
     if vmin is not None:
@@ -810,7 +810,7 @@ def plot(
                 vmin=vmin,  # np.percentile(column,vmin)
             )
         else:
-            log.warning(f"Shapes layer {shapes_name} was empty for crd {crd}.")
+            log.warning(f"Shapes element {shapes_name} was empty for crd {crd}.")
         if filtered_shapes_name is not None:
             for i in filtered_shapes_name:
                 if not sdata.shapes[i].empty:
@@ -825,7 +825,7 @@ def plot(
                     ]
                     polygons = sdata.shapes[i].cx[_crd_shapes[0] : _crd_shapes[1], _crd_shapes[2] : _crd_shapes[3]]
                     if x_translation != 0 or y_translation != 0:
-                        polygons = polygons.copy()  # copy is necessary, we do not want to alter in memory shapes layer
+                        polygons = polygons.copy()  # copy is necessary, we do not want to alter in memory shapes element
                         polygons["geometry"] = polygons["geometry"].apply(
                             lambda geom, x_trans=x_translation, y_trans=y_translation: translate(
                                 geom, xoff=x_trans, yoff=y_trans
@@ -844,7 +844,7 @@ def plot(
                             cmap="gray",
                         )
                 else:
-                    log.warning(f"Shapes layer {i} was empty for crd {crd}.")
+                    log.warning(f"Shapes element {i} was empty for crd {crd}.")
     ax.axes.set_aspect(aspect)
     ax.set_xlim(crd[0], crd[1])
     ax.set_ylim(crd[2], crd[3])

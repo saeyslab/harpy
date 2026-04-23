@@ -19,7 +19,7 @@ def test_filter_on_size(sdata_multi_c_no_backed):
         min_size=100,
         max_size=100000,
         overwrite=True,
-        update_shapes_layers=True,
+        update_shapes_elements=True,
     )
     assert sdata_multi_c_no_backed.tables["table_intensities_filter"].shape == (643, 22)
 
@@ -31,6 +31,6 @@ def test_filter_on_size(sdata_multi_c_no_backed):
         min_size=100,
         max_size=100000,
         overwrite=True,
-        update_shapes_layers=True,
+        update_shapes_elements=True,
     )
     assert sdata_multi_c_no_backed.tables["table_intensities_filter"].shape == (1136, 22)

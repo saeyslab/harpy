@@ -39,10 +39,10 @@ def add_regionprops(
     overwrite: bool = False,
 ):
     """
-    Calculates region property features from the specified labels layer, and adds the results to the :class:`~anndata.AnnData` object that annotates the labels layer.
+    Calculates region property features from the specified labels element, and adds the results to the :class:`~anndata.AnnData` object that annotates the labels element.
 
     This function computes various geometric and morphological properties for each instance
-    found in the specified labels layer of the SpatialData object. These properties include the following measures:
+    found in the specified labels element of the SpatialData object. These properties include the following measures:
 
         - **area**
         - **eccentricity**
@@ -60,24 +60,24 @@ def add_regionprops(
 
     These features are added to the `.obs` attribute of the :class:`anndata.AnnData` table at slot `output_table_name`.
 
-    Note that calculation of **perimeter** and **perim_square_over_area** is not supported for 3D labels layers.
+    Note that calculation of **perimeter** and **perim_square_over_area** is not supported for 3D labels elements.
 
     Parameters
     ----------
     sdata
         The SpatialData object.
     labels_name
-        The name of the layer in `sdata` that contains the labeled regions, typically derived from a segmentation
+        The name of the labels element in `sdata` that contains the labeled regions, typically derived from a segmentation
         process. Each distinct label corresponds to a different instance, and properties will be calculated for these
         labeled regions.
     table_name
-        The table layer in `sdata.tables` that annotates the labels layer, and to which the calculated features will be added.
+        The table element in `sdata.tables` that annotates the labels element, and to which the calculated features will be added.
     output_table_name
-        Output table layer.
+        Output table element.
     properties
         The properties to calculate.
     overwrite
-        If True, overwrites the output layer if it already exists in `sdata`.
+        If True, overwrites the output element if it already exists in `sdata`.
 
     Returns
     -------
@@ -85,7 +85,7 @@ def add_regionprops(
 
     Notes
     -----
-    The function operates by pulling the required labels layers (masks) into memory for processing, as the underlying :func:'skimage.measure.regionprops'
+    The function operates by pulling the required labels elements (masks) into memory for processing, as the underlying :func:'skimage.measure.regionprops'
     functionality does not support lazy loading. Consequently, sufficient memory must be available for large datasets.
 
     Example
@@ -146,7 +146,7 @@ def add_regionprops(
             )
         ):
             log.warning(
-                f"Cell property '{_property}' already exists in '.obs' attribute of table layer '{table_name}'. "
+                f"Cell property '{_property}' already exists in '.obs' attribute of table element '{table_name}'. "
                 "Skipping recomputation. Remove the column to trigger recalculation."
             )
         else:
@@ -167,7 +167,7 @@ def add_regionprops(
         assert region_key not in _cell_props.columns, f"'cell_props' should not contain '{region_key}' columns."
         if _labels_layer not in adata.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY]:
             raise ValueError(
-                f"The labels layer '{_labels_layer}' does not seem to be annotated by the table layer {table_name}."
+                f"The labels element '{_labels_layer}' does not seem to be annotated by the table element {table_name}."
             )
 
         _cell_props[region_key] = pd.Categorical([_labels_layer] * len(_cell_props))
@@ -194,7 +194,7 @@ def add_regionprops(
         extra_cells = sum(~_cell_props[instance_key].isin(adata_view.obs[instance_key].values))
         if extra_cells:
             log.warning(
-                f"Calculated properties of '{extra_cells}' instances obtained from labels layer '{labels_name}' "
+                f"Calculated properties of '{extra_cells}' instances obtained from labels element '{labels_name}' "
                 f"will not be added to 'sdata.tables[{table_name}].obs', because their instance IDs ('{instance_key}') are not in 'sdata.tables[{table_name}].obs.[{instance_key}]'. "
                 "This can happen if some instances in the table were filtered prior to calling this function."
                 "If they should be included, then first append their intensities with the 'harpy.tb.allocate_intensity' function."
@@ -202,7 +202,7 @@ def add_regionprops(
     cell_props[region_key] = cell_props[region_key].astype(
         "category"
     )  # concatenating results in region key no longer categorical
-    # NOTE: we already checked that instance key is unique for given labels layer, in the get_adata() function.
+    # NOTE: we already checked that instance key is unique for given labels element, in the get_adata() function.
     old_index = adata.obs.index
     old_index_name = adata.obs.index.name
     adata.obs = pd.merge(

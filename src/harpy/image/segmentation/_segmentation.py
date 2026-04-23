@@ -69,27 +69,27 @@ def segment(
     **kwargs: Any,
 ) -> SpatialData:
     """
-    Segment images using a provided model and add segmentation results (labels layer and shapes layer) to the SpatialData object.
+    Segment images using a provided model and add segmentation results (labels element and shapes element) to the SpatialData object.
 
     Parameters
     ----------
     sdata
-        The SpatialData object containing the image layer to segment.
+        The SpatialData object containing the image element to segment.
     image_name
-        The image layer in `sdata` to be segmented.
+        The image element in `sdata` to be segmented.
     model
         The segmentation model function used to process the images.
         Callable should take as input numpy arrays of dimension `(z,y,x,c)` and return labels of dimension `(z,y,x,c)`. It can have an arbitrary number of other parameters.
     output_labels_name
-        Name of the label layer in which segmentation results will be stored in `sdata`.
+        Name of the labels element in which segmentation results will be stored in `sdata`.
         Can be a list of strings, if `model` returns multi channel mask.
         If provided as a list, its length should match the `c` dimension of the output of `model`.
     output_shapes_name
-        Name of the shapes layer where boundaries obtained output_labels_name will be stored. If set to None, shapes won't be stored.
+        Name of the shapes element where boundaries obtained output_labels_name will be stored. If set to None, shapes won't be stored.
         Can be a list of strings, if `model` returns multi channel mask.
         If provided as a list, its length should match the `c` dimension of the output of `model`.
     labels_name_align
-        Name of the labels layer in `output_labels_name` to align to if `model` retuns multi channel mask.
+        Name of the labels element in `output_labels_name` to align to if `model` retuns multi channel mask.
     depth
         The depth in `y` and x dimension. The depth parameter is passed to `dask.array.map_overlap`. If trim is set to `False`,
         it's recommended to set the depth to a value greater than twice the estimated diameter of the cells/nulcei.
@@ -116,7 +116,7 @@ def segment(
     scale_factors
         Scale factors to apply for multiscale.
     overwrite
-        If `True`, overwrites the existing layers if they exist. Otherwise, raises an error if the layers exist.
+        If `True`, overwrites the existing output elements if they exist. Otherwise, raises an error if they exist.
     **kwargs
         Additional keyword arguments passed to the provided `model`.
 
@@ -234,7 +234,7 @@ def segment_points(
     **kwargs: Any,
 ) -> SpatialData:
     """
-    Segment images using a `points_name` and a prior (`labels_name`) and add segmentation results (labels layer and shapes layer) to the SpatialData object.
+    Segment images using a `points_name` and a prior (`labels_name`) and add segmentation results (labels element and shapes element) to the SpatialData object.
 
     Currently only segmentation using a prior is supported (i.e. `labels_name` should be provided).
     The `points_name` and the `labels_name` should be registered (i.e. same coordinate space in `sdata`).
@@ -242,15 +242,15 @@ def segment_points(
     Parameters
     ----------
     sdata
-        The SpatialData object containing the image layer to segment.
+        The SpatialData object containing the image element to segment.
     labels_name
-        The labels layer in `sdata` to be used as a prior.
+        The labels element in `sdata` to be used as a prior.
     points_name
-        The points layer in `sdata` to be used for segmentation.
+        The points element in `sdata` to be used for segmentation.
     name_x
-        Column name for x-coordinates of the transcripts in the points layer, by default "x".
+        Column name for x-coordinates of the transcripts in the points element, by default "x".
     name_y
-        Column name for y-coordinates of the transcripts in the points layer, by default "y".
+        Column name for y-coordinates of the transcripts in the points element, by default "y".
     name_gene
         Column name in the points_name representing gene information.
     model
@@ -261,15 +261,15 @@ def segment_points(
         Currently only 2D segmentation is supported `(y,x)`.
         It can have an arbitrary number of other parameters.
     output_labels_name
-        Name of the labels layer in which segmentation results will be stored in `sdata`.
+        Name of the labels element in which segmentation results will be stored in `sdata`.
         Can be a list of strings, if `model` returns multi channel mask.
         If provided as a list, its length should match the `c` dimension of the output of `model`.
     output_shapes_name
-        Name of the shapes layer where boundaries obtained output_labels_name will be stored. If set to None, shapes won't be stored.
+        Name of the shapes element where boundaries obtained output_labels_name will be stored. If set to None, shapes won't be stored.
         Can be a list of strings, if `model` returns multi channel mask.
         If provided as a list, its length should match the `c` dimension of the output of `model`.
     labels_name_align
-        Name of the labels layer in `output_labels_name` to align to if `model` retuns multi channel mask.
+        Name of the labels element in `output_labels_name` to align to if `model` retuns multi channel mask.
     depth
         The depth in `y` and `x` dimension. The depth parameter is passed to `dask.array.map_overlap`. If trim is set to `False`,
         it's recommended to set the depth to a value greater than twice the estimated diameter of the cells/nulcei.
@@ -296,7 +296,7 @@ def segment_points(
     scale_factors
         Scale factors to apply for multiscale.
     overwrite
-        If `True`, overwrites the existing layers if they exist. Otherwise, raises an error if the layers exist.
+        If `True`, overwrites the existing output elements if they exist. Otherwise, raises an error if they exist.
     **kwargs
         Additional keyword arguments passed to the provided `model`.
 
@@ -450,7 +450,7 @@ class SegmentationModel(ABC):
         overwrite: bool = False,
         **kwargs: Any,
     ) -> SpatialData:
-        # x_labels c dimension should be equal to the number of labels layers specified.
+        # x_labels c dimension should be equal to the number of labels elements specified.
         # note that this assert will never fail due to how chunks parameter works in map_overlap.
         # i.e. we set chunks=(,...(len( output_labels_name ),).
         assert x_labels.shape[-1] == len(output_labels_name), (
@@ -458,7 +458,7 @@ class SegmentationModel(ABC):
             f"but got {x_labels.shape[-1]} masks from the segmentation model."
         )
         # squeeze the z-dim if it is 1 (i.e. case where you did not do 3D segmentation),
-        # otherwise 2D labels layer would be saved as 3D
+        # otherwise 2D labels element would be saved as 3D
         if x_labels.shape[0] == 1:
             x_labels = x_labels.squeeze(0)
 
@@ -481,9 +481,9 @@ class SegmentationModel(ABC):
                 overwrite=overwrite,
             )
 
-        # align the labels layers if labels_name_align is specified, and if there is more than one labels layer.
+        # align the labels elements if labels_name_align is specified, and if there is more than one labels element.
         if labels_name_align is not None and len(output_labels_name) > 1:
-            log.info(f"Aligning labels layers: {output_labels_name}")
+            log.info(f"Aligning labels elements: {output_labels_name}")
             depth = kwargs["depth"]
             iou_depth = kwargs["iou_depth"]
             chunks = kwargs["chunks"]
@@ -511,12 +511,12 @@ class SegmentationModel(ABC):
                     overwrite=True,
                 )
 
-        # only calculate shapes layer if it is specified
+        # only calculate shapes element if it is specified
         if output_shapes_name is not None:
             for i, _output_labels_name in enumerate(output_labels_name):
                 se_labels = _get_spatial_element(sdata, element_name=_output_labels_name)
                 _output_shapes_name = output_shapes_name[i]
-                # convert the labels to polygons and add them as shapes layer to sdata
+                # convert the labels to polygons and add them as shapes element to sdata
                 sdata = add_shapes(
                     sdata,
                     input=se_labels.data,
@@ -584,7 +584,7 @@ class SegmentationModel(ABC):
             dtype=_SEG_DTYPE,
             num_blocks=num_blocks,
             shift=shift,
-            # need to pass _output_chunks because we want to query the dask dataframe in case we segment points layer,
+            # need to pass _output_chunks because we want to query the dask dataframe in case we segment points element,
             # so we need to know exact location of block in full array,
             _output_chunks=output_chunks,
             _depth=depth,
@@ -610,7 +610,7 @@ class SegmentationModel(ABC):
         else:
             x_labels = x_labels.persist()
 
-        # we support multi channel labels layer
+        # we support multi channel labels element
         _all_labels = []
         for c_index in range(x_labels.shape[-1]):
             _x_labels = x_labels[..., c_index]
@@ -883,10 +883,10 @@ class SegmentationModelPoints(SegmentationModel):
 
         se = _get_spatial_element(sdata, element_name=labels_name)
 
-        # Now we check that there are no scaling and rotations defined on se; and that points layer has identiy transformation associated.
-        # We do not allow a transformation other than translation in y and x defined on labels layer.
+        # Now we check that there are no scaling and rotations defined on se; and that points element has identiy transformation associated.
+        # We do not allow a transformation other than translation in y and x defined on labels element.
         _get_translation(se, to_coordinate_system=to_coordinate_system)
-        # We do not allow that a transformation other than identity is defined on points layer.
+        # We do not allow that a transformation other than identity is defined on points element.
         _identity_check_transformations_points(sdata.points[points_name], to_coordinate_system=to_coordinate_system)
 
         se_crop = None
@@ -922,14 +922,14 @@ class SegmentationModelPoints(SegmentationModel):
 
         # handle taking crops
         if _crd_points is not None:
-            # need to account for fact that there can be a translation defined on the labels layer
+            # need to account for fact that there can be a translation defined on the labels element
             # query the dask dataframe. We use this query, because spatialdata query pulls query in memory.
             _ddf = sdata.points[points_name].query(
                 f"{_crd_points[0]} <= {name_x} < {_crd_points[1]} and {_crd_points[2]} <= {name_y} < {_crd_points[3]}"
             )
             coordinates = {name_x: name_x, name_y: name_y}
 
-            # we write to points layer,
+            # we write to points element,
             # otherwise we would need to do this query again for every chunk we process later on
             _crd_points_name = f"{points_name}_{'_'.join(str(int(item)) for item in _crd_points)}"
 
@@ -1038,8 +1038,8 @@ class SegmentationModelPoints(SegmentationModel):
 
         df = _ddf.compute()
         # account for the fact that we do a reflect at the boundaries,
-        # i.e. the labels layer does a reflect,
-        # so we need to set relative position of points layer to labels layer correct.
+        # i.e. the labels element does a reflect,
+        # so we need to set relative position of points element to labels element correct.
         # therefore add depth if y_start or x_start is equal to 0/touches crd boundary.
         df[name_y] -= y_start
         df[name_x] -= x_start

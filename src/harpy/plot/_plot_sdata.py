@@ -49,14 +49,14 @@ def plot_sdata(
     sdata
         :class:`~spatialdata.SpatialData` object.
     image_name
-        Image layer to plot from `sdata.images`.
+        Image element to plot from `sdata.images`.
     channel
         Channel(s) to visualize, passed to `.pl.render_images()`.
     labels_name
-        Labels layer to plot from `sdata.labels`.
+        Labels element to plot from `sdata.labels`.
     table_name
         :class:`anndata.AnnData` table from `sdata.tables` used to color instances of the `labels_name`.
-        If specified, the labels layer at `labels_name` should be annotated by `table_name`.
+        If specified, the labels element at `labels_name` should be annotated by `table_name`.
         Ignored if `color` is `None`.
     color
         Column from `sdata[table_name].obs` or name from `sdata[table_name].var_names` to color the instances from `labels_name`.
@@ -161,12 +161,12 @@ def plot_sdata(
     """
     if table_name is not None and labels_name is None:
         raise ValueError(
-            f"Please specify a labels layer (which is annotated by the table layer '{table_name}') if 'table_name' is specified."
+            f"Please specify a labels element (which is annotated by the table element '{table_name}') if 'table_name' is specified."
         )
     if color is not None and table_name is None:
         raise ValueError(
             f"Please specify a 'table_name' if 'color' is specified. "
-            f"Choose from {[*sdata.tables]}, and make sure the table layer annotates the labels layer '{labels_name}'."
+            f"Choose from {[*sdata.tables]}, and make sure the table element annotates the labels element '{labels_name}'."
         )
 
     if table_name is not None:
@@ -176,7 +176,7 @@ def plot_sdata(
         mask = adata.obs[region_key] == labels_name
         if not mask.any():
             raise ValueError(
-                f"The labels layer '{labels_name}' does not seem to be annotated by the table layer '{table_name}'."
+                f"The labels element '{labels_name}' does not seem to be annotated by the table element '{table_name}'."
             )
 
     if "coordinate_systems" in show_kwargs.keys():
@@ -212,18 +212,18 @@ def plot_sdata(
             target_coordinate_system=to_coordinate_system,
             filter_table=True
             if table_name is not None
-            else False,  # table do not need to be filtered if table layer is not specified
+            else False,  # table do not need to be filtered if table element is not specified
         )
         if image_name not in sdata_to_plot.images:
             raise ValueError(
                 f"After applying the bounding-box query with coordinates {crd!r} "
-                f"'(xmin, xmax, ymin, ymax)', the image layer '{image_name}' is no longer present "
+                f"'(xmin, xmax, ymin, ymax)', the image element '{image_name}' is no longer present "
                 "in the resulting SpatialData object. Please try different parameters for 'crd'."
             )
         if labels_name is not None and labels_name not in sdata_to_plot.labels:
             raise ValueError(
                 f"After applying the bounding-box query with coordinates {crd!r} "
-                f"'(xmin, xmax, ymin, ymax)', the labels layer '{labels_name}' is no longer present "
+                f"'(xmin, xmax, ymin, ymax)', the labels element '{labels_name}' is no longer present "
                 "in the resulting SpatialData object. Please try different parameters for 'crd'."
             )
 
@@ -308,10 +308,10 @@ def plot_sdata_genes(
     sdata
         :class:`~spatialdata.SpatialData` object.
     points_name
-        Points layer to plot from ``sdata.points``. The associated :class:`~dask.dataframe.DataFrame` is expected
+        Points element to plot from ``sdata.points``. The associated :class:`~dask.dataframe.DataFrame` is expected
         to contain gene information in ``name_gene_column``.
     image_name
-        Optional image layer to plot from ``sdata.images`` as background.
+        Optional image element to plot from ``sdata.images`` as background.
         If ``None``, no image is rendered and ``channel`` is ignored.
     channel
         Channel(s) of ``image_name`` to visualize, passed to ``.pl.render_images()``.
@@ -421,7 +421,7 @@ def plot_sdata_genes(
     if name_gene_column not in df.columns:
         raise ValueError(
             f"Column '{name_gene_column}' not found in 'sdata.points[{points_name}].columns'. "
-            "Please specify the column in the points layer that contains the gene name via "
+            "Please specify the column in the points element that contains the gene name via "
             "the parameter 'name_gene_column'."
         )
     # if genes is not None, we want the name_gene_column to be ploth as categorical.
@@ -516,7 +516,7 @@ def plot_sdata_genes(
         if len(df) == 0:
             raise ValueError(
                 f"After applying the bounding-box query with coordinates {crd!r} "
-                f"(xmin, xmax, ymin, ymax), the points layer '{points_name}' is no longer present "
+                f"(xmin, xmax, ymin, ymax), the points element '{points_name}' is no longer present "
                 "in the resulting SpatialData object. Please try different parameters for 'crd'."
             )
 
@@ -531,7 +531,7 @@ def plot_sdata_genes(
             if se is None:
                 raise ValueError(
                     f"After applying the bounding-box query with coordinates {crd!r} "
-                    f"(xmin, xmax, ymin, ymax), the image layer '{image_name}' is no longer present "
+                    f"(xmin, xmax, ymin, ymax), the image element '{image_name}' is no longer present "
                     "in the resulting SpatialData object. Please try different parameters for 'crd'."
                 )
     if se is not None:

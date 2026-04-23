@@ -51,7 +51,7 @@ def image_histogram(
     sdata
         The input ``SpatialData`` object containing the image data.
     image_name
-        The name of the image layer within `sdata` to analyze.
+        The name of the image element within `sdata` to analyze.
     channel
         The specific channel of the image data to use for the histogram. Can be a single channel name or index,
         or a sequence of channel names and/or indices.
@@ -137,7 +137,7 @@ def image_histogram(
     assert image_name in sdata.images, f"'{image_name}' not found in 'sdata.images'."
     if scale is not None and not isinstance(sdata.images[image_name], DataTree):
         log.warning(
-            f"Parameter 'scale={scale}' was ignored for image layer '{image_name}' because it is not multiscale; "
+            f"Parameter 'scale={scale}' was ignored for image element '{image_name}' because it is not multiscale; "
             "histogram will be computed at full resolution."
         )
     se = get_dataarray(sdata, element_name=image_name, scale=scale)
@@ -312,7 +312,7 @@ def _resolve_channels(channel_names: list[str], channel: str | int | Sequence[st
 def _resolve_channel_name(channel_names: list[str], channel: str | int) -> str:
     if isinstance(channel, str):
         if channel not in channel_names:
-            raise ValueError(f"Channel '{channel}' not found in image layer.")
+            raise ValueError(f"Channel '{channel}' not found in image element.")
         return channel
     if isinstance(channel, (int, np.integer)):
         return channel_names[channel]

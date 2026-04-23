@@ -65,18 +65,18 @@ def expand_labels(
     --------
     >>> sdata = expand_labels(
             sdata,
-            labels_name='layer',
+            labels_name='segmentation_mask',
             distance=10,
             depth=(100, 100),
             chunks=(1024, 1024),
-            output_labels_name='layer_expanded',
-            output_shapes_name='layer_expanded_boundaries',
+            output_labels_name='segmentation_mask_expanded',
+            output_shapes_name='segmentation_mask_expanded_boundaries',
             overwrite=True,
         )
     """
     sdata = map_labels(
         sdata,
-        labels_layers=[labels_name],
+        labels_name=[labels_name],
         func=_expand_cells,
         depth=depth,
         chunks=chunks,

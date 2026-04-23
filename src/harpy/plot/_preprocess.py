@@ -26,7 +26,7 @@ def preprocess_transcriptomics(
     sdata
         SpatialData object containing the spatial data and annotations.
     table_name
-        The table layer in `sdata`.
+        The table element in `sdata`.
     instance_size_key
         The key in the :class:`~anndata.AnnData` table `.obs` that holds the size of the instances.
     bins_total_counts

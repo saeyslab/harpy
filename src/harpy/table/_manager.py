@@ -46,11 +46,11 @@ class TableLayerManager:
                         )
             if region_key not in adata.obs.columns:
                 raise ValueError(
-                    f"Provided 'AnnData' object should contain a column '{region_key}' in 'adata.obs'. Linking the observations to a region (e.g. a labels layer) in 'sdata'."
+                    f"Provided 'AnnData' object should contain a column '{region_key}' in 'adata.obs'. Linking the observations to a region (e.g. a labels element) in 'sdata'."
                 )
             if instance_key not in adata.obs.columns:
                 raise ValueError(
-                    f"Provided 'AnnData' object should contain a column '{instance_key}' in 'adata.obs'. Linking the observations to a region (e.g. a labels layer) in 'sdata'."
+                    f"Provided 'AnnData' object should contain a column '{instance_key}' in 'adata.obs'. Linking the observations to a region (e.g. a labels element) in 'sdata'."
                 )
             # need to remove spatialdata_attrs, otherwise parsing gives error (TableModel.parse will add spatialdata_attrs back)
             if TableModel.ATTRS_KEY in adata.uns.keys():

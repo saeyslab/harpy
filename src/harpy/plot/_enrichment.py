@@ -31,7 +31,7 @@ def nhood_enrichment(
     sdata
         The SpatialData object containing the data for analysis.
     table_name
-        The table layer in `sdata` to visualize.
+        The table element in `sdata` to visualize.
     celltype_column
         The column name in the SpatialData object's table that specifies the cell type annotations.
     output

@@ -37,18 +37,18 @@ def cell_clustering_preprocess(
 
     This function prepares a SpatialData object for cell clustering by integrating cell segmentation masks (obtained via e.g. `harpy.im.segment`) and SOM pixel/meta cluster (obtained via e.g. `harpy.im.flosom`).
     The function calculates the cluster count (clusters provided via `cluster_labels_name`) for each cell in `cells_labels_name`, normalized by cell size, and optionally by quantile normalization if `q` is provided.
-    The results are stored in a specified table layer within the `sdata` object of shape (#cells, #clusters).
+    The results are stored in a specified table element within the `sdata` object of shape (#cells, #clusters).
 
     Parameters
     ----------
     sdata
         The input SpatialData object containing the spatial proteomics data.
     cells_labels_name
-        The labels layer(s) in `sdata` that contain cell segmentation masks. These masks should be previously generated using `harpy.im.segment`.
+        The labels element(s) in `sdata` that contain cell segmentation masks. These masks should be previously generated using `harpy.im.segment`.
     cluster_labels_name
-        The labels layer(s) in `sdata` that contain metacluster or cluster masks. These should be derived from `harpy.im.flowsom`.
+        The labels element(s) in `sdata` that contain metacluster or cluster masks. These should be derived from `harpy.im.flowsom`.
     output_table_name
-        The name of the table layer within `sdata` where the preprocessed data will be stored.
+        The name of the table element within `sdata` where the preprocessed data will be stored.
     q
         Quantile used for normalization. If specified, each pixel SOM/meta cluster column in `output_table_name` is normalized by this quantile. Values are multiplied by 100 after normalization.
     chunks
@@ -68,7 +68,7 @@ def cell_clustering_preprocess(
 
     Returns
     -------
-    The input `sdata` with a table layer added (`output_table_name`).
+    The input `sdata` with a table element added (`output_table_name`).
 
     See Also
     --------
@@ -100,18 +100,18 @@ def cell_clustering_preprocess(
         se_clusters = _get_spatial_element(sdata, element_name=_cluster_labels_name)
 
         assert se_labels.shape == se_clusters.shape, (
-            f"Provided labels layers '{_cells_labels_name}' and '{_cluster_labels_name}' do not have the same shape."
+            f"Provided labels elements '{_cells_labels_name}' and '{_cluster_labels_name}' do not have the same shape."
         )
 
         assert get_transformation(se_labels, get_all=True) == get_transformation(se_clusters, get_all=True), (
-            f"Transformation on provided labels layers '{_cells_labels_name}' and '{_cluster_labels_name}' are not equal. This is currently not supported."
+            f"Transformation on provided labels elements '{_cells_labels_name}' and '{_cluster_labels_name}' are not equal. This is currently not supported."
         )
 
         if i == 0:
             _array_dim = se_labels.ndim
         else:
             assert _array_dim == se_labels.ndim == se_clusters.ndim, (
-                "Labels layer specified in 'cells_labels_name' and 'cluster_labels_name' should all have same number of dimensions."
+                "Labels element specified in 'cells_labels_name' and 'cluster_labels_name' should all have same number of dimensions."
             )
 
         _array_labels = se_labels.data
@@ -141,7 +141,7 @@ def cell_clustering_preprocess(
         _array_clusters = _arr_list_clusters[i]
 
         assert _array_labels.numblocks == _array_clusters.numblocks, (
-            f"Provided labels layers '{cells_labels_name[i]}' and '{cluster_labels_name[i]}' have different chunk sizes. Set 'chunk' parameter to fix this issue."
+            f"Provided labels elements '{cells_labels_name[i]}' and '{cluster_labels_name[i]}' have different chunk sizes. Set 'chunk' parameter to fix this issue."
         )
 
         _unique_mask = da.unique(_array_labels).compute()

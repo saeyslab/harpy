@@ -238,7 +238,7 @@ class Featurizer:
 
         See Also
         --------
-        harpy.tb.featurize : featurize instances in labels layer from an image layer using an embedding model.
+        harpy.tb.featurize : featurize instances in labels element from an image element using an embedding model.
         """
         if store_intermediate and zarr_output_path is None:
             raise ValueError("Please specify a 'zarr_output_path' if 'store_intermediate' is 'True'.")
@@ -761,7 +761,7 @@ class Featurizer:
 
         See Also
         --------
-        harpy.tb.extract_instances : Extract instance windows from a labels layer and (optionally) an image layer.
+        harpy.tb.extract_instances : Extract instance windows from a labels element and (optionally) an image element.
         """
         if depth is None:
             depth = (diameter // 2) + 1

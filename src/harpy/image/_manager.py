@@ -195,7 +195,7 @@ class LabelLayerManager(LayerManager):
         elif len(arr.shape) == 3:
             return ("z", "y", "x")
         else:
-            raise ValueError("Only 2D and 3D labels layers ( (z), y, x) are currently supported.")
+            raise ValueError("Only 2D and 3D labels elements ( (z), y, x) are currently supported.")
 
     def add_to_sdata(
         self,

@@ -90,10 +90,10 @@ def merscope(
     cell_boundaries
         Whether to read cell boundaries (polygons).
     rasterize_cell_boundaries
-        Whether to rasterize the cell boundaries (i.e. create a labels layer from polygons). We use :func:`harpy.im.rasterize` to rasterize the cell boundaries.
+        Whether to rasterize the cell boundaries (i.e. create a labels element from polygons). We use :func:`harpy.im.rasterize` to rasterize the cell boundaries.
         Ignored if `cell_boundaries` is `False`, or if `mosaic_images` is `False`.
     table
-        Whether to read in the :class:`~anndata.AnnData` table. The table will be annotated by a labels layer.
+        Whether to read in the :class:`~anndata.AnnData` table. The table will be annotated by a labels element.
         If `table` is set to `True` then `cell_boundaries`, `rasterize_cell_boundaries` and `mosaic_images` must also be set to `True`.
     mosaic_images
         Whether to read the mosaic images.
@@ -106,7 +106,7 @@ def merscope(
     image_models_kwargs
         Keyword arguments to pass to the image models. Ignored if `mosaic_images` is `False`.
     filter_gene_names
-        Gene names that need to be filtered out (via `str.contains`) from the resulting points layer (transcripts), mostly control genes that were added, and which you don't want to use.
+        Gene names that need to be filtered out (via `str.contains`) from the resulting points element (transcripts), mostly control genes that were added, and which you don't want to use.
         Filtering is case insensitive. Also see :func:`harpy.read_transcripts`. Ignored if `transcripts` is `False`.
     instance_key
         Instance key. The name of the column in :class:`~anndata.AnnData` table `.obs` that will hold the instance ids.
@@ -277,7 +277,7 @@ def merscope(
             gdf = gpd.read_parquet(os.path.join(_path, MerscopeKeys.BOUNDARIES_FILE))
             # currently all z-stacks of gdf are the same (merscope does not provide us with real 3D segmentation).
             # therefore we take the middle z_layer in z_layers instead of iterating over z_layers
-            # if merscope would provide us with real 3D, we should iterate over z_layers, and construct a 3D labels layer if do_3D is True.
+            # if merscope would provide us with real 3D, we should iterate over z_layers, and construct a 3D labels element if do_3D is True.
             z_layers_to_iterate = z_layers if len(z_layers) == 1 else [z_layers[len(z_layers) // 2]]
             for _z_layer in z_layers_to_iterate:
                 sdata, _output_shapes_name = _add_shapes(
@@ -383,7 +383,7 @@ def merscope(
 
                 adata.obs[region_key] = pd.Series(
                     _output_labels_name, index=adata.obs_names, dtype="category"
-                )  # we annotate with the labels layer
+                )  # we annotate with the labels element
 
                 data.index = adata.obs.index
                 data.index.name = cell_index_name
@@ -479,7 +479,7 @@ def merscope(
 
                 adata_preprocessed.obs[region_key] = pd.Series(
                     _output_labels_name, index=adata_preprocessed.obs_names, dtype="category"
-                )  # we annotate with the labels layer
+                )  # we annotate with the labels element
                 log.info(
                     f"Adding preprocessed AnnData table with normalized counts and leiden cluster ID's as "
                     f"'{dataset_id}_{_to_coordinate_system}_preprocessed_table'."
@@ -626,7 +626,7 @@ def _add_shapes(
 
 
 def _merge_adata_and_shapes(adata: ad.AnnData, shapes: gpd.GeoDataFrame, instance_key: str = _INSTANCE_KEY):
-    """Helper function to merge an AnnData object with a Geopandas object to obtain an instance key that can be linked to a segmentation mask (labels layer)."""
+    """Helper function to merge an AnnData object with a Geopandas object to obtain an instance key that can be linked to a segmentation mask (labels element)."""
     # METADATA_CELL_KEY is the key we need in order to merge shapes with anndata table.
     # We perform this merge as a sanity check, and to obtain the z-index and the cell ID, for future compatibility with 3D data.
     if MerscopeKeys.METADATA_CELL_KEY not in shapes.columns:
@@ -674,7 +674,7 @@ def _merge_adata_and_shapes(adata: ad.AnnData, shapes: gpd.GeoDataFrame, instanc
         adata.obs,
         shapes[
             [MerscopeKeys.METADATA_CELL_KEY, MerscopeKeys.Z_INDEX, instance_key]
-        ],  # we merge, because we want the instance_key in adata.obs, so we can annotate by labels layer
+        ],  # we merge, because we want the instance_key in adata.obs, so we can annotate by labels element
         how="inner",
         on=[MerscopeKeys.METADATA_CELL_KEY],
     )

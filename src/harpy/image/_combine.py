@@ -27,7 +27,7 @@ def combine(
     overwrite: bool = False,
 ) -> SpatialData:
     """
-    Combines specific channels within an image layer of a SpatialData object.
+    Combines specific channels within an image element of a SpatialData object.
 
     When given, `nuc_channels` are aggregated together, as are `mem_channels`.
 
@@ -36,9 +36,9 @@ def combine(
     sdata
         Spatial data object containing the image to be combined.
     image_name
-        The image layer in `sdata` to process.
+        The image element in `sdata` to process.
     output_image_name
-        The name of the output layer where results will be stored.
+        The name of the output element where results will be stored.
     nuc_channels
         Specifies which channel(s) to consider as nuclear channels.
     mem_channels
@@ -48,11 +48,11 @@ def combine(
     scale_factors
         Scale factors to apply for multiscale.
     overwrite
-        If True, overwrites the output layer if it already exists in `sdata`.
+        If True, overwrites the output element if it already exists in `sdata`.
 
     Returns
     -------
-    The `sdata` object with the combined image added to the specified output layer.
+    The `sdata` object with the combined image added to the specified output element.
     If `nuc_channels` and `mem_channels` is not None, the nuc channels will be at position 0 and the mem channel at position 1.
 
     Raises
@@ -66,13 +66,13 @@ def combine(
 
     Notes
     -----
-    The function combines specified channels from a SpatialData object's image layer, creating a new image layer.
+    The function combines specified channels from a SpatialData object's image element, creating a new image element.
     The provided channels can be specified as nuclear or membrane channels. If coordinates (crd) are specified, only
     the region within those coordinates will be considered for the combination.
 
     Examples
     --------
-    Sum nuclear channels 0 and 1, and keep membrane channel 2 as is from the image layer "raw_image":
+    Sum nuclear channels 0 and 1, and keep membrane channel 2 as is from the image element "raw_image":
 
     >>> sdata = combine(sdata, image_name="raw_image", output_image_name="combined_image", nuc_channels=[0,1], mem_channels=2)
 

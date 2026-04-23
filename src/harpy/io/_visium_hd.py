@@ -26,7 +26,7 @@ def visium_hd(
     """
     Read *10x Genomics* Visium HD formatted dataset.
 
-    Wrapper around `spatialdata.io.readers.visium_hd.visium_hd`, but with the resulting table annotated by a labels layer.
+    Wrapper around `spatialdata.io.readers.visium_hd.visium_hd`, but with the resulting table annotated by a labels element.
 
     .. see also::
 
@@ -97,13 +97,13 @@ def visium_hd(
             region=adata.obs[region_key].cat.categories.to_list(),
             instance_key=instance_key,
         )
-        # get the shapes layer for this table layer
+        # get the shapes element for this table element
         for _shapes_layer in [*sdata.shapes]:
             if table_name in _shapes_layer:
                 shapes_name = _shapes_layer
                 break
         assert len(sdata[shapes_name]) == len(adata), (
-            f"Shapes layer containing bins '{shapes_name}' and corresponding table '{table_name}' should have same length."
+            f"Shapes element containing bins '{shapes_name}' and corresponding table '{table_name}' should have same length."
         )
         sdata[shapes_name].index = (
             adata.obs.set_index(VisiumHDKeys.INSTANCE_KEY).loc[sdata[shapes_name].index, instance_key].values

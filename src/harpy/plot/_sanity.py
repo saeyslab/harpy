@@ -56,18 +56,18 @@ def sanity(
     sdata
         The SpatialData object containing the spatial image and transcripts data.
     image_name
-        The layer of the SpatialData object to be plotted. Defaults to the last layer if not provided.
+        The image element of the SpatialData object to be plotted. Defaults to the last image element if not provided.
     labels_name
-        Labels layer to be plotted.
+        Labels element to be plotted.
     points_name
-        The points layer in the SpatialData object representing transcripts.
+        The points element in the SpatialData object representing transcripts.
     shapes_name
-        The layer in the SpatialData object representing cell boundaries. If None, no cell boundaries are plotted.
+        The shapes element in the SpatialData object representing cell boundaries. If None, no cell boundaries are plotted.
     channel
         Channel to display from the image_name. If none provided, or if provided channel could not be found, first channel is plot.
     z_slice
         The z_slice to visualize in case of 3D (c,z,y,x) image/polygons. For transcripts, if the z_slice is specified,
-        the transcripts at index corresponding to the z_slice in the image layer will be plotted.
+        the transcripts at index corresponding to the z_slice in the image element will be plotted.
         If no z_slice is specified and `image_name` or `labels_name` is 3D, a max projection along the z-axis will be performed.
         If no z_slice is specified and `shapes_name` is 3D, all polygons in all z-stacks will be plotted.
         If no z-slice is specified and `points_name` is 3D, all transcripts in all z-stacks will be plotted.
@@ -126,26 +126,26 @@ def sanity(
             "Both image_name and labels_name is not None. Please specify either image_name or labels_name, not both."
         )
 
-    # Choose the appropriate layer or default to the last image layer if none is specified.
+    # Choose the appropriate raster element or default to the last image element if none is specified.
     if image_name is not None:
-        layer = image_name
-        if layer not in sdata.images:
-            raise ValueError(f"Provided layer '{layer}' is not an image layer in 'sdata'.")
+        element_name = image_name
+        if element_name not in sdata.images:
+            raise ValueError(f"Provided element '{element_name}' is not an image element in 'sdata'.")
         is_image = True
     elif labels_name is not None:
-        layer = labels_name
-        if layer not in sdata.labels:
-            raise ValueError(f"Provided layer '{layer}' is not a labels layer in 'sdata'.")
+        element_name = labels_name
+        if element_name not in sdata.labels:
+            raise ValueError(f"Provided element '{element_name}' is not a labels element in 'sdata'.")
         is_image = False
     else:
-        layer = [*sdata.images][-1]
+        element_name = [*sdata.images][-1]
         is_image = True
         log.warning(
-            f"No image layer or labels layer specified. "
-            f"Plotting last image layer {layer} of the provided SpatialData object."
+            f"No image element or labels element specified. "
+            f"Plotting last image element {element_name} of the provided SpatialData object."
         )
 
-    se = _get_spatial_element(sdata, element_name=layer)
+    se = _get_spatial_element(sdata, element_name=element_name)
 
     _, ax = plt.subplots(figsize=(10, 10) if figsize is None else figsize)
 
@@ -171,7 +171,7 @@ def sanity(
         if "z" in se.dims:
             if z_slice not in se.z.data:
                 raise ValueError(
-                    f"z_slice {z_slice} not a z slice in layer '{layer}' of `sdata`. "
+                    f"z_slice {z_slice} not a z slice in element '{element_name}' of `sdata`. "
                     f"Please specify a z_slice from the list '{se.z.data}'."
                 )
             z_index = np.where(se.z.data == z_slice)[0][0]
@@ -186,7 +186,7 @@ def sanity(
             channel = se.c.data[0]
             log.warning(
                 f"Provided channel '{_channel}' not in list of available channels '{se.c.data}' "
-                f"for provided image_name '{layer}'. Falling back to plotting first available channel '{channel}' for this image_name."
+                f"for provided image_name '{element_name}'. Falling back to plotting first available channel '{channel}' for this image_name."
             )
         channel_name = se.c.name
         channel_idx = list(se.c.data).index(channel)
@@ -203,13 +203,13 @@ def sanity(
         if "z" in _se.dims:
             if is_image:
                 log.info(
-                    f"Layer '{layer}' has 3 spatial dimensions, but no z-slice was added. "
+                    f"Element '{element_name}' has 3 spatial dimensions, but no z-slice was added. "
                     f"will perform a max projection along the z-axis."
                 )
                 _se = _se.max(dim="z")
             else:
                 log.info(
-                    f"Layer '{layer}' has 3 spatial dimensions, but no z-slice was added. "
+                    f"Element '{element_name}' has 3 spatial dimensions, but no z-slice was added. "
                     f"By default the z-slice located at the midpoint of the z-dimension ({_se.shape[0] // 2}) will be utilized."
                 )
                 _se = _se[_se.shape[0] // 2, ...]
@@ -275,7 +275,7 @@ def sanity(
                     polygons["geometry"] = polygons.geometry.buffer(polygons[radius])
                 else:
                     log.warning(
-                        f"radius parameter was specified as '{radius}', but could not be found as a column of shapes layer '{shapes_name}'. Will proceed "
+                        f"radius parameter was specified as '{radius}', but could not be found as a column of shapes element '{shapes_name}'. Will proceed "
                         "plotting while ignoring radius parameter."
                     )
             x_translation, y_translation = _get_translation_values_shapes(
@@ -332,7 +332,7 @@ def sanity(
                         va="center",
                     )
         else:
-            log.warning(f"Shapes layer {shapes_name} was empty for crd {crd}.")
+            log.warning(f"Shapes element {shapes_name} was empty for crd {crd}.")
 
     ax.set_xlim(crd[0], crd[1])
     ax.set_ylim(crd[2], crd[3])

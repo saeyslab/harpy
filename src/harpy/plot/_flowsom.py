@@ -52,7 +52,7 @@ def pixel_clusters(
     sdata
         The input :class:`~spatialdata.SpatialData` object.
     labels_name
-        The layer in `sdata` containing labels used to identify clusters.
+        The labels element in `sdata` used to identify clusters.
     crd
         The coordinates for the region of interest in the format `(xmin, xmax, ymin, ymax)`. If `None`, the entire image is considered, by default `None`.
     to_coordinate_system
@@ -181,7 +181,7 @@ def pixel_clusters_heatmap(
     sdata
         The input SpatialData object.
     table_name
-        The table layer in `sdata` containing cluster intensity for clusters and metaclusters, obtained via :func:`harpy.tb.cluster_intensity`.
+        The table element in `sdata` containing cluster intensity for clusters and metaclusters, obtained via :func:`harpy.tb.cluster_intensity`.
     metaclusters
         Whether to display mean channel intensity per metacluster (`True`) or per cluster (`False`).
     z_score

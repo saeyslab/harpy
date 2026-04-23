@@ -35,15 +35,15 @@ def enhance_contrast(
     Enhance the contrast of an image in a SpatialData object.
 
     Contrast Limited Adaptive Histogram Equalization (CLAHE) is used.
-    Compatibility with image layers that have either two or three spatial dimensions (c, (z), y, x).
+    Compatibility with image elements that have either two or three spatial dimensions (c, (z), y, x).
 
     Parameters
     ----------
     sdata
         The SpatialData object containing the image to enhance.
     image_name
-        The image layer in `sdata` on which the enhance_contrast function will be applied.
-        If not provided, the last image layer in `sdata` is used.
+        The image element in `sdata` on which the enhance_contrast function will be applied.
+        If not provided, the last image element in `sdata` is used.
     contrast_clip
         The clip limit for the CLAHE algorithm. Higher values result in stronger contrast enhancement
         but also stronger noise amplification.
@@ -55,7 +55,7 @@ def enhance_contrast(
         The overlapping depth used in `dask.array.map_overlap`.
         If specified as a tuple or dict, it contains the depth used in 'y' and 'x' dimension.
     output_image_name
-        The name of the image layer where the enhanced image will be stored.
+        The name of the image element where the enhanced image will be stored.
         The default value is "clahe".
     crd
         The coordinates specifying the region of the image to be processed. Defines the bounds (x_min, x_max, y_min, y_max).
@@ -68,7 +68,7 @@ def enhance_contrast(
 
     Returns
     -------
-    An updated `sdata` object with the contrast enhanced image added as a new layer.
+    An updated `sdata` object with the contrast-enhanced image added as a new image element.
 
     Raises
     ------
@@ -117,8 +117,8 @@ def enhance_contrast(
     if image_name is None:
         image_name = [*sdata.images][-1]
         log.warning(
-            f"No image layer specified. "
-            f"Applying image processing on the last image layer '{image_name}' of the provided SpatialData object."
+            f"No image element specified. "
+            f"Applying image processing on the last image element '{image_name}' of the provided SpatialData object."
         )
 
     se = _get_spatial_element(sdata, image_name)

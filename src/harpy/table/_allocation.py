@@ -35,7 +35,7 @@ def allocate(
     chunks: str | tuple[int, ...] | int | None = None,
     name_gene_column: str = _GENES_KEY,
     append: bool = False,
-    update_shapes_layers: bool = False,
+    update_shapes_elements: bool = False,
     region_key: str = _REGION_KEY,
     instance_key: str = _INSTANCE_KEY,
     spatial_key: str = _SPATIAL,
@@ -43,7 +43,7 @@ def allocate(
     overwrite: bool = False,
 ) -> SpatialData:
     """
-    Allocates transcripts to instances via provided `labels_name` and `points_name` and returns updated SpatialData object with a table layer (`sdata.tables[output_table_name]`) holding the :class:`anndata.AnnData` object with transcript counts.
+    Allocates transcripts to instances via provided `labels_name` and `points_name` and returns updated SpatialData object with a table element (`sdata.tables[output_table_name]`) holding the :class:`anndata.AnnData` object with transcript counts.
 
     It requires that `labels_name` and `points_name` are registered.
     Relation between `to_coordinate_system` and `points_name` should be a `spatialdata.transformations.Identity` transformation.
@@ -54,11 +54,11 @@ def allocate(
     sdata
         The SpatialData object.
     labels_name
-        The labels layer (i.e. segmentation mask) in `sdata` to be used to allocate the transcripts to cells.
+        The labels element (i.e. segmentation mask) in `sdata` to be used to allocate the transcripts to cells.
     points_name
-        The points layer in `sdata` that contains the transcripts.
+        The points element in `sdata` that contains the transcripts.
     output_table_name
-        The table layer in `sdata` in which to save the AnnData object with the transcripts counts per cell.
+        The table element in `sdata` in which to save the AnnData object with the transcripts counts per cell.
     to_coordinate_system
         The coordinate system that holds `labels_name` and `points_name`.
         This should be the intrinsic coordinate system in pixels.
@@ -70,9 +70,9 @@ def allocate(
         If set to True, and the `labels_name` does not yet exist as a `region_key` in `sdata.tables[output_table_name].obs`,
         the transcripts counts obtained during the current function call will be appended (along axis=0) to any existing transcript count values.
         within the SpatialData object's table attribute. If False, and overwrite is set to True any existing data in `sdata.tables[output_table_name]` will be overwritten by the newly extracted transcripts counts.
-    update_shapes_layers
-        Whether to filter the shapes layers associated with `labels_name`.
-        If set to `True`, cells that do not appear in resulting `output_table_name` (with `region_key` equal to `labels_name`) will be removed from the shapes layers (via `instance_key`) in the `sdata` object.
+    update_shapes_elements
+        Whether to filter the shapes elements associated with `labels_name`.
+        If set to `True`, cells that do not appear in resulting `output_table_name` (with `region_key` equal to `labels_name`) will be removed from the shapes elements (via `instance_key`) in the `sdata` object.
         Filtered shapes will be added to `sdata` with prefix 'filtered_segmentation'.
         This parameter is deprecated, and will be removed in a future version.
     instance_key
@@ -120,7 +120,7 @@ def allocate(
     """
     if labels_name not in [*sdata.labels]:
         raise ValueError(
-            f"Provided labels layer '{labels_name}' not in 'sdata', please specify a labels layer from '{[*sdata.labels]}'"
+            f"Provided labels element '{labels_name}' not in 'sdata', please specify a labels element from '{[*sdata.labels]}'"
         )
     ddf = sdata.points[points_name]
 
@@ -223,7 +223,7 @@ def allocate(
         overwrite=overwrite,
     )
 
-    if update_shapes_layers:
+    if update_shapes_elements:
         sdata = filter_shapes(
             sdata,
             table_name=output_table_name,
@@ -249,20 +249,20 @@ def bin_counts(
     overwrite: bool = False,
 ) -> SpatialData:
     """
-    Bins gene counts from barcodes to cells or regions defined in `labels_name` and returns an updated SpatialData object with a table layer (`sdata.tables[output_table_name]`) holding an AnnData object with the binned counts per cell or region.
+    Bins gene counts from barcodes to cells or regions defined in `labels_name` and returns an updated SpatialData object with a table element (`sdata.tables[output_table_name]`) holding an AnnData object with the binned counts per cell or region.
 
     Parameters
     ----------
     sdata
         The SpatialData object.
     table_name
-        The table layer holding the counts. E.g. obtained using :func:`harpy.io.visium_hd`.
+        The table element holding the counts. E.g. obtained using :func:`harpy.io.visium_hd`.
         We assume that `sdata[table_name].obsm[spatial_key]` contains a numpy array holding the barcode coordinates ('x', 'y').
         The relation of `sdata[table_name].obsm[spatial_key]` to `to_coordinate_system` should be an identity transformation.
     labels_name
-        The labels layer (e.g., segmentation mask, or a grid generated by :func:`harpy.im.add_grid_labels`) in `sdata` used to bin barcodes (as specified via `table_name`) into cells or regions.
+        The labels element (e.g., segmentation mask, or a grid generated by :func:`harpy.im.add_grid_labels`) in `sdata` used to bin barcodes (as specified via `table_name`) into cells or regions.
     output_table_name
-        The table layer in `sdata` in which to save the AnnData object with the binned counts per cell or region defined by `labels_name`.
+        The table element in `sdata` in which to save the AnnData object with the binned counts per cell or region defined by `labels_name`.
     to_coordinate_system
         The coordinate system that holds `labels_name`.
     chunks

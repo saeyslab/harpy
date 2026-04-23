@@ -50,14 +50,14 @@ def score_genes(
     sdata
         The SpatialData object.
     labels_name
-        The labels layer(s) of `sdata` used to select the cells via the region key in `sdata.tables[table_name].obs`.
+        The labels element(s) of `sdata` used to select the cells via the region key in `sdata.tables[table_name].obs`.
         Note that if `output_table_name` is equal to `table_name` and overwrite is True,
         cells in `sdata.tables[table_name]` linked to other `labels_name` (via the region key), will be removed from `sdata.tables[table_name]`.
-        If a list of labels layers is provided, they will therefore be scored together (e.g. multiple samples).
+        If a list of labels elements is provided, they will therefore be scored together (e.g. multiple samples).
     table_name
-        The table layer in `sdata` on which to perform annotation on.
+        The table element in `sdata` on which to perform annotation on.
     output_table_name
-        The output table layer in `sdata` to which table layer with results of annotation will be written.
+        The output table element in `sdata` to which table element with results of annotation will be written.
     marker_genes
         Path to a CSV file, or a :class:`~pandas.DataFrame` containing the marker genes.
         It should be a one-hot encoded matrix with cell types listed in the first row, and marker genes in the first column.
@@ -159,7 +159,7 @@ def score_genes(
     unique_genes = {item for sublist in genes_dict.values() for item in sublist}
     if not set(adata.var.index).intersection(unique_genes):
         raise ValueError(
-            f"No genes in provided marker genes file at '{marker_genes}' where found in attribute .var of the table layer '{table_name}'."
+            f"No genes in provided marker genes file at '{marker_genes}' where found in attribute .var of the table element '{table_name}'."
         )
 
     # Score all cells for all celltypes
@@ -256,15 +256,15 @@ def score_genes_iter(
     sdata
         The :class:`~SpatialData` object.
     labels_name
-        The labels layer(s) of `sdata` used to select the cells via the region key in `sdata.tables[table_name].obs`.
+        The labels element(s) of `sdata` used to select the cells via the region key in `sdata.tables[table_name].obs`.
         Note that if `output_table_name` is equal to `table_name` and overwrite is True,
         cells in `sdata.tables[table_name]` linked to other `labels_name` (via the region key), will be removed from `sdata.tables[table_name]`.
-        If a list of labels layers is provided, they will therefore be scored together (e.g. multiple samples).
+        If a list of labels elements is provided, they will therefore be scored together (e.g. multiple samples).
     table_name
-        The table layer in `sdata` on which to perform annotation on. We assume the data is already preprocessed by e.g. :func:`~harpy.tb.preprocess_transcriptomics`.
+        The table element in `sdata` on which to perform annotation on. We assume the data is already preprocessed by e.g. :func:`~harpy.tb.preprocess_transcriptomics`.
         Features should all have approximately same variance.
     output_table_name
-        The output table layer in `sdata` to which table layer with results of annotation will be written.
+        The output table element in `sdata` to which table element with results of annotation will be written.
     marker_genes
         Path to the CSV file containing the marker genes or a pandas dataframe.
         It should be a one-hot encoded matrix with cell types listed in the first row, and marker genes in the first column.
@@ -719,14 +719,14 @@ def cluster_cleanliness(
     sdata
         Data containing spatial information.
     labels_name
-        The labels layer(s) of `sdata` used to select the cells via the region key in `sdata.tables[table_name].obs`.
+        The labels element(s) of `sdata` used to select the cells via the region key in `sdata.tables[table_name].obs`.
         Note that if `output_table_name` is equal to `table_name` and overwrite is True,
         cells in `sdata.tables[table_name]` linked to other `labels_name` (via the region key), will be removed from `sdata.tables[table_name]`.
-        If a list of labels layers is provided, they will therefore be scored together (e.g. multiple samples).
+        If a list of labels elements is provided, they will therefore be scored together (e.g. multiple samples).
     table_name
-        The table layer in `sdata` on which to perform cleaning on.
+        The table element in `sdata` on which to perform cleaning on.
     output_table_name
-        The output table layer in `sdata` to which table layer with results of cleaned annotations will be written.
+        The output table element in `sdata` to which table element with results of cleaned annotations will be written.
     celltypes
         List of celltypes that you want to use for annotation, can be a subset of what is available in the `.obs` attribute of the corresponding table.
     celltype_indexes

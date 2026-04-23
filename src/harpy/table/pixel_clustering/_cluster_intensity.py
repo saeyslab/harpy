@@ -21,7 +21,7 @@ from harpy.utils._keys import _RAW_COUNTS_KEY, ClusteringKey
 
 def cluster_intensity_SOM(
     sdata: SpatialData,
-    mapping: pd.Series,  # pandas series with at the index the clusters and as values the metaclusters # TODO maybe should also allow passing None, and calculate mapping from provided som labels layer and meta cluster labels layer
+    mapping: pd.Series,  # pandas series with at the index the clusters and as values the metaclusters # TODO maybe should also allow passing None, and calculate mapping from provided som labels element and meta cluster labels element
     image_name: str | Iterable[str],
     labels_name: str | Iterable[str],
     output_table_name: str,
@@ -34,9 +34,9 @@ def cluster_intensity_SOM(
     overwrite=False,
 ) -> SpatialData:
     """
-    Calculates average intensity of each channel in `image_name` per SOM cluster as available in the `labels_name`, and saves it as a table layer in `sdata` as `output_table_name`. Average intensity per metacluster is calculated using the `mapping`.
+    Calculates average intensity of each channel in `image_name` per SOM cluster as available in the `labels_name`, and saves it as a table element in `sdata` as `output_table_name`. Average intensity per metacluster is calculated using the `mapping`.
 
-    This function computes average intensity for each SOM cluster identified in the `labels_name` and stores the results in a new table layer (`output_table_name`).
+    This function computes average intensity for each SOM cluster identified in the `labels_name` and stores the results in a new table element (`output_table_name`).
     Average intensity per metacluster is added to `sdata.tables[output_table_name].uns`.
     The intensity calculation can be subset by channels and adjusted for chunk size for efficient processing. SOM clusters can be calculated using `harpy.im.flowsom`.
 
@@ -47,11 +47,11 @@ def cluster_intensity_SOM(
     mapping
         A pandas Series mapping SOM cluster IDs (index) to metacluster IDs (values).
     image_name
-        The image layer of `sdata` from which the intensity is calculated.
+        The image element of `sdata` from which the intensity is calculated.
     labels_name
-        The labels layer in `sdata` that contains the SOM cluster IDs. I.e. the `output_cluster_labels_name` labels layer obtained through `harpy.im.flowsom`.
+        The labels element in `sdata` that contains the SOM cluster IDs. I.e. the `output_cluster_labels_name` labels element obtained through `harpy.im.flowsom`.
     output_table_name
-        The output table layer in `sdata` where results are stored.
+        The output table element in `sdata` where results are stored.
     to_coordinate_system
         The coordinate system that holds `image_name` and `labels_name`.
         If `image_name` and `labels_name` are provided as a list,
@@ -71,7 +71,7 @@ def cluster_intensity_SOM(
 
     Returns
     -------
-    The input `sdata` with the new table layer added.
+    The input `sdata` with the new table element added.
 
     Raises
     ------
@@ -108,17 +108,17 @@ def cluster_intensity_SOM(
         labels = da.unique(se.data).compute()
 
         assert np.all(np.isin(labels[labels != 0], mapping.index.astype(int))), (
-            f"Some labels labels layer {_labels_layer} could not be found in the provided pandas Series that maps SOM cluster ID's to metacluster IDs."
+            f"Some labels labels element {_labels_layer} could not be found in the provided pandas Series that maps SOM cluster ID's to metacluster IDs."
         )
 
-        # allocate the intensity to via the clusters labels layer
+        # allocate the intensity to via the clusters labels element
 
         if i == 0:
             append = False
         else:
             append = True
         log.info(
-            f"Start allocation of intensities of image layer with name '{_img_layer}' by labels in labels layer with name '{_labels_layer}'."
+            f"Start allocation of intensities of image element with name '{_img_layer}' by labels in labels element with name '{_labels_layer}'."
         )
         sdata = allocate_intensity(
             sdata,
@@ -137,7 +137,7 @@ def cluster_intensity_SOM(
             overwrite=overwrite,
         )
         log.info(
-            f"End allocation of image layer with name '{_img_layer}' and labels layer with name '{_labels_layer}'."
+            f"End allocation of image element with name '{_img_layer}' and labels element with name '{_labels_layer}'."
         )
 
     log.info("Start preprocessing.")
@@ -215,7 +215,7 @@ def cluster_intensity_SOM(
         sdata,
         adata=adata,
         output_table_name=output_table_name,
-        region=None,  # can not be linked to a region, because it contains average over multiple labels layers (ID of the SOM clusters) in multiple fov scenario
+        region=None,  # can not be linked to a region, because it contains average over multiple labels elements (ID of the SOM clusters) in multiple fov scenario
         overwrite=True,
     )
 

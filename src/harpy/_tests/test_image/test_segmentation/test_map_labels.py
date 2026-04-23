@@ -12,7 +12,7 @@ def test_map_labels(sdata_multi_c_no_backed: SpatialData):
     sdata_multi_c_no_backed = map_labels(
         sdata_multi_c_no_backed,
         func=_copy,
-        labels_layers="masks_whole",
+        labels_name="masks_whole",
         output_labels_name="masks_whole_copy",
         output_shapes_name=None,
         depth=depth,

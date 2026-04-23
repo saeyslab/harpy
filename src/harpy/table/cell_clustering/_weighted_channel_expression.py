@@ -19,7 +19,7 @@ def weighted_channel_expression(
     instance_size_key: str = _CELLSIZE_KEY,
     raw_counts_key: str = _RAW_COUNTS_KEY,
     overwrite: bool = False,
-    # specify whether the metaclustering or SOM clustering labels layer of pixel clustering results was used as input for harpy.tb.flowsom, i.e. key that was used for pixel clustering
+    # specify whether the metaclustering or SOM clustering labels element of pixel clustering results was used as input for harpy.tb.flowsom, i.e. key that was used for pixel clustering
 ) -> SpatialData:
     """
     Calculation of weighted channel expression in the context of cell clustering.
@@ -37,13 +37,13 @@ def weighted_channel_expression(
     sdata
         The input SpatialData object containing the necessary data tables.
     cell_clustering_table_name
-        The name of the table layer in `sdata` where FlowSOM cell clustering results are stored (obtained via 'harpy.tb.flowsom').
-        This layer should contain the cell cluster labels derived from the FlowSOM clustering algorithm and the non-normalized pixel cluster counts in `.layers[raw_counts_key]`, as obtained after running `harpy.tb.flowsom`.
+        The name of the table element in `sdata` where FlowSOM cell clustering results are stored (obtained via 'harpy.tb.flowsom').
+        This table element should contain the cell cluster labels derived from the FlowSOM clustering algorithm and the non-normalized pixel cluster counts in `.layers[raw_counts_key]`, as obtained after running `harpy.tb.flowsom`.
     table_name_pixel_cluster_intensity
-        The name of the table layer in `sdata` containing pixel cluster intensity values as obtained by running `harpy.tb.cluster_intensity`.
+        The name of the table element in `sdata` containing pixel cluster intensity values as obtained by running `harpy.tb.cluster_intensity`.
         These intensities are used to calculate the weighted expression of each channel for the cell clusters.
     output_table_name
-        The name of the output table layer in `sdata` where the results of the weighted channel expression computation will be stored.
+        The name of the output table element in `sdata` where the results of the weighted channel expression computation will be stored.
     clustering_key
         Specifies the key that was used for pixel clustering, indicating whether metaclustering or SOM clustering labels were used as input for flowsom cell clustering (`harpy.tb.flowsom`).
     instance_size_key
@@ -69,7 +69,7 @@ def weighted_channel_expression(
     ]  # this is always a list
     process_table_clustering = ProcessTable(
         sdata, labels_name=_labels_name, table_name=cell_clustering_table_name
-    )  # get all of the labels layers, to keep API not too complex, do not allow subsetting labels layers
+    )  # get all of the labels elements, to keep API not too complex, do not allow subsetting labels elements
     adata_cell_clustering = process_table_clustering._get_adata()
     missing_keys = [
         key
@@ -78,7 +78,7 @@ def weighted_channel_expression(
     ]
     assert not missing_keys, (
         "Please first run 'harpy.tb.flosom' before running this function. "
-        f"Missing keys in '.obs' of table layer '{cell_clustering_table_name}' are: {', '.join(missing_keys)}."
+        f"Missing keys in '.obs' of table element '{cell_clustering_table_name}' are: {', '.join(missing_keys)}."
     )
     index_columns = adata_cell_clustering.to_df().columns.astype(int)
     index_columns.name = None
@@ -127,12 +127,12 @@ def weighted_channel_expression(
             df_cluster_mean = pd.merge(df_cluster_mean, mapping, how="left", left_index=True, right_index=True)
         _uns_name = f"{_key}_{adata_cluster_intensity.var_names.name}"
         log.info(
-            f"Adding mean over obtained cell clusters '({_key})' of the average marker expression for each cell weighted by pixel cluster count to '.uns[ '{_uns_name}' ]' of table layer '{output_table_name}'"
+            f"Adding mean over obtained cell clusters '({_key})' of the average marker expression for each cell weighted by pixel cluster count to '.uns[ '{_uns_name}' ]' of table element '{output_table_name}'"
         )
         adata_cell_clustering.uns[_uns_name] = df_cluster_mean
 
     log.info(
-        f"Adding average marker expression for each cell weighted by pixel cluster count to '.obs' of table layer '{output_table_name}'"
+        f"Adding average marker expression for each cell weighted by pixel cluster count to '.obs' of table element '{output_table_name}'"
     )
     adata_cell_clustering.obs = pd.concat([adata_cell_clustering.obs, df], axis=1)
 

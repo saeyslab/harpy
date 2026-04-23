@@ -34,7 +34,7 @@ def map_image(
     **kwargs: Any,
 ) -> SpatialData:
     """
-    Apply a specified function to an image layer of a SpatialData object.
+    Apply a specified function to an image element of a SpatialData object.
 
     Function will be applied to each channel and z stack separately. Input and output dimension of `func` should be (1,1,y,x).
 
@@ -43,9 +43,9 @@ def map_image(
     sdata
         Spatial data object containing the image to be processed.
     image_name
-        The image layer in `sdata` to process.
+        The image element in `sdata` to process.
     output_image_name
-        The name of the output layer where results will be stored.
+        The name of the output element where results will be stored.
     func
         The Callable to apply to the image.
         Can also be a Mapping if different Callable should be applied to different z_slices and/or channels
@@ -71,14 +71,14 @@ def map_image(
     scale_factors
         Scale factors to apply for multiscale.
     overwrite
-        If True, overwrites the output layer if it already exists in `sdata`.
+        If True, overwrites the output element if it already exists in `sdata`.
     kwargs
         Additional keyword arguments to pass to :func:`dask.array.map_overlap` or :func:`dask.array.map_blocks`.
         Ignored if `blockwise` is set to `False`.
 
     Returns
     -------
-    The `sdata` object with the processed image added to the specified output layer.
+    The `sdata` object with the processed image added to the specified output element.
 
     Raises
     ------
@@ -93,7 +93,7 @@ def map_image(
 
     Examples
     --------
-    Apply a custom function `my_function` to all channels of an image layer using different parameters for each channel
+    Apply a custom function `my_function` to all channels of an image element using different parameters for each channel
     (we assume sdata[ "raw_image" ] has 2 channels, 0 and 1, and has dimensions c,y,x ):
 
     >>> def my_function( image, parameter ):
@@ -106,7 +106,7 @@ def map_image(
     >>> fn_kwargs={ "parameter": 2 }
     >>> sdata = apply(sdata, image_name="raw_image", output_image_name="processed_image", func=my_function, fn_kwargs=fn_kwargs,)
 
-    Apply a custom function `my_function` to all z slices of an image layer using different parameters for each z slice
+    Apply a custom function `my_function` to all z slices of an image element using different parameters for each z slice
     (we assume sdata[ "raw_image" ] has 2 z slices at 0.5 and 1.5, and has dimensions c,z,y,x ):
 
     >>> def my_function( image, parameter ):
@@ -114,7 +114,7 @@ def map_image(
     >>> fn_kwargs={ 0.5: { "parameter": 2 }, 1.5: { "parameter": 3 } }
     >>> sdata = apply(sdata, image_name="raw_image", output_image_name="processed_image", func=my_function, fn_kwargs=fn_kwargs,)
 
-    Apply a custom function `my_function` to all z slices and channels of an image layer using different parameters for each z slice
+    Apply a custom function `my_function` to all z slices and channels of an image element using different parameters for each z slice
     and channel.
     (we assume sdata[ "raw_image" ] has 2 channels 0 and 1, and 2 z slices at 0.5 and 1.5, and has dimensions c,z,y,x ):
 

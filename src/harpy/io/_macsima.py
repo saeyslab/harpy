@@ -108,10 +108,10 @@ def macsima(
         E.g if `c_subset=['DAPI']` and  `cycle_scantype_channelname_roiid_reagent = 01_B_DAPI_001_DAPI`,
         then channel `01_B_DAPI_001_DAPI` will be retained.
     image_name
-        Name of the resulting image layer. If `None`, the name is inferred from OME metadata.
+        Name of the resulting image element. If `None`, the name is inferred from OME metadata.
         If `path` contains multiple entries, `image_name` must be a list with the same length.
     to_coordinate_system
-        Target coordinate system name(s) for the resulting image layer(s). If `None`,
+        Target coordinate system name(s) for the resulting image element(s). If `None`,
         defaults to `global_<roi_id>` when ROI metadata is available, otherwise `global`.
         If `path` contains multiple entries, `to_coordinate_system` must be a list with
         the same length.
@@ -138,12 +138,12 @@ def macsima(
     Examples
     --------
     >>> sdata = macsima(
-    ...     path="path/to/roi_folder",  # recursively loads all .tif in this ROI, one image layer
+    ...     path="path/to/roi_folder",  # recursively loads all .tif in this ROI, one image element
     ...     c_subset=["DAPI", "CD43"],
     ...     image_models_kwargs={"chunks": (1, 3000, 3000)},
     ... )
     >>> sdata = macsima(
-    ...     path=["path/to/roi_folder", "path/to/another_roi_folder"],  # two ROI folders -> two image layers
+    ...     path=["path/to/roi_folder", "path/to/another_roi_folder"],  # two ROI folders -> two image elements
     ...     c_subset=["DAPI", "CD43"],
     ...     image_models_kwargs={"chunks": (1, 3000, 3000)},
     ... )
@@ -229,7 +229,7 @@ def _macsima(
 
     if image_name is None:
         image_name = imgs[0].ome_metadata.experiments[0].description
-        log.info(f"'image_name' not provided; metadata-derived base image layer name: {image_name}")
+        log.info(f"'image_name' not provided; metadata-derived base image element name: {image_name}")
     else:
         image_name = image_name
 
@@ -248,7 +248,7 @@ def _macsima(
         )
         if image_name is None:
             image_name = f"{image_name}_{roi_id}"
-            log.info(f"'image_name' not provided; appending ROI id, final image layer name: {image_name}")
+            log.info(f"'image_name' not provided; appending ROI id, final image element name: {image_name}")
     elif to_coordinate_system is not None:
         to_coordinate_system_name = to_coordinate_system
     else:

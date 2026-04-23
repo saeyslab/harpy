@@ -37,7 +37,7 @@ def pixel_clustering_preprocess(
     overwrite: bool = False,
 ) -> SpatialData:
     """
-    Preprocess image layers specified in `image_name`. Normalizes and blurs the images based on various percentile and gaussian blur parameters. The results are added to `sdata` as specified in `output_image_name`.
+    Preprocess image elements specified in `image_name`. Normalizes and blurs the images based on various percentile and gaussian blur parameters. The results are added to `sdata` as specified in `output_image_name`.
 
     Preprocessing function specifically designed for preprocessing images before using `harpy.im.flowsom`.
 
@@ -46,9 +46,9 @@ def pixel_clustering_preprocess(
     sdata
         The SpatialData object containing the image data.
     image_name
-        The image layer(s) from `sdata` to process. This can be a single layer or a list of layers, e.g., when multiple fields of view are available.
+        The image element(s) from `sdata` to process. This can be a single image element or a list of image elements, e.g., when multiple fields of view are available.
     output_image_name
-        The preprocessed images are saved under this layer in `sdata`.
+        The preprocessed images are saved under these image element names in `sdata`.
     channels
         Specifies the channels to be included in the processing.
     p
@@ -64,7 +64,7 @@ def pixel_clustering_preprocess(
     norm_sum
         If `True`, each channel is normalized by the sum of all channels at each pixel.
     cap_max
-        The maximum allowable value for the elements in the resulting preprocessed image layers. If `None`, no capping is applied.
+        The maximum allowable value for the elements in the resulting preprocessed image elements. If `None`, no capping is applied.
         Typical value would be `1.0` to exclude outliers.
     chunks
         Chunk sizes for processing. If provided as a tuple, it should contain chunk sizes for `c`, `(z)`, `y`, `x`.
@@ -85,16 +85,16 @@ def pixel_clustering_preprocess(
     Notes
     -----
     To avoid data leakage:
-     - in the single fov case (one image layer provided), to prevent data leakage between channels, one should set `p_sum=None` and `norm_sum=False`, the only normalization that will be performed will then be a division by the `p` and `p_post` percentile values per channel.
-     - in the multiple fov case (multiple image layers provided), both `p_sum`, `norm_sum`, `p` and `p_post` should be set to None to prevent data leakage both between channels and between images.
+     - in the single fov case (one image element provided), to prevent data leakage between channels, one should set `p_sum=None` and `norm_sum=False`, the only normalization that will be performed will then be a division by the `p` and `p_post` percentile values per channel.
+     - in the multiple fov case (multiple image elements provided), both `p_sum`, `norm_sum`, `p` and `p_post` should be set to None to prevent data leakage both between channels and between images.
 
     Returns
     -------
-    An updated SpatialData object with the preprocessed image data stored in specified `output_layers`.
+    An updated SpatialData object with the preprocessed image data stored in the specified `output_image_name`.
 
     See Also
     --------
-    harpy.im.flowsom : flowsom pixel clustering on image layers.
+    harpy.im.flowsom : flowsom pixel clustering on image elements.
 
     """
     # setting p_sum=None, and norm_sum=False prevents data leakage in the single-fov case.
@@ -126,7 +126,7 @@ def pixel_clustering_preprocess(
             _array_dim = arr.ndim
         else:
             assert _array_dim == arr.ndim, (
-                "Image layers specified via parameter `image_name` should all have same number of dimensions."
+                "Image elements specified via parameter `image_name` should all have same number of dimensions."
             )
         if chunks is not None:
             arr = arr.rechunk(chunks)
@@ -218,7 +218,7 @@ def pixel_clustering_preprocess(
             arr_percentile_post_norm, axis=0
         )  # arr_percentil_post_mean is of shape (#n_channels,)
 
-    # Now normalize each image layer by arr_percentile_post_norm and add to spatialdata object
+    # Now normalize each image element by arr_percentile_post_norm and add to spatialdata object
     if p_post is not None:
         for i in range(len(_arr_list)):
             _arr_list[i] = _arr_list[i] / da.asarray(arr_percentile_post_norm_mean[..., None, None, None])
@@ -228,7 +228,7 @@ def pixel_clustering_preprocess(
             _arr_list[i] = da.clip(_arr_list[i], None, cap_max)
 
     # need to let dask do optimization of the computation graph in case there are multiple images
-    # otherwise will recaclulate whole preprocessing every time we add an image layer to the sdata zarr store
+    # otherwise will recaclulate whole preprocessing every time we add an image element to the sdata zarr store
     # should only do this if there is more than one image
     clean_up = False
     if len(_arr_list) > 1:

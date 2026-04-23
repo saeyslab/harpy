@@ -20,7 +20,7 @@ def cluster(sdata: SpatialData, table_name: str, key_added: str = "leiden", outp
     sdata
         The SpatialData object containing the analyzed data.
     table_name
-        The table layer in `sdata` to visualize.
+        The table element in `sdata` to visualize.
     key_added
         name of the column in `sdata.tables[table_name].obs` that contains the cluster id.
     output

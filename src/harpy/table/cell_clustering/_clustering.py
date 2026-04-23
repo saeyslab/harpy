@@ -48,12 +48,12 @@ def flowsom(
 
     Prepare the data obtained from pixel clustering for cell clustering (see
     :func:`~harpy.tb.cell_clustering_preprocess`) and execute FlowSOM on the
-    resulting table layer (`output_table_name`) of the SpatialData object.
+    resulting table element (`output_table_name`) of the SpatialData object.
 
     This function applies the FlowSOM clustering algorithm (via
     :class:`flowsom.FlowSOM`) on spatial data contained in a SpatialData object.
     The algorithm organizes data into self-organizing maps and then clusters these maps, grouping them into `n_clusters`.
-    The results of this clustering are added to a table layer in the `sdata` object.
+    The results of this clustering are added to a table element in the `sdata` object.
 
     Typically, one would first process `sdata` via
     :func:`~harpy.im.pixel_clustering_preprocess` and :func:`~harpy.im.flowsom`
@@ -64,14 +64,14 @@ def flowsom(
     sdata
         The input SpatialData object.
     cells_labels_name
-        The labels layer(s) in `sdata` that contain cell segmentation masks.
+        The labels element(s) in `sdata` that contain cell segmentation masks.
         These masks should be previously generated using :func:`~harpy.im.segment`.
-        If a list of labels layers is provided, they will be clustered together (e.g. multiple samples).
+        If a list of labels elements is provided, they will be clustered together (e.g. multiple samples).
     cluster_labels_name
-        The labels layer(s) in `sdata` that contain metacluster or SOM cluster masks.
+        The labels element(s) in `sdata` that contain metacluster or SOM cluster masks.
         These should be obtained via :func:`~harpy.im.flowsom`.
     output_table_name
-        The output table layer in `sdata` where results of the clustering and metaclustering will be stored.
+        The output table element in `sdata` where results of the clustering and metaclustering will be stored.
     q
         Quantile used for normalization. If specified, each pixel SOM/meta
         cluster column in `output_table_name` is normalized by this quantile prior

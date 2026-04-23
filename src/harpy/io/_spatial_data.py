@@ -31,12 +31,12 @@ def create_sdata(
     z_projection: bool = True,
 ) -> SpatialData:
     """
-    Convert input images or arrays into a SpatialData object with the image added as an image layer with name `image_name`.
+    Convert input images or arrays into a SpatialData object with the image added as an image element with name `image_name`.
 
     .. deprecated::
         `harpy.io.create_sdata` is deprecated. Prefer constructing a
         :class:`spatialdata.SpatialData` object directly, writing it to disk,
-        reopening it with :func:`spatialdata.read_zarr`, and then adding layers
+        reopening it with :func:`spatialdata.read_zarr`, and then adding image elements
         with :func:`harpy.im.add_image`.
 
     This function allows you to ingest various input formats of images or data arrays,
@@ -86,7 +86,7 @@ def create_sdata(
     output_path
         If specified, the resulting SpatialData object will be written to this path as a zarr.
     image_name
-        The name of the image layer to be created in the SpatialData object.
+        The name of the image element to be created in the SpatialData object.
     chunks
         If specified, the underlying dask array will be rechunked to this size.
         If Tuple, desired chunksize along c,z,y,x should be specified, e.g. (1,1,1024,1024).
@@ -95,7 +95,7 @@ def create_sdata(
         If input is a str, Path or List[str], List[Path], this parameter is ignored.
     crd
         The coordinates for a region of interest in the format (xmin, xmax, ymin, ymax).
-        If specified, this region is cropped from the image, and added as image layer to the
+        If specified, this region is cropped from the image, and added as image element to the
         SpatialData object.
     to_coordinate_system
         Coordinate system to which `image_name` will be added.
@@ -108,7 +108,7 @@ def create_sdata(
 
     Returns
     -------
-    The constructed SpatialData object containing image layer with name `image_name` and dimension (c,(z),y,x)
+    The constructed SpatialData object containing image element with name `image_name` and dimension (c,(z),y,x)
 
     Notes
     -----
