@@ -636,7 +636,7 @@ def _get_source_ids_to_reference_overlap_counts(
 def match_labels_to_reference(
     sdata: SpatialData,
     source_labels_name: str,
-    reference_labels_layers: list[str],
+    reference_labels_name: list[str],
     chunks: str | int | tuple[int, int] | None = None,
     threshold: float = 0.0,
     overlap_metric: Literal["source_fraction", "reference_fraction", "iou"] = "source_fraction",
@@ -645,7 +645,7 @@ def match_labels_to_reference(
     Match source labels to reference labels based on an overlap score.
 
     For each non-zero label in `source_labels_name`, this function determines, for
-    every labels element in `reference_labels_layers`, which non-zero reference
+    every labels element in `reference_labels_name`, which non-zero reference
     label best matches it according to `overlap_metric`. The result is returned as
     a :class:`~pandas.DataFrame` indexed by the source labels, with one column per
     reference labels element.
@@ -668,9 +668,9 @@ def match_labels_to_reference(
     source_labels_name
         Name of the labels element whose non-zero labels are matched to the
         reference labels elements.
-    reference_labels_layers
+    reference_labels_name
         Names of the reference labels elements against which overlap is computed.
-        One output column is produced for each layer in the order provided.
+        One output column is produced for each element name in the order provided.
     chunks
         Chunk specification used when rechunking the label arrays before the
         overlap computation. If a tuple is provided, it is interpreted as the
@@ -694,8 +694,8 @@ def match_labels_to_reference(
     Returns
     -------
     A pandas DataFrame where each row corresponds to a non-zero label from
-    `source_labels_name` and each column corresponds to one layer in
-    `reference_labels_layers`. Every value contains the non-zero reference label
+    `source_labels_name` and each column corresponds to one element name in
+    `reference_labels_name`. Every value contains the non-zero reference label
     selected for that source label according to `overlap_metric`. If a source label has no non-zero
     overlap with a given reference labels element, the corresponding output value
     is `0`.
@@ -730,7 +730,7 @@ def match_labels_to_reference(
         matched = hp.im.match_labels_to_reference(
             sdata,
             source_labels_name="masks_whole",
-            reference_labels_layers=["masks_nuclear"],
+            reference_labels_name=["masks_nuclear"],
             chunks=256,
         )
     """
@@ -743,7 +743,7 @@ def match_labels_to_reference(
 
     label_arrays = [get_dataarray(sdata, layer=source_labels_name).data]
 
-    for _labels_layer in reference_labels_layers:
+    for _labels_layer in reference_labels_name:
         label_arrays.append(get_dataarray(sdata, layer=_labels_layer).data)
 
     # Check for consistent shapes
@@ -780,12 +780,12 @@ def match_labels_to_reference(
 
     if source_ids.size == 0:
         return pd.DataFrame(
-            np.empty((0, len(reference_labels_layers)), dtype=_SEG_DTYPE),
+            np.empty((0, len(reference_labels_name)), dtype=_SEG_DTYPE),
             index=pd.Index([], dtype=str),
-            columns=reference_labels_layers,
+            columns=reference_labels_name,
         )
 
-    result = np.zeros((source_ids.size, len(reference_labels_layers)), dtype=_SEG_DTYPE)
+    result = np.zeros((source_ids.size, len(reference_labels_name)), dtype=_SEG_DTYPE)
     if overlap_metric == "iou" or (threshold > 0 and overlap_metric == "source_fraction"):
         log.info(f"Calculating instance sizes for source labels element '{source_labels_name}'.")
         instance_sizes = get_instance_size(
@@ -809,7 +809,7 @@ def match_labels_to_reference(
             source_ids=source_ids,
         )
         if overlap_metric in {"reference_fraction", "iou"} and overlap_counts_by_source:
-            log.info(f"Calculating instance sizes for reference labels element '{reference_labels_layers[index]}'.")
+            log.info(f"Calculating instance sizes for reference labels element '{reference_labels_name[index]}'.")
             candidate_reference_ids = np.unique(
                 np.asarray(
                     [
@@ -879,4 +879,4 @@ def match_labels_to_reference(
 
         result[:, index] = np.asarray(mapped_labels, dtype=_SEG_DTYPE)
 
-    return pd.DataFrame(result, index=source_ids.astype(str), columns=reference_labels_layers)
+    return pd.DataFrame(result, index=source_ids.astype(str), columns=reference_labels_name)

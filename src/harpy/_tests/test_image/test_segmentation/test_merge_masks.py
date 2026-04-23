@@ -98,7 +98,7 @@ def test_match_labels_to_reference(sdata_multi_c_no_backed: SpatialData):
     df = match_labels_to_reference(
         sdata_multi_c_no_backed,
         source_labels_name="masks_whole",
-        reference_labels_layers=["masks_nuclear"],
+        reference_labels_name=["masks_nuclear"],
         chunks=256,
     )
 
@@ -175,7 +175,7 @@ def test_match_labels_to_reference_layers_small_sdata() -> None:
     result = match_labels_to_reference(
         sdata,
         source_labels_name="mask",
-        reference_labels_layers=["original_1", "original_2"],
+        reference_labels_name=["original_1", "original_2"],
         chunks=2,
     )
 
@@ -207,7 +207,7 @@ def test_match_labels_to_reference_layers_empty_source_returns_empty_dataframe(
     result = match_labels_to_reference(
         sdata,
         source_labels_name="source",
-        reference_labels_layers=["reference"],
+        reference_labels_name=["reference"],
         chunks=2,
         threshold=threshold,
         overlap_metric=overlap_metric,  # type: ignore[arg-type]
@@ -239,7 +239,7 @@ def test_match_labels_to_reference_layers_supports_overlap_metrics() -> None:
     result_source_fraction = match_labels_to_reference(
         sdata,
         source_labels_name="mask",
-        reference_labels_layers=["original"],
+        reference_labels_name=["original"],
         chunks=2,
         threshold=0.5,
         overlap_metric="source_fraction",
@@ -247,7 +247,7 @@ def test_match_labels_to_reference_layers_supports_overlap_metrics() -> None:
     result_reference_fraction = match_labels_to_reference(
         sdata,
         source_labels_name="mask",
-        reference_labels_layers=["original"],
+        reference_labels_name=["original"],
         chunks=2,
         threshold=0.5,
         overlap_metric="reference_fraction",
@@ -255,7 +255,7 @@ def test_match_labels_to_reference_layers_supports_overlap_metrics() -> None:
     result_iou = match_labels_to_reference(
         sdata,
         source_labels_name="mask",
-        reference_labels_layers=["original"],
+        reference_labels_name=["original"],
         chunks=2,
         threshold=0.5,
         overlap_metric="iou",
@@ -321,21 +321,21 @@ def test_match_labels_to_reference_layers_selects_winner_using_overlap_metric() 
     result_source_fraction = match_labels_to_reference(
         sdata,
         source_labels_name="mask",
-        reference_labels_layers=["original"],
+        reference_labels_name=["original"],
         chunks=2,
         overlap_metric="source_fraction",
     )
     result_reference_fraction = match_labels_to_reference(
         sdata,
         source_labels_name="mask",
-        reference_labels_layers=["original"],
+        reference_labels_name=["original"],
         chunks=2,
         overlap_metric="reference_fraction",
     )
     result_iou = match_labels_to_reference(
         sdata,
         source_labels_name="mask",
-        reference_labels_layers=["original"],
+        reference_labels_name=["original"],
         chunks=2,
         overlap_metric="iou",
     )
@@ -359,7 +359,7 @@ def test_match_labels_to_reference_layers_raises_for_invalid_threshold() -> None
         match_labels_to_reference(
             sdata,
             source_labels_name="mask",
-            reference_labels_layers=["original"],
+            reference_labels_name=["original"],
             threshold=1.5,
         )
 
@@ -376,6 +376,6 @@ def test_match_labels_to_reference_layers_raises_for_invalid_overlap_metric() ->
         match_labels_to_reference(
             sdata,
             source_labels_name="mask",
-            reference_labels_layers=["original"],
+            reference_labels_name=["original"],
             overlap_metric="dice",  # type: ignore[arg-type]
         )
