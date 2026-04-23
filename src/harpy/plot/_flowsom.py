@@ -36,7 +36,7 @@ except ImportError:
 
 def pixel_clusters(
     sdata: SpatialData,
-    labels_layer: str,
+    labels_name: str,
     crd: tuple[int, int, int, int] | None = None,
     to_coordinate_system: str = "global",
     ax: Axes | None = None,
@@ -51,8 +51,8 @@ def pixel_clusters(
     ----------
     sdata
         The input :class:`~spatialdata.SpatialData` object.
-    labels_layer
-        The layer in `sdata` containing labels used to identify clusters.
+    labels_name
+        The labels element in `sdata` used to identify clusters.
     crd
         The coordinates for the region of interest in the format `(xmin, xmax, ymin, ymax)`. If `None`, the entire image is considered, by default `None`.
     to_coordinate_system
@@ -79,7 +79,7 @@ def pixel_clusters(
     --------
     harpy.im.flowsom
     """
-    se = _get_spatial_element(sdata, layer=labels_layer)
+    se = _get_spatial_element(sdata, element_name=labels_name)
 
     unique_values = da.unique(se.data).compute()
     labels = unique_values[unique_values != 0]
@@ -87,7 +87,7 @@ def pixel_clusters(
     if crd is None:
         _colors = _colors[labels - 1]
 
-    labels_layer_crop = None
+    labels_name_crop = None
     if crd is not None:
         se_crop = bounding_box_query(
             se,
@@ -97,13 +97,13 @@ def pixel_clusters(
             target_coordinate_system=to_coordinate_system,
         )
         if se_crop is not None:
-            labels_layer_crop = f"_labels_{uuid.uuid4()}_"
-            sdata[labels_layer_crop] = se_crop
+            labels_name_crop = f"_labels_{uuid.uuid4()}_"
+            sdata[labels_name_crop] = se_crop
             se = se_crop
         else:
             raise ValueError(f"Cropped spatial element using crd '{crd}' is None.")
 
-    if labels_layer_crop is not None:
+    if labels_name_crop is not None:
         # recompute unique labels in the crop
         unique_values = da.unique(se.data).compute()
         labels = unique_values[unique_values != 0]
@@ -122,12 +122,12 @@ def pixel_clusters(
     adata = ad.AnnData(X=count_matrix, obs=obs)
     adata.obs[_INSTANCE_KEY] = adata.obs[_INSTANCE_KEY].astype(int)
 
-    adata.obs[_REGION_KEY] = labels_layer if labels_layer_crop is None else labels_layer_crop
+    adata.obs[_REGION_KEY] = labels_name if labels_name_crop is None else labels_name_crop
     adata.obs[_REGION_KEY] = adata.obs[_REGION_KEY].astype("category")
 
     adata = TableModel.parse(
         adata=adata,
-        region=labels_layer if labels_layer_crop is None else labels_layer_crop,
+        region=labels_name if labels_name_crop is None else labels_name_crop,
         region_key=_REGION_KEY,
         instance_key=_INSTANCE_KEY,
     )
@@ -141,7 +141,7 @@ def pixel_clusters(
     sdata[intermediate_table_key].uns[f"{_INSTANCE_KEY}_cat"] = "__value__"  # placeholder
 
     ax = sdata.pl.render_labels(
-        labels_layer if labels_layer_crop is None else labels_layer_crop,
+        labels_name if labels_name_crop is None else labels_name_crop,
         table_name=intermediate_table_key,
         color=f"{_INSTANCE_KEY}_cat",
         **render_labels_kwargs,
@@ -151,8 +151,8 @@ def pixel_clusters(
         return_ax=True,
     )
     del sdata.tables[intermediate_table_key]
-    if labels_layer_crop is not None:
-        del sdata.labels[labels_layer_crop]
+    if labels_name_crop is not None:
+        del sdata.labels[labels_name_crop]
 
     if output is not None:
         ax.figure.savefig(output)
@@ -162,7 +162,7 @@ def pixel_clusters(
 
 def pixel_clusters_heatmap(
     sdata: SpatialData,
-    table_layer: str,  # obtained via hp.tb.cluster_intensity_SOM
+    table_name: str,  # obtained via hp.tb.cluster_intensity_SOM
     metaclusters: bool = True,
     z_score: bool = True,
     clip_value: float | None = 3,
@@ -180,8 +180,8 @@ def pixel_clusters_heatmap(
     ----------
     sdata
         The input SpatialData object.
-    table_layer
-        The table layer in `sdata` containing cluster intensity for clusters and metaclusters, obtained via :func:`harpy.tb.cluster_intensity`.
+    table_name
+        The table element in `sdata` containing cluster intensity for clusters and metaclusters, obtained via :func:`harpy.tb.cluster_intensity`.
     metaclusters
         Whether to display mean channel intensity per metacluster (`True`) or per cluster (`False`).
     z_score
@@ -222,7 +222,7 @@ def pixel_clusters_heatmap(
 
     >>> harpy.tb.pixel_clusters_heatmap(
     ...     sdata,
-    ...     table_layer="counts_clusters",
+    ...     table_name="counts_clusters",
     ...     figsize=(30, 20),
     ...     fig_kwargs={"dpi": 100},
     ...     metaclusters=True,
@@ -235,11 +235,11 @@ def pixel_clusters_heatmap(
     harpy.tb.cluster_intensity_SOM
     """
     # clusters
-    df = sdata.tables[table_layer].to_df().copy()
-    df.index = sdata.tables[table_layer].obs[instance_key].values
+    df = sdata.tables[table_name].to_df().copy()
+    df.index = sdata.tables[table_name].obs[instance_key].values
 
     # sort clusters by metaclusters
-    cluster_info = sdata.tables[table_layer].obs.copy()
+    cluster_info = sdata.tables[table_name].obs.copy()
     cluster_info_sorted = cluster_info.sort_values([ClusteringKey._METACLUSTERING_KEY.value, instance_key])
     cluster_info_sorted.index = cluster_info_sorted[instance_key]
     sorted_clusters = cluster_info_sorted.index.tolist()
@@ -252,7 +252,7 @@ def pixel_clusters_heatmap(
     df.index = new_index_labels
 
     # metaclusters
-    df_metaclusters = sdata.tables[table_layer].uns[ClusteringKey._METACLUSTERING_KEY.value].copy()
+    df_metaclusters = sdata.tables[table_name].uns[ClusteringKey._METACLUSTERING_KEY.value].copy()
     df_metaclusters.index = df_metaclusters[ClusteringKey._METACLUSTERING_KEY.value]
     df_metaclusters.drop(ClusteringKey._METACLUSTERING_KEY.value, axis=1, inplace=True)
 

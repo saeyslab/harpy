@@ -34,9 +34,9 @@ leiden_column: "leiden"
 leiden_cmap: "magma"
 leiden_alpha: 0.5
 
-table_layer_name: "table_transcriptomics"
+table_name: "table_transcriptomics"
 
 overwrite: False
-points_layer_name: "transcripts"
+points_name: "transcripts"
 calculate_transcripts_density: True
-transcripts_density_img_layer_name: "transcript_density"
+transcripts_density_image_name: "transcript_density"

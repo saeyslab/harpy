@@ -10,10 +10,10 @@ from matplotlib.axes import Axes
 from spatialdata import SpatialData
 from spatialdata.transformations import Identity, Scale
 
-from harpy.image._image import add_labels_layer
+from harpy.image._image import add_labels
 from harpy.plot._plot_density import plot_instance_density, plot_transcript_density
-from harpy.points._points import add_points_layer
-from harpy.table._table import add_table_layer
+from harpy.points._points import add_points
+from harpy.table._table import add_table
 from harpy.utils._keys import _GENES_KEY, _INSTANCE_KEY, _REGION_KEY, _SPATIAL
 
 
@@ -21,16 +21,16 @@ from harpy.utils._keys import _GENES_KEY, _INSTANCE_KEY, _REGION_KEY, _SPATIAL
 def sdata_instances():
     sdata = SpatialData()
     labels = da.from_array(np.array([[1, 0], [0, 2]], dtype=np.uint16), chunks=(2, 2))
-    sdata = add_labels_layer(
+    sdata = add_labels(
         sdata,
         arr=labels,
-        output_layer="labels_a",
+        output_labels_name="labels_a",
         transformations={"global": Identity()},
     )
-    sdata = add_labels_layer(
+    sdata = add_labels(
         sdata,
         arr=labels,
-        output_layer="labels_b",
+        output_labels_name="labels_b",
         transformations={"global": Identity()},
     )
 
@@ -54,10 +54,10 @@ def sdata_instances():
         ]
     )
 
-    sdata = add_table_layer(
+    sdata = add_table(
         sdata,
         adata=adata,
-        output_layer="table_instances",
+        output_table_name="table_instances",
         region=["labels_a", "labels_b"],
     )
     return sdata
@@ -74,7 +74,7 @@ def test_plot_transcript_density_returns_input_ax(sdata_transcripts_no_backed, t
         result = plot_transcript_density(
             sdata_transcripts_no_backed,
             bin_size=100,
-            points_layer="transcripts",
+            points_name="transcripts",
             genes=gene,
             frac=0.1,
             ax=ax,
@@ -92,8 +92,8 @@ def test_plot_instance_density_returns_input_ax(sdata_instances, tmp_path):
     try:
         result = plot_instance_density(
             sdata_instances,
-            labels_layer="labels_a",
-            table_layer="table_instances",
+            labels_name="labels_a",
+            table_name="table_instances",
             spatial_key=_SPATIAL,
             bin_size=1,
             ax=ax,
@@ -107,12 +107,12 @@ def test_plot_instance_density_returns_input_ax(sdata_instances, tmp_path):
         plt.close(fig)
 
 
-def test_plot_instance_density_uses_all_observations_when_labels_layer_is_none(sdata_instances):
+def test_plot_instance_density_uses_all_observations_when_labels_name_is_none(sdata_instances):
     fig, ax = plt.subplots()
     try:
         result = plot_instance_density(
             sdata_instances,
-            table_layer="table_instances",
+            table_name="table_instances",
             spatial_key=_SPATIAL,
             bin_size=1,
             ax=ax,
@@ -137,7 +137,7 @@ def test_plot_transcript_density_warns_when_computing_many_points(monkeypatch, s
         plot_transcript_density(
             sdata_transcripts_no_backed,
             bin_size=100,
-            points_layer="transcripts",
+            points_name="transcripts",
             genes=gene,
             ax=ax,
         )
@@ -159,7 +159,7 @@ def test_plot_transcript_density_warns_when_creating_large_grid(monkeypatch, sda
         plot_transcript_density(
             sdata_transcripts_no_backed,
             bin_size=1,
-            points_layer="transcripts",
+            points_name="transcripts",
             genes=gene,
             ax=ax,
         )
@@ -175,7 +175,7 @@ def test_plot_transcript_density_gene_subset_empty_raises(sdata_transcripts_no_b
         plot_transcript_density(
             sdata_transcripts_no_backed,
             bin_size=100,
-            points_layer="transcripts",
+            points_name="transcripts",
             genes="__not_a_gene__",
         )
 
@@ -186,7 +186,7 @@ def test_plot_transcript_density_invalid_frac_raises(sdata_transcripts_no_backed
         plot_transcript_density(
             sdata_transcripts_no_backed,
             bin_size=100,
-            points_layer="transcripts",
+            points_name="transcripts",
             frac=frac,
         )
 
@@ -197,7 +197,7 @@ def test_plot_transcript_density_without_colorbar(sdata_transcripts_no_backed):
         plot_transcript_density(
             sdata_transcripts_no_backed,
             bin_size=100,
-            points_layer="transcripts",
+            points_name="transcripts",
             frac=0.1,
             colorbar=False,
             ax=ax,
@@ -220,10 +220,10 @@ def test_plot_transcript_density_filters_requested_z_plane(tmp_path):
         ),
         npartitions=1,
     )
-    sdata = add_points_layer(
+    sdata = add_points(
         sdata,
         ddf=ddf,
-        output_layer="transcripts",
+        output_points_name="transcripts",
         coordinates={"x": "x", "y": "y", "z": "z"},
         transformations={"global": Identity()},
     )
@@ -233,7 +233,7 @@ def test_plot_transcript_density_filters_requested_z_plane(tmp_path):
         plot_transcript_density(
             sdata,
             bin_size=1,
-            points_layer="transcripts",
+            points_name="transcripts",
             crd=(0, 2, 0, 2),
             z_plane=1,
             ax=ax,
@@ -258,10 +258,10 @@ def test_plot_transcript_density_z_plane_without_z_column_raises():
         ),
         npartitions=1,
     )
-    sdata = add_points_layer(
+    sdata = add_points(
         sdata,
         ddf=ddf,
-        output_layer="transcripts",
+        output_points_name="transcripts",
         coordinates={"x": "x", "y": "y"},
         transformations={"global": Identity()},
     )
@@ -270,7 +270,7 @@ def test_plot_transcript_density_z_plane_without_z_column_raises():
         plot_transcript_density(
             sdata,
             bin_size=1,
-            points_layer="transcripts",
+            points_name="transcripts",
             z_plane=0,
         )
 
@@ -290,10 +290,10 @@ def test_plot_transcript_density_bin_size_in_target_coordinate_system(tmp_path):
         ),
         npartitions=1,
     )
-    sdata = add_points_layer(
+    sdata = add_points(
         sdata,
         ddf=ddf,
-        output_layer="transcripts",
+        output_points_name="transcripts",
         coordinates={"x": "x", "y": "y"},
         transformations={"global": Identity(), "global_micron": Scale(axes=("x", "y"), scale=[0.5, 0.5])},
     )
@@ -303,7 +303,7 @@ def test_plot_transcript_density_bin_size_in_target_coordinate_system(tmp_path):
         plot_transcript_density(
             sdata,
             bin_size=1,
-            points_layer="transcripts",
+            points_name="transcripts",
             crd=(0, 3, 0, 3),
             to_coordinate_system="global_micron",
             ax=ax,

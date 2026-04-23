@@ -11,14 +11,14 @@ from loguru import logger as log
 from sklearn.cluster import KMeans
 from spatialdata import SpatialData
 
-from harpy.table._table import ProcessTable, add_table_layer
+from harpy.table._table import ProcessTable, add_table
 
 
 def kmeans(
     sdata: SpatialData,
-    labels_layer: str | list[str] | None,
-    table_layer: str,
-    output_layer: str,
+    labels_name: str | list[str] | None,
+    table_name: str,
+    output_table_name: str,
     calculate_umap: bool = True,
     rank_genes: bool = True,
     n_neighbors: int = 35,  # ignored if calculate_umap=False
@@ -32,26 +32,26 @@ def kmeans(
     **kwargs,  # keyword arguments for _kmeans
 ):
     """
-    Applies KMeans clustering on the `table_layer` of the SpatialData object with optional UMAP calculation and gene ranking.
+    Applies KMeans clustering on the `table_name` of the SpatialData object with optional UMAP calculation and gene ranking.
 
     This function executes the KMeans clustering algorithm (via :class:`~sklearn.cluster.KMeans`) on spatial data encapsulated by a SpatialData object.
     It optionally computes a UMAP (Uniform Manifold Approximation and Projection) for dimensionality reduction
     and ranks genes based on their contributions to the clustering. The clustering results, along with optional
-    UMAP and gene ranking, are added to the `sdata.tables[output_layer]` for downstream analysis.
+    UMAP and gene ranking, are added to the `sdata.tables[output_table_name]` for downstream analysis.
 
     Parameters
     ----------
     sdata
         The input SpatialData object.
-    labels_layer
-        The labels layer(s) of `sdata` used to select the cells via the region key in `sdata.tables[table_layer].obs`.
-        Note that if `output_layer` is equal to `table_layer` and overwrite is True,
-        cells in `sdata.tables[table_layer]` linked to other `labels_layer` (via the region key), will be removed from `sdata.tables[table_layer]`.
-        If a list of labels layers is provided, they will therefore be clustered together (e.g. multiple samples).
-    table_layer
-        The table layer in `sdata` on which to perform clustering.
-    output_layer
-        The output table layer in `sdata` to which table layer with results of clustering will be written.
+    labels_name
+        The labels element(s) of `sdata` used to select the cells via the region key in `sdata.tables[table_name].obs`.
+        Note that if `output_table_name` is equal to `table_name` and overwrite is True,
+        cells in `sdata.tables[table_name]` linked to other `labels_name` (via the region key), will be removed from `sdata.tables[table_name]`.
+        If a list of labels elements is provided, they will therefore be clustered together (e.g. multiple samples).
+    table_name
+        The table element in `sdata` on which to perform clustering.
+    output_table_name
+        The output table element in `sdata` to which table element with results of clustering will be written.
     calculate_umap
         If `True`, calculates a UMAP via :func:`~scanpy.tl.umap` for visualization of computed clusters.
     rank_genes
@@ -64,15 +64,15 @@ def kmeans(
     n_clusters
         The number of clusters to form.
     key_added
-        The key under which the clustering results are added to the SpatialData object (in `sdata.tables[table_layer].obs`).
+        The key under which the clustering results are added to the SpatialData object (in `sdata.tables[table_name].obs`).
     index_names_var
-        List of index names to subset in `sdata.tables[table_layer].var`. `index_positions_var` will be used if `None`.
+        List of index names to subset in `sdata.tables[table_name].var`. `index_positions_var` will be used if `None`.
     index_positions_var
-        List of integer positions to subset in `sdata.tables[table_layer].var`. Used if `index_names_var` is None.
+        List of integer positions to subset in `sdata.tables[table_name].var`. Used if `index_names_var` is None.
     random_state
         A random state for reproducibility of the clustering.
     overwrite
-        If True, overwrites the `output_layer` if it already exists in `sdata`.
+        If True, overwrites the `output_table_name` if it already exists in `sdata`.
     **kwargs
         Additional keyword arguments passed to the KMeans algorithm (:class:`~sklearn.cluster.KMeans`).
 
@@ -82,7 +82,7 @@ def kmeans(
 
     Notes
     -----
-    - The function adds a table layer, adding clustering labels, and optionally UMAP coordinates
+    - The function adds a table element, adding clustering labels, and optionally UMAP coordinates
       and gene rankings, facilitating downstream analyses and visualization.
     - Gene ranking based on cluster contributions is intended for identifying marker genes that characterize each cluster.
 
@@ -97,9 +97,9 @@ def kmeans(
     harpy.tb.preprocess_transcriptomics : preprocess transcriptomics data.
     harpy.tb.preprocess_proteomics : preprocess proteomics data.
     """
-    cluster = Cluster(sdata, labels_layer=labels_layer, table_layer=table_layer)
+    cluster = Cluster(sdata, labels_name=labels_name, table_name=table_name)
     cluster.cluster(
-        output_layer=output_layer,
+        output_table_name=output_table_name,
         cluster_callable=_kmeans,
         key_added=key_added,
         index_names_var=index_names_var,
@@ -120,9 +120,9 @@ def kmeans(
 
 def leiden(
     sdata: SpatialData,
-    labels_layer: str | list[str] | None,
-    table_layer: str,
-    output_layer: str,
+    labels_name: str | list[str] | None,
+    table_name: str,
+    output_table_name: str,
     calculate_umap: bool = True,
     calculate_neighbors: bool = True,
     rank_genes: bool = True,
@@ -137,30 +137,30 @@ def leiden(
     **kwargs,
 ):
     """
-    Applies leiden clustering on the `table_layer` of the SpatialData object with optional UMAP calculation and gene ranking.
+    Applies leiden clustering on the `table_name` of the SpatialData object with optional UMAP calculation and gene ranking.
 
     This function executes the leiden clustering algorithm (via `sc.tl.leiden`) on spatial data encapsulated by a SpatialData object.
     It optionally computes a UMAP (Uniform Manifold Approximation and Projection) for dimensionality reduction
     and ranks genes based on their contributions to the clustering. The clustering results, along with optional
-    UMAP and gene ranking, are added to the `sdata.tables[output_layer]` for downstream analysis.
+    UMAP and gene ranking, are added to the `sdata.tables[output_table_name]` for downstream analysis.
 
     Parameters
     ----------
     sdata
         The input SpatialData object.
-    labels_layer
-        The labels layer(s) of `sdata` used to select the cells via the region key in `sdata.tables[table_layer].obs`.
-        Note that if `output_layer` is equal to `table_layer` and `overwrite` is `True`,
-        cells in `sdata.tables[table_layer]` linked to other `labels_layer` (via the region key), will be removed from `sdata.tables[table_layer]`.
-        If a list of labels layers is provided, they will therefore be clustered together (e.g. multiple samples).
-    table_layer:
-        The table layer in `sdata` on which to perform clustering on.
-    output_layer
-        The output table layer in `sdata` to which table layer with results of clustering will be written.
+    labels_name
+        The labels element(s) of `sdata` used to select the cells via the region key in `sdata.tables[table_name].obs`.
+        Note that if `output_table_name` is equal to `table_name` and `overwrite` is `True`,
+        cells in `sdata.tables[table_name]` linked to other `labels_name` (via the region key), will be removed from `sdata.tables[table_name]`.
+        If a list of labels elements is provided, they will therefore be clustered together (e.g. multiple samples).
+    table_name:
+        The table element in `sdata` on which to perform clustering on.
+    output_table_name
+        The output table element in `sdata` to which table element with results of clustering will be written.
     calculate_umap
         If `True`, calculates a UMAP via :func:`~scanpy.tl.umap` for visualization of computed clusters.
     calculate_neighbors
-        If `True`, calculates neighbors via :func:`~scanpy.pp.neighbors` required for leiden clustering. Set to False if neighbors are already calculated for `sdata.tables[table_layer]`.
+        If `True`, calculates neighbors via :func:`~scanpy.pp.neighbors` required for leiden clustering. Set to False if neighbors are already calculated for `sdata.tables[table_name]`.
     rank_genes
         If `True`, ranks genes based on their contributions to the clusters via :func:`~scanpy.tl.rank_genes_groups` with default parameters.
         Note that :func:`~scanpy.tl.rank_genes_groups` will be run on the `.raw` attribute of the :class:`~anndata.AnnData` table, if `.raw` is not `None`.
@@ -171,15 +171,15 @@ def leiden(
     resolution
         Cluster resolution passed to :func:`~scanpy.tl.leiden`.
     key_added
-        The key under which the clustering results are added to the SpatialData object (in `sdata.tables[table_layer].obs`).
+        The key under which the clustering results are added to the SpatialData object (in `sdata.tables[table_name].obs`).
     index_names_var
-        List of index names to subset in `sdata.tables[table_layer].var`. `index_positions_var` will be used if `None`.
+        List of index names to subset in `sdata.tables[table_name].var`. `index_positions_var` will be used if `None`.
     index_positions_var
-        List of integer positions to subset in `sdata.tables[table_layer].var`. Used if `index_names_var` is `None`.
+        List of integer positions to subset in `sdata.tables[table_name].var`. Used if `index_names_var` is `None`.
     random_state
         A random state for reproducibility of the clustering.
     overwrite
-        If `True`, overwrites the `output_layer` if it already exists in `sdata`.
+        If `True`, overwrites the `output_table_name` if it already exists in `sdata`.
     **kwargs
         Additional keyword arguments passed to the leiden clustering algorithm (`sc.tl.leiden`).
 
@@ -204,9 +204,9 @@ def leiden(
     harpy.tb.preprocess_transcriptomics : preprocess transcriptomics data.
     harpy.tb.preprocess_proteomics : preprocess proteomics data.
     """
-    cluster = Cluster(sdata, labels_layer=labels_layer, table_layer=table_layer)
+    cluster = Cluster(sdata, labels_name=labels_name, table_name=table_name)
     sdata = cluster.cluster(
-        output_layer=output_layer,
+        output_table_name=output_table_name,
         cluster_callable=_leiden,
         key_added=key_added,
         index_names_var=index_names_var,
@@ -259,7 +259,7 @@ class Cluster(ProcessTable):
 
     def cluster(
         self,
-        output_layer: str,
+        output_table_name: str,
         cluster_callable: Callable = _leiden,  # callable that takes in adata and returns adata with adata.obs[ "key_added" ] column added.
         key_added: str = "leiden",
         index_names_var: Iterable[str] | None = None,
@@ -272,7 +272,7 @@ class Cluster(ProcessTable):
         overwrite: bool = False,
         **kwargs,
     ) -> SpatialData:
-        """Run the preprocessing, optional neighborhood graph computation, optional UMAP computation, and clustering on 'sdata.tables[table_layer]'."""
+        """Run the preprocessing, optional neighborhood graph computation, optional UMAP computation, and clustering on 'sdata.tables[table_name]'."""
         adata = self._get_adata(index_names_var=index_names_var, index_positions_var=index_positions_var)
 
         if calculate_neighbors:
@@ -299,11 +299,11 @@ class Cluster(ProcessTable):
         if rank_genes:
             sc.tl.rank_genes_groups(adata, copy=False, layer=None, groupby=key_added, method="wilcoxon")
 
-        self.sdata = add_table_layer(
+        self.sdata = add_table(
             self.sdata,
             adata=adata,
-            output_layer=output_layer,
-            region=self.labels_layer,
+            output_table_name=output_table_name,
+            region=self.labels_name,
             instance_key=self.instance_key,
             region_key=self.region_key,
             overwrite=overwrite,

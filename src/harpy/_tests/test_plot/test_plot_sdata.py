@@ -21,16 +21,16 @@ matplotlib.use("Agg")  # to make sure plots do not pop up
 
 def _prep_sdata(
     sdata: SpatialData,
-    labels_layer: str = "blobs_multiscale_labels",
-    table_layer: str = "other_table",
+    labels_name: str = "blobs_multiscale_labels",
+    table_name: str = "other_table",
     obs_column: str | None = "category",
     instance_key: str = _INSTANCE_KEY,
     region_key: str = _REGION_KEY,
 ) -> SpatialData:
-    """Add categorical column to table `table_layer` that is annotated by `labels_layer`."""
+    """Add categorical column to table `table_name` that is annotated by `labels_name`."""
     RNG = np.random.default_rng(seed=42)
 
-    instances = get_element_instances(sdata[labels_layer])
+    instances = get_element_instances(sdata[labels_name])
     n_obs = len(instances)
     adata = AnnData(
         RNG.normal(size=(n_obs, 10)),
@@ -39,30 +39,30 @@ def _prep_sdata(
     adata.obs[instance_key] = instances.values
     adata.obs[obs_column] = RNG.choice(["a", "b", "c"], size=adata.n_obs)
     adata.obs[obs_column][:3] = ["a", "b", "c"]
-    adata.obs[region_key] = labels_layer
+    adata.obs[region_key] = labels_name
     table = TableModel.parse(
         adata=adata,
         region_key=region_key,
         instance_key=instance_key,
-        region=labels_layer,
+        region=labels_name,
     )
-    sdata[table_layer] = table
-    sdata[table_layer].obs[obs_column] = sdata[table_layer].obs[obs_column].astype("category")
+    sdata[table_name] = table
+    sdata[table_name].obs[obs_column] = sdata[table_name].obs[obs_column].astype("category")
 
-    sdata[table_layer].uns[f"{obs_column}_colors"] = ["#800080", "#008000", "#FFFF00"]  # purple, green, yellow
+    sdata[table_name].uns[f"{obs_column}_colors"] = ["#800080", "#008000", "#FFFF00"]  # purple, green, yellow
     # placeholder, otherwise "category_colors" will be ignored by spatialdata
-    sdata[table_layer].uns[obs_column] = "__value__"
+    sdata[table_name].uns[obs_column] = "__value__"
     return sdata
 
 
 @pytest.mark.skipif(not importlib.util.find_spec("spatialdata_plot"), reason="requires the spatialdata-plot library")
 def test_plot_sdata_image(sdata: SpatialData, tmp_path):
-    img_layer = "blobs_multiscale_image"
+    image_name = "blobs_multiscale_image"
 
     # 1) plot one channel
     channel_name = 0  # plot channel with name 0
 
-    se = _get_spatial_element(sdata, layer=img_layer)
+    se = _get_spatial_element(sdata, element_name=image_name)
     channels = se.c.data
 
     c_id = np.where(channels == channel_name)[0].item()
@@ -86,7 +86,7 @@ def test_plot_sdata_image(sdata: SpatialData, tmp_path):
 
     plot_sdata(
         sdata,
-        img_layer=img_layer,
+        image_name=image_name,
         channel=channel_name,
         render_images_kwargs=render_images_kwargs,
         show_kwargs=show_kwargs,
@@ -100,7 +100,7 @@ def test_plot_sdata_image(sdata: SpatialData, tmp_path):
 
 @pytest.mark.skipif(not importlib.util.find_spec("spatialdata_plot"), reason="requires the spatialdata-plot library")
 def test_plot_sdata_image_multichannel(sdata: SpatialData, tmp_path):
-    img_layer = "blobs_multiscale_image"
+    image_name = "blobs_multiscale_image"
     channel_name = [0, 1, 2]
     dpi = 100
     # https://matplotlib.org/stable/gallery/color/named_colors.html -> list of colors that can be passed to palette
@@ -121,7 +121,7 @@ def test_plot_sdata_image_multichannel(sdata: SpatialData, tmp_path):
 
     plot_sdata(
         sdata,
-        img_layer=img_layer,
+        image_name=image_name,
         channel=channel_name,
         render_images_kwargs=render_images_kwargs,
         show_kwargs=show_kwargs,
@@ -133,7 +133,7 @@ def test_plot_sdata_image_multichannel(sdata: SpatialData, tmp_path):
 
 @pytest.mark.skipif(not importlib.util.find_spec("spatialdata_plot"), reason="requires the spatialdata-plot library")
 def test_plot_sdata_image_multichannel_multi_axes(sdata: SpatialData, tmp_path):
-    img_layer = "blobs_multiscale_image"
+    image_name = "blobs_multiscale_image"
     channel_name = [0, 1, 2]
     dpi = 100
 
@@ -153,7 +153,7 @@ def test_plot_sdata_image_multichannel_multi_axes(sdata: SpatialData, tmp_path):
 
     plot_sdata(
         sdata,
-        img_layer=img_layer,
+        image_name=image_name,
         channel=channel_name[0],
         render_images_kwargs=render_images_kwargs,
         show_kwargs=show_kwargs,
@@ -174,7 +174,7 @@ def test_plot_sdata_image_multichannel_multi_axes(sdata: SpatialData, tmp_path):
 
     plot_sdata(
         sdata,
-        img_layer=img_layer,
+        image_name=image_name,
         channel=channel_name[1],
         render_images_kwargs=render_images_kwargs,
         show_kwargs=show_kwargs,
@@ -186,8 +186,8 @@ def test_plot_sdata_image_multichannel_multi_axes(sdata: SpatialData, tmp_path):
 
 @pytest.mark.skipif(not importlib.util.find_spec("spatialdata_plot"), reason="requires the spatialdata-plot library")
 def test_plot_sdata_label(sdata: SpatialData, tmp_path):
-    img_layer = "blobs_multiscale_image"
-    labels_layer = "blobs_multiscale_labels"
+    image_name = "blobs_multiscale_image"
+    labels_name = "blobs_multiscale_labels"
     channel_name = 0
     dpi = 100
 
@@ -213,8 +213,8 @@ def test_plot_sdata_label(sdata: SpatialData, tmp_path):
     plot_sdata(
         sdata,
         channel=channel_name,
-        img_layer=img_layer,
-        labels_layer=labels_layer,
+        image_name=image_name,
+        labels_name=labels_name,
         render_images_kwargs=render_images_kwargs,
         render_labels_kwargs=render_labels_kwargs,
         show_kwargs=show_kwargs,
@@ -230,8 +230,8 @@ def test_plot_sdata_label(sdata: SpatialData, tmp_path):
     plot_sdata(
         sdata,
         channel=channel_name,
-        img_layer=img_layer,
-        labels_layer=labels_layer,
+        image_name=image_name,
+        labels_name=labels_name,
         crd=[0, 200, 0, 200],
         render_images_kwargs=render_images_kwargs,
         render_labels_kwargs=render_labels_kwargs,
@@ -244,17 +244,17 @@ def test_plot_sdata_label(sdata: SpatialData, tmp_path):
 
 @pytest.mark.skipif(not importlib.util.find_spec("spatialdata_plot"), reason="requires the spatialdata-plot library")
 def test_plot_sdata_label_categorical(sdata: SpatialData, tmp_path):
-    img_layer = "blobs_multiscale_image"
-    labels_layer = "blobs_multiscale_labels"
-    table_layer = "other_table"
+    image_name = "blobs_multiscale_image"
+    labels_name = "blobs_multiscale_labels"
+    table_name = "other_table"
     obs_column_name = "my_category"
     channel_name = 0
     dpi = 100
 
     sdata = _prep_sdata(
         sdata,
-        labels_layer=labels_layer,
-        table_layer=table_layer,
+        labels_name=labels_name,
+        table_name=table_name,
         obs_column=obs_column_name,
     )
 
@@ -280,9 +280,9 @@ def test_plot_sdata_label_categorical(sdata: SpatialData, tmp_path):
     plot_sdata(
         sdata,
         channel=channel_name,
-        img_layer=img_layer,
-        labels_layer=labels_layer,
-        table_layer=table_layer,
+        image_name=image_name,
+        labels_name=labels_name,
+        table_name=table_name,
         color=obs_column_name,
         render_images_kwargs=render_images_kwargs,
         render_labels_kwargs=render_labels_kwargs,
@@ -299,9 +299,9 @@ def test_plot_sdata_label_categorical(sdata: SpatialData, tmp_path):
     plot_sdata(
         sdata,
         channel=channel_name,
-        img_layer=img_layer,
-        labels_layer=labels_layer,
-        table_layer=table_layer,
+        image_name=image_name,
+        labels_name=labels_name,
+        table_name=table_name,
         color=obs_column_name,
         crd=[0, 200, 0, 200],
         render_images_kwargs=render_images_kwargs,
@@ -315,17 +315,17 @@ def test_plot_sdata_label_categorical(sdata: SpatialData, tmp_path):
 
 @pytest.mark.skipif(not importlib.util.find_spec("spatialdata_plot"), reason="requires the spatialdata-plot library")
 def test_plot_sdata_label_numerical(sdata: SpatialData, tmp_path):
-    img_layer = "blobs_multiscale_image"
-    labels_layer = "blobs_multiscale_labels"
-    table_layer = "other_table"
+    image_name = "blobs_multiscale_image"
+    labels_name = "blobs_multiscale_labels"
+    table_name = "other_table"
     var_column_name = "2"
     channel_name = 0
     dpi = 100
 
     sdata = _prep_sdata(
         sdata,
-        labels_layer=labels_layer,
-        table_layer=table_layer,
+        labels_name=labels_name,
+        table_name=table_name,
     )
 
     fig, ax = plt.subplots()
@@ -350,9 +350,9 @@ def test_plot_sdata_label_numerical(sdata: SpatialData, tmp_path):
     plot_sdata(
         sdata,
         channel=channel_name,
-        img_layer=img_layer,
-        labels_layer=labels_layer,
-        table_layer=table_layer,
+        image_name=image_name,
+        labels_name=labels_name,
+        table_name=table_name,
         color=var_column_name,
         render_images_kwargs=render_images_kwargs,
         render_labels_kwargs=render_labels_kwargs,
@@ -369,9 +369,9 @@ def test_plot_sdata_label_numerical(sdata: SpatialData, tmp_path):
     plot_sdata(
         sdata,
         channel=channel_name,
-        img_layer=img_layer,
-        labels_layer=labels_layer,
-        table_layer=table_layer,
+        image_name=image_name,
+        labels_name=labels_name,
+        table_name=table_name,
         color=var_column_name,
         crd=[0, 200, 0, 200],
         render_images_kwargs=render_images_kwargs,
@@ -386,32 +386,32 @@ def test_plot_sdata_label_numerical(sdata: SpatialData, tmp_path):
 def test_plot_sdata_raises(
     sdata: SpatialData,
 ):
-    img_layer = "blobs_multiscale_image"
-    labels_layer = "blobs_labels"
-    table_layer = "table"
+    image_name = "blobs_multiscale_image"
+    labels_name = "blobs_labels"
+    table_name = "table"
     with pytest.raises(
         ValueError,
         match=re.escape(
-            f"Please specify a labels layer (which is annotated by the table layer '{table_layer}') if 'table_layer' is specified."
+            f"Please specify a labels element (which is annotated by the table element '{table_name}') if 'table_name' is specified."
         ),
     ):
         plot_sdata(
             sdata,
-            img_layer=img_layer,
-            labels_layer=None,
-            table_layer=table_layer,
+            image_name=image_name,
+            labels_name=None,
+            table_name=table_name,
             channel=0,
         )
     with pytest.raises(
         ValueError,
-        match=re.escape("Please specify a 'table_layer' if 'color' is specified."),
+        match=re.escape("Please specify a 'table_name' if 'color' is specified."),
     ):
         plot_sdata(
             sdata,
-            img_layer=img_layer,
-            labels_layer=labels_layer,
+            image_name=image_name,
+            labels_name=labels_name,
             color="channel_0_sum",
-            table_layer=None,
+            table_name=None,
             channel=0,
         )
     with pytest.raises(
@@ -421,32 +421,32 @@ def test_plot_sdata_raises(
         show_kwargs = {"coordinate_systems": "global"}
         plot_sdata(
             sdata,
-            img_layer=img_layer,
+            image_name=image_name,
             show_kwargs=show_kwargs,
             channel=0,
         )
     with pytest.raises(ValueError, match="After applying the bounding-box query with coordinates"):
         plot_sdata(
             sdata,
-            img_layer=img_layer,
-            labels_layer=labels_layer,
+            image_name=image_name,
+            labels_name=labels_name,
             channel=0,
             crd=[2000, 3000, 2000, 3000],
         )
-    render_labels_kwargs = {"table_name": labels_layer}
-    with pytest.raises(ValueError, match="Please specify 'table_name' via the keyword argument 'table_layer'"):
+    render_labels_kwargs = {"table_name": labels_name}
+    with pytest.raises(ValueError, match="Please specify 'table_name' via the keyword argument 'table_name'"):
         plot_sdata(
             sdata,
-            img_layer=img_layer,
-            labels_layer=labels_layer,
+            image_name=image_name,
+            labels_name=labels_name,
             render_labels_kwargs=render_labels_kwargs,
             channel=0,
         )
-    with pytest.raises(ValueError, match="Please specify a 'table_layer' if 'color' is specified"):
+    with pytest.raises(ValueError, match="Please specify a 'table_name' if 'color' is specified"):
         plot_sdata(
             sdata,
-            img_layer=img_layer,
-            labels_layer=labels_layer,
+            image_name=image_name,
+            labels_name=labels_name,
             color="channel_0_sum",
             render_labels_kwargs=render_labels_kwargs,
             channel=0,
@@ -455,24 +455,24 @@ def test_plot_sdata_raises(
     with pytest.raises(ValueError, match="Please specify 'color' via the keyword argument 'color'"):
         plot_sdata(
             sdata,
-            img_layer=img_layer,
-            labels_layer=labels_layer,
-            table_layer=table_layer,
+            image_name=image_name,
+            labels_name=labels_name,
+            table_name=table_name,
             render_labels_kwargs=render_labels_kwargs,
             channel=0,
         )
-    labels_layer = "blobs_multiscale_labels"
-    table_layer = "table"
+    labels_name = "blobs_multiscale_labels"
+    table_name = "table"
     with pytest.raises(
         ValueError,
-        match=f"The labels layer '{labels_layer}' does not seem to be annotated by the table layer '{table_layer}'",
+        match=f"The labels element '{labels_name}' does not seem to be annotated by the table element '{table_name}'",
     ):
         plot_sdata(
             sdata,
-            img_layer=img_layer,
-            labels_layer=labels_layer,
+            image_name=image_name,
+            labels_name=labels_name,
             color="channel_0_sum",
-            table_layer=table_layer,
+            table_name=table_name,
             render_labels_kwargs=render_labels_kwargs,
             channel=0,
         )
@@ -488,16 +488,16 @@ def test_plot_sdata_raises(
     ],
 )
 def test_plot_sdata_genes(sdata: SpatialData, tmp_path, genes):
-    points_layer = "blobs_points"
-    img_layer = "blobs_image"
+    points_name = "blobs_points"
+    image_name = "blobs_image"
     dpi = 200
 
     fig, ax = plt.subplots()
 
     plot_sdata_genes(
         sdata,
-        points_layer=points_layer,
-        img_layer=img_layer,
+        points_name=points_name,
+        image_name=image_name,
         name_gene_column="genes",
         genes=genes,
         ax=ax,
@@ -517,16 +517,16 @@ def test_plot_sdata_genes(sdata: SpatialData, tmp_path, genes):
     ],
 )
 def test_plot_sdata_genes_frac(sdata: SpatialData, tmp_path, frac):
-    points_layer = "blobs_points"
-    img_layer = "blobs_image"
+    points_name = "blobs_points"
+    image_name = "blobs_image"
     dpi = 200
 
     fig, ax = plt.subplots()
 
     plot_sdata_genes(
         sdata,
-        points_layer=points_layer,
-        img_layer=img_layer,
+        points_name=points_name,
+        image_name=image_name,
         name_gene_column="genes",
         genes=None,
         frac=frac,
@@ -547,16 +547,16 @@ def test_plot_sdata_genes_frac(sdata: SpatialData, tmp_path, frac):
     ],
 )
 def test_plot_sdata_genes_crop(sdata: SpatialData, tmp_path, crd):
-    points_layer = "blobs_points"
-    img_layer = "blobs_image"
+    points_name = "blobs_points"
+    image_name = "blobs_image"
     dpi = 200
 
     fig, ax = plt.subplots()
 
     plot_sdata_genes(
         sdata,
-        points_layer=points_layer,
-        img_layer=img_layer,
+        points_name=points_name,
+        image_name=image_name,
         name_gene_column="genes",
         crd=crd,
         genes=["gene_a", "gene_b"],
@@ -569,39 +569,39 @@ def test_plot_sdata_genes_crop(sdata: SpatialData, tmp_path, crd):
 
 
 def test_plot_sdata_genes_name_raises(sdata: SpatialData):
-    points_layer = "blobs_points"
-    img_layer = "blobs_image"
+    points_name = "blobs_points"
+    image_name = "blobs_image"
 
     name_gene_column = "genes_wrong"
 
     with pytest.raises(ValueError, match=f"Column '{name_gene_column}' not found"):
         plot_sdata_genes(
             sdata,
-            points_layer=points_layer,
-            img_layer=img_layer,
+            points_name=points_name,
+            image_name=image_name,
             name_gene_column=name_gene_column,
         )
 
 
 def test_plot_sdata_genes_show_kwargs_raises(sdata: SpatialData):
-    points_layer = "blobs_points"
-    img_layer = "blobs_image"
+    points_name = "blobs_points"
+    image_name = "blobs_image"
 
     show_kwargs = {"coordinate_systems": "global"}
 
     with pytest.raises(ValueError, match="'coordinate_systems' found as key in 'show_kwargs'"):
         plot_sdata_genes(
             sdata,
-            points_layer=points_layer,
-            img_layer=img_layer,
+            points_name=points_name,
+            image_name=image_name,
             name_gene_column="genes",
             show_kwargs=show_kwargs,
         )
 
 
 def test_plot_sdata_genes_palette(sdata: SpatialData, tmp_path):
-    points_layer = "blobs_points"
-    img_layer = "blobs_image"
+    points_name = "blobs_points"
+    image_name = "blobs_image"
 
     dpi = 200
 
@@ -609,8 +609,8 @@ def test_plot_sdata_genes_palette(sdata: SpatialData, tmp_path):
 
     plot_sdata_genes(
         sdata,
-        points_layer=points_layer,
-        img_layer=img_layer,
+        points_name=points_name,
+        image_name=image_name,
         name_gene_column="genes",
         genes=["gene_a", "gene_b"],
         palette=["pink", "red"],
@@ -621,14 +621,14 @@ def test_plot_sdata_genes_palette(sdata: SpatialData, tmp_path):
 
 
 def test_plot_sdata_genes_palette_raises(sdata: SpatialData, tmp_path):
-    points_layer = "blobs_points"
-    img_layer = "blobs_image"
+    points_name = "blobs_points"
+    image_name = "blobs_image"
 
     with pytest.raises(ValueError, match="The number of genes specified via 'genes' "):
         plot_sdata_genes(
             sdata,
-            points_layer=points_layer,
-            img_layer=img_layer,
+            points_name=points_name,
+            image_name=image_name,
             name_gene_column="genes",
             genes=["gene_a", "gene_b"],
             palette=["pink"],

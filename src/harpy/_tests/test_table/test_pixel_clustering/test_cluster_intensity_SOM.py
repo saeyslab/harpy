@@ -15,16 +15,16 @@ def test_cluster_intensity(sdata_blobs):
 
     batch_model = fs.models.BatchFlowSOMEstimator
 
-    img_layer = "blobs_image"
+    image_name = "blobs_image"
     channels = ["lineage_0", "lineage_1", "lineage_5", "lineage_9"]
     fraction = 0.1
 
     with dask.config.set(scheduler="threads"):
         sdata_blobs, fsom, mapping = flowsom(
             sdata_blobs,
-            img_layer=[img_layer],
-            output_layer_clusters=[f"{img_layer}_clusters"],
-            output_layer_metaclusters=[f"{img_layer}_metaclusters"],
+            image_name=[image_name],
+            output_cluster_labels_name=[f"{image_name}_clusters"],
+            output_metacluster_labels_name=[f"{image_name}_metaclusters"],
             channels=channels,
             fraction=fraction,
             n_clusters=20,
@@ -37,9 +37,9 @@ def test_cluster_intensity(sdata_blobs):
     sdata_blobs = cluster_intensity_SOM(
         sdata_blobs,
         mapping=mapping,
-        img_layer=img_layer,
-        labels_layer=f"{img_layer}_clusters",
-        output_layer="counts_clusters",
+        image_name=image_name,
+        labels_name=f"{image_name}_clusters",
+        output_table_name="counts_clusters",
         overwrite=True,
     )
 

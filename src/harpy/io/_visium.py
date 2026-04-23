@@ -25,7 +25,7 @@ def visium(
     """
     Read *10x Genomics* Visium formatted dataset.
 
-    Wrapper around `spatialdata.io.readers.visium.visium`, but with the resulting table annotated by a labels layer.
+    Wrapper around `spatialdata.io.readers.visium.visium`, but with the resulting table annotated by a labels element.
 
     .. see also::
 
@@ -56,13 +56,13 @@ def visium(
         fullres_image_file=fullres_image_file,
     )
 
-    for table_layer in [*sdata.tables]:
-        adata = sdata[table_layer]
+    for table_name in [*sdata.tables]:
+        adata = sdata[table_name]
         adata.var_names_make_unique()
         adata.X = adata.X.tocsc()
 
-        _old_instance_key = sdata[table_layer].uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY]
-        _old_region_key = sdata[table_layer].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]
+        _old_instance_key = sdata[table_name].uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY]
+        _old_region_key = sdata[table_name].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]
         adata.obs[region_key] = pd.Categorical(adata.obs[_old_region_key].astype(str) + "_labels")
         if adata.obs[_old_instance_key].astype(int).min() == 0:  # Make sure index starts from 1
             adata.obs[instance_key] = adata.obs[_old_instance_key].astype(int) + 1
@@ -78,7 +78,7 @@ def visium(
         )
 
         assert len(sdata.shapes[dataset_id]) == len(adata), (
-            f"Shapes layer '{dataset_id}' and corresponding table '{table_layer}' should have same length."
+            f"Shapes element '{dataset_id}' and corresponding table '{table_name}' should have same length."
         )
 
         sdata.shapes[dataset_id].index = (
@@ -94,26 +94,26 @@ def visium(
 
         # Convert Points to Polygons
         if "radius" not in sdata.shapes[dataset_id].columns:
-            raise ValueError("Shapes layer is missing 'radius' column required for polygon buffering.")
+            raise ValueError("Shapes element is missing 'radius' column required for polygon buffering.")
 
         radius = sdata.shapes[dataset_id]["radius"].mean()
         polygons = sdata.shapes[dataset_id].buffer(radius, cap_style="round")
-        sdata = hp.sh.add_shapes_layer(
-            sdata, gpd.GeoDataFrame(geometry=polygons), output_layer=dataset_id, overwrite=True
+        sdata = hp.sh.add_shapes(
+            sdata, gpd.GeoDataFrame(geometry=polygons), output_shapes_name=dataset_id, overwrite=True
         )
 
-        # Create labels layer
+        # Create labels element
         sdata = hp.im.rasterize(
             sdata,
-            shapes_layer=dataset_id,
-            output_layer=f"{dataset_id}_labels",
+            shapes_name=dataset_id,
+            output_labels_name=f"{dataset_id}_labels",
             chunks=5000,
             overwrite=True,
         )
 
-        del sdata[table_layer]
+        del sdata[table_name]
 
-        sdata[table_layer] = adata
+        sdata[table_name] = adata
 
     if output is not None:
         sdata.write(output)

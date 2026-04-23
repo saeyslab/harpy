@@ -15,7 +15,7 @@ from spatialdata.models import TableModel
 
 from harpy.image._image import _get_translation, _precondition, get_dataarray
 from harpy.table._regionprops import _calculate_regionprop_features
-from harpy.table._table import ProcessTable, add_table_layer
+from harpy.table._table import ProcessTable, add_table
 from harpy.utils._aggregate import RasterAggregator, _get_mask_area
 from harpy.utils._keys import _CELL_INDEX, _FEATURE_MATRICES_KEY, _INSTANCE_KEY, _REGION_KEY
 from harpy.utils.utils import _da_unique, _make_list
@@ -40,22 +40,22 @@ _UNSUPPORTED_3D_MORPHOLOGY_FEATURES = ("eccentricity", "perimeter", "perim_squar
 
 @dataclass(frozen=True)
 class _FeaturePair:
-    labels_layer: str
-    img_layer: str | None
+    labels_name: str
+    image_name: str | None
     coordinate_system: str
 
 
 def add_feature_matrix(
     sdata: SpatialData,
-    labels_layer: str | list[str],
-    img_layer: str | list[str] | None,
+    labels_name: str | list[str],
+    image_name: str | list[str] | None,
     *,
-    table_layer: str | None = None,
-    output_layer: str | None = None,
+    table_name: str | None = None,
+    output_table_name: str | None = None,
     feature_key: str,
     features: tuple[str, ...] | list[str],
     channels: int | str | list[int] | list[str] | None = None,
-    overwrite_output_layer: bool = False,
+    overwrite_output_table: bool = False,
     overwrite_feature_key: bool = False,
     to_coordinate_system: str | list[str] = "global",
     region_key: str = _REGION_KEY,
@@ -68,7 +68,7 @@ def add_feature_matrix(
     Compute per-instance feature matrices from labels and optional image data.
 
     This function computes requested object-level features from one or more
-    labels layers and writes the resulting numeric matrix into
+    labels elements and writes the resulting numeric matrix into
     `.obsm[feature_key]` of a target table. Companion metadata describing
     the matrix schema and inputs is stored in
     `.uns[feature_matrices_key][feature_key]`.
@@ -79,11 +79,11 @@ def add_feature_matrix(
 
     The function supports two modes:
 
-    - If `table_layer is None`, a new annotated table is created first and
-      `output_layer` is required.
-    - If `table_layer` is provided, the existing table is updated in place by
-      writing or replacing `obsm[feature_key]` for the selected labels layer or
-      layers.
+    - If `table_name is None`, a new annotated table is created first and
+      `output_table_name` is required.
+    - If `table_name` is provided, the existing table is updated in place by
+      writing or replacing `obsm[feature_key]` for the selected labels element or
+      elements.
 
     Supported intensity features are `"sum"`, `"mean"`, `"var"`, `"min"`,
     `"max"`, `"kurtosis"`, and `"skew"`. Supported morphology features are
@@ -97,21 +97,21 @@ def add_feature_matrix(
     ----------
     sdata
         The input SpatialData object.
-    labels_layer
-        Labels layer or layers from which object features are computed. When a
-        list is provided, one feature matrix block is computed per labels layer
+    labels_name
+        Labels element or elements from which object features are computed. When a
+        list is provided, one feature matrix block is computed per labels element
         and aligned onto the target table using `region_key` and
         `instance_key`.
-    img_layer
-        Image layer or layers used for intensity-derived features. This is
+    image_name
+        Image element or elements used for intensity-derived features. This is
         required if any requested feature is intensity-derived. If a list is
-        provided, it must either have length 1 or match `labels_layer`. If only
-        morphology features are requested, a provided `img_layer` is ignored.
-    table_layer
-        Existing table layer in `sdata.tables` to update. If `None`, a new
-        annotated table is created and written to `output_layer`.
-    output_layer
-        Name of the output table layer to create when `table_layer is None`.
+        provided, it must either have length 1 or match `labels_name`. If only
+        morphology features are requested, a provided `image_name` is ignored.
+    table_name
+        Existing table element in `sdata.tables` to update. If `None`, a new
+        annotated table is created and written to `output_table_name`.
+    output_table_name
+        Name of the output table element to create when `table_name is None`.
         This parameter is not allowed when updating an existing table.
     feature_key
         Key used to store the computed feature matrix in `adata.obsm`.
@@ -121,18 +121,18 @@ def add_feature_matrix(
     channels
         Channel selection for intensity-derived features. Channels can be given
         by index, by name, or as a list of indices or names. If `None`, all
-        channels of the image layer are used.
-    overwrite_output_layer
-        If `True`, overwrite `output_layer` when creating a new table.
+        channels of the image element are used.
+    overwrite_output_table
+        If `True`, overwrite `output_table_name` when creating a new table.
     overwrite_feature_key
         If `True`, replace an existing `adata.obsm[feature_key]` when updating
         an existing table.
     to_coordinate_system
-        Coordinate system or systems used when pairing image and labels layers.
+        Coordinate system or systems used when pairing image and labels elements.
         If a list is provided, it must either have length 1 or match
-        `labels_layer`.
+        `labels_name`.
     region_key
-        Column name in `adata.obs` identifying the source labels layer. This is
+        Column name in `adata.obs` identifying the source labels element. This is
         used when creating a new table and for aligning computed rows onto a
         target table.
     instance_key
@@ -174,13 +174,13 @@ def add_feature_matrix(
 
         sdata = hp.tb.add_feature_matrix(
             sdata,
-            labels_layer="cell_labels_global",
-            img_layer="morphology_focus_global",
-            table_layer=None,
-            output_layer="table_cell_features",
+            labels_name="cell_labels_global",
+            image_name="morphology_focus_global",
+            table_name=None,
+            output_table_name="table_cell_features",
             feature_key="cell_features",
             features=["mean", "area"],
-            overwrite_output_layer=True,
+            overwrite_output_table=True,
         )
 
         sdata["table_cell_features"].obsm["cell_features"].shape
@@ -196,59 +196,59 @@ def add_feature_matrix(
         )
 
     pair_specs = _normalize_feature_pairs(
-        labels_layer=labels_layer,
-        img_layer=img_layer,
+        labels_name=labels_name,
+        image_name=image_name,
         to_coordinate_system=to_coordinate_system,
         needs_image=bool(intensity_features),
     )
-    labels_layers = [pair.labels_layer for pair in pair_specs]
+    labels_names = [pair.labels_name for pair in pair_specs]
 
-    if table_layer is None:
-        if output_layer is None:
-            raise ValueError("Parameter 'output_layer' is required when 'table_layer' is None.")
+    if table_name is None:
+        if output_table_name is None:
+            raise ValueError("Parameter 'output_table_name' is required when 'table_name' is None.")
         if overwrite_feature_key:
             raise ValueError(
                 "Parameter 'overwrite_feature_key' can only be used when updating an existing table, "
-                "which requires setting 'table_layer' to a table name."
+                "which requires setting 'table_name' to a table name."
             )
-        if output_layer in sdata.tables and not overwrite_output_layer:
+        if output_table_name in sdata.tables and not overwrite_output_table:
             raise ValueError(
-                f"Table layer '{output_layer}' already exists in 'sdata.tables'. "
-                "Set 'overwrite_output_layer=True' to replace it."
+                f"Table element '{output_table_name}' already exists in 'sdata.tables'. "
+                "Set 'overwrite_output_table=True' to replace it."
             )
         sdata = _create_empty_feature_table(
             sdata,
-            labels_layers=labels_layers,
-            output_layer=output_layer,
+            labels_name=labels_names,
+            output_table_name=output_table_name,
             region_key=region_key,
             instance_key=instance_key,
-            overwrite=overwrite_output_layer,
+            overwrite=overwrite_output_table,
         )
-        target_table_layer = output_layer
+        target_table_name = output_table_name
     else:
-        if output_layer is not None:
+        if output_table_name is not None:
             raise ValueError(
-                "Parameter 'output_layer' can only be used when 'table_layer' is None, "
+                "Parameter 'output_table_name' can only be used when 'table_name' is None, "
                 "because that is the mode where 'add_feature_matrix' creates a new table."
             )
-        if overwrite_output_layer:
+        if overwrite_output_table:
             raise ValueError(
-                "Parameter 'overwrite_output_layer' can only be used when creating a new table, "
-                "which requires setting 'table_layer=None'."
+                "Parameter 'overwrite_output_table' can only be used when creating a new table, "
+                "which requires setting 'table_name=None'."
             )
-        target_table_layer = table_layer
-        # Validate that the target table exists, annotates the requested labels layers,
+        target_table_name = table_name
+        # Validate that the target table exists, annotates the requested labels elements,
         # and uses unique instance ids within each selected region.
-        ProcessTable(sdata, table_layer=target_table_layer, labels_layer=labels_layers)
-        adata = sdata.tables[target_table_layer]
+        ProcessTable(sdata, table_name=target_table_name, labels_name=labels_names)
+        adata = sdata.tables[target_table_name]
         region_key = adata.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]
         instance_key = adata.uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY]
 
-    adata = sdata.tables[target_table_layer]
+    adata = sdata.tables[target_table_name]
 
     if feature_key in adata.obsm and not overwrite_feature_key:
         raise ValueError(
-            f"Feature matrix '{feature_key}' already exists in 'sdata.tables[{target_table_layer!r}].obsm'. "
+            f"Feature matrix '{feature_key}' already exists in 'sdata.tables[{target_table_name!r}].obsm'. "
             "Set 'overwrite_feature_key=True' to replace it."
         )
 
@@ -286,7 +286,7 @@ def add_feature_matrix(
             f"alignment ambiguous. Examples: {duplicates.to_dict(orient='records')}"
         )
 
-    selected_mask = adata.obs[region_key].isin(labels_layers).to_numpy()
+    selected_mask = adata.obs[region_key].isin(labels_names).to_numpy()
     selected_keys = adata.obs.loc[selected_mask, [region_key, instance_key]]
     aligned = computed_features.set_index([region_key, instance_key]).reindex(pd.MultiIndex.from_frame(selected_keys))
     aligned_values = aligned.loc[:, columns].to_numpy(dtype=np.float64)
@@ -320,8 +320,8 @@ def add_feature_matrix(
             )
     matrix[selected_mask] = aligned_values
 
-    source_labels = [pair.labels_layer for pair in pair_specs]
-    source_images = [pair.img_layer for pair in pair_specs]
+    source_labels = [pair.labels_name for pair in pair_specs]
+    source_images = [pair.image_name for pair in pair_specs]
     coordinate_systems = [pair.coordinate_system for pair in pair_specs]
     metadata = {
         "feature_columns": list(columns),
@@ -343,7 +343,7 @@ def add_feature_matrix(
 
     if sdata.is_backed() and sdata.path is not None:
         root = zarr.open_group(sdata.path, mode="r+", use_consolidated=False)
-        table_group = root["tables"][target_table_layer]
+        table_group = root["tables"][target_table_name]
         write_elem(table_group["obsm"], feature_key, matrix)
 
         uns_group = table_group["uns"]
@@ -377,39 +377,39 @@ def _normalize_requested_features(features: tuple[str, ...] | list[str]) -> list
 
 
 def _normalize_feature_pairs(
-    labels_layer: str | list[str],
-    img_layer: str | list[str] | None,
+    labels_name: str | list[str],
+    image_name: str | list[str] | None,
     to_coordinate_system: str | list[str],
     needs_image: bool,
 ) -> list[_FeaturePair]:
-    labels_layers = _make_list(labels_layer)
-    if not labels_layers:
-        raise ValueError("Parameter 'labels_layer' must contain at least one labels layer.")
-    if len(set(labels_layers)) != len(labels_layers):
-        raise ValueError("Duplicate labels layers are not supported in a single 'add_feature_matrix' call.")
+    labels_names = _make_list(labels_name)
+    if not labels_names:
+        raise ValueError("Parameter 'labels_name' must contain at least one labels element.")
+    if len(set(labels_names)) != len(labels_names):
+        raise ValueError("Duplicate labels elements are not supported in a single 'add_feature_matrix' call.")
 
     coordinate_systems = _broadcast_parameter(
         to_coordinate_system,
-        target_length=len(labels_layers),
+        target_length=len(labels_names),
         parameter_name="to_coordinate_system",
     )
 
     if needs_image:
-        if img_layer is None:
-            raise ValueError("An 'img_layer' is required when requesting intensity-derived features.")
-        img_layers = _broadcast_parameter(
-            img_layer,
-            target_length=len(labels_layers),
-            parameter_name="img_layer",
+        if image_name is None:
+            raise ValueError("An 'image_name' is required when requesting intensity-derived features.")
+        image_names = _broadcast_parameter(
+            image_name,
+            target_length=len(labels_names),
+            parameter_name="image_name",
         )
     else:
-        if img_layer is not None:
-            log.warning("Only morphology features were requested, so the provided 'img_layer' input will be ignored.")
-        img_layers = [None] * len(labels_layers)
+        if image_name is not None:
+            log.warning("Only morphology features were requested, so the provided 'image_name' input will be ignored.")
+        image_names = [None] * len(labels_names)
 
     return [
-        _FeaturePair(labels_layer=labels, img_layer=image, coordinate_system=coordinate_system)
-        for labels, image, coordinate_system in zip(labels_layers, img_layers, coordinate_systems, strict=True)
+        _FeaturePair(labels_name=labels, image_name=image, coordinate_system=coordinate_system)
+        for labels, image, coordinate_system in zip(labels_names, image_names, coordinate_systems, strict=True)
     ]
 
 
@@ -424,24 +424,25 @@ def _broadcast_parameter(
     if len(values) == 1:
         return values * target_length
     raise ValueError(
-        f"Parameter '{parameter_name}' must either have length 1 or match the number of requested labels layers "
+        f"Parameter '{parameter_name}' must either have length 1 or match the number of requested labels elements "
         f"({target_length}), but received length {len(values)}."
     )
 
 
 def _create_empty_feature_table(
     sdata: SpatialData,
-    labels_layers: Sequence[str],
-    output_layer: str,
+    labels_name: Sequence[str],
+    output_table_name: str,
     region_key: str,
     instance_key: str,
     overwrite: bool,
 ) -> SpatialData:
     obs_frames: list[pd.DataFrame] = []
     uuid_value = str(uuid.uuid4())[:8]
+    labels_names = list(labels_name)
 
-    for labels in labels_layers:
-        data = get_dataarray(sdata, layer=labels).data
+    for labels in labels_names:
+        data = get_dataarray(sdata, element_name=labels).data
         instance_ids = np.asarray(_da_unique(data, run_on_gpu=False))
         instance_ids = instance_ids[instance_ids != 0].astype(int, copy=False)
 
@@ -460,19 +461,19 @@ def _create_empty_feature_table(
     if obs_frames:
         table_obs = pd.concat(obs_frames, axis=0)
     else:
-        # Defensive fallback: the public path should always provide at least one labels layer,
+        # Defensive fallback: the public path should always provide at least one labels element,
         # but keep this helper able to construct an empty .obs table if it is called with none.
         table_obs = pd.DataFrame(columns=[instance_key, region_key])
         table_obs.index = pd.Index([], name=_CELL_INDEX)
 
-    table_obs[region_key] = pd.Categorical(table_obs[region_key], categories=list(labels_layers))
+    table_obs[region_key] = pd.Categorical(table_obs[region_key], categories=list(labels_names))
     adata = AnnData(obs=table_obs)
 
-    return add_table_layer(
+    return add_table(
         sdata,
         adata=adata,
-        output_layer=output_layer,
-        region=list(labels_layers),
+        output_table_name=output_table_name,
+        region=list(labels_names),
         instance_key=instance_key,
         region_key=region_key,
         overwrite=overwrite,
@@ -490,7 +491,7 @@ def _compute_pair_feature_frame(
     chunks: str | int | tuple[int, ...] | None,
     run_on_gpu: bool,
 ) -> tuple[pd.DataFrame, list[str]]:
-    labels = get_dataarray(sdata, layer=pair.labels_layer)
+    labels = get_dataarray(sdata, element_name=pair.labels_name)
     _ = _get_translation(labels, to_coordinate_system=pair.coordinate_system)
     source_labels_ndim = labels.data.ndim
 
@@ -498,11 +499,11 @@ def _compute_pair_feature_frame(
     ordered_columns: list[str] = []
 
     if intensity_features:
-        assert pair.img_layer is not None, "Intensity feature computation requires an image layer."
+        assert pair.image_name is not None, "Intensity feature computation requires an image element."
         image, labels = _precondition(
             sdata,
-            img_layer=pair.img_layer,
-            labels_layer=pair.labels_layer,
+            image_name=pair.image_name,
+            labels_name=pair.labels_name,
             to_coordinate_system=pair.coordinate_system,
         )
         channel_names, channel_indices = _resolve_channels(image, channels)
@@ -550,7 +551,7 @@ def _compute_pair_feature_frame(
     for frame in feature_frames[1:]:
         pair_frame = pair_frame.merge(frame, how="outer", on=instance_key)
 
-    pair_frame[region_key] = pair.labels_layer
+    pair_frame[region_key] = pair.labels_name
     pair_frame = pair_frame.reindex(columns=[region_key, instance_key, *ordered_columns])
 
     return pair_frame, ordered_columns
@@ -572,7 +573,7 @@ def _resolve_channels(
             if isinstance(channel, (int, np.integer)) and not isinstance(channel, bool):
                 if channel < 0 or channel >= len(available_channels):
                     raise ValueError(
-                        f"Channel index '{channel}' is out of range for image layer '{image.name}'. "
+                        f"Channel index '{channel}' is out of range for image element '{image.name}'. "
                         f"Available indices are 0 through {len(available_channels) - 1}."
                     )
                 index = int(channel)
@@ -580,7 +581,7 @@ def _resolve_channels(
                 channel_key = str(channel)
                 if channel_key not in string_to_index:
                     raise ValueError(
-                        f"Channel '{channel}' was not found in image layer '{image.name}'. "
+                        f"Channel '{channel}' was not found in image element '{image.name}'. "
                         f"Available channels are {[str(name) for name in available_channels]}."
                     )
                 index = string_to_index[channel_key]

@@ -15,7 +15,7 @@ except ImportError:
 
 def nhood_enrichment(
     sdata: SpatialData,
-    table_layer: str,
+    table_name: str,
     celltype_column: str = _ANNOTATION_KEY,
     output: str | None = None,
 ) -> None:
@@ -30,8 +30,8 @@ def nhood_enrichment(
     ----------
     sdata
         The SpatialData object containing the data for analysis.
-    table_layer
-        The table layer in `sdata` to visualize.
+    table_name
+        The table element in `sdata` to visualize.
     celltype_column
         The column name in the SpatialData object's table that specifies the cell type annotations.
     output
@@ -52,10 +52,10 @@ def nhood_enrichment(
     harpy.tb.nhood_enrichment : Calculate neighborhood enrichment.
     """
     # remove 'nan' values.
-    tmp = sdata.tables[table_layer].uns[f"{celltype_column}_nhood_enrichment"]["zscore"]
-    sdata.tables[table_layer].uns[f"{celltype_column}_nhood_enrichment"]["zscore"] = np.nan_to_num(tmp)
+    tmp = sdata.tables[table_name].uns[f"{celltype_column}_nhood_enrichment"]["zscore"]
+    sdata.tables[table_name].uns[f"{celltype_column}_nhood_enrichment"]["zscore"] = np.nan_to_num(tmp)
 
-    sq.pl.nhood_enrichment(sdata.tables[table_layer], cluster_key=celltype_column, method="ward")
+    sq.pl.nhood_enrichment(sdata.tables[table_name], cluster_key=celltype_column, method="ward")
 
     # Save the plot to ouput
     if output:

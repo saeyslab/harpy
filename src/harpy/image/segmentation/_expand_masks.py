@@ -1,35 +1,35 @@
 from __future__ import annotations
 
 from numpy.typing import NDArray
-from skimage.segmentation import expand_labels
+from skimage.segmentation import expand_labels as skimage_expand_labels
 from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 
 from harpy.image.segmentation._map import map_labels
 
 
-def expand_labels_layer(
+def expand_labels(
     sdata: SpatialData,
-    labels_layer: str,
+    labels_name: str,
     distance: int = 10,
     depth: tuple[int, int] | int = 100,
     chunks: str | int | tuple[int, int] | None = None,
-    output_labels_layer: str | None = None,
-    output_shapes_layer: str | None = None,
+    output_labels_name: str | None = None,
+    output_shapes_name: str | None = None,
     scale_factors: ScaleFactors_t | None = None,
     overwrite: bool = False,
     iou_depth: tuple[int, int] | int = 2,
     iou_threshold: float = 0.7,
 ) -> SpatialData:
     """
-    Expand cells in labels layer `labels_layer` of Spatialdata object with `distance`, using `skimage.segmentation.expand_labels`.
+    Expand cells in the labels element `labels_name` using `skimage.segmentation.expand_labels`.
 
     Parameters
     ----------
     sdata
-        The spatialdata object containing the labels layer to be expanded.
-    labels_layer
-        The name of the labels layer to be expanded.
+        The SpatialData object containing the labels element to be expanded.
+    labels_name
+        The name of the labels element to be expanded.
     distance
         distance passed to skimage.segmentation.expand_labels.
     depth
@@ -39,15 +39,15 @@ def expand_labels_layer(
     chunks
         The desired chunk size for the Dask computation, or "auto" to allow the function to
         choose an optimal chunk size based on the data. Default is "auto".
-    output_labels_layer
-        The name of the output labels layer where results will be stored. This must be specified.
-    output_shapes_layer
-        The name for the new shapes layer generated from the aligned labels layer. If None, no shapes
-        layer is created. Default is None.
+    output_labels_name
+        The name of the output labels element where results will be stored. This must be specified.
+    output_shapes_name
+        The name for the new shapes element generated from the expanded labels element. If None, no shapes
+        element is created. Default is None.
     scale_factors
         Scale factors to apply for multiscale.
     overwrite
-        If True, overwrites the output layers if they already exist in `sdata`.
+        If True, overwrites `output_labels_name` and `output_shapes_name` if they already exist in `sdata`.
     iou_depth
         iou depth used for linking labels.
     iou_threshold
@@ -55,7 +55,7 @@ def expand_labels_layer(
 
     Returns
     -------
-    The modified spatial data object with the expanded labels layer.
+    The modified SpatialData object with the expanded labels element.
 
     Notes
     -----
@@ -63,25 +63,25 @@ def expand_labels_layer(
 
     Examples
     --------
-    >>> sdata = expand_labels_layer(
+    >>> sdata = expand_labels(
             sdata,
-            labels_layer='layer',
+            labels_name='segmentation_mask',
             distance=10,
             depth=(100, 100),
             chunks=(1024, 1024),
-            output_labels_layer='layer_expanded',
-            output_shapes_layer='layer_expanded_boundaries',
+            output_labels_name='segmentation_mask_expanded',
+            output_shapes_name='segmentation_mask_expanded_boundaries',
             overwrite=True,
         )
     """
     sdata = map_labels(
         sdata,
-        labels_layers=[labels_layer],
+        labels_name=[labels_name],
         func=_expand_cells,
         depth=depth,
         chunks=chunks,
-        output_labels_layer=output_labels_layer,
-        output_shapes_layer=output_shapes_layer,
+        output_labels_name=output_labels_name,
+        output_shapes_name=output_shapes_name,
         scale_factors=scale_factors,
         overwrite=overwrite,
         relabel_chunks=False,
@@ -100,6 +100,6 @@ def _expand_cells(
     # input and output is numpy array of shape (z,y,x)
 
     assert x_label.ndim == 3
-    x_label = expand_labels(x_label, distance=distance)
+    x_label = skimage_expand_labels(x_label, distance=distance)
 
     return x_label

@@ -12,10 +12,10 @@ from harpy.utils._keys import _ANNOTATION_KEY, _CLEANLINESS_KEY, _UNKNOWN_CELLTY
 
 def score_genes(
     sdata: SpatialData,
-    table_layer: str,
+    table_name: str,
     celltypes: list[str],
-    img_layer: str | None = None,
-    shapes_layer: str = "segmentation_mask_boundaries",
+    image_name: str | None = None,
+    shapes_name: str = "segmentation_mask_boundaries",
     crd: tuple[int, int, int, int] | None = None,
     filter_index: int | None = None,
     celltype_column: str = _ANNOTATION_KEY,
@@ -38,14 +38,14 @@ def score_genes(
     ----------
     sdata
         Data containing spatial information for plotting.
-    table_layer
-        The table layer in `sdata` to visualize.
+    table_name
+        The table element in `sdata` to visualize.
     celltypes: list[str]
         list of celltypes to plot.
-    img_layer
-        Image layer to be plotted. If not provided, the last image layer in `sdata` will be used.
-    shapes_layer
-        Name of the layer containing segmentation mask boundaries, by default "segmentation_mask_boundaries".
+    image_name
+        Image element to be plotted. If not provided, the last image element in `sdata` will be used.
+    shapes_name
+        Name of the shapes element containing segmentation mask boundaries, by default "segmentation_mask_boundaries".
     crd
         The coordinates for a region of interest in the format (xmin, xmax, ymin, ymax). Only used for plotting purposes.
     filter_index
@@ -69,15 +69,15 @@ def score_genes(
     """
     celltypes = [element for element in celltypes if element != unknown_celltype_key]
 
-    if img_layer is None:
-        img_layer = [*sdata.images][-1]
+    if image_name is None:
+        image_name = [*sdata.images][-1]
 
     # Custom colormap:
     colors = np.concatenate((plt.get_cmap("tab20c")(np.arange(20)), plt.get_cmap("tab20b")(np.arange(20))))
     colors = [mpl.colors.rgb2hex(colors[j * 4 + i]) for i in range(4) for j in range(10)]
 
     # Plot cleanliness and leiden next to annotation
-    sc.pl.umap(sdata.tables[table_layer], color=[cleanliness_key, celltype_column], show=False)
+    sc.pl.umap(sdata.tables[table_name], color=[cleanliness_key, celltype_column], show=False)
 
     if output:
         plt.savefig(output + f"_{cleanliness_key}_{celltype_column}", bbox_inches="tight")
@@ -85,7 +85,7 @@ def score_genes(
         plt.show()
     plt.close()
 
-    sc.pl.umap(sdata.tables[table_layer], color=["leiden", celltype_column], show=False)
+    sc.pl.umap(sdata.tables[table_name], color=["leiden", celltype_column], show=False)
 
     if output:
         plt.savefig(output + f"_leiden_{celltype_column}", bbox_inches="tight")
@@ -93,13 +93,13 @@ def score_genes(
         plt.show()
     plt.close()
 
-    # Plot annotation and cleanliness columns of sdata.tables[table_layer] (AnnData) object
-    sdata.tables[table_layer].uns[f"{celltype_column}_colors"] = colors
+    # Plot annotation and cleanliness columns of sdata.tables[table_name] (AnnData) object
+    sdata.tables[table_name].uns[f"{celltype_column}_colors"] = colors
     plot_shapes(
         sdata=sdata,
-        img_layer=img_layer,
-        shapes_layer=shapes_layer,
-        table_layer=table_layer,
+        image_name=image_name,
+        shapes_name=shapes_name,
+        table_name=table_name,
         column=celltype_column,
         crd=crd,
         output=output + f"_{celltype_column}" if output else None,
@@ -107,7 +107,7 @@ def score_genes(
 
     # Plot heatmap of celltypes and filtered celltypes based on filter index
     sc.pl.heatmap(
-        sdata.tables[table_layer],
+        sdata.tables[table_name],
         var_names=celltypes,
         groupby="leiden",
         show=False,
@@ -121,9 +121,9 @@ def score_genes(
 
     if filter_index:
         sc.pl.heatmap(
-            sdata.tables[table_layer][
-                sdata.tables[table_layer].obs.leiden.isin(
-                    [str(index) for index in range(filter_index, len(sdata.tables[table_layer].obs.leiden))]
+            sdata.tables[table_name][
+                sdata.tables[table_name].obs.leiden.isin(
+                    [str(index) for index in range(filter_index, len(sdata.tables[table_name].obs.leiden))]
                 )
             ],
             var_names=celltypes,

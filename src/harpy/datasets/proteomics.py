@@ -11,7 +11,7 @@ from spatialdata import SpatialData, read_zarr
 from spatialdata.transformations import get_transformation
 
 from harpy.datasets.registry import get_ome_registry, get_registry, get_spatialdata_registry
-from harpy.image._image import add_image_layer
+from harpy.image._image import add_image
 from harpy.io._macsima import macsima
 
 
@@ -44,10 +44,10 @@ def macsima_example() -> SpatialData:
             counts[name] = 0
             new_c_coords.append(name)
     new_c_coords = [_name.replace(" ", "_") for _name in new_c_coords]  # remove the " "
-    sdata = add_image_layer(
+    sdata = add_image(
         sdata,
         arr=sdata["HumanLiverH35"].data,
-        output_layer="HumanLiverH35",
+        output_image_name="HumanLiverH35",
         c_coords=new_c_coords,
         transformations=get_transformation(sdata["HumanLiverH35"], get_all=True),
         overwrite=True,
@@ -84,14 +84,14 @@ def macsima_tonsil_benchmark(path: str | Path | None = None) -> SpatialData:
     """
     Tonsil proteomics dataset acquired with the MACSima platform and used for benchmarking Harpy.
 
-    The image layer under the key ``"image_tiled"`` was obtained by artificially
+    The image element under the key ``"image_tiled"`` was obtained by artificially
     tiling the ``"ROI1_image"`` output of
     :func:`harpy.datasets.macsima_tonsil()` into a 3D image layout with dimensions
     (c, y, x) = (100, 20000, 20000).
 
     The cell segmentation mask stored under the key ``"labels_cells_harpy"`` was
     generated using Cellpose (version 4.0) applied to the ``"image_tiled"`` image
-    layer.
+    element.
 
     Parameters
     ----------

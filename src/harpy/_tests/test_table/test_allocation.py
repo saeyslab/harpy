@@ -12,8 +12,8 @@ def test_allocation(sdata_transcripts: SpatialData):
 
     sdata_transcripts = allocate(
         sdata_transcripts,
-        labels_layer="segmentation_mask",
-        output_layer="table_transcriptomics_recompute",
+        labels_name="segmentation_mask",
+        output_table_name="table_transcriptomics_recompute",
         chunks=1000,
         append=False,
         overwrite=True,
@@ -33,8 +33,8 @@ def test_allocation_append(sdata_transcripts: SpatialData):
 
     sdata_transcripts = allocate(
         sdata_transcripts,
-        labels_layer="segmentation_mask",
-        output_layer="table_transcriptomics",
+        labels_name="segmentation_mask",
+        output_table_name="table_transcriptomics",
         chunks=20000,
         append=False,
         overwrite=True,
@@ -45,8 +45,8 @@ def test_allocation_append(sdata_transcripts: SpatialData):
 
     sdata_transcripts = allocate(
         sdata_transcripts,
-        labels_layer="segmentation_mask_expanded",
-        output_layer="table_transcriptomics",
+        labels_name="segmentation_mask_expanded",
+        output_table_name="table_transcriptomics",
         chunks=20000,
         append=True,  # append to existing table
         overwrite=True,
@@ -62,8 +62,8 @@ def test_allocation_append_raises_instance_key(sdata_transcripts_no_backed: Spat
     region_key = "roi"
     sdata_transcripts = allocate(
         sdata_transcripts,
-        labels_layer="segmentation_mask",
-        output_layer="table_transcriptomics",
+        labels_name="segmentation_mask",
+        output_table_name="table_transcriptomics",
         chunks=20000,
         append=False,
         instance_key=instance_key,
@@ -87,8 +87,8 @@ def test_allocation_append_raises_instance_key(sdata_transcripts_no_backed: Spat
     ):
         sdata_transcripts = allocate(
             sdata_transcripts,
-            labels_layer="segmentation_mask_expanded",
-            output_layer="table_transcriptomics",
+            labels_name="segmentation_mask_expanded",
+            output_table_name="table_transcriptomics",
             chunks=20000,
             append=True,  # append to existing table
             instance_key=instance_key,
@@ -103,8 +103,8 @@ def test_allocation_append_raises_region_key(sdata_transcripts_no_backed: Spatia
     region_key = "roi"
     sdata_transcripts = allocate(
         sdata_transcripts,
-        labels_layer="segmentation_mask",
-        output_layer="table_transcriptomics",
+        labels_name="segmentation_mask",
+        output_table_name="table_transcriptomics",
         chunks=20000,
         append=False,
         instance_key=instance_key,
@@ -128,8 +128,8 @@ def test_allocation_append_raises_region_key(sdata_transcripts_no_backed: Spatia
     ):
         sdata_transcripts = allocate(
             sdata_transcripts,
-            labels_layer="segmentation_mask_expanded",
-            output_layer="table_transcriptomics",
+            labels_name="segmentation_mask_expanded",
+            output_table_name="table_transcriptomics",
             chunks=20000,
             append=True,  # append to existing table
             instance_key="instance_id",
@@ -146,8 +146,8 @@ def test_allocation_overwrite(sdata_transcripts: SpatialData):
         # unit test with append to True, and overwrite to False, which should not be allowed
         sdata_transcripts = allocate(
             sdata_transcripts,
-            labels_layer="segmentation_mask",
-            output_layer="table_transcriptomics",
+            labels_name="segmentation_mask",
+            output_table_name="table_transcriptomics",
             chunks=20000,
             append=False,
             overwrite=False,
@@ -157,21 +157,19 @@ def test_allocation_overwrite(sdata_transcripts: SpatialData):
 def test_bin_counts(
     sdata_bin,
 ):
-    table_layer_bins = "square_002um"
-    labels_layer = (
-        "square_labels_32"  # custom grid to bin the counts of table_layer_bins, can be any segmentation mask.
-    )
-    table_layer = "table_custom_bin_32"
-    output_table_layer = f"{table_layer}_reproduce"
+    table_name_bins = "square_002um"
+    labels_name = "square_labels_32"  # custom grid to bin the counts of table_name_bins, can be any segmentation mask.
+    table_name = "table_custom_bin_32"
+    output_table_name = f"{table_name}_reproduce"
 
-    # check that barcodes are unique in table_layer_bins of sdata_bin
-    assert sdata_bin.tables[table_layer_bins].obs.index.is_unique
+    # check that barcodes are unique in table_name_bins of sdata_bin
+    assert sdata_bin.tables[table_name_bins].obs.index.is_unique
 
     sdata_bin = bin_counts(
         sdata_bin,
-        table_layer=table_layer_bins,
-        labels_layer=labels_layer,
-        output_layer=output_table_layer,
+        table_name=table_name_bins,
+        labels_name=labels_name,
+        output_table_name=output_table_name,
         overwrite=True,
         region_key=_REGION_KEY,
         instance_key=_INSTANCE_KEY,
@@ -180,14 +178,14 @@ def test_bin_counts(
     )
 
     assert np.array_equal(
-        sdata_bin[table_layer].obs[_INSTANCE_KEY].values, sdata_bin[output_table_layer].obs[_INSTANCE_KEY].values
+        sdata_bin[table_name].obs[_INSTANCE_KEY].values, sdata_bin[output_table_name].obs[_INSTANCE_KEY].values
     )
 
-    assert np.array_equal(sdata_bin[table_layer].var_names, sdata_bin[output_table_layer].var_names)
+    assert np.array_equal(sdata_bin[table_name].var_names, sdata_bin[output_table_name].var_names)
 
-    matrix1 = sdata_bin[table_layer].X
-    matrix2 = sdata_bin[output_table_layer].X
+    matrix1 = sdata_bin[table_name].X
+    matrix2 = sdata_bin[output_table_name].X
 
     assert (matrix1 != matrix2).nnz == 0
 
-    assert np.array_equal(sdata_bin[table_layer].obsm[_SPATIAL], sdata_bin[output_table_layer].obsm[_SPATIAL])
+    assert np.array_equal(sdata_bin[table_name].obsm[_SPATIAL], sdata_bin[output_table_name].obsm[_SPATIAL])

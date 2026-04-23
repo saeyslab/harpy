@@ -15,13 +15,13 @@ from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import Identity, Translation
 
-from harpy.image._image import _fix_dimensions, add_image_layer
+from harpy.image._image import _fix_dimensions, add_image
 
 
 def create_sdata(
     input: str | Path | np.ndarray | da.Array | list[str] | list[Path] | list[np.ndarray] | list[da.Array],
     output_path: str | Path | None = None,
-    img_layer: str = "raw_image",
+    image_name: str = "raw_image",
     chunks: str | tuple[int, int, int, int] | int | None = None,
     dims: list[str] | None = None,
     crd: tuple[int, int, int, int] | None = None,
@@ -31,13 +31,13 @@ def create_sdata(
     z_projection: bool = True,
 ) -> SpatialData:
     """
-    Convert input images or arrays into a SpatialData object with the image added as an image layer with name `img_layer`.
+    Convert input images or arrays into a SpatialData object with the image added as an image element with name `image_name`.
 
     .. deprecated::
         `harpy.io.create_sdata` is deprecated. Prefer constructing a
         :class:`spatialdata.SpatialData` object directly, writing it to disk,
-        reopening it with :func:`spatialdata.read_zarr`, and then adding layers
-        with :func:`harpy.im.add_image_layer`.
+        reopening it with :func:`spatialdata.read_zarr`, and then adding image elements
+        with :func:`harpy.im.add_image`.
 
     This function allows you to ingest various input formats of images or data arrays,
     convert them into a unified SpatialData format and write them out to a specified
@@ -85,8 +85,8 @@ def create_sdata(
         Input can also be a numpy array. In that case the dims parameter should be specified.
     output_path
         If specified, the resulting SpatialData object will be written to this path as a zarr.
-    img_layer
-        The name of the image layer to be created in the SpatialData object.
+    image_name
+        The name of the image element to be created in the SpatialData object.
     chunks
         If specified, the underlying dask array will be rechunked to this size.
         If Tuple, desired chunksize along c,z,y,x should be specified, e.g. (1,1,1024,1024).
@@ -95,10 +95,10 @@ def create_sdata(
         If input is a str, Path or List[str], List[Path], this parameter is ignored.
     crd
         The coordinates for a region of interest in the format (xmin, xmax, ymin, ymax).
-        If specified, this region is cropped from the image, and added as image layer to the
+        If specified, this region is cropped from the image, and added as image element to the
         SpatialData object.
     to_coordinate_system
-        Coordinate system to which `img_layer` will be added.
+        Coordinate system to which `image_name` will be added.
     scale_factors
         Scale factors to apply for multiscale.
     c_coords
@@ -108,7 +108,7 @@ def create_sdata(
 
     Returns
     -------
-    The constructed SpatialData object containing image layer with name `img_layer` and dimension (c,(z),y,x)
+    The constructed SpatialData object containing image element with name `image_name` and dimension (c,(z),y,x)
 
     Notes
     -----
@@ -125,10 +125,10 @@ def create_sdata(
         sdata.write("my_data.zarr")
         sdata = read_zarr(sdata.path)
 
-        sdata = hp.im.add_image_layer(
+        sdata = hp.im.add_image(
             sdata,
             arr=image,
-            output_layer="raw_image",
+            output_image_name="raw_image",
         )
     """
     with tempfile.TemporaryDirectory() as tmp_dir:
@@ -174,10 +174,10 @@ def create_sdata(
         else:
             transformation = Identity()
 
-        sdata = add_image_layer(
+        sdata = add_image(
             sdata,
             arr=dask_array,
-            output_layer=img_layer,
+            output_image_name=image_name,
             chunks=None,  # already rechunked in previous step. Also due to possible z projection the 'chunks' dimension can mismatch 'dims' parameter
             transformations={to_coordinate_system: transformation},
             scale_factors=scale_factors,

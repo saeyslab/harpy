@@ -1,5 +1,5 @@
-from ._points import add_points_layer
+from ._points import add_points
 
 __all__ = [
-    "add_points_layer",
+    "add_points",
 ]

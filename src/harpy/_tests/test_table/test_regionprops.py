@@ -2,9 +2,9 @@ import dask.array as da
 import pytest
 from spatialdata.models import TableModel
 
-from harpy.image._image import add_labels_layer
+from harpy.image._image import add_labels
 from harpy.table._regionprops import add_regionprop_features, add_regionprops
-from harpy.table._table import add_table_layer
+from harpy.table._table import add_table
 
 ALL_REGIONPROPS = [
     "area",
@@ -31,13 +31,13 @@ ALL_REGIONPROPS = [
     ],
 )
 def test_add_regionprops(sdata_pixie_intensities, properties_to_calculate):
-    table_layer = "table_intensities"
+    table_name = "table_intensities"
 
     sdata_pixie_intensities = add_regionprops(
         sdata_pixie_intensities,
-        labels_layer=["label_whole_fov0", "label_whole_fov1"],
-        table_layer=table_layer,
-        output_layer=table_layer,
+        labels_name=["label_whole_fov0", "label_whole_fov1"],
+        table_name=table_name,
+        output_table_name=table_name,
         properties=properties_to_calculate,
         overwrite=True,
     )
@@ -47,41 +47,41 @@ def test_add_regionprops(sdata_pixie_intensities, properties_to_calculate):
         if "centroid" in properties_to_calculate
         else 2 + len(properties_to_calculate)
     )
-    assert sdata_pixie_intensities.tables[table_layer].obs.shape == (1414, shape_obs_axis_1)
+    assert sdata_pixie_intensities.tables[table_name].obs.shape == (1414, shape_obs_axis_1)
 
     for _prop in properties_to_calculate:
         if _prop == "centroid":
             assert (
-                f"{_prop}_x" in sdata_pixie_intensities[table_layer].obs.columns
-                and f"{_prop}_y" in sdata_pixie_intensities[table_layer].obs.columns
+                f"{_prop}_x" in sdata_pixie_intensities[table_name].obs.columns
+                and f"{_prop}_y" in sdata_pixie_intensities[table_name].obs.columns
             )
         else:
-            assert _prop in sdata_pixie_intensities[table_layer].obs.columns
+            assert _prop in sdata_pixie_intensities[table_name].obs.columns
 
 
 # test if ValueErrors raised correctly
-# test case where labels layer not annotated by the table layer
+# test case where labels layer not annotated by the table element
 def test_add_regionprops_raises(sdata_pixie_intensities):
-    table_layer = "table_intensities"
-    labels_layer = "label_whole_fov0"
+    table_name = "table_intensities"
+    labels_name = "label_whole_fov0"
 
-    sdata_pixie_intensities = add_labels_layer(
+    sdata_pixie_intensities = add_labels(
         sdata_pixie_intensities,
-        arr=sdata_pixie_intensities[labels_layer].data,
-        output_layer=f"{labels_layer}_not_annotated",
+        arr=sdata_pixie_intensities[labels_name].data,
+        output_labels_name=f"{labels_name}_not_annotated",
         overwrite=True,
     )
 
     # labels layer not annotated by the table layer
     with pytest.raises(
         ValueError,
-        match=f"labels layer '{labels_layer}_not_annotated' not annotated by table layer '{table_layer}'",
+        match=f"labels element '{labels_name}_not_annotated' not annotated by table element '{table_name}'",
     ):
         sdata_pixie_intensities = add_regionprops(
             sdata_pixie_intensities,
-            labels_layer=f"{labels_layer}_not_annotated",
-            table_layer=table_layer,
-            output_layer=table_layer,
+            labels_name=f"{labels_name}_not_annotated",
+            table_name=table_name,
+            output_table_name=table_name,
             properties=["area"],
             overwrite=True,
         )
@@ -93,9 +93,9 @@ def test_add_regionprops_raises(sdata_pixie_intensities):
     ):
         sdata_pixie_intensities = add_regionprops(
             sdata_pixie_intensities,
-            labels_layer=labels_layer,
-            table_layer=table_layer,
-            output_layer=table_layer,
+            labels_name=labels_name,
+            table_name=table_name,
+            output_table_name=table_name,
             properties=[property_not_supported],
             overwrite=True,
         )
@@ -123,38 +123,38 @@ ALL_REGIONPROPS_3D = [
     ],
 )
 def test_add_regionprops_3D(sdata_pixie_intensities, properties_to_calculate):
-    table_layer = "table_intensities"
-    labels_layer = "label_whole_fov0"
+    table_name = "table_intensities"
+    labels_name = "label_whole_fov0"
 
-    array = da.stack([sdata_pixie_intensities[labels_layer].data, sdata_pixie_intensities[labels_layer].data])
+    array = da.stack([sdata_pixie_intensities[labels_name].data, sdata_pixie_intensities[labels_name].data])
 
     # add artificial 3D labels layer
-    sdata_pixie_intensities = add_labels_layer(
+    sdata_pixie_intensities = add_labels(
         sdata_pixie_intensities,
         arr=array,
-        output_layer="label_whole_fov0_3D",
+        output_labels_name="label_whole_fov0_3D",
         overwrite=True,
     )
     # annotate the table layer with label_whole_fov0_3D
-    adata = sdata_pixie_intensities[table_layer]
+    adata = sdata_pixie_intensities[table_name]
     region_key = adata.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]
     adata = adata[adata.obs[region_key] == "label_whole_fov0"].copy()  # copy, otherwise pop will not work
     adata.obs[region_key] = "label_whole_fov0_3D"
     adata.uns.pop(TableModel.ATTRS_KEY)
 
-    sdata_pixie_intensities = add_table_layer(
+    sdata_pixie_intensities = add_table(
         sdata_pixie_intensities,
         adata=adata,
         region=["label_whole_fov0_3D"],
-        output_layer=table_layer,
+        output_table_name=table_name,
         overwrite=True,
     )
 
     sdata_pixie_intensities = add_regionprops(
         sdata_pixie_intensities,
-        labels_layer=["label_whole_fov0_3D"],
-        table_layer=table_layer,
-        output_layer=table_layer,
+        labels_name=["label_whole_fov0_3D"],
+        table_name=table_name,
+        output_table_name=table_name,
         properties=properties_to_calculate,
         overwrite=True,
     )
@@ -164,16 +164,16 @@ def test_add_regionprops_3D(sdata_pixie_intensities, properties_to_calculate):
         if "centroid" in properties_to_calculate
         else 2 + len(properties_to_calculate)
     )
-    assert sdata_pixie_intensities.tables[table_layer].obs.shape == (669, shape_obs_axis_1)
+    assert sdata_pixie_intensities.tables[table_name].obs.shape == (669, shape_obs_axis_1)
 
     for _prop in properties_to_calculate:
         if _prop == "centroid":
             assert (
-                f"{_prop}_x" in sdata_pixie_intensities[table_layer].obs.columns
-                and f"{_prop}_y" in sdata_pixie_intensities[table_layer].obs.columns
+                f"{_prop}_x" in sdata_pixie_intensities[table_name].obs.columns
+                and f"{_prop}_y" in sdata_pixie_intensities[table_name].obs.columns
             )
         else:
-            assert _prop in sdata_pixie_intensities[table_layer].obs.columns
+            assert _prop in sdata_pixie_intensities[table_name].obs.columns
 
 
 def test_add_regionprop_features_alias():

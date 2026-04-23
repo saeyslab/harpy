@@ -11,20 +11,20 @@ from harpy.utils._keys import _CELLSIZE_KEY
 def test_cluster_intensity_heatmap(sdata_pixie, tmp_path):
     sdata = sdata_pixie
 
-    img_layer = ["raw_image_fov0", "raw_image_fov1"]
-    labels_layer = ["label_whole_fov0", "label_whole_fov1"]
-    table_layer = "table_intensities"
+    image_name = ["raw_image_fov0", "raw_image_fov1"]
+    labels_name = ["label_whole_fov0", "label_whole_fov1"]
+    table_name = "table_intensities"
     to_coordinate_system = ["fov0", "fov1"]
     cluster_key = "cluster_id"
 
-    for _img_layer, _labels_layer, _to_coordinate_system in zip(
-        img_layer, labels_layer, to_coordinate_system, strict=True
+    for _image_name, _labels_name, _to_coordinate_system in zip(
+        image_name, labels_name, to_coordinate_system, strict=True
     ):
         sdata = allocate_intensity(
             sdata,
-            img_layer=_img_layer,
-            labels_layer=_labels_layer,
-            output_layer=table_layer,
+            image_name=_image_name,
+            labels_name=_labels_name,
+            output_table_name=table_name,
             mode="mean",
             to_coordinate_system=_to_coordinate_system,
             append=True,
@@ -32,18 +32,18 @@ def test_cluster_intensity_heatmap(sdata_pixie, tmp_path):
         )
 
     # add a dummy cluster id
-    n_obs = sdata[table_layer].shape[0]
+    n_obs = sdata[table_name].shape[0]
     RNG = np.random.default_rng(seed=42)
-    sdata[table_layer].obs[cluster_key] = RNG.choice(range(10), size=n_obs)
-    sdata[table_layer].obs[cluster_key] = sdata[table_layer].obs[cluster_key].astype("category")
+    sdata[table_name].obs[cluster_key] = RNG.choice(range(10), size=n_obs)
+    sdata[table_name].obs[cluster_key] = sdata[table_name].obs[cluster_key].astype("category")
 
     sdata = cluster_intensity(
         sdata,
-        table_layer=table_layer,
-        labels_layer=labels_layer,
+        table_name=table_name,
+        labels_name=labels_name,
         cluster_key=cluster_key,
         cluster_key_uns=f"{cluster_key}_weighted_intensity",
-        output_layer=table_layer,
+        output_table_name=table_name,
         instance_size_key=_CELLSIZE_KEY,
     )
 
@@ -53,7 +53,7 @@ def test_cluster_intensity_heatmap(sdata_pixie, tmp_path):
 
     cluster_intensity_heatmap(
         sdata,
-        table_layer=table_layer,
+        table_name=table_name,
         cluster_key=cluster_key,
         cluster_key_uns=f"{cluster_key}_weighted_intensity",
         z_score=True,

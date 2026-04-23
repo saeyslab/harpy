@@ -17,7 +17,7 @@ from scipy.sparse import csr_matrix
 from spatialdata import SpatialData
 
 from harpy.image._image import _precondition
-from harpy.table._table import ProcessTable, add_table_layer
+from harpy.table._table import ProcessTable, add_table
 from harpy.utils._featurize import Featurizer
 from harpy.utils._keys import _CELL_INDEX, _INSTANCE_KEY, _REGION_KEY
 from harpy.utils.utils import _dummy_embedding, _make_list
@@ -25,8 +25,8 @@ from harpy.utils.utils import _dummy_embedding, _make_list
 
 def extract_instances(
     sdata,
-    img_layer: str,
-    labels_layer: str,
+    image_name: str,
+    labels_name: str,
     diameter: int,
     depth: int | None = None,
     remove_background: bool = True,
@@ -40,13 +40,13 @@ def extract_instances(
     overwrite: bool = False,
 ) -> tuple[NDArray, da.Array | tuple[da.Array, da.Array]]:
     """
-    Extract per-label instance windows from `img_layer`/`labels_layer` of size `diameter` in `y` and `x` using :func:`dask.array.map_overlap` and :func:`dask.array.map_blocks`.
+    Extract per-label instance windows from `image_name`/`labels_name` of size `diameter` in `y` and `x` using :func:`dask.array.map_overlap` and :func:`dask.array.map_blocks`.
 
-    For every non-zero label in the `labels_layer`, this method builds a Dask graph that
+    For every non-zero label in the `labels_name`, this method builds a Dask graph that
     slices out a centered, square window in the `y`, `x` plane around that instance (preserving
-    the `z` dimension) both for the `img_layer` and `labels_layer`.
+    the `z` dimension) both for the `image_name` and `labels_name`.
 
-    Note that decreasing the chunk size on disk of the `image_layer` and `labels_layer` will lead to decreased
+    Note that decreasing the chunk size on disk of the `image_name` and `labels_name` elements will lead to decreased
     consumption of RAM. A good first guess for chunk sizes is: `(c_chunksize, y_chunksize, x_chunksize)=(10, 2048, 2048)`.
 
     For optimal performance, configure :mod:`dask` to use `processes`, e.g. (`dask.config.set(scheduler="processes")`).
@@ -55,10 +55,10 @@ def extract_instances(
     ----------
     sdata
         SpatialData object.
-    img_layer
-        Name of the image layer.
-    labels_layer
-        Name of the labels layer.
+    image_name
+        Name of the image element.
+    labels_name
+        Name of the labels element.
     diameter
         Side length of the resulting `y`, `x` window for every
         instance.
@@ -89,7 +89,7 @@ def extract_instances(
     batch_size
         Chunksize of the resulting dask array in the `i` dimension.
     to_coordinate_system
-        The coordinate system that holds `img_layer` and `labels_layer`.
+        The coordinate system that holds `image_name` and `labels_name`.
     run_on_gpu
         If True and 'cupy' is installed, the extraction step runs on the GPU.
     overwrite
@@ -142,14 +142,14 @@ def extract_instances(
 
         sdata = hp.datasets.pixie_example()
 
-        img_layer = "raw_image_fov0"
-        labels_layer = "label_whole_fov0"
+        image_name = "raw_image_fov0"
+        labels_name = "label_whole_fov0"
 
         # Persist to Zarr on disk (computes instances now)
         instance_ids, instances = hp.tb.extract_instances(
             sdata,
-            img_layer=img_layer,
-            labels_layer=labels_layer,
+            image_name=image_name,
+            labels_name=labels_name,
             depth=100,
             diameter=40,
             remove_background=True,
@@ -177,13 +177,13 @@ def extract_instances(
 
         sdata = hp.datasets.pixie_example()
 
-        img_layer = "raw_image_fov0"
-        labels_layer = "label_whole_fov0"
+        image_name = "raw_image_fov0"
+        labels_name = "label_whole_fov0"
 
         instance_ids, instances_lazy = hp.tb.extract_instances(
             sdata,
-            img_layer=img_layer,
-            labels_layer=labels_layer,
+            image_name=image_name,
+            labels_name=labels_name,
             depth=100,
             diameter=40,
             remove_background=True,
@@ -198,7 +198,7 @@ def extract_instances(
         instances = da.from_zarr( "instances.zarr" )
     """
     se_image, se_labels = _precondition(
-        sdata, img_layer=img_layer, labels_layer=labels_layer, to_coordinate_system=to_coordinate_system
+        sdata, image_name=image_name, labels_name=labels_name, to_coordinate_system=to_coordinate_system
     )
 
     image_array = se_image.data
@@ -226,10 +226,10 @@ def extract_instances(
 
 def featurize(
     sdata: SpatialData,
-    img_layer: str | list[str],
-    labels_layer: str | list[str],
-    table_layer: str | None,
-    output_layer: str,
+    image_name: str | list[str],
+    labels_name: str | list[str],
+    table_name: str | None,
+    output_table_name: str,
     diameter: int,  # for kronos patch sizes must be multiples of 16
     embedding_dimension: int,  # e.g. 384*matched_channels.shape[0]
     depth: int | None = None,
@@ -249,11 +249,11 @@ def featurize(
     **kwargs: Any,
 ) -> SpatialData:
     """
-    Extract per-instance feature vectors from `img_layer` and `labels_layer` using a user-provided embedding `model`.
+    Extract per-instance feature vectors from `image_name` and `labels_name` using a user-provided embedding `model`.
 
-    This method constructs a Dask graph that, for each non-zero label in `labels_layer`, extracts a
-    centered `(y, x)` window (size set by `diameter` or `2 * depth`) from `img_layer`,
-    optionally removes background pixels outside the labeled object (also in the corresponding `img_layer`),
+    This method constructs a Dask graph that, for each non-zero label in `labels_name`, extracts a
+    centered `(y, x)` window (size set by `diameter` or `2 * depth`) from `image_name`,
+    optionally removes background pixels outside the labeled object (also in the corresponding `image_name`),
     and feeds the resulting instance cutout (with preserved `z` and channel dimensions) through `model`
     to produce an embedding of size `embedding_dimension`.
 
@@ -263,11 +263,11 @@ def featurize(
     non-zero labels and `d == embedding_dimension`.
 
     The resulting feature vectors are computed and added to
-    `sdata[output_layer].obsm[embedding_obsm_key]` as a NumPy array.
-    If `table_layer` is `None`, an empty table layer is created at `output_layer`.
+    `sdata[output_table_name].obsm[embedding_obsm_key]` as a NumPy array.
+    If `table_name` is `None`, an empty table element is created at `output_table_name`.
     Otherwise, the feature vectors are sorted and filtered according to
-    `sdata[table_layer].obs[_INSTANCE_KEY]`, and similarly added to
-    `sdata[output_layer].obsm[embedding_obsm_key]`.
+    `sdata[table_name].obs[_INSTANCE_KEY]`, and similarly added to
+    `sdata[output_table_name].obsm[embedding_obsm_key]`.
 
     For optimal performance, configure :mod:`dask` to use `processes`, e.g.:
     `dask.config.set(scheduler="processes")`.
@@ -281,15 +281,15 @@ def featurize(
     ----------
     sdata
         SpatialData object.
-    img_layer
-        Name of the image layer.
-    labels_layer
-        Name of the labels layer.
-    table_layer
-        Name of the table layer. If `table_layer` is `None`, an empty `table_layer` will be created with
-        the calculated embeddings at `.obsm[embedding_obsm_key]`, and annotated by `labels_layer`.
-    output_layer
-        Name of the output tables layer. Can be set equal to `table_layer` if overwrite is set to `True`.
+    image_name
+        Name of the image element.
+    labels_name
+        Name of the labels element.
+    table_name
+        Name of the table element. If `table_name` is `None`, an empty table will be created with
+        the calculated embeddings at `.obsm[embedding_obsm_key]`, and annotated by `labels_name`.
+    output_table_name
+        Name of the output table element. Can be set equal to `table_name` if overwrite is set to `True`.
     diameter
         Side length of the resulting `y`, `x` window for every
         instance.
@@ -317,18 +317,18 @@ def featurize(
         Extra keyword arguments forwarded to `model` at call time (e.g., device selection,
         inference flags).
     embedding_obsm_key
-        Name of the feature matrix added to `sdata[output_layer].obsm`.
+        Name of the feature matrix added to `sdata[output_table_name].obsm`.
     to_coordinate_system
-        The coordinate system that holds `img_layer` and `labels_layer`.
+        The coordinate system that holds `image_name` and `labels_name`.
     instance_key
         Instance key. The name of the column in `adata.obs` that will hold the instance ids.
-        Ignored if `table_layer` is not None.
+        Ignored if `table_name` is not None.
     region_key
-        Region key. The name of the column in `adata.obs` that holds the name of the elements (`region`) that are annotated by the table layer.
-        Ignored if `table_layer` is not None.
+        Region key. The name of the column in `adata.obs` that holds the name of the elements (`region`) that are annotated by the table element.
+        Ignored if `table_name` is not None.
     cell_index_name
         The name of the index of the resulting :class:`~anndata.AnnData` table.
-        Ignored if `table_layer` is not None.
+        Ignored if `table_name` is not None.
     dtype
         Output dtype of `model`.
     run_on_gpu
@@ -338,7 +338,7 @@ def featurize(
         This is only supported for backed `SpatialData`; if `sdata.is_backed()` is `False`, a
         `ValueError` is raised.
     overwrite
-        If `True`, overwrites the `output_layer` if it already exists in `sdata`.
+        If `True`, overwrites the `output_table_name` if it already exists in `sdata`.
     **kwargs
         Additional keyword arguments forwarded to :func:`dask.array.map_blocks`. Use with care.
 
@@ -357,17 +357,17 @@ def featurize(
 
         sdata = hp.datasets.pixie_example()
 
-        img_layer = "raw_image_fov0"
-        labels_layer = "label_whole_fov0"
+        image_name = "raw_image_fov0"
+        labels_name = "label_whole_fov0"
 
         # First, create an AnnData table by allocating intensity statistics
         # Note that this step is optional.
         sdata = hp.tb.allocate_intensity(
             sdata,
-            img_layer=img_layer,
-            labels_layer=labels_layer,
+            image_name=image_name,
+            labels_name=labels_name,
             to_coordinate_system="fov0",
-            output_layer="my_table",
+            output_table_name="my_table",
             mode="sum",
             obs_stats="count",  # cell size
             overwrite=True,
@@ -397,10 +397,10 @@ def featurize(
         # Add embeddings to the table
         sdata = hp.tb.featurize(
             sdata,
-            img_layer=img_layer,
-            labels_layer=labels_layer,
-            table_layer="my_table",
-            output_layer="my_table",
+            image_name=image_name,
+            labels_name=labels_name,
+            table_name="my_table",
+            output_table_name="my_table",
             depth=96,
             embedding_dimension=64,
             diameter=192,
@@ -414,11 +414,11 @@ def featurize(
         # Access the computed embedding for each instance
         sdata["my_table"].obsm["embedding"]
     """
-    # if table_layer is None, we create an empty Anndata, that is annotated by labels layer
+    # If table_name is None, create an empty AnnData object annotated by the labels element.
     # do it with dummy embedding first
 
-    img_layer = _make_list(img_layer)
-    labels_layer = _make_list(labels_layer)
+    image_name = _make_list(image_name)
+    labels_name = _make_list(labels_name)
     to_coordinate_system = _make_list(to_coordinate_system)
 
     instances_ids_list = []
@@ -427,14 +427,14 @@ def featurize(
     if store_intermediate and not sdata.is_backed():
         raise ValueError("Parameter 'store_intermediate=True' is only supported for backed SpatialData.")
 
-    for _img_layer, _labels_layer, _to_coordinate_system in zip(
-        img_layer, labels_layer, to_coordinate_system, strict=True
+    for _image_name, _labels_name, _to_coordinate_system in zip(
+        image_name, labels_name, to_coordinate_system, strict=True
     ):
-        # currently this function will only work if img_layer and labels_layer have the same shape.
+        # currently this function will only work if image_name and labels_name have the same shape.
         # And are in same position, i.e. if one is translated, other should be translated with same offset
 
         se_image, se_labels = _precondition(
-            sdata, img_layer=_img_layer, labels_layer=_labels_layer, to_coordinate_system=_to_coordinate_system
+            sdata, image_name=_image_name, labels_name=_labels_name, to_coordinate_system=_to_coordinate_system
         )
 
         image_array = se_image.data
@@ -485,12 +485,12 @@ def featurize(
         instances_ids_list.append(instances_ids)
 
     # now add the features to the table
-    if table_layer is None:
+    if table_name is None:
         region_key = region_key
         instance_key = instance_key
         # create an anndata object with dummy count matrix.
         _region_keys = np.concatenate(
-            [np.full(len(ids), label) for label, ids in zip(labels_layer, instances_ids_list, strict=True)]
+            [np.full(len(ids), label) for label, ids in zip(labels_name, instances_ids_list, strict=True)]
         )
         instances_ids = np.concatenate(instances_ids_list, axis=0)
 
@@ -506,29 +506,29 @@ def featurize(
 
         adata.obs[region_key] = _region_keys
         adata.obs[region_key] = adata.obs[region_key].astype("category")
-        # create an empty table, with all the layers in them i.e. set region key, instance key etc. instance keys are all unique ids in corresponding labels layer
+        # Create an empty table with the required annotations. Instance ids are the unique ids in the corresponding labels element.
     else:
-        process_table_instance = ProcessTable(sdata, labels_layer=labels_layer, table_layer=table_layer)
+        process_table_instance = ProcessTable(sdata, labels_name=labels_name, table_name=table_name)
         instance_key = process_table_instance.instance_key
         region_key = process_table_instance.region_key
         adata = process_table_instance._get_adata()
 
-    for i, (_labels_layer, instances_ids, features) in enumerate(
-        zip(labels_layer, instances_ids_list, features_list, strict=True)
+    for i, (_labels_name, instances_ids, features) in enumerate(
+        zip(labels_name, instances_ids_list, features_list, strict=True)
     ):
         # get the instance_ids in adata, and sort features and instances_ids matrix in the same way.
-        instances_ids_adata = adata[adata.obs[region_key] == _labels_layer].obs[instance_key].values
+        instances_ids_adata = adata[adata.obs[region_key] == _labels_name].obs[instance_key].values
         _, features = _sort_features(
             instances_ids_adata=instances_ids_adata, instances_ids=instances_ids, features=features
         )
         features_list[i] = features
     adata.obsm[embedding_obsm_key] = np.concatenate(features_list, axis=0)
 
-    sdata = add_table_layer(
+    sdata = add_table(
         sdata,
         adata=adata,
-        output_layer=output_layer,
-        region=adata.obs[region_key].cat.categories.to_list(),  # equal to labels_layer
+        output_table_name=output_table_name,
+        region=adata.obs[region_key].cat.categories.to_list(),  # equal to labels_name
         instance_key=instance_key,
         region_key=region_key,
         overwrite=overwrite,

@@ -153,11 +153,11 @@ def _get_uint_dtype(value: int) -> str:
     return dtype
 
 
-def _self_contained_warning_message(sdata: SpatialData, layer: str) -> str | None:
+def _self_contained_warning_message(sdata: SpatialData, element_name: str) -> str | None:
     elements = sdata.elements_are_self_contained()
-    if not elements[layer]:
+    if not elements[element_name]:
         warning_message = (
-            f"Element '{layer}' is Dask-backed, but the SpatialData object is not self-contained.\n"
+            f"Element '{element_name}' is Dask-backed, but the SpatialData object is not self-contained.\n"
             "To resolve this, ensure that you assign the result of operations:\n"
             "    sdata = harpy.{operation}(sdata, ...)\n"
             "Alternatively, manually reload from the Zarr store:\n"

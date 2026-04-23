@@ -25,12 +25,12 @@ from harpy.utils._io import _incremental_io_on_disk, _write_element_with_cleanup
 from harpy.utils._keys import _INSTANCE_KEY
 
 
-class ShapesLayerManager:
+class ShapesElementManager:
     def add_shapes(
         self,
         sdata: SpatialData,
         input: Array | GeoDataFrame,
-        output_layer: str,
+        output_shapes_name: str,
         transformations: MappingToCoordinateSystem_t = None,
         instance_key: str = _INSTANCE_KEY,
         overwrite: bool = False,
@@ -39,7 +39,7 @@ class ShapesLayerManager:
 
         if polygons.empty:
             log.warning(
-                f"GeoDataFrame contains no polygons. Skipping addition of shapes layer '{output_layer}' to sdata."
+                f"GeoDataFrame contains no polygons. Skipping addition of shapes element '{output_shapes_name}' to sdata."
             )
             return sdata
 
@@ -47,7 +47,7 @@ class ShapesLayerManager:
 
         sdata = self.add_to_sdata(
             sdata,
-            output_layer=output_layer,
+            output_shapes_name=output_shapes_name,
             spatial_element=polygons,
             overwrite=overwrite,
         )
@@ -57,16 +57,16 @@ class ShapesLayerManager:
     def filter_shapes(
         self,
         sdata: SpatialData,
-        table_layer: str,
-        labels_layer: str,
-        prefix_filtered_shapes_layer: str,
+        table_name: str,
+        labels_name: str,
+        prefix_filtered_shapes_name: str,
     ) -> SpatialData:
-        region_key = sdata[table_layer].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]
-        instance_key = sdata[table_layer].uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY]
+        region_key = sdata[table_name].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]
+        instance_key = sdata[table_name].uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY]
 
-        mask = sdata.tables[table_layer].obs[region_key].isin([labels_layer])
-        indexes_to_keep = sdata.tables[table_layer].obs[mask][instance_key].values.astype(int)
-        coordinate_systems_labels_layer = {*get_transformation(sdata.labels[labels_layer], get_all=True)}
+        mask = sdata.tables[table_name].obs[region_key].isin([labels_name])
+        indexes_to_keep = sdata.tables[table_name].obs[mask][instance_key].values.astype(int)
+        coordinate_systems_labels_element = {*get_transformation(sdata.labels[labels_name], get_all=True)}
 
         if len(indexes_to_keep) == 0:
             log.warning(
@@ -75,57 +75,56 @@ class ShapesLayerManager:
             )
             return sdata
 
-        for _shapes_layer in [*sdata.shapes]:
-            polygons = self.retrieve_data_from_sdata(sdata, name=_shapes_layer)
+        for _shapes_name in [*sdata.shapes]:
+            polygons = self.retrieve_data_from_sdata(sdata, name=_shapes_name)
             polygons = self.get_polygons_from_input(polygons, instance_key=instance_key)
-            # only filter shapes that are in same coordinate system as the labels layer
-            if not set(coordinate_systems_labels_layer).intersection({*get_transformation(polygons, get_all=True)}):
+            # only filter shapes that are in same coordinate system as the labels element
+            if not set(coordinate_systems_labels_element).intersection({*get_transformation(polygons, get_all=True)}):
                 continue
 
-            current_indexes_shapes_layer = polygons.index.values.astype(int)
+            current_indexes_shapes_element = polygons.index.values.astype(int)
 
-            bool_to_keep = np.isin(current_indexes_shapes_layer, indexes_to_keep)
+            bool_to_keep = np.isin(current_indexes_shapes_element, indexes_to_keep)
 
             if sum(bool_to_keep) == 0:
-                # no overlap, this means data.shapes[_shapes_layer] is
-                # a polygons layer containing polygons filtered out in a previous step
+                # no overlap, this means data.shapes[_shapes_name] contains polygons filtered out in a previous step
                 continue
 
-            output_filtered_shapes_layer = f"{prefix_filtered_shapes_layer}_{_shapes_layer}"
+            output_filtered_shapes_name = f"{prefix_filtered_shapes_name}_{_shapes_name}"
 
             if sum(~bool_to_keep) == 0:
                 # this is case where there are no polygons filtered out, so no
-                # output_filtered_shapes_layer should be created
+                # output_filtered_shapes_name should be created
                 log.warning(
-                    f"No polygons filtered out for shapes layer '{_shapes_layer}'. As a result, "
-                    f"shapes layer '{output_filtered_shapes_layer}' will not be created. This is "
-                    f"expected if 'indexes_to_keep' matches '{_shapes_layer}' indexes."
+                    f"No polygons filtered out for shapes element '{_shapes_name}'. As a result, "
+                    f"shapes element '{output_filtered_shapes_name}' will not be created. This is "
+                    f"expected if 'indexes_to_keep' matches '{_shapes_name}' indexes."
                 )
 
                 continue
 
-            filtered_polygons = self.retrieve_data_from_sdata(sdata, name=_shapes_layer)[~bool_to_keep]
+            filtered_polygons = self.retrieve_data_from_sdata(sdata, name=_shapes_name)[~bool_to_keep]
 
             log.info(
-                f"Filtering {len(set(filtered_polygons.index))} cells from shapes layer '{_shapes_layer}'. "
-                f"Adding new shapes layer '{output_filtered_shapes_layer}' containing these filtered out polygons."
+                f"Filtering {len(set(filtered_polygons.index))} cells from shapes element '{_shapes_name}'. "
+                f"Adding new shapes element '{output_filtered_shapes_name}' containing these filtered out polygons."
             )
 
             # if this assert would break in future spatialdata, then pass transformations of polygons to .parse
             assert get_transformation(filtered_polygons, get_all=True) == get_transformation(polygons, get_all=True)
             sdata = self.add_to_sdata(
                 sdata,
-                output_layer=output_filtered_shapes_layer,
+                output_shapes_name=output_filtered_shapes_name,
                 spatial_element=spatialdata.models.ShapesModel.parse(filtered_polygons),
                 overwrite=True,
             )
 
-            updated_polygons = self.retrieve_data_from_sdata(sdata, name=_shapes_layer)[bool_to_keep]
+            updated_polygons = self.retrieve_data_from_sdata(sdata, name=_shapes_name)[bool_to_keep]
 
             assert get_transformation(updated_polygons, get_all=True) == get_transformation(polygons, get_all=True)
             sdata = self.add_to_sdata(
                 sdata,
-                output_layer=_shapes_layer,
+                output_shapes_name=_shapes_name,
                 spatial_element=spatialdata.models.ShapesModel.parse(updated_polygons),
                 overwrite=True,
             )
@@ -173,7 +172,7 @@ class ShapesLayerManager:
         assert len(input.shape) in [
             2,
             3,
-        ], "Only 2D (y,x) and 3D (z,y,x) labels layers are supported."
+        ], "Only 2D (y,x) and 3D (z,y,x) labels elements are supported."
 
         return len(input.shape)
 
@@ -190,30 +189,30 @@ class ShapesLayerManager:
     def add_to_sdata(
         self,
         sdata: SpatialData,
-        output_layer: str,
+        output_shapes_name: str,
         spatial_element: GeoDataFrame,
         overwrite: bool = False,
     ) -> SpatialData:
         # given a spatial_element
-        if output_layer in [*sdata.shapes]:
+        if output_shapes_name in [*sdata.shapes]:
             if sdata.is_backed():
                 if overwrite:
                     sdata = _incremental_io_on_disk(
-                        sdata, output_layer=output_layer, element=spatial_element, element_type="shapes"
+                        sdata, element_name=output_shapes_name, element=spatial_element, element_type="shapes"
                     )
                 else:
                     raise ValueError(
-                        f"Attempting to overwrite 'sdata.shapes[\"{output_layer}\"]', but overwrite is set to False. Set overwrite to True to overwrite the .zarr store."
+                        f"Attempting to overwrite 'sdata.shapes[\"{output_shapes_name}\"]', but overwrite is set to False. Set overwrite to True to overwrite the .zarr store."
                     )
             else:
-                sdata[output_layer] = spatial_element
+                sdata[output_shapes_name] = spatial_element
         else:
-            sdata[output_layer] = spatial_element
+            sdata[output_shapes_name] = spatial_element
             if sdata.is_backed():
-                _write_element_with_cleanup(sdata, output_layer)
-                del sdata[output_layer]
+                _write_element_with_cleanup(sdata, output_shapes_name)
+                del sdata[output_shapes_name]
                 sdata_temp = read_zarr(sdata.path, selection=["shapes"])
-                sdata[output_layer] = sdata_temp[output_layer]
+                sdata[output_shapes_name] = sdata_temp[output_shapes_name]
                 del sdata_temp
 
         return sdata

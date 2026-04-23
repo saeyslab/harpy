@@ -15,10 +15,10 @@ from harpy.image._map import _get_spatial_element, map_image
 
 def min_max_filtering(
     sdata: SpatialData,
-    img_layer: str | None = None,
+    image_name: str | None = None,
     size_min_max_filter: int | list[int] = 85,
     chunks: str | tuple[int, ...] | int | None = None,
-    output_layer: str = "min_max_filtered",
+    output_image_name: str = "min_max_filtered",
     crd: tuple[int, int, int, int] | None = None,
     to_coordinate_system: str = "global",
     scale_factors: ScaleFactors_t | None = None,
@@ -29,21 +29,21 @@ def min_max_filtering(
 
     The size of the filter can be provided
     either as an integer or a list of integers corresponding to each channel.
-    Compatibility with image layers that have either two or three spatial dimensions.
+    Compatibility with image elements that have either two or three spatial dimensions.
 
     Parameters
     ----------
     sdata
         Spatial data object containing the images to be processed.
-    img_layer
-        The image layer in `sdata` to run min_max_filtering on. If not provided, the last image layer in `sdata` is used.
+    image_name
+        The image element in `sdata` to run min_max_filtering on. If not provided, the last image element in `sdata` is used.
     size_min_max_filter
         Size of the min_max filter. If provided as a list, the length
         must match the number of channels.
     chunks
         Specification for rechunking the data before applying the function.
-    output_layer
-        The name of the output layer. Defaults to "min_max_filtered".
+    output_image_name
+        The name of the output element. Defaults to "min_max_filtered".
     crd
         The coordinates specifying the region of the image to be processed. Defines the bounds (x_min, x_max, y_min, y_max).
     to_coordinate_system
@@ -120,14 +120,14 @@ def min_max_filtering(
 
         return image
 
-    if img_layer is None:
-        img_layer = [*sdata.images][-1]
+    if image_name is None:
+        image_name = [*sdata.images][-1]
         log.warning(
-            f"No image layer specified. "
-            f"Applying image processing on the last image layer '{img_layer}' of the provided SpatialData object."
+            f"No image element specified. "
+            f"Applying image processing on the last image element '{image_name}' of the provided SpatialData object."
         )
 
-    se = _get_spatial_element(sdata, img_layer)
+    se = _get_spatial_element(sdata, image_name)
 
     if isinstance(size_min_max_filter, Iterable):
         assert len(size_min_max_filter) == len(se.c.data), (
@@ -146,8 +146,8 @@ def min_max_filtering(
 
     sdata = map_image(
         sdata,
-        img_layer=img_layer,
-        output_layer=output_layer,
+        image_name=image_name,
+        output_image_name=output_image_name,
         func=_apply_min_max_filter,
         fn_kwargs=fn_kwargs,
         chunks=chunks,
@@ -163,10 +163,10 @@ def min_max_filtering(
 
 def gaussian_filtering(
     sdata: SpatialData,
-    img_layer: str | None = None,
+    image_name: str | None = None,
     sigma: int | list[int] = 6,
     chunks: str | tuple[int, ...] | int | None = None,
-    output_layer: str = "gaussian_filtered",
+    output_image_name: str = "gaussian_filtered",
     crd: tuple[int, int, int, int] | None = None,
     to_coordinate_system: str = "global",
     scale_factors: ScaleFactors_t | None = None,
@@ -176,22 +176,22 @@ def gaussian_filtering(
     Apply Gaussian filtering to an image in a SpatialData object using dask.
 
     The sigma value can be provided, either as an integer or a list of integers corresponding to each channel.
-    Compatibility with image layers that have either two or three spatial dimensions.
+    Compatibility with image elements that have either two or three spatial dimensions.
     See `scipy.ndimage.filters.gaussian_filter` for more info
 
     Parameters
     ----------
     sdata
         Spatial data object containing the images to be processed.
-    img_layer
-        The image layer in `sdata` to run min_max_filtering on. If not provided, the last image layer in `sdata` is used.
+    image_name
+        The image element in `sdata` to run min_max_filtering on. If not provided, the last image element in `sdata` is used.
     sigma
         Standard deviation for Gaussian kernel. If provided as a list, the length
         must match the number of channels.
     chunks
         Specification for rechunking the data before applying the function.
-    output_layer
-        The name of the output layer. Defaults to "gaussian_filtered".
+    output_image_name
+        The name of the output element. Defaults to "gaussian_filtered".
     crd
         The coordinates specifying the region of the image to be processed. Defines the bounds (x_min, x_max, y_min, y_max).
     to_coordinate_system
@@ -247,14 +247,14 @@ def gaussian_filtering(
 
         return image
 
-    if img_layer is None:
-        img_layer = [*sdata.images][-1]
+    if image_name is None:
+        image_name = [*sdata.images][-1]
         log.warning(
-            f"No image layer specified. "
-            f"Applying image processing on the last image layer '{img_layer}' of the provided SpatialData object."
+            f"No image element specified. "
+            f"Applying image processing on the last image element '{image_name}' of the provided SpatialData object."
         )
 
-    se = _get_spatial_element(sdata, img_layer)
+    se = _get_spatial_element(sdata, image_name)
 
     if isinstance(sigma, Iterable):
         assert len(sigma) == len(se.c.data), (
@@ -266,8 +266,8 @@ def gaussian_filtering(
 
     sdata = map_image(
         sdata,
-        img_layer=img_layer,
-        output_layer=output_layer,
+        image_name=image_name,
+        output_image_name=output_image_name,
         func=_apply_gaussian_filter,
         fn_kwargs=fn_kwargs,
         chunks=chunks,

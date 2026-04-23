@@ -1,7 +1,7 @@
 import pytest
 from spatialdata import SpatialData
 
-from harpy.image._image import _get_spatial_element, add_image_layer, add_labels_layer, get_dataarray
+from harpy.image._image import _get_spatial_element, add_image, add_labels, get_dataarray
 
 
 @pytest.mark.parametrize(
@@ -13,7 +13,7 @@ from harpy.image._image import _get_spatial_element, add_image_layer, add_labels
         ([2, 2, 2, 2], False),
     ],
 )
-def test_add_image_layer_backed(
+def test_add_image_backed(
     sdata_multi_c,
     scale_factors,
     overwrite,
@@ -26,10 +26,10 @@ def test_add_image_layer_backed(
     arr = arr + 1
 
     # Add the image layer
-    sdata_multi_c = add_image_layer(
+    sdata_multi_c = add_image(
         sdata_multi_c,
         arr=arr,
-        output_layer=new_name,
+        output_image_name=new_name,
         scale_factors=scale_factors,
         overwrite=True,
     )
@@ -42,7 +42,7 @@ def test_add_image_layer_backed(
     assert sdata_multi_c[new_name].any().compute()
 
     # Verify materialization of dask graph layers
-    se = _get_spatial_element(sdata_multi_c, layer=new_name)
+    se = _get_spatial_element(sdata_multi_c, element_name=new_name)
     for name, layer in se.data.__dask_graph__().layers.items():
         if not name.startswith("from-zarr-"):
             assert layer.is_materialized()
@@ -58,7 +58,7 @@ def test_add_image_layer_backed(
         ([2, 2, 2, 2], False),
     ],
 )
-def test_add_image_layer_no_backed(
+def test_add_image_no_backed(
     sdata_multi_c,
     scale_factors,
     overwrite,
@@ -69,10 +69,10 @@ def test_add_image_layer_no_backed(
     # create an sdata that is not backed
     sdata_no_backed = SpatialData()
 
-    sdata_no_backed = add_image_layer(
+    sdata_no_backed = add_image(
         sdata_no_backed,
         arr=sdata_multi_c[name].data,
-        output_layer=name,
+        output_image_name=name,
         scale_factors=scale_factors,
         overwrite=True,
     )
@@ -80,14 +80,14 @@ def test_add_image_layer_no_backed(
     assert not sdata_no_backed.is_backed()
 
     # now do a a computation graph, and add result to sdata_no_backed
-    se = _get_spatial_element(sdata_no_backed, layer=name)
+    se = _get_spatial_element(sdata_no_backed, element_name=name)
     arr = se.data
     arr = arr + 1
 
-    sdata_no_backed = add_image_layer(
+    sdata_no_backed = add_image(
         sdata_no_backed,
         arr=arr,
-        output_layer=new_name,
+        output_image_name=new_name,
         scale_factors=scale_factors,
         overwrite=True,
     )
@@ -97,7 +97,7 @@ def test_add_image_layer_no_backed(
     # check if if contains non zero elements
     assert sdata_no_backed[new_name].any().compute()
 
-    se = _get_spatial_element(sdata_no_backed, layer=new_name)
+    se = _get_spatial_element(sdata_no_backed, element_name=new_name)
 
     for _, layer in se.data.__dask_graph__().layers.items():
         assert layer.is_materialized()
@@ -113,7 +113,7 @@ def test_add_image_layer_no_backed(
         ([2, 2, 2, 2], False),
     ],
 )
-def test_add_labels_layer_backed(
+def test_add_labels_backed(
     sdata_multi_c,
     scale_factors,
     overwrite,
@@ -121,12 +121,12 @@ def test_add_labels_layer_backed(
     name = "masks_whole"
     new_name = name if overwrite else f"{name}_processed"
 
-    arr = _get_spatial_element(sdata_multi_c, layer=name).data
+    arr = _get_spatial_element(sdata_multi_c, element_name=name).data
     arr = arr + 1
-    sdata_multi_c = add_labels_layer(
+    sdata_multi_c = add_labels(
         sdata_multi_c,
         arr=arr,
-        output_layer=new_name,
+        output_labels_name=new_name,
         scale_factors=scale_factors,
         overwrite=True,
     )
@@ -139,7 +139,7 @@ def test_add_labels_layer_backed(
     # check if it contains non-zero elements.
     assert sdata_multi_c[new_name].any().compute()
 
-    se = _get_spatial_element(sdata_multi_c, layer=new_name)
+    se = _get_spatial_element(sdata_multi_c, element_name=new_name)
     for layer_name, layer in se.data.__dask_graph__().layers.items():
         if not layer_name.startswith("from-zarr-"):
             assert layer.is_materialized()
@@ -155,7 +155,7 @@ def test_add_labels_layer_backed(
         ([2, 2, 2, 2], False),
     ],
 )
-def test_add_labels_layer_no_backed(
+def test_add_labels_no_backed(
     sdata_multi_c,
     scale_factors,
     overwrite,
@@ -166,10 +166,10 @@ def test_add_labels_layer_no_backed(
     # create an sdata that is not backed
     sdata_no_backed = SpatialData()
 
-    sdata_no_backed = add_labels_layer(
+    sdata_no_backed = add_labels(
         sdata_no_backed,
-        arr=_get_spatial_element(sdata_multi_c, layer=name).data,
-        output_layer=name,
+        arr=_get_spatial_element(sdata_multi_c, element_name=name).data,
+        output_labels_name=name,
         scale_factors=scale_factors,
         overwrite=True,
     )
@@ -177,13 +177,13 @@ def test_add_labels_layer_no_backed(
     assert not sdata_no_backed.is_backed()
 
     # now add a computation graph, and add result to sdata_no_backed
-    arr = _get_spatial_element(sdata_no_backed, layer=name).data
+    arr = _get_spatial_element(sdata_no_backed, element_name=name).data
     arr = arr + 1
 
-    sdata_no_backed = add_labels_layer(
+    sdata_no_backed = add_labels(
         sdata_no_backed,
         arr=arr,
-        output_layer=new_name,
+        output_labels_name=new_name,
         scale_factors=scale_factors,
         overwrite=True,
     )
@@ -192,14 +192,14 @@ def test_add_labels_layer_no_backed(
 
     assert sdata_no_backed[new_name].any().compute()
 
-    se = _get_spatial_element(sdata_no_backed, layer=new_name)
+    se = _get_spatial_element(sdata_no_backed, element_name=new_name)
     for _, layer in se.data.__dask_graph__().layers.items():
         assert layer.is_materialized()
 
 
 def test_get_dataarray_scale_parameter(sdata):
-    se_scale0 = get_dataarray(sdata, layer="blobs_multiscale_image")
-    se_scale2 = get_dataarray(sdata, layer="blobs_multiscale_image", scale="scale2")
+    se_scale0 = get_dataarray(sdata, element_name="blobs_multiscale_image")
+    se_scale2 = get_dataarray(sdata, element_name="blobs_multiscale_image", scale="scale2")
 
     assert se_scale0.shape != se_scale2.shape
     assert se_scale0.sizes["x"] > se_scale2.sizes["x"]
@@ -207,12 +207,12 @@ def test_get_dataarray_scale_parameter(sdata):
 
 
 def test_get_dataarray_scale_ignored_for_dataarray(sdata_blobs):
-    se_default = get_dataarray(sdata_blobs, layer="blobs_image")
-    se_scaled = get_dataarray(sdata_blobs, layer="blobs_image", scale="scale3")
+    se_default = get_dataarray(sdata_blobs, element_name="blobs_image")
+    se_scaled = get_dataarray(sdata_blobs, element_name="blobs_image", scale="scale3")
 
     assert se_default.identical(se_scaled)
 
 
 def test_get_dataarray_scale_raises_for_missing_scale(sdata):
     with pytest.raises(ValueError, match="Scale 'scale9' not found"):
-        get_dataarray(sdata, layer="blobs_multiscale_image", scale="scale9")
+        get_dataarray(sdata, element_name="blobs_multiscale_image", scale="scale9")

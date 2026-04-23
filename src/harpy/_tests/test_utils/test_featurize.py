@@ -6,7 +6,7 @@ from numpy.typing import NDArray
 from scipy import ndimage
 from spatialdata import SpatialData
 
-from harpy.image import add_image_layer
+from harpy.image import add_image
 from harpy.utils._featurize import Featurizer, _region_radii_and_axes
 from harpy.utils._keys import _INSTANCE_KEY
 from harpy.utils.utils import _get_xp, _to_numpy
@@ -22,10 +22,10 @@ def test_featurize(sdata_transcripts_no_backed: SpatialData):
 
     image = sdata["raw_image"].data.rechunk(chunksize_spatial)
 
-    sdata = add_image_layer(
+    sdata = add_image(
         sdata,
         arr=da.concatenate([image, image, image, image], axis=0),
-        output_layer="raw_image",
+        output_image_name="raw_image",
         overwrite=True,
     )
     image = sdata["raw_image"].data[:, None, ...].rechunk((3, 1, chunksize_spatial, chunksize_spatial))
@@ -58,10 +58,10 @@ def test_extract_instances(sdata_transcripts_no_backed, extract_mask):
 
     image = sdata["raw_image"].data.rechunk(chunksize_spatial)
 
-    sdata = add_image_layer(
+    sdata = add_image(
         sdata,
         arr=da.concatenate([image, image, image, image], axis=0),
-        output_layer="raw_image",
+        output_image_name="raw_image",
         overwrite=True,
     )
     image = sdata["raw_image"].data[:, None, ...].rechunk((3, 1, chunksize_spatial, chunksize_spatial))

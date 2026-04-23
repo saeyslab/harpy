@@ -12,17 +12,17 @@ from scipy.sparse import issparse
 from spatialdata import SpatialData
 
 from harpy.image._image import get_dataarray
-from harpy.shape._shape import filter_shapes_layer
-from harpy.table._table import ProcessTable, add_table_layer
+from harpy.shape._shape import filter_shapes
+from harpy.table._table import ProcessTable, add_table
 from harpy.utils._aggregate import _get_mask_area
 from harpy.utils._keys import _CELLSIZE_KEY, _RAW_COUNTS_KEY
 
 
 def preprocess_transcriptomics(
     sdata: SpatialData,
-    labels_layer: str | Iterable[str],
-    table_layer: str,
-    output_layer: str,
+    labels_name: str | Iterable[str],
+    table_name: str,
+    output_table_name: str,
     percent_top: tuple[int, ...] = (2, 5),
     min_counts: int = 10,
     min_cells: int = 5,
@@ -32,7 +32,7 @@ def preprocess_transcriptomics(
     highly_variable_genes_kwargs: Mapping[str, Any] = MappingProxyType({}),
     max_value_scale: float | None = 10,
     n_comps: int = 50,
-    update_shapes_layers: bool = True,
+    update_shapes_elements: bool = True,
     instance_size_key: str = _CELLSIZE_KEY,
     raw_counts_key: str = _RAW_COUNTS_KEY,
     overwrite: bool = False,
@@ -43,21 +43,21 @@ def preprocess_transcriptomics(
     Performs filtering (via :func:`~scanpy.pp.filter_cells` and :func:`~scanpy.pp.filter_genes` ) and optional normalization (on size or via :func:`~scanpy.sc.pp.normalize_total`),
     log transformation (:func:`~scanpy.pp.log1p`), highly variable genes selection (:func:`~scanpy.pp.highly_variable_genes`),
     scaling (:func:`~scanpy.pp.scale`), and PCA calculation (:func:`~scanpy.pp.pca`) for transcriptomics data
-    contained in the `sdata.tables[table_layer]`. QC metrics are added to `sdata.tables[output_layer].obs` using :func:`~scanpy.pp.calculate_qc_metrics`.
+    contained in the `sdata.tables[table_name]`. QC metrics are added to `sdata.tables[output_table_name].obs` using :func:`~scanpy.pp.calculate_qc_metrics`.
 
     Parameters
     ----------
     sdata
         The input SpatialData object.
-    labels_layer
-        The labels layer(s) of `sdata` used to select the cells via the region key in `sdata.tables[table_layer].obs`.
-        Note that if `output_layer` is equal to `table_layer` and overwrite is `True`,
-        cells in `sdata.tables[table_layer]` linked to other `labels_layer` (via the region key), will be removed from `sdata.tables[table_layer]`
+    labels_name
+        The labels element(s) of `sdata` used to select the cells via the region key in `sdata.tables[table_name].obs`.
+        Note that if `output_table_name` is equal to `table_name` and overwrite is `True`,
+        cells in `sdata.tables[table_name]` linked to other `labels_name` (via the region key), will be removed from `sdata.tables[table_name]`
         (also from the backing zarr store if it is backed).
-    table_layer
-        The table layer in `sdata` on which to perform preprocessing on.
-    output_layer
-        The output table layer in `sdata` to which preprocessed table layer will be written.
+    table_name
+        The table element in `sdata` on which to perform preprocessing.
+    output_table_name
+        The output table element in `sdata` to which the preprocessed table will be written.
     percent_top
         List of ranks (where genes are ranked by expression) at which the cumulative proportion of expression will be reported as a percentage.
         Passed to :func:`~scanpy.pp.calculate_qc_metrics`.
@@ -77,22 +77,22 @@ def preprocess_transcriptomics(
         The maximum value to which data will be scaled, when scaling the data to have zero mean and a variance of one, using :func:`~scanpy.pp.scale`.
     n_comps
         Number of principal components to calculate.
-    update_shapes_layers
-        Whether to filter the shapes layers associated with `labels_layer`.
-        If set to `True`, cells that do not appear in resulting `output_layer` (with the region key equal to `labels_layer`) will be removed from the shapes layers (via region key) in the `sdata` object.
+    update_shapes_elements
+        Whether to filter the shapes elements associated with `labels_name`.
+        If set to `True`, cells that do not appear in resulting `output_table_name` (with the region key equal to `labels_name`) will be removed from the shapes elements (via region key) in the `sdata` object.
         Filtered shapes will be added to `sdata` with prefix 'filtered_low_counts'.
         This parameter is deprecated, and will be removed in a future version.
     instance_size_key
-        The key in the :class:`~anndata.AnnData` table `.obs` that holds the size of the instances. If `instance_size_key` is not found in `.obs` it will be calculated from the `labels_layer`.
+        The key in the :class:`~anndata.AnnData` table `.obs` that holds the size of the instances. If `instance_size_key` is not found in `.obs` it will be calculated from the `labels_name`.
         Ignored if `size_norm` is `False`.
     raw_counts_key
         Name of the :class:`~anndata.AnnData` layer where the non-preprocessed counts will be stored.
     overwrite
-        If True, overwrites the `output_layer` if it already exists in `sdata`.
+        If True, overwrites the `output_table_name` if it already exists in `sdata`.
 
     Returns
     -------
-    The `sdata` containing the preprocessed AnnData object as an attribute (`sdata.tables[output_layer]`).
+    The `sdata` containing the preprocessed AnnData object as an attribute (`sdata.tables[output_table_name]`).
 
     Raises
     ------
@@ -101,24 +101,24 @@ def preprocess_transcriptomics(
     ValueError
         If `sdata` does not have tables attribute.
     ValueError
-        If `labels_layer`, or one of the element of `labels_layer` is not a labels layer in `sdata`.
+        If `labels_name`, or one of the elements of `labels_name`, is not a labels element in `sdata`.
     ValueError
-        If `table_layer` is not a table layer in `sdata`.
+        If `table_name` is not a table element in `sdata`.
 
 
     Warnings
     --------
     - If `max_value_scale` is set too low, it may overly constrain the variability of the data,
       potentially impacting downstream analyses.
-    - If the dimensionality of `sdata.tables[table_layer]` is smaller than the desired number of principal components, `n_comps` is set to the minimum dimensionality, and a message is printed.
+    - If the dimensionality of `sdata.tables[table_name]` is smaller than the desired number of principal components, `n_comps` is set to the minimum dimensionality, and a message is printed.
 
     See Also
     --------
-    harpy.tb.allocate : create an AnnData table in `sdata` using a `points_layer` and a `labels_layer`.
+    harpy.tb.allocate : create an AnnData table in `sdata` using a `points_name` and a `labels_name`.
     """
-    preprocess_instance = Preprocess(sdata, labels_layer=labels_layer, table_layer=table_layer)
+    preprocess_instance = Preprocess(sdata, labels_name=labels_name, table_name=table_name)
     sdata = preprocess_instance.preprocess(
-        output_layer=output_layer,
+        output_table_name=output_table_name,
         calculate_qc_metrics=True,
         filter_cells=True,
         filter_genes=True,
@@ -131,7 +131,7 @@ def preprocess_transcriptomics(
         scale=True,
         max_value_scale=max_value_scale,
         calculate_pca=True,
-        update_shapes_layers=update_shapes_layers,
+        update_shapes_elements=update_shapes_elements,
         qc_kwargs={"percent_top": percent_top},
         filter_cells_kwargs={"min_counts": min_counts},
         filter_genes_kwargs={"min_cells": min_cells},
@@ -145,9 +145,9 @@ def preprocess_transcriptomics(
 
 def preprocess_proteomics(
     sdata: SpatialData,
-    labels_layer: str | Iterable[str],
-    table_layer: str,
-    output_layer: str,
+    labels_name: str | Iterable[str],
+    table_name: str,
+    output_table_name: str,
     calculate_cell_size: bool = True,
     size_norm: bool = True,
     library_norm: bool = False,
@@ -173,18 +173,18 @@ def preprocess_proteomics(
     ----------
     sdata
         The input SpatialData object.
-    labels_layer
-        The labels layer(s) of `sdata` used to select the cells via the region key in `sdata.tables[table_layer].obs`.
-        Note that if `output_layer` is equal to `table_layer` and overwrite is True,
-        cells in `sdata.tables[table_layer]` linked to other `labels_layer` (via the region key), will be removed from `sdata.tables[table_layer]`.
-        If a list of labels layers is provided, they will therefore be preprocessed together (e.g. multiple samples).
-    table_layer
-        The table layer in sdata to apply preprocessing to.
+    labels_name
+        The labels element(s) of `sdata` used to select the cells via the region key in `sdata.tables[table_name].obs`.
+        Note that if `output_table_name` is equal to `table_name` and overwrite is True,
+        cells in `sdata.tables[table_name]` linked to other `labels_name` (via the region key), will be removed from `sdata.tables[table_name]`.
+        If a list of labels elements is provided, they will therefore be preprocessed together (e.g. multiple samples).
+    table_name
+        The table element in `sdata` to apply preprocessing to.
         It is an AnnData object containing total intensities per cell in `.obs` (rows) and per channel in `.var` (columns).
-    output_layer
-        The output table layer in `sdata` to which preprocessed table layer will be written.
+    output_table_name
+        The output table element in `sdata` to which the preprocessed table will be written.
     calculate_cell_size
-        If `True`, calculates cell sizes from `labels_layer` and stores them in `.obs[instance_size_key]`.
+        If `True`, calculates cell sizes from `labels_name` and stores them in `.obs[instance_size_key]`.
         Set this to `False` when cell sizes are not needed or are already present and should be preserved.
     size_norm
         If `True`, normalization is based on the size of the nucleus/cell. Resulting values are multiplied by 100 after normalization.
@@ -213,35 +213,35 @@ def preprocess_proteomics(
         Name of the :class:`~anndata.AnnData` layer where the non-preprocessed intensities will be stored.
         This parameter is ignored if no preprocessing is applied (i.e. `size_norm`, `library_norm`, `log1p`, `scale` are all `False` and q is `None`).
     overwrite
-        If `True`, overwrites the `output_layer` if it already exists in `sdata`.
+        If `True`, overwrites the `output_table_name` if it already exists in `sdata`.
 
     Returns
     -------
-    The `sdata` containing the preprocessed AnnData object as an attribute (`sdata.tables[output_layer]`).
+    The `sdata` containing the preprocessed AnnData object as an attribute (`sdata.tables[output_table_name]`).
 
     Raises
     ------
     ValueError
-        - If `sdata` does not contains any labels layers.
-        - If `sdata` does not contain any table layers.
-        - If `labels_layer`, or one of the element of `labels_layer` is not a labels layer in `sdata`.
-        - If `table_layer` is not a table layer in `sdata`.
+        - If `sdata` does not contain any labels elements.
+        - If `sdata` does not contain any table elements.
+        - If `labels_name`, or one of the elements of `labels_name`, is not a labels element in `sdata`.
+        - If `table_name` is not a table element in `sdata`.
         - If both `scale` is set to True and `q` is not None.
 
     Warnings
     --------
     - If `scale` is True and `max_value_scale` is set too low, it may overly constrain the variability of the data,
       potentially impacting downstream analyses.
-    - If the dimensionality of `sdata.tables[table_layer]` is smaller than the desired number of principal components
+    - If the dimensionality of `sdata.tables[table_name]` is smaller than the desired number of principal components
       when `calculate_pca` is True, `n_comps` is set to the minimum dimensionality, and a message is printed.
 
     See Also
     --------
-    harpy.tb.allocate_intensity : create an AnnData table in `sdata` using an `image_layer` and a `labels_layer`.
+    harpy.tb.allocate_intensity : create an AnnData table in `sdata` using an `image_name` and a `labels_name`.
     """
-    preprocess_instance = Preprocess(sdata, labels_layer=labels_layer, table_layer=table_layer)
+    preprocess_instance = Preprocess(sdata, labels_name=labels_name, table_name=table_name)
     sdata = preprocess_instance.preprocess(
-        output_layer=output_layer,
+        output_table_name=output_table_name,
         calculate_qc_metrics=False,
         filter_cells=False,
         filter_genes=False,
@@ -255,7 +255,7 @@ def preprocess_proteomics(
         max_value_q=max_value_q,
         highly_variable_genes=False,
         calculate_pca=calculate_pca,
-        update_shapes_layers=False,
+        update_shapes_elements=False,
         pca_kwargs={"n_comps": n_comps},
         instance_size_key=instance_size_key,
         raw_counts_key=raw_counts_key,
@@ -267,7 +267,7 @@ def preprocess_proteomics(
 class Preprocess(ProcessTable):
     def preprocess(
         self,
-        output_layer: str,
+        output_table_name: str,
         calculate_qc_metrics: bool = True,
         filter_cells: bool = True,
         filter_genes: bool = True,
@@ -281,7 +281,7 @@ class Preprocess(ProcessTable):
         max_value_q: float | None = 1,  # ignored if q is None
         highly_variable_genes: bool = False,
         calculate_pca: bool = True,
-        update_shapes_layers: bool = True,  # whether to update the shapes layer based on the items filtered out in sdata.tables[self.table_layer].
+        update_shapes_elements: bool = True,  # whether to update the shapes element based on the items filtered out in sdata.tables[self.table_name].
         qc_kwargs: Mapping[str, Any] = MappingProxyType({}),  # keyword arguments passed to sc.pp.calculate_qc_metrics
         filter_cells_kwargs: Mapping[str, Any] = MappingProxyType({}),  # keyword arguments passed to sc.pp.filter_cells
         filter_genes_kwargs: Mapping[str, Any] = MappingProxyType({}),  # keyword arguments passed to sc.pp.filter_genes
@@ -314,15 +314,15 @@ class Preprocess(ProcessTable):
                     f"Column with name '{instance_size_key}' already exists. Removing column '{instance_size_key}'."
                 )
                 adata.obs = adata.obs.drop(columns=instance_size_key)
-            for i, _labels_layer in enumerate(self.labels_layer):
-                log.info(f"Calculating cell size from provided labels_layer '{_labels_layer}'")
-                se = get_dataarray(self.sdata, layer=_labels_layer)
+            for i, _labels_name in enumerate(self.labels_name):
+                log.info(f"Calculating cell size from provided labels_name '{_labels_name}'")
+                se = get_dataarray(self.sdata, element_name=_labels_name)
                 _shapesize = _get_mask_area(
                     se.data if se.data.ndim == 3 else se.data[None, ...],
                     instance_key=self.instance_key,
                     instance_size_key=instance_size_key,
                 )
-                _shapesize[self.region_key] = _labels_layer
+                _shapesize[self.region_key] = _labels_name
                 if i == 0:
                     shapesize = _shapesize
                 else:
@@ -403,7 +403,7 @@ class Preprocess(ProcessTable):
                 if min(adata.shape) < n_comps:
                     n_comps = min(adata.shape) - 1
                     log.warning(
-                        f"amount of pc's was set to {min(adata.shape) - 1} because of the dimensionality of 'sdata.tables[table_layer]'."
+                        f"amount of pc's was set to {min(adata.shape) - 1} because of the dimensionality of 'sdata.tables[table_name]'."
                     )
             if not scale and (q is None):
                 log.warning(
@@ -412,23 +412,23 @@ class Preprocess(ProcessTable):
             self._type_check_before_pca(adata)
             sc.pp.pca(adata, copy=False, n_comps=n_comps, **pca_kwargs)
 
-        self.sdata = add_table_layer(
+        self.sdata = add_table(
             self.sdata,
             adata=adata,
-            output_layer=output_layer,
-            region=self.labels_layer,
+            output_table_name=output_table_name,
+            region=self.labels_name,
             instance_key=self.instance_key,
             region_key=self.region_key,
             overwrite=overwrite,
         )
 
-        if update_shapes_layers:
-            for _labels_layer in self.labels_layer:
-                self.sdata = filter_shapes_layer(
+        if update_shapes_elements:
+            for _labels_name in self.labels_name:
+                self.sdata = filter_shapes(
                     self.sdata,
-                    table_layer=output_layer,
-                    labels_layer=_labels_layer,
-                    prefix_filtered_shapes_layer="filtered_low_counts",
+                    table_name=output_table_name,
+                    labels_name=_labels_name,
+                    prefix_filtered_shapes_name="filtered_low_counts",
                 )
 
         return self.sdata

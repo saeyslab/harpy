@@ -1,14 +1,14 @@
 tilingCorrection: True
 crop_param: null
 tile_size: 2144
-output_img_layer_tiling_correction: "tiling_correction"
+output_image_name_tiling_correction: "tiling_correction"
 minmaxFiltering: True
 size_min_max_filter: 85
-output_img_layer_min_max_filtering: "min_max_filtered"
+output_image_name_min_max_filtering: "min_max_filtered"
 contrastEnhancing: True
 contrast_clip: 3.5
 chunksize_clahe: 10000
 depth: 3000
-output_img_layer_clahe: "clahe"
+output_image_name_clahe: "clahe"
 small_size_vis: [0, 3000, 0, 3000]
 overwrite: False

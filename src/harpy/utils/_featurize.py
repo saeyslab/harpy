@@ -174,17 +174,17 @@ class Featurizer:
 
             sdata = hp.datasets.pixie_example()
 
-            img_layer = "raw_image_fov0"
-            labels_layer = "label_whole_fov0"
+            image_name = "raw_image_fov0"
+            labels_name = "label_whole_fov0"
 
             mask_array = (
-                sdata[labels_layer]
+                sdata[labels_name]
                 .data[None, ...]
                 .rechunk(1024)
             )
 
             image_array = (
-                sdata[img_layer]
+                sdata[image_name]
                 .data[:, None, ...]
                 .rechunk(1024)
             )
@@ -238,7 +238,7 @@ class Featurizer:
 
         See Also
         --------
-        harpy.tb.featurize : featurize instances in labels layer from an image layer using an embedding model.
+        harpy.tb.featurize : featurize instances in labels element from an image element using an embedding model.
         """
         if store_intermediate and zarr_output_path is None:
             raise ValueError("Please specify a 'zarr_output_path' if 'store_intermediate' is 'True'.")
@@ -668,17 +668,17 @@ class Featurizer:
 
             sdata = hp.datasets.pixie_example()
 
-            img_layer = "raw_image_fov0"
-            labels_layer = "label_whole_fov0"
+            image_name = "raw_image_fov0"
+            labels_name = "label_whole_fov0"
 
             mask_array = (
-                sdata[labels_layer]
+                sdata[labels_name]
                 .data[None, ...]
                 .rechunk(1024)
             )
 
             image_array = (
-                sdata[img_layer]
+                sdata[image_name]
                 .data[:, None, ...]
                 .rechunk(1024)
             )
@@ -722,8 +722,8 @@ class Featurizer:
 
             sdata = hp.datasets.pixie_example()
 
-            labels_layer = "label_whole_fov0"
-            mask_array = sdata[labels_layer].data[None, ...]
+            labels_name = "label_whole_fov0"
+            mask_array = sdata[labels_name].data[None, ...]
 
             fe = hp.utils.Featurizer(
                 mask_dask_array=mask_array,
@@ -761,7 +761,7 @@ class Featurizer:
 
         See Also
         --------
-        harpy.tb.extract_instances : Extract instance windows from a labels layer and (optionally) an image layer.
+        harpy.tb.extract_instances : Extract instance windows from a labels element and (optionally) an image element.
         """
         if depth is None:
             depth = (diameter // 2) + 1

@@ -26,7 +26,7 @@ def visium_hd(
     """
     Read *10x Genomics* Visium HD formatted dataset.
 
-    Wrapper around `spatialdata.io.readers.visium_hd.visium_hd`, but with the resulting table annotated by a labels layer.
+    Wrapper around `spatialdata.io.readers.visium_hd.visium_hd`, but with the resulting table annotated by a labels element.
 
     .. see also::
 
@@ -83,12 +83,12 @@ def visium_hd(
         )
         remove_transformation(sdata.images[f"{dataset_id}_cytassist_image"], to_coordinate_system="global")
 
-    for table_layer in [*sdata.tables]:
-        adata = sdata[table_layer]
+    for table_name in [*sdata.tables]:
+        adata = sdata[table_name]
         adata.var_names_make_unique()
         adata.X = adata.X.tocsc()
 
-        _old_instance_key = sdata[table_layer].uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY]
+        _old_instance_key = sdata[table_name].uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY]
         adata.obs.rename(columns={VisiumHDKeys.REGION_KEY: region_key, _old_instance_key: instance_key}, inplace=True)
         adata.uns.pop(TableModel.ATTRS_KEY)
         adata = TableModel.parse(
@@ -97,24 +97,24 @@ def visium_hd(
             region=adata.obs[region_key].cat.categories.to_list(),
             instance_key=instance_key,
         )
-        # get the shapes layer for this table layer
-        for _shapes_layer in [*sdata.shapes]:
-            if table_layer in _shapes_layer:
-                shapes_layer = _shapes_layer
+        # get the shapes element for this table element
+        for _shapes_name in [*sdata.shapes]:
+            if table_name in _shapes_name:
+                shapes_name = _shapes_name
                 break
-        assert len(sdata[shapes_layer]) == len(adata), (
-            f"Shapes layer containing bins '{shapes_layer}' and corresponding table '{table_layer}' should have same length."
+        assert len(sdata[shapes_name]) == len(adata), (
+            f"Shapes element containing bins '{shapes_name}' and corresponding table '{table_name}' should have same length."
         )
-        sdata[shapes_layer].index = (
-            adata.obs.set_index(VisiumHDKeys.INSTANCE_KEY).loc[sdata[shapes_layer].index, instance_key].values
+        sdata[shapes_name].index = (
+            adata.obs.set_index(VisiumHDKeys.INSTANCE_KEY).loc[sdata[shapes_name].index, instance_key].values
         )
         if VisiumHDKeys.INSTANCE_KEY in adata.obs.columns:
             adata.obs.drop(columns=VisiumHDKeys.INSTANCE_KEY, inplace=True)
-        sdata[shapes_layer].index.name = instance_key
+        sdata[shapes_name].index.name = instance_key
 
-        del sdata[table_layer]
+        del sdata[table_name]
 
-        sdata[table_layer] = adata
+        sdata[table_name] = adata
 
     if output is not None:
         sdata.write(output)

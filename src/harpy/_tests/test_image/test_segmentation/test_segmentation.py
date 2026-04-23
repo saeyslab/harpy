@@ -13,7 +13,7 @@ from harpy.image._image import _get_spatial_element
 from harpy.image.segmentation._segmentation import segment, segment_points
 from harpy.image.segmentation.segmentation_models._baysor import _dummy
 from harpy.image.segmentation.segmentation_models._cellpose import cellpose_callable
-from harpy.points._points import add_points_layer
+from harpy.points._points import add_points
 
 
 @pytest.mark.skipif(not importlib.util.find_spec("cellpose"), reason="requires the cellpose library")
@@ -23,10 +23,10 @@ def test_segment(sdata_multi_c_no_backed: SpatialData):
     with dask.config.set(scheduler="processes"):
         sdata_multi_c_no_backed = segment(
             sdata_multi_c_no_backed,
-            img_layer="combine",
+            image_name="combine",
             model=cellpose_callable,
-            output_labels_layer="masks_cellpose",
-            output_shapes_layer="masks_cellpose_boundaries",
+            output_labels_name="masks_cellpose",
+            output_shapes_name="masks_cellpose_boundaries",
             trim=False,
             chunks=50,
             overwrite=True,
@@ -54,10 +54,10 @@ def test_segment_pseudo_3D(sdata_multi_c_no_backed: SpatialData):
     with dask.config.set(scheduler="processes"):
         sdata_multi_c_no_backed = segment(
             sdata_multi_c_no_backed,
-            img_layer="combine_z",
+            image_name="combine_z",
             model=cellpose_callable,
-            output_labels_layer="masks_cellpose_3D",
-            output_shapes_layer="masks_cellpose_3D_boundaries",
+            output_labels_name="masks_cellpose_3D",
+            output_shapes_name="masks_cellpose_3D_boundaries",
             trim=False,
             chunks=(50, 50),
             overwrite=True,
@@ -87,10 +87,10 @@ def test_segment_3D(sdata_multi_c_no_backed: SpatialData):
     with dask.config.set(scheduler="processes"):
         sdata_multi_c_no_backed = segment(
             sdata_multi_c_no_backed,
-            img_layer="combine_z",
+            image_name="combine_z",
             model=cellpose_callable,
-            output_labels_layer="masks_cellpose_3D",
-            output_shapes_layer="masks_cellpose_3D_boundaries",
+            output_labels_name="masks_cellpose_3D",
+            output_shapes_name="masks_cellpose_3D_boundaries",
             trim=False,
             chunks=(50, 50),
             overwrite=True,
@@ -122,10 +122,10 @@ def test_segment_points(sdata_multi_c_no_backed: SpatialData):
 
     coordinates = {"x": "x", "y": "y"}
 
-    sdata_multi_c_no_backed = add_points_layer(
+    sdata_multi_c_no_backed = add_points(
         sdata_multi_c_no_backed,
         ddf=ddf,
-        output_layer="transcripts",
+        output_points_name="transcripts",
         coordinates=coordinates,
         overwrite=False,
     )
@@ -134,42 +134,42 @@ def test_segment_points(sdata_multi_c_no_backed: SpatialData):
 
     sdata_multi_c_no_backed = segment_points(
         sdata_multi_c_no_backed,
-        labels_layer="masks_whole",
-        points_layer="transcripts",
+        labels_name="masks_whole",
+        points_name="transcripts",
         name_x="x",
         name_y="y",
         name_gene="gene",
         model=_dummy,
-        output_labels_layer="masks_whole_copy_dummy",
-        output_shapes_layer="masks_whole_copy_dummy_boundaries",
+        output_labels_name="masks_whole_copy_dummy",
+        output_shapes_name="masks_whole_copy_dummy_boundaries",
         chunks=256,
         crd=None,
     )
 
-    output_labels_layer = ["masks_whole_copy_dummy_1", "masks_whole_copy_dummy_2"]
-    output_shapes_layer = ["masks_whole_copy_dummy_boundaries_1", "masks_whole_copy_dummy_boundaries_2"]
+    output_labels_name = ["masks_whole_copy_dummy_1", "masks_whole_copy_dummy_2"]
+    output_shapes_name = ["masks_whole_copy_dummy_boundaries_1", "masks_whole_copy_dummy_boundaries_2"]
     # test multi channel support for output labels dimension.
     sdata_multi_c_no_backed = segment_points(
         sdata_multi_c_no_backed,
-        labels_layer="masks_whole",
-        points_layer="transcripts",
+        labels_name="masks_whole",
+        points_name="transcripts",
         name_x="x",
         name_y="y",
         name_gene="gene",
         model=_dummy,
         c_dim=2,
-        output_labels_layer=output_labels_layer,
-        output_shapes_layer=output_shapes_layer,
-        labels_layer_align=output_labels_layer[0],
+        output_labels_name=output_labels_name,
+        output_shapes_name=output_shapes_name,
+        labels_name_align=output_labels_name[0],
         chunks=256,
         iou_depth=[3, 4],  # this will be used when aligning labels
         crd=None,
     )
 
-    for _output_labels_layer in output_labels_layer:
-        assert _output_labels_layer in sdata_multi_c_no_backed.labels
-    for _output_shapes_layer in output_shapes_layer:
-        assert _output_shapes_layer in sdata_multi_c_no_backed.shapes
+    for _output_labels_name in output_labels_name:
+        assert _output_labels_name in sdata_multi_c_no_backed.labels
+    for _output_shapes_name in output_shapes_name:
+        assert _output_shapes_name in sdata_multi_c_no_backed.shapes
 
 
 @pytest.mark.skipif(not importlib.util.find_spec("instanseg"), reason="requires the instanseg library")
@@ -187,16 +187,16 @@ def test_segment_instanseg(sdata_multi_c_no_backed: SpatialData):
         os.environ.get("INSTANSEG_BIOIMAGEIO_PATH"), "fluorescence_nuclei_and_cells/0.1.1/instanseg.pt"
     )
 
-    output_labels_layer = ["labels_nuclei_instanseg", "labels_cells_instanseg"]
-    output_shapes_layer = ["shapes_nuclei_instanseg", "shapes_cells_instanseg"]
+    output_labels_name = ["labels_nuclei_instanseg", "labels_cells_instanseg"]
+    output_shapes_name = ["shapes_nuclei_instanseg", "shapes_cells_instanseg"]
     with dask.config.set(scheduler="processes"):
         sdata_multi_c_no_backed = segment(
             sdata_multi_c_no_backed,
-            img_layer="combine",
+            image_name="combine",
             model=instanseg_callable,
-            output_labels_layer=output_labels_layer,
-            output_shapes_layer=output_shapes_layer,
-            labels_layer_align="labels_cells_instanseg",
+            output_labels_name=output_labels_name,
+            output_shapes_name=output_shapes_name,
+            labels_name_align="labels_cells_instanseg",
             trim=False,
             chunks=50,
             overwrite=True,
@@ -208,11 +208,11 @@ def test_segment_instanseg(sdata_multi_c_no_backed: SpatialData):
             output="all_outputs",
         )
 
-    for _output_labels_layer in output_labels_layer:
-        assert _output_labels_layer in sdata_multi_c_no_backed.labels
-    for _output_shapes_layer in output_shapes_layer:
-        assert _output_shapes_layer in sdata_multi_c_no_backed.shapes
+    for _output_labels_name in output_labels_name:
+        assert _output_labels_name in sdata_multi_c_no_backed.labels
+    for _output_shapes_name in output_shapes_name:
+        assert _output_shapes_name in sdata_multi_c_no_backed.shapes
 
-    for _output_labels_layer in output_labels_layer:
-        se = _get_spatial_element(sdata_multi_c_no_backed, layer=output_labels_layer[0])
+    for _output_labels_name in output_labels_name:
+        se = _get_spatial_element(sdata_multi_c_no_backed, element_name=output_labels_name[0])
         assert da.any(se.data).compute()

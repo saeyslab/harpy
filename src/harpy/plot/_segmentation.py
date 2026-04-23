@@ -10,28 +10,28 @@ from harpy.plot import plot_shapes
 
 def segment(
     sdata: SpatialData,
-    img_layer: str = "raw_image",
-    shapes_layer: str = "segmentation_mask_boundaries",
+    image_name: str = "raw_image",
+    shapes_name: str = "segmentation_mask_boundaries",
     channel: int | list[int] | None = None,
     crd: tuple[int, int, int, int] | None = None,
     output: str | Path | None = None,
     **kwargs: dict[str, Any],
 ) -> None:
     """
-    Visualize obtained shapes layer (i.e. segmentation mask boundaries) from a SpatialData object.
+    Visualize obtained shapes element (i.e. segmentation mask boundaries) from a SpatialData object.
 
     This function utilizes the `plot_shapes` method to display the segmentation results from the provided SpatialData object.
-    Final plot will contain tow subplots, left the image without provided shapes layer overlay, and the right subplot with
-    shapes layer overlay.
+    Final plot will contain tow subplots, left the image without provided shapes element overlay, and the right subplot with
+    shapes element overlay.
 
     Parameters
     ----------
     sdata
         Data containing spatial information for plotting.
-    img_layer
-        Name of the image layer to be visualized, by default "raw_image".
-    shapes_layer
-        Name of the layer containing segmentation mask boundaries, by default "segmentation_mask_boundaries".
+    image_name
+        Name of the image element to be visualized, by default "raw_image".
+    shapes_name
+        Name of the shapes element containing segmentation mask boundaries, by default "segmentation_mask_boundaries".
     channel
         The channel(s) of the image to be visualized. If None, all channels are considered, by default None.
     crd
@@ -48,7 +48,7 @@ def segment(
     Examples
     --------
     >>> sdata = SpatialData(...)
-    >>> segment(sdata, img_layer="raw_img", crd=(2000,4000,2000,4000))
+    >>> segment(sdata, image_name="raw_img", crd=(2000,4000,2000,4000))
 
     See Also
     --------
@@ -56,8 +56,8 @@ def segment(
     """
     plot_shapes(
         sdata,
-        img_layer=img_layer,
-        shapes_layer=[None, shapes_layer],
+        image_name=image_name,
+        shapes_name=[None, shapes_name],
         channel=channel,
         crd=crd,
         output=output,

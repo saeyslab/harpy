@@ -9,14 +9,14 @@ from harpy.plot import plot_shapes
 
 def transcript_density(
     sdata: SpatialData,
-    img_layer: tuple[str, str] = ["raw_image", "transcript_density"],
+    image_name: tuple[str, str] = ["raw_image", "transcript_density"],
     channel: int = 0,
     crd: tuple[int, int, int, int] | None = None,
     figsize: tuple[int, int] | None = None,
     output: str | Path | None = None,
 ) -> None:
     """
-    Visualize the transcript density layer.
+    Visualize the transcript density image element.
 
     .. deprecated:: 0.3.0
        `harpy.pl.transcript_density` is deprecated and will be removed in 0.4.0.
@@ -28,8 +28,8 @@ def transcript_density(
     ----------
     sdata
         Data containing spatial information for plotting.
-    img_layer
-        A tuple where the first element indicates the base image layer and
+    image_name
+        A tuple where the first element indicates the base image element and
         the second element indicates the transcript density.
     channel
         The channel of the image to be visualized.
@@ -48,7 +48,7 @@ def transcript_density(
     Examples
     --------
     >>> sdata = SpatialData(...)
-    >>> transcript_density(sdata, img_layer=["raw_img", "density"], crd=(2000,4000,2000,4000))
+    >>> transcript_density(sdata, image_name=["raw_img", "density"], crd=(2000,4000,2000,4000))
 
     See Also
     --------
@@ -57,8 +57,8 @@ def transcript_density(
     """
     plot_shapes(
         sdata,
-        img_layer=img_layer,
-        shapes_layer=None,
+        image_name=image_name,
+        shapes_name=None,
         channel=channel,
         crd=crd,
         figsize=figsize,

@@ -18,7 +18,7 @@ def test_spatial_pixel_neighbors(sdata):
     spatial_key = _SPATIAL
     adata = spatial_pixel_neighbors(
         sdata,
-        labels_layer="blobs_labels",
+        labels_name="blobs_labels",
         key_added="cluster_id",
         size=50,
         mode="center",
@@ -41,7 +41,7 @@ def test_spatial_pixel_neighbors(sdata):
     # divide in hexagon grid and take most frequent occuring cluster id in each bin.
     adata = spatial_pixel_neighbors(
         sdata,
-        labels_layer="blobs_labels",
+        labels_name="blobs_labels",
         key_added="cluster_id",
         size=50,
         mode="most_frequent",

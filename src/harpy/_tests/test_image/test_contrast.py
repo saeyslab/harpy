@@ -9,8 +9,8 @@ def test_enhance_contrast(sdata_multi_c_no_backed: SpatialData):
     """
     sdata_multi_c_no_backed = enhance_contrast(
         sdata_multi_c_no_backed,
-        img_layer="combine_z_16bit",
-        output_layer="preprocessed_contrast",
+        image_name="combine_z_16bit",
+        output_image_name="preprocessed_contrast",
         chunks=(1, 1, 200, 200),
         overwrite=True,
     )

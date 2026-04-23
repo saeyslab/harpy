@@ -1,1 +1,1 @@
-"""Neighborhood-based niche analysis utilities for table layers."""
+"""Neighborhood-based niche analysis utilities for table elements."""

@@ -12,20 +12,20 @@ from spatialdata import SpatialData, read_zarr
 from xarray import DataArray, DataTree
 
 
-def _write_element_with_cleanup(sdata: SpatialData, output_layer: str) -> None:
+def _write_element_with_cleanup(sdata: SpatialData, element_name: str) -> None:
     """Write an already-attached element and remove partial state if the write fails."""
     try:
-        sdata.write_element(output_layer)
+        sdata.write_element(element_name)
     except Exception as e:
         log.warning(
-            f"Writing layer '{output_layer}' failed with error: {e}. Attempting best-effort cleanup before re-raising."
+            f"Writing element '{element_name}' failed with error: {e}. Attempting best-effort cleanup before re-raising."
         )
-        if sdata.get(output_layer) is not None:
-            del sdata[output_layer]
+        if sdata.get(element_name) is not None:
+            del sdata[element_name]
         try:
-            sdata.delete_element_from_disk(output_layer)
+            sdata.delete_element_from_disk(element_name)
         except Exception as e:  # noqa: BLE001
-            log.warning(f"Best-effort cleanup failed for layer '{output_layer}': {e}")
+            log.warning(f"Best-effort cleanup failed for element '{element_name}': {e}")
         raise
 
 
@@ -46,9 +46,9 @@ def _read_zarr_with_annotating_table_warning_suppressed(
 
 def _incremental_io_on_disk(
     sdata: SpatialData,
-    output_layer: str,
+    element_name: str,
     element: DataArray | DataTree | DataFrame | GeoDataFrame | AnnData,
-    element_type: str = Literal["images", "labels", "shapes", "tables", "points"],
+    element_type: Literal["images", "labels", "shapes", "tables", "points"] = "images",
 ) -> SpatialData:
     assert element_type in [
         "images",
@@ -57,43 +57,43 @@ def _incremental_io_on_disk(
         "tables",
         "points",
     ], "'element_type' should be one of [ 'images', 'labels', 'shapes', 'tables', 'points' ]"
-    new_output_layer = f"{output_layer}_{uuid.uuid4()}"
+    temporary_element_name = f"{element_name}_{uuid.uuid4()}"
     # a. write a backup copy of the data
-    sdata[new_output_layer] = element
+    sdata[temporary_element_name] = element
     try:
-        sdata.write_element(new_output_layer)
+        sdata.write_element(temporary_element_name)
     except Exception as e:
         log.warning(
-            f"Writing temporary layer '{new_output_layer}' failed with error: {e}. "
+            f"Writing temporary element '{temporary_element_name}' failed with error: {e}. "
             "Attempting best-effort cleanup before re-raising."
         )
-        if sdata.get(new_output_layer) is not None:
-            del sdata[new_output_layer]
+        if sdata.get(temporary_element_name) is not None:
+            del sdata[temporary_element_name]
         try:
-            sdata.delete_element_from_disk(new_output_layer)
+            sdata.delete_element_from_disk(temporary_element_name)
         except Exception as e:  # noqa: BLE001
-            log.warning(f"Best-effort cleanup failed for temporary layer '{new_output_layer}': {e}")
+            log.warning(f"Best-effort cleanup failed for temporary element '{temporary_element_name}': {e}")
         raise
     # a2. remove the in-memory copy from the SpatialData object (note,
     # at this point the backup copy still exists on-disk)
-    del sdata[new_output_layer]
-    del sdata[output_layer]
+    del sdata[temporary_element_name]
+    del sdata[element_name]
     # a3 load the backup copy into memory
     sdata_copy = _read_zarr_with_annotating_table_warning_suppressed(sdata.path, selection=[element_type])
     # b1. rewrite the original data
-    sdata.delete_element_from_disk(output_layer)
-    sdata[output_layer] = sdata_copy[new_output_layer]
-    log.warning(f"layer with name '{output_layer}' already exists. Overwriting...")
-    _write_element_with_cleanup(sdata, output_layer)
+    sdata.delete_element_from_disk(element_name)
+    sdata[element_name] = sdata_copy[temporary_element_name]
+    log.warning(f"Element with name '{element_name}' already exists. Overwriting...")
+    _write_element_with_cleanup(sdata, element_name)
     # b2. reload the new data into memory (because it has been written but in-memory it still points
     # from the backup location)
-    del sdata[output_layer]
+    del sdata[element_name]
     sdata_materialized = _read_zarr_with_annotating_table_warning_suppressed(sdata.path, selection=[element_type])
-    # to make sdata point to layer that is materialized, and keep object id.
-    sdata[output_layer] = sdata_materialized[output_layer]
+    # to make sdata point to the element that is materialized, and keep object id.
+    sdata[element_name] = sdata_materialized[element_name]
     # c. remove the backup copy
-    del sdata_materialized[new_output_layer]
-    sdata_materialized.delete_element_from_disk(new_output_layer)
+    del sdata_materialized[temporary_element_name]
+    sdata_materialized.delete_element_from_disk(temporary_element_name)
     del sdata_materialized
 
     return sdata

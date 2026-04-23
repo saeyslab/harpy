@@ -12,7 +12,7 @@ from spatialdata.transformations import get_transformation
 from spatialdata.transformations.transformations import Affine, Identity, Sequence, Translation
 from xarray import DataArray, DataTree
 
-from harpy.image._manager import ImageLayerManager, LabelLayerManager
+from harpy.image._manager import ImageElementManager, LabelsElementManager
 from harpy.utils._transformations import _get_translation_values
 
 
@@ -68,25 +68,25 @@ def _get_translation(spatial_image: DataArray, to_coordinate_system: str = "glob
 
 
 def _precondition(
-    sdata, img_layer: str, labels_layer: str, to_coordinate_system: str = "global"
+    sdata, image_name: str, labels_name: str, to_coordinate_system: str = "global"
 ) -> tuple[DataArray, DataArray]:
-    """Helper function that gets highest resolution `img_layer` and `labels_layer`, and checks that `img_layer` and `labels_layer` are co-registered."""
-    if img_layer not in sdata.images:
+    """Helper function that gets highest resolution `image_name` and `labels_name`, and checks that `image_name` and `labels_name` are co-registered."""
+    if image_name not in sdata.images:
         raise ValueError(
-            f"image layer with name '{img_layer}' not found in sdata.images. Please choose from: {[*sdata.images]}."
+            f"image element with name '{image_name}' not found in sdata.images. Please choose from: {[*sdata.images]}."
         )
-    if labels_layer not in sdata.labels:
+    if labels_name not in sdata.labels:
         raise ValueError(
-            f"labels layer with name '{labels_layer}' not found in sdata.labels. Please choose from: {[*sdata.labels]}."
+            f"labels element with name '{labels_name}' not found in sdata.labels. Please choose from: {[*sdata.labels]}."
         )
-    se_image = _get_spatial_element(sdata, layer=img_layer)
-    se_labels = _get_spatial_element(sdata, layer=labels_layer)
+    se_image = _get_spatial_element(sdata, element_name=image_name)
+    se_labels = _get_spatial_element(sdata, element_name=labels_name)
 
     if se_image.data.shape[1:] != se_labels.data.shape:
         raise ValueError(
             "Only arrays with same spatial shape are currently supported, "
-            f"but image layer with name {img_layer} has shape {se_image.data.shape}, "
-            f"while labels layer with name {labels_layer} has shape {se_labels.data.shape}."
+            f"but image element with name {image_name} has shape {se_image.data.shape}, "
+            f"while labels element with name {labels_name} has shape {se_labels.data.shape}."
         )
 
     t1x, t1y = _get_translation(se_image, to_coordinate_system=to_coordinate_system)
@@ -94,8 +94,8 @@ def _precondition(
 
     if (t1x, t1y) != (t2x, t2y):
         raise ValueError(
-            f"image layer with name {img_layer} should "
-            f"be registered to labels layer with name {labels_layer} in coordinate system {to_coordinate_system}."
+            f"image element with name {image_name} should "
+            f"be registered to labels element with name {labels_name} in coordinate system {to_coordinate_system}."
         )
     return se_image, se_labels
 
@@ -130,62 +130,64 @@ def _unapply_transform(se: DataArray, x_coords: np.ndarray, y_coords: np.ndarray
     return se
 
 
-def get_dataarray(sdata: SpatialData, layer: str, scale: str | None = None) -> DataArray:
+def get_dataarray(sdata: SpatialData, element_name: str, scale: str | None = None) -> DataArray:
     """
-    Retrieve the highest-resolution :class:`xarray.DataArray` from a layer in ``sdata.images`` or ``sdata.labels``.
+    Retrieve the highest-resolution :class:`xarray.DataArray` from an element in ``sdata.images`` or ``sdata.labels``.
 
-    If ``sdata.images[layer]`` or ``sdata.labels[layer]`` is a
+    If ``sdata.images[element_name]`` or ``sdata.labels[element_name]`` is a
     :class:`xarray.DataTree`, this function returns the requested pyramid
     :class:`xarray.DataArray`. If ``scale`` is ``None``, the base scale
-    (``"scale0"``) is returned. If the layer is already a :class:`xarray.DataArray`,
+    (``"scale0"``) is returned. If the element is already a :class:`xarray.DataArray`,
     ``scale`` is ignored.
 
     Parameters
     ----------
     sdata : SpatialData
-        The SpatialData object containing image and/or labels layers.
-    layer : str
-        The name of the layer to retrieve.
+        The SpatialData object containing image and/or labels elements.
+    element_name : str
+        The name of the element to retrieve.
     scale : str | None
-        Pyramid level to retrieve when the layer is stored as a multiscale
+        Pyramid level to retrieve when the element is stored as a multiscale
         :class:`xarray.DataTree`. If ``None``, ``"scale0"`` is used.
 
     Returns
     -------
-    The resolved :class:`xarray.DataArray` corresponding to the requested layer.
+    The resolved :class:`xarray.DataArray` corresponding to the requested element.
 
     Raises
     ------
     KeyError
-        If the layer does not exist in ``sdata.images`` or ``sdata.labels``.
+        If the element does not exist in ``sdata.images`` or ``sdata.labels``.
     ValueError
-        If the layer exists but is stored in an unsupported format.
+        If the element exists but is stored in an unsupported format.
     """
-    if layer in sdata.images:
-        si = sdata.images[layer]
-    elif layer in sdata.labels:
-        si = sdata.labels[layer]
+    if element_name in sdata.images:
+        si = sdata.images[element_name]
+    elif element_name in sdata.labels:
+        si = sdata.labels[element_name]
     else:
-        raise KeyError(f"'{layer}' not found in 'sdata.images' or 'sdata.labels'")
+        raise KeyError(f"'{element_name}' not found in 'sdata.images' or 'sdata.labels'")
 
     if isinstance(si, DataArray):
         return si
     if isinstance(si, DataTree):
         scale_key = "scale0" if scale is None else scale
         if scale_key not in si:
-            raise ValueError(f"Scale '{scale_key}' not found in layer '{layer}'. Available scales are: {[*si]}.")
+            raise ValueError(
+                f"Scale '{scale_key}' not found in element '{element_name}'. Available scales are: {[*si]}."
+            )
         name = si[scale_key].__iter__().__next__()
         return si[scale_key][name]
-    raise ValueError(f"Not implemented for layer '{layer}' of type {type(si)}.")
+    raise ValueError(f"Not implemented for element '{element_name}' of type {type(si)}.")
 
 
-def _get_spatial_element(sdata: SpatialData, layer: str) -> DataArray:
-    if layer in sdata.images:
-        si = sdata.images[layer]
-    elif layer in sdata.labels:
-        si = sdata.labels[layer]
+def _get_spatial_element(sdata: SpatialData, element_name: str) -> DataArray:
+    if element_name in sdata.images:
+        si = sdata.images[element_name]
+    elif element_name in sdata.labels:
+        si = sdata.labels[element_name]
     else:
-        raise KeyError(f"'{layer}' not found in 'sdata.images' or 'sdata.labels'")
+        raise KeyError(f"'{element_name}' not found in 'sdata.images' or 'sdata.labels'")
     if isinstance(si, DataArray):
         return si
     elif isinstance(si, DataTree):
@@ -194,7 +196,7 @@ def _get_spatial_element(sdata: SpatialData, layer: str) -> DataArray:
         name = si[scale_0].__iter__().__next__()
         return si[scale_0][name]
     else:
-        raise ValueError(f"Not implemented for layer '{layer}' of type {type(si)}.")
+        raise ValueError(f"Not implemented for element '{element_name}' of type {type(si)}.")
 
 
 def _fix_dimensions(
@@ -241,10 +243,10 @@ def _fix_dimensions(
     return array
 
 
-def add_image_layer(
+def add_image(
     sdata: SpatialData,
     arr: Array,
-    output_layer: str,
+    output_image_name: str,
     dims: tuple[str, ...] | None = None,
     chunks: str | tuple[int, ...] | int | None = None,
     transformations: MappingToCoordinateSystem_t | None = None,
@@ -253,42 +255,42 @@ def add_image_layer(
     overwrite: bool = False,
 ) -> SpatialData:
     """
-    Add an image layer to a SpatialData object.
+    Add an image element to a SpatialData object.
 
-    This function allows you to add an image layer to `sdata`.
-    If `sdata` is backed by a zarr store, the resulting image layer will be backed to the zarr store, otherwise `arr` will be persisted in memory.
-    All layers of the Dask graph associated with `arr` will therefore be materialized upon calling `add_image_layer`.
+    This function allows you to add an image element to `sdata`.
+    If `sdata` is backed by a zarr store, the resulting image element will be backed to the zarr store, otherwise `arr` will be persisted in memory.
+    All layers of the Dask graph associated with `arr` will therefore be materialized upon calling `add_image`.
 
     Parameters
     ----------
     sdata
-        The SpatialData object to which the new image layer will be added.
+        The SpatialData object to which the new image element will be added.
     arr
         The array containing the image data to be added.
-    output_layer
-        The name of the output layer where the image data will be stored.
+    output_image_name
+        The name of the output image element where the image data will be stored.
     dims
         A tuple specifying the dimensions of the image data (e.g., ("c", "z", "y", "x")). If None, defaults will be inferred.
     chunks
         Specification for chunking the data.
     transformations
-        Transformations that will be added to resulting `output_layer`.
+        Transformations that will be added to resulting `output_image_name`.
     scale_factors
-        Scale factors to apply for multiscale data. If specified `output_layer` will be multiscale.
+        Scale factors to apply for multiscale data. If specified `output_image_name` will be multiscale.
     c_coords
         Names of the channels. If None, channel names will be named sequentially as 0,1,...
     overwrite
-        If True, overwrites the output layer if it already exists in `sdata`.
+        If True, overwrites `output_image_name` if it already exists in `sdata`.
 
     Returns
     -------
-    The `sdata` object with the image layer added.
+    The `sdata` object with the image element added.
     """
-    manager = ImageLayerManager()
-    sdata = manager.add_layer(
+    manager = ImageElementManager()
+    sdata = manager.add_element(
         sdata,
         arr=arr,
-        output_layer=output_layer,
+        element_name=output_image_name,
         dims=dims,
         chunks=chunks,
         transformations=transformations,
@@ -300,10 +302,10 @@ def add_image_layer(
     return sdata
 
 
-def add_labels_layer(
+def add_labels(
     sdata: SpatialData,
     arr: Array,
-    output_layer: str,
+    output_labels_name: str,
     dims: tuple[str, ...] | None = None,
     chunks: str | tuple[int, ...] | int | None = None,
     transformations: MappingToCoordinateSystem_t | None = None,
@@ -311,40 +313,40 @@ def add_labels_layer(
     overwrite: bool = False,
 ) -> SpatialData:
     """
-    Add a labels layer to a SpatialData object.
+    Add a labels element to a SpatialData object.
 
-    This function allows you to add a labels layer to `sdata`.
-    If `sdata` is backed by a zarr store, the resulting labels layer will be backed to the zarr store, otherwise `arr` will be persisted in memory.
-    All layers of the Dask graph associated with `arr` will therefore be materialized upon calling `add_labels_layer`.
+    This function allows you to add a labels element to `sdata`.
+    If `sdata` is backed by a zarr store, the resulting labels element will be backed to the zarr store, otherwise `arr` will be persisted in memory.
+    All layers of the Dask graph associated with `arr` will therefore be materialized upon calling `add_labels`.
 
     Parameters
     ----------
     sdata
-        The SpatialData object to which the new labels layer will be added.
+        The SpatialData object to which the new labels element will be added.
     arr
         The array containing the labels data to be added. Should be of type int.
-    output_layer
-        The name of the output layer where the labels data will be stored.
+    output_labels_name
+        The name of the output labels element where the labels data will be stored.
     dims
         A tuple specifying the dimensions of the labels data (e.g., (""z", "y", "x")). If None, defaults will be inferred.
     chunks
         Specification for chunking the data.
     transformations
-        Transformations that will be added to resulting `output_layer`.
+        Transformations that will be added to resulting `output_labels_name`.
     scale_factors
-        Scale factors to apply for multiscale data. If specified `output_layer` will be multiscale
+        Scale factors to apply for multiscale data. If specified `output_labels_name` will be multiscale
     overwrite
-        If True, overwrites the `output_layer` if it already exists in `sdata`.
+        If True, overwrites the `output_labels_name` if it already exists in `sdata`.
 
     Returns
     -------
-    The `sdata` object with the labels layer added.
+    The `sdata` object with the labels element added.
     """
-    manager = LabelLayerManager()
-    sdata = manager.add_layer(
+    manager = LabelsElementManager()
+    sdata = manager.add_element(
         sdata,
         arr=arr,
-        output_layer=output_layer,
+        element_name=output_labels_name,
         dims=dims,
         chunks=chunks,
         transformations=transformations,

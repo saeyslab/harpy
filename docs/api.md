@@ -36,7 +36,7 @@ I/O.
 
 ## Image
 
-Operations on image and labels layers.
+Operations on image and labels elements.
 
 ```{eval-rst}
 
@@ -46,8 +46,8 @@ Operations on image and labels layers.
 .. autosummary::
     :toctree: generated
 
-    im.add_image_layer
-    im.add_labels_layer
+    im.add_image
+    im.add_labels
     im.get_dataarray
     im.map_image
     im.tiling_correction
@@ -62,13 +62,13 @@ Operations on image and labels layers.
     im.cellpose_callable
     im.instanseg_callable
     im.baysor_callable
-    im.add_grid_labels_layer
-    im.expand_labels_layer
-    im.align_labels_layers
+    im.add_grid_labels
+    im.expand_labels
+    im.align_labels
     im.map_labels
-    im.filter_labels_layer
-    im.merge_labels_layers
-    im.match_labels_to_reference_layers
+    im.filter_labels
+    im.merge_labels
+    im.match_labels_to_reference
     im.rasterize
     im.pixel_clustering_preprocess
     im.flowsom
@@ -76,7 +76,7 @@ Operations on image and labels layers.
 
 ## Shape
 
-Operations on shapes (polygons) layers.
+Operations on shapes (polygons) elements.
 
 ```{eval-rst}
 
@@ -87,14 +87,14 @@ Operations on shapes (polygons) layers.
     :toctree: generated
 
     sh.vectorize
-    sh.add_shapes_layer
-    sh.filter_shapes_layer
+    sh.add_shapes
+    sh.filter_shapes
     sh.create_voronoi_boundaries
 ```
 
 ## Table
 
-Operations on table (`AnnData` object) layers.
+Operations on table (`AnnData` object) elements.
 
 ```{eval-rst}
 
@@ -104,7 +104,7 @@ Operations on table (`AnnData` object) layers.
 .. autosummary::
     :toctree: generated
 
-    tb.add_table_layer
+    tb.add_table
     tb.allocate
     tb.bin_counts
     tb.allocate_intensity
@@ -135,7 +135,7 @@ Operations on table (`AnnData` object) layers.
 
 ## Points
 
-Operations on points (`Dask` `DataFrame` object) layers.
+Operations on points (`Dask` `DataFrame` object) elements.
 
 ```{eval-rst}
 
@@ -145,7 +145,7 @@ Operations on points (`Dask` `DataFrame` object) layers.
 .. autosummary::
     :toctree: generated
 
-    pt.add_points_layer
+    pt.add_points
 ```
 
 ## Externals

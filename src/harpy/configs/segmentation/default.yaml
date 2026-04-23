@@ -6,7 +6,7 @@ small_size_vis: null
 crop_param: null
 expand_radius: null
 
-output_labels_layer: "segmentation_mask"
-output_shapes_layer: "segmentation_mask_boundaries"
+output_labels_name: "segmentation_mask"
+output_shapes_name: "segmentation_mask_boundaries"
 
 overwrite: False

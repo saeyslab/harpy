@@ -19,7 +19,7 @@ from harpy.utils.utils import _make_list
 
 def cluster_intensity_heatmap(
     sdata: SpatialData,
-    table_layer: str,
+    table_name: str,
     cluster_key: str,
     cluster_key_uns: str | None = None,
     channels: Iterable[str] | None = None,
@@ -43,12 +43,12 @@ def cluster_intensity_heatmap(
     ----------
     sdata
         SpatialData object.
-    table_layer
-        The table layer containing the weighted mean intensities per cluster in `sdata[table_layer].uns[cluster_key_uns]`.
+    table_name
+        The table element containing the weighted mean intensities per cluster in `sdata[table_name].uns[cluster_key_uns]`.
     cluster_key
-        The cluster key in `sdata.tables[table_layer].obs`.
+        The cluster key in `sdata.tables[table_name].obs`.
     cluster_key_uns
-        The key in `sdata.tables[table_layer].uns` where the weighted mean intensitiy per cluster is stored.
+        The key in `sdata.tables[table_name].uns` where the weighted mean intensitiy per cluster is stored.
     channels
         The channels to visualize. If `None` all channels are visualized.
     z_score
@@ -83,18 +83,18 @@ def cluster_intensity_heatmap(
     >>> # Load example dataset
     >>> sdata = hp.datasets.pixie_example()
     >>>
-    >>> img_layer = "raw_image_fov0"
-    >>> labels_layer = "label_whole_fov0"
-    >>> table_layer = "table_intensities"
+    >>> image_name = "raw_image_fov0"
+    >>> labels_name = "label_whole_fov0"
+    >>> table_name = "table_intensities"
     >>> to_coordinate_system = "fov0"
     >>> cluster_key = "cluster_id"
     >>>
-    >>> # Calculate total intensity values for each label in label_layer, for each channel in img_layer
+    >>> # Calculate total intensity values for each label in labels_name, for each channel in image_name
     >>> sdata = hp.tb.allocate_intensity(
     ...     sdata,
-    ...     img_layer=img_layer,
-    ...     labels_layer=labels_layer,
-    ...     output_layer=table_layer,
+    ...     image_name=image_name,
+    ...     labels_name=labels_name,
+    ...     output_table_name=table_name,
     ...     mode="sum",
     ...     to_coordinate_system=to_coordinate_system,
     ...     overwrite=True,
@@ -103,9 +103,9 @@ def cluster_intensity_heatmap(
     >>> # Normalize intensities by instance size
     >>> sdata = hp.tb.preprocess_proteomics(
     ...     sdata,
-    ...     labels_layer=labels_layer,
-    ...     table_layer=table_layer,
-    ...     output_layer=table_layer,
+    ...     labels_name=labels_name,
+    ...     table_name=table_name,
+    ...     output_table_name=table_name,
     ...     size_norm=True,
     ...     log1p=False,
     ...     scale=False,
@@ -114,27 +114,27 @@ def cluster_intensity_heatmap(
     ... )
     >>>
     >>> # Add a dummy cluster ID
-    >>> n_obs = sdata[table_layer].shape[0]
+    >>> n_obs = sdata[table_name].shape[0]
     >>> RNG = np.random.default_rng(seed=42)
-    >>> sdata[table_layer].obs[cluster_key] = RNG.choice(range(10), size=n_obs)
-    >>> sdata[table_layer].obs[cluster_key] = (
-    ...     sdata[table_layer].obs[cluster_key].astype("category")
+    >>> sdata[table_name].obs[cluster_key] = RNG.choice(range(10), size=n_obs)
+    >>> sdata[table_name].obs[cluster_key] = (
+    ...     sdata[table_name].obs[cluster_key].astype("category")
     ... )
     >>>
     >>> Calculate mean intensity per cluster
     >>> sdata = hp.tb.cluster_intensity(
     ...     sdata,
-    ...     table_layer=table_layer,
-    ...     labels_layer=labels_layer,
+    ...     table_name=table_name,
+    ...     labels_name=labels_name,
     ...     cluster_key=cluster_key,
-    ...     output_layer=table_layer,
+    ...     output_table_name=table_name,
     ... )
     >>>
     >>> # Plot heatmap of mean intensity per cluster
     >>> fig_kwargs = {"dpi": 200}
     >>> hp.pl.cluster_intensity_heatmap(
     ...     sdata,
-    ...     table_layer=table_layer,
+    ...     table_name=table_name,
     ...     cluster_key=cluster_key,
     ...     z_score=True,
     ...     figsize=(10, 5),
@@ -153,17 +153,17 @@ def cluster_intensity_heatmap(
     if cluster_key_uns is None:
         cluster_key_uns = f"{cluster_key}_weighted_intensity"
     # get weighted (by instance size) mean intensity per cluster (cluster_key)
-    if cluster_key_uns not in sdata.tables[table_layer].uns.keys():
+    if cluster_key_uns not in sdata.tables[table_name].uns.keys():
         raise ValueError(
-            f"Key '{cluster_key_uns}' not found in sdata.tables[{table_layer}].uns. "
+            f"Key '{cluster_key_uns}' not found in sdata.tables[{table_name}].uns. "
             "Run 'harpy.tb.cluster_intensity()' first."
         )
-    if cluster_key not in sdata.tables[table_layer].uns[cluster_key_uns].columns:
+    if cluster_key not in sdata.tables[table_name].uns[cluster_key_uns].columns:
         raise ValueError(
-            f"Cluster key '{cluster_key}' not found in sdata.tables[{table_layer}].uns[{cluster_key_uns}]. "
+            f"Cluster key '{cluster_key}' not found in sdata.tables[{table_name}].uns[{cluster_key_uns}]. "
             "Run harpy.tb.cluster_intensity() first."
         )
-    df = sdata.tables[table_layer].uns[cluster_key_uns].copy()
+    df = sdata.tables[table_name].uns[cluster_key_uns].copy()
     df.index = df[cluster_key]
     df.drop(cluster_key, axis=1, inplace=True)
     if channels is not None:

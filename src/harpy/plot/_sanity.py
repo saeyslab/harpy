@@ -24,10 +24,10 @@ from harpy.utils._transformations import _identity_check_transformations_points
 
 def sanity(
     sdata: SpatialData,
-    img_layer: str | None = None,
-    labels_layer: str | None = None,
-    points_layer: str | None = "transcripts",
-    shapes_layer: str | None = None,
+    image_name: str | None = None,
+    labels_name: str | None = None,
+    points_name: str | None = "transcripts",
+    shapes_name: str | None = None,
     channel: int | str | None = None,
     z_slice: float | None = None,
     plot_cell_number: bool = False,
@@ -55,39 +55,39 @@ def sanity(
     ----------
     sdata
         The SpatialData object containing the spatial image and transcripts data.
-    img_layer
-        The layer of the SpatialData object to be plotted. Defaults to the last layer if not provided.
-    labels_layer
-        Labels layer to be plotted.
-    points_layer
-        The points layer in the SpatialData object representing transcripts.
-    shapes_layer
-        The layer in the SpatialData object representing cell boundaries. If None, no cell boundaries are plotted.
+    image_name
+        The image element of the SpatialData object to be plotted. Defaults to the last image element if not provided.
+    labels_name
+        Labels element to be plotted.
+    points_name
+        The points element in the SpatialData object representing transcripts.
+    shapes_name
+        The shapes element in the SpatialData object representing cell boundaries. If None, no cell boundaries are plotted.
     channel
-        Channel to display from the img_layer. If none provided, or if provided channel could not be found, first channel is plot.
+        Channel to display from the image_name. If none provided, or if provided channel could not be found, first channel is plot.
     z_slice
         The z_slice to visualize in case of 3D (c,z,y,x) image/polygons. For transcripts, if the z_slice is specified,
-        the transcripts at index corresponding to the z_slice in the image layer will be plotted.
-        If no z_slice is specified and `img_layer` or `labels_layer` is 3D, a max projection along the z-axis will be performed.
-        If no z_slice is specified and `shapes_layer` is 3D, all polygons in all z-stacks will be plotted.
-        If no z-slice is specified and `points_layer` is 3D, all transcripts in all z-stacks will be plotted.
+        the transcripts at index corresponding to the z_slice in the image element will be plotted.
+        If no z_slice is specified and `image_name` or `labels_name` is 3D, a max projection along the z-axis will be performed.
+        If no z_slice is specified and `shapes_name` is 3D, all polygons in all z-stacks will be plotted.
+        If no z-slice is specified and `points_name` is 3D, all transcripts in all z-stacks will be plotted.
     plot_cell_number
         Whether to annotate cells with their numbers on the plot.
     n_sample
-        The number of transcripts to sample for plotting. Useful for large datasets. Ignored if `gene` is specified or if `points_layer` is `None`.
+        The number of transcripts to sample for plotting. Useful for large datasets. Ignored if `gene` is specified or if `points_name` is `None`.
     name_x
-        Column name in the points_layer representing x-coordinates of transcripts. Ignored if `points_layer` is `None`.
+        Column name in the points_name representing x-coordinates of transcripts. Ignored if `points_name` is `None`.
     name_y
-        Column name in the points_layer representing y-coordinates of transcripts. Ignored if `points_layer` is `None`.
+        Column name in the points_name representing y-coordinates of transcripts. Ignored if `points_name` is `None`.
     name_z
-        Column name in the points_layer representing z-coordinates of transcripts. Ignored if `points_layer` is `None`.
+        Column name in the points_name representing z-coordinates of transcripts. Ignored if `points_name` is `None`.
     name_gene_column
-        Column name in the points_layer representing gene information. Ignored if `points_layer` is `None`.
+        Column name in the points_name representing gene information. Ignored if `points_name` is `None`.
     gene
-        Specific gene to filter and plot. If `None`, all genes are plotted. Ignored if `points_layer` is `None`.
+        Specific gene to filter and plot. If `None`, all genes are plotted. Ignored if `points_name` is `None`.
     radius
-        Column in the `shapes_layer` specifying the radius. The radius will be applied using `geometry.buffer` before plotting `shapes_layer`.
-        Useful when the `geometry` of the `shapes_layer` contains points instead of polygons.
+        Column in the `shapes_name` specifying the radius. The radius will be applied using `geometry.buffer` before plotting `shapes_name`.
+        Useful when the `geometry` of the `shapes_name` contains points instead of polygons.
     crd
         Coordinates to define a rectangular region for plotting as (xmin, xmax, ymin, ymax).
         If None, the entire image boundary is used.
@@ -105,15 +105,15 @@ def sanity(
     Raises
     ------
     ValueError
-        If both `img_layer` and `labels_layer` are specified.
+        If both `image_name` and `labels_name` are specified.
     ValueError
-        If `img_layer` or `labels_layer` is specified, and they are not found in `sdata.images` respectively `sdata.labels`.
+        If `image_name` or `labels_name` is specified, and they are not found in `sdata.images` respectively `sdata.labels`.
     AttributeError
-        If `sdata` does not contain a `points_layer`.
+        If `sdata` does not contain a `points_name`.
     Warning
         If provided coordinates (crd) and image boundary do not have overlap.
     Warning
-        If provided shapes_layer is not present in the SpatialData object.
+        If provided shapes_name is not present in the SpatialData object.
 
     Notes
     -----
@@ -121,31 +121,31 @@ def sanity(
     - If `plot_cell_number` is set to True, cells are annotated with their numbers.
     - If the `output` parameter is provided, the plot is saved to the specified location, otherwise, it's displayed.
     """
-    if img_layer is not None and labels_layer is not None:
+    if image_name is not None and labels_name is not None:
         raise ValueError(
-            "Both img_layer and labels_layer is not None. Please specify either img_layer or labels_layer, not both."
+            "Both image_name and labels_name is not None. Please specify either image_name or labels_name, not both."
         )
 
-    # Choose the appropriate layer or default to the last image layer if none is specified.
-    if img_layer is not None:
-        layer = img_layer
-        if layer not in sdata.images:
-            raise ValueError(f"Provided layer '{layer}' is not an image layer in 'sdata'.")
-        img_layer_type = True
-    elif labels_layer is not None:
-        layer = labels_layer
-        if layer not in sdata.labels:
-            raise ValueError(f"Provided layer '{layer}' is not a labels layer in 'sdata'.")
-        img_layer_type = False
+    # Choose the appropriate raster element or default to the last image element if none is specified.
+    if image_name is not None:
+        element_name = image_name
+        if element_name not in sdata.images:
+            raise ValueError(f"Provided element '{element_name}' is not an image element in 'sdata'.")
+        is_image = True
+    elif labels_name is not None:
+        element_name = labels_name
+        if element_name not in sdata.labels:
+            raise ValueError(f"Provided element '{element_name}' is not a labels element in 'sdata'.")
+        is_image = False
     else:
-        layer = [*sdata.images][-1]
-        img_layer_type = True
+        element_name = [*sdata.images][-1]
+        is_image = True
         log.warning(
-            f"No image layer or labels layer specified. "
-            f"Plotting last image layer {layer} of the provided SpatialData object."
+            f"No image element or labels element specified. "
+            f"Plotting last image element {element_name} of the provided SpatialData object."
         )
 
-    se = _get_spatial_element(sdata, layer=layer)
+    se = _get_spatial_element(sdata, element_name=element_name)
 
     _, ax = plt.subplots(figsize=(10, 10) if figsize is None else figsize)
 
@@ -171,12 +171,12 @@ def sanity(
         if "z" in se.dims:
             if z_slice not in se.z.data:
                 raise ValueError(
-                    f"z_slice {z_slice} not a z slice in layer '{layer}' of `sdata`. "
+                    f"z_slice {z_slice} not a z slice in element '{element_name}' of `sdata`. "
                     f"Please specify a z_slice from the list '{se.z.data}'."
                 )
             z_index = np.where(se.z.data == z_slice)[0][0]
 
-    if img_layer_type:
+    if is_image:
         if channel is None:
             # if channel is None, plot the first channel
             channel = se.c.data[0]
@@ -186,37 +186,37 @@ def sanity(
             channel = se.c.data[0]
             log.warning(
                 f"Provided channel '{_channel}' not in list of available channels '{se.c.data}' "
-                f"for provided img_layer '{layer}'. Falling back to plotting first available channel '{channel}' for this img_layer."
+                f"for provided image_name '{element_name}'. Falling back to plotting first available channel '{channel}' for this image_name."
             )
         channel_name = se.c.name
         channel_idx = list(se.c.data).index(channel)
         _se = se.isel(c=channel_idx)
-        cmap_layer = "gray"
+        raster_cmap = "gray"
     else:
         _se = se
-        cmap_layer = "viridis"
+        raster_cmap = "viridis"
 
     if z_slice is not None:
         if "z" in _se.dims:
             _se = _se.sel(z=z_slice)
     else:
         if "z" in _se.dims:
-            if img_layer_type:
+            if is_image:
                 log.info(
-                    f"Layer '{layer}' has 3 spatial dimensions, but no z-slice was added. "
+                    f"Element '{element_name}' has 3 spatial dimensions, but no z-slice was added. "
                     f"will perform a max projection along the z-axis."
                 )
                 _se = _se.max(dim="z")
             else:
                 log.info(
-                    f"Layer '{layer}' has 3 spatial dimensions, but no z-slice was added. "
+                    f"Element '{element_name}' has 3 spatial dimensions, but no z-slice was added. "
                     f"By default the z-slice located at the midpoint of the z-dimension ({_se.shape[0] // 2}) will be utilized."
                 )
                 _se = _se[_se.shape[0] // 2, ...]
         _se = _se.squeeze()
 
     _se.sel(x=slice(crd[0], crd[1]), y=slice(crd[2], crd[3])).plot.imshow(
-        cmap=cmap_layer, robust=True, ax=ax, add_colorbar=False
+        cmap=raster_cmap, robust=True, ax=ax, add_colorbar=False
     )
 
     se = _unapply_transform(se, x_coords_orig, y_coords_orig)
@@ -224,10 +224,10 @@ def sanity(
     if not hasattr(sdata, "points"):
         raise AttributeError("Please first read transcripts in SpatialData object.")
 
-    if points_layer is not None:
-        _identity_check_transformations_points(sdata.points[points_layer], to_coordinate_system=to_coordinate_system)
+    if points_name is not None:
+        _identity_check_transformations_points(sdata.points[points_name], to_coordinate_system=to_coordinate_system)
 
-        in_df = sdata.points[points_layer]
+        in_df = sdata.points[points_name]
 
         # query first and then slicing gene is faster than vice versa
         in_df = in_df.query(f"{crd[0]} <= {name_x} < {crd[1]} and {crd[2]} <= {name_y} < {crd[3]}")
@@ -260,8 +260,8 @@ def sanity(
 
         ax.scatter(in_df[name_x], in_df[name_y], color="r", s=8, alpha=alpha)
 
-    if shapes_layer is not None:
-        polygons = sdata.shapes[shapes_layer]
+    if shapes_name is not None:
+        polygons = sdata.shapes[shapes_name]
     else:
         polygons = None
 
@@ -275,7 +275,7 @@ def sanity(
                     polygons["geometry"] = polygons.geometry.buffer(polygons[radius])
                 else:
                     log.warning(
-                        f"radius parameter was specified as '{radius}', but could not be found as a column of shapes layer '{shapes_layer}'. Will proceed "
+                        f"radius parameter was specified as '{radius}', but could not be found as a column of shapes element '{shapes_name}'. Will proceed "
                         "plotting while ignoring radius parameter."
                     )
             x_translation, y_translation = _get_translation_values_shapes(
@@ -332,7 +332,7 @@ def sanity(
                         va="center",
                     )
         else:
-            log.warning(f"Shapes layer {shapes_layer} was empty for crd {crd}.")
+            log.warning(f"Shapes element {shapes_name} was empty for crd {crd}.")
 
     ax.set_xlim(crd[0], crd[1])
     ax.set_ylim(crd[2], crd[3])
@@ -340,10 +340,10 @@ def sanity(
     ax.invert_yaxis()
 
     ax.axis("on")
-    if img_layer_type:
+    if is_image:
         ax.set_title(f"{channel_name}={channel}")
 
-    if points_layer is not None and gene is not None:
+    if points_name is not None and gene is not None:
         ax.set_title(f"Transcripts and cell boundaries for gene: {gene}.")
 
     if output:

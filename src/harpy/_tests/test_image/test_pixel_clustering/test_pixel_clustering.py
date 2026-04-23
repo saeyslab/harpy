@@ -15,7 +15,7 @@ def test_flowsom(sdata_blobs, client):
 
     from harpy.image.pixel_clustering._clustering import flowsom
 
-    img_layer = "blobs_image"
+    image_name = "blobs_image"
     channels = ["lineage_0", "lineage_1", "lineage_5", "lineage_9"]
     fraction = 0.1
 
@@ -33,9 +33,9 @@ def test_flowsom(sdata_blobs, client):
 
     sdata_blobs, fsom, mapping = flowsom(
         sdata_blobs,
-        img_layer=[img_layer],
-        output_layer_clusters=[f"{img_layer}_clusters"],
-        output_layer_metaclusters=[f"{img_layer}_metaclusters"],
+        image_name=[image_name],
+        output_cluster_labels_name=[f"{image_name}_clusters"],
+        output_metacluster_labels_name=[f"{image_name}_metaclusters"],
         channels=channels,
         fraction=fraction,
         n_clusters=20,
@@ -49,17 +49,17 @@ def test_flowsom(sdata_blobs, client):
     if client is not None:
         client.close()
 
-    assert f"{img_layer}_clusters" in sdata_blobs.labels
-    assert f"{img_layer}_metaclusters" in sdata_blobs.labels
+    assert f"{image_name}_clusters" in sdata_blobs.labels
+    assert f"{image_name}_metaclusters" in sdata_blobs.labels
     assert fsom.model._is_fitted
-    assert int(fraction * np.prod(sdata_blobs[img_layer].shape[1:])) == fsom.get_cell_data().shape[0]
+    assert int(fraction * np.prod(sdata_blobs[image_name].shape[1:])) == fsom.get_cell_data().shape[0]
     assert (fsom.get_cell_data().var.index == channels).all()
 
     # sanity check for consistency between flowsom object and sdata object.
     coord = fsom.get_cell_data().obsm[_SPATIAL][-2]
     assert (
         fsom.get_cell_data()[-2].to_df()["lineage_9"].values[0]
-        == sdata_blobs[img_layer].sel(c=["lineage_9"]).data[0, coord[0], coord[1]].compute()
+        == sdata_blobs[image_name].sel(c=["lineage_9"]).data[0, coord[0], coord[1]].compute()
     )
 
 
@@ -71,15 +71,15 @@ def test_flowsom_multi_c(sdata_multi_c_no_backed):
 
     batch_model = fs.models.BatchFlowSOMEstimator
 
-    img_layer = "raw_image"
+    image_name = "raw_image"
     fraction = 0.1
 
     with dask.config.set(scheduler="threads"):
         sdata_multi_c_no_backed, fsom, mapping = flowsom(
             sdata_multi_c_no_backed,
-            img_layer=[img_layer],
-            output_layer_clusters=[f"{img_layer}_clusters"],
-            output_layer_metaclusters=[f"{img_layer}_metaclusters"],
+            image_name=[image_name],
+            output_cluster_labels_name=[f"{image_name}_clusters"],
+            output_metacluster_labels_name=[f"{image_name}_metaclusters"],
             fraction=fraction,
             n_clusters=20,
             random_state=100,
@@ -88,16 +88,16 @@ def test_flowsom_multi_c(sdata_multi_c_no_backed):
             overwrite=True,
         )
 
-    assert f"{img_layer}_clusters" in sdata_multi_c_no_backed.labels
-    assert f"{img_layer}_metaclusters" in sdata_multi_c_no_backed.labels
+    assert f"{image_name}_clusters" in sdata_multi_c_no_backed.labels
+    assert f"{image_name}_metaclusters" in sdata_multi_c_no_backed.labels
     assert fsom.model._is_fitted
-    assert int(fraction * np.prod(sdata_multi_c_no_backed[img_layer].shape[1:])) == fsom.get_cell_data().shape[0]
+    assert int(fraction * np.prod(sdata_multi_c_no_backed[image_name].shape[1:])) == fsom.get_cell_data().shape[0]
 
     # sanity check for consistency between flowsom object and sdata object.
     coord = fsom.get_cell_data().obsm[_SPATIAL][-2]
     assert (
         fsom.get_cell_data()[-2].to_df()["0"].values[0]
-        == sdata_multi_c_no_backed[img_layer].sel(c=[0]).data[0, coord[0], coord[1]].compute()
+        == sdata_multi_c_no_backed[image_name].sel(c=[0]).data[0, coord[0], coord[1]].compute()
     )
 
 

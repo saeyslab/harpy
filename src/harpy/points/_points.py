@@ -6,39 +6,39 @@ from spatialdata.models._utils import MappingToCoordinateSystem_t
 from harpy.utils._io import _incremental_io_on_disk, _write_element_with_cleanup
 
 
-def add_points_layer(
+def add_points(
     sdata: SpatialData,
     ddf: DaskDataFrame,
-    output_layer: str,
+    output_points_name: str,
     coordinates: dict[str, str],
     transformations: MappingToCoordinateSystem_t | None = None,
     overwrite: bool = True,
 ) -> SpatialData:
     """
-    Add a points layer to a SpatialData object.
+    Add a points element to a SpatialData object.
 
-    This function allows you to add a points layer to `sdata`.
-    The points layer is derived from a `Dask` `DataFrame`.
-    If `sdata` is backed by a zarr store, the resulting points layer will be backed to the zarr store, otherwise `ddf` will be persisted in memory.
+    This function allows you to add a points element to `sdata`.
+    The points element is derived from a `Dask` `DataFrame`.
+    If `sdata` is backed by a zarr store, the resulting points element will be backed to the zarr store, otherwise `ddf` will be persisted in memory.
 
     Parameters
     ----------
     sdata
-        The SpatialData object to which the new points layer will be added.
+        The SpatialData object to which the new points element will be added.
     ddf
         The DaskDataFrame containing the points data to be added.
-    output_layer
-        The name of the output layer where the points data will be stored.
+    output_points_name
+        The name of the output points element where the points data will be stored.
     coordinates
         A dictionary specifying the coordinate mappings for the points data (e.g., {"x": "x_column", "y": "y_column"}).
     transformations
-        Transformations that will be added to the resulting `output_layer`. Currently `harpy` only supports the Identity transformation.
+        Transformations that will be added to the resulting `output_points_name`. Currently `harpy` only supports the Identity transformation.
     overwrite
-        If True, overwrites `output_layer` if it already exists in `sdata`.
+        If True, overwrites `output_points_name` if it already exists in `sdata`.
 
     Returns
     -------
-    The `sdata` object with the points layer added.
+    The `sdata` object with the points element added.
     """
     points = spatialdata.models.PointsModel.parse(ddf, coordinates=coordinates, transformations=transformations)
 
@@ -49,23 +49,25 @@ def add_points_layer(
         points = points.persist()
         points.attrs.update(attrs)
 
-    if output_layer in [*sdata.points]:
+    if output_points_name in [*sdata.points]:
         if sdata.is_backed():
             if overwrite:
-                sdata = _incremental_io_on_disk(sdata, output_layer=output_layer, element=points, element_type="points")
+                sdata = _incremental_io_on_disk(
+                    sdata, element_name=output_points_name, element=points, element_type="points"
+                )
             else:
                 raise ValueError(
-                    f"Attempting to overwrite 'sdata.points[\"{output_layer}\"]', but overwrite is set to False. Set overwrite to True to overwrite the .zarr store."
+                    f"Attempting to overwrite 'sdata.points[\"{output_points_name}\"]', but overwrite is set to False. Set overwrite to True to overwrite the .zarr store."
                 )
         else:
-            sdata[output_layer] = points
+            sdata[output_points_name] = points
 
     else:
-        sdata[output_layer] = points
+        sdata[output_points_name] = points
         if sdata.is_backed():
-            _write_element_with_cleanup(sdata, output_layer)
-            del sdata[output_layer]
+            _write_element_with_cleanup(sdata, output_points_name)
+            del sdata[output_points_name]
             sdata_temp = read_zarr(sdata.path, selection=["points"])
-            sdata[output_layer] = sdata_temp[output_layer]
+            sdata[output_points_name] = sdata_temp[output_points_name]
             del sdata_temp
     return sdata

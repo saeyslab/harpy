@@ -64,7 +64,7 @@ class MacsimaKeys(ModeEnum):
 
 def macsima(
     path: str | Path | list[str] | list[Path],
-    img_layer: str | Iterable[str] | None = None,
+    image_name: str | Iterable[str] | None = None,
     to_coordinate_system: str | Iterable[str] | None = None,
     c_subset: list[str] = None,
     remove_bleached: bool = True,
@@ -107,11 +107,11 @@ def macsima(
         (or `cycle_scantype_channelname_reagent` if `include_roi_id_in_channel_name=False`).
         E.g if `c_subset=['DAPI']` and  `cycle_scantype_channelname_roiid_reagent = 01_B_DAPI_001_DAPI`,
         then channel `01_B_DAPI_001_DAPI` will be retained.
-    img_layer
-        Name of the resulting image layer. If `None`, the name is inferred from OME metadata.
-        If `path` contains multiple entries, `img_layer` must be a list with the same length.
+    image_name
+        Name of the resulting image element. If `None`, the name is inferred from OME metadata.
+        If `path` contains multiple entries, `image_name` must be a list with the same length.
     to_coordinate_system
-        Target coordinate system name(s) for the resulting image layer(s). If `None`,
+        Target coordinate system name(s) for the resulting image element(s). If `None`,
         defaults to `global_<roi_id>` when ROI metadata is available, otherwise `global`.
         If `path` contains multiple entries, `to_coordinate_system` must be a list with
         the same length.
@@ -138,12 +138,12 @@ def macsima(
     Examples
     --------
     >>> sdata = macsima(
-    ...     path="path/to/roi_folder",  # recursively loads all .tif in this ROI, one image layer
+    ...     path="path/to/roi_folder",  # recursively loads all .tif in this ROI, one image element
     ...     c_subset=["DAPI", "CD43"],
     ...     image_models_kwargs={"chunks": (1, 3000, 3000)},
     ... )
     >>> sdata = macsima(
-    ...     path=["path/to/roi_folder", "path/to/another_roi_folder"],  # two ROI folders -> two image layers
+    ...     path=["path/to/roi_folder", "path/to/another_roi_folder"],  # two ROI folders -> two image elements
     ...     c_subset=["DAPI", "CD43"],
     ...     image_models_kwargs={"chunks": (1, 3000, 3000)},
     ... )
@@ -161,16 +161,16 @@ def macsima(
             "Please install it with `pip install bioio bioio-ome-tiff`."
         ) from e
     path = _make_list(path)
-    if img_layer is None:
-        img_layer_list = [None] * len(path)
+    if image_name is None:
+        image_name_list = [None] * len(path)
     else:
-        img_layer_list = _make_list(img_layer)
-        if len(img_layer_list) != len(path):
+        image_name_list = _make_list(image_name)
+        if len(image_name_list) != len(path):
             raise ValueError(
-                f"'img_layer' must have same length as 'path' (got {len(img_layer_list)} and {len(path)})."
+                f"'image_name' must have same length as 'path' (got {len(image_name_list)} and {len(path)})."
             )
-        if len(set(img_layer_list)) != len(img_layer_list):
-            raise ValueError("'img_layer' entries must be unique.")
+        if len(set(image_name_list)) != len(image_name_list):
+            raise ValueError("'image_name' entries must be unique.")
     if to_coordinate_system is None:
         to_coordinate_system_list = [None] * len(path)
     else:
@@ -184,10 +184,10 @@ def macsima(
             raise ValueError("'to_coordinate_system' entries must be unique.")
 
     sdata = SpatialData()
-    for _path, _img_layer, _to_coordinate_system in zip(path, img_layer_list, to_coordinate_system_list, strict=True):
+    for _path, _image_name, _to_coordinate_system in zip(path, image_name_list, to_coordinate_system_list, strict=True):
         image_name, se = _macsima(
             _path,
-            img_layer=_img_layer,
+            image_name=_image_name,
             to_coordinate_system=_to_coordinate_system,
             c_subset=c_subset,
             remove_bleached=remove_bleached,
@@ -207,7 +207,7 @@ def macsima(
 
 def _macsima(
     path: str | Path,
-    img_layer: str | None = None,
+    image_name: str | None = None,
     to_coordinate_system: str | None = None,
     c_subset: list[str] = None,
     remove_bleached: bool = True,
@@ -227,11 +227,11 @@ def _macsima(
         raise ValueError(f"Cannot determine data set, expecting '*{MacsimaKeys.IMAGE_OMETIF}' files in {path}.")
     imgs = [BioImage(img_path, **imread_kwargs) for img_path in path_list]
 
-    if img_layer is None:
+    if image_name is None:
         image_name = imgs[0].ome_metadata.experiments[0].description
-        log.info(f"'img_layer' not provided; metadata-derived base image layer name: {image_name}")
+        log.info(f"'image_name' not provided; metadata-derived base image element name: {image_name}")
     else:
-        image_name = img_layer
+        image_name = image_name
 
     metadata = [_get_metadata(_img) for _img in imgs]
     roi = [item[3] for item in metadata]
@@ -246,9 +246,9 @@ def _macsima(
             "'to_coordinate_system' not provided; ROI metadata found, "
             f"falling back to coordinate system: {to_coordinate_system_name}"
         )
-        if img_layer is None:
+        if image_name is None:
             image_name = f"{image_name}_{roi_id}"
-            log.info(f"'img_layer' not provided; appending ROI id, final image layer name: {image_name}")
+            log.info(f"'image_name' not provided; appending ROI id, final image element name: {image_name}")
     elif to_coordinate_system is not None:
         to_coordinate_system_name = to_coordinate_system
     else:

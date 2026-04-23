@@ -9,7 +9,7 @@ from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import Translation
 
-from harpy.image._image import _get_boundary, add_image_layer, get_dataarray
+from harpy.image._image import _get_boundary, add_image, get_dataarray
 from harpy.utils._transformations import _identity_check_transformations_points
 
 
@@ -29,8 +29,8 @@ def _build_density_chunk(
 
 def transcript_density(
     sdata: SpatialData,
-    img_layer: str = "raw_image",
-    points_layer: str = "transcripts",
+    image_name: str = "raw_image",
+    points_name: str = "transcripts",
     n_sample: int | None = 15000000,
     name_x: str = "x",
     name_y: str = "y",
@@ -40,7 +40,7 @@ def transcript_density(
     crd: tuple[int, int, int, int] | None = None,
     to_coordinate_system: str = "global",
     scale_factors: ScaleFactors_t | None = None,
-    output_layer: str = "transcript_density",
+    output_image_name: str = "transcript_density",
     overwrite: bool = False,
 ) -> SpatialData:
     """
@@ -54,21 +54,21 @@ def transcript_density(
     ----------
     sdata
         :class:`spatialdata.SpatialData` object containing spatial information.
-    img_layer
-        The layer of the SpatialData object used for determining image boundary.
-        `img_layer` and `points_layer` should be registered in coordinate system `to_coordinate_system`.
-    points_layer
-        The layer name that contains the transcript data points, by default "transcripts".
+    image_name
+        The image element of the SpatialData object used for determining image boundary.
+        `image_name` and `points_name` should be registered in coordinate system `to_coordinate_system`.
+    points_name
+        The name of the points element containing transcript data, by default "transcripts".
     n_sample
         The number of transcripts to sample for calculation of transcript density.
     name_x
-        Column name for x-coordinates of the transcripts in the points layer, by default "x".
+        Column name for x-coordinates of the transcripts in the points element, by default "x".
     name_y
-        Column name for y-coordinates of the transcripts in the points layer, by default "y".
+        Column name for y-coordinates of the transcripts in the points element, by default "y".
     name_z
-        Column name for z-coordinates of the transcripts in the points layer, by default None.
+        Column name for z-coordinates of the transcripts in the points element, by default None.
     z_index
-        The z index in the points layer for which to calculate transcript density. If set to None for a 3D points layer
+        The z index in the points element for which to calculate transcript density. If set to None for a 3D points element
         (and `name_z` is not equal to None), an y-x transcript density projection will be calculated.
     chunks
         Chunksize for calculation of density using gaussian filter.
@@ -76,34 +76,34 @@ def transcript_density(
         The coordinates for a region of interest in the format (xmin, xmax, ymin, ymax).
         If provided, the density is computed only for this region, by default None.
     to_coordinate_system
-        The coordinate system that holds `img_layer` and `points_layer`.
+        The coordinate system that holds `image_name` and `points_name`.
         This coordinate system should be the intrinsic coordinate system in pixels.
     scale_factors
         Scale factors to apply for multiscale.
-    output_layer
-        The name of the output image layer in the :class:`spatialdata.SpatialData` object
+    output_image_name
+        The name of the output image element in the :class:`spatialdata.SpatialData` object
         where the transcript density will be added, by default "transcript_density".
     overwrite
         If True overwrites the element if it already exists.
 
     Returns
     -------
-    Updated :class:`spatialdata.SpatialData` object with the added transcript density layer
-    as an image layer.
+    Updated :class:`spatialdata.SpatialData` object with the added transcript density
+    image element.
 
     Examples
     --------
     >>> sdata = SpatialData(...)
-    >>> sdata = transcript_density(sdata, points_layer="transcripts", crd=(2000, 4000, 2000, 4000))
+    >>> sdata = transcript_density(sdata, points_name="transcripts", crd=(2000, 4000, 2000, 4000))
 
     """
     if z_index is not None and name_z is None:
         raise ValueError(
-            "Please specify column name for the z-coordinates of the transcripts in the points layer "
+            "Please specify column name for the z-coordinates of the transcripts in the points element "
             "when specifying z_index."
         )
 
-    ddf = sdata.points[points_layer]
+    ddf = sdata.points[points_name]
 
     _identity_check_transformations_points(ddf, to_coordinate_system=to_coordinate_system)
 
@@ -112,19 +112,19 @@ def transcript_density(
     if name_z is not None:
         ddf[name_z] = np.floor(ddf[name_z]).astype(int)
 
-    # get image boundary from last image layer if img_layer is None
-    if img_layer is None:
-        img_layer = [*sdata.images][-1]
+    # get image boundary from last image element if image_name is None
+    if image_name is None:
+        image_name = [*sdata.images][-1]
 
-    se = get_dataarray(sdata, layer=img_layer)
+    se = get_dataarray(sdata, element_name=image_name)
 
     img_boundary = _get_boundary(se, to_coordinate_system=to_coordinate_system)
 
-    # if crd is None, get boundary from image at img_layer if given,
+    # if crd is None, get boundary from image at image_name if given,
     if crd is None:
         crd = img_boundary
     else:
-        # fix crd so it falls in boundaries of img_layer, otherwise possible issues with registration transcripts, and size of the generated image.
+        # fix crd so it falls in boundaries of image_name, otherwise possible issues with registration transcripts, and size of the generated image.
         _crd = [
             max(img_boundary[0], crd[0]),
             min(img_boundary[1], crd[1]),
@@ -133,7 +133,7 @@ def transcript_density(
         ]
         if _crd != crd:
             log.warning(
-                f"Provided crd didn't fully fit within the image layer '{img_layer}' with image boundary '{img_boundary}'. "
+                f"Provided crd didn't fully fit within the image element '{image_name}' with image boundary '{img_boundary}'. "
                 f"The crd was updated from '{crd}' to '{_crd}'."
             )
         crd = _crd
@@ -251,10 +251,10 @@ def transcript_density(
 
     arr = blurred_transcripts[None,]
 
-    sdata = add_image_layer(
+    sdata = add_image(
         sdata,
         arr=arr,
-        output_layer=output_layer,
+        output_image_name=output_image_name,
         chunks=arr.chunksize,
         transformations={to_coordinate_system: translation},
         scale_factors=scale_factors,

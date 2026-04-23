@@ -20,16 +20,16 @@ def test_plot_pixel_clusters(sdata_blobs, tmp_path):
 
     matplotlib.use("Agg")
 
-    img_layer = "blobs_image"
+    image_name = "blobs_image"
     channels = ["lineage_0", "lineage_1", "lineage_5", "lineage_9"]
     fraction = 0.1
 
     with dask.config.set(scheduler="threads"):
         sdata_blobs, fsom, mapping = flowsom(
             sdata_blobs,
-            img_layer=[img_layer],
-            output_layer_clusters=[f"{img_layer}_clusters"],
-            output_layer_metaclusters=[f"{img_layer}_metaclusters"],
+            image_name=[image_name],
+            output_cluster_labels_name=[f"{image_name}_clusters"],
+            output_metacluster_labels_name=[f"{image_name}_metaclusters"],
             channels=channels,
             fraction=fraction,
             n_clusters=20,
@@ -39,13 +39,13 @@ def test_plot_pixel_clusters(sdata_blobs, tmp_path):
             overwrite=True,
         )
 
-    assert f"{img_layer}_clusters" in sdata_blobs.labels
-    assert f"{img_layer}_metaclusters" in sdata_blobs.labels
+    assert f"{image_name}_clusters" in sdata_blobs.labels
+    assert f"{image_name}_metaclusters" in sdata_blobs.labels
     assert fsom.model._is_fitted
 
     pixel_clusters(
         sdata_blobs,
-        labels_layer=f"{img_layer}_metaclusters",
+        labels_name=f"{image_name}_metaclusters",
         figsize=(10, 10),
         coordinate_systems="global",
         crd=(100, 300, 100, 300),
@@ -56,14 +56,14 @@ def test_plot_pixel_clusters(sdata_blobs, tmp_path):
 
     pixel_clusters(
         sdata_blobs,
-        labels_layer=f"{img_layer}_clusters",
+        labels_name=f"{image_name}_clusters",
         crd=(100, 300, 100, 300),
         ax=axes[0],
     )
 
     pixel_clusters(
         sdata_blobs,
-        labels_layer=f"{img_layer}_metaclusters",
+        labels_name=f"{image_name}_metaclusters",
         crd=(100, 300, 100, 300),
         ax=axes[1],
     )
@@ -74,10 +74,10 @@ def test_plot_pixel_clusters(sdata_blobs, tmp_path):
     sdata_blobs = cluster_intensity_SOM(
         sdata_blobs,
         mapping=mapping,
-        img_layer=[img_layer],
-        labels_layer=[f"{img_layer}_clusters"],
+        image_name=[image_name],
+        labels_name=[f"{image_name}_clusters"],
         to_coordinate_system=["global"],
-        output_layer="counts_clusters",
+        output_table_name="counts_clusters",
         chunks="auto",
         overwrite=True,
     )
@@ -86,7 +86,7 @@ def test_plot_pixel_clusters(sdata_blobs, tmp_path):
 
     pixel_clusters_heatmap(
         sdata_blobs,
-        table_layer="counts_clusters",
+        table_name="counts_clusters",
         ax=axes[0],
         metaclusters=True,
         linewidths=0.01,
@@ -95,7 +95,7 @@ def test_plot_pixel_clusters(sdata_blobs, tmp_path):
 
     pixel_clusters_heatmap(
         sdata_blobs,
-        table_layer="counts_clusters",
+        table_name="counts_clusters",
         ax=axes[1],
         metaclusters=False,
         linewidths=0.01,

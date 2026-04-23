@@ -12,7 +12,7 @@ from harpy.plot import plot_shapes
 
 def tiling_correction(
     sdata: SpatialData,
-    img_layer: tuple[str, str] = ["raw_image", "tiling_correction"],
+    image_name: tuple[str, str] = ["raw_image", "tiling_correction"],
     channel: int | Iterable[int] | None = None,
     crd: tuple[int, int, int, int] | None = None,
     figsize: tuple[int, int] | None = None,
@@ -23,17 +23,17 @@ def tiling_correction(
     """
     Visualizes the effect of tiling correction.
 
-    This function plots the uncorrected image layer of a SpatialData object alongside the tiling corrected version, allowing for a visual
+    This function plots the uncorrected image element of a SpatialData object alongside the tiling corrected version, allowing for a visual
     comparison between the two. This can be useful for assessing the effectiveness of tiling correction methods
-    applied to an image layer of a SpatialData object.
+    applied to an image element of a SpatialData object.
 
     Parameters
     ----------
     sdata
         Data containing spatial information for plotting.
-    img_layer
-        Tuple where the first string represents the layer name for the uncorrected image and the second string
-        represents the layer name for the tiling corrected image. Default is ["raw_image", "tiling_correction"].
+    image_name
+        Tuple where the first string represents the name of the uncorrected image element and the second string
+        represents the name of the tiling-corrected image element. Default is ["raw_image", "tiling_correction"].
         Images will be plotted next to each other.
     channel
         Specifies the channel or channels to visualize. If not provided, all channels are used.
@@ -57,7 +57,7 @@ def tiling_correction(
     Examples
     --------
     >>> sdata = SpatialData(...)
-    >>> tiling_correction(sdata, img_layer=["original", "corrected"], crd=(2000, 4000, 2000, 4000))
+    >>> tiling_correction(sdata, image_name=["original", "corrected"], crd=(2000, 4000, 2000, 4000))
 
     See Also
     --------
@@ -65,8 +65,8 @@ def tiling_correction(
     """
     plot_shapes(
         sdata,
-        img_layer=img_layer,
-        shapes_layer=None,
+        image_name=image_name,
+        shapes_name=None,
         channel=channel,
         crd=crd,
         figsize=figsize,

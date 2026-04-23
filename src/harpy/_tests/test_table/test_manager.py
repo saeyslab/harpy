@@ -4,12 +4,12 @@ from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
 from harpy.table._manager import _cast_stringdtype_uns_sdata
-from harpy.table._table import add_table_layer
+from harpy.table._table import add_table
 from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY
 
 
 @pytest.mark.parametrize("is_backed", [True, False])
-def test_add_table_layer(sdata_transcripts: SpatialData, recwarn, is_backed):
+def test_add_table(sdata_transcripts: SpatialData, recwarn, is_backed):
     assert sdata_transcripts.is_backed()
 
     if not is_backed:
@@ -17,10 +17,10 @@ def test_add_table_layer(sdata_transcripts: SpatialData, recwarn, is_backed):
 
     adata = sdata_transcripts["table_transcriptomics"]
 
-    sdata_transcripts = add_table_layer(
+    sdata_transcripts = add_table(
         sdata_transcripts,
         adata=adata,
-        output_layer="table_transcriptomics",
+        output_table_name="table_transcriptomics",
         instance_key=_INSTANCE_KEY,
         region_key=_REGION_KEY,
         region=adata.obs[_REGION_KEY].cat.categories.to_list(),
@@ -44,7 +44,7 @@ def test_add_table_layer(sdata_transcripts: SpatialData, recwarn, is_backed):
 
 
 @pytest.mark.parametrize("is_backed", [True, False])
-def test_add_table_layer_change_region_instance_keys(sdata_transcripts: SpatialData, recwarn, is_backed):
+def test_add_table_change_region_instance_keys(sdata_transcripts: SpatialData, recwarn, is_backed):
     assert sdata_transcripts.is_backed()
 
     if not is_backed:
@@ -62,10 +62,10 @@ def test_add_table_layer_change_region_instance_keys(sdata_transcripts: SpatialD
     # need to pop the spatialdata_attrs, otherwise harpy will complain that new region key does not match the old region key
     adata.uns.pop(TableModel.ATTRS_KEY, None)
 
-    sdata_transcripts = add_table_layer(
+    sdata_transcripts = add_table(
         sdata_transcripts,
         adata=adata,
-        output_layer="table_transcriptomics",
+        output_table_name="table_transcriptomics",
         instance_key=new_instance_key,
         region_key=new_region_key,
         region=adata.obs[new_region_key].cat.categories.to_list(),
@@ -91,7 +91,7 @@ def test_add_table_layer_change_region_instance_keys(sdata_transcripts: SpatialD
 
 
 @pytest.mark.parametrize("is_backed", [True, False])
-def test_add_table_layer_not_annotating(sdata_transcripts: SpatialData, is_backed):
+def test_add_table_not_annotating(sdata_transcripts: SpatialData, is_backed):
     assert sdata_transcripts.is_backed()
 
     if not is_backed:
@@ -99,10 +99,10 @@ def test_add_table_layer_not_annotating(sdata_transcripts: SpatialData, is_backe
 
     adata = sdata_transcripts["table_transcriptomics"]
 
-    sdata_transcripts = add_table_layer(
+    sdata_transcripts = add_table(
         sdata_transcripts,
         adata=adata,
-        output_layer="table_transcriptomics",
+        output_table_name="table_transcriptomics",
         region=None,  # table is not annotating a region
         overwrite=True,
     )
@@ -110,13 +110,13 @@ def test_add_table_layer_not_annotating(sdata_transcripts: SpatialData, is_backe
     assert TableModel.ATTRS_KEY not in sdata_transcripts["table_transcriptomics"].uns
 
 
-def test_add_new_backed_table_layer_does_not_warn_about_missing_regions(sdata_transcripts: SpatialData, recwarn):
+def test_add_new_backed_table_does_not_warn_about_missing_regions(sdata_transcripts: SpatialData, recwarn):
     adata = sdata_transcripts["table_transcriptomics"].copy()
 
-    sdata_transcripts = add_table_layer(
+    sdata_transcripts = add_table(
         sdata_transcripts,
         adata=adata,
-        output_layer="table_transcriptomics_copy",
+        output_table_name="table_transcriptomics_copy",
         instance_key=_INSTANCE_KEY,
         region_key=_REGION_KEY,
         region=adata.obs[_REGION_KEY].cat.categories.to_list(),

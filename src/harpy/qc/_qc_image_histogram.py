@@ -20,7 +20,7 @@ from harpy.image._image import get_dataarray
 
 def image_histogram(
     sdata: SpatialData,
-    img_layer: str,
+    image_name: str,
     channel: str | int | Sequence[str | int],
     bins: int,
     scale: str | None = None,
@@ -50,15 +50,15 @@ def image_histogram(
     ----------
     sdata
         The input ``SpatialData`` object containing the image data.
-    img_layer
-        The name of the image layer within `sdata` to analyze.
+    image_name
+        The name of the image element within `sdata` to analyze.
     channel
         The specific channel of the image data to use for the histogram. Can be a single channel name or index,
         or a sequence of channel names and/or indices.
     bins
         The number of bins for the histogram.
     scale
-        Pyramid level to use when ``img_layer`` is multiscale. If ``None``,
+        Pyramid level to use when ``image_name`` is multiscale. If ``None``,
         the histogram is computed from ``"scale0"``. Using a lower-resolution
         scale provides a faster but approximate histogram.
     range
@@ -108,7 +108,7 @@ def image_histogram(
     Raises
     ------
     AssertionError
-        If ``img_layer`` is not found in ``sdata.images``.
+        If ``image_name`` is not found in ``sdata.images``.
 
     Examples
     --------
@@ -120,8 +120,8 @@ def image_histogram(
 
         ax = hp.qc.image_histogram(
             sdata,
-            img_layer="raw_image_fov0",
-            channel=hp.im.get_dataarray(sdata, layer="raw_image_fov0").c.data,
+            image_name="raw_image_fov0",
+            channel=hp.im.get_dataarray(sdata, element_name="raw_image_fov0").c.data,
             percentile_lines=[0.1, 99.9],
             kind="hist",
             ncols=5,
@@ -134,13 +134,13 @@ def image_histogram(
             bins=100,
         )
     """
-    assert img_layer in sdata.images, f"'{img_layer}' not found in 'sdata.images'."
-    if scale is not None and not isinstance(sdata.images[img_layer], DataTree):
+    assert image_name in sdata.images, f"'{image_name}' not found in 'sdata.images'."
+    if scale is not None and not isinstance(sdata.images[image_name], DataTree):
         log.warning(
-            f"Parameter 'scale={scale}' was ignored for image layer '{img_layer}' because it is not multiscale; "
+            f"Parameter 'scale={scale}' was ignored for image element '{image_name}' because it is not multiscale; "
             "histogram will be computed at full resolution."
         )
-    se = get_dataarray(sdata, layer=img_layer, scale=scale)
+    se = get_dataarray(sdata, element_name=image_name, scale=scale)
     channel_names = _resolve_channels(se.c.data.tolist(), channel)
 
     if len(channel_names) == 1:
@@ -312,7 +312,7 @@ def _resolve_channels(channel_names: list[str], channel: str | int | Sequence[st
 def _resolve_channel_name(channel_names: list[str], channel: str | int) -> str:
     if isinstance(channel, str):
         if channel not in channel_names:
-            raise ValueError(f"Channel '{channel}' not found in image layer.")
+            raise ValueError(f"Channel '{channel}' not found in image element.")
         return channel
     if isinstance(channel, (int, np.integer)):
         return channel_names[channel]

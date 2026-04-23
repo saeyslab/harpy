@@ -11,64 +11,64 @@ from spatialdata import bounding_box_query as bounding_box_query_spatialdata
 from spatialdata.models import TableModel
 from spatialdata.transformations import get_transformation
 
-from harpy.image._image import add_labels_layer, get_dataarray
-from harpy.table._table import add_table_layer
+from harpy.image._image import add_labels, get_dataarray
+from harpy.table._table import add_table
 
 
 def bounding_box_query(
     sdata: SpatialData,
-    labels_layer: str | Iterable[str],
+    labels_name: str | Iterable[str],
     to_coordinate_system: str | Iterable[str] | None,
     crd: tuple[int, int, int, int] | Iterable[tuple[int, int, int, int] | None] | None,
-    copy_img_layer: bool = True,
-    copy_shapes_layer: bool = True,
-    copy_points_layer: bool = True,
+    copy_image: bool = True,
+    copy_shapes: bool = True,
+    copy_points: bool = True,
     output: str | Path | None = None,
 ) -> SpatialData:
     """
-    Query the labels layers of a SpatialData object and the corresponding instances it annotates in `sdata.tables` via a bounding box query.
+    Query the labels elements of a SpatialData object and the corresponding instances it annotates in `sdata.tables` via a bounding box query.
 
     Parameters
     ----------
     sdata
         The SpatialData object to query.
-    labels_layer
-        The labels layer(s) to query, which can be a single string or an iterable of strings.
+    labels_name
+        The labels element(s) to query, which can be a single string or an iterable of strings.
     to_coordinate_system
         The coordinate system(s) to which the query provided via `crd` is defined. If `None`, will use 'global'.
     crd
         Coordinates defining the bounding box, specified as a tuple of four integers (x_min, y_min, x_max, y_max), or an iterable of such tuples.
-        Setting `crd` to `None` can be usefull if you want to filter elments in tables layers that are annotated by specific labels layers.
-        E.g. setting `labels_layer=layer_1` and `crd=None`, will result in AnnData objects in `sdata.tables` containing only instances annotated by `layer_1`.
-    copy_img_layer
-        Whether to copy all image layers to the new SpatialData object. If set to `False`, image layers will not be included in the result.
-    copy_shapes_layer
-        Whether to copy all shapes layers to the new SpatialData object. If set to `False`, shapes layers will not be included in the result.
-    copy_points_layer
-        Whether to copy all points layers to the new SpatialData object. If set to `False`, points layers will not be included in the result.
+        Setting `crd` to `None` can be useful if you want to filter elements in table elements that are annotated by specific labels elements.
+        E.g. setting `labels_name="labels_a"` and `crd=None` will result in AnnData objects in `sdata.tables` containing only instances annotated by `"labels_a"`.
+    copy_image
+        Whether to copy all image elements to the new SpatialData object. If set to `False`, image elements will not be included in the result.
+    copy_shapes
+        Whether to copy all shapes elements to the new SpatialData object. If set to `False`, shapes elements will not be included in the result.
+    copy_points
+        Whether to copy all points elements to the new SpatialData object. If set to `False`, points elements will not be included in the result.
     output
         Path to the zarr store where the resulting SpatialData object will be backed.
         If None, the new resulting SpatialData object will be persisted in memory.
 
     Returns
     -------
-    A new SpatialData object containing the extracted bounding box region and associated data layers.
+    A new SpatialData object containing the extracted bounding box region and associated data elements.
 
     Raises
     ------
     AssertionError
-        If the number of provided `labels_layer`, `crd` and `to_coordinate_system` is not equal.
+        If the number of provided `labels_name`, `crd` and `to_coordinate_system` is not equal.
     """
 
     def _fix_name(name: str | Iterable[str]):
         return list(name) if isinstance(name, Iterable) and not isinstance(name, str) else [name]
 
     # make all input iterables
-    labels_layer = _fix_name(labels_layer)
+    labels_name = _fix_name(labels_name)
     crd = _crd_to_iterable_of_iterables(crd)
     to_coordinate_system = _fix_name(to_coordinate_system)
-    assert len(labels_layer) == len(crd) == len(to_coordinate_system), (
-        "The number of 'labels_layer', 'crd' and 'to_coordinate_system' specified should all be equal."
+    assert len(labels_name) == len(crd) == len(to_coordinate_system), (
+        "The number of 'labels_name', 'crd' and 'to_coordinate_system' specified should all be equal."
     )
 
     sdata_queried = SpatialData()
@@ -76,11 +76,11 @@ def bounding_box_query(
     if output is not None:
         sdata_queried.write(output)
 
-    # first add queried labels layer to sdata, so we do not have to query them + calculate unique labels in them len[*sdata.tables] times.
+    # first add queried labels element to sdata, so we do not have to query them + calculate unique labels in them len[*sdata.tables] times.
     labels_ids = []
-    # labels_layer_queried=[]
-    for _labels_layer, _crd, _to_coordinate_system in zip(labels_layer, crd, to_coordinate_system, strict=True):
-        se = get_dataarray(sdata, layer=_labels_layer)
+    # labels_name_queried=[]
+    for _labels_name, _crd, _to_coordinate_system in zip(labels_name, crd, to_coordinate_system, strict=True):
+        se = get_dataarray(sdata, element_name=_labels_name)
 
         if _crd is None:
             se_queried = se
@@ -94,102 +94,102 @@ def bounding_box_query(
             )
 
         if se_queried is None:
-            # set labels_id to empty array, so for this labels layer, all instances will be removed from table.
+            # set labels_id to empty array, so for this labels element, all instances will be removed from table.
             labels_ids.append(np.array([]))
             log.warning(
-                f"query with crd {crd} to coordinate system '{to_coordinate_system}' for labels layer '{labels_layer}' resulted in empty labels layer."
-                f"Therefore labels layer '{labels_layer}' will not be present in resulting spatialdata object. "
-                f"Instances in tables annotated by '{labels_layer}' will also be removed from the tables."
+                f"query with crd {crd} to coordinate system '{to_coordinate_system}' for labels element '{labels_name}' resulted in empty labels element."
+                f"Therefore labels element '{labels_name}' will not be present in resulting spatialdata object. "
+                f"Instances in tables annotated by '{labels_name}' will also be removed from the tables."
             )
         else:
             labels_ids.append(da.unique(se_queried.data).compute())
-            sdata_queried = add_labels_layer(
+            sdata_queried = add_labels(
                 sdata_queried,
                 arr=se_queried.data.rechunk(
                     se_queried.data.chunksize
                 ),  # rechunk to avoid irregular chunks when writing to zarr store.
-                output_layer=_labels_layer,
+                output_labels_name=_labels_name,
                 transformations=get_transformation(se_queried, get_all=True),
-                # note that if labels layer was multiscale, it will now not be multiscale.
+                # note that if labels element was multiscale, it will now not be multiscale.
             )
 
-    # now query the associated table layer
-    for _table_layer in [*sdata.tables]:
+    # now query the associated table element
+    for _table_name in [*sdata.tables]:
         region = []
-        adata = sdata.tables[_table_layer]
+        adata = sdata.tables[_table_name]
         remove = np.ones(len(adata), dtype=bool)
         if TableModel.ATTRS_KEY in adata.uns:
             region_key = adata.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]
             instance_key = adata.uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY]
         else:
-            # do not query the table layers that do not annotate any region
+            # do not query the table elements that do not annotate any region
             log.info(
-                f"table_layer={_table_layer} does not annotate any spatial element — adding data as such to the resulting SpatialData object."
+                f"table_name={_table_name} does not annotate any spatial element — adding data as such to the resulting SpatialData object."
             )
-            sdata_queried = add_table_layer(
+            sdata_queried = add_table(
                 sdata_queried,
                 adata=adata.copy(),
-                output_layer=_table_layer,
+                output_table_name=_table_name,
                 region=None,
             )
             continue
 
-        for _labels_layer, _crd, _to_coordinate_system, _labels_id in zip(
-            labels_layer,
+        for _labels_name, _crd, _to_coordinate_system, _labels_id in zip(
+            labels_name,
             crd,
             to_coordinate_system,
             labels_ids,
             strict=True,
         ):
-            # the code also handles case when labels layer does not annotate the table
-            # (i.e. _labels_layer not in adata.obs[region_key].values), because remove already set to True for all instances.
-            if _labels_layer in adata.obs[region_key].values:
-                mask_label = adata.obs[region_key] == _labels_layer
+            # the code also handles case when labels element does not annotate the table
+            # (i.e. _labels_name not in adata.obs[region_key].values), because remove already set to True for all instances.
+            if _labels_name in adata.obs[region_key].values:
+                mask_label = adata.obs[region_key] == _labels_name
 
                 remove_label = ~((mask_label) & (adata.obs[instance_key].isin(_labels_id))).to_numpy()
                 remove = remove & remove_label
                 if remove_label[
                     (mask_label).to_numpy()
-                ].all():  # if all instances from this label layer will be removed from adata, then we do not append _labels_layer to region
+                ].all():  # if all instances from this labels element will be removed from adata, then we do not append _labels_name to region
                     continue
                 else:
-                    region.append(_labels_layer)
+                    region.append(_labels_name)
 
         if remove.all():
             log.info(
-                f"Query removed all instances from table layer '{_table_layer}'. "
-                "Therefore this table layer will not be present in resulting spatialdata object."
+                f"Query removed all instances from table element '{_table_name}'. "
+                "Therefore this table element will not be present in resulting spatialdata object."
             )
             continue
         # subset
         adata = adata[~remove].copy()
         # add subsetted adata to sdata
-        sdata_queried = add_table_layer(
+        sdata_queried = add_table(
             sdata_queried,
             adata=adata,
-            output_layer=_table_layer,
+            output_table_name=_table_name,
             region=region,
             instance_key=instance_key,
             region_key=region_key,
         )
 
-    # now copy image, shapes and points layer if copy is True.
-    layers_to_copy = []
+    # now copy image, shapes and points element if copy is True.
+    element_names_to_copy = []
 
-    if copy_img_layer:
-        layers_to_copy.extend([*sdata.images])
-    if copy_shapes_layer:
-        layers_to_copy.extend([*sdata.shapes])
-    if copy_points_layer:
-        layers_to_copy.extend(*[sdata.points])
+    if copy_image:
+        element_names_to_copy.extend([*sdata.images])
+    if copy_shapes:
+        element_names_to_copy.extend([*sdata.shapes])
+    if copy_points:
+        element_names_to_copy.extend([*sdata.points])
 
-    for _layer_to_copy in layers_to_copy:
-        sdata_queried[_layer_to_copy] = sdata[_layer_to_copy]
+    for _element_name_to_copy in element_names_to_copy:
+        sdata_queried[_element_name_to_copy] = sdata[_element_name_to_copy]
         if sdata_queried.is_backed():
-            sdata_queried.write_element(_layer_to_copy)
+            sdata_queried.write_element(_element_name_to_copy)
 
-    # if backed, and if there were layers copied, we read back from zarr, otherwise sdata_queried not self contained
-    if sdata_queried.is_backed() and layers_to_copy:
+    # if backed, and if there were elements copied, we read back from zarr, otherwise sdata_queried not self contained
+    if sdata_queried.is_backed() and element_names_to_copy:
         sdata_queried = read_zarr(sdata_queried.path)
 
     return sdata_queried

@@ -24,11 +24,11 @@ def _get_mapping(
 
 
 def _export_to_ark_format(
-    sdata: SpatialData, table_layer: str, output: str | Path | None = None
+    sdata: SpatialData, table_name: str, output: str | Path | None = None
 ) -> tuple[pd.DataFrame, pd.DataFrame | None, pd.DataFrame | None]:
     clustering_key = ClusteringKey._CLUSTERING_KEY.value
     metaclustering_key = ClusteringKey._METACLUSTERING_KEY.value
-    df_cell_som_cluster_count_avg = sdata.tables[table_layer].uns[clustering_key].copy()
+    df_cell_som_cluster_count_avg = sdata.tables[table_name].uns[clustering_key].copy()
     df_cell_som_cluster_count_avg.reset_index(inplace=True)
     log.warning(
         "Increasing cell cluster IDs (SOM cluster and meta cluster IDs) with +1 for visualization. The underlying dataframe in the SpatialData object remains unchanges."
@@ -46,8 +46,8 @@ def _export_to_ark_format(
     df_cell_som_cluster_channel_avg = None
     df_cell_meta_cluster_channel_avg = None
     for _key in [clustering_key, metaclustering_key]:
-        if f"{_key}_channels" in sdata.tables[table_layer].uns:
-            df = sdata.tables[table_layer].uns[f"{_key}_channels"].copy()
+        if f"{_key}_channels" in sdata.tables[table_name].uns:
+            df = sdata.tables[table_name].uns[f"{_key}_channels"].copy()
             df.reset_index(inplace=True)
             log.warning(
                 "Increasing cell cluster IDs (SOM cluster and meta cluster IDs) with +1 for visualization. The underlying dataframe in the SpatialData object remains unchanges."

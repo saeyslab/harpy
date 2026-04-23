@@ -17,15 +17,15 @@ from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import get_transformation
 
-from harpy.image._image import add_labels_layer
+from harpy.image._image import add_labels
 from harpy.utils._keys import _INSTANCE_KEY
 from harpy.utils.utils import _get_uint_dtype
 
 
 def rasterize(
     sdata: SpatialData,
-    shapes_layer: str,
-    output_layer: str,
+    shapes_name: str,
+    output_labels_name: str,
     out_shape: tuple[int, int] | None = None,  # output shape in y, x.
     chunks: int | None = None,
     client: Client | None = None,
@@ -33,83 +33,83 @@ def rasterize(
     overwrite: bool = False,
 ) -> SpatialData:
     """
-    Given a shapes layer in a SpatialData object, corresponding masks are created, and added as a labels layer to the SpatialData object.
+    Given a shapes element in a SpatialData object, corresponding masks are created, and added as a labels element to the SpatialData object.
 
-    The index of the shapes layer will be used as the label in the resulting labels layer (`output_layer`).
+    The index of the shapes element will be used as the label in the resulting labels element (`output_labels_name`).
 
     Parameters
     ----------
     sdata
         The SpatialData object.
-    shapes_layer
-        The shapes layer to be converted to a labels layer.
-    output_layer
-        Name of the resulting labels layer that will be added to `sdata`.
+    shapes_name
+        The shapes element to be converted to a labels element.
+    output_labels_name
+        Name of the resulting labels element that will be added to `sdata`.
     out_shape
-        Output shape of the resulting labels layer `(y,x)`. Will be automatically calculated if set to None via `sdata[shapes_layer].geometry.total_bounds`.
-        If `out_shape` is not `None`, with  `x_min, y_min, x_max, y_max = sdata[shapes_layer].geometry.total_bounds`,
+        Output shape of the resulting labels element `(y,x)`. Will be automatically calculated if set to None via `sdata[shapes_name].geometry.total_bounds`.
+        If `out_shape` is not `None`, with  `x_min, y_min, x_max, y_max = sdata[shapes_name].geometry.total_bounds`,
         and `out_shape[1]<x_max` or `out_shape[0]<y_max`, then shapes with coordinates outside `out_shapes` will
-        not be in resulting `output_layer`.
-        For `shapes_layer` with large offset `(y_min, x_min)`,
+        not be in resulting `output_labels_name`.
+        For `shapes_name` with large offset `(y_min, x_min)`,
         we recommend translating the shapes to the origin, and add the offset via a translation (`spatialdata.transformations.Translation`).
     chunks
-        If provided, creation of the labels layer will be done in a chunked manner, with data divided into chunks for efficient computation.
+        If provided, creation of the labels element will be done in a chunked manner, with data divided into chunks for efficient computation.
     client
-        A `Dask` client. If specified, a copy of `sdata[shapes_layer]` will be scattered across the workers, reducing the size of the task graph.
+        A `Dask` client. If specified, a copy of `sdata[shapes_name]` will be scattered across the workers, reducing the size of the task graph.
         If not specified, `Dask` will use the default scheduler as configured on your system.
     client
-        A Dask `Client` instance. If specified, a copy of the GeoDataFrame (`sdata[shapes_layer]`) will be scattered across the workers.
+        A Dask `Client` instance. If specified, a copy of the GeoDataFrame (`sdata[shapes_name]`) will be scattered across the workers.
         This reduces the size of the task graph and can improve performance by minimizing data transfer overhead during computation.
         If not specified, Dask will use the default scheduler as configured on your system (e.g., single-threaded, multithreaded, or a global client if one is running).
     scale_factors
         Scale factors to apply for multiscale.
     overwrite
-        If True, overwrites the `output_layer` if it already exists in `sdata`.
+        If True, overwrites the `output_labels_name` if it already exists in `sdata`.
 
     Returns
     -------
-        An updated SpatialData object with the added labels layer.
+        An updated SpatialData object with the added labels element.
 
     Raises
     ------
     ValueError
-        If the provided `shapes_layer` contains 3D polygons.
+        If the provided `shapes_name` contains 3D polygons.
     ValueError
-        If the provided `shapes_layer` contains Points.
+        If the provided `shapes_name` contains Points.
     ValueError
-        If 0 is in the index of the `shapes_layer`. As 0 is used as background in the `output_layer`.
+        If 0 is in the index of the `shapes_name`. As 0 is used as background in the `output_labels_name`.
     TypeError
         If `chunks` is not `None` and not an instance of `int`.
     """
     # only 2D polygons are suported.
-    has_z = sdata.shapes[shapes_layer]["geometry"].apply(lambda geom: geom.has_z)
+    has_z = sdata.shapes[shapes_name]["geometry"].apply(lambda geom: geom.has_z)
     if any(has_z):
-        raise ValueError("Shapes layer contains 3D polygons. This is currently not supported.")
+        raise ValueError("Shapes element contains 3D polygons. This is currently not supported.")
 
-    if any(sdata.shapes[shapes_layer].geometry.type == "Point"):
+    if any(sdata.shapes[shapes_name].geometry.type == "Point"):
         raise ValueError(
-            "Shapes layer contains Points. This is currently not supported. Please consider converting the Points to Polygons first using e.g. '.buffer( your_radius, cap_style=your_cap_style )"
+            "Shapes element contains Points. This is currently not supported. Please consider converting the Points to Polygons first using e.g. '.buffer( your_radius, cap_style=your_cap_style )"
         )
 
-    if 0 in sdata[shapes_layer].index.astype(int):
+    if 0 in sdata[shapes_name].index.astype(int):
         raise ValueError(
-            "0 is in the index of the shapes layer. This is not allowed, because the label 0 is reserved for background. "
-            "Either remove the item from the shapes layer or increase indices of shapes with 1."
+            "0 is in the index of the shapes element. This is not allowed, because the label 0 is reserved for background. "
+            "Either remove the item from the shapes element or increase indices of shapes with 1."
         )
     if chunks is not None and not isinstance(chunks, int):
         raise TypeError("Parameter 'chunks' must be of type int if not None.")
 
-    bounds = [int(round(coord)) for coord in sdata[shapes_layer].geometry.total_bounds]
+    bounds = [int(round(coord)) for coord in sdata[shapes_name].geometry.total_bounds]
     x_min, y_min, x_max, y_max = bounds
     y_min = y_min if y_min > 0 else 0
     x_min = x_min if x_min > 0 else 0
 
     assert x_max > 0 and y_max > 0, (
-        f"The maximum of the bounding box of the shapes layer {shapes_layer} is negative. This is not allowed."
+        f"The maximum of the bounding box of the shapes element {shapes_name} is negative. This is not allowed."
     )
-    shapes = sdata[shapes_layer].copy()
+    shapes = sdata[shapes_name].copy()
     shapes.index = shapes.index.values.astype(int)
-    # set index name to this value, because otherwise reset_index could cause error, if _INSTANCE_KEY column already exists in the shapes layer
+    # set index name to this value, because otherwise reset_index could cause error, if _INSTANCE_KEY column already exists in the shapes element
     index_name = f"{_INSTANCE_KEY}_{uuid.uuid4()}"
     shapes.index.name = index_name
     shapes.reset_index(inplace=True)
@@ -187,18 +187,18 @@ def rasterize(
 
     arr = da.block(blocks)
     # we choose to pad with zeros, not add a translation,
-    # if shapes layer has a (large) offset (y_min!=0 or x_min!=0),
+    # if shapes element has a (large) offset (y_min!=0 or x_min!=0),
     # it is therefore better, performance wise, to translate the shapes to the origin,
-    # and add the offset as a translation to the shapes layer, so the labels layer does not need to be padded
+    # and add the offset as a translation to the shapes element, so the labels element does not need to be padded
     arr = da.pad(arr, pad_width=((y_min, 0), (x_min, 0)), mode="constant", constant_values=0)
     # rechunk to avoid irregular chunksize after padding
     arr = arr.rechunk(rechunksize)
 
-    sdata = add_labels_layer(
+    sdata = add_labels(
         sdata,
         arr=arr,
-        output_layer=output_layer,
-        transformations=get_transformation(sdata[shapes_layer], get_all=True),
+        output_labels_name=output_labels_name,
+        transformations=get_transformation(sdata[shapes_name], get_all=True),
         scale_factors=scale_factors,
         overwrite=overwrite,
     )

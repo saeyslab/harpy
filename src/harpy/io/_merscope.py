@@ -27,8 +27,8 @@ from spatialdata_io._constants._constants import MerscopeKeys
 from harpy.image._image import _get_spatial_element
 from harpy.image._rasterize import rasterize
 from harpy.io._transcripts import read_transcripts
-from harpy.shape import add_shapes_layer
-from harpy.table._table import add_table_layer
+from harpy.shape import add_shapes
+from harpy.table._table import add_table
 from harpy.utils._keys import _CELL_INDEX, _INSTANCE_KEY, _REGION_KEY, _SPATIAL
 from harpy.utils.utils import _affine_transform
 
@@ -90,10 +90,10 @@ def merscope(
     cell_boundaries
         Whether to read cell boundaries (polygons).
     rasterize_cell_boundaries
-        Whether to rasterize the cell boundaries (i.e. create a labels layer from polygons). We use :func:`harpy.im.rasterize` to rasterize the cell boundaries.
+        Whether to rasterize the cell boundaries (i.e. create a labels element from polygons). We use :func:`harpy.im.rasterize` to rasterize the cell boundaries.
         Ignored if `cell_boundaries` is `False`, or if `mosaic_images` is `False`.
     table
-        Whether to read in the :class:`~anndata.AnnData` table. The table will be annotated by a labels layer.
+        Whether to read in the :class:`~anndata.AnnData` table. The table will be annotated by a labels element.
         If `table` is set to `True` then `cell_boundaries`, `rasterize_cell_boundaries` and `mosaic_images` must also be set to `True`.
     mosaic_images
         Whether to read the mosaic images.
@@ -106,7 +106,7 @@ def merscope(
     image_models_kwargs
         Keyword arguments to pass to the image models. Ignored if `mosaic_images` is `False`.
     filter_gene_names
-        Gene names that need to be filtered out (via `str.contains`) from the resulting points layer (transcripts), mostly control genes that were added, and which you don't want to use.
+        Gene names that need to be filtered out (via `str.contains`) from the resulting points element (transcripts), mostly control genes that were added, and which you don't want to use.
         Filtering is case insensitive. Also see :func:`harpy.read_transcripts`. Ignored if `transcripts` is `False`.
     instance_key
         Instance key. The name of the column in :class:`~anndata.AnnData` table `.obs` that will hold the instance ids.
@@ -227,7 +227,10 @@ def merscope(
                 dims = get_axes_names(_get_spatial_element(sdata, first_image_name))
 
                 arr = da.stack(
-                    [_get_spatial_element(sdata, layer=f"{root_image_name}{z_layer}").data for z_layer in z_layers],
+                    [
+                        _get_spatial_element(sdata, element_name=f"{root_image_name}{z_layer}").data
+                        for z_layer in z_layers
+                    ],
                     axis=1,
                 )
 
@@ -257,16 +260,16 @@ def merscope(
                 for z_layer in z_layers:
                     del sdata[f"{root_image_name}{z_layer}"]
 
-        layers = [*sdata.images]
+        image_names = [*sdata.images]
         log.info(f"Adding micron coordinate system for mosaic images: '{_to_coordinate_system}_micron'.")
         transformations = {_to_coordinate_system: Identity(), f"{_to_coordinate_system}_micron": pixels_to_micron}
-        for _layer in layers:
+        for _image_name in image_names:
             # rename coordinate system "global" to _to_coordinate_system
             # _to_coordinate_system is the pixel coordinate system -> intrinsic coordinate system
             # _to_coordinate_system_micron is the micron coordinate system
-            set_transformation(sdata[_layer], transformation=transformations, set_all=True)
-            sdata[f"{_layer}_{_to_coordinate_system}"] = sdata[_layer]
-            del sdata[_layer]
+            set_transformation(sdata[_image_name], transformation=transformations, set_all=True)
+            sdata[f"{_image_name}_{_to_coordinate_system}"] = sdata[_image_name]
+            del sdata[_image_name]
 
     if output is not None:
         sdata.write(output)
@@ -277,10 +280,10 @@ def merscope(
             gdf = gpd.read_parquet(os.path.join(_path, MerscopeKeys.BOUNDARIES_FILE))
             # currently all z-stacks of gdf are the same (merscope does not provide us with real 3D segmentation).
             # therefore we take the middle z_layer in z_layers instead of iterating over z_layers
-            # if merscope would provide us with real 3D, we should iterate over z_layers, and construct a 3D labels layer if do_3D is True.
+            # if merscope would provide us with real 3D, we should iterate over z_layers, and construct a 3D labels element if do_3D is True.
             z_layers_to_iterate = z_layers if len(z_layers) == 1 else [z_layers[len(z_layers) // 2]]
             for _z_layer in z_layers_to_iterate:
-                sdata, _output_shapes_layer = _add_shapes(
+                sdata, _output_shapes_name = _add_shapes(
                     sdata,
                     gdf=gdf,
                     path=_path,
@@ -297,25 +300,25 @@ def merscope(
                         "cell boundaries will therefore not be rasterized."
                     )
                 if mosaic_images and rasterize_cell_boundaries:
-                    _mosaic_layer = [
-                        *sdata.filter_by_coordinate_system(coordinate_system=_to_coordinate_system).images
-                    ][0]
-                    se = _get_spatial_element(sdata, layer=_mosaic_layer)
+                    _mosaic_name = [*sdata.filter_by_coordinate_system(coordinate_system=_to_coordinate_system).images][
+                        0
+                    ]
+                    se = _get_spatial_element(sdata, element_name=_mosaic_name)
                     out_shape = se.data.shape[-2:]
                     _chunks = se.data.chunksize[-1]
                     if "scale_factors" in image_models_kwargs:
                         scale_factors = image_models_kwargs["scale_factors"]
                     else:
                         scale_factors = [2, 2, 2, 2]
-                    _output_labels_layer = f"{dataset_id}_z{_z_layer}_{_to_coordinate_system}_labels"
-                    log.info(f"Saving cell masks for z stack '{_z_layer}' as '{_output_labels_layer}'.")
+                    _output_labels_name = f"{dataset_id}_z{_z_layer}_{_to_coordinate_system}_labels"
+                    log.info(f"Saving cell masks for z stack '{_z_layer}' as '{_output_labels_name}'.")
                     log.info(
                         f"Adding micron coordinate system for cell masks: '{_to_coordinate_system}_micron'."
                     )  # coordinate system of shapes is copied to labels via hp.im.rasterize
                     sdata = rasterize(
                         sdata,
-                        shapes_layer=_output_shapes_layer,
-                        output_layer=_output_labels_layer,
+                        shapes_name=_output_shapes_name,
+                        output_labels_name=_output_labels_name,
                         out_shape=out_shape,
                         chunks=_chunks,
                         scale_factors=scale_factors,
@@ -332,7 +335,7 @@ def merscope(
                     output_axes=("x", "y"),
                 )
 
-                shapes = sdata.shapes[_output_shapes_layer]
+                shapes = sdata.shapes[_output_shapes_name]
                 # 1) read the raw unprocessed counts
                 count_path = os.path.join(_path, MerscopeKeys.COUNTS_FILE)
                 obs_path = os.path.join(_path, MerscopeKeys.CELL_METADATA_FILE)
@@ -377,13 +380,13 @@ def merscope(
                 # set adata.obs.index in same way as we set it in hp.tb.allocate, for consistency
                 _uuid_value = str(uuid.uuid4())[:8]
                 adata.obs.index = adata.obs.index.map(
-                    lambda x, layer=_output_labels_layer, uid=_uuid_value: f"{str(x)}_{layer}_{uid}"
+                    lambda x, labels_name=_output_labels_name, uid=_uuid_value: f"{str(x)}_{labels_name}_{uid}"
                 )
                 adata.obs.index.name = cell_index_name
 
                 adata.obs[region_key] = pd.Series(
-                    _output_labels_layer, index=adata.obs_names, dtype="category"
-                )  # we annotate with the labels layer
+                    _output_labels_name, index=adata.obs_names, dtype="category"
+                )  # we annotate with the labels element
 
                 data.index = adata.obs.index
                 data.index.name = cell_index_name
@@ -397,11 +400,11 @@ def merscope(
                 log.info(
                     f"Adding AnnData table with non normalized counts as '{dataset_id}_{_to_coordinate_system}_table'."
                 )
-                sdata = add_table_layer(
+                sdata = add_table(
                     sdata,
                     adata=adata,
-                    output_layer=f"{dataset_id}_{_to_coordinate_system}_table",
-                    region=[_output_labels_layer],
+                    output_table_name=f"{dataset_id}_{_to_coordinate_system}_table",
+                    region=[_output_labels_name],
                     instance_key=instance_key,
                     region_key=region_key,
                     overwrite=False,
@@ -473,22 +476,22 @@ def merscope(
                 )
                 # set adata.obs.index in same way as we set it in hp.tb.allocate, just for consistency
                 adata_preprocessed.obs.index = adata_preprocessed.obs.index.map(
-                    lambda x, layer=_output_labels_layer, uid=_uuid_value: f"{str(x)}_{layer}_{uid}"
+                    lambda x, labels_name=_output_labels_name, uid=_uuid_value: f"{str(x)}_{labels_name}_{uid}"
                 )
                 adata_preprocessed.obs.index.name = cell_index_name
 
                 adata_preprocessed.obs[region_key] = pd.Series(
-                    _output_labels_layer, index=adata_preprocessed.obs_names, dtype="category"
-                )  # we annotate with the labels layer
+                    _output_labels_name, index=adata_preprocessed.obs_names, dtype="category"
+                )  # we annotate with the labels element
                 log.info(
                     f"Adding preprocessed AnnData table with normalized counts and leiden cluster ID's as "
                     f"'{dataset_id}_{_to_coordinate_system}_preprocessed_table'."
                 )
-                sdata = add_table_layer(
+                sdata = add_table(
                     sdata,
                     adata=adata_preprocessed,
-                    output_layer=f"{dataset_id}_{_to_coordinate_system}_preprocessed_table",
-                    region=[_output_labels_layer],
+                    output_table_name=f"{dataset_id}_{_to_coordinate_system}_preprocessed_table",
+                    region=[_output_labels_name],
                     instance_key=instance_key,
                     region_key=region_key,
                     overwrite=False,
@@ -509,8 +512,8 @@ def merscope(
             column_z = table.columns.get_loc(column_z_name)
             column_gene = table.columns.get_loc(column_gene_name)
 
-            output_layer = f"{dataset_id}_{_to_coordinate_system}_points"
-            log.info(f"Saving transcripts as {output_layer}")
+            output_points_name = f"{dataset_id}_{_to_coordinate_system}_points"
+            log.info(f"Saving transcripts as {output_points_name}")
             sdata = read_transcripts(
                 sdata,
                 path_count_matrix=os.path.join(_path, MerscopeKeys.TRANSCRIPTS_FILE),
@@ -520,7 +523,7 @@ def merscope(
                 column_z=column_z if do_3D else None,
                 column_gene=column_gene,
                 header=0,
-                output_layer=output_layer,
+                output_points_name=output_points_name,
                 to_coordinate_system=_to_coordinate_system,
                 to_micron_coordinate_system=f"{_to_coordinate_system}_micron",
                 filter_gene_names=filter_gene_names,
@@ -606,14 +609,14 @@ def _add_shapes(
 
     gdf.geometry = gdf.geometry.apply(lambda geom: affine_transform(geom, params))
 
-    output_layer = f"{dataset_id}_z{z_layer}_{to_coordinate_system}_shapes"
+    output_shapes_name = f"{dataset_id}_z{z_layer}_{to_coordinate_system}_shapes"
 
-    log.info(f"Saving cell boundaries for z stack '{z_layer}' as '{output_layer}'.")
+    log.info(f"Saving cell boundaries for z stack '{z_layer}' as '{output_shapes_name}'.")
     log.info(f"Adding micron coordinate system for cell boundaries: '{to_micron_coordinate_system}'.")
-    sdata = add_shapes_layer(
+    sdata = add_shapes(
         sdata,
         input=gdf,
-        output_layer=output_layer,
+        output_shapes_name=output_shapes_name,
         transformations={
             to_coordinate_system: Identity(),
             f"{to_micron_coordinate_system}": pixels_to_micron,
@@ -622,11 +625,11 @@ def _add_shapes(
         overwrite=False,
     )
 
-    return sdata, output_layer
+    return sdata, output_shapes_name
 
 
 def _merge_adata_and_shapes(adata: ad.AnnData, shapes: gpd.GeoDataFrame, instance_key: str = _INSTANCE_KEY):
-    """Helper function to merge an AnnData object with a Geopandas object to obtain an instance key that can be linked to a segmentation mask (labels layer)."""
+    """Helper function to merge an AnnData object with a Geopandas object to obtain an instance key that can be linked to a segmentation mask (labels element)."""
     # METADATA_CELL_KEY is the key we need in order to merge shapes with anndata table.
     # We perform this merge as a sanity check, and to obtain the z-index and the cell ID, for future compatibility with 3D data.
     if MerscopeKeys.METADATA_CELL_KEY not in shapes.columns:
@@ -674,7 +677,7 @@ def _merge_adata_and_shapes(adata: ad.AnnData, shapes: gpd.GeoDataFrame, instanc
         adata.obs,
         shapes[
             [MerscopeKeys.METADATA_CELL_KEY, MerscopeKeys.Z_INDEX, instance_key]
-        ],  # we merge, because we want the instance_key in adata.obs, so we can annotate by labels layer
+        ],  # we merge, because we want the instance_key in adata.obs, so we can annotate by labels element
         how="inner",
         on=[MerscopeKeys.METADATA_CELL_KEY],
     )

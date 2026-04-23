@@ -11,8 +11,8 @@ from harpy.shape._shape import vectorize
 def test_vectorize(sdata):
     sdata = vectorize(
         sdata,
-        labels_layer="blobs_labels",
-        output_layer="blobs_labels_boundaries",
+        labels_name="blobs_labels",
+        output_shapes_name="blobs_labels_boundaries",
         overwrite=True,
     )
 
@@ -31,21 +31,21 @@ def test_vectorize_roundtrip(sdata):
     # roundtrip unit test only works when doing vectorize with rasterio backend.
     sdata = vectorize(
         sdata,
-        labels_layer="blobs_labels",
-        output_layer="blobs_labels_boundaries",
+        labels_name="blobs_labels",
+        output_shapes_name="blobs_labels_boundaries",
         overwrite=True,
     )
     sdata = rasterize(
         sdata,
-        shapes_layer="blobs_labels_boundaries",
-        output_layer="blobs_labels_redo",
+        shapes_name="blobs_labels_boundaries",
+        output_labels_name="blobs_labels_redo",
         overwrite=True,
     )
 
     sdata = vectorize(
         sdata,
-        labels_layer="blobs_labels_redo",
-        output_layer="blobs_labels_boundaries_redo",
+        labels_name="blobs_labels_redo",
+        output_shapes_name="blobs_labels_boundaries_redo",
         overwrite=True,
     )
 

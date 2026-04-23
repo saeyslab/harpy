@@ -21,11 +21,11 @@ except ImportError:
 
 def enhance_contrast(
     sdata: SpatialData,
-    img_layer: str | None = None,
+    image_name: str | None = None,
     contrast_clip: float | list[float] = 3.5,
     chunks: str | tuple[int, ...] | int | None = 10000,
     depth: tuple[int, ...] | dict[int, int] | int = 3000,
-    output_layer: str = "clahe",
+    output_image_name: str = "clahe",
     crd: tuple[int, int, int, int] | None = None,
     to_coordinate_system: str = "global",
     scale_factors: ScaleFactors_t | None = None,
@@ -35,15 +35,15 @@ def enhance_contrast(
     Enhance the contrast of an image in a SpatialData object.
 
     Contrast Limited Adaptive Histogram Equalization (CLAHE) is used.
-    Compatibility with image layers that have either two or three spatial dimensions (c, (z), y, x).
+    Compatibility with image elements that have either two or three spatial dimensions (c, (z), y, x).
 
     Parameters
     ----------
     sdata
         The SpatialData object containing the image to enhance.
-    img_layer
-        The image layer in `sdata` on which the enhance_contrast function will be applied.
-        If not provided, the last image layer in `sdata` is used.
+    image_name
+        The image element in `sdata` on which the enhance_contrast function will be applied.
+        If not provided, the last image element in `sdata` is used.
     contrast_clip
         The clip limit for the CLAHE algorithm. Higher values result in stronger contrast enhancement
         but also stronger noise amplification.
@@ -54,8 +54,8 @@ def enhance_contrast(
     depth
         The overlapping depth used in `dask.array.map_overlap`.
         If specified as a tuple or dict, it contains the depth used in 'y' and 'x' dimension.
-    output_layer
-        The name of the image layer where the enhanced image will be stored.
+    output_image_name
+        The name of the image element where the enhanced image will be stored.
         The default value is "clahe".
     crd
         The coordinates specifying the region of the image to be processed. Defines the bounds (x_min, x_max, y_min, y_max).
@@ -68,12 +68,12 @@ def enhance_contrast(
 
     Returns
     -------
-    An updated `sdata` object with the contrast enhanced image added as a new layer.
+    An updated `sdata` object with the contrast-enhanced image added as a new image element.
 
     Raises
     ------
     ValueError
-        If the dimensions in `img_layer` of `sdata` is not equal to (c,(z),y,x)
+        If the dimensions in `image_name` of `sdata` is not equal to (c,(z),y,x)
 
     Notes
     -----
@@ -114,14 +114,14 @@ def enhance_contrast(
 
         return image
 
-    if img_layer is None:
-        img_layer = [*sdata.images][-1]
+    if image_name is None:
+        image_name = [*sdata.images][-1]
         log.warning(
-            f"No image layer specified. "
-            f"Applying image processing on the last image layer '{img_layer}' of the provided SpatialData object."
+            f"No image element specified. "
+            f"Applying image processing on the last image element '{image_name}' of the provided SpatialData object."
         )
 
-    se = _get_spatial_element(sdata, img_layer)
+    se = _get_spatial_element(sdata, image_name)
 
     supported_dtypes = ["uint8", "uint16"]
     if se.dtype not in supported_dtypes:
@@ -140,8 +140,8 @@ def enhance_contrast(
 
     sdata = map_image(
         sdata,
-        img_layer=img_layer,
-        output_layer=output_layer,
+        image_name=image_name,
+        output_image_name=output_image_name,
         func=_apply_clahe,
         fn_kwargs=fn_kwargs,
         chunks=chunks,

@@ -100,27 +100,27 @@ def pixie_example_datasets(fovs: list | None = None, with_pixel_output=True, wit
             results.append(arr)
         da.stack(results, axis=0)
 
-        sdata = harpy.im.add_image_layer(
+        sdata = harpy.im.add_image(
             sdata,
             arr=da.stack(results, axis=0).squeeze(),
-            output_layer=f"raw_image_{fov}",
+            output_image_name=f"raw_image_{fov}",
             c_coords=channels,
             overwrite=True,
             transformations={fov: sd.transformations.Identity()},
         )
 
-        sdata = harpy.im.add_labels_layer(
+        sdata = harpy.im.add_labels(
             sdata,
             arr=imread.imread(os.path.join(path_segment_data, f"{fov}_nuclear.tiff")).squeeze(),
-            output_layer=f"label_nuclear_{fov}",
+            output_labels_name=f"label_nuclear_{fov}",
             overwrite=True,
             transformations={fov: sd.transformations.Identity()},
         )
 
-        sdata = harpy.im.add_labels_layer(
+        sdata = harpy.im.add_labels(
             sdata,
             arr=imread.imread(os.path.join(path_segment_data, f"{fov}_whole_cell.tiff")).squeeze(),
-            output_layer=f"label_whole_{fov}",
+            output_labels_name=f"label_whole_{fov}",
             overwrite=True,
             transformations={fov: sd.transformations.Identity()},
         )

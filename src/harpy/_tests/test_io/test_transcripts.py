@@ -17,7 +17,7 @@ def test_read_transcripts(path_transcripts, backed, tmp_path):
 
     to_coordinate_system = "a1_1_pixel"
     to_micron_coordinate_system = "a1_1_micron"
-    output_layer = "transcripts_a1_1"
+    output_points_name = "transcripts_a1_1"
 
     sdata = read_transcripts(
         sdata,
@@ -27,7 +27,7 @@ def test_read_transcripts(path_transcripts, backed, tmp_path):
         column_gene=3,
         delimiter="\t",
         header=None,
-        output_layer=output_layer,
+        output_points_name=output_points_name,
         to_coordinate_system=to_coordinate_system,
         to_micron_coordinate_system=to_micron_coordinate_system,
         pixel_size=pixel_size,  # size of pixels in micron
@@ -35,9 +35,9 @@ def test_read_transcripts(path_transcripts, backed, tmp_path):
         overwrite=True,
     )
 
-    assert output_layer in sdata.points
+    assert output_points_name in sdata.points
 
-    assert Identity() == get_transformation(sdata.points[output_layer], to_coordinate_system=to_coordinate_system)
+    assert Identity() == get_transformation(sdata.points[output_points_name], to_coordinate_system=to_coordinate_system)
     # check correct transformation is defined on the spatial element
     affine_matrix = Scale(axes=("x", "y"), scale=[pixel_size, pixel_size]).to_affine_matrix(
         input_axes=("x", "y"), output_axes=("x", "y")
@@ -45,7 +45,7 @@ def test_read_transcripts(path_transcripts, backed, tmp_path):
     assert np.array_equal(
         affine_matrix,
         get_transformation(
-            sdata.points[output_layer], to_coordinate_system=to_micron_coordinate_system
+            sdata.points[output_points_name], to_coordinate_system=to_micron_coordinate_system
         ).to_affine_matrix(input_axes=("x", "y"), output_axes=("x", "y")),
     )
 
@@ -61,7 +61,7 @@ def test_read_transcripts_transform_matrix(path_transcripts, backed, tmp_path):
 
     to_coordinate_system = "a1_1_pixel"
     to_micron_coordinate_system = "a1_1_micron"
-    output_layer = "transcripts_a1_1"
+    output_points_name = "transcripts_a1_1"
 
     transform_matrix = np.array([[1 / pixel_size, 0, 0], [0, 1 / pixel_size, 0], [0, 0, 1]])
     # Note: transform_matrix is a dummy matrix, the transcripts are already in pixels
@@ -74,7 +74,7 @@ def test_read_transcripts_transform_matrix(path_transcripts, backed, tmp_path):
         column_gene=3,
         delimiter="\t",
         header=None,
-        output_layer=output_layer,
+        output_points_name=output_points_name,
         to_coordinate_system=to_coordinate_system,
         to_micron_coordinate_system=to_micron_coordinate_system,
         pixel_size=None,
@@ -82,8 +82,8 @@ def test_read_transcripts_transform_matrix(path_transcripts, backed, tmp_path):
         overwrite=True,
     )
 
-    assert output_layer in sdata.points
-    assert Identity() == get_transformation(sdata.points[output_layer], to_coordinate_system=to_coordinate_system)
+    assert output_points_name in sdata.points
+    assert Identity() == get_transformation(sdata.points[output_points_name], to_coordinate_system=to_coordinate_system)
     affine_matrix = (
         Affine(matrix=transform_matrix, input_axes=("x", "y"), output_axes=("x", "y"))
         .inverse()
@@ -92,7 +92,7 @@ def test_read_transcripts_transform_matrix(path_transcripts, backed, tmp_path):
     assert np.array_equal(
         affine_matrix,
         get_transformation(
-            sdata.points[output_layer], to_coordinate_system=to_micron_coordinate_system
+            sdata.points[output_points_name], to_coordinate_system=to_micron_coordinate_system
         ).to_affine_matrix(input_axes=("x", "y"), output_axes=("x", "y")),
     )
 
@@ -108,7 +108,7 @@ def test_read_transcripts_raises(path_transcripts, backed, tmp_path):
 
     to_coordinate_system = "a1_1_pixel"
     to_micron_coordinate_system = "a1_1_micron"
-    output_layer = "transcripts_a1_1"
+    output_points_name = "transcripts_a1_1"
 
     transform_matrix = np.array([[1 / pixel_size, 0, 0], [0, 1 / pixel_size, 0], [0, 0, 1]])
     # Note: transform_matrix is a dummy matrix, the transcripts are already in pixels
@@ -125,7 +125,7 @@ def test_read_transcripts_raises(path_transcripts, backed, tmp_path):
             column_gene=3,
             delimiter="\t",
             header=None,
-            output_layer=output_layer,
+            output_points_name=output_points_name,
             to_coordinate_system=to_coordinate_system,
             to_micron_coordinate_system=to_micron_coordinate_system,
             pixel_size=pixel_size,  # both pixel size and transform matrix specified

@@ -1,7 +1,7 @@
 from enum import Enum
 
 _CELL_INDEX = "cells"  # name of index in tables
-_GENES_KEY = "gene"  # name of transcript in points layer
+_GENES_KEY = "gene"  # name of transcript in points element
 _INSTANCE_KEY = "cell_ID"
 _REGION_KEY = "fov_labels"
 _ANNOTATION_KEY = "annotation"

@@ -9,8 +9,8 @@ def test_min_max_filtering(sdata_multi_c_no_backed: SpatialData):
     """
     sdata_multi_c_no_backed = min_max_filtering(
         sdata_multi_c_no_backed,
-        img_layer="combine_z",
-        output_layer="preprocessed_min_max",
+        image_name="combine_z",
+        output_image_name="preprocessed_min_max",
         overwrite=True,
     )
 
@@ -24,8 +24,8 @@ def test_gaussian_filtering(sdata_multi_c_no_backed: SpatialData):
     """
     sdata_multi_c_no_backed = gaussian_filtering(
         sdata_multi_c_no_backed,
-        img_layer="combine_z",
-        output_layer="preprocessed_gaussian",
+        image_name="combine_z",
+        output_image_name="preprocessed_gaussian",
         overwrite=True,
     )
 
