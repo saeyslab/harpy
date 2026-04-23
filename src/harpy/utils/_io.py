@@ -89,7 +89,7 @@ def _incremental_io_on_disk(
     # from the backup location)
     del sdata[element_name]
     sdata_materialized = _read_zarr_with_annotating_table_warning_suppressed(sdata.path, selection=[element_type])
-    # to make sdata point to layer that is materialized, and keep object id.
+    # to make sdata point to the element that is materialized, and keep object id.
     sdata[element_name] = sdata_materialized[element_name]
     # c. remove the backup copy
     del sdata_materialized[temporary_element_name]

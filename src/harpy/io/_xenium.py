@@ -167,7 +167,7 @@ def xenium(
             labels_models_kwargs=labels_models_kwargs,
         )
 
-        layers = [*_sdata.images] + [*_sdata.labels]
+        elements = [*_sdata.images] + [*_sdata.labels]
 
         with open(os.path.join(_path, XeniumKeys.XENIUM_SPECS)) as f:
             specs = json.load(f)
@@ -175,16 +175,16 @@ def xenium(
 
         scale_pixels_to_micron = Scale(axes=("x", "y"), scale=[pixel_size, pixel_size])
 
-        for _layer in layers:
+        for _element_name in elements:
             # rename coordinate system "global" to _to_coordinate_system, and add micron coordinate system
-            transformation = get_transformation(_sdata[_layer], to_coordinate_system="global")
+            transformation = get_transformation(_sdata[_element_name], to_coordinate_system="global")
             transformations = {
                 _to_coordinate_system: transformation,
                 f"{_to_coordinate_system}_micron": Sequence([transformation, scale_pixels_to_micron]),
             }
-            set_transformation(_sdata[_layer], transformation=transformations, set_all=True)
-            _sdata[f"{_layer}_{_to_coordinate_system}"] = _sdata[_layer]
-            del _sdata[_layer]
+            set_transformation(_sdata[_element_name], transformation=transformations, set_all=True)
+            _sdata[f"{_element_name}_{_to_coordinate_system}"] = _sdata[_element_name]
+            del _sdata[_element_name]
 
         if cells_table:
             adata = _sdata["table"]
@@ -210,12 +210,12 @@ def xenium(
 
             _sdata[f"table_{_to_coordinate_system}"] = adata
 
-        layers = [*_sdata.images] + [*_sdata.labels] + [*_sdata.tables]
+        elements = [*_sdata.images] + [*_sdata.labels] + [*_sdata.tables]
 
-        for _layer in layers:
-            sdata[_layer] = _sdata[_layer]
+        for _element_name in elements:
+            sdata[_element_name] = _sdata[_element_name]
             if sdata.is_backed():
-                sdata.write_element(_layer)
+                sdata.write_element(_element_name)
 
         if sdata.is_backed():
             sdata = read_zarr(sdata.path)
