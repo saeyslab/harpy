@@ -50,14 +50,14 @@ def preprocess_transcriptomics(
     sdata
         The input SpatialData object.
     labels_name
-        The labels layer(s) of `sdata` used to select the cells via the region key in `sdata.tables[table_name].obs`.
+        The labels element(s) of `sdata` used to select the cells via the region key in `sdata.tables[table_name].obs`.
         Note that if `output_table_name` is equal to `table_name` and overwrite is `True`,
         cells in `sdata.tables[table_name]` linked to other `labels_name` (via the region key), will be removed from `sdata.tables[table_name]`
         (also from the backing zarr store if it is backed).
     table_name
-        The table layer in `sdata` on which to perform preprocessing on.
+        The table element in `sdata` on which to perform preprocessing.
     output_table_name
-        The output table layer in `sdata` to which preprocessed table layer will be written.
+        The output table element in `sdata` to which the preprocessed table will be written.
     percent_top
         List of ranks (where genes are ranked by expression) at which the cumulative proportion of expression will be reported as a percentage.
         Passed to :func:`~scanpy.pp.calculate_qc_metrics`.
@@ -78,8 +78,8 @@ def preprocess_transcriptomics(
     n_comps
         Number of principal components to calculate.
     update_shapes_layers
-        Whether to filter the shapes layers associated with `labels_name`.
-        If set to `True`, cells that do not appear in resulting `output_table_name` (with the region key equal to `labels_name`) will be removed from the shapes layers (via region key) in the `sdata` object.
+        Whether to filter the shapes elements associated with `labels_name`.
+        If set to `True`, cells that do not appear in resulting `output_table_name` (with the region key equal to `labels_name`) will be removed from the shapes elements (via region key) in the `sdata` object.
         Filtered shapes will be added to `sdata` with prefix 'filtered_low_counts'.
         This parameter is deprecated, and will be removed in a future version.
     instance_size_key
@@ -101,9 +101,9 @@ def preprocess_transcriptomics(
     ValueError
         If `sdata` does not have tables attribute.
     ValueError
-        If `labels_name`, or one of the element of `labels_name` is not a labels layer in `sdata`.
+        If `labels_name`, or one of the elements of `labels_name`, is not a labels element in `sdata`.
     ValueError
-        If `table_name` is not a table layer in `sdata`.
+        If `table_name` is not a table element in `sdata`.
 
 
     Warnings
@@ -174,15 +174,15 @@ def preprocess_proteomics(
     sdata
         The input SpatialData object.
     labels_name
-        The labels layer(s) of `sdata` used to select the cells via the region key in `sdata.tables[table_name].obs`.
+        The labels element(s) of `sdata` used to select the cells via the region key in `sdata.tables[table_name].obs`.
         Note that if `output_table_name` is equal to `table_name` and overwrite is True,
         cells in `sdata.tables[table_name]` linked to other `labels_name` (via the region key), will be removed from `sdata.tables[table_name]`.
-        If a list of labels layers is provided, they will therefore be preprocessed together (e.g. multiple samples).
+        If a list of labels elements is provided, they will therefore be preprocessed together (e.g. multiple samples).
     table_name
-        The table layer in sdata to apply preprocessing to.
+        The table element in `sdata` to apply preprocessing to.
         It is an AnnData object containing total intensities per cell in `.obs` (rows) and per channel in `.var` (columns).
     output_table_name
-        The output table layer in `sdata` to which preprocessed table layer will be written.
+        The output table element in `sdata` to which the preprocessed table will be written.
     calculate_cell_size
         If `True`, calculates cell sizes from `labels_name` and stores them in `.obs[instance_size_key]`.
         Set this to `False` when cell sizes are not needed or are already present and should be preserved.
@@ -222,10 +222,10 @@ def preprocess_proteomics(
     Raises
     ------
     ValueError
-        - If `sdata` does not contains any labels layers.
-        - If `sdata` does not contain any table layers.
-        - If `labels_name`, or one of the element of `labels_name` is not a labels layer in `sdata`.
-        - If `table_name` is not a table layer in `sdata`.
+        - If `sdata` does not contain any labels elements.
+        - If `sdata` does not contain any table elements.
+        - If `labels_name`, or one of the elements of `labels_name`, is not a labels element in `sdata`.
+        - If `table_name` is not a table element in `sdata`.
         - If both `scale` is set to True and `q` is not None.
 
     Warnings
@@ -237,7 +237,7 @@ def preprocess_proteomics(
 
     See Also
     --------
-    harpy.tb.allocate_intensity : create an AnnData table in `sdata` using an `image_layer` and a `labels_name`.
+    harpy.tb.allocate_intensity : create an AnnData table in `sdata` using an `image_name` and a `labels_name`.
     """
     preprocess_instance = Preprocess(sdata, labels_name=labels_name, table_name=table_name)
     sdata = preprocess_instance.preprocess(
@@ -281,7 +281,7 @@ class Preprocess(ProcessTable):
         max_value_q: float | None = 1,  # ignored if q is None
         highly_variable_genes: bool = False,
         calculate_pca: bool = True,
-        update_shapes_layers: bool = True,  # whether to update the shapes layer based on the items filtered out in sdata.tables[self.table_name].
+        update_shapes_layers: bool = True,  # whether to update the shapes element based on the items filtered out in sdata.tables[self.table_name].
         qc_kwargs: Mapping[str, Any] = MappingProxyType({}),  # keyword arguments passed to sc.pp.calculate_qc_metrics
         filter_cells_kwargs: Mapping[str, Any] = MappingProxyType({}),  # keyword arguments passed to sc.pp.filter_cells
         filter_genes_kwargs: Mapping[str, Any] = MappingProxyType({}),  # keyword arguments passed to sc.pp.filter_genes

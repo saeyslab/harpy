@@ -46,7 +46,7 @@ def extract_instances(
     slices out a centered, square window in the `y`, `x` plane around that instance (preserving
     the `z` dimension) both for the `image_name` and `labels_name`.
 
-    Note that decreasing the chunk size on disk of the `image_layer` and `labels_name` will lead to decreased
+    Note that decreasing the chunk size on disk of the `image_name` and `labels_name` elements will lead to decreased
     consumption of RAM. A good first guess for chunk sizes is: `(c_chunksize, y_chunksize, x_chunksize)=(10, 2048, 2048)`.
 
     For optimal performance, configure :mod:`dask` to use `processes`, e.g. (`dask.config.set(scheduler="processes")`).
@@ -56,9 +56,9 @@ def extract_instances(
     sdata
         SpatialData object.
     image_name
-        Name of the image layer.
+        Name of the image element.
     labels_name
-        Name of the labels layer.
+        Name of the labels element.
     diameter
         Side length of the resulting `y`, `x` window for every
         instance.
@@ -264,7 +264,7 @@ def featurize(
 
     The resulting feature vectors are computed and added to
     `sdata[output_table_name].obsm[embedding_obsm_key]` as a NumPy array.
-    If `table_name` is `None`, an empty table layer is created at `output_table_name`.
+    If `table_name` is `None`, an empty table element is created at `output_table_name`.
     Otherwise, the feature vectors are sorted and filtered according to
     `sdata[table_name].obs[_INSTANCE_KEY]`, and similarly added to
     `sdata[output_table_name].obsm[embedding_obsm_key]`.
@@ -282,14 +282,14 @@ def featurize(
     sdata
         SpatialData object.
     image_name
-        Name of the image layer.
+        Name of the image element.
     labels_name
-        Name of the labels layer.
+        Name of the labels element.
     table_name
-        Name of the table layer. If `table_name` is `None`, an empty `table_name` will be created with
+        Name of the table element. If `table_name` is `None`, an empty table will be created with
         the calculated embeddings at `.obsm[embedding_obsm_key]`, and annotated by `labels_name`.
     output_table_name
-        Name of the output tables layer. Can be set equal to `table_name` if overwrite is set to `True`.
+        Name of the output table element. Can be set equal to `table_name` if overwrite is set to `True`.
     diameter
         Side length of the resulting `y`, `x` window for every
         instance.
@@ -324,7 +324,7 @@ def featurize(
         Instance key. The name of the column in `adata.obs` that will hold the instance ids.
         Ignored if `table_name` is not None.
     region_key
-        Region key. The name of the column in `adata.obs` that holds the name of the elements (`region`) that are annotated by the table layer.
+        Region key. The name of the column in `adata.obs` that holds the name of the elements (`region`) that are annotated by the table element.
         Ignored if `table_name` is not None.
     cell_index_name
         The name of the index of the resulting :class:`~anndata.AnnData` table.
@@ -414,7 +414,7 @@ def featurize(
         # Access the computed embedding for each instance
         sdata["my_table"].obsm["embedding"]
     """
-    # if table_name is None, we create an empty Anndata, that is annotated by labels layer
+    # If table_name is None, create an empty AnnData object annotated by the labels element.
     # do it with dummy embedding first
 
     image_name = _make_list(image_name)
@@ -506,7 +506,7 @@ def featurize(
 
         adata.obs[region_key] = _region_keys
         adata.obs[region_key] = adata.obs[region_key].astype("category")
-        # create an empty table, with all the layers in them i.e. set region key, instance key etc. instance keys are all unique ids in corresponding labels layer
+        # Create an empty table with the required annotations. Instance ids are the unique ids in the corresponding labels element.
     else:
         process_table_instance = ProcessTable(sdata, labels_name=labels_name, table_name=table_name)
         instance_key = process_table_instance.instance_key

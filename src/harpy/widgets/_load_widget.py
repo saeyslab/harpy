@@ -52,7 +52,7 @@ def load_widget(
     viewer: napari.Viewer,
     path_zarr: Path = Path(""),
     path_image: Path = Path(""),
-    image_layer: str | None = utils.LOAD,
+    image_name: str | None = utils.LOAD,
     output_dir: Path = Path(""),
     x_min: str | None = "",
     x_max: str | None = "",
@@ -84,7 +84,7 @@ def load_widget(
 
     cfg.dataset.crop_param = crd
 
-    pipeline = HarpyPipeline(cfg, image_name=image_layer)
+    pipeline = HarpyPipeline(cfg, image_name=image_name)
 
     fn_kwargs: dict[str, Any] = {"pipeline": pipeline}
 

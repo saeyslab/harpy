@@ -37,7 +37,7 @@ except ImportError:
 def flowsom(
     sdata: SpatialData,
     image_name: str | Iterable[str],
-    output_cluster_labels_name: str | Iterable[str],  # these are labels layers containing predicted clusters
+    output_cluster_labels_name: str | Iterable[str],  # these are labels elements containing predicted clusters
     output_metacluster_labels_name: str | Iterable[str],
     channels: int | str | Iterable[int] | Iterable[str] | None = None,
     fraction: float | None = 0.1,
@@ -55,25 +55,26 @@ def flowsom(
     **kwargs,  # keyword arguments passed to _flowsom
 ) -> tuple[SpatialData, fs.FlowSOM, pd.Series]:
     """
-    Applies flowsom clustering on image layer(s) of a SpatialData object.
+    Applies flowsom clustering on image element(s) of a SpatialData object.
 
     This function executes the flowsom clustering algorithm (via `fs.FlowSOM`) on spatial data encapsulated by a SpatialData object.
-    The predited clusters and metaclusters are added as a labels layer to respectively `sdata.labels[output_cluster_labels_name]` and `sdata.labels[output_metacluster_labels_name]`.
+    The predicted clusters and metaclusters are added as labels elements to respectively
+    `sdata.labels[output_cluster_labels_name]` and `sdata.labels[output_metacluster_labels_name]`.
 
     Parameters
     ----------
     sdata
         The input SpatialData object.
     image_name
-        The image layer(s) of `sdata` on which flowsom is run. It is recommended to preprocess the data with :func:`harpy.im.pixel_clustering_preprocess`.
+        The image element(s) of `sdata` on which FlowSOM is run. It is recommended to preprocess the data with :func:`harpy.im.pixel_clustering_preprocess`.
     output_cluster_labels_name
-        The output labels layer in `sdata` to which labels layer with predicted flowsom SOM clusters are saved.
+        The output labels element in `sdata` to which the predicted FlowSOM SOM clusters are saved.
     output_metacluster_labels_name
-        The output labels layer in `sdata` to which labels layer with predicted flowsom metaclusters are saved.
+        The output labels element in `sdata` to which the predicted FlowSOM metaclusters are saved.
     channels
         Specifies the channels to be included in the pixel clustering.
     fraction
-        Fraction of the data to sample for training flowsom. Inference will be done on all pixels in `image_layer`.
+        Fraction of the data to sample for training FlowSOM. Inference will be done on all pixels in `image_name`.
     n_clusters
         The number of meta clusters to form.
     random_state
@@ -101,7 +102,7 @@ def flowsom(
     region_key
         Region key. The name of the column in the `.obs` attribute of the :class:`~anndata.AnnData` table at slot "cell_data"
         of the :class:`mudata.MuData` object (which is an attribute of the returned :class:`flowsom.FlowSOM` object)
-        that will hold the name of the image layer that is annotated by the table.
+        that will hold the name of the image element that is annotated by the table.
     spatial_key
         Spatial key. The name of the slot in the `.obsm` attribute of the :class:`~anndata.AnnData` table at slot "cell_data"
         of the :class:`mudata.MuData` object (which is an attribute of the returned :class:`flowsom.FlowSOM` object)
@@ -123,7 +124,7 @@ def flowsom(
 
     See Also
     --------
-    harpy.im.pixel_clustering_preprocess : preprocess image layers before applying flowsom clustering.
+    harpy.im.pixel_clustering_preprocess : preprocess image elements before applying FlowSOM clustering.
 
     Warnings
     --------
@@ -166,7 +167,7 @@ def flowsom(
             _array_dim = arr.ndim
         else:
             assert _array_dim == arr.ndim, (
-                "Image layers specified via parameter `image_name` should all have same number of dimensions."
+                "Image elements specified via parameter `image_name` should all have same number of dimensions."
             )
 
         to_squeeze = False
@@ -265,7 +266,7 @@ def flowsom(
 
         _labels_flowsom_clusters, _labels_flowsom_metaclusters = _labels_flowsom
 
-        # save the predicted clusters and metaclusters as a labels layer
+        # Save the predicted clusters and metaclusters as labels elements.
         sdata = add_labels(
             sdata,
             arr=_labels_flowsom_clusters.squeeze(0) if to_squeeze else _labels_flowsom_clusters,
@@ -289,7 +290,7 @@ def flowsom(
             sdata.delete_element_from_disk(element_name=_labels_flowsom_name)
 
     # TODO decide on fix in flowsom to let clusters count from 1.
-    # fsom cluster ID's count from 0, while labels layer cluster ID's count from 1.
+    # FlowSOM cluster IDs count from 0, while labels element IDs count from 1.
 
     mapping = fsom.get_cluster_data().obs[ClusteringKey._METACLUSTERING_KEY.value].copy()
     # +1 because flowsom SOM clusters count from 0,
