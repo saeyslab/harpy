@@ -18,7 +18,7 @@ class PixelClusteringSuite:
     """Benchmark FlowSOM pixel clustering."""
 
     timeout = 600
-    image_layer = "image"
+    image_name = "image"
 
     params = ([1024],)
     param_names = [
@@ -40,7 +40,7 @@ class PixelClusteringSuite:
         se = Image2DModel.parse(arr, dims=("c", "y", "x"))
 
         _sdata = SpatialData()
-        _sdata[self.image_layer] = se
+        _sdata[self.image_name] = se
 
         _sdata.write("sdata.zarr")
 
@@ -50,27 +50,27 @@ class PixelClusteringSuite:
 
     def time_preprocess_pixel_clustering(self, chunks):
         """Peakmem clustering"""
-        _pixel_clustering_preprocess(self.sdata, image_layer=self.image_layer, chunks=chunks)
+        _pixel_clustering_preprocess(self.sdata, image_name=self.image_name, chunks=chunks)
 
     def peakmem_preprocess_pixel_clustering(self, chunks):
         """Peakmem clustering"""
-        _pixel_clustering_preprocess(self.sdata, image_layer=self.image_layer, chunks=chunks)
+        _pixel_clustering_preprocess(self.sdata, image_name=self.image_name, chunks=chunks)
 
     def time_pixel_clustering(self, chunks):
         """Peakmem clustering"""
-        _pixel_clustering(self.sdata, image_layer=self.image_layer, chunks=chunks)
+        _pixel_clustering(self.sdata, image_name=self.image_name, chunks=chunks)
 
     def peakmem_pixel_clustering(self, chunks):
         """Peakmem clustering"""
-        _pixel_clustering(self.sdata, image_layer=self.image_layer, chunks=chunks)
+        _pixel_clustering(self.sdata, image_name=self.image_name, chunks=chunks)
 
 
 class RasterSuite:
     """Benchmark vectorization, rasterization, aggregation and (mock) segmentation."""
 
     timeout = 600
-    labels_layer = "labels"
-    image_layer = "image"
+    labels_name = "labels"
+    image_name = "image"
 
     params = ([4096],)
     param_names = [
@@ -87,14 +87,14 @@ class RasterSuite:
         se = Image2DModel.parse(sdata["clahe"].data[:, :size, :size].rechunk((1, 4096, 4096)), dims=("c", "y", "x"))
         assert se.data.chunksize == (1, 4096, 4096)
 
-        _sdata[self.image_layer] = se
+        _sdata[self.image_name] = se
 
         se = Labels2DModel.parse(
             sdata["segmentation_mask_full"].data[:size, :size].rechunk((4096, 4096)), dims=("y", "x")
         )
         assert se.data.chunksize == (4096, 4096)
 
-        _sdata[self.labels_layer] = se
+        _sdata[self.labels_name] = se
 
         _sdata.write("sdata.zarr")
 
@@ -111,7 +111,7 @@ class RasterSuite:
         """Time vectorize and rasterize."""
         _vectorize_rasterize(
             self.sdata,
-            labels_layer=self.labels_layer,
+            labels_name=self.labels_name,
             chunks=chunks,
         )
 
@@ -119,35 +119,35 @@ class RasterSuite:
         """Peak mem vectorize and rasterize."""
         _vectorize_rasterize(
             self.sdata,
-            labels_layer=self.labels_layer,
+            labels_name=self.labels_name,
             chunks=chunks,
         )
 
     # 2. aggregate
     def time_aggregate_sum(self, chunks):
         """Aggregate mean."""
-        _aggregate_sum(self.sdata, image_layer=self.image_layer, labels_layer=self.labels_layer, chunks=chunks)
+        _aggregate_sum(self.sdata, image_name=self.image_name, labels_name=self.labels_name, chunks=chunks)
 
     def peakmem_aggregate_sum(self, chunks):
         """Aggregate mean."""
-        _aggregate_sum(self.sdata, image_layer=self.image_layer, labels_layer=self.labels_layer, chunks=chunks)
+        _aggregate_sum(self.sdata, image_name=self.image_name, labels_name=self.labels_name, chunks=chunks)
 
     # skip these
     # def time_aggregate_var(self, chunks):
     #    """Aggregate mean."""
-    #    _aggregate_var(self.sdata, image_layer=self.image_layer, labels_layer=self.labels_layer, chunks=chunks)
+    #    _aggregate_var(self.sdata, image_name=self.image_name, labels_name=self.labels_name, chunks=chunks)
 
     # def peakmem_aggregate_var(self, chunks):
     #    """Aggregate var."""
-    #    _aggregate_var(self.sdata, image_layer=self.image_layer, labels_layer=self.labels_layer, chunks=chunks)
+    #    _aggregate_var(self.sdata, image_name=self.image_name, labels_name=self.labels_name, chunks=chunks)
 
     def time_aggregate_area(self, chunks):
         """Aggregate area."""
-        _aggregate_area(self.sdata, labels_layer=self.labels_layer, chunks=chunks)
+        _aggregate_area(self.sdata, labels_name=self.labels_name, chunks=chunks)
 
     def peakmem_aggregate_area(self, chunks):
         """Aggregate area."""
-        _aggregate_area(self.sdata, labels_layer=self.labels_layer, chunks=chunks)
+        _aggregate_area(self.sdata, labels_name=self.labels_name, chunks=chunks)
 
     # 3. (mock) segmentation
     def peakmem_segment(self, chunks):
@@ -155,31 +155,31 @@ class RasterSuite:
         # Note, that when using a client, dask spills to disk to reduce memory.
         # also, smaller chunks size can lead to higher mem consumption in this case (when not using a client),
         # due to more artefacts to solve/larger task graph.
-        _mock_segment(self.sdata, labels_layer=self.labels_layer, chunks=chunks)
+        _mock_segment(self.sdata, labels_name=self.labels_name, chunks=chunks)
 
     def time_segment(self, chunks):
         """Segmentation."""
-        _mock_segment(self.sdata, labels_layer=self.labels_layer, chunks=chunks)
+        _mock_segment(self.sdata, labels_name=self.labels_name, chunks=chunks)
 
 
-def _vectorize_rasterize(sdata: SpatialData, labels_layer: str, chunks: int = 2000):
+def _vectorize_rasterize(sdata: SpatialData, labels_name: str, chunks: int = 2000):
     """Rasterize and vectorize"""
     dask.config.set(scheduler="processes")
 
-    shapes_layer = f"shapes_layer_{uuid.uuid4()}"
-    sdata = hp.sh.vectorize(sdata, labels_layer=labels_layer, output_layer=shapes_layer, overwrite=True)
+    shapes_name = f"shapes_{uuid.uuid4()}"
+    sdata = hp.sh.vectorize(sdata, labels_name=labels_name, output_shapes_name=shapes_name, overwrite=True)
 
     dask.config.set(scheduler="threads")
-    output_labels_layer = f"labels_layer_{uuid.uuid4()}"
+    output_labels_name = f"labels_{uuid.uuid4()}"
 
     sdata = hp.im.rasterize(
-        sdata, shapes_layer=shapes_layer, output_layer=output_labels_layer, chunks=chunks, overwrite=True
+        sdata, shapes_name=shapes_name, output_labels_name=output_labels_name, chunks=chunks, overwrite=True
     )
 
 
-def _aggregate_sum(sdata: SpatialData, image_layer: str, labels_layer: str, chunks: int):
-    se_labels = sdata[labels_layer]
-    se_image = sdata[image_layer]
+def _aggregate_sum(sdata: SpatialData, image_name: str, labels_name: str, chunks: int):
+    se_labels = sdata[labels_name]
+    se_image = sdata[image_name]
 
     aggregator = RasterAggregator(
         mask_dask_array=se_labels.data[None, ...].rechunk(chunks),
@@ -188,9 +188,9 @@ def _aggregate_sum(sdata: SpatialData, image_layer: str, labels_layer: str, chun
     aggregator.aggregate_sum()
 
 
-def _aggregate_var(sdata: SpatialData, image_layer: str, labels_layer: str, chunks: int):
-    se_labels = sdata[labels_layer]
-    se_image = sdata[image_layer]
+def _aggregate_var(sdata: SpatialData, image_name: str, labels_name: str, chunks: int):
+    se_labels = sdata[labels_name]
+    se_image = sdata[image_name]
 
     aggregator = RasterAggregator(
         mask_dask_array=se_labels.data[None, ...].rechunk(chunks),
@@ -199,8 +199,8 @@ def _aggregate_var(sdata: SpatialData, image_layer: str, labels_layer: str, chun
     aggregator.aggregate_var()
 
 
-def _aggregate_area(sdata: SpatialData, labels_layer: str, chunks: int):
-    se_labels = sdata[labels_layer]
+def _aggregate_area(sdata: SpatialData, labels_name: str, chunks: int):
+    se_labels = sdata[labels_name]
 
     aggregator = RasterAggregator(
         mask_dask_array=se_labels.data[None, ...].rechunk(chunks),
@@ -209,7 +209,7 @@ def _aggregate_area(sdata: SpatialData, labels_layer: str, chunks: int):
     aggregator.aggregate_area()
 
 
-def _mock_segment(sdata: SpatialData, labels_layer: str, chunks: int):
+def _mock_segment(sdata: SpatialData, labels_name: str, chunks: int):
     import dask.dataframe as dd
     from dask.dataframe import DataFrame
 
@@ -225,7 +225,7 @@ def _mock_segment(sdata: SpatialData, labels_layer: str, chunks: int):
     sdata = hp.pt.add_points(
         sdata,
         ddf=ddf,
-        output_layer="dummy_transcripts",
+        output_points_name="dummy_transcripts",
         coordinates=coordinates,
         overwrite=True,
     )
@@ -234,27 +234,27 @@ def _mock_segment(sdata: SpatialData, labels_layer: str, chunks: int):
 
     sdata = hp.im.segment_points(
         sdata,
-        labels_layer=labels_layer,
-        points_layer="dummy_transcripts",
+        labels_name=labels_name,
+        points_name="dummy_transcripts",
         name_x="x",
         name_y="y",
         name_gene="gene",
         model=_dummy,
         c_dim=2,
-        output_labels_layer=[f"{labels_layer}_output_1", f"{labels_layer}_output_2"],
-        output_shapes_layer=None,
-        labels_layer_align=None,
+        output_labels_name=[f"{labels_name}_output_1", f"{labels_name}_output_2"],
+        output_shapes_name=None,
+        labels_name_align=None,
         chunks=chunks,
         depth=300,
         overwrite=True,
     )
 
 
-def _pixel_clustering_preprocess(sdata: SpatialData, image_layer: str, chunks: int):
+def _pixel_clustering_preprocess(sdata: SpatialData, image_name: str, chunks: int):
     sdata = hp.im.pixel_clustering_preprocess(
         sdata,
-        img_layer=[image_layer],
-        output_layer=[f"{image_layer}_preprocessed"],
+        image_name=[image_name],
+        output_image_name=[f"{image_name}_preprocessed"],
         chunks=chunks,
         persist_intermediate=False,  # set to False if you have multiple images, and if they are large.
         overwrite=True,
@@ -262,16 +262,16 @@ def _pixel_clustering_preprocess(sdata: SpatialData, image_layer: str, chunks: i
     )
 
 
-def _pixel_clustering(sdata: SpatialData, image_layer: str, chunks: int):
+def _pixel_clustering(sdata: SpatialData, image_name: str, chunks: int):
     batch_model = fs.models.BatchFlowSOMEstimator
 
     sdata, _, _ = hp.im.flowsom(
         sdata,
-        img_layer=[f"{image_layer}"],
-        output_layer_clusters=[
-            f"{image_layer}_clusters",
+        image_name=[f"{image_name}"],
+        output_cluster_labels_name=[
+            f"{image_name}_clusters",
         ],
-        output_layer_metaclusters=[f"{image_layer}_metaclusters"],
+        output_metacluster_labels_name=[f"{image_name}_metaclusters"],
         n_clusters=20,
         chunks=chunks,
         client=None,

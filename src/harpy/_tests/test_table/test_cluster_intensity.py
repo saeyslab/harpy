@@ -14,13 +14,13 @@ def test_cluster_intensity(sdata_pixie):
     to_coordinate_system = ["fov0", "fov1"]
     cluster_key = "cluster_id"
 
-    for _img_layer, _labels_layer, _to_coordinate_system in zip(
+    for _image_name, _labels_name, _to_coordinate_system in zip(
         image_name, labels_name, to_coordinate_system, strict=True
     ):
         sdata = allocate_intensity(
             sdata,
-            image_name=_img_layer,
-            labels_name=_labels_layer,
+            image_name=_image_name,
+            labels_name=_labels_name,
             output_table_name=table_name,
             mode="mean",
             to_coordinate_system=_to_coordinate_system,

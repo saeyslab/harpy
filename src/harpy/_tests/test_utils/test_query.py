@@ -72,13 +72,13 @@ def test_bounding_box_query_multiple_coordinate_systems(sdata_transcripts_mul_co
     )
 
     assert isinstance(sdata_transcripts_queried, SpatialData)
-    for _labels_layer in labels_name:
+    for _labels_name in labels_name:
         for _table_name in [*sdata_transcripts_queried.tables]:
             adata = sdata_transcripts_queried.tables[_table_name]
             region_key = adata.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]
             instance_key = adata.uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY]
-            ids = adata[adata.obs[region_key] == _labels_layer].obs[instance_key].values
-            labels_queried = da.unique(sdata_transcripts_queried.labels[_labels_layer].data).compute()
+            ids = adata[adata.obs[region_key] == _labels_name].obs[instance_key].values
+            labels_queried = da.unique(sdata_transcripts_queried.labels[_labels_name].data).compute()
             labels_queried = labels_queried[labels_queried != 0]
 
             assert np.all(np.isin(ids, labels_queried))
@@ -112,23 +112,23 @@ def test_bounding_box_query_multiple_coordinate_systems_crd_none(sdata_transcrip
     )
 
     assert isinstance(sdata_transcripts_queried, SpatialData)
-    _labels_layer = "labels_a1_1"
-    assert _labels_layer not in sdata_transcripts_queried.labels
+    _labels_name = "labels_a1_1"
+    assert _labels_name not in sdata_transcripts_queried.labels
     for _table_name in [*sdata_transcripts_queried.tables]:
         # check that all elements that are annoted by labels_a1_1  will be removed from resulting sdata tables.
         region = sdata_transcripts_queried.tables[_table_name].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY]
-        assert _labels_layer not in region
+        assert _labels_name not in region
         assert (
-            _labels_layer
+            _labels_name
             not in sdata_transcripts_queried.tables[_table_name].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY]
         )
-    _labels_layer = "labels_a1_2"
+    _labels_name = "labels_a1_2"
     for _table_name in [*sdata_transcripts_queried.tables]:
         adata = sdata_transcripts_queried.tables[_table_name]
         region_key = adata.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]
         instance_key = adata.uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY]
-        ids = adata[adata.obs[region_key] == _labels_layer].obs[instance_key].values
-        labels_queried = da.unique(sdata_transcripts_queried.labels[_labels_layer].data).compute()
+        ids = adata[adata.obs[region_key] == _labels_name].obs[instance_key].values
+        labels_queried = da.unique(sdata_transcripts_queried.labels[_labels_name].data).compute()
         labels_queried = labels_queried[labels_queried != 0]
 
         assert np.all(np.isin(ids, labels_queried))
