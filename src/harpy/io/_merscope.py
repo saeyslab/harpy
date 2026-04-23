@@ -257,16 +257,16 @@ def merscope(
                 for z_layer in z_layers:
                     del sdata[f"{root_image_name}{z_layer}"]
 
-        layers = [*sdata.images]
+        image_names = [*sdata.images]
         log.info(f"Adding micron coordinate system for mosaic images: '{_to_coordinate_system}_micron'.")
         transformations = {_to_coordinate_system: Identity(), f"{_to_coordinate_system}_micron": pixels_to_micron}
-        for _layer in layers:
+        for _image_name in image_names:
             # rename coordinate system "global" to _to_coordinate_system
             # _to_coordinate_system is the pixel coordinate system -> intrinsic coordinate system
             # _to_coordinate_system_micron is the micron coordinate system
-            set_transformation(sdata[_layer], transformation=transformations, set_all=True)
-            sdata[f"{_layer}_{_to_coordinate_system}"] = sdata[_layer]
-            del sdata[_layer]
+            set_transformation(sdata[_image_name], transformation=transformations, set_all=True)
+            sdata[f"{_image_name}_{_to_coordinate_system}"] = sdata[_image_name]
+            del sdata[_image_name]
 
     if output is not None:
         sdata.write(output)
@@ -297,10 +297,10 @@ def merscope(
                         "cell boundaries will therefore not be rasterized."
                     )
                 if mosaic_images and rasterize_cell_boundaries:
-                    _mosaic_layer = [
+                    _mosaic_name = [
                         *sdata.filter_by_coordinate_system(coordinate_system=_to_coordinate_system).images
                     ][0]
-                    se = _get_spatial_element(sdata, element_name=_mosaic_layer)
+                    se = _get_spatial_element(sdata, element_name=_mosaic_name)
                     out_shape = se.data.shape[-2:]
                     _chunks = se.data.chunksize[-1]
                     if "scale_factors" in image_models_kwargs:
@@ -377,7 +377,7 @@ def merscope(
                 # set adata.obs.index in same way as we set it in hp.tb.allocate, for consistency
                 _uuid_value = str(uuid.uuid4())[:8]
                 adata.obs.index = adata.obs.index.map(
-                    lambda x, layer=_output_labels_name, uid=_uuid_value: f"{str(x)}_{layer}_{uid}"
+                    lambda x, labels_name=_output_labels_name, uid=_uuid_value: f"{str(x)}_{labels_name}_{uid}"
                 )
                 adata.obs.index.name = cell_index_name
 
@@ -473,7 +473,7 @@ def merscope(
                 )
                 # set adata.obs.index in same way as we set it in hp.tb.allocate, just for consistency
                 adata_preprocessed.obs.index = adata_preprocessed.obs.index.map(
-                    lambda x, layer=_output_labels_name, uid=_uuid_value: f"{str(x)}_{layer}_{uid}"
+                    lambda x, labels_name=_output_labels_name, uid=_uuid_value: f"{str(x)}_{labels_name}_{uid}"
                 )
                 adata_preprocessed.obs.index.name = cell_index_name
 

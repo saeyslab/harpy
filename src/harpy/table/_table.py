@@ -9,7 +9,7 @@ from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
 from harpy.shape._shape import filter_shapes
-from harpy.table._manager import TableLayerManager
+from harpy.table._manager import TableElementManager
 from harpy.utils._keys import _CELLSIZE_KEY, _INSTANCE_KEY, _REGION_KEY
 
 
@@ -56,34 +56,36 @@ class ProcessTable:
         self.labels_name = labels_name
         self.table_name = table_name
         # Do not pass it here, get it straight from the anndata
-        self._validated_table_layer()
+        self._validate_table_element()
         self.instance_key = None
         self.region_key = None
         if TableModel.ATTRS_KEY in self.sdata.tables[self.table_name].uns:
             self.instance_key = self.sdata.tables[self.table_name].uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY]
             self.region_key = self.sdata.tables[self.table_name].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]
         if self.labels_name is not None:
-            self._validate_layer(layer_list=self.labels_name)
+            self._validate_elements(element_names=self.labels_name)
         # if self.labels_name is None:
         #    self._validate()
 
-    def _validate_layer(self, layer_list, layer_type="labels"):
+    def _validate_elements(self, element_names, element_type="labels"):
         """Generic element validation helper to reduce code duplication."""
-        for _layer in layer_list:
-            if _layer not in [*getattr(self.sdata, layer_type)]:
-                raise ValueError(f"{layer_type} element '{_layer}' not in 'sdata.{layer_type}'.")
+        for element_name in element_names:
+            if element_name not in [*getattr(self.sdata, element_type)]:
+                raise ValueError(f"{element_type} element '{element_name}' not in 'sdata.{element_type}'.")
             if (
-                _layer not in self.sdata.tables[self.table_name].obs[self.region_key].cat.categories
-                or _layer not in self.sdata.tables[self.table_name].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY]
+                element_name not in self.sdata.tables[self.table_name].obs[self.region_key].cat.categories
+                or element_name not in self.sdata.tables[self.table_name].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY]
             ):
-                raise ValueError(f"{layer_type} element '{_layer}' not annotated by table element '{self.table_name}'.")
+                raise ValueError(
+                    f"{element_type} element '{element_name}' not annotated by table element '{self.table_name}'."
+                )
             # Check for uniqueness of instance keys
             assert (
                 self.sdata.tables[self.table_name]
-                .obs[self.sdata.tables[self.table_name].obs[self.region_key] == _layer][self.instance_key]
+                .obs[self.sdata.tables[self.table_name].obs[self.region_key] == element_name][self.instance_key]
                 .is_unique
             ), (
-                f"'{self.instance_key}' is not unique for '{self.region_key}' == '{_layer}'. Please make sure these are unique."
+                f"'{self.instance_key}' is not unique for '{self.region_key}' == '{element_name}'. Please make sure these are unique."
             )
 
     def _validate(self):
@@ -91,7 +93,7 @@ class ProcessTable:
             f"'{self.instance_key}' is not unique. Please make sure these are unique, or specify a 'labels_name' via '{self.region_key}'."
         )
 
-    def _validated_table_layer(self):
+    def _validate_table_element(self):
         """Validate if the specified table element exists in the SpatialData object."""
         if self.table_name not in [*self.sdata.tables]:
             raise ValueError(f"table element '{self.table_name}' not in 'sdata.tables'.")
@@ -305,11 +307,11 @@ def filter_on_size(
     )
 
     if update_shapes_elements:
-        for _labels_layer in process_table_instance.labels_name:
+        for _labels_name in process_table_instance.labels_name:
             sdata = filter_shapes(
                 sdata,
                 table_name=output_table_name,
-                labels_name=_labels_layer,
+                labels_name=_labels_name,
                 prefix_filtered_shapes_name="filtered_size",
             )
 
@@ -363,7 +365,7 @@ def add_table(
     -------
     The updated :class:`~spatialdata.SpatialData` object.
     """
-    manager = TableLayerManager()
+    manager = TableElementManager()
     sdata = manager.add_table(
         sdata,
         adata=adata,

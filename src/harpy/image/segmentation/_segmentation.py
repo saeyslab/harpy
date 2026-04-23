@@ -193,7 +193,7 @@ def segment(
 
     segmentation_model = SegmentationModelStains(model)
 
-    sdata = segmentation_model._segment_layer(
+    sdata = segmentation_model._segment_element(
         sdata,
         image_name=image_name,
         output_labels_name=output_labels_name,
@@ -326,7 +326,7 @@ def segment_points(
 
     segmentation_model = SegmentationModelPoints(model)
 
-    sdata = segmentation_model._segment_layer(
+    sdata = segmentation_model._segment_element(
         sdata,
         labels_name=labels_name,
         points_name=points_name,
@@ -351,7 +351,7 @@ class SegmentationModel(ABC):
         self._model = model
 
     @abstractmethod
-    def _segment_layer(
+    def _segment_element(
         self,
         sdata: SpatialData,
         *args,
@@ -359,7 +359,7 @@ class SegmentationModel(ABC):
     ) -> SpatialData:
         pass
 
-    def _precondition_output_layers_name(
+    def _precondition_output_element_names(
         self, output_labels_name: str | list[str] | None, output_shapes_name: str | list[str] | None
     ) -> tuple[list[str] | None, list[str] | None]:
         def _fix_name(name: str | Iterable[str]):
@@ -753,7 +753,7 @@ class SegmentationModelStains(SegmentationModel):
     ):
         self._model = model
 
-    def _segment_layer(
+    def _segment_element(
         self,
         sdata: SpatialData,
         image_name: str,
@@ -767,7 +767,7 @@ class SegmentationModelStains(SegmentationModel):
         fn_kwargs: Mapping[str, Any] = MappingProxyType({}),
         **kwargs: Any,
     ) -> SpatialData:
-        output_labels_name, output_shapes_name = self._precondition_output_layers_name(
+        output_labels_name, output_shapes_name = self._precondition_output_element_names(
             output_labels_name, output_shapes_name
         )
         if labels_name_align is not None and labels_name_align not in output_labels_name:
@@ -850,7 +850,7 @@ class SegmentationModelPoints(SegmentationModel):
     ):
         self._model = model
 
-    def _segment_layer(
+    def _segment_element(
         self,
         sdata: SpatialData,
         labels_name: str,  # prior, required for now
@@ -872,7 +872,7 @@ class SegmentationModelPoints(SegmentationModel):
         fn_kwargs["name_y"] = name_y
         fn_kwargs["name_gene"] = name_gene
 
-        output_labels_name, output_shapes_name = self._precondition_output_layers_name(
+        output_labels_name, output_shapes_name = self._precondition_output_element_names(
             output_labels_name, output_shapes_name
         )
         if labels_name_align is not None and labels_name_align not in output_labels_name:

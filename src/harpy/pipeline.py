@@ -75,8 +75,8 @@ class HarpyPipeline:
         if not isinstance(filename_pattern, list) and filename_pattern.endswith(".zarr"):
             sdata = read_zarr(filename_pattern)
             if isinstance(sdata, SpatialData):
-                img_layers = [*sdata.images]
-                if self.loaded_image_name not in img_layers:
+                image_names = [*sdata.images]
+                if self.loaded_image_name not in image_names:
                     raise ValueError(
                         f"Provided image element '{self.loaded_image_name}' not in SpatialData object loaded from zarr."
                     )

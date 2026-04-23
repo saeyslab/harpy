@@ -134,8 +134,8 @@ def flowsom(
     """
     assert 0 < fraction <= 1, "Value must be between 0 and 1"
 
-    def _fix_name(layer: str | Iterable[str]):
-        return list(layer) if isinstance(layer, Iterable) and not isinstance(layer, str) else [layer]
+    def _fix_name(value: str | Iterable[str]):
+        return list(value) if isinstance(value, Iterable) and not isinstance(value, str) else [value]
 
     image_name = _fix_name(image_name)
     output_cluster_labels_name = _fix_name(output_cluster_labels_name)
@@ -159,8 +159,8 @@ def flowsom(
     _transformations = []
     _region_keys = []
     log.info("Extracting random sample for FlowSOM training.")
-    for i, _img_layer in enumerate(image_name):
-        se_image = _get_spatial_element(sdata, element_name=_img_layer)
+    for i, _image_name in enumerate(image_name):
+        se_image = _get_spatial_element(sdata, element_name=_image_name)
         _transformations.append(get_transformation(se_image, get_all=True))
         arr = se_image.sel(c=channels).data
         if i == 0:

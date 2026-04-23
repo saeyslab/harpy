@@ -19,13 +19,13 @@ def _needs_stringdtype_copy_workaround() -> bool:
     return np.lib.NumpyVersion(np.__version__) < np.lib.NumpyVersion("2.2.5")
 
 
-class TableLayerManager:
+class TableElementManager:
     def add_table(
         self,
         sdata: SpatialData,
         adata: AnnData,
         output_table_name: str,
-        region: list[str] | None,  # list of labels_layers
+        region: list[str] | None,  # list of labels elements
         instance_key: str = _INSTANCE_KEY,  # ignored if region is None
         region_key: str = _REGION_KEY,  # ignored if region is None
         overwrite: bool = False,

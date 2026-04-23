@@ -314,15 +314,15 @@ class Preprocess(ProcessTable):
                     f"Column with name '{instance_size_key}' already exists. Removing column '{instance_size_key}'."
                 )
                 adata.obs = adata.obs.drop(columns=instance_size_key)
-            for i, _labels_layer in enumerate(self.labels_name):
-                log.info(f"Calculating cell size from provided labels_name '{_labels_layer}'")
-                se = get_dataarray(self.sdata, element_name=_labels_layer)
+            for i, _labels_name in enumerate(self.labels_name):
+                log.info(f"Calculating cell size from provided labels_name '{_labels_name}'")
+                se = get_dataarray(self.sdata, element_name=_labels_name)
                 _shapesize = _get_mask_area(
                     se.data if se.data.ndim == 3 else se.data[None, ...],
                     instance_key=self.instance_key,
                     instance_size_key=instance_size_key,
                 )
-                _shapesize[self.region_key] = _labels_layer
+                _shapesize[self.region_key] = _labels_name
                 if i == 0:
                     shapesize = _shapesize
                 else:
@@ -423,11 +423,11 @@ class Preprocess(ProcessTable):
         )
 
         if update_shapes_elements:
-            for _labels_layer in self.labels_name:
+            for _labels_name in self.labels_name:
                 self.sdata = filter_shapes(
                     self.sdata,
                     table_name=output_table_name,
-                    labels_name=_labels_layer,
+                    labels_name=_labels_name,
                     prefix_filtered_shapes_name="filtered_low_counts",
                 )
 

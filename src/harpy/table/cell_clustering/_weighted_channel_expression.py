@@ -63,7 +63,7 @@ def weighted_channel_expression(
     harpy.tb.flowsom : flowsom cell clustering
     harpy.tb.cluster_intensity : calculates average intensity SOM/meta cluster (pixel clusters).
     """
-    # subset over all _labels_layer in 'cell_clustering_table_name'
+    # subset over all labels elements in 'cell_clustering_table_name'
     _labels_name = sdata[cell_clustering_table_name].uns[TableModel.ATTRS_KEY][
         TableModel.REGION_KEY
     ]  # this is always a list

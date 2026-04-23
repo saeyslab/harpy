@@ -745,8 +745,8 @@ def match_labels_to_reference(
 
     label_arrays = [get_dataarray(sdata, element_name=source_labels_name).data]
 
-    for _labels_layer in reference_labels_name:
-        label_arrays.append(get_dataarray(sdata, element_name=_labels_layer).data)
+    for _reference_labels_name in reference_labels_name:
+        label_arrays.append(get_dataarray(sdata, element_name=_reference_labels_name).data)
 
     # Check for consistent shapes
     first_shape = label_arrays[0].shape

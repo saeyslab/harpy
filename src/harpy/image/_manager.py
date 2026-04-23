@@ -14,8 +14,8 @@ from xarray import DataArray, DataTree
 from harpy.utils._io import _incremental_io_on_disk, _write_element_with_cleanup
 
 
-class LayerManager(ABC):
-    def add_layer(
+class ElementManager(ABC):
+    def add_element(
         self,
         sdata: SpatialData,
         arr: Array,
@@ -85,7 +85,7 @@ class LayerManager(ABC):
         pass
 
 
-class ImageLayerManager(LayerManager):
+class ImageElementManager(ElementManager):
     def create_spatial_element(
         self,
         arr: Array,
@@ -149,7 +149,7 @@ class ImageLayerManager(LayerManager):
         else:
             sdata[element_name] = spatial_element
             if sdata.is_backed():
-                # to make sdata point to layer that is materialized, and keep object id.
+                # to make sdata point to the materialized element while keeping object identity.
                 _write_element_with_cleanup(sdata, element_name)
                 del sdata[element_name]
                 sdata_temp = read_zarr(sdata.path, selection=["images"])
@@ -162,7 +162,7 @@ class ImageLayerManager(LayerManager):
         return sdata.images[name].data
 
 
-class LabelLayerManager(LayerManager):
+class LabelsElementManager(ElementManager):
     def create_spatial_element(
         self,
         arr: Array,

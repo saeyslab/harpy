@@ -191,10 +191,10 @@ def sanity(
         channel_name = se.c.name
         channel_idx = list(se.c.data).index(channel)
         _se = se.isel(c=channel_idx)
-        cmap_layer = "gray"
+        raster_cmap = "gray"
     else:
         _se = se
-        cmap_layer = "viridis"
+        raster_cmap = "viridis"
 
     if z_slice is not None:
         if "z" in _se.dims:
@@ -216,7 +216,7 @@ def sanity(
         _se = _se.squeeze()
 
     _se.sel(x=slice(crd[0], crd[1]), y=slice(crd[2], crd[3])).plot.imshow(
-        cmap=cmap_layer, robust=True, ax=ax, add_colorbar=False
+        cmap=raster_cmap, robust=True, ax=ax, add_colorbar=False
     )
 
     se = _unapply_transform(se, x_coords_orig, y_coords_orig)

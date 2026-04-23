@@ -8,7 +8,7 @@ from spatialdata.models._utils import MappingToCoordinateSystem_t
 from spatialdata.transformations import get_transformation
 
 from harpy.image._image import _get_spatial_element
-from harpy.shape._manager import ShapesLayerManager
+from harpy.shape._manager import ShapesElementManager
 from harpy.utils._keys import _INSTANCE_KEY
 
 
@@ -96,7 +96,7 @@ def add_shapes(
     -------
     The `sdata` object with the shapes element added.
     """
-    manager = ShapesLayerManager()
+    manager = ShapesElementManager()
     sdata = manager.add_shapes(
         sdata,
         input=input,
@@ -137,7 +137,7 @@ def filter_shapes(
     -------
     The updated `sdata` object.
     """
-    manager = ShapesLayerManager()
+    manager = ShapesElementManager()
 
     sdata = manager.filter_shapes(
         sdata,

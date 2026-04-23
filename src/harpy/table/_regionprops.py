@@ -154,8 +154,8 @@ def add_regionprops(
     properties = tuple(new_properties)
 
     cell_props = []
-    for _labels_layer in labels_name:
-        se = get_dataarray(sdata, element_name=_labels_layer)
+    for _labels_name in labels_name:
+        se = get_dataarray(sdata, element_name=_labels_name)
         # pull masks in in memory. skimage.measure.regionprops does not work with lazy objects.
         masks = se.data.compute()
         _cell_props = _calculate_regionprop_features(
@@ -165,19 +165,19 @@ def add_regionprops(
         )
         assert instance_key in _cell_props.columns, f"'cell_props' should contain '{instance_key}' column"
         assert region_key not in _cell_props.columns, f"'cell_props' should not contain '{region_key}' columns."
-        if _labels_layer not in adata.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY]:
+        if _labels_name not in adata.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY]:
             raise ValueError(
-                f"The labels element '{_labels_layer}' does not seem to be annotated by the table element {table_name}."
+                f"The labels element '{_labels_name}' does not seem to be annotated by the table element {table_name}."
             )
 
-        _cell_props[region_key] = pd.Categorical([_labels_layer] * len(_cell_props))
+        _cell_props[region_key] = pd.Categorical([_labels_name] * len(_cell_props))
         cell_props.append(_cell_props)
     cell_props = pd.concat(cell_props)
 
     # Sanity checks before merging cell_props and adata.obs.
-    for _labels_layer in labels_name:
-        _cell_props = cell_props[cell_props[region_key] == _labels_layer]
-        adata_view = adata[adata.obs[region_key] == _labels_layer]
+    for _labels_name in labels_name:
+        _cell_props = cell_props[cell_props[region_key] == _labels_name]
+        adata_view = adata[adata.obs[region_key] == _labels_name]
         # 1) check that all cells in adata_view.obs could be matched to _cell_props
         missing = set(adata_view.obs[instance_key]) - set(_cell_props[instance_key])
         if missing:

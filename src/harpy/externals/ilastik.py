@@ -76,7 +76,7 @@ def _validate_ilastik_inputs(sdata: SpatialData, image_name: str, labels_name: s
         )
 
 
-def _get_layer_path(store_path: Path, element_type: str, element_name: str) -> Path:
+def _get_element_path(store_path: Path, element_type: str, element_name: str) -> Path:
     element_path = store_path / element_type / element_name
     scale_zero_path = element_path / "0"
     if not element_path.exists():
@@ -439,8 +439,8 @@ def run_object_classification(
 
     path_to_classifier = Path(path_to_classifier).expanduser().resolve()
     ilastik_executable = _resolve_ilastik_executable(path_to_ilastik_executable).expanduser().resolve()
-    path_to_image = _get_layer_path(store_path, "images", image_name)
-    path_to_segmentation = _get_layer_path(store_path, "labels", labels_name)
+    path_to_image = _get_element_path(store_path, "images", image_name)
+    path_to_segmentation = _get_element_path(store_path, "labels", labels_name)
 
     for path in (ilastik_executable, path_to_classifier, path_to_image, path_to_segmentation):
         if not path.exists():

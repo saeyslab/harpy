@@ -79,8 +79,8 @@ def bounding_box_query(
     # first add queried labels element to sdata, so we do not have to query them + calculate unique labels in them len[*sdata.tables] times.
     labels_ids = []
     # labels_name_queried=[]
-    for _labels_layer, _crd, _to_coordinate_system in zip(labels_name, crd, to_coordinate_system, strict=True):
-        se = get_dataarray(sdata, element_name=_labels_layer)
+    for _labels_name, _crd, _to_coordinate_system in zip(labels_name, crd, to_coordinate_system, strict=True):
+        se = get_dataarray(sdata, element_name=_labels_name)
 
         if _crd is None:
             se_queried = se
@@ -108,15 +108,15 @@ def bounding_box_query(
                 arr=se_queried.data.rechunk(
                     se_queried.data.chunksize
                 ),  # rechunk to avoid irregular chunks when writing to zarr store.
-                output_labels_name=_labels_layer,
+                output_labels_name=_labels_name,
                 transformations=get_transformation(se_queried, get_all=True),
                 # note that if labels element was multiscale, it will now not be multiscale.
             )
 
     # now query the associated table element
-    for _table_layer in [*sdata.tables]:
+    for _table_name in [*sdata.tables]:
         region = []
-        adata = sdata.tables[_table_layer]
+        adata = sdata.tables[_table_name]
         remove = np.ones(len(adata), dtype=bool)
         if TableModel.ATTRS_KEY in adata.uns:
             region_key = adata.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]
@@ -124,17 +124,17 @@ def bounding_box_query(
         else:
             # do not query the table elements that do not annotate any region
             log.info(
-                f"table_name={_table_layer} does not annotate any spatial element — adding data as such to the resulting SpatialData object."
+                f"table_name={_table_name} does not annotate any spatial element — adding data as such to the resulting SpatialData object."
             )
             sdata_queried = add_table(
                 sdata_queried,
                 adata=adata.copy(),
-                output_table_name=_table_layer,
+                output_table_name=_table_name,
                 region=None,
             )
             continue
 
-        for _labels_layer, _crd, _to_coordinate_system, _labels_id in zip(
+        for _labels_name, _crd, _to_coordinate_system, _labels_id in zip(
             labels_name,
             crd,
             to_coordinate_system,
@@ -142,22 +142,22 @@ def bounding_box_query(
             strict=True,
         ):
             # the code also handles case when labels element does not annotate the table
-            # (i.e. _labels_layer not in adata.obs[region_key].values), because remove already set to True for all instances.
-            if _labels_layer in adata.obs[region_key].values:
-                mask_label = adata.obs[region_key] == _labels_layer
+            # (i.e. _labels_name not in adata.obs[region_key].values), because remove already set to True for all instances.
+            if _labels_name in adata.obs[region_key].values:
+                mask_label = adata.obs[region_key] == _labels_name
 
                 remove_label = ~((mask_label) & (adata.obs[instance_key].isin(_labels_id))).to_numpy()
                 remove = remove & remove_label
                 if remove_label[
                     (mask_label).to_numpy()
-                ].all():  # if all instances from this labels element will be removed from adata, then we do not append _labels_layer to region
+                ].all():  # if all instances from this labels element will be removed from adata, then we do not append _labels_name to region
                     continue
                 else:
-                    region.append(_labels_layer)
+                    region.append(_labels_name)
 
         if remove.all():
             log.info(
-                f"Query removed all instances from table element '{_table_layer}'. "
+                f"Query removed all instances from table element '{_table_name}'. "
                 "Therefore this table element will not be present in resulting spatialdata object."
             )
             continue
@@ -167,29 +167,29 @@ def bounding_box_query(
         sdata_queried = add_table(
             sdata_queried,
             adata=adata,
-            output_table_name=_table_layer,
+            output_table_name=_table_name,
             region=region,
             instance_key=instance_key,
             region_key=region_key,
         )
 
     # now copy image, shapes and points element if copy is True.
-    layers_to_copy = []
+    element_names_to_copy = []
 
     if copy_image:
-        layers_to_copy.extend([*sdata.images])
+        element_names_to_copy.extend([*sdata.images])
     if copy_shapes:
-        layers_to_copy.extend([*sdata.shapes])
+        element_names_to_copy.extend([*sdata.shapes])
     if copy_points:
-        layers_to_copy.extend(*[sdata.points])
+        element_names_to_copy.extend([*sdata.points])
 
-    for _layer_to_copy in layers_to_copy:
-        sdata_queried[_layer_to_copy] = sdata[_layer_to_copy]
+    for _element_name_to_copy in element_names_to_copy:
+        sdata_queried[_element_name_to_copy] = sdata[_element_name_to_copy]
         if sdata_queried.is_backed():
-            sdata_queried.write_element(_layer_to_copy)
+            sdata_queried.write_element(_element_name_to_copy)
 
-    # if backed, and if there were layers copied, we read back from zarr, otherwise sdata_queried not self contained
-    if sdata_queried.is_backed() and layers_to_copy:
+    # if backed, and if there were elements copied, we read back from zarr, otherwise sdata_queried not self contained
+    if sdata_queried.is_backed() and element_names_to_copy:
         sdata_queried = read_zarr(sdata_queried.path)
 
     return sdata_queried

@@ -98,9 +98,9 @@ def visium_hd(
             instance_key=instance_key,
         )
         # get the shapes element for this table element
-        for _shapes_layer in [*sdata.shapes]:
-            if table_name in _shapes_layer:
-                shapes_name = _shapes_layer
+        for _shapes_name in [*sdata.shapes]:
+            if table_name in _shapes_name:
+                shapes_name = _shapes_name
                 break
         assert len(sdata[shapes_name]) == len(adata), (
             f"Shapes element containing bins '{shapes_name}' and corresponding table '{table_name}' should have same length."

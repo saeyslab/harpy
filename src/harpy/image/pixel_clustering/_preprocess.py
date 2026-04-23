@@ -118,8 +118,8 @@ def pixel_clustering_preprocess(
 
     _arr_list = []
     _transformations = []
-    for i, _img_layer in enumerate(image_name):
-        se_image = _get_spatial_element(sdata, element_name=_img_layer)
+    for i, _image_name in enumerate(image_name):
+        se_image = _get_spatial_element(sdata, element_name=_image_name)
         _transformations.append(get_transformation(se_image, get_all=True))
         arr = se_image.sel(c=channels).data
         if i == 0:

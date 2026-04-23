@@ -100,15 +100,15 @@ def cluster_intensity_SOM(
         "The number of provided 'image_name', 'labels_name' and 'to_coordinate_system' should be equal."
     )
 
-    for i, (_img_layer, _labels_layer, _to_coordinate_system) in enumerate(
+    for i, (_image_name, _labels_name, _to_coordinate_system) in enumerate(
         zip(image_name, labels_name, to_coordinate_system, strict=True)
     ):
-        se = _get_spatial_element(sdata, element_name=_labels_layer)
+        se = _get_spatial_element(sdata, element_name=_labels_name)
 
         labels = da.unique(se.data).compute()
 
         assert np.all(np.isin(labels[labels != 0], mapping.index.astype(int))), (
-            f"Some labels labels element {_labels_layer} could not be found in the provided pandas Series that maps SOM cluster ID's to metacluster IDs."
+            f"Some labels labels element {_labels_name} could not be found in the provided pandas Series that maps SOM cluster ID's to metacluster IDs."
         )
 
         # allocate the intensity to via the clusters labels element
@@ -118,12 +118,12 @@ def cluster_intensity_SOM(
         else:
             append = True
         log.info(
-            f"Start allocation of intensities of image element with name '{_img_layer}' by labels in labels element with name '{_labels_layer}'."
+            f"Start allocation of intensities of image element with name '{_image_name}' by labels in labels element with name '{_labels_name}'."
         )
         sdata = allocate_intensity(
             sdata,
-            image_name=_img_layer,
-            labels_name=_labels_layer,
+            image_name=_image_name,
+            labels_name=_labels_name,
             output_table_name=output_table_name,
             channels=channels,
             mode="sum",
@@ -137,7 +137,7 @@ def cluster_intensity_SOM(
             overwrite=overwrite,
         )
         log.info(
-            f"End allocation of image element with name '{_img_layer}' and labels element with name '{_labels_layer}'."
+            f"End allocation of image element with name '{_image_name}' and labels element with name '{_labels_name}'."
         )
 
     log.info("Start preprocessing.")

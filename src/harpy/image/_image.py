@@ -12,7 +12,7 @@ from spatialdata.transformations import get_transformation
 from spatialdata.transformations.transformations import Affine, Identity, Sequence, Translation
 from xarray import DataArray, DataTree
 
-from harpy.image._manager import ImageLayerManager, LabelLayerManager
+from harpy.image._manager import ImageElementManager, LabelsElementManager
 from harpy.utils._transformations import _get_translation_values
 
 
@@ -286,8 +286,8 @@ def add_image(
     -------
     The `sdata` object with the image element added.
     """
-    manager = ImageLayerManager()
-    sdata = manager.add_layer(
+    manager = ImageElementManager()
+    sdata = manager.add_element(
         sdata,
         arr=arr,
         element_name=output_image_name,
@@ -342,8 +342,8 @@ def add_labels(
     -------
     The `sdata` object with the labels element added.
     """
-    manager = LabelLayerManager()
-    sdata = manager.add_layer(
+    manager = LabelsElementManager()
+    sdata = manager.add_element(
         sdata,
         arr=arr,
         element_name=output_labels_name,

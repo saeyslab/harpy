@@ -427,14 +427,14 @@ def featurize(
     if store_intermediate and not sdata.is_backed():
         raise ValueError("Parameter 'store_intermediate=True' is only supported for backed SpatialData.")
 
-    for _img_layer, _labels_layer, _to_coordinate_system in zip(
+    for _image_name, _labels_name, _to_coordinate_system in zip(
         image_name, labels_name, to_coordinate_system, strict=True
     ):
         # currently this function will only work if image_name and labels_name have the same shape.
         # And are in same position, i.e. if one is translated, other should be translated with same offset
 
         se_image, se_labels = _precondition(
-            sdata, image_name=_img_layer, labels_name=_labels_layer, to_coordinate_system=_to_coordinate_system
+            sdata, image_name=_image_name, labels_name=_labels_name, to_coordinate_system=_to_coordinate_system
         )
 
         image_array = se_image.data
@@ -513,11 +513,11 @@ def featurize(
         region_key = process_table_instance.region_key
         adata = process_table_instance._get_adata()
 
-    for i, (_labels_layer, instances_ids, features) in enumerate(
+    for i, (_labels_name, instances_ids, features) in enumerate(
         zip(labels_name, instances_ids_list, features_list, strict=True)
     ):
         # get the instance_ids in adata, and sort features and instances_ids matrix in the same way.
-        instances_ids_adata = adata[adata.obs[region_key] == _labels_layer].obs[instance_key].values
+        instances_ids_adata = adata[adata.obs[region_key] == _labels_name].obs[instance_key].values
         _, features = _sort_features(
             instances_ids_adata=instances_ids_adata, instances_ids=instances_ids, features=features
         )

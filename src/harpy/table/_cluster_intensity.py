@@ -104,15 +104,15 @@ def cluster_intensity(
             f"Column with name '{instance_size_key}' not found in 'sdata[{table_name}].obs', "
             f"calculating instance size for all instances in {labels_name}."
         )
-        for i, _labels_layer in enumerate(process_table_instance.labels_name):
-            log.info(f"Calculating instance size from provided labels element '{_labels_layer}'")
-            se = _get_spatial_element(sdata, element_name=_labels_layer)
+        for i, _labels_name in enumerate(process_table_instance.labels_name):
+            log.info(f"Calculating instance size from provided labels element '{_labels_name}'")
+            se = _get_spatial_element(sdata, element_name=_labels_name)
             _shapesize = _get_mask_area(
                 se.data if se.data.ndim == 3 else se.data[None, ...],
                 instance_key=instance_key,
                 instance_size_key=instance_size_key,
             )
-            _shapesize[region_key] = _labels_layer
+            _shapesize[region_key] = _labels_name
             if i == 0:
                 shapesize = _shapesize
             else:

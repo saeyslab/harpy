@@ -308,19 +308,19 @@ def plot_shapes(
     if column is not None and table_name is None:
         raise ValueError("Please specify a 'table_name' if a 'column' is specified.")
 
-    # Choose the appropriate layer or default to the last image element if none is specified.
+    # Choose the appropriate raster element or default to the last image element if none is specified.
     if image_name is not None:
-        layer = image_name
+        raster_name = image_name
         is_image = True
     elif labels_name is not None:
-        layer = labels_name
+        raster_name = labels_name
         is_image = False
     else:
-        layer = [*sdata.images][-1]
+        raster_name = [*sdata.images][-1]
         is_image = True
         log.warning(
             f"No image element or labels element specified. "
-            f"Plotting last image element '{layer}' of the provided SpatialData object."
+            f"Plotting last image element '{raster_name}' of the provided SpatialData object."
         )
 
     if table_name is not None:
@@ -328,7 +328,9 @@ def plot_shapes(
             raise ValueError(f"table element '{table_name}' not found in 'sdata.tables'")
 
     # Make code also work if user would provide another iterable than List
-    layer = list(layer) if isinstance(layer, Iterable) and not isinstance(layer, str) else [layer]
+    raster_names = (
+        list(raster_name) if isinstance(raster_name, Iterable) and not isinstance(raster_name, str) else [raster_name]
+    )
     shapes_name = (
         list(shapes_name)
         if isinstance(shapes_name, Iterable) and not isinstance(shapes_name, str)
@@ -338,21 +340,21 @@ def plot_shapes(
         channel = list(channel) if isinstance(channel, Iterable) and not isinstance(channel, str) else [channel]
 
     # if multiple shapes are provided, and one image_name, then len(shapes_name) subfigures with same image_name beneath are plotted.
-    if len(layer) == 1 and shapes_name != 1:
-        layer = layer * len(shapes_name)
-    # if multiple img_layers are provided, and one shapes_name, then len(image_name) subfigures with same shapes_name above are plotted.
-    if len(shapes_name) == 1 and layer != 1:
-        shapes_name = shapes_name * len(layer)
+    if len(raster_names) == 1 and len(shapes_name) != 1:
+        raster_names = raster_names * len(shapes_name)
+    # if multiple image elements are provided, and one shapes_name, then len(image_name) subfigures with same shapes_name above are plotted.
+    if len(shapes_name) == 1 and len(raster_names) != 1:
+        shapes_name = shapes_name * len(raster_names)
 
-    if isinstance(layer, list) and isinstance(shapes_name, list) and len(layer) != len(shapes_name):
-        raise ValueError(f"Length of '{layer}' is not equal to the length of shapes_name '{shapes_name}'.")
+    if isinstance(raster_names, list) and isinstance(shapes_name, list) and len(raster_names) != len(shapes_name):
+        raise ValueError(f"Length of '{raster_names}' is not equal to the length of shapes_name '{shapes_name}'.")
 
-    nr_of_columns = max(len(layer), len(shapes_name))
+    nr_of_columns = max(len(raster_names), len(shapes_name))
 
     if is_image:
         # if channel is None, get the number of channels from the first image_name given, maybe print a message about this.
         if channel is None:
-            se = _get_spatial_element(sdata, element_name=layer[0])
+            se = _get_spatial_element(sdata, element_name=raster_names[0])
             channels = se.c.data
         else:
             channels = channel
@@ -387,13 +389,13 @@ def plot_shapes(
 
     idx = 0
     for _channel in channels:
-        for _layer, _shapes_layer in zip(layer, shapes_name, strict=True):
+        for _raster_name, _shapes_name in zip(raster_names, shapes_name, strict=True):
             plot(
                 sdata,
                 axes[idx],
-                image_name=_layer if is_image else None,
-                labels_name=_layer if not is_image else None,
-                shapes_name=_shapes_layer,
+                image_name=_raster_name if is_image else None,
+                labels_name=_raster_name if not is_image else None,
+                shapes_name=_shapes_name,
                 table_name=table_name,
                 column=column,
                 region=region,
@@ -570,23 +572,23 @@ def plot(
     if column is not None and table_name is None:
         raise ValueError("Please specify a 'table_name' if a 'column' is specified.")
 
-    # Choose the appropriate layer or default to the last image element if none is specified.
+    # Choose the appropriate raster element or default to the last image element if none is specified.
     if image_name is not None:
-        layer = image_name
-        if layer not in sdata.images:
-            raise ValueError(f"Provided layer '{layer}' is not an image element in 'sdata'.")
+        raster_name = image_name
+        if raster_name not in sdata.images:
+            raise ValueError(f"Provided element '{raster_name}' is not an image element in 'sdata'.")
         is_image = True
     elif labels_name is not None:
-        layer = labels_name
+        raster_name = labels_name
         is_image = False
-        if layer not in sdata.labels:
-            raise ValueError(f"Provided layer '{layer}' is not a labels element in 'sdata'.")
+        if raster_name not in sdata.labels:
+            raise ValueError(f"Provided element '{raster_name}' is not a labels element in 'sdata'.")
     else:
-        layer = [*sdata.images][-1]
+        raster_name = [*sdata.images][-1]
         is_image = True
         log.warning(
             f"No image element or labels element specified. "
-            f"Plotting last image element '{layer}' of the provided SpatialData object."
+            f"Plotting last image element '{raster_name}' of the provided SpatialData object."
         )
 
     if table_name is not None:
@@ -600,7 +602,7 @@ def plot(
             else [filtered_shapes_name]
         )
 
-    se = _get_spatial_element(sdata, element_name=layer)
+    se = _get_spatial_element(sdata, element_name=raster_name)
 
     # Update coords
     se, x_coords_orig, y_coords_orig = _apply_transform(se, to_coordinate_system=to_coordinate_system)
@@ -624,7 +626,7 @@ def plot(
         if "z" in se.dims:
             if z_slice not in se.z.data:
                 raise ValueError(
-                    f"z_slice {z_slice} not a z slice in layer '{layer}' of `sdata`. "
+                    f"z_slice {z_slice} not a z slice in element '{raster_name}' of `sdata`. "
                     f"Please specify a z_slice from the list '{se.z.data}'."
                 )
             z_index = np.where(se.z.data == z_slice)[0][0]
@@ -752,16 +754,16 @@ def plot(
             channel = se.c.data[0]
             log.warning(
                 f"Provided channel '{_channel}' not in list of available channels '{se.c.data}' "
-                f"for provided image_name '{layer}'. Falling back to plotting first available channel '{channel}' for this image_name."
+                f"for provided image_name '{raster_name}'. Falling back to plotting first available channel '{channel}' for this image_name."
             )
 
         channel_name = se.c.name
         channel_idx = list(se.c.data).index(channel)
         _se = se.isel(c=channel_idx)
-        cmap_layer = "gray"
+        raster_cmap = "gray"
     else:
         _se = se
-        cmap_layer = "viridis"
+        raster_cmap = "viridis"
 
     if z_slice is not None:
         if "z" in _se.dims:
@@ -770,13 +772,13 @@ def plot(
         if "z" in _se.dims:
             if is_image:
                 log.info(
-                    f"Layer '{layer}' has 3 spatial dimensions, but no z-slice was specified. "
+                    f"Element '{raster_name}' has 3 spatial dimensions, but no z-slice was specified. "
                     f"will perform a max projection along the z-axis."
                 )
                 _se = _se.max(dim="z")
             else:
                 log.info(
-                    f"Layer '{layer}' has 3 spatial dimensions, but no z-slice was specified. "
+                    f"Element '{raster_name}' has 3 spatial dimensions, but no z-slice was specified. "
                     f"By default the z-slice located at the midpoint of the z-dimension ({_se.shape[0] // 2}) will be utilized."
                 )
                 _se = _se[_se.shape[0] // 2, ...]
@@ -784,7 +786,7 @@ def plot(
         _se = _se.squeeze()
 
     _se.sel(x=slice(crd[0], crd[1]), y=slice(crd[2], crd[3])).plot.imshow(
-        cmap=cmap_layer,
+        cmap=raster_cmap,
         robust=True,
         ax=ax,
         add_colorbar=colorbar,
@@ -853,7 +855,7 @@ def plot(
     if channel_title and is_image:
         titles.append(f"{channel_name}={channel}")
     if img_title:
-        titles.append(layer)
+        titles.append(raster_name)
     if shapes_title and shapes_name:
         titles.append(shapes_name)
     title = ", ".join(titles)
