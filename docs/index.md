@@ -26,7 +26,7 @@ In practice, Harpy offers fast, out-of-core image preprocessing, tiled segmentat
 
 For interactive visualization of `Harpy` outputs using [Vitessce](https://github.com/vitessce/vitessce), see the [harpy_vitessce](https://github.com/vibspatial/harpy_vitessce) package.
 
-> Note for users upgrading to Harpy `4.0.0`: parameters that refer to `SpatialData` elements now use the `*_name` convention instead of the older `*_layer` naming to stay aligned with scverse naming conventions. For example, `img_layer` becomes `image_name`, `labels_layer` becomes `labels_name`, and `table_layer` becomes `table_name`.
+> Note for users upgrading to Harpy `0.4.0`: parameters that refer to `SpatialData` elements now use the `*_name` convention instead of the older `*_layer` naming to stay aligned with scverse naming conventions. For example, `img_layer` becomes `image_name`, `labels_layer` becomes `labels_name`, and `table_layer` becomes `table_name`.
 
 ---
 
