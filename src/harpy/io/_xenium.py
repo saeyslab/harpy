@@ -19,7 +19,7 @@ from spatialdata_io import xenium as sdata_xenium
 from spatialdata_io._constants._constants import XeniumKeys
 
 from harpy.io._transcripts import read_transcripts
-from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY, _SPATIAL
+from harpy.utils._keys import _CELL_INDEX, _INSTANCE_KEY, _REGION_KEY, _SPATIAL
 
 
 def xenium(
@@ -191,10 +191,12 @@ def xenium(
             assert f"cell_labels_{_to_coordinate_system}" in [*_sdata.labels], (
                 "labels element annotating the table is not found in SpatialData object."
             )
-            # set "cell_id" column in table as index, because anndata does not allow both "cell_id" and "cell_ID" (=_INSTANCE_KEY) as columns in obs.
+            # Store Xenium barcode IDs in the table index. Use Harpy's table index name so zarr writes the
+            # barcode index explicitly while keeping "cell_ID" available as the instance key column.
             if XeniumKeys.CELL_ID in adata.obs.columns:
                 logger.info(f"Setting '{XeniumKeys.CELL_ID}' as table index.")
                 adata.obs.set_index(XeniumKeys.CELL_ID, inplace=True)
+                adata.obs.index.name = _CELL_INDEX
             adata.obs.rename(columns={"region": region_key, "cell_labels": instance_key}, inplace=True)
             adata.obs[region_key] = pd.Categorical(adata.obs[region_key].astype(str) + f"_{_to_coordinate_system}")
             adata.uns.pop(TableModel.ATTRS_KEY)
