@@ -16,6 +16,7 @@ from harpy.datasets.registry import get_registry
 from harpy.io._merscope import merscope
 from harpy.io._visium_hd import visium_hd
 from harpy.io._xenium import xenium
+from harpy.utils._keys import _CELL_INDEX
 
 
 def resolve_example(path: str | Path | None = None) -> SpatialData:
@@ -286,41 +287,43 @@ def xenium_human_ovarian_cancer(
     set_transformation(se, transformation=transformations, set_all=True)
 
     sdata[f"he_image_annotated_{to_coordinate_system}"] = se
-    sdata.write_element(f"he_image_annotated_{to_coordinate_system}")
-    sdata = read_zarr(sdata.path)
+    if sdata.is_backed():
+        sdata.write_element(f"he_image_annotated_{to_coordinate_system}")
+        sdata = read_zarr(sdata.path)
 
     # 3. add cell and gene groups to the AnnData table
 
     table_name = f"table_{to_coordinate_system}"  # default table name when calling hp.io.xenium
 
-    # index of adata is XeniumKeys.CELL_ID
+    # index of adata stores the Xenium cell_id barcodes
     adata = sdata[table_name]
-    if adata.obs.index.name != XeniumKeys.CELL_ID:
+    if adata.obs.index.name != _CELL_INDEX:
         raise ValueError(
-            f"Name of the index of the AnnData table with name '{table_name}' should be {XeniumKeys.CELL_ID}, please report this bug."
+            f"Name of the index of the AnnData table with name '{table_name}' should be {_CELL_INDEX}, please report this bug."
         )
     adata.obs.reset_index(inplace=True)
 
     cell_groups = pd.read_csv(path_cell_groups)
+    cell_groups.rename(columns={XeniumKeys.CELL_ID: _CELL_INDEX}, inplace=True)
     gene_groups = pd.read_csv(path_gene_groups)
 
     # i) check which cells in adata.obs could be matched to a group
-    missing = set(adata.obs[XeniumKeys.CELL_ID]) - set(cell_groups[XeniumKeys.CELL_ID])
+    missing = set(adata.obs[_CELL_INDEX]) - set(cell_groups[_CELL_INDEX])
     if missing:
         log.info(
             f"{len(missing)} {XeniumKeys.CELL_ID} values in .obs not found in cell groups (e.g. {list(missing)[:5]}). These will be removed from the AnnData table."
         )
 
     # ii) check that there are no duplicates in cell_groups dataframe. If there would be duplicates in cell_groups, then rows in adata.obs would be multiplied, we want to catch this early
-    duplicates = cell_groups[cell_groups.duplicated(subset=XeniumKeys.CELL_ID, keep=False)]
+    duplicates = cell_groups[cell_groups.duplicated(subset=_CELL_INDEX, keep=False)]
     if not duplicates.empty:
         raise ValueError(
-            f"Duplicate {XeniumKeys.CELL_ID} values found in cell groups (e.g. {duplicates[XeniumKeys.CELL_ID].unique()[:5]})"
+            f"Duplicate {XeniumKeys.CELL_ID} values found in cell groups (e.g. {duplicates[_CELL_INDEX].unique()[:5]})"
         )
 
     # merge cell groups with adata
-    adata.obs = pd.merge(adata.obs, cell_groups, how="left", on=XeniumKeys.CELL_ID)
-    adata.obs.set_index(XeniumKeys.CELL_ID, inplace=True)
+    adata.obs = pd.merge(adata.obs, cell_groups, how="left", on=_CELL_INDEX)
+    adata.obs.set_index(_CELL_INDEX, inplace=True)
 
     adata = adata[~adata.obs["group"].isna()].copy()  # copy because we can not pop on a view
 
