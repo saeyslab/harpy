@@ -287,8 +287,9 @@ def xenium_human_ovarian_cancer(
     set_transformation(se, transformation=transformations, set_all=True)
 
     sdata[f"he_image_annotated_{to_coordinate_system}"] = se
-    sdata.write_element(f"he_image_annotated_{to_coordinate_system}")
-    sdata = read_zarr(sdata.path)
+    if sdata.is_backed():
+        sdata.write_element(f"he_image_annotated_{to_coordinate_system}")
+        sdata = read_zarr(sdata.path)
 
     # 3. add cell and gene groups to the AnnData table
 
