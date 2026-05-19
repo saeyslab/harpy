@@ -34,6 +34,8 @@
   ·
   <a href="https://harpy.readthedocs.io/en/latest/tutorials/index.html">Tutorials</a>
   ·
+  <a href="https://github.com/vibspatial/napari-harpy">napari-harpy</a>
+  ·
   <a href="https://github.com/vibspatial/harpy_vitessce">Harpy Vitessce</a>
 </p>
 

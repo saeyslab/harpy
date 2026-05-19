@@ -24,6 +24,8 @@ In practice, Harpy offers fast, out-of-core image preprocessing, tiled segmentat
 - **Scales to (very) large images**: tiled workflows with [Dask](https://www.dask.org/); optional GPU acceleration with [CuPy](https://cupy.dev/) and [PyTorch](https://pytorch.org/).
 - **Scalable computational building blocks** for segmentation, feature extraction, clustering, and spatial analysis.
 
+For loading and browsing SpatialData stores in [napari](https://napari.org/stable/), alongside feature extraction and interactive object classification workflows, see the [napari-harpy](https://github.com/vibspatial/napari-harpy) package.
+
 For interactive visualization of `Harpy` outputs using [Vitessce](https://github.com/vitessce/vitessce), see the [harpy_vitessce](https://github.com/vibspatial/harpy_vitessce) package.
 
 > Note for users upgrading to Harpy `0.4.0`: parameters that refer to `SpatialData` elements now use the `*_name` convention instead of the older `*_layer` naming to stay aligned with scverse naming conventions. For example, `img_layer` becomes `image_name`, `labels_layer` becomes `labels_name`, and `table_layer` becomes `table_name`.
