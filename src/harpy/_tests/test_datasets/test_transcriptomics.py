@@ -9,6 +9,7 @@ from harpy.datasets.transcriptomics import (
     visium_hd_example,
     xenium_human_lung_cancer,
     xenium_human_ovarian_cancer,
+    xenium_human_ovarian_cancer_course,
 )
 from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY
 
@@ -77,6 +78,18 @@ def test_xenium_human_ovarian_cancer(tmp_path):
         sdata.tables[f"table_{to_coordinate_system}"].uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY]
         == _INSTANCE_KEY
     )
+
+
+@pytest.mark.skip(reason="This test downloads a Xenium human ovarian cancer course checkpoint to the OS cache.")
+def test_xenium_human_ovarian_cancer_course_checkpoint(tmp_path):
+    sdata = xenium_human_ovarian_cancer_course(checkpoint="checkpoint_2", output=tmp_path / "sdata.zarr")
+    assert sdata.is_backed()
+    assert isinstance(sdata, SpatialData)
+
+
+def test_xenium_human_ovarian_cancer_course_invalid_checkpoint():
+    with pytest.raises(ValueError, match="Invalid checkpoint"):
+        xenium_human_ovarian_cancer_course("checkpoint_3")  # type: ignore[arg-type]
 
 
 @pytest.mark.skip(reason="This test downloads a full Merscope run experiment to the OS cache.")

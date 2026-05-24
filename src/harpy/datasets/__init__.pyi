@@ -19,6 +19,7 @@ from .transcriptomics import (
     visium_hd_example_custom_binning,
     xenium_human_lung_cancer,
     xenium_human_ovarian_cancer,
+    xenium_human_ovarian_cancer_course,
 )
 
 __all__ = [
@@ -43,4 +44,5 @@ __all__ = [
     "visium_hd_example_custom_binning",
     "xenium_human_lung_cancer",
     "xenium_human_ovarian_cancer",
+    "xenium_human_ovarian_cancer_course",
 ]
