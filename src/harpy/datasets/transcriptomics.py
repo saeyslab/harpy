@@ -1,6 +1,7 @@
 import json
 import os
 from pathlib import Path
+from typing import Literal
 
 import pandas as pd
 import pooch
@@ -345,6 +346,48 @@ def xenium_human_ovarian_cancer(
         overwrite=True,
     )
 
+    return sdata
+
+
+def xenium_human_ovarian_cancer_course(
+    checkpoint: Literal["checkpoint_1", "checkpoint_2"],
+    output: str | Path | None = None,
+    path: str | Path | None = None,
+) -> SpatialData:
+    """
+    Human ovarian cancer Xenium course dataset.
+
+    Parameters
+    ----------
+    checkpoint
+        Course checkpoint to load. ``"checkpoint_1"`` loads the first checkpoint and
+        ``"checkpoint_2"`` loads the second checkpoint.
+    output
+        The path where the resulting `SpatialData` object will be backed. If `None`, it will not be backed to a Zarr store.
+    path
+        If `None`, the example data will be downloaded into the default cache
+        directory for your OS. Provide a custom path to change this behavior.
+
+    Returns
+    -------
+    A SpatialData object.
+    """
+    checkpoints = {
+        "checkpoint_1": "transcriptomics/xenium/Xenium_human_ovarian_cancer/summer_school_2026/sdata_xenium_1.zarr.zip",
+        "checkpoint_2": "transcriptomics/xenium/Xenium_human_ovarian_cancer/summer_school_2026/sdata_xenium_2.zarr.zip",
+    }
+    if checkpoint not in checkpoints:
+        raise ValueError(
+            f"Invalid checkpoint {checkpoint!r}. Expected one of {', '.join(repr(key) for key in checkpoints)}."
+        )
+
+    registry = get_registry(path)
+    unzip_path = registry.fetch(checkpoints[checkpoint], processor=pooch.Unzip())
+    sdata = read_zarr(os.path.commonpath(unzip_path))
+    sdata.path = None
+    if output is not None:
+        sdata.write(output)
+        sdata = read_zarr(output)
     return sdata
 
 
