@@ -87,6 +87,8 @@ def get_registry(path: str | Path | None = None) -> Pooch:
             "proteomics/macsima/REAscreen_IO_CRC/C-002_S-000_S_FITC_R-02_W-A-1_ROI-01_A-CD8a_C-REA1024.tif": "d726a50eacc6b511d52f154e93b9a2c6af32031948b18b2bf4b9a3c3afd5e4e1",
             "proteomics/macsima/REAscreen_IO_CRC/C-004_S-000_S_FITC_R-02_W-A-1_ROI-01_A-CD15_C-VIMC6.tif": "fba87cfec6c2761915001d8f6da0e0303c20a17a055d4e0aa3d40e90b26dfec9",
             "proteomics/macsima/REAscreen_IO_CRC/C-004_S-000_S_PE_R-02_W-A-1_ROI-01_A-CD45_C-5B1.tif": "dc26434d0d6fc3693f88a39bfb5a3bdfd4d3ef24aa12e388222fc5c1cae2a764",
+            "proteomics/macsima/REAscreen_IO_CRC_summer_school_2026/sdata_macsima_1.zarr.zip": "da0fc500b87dc33e0cff8e2863819b4b02a7f1b11e22cc47eddc1f60cdb55145",
+            "proteomics/macsima/REAscreen_IO_CRC_summer_school_2026/sdata_macsima_2.zarr.zip": "3432e81d5f86f7e2ed3c981a7af7d6dc190ab433baa08b7008748182ba15ed7b",
             "proteomics/macsima/sdata_tonsil.zarr.zip": "9a22f90480c28ce07c51c489f279ade0d545103354e153124a9cd2d9ab7f7a43",  # data used for benchmarking
         },
     )
