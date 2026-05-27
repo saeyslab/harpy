@@ -31,6 +31,7 @@ def test_add_feature_matrix_creates_new_table(sdata_multi_c_no_backed):
     assert metadata["feature_columns"] == ["mean__0", "mean__4", "area"]
     assert metadata["source_label"] == "masks_whole"
     assert metadata["source_image"] == "raw_image"
+    assert metadata["source_channels"] == ["0", "4"]
 
 
 def test_add_feature_matrix_creates_intensity_stats_table(sdata_multi_c_no_backed):
@@ -51,6 +52,28 @@ def test_add_feature_matrix_creates_intensity_stats_table(sdata_multi_c_no_backe
     assert adata.obsm["intensity_stats"].shape == (adata.n_obs, 2)
     assert np.isfinite(adata.obsm["intensity_stats"]).all()
     assert adata.uns["feature_matrices"]["intensity_stats"]["feature_columns"] == ["mean__0", "var__0"]
+    assert adata.uns["feature_matrices"]["intensity_stats"]["source_channels"] == ["0"]
+
+
+def test_add_feature_matrix_stores_all_source_channels_when_channels_is_none(sdata_multi_c_no_backed):
+    sdata_multi_c_no_backed = add_feature_matrix(
+        sdata_multi_c_no_backed,
+        labels_name="masks_whole",
+        image_name="raw_image",
+        table_name=None,
+        output_table_name="table_all_channels",
+        feature_key="all_channels",
+        features=["mean"],
+        channels=None,
+        overwrite_output_table=True,
+    )
+
+    adata = sdata_multi_c_no_backed.tables["table_all_channels"]
+    expected_channels = [str(channel) for channel in sdata_multi_c_no_backed["raw_image"].c.data]
+    metadata = adata.uns["feature_matrices"]["all_channels"]
+
+    assert metadata["source_channels"] == expected_channels
+    assert metadata["feature_columns"] == [f"mean__{channel}" for channel in expected_channels]
 
 
 def test_add_feature_matrix_supports_2d_eccentricity_with_intensity_features(sdata_multi_c_no_backed):
@@ -103,6 +126,7 @@ def test_add_feature_matrix_supports_custom_metadata_key(sdata_multi_c_no_backed
     assert "custom_feature_matrices" in adata.uns
     assert "feature_matrices" not in adata.uns
     assert adata.uns["custom_feature_matrices"]["area_features"]["feature_columns"] == ["area"]
+    assert adata.uns["custom_feature_matrices"]["area_features"]["source_channels"] is None
 
 
 def test_add_feature_matrix_existing_table_preserves_other_regions(sdata_pixie_intensities):
@@ -150,10 +174,24 @@ def test_add_feature_matrix_persists_backed_updates(sdata_multi_c):
         features=["area"],
         overwrite_output_table=True,
     )
+    sdata_multi_c = add_feature_matrix(
+        sdata_multi_c,
+        labels_name="masks_whole",
+        image_name="raw_image",
+        table_name=None,
+        output_table_name="table_intensity_feature_matrix",
+        feature_key="mean_features",
+        features=["mean"],
+        channels=[0],
+        overwrite_output_table=True,
+    )
 
     reloaded = read_zarr(sdata_multi_c.path)
     adata = reloaded.tables["table_feature_matrix"]
+    intensity_adata = reloaded.tables["table_intensity_feature_matrix"]
 
     assert "area_features" in adata.obsm
     assert adata.obsm["area_features"].shape == (adata.n_obs, 1)
     assert adata.uns["feature_matrices"]["area_features"]["feature_columns"].tolist() == ["area"]
+    assert adata.uns["feature_matrices"]["area_features"]["source_channels"] is None
+    assert intensity_adata.uns["feature_matrices"]["mean_features"]["source_channels"].tolist() == ["0"]

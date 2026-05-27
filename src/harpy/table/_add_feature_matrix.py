@@ -71,7 +71,8 @@ def add_feature_matrix(
     labels elements and writes the resulting numeric matrix into
     `.obsm[feature_key]` of a target table. Companion metadata describing
     the matrix schema and inputs is stored in
-    `.uns[feature_matrices_key][feature_key]`.
+    `.uns[feature_matrices_key][feature_key]`, including explicit
+    `source_channels` for intensity-derived features.
 
     Features are aligned onto table rows by `(region_key, instance_key)`, not
     by row order. This makes the resulting matrix immediately reusable in
@@ -254,9 +255,10 @@ def add_feature_matrix(
 
     pair_frames: list[pd.DataFrame] = []
     columns: list[str] = []
+    source_channels: list[list[str]] = []
     seen_columns: set[str] = set()
     for pair in pair_specs:
-        pair_frame, pair_columns = _compute_pair_feature_frame(
+        pair_frame, pair_columns, pair_channels = _compute_pair_feature_frame(
             sdata,
             pair=pair,
             intensity_features=intensity_features,
@@ -268,6 +270,8 @@ def add_feature_matrix(
             run_on_gpu=run_on_gpu,
         )
         pair_frames.append(pair_frame)
+        if pair_channels is not None:
+            source_channels.append(pair_channels)
         for column in pair_columns:
             if column not in seen_columns:
                 seen_columns.add(column)
@@ -322,6 +326,12 @@ def add_feature_matrix(
 
     source_labels = [pair.labels_name for pair in pair_specs]
     source_images = [pair.image_name for pair in pair_specs]
+    if not source_channels:
+        source_channels_metadata = None
+    elif len(source_channels) == 1:
+        source_channels_metadata = source_channels[0]
+    else:
+        source_channels_metadata = source_channels
     coordinate_systems = [pair.coordinate_system for pair in pair_specs]
     metadata = {
         "feature_columns": list(columns),
@@ -330,6 +340,7 @@ def add_feature_matrix(
         "dtype": str(matrix.dtype),
         "source_label": source_labels[0] if len(source_labels) == 1 else source_labels,
         "source_image": source_images[0] if len(source_images) == 1 else source_images,
+        "source_channels": source_channels_metadata,
         "coordinate_system": coordinate_systems[0] if len(coordinate_systems) == 1 else coordinate_systems,
         "features": list(requested_features),
     }
@@ -490,13 +501,14 @@ def _compute_pair_feature_frame(
     region_key: str,
     chunks: str | int | tuple[int, ...] | None,
     run_on_gpu: bool,
-) -> tuple[pd.DataFrame, list[str]]:
+) -> tuple[pd.DataFrame, list[str], list[str] | None]:
     labels = get_dataarray(sdata, element_name=pair.labels_name)
     _ = _get_translation(labels, to_coordinate_system=pair.coordinate_system)
     source_labels_ndim = labels.data.ndim
 
     feature_frames: list[pd.DataFrame] = []
     ordered_columns: list[str] = []
+    source_channels: list[str] | None = None
 
     if intensity_features:
         assert pair.image_name is not None, "Intensity feature computation requires an image element."
@@ -507,6 +519,7 @@ def _compute_pair_feature_frame(
             to_coordinate_system=pair.coordinate_system,
         )
         channel_names, channel_indices = _resolve_channels(image, channels)
+        source_channels = list(channel_names)
         image_array, labels_array = _prepare_raster_arrays(image.data, labels.data, chunks=chunks)
         ordered_columns.extend(_ordered_intensity_columns(intensity_features, channel_names))
     else:
@@ -554,7 +567,7 @@ def _compute_pair_feature_frame(
     pair_frame[region_key] = pair.labels_name
     pair_frame = pair_frame.reindex(columns=[region_key, instance_key, *ordered_columns])
 
-    return pair_frame, ordered_columns
+    return pair_frame, ordered_columns, source_channels
 
 
 def _resolve_channels(
