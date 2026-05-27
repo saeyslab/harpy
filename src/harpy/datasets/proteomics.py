@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Literal
 
 import dask.array as da
 import pooch
@@ -170,6 +171,48 @@ def macsima_colorectal_carcinoma(subset: bool = True, path: str | Path | None = 
             os.path.commonpath(unzip_path),
             **kwargs,
         )
+
+
+def macsima_colorectal_carcinoma_course(
+    checkpoint: Literal["checkpoint_1", "checkpoint_2"],
+    output: str | Path | None = None,
+    path: str | Path | None = None,
+) -> SpatialData:
+    """
+    Colorectal carcinoma MACSima course dataset.
+
+    Parameters
+    ----------
+    checkpoint
+        Course checkpoint to load. ``"checkpoint_1"`` loads the first checkpoint and
+        ``"checkpoint_2"`` loads the second checkpoint.
+    output
+        The path where the resulting `SpatialData` object will be backed. If `None`, it will not be backed to a Zarr store.
+    path
+        If `None`, the example data will be downloaded into the default cache
+        directory for your OS. Provide a custom path to change this behavior.
+
+    Returns
+    -------
+    A SpatialData object.
+    """
+    checkpoints = {
+        "checkpoint_1": "proteomics/macsima/REAscreen_IO_CRC_summer_school_2026/sdata_macsima_1.zarr.zip",
+        "checkpoint_2": "proteomics/macsima/REAscreen_IO_CRC_summer_school_2026/sdata_macsima_2.zarr.zip",
+    }
+    if checkpoint not in checkpoints:
+        raise ValueError(
+            f"Invalid checkpoint {checkpoint!r}. Expected one of {', '.join(repr(key) for key in checkpoints)}."
+        )
+
+    registry = get_registry(path)
+    unzip_path = registry.fetch(checkpoints[checkpoint], processor=pooch.Unzip())
+    sdata = read_zarr(os.path.commonpath(unzip_path))
+    sdata.path = None
+    if output is not None:
+        sdata.write(output)
+        sdata = read_zarr(output)
+    return sdata
 
 
 def imc_example():

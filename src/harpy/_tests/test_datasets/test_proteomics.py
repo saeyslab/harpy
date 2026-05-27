@@ -5,7 +5,13 @@ import pytest
 from spatialdata import SpatialData, get_pyramid_levels
 from spatialdata.transformations import Identity, Scale, get_transformation
 
-from harpy.datasets.proteomics import macsima_colorectal_carcinoma, macsima_example, macsima_tonsil, mibi_example
+from harpy.datasets.proteomics import (
+    macsima_colorectal_carcinoma,
+    macsima_colorectal_carcinoma_course,
+    macsima_example,
+    macsima_tonsil,
+    mibi_example,
+)
 from harpy.image._image import get_dataarray
 
 # Do not forget to set the pooch cache dir when running these unit test on an hpc, e.g:
@@ -120,3 +126,15 @@ def test_macsima_colorectal_carcinoma_c_subset():
         transformations["global_1_micron"].to_affine_matrix(input_axes=("y", "x"), output_axes=("y", "x")),
         Scale(axes=("y", "x"), scale=[0.17, 0.17]).to_affine_matrix(input_axes=("y", "x"), output_axes=("y", "x")),
     )
+
+
+@pytest.mark.skip(reason="This test downloads a MACSima colorectal carcinoma course checkpoint to the OS cache.")
+def test_macsima_colorectal_carcinoma_course_checkpoint(tmp_path):
+    sdata = macsima_colorectal_carcinoma_course(checkpoint="checkpoint_2", output=tmp_path / "sdata.zarr")
+    assert sdata.is_backed()
+    assert isinstance(sdata, SpatialData)
+
+
+def test_macsima_colorectal_carcinoma_course_invalid_checkpoint():
+    with pytest.raises(ValueError, match="Invalid checkpoint"):
+        macsima_colorectal_carcinoma_course("checkpoint_3")  # type: ignore[arg-type]
