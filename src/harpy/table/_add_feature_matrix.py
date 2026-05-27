@@ -255,7 +255,7 @@ def add_feature_matrix(
 
     pair_frames: list[pd.DataFrame] = []
     columns: list[str] = []
-    source_channels: list[list[str]] = []
+    source_channels: list[str] | None = None
     seen_columns: set[str] = set()
     for pair in pair_specs:
         pair_frame, pair_columns, pair_channels = _compute_pair_feature_frame(
@@ -271,7 +271,17 @@ def add_feature_matrix(
         )
         pair_frames.append(pair_frame)
         if pair_channels is not None:
-            source_channels.append(pair_channels)
+            # Harpy does not support heterogeneous channels across samples, so every
+            # intensity pair must resolve to the same channels. Enforcing this keeps
+            # the feature matrix well-defined and the metadata a single channel list.
+            if source_channels is None:
+                source_channels = pair_channels
+            elif source_channels != pair_channels:
+                raise ValueError(
+                    "All labels/image pairs must resolve to the same channels for intensity-derived features, "
+                    f"but received {source_channels} and {pair_channels}. "
+                    "Harpy does not support different channels for different samples."
+                )
         for column in pair_columns:
             if column not in seen_columns:
                 seen_columns.add(column)
@@ -324,24 +334,17 @@ def add_feature_matrix(
             )
     matrix[selected_mask] = aligned_values
 
-    source_labels = [pair.labels_name for pair in pair_specs]
-    source_images = [pair.image_name for pair in pair_specs]
-    if not source_channels:
-        source_channels_metadata = None
-    elif len(source_channels) == 1:
-        source_channels_metadata = source_channels[0]
-    else:
-        source_channels_metadata = source_channels
-    coordinate_systems = [pair.coordinate_system for pair in pair_specs]
+    # Per-pair fields are always stored as lists (one entry per labels/image pair) so
+    # the metadata schema does not depend on how many pairs were requested.
     metadata = {
         "feature_columns": list(columns),
         "schema_version": 1,
         "backend": "numpy",
         "dtype": str(matrix.dtype),
-        "source_label": source_labels[0] if len(source_labels) == 1 else source_labels,
-        "source_image": source_images[0] if len(source_images) == 1 else source_images,
-        "source_channels": source_channels_metadata,
-        "coordinate_system": coordinate_systems[0] if len(coordinate_systems) == 1 else coordinate_systems,
+        "source_label": [pair.labels_name for pair in pair_specs],
+        "source_image": [pair.image_name for pair in pair_specs],
+        "source_channels": source_channels,
+        "coordinate_system": [pair.coordinate_system for pair in pair_specs],
         "features": list(requested_features),
     }
 

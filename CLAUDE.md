@@ -2,12 +2,13 @@
 Canonical environment: `.venv_harpy`. Use it as-is — do NOT sync, update, or install
 into it (e.g. no `uv sync`/`uv run`); the maintainer manages env updates manually.
 
-Activate `.venv_harpy` explicitly before running Python, tests, lint, or tooling. Because
-shell state does not persist between commands, chain the activation in the same call:
+Run Python, tests, lint, and tooling by calling the environment's binaries directly via
+their `.venv_harpy/bin/` path.
 
 ```bash
-source .venv_harpy/bin/activate && pytest
-source .venv_harpy/bin/activate && ruff check .
+.venv_harpy/bin/pytest
+.venv_harpy/bin/python -m pytest
+.venv_harpy/bin/pre-commit run ruff --all-files
 ```
 
 ## Claude config

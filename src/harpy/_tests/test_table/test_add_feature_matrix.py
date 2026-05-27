@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 from skimage.measure import regionprops_table
 from spatialdata import read_zarr
 
@@ -29,8 +30,8 @@ def test_add_feature_matrix_creates_new_table(sdata_multi_c_no_backed):
     metadata = adata.uns["feature_matrices"]["cell_features"]
     assert metadata["features"] == ["mean", "area"]
     assert metadata["feature_columns"] == ["mean__0", "mean__4", "area"]
-    assert metadata["source_label"] == "masks_whole"
-    assert metadata["source_image"] == "raw_image"
+    assert metadata["source_label"] == ["masks_whole"]
+    assert metadata["source_image"] == ["raw_image"]
     assert metadata["source_channels"] == ["0", "4"]
 
 
@@ -161,6 +162,47 @@ def test_add_feature_matrix_existing_table_preserves_other_regions(sdata_pixie_i
     assert np.isfinite(matrix[fov0_mask]).all()
     assert np.isfinite(matrix[fov1_mask]).all()
     assert adata.uns["feature_matrices"]["morphology_features"]["feature_columns"] == ["area"]
+
+
+def test_add_feature_matrix_multiple_pairs_share_flat_source_channels(sdata_pixie_intensities):
+    sdata_pixie_intensities = add_feature_matrix(
+        sdata_pixie_intensities,
+        labels_name=["label_whole_fov0", "label_whole_fov1"],
+        image_name=["raw_image_fov0", "raw_image_fov1"],
+        table_name=None,
+        output_table_name="table_multi_pair",
+        feature_key="mean_features",
+        features=["mean"],
+        channels=["CD14"],
+        to_coordinate_system=["fov0", "fov1"],
+        overwrite_output_table=True,
+    )
+
+    metadata = sdata_pixie_intensities.tables["table_multi_pair"].uns["feature_matrices"]["mean_features"]
+
+    # Channels are shared across samples, so the metadata is a single flat list, not a list of lists.
+    assert metadata["source_channels"] == ["CD14"]
+    assert metadata["feature_columns"] == ["mean__CD14"]
+    assert metadata["source_label"] == ["label_whole_fov0", "label_whole_fov1"]
+
+
+def test_add_feature_matrix_rejects_mismatched_channels_across_pairs(sdata_pixie_intensities):
+    image = sdata_pixie_intensities["raw_image_fov1"]
+    sdata_pixie_intensities["raw_image_fov1"] = image.assign_coords(c=[f"alt_{name}" for name in image.c.data])
+
+    with pytest.raises(ValueError, match="same channels"):
+        add_feature_matrix(
+            sdata_pixie_intensities,
+            labels_name=["label_whole_fov0", "label_whole_fov1"],
+            image_name=["raw_image_fov0", "raw_image_fov1"],
+            table_name=None,
+            output_table_name="table_mismatched_channels",
+            feature_key="mean_features",
+            features=["mean"],
+            channels=None,
+            to_coordinate_system=["fov0", "fov1"],
+            overwrite_output_table=True,
+        )
 
 
 def test_add_feature_matrix_persists_backed_updates(sdata_multi_c):

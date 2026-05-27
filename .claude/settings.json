@@ -11,7 +11,11 @@
   },
   "permissions": {
     "allow": [
-      "Bash(source .venv_harpy/bin/activate)",
+      "Bash(.venv_harpy/bin/pytest:*)",
+      "Bash(.venv_harpy/bin/python:*)",
+      "Bash(.venv_harpy/bin/python3:*)",
+      "Bash(.venv_harpy/bin/pre-commit:*)",
+      "Bash(.venv_harpy/bin/ruff:*)",
       "Bash(pytest:*)",
       "Bash(ruff:*)",
       "Bash(pre-commit run:*)",
