@@ -658,6 +658,16 @@ def _prepare_raster_arrays(
     if labels_chunks is not None:
         prepared_labels = prepared_labels.rechunk(labels_chunks)
 
+    # RasterAggregator requires the labels and the image to share spatial (z, y, x) chunks.
+    # The labels and image already share spatial shape (validated by _precondition), so align
+    # the (cheaper) single-band labels onto the image's spatial chunking when they differ.
+    if prepared_labels.chunksize != prepared_image.chunksize[1:]:
+        log.info(
+            "Image and labels have different chunk sizes; rechunking labels to match "
+            f"the image's spatial chunks {prepared_image.chunksize[1:]} for aggregation."
+        )
+        prepared_labels = prepared_labels.rechunk(prepared_image.chunksize[1:])
+
     return prepared_image, prepared_labels
 
 

@@ -56,6 +56,44 @@ def test_add_feature_matrix_creates_intensity_stats_table(sdata_multi_c_no_backe
     assert adata.uns["feature_matrices"]["intensity_stats"]["source_channels"] == ["0"]
 
 
+def test_add_feature_matrix_rechunks_labels_when_chunks_differ(sdata_multi_c_no_backed):
+    # Reference matrix computed when image and labels share chunks.
+    reference = add_feature_matrix(
+        sdata_multi_c_no_backed,
+        labels_name="masks_whole",
+        image_name="raw_image",
+        table_name=None,
+        output_table_name="table_reference",
+        feature_key="intensity_stats",
+        features=["mean", "var"],
+        channels=[0],
+        overwrite_output_table=True,
+    ).tables["table_reference"].obsm["intensity_stats"]
+
+    # Give the labels a different spatial chunk size than the image.
+    sdata_multi_c_no_backed["masks_whole"] = sdata_multi_c_no_backed["masks_whole"].chunk({"y": 256, "x": 256})
+
+    # Previously this raised in RasterAggregator ("Please rechunk"); now labels are
+    # auto-aligned onto the image's spatial chunks.
+    sdata_multi_c_no_backed = add_feature_matrix(
+        sdata_multi_c_no_backed,
+        labels_name="masks_whole",
+        image_name="raw_image",
+        table_name=None,
+        output_table_name="table_mismatched_chunks",
+        feature_key="intensity_stats",
+        features=["mean", "var"],
+        channels=[0],
+        overwrite_output_table=True,
+    )
+
+    matrix = sdata_multi_c_no_backed.tables["table_mismatched_chunks"].obsm["intensity_stats"]
+
+    assert np.isfinite(matrix).all()
+    # Rechunking must not change the computed values.
+    assert np.allclose(matrix, reference)
+
+
 def test_add_feature_matrix_stores_all_source_channels_when_channels_is_none(sdata_multi_c_no_backed):
     sdata_multi_c_no_backed = add_feature_matrix(
         sdata_multi_c_no_backed,
