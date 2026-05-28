@@ -234,6 +234,19 @@ def allocate_intensity(
     )
     channel_indices = [list(se_image.c.data).index(channel) for channel in channels]
     _array_img = _array_img[channel_indices]
+
+    # RasterAggregator requires the labels and the image to share spatial (z, y, x) chunks.
+    # The labels and image already share spatial shape (validated above), so align the
+    # (cheaper) single-band labels onto the image's spatial chunking when they differ.
+    # Only the aggregator's mask is rechunked; '_array_mask' is left at its native chunks
+    # for the center-of-mass path, where rechunking would significantly increase RAM usage.
+    if _array_mask_rechunked.chunksize != _array_img.chunksize[1:]:
+        log.info(
+            "Image and labels have different chunk sizes; rechunking labels to match "
+            f"the image's spatial chunks {_array_img.chunksize[1:]} for aggregation."
+        )
+        _array_mask_rechunked = _array_mask_rechunked.rechunk(_array_img.chunksize[1:])
+
     aggregator = RasterAggregator(
         image_dask_array=_array_img,
         mask_dask_array=_array_mask_rechunked,

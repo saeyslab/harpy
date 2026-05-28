@@ -96,6 +96,46 @@ def test_allocate_intensity(sdata_multi_c_no_backed: SpatialData):
     assert isinstance(sdata_multi_c_no_backed.tables["table_intensities"], AnnData)
 
 
+def test_allocate_intensity_rechunks_labels_when_chunks_differ(sdata_multi_c_no_backed: SpatialData):
+    # Reference values computed when image and labels share chunks.
+    reference = (
+        allocate_intensity(
+            sdata_multi_c_no_backed,
+            image_name="raw_image",
+            labels_name="masks_whole",
+            output_table_name="table_reference",
+            mode="mean",
+            append=False,
+            channels=[0],
+            overwrite=True,
+        )
+        .tables["table_reference"]
+        .to_df()["0"]
+        .values
+    )
+
+    # Give the labels a different spatial chunk size than the image.
+    sdata_multi_c_no_backed["masks_whole"] = sdata_multi_c_no_backed["masks_whole"].chunk({"y": 256, "x": 256})
+
+    # Previously this raised in RasterAggregator ("Please rechunk"); now the aggregator's
+    # labels are auto-aligned onto the image's spatial chunks.
+    sdata_multi_c_no_backed = allocate_intensity(
+        sdata_multi_c_no_backed,
+        image_name="raw_image",
+        labels_name="masks_whole",
+        output_table_name="table_mismatched_chunks",
+        mode="mean",
+        append=False,
+        channels=[0],
+        overwrite=True,
+    )
+
+    values = sdata_multi_c_no_backed.tables["table_mismatched_chunks"].to_df()["0"].values
+
+    # Rechunking must not change the computed values.
+    assert np.allclose(values, reference)
+
+
 def test_allocate_intensity_overwrite(sdata_multi_c: SpatialData):
     sdata_multi_c = allocate_intensity(
         sdata_multi_c,

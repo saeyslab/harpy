@@ -1,0 +1,37 @@
+{
+  "env": {
+    "UV_PROJECT_ENVIRONMENT": ".venv_harpy",
+    "PYTHONUNBUFFERED": "1",
+    "PYTHONPYCACHEPREFIX": ".cache/claude/pycache",
+    "XDG_CACHE_HOME": ".cache/claude",
+    "PIP_CACHE_DIR": ".cache/claude/pip",
+    "UV_CACHE_DIR": ".cache/claude/uv",
+    "MPLCONFIGDIR": ".cache/claude/matplotlib",
+    "RUFF_CACHE_DIR": ".cache/claude/ruff_cache"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(.venv_harpy/bin/pytest:*)",
+      "Bash(.venv_harpy/bin/python:*)",
+      "Bash(.venv_harpy/bin/python3:*)",
+      "Bash(.venv_harpy/bin/pre-commit:*)",
+      "Bash(.venv_harpy/bin/ruff:*)",
+      "Bash(pytest:*)",
+      "Bash(ruff:*)",
+      "Bash(pre-commit run:*)",
+      "Bash(python:*)",
+      "Bash(python3:*)",
+      "Bash(git status)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git branch:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(grep:*)",
+      "Bash(rg:*)",
+      "Bash(find:*)"
+    ],
+    "deny": ["Read(./.env)", "Read(./.env.*)"]
+  }
+}

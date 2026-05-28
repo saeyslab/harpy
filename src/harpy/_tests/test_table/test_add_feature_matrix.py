@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 from skimage.measure import regionprops_table
 from spatialdata import read_zarr
 
@@ -29,8 +30,9 @@ def test_add_feature_matrix_creates_new_table(sdata_multi_c_no_backed):
     metadata = adata.uns["feature_matrices"]["cell_features"]
     assert metadata["features"] == ["mean", "area"]
     assert metadata["feature_columns"] == ["mean__0", "mean__4", "area"]
-    assert metadata["source_label"] == "masks_whole"
-    assert metadata["source_image"] == "raw_image"
+    assert metadata["source_label"] == ["masks_whole"]
+    assert metadata["source_image"] == ["raw_image"]
+    assert metadata["source_channels"] == ["0", "4"]
 
 
 def test_add_feature_matrix_creates_intensity_stats_table(sdata_multi_c_no_backed):
@@ -51,6 +53,70 @@ def test_add_feature_matrix_creates_intensity_stats_table(sdata_multi_c_no_backe
     assert adata.obsm["intensity_stats"].shape == (adata.n_obs, 2)
     assert np.isfinite(adata.obsm["intensity_stats"]).all()
     assert adata.uns["feature_matrices"]["intensity_stats"]["feature_columns"] == ["mean__0", "var__0"]
+    assert adata.uns["feature_matrices"]["intensity_stats"]["source_channels"] == ["0"]
+
+
+def test_add_feature_matrix_rechunks_labels_when_chunks_differ(sdata_multi_c_no_backed):
+    # Reference matrix computed when image and labels share chunks.
+    reference = (
+        add_feature_matrix(
+            sdata_multi_c_no_backed,
+            labels_name="masks_whole",
+            image_name="raw_image",
+            table_name=None,
+            output_table_name="table_reference",
+            feature_key="intensity_stats",
+            features=["mean", "var"],
+            channels=[0],
+            overwrite_output_table=True,
+        )
+        .tables["table_reference"]
+        .obsm["intensity_stats"]
+    )
+
+    # Give the labels a different spatial chunk size than the image.
+    sdata_multi_c_no_backed["masks_whole"] = sdata_multi_c_no_backed["masks_whole"].chunk({"y": 256, "x": 256})
+
+    # Previously this raised in RasterAggregator ("Please rechunk"); now labels are
+    # auto-aligned onto the image's spatial chunks.
+    sdata_multi_c_no_backed = add_feature_matrix(
+        sdata_multi_c_no_backed,
+        labels_name="masks_whole",
+        image_name="raw_image",
+        table_name=None,
+        output_table_name="table_mismatched_chunks",
+        feature_key="intensity_stats",
+        features=["mean", "var"],
+        channels=[0],
+        overwrite_output_table=True,
+    )
+
+    matrix = sdata_multi_c_no_backed.tables["table_mismatched_chunks"].obsm["intensity_stats"]
+
+    assert np.isfinite(matrix).all()
+    # Rechunking must not change the computed values.
+    assert np.allclose(matrix, reference)
+
+
+def test_add_feature_matrix_stores_all_source_channels_when_channels_is_none(sdata_multi_c_no_backed):
+    sdata_multi_c_no_backed = add_feature_matrix(
+        sdata_multi_c_no_backed,
+        labels_name="masks_whole",
+        image_name="raw_image",
+        table_name=None,
+        output_table_name="table_all_channels",
+        feature_key="all_channels",
+        features=["mean"],
+        channels=None,
+        overwrite_output_table=True,
+    )
+
+    adata = sdata_multi_c_no_backed.tables["table_all_channels"]
+    expected_channels = [str(channel) for channel in sdata_multi_c_no_backed["raw_image"].c.data]
+    metadata = adata.uns["feature_matrices"]["all_channels"]
+
+    assert metadata["source_channels"] == expected_channels
+    assert metadata["feature_columns"] == [f"mean__{channel}" for channel in expected_channels]
 
 
 def test_add_feature_matrix_supports_2d_eccentricity_with_intensity_features(sdata_multi_c_no_backed):
@@ -103,6 +169,7 @@ def test_add_feature_matrix_supports_custom_metadata_key(sdata_multi_c_no_backed
     assert "custom_feature_matrices" in adata.uns
     assert "feature_matrices" not in adata.uns
     assert adata.uns["custom_feature_matrices"]["area_features"]["feature_columns"] == ["area"]
+    assert adata.uns["custom_feature_matrices"]["area_features"]["source_channels"] is None
 
 
 def test_add_feature_matrix_existing_table_preserves_other_regions(sdata_pixie_intensities):
@@ -139,6 +206,47 @@ def test_add_feature_matrix_existing_table_preserves_other_regions(sdata_pixie_i
     assert adata.uns["feature_matrices"]["morphology_features"]["feature_columns"] == ["area"]
 
 
+def test_add_feature_matrix_multiple_pairs_share_flat_source_channels(sdata_pixie_intensities):
+    sdata_pixie_intensities = add_feature_matrix(
+        sdata_pixie_intensities,
+        labels_name=["label_whole_fov0", "label_whole_fov1"],
+        image_name=["raw_image_fov0", "raw_image_fov1"],
+        table_name=None,
+        output_table_name="table_multi_pair",
+        feature_key="mean_features",
+        features=["mean"],
+        channels=["CD14"],
+        to_coordinate_system=["fov0", "fov1"],
+        overwrite_output_table=True,
+    )
+
+    metadata = sdata_pixie_intensities.tables["table_multi_pair"].uns["feature_matrices"]["mean_features"]
+
+    # Channels are shared across samples, so the metadata is a single flat list, not a list of lists.
+    assert metadata["source_channels"] == ["CD14"]
+    assert metadata["feature_columns"] == ["mean__CD14"]
+    assert metadata["source_label"] == ["label_whole_fov0", "label_whole_fov1"]
+
+
+def test_add_feature_matrix_rejects_mismatched_channels_across_pairs(sdata_pixie_intensities):
+    image = sdata_pixie_intensities["raw_image_fov1"]
+    sdata_pixie_intensities["raw_image_fov1"] = image.assign_coords(c=[f"alt_{name}" for name in image.c.data])
+
+    with pytest.raises(ValueError, match="same channels"):
+        add_feature_matrix(
+            sdata_pixie_intensities,
+            labels_name=["label_whole_fov0", "label_whole_fov1"],
+            image_name=["raw_image_fov0", "raw_image_fov1"],
+            table_name=None,
+            output_table_name="table_mismatched_channels",
+            feature_key="mean_features",
+            features=["mean"],
+            channels=None,
+            to_coordinate_system=["fov0", "fov1"],
+            overwrite_output_table=True,
+        )
+
+
 def test_add_feature_matrix_persists_backed_updates(sdata_multi_c):
     sdata_multi_c = add_feature_matrix(
         sdata_multi_c,
@@ -150,10 +258,24 @@ def test_add_feature_matrix_persists_backed_updates(sdata_multi_c):
         features=["area"],
         overwrite_output_table=True,
     )
+    sdata_multi_c = add_feature_matrix(
+        sdata_multi_c,
+        labels_name="masks_whole",
+        image_name="raw_image",
+        table_name=None,
+        output_table_name="table_intensity_feature_matrix",
+        feature_key="mean_features",
+        features=["mean"],
+        channels=[0],
+        overwrite_output_table=True,
+    )
 
     reloaded = read_zarr(sdata_multi_c.path)
     adata = reloaded.tables["table_feature_matrix"]
+    intensity_adata = reloaded.tables["table_intensity_feature_matrix"]
 
     assert "area_features" in adata.obsm
     assert adata.obsm["area_features"].shape == (adata.n_obs, 1)
     assert adata.uns["feature_matrices"]["area_features"]["feature_columns"].tolist() == ["area"]
+    assert adata.uns["feature_matrices"]["area_features"]["source_channels"] is None
+    assert intensity_adata.uns["feature_matrices"]["mean_features"]["source_channels"].tolist() == ["0"]

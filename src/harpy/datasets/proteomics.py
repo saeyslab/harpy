@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Literal
 
+import dask.array as da
 import pooch
 import spatialdata as sd
 import tifffile
 from numpy.typing import NDArray
 from spatialdata import SpatialData, read_zarr
-from spatialdata.transformations import get_transformation
+from spatialdata.transformations import Identity, Scale, get_transformation
 
 from harpy.datasets.registry import get_ome_registry, get_registry, get_spatialdata_registry
 from harpy.image._image import add_image
@@ -171,6 +173,48 @@ def macsima_colorectal_carcinoma(subset: bool = True, path: str | Path | None = 
         )
 
 
+def macsima_colorectal_carcinoma_course(
+    checkpoint: Literal["checkpoint_1", "checkpoint_2"],
+    output: str | Path | None = None,
+    path: str | Path | None = None,
+) -> SpatialData:
+    """
+    Colorectal carcinoma MACSima course dataset.
+
+    Parameters
+    ----------
+    checkpoint
+        Course checkpoint to load. ``"checkpoint_1"`` loads the first checkpoint and
+        ``"checkpoint_2"`` loads the second checkpoint.
+    output
+        The path where the resulting `SpatialData` object will be backed. If `None`, it will not be backed to a Zarr store.
+    path
+        If `None`, the example data will be downloaded into the default cache
+        directory for your OS. Provide a custom path to change this behavior.
+
+    Returns
+    -------
+    A SpatialData object.
+    """
+    checkpoints = {
+        "checkpoint_1": "proteomics/macsima/REAscreen_IO_CRC_summer_school_2026/sdata_macsima_1.zarr.zip",
+        "checkpoint_2": "proteomics/macsima/REAscreen_IO_CRC_summer_school_2026/sdata_macsima_2.zarr.zip",
+    }
+    if checkpoint not in checkpoints:
+        raise ValueError(
+            f"Invalid checkpoint {checkpoint!r}. Expected one of {', '.join(repr(key) for key in checkpoints)}."
+        )
+
+    registry = get_registry(path)
+    unzip_path = registry.fetch(checkpoints[checkpoint], processor=pooch.Unzip())
+    sdata = read_zarr(os.path.commonpath(unzip_path))
+    sdata.path = None
+    if output is not None:
+        sdata.write(output)
+        sdata = read_zarr(output)
+    return sdata
+
+
 def imc_example():
     """Example IMC dataset"""
     # Fetch and unzip the file
@@ -205,16 +249,47 @@ def imc_example():
     return sdata
 
 
-def vectra_example():
-    """Example proteomics dataset LuCa-7color_[13860,52919]_1x1 from Perkin Elmer"""
-    # Fetch and unzip the file
-    registry = get_ome_registry()
+def vectra_example(path: str | Path | None = None) -> SpatialData:
+    """Example proteomics dataset LuCa-7color_[13860,52919]_1x1 from Perkin Elmer
+
+    Parameters
+    ----------
+    path
+        If ``None``, the example data will be downloaded into the default cache
+        directory for your OS. Provide a custom path to change this behavior.
+
+    """
+    # Fetch and read the TIFF file
+    registry = get_ome_registry(path)
     path = registry.fetch("Vectra-QPTIFF/perkinelmer/PKI_fields/LuCa-7color_%5b13860,52919%5d_1x1component_data.tif")
     input_data, physical_pixel_size_x, physical_pixel_size_y = read_tifffile(path)
     assert physical_pixel_size_x == physical_pixel_size_y
-    # TODO use pixel metadata to set the pixel size
-    sdata = sd.SpatialData(images={"image": sd.models.Image2DModel.parse(input_data, dims="cyx")})
+    pixels_to_microns = Scale(axes=("x", "y"), scale=[physical_pixel_size_x, physical_pixel_size_y])
+    channels = [
+        "PDL1",
+        "CD8",
+        "FoxP3",
+        "CD68",
+        "PD1",
+        "CK",
+        "DAPI",
+        "Autofluorescence",
+    ]
+
+    sdata = sd.SpatialData()
+
+    sdata = add_image(
+        sdata,
+        arr=da.from_array(input_data, chunks=(1, 1024, 1024)),
+        output_image_name="image",
+        c_coords=channels,
+        scale_factors=[2, 2, 2],
+        transformations={"global": Identity(), "global_micron": pixels_to_microns},
+        overwrite=True,
+    )
+
     sdata.path = None
+
     return sdata
 
 

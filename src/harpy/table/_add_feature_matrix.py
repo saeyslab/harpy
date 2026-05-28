@@ -71,7 +71,8 @@ def add_feature_matrix(
     labels elements and writes the resulting numeric matrix into
     `.obsm[feature_key]` of a target table. Companion metadata describing
     the matrix schema and inputs is stored in
-    `.uns[feature_matrices_key][feature_key]`.
+    `.uns[feature_matrices_key][feature_key]`, including explicit
+    `source_channels` for intensity-derived features.
 
     Features are aligned onto table rows by `(region_key, instance_key)`, not
     by row order. This makes the resulting matrix immediately reusable in
@@ -254,9 +255,10 @@ def add_feature_matrix(
 
     pair_frames: list[pd.DataFrame] = []
     columns: list[str] = []
+    source_channels: list[str] | None = None
     seen_columns: set[str] = set()
     for pair in pair_specs:
-        pair_frame, pair_columns = _compute_pair_feature_frame(
+        pair_frame, pair_columns, pair_channels = _compute_pair_feature_frame(
             sdata,
             pair=pair,
             intensity_features=intensity_features,
@@ -268,6 +270,18 @@ def add_feature_matrix(
             run_on_gpu=run_on_gpu,
         )
         pair_frames.append(pair_frame)
+        if pair_channels is not None:
+            # Harpy does not support heterogeneous channels across samples, so every
+            # intensity pair must resolve to the same channels. Enforcing this keeps
+            # the feature matrix well-defined and the metadata a single channel list.
+            if source_channels is None:
+                source_channels = pair_channels
+            elif source_channels != pair_channels:
+                raise ValueError(
+                    "All labels/image pairs must resolve to the same channels for intensity-derived features, "
+                    f"but received {source_channels} and {pair_channels}. "
+                    "Harpy does not support different channels for different samples."
+                )
         for column in pair_columns:
             if column not in seen_columns:
                 seen_columns.add(column)
@@ -320,17 +334,17 @@ def add_feature_matrix(
             )
     matrix[selected_mask] = aligned_values
 
-    source_labels = [pair.labels_name for pair in pair_specs]
-    source_images = [pair.image_name for pair in pair_specs]
-    coordinate_systems = [pair.coordinate_system for pair in pair_specs]
+    # Per-pair fields are always stored as lists (one entry per labels/image pair) so
+    # the metadata schema does not depend on how many pairs were requested.
     metadata = {
         "feature_columns": list(columns),
         "schema_version": 1,
         "backend": "numpy",
         "dtype": str(matrix.dtype),
-        "source_label": source_labels[0] if len(source_labels) == 1 else source_labels,
-        "source_image": source_images[0] if len(source_images) == 1 else source_images,
-        "coordinate_system": coordinate_systems[0] if len(coordinate_systems) == 1 else coordinate_systems,
+        "source_label": [pair.labels_name for pair in pair_specs],
+        "source_image": [pair.image_name for pair in pair_specs],
+        "source_channels": source_channels,
+        "coordinate_system": [pair.coordinate_system for pair in pair_specs],
         "features": list(requested_features),
     }
 
@@ -490,13 +504,14 @@ def _compute_pair_feature_frame(
     region_key: str,
     chunks: str | int | tuple[int, ...] | None,
     run_on_gpu: bool,
-) -> tuple[pd.DataFrame, list[str]]:
+) -> tuple[pd.DataFrame, list[str], list[str] | None]:
     labels = get_dataarray(sdata, element_name=pair.labels_name)
     _ = _get_translation(labels, to_coordinate_system=pair.coordinate_system)
     source_labels_ndim = labels.data.ndim
 
     feature_frames: list[pd.DataFrame] = []
     ordered_columns: list[str] = []
+    source_channels: list[str] | None = None
 
     if intensity_features:
         assert pair.image_name is not None, "Intensity feature computation requires an image element."
@@ -507,6 +522,7 @@ def _compute_pair_feature_frame(
             to_coordinate_system=pair.coordinate_system,
         )
         channel_names, channel_indices = _resolve_channels(image, channels)
+        source_channels = list(channel_names)
         image_array, labels_array = _prepare_raster_arrays(image.data, labels.data, chunks=chunks)
         ordered_columns.extend(_ordered_intensity_columns(intensity_features, channel_names))
     else:
@@ -554,7 +570,7 @@ def _compute_pair_feature_frame(
     pair_frame[region_key] = pair.labels_name
     pair_frame = pair_frame.reindex(columns=[region_key, instance_key, *ordered_columns])
 
-    return pair_frame, ordered_columns
+    return pair_frame, ordered_columns, source_channels
 
 
 def _resolve_channels(
@@ -641,6 +657,16 @@ def _prepare_raster_arrays(
         prepared_image = prepared_image.rechunk(image_chunks)
     if labels_chunks is not None:
         prepared_labels = prepared_labels.rechunk(labels_chunks)
+
+    # RasterAggregator requires the labels and the image to share spatial (z, y, x) chunks.
+    # The labels and image already share spatial shape (validated by _precondition), so align
+    # the (cheaper) single-band labels onto the image's spatial chunking when they differ.
+    if prepared_labels.chunksize != prepared_image.chunksize[1:]:
+        log.info(
+            "Image and labels have different chunk sizes; rechunking labels to match "
+            f"the image's spatial chunks {prepared_image.chunksize[1:]} for aggregation."
+        )
+        prepared_labels = prepared_labels.rechunk(prepared_image.chunksize[1:])
 
     return prepared_image, prepared_labels
 

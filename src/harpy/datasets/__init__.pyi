@@ -3,6 +3,7 @@ from .pixie_example import pixie_example
 from .proteomics import (
     codex_example,
     macsima_colorectal_carcinoma,
+    macsima_colorectal_carcinoma_course,
     macsima_example,
     macsima_tonsil,
     macsima_tonsil_benchmark,
@@ -31,6 +32,7 @@ __all__ = [
     "macsima_tonsil_benchmark",
     "codex_example",
     "macsima_colorectal_carcinoma",
+    "macsima_colorectal_carcinoma_course",
     "mibi_example",
     "vectra_example",
     "get_ome_registry",

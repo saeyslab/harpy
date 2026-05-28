@@ -271,6 +271,7 @@ Dataset loaders.
     datasets.pixie_example
     datasets.macsima_example
     datasets.macsima_colorectal_carcinoma
+    datasets.macsima_colorectal_carcinoma_course
     datasets.macsima_tonsil
     datasets.codex_example
     datasets.mibi_example
@@ -279,6 +280,7 @@ Dataset loaders.
     datasets.merscope_mouse_liver
     datasets.xenium_human_lung_cancer
     datasets.xenium_human_ovarian_cancer
+    datasets.xenium_human_ovarian_cancer_course
     datasets.visium_hd_example
     datasets.visium_hd_example_custom_binning
     datasets.get_registry
