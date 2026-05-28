@@ -32,9 +32,6 @@
       "Bash(rg:*)",
       "Bash(find:*)"
     ],
-    "deny": [
-      "Read(./.env)",
-      "Read(./.env.*)"
-    ]
+    "deny": ["Read(./.env)", "Read(./.env.*)"]
   }
 }

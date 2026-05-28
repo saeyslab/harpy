@@ -1,4 +1,5 @@
 ## Python environment
+
 Canonical environment: `.venv_harpy`. Use it as-is — do NOT sync, update, or install
 into it (e.g. no `uv sync`/`uv run`); the maintainer manages env updates manually.
 
@@ -12,6 +13,7 @@ their `.venv_harpy/bin/` path.
 ```
 
 ## Claude config
+
 Repository-local Claude Code settings for this project live in `.claude/settings.json`.
 
 When checking or updating Claude cache, permission, or environment settings for this repo,

@@ -98,16 +98,21 @@ def test_allocate_intensity(sdata_multi_c_no_backed: SpatialData):
 
 def test_allocate_intensity_rechunks_labels_when_chunks_differ(sdata_multi_c_no_backed: SpatialData):
     # Reference values computed when image and labels share chunks.
-    reference = allocate_intensity(
-        sdata_multi_c_no_backed,
-        image_name="raw_image",
-        labels_name="masks_whole",
-        output_table_name="table_reference",
-        mode="mean",
-        append=False,
-        channels=[0],
-        overwrite=True,
-    ).tables["table_reference"].to_df()["0"].values
+    reference = (
+        allocate_intensity(
+            sdata_multi_c_no_backed,
+            image_name="raw_image",
+            labels_name="masks_whole",
+            output_table_name="table_reference",
+            mode="mean",
+            append=False,
+            channels=[0],
+            overwrite=True,
+        )
+        .tables["table_reference"]
+        .to_df()["0"]
+        .values
+    )
 
     # Give the labels a different spatial chunk size than the image.
     sdata_multi_c_no_backed["masks_whole"] = sdata_multi_c_no_backed["masks_whole"].chunk({"y": 256, "x": 256})
