@@ -1,6 +1,8 @@
 ## Python environment
 
-Canonical environment: `.venv`
+Canonical environment: `.venv`. Use it as-is — do NOT sync, update, or install
+into it (e.g. no `uv sync`/`uv run`); the maintainer manages env updates manually.
+
 
 Run Python, tests, lint, and tooling by calling the environment's binaries directly via
 their `.venv/bin/` path rather than sourcing `activate`:
