@@ -43,7 +43,10 @@ conflicts = [[
 ]]
 
 [manifest]
-overrides = [{ name = "numpy", specifier = ">=2.4.6" }]
+overrides = [
+    { name = "numba", specifier = ">=0.64.0" },
+    { name = "numpy", specifier = ">=2.4.6" },
+]
 
 [[package]]
 name = "accessible-pygments"
@@ -1723,7 +1726,6 @@ dependencies = [
     { name = "lazy-loader" },
     { name = "leidenalg" },
     { name = "magicgui" },
-    { name = "numba" },
     { name = "ome-zarr" },
     { name = "omegaconf" },
     { name = "pyrootutils" },
@@ -1884,7 +1886,6 @@ requires-dist = [
     { name = "napari", extras = ["all"], marker = "extra == 'napari'", specifier = ">=0.4.18" },
     { name = "napari-spatialdata", marker = "extra == 'napari'", specifier = ">=0.2.6" },
     { name = "nbconvert", marker = "extra == 'notebook'" },
-    { name = "numba", specifier = ">=0.64.0" },
     { name = "ome-zarr", specifier = ">=0.14.0" },
     { name = "omegaconf" },
     { name = "opencv-python-headless", marker = "extra == 'opencv'" },
