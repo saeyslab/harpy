@@ -51,7 +51,6 @@ dependencies = [
     "rasterio>=1.3.2",
     "seaborn>=0.12.2",
     "leidenalg>=0.9.1",
-    "numba>=0.64.0",
     "ome_zarr>=0.14.0",
     "omegaconf",
     "magicgui",
@@ -167,8 +166,10 @@ VIBSpatialCatalyst = "https://vib.be/en/technologies/technology-portfolio/spatia
 [tool.uv]
 # Override Cellpose 3.x's stale numpy<2.1 requirement. This keeps Python 3.13
 # installs on pre-built numpy wheels while still allowing numpy to be bumped.
+# Keep transitive numba new enough to import with the overridden numpy version.
 override-dependencies = [
     "numpy>=2.4.6",
+    "numba>=0.64.0",
 ]
 required-environments = [
     "sys_platform == 'darwin' and platform_machine == 'arm64'",
