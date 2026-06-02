@@ -1731,6 +1731,7 @@ dependencies = [
     { name = "pyrootutils" },
     { name = "rasterio" },
     { name = "scanpy" },
+    { name = "scikit-learn" },
     { name = "seaborn" },
     { name = "session-info2" },
     { name = "spatialdata" },
@@ -1760,19 +1761,15 @@ cli = [
     { name = "hydra-submitit-launcher" },
     { name = "submitit" },
 ]
-clustering = [
-    { name = "flowsom" },
-    { name = "scikit-learn" },
-]
 dev = [
     { name = "asv" },
     { name = "bokeh" },
     { name = "cellpose", version = "3.1.1.3", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-14-harpy-analysis-cellpose3'" },
     { name = "cellpose", version = "4.1.1", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-14-harpy-analysis-cellpose4' or extra != 'extra-14-harpy-analysis-cellpose3'" },
-    { name = "flowsom" },
     { name = "hydra-colorlog" },
     { name = "hydra-core" },
     { name = "hydra-submitit-launcher" },
+    { name = "instanseg-torch" },
     { name = "ipython" },
     { name = "ipywidgets" },
     { name = "joypy" },
@@ -1782,7 +1779,6 @@ dev = [
     { name = "pre-commit" },
     { name = "pytest" },
     { name = "pytest-cov" },
-    { name = "scikit-learn" },
     { name = "sphinx" },
     { name = "sphinx-autodoc-typehints" },
     { name = "sphinx-book-theme" },
@@ -1811,16 +1807,15 @@ extra = [
     { name = "bokeh" },
     { name = "cellpose", version = "3.1.1.3", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-14-harpy-analysis-cellpose3'" },
     { name = "cellpose", version = "4.1.1", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-14-harpy-analysis-cellpose4' or extra != 'extra-14-harpy-analysis-cellpose3'" },
-    { name = "flowsom" },
     { name = "hydra-colorlog" },
     { name = "hydra-core" },
     { name = "hydra-submitit-launcher" },
+    { name = "instanseg-torch" },
     { name = "ipython" },
     { name = "ipywidgets" },
     { name = "joypy" },
     { name = "nbconvert" },
     { name = "opencv-python-headless" },
-    { name = "scikit-learn" },
     { name = "submitit" },
     { name = "supervenn" },
     { name = "textalloc" },
@@ -1847,10 +1842,6 @@ notebook = [
 opencv = [
     { name = "opencv-python-headless" },
 ]
-segmentation = [
-    { name = "cellpose", version = "3.1.1.3", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-14-harpy-analysis-cellpose3'" },
-    { name = "cellpose", version = "4.1.1", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-14-harpy-analysis-cellpose4' or extra != 'extra-14-harpy-analysis-cellpose3'" },
-]
 test = [
     { name = "opencv-python-headless" },
     { name = "pytest" },
@@ -1868,9 +1859,7 @@ requires-dist = [
     { name = "crick" },
     { name = "distributed" },
     { name = "flowsom" },
-    { name = "flowsom", marker = "extra == 'clustering'" },
-    { name = "harpy-analysis", extras = ["cellpose"], marker = "extra == 'segmentation'" },
-    { name = "harpy-analysis", extras = ["cli", "segmentation", "opencv", "clustering", "notebook"], marker = "extra == 'extra'" },
+    { name = "harpy-analysis", extras = ["cellpose", "instanseg", "opencv", "cli", "notebook"], marker = "extra == 'extra'" },
     { name = "harpy-analysis", extras = ["extra", "test", "docs", "benchmark"], marker = "extra == 'dev'" },
     { name = "hydra-colorlog", marker = "extra == 'cli'", specifier = ">=1.2.0" },
     { name = "hydra-core", marker = "extra == 'cli'", specifier = ">=1.2.0" },
@@ -1896,7 +1885,7 @@ requires-dist = [
     { name = "pytest-cov", marker = "extra == 'test'" },
     { name = "rasterio", specifier = ">=1.3.2" },
     { name = "scanpy", specifier = ">=1.9.1" },
-    { name = "scikit-learn", marker = "extra == 'clustering'", specifier = ">=1.3.1" },
+    { name = "scikit-learn", specifier = ">=1.3.1" },
     { name = "seaborn", specifier = ">=0.12.2" },
     { name = "session-info2" },
     { name = "spatialdata", specifier = ">=0.7.3" },
@@ -1918,7 +1907,7 @@ requires-dist = [
     { name = "universal-pathlib" },
     { name = "voronoi-diagram-for-polygons", specifier = ">=0.1.6" },
 ]
-provides-extras = ["cellpose", "cellpose3", "cellpose4", "instanseg", "segmentation", "opencv", "clustering", "napari", "cli", "notebook", "extra", "test", "docs", "benchmark", "dev"]
+provides-extras = ["cellpose", "cellpose3", "cellpose4", "instanseg", "opencv", "napari", "cli", "notebook", "extra", "test", "docs", "benchmark", "dev"]
 
 [[package]]
 name = "heapdict"
