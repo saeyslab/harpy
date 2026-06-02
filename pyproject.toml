@@ -47,6 +47,7 @@ dependencies = [
     "spatialdata>=0.7.3",
     "distributed",
     "scanpy>=1.9.1",
+    "scikit-learn>=1.3.1",
     "voronoi-diagram-for-polygons>=0.1.6",
     "rasterio>=1.3.2",
     "seaborn>=0.12.2",
@@ -80,9 +81,6 @@ cellpose4 = [
 instanseg = [
     "instanseg-torch>=0.1.1",
 ]
-segmentation = [
-    "harpy-analysis[cellpose]"
-]
 # installation basicpy broken https://github.com/peng-lab/BaSiCPy/issues/162 fix:
 #basic = [
 #    "jax>=0.4.6,<=0.4.23; python_version <= '3.11'",
@@ -94,10 +92,6 @@ segmentation = [
 
 opencv = [
     "opencv-python-headless",
-]
-clustering = [
-    "flowsom",
-    "scikit-learn>=1.3.1",
 ]
 # additional UI or CLI interfaces
 napari = [
@@ -123,7 +117,7 @@ notebook = [
 # best default for end-users
 extra = [
     # do not support basic tiling correction, and squidpy installation in default PyPI install
-    "harpy-analysis[cli,segmentation,opencv,clustering,notebook]",
+    "harpy-analysis[cellpose,instanseg,opencv,cli,notebook]",
 ]
 # dev dependencies
 test = [
