@@ -1960,7 +1960,7 @@ wheels = [
 
 [[package]]
 name = "harpy-analysis"
-version = "0.4.2"
+version = "0.4.3"
 source = { editable = "." }
 dependencies = [
     { name = "crick" },
@@ -6941,7 +6941,7 @@ name = "triangle"
 version = "20250106"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy" },
+    { name = "numpy", marker = "(python_full_version < '3.14' and platform_machine != 'x86_64') or (python_full_version < '3.14' and sys_platform != 'darwin') or (platform_machine == 'x86_64' and sys_platform == 'darwin') or (platform_machine != 'x86_64' and extra == 'extra-14-harpy-analysis-cellpose3' and extra == 'extra-14-harpy-analysis-cellpose4') or (sys_platform != 'darwin' and extra == 'extra-14-harpy-analysis-cellpose3' and extra == 'extra-14-harpy-analysis-cellpose4')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/5c/91/83167e3d0cd1912b46e61a2b3485bf9886e49b48cea4daa59e8de4058a1a/triangle-20250106-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:93bd02b3341b2e4452952cb7605cf239bddd788a6f410ea54aeeb7db61836ba5", size = 1438115, upload-time = "2025-01-07T04:54:01.302Z" },
