@@ -1,6 +1,6 @@
 {
   "env": {
-    "UV_PROJECT_ENVIRONMENT": ".venv_harpy",
+    "UV_PROJECT_ENVIRONMENT": ".venv",
     "PYTHONUNBUFFERED": "1",
     "PYTHONPYCACHEPREFIX": ".cache/claude/pycache",
     "XDG_CACHE_HOME": ".cache/claude",
@@ -11,11 +11,11 @@
   },
   "permissions": {
     "allow": [
-      "Bash(.venv_harpy/bin/pytest:*)",
-      "Bash(.venv_harpy/bin/python:*)",
-      "Bash(.venv_harpy/bin/python3:*)",
-      "Bash(.venv_harpy/bin/pre-commit:*)",
-      "Bash(.venv_harpy/bin/ruff:*)",
+      "Bash(.venv/bin/pytest:*)",
+      "Bash(.venv/bin/python:*)",
+      "Bash(.venv/bin/python3:*)",
+      "Bash(.venv/bin/pre-commit:*)",
+      "Bash(.venv/bin/ruff:*)",
       "Bash(pytest:*)",
       "Bash(ruff:*)",
       "Bash(pre-commit run:*)",

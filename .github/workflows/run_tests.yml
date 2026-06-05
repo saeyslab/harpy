@@ -53,7 +53,7 @@ jobs:
             **/pyproject.toml
 
       - name: Sync env (locked, --lock makes it fail immediatelly if uv.lock out of date with pyproject.toml)
-        run: uv sync --locked --extra dev --python ${{ matrix.python }}
+        run: uv sync --locked --extra dev --extra cellpose3 --python ${{ matrix.python }}
 
       - name: run tests using uv and pytest (locked, no sync)
         env:

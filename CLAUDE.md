@@ -1,15 +1,15 @@
 ## Python environment
 
-Canonical environment: `.venv_harpy`. Use it as-is — do NOT sync, update, or install
+Canonical environment: `.venv`. Use it as-is — do NOT sync, update, or install
 into it (e.g. no `uv sync`/`uv run`); the maintainer manages env updates manually.
 
 Run Python, tests, lint, and tooling by calling the environment's binaries directly via
-their `.venv_harpy/bin/` path.
+their `.venv/bin/` path.
 
 ```bash
-.venv_harpy/bin/pytest
-.venv_harpy/bin/python -m pytest
-.venv_harpy/bin/pre-commit run ruff --all-files
+.venv/bin/pytest
+.venv/bin/python -m pytest
+.venv/bin/pre-commit run ruff --all-files
 ```
 
 ## Claude config
