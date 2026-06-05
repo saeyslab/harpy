@@ -36,7 +36,7 @@
   ·
   <a href="https://github.com/vibspatial/napari-harpy">napari-harpy</a>
   ·
-  <a href="https://github.com/vibspatial/harpy_vitessce">Harpy Vitessce</a>
+  <a href="https://github.com/vibspatial/harpy_vitessce">harpy-vitessce</a>
 </p>
 
 > 💫 **If you find Harpy useful, please give us a [⭐](https://github.com/saeyslab/harpy)!** It helps others discover the project and supports continued development.
@@ -66,9 +66,10 @@ pip install "harpy-analysis[extra]"
 
 `[extra]` installs optional dependencies for:
 
-- Segmentation: `cellpose`
+- Segmentation: `cellpose`, `instanseg-torch`
 - OpenCV support: `opencv-python-headless`
 - FlowSOM Clustering: `flowsom`
+- Vitessce: `harpy-vitessce`
 - Notebook workflows: `ipywidgets`, `tqdm`, `bokeh`, `textalloc`, `joypy`, `supervenn`, `nbconvert`, `ipython`
 - CLI workflows: `hydra-core`
 
@@ -81,6 +82,7 @@ pip install "harpy-analysis[extra,napari]"
 `[napari]` adds:
 
 - `napari[all]`
+- `napari-harpy`
 - `napari-spatialdata`
 
 **Only for developers.** Clone this repository locally, install the `.[dev]` instead of the `[extra]` dependencies and read the [contribution guide](https://harpy.readthedocs.io/en/latest/contributing.html).
@@ -95,7 +97,7 @@ python -c 'import harpy; print(harpy.__version__)'  # check if the package is in
 python -m pytest  # run the tests
 ```
 
-It is possible to install Harpy using Anaconda although we recommend [uv](https://github.com/astral-sh/uv), see the [installation guide](./docs/installation.md).
+For more installation details, see the [installation guide](./docs/installation.md).
 
 ## Quickstart
 
