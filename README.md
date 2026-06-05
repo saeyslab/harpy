@@ -95,7 +95,7 @@ python -c 'import harpy; print(harpy.__version__)'  # check if the package is in
 python -m pytest  # run the tests
 ```
 
-It is possible to install Harpy using Anaconda although we recommend [uv](https://github.com/astral-sh/uv), see the [installation guide](./docs/installation.md).
+For more installation details, see the [installation guide](./docs/installation.md).
 
 ## Quickstart
 
