@@ -15,6 +15,7 @@ pip install "harpy-analysis[extra]"
 - Segmentation: `cellpose`
 - OpenCV support: `opencv-python-headless`
 - FlowSOM Clustering: `flowsom`, `scikit-learn`
+- Vitessce: `harpy-vitessce`
 - Notebook workflows: `ipywidgets`, `tqdm`, `bokeh`, `textalloc`, `joypy`, `supervenn`, `nbconvert`, `ipython`
 - CLI workflows: `hydra-core`, `hydra-colorlog`, `submitit`, `hydra-submitit-launcher`
 
@@ -27,6 +28,7 @@ pip install "harpy-analysis[extra,napari]"
 `[napari]` adds:
 
 - `napari[all]`
+- `napari-harpy`
 - `napari-spatialdata`
 
 **Only for developers.** Clone this repository locally, install the `.[dev]` instead of the `.[extra]` dependencies and read the [contribution guide](contributing.md).
