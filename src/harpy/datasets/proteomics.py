@@ -14,7 +14,6 @@ from spatialdata.transformations import Identity, Scale, get_transformation
 
 from harpy.datasets.registry import get_ome_registry, get_registry, get_spatialdata_registry
 from harpy.image._image import add_image
-from harpy.io._macsima import macsima
 
 
 def mibi_example() -> SpatialData:
@@ -150,6 +149,8 @@ def macsima_colorectal_carcinoma(subset: bool = True, path: str | Path | None = 
     --------
     harpy.io.macsima : Reader for MACSima data.
     """
+    from harpy.io._macsima import macsima
+
     registry = get_registry(path)
     if subset:
         files = [
