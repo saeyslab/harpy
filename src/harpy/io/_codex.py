@@ -12,36 +12,16 @@ import tifffile
 from spatialdata import SpatialData, read_zarr
 from spatialdata.models import Image2DModel
 from spatialdata.transformations import Identity, Scale
-from xarray import DataArray, DataTree
 
-_COMMON_METADATA_FIELDS = (
-    "AcquisitionSoftware",
-    "AutofluorescenceSubtracted",
-    "CameraName",
-    "CameraType",
-    "ImageType",
-    "InstrumentType",
-    "Objective",
-    "OperatorName",
-    "SampleDescription",
-    "ScaleFactor",
-    "SlideID",
-    "StudyName",
-)
-_CHANNEL_METADATA_FIELDS = (
-    "AutofluorescenceSubtracted",
+_CHANNEL_NAME_FIELDS = (
     "Biomarker",
-    "Color",
-    "ExposureTime",
-    "Identifier",
-    "ImageType",
     "Name",
-    "Objective",
-    "ScaleFactor",
 )
+_DEFAULT_PYRAMID_MAX_SIZE = 2048
+_DEFAULT_SCALE_FACTOR = 2
 
 
-def qptiff(
+def codex(
     path: str | Path,
     image_name: str = "image",
     to_coordinate_system: str = "global",
@@ -55,7 +35,7 @@ def qptiff(
     overwrite: bool = False,
 ) -> SpatialData:
     """
-    Read a PerkinElmer/Akoya QPTIFF image as a :class:`spatialdata.SpatialData` object.
+    Read a PerkinElmer/Akoya CODEX QPTIFF image as a :class:`spatialdata.SpatialData` object.
 
     The pixel data is loaded lazily through :func:`tifffile.imread` with ``return_as="zarr"``.
     QPTIFF metadata is read from TIFF tags and PerkinElmer XML descriptions; channel coordinates
@@ -81,7 +61,8 @@ def qptiff(
     chunks
         Optional Dask rechunking applied before creating the SpatialData image element.
     image_models_kwargs
-        Additional keyword arguments passed to :meth:`spatialdata.models.Image2DModel.parse`.
+        Additional keyword arguments passed to :meth:`spatialdata.models.Image2DModel.parse`. If ``scale_factors``
+        is omitted, a size-based default is used. Pass ``{"scale_factors": None}`` to opt out.
     output
         Optional path where the resulting SpatialData object should be written.
     overwrite
@@ -101,13 +82,16 @@ def qptiff(
     if not path.exists():
         raise FileNotFoundError(f"QPTIFF file does not exist: {path}")
 
-    metadata = _read_qptiff_metadata(path, series=series, level=level, channel_names=channel_names)
-    data = _read_qptiff_level(path, series=metadata["series"], level=level)
+    metadata = _read_codex_metadata(path, series=series, level=level, channel_names=channel_names)
+    data = _read_codex_level(path, series=metadata["series"], level=level)
 
     image_models_kwargs = dict(image_models_kwargs)
     chunks = chunks if chunks is not None else image_models_kwargs.pop("chunks", None)
     if chunks is not None:
         data = data.rechunk(chunks)
+
+    if "scale_factors" not in image_models_kwargs:
+        image_models_kwargs["scale_factors"] = _default_scale_factors(data.shape[-2:])
 
     transformations = {to_coordinate_system: Identity()}
     pixel_size = metadata["physical_pixel_size"]
@@ -125,7 +109,6 @@ def qptiff(
         transformations=transformations,
         **image_models_kwargs,
     )
-    _set_qptiff_attrs(se, metadata)
 
     sdata = SpatialData()
     sdata[_clean_element_name(image_name)] = se
@@ -137,7 +120,7 @@ def qptiff(
     return sdata
 
 
-def _read_qptiff_level(path: Path, *, series: int, level: int) -> da.Array:
+def _read_codex_level(path: Path, *, series: int, level: int) -> da.Array:
     store = tifffile.imread(path, series=series, level=level, return_as="zarr")
     try:
         array = da.from_zarr(store)
@@ -149,7 +132,7 @@ def _read_qptiff_level(path: Path, *, series: int, level: int) -> da.Array:
     return array
 
 
-def _read_qptiff_metadata(
+def _read_codex_metadata(
     path: Path,
     *,
     series: int | None,
@@ -157,7 +140,7 @@ def _read_qptiff_metadata(
     channel_names: Sequence[str] | None,
 ) -> dict[str, Any]:
     with tifffile.TiffFile(path) as tif:
-        series_index = _select_qptiff_series(tif, series=series)
+        series_index = _select_codex_series(tif, series=series)
         tiff_series = tif.series[series_index]
         if level < 0 or level >= len(tiff_series.levels):
             raise ValueError(
@@ -175,7 +158,7 @@ def _read_qptiff_metadata(
         channel_count = tiff_series.shape[0]
         pages = list(tiff_series.pages)
         page_metadata = [
-            _parse_perkinelmer_description(pages[i].description if i < len(pages) else None)
+            _parse_channel_name_fields(pages[i].description if i < len(pages) else None)
             for i in range(channel_count)
         ]
 
@@ -193,37 +176,20 @@ def _read_qptiff_metadata(
                 )
 
         base_page = pages[0]
-        pixel_size_x, pixel_size_y, resolution_unit = _physical_pixel_size_from_page(base_page)
-        common_metadata = {
-            field: page_metadata[0][field] for field in _COMMON_METADATA_FIELDS if field in page_metadata[0]
-        }
+        pixel_size_x, pixel_size_y = _physical_pixel_size_from_page(base_page)
 
         return {
-            "path": str(path),
             "series": series_index,
-            "level": level,
             "axes": tiff_series.axes,
-            "shape": tuple(int(item) for item in tiff_series.levels[level].shape),
-            "dtype": str(tiff_series.dtype),
             "channel_names": _make_unique_channel_names(parsed_channel_names),
-            "channels": [
-                {
-                    "index": i,
-                    **{field: fields[field] for field in _CHANNEL_METADATA_FIELDS if field in fields},
-                }
-                for i, fields in enumerate(page_metadata)
-            ],
-            "image": common_metadata,
             "physical_pixel_size": {
                 "x": pixel_size_x,
                 "y": pixel_size_y,
-                "unit": "micrometer" if pixel_size_x is not None and pixel_size_y is not None else None,
-                "resolution_unit": resolution_unit,
             },
         }
 
 
-def _select_qptiff_series(tif: tifffile.TiffFile, *, series: int | None) -> int:
+def _select_codex_series(tif: tifffile.TiffFile, *, series: int | None) -> int:
     if series is not None:
         if series < 0 or series >= len(tif.series):
             raise ValueError(f"Series {series} not found. Available series are 0..{len(tif.series) - 1}.")
@@ -244,7 +210,7 @@ def _select_qptiff_series(tif: tifffile.TiffFile, *, series: int | None) -> int:
     raise ValueError("Could not find a non-RGB 3D channel-by-YX series in the QPTIFF file.")
 
 
-def _parse_perkinelmer_description(description: str | None) -> dict[str, str]:
+def _parse_channel_name_fields(description: str | None) -> dict[str, str]:
     if not description:
         return {}
     try:
@@ -253,7 +219,7 @@ def _parse_perkinelmer_description(description: str | None) -> dict[str, str]:
         return {}
 
     fields = {}
-    for field in {*_COMMON_METADATA_FIELDS, *_CHANNEL_METADATA_FIELDS}:
+    for field in _CHANNEL_NAME_FIELDS:
         value = root.findtext(field)
         if value is not None:
             value = value.strip()
@@ -262,20 +228,20 @@ def _parse_perkinelmer_description(description: str | None) -> dict[str, str]:
     return fields
 
 
-def _physical_pixel_size_from_page(page: tifffile.TiffPage) -> tuple[float | None, float | None, str | None]:
+def _physical_pixel_size_from_page(page: tifffile.TiffPage) -> tuple[float | None, float | None]:
     tags = page.tags
     x_resolution = _resolution_value(tags.get("XResolution"))
     y_resolution = _resolution_value(tags.get("YResolution"))
     resolution_unit = _resolution_unit(tags.get("ResolutionUnit"))
 
     if x_resolution is None or y_resolution is None or resolution_unit is None:
-        return None, None, resolution_unit
+        return None, None
 
     unit_size_um = {"inch": 25_400.0, "centimeter": 10_000.0}.get(resolution_unit)
     if unit_size_um is None:
-        return None, None, resolution_unit
+        return None, None
 
-    return unit_size_um / x_resolution, unit_size_um / y_resolution, resolution_unit
+    return unit_size_um / x_resolution, unit_size_um / y_resolution
 
 
 def _resolution_value(tag: tifffile.TiffTag | None) -> float | None:
@@ -314,11 +280,15 @@ def _make_unique_channel_names(channel_names: Sequence[str]) -> list[str]:
     return unique_names
 
 
-def _set_qptiff_attrs(se: DataArray | DataTree, metadata: Mapping[str, Any]) -> None:
-    se.attrs["qptiff"] = dict(metadata)
+def _default_scale_factors(shape: Sequence[int]) -> list[int] | None:
+    max_size = max(int(size) for size in shape)
+    scale_factors = []
+    while max_size > _DEFAULT_PYRAMID_MAX_SIZE:
+        scale_factors.append(_DEFAULT_SCALE_FACTOR)
+        max_size = (max_size + _DEFAULT_SCALE_FACTOR - 1) // _DEFAULT_SCALE_FACTOR
+    return scale_factors or None
 
 
 def _clean_element_name(name: str) -> str:
     name = re.sub(r"[^a-zA-Z0-9_]", "_", name)
     return name or "image"
-

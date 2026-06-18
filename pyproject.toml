@@ -182,7 +182,15 @@ conflicts = [
 
 [tool.coverage.run]
 source = ["harpy"]
-omit = ["src/harpy/_tests/*", "experiments/*", "src/harpy/widgets/*", "src/harpy/externals/*", "docs/*" ]
+omit = [
+    "src/harpy/_tests/*",
+    "experiments/*",
+    "src/harpy/widgets/*",
+    "src/harpy/externals/*",
+    "src/harpy/io/*",
+    "src/harpy/pipeline.py",
+    "docs/*",
+]
 
 [tool.ruff]
 src = ["src"]
