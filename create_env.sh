@@ -7,4 +7,4 @@
 
 # Use uv sync so pyproject.toml, including [tool.uv] dependency overrides, is
 # the single source of truth for the environment.
-UV_PROJECT_ENVIRONMENT=.venv uv sync --python 3.13 --locked --extra napari --extra extra --extra dev --extra cellpose3
+UV_PROJECT_ENVIRONMENT=.venv uv sync --python 3.13 --locked --extra napari --extra extra --extra dev --extra cellpose4

@@ -1,3 +1,4 @@
+from ._codex import qptiff
 from ._macsima import macsima
 from ._merscope import merscope
 from ._spatial_data import create_sdata
@@ -15,6 +16,7 @@ from ._zarr import convert_to_zarr_2
 __all__ = [
     "macsima",
     "merscope",
+    "qptiff",
     "convert_to_zarr_2",
     "create_sdata",
     "read_merscope_transcripts",
