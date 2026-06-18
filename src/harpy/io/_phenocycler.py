@@ -22,7 +22,7 @@ _DEFAULT_SCALE_FACTOR = 2
 _DEFAULT_CHUNKS = (1, 1024, 1024)
 
 
-def codex(
+def phenocycler(
     path: str | Path,
     image_name: str = "image",
     to_coordinate_system: str = "global",
@@ -36,10 +36,10 @@ def codex(
     overwrite: bool = False,
 ) -> SpatialData:
     """
-    Read a PerkinElmer/Akoya CODEX QPTIFF image as a :class:`spatialdata.SpatialData` object.
+    Read an Akoya/Quanterix PhenoCycler QPTIFF image as a :class:`spatialdata.SpatialData` object.
 
     The pixel data is loaded lazily through :func:`tifffile.imread` with ``return_as="zarr"``.
-    QPTIFF metadata is read from TIFF tags and PerkinElmer XML descriptions; channel coordinates
+    QPTIFF metadata is read from TIFF tags and vendor XML descriptions; channel coordinates
     are taken from the XML ``Biomarker`` field when available, falling back to ``Name``.
 
     Parameters
@@ -84,8 +84,8 @@ def codex(
     if not path.exists():
         raise FileNotFoundError(f"QPTIFF file does not exist: {path}")
 
-    metadata = _read_codex_metadata(path, series=series, level=level, channel_names=channel_names)
-    data = _read_codex_level(path, series=metadata["series"], level=level)
+    metadata = _read_phenocycler_metadata(path, series=series, level=level, channel_names=channel_names)
+    data = _read_phenocycler_level(path, series=metadata["series"], level=level)
 
     image_models_kwargs = dict(image_models_kwargs)
     image_model_chunks = image_models_kwargs.pop("chunks", None)
@@ -124,7 +124,7 @@ def codex(
     return sdata
 
 
-def _read_codex_level(path: Path, *, series: int, level: int) -> da.Array:
+def _read_phenocycler_level(path: Path, *, series: int, level: int) -> da.Array:
     store = tifffile.imread(path, series=series, level=level, return_as="zarr")
     # SpatialData scans Dask graphs for backing files before writing and expects
     # Zarr stores to expose either ``path`` or ``root``. ZarrTiffStore exposes neither.
@@ -139,7 +139,7 @@ def _read_codex_level(path: Path, *, series: int, level: int) -> da.Array:
     return array
 
 
-def _read_codex_metadata(
+def _read_phenocycler_metadata(
     path: Path,
     *,
     series: int | None,
@@ -147,7 +147,7 @@ def _read_codex_metadata(
     channel_names: Sequence[str] | None,
 ) -> dict[str, Any]:
     with tifffile.TiffFile(path) as tif:
-        series_index = _select_codex_series(tif, series=series)
+        series_index = _select_phenocycler_series(tif, series=series)
         tiff_series = tif.series[series_index]
         if level < 0 or level >= len(tiff_series.levels):
             raise ValueError(
@@ -195,7 +195,7 @@ def _read_codex_metadata(
         }
 
 
-def _select_codex_series(tif: tifffile.TiffFile, *, series: int | None) -> int:
+def _select_phenocycler_series(tif: tifffile.TiffFile, *, series: int | None) -> int:
     if series is not None:
         if series < 0 or series >= len(tif.series):
             raise ValueError(f"Series {series} not found. Available series are 0..{len(tif.series) - 1}.")

@@ -1,6 +1,6 @@
-from ._codex import codex
 from ._macsima import macsima
 from ._merscope import merscope
+from ._phenocycler import phenocycler
 from ._spatial_data import create_sdata
 from ._transcripts import (
     read_merscope_transcripts,
@@ -16,7 +16,7 @@ from ._zarr import convert_to_zarr_2
 __all__ = [
     "macsima",
     "merscope",
-    "codex",
+    "phenocycler",
     "convert_to_zarr_2",
     "create_sdata",
     "read_merscope_transcripts",
