@@ -96,7 +96,7 @@ opencv = [
 napari = [
     "napari[all]>=0.4.18",
     "napari-spatialdata>=0.2.6",
-    "napari-harpy",
+    "napari-harpy>=0.0.11",
 ]
 vitessce = [
     "harpy-vitessce ; python_version >= '3.12'"

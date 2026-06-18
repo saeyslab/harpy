@@ -32,6 +32,7 @@ def image_histogram(
     density: bool = False,
     log_y: bool = False,
     percentile_lines: Sequence[float] | None = None,
+    percentile_internal_method: str = "tdigest",
     kind: str = "hist",
     exclude_zeros: bool = True,
     exclude_nan: bool = True,
@@ -81,6 +82,8 @@ def image_histogram(
         If ``True``, use a logarithmic scale for the y-axis.
     percentile_lines
         Percentile values in the interval ``[0, 100]`` to visualize as vertical guide lines.
+    percentile_internal_method
+        Internal Dask method used when computing percentile guide lines.
     kind
         Plot kind. Choose between ``"hist"`` for a histogram and ``"ecdf"`` for an empirical cumulative
         distribution plot.
@@ -157,6 +160,7 @@ def image_histogram(
             density=density,
             log_y=log_y,
             percentile_lines=percentile_lines,
+            percentile_internal_method=percentile_internal_method,
             kind=kind,
             exclude_zeros=exclude_zeros,
             exclude_nan=exclude_nan,
@@ -201,6 +205,7 @@ def image_histogram(
             density=density,
             log_y=log_y,
             percentile_lines=percentile_lines,
+            percentile_internal_method=percentile_internal_method,
             kind=kind,
             exclude_zeros=exclude_zeros,
             exclude_nan=exclude_nan,
@@ -228,6 +233,7 @@ def _plot_histogram_for_channel(
     density: bool,
     log_y: bool,
     percentile_lines: Sequence[float] | None,
+    percentile_internal_method: str,
     kind: str,
     exclude_zeros: bool,
     exclude_nan: bool,
@@ -276,7 +282,9 @@ def _plot_histogram_for_channel(
             ax.set_xlim(range)
 
     if percentile_lines is not None:
-        percentile_values = da.percentile(array, q=list(percentile_lines)).compute()
+        percentile_values = da.percentile(
+            array, q=list(percentile_lines), internal_method=percentile_internal_method
+        ).compute()
         percentile_values = np.atleast_1d(percentile_values)
         for percentile, value in zip(percentile_lines, percentile_values, strict=True):
             ax.axvline(value, color=color, linestyle="--", linewidth=1, alpha=0.6)

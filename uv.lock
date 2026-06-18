@@ -2123,7 +2123,7 @@ requires-dist = [
     { name = "magicgui" },
     { name = "myst-nb", marker = "extra == 'docs'" },
     { name = "napari", extras = ["all"], marker = "extra == 'napari'", specifier = ">=0.4.18" },
-    { name = "napari-harpy", marker = "extra == 'napari'" },
+    { name = "napari-harpy", marker = "extra == 'napari'", specifier = ">=0.0.11" },
     { name = "napari-spatialdata", marker = "extra == 'napari'", specifier = ">=0.2.6" },
     { name = "nbconvert", marker = "extra == 'notebook'" },
     { name = "ome-zarr", specifier = ">=0.14.0" },
@@ -3577,7 +3577,7 @@ wheels = [
 
 [[package]]
 name = "napari-harpy"
-version = "0.0.8"
+version = "0.0.11"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "dask", extra = ["dataframe"] },
@@ -3591,9 +3591,9 @@ dependencies = [
     { name = "pyarrow" },
     { name = "spatialdata" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/52/a4/5fd8c0f13e40d7e9c46308b874f6ecc8dea595be74368df17b86a5a0ae07/napari_harpy-0.0.8.tar.gz", hash = "sha256:6aec2cff0c1f8751e64c26ccdbd802c5e5741e9ab5acc836c5d49f5dbd35c22a", size = 11818101, upload-time = "2026-06-04T09:21:54.288Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c3/a5/0b264d26be9ca437ab735bdd612ad5067ac4f1980b755e95d26f7303c9d8/napari_harpy-0.0.11.tar.gz", hash = "sha256:3dc5be993a50ebf63fe4a3024344eeb4569deb3b0ca6c43a493e9141baa206d1", size = 19567339, upload-time = "2026-06-14T19:19:30.139Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b9/88/021750ad486adb0c0d2c2758ee3dcac5c7df537b21b18d01452a715ba525/napari_harpy-0.0.8-py3-none-any.whl", hash = "sha256:759e95c42bd9539205beb7cfeda339178ba920bbbf26027e9ee6007a9677919a", size = 503011, upload-time = "2026-06-04T09:21:52.417Z" },
+    { url = "https://files.pythonhosted.org/packages/5f/dc/37c91abff16ba8229825316a62fae3b357767be40c2b40e3a9e5dea3b1b6/napari_harpy-0.0.11-py3-none-any.whl", hash = "sha256:153626838a653501419c12e6ebc0b82d45866cf7f38302e1ad006cda7ed7ae03", size = 524915, upload-time = "2026-06-14T19:19:28.058Z" },
 ]
 
 [[package]]
