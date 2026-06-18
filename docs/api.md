@@ -21,6 +21,7 @@ I/O.
 .. autosummary::
     :toctree: generated
 
+    io.phenocycler
     io.macsima
     io.merscope
     io.xenium
