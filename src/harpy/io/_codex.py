@@ -17,8 +17,9 @@ _CHANNEL_NAME_FIELDS = (
     "Biomarker",
     "Name",
 )
-_DEFAULT_PYRAMID_MAX_SIZE = 2048
+_DEFAULT_PYRAMID_MAX_SIZE = 1024
 _DEFAULT_SCALE_FACTOR = 2
+_DEFAULT_CHUNKS = (1, 1024, 1024)
 
 
 def codex(
@@ -29,7 +30,7 @@ def codex(
     channel_names: Sequence[str] | None = None,
     series: int | None = None,
     level: int = 0,
-    chunks: str | tuple[int, ...] | int | None = None,
+    chunks: str | tuple[int, ...] | int | None = _DEFAULT_CHUNKS,
     image_models_kwargs: Mapping[str, Any] = MappingProxyType({}),
     output: str | Path | None = None,
     overwrite: bool = False,
@@ -59,7 +60,8 @@ def codex(
     level
         Pyramid level to read. Defaults to full resolution.
     chunks
-        Optional Dask rechunking applied before creating the SpatialData image element.
+        Optional Dask rechunking applied before creating the SpatialData image element. Defaults to
+        ``(1, 1024, 1024)``. Pass ``None`` to keep the source/parser chunking.
     image_models_kwargs
         Additional keyword arguments passed to :meth:`spatialdata.models.Image2DModel.parse`. If ``scale_factors``
         is omitted, a size-based default is used. Pass ``{"scale_factors": None}`` to opt out.
@@ -86,7 +88,8 @@ def codex(
     data = _read_codex_level(path, series=metadata["series"], level=level)
 
     image_models_kwargs = dict(image_models_kwargs)
-    chunks = chunks if chunks is not None else image_models_kwargs.pop("chunks", None)
+    image_model_chunks = image_models_kwargs.pop("chunks", None)
+    chunks = chunks if chunks is not None else image_model_chunks
     if chunks is not None:
         data = data.rechunk(chunks)
 
@@ -107,6 +110,7 @@ def codex(
         dims=["c", "y", "x"],
         c_coords=metadata["channel_names"],
         transformations=transformations,
+        chunks=chunks,
         **image_models_kwargs,
     )
 
@@ -122,6 +126,9 @@ def codex(
 
 def _read_codex_level(path: Path, *, series: int, level: int) -> da.Array:
     store = tifffile.imread(path, series=series, level=level, return_as="zarr")
+    # SpatialData scans Dask graphs for backing files before writing and expects
+    # Zarr stores to expose either ``path`` or ``root``. ZarrTiffStore exposes neither.
+    store.path = str(path.resolve())
     try:
         array = da.from_zarr(store)
     finally:
@@ -158,8 +165,7 @@ def _read_codex_metadata(
         channel_count = tiff_series.shape[0]
         pages = list(tiff_series.pages)
         page_metadata = [
-            _parse_channel_name_fields(pages[i].description if i < len(pages) else None)
-            for i in range(channel_count)
+            _parse_channel_name_fields(pages[i].description if i < len(pages) else None) for i in range(channel_count)
         ]
 
         if channel_names is None:
