@@ -55,7 +55,6 @@ dependencies = [
     "leidenalg>=0.9.1",
     "ome_zarr>=0.14.0",
     "omegaconf",
-    "magicgui",
     "pyrootutils",
     "universal_pathlib",
     "crick",
@@ -128,7 +127,6 @@ test = [
     "opencv-python-headless",
     "pytest",
     "pytest-cov",
-    #"pytest-qt", # only necessary for unit testing deprecated plugin
     "tox",
 ]
 docs = [
@@ -185,7 +183,6 @@ source = ["harpy"]
 omit = [
     "src/harpy/_tests/*",
     "experiments/*",
-    "src/harpy/widgets/*",
     "src/harpy/externals/*",
     "src/harpy/io/*",
     "src/harpy/pipeline.py",
