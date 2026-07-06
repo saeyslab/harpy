@@ -30,6 +30,7 @@ def test_add_feature_matrix_creates_new_table(sdata_multi_c_no_backed):
     metadata = adata.uns["feature_matrices"]["cell_features"]
     assert metadata["features"] == ["mean", "area"]
     assert metadata["feature_columns"] == ["mean__0", "mean__4", "area"]
+    assert metadata["source_kind"] == "harpy_add_feature_matrix"
     assert metadata["source_label"] == ["masks_whole"]
     assert metadata["source_image"] == ["raw_image"]
     assert metadata["source_channels"] == ["0", "4"]
@@ -169,6 +170,7 @@ def test_add_feature_matrix_supports_custom_metadata_key(sdata_multi_c_no_backed
     assert "custom_feature_matrices" in adata.uns
     assert "feature_matrices" not in adata.uns
     assert adata.uns["custom_feature_matrices"]["area_features"]["feature_columns"] == ["area"]
+    assert adata.uns["custom_feature_matrices"]["area_features"]["source_kind"] == "harpy_add_feature_matrix"
     assert adata.uns["custom_feature_matrices"]["area_features"]["source_channels"] is None
 
 
@@ -277,5 +279,7 @@ def test_add_feature_matrix_persists_backed_updates(sdata_multi_c):
     assert "area_features" in adata.obsm
     assert adata.obsm["area_features"].shape == (adata.n_obs, 1)
     assert adata.uns["feature_matrices"]["area_features"]["feature_columns"].tolist() == ["area"]
+    assert adata.uns["feature_matrices"]["area_features"]["source_kind"] == "harpy_add_feature_matrix"
     assert adata.uns["feature_matrices"]["area_features"]["source_channels"] is None
+    assert intensity_adata.uns["feature_matrices"]["mean_features"]["source_kind"] == "harpy_add_feature_matrix"
     assert intensity_adata.uns["feature_matrices"]["mean_features"]["source_channels"].tolist() == ["0"]
