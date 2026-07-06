@@ -36,6 +36,7 @@ _MORPHOLOGY_FEATURES = (
     "centroid_dif",
 )
 _UNSUPPORTED_3D_MORPHOLOGY_FEATURES = ("eccentricity", "perimeter", "perim_square_over_area")
+_SOURCE_KIND = "harpy_add_feature_matrix"
 
 
 @dataclass(frozen=True)
@@ -340,6 +341,7 @@ def add_feature_matrix(
         "feature_columns": list(columns),
         "schema_version": 1,
         "backend": "numpy",
+        "source_kind": _SOURCE_KIND,
         "dtype": str(matrix.dtype),
         "source_label": [pair.labels_name for pair in pair_specs],
         "source_image": [pair.image_name for pair in pair_specs],
