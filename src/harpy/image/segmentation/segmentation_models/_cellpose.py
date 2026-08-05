@@ -193,6 +193,11 @@ def cellpose_callable(
     else:
         common_args["flow3D_smooth"] = flow3D_smooth
 
+    if cellpose_version < version.parse("4.2.0"):
+        common_args["invert"] = invert
+    else:
+        log.warning("``invert`` argument is not supported in cellpose>=4.2 and will be ignored.")
+
     results = model.eval(**common_args)
 
     masks = results[0][0]
