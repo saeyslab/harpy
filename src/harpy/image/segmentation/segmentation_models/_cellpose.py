@@ -171,7 +171,6 @@ def cellpose_callable(
         "channel_axis": 3 if do_3D_segmentation else 2,
         "z_axis": 0 if do_3D_segmentation else None,
         "normalize": normalize,
-        "invert": invert,
         "rescale": None,  # not supported in harpy.
         "diameter": diameter,
         "flow_threshold": flow_threshold,
