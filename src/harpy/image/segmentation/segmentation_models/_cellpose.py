@@ -71,6 +71,7 @@ def cellpose_callable(
         See documentation of `cellpose.models.CellposeModel.eval` for full description.
     invert
         Invert image pixel intensity before running network. Defaults to `False`.
+        Only supported for cellpose versions `<4.2.0` and raises a `ValueError` on newer versions.
     diameter
         The estimated diameter of cells (in pixels).
     flow_threshold
@@ -171,7 +172,6 @@ def cellpose_callable(
         "channel_axis": 3 if do_3D_segmentation else 2,
         "z_axis": 0 if do_3D_segmentation else None,
         "normalize": normalize,
-        "invert": invert,
         "rescale": None,  # not supported in harpy.
         "diameter": diameter,
         "flow_threshold": flow_threshold,
@@ -193,6 +193,13 @@ def cellpose_callable(
     else:
         common_args["flow3D_smooth"] = flow3D_smooth
 
+    if cellpose_version < version.parse("4.2.0"):
+        common_args["invert"] = invert
+    elif invert:
+        raise ValueError(
+            "`invert` was removed from 'CellposeModel.eval' in cellpose>=4.2.0. "
+            "Please invert the image before passing with it with `invert=False` to `harpy.im.segment`, or pin 'cellpose<4.2.0'."
+        )
     results = model.eval(**common_args)
 
     masks = results[0][0]
