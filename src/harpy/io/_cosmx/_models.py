@@ -68,12 +68,17 @@ class _CosmxManifest:
 
 
 @dataclass(frozen=True)
-class _CosmxComponentPreview:
-    component: int
+class _CosmxMosaicGeometry:
+    mosaic: int
     fovs: tuple[int, ...]
     origin_x_px: int
     origin_y_px: int
     shape: tuple[int, int]
+
+
+@dataclass(frozen=True)
+class _CosmxMosaicSizeEstimate:
+    mosaic: int
     image_nbytes: int
     cell_labels_nbytes: int
     compartment_labels_nbytes: int
@@ -85,20 +90,21 @@ class _CosmxPreview:
     included_fovs: tuple[int, ...]
     excluded_fovs: tuple[int, ...]
     unpositioned_fovs: tuple[int, ...]
-    components: tuple[_CosmxComponentPreview, ...]
+    mosaics: tuple[_CosmxMosaicGeometry, ...]
+    estimates: tuple[_CosmxMosaicSizeEstimate, ...]
     diagnostics: tuple[str, ...]
 
     @property
     def estimated_image_nbytes(self) -> int:
-        return sum(component.image_nbytes for component in self.components)
+        return sum(estimate.image_nbytes for estimate in self.estimates)
 
     @property
     def estimated_cell_labels_nbytes(self) -> int:
-        return sum(component.cell_labels_nbytes for component in self.components)
+        return sum(estimate.cell_labels_nbytes for estimate in self.estimates)
 
     @property
     def estimated_compartment_labels_nbytes(self) -> int:
-        return sum(component.compartment_labels_nbytes for component in self.components)
+        return sum(estimate.compartment_labels_nbytes for estimate in self.estimates)
 
 
 @dataclass(frozen=True)

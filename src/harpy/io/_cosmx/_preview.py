@@ -4,12 +4,14 @@ import numpy as np
 
 from harpy.io._cosmx._models import (
     _PRODUCTS,
-    _CosmxComponentGeometry,
-    _CosmxComponentSizeEstimate,
     _CosmxFovPosition,
     _CosmxManifest,
+    _CosmxMosaicGeometry,
+    _CosmxMosaicSizeEstimate,
     _CosmxPreview,
 )
+
+_DEFAULT_ADJACENCY_TOLERANCE_FRACTION = 0.02
 
 
 def _preview_cosmx(
@@ -31,12 +33,14 @@ def _preview_cosmx(
     included = tuple(sorted(requested & common))
     excluded = tuple(sorted(all_fovs - set(included)))
     unpositioned = tuple(sorted(all_fovs - positioned))
-    components = _component_geometry(
+    adjacency_tolerance_px = _default_adjacency_tolerance_px(manifest.run.tile_shape)
+    mosaics = _mosaic_geometries(
         positions={fov: positions_by_fov[fov] for fov in included},
         tile_shape=manifest.run.tile_shape,
+        adjacency_tolerance_px=adjacency_tolerance_px,
     )
-    estimates = _estimate_component_sizes(
-        components,
+    estimates = _estimate_mosaic_sizes(
+        mosaics,
         image_dtype=manifest.run.morphology_dtype,
         channel_count=len(manifest.run.channels),
         cell_labels_dtype=manifest.run.cell_labels_dtype,
@@ -44,6 +48,12 @@ def _preview_cosmx(
     )
 
     diagnostics = list(manifest.diagnostics)
+    if mosaics:
+        pixel_unit = "pixel" if adjacency_tolerance_px == 1 else "pixels"
+        diagnostics.append(
+            f"Grouped {len(included)} positioned FOV(s) into {len(mosaics)} spatial mosaic group(s) using an "
+            f"adjacency tolerance of {adjacency_tolerance_px} {pixel_unit}."
+        )
     if excluded:
         diagnostics.append(
             f"Selected {len(included)} common positioned FOV(s); excluded FOVs {list(excluded)} without reading "
@@ -55,19 +65,63 @@ def _preview_cosmx(
         included_fovs=included,
         excluded_fovs=excluded,
         unpositioned_fovs=unpositioned,
-        components=components,
+        mosaics=mosaics,
         estimates=estimates,
         diagnostics=tuple(diagnostics),
     )
 
 
-def _component_geometry(
+def _mosaic_geometries(
     *,
     positions: dict[int, _CosmxFovPosition],
     tile_shape: tuple[int, int],
-) -> tuple[_CosmxComponentGeometry, ...]:
+    adjacency_tolerance_px: int = 0,
+) -> tuple[_CosmxMosaicGeometry, ...]:
+    """Group spatially adjacent FOV rectangles into mosaic geometries.
+
+    Each FOV is represented by a rectangle with its top-left corner given by
+    ``positions`` and its common height and width given by ``tile_shape``. FOVs
+    that overlap, share an edge, or have a small axis-aligned gap are placed in
+    the same mosaic group. Connectivity is transitive: if FOV 1 is adjacent to
+    FOV 2 and FOV 2 is adjacent to FOV 3, all three belong to one mosaic.
+
+    The grouping can be pictured as follows::
+
+        FOV 1  FOV 2  FOV 3          FOV 20 FOV 21       FOV 50
+        ┌────┐ ┌────┐ ┌────┐         ┌────┐ ┌────┐       ┌────┐
+        │    │ │    │ │    │         │    │ │    │       │    │
+        └────┘ └────┘ └────┘         └────┘ └────┘       └────┘
+        └──── mosaic group 1 ────┘   └─ mosaic group 2 ─┘ mosaic group 3
+
+    Small horizontal or vertical gaps up to ``adjacency_tolerance_px`` are
+    bridged only when the FOV rectangles overlap along the other axis. FOVs
+    that meet only diagonally at a corner are therefore kept separate. Each
+    returned geometry is the bounding rectangle of one group and may contain
+    uncovered background pixels between its FOVs.
+
+    Parameters
+    ----------
+    positions
+        Mapping from FOV number to its top-left position in global pixel
+        coordinates. Only FOVs present in this mapping participate in grouping.
+    tile_shape
+        Common FOV shape as ``(height, width)`` in pixels.
+    adjacency_tolerance_px
+        Maximum nonnegative horizontal or vertical gap, in pixels, that is
+        treated as adjacency. The default of zero requires overlap or edge
+        contact; the CosMx preview supplies its documented small-gap tolerance.
+
+    Returns
+    -------
+    tuple of _CosmxMosaicGeometry
+        Derived mosaic groups ordered deterministically by decreasing FOV
+        count, then global position and FOV number. These groups describe
+        spatial proximity and are not authoritative vendor ROI assignments.
+    """
     if not positions:
         return ()
+    if adjacency_tolerance_px < 0:
+        raise ValueError(f"Adjacency tolerance must be nonnegative, found {adjacency_tolerance_px}.")
 
     included_fovs = tuple(sorted(positions))
     height, width = tile_shape
@@ -95,7 +149,9 @@ def _component_geometry(
             overlap_y = min(left_position.y_px + height, right_position.y_px + height) - max(
                 left_position.y_px, right_position.y_px
             )
-            if (overlap_x > 0 and overlap_y >= 0) or (overlap_y > 0 and overlap_x >= 0):
+            if (overlap_x >= -adjacency_tolerance_px and overlap_y > 0) or (
+                overlap_y >= -adjacency_tolerance_px and overlap_x > 0
+            ):
                 union(left, right)
 
     groups: dict[int, list[int]] = {}
@@ -111,50 +167,54 @@ def _component_geometry(
         ),
     )
 
-    components = []
-    for component, group in enumerate(ordered_groups, start=1):
+    mosaics = []
+    for mosaic, group in enumerate(ordered_groups, start=1):
         origin_x = min(positions[fov].x_px for fov in group)
         origin_y = min(positions[fov].y_px for fov in group)
         max_x = max(positions[fov].x_px + width for fov in group)
         max_y = max(positions[fov].y_px + height for fov in group)
-        components.append(
-            _CosmxComponentGeometry(
-                component=component,
+        mosaics.append(
+            _CosmxMosaicGeometry(
+                mosaic=mosaic,
                 fovs=group,
                 origin_x_px=origin_x,
                 origin_y_px=origin_y,
                 shape=(max_y - origin_y, max_x - origin_x),
             )
         )
-    return tuple(components)
+    return tuple(mosaics)
 
 
-def _estimate_component_sizes(
-    components: tuple[_CosmxComponentGeometry, ...],
+def _estimate_mosaic_sizes(
+    mosaics: tuple[_CosmxMosaicGeometry, ...],
     *,
     image_dtype: str,
     channel_count: int,
     cell_labels_dtype: str | None,
     compartment_labels_dtype: str | None,
-) -> tuple[_CosmxComponentSizeEstimate, ...]:
-    if not components:
+) -> tuple[_CosmxMosaicSizeEstimate, ...]:
+    if not mosaics:
         return ()
     if cell_labels_dtype is None or compartment_labels_dtype is None:
         raise ValueError("Cannot estimate label output sizes without relevant label dtypes.")
 
     image_itemsize = np.dtype(image_dtype).itemsize
-    max_fov = max(fov for component in components for fov in component.fovs)
+    max_fov = max(fov for mosaic in mosaics for fov in mosaic.fovs)
     cell_labels_itemsize = _remapped_cell_dtype(cell_labels_dtype, max_fov).itemsize
     compartment_itemsize = np.dtype(compartment_labels_dtype).itemsize
     return tuple(
-        _CosmxComponentSizeEstimate(
-            component=component.component,
-            image_nbytes=component.shape[0] * component.shape[1] * channel_count * image_itemsize,
-            cell_labels_nbytes=component.shape[0] * component.shape[1] * cell_labels_itemsize,
-            compartment_labels_nbytes=component.shape[0] * component.shape[1] * compartment_itemsize,
+        _CosmxMosaicSizeEstimate(
+            mosaic=mosaic.mosaic,
+            image_nbytes=mosaic.shape[0] * mosaic.shape[1] * channel_count * image_itemsize,
+            cell_labels_nbytes=mosaic.shape[0] * mosaic.shape[1] * cell_labels_itemsize,
+            compartment_labels_nbytes=mosaic.shape[0] * mosaic.shape[1] * compartment_itemsize,
         )
-        for component in components
+        for mosaic in mosaics
     )
+
+
+def _default_adjacency_tolerance_px(tile_shape: tuple[int, int]) -> int:
+    return max(1, round(min(tile_shape) * _DEFAULT_ADJACENCY_TOLERANCE_FRACTION))
 
 
 def _remapped_cell_dtype(source_dtype: str, max_fov: int) -> np.dtype:
