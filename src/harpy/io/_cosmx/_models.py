@@ -16,6 +16,7 @@ _PRODUCTS = (
     _COMPARTMENT_LABELS_PRODUCT,
     _TRANSCRIPTS_PRODUCT,
 )
+_INSTANCE_ID_DTYPE = np.dtype(np.uint32)
 
 
 @dataclass(frozen=True)
@@ -155,28 +156,12 @@ class _CosmxMosaicGeometry:
 
 
 @dataclass(frozen=True)
-class _CosmxMosaicSizeEstimate:
-    mosaic: int
-    image_nbytes: int
-    instance_labels_nbytes: int
-    compartment_labels_nbytes: int
-
-    def __post_init__(self) -> None:
-        if self.mosaic < 1:
-            raise ValueError(f"CosMx mosaic number must be positive, found {self.mosaic}.")
-        estimates = (self.image_nbytes, self.instance_labels_nbytes, self.compartment_labels_nbytes)
-        if any(estimate < 0 for estimate in estimates):
-            raise ValueError(f"CosMx mosaic byte estimates must be nonnegative, found {estimates}.")
-
-
-@dataclass(frozen=True)
 class _CosmxPreview:
     manifest: _CosmxManifest
     included_fovs: tuple[int, ...]
     excluded_fovs: tuple[int, ...]
     unpositioned_fovs: tuple[int, ...]
     mosaics: tuple[_CosmxMosaicGeometry, ...]
-    estimates: tuple[_CosmxMosaicSizeEstimate, ...]
     diagnostics: tuple[str, ...]
 
     def __post_init__(self) -> None:
@@ -207,21 +192,30 @@ class _CosmxPreview:
             raise ValueError("Every included CosMx FOV must belong to exactly one mosaic.")
         _validate_preview_mosaics(self.manifest, self.mosaics)
 
-        estimate_ids = tuple(estimate.mosaic for estimate in self.estimates)
-        if estimate_ids != mosaic_ids:
-            raise ValueError(f"CosMx size-estimate mosaic IDs {estimate_ids} do not match geometries {mosaic_ids}.")
-
     @property
     def estimated_image_nbytes(self) -> int:
-        return sum(estimate.image_nbytes for estimate in self.estimates)
+        """Estimated bytes for dense mosaics containing every image channel."""
+        return self._mosaic_pixel_count * len(self.manifest.run.channels) * np.dtype(
+            self.manifest.run.morphology_dtype
+        ).itemsize
 
     @property
     def estimated_instance_labels_nbytes(self) -> int:
-        return sum(estimate.instance_labels_nbytes for estimate in self.estimates)
+        """Estimated bytes for dense ``uint32`` instance-label mosaics."""
+        return self._mosaic_pixel_count * _INSTANCE_ID_DTYPE.itemsize
 
     @property
     def estimated_compartment_labels_nbytes(self) -> int:
-        return sum(estimate.compartment_labels_nbytes for estimate in self.estimates)
+        """Estimated bytes for dense compartment-label mosaics."""
+        if not self.mosaics:
+            return 0
+        dtype = self.manifest.run.compartment_labels_dtype
+        assert dtype is not None
+        return self._mosaic_pixel_count * np.dtype(dtype).itemsize
+
+    @property
+    def _mosaic_pixel_count(self) -> int:
+        return sum(mosaic.shape[0] * mosaic.shape[1] for mosaic in self.mosaics)
 
 
 @dataclass(frozen=True)
@@ -258,10 +252,43 @@ def _validate_preview_mosaics(
     manifest: _CosmxManifest,
     mosaics: tuple[_CosmxMosaicGeometry, ...],
 ) -> None:
-    """Validate mosaic sources and geometry against the manifest."""
+    """Validate mosaic sources and geometry against the manifest.
+
+    FOV rectangles may share an edge or meet at a corner: either case has zero
+    intersection area and does not create conflicting raster pixels. FOVs may
+    also be separated by uncovered gaps within a mosaic. An intersection with
+    positive extent along both x and y is rejected because the reader has no
+    image-blending or label-conflict policy.
+
+    Edge contact is allowed because its overlap width is zero::
+
+        ┌────────┐┌────────┐
+        │ FOV 1  ││ FOV 2  │
+        └────────┘└────────┘
+                 ↑ overlap width = 0
+
+    Positive-area overlap is rejected::
+
+        ┌────────┐
+        │ FOV 1  │
+        │    ┌───┼────┐
+        └────┼───┘    │
+             │ FOV 2  │
+             └────────┘
+    """
     positions = manifest.positions_by_fov
     fovs_by_id = manifest.fovs_by_id
     tile_height, tile_width = manifest.run.tile_shape
+
+    if mosaics:
+        instance_labels_dtype = manifest.run.instance_labels_dtype
+        compartment_labels_dtype = manifest.run.compartment_labels_dtype
+        if instance_labels_dtype is None or compartment_labels_dtype is None:
+            raise ValueError("CosMx preview mosaics require instance- and compartment-label dtypes.")
+        # Reserve one complete source-dtype ID range per FOV:
+        # global_id = (fov - 1) * number_of_source_dtype_values + local_id.
+        # Validate against the full manifest so IDs remain stable across subsets.
+        _validate_instance_id_encoding(instance_labels_dtype, max(manifest.fov_ids))
 
     for mosaic in mosaics:
         for product in _PRODUCTS:
@@ -295,11 +322,56 @@ def _validate_preview_mosaics(
                 overlap_x1 = min(left_position.x_px + tile_width, right_position.x_px + tile_width)
                 overlap_y0 = max(left_position.y_px, right_position.y_px)
                 overlap_y1 = min(left_position.y_px + tile_height, right_position.y_px + tile_height)
+                # A zero extent means allowed edge or corner contact. Only an
+                # intersection that is positive along both axes covers pixels.
                 if overlap_x1 > overlap_x0 and overlap_y1 > overlap_y0:
                     raise ValueError(
                         f"CosMx mosaic {mosaic.mosaic} has positive-area overlap between FOVs {left} and {right}: "
                         f"x=[{overlap_x0}, {overlap_x1}), y=[{overlap_y0}, {overlap_y1})."
                     )
+
+
+def _validate_instance_id_encoding(source_dtype: str, max_fov: int) -> None:
+    """Validate that FOV-local instance IDs can be encoded safely as ``uint32``.
+
+    A later ingestion step will map each nonzero local instance ID using::
+
+        global_id = (fov - 1) * number_of_source_dtype_values + local_id
+
+    Here, ``number_of_source_dtype_values`` is the size of the complete value
+    range representable by the unsigned source dtype (for example, 65,536 for
+    ``uint16``). This reserves a non-overlapping ID range for every FOV while
+    keeping zero as background.
+
+    This function checks the encoding from dtype metadata and the maximum FOV
+    number only. It neither reads label pixels nor performs the remapping.
+
+    Parameters
+    ----------
+    source_dtype
+        Dtype of the FOV-local instance-label rasters. It must be an unsigned
+        integer dtype.
+    max_fov
+        Largest FOV number that the encoding must support. It must be positive
+        and should cover the complete manifest rather than a selected subset.
+
+    Raises
+    ------
+    ValueError
+        If the source dtype is not unsigned, ``max_fov`` is not positive, or
+        the largest possible encoded ID does not fit in ``uint32``.
+    """
+    source = np.dtype(source_dtype)
+    if source.kind != "u":
+        raise ValueError(f"CosMx instance labels must use an unsigned integer dtype, found {source.name}.")
+    if max_fov < 1:
+        raise ValueError(f"Maximum CosMx FOV number must be positive, found {max_fov}.")
+    base = 1 << (source.itemsize * 8)
+    max_global_id = (max_fov - 1) * base + (base - 1)
+    if max_global_id > np.iinfo(_INSTANCE_ID_DTYPE).max:
+        raise ValueError(
+            f"CosMx instance-ID encoding requires maximum ID {max_global_id}, which does not fit in uint32."
+        )
 
 
 def _validate_stage_position(x_mm: float, y_mm: float, *, fov: int) -> None:

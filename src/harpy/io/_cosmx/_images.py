@@ -29,7 +29,7 @@ class _CosmxSelectedChannel:
 
 
 @dataclass(frozen=True)
-class _CosmxMosaicCell:
+class _CosmxMosaicBlock:
     shape: tuple[int, int]
     fov: int | None = None
     source_y: slice | None = None
@@ -55,7 +55,7 @@ def _add_morphology_images(
     it does not repeat discovery or spatial grouping. Each selected TIFF page
     becomes one delayed source task and receives the requested dataset-wide
     axis flips before placement. Disjoint tile slices and lazy zero-filled gap
-    cells are concatenated into a virtual mosaic and materialized only when
+    blocks are concatenated into a virtual mosaic and materialized only when
     Harpy writes the image element to the already-backed ``SpatialData`` store.
 
     Parameters
@@ -76,12 +76,12 @@ def _add_morphology_images(
         ``<base>_n`` pixel and ``<base>_n_micron`` physical systems.
     flip_x
         Whether to reverse the local TIFF x-axis before mosaic placement. The
-        default matches the validated UCB decoded export. The same value must
-        be used for labels and transcript-local coordinates.
+        default follows the supported decoded-layout convention. The same value
+        must be used for labels and transcript-local coordinates.
     flip_y
         Whether to reverse the local TIFF y-axis before mosaic placement. The
-        default matches the validated UCB decoded export. The same value must
-        be used for labels and transcript-local coordinates.
+        default follows the supported decoded-layout convention. The same value
+        must be used for labels and transcript-local coordinates.
     chunks
         Final ``(c, y, x)`` Dask/Zarr chunks. The channel chunk must be one.
     scale_factors
@@ -262,7 +262,7 @@ def _morphology_mosaic(
     chunks: tuple[int, int, int],
 ) -> da.Array:
     """Construct a lazy ``(c, y, x)`` morphology mosaic without reading pixels."""
-    cell_grid = _mosaic_cell_grid(
+    block_grid = _mosaic_block_grid(
         mosaic,
         placements=placements,
         tile_shape=preview.manifest.run.tile_shape,
@@ -282,7 +282,7 @@ def _morphology_mosaic(
             )
             for fov in mosaic.fovs
         }
-        channel_arrays.append(_assemble_channel(cell_grid, planes=planes, dtype=dtype))
+        channel_arrays.append(_assemble_channel(block_grid, planes=planes, dtype=dtype))
 
     result = da.stack(channel_arrays, axis=0).rechunk(chunks)
     expected_shape = (len(channels), *mosaic.shape)
@@ -291,13 +291,55 @@ def _morphology_mosaic(
     return result
 
 
-def _mosaic_cell_grid(
+def _mosaic_block_grid(
     mosaic: _CosmxMosaicGeometry,
     *,
     placements: dict[int, tuple[int, int]],
     tile_shape: tuple[int, int],
-) -> tuple[tuple[_CosmxMosaicCell, ...], ...]:
-    """Partition a mosaic into disjoint covered tile slices and uncovered gaps."""
+) -> tuple[tuple[_CosmxMosaicBlock, ...], ...]:
+    """Partition a mosaic canvas into disjoint rectangular assembly blocks.
+
+    The function collects the start and end coordinates of every placed FOV,
+    together with the mosaic bounds, along both axes. Consecutive coordinates
+    define a rectangular grid. Because every FOV edge is a grid boundary, each
+    resulting block is either wholly covered by one FOV or wholly uncovered.
+
+    For example, two four-pixel-wide FOVs separated by one pixel produce::
+
+        x: 0        4 5        9
+           +--------+ +--------+
+           | FOV 1  | | FOV 2  |
+           +--------+ +--------+
+           | covered|g| covered|
+                     ^
+                    gap
+
+    Covered blocks store the owning FOV and the corresponding FOV-local source
+    slices. Uncovered blocks store only their shape and are later represented
+    by lazy zero arrays. The returned blocks are assembly metadata, not Dask or
+    Zarr chunks; `_assemble_channel` concatenates them before the completed
+    mosaic is rechunked.
+
+    Parameters
+    ----------
+    mosaic
+        Validated mosaic geometry defining the output canvas.
+    placements
+        Mapping from FOV number to its mosaic-local ``(y, x)`` tile origin.
+    tile_shape
+        Common source-FOV shape as ``(height, width)``.
+
+    Returns
+    -------
+    tuple of tuple of _CosmxMosaicBlock
+        Rows of blocks ordered from top to bottom and left to right.
+
+    Raises
+    ------
+    RuntimeError
+        If a block has multiple FOV owners, violating the validated no-overlap
+        invariant.
+    """
     tile_height, tile_width = tile_shape
     y_boundaries = sorted(
         {0, mosaic.shape[0]}
@@ -320,14 +362,14 @@ def _mosaic_cell_grid(
                 if tile_y <= y0 and y1 <= tile_y + tile_height and tile_x <= x0 and x1 <= tile_x + tile_width
             ]
             if len(owners) > 1:
-                raise RuntimeError(f"CosMx mosaic cell {(y0, y1, x0, x1)} has multiple FOV owners {owners}.")
+                raise RuntimeError(f"CosMx mosaic block {(y0, y1, x0, x1)} has multiple FOV owners {owners}.")
             if not owners:
-                row.append(_CosmxMosaicCell(shape=(y1 - y0, x1 - x0)))
+                row.append(_CosmxMosaicBlock(shape=(y1 - y0, x1 - x0)))
                 continue
             fov = owners[0]
             tile_y, tile_x = placements[fov]
             row.append(
-                _CosmxMosaicCell(
+                _CosmxMosaicBlock(
                     shape=(y1 - y0, x1 - x0),
                     fov=fov,
                     source_y=slice(y0 - tile_y, y1 - tile_y),
@@ -339,22 +381,22 @@ def _mosaic_cell_grid(
 
 
 def _assemble_channel(
-    cell_grid: tuple[tuple[_CosmxMosaicCell, ...], ...],
+    block_grid: tuple[tuple[_CosmxMosaicBlock, ...], ...],
     *,
     planes: dict[int, da.Array],
     dtype: np.dtype,
 ) -> da.Array:
     rows = []
-    for row in cell_grid:
-        cells = []
-        for cell in row:
-            if cell.fov is None:
-                cells.append(da.zeros(cell.shape, chunks=cell.shape, dtype=dtype))
+    for row in block_grid:
+        blocks = []
+        for block in row:
+            if block.fov is None:
+                blocks.append(da.zeros(block.shape, chunks=block.shape, dtype=dtype))
             else:
-                assert cell.source_y is not None
-                assert cell.source_x is not None
-                cells.append(planes[cell.fov][cell.source_y, cell.source_x])
-        rows.append(cells[0] if len(cells) == 1 else da.concatenate(cells, axis=1))
+                assert block.source_y is not None
+                assert block.source_x is not None
+                blocks.append(planes[block.fov][block.source_y, block.source_x])
+        rows.append(blocks[0] if len(blocks) == 1 else da.concatenate(blocks, axis=1))
     return rows[0] if len(rows) == 1 else da.concatenate(rows, axis=0)
 
 
