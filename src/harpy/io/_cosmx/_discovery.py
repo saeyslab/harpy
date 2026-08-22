@@ -136,12 +136,12 @@ def _discover_cosmx(path: str | Path) -> _CosmxManifest:
         )
     all_fovs = sorted(declared_fovs | observed_fovs)
 
-    instance_labels_dtype = _validate_label_family(
+    instance_labels_dtype = _validate_label_metadata(
         discovered,
         product=_INSTANCE_LABELS_PRODUCT,
         expected_shape=run_metadata.tile_shape,
     )
-    compartment_labels_dtype = _validate_label_family(
+    compartment_labels_dtype = _validate_label_metadata(
         discovered,
         product=_COMPARTMENT_LABELS_PRODUCT,
         expected_shape=run_metadata.tile_shape,
@@ -347,12 +347,34 @@ def _channel_metadata(metadata: dict[str, Any], channel_order: tuple[str, ...]) 
     )
 
 
-def _validate_label_family(
+def _validate_label_metadata(
     discovered: dict[int, dict[str, Path]],
     *,
     product: str,
     expected_shape: tuple[int, int],
 ) -> str | None:
+    """Validate label TIFF metadata across a product's FOVs.
+
+    Parameters
+    ----------
+    discovered
+        Relevant product paths grouped by FOV.
+    product
+        Label product identifier to validate.
+    expected_shape
+        Required ``(height, width)`` matching the morphology tiles.
+
+    Returns
+    -------
+    str or None
+        The common NumPy dtype name, or ``None`` when the product is absent.
+
+    Raises
+    ------
+    ValueError
+        If a label TIFF is not unsigned integer, has the wrong shape, or has a
+        dtype that differs from another FOV in the family.
+    """
     reference_dtype = None
     for fov, files in sorted(discovered.items()):
         if product not in files:
