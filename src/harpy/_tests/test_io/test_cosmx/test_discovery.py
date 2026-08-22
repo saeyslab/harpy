@@ -104,6 +104,14 @@ def test_discovery_rejects_fov_directory_file_mismatch(decoded_cosmx_path: Path)
         _discover_cosmx(decoded_cosmx_path)
 
 
+def test_discovery_rejects_signed_compartment_labels(decoded_cosmx_path: Path) -> None:
+    labels_path = decoded_cosmx_path / "CellStatsDir" / "FOV00001" / "CompartmentLabels_F00001.tif"
+    tifffile.imwrite(labels_path, np.zeros((_TILE_SIZE, _TILE_SIZE), dtype=np.int8), metadata=None)
+
+    with pytest.raises(ValueError, match="CosMx compartment labels must use an unsigned integer dtype"):
+        _discover_cosmx(decoded_cosmx_path)
+
+
 def _rewrite_morphology_metadata(path: Path, **updates: object) -> None:
     with tifffile.TiffFile(path) as tif:
         metadata = json.loads(tif.pages[0].description)
