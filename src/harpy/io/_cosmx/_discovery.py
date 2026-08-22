@@ -177,6 +177,34 @@ def _fov_from_path(path: Path) -> int | None:
 def _read_raster_metadata(
     discovered: dict[int, dict[str, Path]],
 ) -> tuple[_CosmxRunMetadata, dict[int, _MorphologyPosition]]:
+    """Read the raster headers needed to describe and position a CosMx run.
+
+    Morphology TIFFs provide both run-wide metadata and the stage position of
+    each imaged FOV. The first morphology TIFF is used as the reference; all
+    remaining morphology TIFFs must agree with it on the declared FOV count,
+    channel order, pixel size, tile dimensions, TIFF shape, and dtype. Instance
+    and compartment label TIFF headers are then checked against the morphology
+    tile shape and within their respective label families. Pixel arrays are not
+    loaded.
+
+    Parameters
+    ----------
+    discovered
+        Relevant product paths grouped by FOV.
+
+    Returns
+    -------
+    _CosmxRunMetadata
+        Run-wide channel, scale, raster-shape, and dtype metadata.
+    dict[int, _MorphologyPosition]
+        Morphology stage positions keyed by FOV number.
+
+    Raises
+    ------
+    ValueError
+        If no morphology TIFF is available, required morphology metadata is
+        missing, or raster metadata is inconsistent within a product family.
+    """
     morphology_files = [
         (fov, files[_MORPHOLOGY_PRODUCT])
         for fov, files in discovered.items()
