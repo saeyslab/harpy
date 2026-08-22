@@ -11,7 +11,11 @@ import numpy as np
 import tifffile
 
 from harpy.io._cosmx._models import (
+    _COMPARTMENT_LABELS_PRODUCT,
+    _INSTANCE_LABELS_PRODUCT,
+    _MORPHOLOGY_PRODUCT,
     _PRODUCTS,
+    _TRANSCRIPTS_PRODUCT,
     _CosmxChannel,
     _CosmxFovFiles,
     _CosmxFovPosition,
@@ -31,6 +35,8 @@ _DEFAULT_PIXEL_SIZE_UM = 0.120280945
 _CELL_STATS_DIRNAME = "CellStatsDir"
 _MORPHOLOGY_DIRNAME = "Morphology2D"
 _ANALYSIS_RESULTS_DIRNAME = "AnalysisResults"
+_TIFF_SUFFIXES = (".tif", ".tiff")
+_MORPHOLOGY_INVARIANT_KEYS = ("NFov", "ChannelOrder", "ImPixelSize_nm", "ImRows", "ImCols")
 
 
 def _is_decoded_cosmx(path: str | Path) -> bool:
@@ -78,11 +84,11 @@ def _discover_cosmx(path: str | Path) -> _CosmxManifest:
 
     morphology_dir = root / _CELL_STATS_DIRNAME / _MORPHOLOGY_DIRNAME
     for file_path in sorted(morphology_dir.iterdir()):
-        if not file_path.is_file() or file_path.suffix.lower() not in {".tif", ".tiff"}:
+        if not file_path.is_file() or file_path.suffix.lower() not in _TIFF_SUFFIXES:
             continue
         match = _MORPHOLOGY_FILE_RE.match(file_path.name)
         if match is not None:
-            assign(int(match.group("fov")), "morphology", file_path)
+            assign(int(match.group("fov")), _MORPHOLOGY_PRODUCT, file_path)
 
     fov_root = root / _CELL_STATS_DIRNAME
     for fov_dir in sorted(fov_root.iterdir()):
@@ -111,7 +117,7 @@ def _discover_cosmx(path: str | Path) -> _CosmxManifest:
         fov = _fov_from_path(file_path)
         if fov is None:
             raise ValueError(f"Could not determine the FOV from transcript file {file_path}.")
-        assign(fov, "transcripts", file_path)
+        assign(fov, _TRANSCRIPTS_PRODUCT, file_path)
 
     run_metadata, morphology_positions = _read_morphology_metadata(discovered)
     positions = _normalize_positions(
@@ -132,12 +138,12 @@ def _discover_cosmx(path: str | Path) -> _CosmxManifest:
 
     instance_labels_dtype = _validate_label_family(
         discovered,
-        product="instance_labels",
+        product=_INSTANCE_LABELS_PRODUCT,
         expected_shape=run_metadata.tile_shape,
     )
     compartment_labels_dtype = _validate_label_family(
         discovered,
-        product="compartment_labels",
+        product=_COMPARTMENT_LABELS_PRODUCT,
         expected_shape=run_metadata.tile_shape,
     )
     run_metadata = replace(
@@ -166,10 +172,10 @@ def _discover_cosmx(path: str | Path) -> _CosmxManifest:
 
 def _label_product(name: str) -> str | None:
     lower = name.lower()
-    if lower.startswith("celllabels_f") and lower.endswith((".tif", ".tiff")):
-        return "instance_labels"
-    if lower.startswith("compartmentlabels_f") and lower.endswith((".tif", ".tiff")):
-        return "compartment_labels"
+    if lower.startswith("celllabels_f") and lower.endswith(_TIFF_SUFFIXES):
+        return _INSTANCE_LABELS_PRODUCT
+    if lower.startswith("compartmentlabels_f") and lower.endswith(_TIFF_SUFFIXES):
+        return _COMPARTMENT_LABELS_PRODUCT
     return None
 
 
@@ -188,7 +194,11 @@ def _fov_from_path(path: Path) -> int | None:
 def _read_morphology_metadata(
     discovered: dict[int, dict[str, Path]],
 ) -> tuple[_CosmxRunMetadata, dict[int, _MorphologyPosition]]:
-    morphology_files = [(fov, files["morphology"]) for fov, files in discovered.items() if "morphology" in files]
+    morphology_files = [
+        (fov, files[_MORPHOLOGY_PRODUCT])
+        for fov, files in discovered.items()
+        if _MORPHOLOGY_PRODUCT in files
+    ]
     if not morphology_files:
         raise ValueError("Decoded CosMx layout has no morphology TIFFs; run metadata and positions are unavailable.")
 
@@ -282,7 +292,7 @@ def _validate_morphology_metadata(
     dtype: str,
     file_path: Path,
 ) -> None:
-    for key in ("NFov", "ChannelOrder", "ImPixelSize_nm", "ImRows", "ImCols"):
+    for key in _MORPHOLOGY_INVARIANT_KEYS:
         if reference.get(key) != metadata.get(key):
             raise ValueError(
                 f"Contradictory morphology metadata for {key}: {reference.get(key)!r} versus "
@@ -350,7 +360,7 @@ def _validate_label_family(
         with tifffile.TiffFile(files[product]) as tif:
             shape = tuple(int(value) for value in tif.series[0].shape)
             dtype = np.dtype(tif.series[0].dtype).name
-        if product == "instance_labels" and np.dtype(dtype).kind != "u":
+        if product == _INSTANCE_LABELS_PRODUCT and np.dtype(dtype).kind != "u":
             raise ValueError(
                 f"CosMx instance labels must use an unsigned integer dtype, found {dtype} for FOV {fov}."
             )

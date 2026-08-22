@@ -3,7 +3,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-_PRODUCTS = ("morphology", "instance_labels", "compartment_labels", "transcripts")
+_MORPHOLOGY_PRODUCT = "morphology"
+_INSTANCE_LABELS_PRODUCT = "instance_labels"
+_COMPARTMENT_LABELS_PRODUCT = "compartment_labels"
+_TRANSCRIPTS_PRODUCT = "transcripts"
+_PRODUCTS = (
+    _MORPHOLOGY_PRODUCT,
+    _INSTANCE_LABELS_PRODUCT,
+    _COMPARTMENT_LABELS_PRODUCT,
+    _TRANSCRIPTS_PRODUCT,
+)
 
 
 @dataclass(frozen=True)
