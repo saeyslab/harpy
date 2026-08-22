@@ -12,6 +12,7 @@ from harpy.io._cosmx._models import (
 )
 
 _DEFAULT_ADJACENCY_TOLERANCE_FRACTION = 0.02
+_INSTANCE_ID_DTYPE = np.dtype(np.uint32)
 
 
 def _preview_cosmx(
@@ -43,7 +44,8 @@ def _preview_cosmx(
         mosaics,
         image_dtype=manifest.run.morphology_dtype,
         channel_count=len(manifest.run.channels),
-        cell_labels_dtype=manifest.run.cell_labels_dtype,
+        instance_labels_dtype=manifest.run.instance_labels_dtype,
+        instance_id_max_fov=max(manifest.fov_ids, default=0),
         compartment_labels_dtype=manifest.run.compartment_labels_dtype,
     )
 
@@ -102,8 +104,9 @@ def _mosaic_geometries(
     Parameters
     ----------
     positions
-        Mapping from FOV number to its top-left position in global pixel
-        coordinates. Only FOVs present in this mapping participate in grouping.
+        Mapping from FOV number to its top-left position in pre-group source
+        pixel coordinates. Only FOVs present in this mapping participate in
+        grouping.
     tile_shape
         Common FOV shape as ``(height, width)`` in pixels.
     adjacency_tolerance_px
@@ -190,23 +193,24 @@ def _estimate_mosaic_sizes(
     *,
     image_dtype: str,
     channel_count: int,
-    cell_labels_dtype: str | None,
+    instance_labels_dtype: str | None,
+    instance_id_max_fov: int,
     compartment_labels_dtype: str | None,
 ) -> tuple[_CosmxMosaicSizeEstimate, ...]:
     if not mosaics:
         return ()
-    if cell_labels_dtype is None or compartment_labels_dtype is None:
+    if instance_labels_dtype is None or compartment_labels_dtype is None:
         raise ValueError("Cannot estimate label output sizes without relevant label dtypes.")
 
     image_itemsize = np.dtype(image_dtype).itemsize
-    max_fov = max(fov for mosaic in mosaics for fov in mosaic.fovs)
-    cell_labels_itemsize = _remapped_cell_dtype(cell_labels_dtype, max_fov).itemsize
+    _validate_instance_id_encoding(instance_labels_dtype, instance_id_max_fov)
+    instance_id_itemsize = _INSTANCE_ID_DTYPE.itemsize
     compartment_itemsize = np.dtype(compartment_labels_dtype).itemsize
     return tuple(
         _CosmxMosaicSizeEstimate(
             mosaic=mosaic.mosaic,
             image_nbytes=mosaic.shape[0] * mosaic.shape[1] * channel_count * image_itemsize,
-            cell_labels_nbytes=mosaic.shape[0] * mosaic.shape[1] * cell_labels_itemsize,
+            instance_labels_nbytes=mosaic.shape[0] * mosaic.shape[1] * instance_id_itemsize,
             compartment_labels_nbytes=mosaic.shape[0] * mosaic.shape[1] * compartment_itemsize,
         )
         for mosaic in mosaics
@@ -217,11 +221,40 @@ def _default_adjacency_tolerance_px(tile_shape: tuple[int, int]) -> int:
     return max(1, round(min(tile_shape) * _DEFAULT_ADJACENCY_TOLERANCE_FRACTION))
 
 
-def _remapped_cell_dtype(source_dtype: str, max_fov: int) -> np.dtype:
+def _validate_instance_id_encoding(source_dtype: str, max_fov: int) -> None:
+    """Validate that FOV-local instance IDs can be encoded safely as ``uint32``.
+
+    A later ingestion step will map each nonzero local instance ID to
+    ``(fov - 1) * base + local_instance_id``, where ``base`` is the number of
+    distinct values representable by the unsigned source dtype. This reserves a
+    non-overlapping ID range for every FOV while keeping zero as background.
+
+    This function checks the encoding from dtype metadata and the maximum FOV
+    number only. It neither reads label pixels nor performs the remapping.
+
+    Parameters
+    ----------
+    source_dtype
+        Dtype of the FOV-local instance-label rasters. It must be an unsigned
+        integer dtype.
+    max_fov
+        Largest FOV number that the encoding must support. It must be positive
+        and should cover the complete manifest rather than a selected subset.
+
+    Raises
+    ------
+    ValueError
+        If the source dtype is not unsigned, ``max_fov`` is not positive, or
+        the largest possible encoded ID does not fit in ``uint32``.
+    """
     source = np.dtype(source_dtype)
+    if source.kind != "u":
+        raise ValueError(f"CosMx cell labels must use an unsigned integer dtype, found {source.name}.")
+    if max_fov < 1:
+        raise ValueError(f"Maximum CosMx FOV number must be positive, found {max_fov}.")
     base = 1 << (source.itemsize * 8)
     max_global_id = (max_fov - 1) * base + (base - 1)
-    output = np.dtype(np.min_scalar_type(max_global_id))
-    if output.kind != "u":
-        raise ValueError(f"Could not select an unsigned global cell-ID dtype for maximum ID {max_global_id}.")
-    return output
+    if max_global_id > np.iinfo(_INSTANCE_ID_DTYPE).max:
+        raise ValueError(
+            f"CosMx instance-ID encoding requires maximum ID {max_global_id}, which does not fit in uint32."
+        )

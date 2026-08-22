@@ -125,9 +125,9 @@ def _discover_cosmx(path: str | Path) -> _CosmxManifest:
         )
     all_fovs = sorted(declared_fovs | observed_fovs)
 
-    cell_labels_dtype = _validate_label_family(
+    instance_labels_dtype = _validate_label_family(
         discovered,
-        product="cell_labels",
+        product="instance_labels",
         expected_shape=run_metadata.tile_shape,
     )
     compartment_labels_dtype = _validate_label_family(
@@ -137,7 +137,7 @@ def _discover_cosmx(path: str | Path) -> _CosmxManifest:
     )
     run_metadata = replace(
         run_metadata,
-        cell_labels_dtype=cell_labels_dtype,
+        instance_labels_dtype=instance_labels_dtype,
         compartment_labels_dtype=compartment_labels_dtype,
     )
 
@@ -162,7 +162,7 @@ def _discover_cosmx(path: str | Path) -> _CosmxManifest:
 def _label_product(name: str) -> str | None:
     lower = name.lower()
     if lower.startswith("celllabels_f") and lower.endswith((".tif", ".tiff")):
-        return "cell_labels"
+        return "instance_labels"
     if lower.startswith("compartmentlabels_f") and lower.endswith((".tif", ".tiff")):
         return "compartment_labels"
     return None
@@ -260,7 +260,7 @@ def _read_morphology_metadata(
             pixel_size_um=_pixel_size_um(reference),
             tile_shape=tile_shape,
             morphology_dtype=reference_dtype,
-            cell_labels_dtype=None,
+            instance_labels_dtype=None,
             compartment_labels_dtype=None,
         ),
         positions,
@@ -345,8 +345,10 @@ def _validate_label_family(
         with tifffile.TiffFile(files[product]) as tif:
             shape = tuple(int(value) for value in tif.series[0].shape)
             dtype = np.dtype(tif.series[0].dtype).name
-        if product == "cell_labels" and np.dtype(dtype).kind != "u":
-            raise ValueError(f"CosMx cell labels must use an unsigned integer dtype, found {dtype} for FOV {fov}.")
+        if product == "instance_labels" and np.dtype(dtype).kind != "u":
+            raise ValueError(
+                f"CosMx instance labels must use an unsigned integer dtype, found {dtype} for FOV {fov}."
+            )
         if shape != expected_shape:
             raise ValueError(f"{product} for FOV {fov} has shape {shape}; expected {expected_shape}.")
         if reference_dtype is None:

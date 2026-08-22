@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-_PRODUCTS = ("morphology", "cell_labels", "compartment_labels", "transcripts")
+_PRODUCTS = ("morphology", "instance_labels", "compartment_labels", "transcripts")
 
 
 @dataclass(frozen=True)
@@ -19,7 +19,7 @@ class _CosmxRunMetadata:
     pixel_size_um: float
     tile_shape: tuple[int, int]
     morphology_dtype: str
-    cell_labels_dtype: str | None
+    instance_labels_dtype: str | None
     compartment_labels_dtype: str | None
 
 
@@ -27,7 +27,7 @@ class _CosmxRunMetadata:
 class _CosmxFovFiles:
     fov: int
     morphology: Path | None = None
-    cell_labels: Path | None = None
+    instance_labels: Path | None = None
     compartment_labels: Path | None = None
     transcripts: Path | None = None
 
@@ -80,7 +80,7 @@ class _CosmxMosaicGeometry:
 class _CosmxMosaicSizeEstimate:
     mosaic: int
     image_nbytes: int
-    cell_labels_nbytes: int
+    instance_labels_nbytes: int
     compartment_labels_nbytes: int
 
 
@@ -99,8 +99,8 @@ class _CosmxPreview:
         return sum(estimate.image_nbytes for estimate in self.estimates)
 
     @property
-    def estimated_cell_labels_nbytes(self) -> int:
-        return sum(estimate.cell_labels_nbytes for estimate in self.estimates)
+    def estimated_instance_labels_nbytes(self) -> int:
+        return sum(estimate.instance_labels_nbytes for estimate in self.estimates)
 
     @property
     def estimated_compartment_labels_nbytes(self) -> int:

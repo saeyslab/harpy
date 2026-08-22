@@ -60,7 +60,14 @@ def test_preview_selects_common_positioned_fovs(decoded_cosmx_path: Path) -> Non
     assert [estimate.mosaic for estimate in preview.estimates] == [1, 2]
     pixels = 8 * 16 + 8 * 8
     assert preview.estimated_image_nbytes == pixels * 5 * np.dtype(np.uint16).itemsize
-    assert preview.estimated_cell_labels_nbytes == pixels * np.dtype(np.uint32).itemsize
+    assert preview.estimated_instance_labels_nbytes == pixels * np.dtype(np.uint32).itemsize
     assert preview.estimated_compartment_labels_nbytes == pixels * np.dtype(np.uint8).itemsize
     assert any("adjacency tolerance of 1 pixel" in message for message in preview.diagnostics)
     assert any("without reading transcript contents" in message for message in preview.diagnostics)
+
+
+def test_preview_cell_label_estimate_is_uint32_for_fov_subset(decoded_cosmx_path: Path) -> None:
+    preview = _preview_cosmx(_discover_cosmx(decoded_cosmx_path), fovs=(1,))
+
+    pixels = np.prod(preview.mosaics[0].shape)
+    assert preview.estimated_instance_labels_nbytes == pixels * np.dtype(np.uint32).itemsize

@@ -49,7 +49,7 @@ def test_discover_compact_manifest_without_opening_deferred_data(
     assert manifest.root == decoded_cosmx_path.resolve()
     assert manifest.fov_ids == (1, 2, 3, 4)
     assert manifest.available_fovs("morphology") == (1, 2, 3)
-    assert manifest.available_fovs("cell_labels") == (1, 2, 3, 4)
+    assert manifest.available_fovs("instance_labels") == (1, 2, 3, 4)
     assert manifest.available_fovs("compartment_labels") == (1, 2, 3, 4)
     assert manifest.available_fovs("transcripts") == (1, 2, 3, 4)
     assert tuple(position.fov for position in manifest.positions) == (1, 2, 3)
@@ -60,7 +60,7 @@ def test_discover_compact_manifest_without_opening_deferred_data(
     assert tuple(channel.name for channel in manifest.run.channels) == ("Histone", "G", "rRNA", "GFAP", "DNA")
     assert manifest.run.pixel_size_um == pytest.approx(1.0)
     assert manifest.run.tile_shape == (_TILE_SIZE, _TILE_SIZE)
-    assert manifest.run.cell_labels_dtype == "uint16"
+    assert manifest.run.instance_labels_dtype == "uint16"
     assert manifest.run.compartment_labels_dtype == "uint8"
 
 
