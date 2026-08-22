@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import math
 import re
-from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -119,7 +118,7 @@ def _discover_cosmx(path: str | Path) -> _CosmxManifest:
             raise ValueError(f"Could not determine the FOV from transcript file {file_path}.")
         assign(fov, _TRANSCRIPTS_PRODUCT, file_path)
 
-    run_metadata, morphology_positions = _read_morphology_metadata(discovered)
+    run_metadata, morphology_positions = _read_raster_metadata(discovered)
     positions = _normalize_positions(
         morphology_positions,
         pixel_size_um=run_metadata.pixel_size_um,
@@ -135,22 +134,6 @@ def _discover_cosmx(path: str | Path) -> _CosmxManifest:
             f"Files contain FOVs outside morphology NFov={run_metadata.declared_fov_count}: {sorted(unexpected_fovs)}"
         )
     all_fovs = sorted(declared_fovs | observed_fovs)
-
-    instance_labels_dtype = _validate_label_metadata(
-        discovered,
-        product=_INSTANCE_LABELS_PRODUCT,
-        expected_shape=run_metadata.tile_shape,
-    )
-    compartment_labels_dtype = _validate_label_metadata(
-        discovered,
-        product=_COMPARTMENT_LABELS_PRODUCT,
-        expected_shape=run_metadata.tile_shape,
-    )
-    run_metadata = replace(
-        run_metadata,
-        instance_labels_dtype=instance_labels_dtype,
-        compartment_labels_dtype=compartment_labels_dtype,
-    )
 
     fov_records = tuple(
         _CosmxFovFiles(
@@ -191,7 +174,7 @@ def _fov_from_path(path: Path) -> int | None:
     return _fov_from_name(path.name)
 
 
-def _read_morphology_metadata(
+def _read_raster_metadata(
     discovered: dict[int, dict[str, Path]],
 ) -> tuple[_CosmxRunMetadata, dict[int, _MorphologyPosition]]:
     morphology_files = [
@@ -268,6 +251,17 @@ def _read_morphology_metadata(
     if declared_shape != tile_shape:
         raise ValueError(f"Morphology ImRows/ImCols {declared_shape} disagree with TIFF shape {tile_shape}.")
 
+    instance_labels_dtype = _validate_label_metadata(
+        discovered,
+        product=_INSTANCE_LABELS_PRODUCT,
+        expected_shape=tile_shape,
+    )
+    compartment_labels_dtype = _validate_label_metadata(
+        discovered,
+        product=_COMPARTMENT_LABELS_PRODUCT,
+        expected_shape=tile_shape,
+    )
+
     return (
         _CosmxRunMetadata(
             declared_fov_count=int(reference["NFov"]) if reference.get("NFov") is not None else None,
@@ -275,8 +269,8 @@ def _read_morphology_metadata(
             pixel_size_um=_pixel_size_um(reference),
             tile_shape=tile_shape,
             morphology_dtype=reference_dtype,
-            instance_labels_dtype=None,
-            compartment_labels_dtype=None,
+            instance_labels_dtype=instance_labels_dtype,
+            compartment_labels_dtype=compartment_labels_dtype,
         ),
         positions,
     )
