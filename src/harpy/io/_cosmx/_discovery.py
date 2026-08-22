@@ -360,9 +360,9 @@ def _validate_label_family(
         with tifffile.TiffFile(files[product]) as tif:
             shape = tuple(int(value) for value in tif.series[0].shape)
             dtype = np.dtype(tif.series[0].dtype).name
-        if product == _INSTANCE_LABELS_PRODUCT and np.dtype(dtype).kind != "u":
+        if np.dtype(dtype).kind != "u":
             raise ValueError(
-                f"CosMx instance labels must use an unsigned integer dtype, found {dtype} for FOV {fov}."
+                f"CosMx {product.replace('_', ' ')} must use an unsigned integer dtype, found {dtype} for FOV {fov}."
             )
         if shape != expected_shape:
             raise ValueError(f"{product} for FOV {fov} has shape {shape}; expected {expected_shape}.")
