@@ -20,6 +20,37 @@ def _preview_cosmx(
     *,
     fovs: tuple[int, ...] | list[int] | set[int] | None = None,
 ) -> _CosmxPreview:
+    """Select usable FOVs and organize them into spatial mosaic groups.
+
+    A FOV is included only when it was requested, has a known morphology
+    position, and has morphology, instance-label, compartment-label, and
+    transcript files. Included FOVs are grouped by spatial adjacency into
+    independent mosaic geometries; they are not placed in one shared global
+    coordinate system. The function also records excluded and unpositioned
+    FOVs, estimates the raster size of each mosaic, validates that the planned
+    instance-ID encoding fits in ``uint32``, and appends selection and grouping
+    diagnostics. It does not load raster pixels or transcript contents.
+
+    Parameters
+    ----------
+    manifest
+        Discovered files, positions, and validated run metadata.
+    fovs
+        Optional FOV subset to consider. By default, all manifest FOVs are
+        considered.
+
+    Returns
+    -------
+    _CosmxPreview
+        The validated FOV selection, mosaic geometries, size estimates, and
+        diagnostics.
+
+    Raises
+    ------
+    ValueError
+        If a requested FOV is absent from the manifest or the planned raster
+        outputs and instance-ID encoding cannot be represented consistently.
+    """
     all_fovs = set(manifest.fov_ids)
     requested = all_fovs if fovs is None else {int(fov) for fov in fovs}
     unknown = requested - all_fovs
