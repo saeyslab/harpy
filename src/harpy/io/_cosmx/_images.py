@@ -18,7 +18,6 @@ from harpy.image._image import add_image
 from harpy.io._cosmx._models import _CosmxMosaicGeometry, _CosmxPreview
 
 _DEFAULT_CHUNKS = (1, 1024, 1024)
-_ORIENTATION = "identity"
 
 
 @dataclass(frozen=True)
@@ -44,6 +43,8 @@ def _add_morphology_images(
     channels: Sequence[str] | None = None,
     output_image_name: str = "morphology_image",
     coordinate_system: str = "global",
+    flip_x: bool = True,
+    flip_y: bool = False,
     chunks: tuple[int, int, int] = _DEFAULT_CHUNKS,
     scale_factors: ScaleFactors_t | None = None,
     overwrite: bool = False,
@@ -52,8 +53,9 @@ def _add_morphology_images(
 
     The function consumes the FOV selection and geometries from ``preview``;
     it does not repeat discovery or spatial grouping. Each selected TIFF page
-    becomes one delayed source task. Disjoint tile slices and lazy zero-filled
-    gap cells are concatenated into a virtual mosaic and materialized only when
+    becomes one delayed source task and receives the requested dataset-wide
+    axis flips before placement. Disjoint tile slices and lazy zero-filled gap
+    cells are concatenated into a virtual mosaic and materialized only when
     Harpy writes the image element to the already-backed ``SpatialData`` store.
 
     Parameters
@@ -72,6 +74,14 @@ def _add_morphology_images(
     coordinate_system
         Base coordinate-system name. Each mosaic receives independent
         ``<base>_n`` pixel and ``<base>_n_micron`` physical systems.
+    flip_x
+        Whether to reverse the local TIFF x-axis before mosaic placement. The
+        default matches the validated UCB decoded export. The same value must
+        be used for labels and transcript-local coordinates.
+    flip_y
+        Whether to reverse the local TIFF y-axis before mosaic placement. The
+        default matches the validated UCB decoded export. The same value must
+        be used for labels and transcript-local coordinates.
     chunks
         Final ``(c, y, x)`` Dask/Zarr chunks. The channel chunk must be one.
     scale_factors
@@ -88,8 +98,9 @@ def _add_morphology_images(
     Raises
     ------
     ValueError
-        If the destination is unbacked, selection or chunking is invalid,
-        placements overlap or exceed a canvas, or output elements collide.
+        If the destination is unbacked, selection, orientation, or chunking is
+        invalid, placements overlap or exceed a canvas, or output elements
+        collide.
     """
     if not sdata.is_backed():
         raise ValueError("CosMx morphology ingestion requires a backed SpatialData object.")
@@ -100,12 +111,11 @@ def _add_morphology_images(
     if not coordinate_system:
         raise ValueError("CosMx coordinate-system base name must not be empty.")
 
+    _validate_orientation(flip_x=flip_x, flip_y=flip_y)
     _validate_chunks(chunks)
     selected_channels = _select_channels(preview, channels)
     _validate_morphology_provenance_destination(sdata)
-    placements = {
-        mosaic.mosaic: _validate_mosaic_placements(preview, mosaic) for mosaic in preview.mosaics
-    }
+    placements = {mosaic.mosaic: _mosaic_placements(preview, mosaic) for mosaic in preview.mosaics}
     element_names = tuple(_image_element_name(output_image_name, mosaic.mosaic) for mosaic in preview.mosaics)
     existing = sorted(set(element_names) & set(sdata.images))
     if existing and not overwrite:
@@ -118,6 +128,8 @@ def _add_morphology_images(
             mosaic,
             placements=placements[mosaic.mosaic],
             channels=selected_channels,
+            flip_x=flip_x,
+            flip_y=flip_y,
             chunks=chunks,
         )
         pixel_coordinate_system = _pixel_coordinate_system(coordinate_system, mosaic.mosaic)
@@ -145,6 +157,8 @@ def _add_morphology_images(
         sdata,
         preview=preview,
         channels=selected_channels,
+        flip_x=flip_x,
+        flip_y=flip_y,
         chunks=chunks,
         scale_factors=scale_factors,
         written=written,
@@ -215,47 +229,26 @@ def _validate_chunks(chunks: tuple[int, int, int]) -> None:
         raise ValueError(f"CosMx morphology channel chunk must be 1, found {chunks[0]}.")
 
 
-def _validate_mosaic_placements(
+def _validate_orientation(*, flip_x: bool, flip_y: bool) -> None:
+    """Require explicit booleans for the two dataset-wide axis flips."""
+    for name, value in (("flip_x", flip_x), ("flip_y", flip_y)):
+        if not isinstance(value, bool):
+            raise ValueError(f"CosMx morphology {name} must be a bool, found {value!r}.")
+
+
+def _mosaic_placements(
     preview: _CosmxPreview,
     mosaic: _CosmxMosaicGeometry,
 ) -> dict[int, tuple[int, int]]:
-    """Return mosaic-local tile offsets after validating bounds and overlaps."""
+    """Derive mosaic-local tile offsets from an internally valid preview."""
     positions = preview.manifest.positions_by_fov
-    tile_height, tile_width = preview.manifest.run.tile_shape
-    canvas_height, canvas_width = mosaic.shape
-    placements: dict[int, tuple[int, int]] = {}
-
-    for fov in mosaic.fovs:
-        position = positions.get(fov)
-        if position is None:
-            raise ValueError(f"CosMx mosaic {mosaic.mosaic} FOV {fov} has no morphology position.")
-        files = preview.manifest.fovs_by_id[fov]
-        if files.morphology is None:
-            raise ValueError(f"CosMx mosaic {mosaic.mosaic} FOV {fov} has no morphology TIFF.")
-        y = position.y_px - mosaic.origin_y_px
-        x = position.x_px - mosaic.origin_x_px
-        if y < 0 or x < 0 or y + tile_height > canvas_height or x + tile_width > canvas_width:
-            raise ValueError(
-                f"CosMx FOV {fov} placement {(y, x)} with tile shape {(tile_height, tile_width)} falls outside "
-                f"mosaic {mosaic.mosaic} canvas {mosaic.shape}."
-            )
-        placements[fov] = (y, x)
-
-    fovs = tuple(placements)
-    for index, left in enumerate(fovs):
-        left_y, left_x = placements[left]
-        for right in fovs[index + 1 :]:
-            right_y, right_x = placements[right]
-            overlap_x0 = max(left_x, right_x)
-            overlap_x1 = min(left_x + tile_width, right_x + tile_width)
-            overlap_y0 = max(left_y, right_y)
-            overlap_y1 = min(left_y + tile_height, right_y + tile_height)
-            if overlap_x1 > overlap_x0 and overlap_y1 > overlap_y0:
-                raise ValueError(
-                    f"CosMx mosaic {mosaic.mosaic} has positive-area overlap between FOVs {left} and {right}: "
-                    f"x=[{overlap_x0}, {overlap_x1}), y=[{overlap_y0}, {overlap_y1})."
-                )
-    return placements
+    return {
+        fov: (
+            positions[fov].y_px - mosaic.origin_y_px,
+            positions[fov].x_px - mosaic.origin_x_px,
+        )
+        for fov in mosaic.fovs
+    }
 
 
 def _morphology_mosaic(
@@ -264,6 +257,8 @@ def _morphology_mosaic(
     *,
     placements: dict[int, tuple[int, int]],
     channels: tuple[_CosmxSelectedChannel, ...],
+    flip_x: bool,
+    flip_y: bool,
     chunks: tuple[int, int, int],
 ) -> da.Array:
     """Construct a lazy ``(c, y, x)`` morphology mosaic without reading pixels."""
@@ -282,6 +277,8 @@ def _morphology_mosaic(
                 plane=channel.plane,
                 expected_shape=preview.manifest.run.tile_shape,
                 expected_dtype=dtype,
+                flip_x=flip_x,
+                flip_y=flip_y,
             )
             for fov in mosaic.fovs
         }
@@ -367,10 +364,19 @@ def _lazy_morphology_plane(
     plane: int,
     expected_shape: tuple[int, int],
     expected_dtype: np.dtype,
+    flip_x: bool,
+    flip_y: bool,
 ) -> da.Array:
     if path is None:
         raise ValueError("Cannot construct a lazy CosMx morphology plane without a TIFF path.")
-    value = delayed(_read_morphology_plane, pure=True)(path, plane, expected_shape, expected_dtype.name)
+    value = delayed(_read_morphology_plane, pure=True)(
+        path,
+        plane,
+        expected_shape,
+        expected_dtype.name,
+        flip_x=flip_x,
+        flip_y=flip_y,
+    )
     return da.from_delayed(value, shape=expected_shape, dtype=expected_dtype)
 
 
@@ -379,8 +385,16 @@ def _read_morphology_plane(
     plane: int,
     expected_shape: tuple[int, int],
     expected_dtype: str,
+    *,
+    flip_x: bool,
+    flip_y: bool,
 ) -> np.ndarray:
-    """Read and revalidate one morphology TIFF page in its stored row order."""
+    """Read, revalidate, and orient one morphology TIFF page.
+
+    The flips map local TIFF axes into the stage-derived mosaic axes without
+    changing the preview geometry. They must be resolved once per dataset and
+    shared by morphology, labels, and transcript-local coordinates.
+    """
     with tifffile.TiffFile(path) as tif:
         series = tif.series[0]
         shape = tuple(int(value) for value in series.shape)
@@ -404,6 +418,10 @@ def _read_morphology_plane(
             f"CosMx morphology plane {plane} in {path} has {(result.shape, result.dtype.name)}; expected "
             f"{(expected_shape, dtype.name)}."
         )
+    if flip_y:
+        result = result[::-1, :]
+    if flip_x:
+        result = result[:, ::-1]
     return result
 
 
@@ -412,6 +430,8 @@ def _record_morphology_provenance(
     *,
     preview: _CosmxPreview,
     channels: tuple[_CosmxSelectedChannel, ...],
+    flip_x: bool,
+    flip_y: bool,
     chunks: tuple[int, int, int],
     scale_factors: ScaleFactors_t | None,
     written: list[tuple[_CosmxMosaicGeometry, str, str, str]],
@@ -444,7 +464,7 @@ def _record_morphology_provenance(
             "fovs": list(mosaic.fovs),
             "source_origin_px": {"x": mosaic.origin_x_px, "y": mosaic.origin_y_px},
             "shape_yx": list(mosaic.shape),
-            "orientation": _ORIENTATION,
+            "orientation": {"flip_x": flip_x, "flip_y": flip_y},
             "source_dtype": preview.manifest.run.morphology_dtype,
             "pixel_size_um": preview.manifest.run.pixel_size_um,
             "chunks_cyx": list(chunks),

@@ -131,6 +131,13 @@ class _CosmxManifest:
 
 @dataclass(frozen=True)
 class _CosmxMosaicGeometry:
+    """Geometry of one derived spatial group of nearby CosMx FOVs.
+
+    The FOVs form one connected mosaic group under the configured adjacency
+    rule. The origin and shape define their bounding pixel canvas; the group is
+    not an authoritative vendor ROI or biological compartment.
+    """
+
     mosaic: int
     fovs: tuple[int, ...]
     origin_x_px: int
@@ -198,6 +205,7 @@ class _CosmxPreview:
         mosaic_fovs = tuple(fov for mosaic in self.mosaics for fov in mosaic.fovs)
         if len(set(mosaic_fovs)) != len(mosaic_fovs) or set(mosaic_fovs) != included:
             raise ValueError("Every included CosMx FOV must belong to exactly one mosaic.")
+        _validate_preview_mosaics(self.manifest, self.mosaics)
 
         estimate_ids = tuple(estimate.mosaic for estimate in self.estimates)
         if estimate_ids != mosaic_ids:
@@ -244,6 +252,54 @@ def _validate_sorted_unique_fovs(fovs: tuple[int, ...], *, name: str) -> None:
         raise ValueError(f"CosMx {name} must be sorted and unique, found {fovs}.")
     for fov in fovs:
         _validate_fov(fov)
+
+
+def _validate_preview_mosaics(
+    manifest: _CosmxManifest,
+    mosaics: tuple[_CosmxMosaicGeometry, ...],
+) -> None:
+    """Validate mosaic sources and geometry against the manifest."""
+    positions = manifest.positions_by_fov
+    fovs_by_id = manifest.fovs_by_id
+    tile_height, tile_width = manifest.run.tile_shape
+
+    for mosaic in mosaics:
+        for product in _PRODUCTS:
+            missing_sources = [fov for fov in mosaic.fovs if getattr(fovs_by_id[fov], product) is None]
+            if missing_sources:
+                raise ValueError(
+                    f"CosMx mosaic {mosaic.mosaic} FOVs have no {product} sources: {missing_sources}."
+                )
+
+        expected_origin_x = min(positions[fov].x_px for fov in mosaic.fovs)
+        expected_origin_y = min(positions[fov].y_px for fov in mosaic.fovs)
+        expected_max_x = max(positions[fov].x_px + tile_width for fov in mosaic.fovs)
+        expected_max_y = max(positions[fov].y_px + tile_height for fov in mosaic.fovs)
+        expected_origin = (expected_origin_x, expected_origin_y)
+        expected_shape = (expected_max_y - expected_origin_y, expected_max_x - expected_origin_x)
+        if (mosaic.origin_x_px, mosaic.origin_y_px) != expected_origin:
+            raise ValueError(
+                f"CosMx mosaic {mosaic.mosaic} origin must be {expected_origin}, found "
+                f"{(mosaic.origin_x_px, mosaic.origin_y_px)}."
+            )
+        if mosaic.shape != expected_shape:
+            raise ValueError(
+                f"CosMx mosaic {mosaic.mosaic} shape must be {expected_shape}, found {mosaic.shape}."
+            )
+
+        for index, left in enumerate(mosaic.fovs):
+            left_position = positions[left]
+            for right in mosaic.fovs[index + 1 :]:
+                right_position = positions[right]
+                overlap_x0 = max(left_position.x_px, right_position.x_px)
+                overlap_x1 = min(left_position.x_px + tile_width, right_position.x_px + tile_width)
+                overlap_y0 = max(left_position.y_px, right_position.y_px)
+                overlap_y1 = min(left_position.y_px + tile_height, right_position.y_px + tile_height)
+                if overlap_x1 > overlap_x0 and overlap_y1 > overlap_y0:
+                    raise ValueError(
+                        f"CosMx mosaic {mosaic.mosaic} has positive-area overlap between FOVs {left} and {right}: "
+                        f"x=[{overlap_x0}, {overlap_x1}), y=[{overlap_y0}, {overlap_y1})."
+                    )
 
 
 def _validate_stage_position(x_mm: float, y_mm: float, *, fov: int) -> None:
