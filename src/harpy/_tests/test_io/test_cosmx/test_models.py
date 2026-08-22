@@ -11,7 +11,6 @@ from harpy.io._cosmx._models import (
     _CosmxFovPosition,
     _CosmxManifest,
     _CosmxMosaicGeometry,
-    _CosmxMosaicSizeEstimate,
     _CosmxPreview,
     _CosmxRunMetadata,
     _MorphologyPosition,
@@ -35,7 +34,16 @@ def _run_metadata(**updates: object) -> _CosmxRunMetadata:
 def _manifest() -> _CosmxManifest:
     return _CosmxManifest(
         root=Path("/dataset"),
-        fovs=(_CosmxFovFiles(fov=1), _CosmxFovFiles(fov=2)),
+        fovs=(
+            _CosmxFovFiles(
+                fov=1,
+                morphology=Path("/dataset/fov_1.TIF"),
+                instance_labels=Path("/dataset/fov_1_instance.TIF"),
+                compartment_labels=Path("/dataset/fov_1_compartment.TIF"),
+                transcripts=Path("/dataset/fov_1_tx.csv"),
+            ),
+            _CosmxFovFiles(fov=2),
+        ),
         positions=(_CosmxFovPosition(fov=1, x_px=0, y_px=0, x_mm=0.0, y_mm=0.0),),
         run=_run_metadata(),
         diagnostics=(),
@@ -49,14 +57,6 @@ def _preview() -> _CosmxPreview:
         excluded_fovs=(2,),
         unpositioned_fovs=(2,),
         mosaics=(_CosmxMosaicGeometry(mosaic=1, fovs=(1,), origin_x_px=0, origin_y_px=0, shape=(8, 8)),),
-        estimates=(
-            _CosmxMosaicSizeEstimate(
-                mosaic=1,
-                image_nbytes=640,
-                instance_labels_nbytes=256,
-                compartment_labels_nbytes=64,
-            ),
-        ),
         diagnostics=(),
     )
 
@@ -126,20 +126,13 @@ def test_manifest_rejects_inconsistent_fov_records() -> None:
         )
 
 
-def test_mosaic_models_reject_invalid_geometry_and_estimates() -> None:
+def test_mosaic_model_rejects_invalid_geometry() -> None:
     with pytest.raises(ValueError, match="at least one FOV"):
         _CosmxMosaicGeometry(mosaic=1, fovs=(), origin_x_px=0, origin_y_px=0, shape=(8, 8))
     with pytest.raises(ValueError, match="must be sorted and unique"):
         _CosmxMosaicGeometry(mosaic=1, fovs=(2, 1), origin_x_px=0, origin_y_px=0, shape=(8, 8))
     with pytest.raises(ValueError, match="shape must contain two positive dimensions"):
         _CosmxMosaicGeometry(mosaic=1, fovs=(1,), origin_x_px=0, origin_y_px=0, shape=(0, 8))
-    with pytest.raises(ValueError, match="byte estimates must be nonnegative"):
-        _CosmxMosaicSizeEstimate(
-            mosaic=1,
-            image_nbytes=-1,
-            instance_labels_nbytes=0,
-            compartment_labels_nbytes=0,
-        )
 
 
 def test_preview_rejects_inconsistent_fov_and_mosaic_relationships() -> None:
@@ -154,15 +147,24 @@ def test_preview_rejects_inconsistent_fov_and_mosaic_relationships() -> None:
             preview,
             mosaics=(_CosmxMosaicGeometry(mosaic=1, fovs=(2,), origin_x_px=0, origin_y_px=0, shape=(8, 8)),),
         )
-    with pytest.raises(ValueError, match="size-estimate mosaic IDs"):
+
+
+def test_preview_rejects_geometry_inconsistent_with_manifest() -> None:
+    preview = _preview()
+
+    missing_morphology = replace(preview.manifest.fovs[0], morphology=None)
+    with pytest.raises(ValueError, match="FOVs have no morphology sources"):
         replace(
             preview,
-            estimates=(
-                _CosmxMosaicSizeEstimate(
-                    mosaic=2,
-                    image_nbytes=640,
-                    instance_labels_nbytes=256,
-                    compartment_labels_nbytes=64,
-                ),
-            ),
+            manifest=replace(preview.manifest, fovs=(missing_morphology, preview.manifest.fovs[1])),
+        )
+    with pytest.raises(ValueError, match=r"origin must be \(0, 0\)"):
+        replace(
+            preview,
+            mosaics=(_CosmxMosaicGeometry(mosaic=1, fovs=(1,), origin_x_px=1, origin_y_px=0, shape=(8, 8)),),
+        )
+    with pytest.raises(ValueError, match=r"shape must be \(8, 8\)"):
+        replace(
+            preview,
+            mosaics=(_CosmxMosaicGeometry(mosaic=1, fovs=(1,), origin_x_px=0, origin_y_px=0, shape=(9, 8)),),
         )

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from harpy.io._cosmx._discovery import _discover_cosmx
 from harpy.io._cosmx._models import _CosmxFovPosition
@@ -49,6 +51,42 @@ def test_default_adjacency_tolerance_is_two_percent_of_tile() -> None:
     assert _default_adjacency_tolerance_px((4256, 4256)) == 85
 
 
+@pytest.mark.parametrize(
+    ("x_px", "y_px", "expected_groups"),
+    [
+        pytest.param(8, 0, ((1, 2), (3,)), id="edge-contact"),
+        pytest.param(8, 8, ((1,), (2,), (3,)), id="corner-contact"),
+        pytest.param(9, 0, ((1, 2), (3,)), id="one-pixel-gap"),
+    ],
+)
+def test_preview_accepts_non_overlapping_fov_relationships(
+    decoded_cosmx_path: Path,
+    x_px: int,
+    y_px: int,
+    expected_groups: tuple[tuple[int, ...], ...],
+) -> None:
+    manifest = _discover_cosmx(decoded_cosmx_path)
+    positions = tuple(
+        replace(position, x_px=x_px, y_px=y_px) if position.fov == 2 else position
+        for position in manifest.positions
+    )
+
+    preview = _preview_cosmx(replace(manifest, positions=positions))
+
+    assert tuple(mosaic.fovs for mosaic in preview.mosaics) == expected_groups
+
+
+def test_preview_rejects_positive_area_fov_overlap(decoded_cosmx_path: Path) -> None:
+    manifest = _discover_cosmx(decoded_cosmx_path)
+    positions = tuple(
+        replace(position, x_px=7, y_px=0) if position.fov == 2 else position
+        for position in manifest.positions
+    )
+
+    with pytest.raises(ValueError, match=r"overlap between FOVs 1 and 2.*x=\[7, 8\)"):
+        _preview_cosmx(replace(manifest, positions=positions))
+
+
 def test_preview_selects_common_positioned_fovs(decoded_cosmx_path: Path) -> None:
     preview = _preview_cosmx(_discover_cosmx(decoded_cosmx_path))
 
@@ -57,7 +95,6 @@ def test_preview_selects_common_positioned_fovs(decoded_cosmx_path: Path) -> Non
     assert preview.unpositioned_fovs == (4,)
     assert [mosaic.fovs for mosaic in preview.mosaics] == [(1, 2), (3,)]
     assert [mosaic.shape for mosaic in preview.mosaics] == [(8, 16), (8, 8)]
-    assert [estimate.mosaic for estimate in preview.estimates] == [1, 2]
     pixels = 8 * 16 + 8 * 8
     assert preview.estimated_image_nbytes == pixels * 5 * np.dtype(np.uint16).itemsize
     assert preview.estimated_instance_labels_nbytes == pixels * np.dtype(np.uint32).itemsize
