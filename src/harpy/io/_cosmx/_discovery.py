@@ -28,11 +28,16 @@ _MORPHOLOGY_FILE_RE = re.compile(
 )
 _TRANSCRIPT_SUFFIX = "target_call_coord.csv"
 _DEFAULT_PIXEL_SIZE_UM = 0.120280945
+_CELL_STATS_DIRNAME = "CellStatsDir"
+_MORPHOLOGY_DIRNAME = "Morphology2D"
+_ANALYSIS_RESULTS_DIRNAME = "AnalysisResults"
 
 
 def _is_decoded_cosmx(path: str | Path) -> bool:
     path = Path(path)
-    return (path / "CellStatsDir" / "Morphology2D").is_dir() and (path / "AnalysisResults").is_dir()
+    return (path / _CELL_STATS_DIRNAME / _MORPHOLOGY_DIRNAME).is_dir() and (
+        path / _ANALYSIS_RESULTS_DIRNAME
+    ).is_dir()
 
 
 def _resolve_decoded_cosmx_root(path: str | Path) -> Path:
@@ -44,15 +49,15 @@ def _resolve_decoded_cosmx_root(path: str | Path) -> Path:
 
     candidates = sorted(
         candidate.parent.parent
-        for candidate in path.rglob("Morphology2D")
+        for candidate in path.rglob(_MORPHOLOGY_DIRNAME)
         if candidate.is_dir()
-        and candidate.parent.name == "CellStatsDir"
-        and (candidate.parent.parent / "AnalysisResults").is_dir()
+        and candidate.parent.name == _CELL_STATS_DIRNAME
+        and (candidate.parent.parent / _ANALYSIS_RESULTS_DIRNAME).is_dir()
     )
     if not candidates:
         raise ValueError(
-            f"Could not find a decoded CosMx run below {path}. Expected CellStatsDir/Morphology2D and "
-            "AnalysisResults directories."
+            f"Could not find a decoded CosMx run below {path}. Expected "
+            f"{_CELL_STATS_DIRNAME}/{_MORPHOLOGY_DIRNAME} and {_ANALYSIS_RESULTS_DIRNAME} directories."
         )
     if len(candidates) > 1:
         formatted = "\n".join(f"- {candidate}" for candidate in candidates)
@@ -71,7 +76,7 @@ def _discover_cosmx(path: str | Path) -> _CosmxManifest:
             raise ValueError(f"Duplicate {product} files for FOV {fov}: {existing} and {file_path}")
         discovered[fov][product] = file_path
 
-    morphology_dir = root / "CellStatsDir" / "Morphology2D"
+    morphology_dir = root / _CELL_STATS_DIRNAME / _MORPHOLOGY_DIRNAME
     for file_path in sorted(morphology_dir.iterdir()):
         if not file_path.is_file() or file_path.suffix.lower() not in {".tif", ".tiff"}:
             continue
@@ -79,8 +84,8 @@ def _discover_cosmx(path: str | Path) -> _CosmxManifest:
         if match is not None:
             assign(int(match.group("fov")), "morphology", file_path)
 
-    cell_stats_dir = root / "CellStatsDir"
-    for fov_dir in sorted(cell_stats_dir.iterdir()):
+    fov_root = root / _CELL_STATS_DIRNAME
+    for fov_dir in sorted(fov_root.iterdir()):
         if not fov_dir.is_dir() or (match := _FOV_DIR_RE.match(fov_dir.name)) is None:
             continue
         directory_fov = int(match.group(1))
@@ -99,7 +104,7 @@ def _discover_cosmx(path: str | Path) -> _CosmxManifest:
                 )
             assign(directory_fov, product, file_path)
 
-    analysis_results = root / "AnalysisResults"
+    analysis_results = root / _ANALYSIS_RESULTS_DIRNAME
     for file_path in sorted(analysis_results.rglob(f"*{_TRANSCRIPT_SUFFIX}")):
         if not file_path.is_file():
             continue
