@@ -135,6 +135,7 @@ def _add_transcript_points(
 
     _record_transcript_provenance(
         sdata,
+        preview=preview,
         flip_x=flip_x,
         flip_y=flip_y,
         written=written,
@@ -304,6 +305,14 @@ def _normalize_transcript_partition(
         raise ValueError(f"CosMx transcript CSV {path} contains null gene targets.")
 
     tile_height, tile_width = tile_shape
+    if (
+        not ((0 <= source_x) & (source_x < tile_width)).all()
+        or not ((0 <= source_y) & (source_y < tile_height)).all()
+    ):
+        raise ValueError(
+            f"CosMx transcript CSV {path} contains coordinates outside FOV bounds "
+            f"0 <= x < {tile_width} and 0 <= y < {tile_height}."
+        )
     placement_y, placement_x = placement
     x = tile_width - 1 - source_x if flip_x else source_x
     y = tile_height - 1 - source_y if flip_y else source_y
@@ -319,6 +328,7 @@ def _normalize_transcript_partition(
 def _record_transcript_provenance(
     sdata: SpatialData,
     *,
+    preview: _CosmxPreview,
     flip_x: bool,
     flip_y: bool,
     written: list[tuple[_CosmxMosaicGeometry, str]],
@@ -333,6 +343,7 @@ def _record_transcript_provenance(
         transcripts[element_name] = {
             "fovs": list(mosaic.fovs),
             "orientation": {"flip_x": flip_x, "flip_y": flip_y},
+            "pixel_size_um": preview.manifest.run.pixel_size_um,
         }
 
     sdata.attrs = attrs
