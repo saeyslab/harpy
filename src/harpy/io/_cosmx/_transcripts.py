@@ -83,22 +83,36 @@ def _add_transcript_points(
     SpatialData
         The input object with one backed transcript element per mosaic.
     """
-    _validate_transcript_request(
-        sdata,
-        preview,
-        output_points_name=output_points_name,
-        coordinate_system=coordinate_system,
-        flip_x=flip_x,
-        flip_y=flip_y,
-        blocksize=blocksize,
-        overwrite=overwrite,
-    )
+    if not sdata.is_backed():
+        raise ValueError("CosMx transcript ingestion requires a backed SpatialData object.")
+    if not preview.mosaics:
+        raise ValueError("CosMx transcript ingestion requires at least one selected mosaic.")
+    if not output_points_name:
+        raise ValueError("CosMx output points base name must not be empty.")
+    if not coordinate_system:
+        raise ValueError("CosMx coordinate-system base name must not be empty.")
+    if not isinstance(overwrite, bool):
+        raise ValueError(f"CosMx transcript overwrite must be a bool, found {overwrite!r}.")
+
+    _validate_orientation(flip_x=flip_x, flip_y=flip_y)
+    _validate_blocksize(blocksize)
+    _validate_transcript_metadata_destination(sdata)
+
+    element_names = tuple(_points_element_name(output_points_name, mosaic.mosaic) for mosaic in preview.mosaics)
+    existing = {name: element_type for element_type, name, _ in sdata.gen_elements() if name in element_names}
+    wrong_type = sorted(name for name, element_type in existing.items() if element_type != "points")
+    if wrong_type:
+        raise ValueError(f"CosMx transcript output names already belong to non-points elements: {wrong_type}.")
+    collisions = sorted(existing)
+    if collisions and not overwrite:
+        raise ValueError(f"CosMx transcript points elements already exist: {collisions}.")
+
     sources = _transcript_sources(preview)
     headers = {fov: _read_transcript_header(path) for fov, path in sources.items()}
     gene_categories = _gene_categories(tuple(sources.values()), blocksize=blocksize)
 
     written: list[tuple[_CosmxMosaicGeometry, str]] = []
-    for mosaic in preview.mosaics:
+    for mosaic, element_name in zip(preview.mosaics, element_names, strict=True):
         placements = _mosaic_placements(preview, mosaic)
         frames = [
             _read_fov_transcripts(
@@ -114,7 +128,6 @@ def _add_transcript_points(
             for fov in mosaic.fovs
         ]
         points = frames[0] if len(frames) == 1 else dd.concat(frames, axis=0, interleave_partitions=True)
-        element_name = _points_element_name(output_points_name, mosaic.mosaic)
         pixel_coordinate_system = _pixel_coordinate_system(coordinate_system, mosaic.mosaic)
         micron_coordinate_system = f"{pixel_coordinate_system}_micron"
         sdata = add_points(
@@ -141,42 +154,6 @@ def _add_transcript_points(
         written=written,
     )
     return sdata
-
-
-def _validate_transcript_request(
-    sdata: SpatialData,
-    preview: _CosmxPreview,
-    *,
-    output_points_name: str,
-    coordinate_system: str,
-    flip_x: bool,
-    flip_y: bool,
-    blocksize: str | int,
-    overwrite: bool,
-) -> None:
-    """Validate cheap request invariants before reading any transcript rows."""
-    if not sdata.is_backed():
-        raise ValueError("CosMx transcript ingestion requires a backed SpatialData object.")
-    if not preview.mosaics:
-        raise ValueError("CosMx transcript ingestion requires at least one selected mosaic.")
-    if not output_points_name:
-        raise ValueError("CosMx output points base name must not be empty.")
-    if not coordinate_system:
-        raise ValueError("CosMx coordinate-system base name must not be empty.")
-    if not isinstance(overwrite, bool):
-        raise ValueError(f"CosMx transcript overwrite must be a bool, found {overwrite!r}.")
-    _validate_orientation(flip_x=flip_x, flip_y=flip_y)
-    _validate_blocksize(blocksize)
-    _validate_transcript_provenance_destination(sdata)
-
-    planned = {_points_element_name(output_points_name, mosaic.mosaic) for mosaic in preview.mosaics}
-    existing = {name: element_type for element_type, name, _ in sdata.gen_elements() if name in planned}
-    wrong_type = sorted(name for name, element_type in existing.items() if element_type != "points")
-    if wrong_type:
-        raise ValueError(f"CosMx transcript output names already belong to non-points elements: {wrong_type}.")
-    collisions = sorted(existing)
-    if collisions and not overwrite:
-        raise ValueError(f"CosMx transcript points elements already exist: {collisions}.")
 
 
 def _validate_blocksize(blocksize: str | int) -> None:
@@ -350,8 +327,8 @@ def _record_transcript_provenance(
     sdata.write_attrs()
 
 
-def _validate_transcript_provenance_destination(sdata: SpatialData) -> None:
-    """Validate existing CosMx transcript provenance before element writes."""
+def _validate_transcript_metadata_destination(sdata: SpatialData) -> None:
+    """Validate the root metadata mappings used for transcript provenance."""
     cosmx = sdata.attrs.get("cosmx")
     if cosmx is not None and not isinstance(cosmx, dict):
         raise ValueError("SpatialData attribute 'cosmx' must be a mapping.")

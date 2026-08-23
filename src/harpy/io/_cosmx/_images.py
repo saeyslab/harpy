@@ -115,12 +115,16 @@ def _add_morphology_images(
     _validate_orientation(flip_x=flip_x, flip_y=flip_y)
     _validate_chunks(chunks)
     selected_channels = _select_channels(preview, channels)
-    _validate_morphology_provenance_destination(sdata)
+    _validate_morphology_metadata_destination(sdata)
     placements = {mosaic.mosaic: _mosaic_placements(preview, mosaic) for mosaic in preview.mosaics}
     element_names = tuple(_image_element_name(output_image_name, mosaic.mosaic) for mosaic in preview.mosaics)
-    existing = sorted(set(element_names) & set(sdata.images))
-    if existing and not overwrite:
-        raise ValueError(f"CosMx morphology image elements already exist: {existing}.")
+    existing = {name: element_type for element_type, name, _ in sdata.gen_elements() if name in element_names}
+    wrong_type = sorted(name for name, element_type in existing.items() if element_type != "images")
+    if wrong_type:
+        raise ValueError(f"CosMx morphology output names already belong to non-image elements: {wrong_type}.")
+    collisions = sorted(existing)
+    if collisions and not overwrite:
+        raise ValueError(f"CosMx morphology image elements already exist: {collisions}.")
 
     written = []
     for mosaic, element_name in zip(preview.mosaics, element_names, strict=True):
@@ -481,8 +485,8 @@ def _record_morphology_provenance(
     sdata.write_attrs()
 
 
-def _validate_morphology_provenance_destination(sdata: SpatialData) -> None:
-    """Validate existing CosMx provenance mappings before any image write."""
+def _validate_morphology_metadata_destination(sdata: SpatialData) -> None:
+    """Validate the root metadata mappings used for morphology provenance."""
     cosmx = sdata.attrs.get("cosmx")
     if cosmx is not None and not isinstance(cosmx, dict):
         raise ValueError("SpatialData attribute 'cosmx' must be a mapping.")
