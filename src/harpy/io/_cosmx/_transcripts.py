@@ -13,7 +13,7 @@ from dask.utils import parse_bytes
 from spatialdata import SpatialData
 from spatialdata.transformations import Identity, Scale
 
-from harpy.io._cosmx._models import _CosmxMosaicGeometry, _CosmxPreview
+from harpy.io._cosmx._models import _CosmxPreview
 from harpy.io._cosmx._raster import _mosaic_placements, _pixel_coordinate_system, _validate_orientation
 from harpy.points._points import add_points
 
@@ -111,7 +111,6 @@ def _add_transcript_points(
     headers = {fov: _read_transcript_header(path) for fov, path in sources.items()}
     gene_categories = _gene_categories(tuple(sources.values()), blocksize=blocksize)
 
-    written: list[tuple[_CosmxMosaicGeometry, str]] = []
     for mosaic, element_name in zip(preview.mosaics, element_names, strict=True):
         placements = _mosaic_placements(preview, mosaic)
         frames = [
@@ -144,15 +143,19 @@ def _add_transcript_points(
             },
             overwrite=overwrite,
         )
-        written.append((mosaic, element_name))
-
-    _record_transcript_provenance(
-        sdata,
-        preview=preview,
-        flip_x=flip_x,
-        flip_y=flip_y,
-        written=written,
-    )
+    attrs = deepcopy(sdata.attrs)
+    cosmx = attrs.setdefault("cosmx", {})
+    assert isinstance(cosmx, dict)
+    transcripts = cosmx.setdefault("transcripts", {})
+    assert isinstance(transcripts, dict)
+    for mosaic, element_name in zip(preview.mosaics, element_names, strict=True):
+        transcripts[element_name] = {
+            "fovs": list(mosaic.fovs),
+            "orientation": {"flip_x": flip_x, "flip_y": flip_y},
+            "pixel_size_um": preview.manifest.run.pixel_size_um,
+        }
+    sdata.attrs = attrs
+    sdata.write_attrs()
     return sdata
 
 
@@ -300,31 +303,6 @@ def _normalize_transcript_partition(
     result["y"] = y + placement_y
     extras = [column for column in result.columns if column not in _OUTPUT_COLUMNS]
     return result[[*_OUTPUT_COLUMNS, *extras]]
-
-
-def _record_transcript_provenance(
-    sdata: SpatialData,
-    *,
-    preview: _CosmxPreview,
-    flip_x: bool,
-    flip_y: bool,
-    written: list[tuple[_CosmxMosaicGeometry, str]],
-) -> None:
-    attrs = deepcopy(sdata.attrs)
-    cosmx = attrs.setdefault("cosmx", {})
-    assert isinstance(cosmx, dict)
-    transcripts = cosmx.setdefault("transcripts", {})
-    assert isinstance(transcripts, dict)
-
-    for mosaic, element_name in written:
-        transcripts[element_name] = {
-            "fovs": list(mosaic.fovs),
-            "orientation": {"flip_x": flip_x, "flip_y": flip_y},
-            "pixel_size_um": preview.manifest.run.pixel_size_um,
-        }
-
-    sdata.attrs = attrs
-    sdata.write_attrs()
 
 
 def _validate_transcript_metadata_destination(sdata: SpatialData) -> None:
