@@ -16,6 +16,7 @@ from spatialdata.transformations import Identity, Scale
 
 from harpy.image._image import add_image
 from harpy.io._cosmx._models import _CosmxMosaicGeometry, _CosmxPreview
+from harpy.io._cosmx._raster import _mosaic_placements, _pixel_coordinate_system, _validate_orientation
 
 _DEFAULT_CHUNKS = (1, 1024, 1024)
 
@@ -151,7 +152,7 @@ def _add_morphology_images(
             c_coords=[channel.output_coordinate for channel in selected_channels],
             overwrite=overwrite,
         )
-        written.append((mosaic, element_name, pixel_coordinate_system, micron_coordinate_system))
+        written.append((mosaic, element_name))
 
     _record_morphology_provenance(
         sdata,
@@ -159,8 +160,6 @@ def _add_morphology_images(
         channels=selected_channels,
         flip_x=flip_x,
         flip_y=flip_y,
-        chunks=chunks,
-        scale_factors=scale_factors,
         written=written,
     )
     return sdata
@@ -221,34 +220,14 @@ def _select_channels(
 
 
 def _validate_chunks(chunks: tuple[int, int, int]) -> None:
-    if not isinstance(chunks, tuple) or len(chunks) != 3 or any(
-        not isinstance(chunk, int) or isinstance(chunk, bool) or chunk < 1 for chunk in chunks
+    if (
+        not isinstance(chunks, tuple)
+        or len(chunks) != 3
+        or any(not isinstance(chunk, int) or isinstance(chunk, bool) or chunk < 1 for chunk in chunks)
     ):
         raise ValueError(f"CosMx morphology chunks must be three positive integers, found {chunks!r}.")
     if chunks[0] != 1:
         raise ValueError(f"CosMx morphology channel chunk must be 1, found {chunks[0]}.")
-
-
-def _validate_orientation(*, flip_x: bool, flip_y: bool) -> None:
-    """Require explicit booleans for the two dataset-wide axis flips."""
-    for name, value in (("flip_x", flip_x), ("flip_y", flip_y)):
-        if not isinstance(value, bool):
-            raise ValueError(f"CosMx morphology {name} must be a bool, found {value!r}.")
-
-
-def _mosaic_placements(
-    preview: _CosmxPreview,
-    mosaic: _CosmxMosaicGeometry,
-) -> dict[int, tuple[int, int]]:
-    """Derive mosaic-local tile offsets from an internally valid preview."""
-    positions = preview.manifest.positions_by_fov
-    return {
-        fov: (
-            positions[fov].y_px - mosaic.origin_y_px,
-            positions[fov].x_px - mosaic.origin_x_px,
-        )
-        for fov in mosaic.fovs
-    }
 
 
 def _morphology_mosaic(
@@ -342,14 +321,10 @@ def _mosaic_block_grid(
     """
     tile_height, tile_width = tile_shape
     y_boundaries = sorted(
-        {0, mosaic.shape[0]}
-        | {y for y, _ in placements.values()}
-        | {y + tile_height for y, _ in placements.values()}
+        {0, mosaic.shape[0]} | {y for y, _ in placements.values()} | {y + tile_height for y, _ in placements.values()}
     )
     x_boundaries = sorted(
-        {0, mosaic.shape[1]}
-        | {x for _, x in placements.values()}
-        | {x + tile_width for _, x in placements.values()}
+        {0, mosaic.shape[1]} | {x for _, x in placements.values()} | {x + tile_width for _, x in placements.values()}
     )
 
     rows = []
@@ -474,9 +449,7 @@ def _record_morphology_provenance(
     channels: tuple[_CosmxSelectedChannel, ...],
     flip_x: bool,
     flip_y: bool,
-    chunks: tuple[int, int, int],
-    scale_factors: ScaleFactors_t | None,
-    written: list[tuple[_CosmxMosaicGeometry, str, str, str]],
+    written: list[tuple[_CosmxMosaicGeometry, str]],
 ) -> None:
     attrs = deepcopy(sdata.attrs)
     cosmx = attrs.setdefault("cosmx", {})
@@ -495,24 +468,12 @@ def _record_morphology_provenance(
         }
         for channel in channels
     ]
-    serialized_scale_factors = (
-        None
-        if scale_factors is None
-        else [dict(factor) if isinstance(factor, dict) else int(factor) for factor in scale_factors]
-    )
-    for mosaic, element_name, pixel_coordinate_system, micron_coordinate_system in written:
+    for mosaic, element_name in written:
         morphology_images[element_name] = {
-            "mosaic": mosaic.mosaic,
             "fovs": list(mosaic.fovs),
             "source_origin_px": {"x": mosaic.origin_x_px, "y": mosaic.origin_y_px},
-            "shape_yx": list(mosaic.shape),
             "orientation": {"flip_x": flip_x, "flip_y": flip_y},
-            "source_dtype": preview.manifest.run.morphology_dtype,
             "pixel_size_um": preview.manifest.run.pixel_size_um,
-            "chunks_cyx": list(chunks),
-            "scale_factors": serialized_scale_factors,
-            "pixel_coordinate_system": pixel_coordinate_system,
-            "micron_coordinate_system": micron_coordinate_system,
             "channels": deepcopy(channel_records),
         }
 
@@ -532,7 +493,3 @@ def _validate_morphology_provenance_destination(sdata: SpatialData) -> None:
 
 def _image_element_name(base: str, mosaic: int) -> str:
     return f"{base}_mosaic_{mosaic}"
-
-
-def _pixel_coordinate_system(base: str, mosaic: int) -> str:
-    return f"{base}_{mosaic}"
