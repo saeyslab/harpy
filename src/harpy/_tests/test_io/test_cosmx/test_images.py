@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 import tifffile
 from spatialdata import SpatialData, read_zarr
+from spatialdata.models import Labels2DModel
 from spatialdata.transformations import Identity, Scale, get_transformation
 from xarray import DataArray
 
@@ -58,18 +59,21 @@ def test_add_morphology_images_stitches_groups_and_roundtrips(
         values,
     )
     provenance = roundtripped.attrs["cosmx"]["morphology_images"]["morphology_image_mosaic_1"]
-    assert provenance["fovs"] == [1, 2]
-    assert provenance["source_origin_px"] == {"x": 0, "y": 0}
-    assert provenance["orientation"] == {"flip_x": True, "flip_y": False}
-    assert provenance["channels"] == [
-        {
-            "channel_id": "B",
-            "name": "Histone",
-            "source_plane": 0,
-            "output_coordinate": "Histone",
-        },
-        {"channel_id": "U", "name": "DNA", "source_plane": 4, "output_coordinate": "DNA"},
-    ]
+    assert provenance == {
+        "fovs": [1, 2],
+        "source_origin_px": {"x": 0, "y": 0},
+        "orientation": {"flip_x": True, "flip_y": False},
+        "pixel_size_um": 1.0,
+        "channels": [
+            {
+                "channel_id": "B",
+                "name": "Histone",
+                "source_plane": 0,
+                "output_coordinate": "Histone",
+            },
+            {"channel_id": "U", "name": "DNA", "source_plane": 4, "output_coordinate": "DNA"},
+        ],
+    }
 
 
 def test_morphology_mosaic_does_not_read_pixels_during_construction(
@@ -193,6 +197,33 @@ def test_add_morphology_images_rejects_non_boolean_orientation(
             chunks=(1, 4, 4),
             **orientation,
         )
+
+
+@pytest.mark.parametrize("overwrite", [False, True])
+def test_morphology_rejects_non_image_name_collision_before_pixel_reads(
+    decoded_cosmx_path: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    overwrite: bool,
+) -> None:
+    preview = _valued_preview(decoded_cosmx_path)
+    labels = Labels2DModel.parse(np.zeros(_TILE_SHAPE, dtype=np.uint8), dims=("y", "x"))
+    path = tmp_path / "cosmx.zarr"
+    SpatialData(labels={"morphology_image_mosaic_1": labels}).write(path)
+    sdata = read_zarr(path)
+    reads = _instrument_plane_reads(monkeypatch)
+
+    with pytest.raises(ValueError, match="output names already belong to non-image elements"):
+        _add_morphology_images(
+            sdata,
+            preview,
+            channels=("B",),
+            chunks=(1, 4, 4),
+            overwrite=overwrite,
+        )
+
+    assert not reads
+    assert "morphology_image_mosaic_1" in read_zarr(path).labels
 
 
 def test_multiscale_morphology_reads_each_source_plane_once(
