@@ -126,7 +126,21 @@ def _add_morphology_images(
     if collisions and not overwrite:
         raise ValueError(f"CosMx morphology image elements already exist: {collisions}.")
 
-    written = []
+    attrs = deepcopy(sdata.attrs)
+    cosmx = attrs.setdefault("cosmx", {})
+    assert isinstance(cosmx, dict)
+    morphology_images = cosmx.setdefault("morphology_images", {})
+    assert isinstance(morphology_images, dict)
+    channel_records = [
+        {
+            "channel_id": channel.channel_id,
+            "name": channel.name,
+            "source_plane": channel.plane,
+            "output_coordinate": channel.output_coordinate,
+        }
+        for channel in selected_channels
+    ]
+
     for mosaic, element_name in zip(preview.mosaics, element_names, strict=True):
         array = _morphology_mosaic(
             preview,
@@ -156,16 +170,16 @@ def _add_morphology_images(
             c_coords=[channel.output_coordinate for channel in selected_channels],
             overwrite=overwrite,
         )
-        written.append((mosaic, element_name))
+        morphology_images[element_name] = {
+            "fovs": list(mosaic.fovs),
+            "source_origin_px": {"x": mosaic.origin_x_px, "y": mosaic.origin_y_px},
+            "orientation": {"flip_x": flip_x, "flip_y": flip_y},
+            "pixel_size_um": preview.manifest.run.pixel_size_um,
+            "channels": deepcopy(channel_records),
+        }
 
-    _record_morphology_provenance(
-        sdata,
-        preview=preview,
-        channels=selected_channels,
-        flip_x=flip_x,
-        flip_y=flip_y,
-        written=written,
-    )
+    sdata.attrs = attrs
+    sdata.write_attrs()
     return sdata
 
 
@@ -444,45 +458,6 @@ def _read_morphology_plane(
     if flip_x:
         result = result[:, ::-1]
     return result
-
-
-def _record_morphology_provenance(
-    sdata: SpatialData,
-    *,
-    preview: _CosmxPreview,
-    channels: tuple[_CosmxSelectedChannel, ...],
-    flip_x: bool,
-    flip_y: bool,
-    written: list[tuple[_CosmxMosaicGeometry, str]],
-) -> None:
-    attrs = deepcopy(sdata.attrs)
-    cosmx = attrs.setdefault("cosmx", {})
-    if not isinstance(cosmx, dict):
-        raise ValueError("SpatialData attribute 'cosmx' must be a mapping.")
-    morphology_images = cosmx.setdefault("morphology_images", {})
-    if not isinstance(morphology_images, dict):
-        raise ValueError("SpatialData attribute 'cosmx.morphology_images' must be a mapping.")
-
-    channel_records = [
-        {
-            "channel_id": channel.channel_id,
-            "name": channel.name,
-            "source_plane": channel.plane,
-            "output_coordinate": channel.output_coordinate,
-        }
-        for channel in channels
-    ]
-    for mosaic, element_name in written:
-        morphology_images[element_name] = {
-            "fovs": list(mosaic.fovs),
-            "source_origin_px": {"x": mosaic.origin_x_px, "y": mosaic.origin_y_px},
-            "orientation": {"flip_x": flip_x, "flip_y": flip_y},
-            "pixel_size_um": preview.manifest.run.pixel_size_um,
-            "channels": deepcopy(channel_records),
-        }
-
-    sdata.attrs = attrs
-    sdata.write_attrs()
 
 
 def _validate_morphology_metadata_destination(sdata: SpatialData) -> None:
