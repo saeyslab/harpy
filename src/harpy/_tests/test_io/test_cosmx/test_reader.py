@@ -73,6 +73,7 @@ def test_cosmx_reads_all_modalities_into_matching_mosaics(
         "included_fovs": [1, 2, 3],
         "excluded_fovs": [4],
         "unpositioned_fovs": [4],
+        "mosaic_mode": "spatial_groups",
         "adjacency_tolerance_px": 1,
     }
     assert not _generated_siblings(output)
@@ -103,6 +104,7 @@ def test_cosmx_applies_fov_and_channel_selection(
     assert sdata.attrs["cosmx"]["selection"]["requested_fovs"] == [1, 2]
     assert sdata.attrs["cosmx"]["selection"]["included_fovs"] == [1, 2]
     assert sdata.attrs["cosmx"]["selection"]["excluded_fovs"] == [3, 4]
+    assert sdata.attrs["cosmx"]["selection"]["mosaic_mode"] == "spatial_groups"
     assert sdata.attrs["cosmx"]["selection"]["adjacency_tolerance_px"] == 0
 
 
