@@ -125,7 +125,7 @@ def _add_morphology_images(
 
     _validate_chunks(chunks)
     selected_channels = _select_channels(preview, channels)
-    _validate_morphology_metadata_destination(sdata)
+    _validate_metadata_destination(sdata, _IMAGES_METADATA_KEY)
     placements = {mosaic.mosaic: _mosaic_placements(preview, mosaic) for mosaic in preview.mosaics}
     element_names = tuple(_image_element_name(output_image_name, mosaic.mosaic) for mosaic in preview.mosaics)
     existing = {name: element_type for element_type, name, _ in sdata.gen_elements() if name in element_names}
@@ -364,11 +364,6 @@ def _read_morphology_plane(
     if flip_x:
         result = result[:, ::-1]
     return result
-
-
-def _validate_morphology_metadata_destination(sdata: SpatialData) -> None:
-    """Validate the root mappings used for morphology metadata."""
-    _validate_metadata_destination(sdata, _IMAGES_METADATA_KEY)
 
 
 def _image_element_name(base: str, mosaic: int) -> str:
