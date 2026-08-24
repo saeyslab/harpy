@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import json
 import math
 import re
@@ -16,6 +17,8 @@ from harpy.io._cosmx._models import (
     _PRODUCTS,
     _TRANSCRIPTS_PRODUCT,
     _CosmxChannel,
+    _CosmxFeatureClass,
+    _CosmxFeaturePanel,
     _CosmxFovFiles,
     _CosmxFovPosition,
     _CosmxManifest,
@@ -36,13 +39,16 @@ _MORPHOLOGY_DIRNAME = "Morphology2D"
 _ANALYSIS_RESULTS_DIRNAME = "AnalysisResults"
 _TIFF_SUFFIXES = (".tif", ".tiff")
 _MORPHOLOGY_INVARIANT_KEYS = ("NFov", "ChannelOrder", "ImPixelSize_nm", "ImRows", "ImCols")
+_PLEX_FILE_RE = re.compile(r"^plex(?:[-_].*)?\.txt$", re.IGNORECASE)
+_PLEX_FEATURE_COLUMN = "DisplayName"
+_PLEX_CLASS_COLUMN = "CodeClass"
+_PANEL_FEATURE_COLUMN = "gene"
+_PANEL_CLASS_COLUMN = "code_class"
 
 
 def _is_decoded_cosmx(path: str | Path) -> bool:
     path = Path(path)
-    return (path / _CELL_STATS_DIRNAME / _MORPHOLOGY_DIRNAME).is_dir() and (
-        path / _ANALYSIS_RESULTS_DIRNAME
-    ).is_dir()
+    return (path / _CELL_STATS_DIRNAME / _MORPHOLOGY_DIRNAME).is_dir() and (path / _ANALYSIS_RESULTS_DIRNAME).is_dir()
 
 
 def _resolve_decoded_cosmx_root(path: str | Path) -> Path:
@@ -143,6 +149,7 @@ def _discover_cosmx(path: str | Path) -> _CosmxManifest:
         for fov in all_fovs
     )
     diagnostics = _availability_diagnostics(fov_records, positions)
+    feature_panel = _discover_feature_panel(root)
 
     return _CosmxManifest(
         root=root,
@@ -150,6 +157,71 @@ def _discover_cosmx(path: str | Path) -> _CosmxManifest:
         positions=tuple(sorted(positions.values(), key=lambda item: item.fov)),
         run=run_metadata,
         diagnostics=tuple(diagnostics),
+        feature_panel=feature_panel,
+    )
+
+
+def _discover_feature_panel(root: Path) -> _CosmxFeaturePanel | None:
+    """Discover and parse the optional run-level plex exactly once."""
+    candidates = sorted(
+        path for path in root.iterdir() if path.is_file() and _PLEX_FILE_RE.fullmatch(path.name) is not None
+    )
+    if not candidates:
+        return None
+    if len(candidates) > 1:
+        raise ValueError(f"Found multiple CosMx plex files: {candidates}.")
+    return _read_feature_panel(candidates[0])
+
+
+def _read_feature_panel(path: Path) -> _CosmxFeaturePanel:
+    """Read the authoritative target-to-class relation from a CosMx plex."""
+    with path.open(newline="", encoding="utf-8-sig") as file:
+        reader = csv.DictReader(file)
+        header = tuple(reader.fieldnames or ())
+        if not header:
+            raise ValueError(f"CosMx plex file is empty: {path}.")
+        if any(not column for column in header) or len(set(header)) != len(header):
+            raise ValueError(f"CosMx plex file has invalid column names {header}: {path}.")
+        missing = sorted({_PLEX_FEATURE_COLUMN, _PLEX_CLASS_COLUMN} - set(header))
+        if missing:
+            raise ValueError(f"CosMx plex file {path} is missing required columns {missing}.")
+
+        target_classes: dict[str, str] = {}
+        for line_number, row in enumerate(reader, start=2):
+            if None in row:
+                raise ValueError(f"CosMx plex file {path} has too many fields on line {line_number}.")
+            target = row[_PLEX_FEATURE_COLUMN]
+            feature_class = row[_PLEX_CLASS_COLUMN]
+            if target is None or not target or target != target.strip():
+                raise ValueError(
+                    f"CosMx plex file {path} has an empty or untrimmed {_PLEX_FEATURE_COLUMN} on line {line_number}."
+                )
+            if feature_class is None or not feature_class or feature_class != feature_class.strip():
+                raise ValueError(
+                    f"CosMx plex file {path} has an empty or untrimmed {_PLEX_CLASS_COLUMN} on line {line_number}."
+                )
+            previous = target_classes.get(target)
+            if previous is not None:
+                raise ValueError(
+                    f"CosMx plex target {target!r} occurs more than once with classes "
+                    f"{previous!r} and {feature_class!r}: {path}."
+                )
+            target_classes[target] = feature_class
+
+    if not target_classes:
+        raise ValueError(f"CosMx plex file contains no targets: {path}.")
+
+    targets_by_class: dict[str, list[str]] = {}
+    for target, feature_class in target_classes.items():
+        targets_by_class.setdefault(feature_class, []).append(target)
+    classes = tuple(
+        _CosmxFeatureClass(name=feature_class, targets=tuple(sorted(targets)))
+        for feature_class, targets in sorted(targets_by_class.items())
+    )
+    return _CosmxFeaturePanel(
+        feature_column=_PANEL_FEATURE_COLUMN,
+        class_column=_PANEL_CLASS_COLUMN,
+        classes=classes,
     )
 
 
@@ -206,9 +278,7 @@ def _read_raster_metadata(
         missing, or raster metadata is inconsistent within a product family.
     """
     morphology_files = [
-        (fov, files[_MORPHOLOGY_PRODUCT])
-        for fov, files in discovered.items()
-        if _MORPHOLOGY_PRODUCT in files
+        (fov, files[_MORPHOLOGY_PRODUCT]) for fov, files in discovered.items() if _MORPHOLOGY_PRODUCT in files
     ]
     if not morphology_files:
         raise ValueError("Decoded CosMx layout has no morphology TIFFs; run metadata and positions are unavailable.")

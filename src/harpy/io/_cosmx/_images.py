@@ -15,6 +15,7 @@ from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import Identity, Scale
 
+from harpy._metadata import _IMAGES_METADATA_KEY, _metadata_registry, _validate_metadata_destination
 from harpy.image._image import add_image
 from harpy.io._cosmx._models import _CosmxMosaicGeometry, _CosmxPreview
 from harpy.io._cosmx._raster import (
@@ -136,10 +137,7 @@ def _add_morphology_images(
         raise ValueError(f"CosMx morphology image elements already exist: {collisions}.")
 
     attrs = deepcopy(sdata.attrs)
-    cosmx = attrs.setdefault("cosmx", {})
-    assert isinstance(cosmx, dict)
-    morphology_images = cosmx.setdefault("morphology_images", {})
-    assert isinstance(morphology_images, dict)
+    images_metadata = _metadata_registry(attrs, _IMAGES_METADATA_KEY)
     channel_records = [
         {
             "channel_id": channel.channel_id,
@@ -183,7 +181,7 @@ def _add_morphology_images(
             c_coords=[channel.output_coordinate for channel in selected_channels],
             overwrite=overwrite,
         )
-        morphology_images[element_name] = {
+        images_metadata[element_name] = {
             "fovs": list(mosaic.fovs),
             "source_origin_px": {"x": mosaic.origin_x_px, "y": mosaic.origin_y_px},
             "orientation": {"flip_x": flip_x, "flip_y": flip_y},
@@ -370,12 +368,7 @@ def _read_morphology_plane(
 
 def _validate_morphology_metadata_destination(sdata: SpatialData) -> None:
     """Validate the root mappings used for morphology metadata."""
-    cosmx = sdata.attrs.get("cosmx")
-    if cosmx is not None and not isinstance(cosmx, dict):
-        raise ValueError("SpatialData attribute 'cosmx' must be a mapping.")
-    morphology_images = None if cosmx is None else cosmx.get("morphology_images")
-    if morphology_images is not None and not isinstance(morphology_images, dict):
-        raise ValueError("SpatialData attribute 'cosmx.morphology_images' must be a mapping.")
+    _validate_metadata_destination(sdata, _IMAGES_METADATA_KEY)
 
 
 def _image_element_name(base: str, mosaic: int) -> str:
