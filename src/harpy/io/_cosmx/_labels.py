@@ -8,6 +8,7 @@ import dask.array as da
 import numpy as np
 import tifffile
 from dask import delayed
+from loguru import logger as log
 from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import Identity, Scale
@@ -204,6 +205,10 @@ def _add_label_family(
             flip_x=flip_x,
             flip_y=flip_y,
             chunks=chunks,
+        )
+        log.info(
+            f"CosMx {family} mosaic {mosaic.mosaic} pre-write graph contains "
+            f"{len(array.__dask_graph__())} tasks across {len(array.dask.layers)} layers."
         )
         pixel_coordinate_system = _pixel_coordinate_system(coordinate_system, mosaic.mosaic)
         sdata = add_labels(

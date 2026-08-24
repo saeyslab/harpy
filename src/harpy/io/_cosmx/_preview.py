@@ -15,6 +15,7 @@ def _preview_cosmx(
     manifest: _CosmxManifest,
     *,
     fovs: tuple[int, ...] | list[int] | set[int] | None = None,
+    adjacency_tolerance_px: int | None = None,
 ) -> _CosmxPreview:
     """Select usable FOVs and organize them into spatial mosaic groups.
 
@@ -35,6 +36,9 @@ def _preview_cosmx(
     fovs
         Optional FOV subset to consider. By default, all manifest FOVs are
         considered.
+    adjacency_tolerance_px
+        Maximum horizontal or vertical gap, in pixels, bridged when grouping
+        FOVs. ``None`` uses two percent of the smaller tile dimension.
 
     Returns
     -------
@@ -62,7 +66,16 @@ def _preview_cosmx(
     included = tuple(sorted(requested & common))
     excluded = tuple(sorted(all_fovs - set(included)))
     unpositioned = tuple(sorted(all_fovs - positioned))
-    adjacency_tolerance_px = _default_adjacency_tolerance_px(manifest.run.tile_shape)
+    if adjacency_tolerance_px is None:
+        adjacency_tolerance_px = _default_adjacency_tolerance_px(manifest.run.tile_shape)
+    elif (
+        not isinstance(adjacency_tolerance_px, int)
+        or isinstance(adjacency_tolerance_px, bool)
+        or adjacency_tolerance_px < 0
+    ):
+        raise ValueError(
+            f"CosMx adjacency tolerance must be a nonnegative integer, found {adjacency_tolerance_px!r}."
+        )
     mosaics = _mosaic_geometries(
         positions={fov: positions_by_fov[fov] for fov in included},
         tile_shape=manifest.run.tile_shape,
@@ -88,6 +101,7 @@ def _preview_cosmx(
         unpositioned_fovs=unpositioned,
         mosaics=mosaics,
         diagnostics=tuple(diagnostics),
+        adjacency_tolerance_px=adjacency_tolerance_px,
     )
 
 

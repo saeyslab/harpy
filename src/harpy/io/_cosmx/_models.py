@@ -161,8 +161,18 @@ class _CosmxPreview:
     unpositioned_fovs: tuple[int, ...]
     mosaics: tuple[_CosmxMosaicGeometry, ...]
     diagnostics: tuple[str, ...]
+    adjacency_tolerance_px: int = 0
 
     def __post_init__(self) -> None:
+        if (
+            not isinstance(self.adjacency_tolerance_px, int)
+            or isinstance(self.adjacency_tolerance_px, bool)
+            or self.adjacency_tolerance_px < 0
+        ):
+            raise ValueError(
+                "CosMx adjacency tolerance must be a nonnegative integer, "
+                f"found {self.adjacency_tolerance_px!r}."
+            )
         _validate_sorted_unique_fovs(self.included_fovs, name="included FOVs")
         _validate_sorted_unique_fovs(self.excluded_fovs, name="excluded FOVs")
         _validate_sorted_unique_fovs(self.unpositioned_fovs, name="unpositioned FOVs")

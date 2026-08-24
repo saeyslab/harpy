@@ -103,6 +103,35 @@ def test_preview_selects_common_positioned_fovs(decoded_cosmx_path: Path) -> Non
     assert any("without reading transcript contents" in message for message in preview.diagnostics)
 
 
+def test_preview_uses_configurable_adjacency_tolerance(decoded_cosmx_path: Path) -> None:
+    manifest = _discover_cosmx(decoded_cosmx_path)
+    positions = tuple(
+        replace(position, x_px=9) if position.fov == 2 else position
+        for position in manifest.positions
+    )
+    manifest = replace(manifest, positions=positions)
+
+    default_preview = _preview_cosmx(manifest)
+    exact_contact_preview = _preview_cosmx(manifest, adjacency_tolerance_px=0)
+
+    assert [mosaic.fovs for mosaic in default_preview.mosaics] == [(1, 2), (3,)]
+    assert [mosaic.fovs for mosaic in exact_contact_preview.mosaics] == [(1,), (2,), (3,)]
+    assert default_preview.adjacency_tolerance_px == 1
+    assert exact_contact_preview.adjacency_tolerance_px == 0
+
+
+@pytest.mark.parametrize("tolerance", [-1, True, 1.5])
+def test_preview_rejects_invalid_adjacency_tolerance(
+    decoded_cosmx_path: Path,
+    tolerance: object,
+) -> None:
+    with pytest.raises(ValueError, match="adjacency tolerance must be a nonnegative integer"):
+        _preview_cosmx(
+            _discover_cosmx(decoded_cosmx_path),
+            adjacency_tolerance_px=tolerance,  # type: ignore[arg-type]
+        )
+
+
 def test_preview_cell_label_estimate_is_uint32_for_fov_subset(decoded_cosmx_path: Path) -> None:
     preview = _preview_cosmx(_discover_cosmx(decoded_cosmx_path), fovs=(1,))
 
