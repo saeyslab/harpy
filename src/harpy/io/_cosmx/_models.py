@@ -66,6 +66,91 @@ class _CosmxRunMetadata:
 
 
 @dataclass(frozen=True)
+class _CosmxFeatureClass:
+    """One authoritative feature class and its sorted panel targets.
+
+    ``targets`` contains the CosMx plex display names assigned to this class.
+    These are biological gene targets for an endogenous class, but they are
+    negative-target or system-control identifiers for the corresponding control
+    classes. Consequently, not every target is a gene.
+    """
+
+    name: str
+    targets: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if not self.name or self.name != self.name.strip():
+            raise ValueError(f"CosMx feature-class name must be a non-empty trimmed string, found {self.name!r}.")
+        if not self.targets:
+            raise ValueError(f"CosMx feature class {self.name!r} must contain at least one target.")
+        if tuple(sorted(self.targets)) != self.targets or len(set(self.targets)) != len(self.targets):
+            raise ValueError(f"CosMx targets for feature class {self.name!r} must be sorted and unique.")
+        invalid = [target for target in self.targets if not target or target != target.strip()]
+        if invalid:
+            raise ValueError(
+                f"CosMx targets for feature class {self.name!r} must be non-empty trimmed strings, found {invalid}."
+            )
+
+
+@dataclass(frozen=True)
+class _CosmxFeaturePanel:
+    """Authoritative relation between transcript features and assay classes.
+
+    A feature is the named target stored in the transcript points element, such
+    as a gene or control target. The panel records every target defined by the
+    assay, including targets with zero detected transcripts, and assigns each
+    one to exactly one feature class. It is target-level metadata rather than a
+    description of individual physical probes; fields such as ``ProbeID`` are
+    intentionally not represented.
+
+    The relation is parsed once from the run-level plex and shared by all
+    transcript mosaic elements from the run.
+
+    For example, a CosMx feature panel is represented conceptually as::
+
+        {
+            "feature_column": "gene",
+            "class_column": "code_class",
+            "categories": ["Endogenous", "Negative", "SystemControl"],
+            "targets_by_class": {
+                "Endogenous": ["ACTB", "GAPDH", ...],
+                "Negative": ["Negative1", "Negative2", ...],
+                "SystemControl": ["SystemControl1", "SystemControl2", ...],
+            },
+        }
+    """
+
+    feature_column: str
+    class_column: str
+    classes: tuple[_CosmxFeatureClass, ...]
+
+    def __post_init__(self) -> None:
+        for field_name, value in (("feature column", self.feature_column), ("class column", self.class_column)):
+            if not value or value != value.strip():
+                raise ValueError(f"CosMx panel {field_name} must be a non-empty trimmed string, found {value!r}.")
+        if not self.classes:
+            raise ValueError("CosMx feature panel must contain at least one feature class.")
+        categories = self.categories
+        if tuple(sorted(categories)) != categories or len(set(categories)) != len(categories):
+            raise ValueError(f"CosMx feature classes must be sorted and unique, found {categories}.")
+        all_targets = tuple(target for feature_class in self.classes for target in feature_class.targets)
+        if len(set(all_targets)) != len(all_targets):
+            raise ValueError("Each CosMx panel target must belong to exactly one feature class.")
+
+    @property
+    def categories(self) -> tuple[str, ...]:
+        return tuple(feature_class.name for feature_class in self.classes)
+
+    @property
+    def target_classes(self) -> dict[str, str]:
+        return {target: feature_class.name for feature_class in self.classes for target in feature_class.targets}
+
+    @property
+    def targets_by_class(self) -> dict[str, tuple[str, ...]]:
+        return {feature_class.name: feature_class.targets for feature_class in self.classes}
+
+
+@dataclass(frozen=True)
 class _CosmxFovFiles:
     fov: int
     morphology: Path | None = None
@@ -97,6 +182,7 @@ class _CosmxManifest:
     positions: tuple[_CosmxFovPosition, ...]
     run: _CosmxRunMetadata
     diagnostics: tuple[str, ...]
+    feature_panel: _CosmxFeaturePanel | None = None
 
     def __post_init__(self) -> None:
         fov_ids = self.fov_ids
@@ -176,8 +262,7 @@ class _CosmxPreview:
             or self.adjacency_tolerance_px < 0
         ):
             raise ValueError(
-                "CosMx adjacency tolerance must be a nonnegative integer, "
-                f"found {self.adjacency_tolerance_px!r}."
+                f"CosMx adjacency tolerance must be a nonnegative integer, found {self.adjacency_tolerance_px!r}."
             )
         if self.mosaic_mode == "single" and self.adjacency_tolerance_px is not None:
             raise ValueError("CosMx single-mosaic mode does not use an adjacency tolerance.")
