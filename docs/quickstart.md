@@ -18,18 +18,12 @@ import harpy as hp
 # Download an example proteomics dataset
 sdata = hp.datasets.macsima_example()
 
-# Get the DAPI stain, and add it to a new slot.
-sdata = hp.im.add_image(
-    sdata,
-    arr=sdata["HumanLiverH35"].sel(c="R0_DAPI").data[None, ...],
-    output_image_name="image",
-    overwrite=True
-)
-
 # Segment the DAPI stain with Cellpose, or any segmentation model of choice.
+# Channel selection is lazy and does not create an intermediate image.
 sdata = hp.im.segment(
     sdata,
-    image_name="image",
+    image_name="HumanLiverH35",
+    image_channels="R0_DAPI",
     model = hp.im.cellpose_callable,
     # keywords passed to Cellpose
     diameter=50,

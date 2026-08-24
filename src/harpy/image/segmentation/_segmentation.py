@@ -51,6 +51,7 @@ from harpy.utils._transformations import _identity_check_transformations_points
 def segment(
     sdata: SpatialData,
     image_name: str,
+    image_channels: int | str | Iterable[int | str] | None = None,
     model: Callable[..., NDArray] = _model,
     output_labels_name: str | list[str] = "segmentation_mask",
     output_shapes_name: str | list[str] | None = "segmentation_mask_boundaries",
@@ -77,6 +78,10 @@ def segment(
         The SpatialData object containing the image element to segment.
     image_name
         The image element in `sdata` to be segmented.
+    image_channels
+        Channel coordinate or coordinates from `image_name` to pass to the segmentation model. The requested order is
+        preserved. Selection is lazy and does not create an intermediate image. If `None`, all image channels are used.
+        This is distinct from a model-specific `channels` keyword supplied through `**kwargs`.
     model
         The segmentation model function used to process the images.
         Callable should take as input numpy arrays of dimension `(z,y,x,c)` and return labels of dimension `(z,y,x,c)`. It can have an arbitrary number of other parameters.
@@ -203,6 +208,7 @@ def segment(
         to_coordinate_system=to_coordinate_system,
         scale_factors=scale_factors,
         overwrite=overwrite,
+        image_channels=image_channels,
         fn_kwargs=fn_kwargs,
         **kwargs,
     )
@@ -757,6 +763,7 @@ class SegmentationModelStains(SegmentationModel):
         self,
         sdata: SpatialData,
         image_name: str,
+        image_channels: int | str | Iterable[int | str] | None = None,
         output_labels_name: str | list[str] = "segmentation_mask",
         output_shapes_name: str | list[str] | None = "segmentation_mask_boundaries",
         labels_name_align: str | None = None,
@@ -777,6 +784,24 @@ class SegmentationModelStains(SegmentationModel):
         c_dim_output_labels = len(output_labels_name)
 
         se = _get_spatial_element(sdata, element_name=image_name)
+        if image_channels is not None:
+            selected_channels = (
+                list(image_channels)
+                if isinstance(image_channels, Iterable) and not isinstance(image_channels, str)
+                else [image_channels]
+            )
+            if not selected_channels:
+                raise ValueError("'image_channels' must contain at least one channel.")
+
+            available_channels = list(se.coords["c"].values)
+            missing_channels = [channel for channel in selected_channels if channel not in available_channels]
+            if missing_channels:
+                raise ValueError(
+                    f"Image channels {missing_channels} were not found in image element '{image_name}'. "
+                    f"Available channels are {available_channels}."
+                )
+            se = se.sel(c=selected_channels)
+
         se_crop = None
         if crd is not None:
             se_crop = bounding_box_query(

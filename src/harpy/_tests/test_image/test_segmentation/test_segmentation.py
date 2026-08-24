@@ -4,16 +4,92 @@ import os
 import dask
 import dask.array as da
 import dask.dataframe as dd
+import numpy as np
 import pandas as pd
 import pytest
 from dask.dataframe import DataFrame
 from spatialdata import SpatialData
+from spatialdata.models import Image2DModel
 
 from harpy.image._image import _get_spatial_element
 from harpy.image.segmentation._segmentation import segment, segment_points
 from harpy.image.segmentation.segmentation_models._baysor import _dummy
 from harpy.image.segmentation.segmentation_models._cellpose import cellpose_callable
 from harpy.points._points import add_points
+
+
+def _channel_selection_model(
+    img: np.ndarray,
+    expected_channel_values: tuple[int, ...],
+    channels: list[int],
+) -> np.ndarray:
+    assert channels == [1, 0]
+    assert img.shape[-1] == len(expected_channel_values)
+    for channel, expected_value in enumerate(expected_channel_values):
+        assert np.all(img[..., channel] == expected_value)
+    return np.zeros((*img.shape[:-1], 1), dtype=np.uint32)
+
+
+def _channel_selection_sdata(scale_factors=None) -> SpatialData:
+    image = da.stack([da.full((8, 8), value, chunks=(8, 8), dtype=np.uint8) for value in (1, 2, 3)])
+    return SpatialData(
+        images={
+            "image": Image2DModel.parse(
+                image,
+                dims=("c", "y", "x"),
+                c_coords=["first", "second", "third"],
+                scale_factors=scale_factors,
+            )
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("scale_factors", "image_channels", "expected_channel_values"),
+    [
+        (None, None, (1, 2, 3)),
+        ([2], "second", (2,)),
+        ([2], ["third", "first"], (3, 1)),
+    ],
+)
+def test_segment_selects_image_channels_and_preserves_model_channels(
+    scale_factors,
+    image_channels,
+    expected_channel_values,
+):
+    sdata = _channel_selection_sdata(scale_factors=scale_factors)
+
+    sdata = segment(
+        sdata,
+        image_name="image",
+        image_channels=image_channels,
+        model=_channel_selection_model,
+        output_labels_name="labels",
+        output_shapes_name=None,
+        trim=True,
+        depth=1,
+        channels=[1, 0],
+        expected_channel_values=expected_channel_values,
+    )
+
+    assert "labels" in sdata.labels
+
+
+@pytest.mark.parametrize("image_channels", [[], ["missing"]])
+def test_segment_rejects_invalid_image_channels(image_channels):
+    sdata = _channel_selection_sdata()
+
+    with pytest.raises(ValueError, match="image_channels|Image channels"):
+        segment(
+            sdata,
+            image_name="image",
+            image_channels=image_channels,
+            model=_channel_selection_model,
+            output_labels_name="labels",
+            output_shapes_name=None,
+            channels=[1, 0],
+            expected_channel_values=(1,),
+        )
 
 
 @pytest.mark.skipif(not importlib.util.find_spec("cellpose"), reason="requires the cellpose library")
