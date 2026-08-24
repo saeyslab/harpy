@@ -2,10 +2,10 @@
 
 ## Status
 
-Three implementation slices are specified; none is implemented:
+Three implementation slices are planned; Slice 1 is implemented:
 
 1. patch the CosMx reader and establish the generic Harpy feature-panel
-   metadata contract;
+   metadata contract — implemented;
 2. add class-aware aggregation to `hp.tb.allocate`; and
 3. add QC functions that summarize the original, unallocated control points.
 
@@ -39,7 +39,7 @@ sizes.
 
 ## Slice 1: reader and feature-panel metadata
 
-**Status: specified; not implemented.**
+**Status: implemented.**
 
 This slice changes the CosMx reader and the metadata it writes. It does not
 change `hp.tb.allocate` or introduce QC computations.
@@ -83,11 +83,11 @@ Introduce a vendor-neutral Harpy metadata convention in the root
 standard. All metadata written and consumed by Harpy belongs under the single
 top-level `harpy` namespace. Do not retain a parallel top-level `cosmx`
 metadata tree: the originating reader is identified by
-`harpy.selection.reader`, while downstream operations resolve modality
+`harpy.provenance.reader`, while downstream operations resolve modality
 metadata by SpatialData element type and exact element name.
 
 The namespace has a versioned, element-keyed structure. The CosMx reader must
-migrate its existing selection, image, label, and transcript records into this
+migrate its existing provenance, image, label, and transcript records into this
 structure when feature-panel support is implemented:
 
 ```python
@@ -95,9 +95,9 @@ harpy_metadata = sdata.attrs.setdefault("harpy", {})
 harpy_metadata.update(
     {
         "metadata_version": 1,
-        "selection": {
+        "provenance": {
             "reader": "cosmx",
-            # Existing CosMx run-selection fields live here.
+            # Existing CosMx reader, source, and run-selection fields live here.
         },
         "images": {
             "morphology_image_mosaic_1": {
@@ -112,12 +112,12 @@ harpy_metadata.update(
         "points": {
             "transcripts_mosaic_1": {
                 # Existing per-points source metadata lives here.
-                "feature_panel": "cosmx_panel",
+                "feature_panel": "transcripts_panel",
             },
-            "transcripts_mosaic_2": {"feature_panel": "cosmx_panel"},
+            "transcripts_mosaic_2": {"feature_panel": "transcripts_panel"},
         },
         "feature_panels": {
-            "cosmx_panel": {
+            "transcripts_panel": {
                 "feature_column": "gene",
                 "class_column": "code_class",
                 "categories": ["Endogenous", "Negative", "SystemControl"],
@@ -136,7 +136,7 @@ The `images`, `labels`, and `points` mappings are keyed by the exact element
 names in the corresponding SpatialData collections. This makes metadata
 lookup independent of the reader that created an element. The metadata version
 applies to the complete Harpy root contract. The CosMx whole-store overwrite
-safety check must specifically require `harpy.selection.reader == "cosmx"`;
+safety check must specifically require `harpy.provenance.reader == "cosmx"`;
 the mere presence of Harpy metadata is not sufficient evidence that the store
 is replaceable by that reader.
 
@@ -149,7 +149,10 @@ The `categories` order is the categorical dtype order shared by all associated
 points elements. `targets_by_class` keys must exactly equal those categories;
 each target list must contain unique, non-empty strings; and no target may occur
 under more than one class. Derive target counts from the list lengths instead of
-storing a second potentially inconsistent count mapping.
+storing a second potentially inconsistent count mapping. The CosMx reader sorts
+both class names and the targets within each class lexicographically so output
+does not depend on row order in the plex; this ordering is deterministic rather
+than a claim of biological precedence.
 
 Slice 2 only needs those derived counts: it uses the length of each class target
 list as the denominator for normalized control metrics. Slice 3 additionally
@@ -171,11 +174,15 @@ class target counts are positive. Prefix matching is not an acceptable
 fallback: this panel contains a target named `NegativeAdd` whose authoritative
 `CodeClass` is `Endogenous`.
 
-The CosMx reader must store `code_class` with one known categorical dtype shared
-by all mosaic points elements from the run. Its categories come from the plex
-`CodeClass` values. This changes the current Arrow-string representation only
-for newly ingested data; ordinary allocation remains compatible with existing
-string columns when class-aware mode is not requested.
+The CosMx reader stores `code_class` categorically with the same category set
+for every mosaic points element from the run. Its categories come from the plex
+`CodeClass` values. Parquet preserves the categorical values, but a reopened
+Dask dataframe may report them as unknown until supplied with the authoritative
+category list. That list is persisted in the shared feature-panel metadata so
+Slice 2 can restore a known categorical dtype lazily without scanning the
+points. This changes the previous Arrow-string representation only for newly
+ingested data; ordinary allocation remains compatible with existing string
+columns when class-aware mode is not requested.
 
 ### Verification
 
@@ -193,11 +200,11 @@ Focused reader tests should establish that:
   rejected before transcript materialization;
 - a missing plex still permits raw transcript ingestion but creates no
   feature-panel reference;
-- selection and all image, label, and points metadata are migrated to the
+- provenance and all image, label, and points metadata are migrated to the
   versioned, element-keyed `harpy` namespace with no parallel top-level
   `cosmx` metadata; and
 - whole-store overwrite is permitted only when
-  `harpy.selection.reader == "cosmx"`.
+  `harpy.provenance.reader == "cosmx"`.
 
 ## Slice 2: class-aware `hp.tb.allocate`
 
@@ -260,9 +267,13 @@ silently ignored.
 ### Categorical class contract
 
 When `name_feature_class_column` is provided, its points column must have a
-categorical dtype with known Dask categories. The category set is the complete
-feature-class universe for the points element, including a class with zero
-detected or zero assigned points. Require that:
+categorical dtype. If its Dask categories are unknown after a Parquet round
+trip, compatible feature-panel metadata must supply the authoritative ordered
+categories and allocation must apply that categorical dtype lazily before
+validation. Without such metadata, the input must already have known Dask
+categories. The category set is the complete feature-class universe for the
+points element, including a class with zero detected or zero assigned points.
+Require that:
 
 - every category is a non-empty string;
 - `expression_class` is one of the categories;
