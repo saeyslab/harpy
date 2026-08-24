@@ -58,7 +58,7 @@ def test_add_morphology_images_stitches_groups_and_roundtrips(
         get_dataarray(roundtripped, "morphology_image_mosaic_1").data.compute(),
         values,
     )
-    metadata = roundtripped.attrs["cosmx"]["morphology_images"]["morphology_image_mosaic_1"]
+    metadata = roundtripped.attrs["harpy"]["images"]["morphology_image_mosaic_1"]
     assert metadata == {
         "fovs": [1, 2],
         "source_origin_px": {"x": 0, "y": 0},
@@ -174,7 +174,7 @@ def test_add_morphology_images_forwards_explicit_orientation(
 
     values = get_dataarray(sdata, "morphology_image_mosaic_1").data.compute()
     np.testing.assert_array_equal(values[:, :, :8], _tile(1, planes=(0,))[:, ::-1, :])
-    metadata = sdata.attrs["cosmx"]["morphology_images"]["morphology_image_mosaic_1"]
+    metadata = sdata.attrs["harpy"]["images"]["morphology_image_mosaic_1"]
     assert metadata["orientation"] == {"flip_x": False, "flip_y": True}
 
 

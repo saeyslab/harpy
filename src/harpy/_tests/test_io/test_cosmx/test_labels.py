@@ -64,7 +64,7 @@ def test_add_instance_labels_remaps_stitches_and_roundtrips(
         get_dataarray(roundtripped, "instance_labels_mosaic_1").data.compute(),
         values,
     )
-    assert roundtripped.attrs["cosmx"]["instance_labels"]["instance_labels_mosaic_1"] == {
+    assert roundtripped.attrs["harpy"]["labels"]["instance_labels_mosaic_1"] == {
         "fovs": [1, 2],
         "source_origin_px": {"x": 0, "y": 0},
         "orientation": {"flip_x": True, "flip_y": False},
@@ -100,7 +100,7 @@ def test_add_compartment_labels_preserves_semantic_values(
     np.testing.assert_array_equal(values[:, 8:], _compartment_tile(2)[:, ::-1])
 
     roundtripped = read_zarr(sdata.path)
-    categories = roundtripped.attrs["cosmx"]["compartment_labels"]["compartment_labels_mosaic_1"]["categories"]
+    categories = roundtripped.attrs["harpy"]["labels"]["compartment_labels_mosaic_1"]["categories"]
     assert {int(value): name for value, name in categories.items()} == {
         0: "background",
         1: "nuclear",

@@ -77,12 +77,30 @@ def test_add_transcript_points_splits_mosaics_and_roundtrips(
     roundtripped_values = roundtripped.points["transcripts_mosaic_1"].compute()
     assert isinstance(roundtripped_values["gene"].dtype, pd.CategoricalDtype)
     assert roundtripped_values["gene"].cat.categories.tolist() == ["GeneA", "GeneB", "GeneC"]
-    metadata = roundtripped.attrs["cosmx"]["transcripts"]["transcripts_mosaic_1"]
+    metadata = roundtripped.attrs["harpy"]["points"]["transcripts_mosaic_1"]
     assert metadata == {
         "fovs": [1, 2],
         "source_origin_px": {"x": 0, "y": 0},
         "orientation": {"flip_x": True, "flip_y": False},
         "pixel_size_um": 1.0,
+        "feature_panel": "transcripts_panel",
+    }
+    assert roundtripped_values["code_class"].cat.categories.tolist() == [
+        "Endogenous",
+        "Negative",
+        "SystemControl",
+    ]
+    assert roundtripped.attrs["harpy"]["feature_panels"] == {
+        "transcripts_panel": {
+            "feature_column": "gene",
+            "class_column": "code_class",
+            "categories": ["Endogenous", "Negative", "SystemControl"],
+            "targets_by_class": {
+                "Endogenous": ["Gene1", "Gene2", "Gene3", "GeneA", "GeneB", "GeneC"],
+                "Negative": ["Negative01"],
+                "SystemControl": ["SystemControl1"],
+            },
+        }
     }
 
 
@@ -146,7 +164,7 @@ def test_transcript_preflight_rejects_missing_retained_column_without_writing(
     preview = _preview_cosmx(_discover_cosmx(decoded_cosmx_path), fovs=(1,))
     path = preview.manifest.fovs_by_id[1].transcripts
     assert path is not None
-    path.write_text("V1,CellComp,codeclass,target,x,y\n1,Nuclear,Call,GeneA,1,2\n")
+    path.write_text("V1,CellComp,codeclass,target,x,y\n1,Nuclear,Endogenous,GeneA,1,2\n")
     sdata = _backed_sdata(tmp_path)
 
     with pytest.raises(ValueError, match=r"missing required columns \['z'\]"):
@@ -195,12 +213,82 @@ def test_transcript_materialization_rejects_nonfinite_coordinates(
     assert "transcripts_mosaic_1" not in read_zarr(sdata.path).points
 
 
+def test_transcript_ingestion_without_plex_keeps_raw_classes(
+    decoded_cosmx_path: Path,
+    tmp_path: Path,
+) -> None:
+    (decoded_cosmx_path / "plex-analysis.txt").unlink()
+    preview = _preview_cosmx(_discover_cosmx(decoded_cosmx_path), fovs=(1,))
+    _write_transcript_csv(
+        preview.manifest.fovs_by_id[1].transcripts,
+        genes=("GeneA",),
+        x=(1.0,),
+        y=(2.0,),
+    )
+    sdata = _backed_sdata(tmp_path)
+
+    _add_transcript_points(sdata, preview)
+
+    roundtripped = read_zarr(sdata.path)
+    values = roundtripped.points["transcripts_mosaic_1"].compute()
+    assert not isinstance(values["code_class"].dtype, pd.CategoricalDtype)
+    assert "feature_panel" not in roundtripped.attrs["harpy"]["points"]["transcripts_mosaic_1"]
+    assert "feature_panels" not in roundtripped.attrs["harpy"]
+
+
+def test_transcript_materialization_rejects_panel_disagreement(
+    decoded_cosmx_path: Path,
+    tmp_path: Path,
+) -> None:
+    preview = _preview_cosmx(_discover_cosmx(decoded_cosmx_path), fovs=(1,))
+    _write_transcript_csv(
+        preview.manifest.fovs_by_id[1].transcripts,
+        genes=("GeneA",),
+        code_classes=("Negative",),
+        x=(1.0,),
+        y=(2.0,),
+    )
+    sdata = _backed_sdata(tmp_path)
+
+    with pytest.raises(ValueError, match="disagree with the feature panel"):
+        _add_transcript_points(sdata, preview)
+
+    assert "transcripts_mosaic_1" not in read_zarr(sdata.path).points
+
+
+def test_transcript_preflight_rejects_incompatible_panel_identifier(
+    decoded_cosmx_path: Path,
+    tmp_path: Path,
+) -> None:
+    preview = _preview_cosmx(_discover_cosmx(decoded_cosmx_path), fovs=(1,))
+    _write_transcript_csv(
+        preview.manifest.fovs_by_id[1].transcripts,
+        genes=("GeneA",),
+        x=(1.0,),
+        y=(2.0,),
+    )
+    sdata = _backed_sdata(tmp_path)
+    sdata.attrs = {
+        "harpy": {
+            "metadata_version": 1,
+            "feature_panels": {"transcripts_panel": {"feature_column": "incompatible"}},
+        }
+    }
+    sdata.write_attrs()
+
+    with pytest.raises(ValueError, match="already exists with incompatible metadata"):
+        _add_transcript_points(sdata, preview)
+
+    assert not read_zarr(sdata.path).points
+
+
 def _write_transcript_csv(
     path: Path | None,
     *,
     genes: tuple[str, ...],
     x: tuple[float, ...],
     y: tuple[float, ...],
+    code_classes: tuple[str, ...] | None = None,
     cell_comp: tuple[str | None, ...] | None = None,
     invalid_ignored_fields: bool = False,
     include_ignored_fields: bool = True,
@@ -210,7 +298,7 @@ def _write_transcript_csv(
     values: dict[str, object] = {
         "V1": np.arange(1, count + 1),
         "CellComp": cell_comp if cell_comp is not None else ("Nuclear",) * count,
-        "codeclass": ("Call",) * count,
+        "codeclass": code_classes if code_classes is not None else ("Endogenous",) * count,
         "target": genes,
         "x": x,
         "y": y,
@@ -230,7 +318,7 @@ def _transcript_partition(*, x: float, y: float) -> pd.DataFrame:
         {
             "V1": [1],
             "CellComp": ["Nuclear"],
-            "codeclass": ["Call"],
+            "codeclass": ["Endogenous"],
             "target": ["GeneA"],
             "x": [x],
             "y": [y],

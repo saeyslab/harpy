@@ -7,6 +7,8 @@ import pytest
 
 from harpy.io._cosmx._models import (
     _CosmxChannel,
+    _CosmxFeatureClass,
+    _CosmxFeaturePanel,
     _CosmxFovFiles,
     _CosmxFovPosition,
     _CosmxManifest,
@@ -96,6 +98,22 @@ def test_leaf_models_reject_invalid_identifiers_and_coordinates() -> None:
         _MorphologyPosition(fov=1, x_mm=0.0, y_mm=float("inf"))
     with pytest.raises(ValueError, match="channel ID must not be empty"):
         _CosmxChannel(channel_id="", name="DNA")
+
+
+def test_feature_panel_models_validate_structure() -> None:
+    with pytest.raises(ValueError, match="at least one target"):
+        _CosmxFeatureClass(name="Endogenous", targets=())
+    with pytest.raises(ValueError, match="sorted and unique"):
+        _CosmxFeatureClass(name="Endogenous", targets=("GeneB", "GeneA"))
+    with pytest.raises(ValueError, match="exactly one feature class"):
+        _CosmxFeaturePanel(
+            feature_column="gene",
+            class_column="code_class",
+            classes=(
+                _CosmxFeatureClass(name="Endogenous", targets=("GeneA",)),
+                _CosmxFeatureClass(name="Negative", targets=("GeneA",)),
+            ),
+        )
 
 
 def test_manifest_rejects_inconsistent_fov_records() -> None:

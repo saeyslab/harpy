@@ -52,7 +52,17 @@ def decoded_cosmx_path(tmp_path: Path) -> Path:
         )
         transcript_path.write_bytes(b"discovery-must-not-read-this")
 
-    (root / "plex-analysis.txt").write_bytes(b"ignored")
+    (root / "plex-analysis.txt").write_text(
+        "DisplayName,CodeClass,ProbeID\n"
+        "GeneA,Endogenous,NA\n"
+        "GeneB,Endogenous,NA\n"
+        "GeneC,Endogenous,NA\n"
+        "Gene1,Endogenous,NA\n"
+        "Gene2,Endogenous,NA\n"
+        "Gene3,Endogenous,NA\n"
+        "Negative01,Negative,NA\n"
+        "SystemControl1,SystemControl,NA\n"
+    )
     return root
 
 

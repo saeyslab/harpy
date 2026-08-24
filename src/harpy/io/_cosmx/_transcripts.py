@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import csv
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from pathlib import Path
 
@@ -13,6 +13,12 @@ from dask.utils import parse_bytes
 from spatialdata import SpatialData
 from spatialdata.transformations import Identity, Scale
 
+from harpy._metadata import (
+    _FEATURE_PANELS_METADATA_KEY,
+    _POINTS_METADATA_KEY,
+    _metadata_registry,
+    _validate_metadata_destination,
+)
 from harpy.io._cosmx._models import _CosmxPreview
 from harpy.io._cosmx._raster import _mosaic_placements, _pixel_coordinate_system
 from harpy.points._points import add_points
@@ -69,7 +75,12 @@ def _add_transcript_points(
       transformation;
     - ``orientation``: dataset-wide local x/y-axis flips applied before each
       FOV placement is added; and
-    - ``pixel_size_um``: physical size of one source x/y coordinate unit.
+    - ``pixel_size_um``: physical size of one source x/y coordinate unit; and
+    - ``feature_panel`` when authoritative panel metadata is available: the
+      key of the shared record in ``harpy.feature_panels``. That record maps
+      every assay-defined transcript target (the feature) to one class,
+      including targets with zero detections. It describes targets, not
+      individual physical probes.
 
     Parameters
     ----------
@@ -107,7 +118,7 @@ def _add_transcript_points(
         raise ValueError(f"CosMx transcript overwrite must be a bool, found {overwrite!r}.")
 
     _validate_blocksize(blocksize)
-    _validate_transcript_metadata_destination(sdata)
+    _validate_metadata_destination(sdata, _POINTS_METADATA_KEY, _FEATURE_PANELS_METADATA_KEY)
 
     element_names = tuple(_points_element_name(output_points_name, mosaic.mosaic) for mosaic in preview.mosaics)
     existing = {name: element_type for element_type, name, _ in sdata.gen_elements() if name in element_names}
@@ -121,6 +132,13 @@ def _add_transcript_points(
     sources = _transcript_sources(preview)
     headers = {fov: _read_transcript_header(path) for fov, path in sources.items()}
     gene_categories = _gene_categories(tuple(sources.values()), blocksize=blocksize)
+    feature_panel = preview.manifest.feature_panel
+    feature_panel_name = _feature_panel_name(output_points_name) if feature_panel is not None else None
+    feature_panel_metadata = _feature_panel_metadata(preview) if feature_panel is not None else None
+    if feature_panel_name is not None and feature_panel_metadata is not None:
+        _validate_feature_panel_collision(sdata, feature_panel_name, feature_panel_metadata)
+    code_class_categories = None if feature_panel is None else feature_panel.categories
+    target_classes = None if feature_panel is None else feature_panel.target_classes
 
     for mosaic, element_name in zip(preview.mosaics, element_names, strict=True):
         placements = _mosaic_placements(preview, mosaic)
@@ -134,6 +152,8 @@ def _add_transcript_points(
                 flip_x=flip_x,
                 flip_y=flip_y,
                 blocksize=blocksize,
+                code_class_categories=code_class_categories,
+                target_classes=target_classes,
             )
             for fov in mosaic.fovs
         ]
@@ -155,17 +175,20 @@ def _add_transcript_points(
             overwrite=overwrite,
         )
     attrs = deepcopy(sdata.attrs)
-    cosmx = attrs.setdefault("cosmx", {})
-    assert isinstance(cosmx, dict)
-    transcripts = cosmx.setdefault("transcripts", {})
-    assert isinstance(transcripts, dict)
+    points_metadata = _metadata_registry(attrs, _POINTS_METADATA_KEY)
+    if feature_panel_name is not None and feature_panel_metadata is not None:
+        feature_panels = _metadata_registry(attrs, _FEATURE_PANELS_METADATA_KEY)
+        feature_panels[feature_panel_name] = feature_panel_metadata
     for mosaic, element_name in zip(preview.mosaics, element_names, strict=True):
-        transcripts[element_name] = {
+        metadata = {
             "fovs": list(mosaic.fovs),
             "source_origin_px": {"x": mosaic.origin_x_px, "y": mosaic.origin_y_px},
             "orientation": {"flip_x": flip_x, "flip_y": flip_y},
             "pixel_size_um": preview.manifest.run.pixel_size_um,
         }
+        if feature_panel_name is not None:
+            metadata["feature_panel"] = feature_panel_name
+        points_metadata[element_name] = metadata
     sdata.attrs = attrs
     sdata.write_attrs()
     return sdata
@@ -252,6 +275,8 @@ def _read_fov_transcripts(
     flip_x: bool,
     flip_y: bool,
     blocksize: str | int,
+    code_class_categories: tuple[str, ...] | None,
+    target_classes: Mapping[str, str] | None,
 ) -> DaskDataFrame:
     """Build a lazy canonical transcript frame for one manifest-routed FOV."""
     retained = [column for column in header if column not in _IGNORED_SOURCE_COLUMNS]
@@ -265,6 +290,8 @@ def _read_fov_transcripts(
         flip_x=flip_x,
         flip_y=flip_y,
         path=path,
+        code_class_categories=code_class_categories,
+        target_classes=target_classes,
     )
     return raw.map_partitions(
         _normalize_transcript_partition,
@@ -274,6 +301,8 @@ def _read_fov_transcripts(
         flip_x=flip_x,
         flip_y=flip_y,
         path=path,
+        code_class_categories=code_class_categories,
+        target_classes=target_classes,
         meta=meta,
     )
 
@@ -287,14 +316,56 @@ def _normalize_transcript_partition(
     flip_x: bool,
     flip_y: bool,
     path: Path,
+    code_class_categories: tuple[str, ...] | None = None,
+    target_classes: Mapping[str, str] | None = None,
 ) -> pd.DataFrame:
-    """Rename retained fields and map FOV-local coordinates into a mosaic."""
+    """Validate and normalize one lazy transcript partition.
+
+    In addition to renaming retained fields and mapping FOV-local coordinates
+    into a mosaic, this function checks transcript classes against the feature
+    panel when one is available. The panel's target-to-class relation is
+    authoritative: every observed target must occur in the panel, and its CSV
+    ``codeclass`` must equal the class assigned by the panel. The reverse is not
+    required, because panel targets may legitimately have zero detections.
+
+    Dask calls this function when a partition is materialized, so these
+    row-level checks run during transcript computation or writing rather than
+    during manifest discovery. Without a feature panel, the cross-validation is
+    skipped and the transcript-provided classes are retained.
+    """
     source_x = frame["x"].to_numpy(dtype=np.float64, na_value=np.nan)
     source_y = frame["y"].to_numpy(dtype=np.float64, na_value=np.nan)
     if not np.isfinite(source_x).all() or not np.isfinite(source_y).all():
         raise ValueError(f"CosMx transcript CSV {path} contains non-finite x or y coordinates.")
     if frame["target"].isna().any():
         raise ValueError(f"CosMx transcript CSV {path} contains null gene targets.")
+    if (code_class_categories is None) != (target_classes is None):
+        raise ValueError("CosMx transcript feature-class categories and target mapping must be provided together.")
+    if code_class_categories is not None and target_classes is not None:
+        if frame["codeclass"].isna().any():
+            raise ValueError(f"CosMx transcript CSV {path} contains null feature classes.")
+        expected_classes = frame["target"].map(target_classes)
+        unknown_targets = sorted(str(value) for value in frame.loc[expected_classes.isna(), "target"].unique())
+        if unknown_targets:
+            raise ValueError(
+                f"CosMx transcript CSV {path} contains targets absent from the feature panel: {unknown_targets}."
+            )
+        mismatched = frame["codeclass"].astype(str) != expected_classes.astype(str)
+        if mismatched.any():
+            pairs = sorted(
+                {
+                    (str(target), str(observed), str(expected))
+                    for target, observed, expected in zip(
+                        frame.loc[mismatched, "target"],
+                        frame.loc[mismatched, "codeclass"],
+                        expected_classes.loc[mismatched],
+                        strict=True,
+                    )
+                }
+            )
+            raise ValueError(
+                f"CosMx transcript CSV {path} has target/class values that disagree with the feature panel: {pairs}."
+            )
 
     tile_height, tile_width = tile_shape
     if not ((0 <= source_x) & (source_x < tile_width)).all() or not ((0 <= source_y) & (source_y < tile_height)).all():
@@ -308,20 +379,48 @@ def _normalize_transcript_partition(
 
     result = frame.drop(columns=["x", "y"]).rename(columns=_SOURCE_TO_OUTPUT)
     result["gene"] = result["gene"].astype(pd.CategoricalDtype(categories=gene_categories))
+    if code_class_categories is not None:
+        result["code_class"] = result["code_class"].astype(pd.CategoricalDtype(categories=code_class_categories))
     result["x"] = x + placement_x
     result["y"] = y + placement_y
     extras = [column for column in result.columns if column not in _OUTPUT_COLUMNS]
     return result[[*_OUTPUT_COLUMNS, *extras]]
 
 
-def _validate_transcript_metadata_destination(sdata: SpatialData) -> None:
-    """Validate the root mappings used for transcript metadata."""
-    cosmx = sdata.attrs.get("cosmx")
-    if cosmx is not None and not isinstance(cosmx, dict):
-        raise ValueError("SpatialData attribute 'cosmx' must be a mapping.")
-    transcripts = None if cosmx is None else cosmx.get("transcripts")
-    if transcripts is not None and not isinstance(transcripts, dict):
-        raise ValueError("SpatialData attribute 'cosmx.transcripts' must be a mapping.")
+def _feature_panel_name(output_points_name: str) -> str:
+    """Derive the store-local shared panel key from the points base name."""
+    return f"{output_points_name}_panel"
+
+
+def _feature_panel_metadata(preview: _CosmxPreview) -> dict[str, object]:
+    """Serialize the authoritative target-to-class relation as Harpy metadata."""
+    panel = preview.manifest.feature_panel
+    if panel is None:
+        raise ValueError("CosMx manifest has no feature panel.")
+    return {
+        "feature_column": panel.feature_column,
+        "class_column": panel.class_column,
+        "categories": list(panel.categories),
+        "targets_by_class": {feature_class: list(targets) for feature_class, targets in panel.targets_by_class.items()},
+    }
+
+
+def _validate_feature_panel_collision(
+    sdata: SpatialData,
+    feature_panel_name: str,
+    feature_panel_metadata: dict[str, object],
+) -> None:
+    """Reject reuse of a panel identifier for a different panel."""
+    harpy_metadata = sdata.attrs.get("harpy")
+    if harpy_metadata is None:
+        return
+    assert isinstance(harpy_metadata, dict)
+    feature_panels = harpy_metadata.get(_FEATURE_PANELS_METADATA_KEY)
+    if feature_panels is None:
+        return
+    assert isinstance(feature_panels, dict)
+    if feature_panel_name in feature_panels and feature_panels[feature_panel_name] != feature_panel_metadata:
+        raise ValueError(f"Harpy feature panel {feature_panel_name!r} already exists with incompatible metadata.")
 
 
 def _points_element_name(base: str, mosaic: int) -> str:

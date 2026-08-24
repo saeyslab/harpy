@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 import tifffile
 
+from harpy.io._cosmx import _discovery
 from harpy.io._cosmx._discovery import _discover_cosmx, _is_decoded_cosmx, _resolve_decoded_cosmx_root
 
 _CHANNEL_ORDER = "BGYRU"
@@ -62,6 +63,11 @@ def test_discover_compact_manifest_without_opening_deferred_data(
     assert manifest.run.tile_shape == (_TILE_SIZE, _TILE_SIZE)
     assert manifest.run.instance_labels_dtype == "uint16"
     assert manifest.run.compartment_labels_dtype == "uint8"
+    assert manifest.feature_panel is not None
+    assert manifest.feature_panel.feature_column == "gene"
+    assert manifest.feature_panel.class_column == "code_class"
+    assert manifest.feature_panel.categories == ("Endogenous", "Negative", "SystemControl")
+    assert manifest.feature_panel.targets_by_class["Negative"] == ("Negative01",)
 
 
 def test_resolve_decoded_cosmx_root(decoded_cosmx_path: Path) -> None:
@@ -75,6 +81,58 @@ def test_discovery_rejects_duplicate_morphology(decoded_cosmx_path: Path) -> Non
     shutil.copyfile(source, duplicate)
 
     with pytest.raises(ValueError, match="Duplicate morphology files for FOV 1"):
+        _discover_cosmx(decoded_cosmx_path)
+
+
+def test_discovery_reads_one_plex_once(
+    decoded_cosmx_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[Path] = []
+    original = _discovery._read_feature_panel
+
+    def record(path: Path):
+        calls.append(path)
+        return original(path)
+
+    monkeypatch.setattr(_discovery, "_read_feature_panel", record)
+
+    _discover_cosmx(decoded_cosmx_path)
+
+    assert calls == [decoded_cosmx_path / "plex-analysis.txt"]
+
+
+def test_discovery_allows_missing_plex(decoded_cosmx_path: Path) -> None:
+    (decoded_cosmx_path / "plex-analysis.txt").unlink()
+
+    manifest = _discover_cosmx(decoded_cosmx_path)
+
+    assert manifest.feature_panel is None
+
+
+def test_discovery_rejects_multiple_plex_files(decoded_cosmx_path: Path) -> None:
+    shutil.copyfile(decoded_cosmx_path / "plex-analysis.txt", decoded_cosmx_path / "plex-second.txt")
+
+    with pytest.raises(ValueError, match="multiple CosMx plex files"):
+        _discover_cosmx(decoded_cosmx_path)
+
+
+@pytest.mark.parametrize(
+    ("content", "message"),
+    [
+        ("DisplayName,CodeClass\nGeneA,Endogenous\nGeneA,Endogenous\n", "occurs more than once"),
+        ("DisplayName,CodeClass\nGeneA,\n", "empty or untrimmed CodeClass"),
+        ("DisplayName,ProbeID\nGeneA,NA\n", "missing required columns.*CodeClass"),
+    ],
+)
+def test_discovery_rejects_invalid_plex(
+    decoded_cosmx_path: Path,
+    content: str,
+    message: str,
+) -> None:
+    (decoded_cosmx_path / "plex-analysis.txt").write_text(content)
+
+    with pytest.raises(ValueError, match=message):
         _discover_cosmx(decoded_cosmx_path)
 
 

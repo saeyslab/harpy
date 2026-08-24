@@ -24,7 +24,7 @@ def ingestible_cosmx_path(decoded_cosmx_path: Path) -> Path:
             {
                 "V1": [fov],
                 "CellComp": ["Nuclear"],
-                "codeclass": ["Call"],
+                "codeclass": ["Endogenous"],
                 "target": [f"Gene{fov}"],
                 "x": [1.0],
                 "y": [2.0],
@@ -67,7 +67,10 @@ def test_cosmx_reads_all_modalities_into_matching_mosaics(
         assert set(get_transformation(sdata.labels[f"instance_labels_mosaic_{mosaic}"], get_all=True)) == expected
         assert set(get_transformation(sdata.points[f"transcripts_mosaic_{mosaic}"], get_all=True)) == expected
 
-    assert sdata.attrs["cosmx"]["selection"] == {
+    assert sdata.attrs["harpy"]["metadata_version"] == 1
+    assert "cosmx" not in sdata.attrs
+    assert sdata.attrs["harpy"]["provenance"] == {
+        "reader": "cosmx",
         "source_root": str(ingestible_cosmx_path.resolve()),
         "requested_fovs": [1, 2, 3, 4],
         "included_fovs": [1, 2, 3],
@@ -76,6 +79,16 @@ def test_cosmx_reads_all_modalities_into_matching_mosaics(
         "mosaic_mode": "spatial_groups",
         "adjacency_tolerance_px": 1,
     }
+    assert set(sdata.attrs["harpy"]) == {
+        "metadata_version",
+        "provenance",
+        "images",
+        "labels",
+        "points",
+        "feature_panels",
+    }
+    assert set(sdata.attrs["harpy"]["feature_panels"]) == {"transcripts_panel"}
+    assert {metadata["feature_panel"] for metadata in sdata.attrs["harpy"]["points"].values()} == {"transcripts_panel"}
     assert not _generated_siblings(output)
 
 
@@ -101,11 +114,11 @@ def test_cosmx_applies_fov_and_channel_selection(
     assert set(sdata.images) == {"morphology_image_mosaic_1"}
     image = get_dataarray(sdata, "morphology_image_mosaic_1")
     assert image.coords["c"].values.tolist() == ["DNA"]
-    assert sdata.attrs["cosmx"]["selection"]["requested_fovs"] == [1, 2]
-    assert sdata.attrs["cosmx"]["selection"]["included_fovs"] == [1, 2]
-    assert sdata.attrs["cosmx"]["selection"]["excluded_fovs"] == [3, 4]
-    assert sdata.attrs["cosmx"]["selection"]["mosaic_mode"] == "spatial_groups"
-    assert sdata.attrs["cosmx"]["selection"]["adjacency_tolerance_px"] == 0
+    assert sdata.attrs["harpy"]["provenance"]["requested_fovs"] == [1, 2]
+    assert sdata.attrs["harpy"]["provenance"]["included_fovs"] == [1, 2]
+    assert sdata.attrs["harpy"]["provenance"]["excluded_fovs"] == [3, 4]
+    assert sdata.attrs["harpy"]["provenance"]["mosaic_mode"] == "spatial_groups"
+    assert sdata.attrs["harpy"]["provenance"]["adjacency_tolerance_px"] == 0
 
 
 @pytest.mark.parametrize(
@@ -265,7 +278,21 @@ def test_cosmx_refuses_to_overwrite_unrecognized_spatialdata(
     with pytest.raises(ValueError, match="not created by the CosMx reader"):
         cosmx(decoded_cosmx_path, output, morphology=True, overwrite=True)
 
-    assert read_zarr(output).attrs.get("cosmx") is None
+    assert read_zarr(output).attrs.get("harpy") is None
+
+
+def test_cosmx_refuses_to_overwrite_store_from_another_reader(
+    decoded_cosmx_path: Path,
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "other-reader.zarr"
+    sdata = SpatialData(attrs={"harpy": {"metadata_version": 1, "provenance": {"reader": "other"}}})
+    sdata.write(output)
+
+    with pytest.raises(ValueError, match="not created by the CosMx reader"):
+        cosmx(decoded_cosmx_path, output, morphology=True, overwrite=True)
+
+    assert read_zarr(output).attrs["harpy"]["provenance"]["reader"] == "other"
 
 
 def _generated_siblings(output: Path) -> list[Path]:

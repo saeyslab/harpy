@@ -125,6 +125,37 @@ def cosmx(
     -------
     Reopened SpatialData object backed by ``output``.
 
+    Metadata
+    --------
+    Reader metadata is stored under ``sdata.attrs["harpy"]``. This is a
+    versioned Harpy convention, not part of the SpatialData standard. Its
+    structure is::
+
+        harpy
+        ├── metadata_version
+        ├── provenance
+        ├── images
+        │   └── <image element name>
+        ├── labels
+        │   └── <labels element name>
+        ├── points
+        │   └── <points element name>
+        └── feature_panels
+            └── <shared panel name>
+
+    ``provenance`` records the reader, source root, FOV selection, and mosaic
+    construction settings. The ``images``, ``labels``, and ``points`` mappings
+    are keyed by exact SpatialData element names. Their records contain source
+    FOV membership, pre-group/source origin, orientation, and pixel size.
+    Images additionally describe retained channels; instance labels describe
+    their ID encoding; compartment labels describe their semantic categories.
+
+    When an authoritative run-level plex is available, ``feature_panels``
+    stores its shared target-to-class relation, including panel targets with
+    zero detections. Each associated points record references that shared panel
+    by name. If no plex is available, transcript ingestion still succeeds and
+    neither the shared panel nor its points reference is written.
+
     Notes
     -----
     This reader does not create cell-boundary shapes, tables, cell statistics,
