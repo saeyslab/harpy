@@ -78,7 +78,7 @@ def test_discovery_rejects_duplicate_morphology(decoded_cosmx_path: Path) -> Non
         _discover_cosmx(decoded_cosmx_path)
 
 
-def test_discovery_allows_varying_provenance_metadata(decoded_cosmx_path: Path) -> None:
+def test_discovery_allows_varying_non_stitching_metadata(decoded_cosmx_path: Path) -> None:
     morphology = decoded_cosmx_path / "CellStatsDir" / "Morphology2D" / "20240101_120000_S2_C001_P01_N01_F00002.TIF"
     _rewrite_morphology_metadata(morphology, OrigTimeStamp="another-acquisition", Slot=99)
 

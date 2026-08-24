@@ -77,9 +77,10 @@ def test_add_transcript_points_splits_mosaics_and_roundtrips(
     roundtripped_values = roundtripped.points["transcripts_mosaic_1"].compute()
     assert isinstance(roundtripped_values["gene"].dtype, pd.CategoricalDtype)
     assert roundtripped_values["gene"].cat.categories.tolist() == ["GeneA", "GeneB", "GeneC"]
-    provenance = roundtripped.attrs["cosmx"]["transcripts"]["transcripts_mosaic_1"]
-    assert provenance == {
+    metadata = roundtripped.attrs["cosmx"]["transcripts"]["transcripts_mosaic_1"]
+    assert metadata == {
         "fovs": [1, 2],
+        "source_origin_px": {"x": 0, "y": 0},
         "orientation": {"flip_x": True, "flip_y": False},
         "pixel_size_um": 1.0,
     }

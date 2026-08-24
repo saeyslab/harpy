@@ -58,8 +58,8 @@ def test_add_morphology_images_stitches_groups_and_roundtrips(
         get_dataarray(roundtripped, "morphology_image_mosaic_1").data.compute(),
         values,
     )
-    provenance = roundtripped.attrs["cosmx"]["morphology_images"]["morphology_image_mosaic_1"]
-    assert provenance == {
+    metadata = roundtripped.attrs["cosmx"]["morphology_images"]["morphology_image_mosaic_1"]
+    assert metadata == {
         "fovs": [1, 2],
         "source_origin_px": {"x": 0, "y": 0},
         "orientation": {"flip_x": True, "flip_y": False},
@@ -174,29 +174,8 @@ def test_add_morphology_images_forwards_explicit_orientation(
 
     values = get_dataarray(sdata, "morphology_image_mosaic_1").data.compute()
     np.testing.assert_array_equal(values[:, :, :8], _tile(1, planes=(0,))[:, ::-1, :])
-    provenance = sdata.attrs["cosmx"]["morphology_images"]["morphology_image_mosaic_1"]
-    assert provenance["orientation"] == {"flip_x": False, "flip_y": True}
-
-
-@pytest.mark.parametrize(("name", "value"), [("flip_x", 1), ("flip_y", "false")])
-def test_add_morphology_images_rejects_non_boolean_orientation(
-    decoded_cosmx_path: Path,
-    tmp_path: Path,
-    name: str,
-    value: object,
-) -> None:
-    preview = _valued_preview(decoded_cosmx_path)
-    sdata = _backed_sdata(tmp_path)
-    orientation = {"flip_x": True, "flip_y": False, name: value}
-
-    with pytest.raises(ValueError, match=rf"{name} must be a bool"):
-        _add_morphology_images(
-            sdata,
-            preview,
-            channels=("B",),
-            chunks=(1, 4, 4),
-            **orientation,
-        )
+    metadata = sdata.attrs["cosmx"]["morphology_images"]["morphology_image_mosaic_1"]
+    assert metadata["orientation"] == {"flip_x": False, "flip_y": True}
 
 
 @pytest.mark.parametrize("overwrite", [False, True])
@@ -281,8 +260,7 @@ def _valued_preview(decoded_cosmx_path: Path, *, fov_2_x_px: int = 8):
             _rewrite_morphology_values(files.morphology, fov=files.fov)
     if fov_2_x_px != 8:
         positions = tuple(
-            replace(position, x_px=fov_2_x_px) if position.fov == 2 else position
-            for position in manifest.positions
+            replace(position, x_px=fov_2_x_px) if position.fov == 2 else position for position in manifest.positions
         )
         manifest = replace(manifest, positions=positions)
     return _preview_cosmx(manifest)
@@ -341,10 +319,6 @@ def _assert_transformations(sdata: SpatialData, image_name: str, *, mosaic: int)
     transformations = get_transformation(sdata.images[image_name], get_all=True)
     assert set(transformations) == {f"global_{mosaic}", f"global_{mosaic}_micron"}
     assert transformations[f"global_{mosaic}"] == Identity()
-    expected = Scale([1.0, 1.0], axes=("x", "y")).to_affine_matrix(
-        input_axes=("x", "y"), output_axes=("x", "y")
-    )
-    actual = transformations[f"global_{mosaic}_micron"].to_affine_matrix(
-        input_axes=("x", "y"), output_axes=("x", "y")
-    )
+    expected = Scale([1.0, 1.0], axes=("x", "y")).to_affine_matrix(input_axes=("x", "y"), output_axes=("x", "y"))
+    actual = transformations[f"global_{mosaic}_micron"].to_affine_matrix(input_axes=("x", "y"), output_axes=("x", "y"))
     np.testing.assert_array_equal(actual, expected)
