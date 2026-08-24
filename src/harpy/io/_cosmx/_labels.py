@@ -13,6 +13,7 @@ from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import Identity, Scale
 
+from harpy._metadata import _LABELS_METADATA_KEY, _metadata_registry, _validate_metadata_destination
 from harpy.image._image import add_labels
 from harpy.io._cosmx._models import (
     _COMPARTMENT_LABELS_PRODUCT,
@@ -166,7 +167,7 @@ def _add_label_family(
         raise ValueError("CosMx coordinate-system base name must not be empty.")
 
     _validate_label_chunks(chunks)
-    _validate_label_metadata_destination(sdata, family=family)
+    _validate_metadata_destination(sdata, _LABELS_METADATA_KEY)
     element_names = tuple(_labels_element_name(output_labels_name, mosaic.mosaic) for mosaic in preview.mosaics)
     existing = {name: element_type for element_type, name, _ in sdata.gen_elements() if name in element_names}
     wrong_type = sorted(name for name, element_type in existing.items() if element_type != "labels")
@@ -188,10 +189,7 @@ def _add_label_family(
     placements = {mosaic.mosaic: _mosaic_placements(preview, mosaic) for mosaic in preview.mosaics}
 
     attrs = deepcopy(sdata.attrs)
-    cosmx = attrs.setdefault("cosmx", {})
-    assert isinstance(cosmx, dict)
-    family_metadata = cosmx.setdefault(family, {})
-    assert isinstance(family_metadata, dict)
+    labels_metadata = _metadata_registry(attrs, _LABELS_METADATA_KEY)
     instance_id_base = _instance_id_base(source_dtype) if family == _INSTANCE_LABELS_PRODUCT else None
 
     for mosaic, element_name in zip(preview.mosaics, element_names, strict=True):
@@ -242,7 +240,7 @@ def _add_label_family(
             }
         else:
             metadata["categories"] = deepcopy(_COMPARTMENT_CATEGORIES)
-        family_metadata[element_name] = metadata
+        labels_metadata[element_name] = metadata
 
     sdata.attrs = attrs
     sdata.write_attrs()
@@ -381,16 +379,6 @@ def _validate_label_chunks(chunks: tuple[int, int]) -> None:
         or any(not isinstance(chunk, int) or isinstance(chunk, bool) or chunk < 1 for chunk in chunks)
     ):
         raise ValueError(f"CosMx label chunks must be two positive integers, found {chunks!r}.")
-
-
-def _validate_label_metadata_destination(sdata: SpatialData, *, family: _LabelFamily) -> None:
-    """Validate the root mappings used for label metadata."""
-    cosmx = sdata.attrs.get("cosmx")
-    if cosmx is not None and not isinstance(cosmx, dict):
-        raise ValueError("SpatialData attribute 'cosmx' must be a mapping.")
-    family_metadata = None if cosmx is None else cosmx.get(family)
-    if family_metadata is not None and not isinstance(family_metadata, dict):
-        raise ValueError(f"SpatialData attribute 'cosmx.{family}' must be a mapping.")
 
 
 def _labels_element_name(base: str, mosaic: int) -> str:
