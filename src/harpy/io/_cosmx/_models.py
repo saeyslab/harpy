@@ -108,9 +108,7 @@ class _CosmxManifest:
         if self.run.declared_fov_count is not None:
             expected_fovs = tuple(range(1, self.run.declared_fov_count + 1))
             if fov_ids != expected_fovs:
-                raise ValueError(
-                    f"CosMx manifest FOVs must match the declared range {expected_fovs}, found {fov_ids}."
-                )
+                raise ValueError(f"CosMx manifest FOVs must match the declared range {expected_fovs}, found {fov_ids}.")
 
     @property
     def fov_ids(self) -> tuple[int, ...]:
@@ -182,7 +180,9 @@ class _CosmxPreview:
                 f"CosMx unpositioned FOVs must be {sorted(expected_unpositioned)}, found {self.unpositioned_fovs}."
             )
         if not included <= positioned:
-            raise ValueError(f"CosMx included FOVs must have positions, found unpositioned {sorted(included - positioned)}.")
+            raise ValueError(
+                f"CosMx included FOVs must have positions, found unpositioned {sorted(included - positioned)}."
+            )
 
         mosaic_ids = tuple(mosaic.mosaic for mosaic in self.mosaics)
         if mosaic_ids != tuple(range(1, len(self.mosaics) + 1)):
@@ -195,9 +195,11 @@ class _CosmxPreview:
     @property
     def estimated_image_nbytes(self) -> int:
         """Estimated bytes for dense mosaics containing every image channel."""
-        return self._mosaic_pixel_count * len(self.manifest.run.channels) * np.dtype(
-            self.manifest.run.morphology_dtype
-        ).itemsize
+        return (
+            self._mosaic_pixel_count
+            * len(self.manifest.run.channels)
+            * np.dtype(self.manifest.run.morphology_dtype).itemsize
+        )
 
     @property
     def estimated_instance_labels_nbytes(self) -> int:
@@ -294,9 +296,7 @@ def _validate_preview_mosaics(
         for product in _PRODUCTS:
             missing_sources = [fov for fov in mosaic.fovs if getattr(fovs_by_id[fov], product) is None]
             if missing_sources:
-                raise ValueError(
-                    f"CosMx mosaic {mosaic.mosaic} FOVs have no {product} sources: {missing_sources}."
-                )
+                raise ValueError(f"CosMx mosaic {mosaic.mosaic} FOVs have no {product} sources: {missing_sources}.")
 
         expected_origin_x = min(positions[fov].x_px for fov in mosaic.fovs)
         expected_origin_y = min(positions[fov].y_px for fov in mosaic.fovs)
@@ -310,9 +310,7 @@ def _validate_preview_mosaics(
                 f"{(mosaic.origin_x_px, mosaic.origin_y_px)}."
             )
         if mosaic.shape != expected_shape:
-            raise ValueError(
-                f"CosMx mosaic {mosaic.mosaic} shape must be {expected_shape}, found {mosaic.shape}."
-            )
+            raise ValueError(f"CosMx mosaic {mosaic.mosaic} shape must be {expected_shape}, found {mosaic.shape}.")
 
         for index, left in enumerate(mosaic.fovs):
             left_position = positions[left]
@@ -362,16 +360,22 @@ def _validate_instance_id_encoding(source_dtype: str, max_fov: int) -> None:
         the largest possible encoded ID does not fit in ``uint32``.
     """
     source = np.dtype(source_dtype)
-    if source.kind != "u":
-        raise ValueError(f"CosMx instance labels must use an unsigned integer dtype, found {source.name}.")
+    base = _instance_id_base(source)
     if max_fov < 1:
         raise ValueError(f"Maximum CosMx FOV number must be positive, found {max_fov}.")
-    base = 1 << (source.itemsize * 8)
     max_global_id = (max_fov - 1) * base + (base - 1)
     if max_global_id > np.iinfo(_INSTANCE_ID_DTYPE).max:
         raise ValueError(
             f"CosMx instance-ID encoding requires maximum ID {max_global_id}, which does not fit in uint32."
         )
+
+
+def _instance_id_base(source_dtype: str | np.dtype) -> int:
+    """Return the complete value-range size reserved for each FOV's IDs."""
+    source = np.dtype(source_dtype)
+    if source.kind != "u":
+        raise ValueError(f"CosMx instance labels must use an unsigned integer dtype, found {source.name}.")
+    return 1 << (source.itemsize * 8)
 
 
 def _validate_stage_position(x_mm: float, y_mm: float, *, fov: int) -> None:

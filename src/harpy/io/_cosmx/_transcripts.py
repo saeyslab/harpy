@@ -14,7 +14,7 @@ from spatialdata import SpatialData
 from spatialdata.transformations import Identity, Scale
 
 from harpy.io._cosmx._models import _CosmxPreview
-from harpy.io._cosmx._raster import _mosaic_placements, _pixel_coordinate_system, _validate_orientation
+from harpy.io._cosmx._raster import _mosaic_placements, _pixel_coordinate_system
 from harpy.points._points import add_points
 
 _SOURCE_COLUMNS = ("V1", "CellComp", "codeclass", "target", "x", "y", "z")
@@ -59,6 +59,18 @@ def _add_transcript_points(
     parse time. Instance allocation is a downstream spatial operation against
     the final label raster, while FOV routing comes from the validated manifest.
 
+    Each points element receives a root metadata record containing:
+
+    - ``fovs``: source FOV numbers contributing to the mosaic;
+    - ``source_origin_px``: upper-left mosaic bound in the pre-group/source
+      pixel coordinate system. This origin is subtracted from every FOV
+      position so that the output points use mosaic-local coordinates starting
+      at ``(0, 0)``. It is source-geometry metadata, not an active SpatialData
+      transformation;
+    - ``orientation``: dataset-wide local x/y-axis flips applied before each
+      FOV placement is added; and
+    - ``pixel_size_um``: physical size of one source x/y coordinate unit.
+
     Parameters
     ----------
     sdata
@@ -94,7 +106,6 @@ def _add_transcript_points(
     if not isinstance(overwrite, bool):
         raise ValueError(f"CosMx transcript overwrite must be a bool, found {overwrite!r}.")
 
-    _validate_orientation(flip_x=flip_x, flip_y=flip_y)
     _validate_blocksize(blocksize)
     _validate_transcript_metadata_destination(sdata)
 
@@ -151,6 +162,7 @@ def _add_transcript_points(
     for mosaic, element_name in zip(preview.mosaics, element_names, strict=True):
         transcripts[element_name] = {
             "fovs": list(mosaic.fovs),
+            "source_origin_px": {"x": mosaic.origin_x_px, "y": mosaic.origin_y_px},
             "orientation": {"flip_x": flip_x, "flip_y": flip_y},
             "pixel_size_um": preview.manifest.run.pixel_size_um,
         }
@@ -285,10 +297,7 @@ def _normalize_transcript_partition(
         raise ValueError(f"CosMx transcript CSV {path} contains null gene targets.")
 
     tile_height, tile_width = tile_shape
-    if (
-        not ((0 <= source_x) & (source_x < tile_width)).all()
-        or not ((0 <= source_y) & (source_y < tile_height)).all()
-    ):
+    if not ((0 <= source_x) & (source_x < tile_width)).all() or not ((0 <= source_y) & (source_y < tile_height)).all():
         raise ValueError(
             f"CosMx transcript CSV {path} contains coordinates outside FOV bounds "
             f"0 <= x < {tile_width} and 0 <= y < {tile_height}."
@@ -306,7 +315,7 @@ def _normalize_transcript_partition(
 
 
 def _validate_transcript_metadata_destination(sdata: SpatialData) -> None:
-    """Validate the root metadata mappings used for transcript provenance."""
+    """Validate the root mappings used for transcript metadata."""
     cosmx = sdata.attrs.get("cosmx")
     if cosmx is not None and not isinstance(cosmx, dict):
         raise ValueError("SpatialData attribute 'cosmx' must be a mapping.")
