@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from harpy.io._cosmx._models import (
+    _MOSAIC_MODES,
     _PRODUCTS,
     _CosmxFovPosition,
     _CosmxManifest,
     _CosmxMosaicGeometry,
     _CosmxPreview,
+    _MosaicMode,
 )
 
 _DEFAULT_ADJACENCY_TOLERANCE_FRACTION = 0.02
@@ -15,19 +17,20 @@ def _preview_cosmx(
     manifest: _CosmxManifest,
     *,
     fovs: tuple[int, ...] | list[int] | set[int] | None = None,
+    mosaic_mode: _MosaicMode = "spatial_groups",
     adjacency_tolerance_px: int | None = None,
 ) -> _CosmxPreview:
     """Select usable FOVs and organize them into spatial mosaic groups.
 
     A FOV is included only when it was requested, has a known morphology
     position, and has morphology, instance-label, compartment-label, and
-    transcript files. Included FOVs are grouped by spatial adjacency into
-    independent mosaic geometries; they are not placed in one shared global
-    coordinate system. The function also records excluded and unpositioned
-    FOVs and appends selection and grouping diagnostics. The returned preview
-    calculates aggregate raster-size estimates from its mosaic geometries and
-    validates that the planned instance-ID encoding fits in ``uint32``. No
-    raster pixels or transcript contents are loaded.
+    transcript files. Included FOVs are either grouped by spatial adjacency or
+    deliberately placed in one bounding mosaic. The function also records
+    excluded and unpositioned FOVs and appends selection and grouping
+    diagnostics. The returned preview calculates aggregate raster-size
+    estimates from its mosaic geometries and validates that the planned
+    instance-ID encoding fits in ``uint32``. No raster pixels or transcript
+    contents are loaded.
 
     Parameters
     ----------
@@ -36,9 +39,15 @@ def _preview_cosmx(
     fovs
         Optional FOV subset to consider. By default, all manifest FOVs are
         considered.
+    mosaic_mode
+        ``"spatial_groups"`` derives separate mosaics from adjacency;
+        ``"single"`` places every included FOV in one bounding canvas.
     adjacency_tolerance_px
         Maximum horizontal or vertical gap, in pixels, bridged when grouping
-        FOVs. ``None`` uses two percent of the smaller tile dimension.
+        spatial groups. ``None`` uses two percent of the smaller tile
+        dimension. Single-mosaic mode does not perform adjacency grouping and
+        requires this value to remain ``None``; an explicit integer raises a
+        ``ValueError`` rather than being ignored.
 
     Returns
     -------
@@ -66,28 +75,38 @@ def _preview_cosmx(
     included = tuple(sorted(requested & common))
     excluded = tuple(sorted(all_fovs - set(included)))
     unpositioned = tuple(sorted(all_fovs - positioned))
-    if adjacency_tolerance_px is None:
-        adjacency_tolerance_px = _default_adjacency_tolerance_px(manifest.run.tile_shape)
-    elif (
-        not isinstance(adjacency_tolerance_px, int)
-        or isinstance(adjacency_tolerance_px, bool)
-        or adjacency_tolerance_px < 0
-    ):
-        raise ValueError(
-            f"CosMx adjacency tolerance must be a nonnegative integer, found {adjacency_tolerance_px!r}."
+    if mosaic_mode not in _MOSAIC_MODES:
+        raise ValueError(f"Unknown CosMx mosaic mode {mosaic_mode!r}; expected one of {_MOSAIC_MODES}.")
+    selected_positions = {fov: positions_by_fov[fov] for fov in included}
+    if mosaic_mode == "single":
+        if adjacency_tolerance_px is not None:
+            raise ValueError("CosMx single-mosaic mode does not use an adjacency tolerance.")
+        mosaics = _single_mosaic_geometry(positions=selected_positions, tile_shape=manifest.run.tile_shape)
+    else:
+        if adjacency_tolerance_px is None:
+            adjacency_tolerance_px = _default_adjacency_tolerance_px(manifest.run.tile_shape)
+        elif (
+            not isinstance(adjacency_tolerance_px, int)
+            or isinstance(adjacency_tolerance_px, bool)
+            or adjacency_tolerance_px < 0
+        ):
+            raise ValueError(
+                f"CosMx adjacency tolerance must be a nonnegative integer, found {adjacency_tolerance_px!r}."
+            )
+        mosaics = _mosaic_geometries(
+            positions=selected_positions,
+            tile_shape=manifest.run.tile_shape,
+            adjacency_tolerance_px=adjacency_tolerance_px,
         )
-    mosaics = _mosaic_geometries(
-        positions={fov: positions_by_fov[fov] for fov in included},
-        tile_shape=manifest.run.tile_shape,
-        adjacency_tolerance_px=adjacency_tolerance_px,
-    )
     diagnostics = list(manifest.diagnostics)
-    if mosaics:
+    if mosaics and mosaic_mode == "spatial_groups":
         pixel_unit = "pixel" if adjacency_tolerance_px == 1 else "pixels"
         diagnostics.append(
             f"Grouped {len(included)} positioned FOV(s) into {len(mosaics)} spatial mosaic group(s) using an "
             f"adjacency tolerance of {adjacency_tolerance_px} {pixel_unit}."
         )
+    elif mosaics:
+        diagnostics.append(f"Placed {len(included)} positioned FOV(s) in one mosaic without adjacency grouping.")
     if excluded:
         diagnostics.append(
             f"Selected {len(included)} common positioned FOV(s); excluded FOVs {list(excluded)} without reading "
@@ -101,7 +120,32 @@ def _preview_cosmx(
         unpositioned_fovs=unpositioned,
         mosaics=mosaics,
         diagnostics=tuple(diagnostics),
+        mosaic_mode=mosaic_mode,
         adjacency_tolerance_px=adjacency_tolerance_px,
+    )
+
+
+def _single_mosaic_geometry(
+    *,
+    positions: dict[int, _CosmxFovPosition],
+    tile_shape: tuple[int, int],
+) -> tuple[_CosmxMosaicGeometry, ...]:
+    """Place all selected FOVs in one bounding canvas without adjacency grouping."""
+    if not positions:
+        return ()
+    height, width = tile_shape
+    origin_x = min(position.x_px for position in positions.values())
+    origin_y = min(position.y_px for position in positions.values())
+    max_x = max(position.x_px + width for position in positions.values())
+    max_y = max(position.y_px + height for position in positions.values())
+    return (
+        _CosmxMosaicGeometry(
+            mosaic=1,
+            fovs=tuple(sorted(positions)),
+            origin_x_px=origin_x,
+            origin_y_px=origin_y,
+            shape=(max_y - origin_y, max_x - origin_x),
+        ),
     )
 
 

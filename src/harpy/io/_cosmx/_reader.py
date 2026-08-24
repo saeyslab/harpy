@@ -14,7 +14,7 @@ from spatialdata.models.models import ScaleFactors_t
 from harpy.io._cosmx._discovery import _discover_cosmx
 from harpy.io._cosmx._images import _add_morphology_images
 from harpy.io._cosmx._labels import _add_compartment_labels, _add_instance_labels
-from harpy.io._cosmx._models import _CosmxPreview
+from harpy.io._cosmx._models import _CosmxPreview, _MosaicMode
 from harpy.io._cosmx._preview import _preview_cosmx
 from harpy.io._cosmx._transcripts import _add_transcript_points
 
@@ -27,6 +27,7 @@ def cosmx(
     *,
     fovs: Sequence[int] | None = None,
     channels: Sequence[str] | None = None,
+    mosaic_mode: _MosaicMode = "spatial_groups",
     adjacency_tolerance_px: int | None = None,
     morphology: bool = True,
     instance_labels: bool = True,
@@ -48,11 +49,11 @@ def cosmx(
     """Read a decoded CosMx run into a backed SpatialData Zarr store.
 
     Positioned FOVs for which morphology, instance labels, compartment labels,
-    and transcripts are all available are grouped into independent spatial
-    mosaics. Every enabled modality uses the same groups, orientation, and
-    mosaic-specific pixel and micron coordinate systems. Raster mosaics and
-    transcript tables are constructed out of core by their modality-specific
-    readers.
+    and transcripts are all available are organized according to
+    ``mosaic_mode``. Every enabled modality uses the same resulting mosaics,
+    orientation, and mosaic-specific pixel and micron coordinate systems.
+    Raster mosaics and transcript tables are constructed out of core by their
+    modality-specific readers.
 
     The complete output is transactional. Data are written directly into a
     temporary sibling Zarr store and published only after that store can be
@@ -73,10 +74,18 @@ def cosmx(
     channels
         Optional morphology channel IDs or unambiguous biological names. The
         acquisition order is preserved. Ignored when morphology is disabled.
+    mosaic_mode
+        ``"spatial_groups"`` creates separate adjacency-derived mosaics.
+        ``"single"`` deliberately places every included FOV in one potentially
+        sparse bounding canvas.
     adjacency_tolerance_px
         Maximum horizontal or vertical FOV gap, in pixels, bridged during
         mosaic grouping. ``None`` uses two percent of the smaller tile
-        dimension.
+        dimension when ``mosaic_mode="spatial_groups"``. Single-mosaic mode
+        does not perform adjacency grouping and therefore requires this value
+        to remain ``None``; supplying an integer together with
+        ``mosaic_mode="single"`` raises a ``ValueError`` rather than silently
+        ignoring it.
     morphology
         Whether to ingest morphology images.
     instance_labels
@@ -139,6 +148,7 @@ def cosmx(
     preview = _preview_cosmx(
         manifest,
         fovs=requested_fovs,
+        mosaic_mode=mosaic_mode,
         adjacency_tolerance_px=adjacency_tolerance_px,
     )
     if not preview.mosaics:
@@ -240,6 +250,7 @@ def cosmx(
             "included_fovs": list(preview.included_fovs),
             "excluded_fovs": list(preview.excluded_fovs),
             "unpositioned_fovs": list(preview.unpositioned_fovs),
+            "mosaic_mode": preview.mosaic_mode,
             "adjacency_tolerance_px": preview.adjacency_tolerance_px,
         }
         sdata.attrs = attrs
