@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 
@@ -17,6 +18,8 @@ _PRODUCTS = (
     _TRANSCRIPTS_PRODUCT,
 )
 _INSTANCE_ID_DTYPE = np.dtype(np.uint32)
+_MOSAIC_MODES = ("spatial_groups", "single")
+_MosaicMode = Literal["spatial_groups", "single"]
 
 
 @dataclass(frozen=True)
@@ -161,10 +164,13 @@ class _CosmxPreview:
     unpositioned_fovs: tuple[int, ...]
     mosaics: tuple[_CosmxMosaicGeometry, ...]
     diagnostics: tuple[str, ...]
-    adjacency_tolerance_px: int = 0
+    mosaic_mode: _MosaicMode = "spatial_groups"
+    adjacency_tolerance_px: int | None = 0
 
     def __post_init__(self) -> None:
-        if (
+        if self.mosaic_mode not in _MOSAIC_MODES:
+            raise ValueError(f"Unknown CosMx mosaic mode {self.mosaic_mode!r}; expected one of {_MOSAIC_MODES}.")
+        if self.mosaic_mode == "spatial_groups" and (
             not isinstance(self.adjacency_tolerance_px, int)
             or isinstance(self.adjacency_tolerance_px, bool)
             or self.adjacency_tolerance_px < 0
@@ -173,6 +179,8 @@ class _CosmxPreview:
                 "CosMx adjacency tolerance must be a nonnegative integer, "
                 f"found {self.adjacency_tolerance_px!r}."
             )
+        if self.mosaic_mode == "single" and self.adjacency_tolerance_px is not None:
+            raise ValueError("CosMx single-mosaic mode does not use an adjacency tolerance.")
         _validate_sorted_unique_fovs(self.included_fovs, name="included FOVs")
         _validate_sorted_unique_fovs(self.excluded_fovs, name="excluded FOVs")
         _validate_sorted_unique_fovs(self.unpositioned_fovs, name="unpositioned FOVs")
