@@ -11,14 +11,13 @@ from loguru import logger as log
 from spatialdata import SpatialData, read_zarr
 from spatialdata.models.models import ScaleFactors_t
 
+from harpy._metadata import _HARPY_METADATA_KEY, _PROVENANCE_METADATA_KEY, _harpy_metadata
 from harpy.io._cosmx._discovery import _discover_cosmx
 from harpy.io._cosmx._images import _add_morphology_images
 from harpy.io._cosmx._labels import _add_compartment_labels, _add_instance_labels
 from harpy.io._cosmx._models import _CosmxPreview, _MosaicMode
 from harpy.io._cosmx._preview import _preview_cosmx
 from harpy.io._cosmx._transcripts import _add_transcript_points
-
-_SELECTION_METADATA_KEY = "selection"
 
 
 def cosmx(
@@ -142,9 +141,7 @@ def cosmx(
         raise ValueError("CosMx ingestion requires at least one enabled modality.")
 
     manifest = _discover_cosmx(path)
-    requested_fovs = (
-        manifest.fov_ids if fovs is None else tuple(sorted({int(fov) for fov in fovs}))
-    )
+    requested_fovs = manifest.fov_ids if fovs is None else tuple(sorted({int(fov) for fov in fovs}))
     preview = _preview_cosmx(
         manifest,
         fovs=requested_fovs,
@@ -242,9 +239,9 @@ def cosmx(
             log.info(f"Wrote CosMx transcript points in {perf_counter() - started:.2f} seconds.")
 
         attrs = deepcopy(sdata.attrs)
-        cosmx_metadata = attrs.setdefault("cosmx", {})
-        assert isinstance(cosmx_metadata, dict)
-        cosmx_metadata[_SELECTION_METADATA_KEY] = {
+        harpy_metadata = _harpy_metadata(attrs)
+        harpy_metadata[_PROVENANCE_METADATA_KEY] = {
+            "reader": "cosmx",
             "source_root": str(manifest.root),
             "requested_fovs": list(requested_fovs),
             "included_fovs": list(preview.included_fovs),
@@ -283,9 +280,7 @@ def _validate_planned_names(
             element_name = f"{base_name}_mosaic_{mosaic.mosaic}"
             previous = owners.setdefault(element_name, modality)
             if previous != modality:
-                raise ValueError(
-                    f"CosMx output element {element_name!r} is planned by both {previous} and {modality}."
-                )
+                raise ValueError(f"CosMx output element {element_name!r} is planned by both {previous} and {modality}.")
 
 
 def _validate_replaceable_output(output: Path) -> None:
@@ -294,9 +289,9 @@ def _validate_replaceable_output(output: Path) -> None:
         existing = read_zarr(output)
     except Exception as error:
         raise ValueError(f"Refusing to replace unreadable or non-SpatialData output: {output}") from error
-    cosmx_metadata = existing.attrs.get("cosmx")
-    selection = cosmx_metadata.get(_SELECTION_METADATA_KEY) if isinstance(cosmx_metadata, dict) else None
-    if not isinstance(selection, dict):
+    harpy_metadata = existing.attrs.get(_HARPY_METADATA_KEY)
+    provenance = harpy_metadata.get(_PROVENANCE_METADATA_KEY) if isinstance(harpy_metadata, dict) else None
+    if not isinstance(provenance, dict) or provenance.get("reader") != "cosmx":
         raise ValueError(f"Refusing to replace SpatialData output not created by the CosMx reader: {output}")
 
 
