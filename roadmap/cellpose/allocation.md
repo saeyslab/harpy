@@ -217,8 +217,18 @@ arguments are omitted.
 
 ### Public contract
 
-Extend `hp.tb.allocate` with optional class-aware arguments following this
-contract:
+Remove the stateful `append` parameter and let one allocation call describe the
+complete output table. The element-selection arguments accept one region or a
+collection of paired regions:
+
+```python
+labels_name: str | list[str]
+points_name: str | list[str] = "transcripts"
+to_coordinate_system: str | list[str] = "global"
+output_table_name: str = "table_transcriptomics"
+```
+
+Extend `hp.tb.allocate` with optional class-aware arguments:
 
 ```python
 name_feature_class_column: str | None = None
@@ -226,21 +236,40 @@ expression_class: str | None = None
 control_class_denominators: Mapping[str, int] | None = None
 ```
 
-These parameter names, types, and defaults are final for this slice.
+These parameter names, types, and defaults are final for this slice. The
+`append` parameter is removed; `overwrite` controls only whether the completed
+table may replace an existing table element.
 
 ```python
 sdata = hp.tb.allocate(
     sdata,
-    labels_name="cellpose_labels_mosaic_1",
-    points_name="transcripts_mosaic_1",
+    labels_name=["cellpose_labels_mosaic_1", "cellpose_labels_mosaic_2"],
+    points_name=["transcripts_mosaic_1", "transcripts_mosaic_2"],
     output_table_name="table_transcriptomics",
-    to_coordinate_system="global_1",
+    to_coordinate_system=["global_1", "global_2"],
     name_gene_column="gene",
     name_feature_class_column="code_class",
     expression_class="Endogenous",
     control_class_denominators=None,
     overwrite=True,
 )
+```
+
+`labels_name` defines the number and order of allocation pairs. Require at
+least one labels element and reject duplicate labels names. A scalar
+`points_name` or `to_coordinate_system` is broadcast to every labels element;
+a list must have the same length as `labels_name`. This permits both one shared
+points element in a common coordinate system and separate points elements for
+independent mosaics. Validate and normalize these pairs before starting any
+spatial lookup.
+
+This follows the established multi-element convention in
+`hp.tb.add_feature_matrix`, while keeping the biological association explicit:
+
+```text
+labels[0]  + points[0]  + coordinate_system[0]
+labels[1]  + points[1]  + coordinate_system[1]
+    ...
 ```
 
 Their semantics are:
@@ -289,6 +318,44 @@ projection, validation, or aggregation. No additional `.obs` columns are
 created and every `name_gene_column` value remains in `adata.X`. Other
 class-aware parameters must also be `None` in this mode so that a partially
 specified request is not silently ignored.
+
+The ordinary path still supports multiple allocation pairs. It uses the
+deterministic union of observed targets as the shared feature axis and fills a
+target absent from one pair with zero counts for that pair.
+
+### Shared feature axis and panel compatibility
+
+Do not construct independently schematized AnnData objects and combine them
+with the default inner join. An inner join would silently discard a target from
+the complete table whenever that target has no assigned transcripts in one
+region.
+
+For class-aware allocation, resolve one shared feature axis before constructing
+the final AnnData:
+
+- when all selected points elements reference compatible feature-panel
+  metadata, use the panel's ordered `expression_class` targets, including
+  targets with zero detections;
+- without feature-panel metadata, use a deterministic, lexicographically
+  sorted union of the observed expression targets across all selected points
+  elements; and
+- construct every per-pair sparse count matrix against this shared axis, so a
+  missing target is represented by a zero rather than by dropping the feature.
+
+In class-aware mode, feature-panel metadata must be available for all selected
+points elements or for none of them. When present, all referenced panels must
+agree on the feature column, class column, ordered categories, target-to-class
+mapping, and targets by class. Reject mixed metadata availability and
+incompatible panels before spatial allocation. This prevents a zero from
+ambiguously meaning either "assayed but not detected" or "not assayed by this
+panel."
+
+There is one `control_class_denominators` mapping for the complete allocation
+call. When compatible panel metadata is present, derive one shared mapping and
+compare an explicitly supplied mapping with it as a consistency assertion.
+Without panel metadata, require one explicit mapping and apply it to every
+pair. Per-region denominator mappings are not supported because they would make
+the same normalized `.obs` column have different meanings in different rows.
 
 ### Categorical class contract
 
@@ -397,6 +464,10 @@ adata.uns["feature_class_allocation"] = {
             "points_element": "transcripts_mosaic_1",
             "coordinate_system": "global_1",
         },
+        "cellpose_labels_mosaic_2": {
+            "points_element": "transcripts_mosaic_2",
+            "coordinate_system": "global_2",
+        },
     },
 }
 ```
@@ -419,11 +490,9 @@ values are retained.
 
 Configuration shared by the complete table lives at the top level. The
 `regions` mapping is keyed by the exact labels element name and records the
-points element and coordinate system used for each appended region. A new
-class-aware allocation creates this record. Class-aware append requires all
-shared fields to match exactly and adds one new region entry; appending an
-already registered region is an error. Ordinary allocation does not create this
-record.
+paired points element and coordinate system used for each region in the same
+allocation call. Class-aware allocation creates the complete record once;
+ordinary allocation does not create this record.
 
 ### Single-pass implementation
 
@@ -433,8 +502,10 @@ part of allocation.
 
 Generalize the private allocation primitive so it can retain both the gene
 column and the feature-class column while assigning each point to the label
-value underneath its coordinates. The resulting lazy assigned-points dataframe
-should feed all reductions in one Dask computation:
+value underneath its coordinates. Perform one spatial lookup per normalized
+labels/points/coordinate-system pair, never one lookup per feature class. Each
+resulting lazy assigned-points dataframe should feed its reductions in one Dask
+computation:
 
 1. validate that every observed target maps to exactly one feature class;
 2. group assigned points by instance and target to build one temporary sparse
@@ -443,8 +514,14 @@ should feed all reductions in one Dask computation:
    belonging to each class;
 4. calculate the normalized control metrics and `control_fraction`;
 5. retain only the `expression_class` columns in the final `adata.X`; and
-6. attach the count and normalized metrics to the corresponding `.obs` rows
-   before adding the table to `SpatialData`.
+6. attach the count and normalized metrics to the corresponding `.obs` rows.
+
+After all pairs have been reduced, align their sparse matrices to the previously
+resolved shared feature axis, stack them row-wise, concatenate `.obs` and
+spatial coordinates in pair order, and construct one AnnData object. Add that
+table to `SpatialData` exactly once. "One allocation call" therefore does not
+require one monolithic Dask graph across every mosaic; pair-level work may stay
+independent and out of core until the compact sparse results are assembled.
 
 Conceptually:
 
@@ -472,9 +549,8 @@ Unexpected or null feature classes, targets associated with multiple classes,
 non-positive resolved panel target counts, a missing expression class, and
 collisions with existing output columns must produce clear errors. A panel
 control class with no assigned points is valid and must produce zero counts and
-rates. Appending another labels region must preserve the same `.obs` schema and
-shared `feature_class_allocation` configuration, then extend its `regions`
-mapping.
+rates. Validate the complete multi-region request and shared
+`feature_class_allocation` configuration before writing the output table.
 
 ### Boundary with Slice 3
 
@@ -512,10 +588,19 @@ Focused tests should establish that:
   before writing a table element;
 - the versioned `feature_class_allocation` record and its generated-column
   bindings survive a SpatialData Zarr round trip;
-- append mode requires identical shared configuration, preserves the metrics,
-  and adds the new labels/points/coordinate-system entry under `regions`;
-- append rejects an already registered region and incompatible existing
-  allocation metadata; and
+- scalar points and coordinate-system inputs broadcast across labels, while
+  incompatible list lengths and duplicate labels are rejected;
+- multiple allocation pairs create one table and one complete `regions`
+  mapping in a single call;
+- the final expression matrix uses the panel-defined feature axis when panel
+  metadata is present and the sorted union of observed targets otherwise;
+- expression targets missing from one allocation pair are zero-filled rather
+  than removed by an inner join;
+- mixed feature-panel availability and incompatible panels are rejected before
+  spatial lookup;
+- one shared denominator mapping applies to every pair and conflicts from any
+  referenced panel are rejected;
+- an existing output table is replaced only when `overwrite=True`; and
 - omitting class-aware arguments reproduces the existing allocation result.
 
 Benchmark the class-aware path on a representative backed crop before the full
