@@ -221,6 +221,14 @@ Extend `hp.tb.allocate` with optional class-aware arguments following this
 contract:
 
 ```python
+name_feature_class_column: str | None = None
+expression_class: str | None = None
+control_class_denominators: Mapping[str, int] | None = None
+```
+
+These parameter names, types, and defaults are final for this slice.
+
+```python
 sdata = hp.tb.allocate(
     sdata,
     labels_name="cellpose_labels_mosaic_1",
@@ -235,16 +243,15 @@ sdata = hp.tb.allocate(
 )
 ```
 
-The exact parameter names remain subject to implementation review, but the
-semantics are fixed:
+Their semantics are:
 
 - `name_feature_class_column` identifies the per-point column that classifies
   each target;
 - `expression_class` selects the only class whose targets are retained in
   `adata.X`; and
-- `control_class_denominators` optionally supplies the authoritative number of
-  panel targets for every non-expression class. When it is `None`, allocation
-  resolves the same mapping from metadata associated with `points_name`.
+- `control_class_denominators` optionally supplies the number of panel targets
+  for every non-expression class as a fallback for points without feature-panel
+  metadata, or as a consistency assertion when such metadata is available.
 
 An ordinary reader-backed call should not contain panel-specific constants. An
 explicit mapping remains available for generic points elements that were not
@@ -257,12 +264,31 @@ control_class_denominators={
 }
 ```
 
+Control denominators are assay facts rather than tunable normalization
+parameters. Allocation must resolve the two possible sources according to this
+contract:
+
+| Feature-panel metadata | Explicit mapping | Result |
+| --- | --- | --- |
+| available | `None` | derive denominators from panel target-list lengths |
+| unavailable | provided | validate and use the explicit mapping |
+| available | identical values | accept the assertion and use the panel-derived values |
+| available | conflicting values | raise `ValueError` |
+| unavailable | `None` | raise `ValueError` before spatial lookup |
+
+When both sources are present, require exact equality after validation: the
+class keys and positive integer values must match. Partial mappings, missing or
+additional classes, and per-class overrides are not supported. Explicit values
+must never silently replace an attached panel's values. A malformed or
+column-incompatible attached panel is itself an error and cannot be bypassed by
+supplying explicit denominators.
+
 When `name_feature_class_column=None`, allocation must branch to the existing
-implementation before performing any class-specific projection, validation, or
-aggregation. No additional `.obs` columns are created and every
-`name_gene_column` value remains in `adata.X`. Other class-aware parameters must
-also be `None` in this mode so that a partially specified request is not
-silently ignored.
+implementation immediately, before feature-panel lookup or any class-specific
+projection, validation, or aggregation. No additional `.obs` columns are
+created and every `name_gene_column` value remains in `adata.X`. Other
+class-aware parameters must also be `None` in this mode so that a partially
+specified request is not silently ignored.
 
 ### Categorical class contract
 
@@ -279,7 +305,7 @@ Require that:
 - `expression_class` is one of the categories;
 - the column contains no null values;
 - every target maps to exactly one feature class; and
-- after metadata resolution or application of an explicit override, the keys
+- after metadata resolution or application of an explicit fallback, the keys
   of `control_class_denominators` are exactly
   `set(categories) - {expression_class}`.
 
@@ -307,10 +333,11 @@ does not affect the calculations.
 When compatible panel metadata is available, allocation resolves it from the
 selected `points_name`, verifies that the stored feature and class columns match
 the requested columns, and derives denominators from the target-list lengths.
-Callers do not pass panel-specific denominators. If the metadata is absent, the
-caller must provide the complete mapping explicitly or class-aware allocation
-fails before the spatial lookup. It must not silently estimate missing
-denominators from observed points.
+Callers normally do not pass panel-specific denominators. If they do, the
+mapping is treated only as an assertion and must equal the derived mapping. If
+the metadata is absent, the caller must provide the complete mapping explicitly
+or class-aware allocation fails before the spatial lookup. It must not silently
+estimate missing denominators from observed points.
 
 ### Output metrics
 
@@ -338,9 +365,65 @@ control_fraction =
     / (n_endogenous + n_negative + n_system_control)
 ```
 
-The resolved panel class counts and normalization semantics should be recorded
-compactly in the output table's `.uns` so that the normalized `.obs` values
-remain interpretable after round-tripping the SpatialData Zarr store.
+### Table-local metadata contract
+
+Record the resolved configuration and generated-column bindings under one
+dedicated table-local key:
+
+```python
+adata.uns["feature_class_allocation"] = {
+    "schema_version": 1,
+    "source_kind": "harpy_allocate",
+    "feature_column": "gene",
+    "class_column": "code_class",
+    "expression_class": "Endogenous",
+    "categories": ["Endogenous", "Negative", "SystemControl"],
+    "control_class_denominators": {
+        "Negative": 10,
+        "SystemControl": 197,
+    },
+    "count_columns": {
+        "Endogenous": "n_endogenous",
+        "Negative": "n_negative",
+        "SystemControl": "n_system_control",
+    },
+    "normalized_columns": {
+        "Negative": "negative_per_target",
+        "SystemControl": "system_control_per_target",
+    },
+    "control_fraction_column": "control_fraction",
+    "regions": {
+        "cellpose_labels_mosaic_1": {
+            "points_element": "transcripts_mosaic_1",
+            "coordinate_system": "global_1",
+        },
+    },
+}
+```
+
+This follows the table-local convention used by Harpy feature matrices and
+napari-harpy canonical centers: a dedicated semantic `.uns` key owns a
+versioned schema that identifies its generated payload and sources. Do not wrap
+this record in `adata.uns["harpy"]`; the root
+`sdata.attrs["harpy"]["metadata_version"]` governs a different SpatialData-level
+metadata contract and may not accompany an AnnData table used independently.
+
+There is only one class-aware expression matrix and one coherent set of class
+summaries per table, so `feature_class_allocation` is a direct record rather
+than a registry keyed by an arbitrary artifact name. Its generated-column
+mappings bind the metadata to the actual `.obs` payload instead of requiring
+downstream code to reconstruct names. The complete feature-panel target lists
+remain in SpatialData root metadata and are not duplicated into the table;
+only the resolved non-expression denominators needed to interpret normalized
+values are retained.
+
+Configuration shared by the complete table lives at the top level. The
+`regions` mapping is keyed by the exact labels element name and records the
+points element and coordinate system used for each appended region. A new
+class-aware allocation creates this record. Class-aware append requires all
+shared fields to match exactly and adds one new region entry; appending an
+already registered region is an error. Ordinary allocation does not create this
+record.
 
 ### Single-pass implementation
 
@@ -390,7 +473,8 @@ non-positive resolved panel target counts, a missing expression class, and
 collisions with existing output columns must produce clear errors. A panel
 control class with no assigned points is valid and must produce zero counts and
 rates. Appending another labels region must preserve the same `.obs` schema and
-compatible panel metadata.
+shared `feature_class_allocation` configuration, then extend its `regions`
+mapping.
 
 ### Boundary with Slice 3
 
@@ -422,10 +506,16 @@ Focused tests should establish that:
 - category-derived output names are deterministic and collisions are rejected;
 - metadata-resolved denominators produce the same result as an equivalent
   explicit denominator mapping;
+- explicit denominators that conflict with attached panel metadata are
+  rejected;
 - conflicting target-to-class mappings and invalid class configuration fail
   before writing a table element;
-- append mode preserves the metrics and configuration across multiple mosaic
-  regions; and
+- the versioned `feature_class_allocation` record and its generated-column
+  bindings survive a SpatialData Zarr round trip;
+- append mode requires identical shared configuration, preserves the metrics,
+  and adds the new labels/points/coordinate-system entry under `regions`;
+- append rejects an already registered region and incompatible existing
+  allocation metadata; and
 - omitting class-aware arguments reproduces the existing allocation result.
 
 Benchmark the class-aware path on a representative backed crop before the full
