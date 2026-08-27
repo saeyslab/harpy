@@ -226,6 +226,7 @@ def _macsima(
     if not path_list:
         raise ValueError(f"Cannot determine data set, expecting '*{MacsimaKeys.IMAGE_OMETIF}' files in {path}.")
     imgs = [BioImage(img_path, **imread_kwargs) for img_path in path_list]
+    source_paths = path_list
 
     if image_name is None:
         image_name = imgs[0].ome_metadata.experiments[0].description
@@ -258,12 +259,12 @@ def _macsima(
         )
 
     if remove_bleached:
-        metadata_imgs = [
-            (m, i)
-            for m, i in zip(metadata, imgs, strict=True)
+        metadata_imgs_paths = [
+            (m, i, p)
+            for m, i, p in zip(metadata, imgs, source_paths, strict=True)
             if m[1] is None or m[1] != "B"  # we keep if scantype is None
         ]
-        metadata, imgs = zip(*metadata_imgs, strict=True) if metadata_imgs else ([], [])
+        metadata, imgs, source_paths = zip(*metadata_imgs_paths, strict=True) if metadata_imgs_paths else ([], [], [])
         if not metadata:
             raise ValueError(
                 "Resulting number of channels after removing channels of scantype 'B'(=bleached) is zero. "
@@ -275,15 +276,15 @@ def _macsima(
         def _is_dapi_channel(channel_name: str | None) -> bool:
             return channel_name == "DAPI" or (channel_name is not None and channel_name.startswith("DAPI "))
 
-        metadata_imgs = [
-            (m, i)
-            for m, i in zip(metadata, imgs, strict=True)
+        metadata_imgs_paths = [
+            (m, i, p)
+            for m, i, p in zip(metadata, imgs, source_paths, strict=True)
             if m[2] is None
             or m[0] is None
             or not _is_dapi_channel(m[2])
             or (_is_dapi_channel(m[2]) and m[0] == "0")  # we keep only first round DAPI
         ]
-        metadata, imgs = zip(*metadata_imgs, strict=True) if metadata_imgs else ([], [])
+        metadata, imgs, source_paths = zip(*metadata_imgs_paths, strict=True) if metadata_imgs_paths else ([], [], [])
         if not metadata:
             raise ValueError(
                 "Resulting number of channels after removing DAPI channels (from cycle round i with i>0), is zero. "
@@ -297,9 +298,13 @@ def _macsima(
         names = ["_".join([part for part in name_parts if part]) for name_parts in (m[:3] + m[4:] for m in metadata)]
     number_pattern = re.compile(r"^\d+")
     # sort by cycle number
-    combined_sorted = sorted(zip(names, imgs, strict=True), key=lambda x: int(number_pattern.match(x[0]).group()))
-    names, imgs = zip(*combined_sorted, strict=True)
+    combined_sorted = sorted(
+        zip(names, imgs, source_paths, strict=True), key=lambda x: int(number_pattern.match(x[0]).group())
+    )
+    names, imgs, source_paths = zip(*combined_sorted, strict=True)
     names = [_name.strip("_") for _name in names]  # macsima adds these trailing _ to reagents.
+
+    _validate_unique_channel_names(names, source_paths)
 
     if c_subset:
         matched = []
@@ -385,6 +390,26 @@ def _macsima(
     image_name = _clean_string(image_name)
 
     return image_name, se
+
+
+def _validate_unique_channel_names(channel_names: Iterable[str], source_paths: Iterable[str | Path]) -> None:
+    channel_sources: dict[str, list[str]] = {}
+    for channel_name, source_path in zip(channel_names, source_paths, strict=True):
+        channel_sources.setdefault(channel_name, []).append(str(source_path))
+
+    duplicates = {name: paths for name, paths in channel_sources.items() if len(paths) > 1}
+    if not duplicates:
+        return
+
+    details = "\n".join(
+        f"- {name!r}:\n" + "\n".join(f"  - {source_path}" for source_path in paths)
+        for name, paths in duplicates.items()
+    )
+    raise ValueError(
+        "Duplicate composite MACSima channel names were generated from the input TIFF files:\n"
+        f"{details}\n"
+        "No channels were discarded. Check the input path for duplicated TIFF files or ambiguous MACSima metadata."
+    )
 
 
 def _get_structured_annotations(img: BioImage, metadata_key: str) -> str | None:
