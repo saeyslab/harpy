@@ -102,7 +102,7 @@ harpy_metadata.update(
         "provenance": {
             "reader": "cosmx",
             "reader_version": "...",
-            # Existing CosMx run-selection and mosaic-construction fields live here.
+            # Existing CosMx mosaic-construction fields live here.
         },
         "images": {
             "morphology_image_mosaic_1": {
