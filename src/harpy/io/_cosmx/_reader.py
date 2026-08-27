@@ -144,13 +144,14 @@ def cosmx(
         └── feature_panels
             └── <shared panel name>
 
-    ``provenance`` records the reader and its Harpy version, FOV selection, and
-    mosaic construction settings. Machine-specific source paths are not
-    persisted. The ``images``, ``labels``, and ``points`` mappings are keyed by
-    exact SpatialData element names. Their records contain source FOV
-    membership, pre-group/source origin, orientation, and pixel size. Images
-    additionally describe retained channels; instance labels describe their ID
-    encoding; compartment labels describe their semantic categories.
+    ``provenance`` records the reader and its Harpy version together with the
+    mosaic construction settings. Machine-specific source paths and FOV
+    selection diagnostics are not persisted. The ``images``, ``labels``, and
+    ``points`` mappings are keyed by exact SpatialData element names. Their
+    records contain the authoritative source FOV membership, pre-group/source
+    origin, orientation, and pixel size. Images additionally describe retained
+    channels; instance labels describe their ID encoding; compartment labels
+    describe their semantic categories.
 
     When an authoritative run-level plex is available, ``feature_panels``
     stores its shared target-to-class relation, including panel targets with
@@ -276,10 +277,6 @@ def cosmx(
         harpy_metadata[_PROVENANCE_METADATA_KEY] = {
             "reader": "cosmx",
             "reader_version": __version__,
-            "requested_fovs": list(requested_fovs),
-            "included_fovs": list(preview.included_fovs),
-            "excluded_fovs": list(preview.excluded_fovs),
-            "unpositioned_fovs": list(preview.unpositioned_fovs),
             "mosaic_mode": preview.mosaic_mode,
             "adjacency_tolerance_px": preview.adjacency_tolerance_px,
         }
