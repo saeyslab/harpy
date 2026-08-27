@@ -73,10 +73,6 @@ def test_cosmx_reads_all_modalities_into_matching_mosaics(
     assert sdata.attrs["harpy"]["provenance"] == {
         "reader": "cosmx",
         "reader_version": __version__,
-        "requested_fovs": [1, 2, 3, 4],
-        "included_fovs": [1, 2, 3],
-        "excluded_fovs": [4],
-        "unpositioned_fovs": [4],
         "mosaic_mode": "spatial_groups",
         "adjacency_tolerance_px": 1,
     }
@@ -115,9 +111,7 @@ def test_cosmx_applies_fov_and_channel_selection(
     assert set(sdata.images) == {"morphology_image_mosaic_1"}
     image = get_dataarray(sdata, "morphology_image_mosaic_1")
     assert image.coords["c"].values.tolist() == ["DNA"]
-    assert sdata.attrs["harpy"]["provenance"]["requested_fovs"] == [1, 2]
-    assert sdata.attrs["harpy"]["provenance"]["included_fovs"] == [1, 2]
-    assert sdata.attrs["harpy"]["provenance"]["excluded_fovs"] == [3, 4]
+    assert sdata.attrs["harpy"]["images"]["morphology_image_mosaic_1"]["fovs"] == [1, 2]
     assert sdata.attrs["harpy"]["provenance"]["mosaic_mode"] == "spatial_groups"
     assert sdata.attrs["harpy"]["provenance"]["adjacency_tolerance_px"] == 0
 
