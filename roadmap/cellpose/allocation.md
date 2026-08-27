@@ -2,29 +2,32 @@
 
 ## Status
 
-Four implementation slices are planned; Slice 1 is implemented:
+Five implementation slices are planned; Slice 1 is implemented:
 
 1. patch the CosMx reader and establish the generic Harpy feature-panel
    metadata contract — implemented;
-2. add class-aware aggregation to `hp.tb.allocate`;
-3. add QC functions that summarize the original, unallocated control points;
-   and
-4. optimize the generic point-to-label assignment and reduction path.
+2. extend the CosMx reader with an explicit, sample-scoped multi-sample API;
+3. add class-aware aggregation to `hp.tb.allocate`;
+4. add QC functions that summarize the original, unallocated control points;
+5. optimize the generic point-to-label assignment and reduction path.
 
-Slice 2 consumes the metadata produced by Slice 1, but also supports an explicit
-denominator mapping for generic points. Slice 3 depends only on Slice 1, not on
-allocation, instance labels, or an AnnData table. Slice 4 preserves the public
-behavior established by Slice 2 while replacing the private allocation
-execution path.
+Slice 2 extends the reader foundation from Slice 1 without changing the
+single-sample API. Slice 3 consumes the feature-panel metadata produced by
+Slice 1 and the sample-aware element contracts established by Slice 2, but
+also supports an explicit denominator mapping for generic points. Slice 4
+depends on the reader metadata from Slices 1 and 2, not on allocation,
+instance labels, or an AnnData table. Slice 5 preserves the public behavior
+established by Slice 3 while replacing the private allocation execution path.
 
 ## Goal
 
 Establish a general control-aware transcript workflow: readers preserve
-authoritative panel information, allocation creates an AnnData expression
-matrix containing only the selected biological class while retaining compact
-per-instance control summaries in `.obs`, and separate QC functions summarize
-all original control points. The raw points element remains unchanged and
-continues to contain biological and control transcripts.
+authoritative panel information for one or more sample-scoped runs, allocation
+creates an AnnData expression matrix containing only the selected biological
+class while retaining compact per-instance control summaries in `.obs`, and
+separate QC functions summarize all original control points. The raw points
+elements remain unchanged and continue to contain biological and control
+transcripts.
 
 For the investigated CosMx run, `code_class` has three values:
 
@@ -102,7 +105,6 @@ harpy_metadata.update(
         "provenance": {
             "reader": "cosmx",
             "reader_version": "...",
-            # Existing CosMx mosaic-construction fields live here.
         },
         "images": {
             "morphology_image_mosaic_1": {
@@ -140,10 +142,14 @@ harpy_metadata.update(
 The `images`, `labels`, and `points` mappings are keyed by the exact element
 names in the corresponding SpatialData collections. This makes metadata
 lookup independent of the reader that created an element. The metadata version
-applies to the complete Harpy root contract. The CosMx whole-store overwrite
-safety check must specifically require `harpy.provenance.reader == "cosmx"`;
-the mere presence of Harpy metadata is not sufficient evidence that the store
-is replaceable by that reader.
+applies to the complete Harpy root contract. Root provenance is deliberately
+minimal: it identifies the reader and its version, but contains neither source
+paths nor FOV or mosaic settings. Actual FOV membership belongs to each
+element. Slice 2 adds the sample identity and sample-specific mosaic settings
+to those element records. The CosMx whole-store overwrite safety check must
+specifically require `harpy.provenance.reader == "cosmx"`; the mere presence of
+Harpy metadata is not sufficient evidence that the store is replaceable by
+that reader.
 
 The panel identifier is local to the SpatialData object and must be non-empty
 and unique. The reader should derive a stable identifier from its transcript
@@ -159,8 +165,8 @@ both class names and the targets within each class lexicographically so output
 does not depend on row order in the plex; this ordering is deterministic rather
 than a claim of biological precedence.
 
-Slice 2 only needs those derived counts: it uses the length of each class target
-list as the denominator for normalized control metrics. Slice 3 additionally
+Slice 3 only needs those derived counts: it uses the length of each class target
+list as the denominator for normalized control metrics. Slice 4 additionally
 needs the actual target names. A categorical transcript column contains only
 categories represented by the ingested points and cannot, by itself, preserve
 the target-to-class relationship for a panel target with no detected rows.
@@ -184,7 +190,7 @@ for every mosaic points element from the run. Its categories come from the plex
 `CodeClass` values. Parquet preserves the categorical values, but a reopened
 Dask dataframe may report them as unknown until supplied with the authoritative
 category list. That list is persisted in the shared feature-panel metadata so
-Slice 2 can restore a known categorical dtype lazily without scanning the
+Slice 3 can restore a known categorical dtype lazily without scanning the
 points. This changes the previous Arrow-string representation only for newly
 ingested data; ordinary allocation remains compatible with existing string
 columns when class-aware mode is not requested.
@@ -211,14 +217,214 @@ Focused reader tests should establish that:
 - whole-store overwrite is permitted only when
   `harpy.provenance.reader == "cosmx"`.
 
-## Slice 2: class-aware `hp.tb.allocate`
+## Slice 2: multi-sample CosMx reader
 
 **Status: specified; not implemented.**
 
-This slice consumes the generic feature-panel contract established by Slice 1.
-It must remain usable with non-reader points through an explicit denominator
-mapping, and it must preserve ordinary allocation behavior when class-aware
-arguments are omitted.
+Extend the reader foundation from Slice 1 so several independent CosMx runs
+can be written into one SpatialData store. A sample is an explicit unit of
+configuration and identity. Do not represent samples through parallel lists of
+paths, FOV selections, channels, mosaic modes, tolerances, and orientations;
+those lists are difficult to validate and can silently associate a setting
+with the wrong run.
+
+### Public contract
+
+Introduce one immutable sample configuration:
+
+```python
+@dataclass(frozen=True)
+class CosmxSample:
+    path: str | Path
+    fovs: Sequence[int] | None = None
+    channels: Sequence[str] | None = None
+    mosaic_mode: Literal["spatial_groups", "single"] = "spatial_groups"
+    adjacency_tolerance_px: int | None = None
+    flip_x: bool = True
+    flip_y: bool = False
+```
+
+Add a multi-sample entry point whose mapping keys are the sample identifiers:
+
+```python
+sdata = cosmx_samples(
+    samples={
+        "sample_a": CosmxSample(
+            path=sample_a_root,
+            fovs=range(1, 58),
+            channels=["DAPI", "PanCK"],
+            adjacency_tolerance_px=85,
+        ),
+        "sample_b": CosmxSample(
+            path=sample_b_root,
+            mosaic_mode="single",
+            flip_x=False,
+        ),
+    },
+    output=output_zarr,
+    raster_scale_factors=[2, 2, 2, 2, 2],
+    overwrite=True,
+)
+```
+
+Keep `harpy.io.cosmx()` as the backward-compatible single-sample API. It may
+delegate to shared preparation and writing primitives, but existing calls and
+their element names must remain unchanged. Do not make callers wrap one run in
+an arbitrary sample mapping merely to preserve current behavior.
+
+The sample mapping must be non-empty and its keys must be unique, non-empty,
+SpatialData-safe identifiers. Preserve mapping iteration order for predictable
+execution, while ensuring that output metadata and panel identifiers are
+deterministic for the same logical inputs. Reject a sample identifier that
+would make any planned element or coordinate-system name collide.
+
+The sample configuration owns values that may differ between runs:
+
+- source path;
+- selected FOVs and morphology channels;
+- mosaic mode and adjacency tolerance; and
+- X/Y orientation.
+
+As in the single-sample API, `adjacency_tolerance_px` applies only to
+`mosaic_mode="spatial_groups"`. It is ignored when `mosaic_mode="single"`,
+because that mode deliberately constructs one mosaic without adjacency-based
+grouping.
+
+Arguments that define the complete output remain on `cosmx_samples`: output
+path, modality inclusion, output base names, image and label chunks, raster
+scale factors, transcript block size, and overwrite behavior. Do not accept a
+list of these output-wide values.
+
+### Sample-scoped elements and coordinate systems
+
+Prefix every element and coordinate system created by the multi-sample API
+with its sample identifier. For example:
+
+```text
+sample_a_morphology_image_mosaic_1
+sample_a_instance_labels_mosaic_1
+sample_a_compartment_labels_mosaic_1
+sample_a_transcripts_mosaic_1
+
+sample_a_global_1
+sample_a_global_1_micron
+```
+
+Mosaic numbering is local to a sample. The coordinate systems of different
+samples are independent even when their local pixel coordinates, FOV numbers,
+or mosaic numbers happen to match. The reader must not place unrelated samples
+in a shared active `global` coordinate system or imply that they are aligned.
+Cross-sample registration, when available, is a later explicit transformation
+step.
+
+Overlapping local instance IDs between samples are valid. SpatialData table
+rows are identified by the pair `(region, instance_id)`, where `region` is the
+sample-prefixed labels element. Do not reserve sample-wide integer ranges or
+change the existing per-FOV `uint32` instance-ID encoding merely to make IDs
+globally unique across labels elements.
+
+### Metadata placement
+
+Keep root provenance common to the whole reader invocation and minimal:
+
+```python
+sdata.attrs["harpy"]["provenance"] = {
+    "reader": "cosmx",
+    "reader_version": "...",
+}
+```
+
+Do not store source paths, a run registry, a union of selected FOVs, or one
+scalar mosaic setting at the root. Each created image, labels, and points
+record must instead include its sample identity, actual FOV membership, and
+sample-specific mosaic construction settings:
+
+```python
+{
+    "sample_id": "sample_a",
+    "fovs": [1, 2, 3, ...],
+    "mosaic": {
+        "mode": "spatial_groups",
+        "adjacency_tolerance_px": 85,
+    },
+    # Existing modality-specific orientation, origin, scale, and channel data.
+}
+```
+
+The FOV list describes the exact source tiles represented by that element; it
+is not a duplicate invocation-level selection record. A points element keeps
+its `feature_panel` reference alongside this sample-scoped metadata. The
+`sample_id` field is required for elements created by `cosmx_samples()`. The
+backward-compatible `cosmx()` path has no caller-supplied sample identity and
+therefore keeps unprefixed element names and omits this field, but it still
+stores FOV membership and mosaic construction settings at element level.
+
+### Feature panels across samples
+
+Canonicalize every discovered panel using the Slice 1 contract before writing
+any points. Samples with identical canonical panel contents should reference
+one shared feature-panel record. Samples with different panels must reference
+separate records. Derive stable panel identifiers from canonical content plus
+a readable base so panel sharing does not depend on sample input order, and
+reject a key collision with incompatible existing content.
+
+Sharing a panel record is a storage optimization, not an assertion that the
+samples are spatially aligned. Conversely, two different registry keys do not
+necessarily make panels incompatible for allocation: Slice 3 compares the
+canonical feature column, class column, categories, and target-to-class
+contents. One output table may combine only compatible selected panels.
+
+### Validation and atomic publication
+
+Prepare all samples before writing: discover and validate every manifest,
+construct every preview, canonicalize panels, and plan all element names,
+coordinate systems, and metadata references. Fail on a configuration or name
+collision before decoding raster or transcript payloads.
+
+Refactor the single-sample implementation around reusable internal operations
+such as `_prepare_cosmx_sample` and `_write_cosmx_sample`; the exact private
+names may differ. The multi-sample reader must not repeatedly call the public
+`cosmx()` function and then attempt to merge its stores. It must write samples
+sequentially into one staging store to bound peak memory, reopen and validate
+the completed SpatialData object, and publish the store once. A failure in any
+sample removes reader-generated staging data and leaves an existing output
+store intact.
+
+Do not rely on generic SpatialData concatenation to define this contract.
+Although concatenation can suffix duplicate element names, the reader must
+control sample-prefixed names, coordinate systems, Harpy metadata references,
+and feature-panel deduplication explicitly.
+
+### Verification
+
+Focused reader tests should establish that:
+
+- two samples with overlapping FOV and mosaic numbers create distinct,
+  sample-prefixed elements and coordinate systems;
+- per-sample FOV, channel, mosaic, tolerance, and orientation settings reach
+  only that sample's elements;
+- per-element metadata records the correct `sample_id`, represented FOVs, and
+  mosaic construction settings, while root provenance remains reader-only;
+- identical panels are stored once and referenced by both samples, whereas
+  incompatible panels remain separate;
+- overlapping instance IDs in different labels elements are preserved;
+- invalid sample identifiers and all planned name or coordinate-system
+  collisions fail before payload materialization;
+- failure while writing a later sample leaves an existing destination intact
+  and removes staging data; and
+- the existing single-sample `cosmx()` call retains its API, element names,
+  coordinate systems, and data results, while its mosaic settings use the same
+  element-local metadata contract.
+
+## Slice 3: class-aware `hp.tb.allocate`
+
+**Status: specified; not implemented.**
+
+This slice consumes the generic feature-panel contract established by Slice 1
+and supports the sample-scoped elements created by Slice 2. It must remain
+usable with non-reader points through an explicit denominator mapping, and it
+must preserve ordinary allocation behavior when class-aware arguments are
+omitted.
 
 ### Public contract
 
@@ -248,10 +454,16 @@ table may replace an existing table element.
 ```python
 sdata = hp.tb.allocate(
     sdata,
-    labels_name=["cellpose_labels_mosaic_1", "cellpose_labels_mosaic_2"],
-    points_name=["transcripts_mosaic_1", "transcripts_mosaic_2"],
+    labels_name=[
+        "sample_a_cellpose_labels_mosaic_1",
+        "sample_b_cellpose_labels_mosaic_1",
+    ],
+    points_name=[
+        "sample_a_transcripts_mosaic_1",
+        "sample_b_transcripts_mosaic_1",
+    ],
     output_table_name="table_transcriptomics",
-    to_coordinate_system=["global_1", "global_2"],
+    to_coordinate_system=["sample_a_global_1", "sample_b_global_1"],
     name_gene_column="gene",
     name_feature_class_column="code_class",
     expression_class="Endogenous",
@@ -350,10 +562,11 @@ the final AnnData:
 In class-aware mode, feature-panel metadata must be available for all selected
 points elements or for none of them. When present, all referenced panels must
 agree on the feature column, class column, ordered categories, target-to-class
-mapping, and targets by class. Reject mixed metadata availability and
-incompatible panels before spatial allocation. This prevents a zero from
-ambiguously meaning either "assayed but not detected" or "not assayed by this
-panel."
+mapping, and targets by class. Panels selected from different samples need not
+share the same registry key, but their canonical contents must be compatible.
+Reject mixed metadata availability and incompatible panels before spatial
+allocation. This prevents a zero from ambiguously meaning either "assayed but
+not detected" or "not assayed by this panel."
 
 There is one `control_class_denominators` mapping for the complete allocation
 call. When compatible panel metadata is present, derive one shared mapping and
@@ -465,13 +678,13 @@ adata.uns["feature_class_allocation"] = {
     },
     "control_fraction_column": "control_fraction",
     "regions": {
-        "cellpose_labels_mosaic_1": {
-            "points_element": "transcripts_mosaic_1",
-            "coordinate_system": "global_1",
+        "sample_a_cellpose_labels_mosaic_1": {
+            "points_element": "sample_a_transcripts_mosaic_1",
+            "coordinate_system": "sample_a_global_1",
         },
-        "cellpose_labels_mosaic_2": {
-            "points_element": "transcripts_mosaic_2",
-            "coordinate_system": "global_2",
+        "sample_b_cellpose_labels_mosaic_1": {
+            "points_element": "sample_b_transcripts_mosaic_1",
+            "coordinate_system": "sample_b_global_1",
         },
     },
 }
@@ -557,7 +770,7 @@ control class with no assigned points is valid and must produce zero counts and
 rates. Validate the complete multi-region request and shared
 `feature_class_allocation` configuration before writing the output table.
 
-### Boundary with Slice 3
+### Boundary with Slice 4
 
 The `.obs` summaries describe only control points that land inside an instance
 mask. They are suitable for cell-level histograms, violin plots, and a hexbin
@@ -597,6 +810,8 @@ Focused tests should establish that:
   incompatible list lengths and duplicate labels are rejected;
 - multiple allocation pairs create one table and one complete `regions`
   mapping in a single call;
+- pairs from different samples retain their sample-prefixed region, points,
+  and coordinate-system bindings, even when their local instance IDs overlap;
 - the final expression matrix uses the panel-defined feature axis when panel
   metadata is present and the sorted union of observed targets otherwise;
 - expression targets missing from one allocation pair are zero-filled rather
@@ -613,15 +828,16 @@ run. Compare wall time, peak worker memory, task count, and output-table size
 with ordinary allocation. The additional summaries should be small relative to
 the point-to-label lookup and target-count reduction.
 
-## Slice 3: original-point control QC
+## Slice 4: original-point control QC
 
 **Status: specified; not implemented.**
 
 Add separate lightweight QC functions over the original transcript points.
-This slice is implemented after Slice 2 to keep delivery sequential, but its
+This slice is implemented after Slice 3 to keep delivery sequential, but its
 runtime contract depends only on the points and feature-panel metadata from
-Slice 1. Users may run it before or after allocation because it does not depend
-on an instance-label raster or an AnnData table.
+Slice 1 and the sample-aware point metadata from Slice 2. Users may run it
+before or after allocation because it does not depend on an instance-label
+raster or an AnnData table.
 
 This operation complements the instance-level `.obs` metrics. It must use the
 original points element so that controls on label value zero and controls
@@ -630,8 +846,8 @@ the points or route individual controls through `hp.tb.allocate`.
 
 ### Per-target summary
 
-Produce one small summary row per control target and mosaic, containing at
-least:
+Produce one small summary row per control target, sample, and points
+element/mosaic, containing at least:
 
 - target name;
 - authoritative feature class;
@@ -640,15 +856,15 @@ least:
 - density per analyzed area when a physical coordinate system is available.
 
 Use the feature-panel metadata to include control targets with zero detections.
-Concretely, aggregate the observed control points by mosaic, class, and target;
-reindex that result against the authoritative target names for every control
-class; and fill absent counts with zero. This must represent both a target that
-is absent from one mosaic and a target that has no detections anywhere in the
-run. Do not identify controls from target-name prefixes. A ranked bar or dot
-plot of these summaries should make a single unusually noisy negative probe or
-false code immediately visible. Keep `Negative` and `SystemControl` in separate
-facets because they measure different technical processes and have different
-numbers of panel targets.
+Concretely, aggregate the observed control points by sample, points element,
+class, and target; reindex that result against the authoritative target names
+for every control class; and fill absent counts with zero. This must represent
+both a target that is absent from one mosaic and a target that has no detections
+anywhere in a sample. Do not identify controls from target-name prefixes. A
+ranked bar or dot plot of these summaries should make a single unusually noisy
+negative probe or false code immediately visible. Keep `Negative` and
+`SystemControl` in separate facets because they measure different technical
+processes and have different numbers of panel targets.
 
 ### Spatially binned summary
 
@@ -660,8 +876,8 @@ when operating in a physical coordinate system, also normalize by bin area.
 The bin size must be configurable in coordinate-system units. Choose a default
 that yields a QC overview rather than single-transcript resolution; for this
 dataset, approximately 100-250 micrometres is an appropriate range to evaluate.
-Bins with no controls must remain explicit zeros, and mosaic groups must remain
-in their independent coordinate systems.
+Bins with no controls must remain explicit zeros, and sample/mosaic groups must
+remain in their independent coordinate systems.
 
 The primary visualization should be a matched pair of spatial heatmaps with a
 shared tissue outline or morphology context:
@@ -705,15 +921,15 @@ Focused tests should establish that:
 - spatial-bin counts conserve the input control-point totals within the chosen
   extent;
 - normalization uses authoritative panel counts and physical bin area;
-- mosaic coordinate systems remain independent; and
+- sample and mosaic coordinate systems remain independent; and
 - the implementation stays lazy until the compact summaries are computed.
 
-## Slice 4: scalable point-to-label assignment and reduction
+## Slice 5: scalable point-to-label assignment and reduction
 
 **Status: specified; not implemented.**
 
 Refactor the private execution path used by `hp.tb.allocate` without changing
-the public or biological contracts established by Slice 2. This optimization
+the public or biological contracts established by Slice 3. This optimization
 must remain generic to raster labels and points elements; it must not depend on
 CosMx FOV identifiers or reader-specific partition metadata.
 
@@ -820,14 +1036,14 @@ and coordinate statistics from the same assigned-points dataframe. Prefer one
 grouped intermediate keyed by instance and target, carrying at least transcript
 count and the coordinate sums/count needed for instance means. In class-aware
 mode, coordinate statistics use only the configured expression class, as
-specified by Slice 2.
+specified by Slice 3.
 
 Derive instance coordinates from the compact grouped result instead of running
 a second independent groupby over every assigned point. Retain sparse
 instance-by-target construction and compute all compact Dask reductions
 together so the assignment graph is executed once. Pair-level work remains
 independent; the shared feature-axis alignment and final row-wise stacking from
-Slice 2 are unchanged.
+Slice 3 are unchanged.
 
 ### Performance contract and verification
 
