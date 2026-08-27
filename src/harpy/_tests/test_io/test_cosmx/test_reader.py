@@ -8,6 +8,7 @@ import pytest
 from spatialdata import SpatialData, read_zarr
 from spatialdata.transformations import get_transformation
 
+from harpy import __version__
 from harpy.image._image import get_dataarray
 from harpy.io import cosmx
 from harpy.io._cosmx import _reader
@@ -71,7 +72,7 @@ def test_cosmx_reads_all_modalities_into_matching_mosaics(
     assert "cosmx" not in sdata.attrs
     assert sdata.attrs["harpy"]["provenance"] == {
         "reader": "cosmx",
-        "source_root": str(ingestible_cosmx_path.resolve()),
+        "reader_version": __version__,
         "requested_fovs": [1, 2, 3, 4],
         "included_fovs": [1, 2, 3],
         "excluded_fovs": [4],
