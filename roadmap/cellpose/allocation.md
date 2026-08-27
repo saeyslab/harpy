@@ -2,16 +2,20 @@
 
 ## Status
 
-Three implementation slices are planned; Slice 1 is implemented:
+Four implementation slices are planned; Slice 1 is implemented:
 
 1. patch the CosMx reader and establish the generic Harpy feature-panel
    metadata contract — implemented;
-2. add class-aware aggregation to `hp.tb.allocate`; and
-3. add QC functions that summarize the original, unallocated control points.
+2. add class-aware aggregation to `hp.tb.allocate`;
+3. add QC functions that summarize the original, unallocated control points;
+   and
+4. optimize the generic point-to-label assignment and reduction path.
 
 Slice 2 consumes the metadata produced by Slice 1, but also supports an explicit
-denominator mapping for generic points. Slice 3 is implemented last but depends
-only on Slice 1, not on allocation, instance labels, or an AnnData table.
+denominator mapping for generic points. Slice 3 depends only on Slice 1, not on
+allocation, instance labels, or an AnnData table. Slice 4 preserves the public
+behavior established by Slice 2 while replacing the private allocation
+execution path.
 
 ## Goal
 
@@ -702,3 +706,151 @@ Focused tests should establish that:
 - normalization uses authoritative panel counts and physical bin area;
 - mosaic coordinate systems remain independent; and
 - the implementation stays lazy until the compact summaries are computed.
+
+## Slice 4: scalable point-to-label assignment and reduction
+
+**Status: specified; not implemented.**
+
+Refactor the private execution path used by `hp.tb.allocate` without changing
+the public or biological contracts established by Slice 2. This optimization
+must remain generic to raster labels and points elements; it must not depend on
+CosMx FOV identifiers or reader-specific partition metadata.
+
+### Current scaling limitation
+
+The current `_aggregate` helper is primarily a point-to-label assignment
+operation rather than an aggregation. It enumerates every labels-array chunk
+and builds a complete points-dataframe bounding-box query for each chunk. With
+`C` labels chunks and `P` effective points partitions, the graph therefore
+contains approximately `C * P` spatial-filter tasks. The Parquet read nodes may
+be shared within one computation, but every decoded points partition still
+feeds many predicates, increasing graph fan-out, CPU work, scheduler pressure,
+and the lifetime of intermediate partitions.
+
+On a representative backed mosaic, the natural 78 labels chunks produced 1,170
+spatial-query tasks and approximately 2,000 assignment-graph tasks. Virtually
+rechunking the same raster to 1,024-pixel blocks produced 1,150 labels chunks,
+17,250 spatial-query tasks, and approximately 28,000 graph tasks before the
+downstream reductions. These figures are diagnostic baselines rather than
+stable unit-test expectations.
+
+The current `dd.from_delayed` call also omits `meta`. Dask consequently computes
+the first delayed partition to infer its schema, so constructing the supposedly
+lazy assignment can perform source I/O. The optimized implementation must not
+read points or labels merely to build the graph.
+
+### Separate assignment from reduction
+
+Replace the overloaded private helper with two explicit stages:
+
+```python
+assigned_points = _assign_points_to_labels(
+    labels=...,
+    points=...,
+    value_keys=...,
+    to_coordinate_system=...,
+)
+
+aggregates = _aggregate_assigned_points(assigned_points, ...)
+```
+
+`_assign_points_to_labels` assigns the raster value underneath each point and
+filters label value zero. It accepts all value columns needed by the caller,
+rather than a single `value_key`, so ordinary and class-aware allocation use the
+same spatial lookup. `_aggregate_assigned_points` owns the count and coordinate
+reductions. The exact private names may change during implementation, but this
+separation of responsibilities is required.
+
+### Chunk-aware assignment
+
+Use the existing scale-zero labels chunks by default. Given their cumulative
+boundaries, the assignment stage should:
+
+1. project only the required point columns and normalize point coordinates
+   once;
+2. filter points against the complete labels extent once, using half-open
+   bounds;
+3. calculate each point's labels-chunk indices with the cumulative chunk
+   boundaries, including irregular final chunks;
+4. encode those indices as one temporary `block_id`;
+5. partition the points once by `block_id` using an appropriate Dask range or
+   peer-to-peer shuffle;
+6. pair each points bucket with exactly its corresponding delayed labels
+   chunk;
+7. perform one vectorized label lookup for the bucket; and
+8. discard background assignments and the temporary block columns as early as
+   possible.
+
+Conceptually:
+
+```text
+points
+  │
+  ├── coordinate normalization and one extent filter
+  │
+  ├── calculate block_id once
+  │
+  └── partition once by block_id
+                    │
+                    ├── block 0 + labels chunk 0 ── lookup
+                    ├── block 1 + labels chunk 1 ── lookup
+                    └── ...
+```
+
+This replaces repeated full-dataframe predicates with one linear block
+classification and one redistribution of the points. Supply explicit Dask
+`meta` throughout. Do not materialize the complete points dataframe, the
+complete labels raster, or a dense instance-by-target matrix. Preserve the
+existing coordinate-system contract initially: points are identity-transformed
+in the selected coordinate system and labels may differ by a pixel-aligned
+translation. Validate any coordinate-to-pixel rounding and translation
+assumptions explicitly rather than relying on integer truncation.
+
+The existing `chunks` option may still request a virtual labels rechunk, but
+the natural stored chunks remain the default. Benchmark virtual rechunking
+carefully because smaller blocks reduce the size of each labels task while
+increasing the number of point buckets, shuffle partitions, and scheduler
+tasks.
+
+### Combined reductions
+
+For each normalized labels/points/coordinate-system pair, derive feature counts
+and coordinate statistics from the same assigned-points dataframe. Prefer one
+grouped intermediate keyed by instance and target, carrying at least transcript
+count and the coordinate sums/count needed for instance means. In class-aware
+mode, coordinate statistics use only the configured expression class, as
+specified by Slice 2.
+
+Derive instance coordinates from the compact grouped result instead of running
+a second independent groupby over every assigned point. Retain sparse
+instance-by-target construction and compute all compact Dask reductions
+together so the assignment graph is executed once. Pair-level work remains
+independent; the shared feature-axis alignment and final row-wise stacking from
+Slice 2 are unchanged.
+
+### Performance contract and verification
+
+Focused correctness tests should establish that:
+
+- optimized assignment matches a simple in-memory reference for 2D labels;
+- half-open chunk edges assign every in-bounds point exactly once;
+- background and out-of-bounds points are excluded;
+- irregular final chunks and empty spatial buckets are handled correctly;
+- supported translated coordinate systems produce the expected raster lookup;
+- multiple retained value columns survive assignment with their dtypes and
+  categorical metadata intact;
+- ordinary and class-aware allocation produce the same counts, rows,
+  coordinates, `.obs` metrics, and table metadata as before the refactor; and
+- graph construction performs no point or labels source reads.
+
+Do not make unit tests depend on Dask layer names or an exact task count. Use a
+separate benchmark and source-read instrumentation to compare the old and new
+implementations across increasing point-partition and labels-chunk counts.
+Record at least wall time, peak worker memory, graph construction time, task
+count, bytes read, shuffle bytes, and spill volume. Include both a small case,
+where shuffle overhead can dominate, and a representative full backed mosaic.
+
+The optimized path is acceptable when it preserves exact allocation results,
+remains lazy during graph construction, avoids the `C * P` predicate fan-out,
+and materially improves the representative large-mosaic workload without a
+major regression on the small case.
