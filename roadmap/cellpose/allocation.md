@@ -12,11 +12,11 @@ Six implementation slices are planned; Slice 1 is implemented:
 5. add QC functions that summarize the original, unallocated control points;
 6. optimize the generic point-to-label assignment and reduction path.
 
-Slice 2 extends the reader foundation from Slice 1 without changing the
-single-sample API. Slice 3 incrementally extends stores created through the
-sample-aware API without rebuilding their existing samples. Slice 4 consumes
-the feature-panel metadata produced by Slice 1 and the sample-aware element
-contracts established by Slices 2 and 3, but also supports an explicit
+Slice 2 replaces the initial single-run reader surface with one coherent,
+sample-aware creation contract. Slice 3 incrementally extends stores created
+through that sample-aware API without rebuilding their existing samples. Slice
+4 consumes the feature-panel metadata produced by Slice 1 and the sample-aware
+element contracts established by Slices 2 and 3, but also supports an explicit
 denominator mapping for generic points. Slice 5 depends on the reader metadata
 from Slices 1–3, not on allocation, instance labels, or an AnnData table. Slice
 6 preserves the public behavior established by Slice 4 while replacing the
@@ -46,6 +46,26 @@ platforms also distinguish biological targets, negative probes, and unused
 codewords. The allocation API and implementation should therefore use generic
 feature-class terminology and must not hard-code CosMx class names or panel
 sizes.
+
+## Compatibility policy
+
+Slices 1–3 define the initial public-ready CosMx reader contract. The current
+experimental reader API, unprefixed element names, metadata layout, and stores
+created from them are not backward-compatibility constraints. Breaking changes
+are acceptable when they produce a smaller and more coherent sample-aware API.
+
+Do not add deprecated aliases, dual metadata layouts, automatic store
+migrations, or special legacy branches solely to preserve the initial
+implementation. Existing experimental stores may be rejected with a clear
+message and rebuilt using the final reader contract. A single-sample
+convenience entry point is useful only if it is a thin application of the same
+sample-aware naming and metadata rules; it must not establish a second,
+unprefixed format.
+
+This does not relax product quality. The resulting contract must remain
+explicit, deterministic, validated, documented, tested, and safely versioned.
+Backward-compatibility and deprecation policy can be introduced after this
+initial contract is declared stable.
 
 ## Slice 1: reader and feature-panel metadata
 
@@ -97,8 +117,8 @@ metadata tree: the originating reader is identified by
 metadata by SpatialData element type and exact element name.
 
 The namespace has a versioned, element-keyed structure. The CosMx reader must
-migrate its existing provenance, image, label, and transcript records into this
-structure when feature-panel support is implemented:
+write its provenance, image, label, and transcript records in this structure
+when feature-panel support is implemented:
 
 ```python
 harpy_metadata = sdata.attrs.setdefault("harpy", {})
@@ -194,9 +214,9 @@ for every mosaic points element from the run. Its categories come from the plex
 Dask dataframe may report them as unknown until supplied with the authoritative
 category list. That list is persisted in the shared feature-panel metadata so
 Slice 4 can restore a known categorical dtype lazily without scanning the
-points. This changes the previous Arrow-string representation only for newly
-ingested data; ordinary allocation remains compatible with existing string
-columns when class-aware mode is not requested.
+points. The categorical representation is the canonical contract for data
+created by this reader; no compatibility path is required for experimental
+stores that used the earlier Arrow-string representation.
 
 ### Verification
 
@@ -214,7 +234,7 @@ Focused reader tests should establish that:
   rejected before transcript materialization;
 - a missing plex still permits raw transcript ingestion but creates no
   feature-panel reference;
-- provenance and all image, label, and points metadata are migrated to the
+- provenance and all image, label, and points metadata are written to the
   versioned, element-keyed `harpy` namespace with no parallel top-level
   `cosmx` metadata; and
 - whole-store overwrite is permitted only when
@@ -270,10 +290,12 @@ sdata = cosmx_samples(
 )
 ```
 
-Keep `harpy.io.cosmx()` as the backward-compatible single-sample API. It may
-delegate to shared preparation and writing primitives, but existing calls and
-their element names must remain unchanged. Do not make callers wrap one run in
-an arbitrary sample mapping merely to preserve current behavior.
+Make `cosmx_samples()` the canonical reader contract. The initial
+`harpy.io.cosmx()` signature and its unprefixed outputs do not need to be
+preserved. It may be removed or redefined as a single-sample convenience
+wrapper, but if retained it must require an explicit sample identity and
+delegate to the same sample-aware preparation, naming, metadata, and writing
+path. Do not maintain separate behavior merely to accept earlier calls.
 
 The sample mapping must be non-empty and its keys must be unique, non-empty,
 SpatialData-safe identifiers. Preserve mapping iteration order for predictable
@@ -288,7 +310,7 @@ The sample configuration owns values that may differ between runs:
 - mosaic mode and adjacency tolerance; and
 - X/Y orientation.
 
-As in the single-sample API, `adjacency_tolerance_px` applies only to
+`adjacency_tolerance_px` applies only to
 `mosaic_mode="spatial_groups"`. It is ignored when `mosaic_mode="single"`,
 because that mode deliberately constructs one mosaic without adjacency-based
 grouping.
@@ -357,10 +379,9 @@ sample-specific mosaic construction settings:
 The FOV list describes the exact source tiles represented by that element; it
 is not a duplicate invocation-level selection record. A points element keeps
 its `feature_panel` reference alongside this sample-scoped metadata. The
-`sample_id` field is required for elements created by `cosmx_samples()`. The
-backward-compatible `cosmx()` path has no caller-supplied sample identity and
-therefore keeps unprefixed element names and omits this field, but it still
-stores FOV membership and mosaic construction settings at element level.
+`sample_id` field and sample-prefixed names are required for every element
+created through the final reader contract, including use through any retained
+single-sample convenience wrapper.
 
 ### Feature panels across samples
 
@@ -415,9 +436,9 @@ Focused reader tests should establish that:
   collisions fail before payload materialization;
 - failure while writing a later sample leaves an existing destination intact
   and removes staging data; and
-- the existing single-sample `cosmx()` call retains its API, element names,
-  coordinate systems, and data results, while its mosaic settings use the same
-  element-local metadata contract.
+- any retained single-sample convenience wrapper produces the same
+  sample-prefixed names, coordinate systems, element metadata, and data as an
+  equivalent one-entry `cosmx_samples()` call.
 
 ## Slice 3: incremental CosMx sample addition
 
@@ -455,10 +476,11 @@ SpatialData Zarr store created through the sample-aware CosMx API. Require a
 supported Harpy metadata version and
 `harpy.provenance.reader == "cosmx"`.
 
-Initially reject stores created only through the legacy, unprefixed `cosmx()`
-path because those elements have no caller-defined sample identity. Such a
-store must be rebuilt once with `cosmx_samples()` before incremental addition.
-Do not guess a sample identifier or silently migrate and rename its elements.
+Reject stores that do not satisfy the final sample-aware metadata and naming
+contract, including stores produced by the earlier unprefixed implementation.
+They must be rebuilt with `cosmx_samples()` before incremental addition. Do not
+guess a sample identifier, silently migrate elements, or add compatibility
+logic for those experimental stores.
 
 The operation is add-only:
 
@@ -561,8 +583,8 @@ Focused tests should establish that:
   panels remain;
 - an incomplete prior sample is detected and reported rather than overwritten
   or resumed;
-- a non-CosMx, unsupported-metadata, unbacked, or legacy unprefixed destination
-  is rejected; and
+- a non-CosMx, unsupported-metadata, unbacked, or earlier unprefixed
+  destination is rejected without a migration attempt; and
 - `cosmx_samples()` retains staged whole-store creation/replacement, whereas
   `add_cosmx_samples()` performs no whole-store staging or publication swap.
 
