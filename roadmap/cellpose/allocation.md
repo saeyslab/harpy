@@ -86,11 +86,11 @@ The investigated CosMx export contains a small run-level plex file with the
 columns `DisplayName`, `CodeClass`, and `ProbeID`. It contains 1,165 unique
 targets:
 
-| `CodeClass` | Panel targets |
-| --- | ---: |
-| `Endogenous` | 958 |
-| `Negative` | 10 |
-| `SystemControl` | 197 |
+| `CodeClass`     | Panel targets |
+| --------------- | ------------: |
+| `Endogenous`    |           958 |
+| `Negative`      |            10 |
+| `SystemControl` |           197 |
 
 The CosMx reader currently does not need the plex to create transcript points,
 because each detected transcript already carries its target and code class.
@@ -371,19 +371,19 @@ included FOVs
 ```
 
 A missing disabled product must not exclude an otherwise usable FOV. For
-example, morphology-only ingestion does not require instance labels,
-compartment labels, or transcript files. Conversely, when morphology and
-transcripts are enabled, an included FOV must provide both products. Every
-enabled modality is then constructed from the same included FOVs and mosaic
-geometries, so corresponding image, labels, and points elements remain
-spatially aligned.
+example, `images=True` with all other modality flags disabled does not require
+instance labels, compartment labels, or transcript files. Conversely, when
+`images` and `points` are enabled, an included FOV must provide both morphology
+images and transcript files. Every enabled modality is then constructed from
+the same included FOVs and mosaic geometries, so corresponding image, labels,
+and points elements remain spatially aligned.
 
 Known FOV positions, pixel size, tile dimensions, and morphology TIFF shape
 remain mandatory regardless of which payload modalities are enabled because
 mosaic construction requires that geometry. Validate morphology channel order
 and dtype only when morphology images are enabled. Validate label dtype and
 instance-ID encoding only when their corresponding label outputs are enabled.
-A per-sample `channels` selection has no effect when morphology is disabled.
+A per-sample `channels` selection has no effect when `images=False`.
 
 ### Sample-scoped elements and coordinate systems
 
@@ -618,7 +618,7 @@ Expose:
 validate_cosmx_store(
     output: str | Path,
     *,
-    check_point_contents: bool = False,
+    check_point_contents: bool = True,
 ) -> None
 ```
 
@@ -637,8 +637,8 @@ remains in its existing modules.
 
 ### Structural validation
 
-The default mode validates metadata and dataframe schemas without scanning
-existing transcript rows:
+With `check_point_contents=False`, validate metadata and dataframe schemas
+without scanning existing transcript rows:
 
 - the destination is backed and its Zarr store can be read;
 - `harpy` is a mapping with the supported `metadata_version`;
@@ -691,7 +691,7 @@ required to contain categorical feature or class columns; this is the supported
 missing-plex reader result. For a referenced panel, accept either known or
 unknown Dask categorical metadata for the declared columns. Structural
 validation establishes the categorical dtype without calling
-`.cat.as_known()` or computing a partition. The optional deep check performs
+`.cat.as_known()` or computing a partition. The default content check performs
 the projected payload scan.
 
 Root provenance deliberately contains no sample registry. Derive existing
@@ -705,14 +705,15 @@ CosMx sample identities. The validator checks the reader-owned metadata
 contract, while Slice 4 separately includes every existing element and
 coordinate system in collision preflight.
 
-### Optional feature-panel content validation
+### Feature-panel content validation
 
-With `check_point_contents=True`, additionally validate every points element
-that references a feature panel against its actual transcript payload. Project
-only the panel-declared feature and class columns and validate each Dask
-partition independently against the authoritative target-to-class mapping. Each
-partition returns at most one small diagnostic, so this check requires no
-global shuffle and does not collect transcript rows in the client. Require:
+With the default `check_point_contents=True`, additionally validate every
+points element that references a feature panel against its actual transcript
+payload. Project only the panel-declared feature and class columns and validate
+each Dask partition independently against the authoritative target-to-class
+mapping. Each partition returns at most one small diagnostic, so this check
+requires no global shuffle and does not collect transcript rows in the client.
+Require:
 
 - every observed target occurs in the referenced panel;
 - every observed target has exactly the feature class assigned by that panel;
@@ -722,16 +723,18 @@ global shuffle and does not collect transcript rows in the client. Require:
   disagrees with its single authoritative panel assignment.
 
 This remains a one-way inclusion check: authoritative panel targets with zero
-detections are valid. The deep mode must not load spatial columns, materialize a
-complete points dataframe, or modify categorical metadata. It necessarily scans
-the two projected payload columns and can therefore be substantially more
-expensive than structural validation.
+detections are valid. The content check must not load spatial columns,
+materialize a complete points dataframe, or modify categorical metadata. It
+necessarily scans the two projected payload columns and can therefore be
+substantially more expensive than structural validation.
 
-Slice 4 invokes structural validation before source discovery and mutation, but
-does not perform the optional points-content scan implicitly. A caller who
-wants a complete payload audit runs `validate_cosmx_store(...,
-check_point_contents=True)` explicitly before incremental addition. This keeps
-ordinary addition from re-reading existing transcript payloads.
+Slice 4 explicitly invokes validation with `check_point_contents=True` before
+source discovery and mutation. Incremental addition therefore re-reads the two
+panel-declared columns of existing, panel-associated transcript elements. This
+cost is intentional: a store whose existing transcript contents disagree with
+their referenced feature panels must not be extended. Callers performing a
+standalone lightweight audit can opt out explicitly with
+`validate_cosmx_store(..., check_point_contents=False)`.
 
 ### Verification
 
@@ -745,24 +748,26 @@ Focused tests should establish that:
   sample IDs, and malformed required element metadata are rejected;
 - unrelated unregistered downstream elements are accepted;
 - invalid, content-hash-mismatched, and unresolved feature panels are rejected;
-- structural validation checks referenced points schemas without computing
-  their partitions;
-- deep validation accepts detected panel subsets and zero-detection panel
+- `check_point_contents=False` checks referenced points schemas without
+  computing their partitions;
+- default validation accepts detected panel subsets and zero-detection panel
   targets;
-- deep validation rejects unknown targets, target-to-class disagreement
+- default validation rejects unknown targets, target-to-class disagreement
   (including multiple observed classes), and null values without a global
   shuffle; and
 - neither successful nor failed validation writes to the destination.
 
 ## Slice 4: incremental CosMx sample addition
 
-**Status: specified; not implemented.**
+**Status: implemented.**
 
 Add an explicit incremental API for appending new, independently named CosMx
 samples to an existing sample-aware SpatialData Zarr store. This is an additive
 operation, distinct from the staged create-or-replace behavior of `cosmx()`.
-It must not re-read existing sample payloads or rewrite or rename samples
-already in the destination.
+It must not rewrite or rename samples already in the destination. The only
+existing payload data it reads are the two panel-declared columns in
+panel-associated transcript elements, as required by the preflight content
+validation.
 
 ### Public contract
 
@@ -810,10 +815,12 @@ is outside this slice.
 ### Preflight and panel resolution
 
 Before discovering requested sources or writing any payload, reopen the
-destination and run Slice 3 structural validation on that backed object. Then
-prepare every requested sample exactly as in Slice 2: discover and validate
-manifests, construct previews, canonicalize panels, and plan sample-prefixed
-element names, coordinate systems, and metadata references.
+destination and run Slice 3 validation with `check_point_contents=True` on that
+backed object. This scans only the panel-declared feature and class columns of
+referenced points elements and validates them partition-wise without a global
+shuffle. Then prepare every requested sample exactly as in Slice 2: discover
+and validate manifests, construct previews, canonicalize panels, and plan
+sample-prefixed element names, coordinate systems, and metadata references.
 
 Validate all requested samples against each other and against the destination
 before decoding raster or transcript payloads. This includes sample-ID,
@@ -1018,13 +1025,13 @@ Control denominators are assay facts rather than tunable normalization
 parameters. Allocation must resolve the two possible sources according to this
 contract:
 
-| Feature-panel metadata | Explicit mapping | Result |
-| --- | --- | --- |
-| available | `None` | derive denominators from panel target-list lengths |
-| unavailable | provided | validate and use the explicit mapping |
-| available | identical values | accept the assertion and use the panel-derived values |
-| available | conflicting values | raise `ValueError` |
-| unavailable | `None` | raise `ValueError` before spatial lookup |
+| Feature-panel metadata | Explicit mapping   | Result                                                |
+| ---------------------- | ------------------ | ----------------------------------------------------- |
+| available              | `None`             | derive denominators from panel target-list lengths    |
+| unavailable            | provided           | validate and use the explicit mapping                 |
+| available              | identical values   | accept the assertion and use the panel-derived values |
+| available              | conflicting values | raise `ValueError`                                    |
+| unavailable            | `None`             | raise `ValueError` before spatial lookup              |
 
 When both sources are present, require exact equality after validation: the
 class keys and positive integer values must match. Partial mappings, missing or

@@ -45,10 +45,10 @@ def cosmx(
     samples: Mapping[str, CosmxSample],
     output: str | Path,
     *,
-    morphology: bool = True,
+    images: bool = True,
     instance_labels: bool = True,
     compartment_labels: bool = True,
-    transcripts: bool = True,
+    points: bool = True,
     output_image_name: str = "morphology_image",
     output_instance_labels_name: str = "instance_labels",
     output_compartment_labels_name: str = "compartment_labels",
@@ -82,14 +82,14 @@ def cosmx(
     output
         Destination for the backed SpatialData Zarr store. In-memory output is
         not supported.
-    morphology
+    images
         Whether to ingest morphology images.
     instance_labels
         Whether to ingest instance-label rasters with globally unique
         ``uint32`` IDs.
     compartment_labels
         Whether to ingest semantic compartment-label rasters.
-    transcripts
+    points
         Whether to ingest out-of-core transcript points.
     output_image_name
         Base name for morphology elements.
@@ -243,13 +243,13 @@ def cosmx(
     merged.
     """
     enabled_product_output_names = _validate_enabled_product_output_names(
-        morphology=morphology,
+        images=images,
         output_image_name=output_image_name,
         instance_labels=instance_labels,
         output_instance_labels_name=output_instance_labels_name,
         compartment_labels=compartment_labels,
         output_compartment_labels_name=output_compartment_labels_name,
-        transcripts=transcripts,
+        points=points,
         output_points_name=output_points_name,
     )
 
@@ -298,10 +298,10 @@ def add_cosmx_samples(
     output: str | Path,
     samples: Mapping[str, CosmxSample],
     *,
-    morphology: bool = True,
+    images: bool = True,
     instance_labels: bool = True,
     compartment_labels: bool = True,
-    transcripts: bool = True,
+    points: bool = True,
     output_image_name: str = "morphology_image",
     output_instance_labels_name: str = "instance_labels",
     output_compartment_labels_name: str = "compartment_labels",
@@ -334,7 +334,7 @@ def add_cosmx_samples(
     samples
         Non-empty mapping from new sample identifiers to :class:`CosmxSample`
         configurations.
-    morphology, instance_labels, compartment_labels, transcripts
+    images, instance_labels, compartment_labels, points
         Modalities to ingest for every requested sample. At least one must be
         enabled.
     output_image_name, output_instance_labels_name, output_compartment_labels_name, output_points_name
@@ -360,13 +360,13 @@ def add_cosmx_samples(
     process writes to the destination concurrently.
     """
     enabled_product_output_names = _validate_enabled_product_output_names(
-        morphology=morphology,
+        images=images,
         output_image_name=output_image_name,
         instance_labels=instance_labels,
         output_instance_labels_name=output_instance_labels_name,
         compartment_labels=compartment_labels,
         output_compartment_labels_name=output_compartment_labels_name,
-        transcripts=transcripts,
+        points=points,
         output_points_name=output_points_name,
     )
     output_path = Path(output).expanduser().resolve()
@@ -411,13 +411,13 @@ def add_cosmx_samples(
 
 def _validate_enabled_product_output_names(
     *,
-    morphology: bool,
+    images: bool,
     output_image_name: str,
     instance_labels: bool,
     output_instance_labels_name: str,
     compartment_labels: bool,
     output_compartment_labels_name: str,
-    transcripts: bool,
+    points: bool,
     output_points_name: str,
 ) -> dict[str, str]:
     """Return the output base name for each enabled CosMx product.
@@ -442,10 +442,10 @@ def _validate_enabled_product_output_names(
     products do not generate SpatialData elements.
     """
     configured_outputs = {
-        _MORPHOLOGY_PRODUCT: (morphology, output_image_name),
+        _MORPHOLOGY_PRODUCT: (images, output_image_name),
         _INSTANCE_LABELS_PRODUCT: (instance_labels, output_instance_labels_name),
         _COMPARTMENT_LABELS_PRODUCT: (compartment_labels, output_compartment_labels_name),
-        _TRANSCRIPTS_PRODUCT: (transcripts, output_points_name),
+        _TRANSCRIPTS_PRODUCT: (points, output_points_name),
     }
     enabled_product_output_names = {
         product: output_name for product, (enabled, output_name) in configured_outputs.items() if enabled

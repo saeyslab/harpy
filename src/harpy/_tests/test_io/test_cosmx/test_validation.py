@@ -34,7 +34,7 @@ def reader_store(decoded_cosmx_path: Path, tmp_path: Path) -> Path:
     cosmx(
         {"sample": CosmxSample(path=decoded_cosmx_path)},
         output,
-        transcripts=False,
+        points=False,
         image_chunks=(1, 4, 4),
         labels_chunks=(4, 4),
     )
@@ -79,7 +79,7 @@ def test_validate_cosmx_store_rejects_ambiguous_label_family(reader_store: Path,
         validate_cosmx_store(reader_store)
 
 
-def test_validate_cosmx_store_structural_check_is_lazy_and_non_mutating(
+def test_validate_cosmx_store_structural_opt_out_is_lazy_and_non_mutating(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -93,7 +93,7 @@ def test_validate_cosmx_store_structural_check_is_lazy_and_non_mutating(
     monkeypatch.setattr(SpatialData, "write_element", fail)
     monkeypatch.setattr(SpatialData, "delete_element_from_disk", fail)
 
-    validate_cosmx_store(output)
+    validate_cosmx_store(output, check_point_contents=False)
 
 
 def test_validate_cosmx_store_accepts_compatible_metadata_extensions(tmp_path: Path) -> None:
@@ -159,13 +159,13 @@ def test_validate_cosmx_store_rejects_invalid_structure(tmp_path: Path, mutation
         validate_cosmx_store(output)
 
 
-def test_validate_cosmx_store_deep_check_accepts_detected_panel_subset(tmp_path: Path) -> None:
+def test_validate_cosmx_store_default_content_check_accepts_detected_panel_subset(tmp_path: Path) -> None:
     output = _write_points_store(tmp_path, rows=[("GeneA", "Endogenous")])
 
-    validate_cosmx_store(output, check_point_contents=True)
+    validate_cosmx_store(output)
 
 
-def test_validate_cosmx_store_deep_check_validates_each_points_partition(tmp_path: Path) -> None:
+def test_validate_cosmx_store_default_content_check_validates_each_points_partition(tmp_path: Path) -> None:
     output = _write_points_store(
         tmp_path,
         rows=[("GeneA", "Endogenous"), ("GeneB", "Endogenous"), ("Unknown", "Endogenous")],
@@ -173,7 +173,7 @@ def test_validate_cosmx_store_deep_check_validates_each_points_partition(tmp_pat
     )
 
     with pytest.raises(ValueError, match="target 'Unknown' absent from its feature panel"):
-        validate_cosmx_store(output, check_point_contents=True)
+        validate_cosmx_store(output)
 
 
 @pytest.mark.parametrize(
@@ -185,7 +185,7 @@ def test_validate_cosmx_store_deep_check_validates_each_points_partition(tmp_pat
         ([(None, "Endogenous")], "null panel target or feature class"),
     ],
 )
-def test_validate_cosmx_store_deep_check_rejects_inconsistent_points(
+def test_validate_cosmx_store_default_content_check_rejects_inconsistent_points(
     tmp_path: Path,
     rows: list[tuple[str | None, str | None]],
     message: str,
@@ -193,7 +193,13 @@ def test_validate_cosmx_store_deep_check_rejects_inconsistent_points(
     output = _write_points_store(tmp_path, rows=rows)
 
     with pytest.raises(ValueError, match=message):
-        validate_cosmx_store(output, check_point_contents=True)
+        validate_cosmx_store(output)
+
+
+def test_validate_cosmx_store_structural_opt_out_skips_inconsistent_point_contents(tmp_path: Path) -> None:
+    output = _write_points_store(tmp_path, rows=[("Unknown", "Endogenous")])
+
+    validate_cosmx_store(output, check_point_contents=False)
 
 
 def test_internal_cosmx_store_validator_requires_backed_spatialdata() -> None:

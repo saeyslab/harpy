@@ -111,7 +111,7 @@ def test_cosmx_writes_two_samples_with_independent_configuration(
         output,
         instance_labels=False,
         compartment_labels=False,
-        transcripts=False,
+        points=False,
         image_chunks=(1, 4, 4),
     )
 
@@ -152,10 +152,10 @@ def test_cosmx_deduplicates_identical_feature_panels_across_samples(
             "sample_b": CosmxSample(path=ingestible_cosmx_path, fovs=[2]),
         },
         tmp_path / "panels.zarr",
-        morphology=False,
+        images=False,
         instance_labels=False,
         compartment_labels=False,
-        transcripts=True,
+        points=True,
         transcript_blocksize=64,
     )
 
@@ -180,10 +180,10 @@ def test_cosmx_keeps_different_feature_panels_separate(
             "sample_b": CosmxSample(path=second_path, fovs=[1]),
         },
         tmp_path / "different_panels.zarr",
-        morphology=False,
+        images=False,
         instance_labels=False,
         compartment_labels=False,
-        transcripts=True,
+        points=True,
         transcript_blocksize=64,
     )
 
@@ -204,25 +204,21 @@ def test_cosmx_intersects_fovs_only_across_enabled_modalities(
         tmp_path / "morphology.zarr",
         instance_labels=False,
         compartment_labels=False,
-        transcripts=False,
+        points=False,
         image_chunks=(1, 4, 4),
     )
-    represented = {
-        fov for record in morphology_only.attrs["harpy"]["images"].values() for fov in record["fovs"]
-    }
+    represented = {fov for record in morphology_only.attrs["harpy"]["images"].values() for fov in record["fovs"]}
     assert represented == {1, 2, 3}
 
     with_instance_labels = cosmx(
         {"sample": CosmxSample(path=decoded_cosmx_path)},
         tmp_path / "labels.zarr",
         compartment_labels=False,
-        transcripts=False,
+        points=False,
         image_chunks=(1, 4, 4),
         labels_chunks=(4, 4),
     )
-    represented = {
-        fov for record in with_instance_labels.attrs["harpy"]["images"].values() for fov in record["fovs"]
-    }
+    represented = {fov for record in with_instance_labels.attrs["harpy"]["images"].values() for fov in record["fovs"]}
     assert represented == {1, 3}
 
 
@@ -261,10 +257,10 @@ def test_cosmx_transcript_only_ignores_morphology_image_inconsistencies(
     sdata = cosmx(
         {"sample": CosmxSample(path=ingestible_cosmx_path)},
         tmp_path / f"transcripts_{inconsistency}.zarr",
-        morphology=False,
+        images=False,
         instance_labels=False,
         compartment_labels=False,
-        transcripts=True,
+        points=True,
         transcript_blocksize=64,
     )
 
@@ -280,7 +276,7 @@ def test_cosmx_rejects_configuration_errors_before_staging(decoded_cosmx_path: P
     with pytest.raises(ValueError, match="non-empty mapping"):
         cosmx({}, output)
     with pytest.raises(ValueError, match="sample identifier must match"):
-        cosmx({"invalid-id": CosmxSample(path=decoded_cosmx_path)}, output, transcripts=False)
+        cosmx({"invalid-id": CosmxSample(path=decoded_cosmx_path)}, output, points=False)
     with pytest.raises(ValueError, match="planned by both"):
         cosmx(
             {
@@ -290,16 +286,16 @@ def test_cosmx_rejects_configuration_errors_before_staging(decoded_cosmx_path: P
             output,
             instance_labels=False,
             compartment_labels=False,
-            transcripts=False,
+            points=False,
         )
     with pytest.raises(ValueError, match="at least one enabled modality"):
         cosmx(
             {"sample": CosmxSample(path=decoded_cosmx_path)},
             output,
-            morphology=False,
+            images=False,
             instance_labels=False,
             compartment_labels=False,
-            transcripts=False,
+            points=False,
         )
     with pytest.raises(ValueError, match="planned by both"):
         cosmx(
@@ -308,7 +304,7 @@ def test_cosmx_rejects_configuration_errors_before_staging(decoded_cosmx_path: P
             output_image_name="shared",
             output_instance_labels_name="shared",
             compartment_labels=False,
-            transcripts=False,
+            points=False,
         )
 
     assert not output.exists()
@@ -326,7 +322,7 @@ def test_cosmx_failure_while_writing_later_sample_preserves_existing_store(
         output,
         instance_labels=False,
         compartment_labels=False,
-        transcripts=False,
+        points=False,
         image_chunks=(1, 4, 4),
     )
     before = _store_snapshot(output)
@@ -350,7 +346,7 @@ def test_cosmx_failure_while_writing_later_sample_preserves_existing_store(
             output,
             instance_labels=False,
             compartment_labels=False,
-            transcripts=False,
+            points=False,
             image_chunks=(1, 4, 4),
             overwrite=True,
         )
@@ -363,14 +359,41 @@ def test_cosmx_rejects_source_output_alias_and_unrecognized_overwrite(
     decoded_cosmx_path: Path,
     tmp_path: Path,
 ) -> None:
+    nested_output = decoded_cosmx_path / "nested-output.zarr"
     with pytest.raises(ValueError, match="must not equal or contain one another"):
-        cosmx({"sample": CosmxSample(path=decoded_cosmx_path)}, decoded_cosmx_path, transcripts=False)
+        cosmx({"sample": CosmxSample(path=decoded_cosmx_path)}, nested_output, points=False)
 
     output = tmp_path / "unrecognized.zarr"
     SpatialData().write(output)
     with pytest.raises(ValueError, match="not created by the CosMx reader"):
-        cosmx({"sample": CosmxSample(path=decoded_cosmx_path)}, output, transcripts=False, overwrite=True)
+        cosmx({"sample": CosmxSample(path=decoded_cosmx_path)}, output, points=False, overwrite=True)
     assert read_zarr(output).attrs.get("harpy") is None
+
+
+def test_cosmx_rejects_existing_output_before_source_discovery(
+    decoded_cosmx_path: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_discovery(*args: object, **kwargs: object) -> None:
+        raise AssertionError("Existing-output preflight reached source discovery.")
+
+    monkeypatch.setattr(_reader, "_discover_cosmx", fail_discovery)
+
+    existing = tmp_path / "existing.zarr"
+    existing.mkdir()
+    with pytest.raises(FileExistsError, match="already exists"):
+        cosmx({"sample": CosmxSample(path=decoded_cosmx_path)}, existing, points=False)
+
+    unrecognized = tmp_path / "unrecognized.zarr"
+    SpatialData().write(unrecognized)
+    with pytest.raises(ValueError, match="not created by the CosMx reader"):
+        cosmx(
+            {"sample": CosmxSample(path=decoded_cosmx_path)},
+            unrecognized,
+            points=False,
+            overwrite=True,
+        )
 
 
 def _generated_siblings(output: Path) -> list[Path]:
