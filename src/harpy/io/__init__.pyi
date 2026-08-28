@@ -1,4 +1,4 @@
-from ._cosmx import CosmxSample, cosmx
+from ._cosmx import CosmxSample, cosmx, validate_cosmx_store
 from ._macsima import macsima
 from ._merscope import merscope
 from ._phenocycler import phenocycler
@@ -17,6 +17,7 @@ from ._zarr import convert_to_zarr_2
 __all__ = [
     "cosmx",
     "CosmxSample",
+    "validate_cosmx_store",
     "macsima",
     "merscope",
     "phenocycler",

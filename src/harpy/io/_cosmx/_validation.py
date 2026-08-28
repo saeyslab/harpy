@@ -50,9 +50,10 @@ def validate_cosmx_store(
     does not compute raster or transcript partitions.
 
     The optional content check projects only the feature and feature-class
-    columns from each panel-associated points element, computes their distinct
-    observed pairs out of core, and verifies those pairs against the referenced
-    authoritative panel. Panel targets with zero detections remain valid.
+    columns from each panel-associated points element and validates each
+    partition independently against the referenced authoritative panel. It
+    computes at most one small diagnostic per partition and does not require a
+    global shuffle. Panel targets with zero detections remain valid.
 
     Parameters
     ----------
@@ -337,37 +338,109 @@ def _validate_points_panel_contents(
 ) -> None:
     columns = [panel.feature_column, panel.class_column]
     try:
-        observed = points[columns].drop_duplicates().compute()
+        errors = (
+            points[columns]
+            .map_partitions(
+                _points_panel_partition_error,
+                feature_column=panel.feature_column,
+                class_column=panel.class_column,
+                target_classes=panel.target_classes,
+                meta=pd.Series(name="error", dtype="object"),
+            )
+            .dropna()
+            .compute()
+        )
     except Exception as error:
         raise ValueError(
             f"Could not validate feature-panel contents for CosMx points element {element_name!r}."
         ) from error
 
-    observed_classes: dict[str, str] = {}
-    for feature, feature_class in observed.itertuples(index=False, name=None):
-        if pd.isna(feature) or pd.isna(feature_class):
-            raise ValueError(f"CosMx points element {element_name!r} contains a null panel target or feature class.")
-        if not isinstance(feature, str) or not isinstance(feature_class, str):
-            raise ValueError(
-                f"CosMx points element {element_name!r} panel targets and feature classes must be strings, "
-                f"found {(feature, feature_class)!r}."
-            )
-        previous = observed_classes.setdefault(feature, feature_class)
-        if previous != feature_class:
-            raise ValueError(
-                f"CosMx points element {element_name!r} target {feature!r} has multiple observed "
-                f"feature classes: {previous!r} and {feature_class!r}."
-            )
-        expected_class = panel.target_classes.get(feature)
-        if expected_class is None:
-            raise ValueError(
-                f"CosMx points element {element_name!r} contains target {feature!r} absent from its feature panel."
-            )
-        if feature_class != expected_class:
-            raise ValueError(
-                f"CosMx points element {element_name!r} target {feature!r} has feature class "
-                f"{feature_class!r}; expected {expected_class!r}."
-            )
+    if not errors.empty:
+        raise ValueError(f"CosMx points element {element_name!r} {errors.iloc[0]}")
+
+
+def _points_panel_partition_error(
+    partition: pd.DataFrame,
+    *,
+    feature_column: str,
+    class_column: str,
+    target_classes: Mapping[str, str],
+) -> pd.Series:
+    """Validate one points partition against its authoritative feature panel.
+
+    The feature panel maps every declared target to exactly one feature class.
+    This check therefore requires every observed target to occur in
+    ``target_classes`` and its observed class to equal the corresponding mapped
+    class. Null targets or classes are invalid. Panel targets without detections
+    in this partition remain valid.
+
+    Only the first violation in a partition is returned. Consequently, the Dask
+    computation collects at most one small diagnostic per partition and does
+    not need a global shuffle or materialize transcript rows in the client.
+
+    Parameters
+    ----------
+    partition
+        In-memory pandas partition containing the two panel-declared columns.
+    feature_column
+        Name of the column containing observed target identifiers.
+    class_column
+        Name of the column containing observed feature classes.
+    target_classes
+        Authoritative mapping from every panel target to its feature class.
+
+    Returns
+    -------
+    pandas.Series
+        A one-element series containing the first validation error, or ``None``
+        when the partition satisfies the feature-panel contract.
+
+    Examples
+    --------
+    Given a panel that assigns ``GeneA`` to ``Endogenous``, the observed pairs
+    have the following outcomes::
+
+        GeneA, Endogenous        -> valid
+        GeneA, Negative          -> rejected: class disagrees with the panel
+        GeneA, UnknownClass      -> rejected: class disagrees with the panel
+        UnknownGene, Endogenous  -> rejected: target is absent from the panel
+    """
+    error: str | None = None
+    if not partition.empty:
+        features = partition[feature_column]
+        feature_classes = partition[class_column]
+
+        null = features.isna() | feature_classes.isna()
+        if null.any():
+            error = "contains a null panel target or feature class."
+        else:
+            known = features.isin(target_classes)
+            if not known.all():
+                position = int(np.flatnonzero(~known.to_numpy())[0])
+                feature = features.iloc[position]
+                feature_class = feature_classes.iloc[position]
+                if not isinstance(feature, str) or not isinstance(feature_class, str):
+                    error = f"panel targets and feature classes must be strings, found {(feature, feature_class)!r}."
+                else:
+                    error = f"contains target {feature!r} absent from its feature panel."
+            else:
+                expected_classes = features.astype(object).map(target_classes)
+                mismatch = feature_classes.astype(object) != expected_classes
+                if mismatch.any():
+                    position = int(np.flatnonzero(mismatch.to_numpy())[0])
+                    feature = features.iloc[position]
+                    feature_class = feature_classes.iloc[position]
+                    if not isinstance(feature, str) or not isinstance(feature_class, str):
+                        error = (
+                            f"panel targets and feature classes must be strings, found {(feature, feature_class)!r}."
+                        )
+                    else:
+                        error = (
+                            f"target {feature!r} has feature class {feature_class!r}; "
+                            f"expected {target_classes[feature]!r}."
+                        )
+
+    return pd.Series([error], name="error", dtype="object")
 
 
 def _validate_common_element_record(record: Mapping[str, object], *, path: str) -> str:

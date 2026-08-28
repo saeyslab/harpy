@@ -15,6 +15,7 @@ from spatialdata.transformations import Identity, Scale
 
 from harpy._metadata import _LABELS_METADATA_KEY, _metadata_registry, _validate_metadata_destination
 from harpy.image._image import add_labels
+from harpy.io._cosmx._constants import _COMPARTMENT_CATEGORIES, _INSTANCE_ID_FORMULA
 from harpy.io._cosmx._models import (
     _COMPARTMENT_LABELS_PRODUCT,
     _INSTANCE_ID_DTYPE,
@@ -31,12 +32,6 @@ from harpy.io._cosmx._raster import (
 )
 
 _DEFAULT_CHUNKS = (1024, 1024)
-_COMPARTMENT_CATEGORIES = {
-    0: "background",
-    1: "nuclear",
-    2: "membrane",
-    3: "cytoplasmic",
-}
 _LabelFamily = Literal["instance_labels", "compartment_labels"]
 
 
@@ -252,7 +247,7 @@ def _add_label_family(
             metadata["instance_id_encoding"] = {
                 "background": 0,
                 "base": instance_id_base,
-                "formula": "global_id = (fov - 1) * base + local_id",
+                "formula": _INSTANCE_ID_FORMULA,
             }
         else:
             metadata["categories"] = deepcopy(_COMPARTMENT_CATEGORIES)

@@ -82,13 +82,10 @@ class CosmxSample:
             raise ValueError(f"Unknown CosMx mosaic mode {self.mosaic_mode!r}; expected one of {_MOSAIC_MODES}.")
         if self.mosaic_mode == "single":
             object.__setattr__(self, "adjacency_tolerance_px", None)
-        elif (
-            self.adjacency_tolerance_px is not None
-            and (
-                not isinstance(self.adjacency_tolerance_px, int)
-                or isinstance(self.adjacency_tolerance_px, bool)
-                or self.adjacency_tolerance_px < 0
-            )
+        elif self.adjacency_tolerance_px is not None and (
+            not isinstance(self.adjacency_tolerance_px, int)
+            or isinstance(self.adjacency_tolerance_px, bool)
+            or self.adjacency_tolerance_px < 0
         ):
             raise ValueError(
                 "CosMx adjacency tolerance must be a nonnegative integer or None, "
@@ -206,6 +203,25 @@ class _CosmxFeaturePanel:
                 "SystemControl": ["SystemControl1", "SystemControl2", ...],
             },
         }
+
+    For example, the smaller stored relation::
+
+        {
+            "targets_by_class": {
+                "Endogenous": ["GeneA"],
+                "Negative": ["Negative01"],
+            },
+        }
+
+    defines the authoritative target-to-class lookup::
+
+        {
+            "GeneA": "Endogenous",
+            "Negative01": "Negative",
+        }
+
+    Transcript ingestion and store validation use this inverse lookup to check
+    each observed target/class pair.
     """
 
     feature_column: str
@@ -347,7 +363,9 @@ class _CosmxPreview:
             raise ValueError(f"CosMx preview products must be non-empty and unique, found {self.products}.")
         unknown_products = set(self.products) - set(_PRODUCTS)
         if unknown_products:
-            raise ValueError(f"Unknown CosMx preview products {sorted(unknown_products)}; expected a subset of {_PRODUCTS}.")
+            raise ValueError(
+                f"Unknown CosMx preview products {sorted(unknown_products)}; expected a subset of {_PRODUCTS}."
+            )
         if self.mosaic_mode not in _MOSAIC_MODES:
             raise ValueError(f"Unknown CosMx mosaic mode {self.mosaic_mode!r}; expected one of {_MOSAIC_MODES}.")
         if self.mosaic_mode == "spatial_groups" and (
@@ -396,11 +414,7 @@ class _CosmxPreview:
             return 0
         dtype = self.manifest.run.morphology_dtype
         assert dtype is not None
-        return (
-            self._mosaic_pixel_count
-            * len(self.manifest.run.channels)
-            * np.dtype(dtype).itemsize
-        )
+        return self._mosaic_pixel_count * len(self.manifest.run.channels) * np.dtype(dtype).itemsize
 
     @property
     def estimated_instance_labels_nbytes(self) -> int:
@@ -495,14 +509,14 @@ def _validate_preview_mosaics(
         # global_id = (fov - 1) * number_of_source_dtype_values + local_id.
         # Validate against the full manifest so IDs remain stable across subsets.
         _validate_instance_id_encoding(instance_labels_dtype, max(manifest.fov_ids))
-    if mosaics and _MORPHOLOGY_PRODUCT in products and (
-        manifest.run.morphology_dtype is None or not manifest.run.channels
+    if (
+        mosaics
+        and _MORPHOLOGY_PRODUCT in products
+        and (manifest.run.morphology_dtype is None or not manifest.run.channels)
     ):
         raise ValueError("CosMx preview mosaics require morphology dtype and channels when morphology is enabled.")
     if mosaics and _COMPARTMENT_LABELS_PRODUCT in products and manifest.run.compartment_labels_dtype is None:
-        raise ValueError(
-            "CosMx preview mosaics require a compartment-label dtype when compartment labels are enabled."
-        )
+        raise ValueError("CosMx preview mosaics require a compartment-label dtype when compartment labels are enabled.")
 
     for mosaic in mosaics:
         for product in products:

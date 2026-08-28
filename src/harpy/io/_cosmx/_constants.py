@@ -37,3 +37,10 @@ _DEFAULT_PIXEL_SIZE_UM = 0.120280945
 _TIFF_SUFFIXES = (".tif", ".tiff")
 _MORPHOLOGY_GEOMETRY_INVARIANT_KEYS = ("NFov", "ImPixelSize_nm", "ImRows", "ImCols")
 _MORPHOLOGY_IMAGE_INVARIANT_KEYS = ("ChannelOrder",)
+_INSTANCE_ID_FORMULA = "global_id = (fov - 1) * base + local_id"
+_COMPARTMENT_CATEGORIES = {
+    0: "background",
+    1: "nuclear",
+    2: "membrane",
+    3: "cytoplasmic",
+}

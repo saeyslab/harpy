@@ -5,6 +5,7 @@ from harpy.io._cosmx._models import CosmxSample
 from harpy.io._cosmx._preview import _preview_cosmx
 from harpy.io._cosmx._reader import cosmx
 from harpy.io._cosmx._transcripts import _add_transcript_points
+from harpy.io._cosmx._validation import validate_cosmx_store
 
 __all__ = [
     "_add_morphology_images",
@@ -17,4 +18,5 @@ __all__ = [
     "_resolve_decoded_cosmx_root",
     "CosmxSample",
     "cosmx",
+    "validate_cosmx_store",
 ]
