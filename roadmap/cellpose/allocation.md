@@ -602,7 +602,7 @@ Focused reader tests should establish that:
 
 ## Slice 3: CosMx SpatialData store validation
 
-**Status: specified; not implemented.**
+**Status: implemented.**
 
 Add a dedicated, non-mutating validator for an existing sample-aware CosMx
 SpatialData Zarr store. Incremental addition must establish that the destination
