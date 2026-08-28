@@ -320,7 +320,30 @@ adjacency-based grouping, so that value has no effect.
 Arguments that define the complete output remain on `cosmx_samples`: output
 path, modality inclusion, output base names, image and label chunks, raster
 scale factors, transcript block size, and overwrite behavior. Do not accept a
-list of these output-wide values.
+list of these output-wide values. Require at least one enabled modality.
+
+For each sample, derive one common FOV set from only the enabled modalities:
+
+```text
+included FOVs
+    = requested FOVs
+    ∩ positioned FOVs
+    ∩ FOVs available for every enabled modality
+```
+
+A missing disabled product must not exclude an otherwise usable FOV. For
+example, morphology-only ingestion does not require instance labels,
+compartment labels, or transcript files. Conversely, when morphology and
+transcripts are enabled, an included FOV must provide both products. Every
+enabled modality is then constructed from the same included FOVs and mosaic
+geometries, so corresponding image, labels, and points elements remain
+spatially aligned.
+
+Known FOV positions remain mandatory regardless of which payload modalities
+are enabled because mosaic construction requires them. Validate source dtype,
+shape, channel, and ID-encoding invariants only when they are required by an
+enabled output. A per-sample `channels` selection has no effect when morphology
+is disabled.
 
 ### Sample-scoped elements and coordinate systems
 
@@ -436,6 +459,10 @@ Focused reader tests should establish that:
   sample-prefixed elements and coordinate systems;
 - per-sample FOV, channel, mosaic, tolerance, and orientation settings reach
   only that sample's elements;
+- FOV eligibility intersects positions and only the enabled modality
+  availabilities, and all enabled modalities use the resulting common mosaics;
+- a missing disabled product does not exclude an FOV, while a missing enabled
+  product does;
 - single-mosaic samples normalize any supplied adjacency tolerance to `None`
   without rejecting the request;
 - per-element metadata records the correct `sample_id`, represented FOVs, and
