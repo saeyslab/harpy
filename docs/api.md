@@ -22,6 +22,7 @@ I/O.
     :toctree: generated
 
     io.cosmx
+    io.validate_cosmx_store
     io.phenocycler
     io.macsima
     io.merscope
