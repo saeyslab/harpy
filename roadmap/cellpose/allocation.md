@@ -207,6 +207,15 @@ class target counts are positive. Prefix matching is not an acceptable
 fallback: this panel contains a target named `NegativeAdd` whose authoritative
 `CodeClass` is `Endogenous`.
 
+For every transcript points element that references a shared feature-panel
+record, validate the points payload against that specific record: every
+detected target in the points element must occur in the panel, and the detected
+target's feature-class value must equal the class assigned to that target by
+the panel. This is a one-way inclusion requirement; authoritative panel targets
+with zero detected transcripts are valid and remain represented only in the
+shared panel metadata. When no panel is available, omit the reference and skip
+this cross-validation.
+
 The CosMx reader stores `code_class` categorically with the same category set
 for every mosaic points element from the run. Its categories come from the plex
 `CodeClass` values. Parquet preserves the categorical values, but a reopened
@@ -224,6 +233,9 @@ Focused reader tests should establish that:
 - one valid plex is read once and stored as one shared feature-panel record;
 - every transcript points element references that shared panel without
   duplicating it;
+- every target and feature-class pair represented in a transcript points
+  element agrees with its referenced shared panel record, while panel targets
+  with zero detections remain valid;
 - the persisted `code_class` column has known categorical categories matching
   the panel;
 - target names, classes, and zero-detection panel targets survive a SpatialData
@@ -445,6 +457,7 @@ sample-specific mosaic construction settings:
         "mode": "spatial_groups",
         "adjacency_tolerance_px": 85,
     },
+    "acquisition_timestamp": "20260312_140910_S2",  # optional source value
     # Existing modality-specific orientation, origin, scale, and channel data.
 }
 ```
@@ -454,6 +467,11 @@ is not a duplicate invocation-level selection record. A points element keeps
 its `feature_panel` reference alongside this sample-scoped metadata. The
 `sample_id` field and sample-prefixed names are required for every element
 created through `cosmx`, including a call whose mapping contains one sample.
+When every morphology TIFF for a sample provides the same non-empty
+`OrigTimeStamp`, preserve that source value verbatim as the optional
+`acquisition_timestamp` on every element record for the sample. If the value is
+absent or inconsistent, omit it and log a warning for inconsistent provided
+values; acquisition metadata must not make an otherwise readable run fail.
 
 ### Feature panels across samples
 
