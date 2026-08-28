@@ -17,14 +17,15 @@ def _preview_cosmx(
     manifest: _CosmxManifest,
     *,
     fovs: tuple[int, ...] | list[int] | set[int] | None = None,
+    products: tuple[str, ...] = _PRODUCTS,
     mosaic_mode: _MosaicMode = "spatial_groups",
     adjacency_tolerance_px: int | None = None,
 ) -> _CosmxPreview:
     """Select usable FOVs and organize them into spatial mosaic groups.
 
     A FOV is included only when it was requested, has a known morphology
-    position, and has morphology, instance-label, compartment-label, and
-    transcript files. Included FOVs are either grouped by spatial adjacency or
+    position, and has source files for every enabled product. Included FOVs are
+    either grouped by spatial adjacency or
     deliberately placed in one bounding mosaic. The function also records
     excluded and unpositioned FOVs and appends selection and grouping
     diagnostics. The returned preview calculates aggregate raster-size
@@ -37,17 +38,21 @@ def _preview_cosmx(
     manifest
         Discovered files, positions, and validated run metadata.
     fovs
-        Optional FOV subset to consider. By default, all manifest FOVs are
-        considered.
+        Optional requested FOV subset. By default, all manifest FOVs are
+        requested. IDs absent from the manifest raise; known requested FOVs
+        that lack a position or an enabled-product source are excluded from the
+        returned common selection.
+    products
+        Non-empty subset of products enabled for this read. FOV availability
+        is intersected only across this subset.
     mosaic_mode
         ``"spatial_groups"`` derives separate mosaics from adjacency;
         ``"single"`` places every included FOV in one bounding canvas.
     adjacency_tolerance_px
         Maximum horizontal or vertical gap, in pixels, bridged when grouping
         spatial groups. ``None`` uses two percent of the smaller tile
-        dimension. Single-mosaic mode does not perform adjacency grouping and
-        requires this value to remain ``None``; an explicit integer raises a
-        ``ValueError`` rather than being ignored.
+        dimension. Single-mosaic mode does not perform adjacency grouping, so
+        any supplied value is normalized to ``None``.
 
     Returns
     -------
@@ -58,8 +63,10 @@ def _preview_cosmx(
     Raises
     ------
     ValueError
-        If a requested FOV is absent from the manifest or the planned raster
+        If a requested FOV ID is absent from the manifest or the planned raster
         outputs and instance-ID encoding cannot be represented consistently.
+        An empty common selection is represented by an empty preview; the
+        public reader is responsible for rejecting it.
     """
     all_fovs = set(manifest.fov_ids)
     requested = all_fovs if fovs is None else {int(fov) for fov in fovs}
@@ -67,10 +74,18 @@ def _preview_cosmx(
     if unknown:
         raise ValueError(f"Requested FOVs are not present in the manifest: {sorted(unknown)}")
 
+    products = tuple(products)
+    if not products or len(set(products)) != len(products):
+        raise ValueError(f"CosMx preview products must be non-empty and unique, found {products}.")
+    unknown_products = set(products) - set(_PRODUCTS)
+    if unknown_products:
+        raise ValueError(f"Unknown CosMx preview products {sorted(unknown_products)}; expected a subset of {_PRODUCTS}.")
+
     positions_by_fov = manifest.positions_by_fov
     positioned = set(positions_by_fov)
+    # A usable FOV must be positioned and have a source for every enabled product.
     common = set(positioned)
-    for product in _PRODUCTS:
+    for product in products:
         common &= set(manifest.available_fovs(product))
     included = tuple(sorted(requested & common))
     excluded = tuple(sorted(all_fovs - set(included)))
@@ -79,8 +94,7 @@ def _preview_cosmx(
         raise ValueError(f"Unknown CosMx mosaic mode {mosaic_mode!r}; expected one of {_MOSAIC_MODES}.")
     selected_positions = {fov: positions_by_fov[fov] for fov in included}
     if mosaic_mode == "single":
-        if adjacency_tolerance_px is not None:
-            raise ValueError("CosMx single-mosaic mode does not use an adjacency tolerance.")
+        adjacency_tolerance_px = None
         mosaics = _single_mosaic_geometry(positions=selected_positions, tile_shape=manifest.run.tile_shape)
     else:
         if adjacency_tolerance_px is None:
@@ -120,6 +134,7 @@ def _preview_cosmx(
         unpositioned_fovs=unpositioned,
         mosaics=mosaics,
         diagnostics=tuple(diagnostics),
+        products=products,
         mosaic_mode=mosaic_mode,
         adjacency_tolerance_px=adjacency_tolerance_px,
     )
