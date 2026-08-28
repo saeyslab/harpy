@@ -267,6 +267,13 @@ class CosmxSample:
     flip_y: bool = False
 ```
 
+Although the public constructor accepts general sequences, normalize `fovs`
+and `channels` to tuples during `CosmxSample` construction. The frozen sample
+configuration must therefore not retain references to caller-owned mutable
+lists. Preserve `None` as `None`, preserve sequence order, and perform the
+normalization before the configuration participates in validation, planning,
+or metadata generation.
+
 Change the canonical creation API so that `cosmx()` accepts a `samples` mapping
 whose keys are the sample identifiers:
 
@@ -298,11 +305,19 @@ one-entry mapping; do not add a separate `cosmx_samples()` alias or
 single-sample code path. Every invocation uses the same sample-aware
 preparation, naming, metadata, and writing implementation.
 
-The sample mapping must be non-empty and its keys must be unique, non-empty,
-SpatialData-safe identifiers. Preserve mapping iteration order for predictable
-execution, while ensuring that output metadata and panel identifiers are
-deterministic for the same logical inputs. Reject a sample identifier that
-would make any planned element or coordinate-system name collide.
+The sample mapping must be non-empty and its keys must be unique identifiers
+that match exactly:
+
+```text
+^[A-Za-z][A-Za-z0-9_]*$
+```
+
+Validate identifiers as supplied and never strip, case-fold, replace
+characters, or otherwise normalize them automatically. Preserve mapping
+iteration order for predictable execution, while ensuring that output metadata
+and panel identifiers are deterministic for the same logical inputs. Reject a
+sample identifier that would make any planned element or coordinate-system name
+collide.
 
 The sample configuration owns values that may differ between runs:
 
