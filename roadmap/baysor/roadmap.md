@@ -32,6 +32,12 @@ and rely primarily on pixel-IoU stitching. Baysor's molecule assignments are the
 authoritative result; cell polygons, count matrices, cell statistics, and
 optional raster labels should be derived globally after reconciliation.
 
+Global cell boundaries will be generated with a minimally vendored, pinned copy
+of Baysor's C++ boundary-estimation kernel in the Harpy repository. A thin native
+companion extension will expose that kernel to Harpy's Python API. This preserves
+Baysor's boundary semantics without rewriting the algorithm in Python or making
+the complete Baysor application a Harpy library dependency.
+
 ## Goals
 
 The integration should:
@@ -45,6 +51,8 @@ The integration should:
 - preserve one stable identity for every retained transcript;
 - produce globally consistent molecule assignments, cell identifiers, shapes,
   counts, and cell statistics;
+- reproduce Baysor's boundary semantics through a pinned native C++ kernel with
+  explicit upstream provenance and parity tests;
 - expose all scale-sensitive and resource-sensitive Baysor parameters;
 - make runs reproducible, inspectable, resumable, and safe to retry; and
 - demonstrate that tiled results are not materially dependent on tile seams or
@@ -408,13 +416,58 @@ Tile count matrices must be ignored. Tile polygons must not simply be clipped
 and unioned because doing so can create visible seams and can disagree with the
 final transcript assignments.
 
-The preferred boundary path is to estimate each final cell polygon from its
-global assigned molecule cloud. Thus, a cell crossing a seam receives one
-boundary calculation over the molecules on both sides, rather than two polygon
-fragments followed by a geometric merge. This is naturally parallel per cell
-and keeps memory bounded. If exact reuse of Baysor's C++ boundary estimator is
-required, a standalone upstream boundary operation would be preferable to
-duplicating the algorithm indefinitely in Harpy.
+The selected boundary path is to estimate each final cell polygon once from the
+globally reconciled molecule assignments. Thus, a cell crossing a seam receives
+one boundary calculation over the molecules on both sides, rather than two
+polygon fragments followed by a geometric merge.
+
+"Global molecule cloud" does not mean that the estimator may see only the
+molecules assigned to the target cell. Baysor's boundary algorithm also uses
+nearby molecules assigned to other cells or to noise to reject admixture around
+the Delaunay boundary. An exact whole-dataset call therefore receives the complete
+reconciled coordinates and cell labels. A bounded-memory batched call may receive
+only a subset of target cells, but it must also receive every contextual molecule
+intersecting those cells' required bounding regions. The global boundary-distance
+parameter must be computed once or passed unchanged to every batch.
+
+### Native boundary-estimator decision
+
+Harpy will not reimplement the estimator in Python and will not merge tile-local
+polygons. Instead, the Harpy repository will contain a minimally extracted,
+pinned copy of Baysor's C++ boundary-estimation kernel and the helper routines
+needed by that kernel. It will not vendor Baysor's CLI, segmentation, clustering,
+configuration, Parquet, HDF5, TIFF, or logging infrastructure.
+
+The native code will be exposed through a thin `pybind11` or `nanobind` extension.
+The extension boundary must remain array-oriented and independent of SpatialData,
+GeoPandas, Shapely, Arrow, and Parquet. Its conceptual contract is:
+
+- input: contiguous molecule coordinates, final global cell labels, optional
+  target cell identifiers, and an optional precomputed global boundary-distance
+  parameter;
+- output: packed polygon vertices, polygon offsets, and the corresponding global
+  cell identifiers; and
+- execution: release the Python GIL, support sparse global cell identifiers, and
+  handle empty, one-molecule, two-molecule, and collinear cells explicitly.
+
+A Harpy Python wrapper will prepare the arrays, invoke the native extension,
+convert the packed result to Shapely polygons and a GeoDataFrame, and add the
+result through Harpy's normal shapes API.
+
+The initial packaging preference is a small native companion distribution built
+from the Harpy repository with CMake and `scikit-build-core`. Harpy itself remains
+the owner of the public Python API and imports the companion lazily. This avoids
+forcing Harpy's current pure-Python Hatchling build to compile CGAL and Eigen on
+every supported platform. Prebuilt wheels should initially cover the supported
+macOS ARM64 and Linux x86-64 environments. Folding the extension into the main
+Harpy distribution can be reconsidered after its build and wheel pipeline is
+stable.
+
+The vendored source must include Baysor's MIT notice, the exact upstream commit
+and original paths, an inventory of Harpy modifications, and an update procedure.
+Parity tests must compare the generated geometry with the pinned upstream Baysor
+implementation after normalizing irrelevant polygon orientation and starting-
+vertex differences.
 
 ## Baysor upstream requirements and optimizations
 
@@ -439,11 +492,13 @@ yet Parquet output currently generates them. Upstream switches to skip these
 products would reduce tile runtime, memory, and disk use. A molecules-only mode
 is desirable.
 
-### Boundary-only operation
+### Optional upstream boundary-only operation
 
-A C++ subcommand that consumes final molecule assignments and writes cell
-boundaries would allow Harpy to use Baysor's own boundary semantics after
-reconciliation without rerunning segmentation.
+The vendored native kernel is the selected implementation and does not depend on
+an upstream CLI change. A future Baysor C++ subcommand or supported linkable
+boundary library would still be useful: after parity and packaging evaluation,
+Harpy could replace the vendored implementation with that maintained upstream
+interface without changing its public Python API.
 
 ### Optional precomputed confidence
 
@@ -490,7 +545,26 @@ Deliverables:
 Exit criterion: Harpy reproduces a direct pinned-Baysor run without using the
 Julia-era raster callback.
 
-### Phase 2: Implement tile planning and staging
+### Phase 2: Establish the native boundary component
+
+Resolve the highest-risk native packaging and semantic-parity questions before
+building the tiled workflow around this component.
+
+Deliverables:
+
+- a minimal, attributed extraction of the pinned Baysor C++ boundary kernel;
+- an array-oriented native extension and lazy Harpy Python wrapper;
+- explicit full-context and batched-target input contracts;
+- packed polygon output and conversion to Harpy shapes;
+- focused edge-case and upstream-parity tests;
+- macOS ARM64 and Linux x86-64 build and wheel smoke tests; and
+- dependency, licence, provenance, and upstream-update documentation.
+
+Exit criterion: for identical molecule coordinates, assignments, and parameters,
+the extension produces geometry equivalent to pinned Baysor and can be installed
+on both initially supported platforms.
+
+### Phase 3: Implement tile planning and staging
 
 Deliverables:
 
@@ -505,7 +579,7 @@ Deliverables:
 Exit criterion: every input transcript has exactly one core owner and the
 expected halo memberships, with no uncovered or unexpectedly duplicated rows.
 
-### Phase 3: Implement resource-aware tile execution
+### Phase 4: Implement resource-aware tile execution
 
 Deliverables:
 
@@ -520,7 +594,7 @@ Deliverables:
 Exit criterion: a complete set of reproducible tile-local molecule assignments
 can be generated without exceeding the configured memory budget.
 
-### Phase 4: Implement reconciliation
+### Phase 5: Implement reconciliation
 
 Deliverables:
 
@@ -534,13 +608,14 @@ Deliverables:
 Exit criterion: one final row exists per retained transcript, reconciliation is
 order-independent, and all graph invariants pass.
 
-### Phase 5: Build and import global products
+### Phase 6: Build and import global products
 
 Deliverables:
 
 - global sparse cell-by-gene aggregation;
 - cell statistics and nucleus-ownership QC;
-- global boundary generation;
+- global boundary generation through the native kernel, with complete contextual
+  molecules for each exact or batched call;
 - SpatialData points, shapes, and table elements;
 - optional rasterization; and
 - complete provenance metadata.
@@ -548,7 +623,7 @@ Deliverables:
 Exit criterion: assignments, shapes, table instances, and optional labels are
 mutually consistent and survive a SpatialData write/read round trip.
 
-### Phase 6: Validate tiled quality and choose defaults
+### Phase 7: Validate tiled quality and choose defaults
 
 Deliverables:
 
@@ -562,7 +637,7 @@ Deliverables:
 Exit criterion: tiled results meet the agreed quality gates and do not show
 material seam or grid-placement dependence.
 
-### Phase 7: Distributed hardening
+### Phase 8: Distributed hardening
 
 Only after the local tiled workflow is correct:
 
