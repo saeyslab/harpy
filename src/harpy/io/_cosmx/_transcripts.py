@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import csv
+import hashlib
+import json
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from pathlib import Path
@@ -52,6 +54,7 @@ def _add_transcript_points(
     flip_x: bool = True,
     flip_y: bool = False,
     blocksize: str | int = "64MB",
+    sample_id: str | None = None,
     overwrite: bool = False,
 ) -> SpatialData:
     """Add one backed, out-of-core transcript points element per mosaic.
@@ -68,6 +71,8 @@ def _add_transcript_points(
     Each points element receives a root metadata record containing:
 
     - ``fovs``: source FOV numbers contributing to the mosaic;
+    - ``sample_id`` and ``mosaic`` when called by the public reader: the sample
+      identity and the grouping mode/effective adjacency tolerance;
     - ``source_origin_px``: upper-left mosaic bound in the pre-group/source
       pixel coordinate system. This origin is subtracted from every FOV
       position so that the output points use mosaic-local coordinates starting
@@ -133,8 +138,8 @@ def _add_transcript_points(
     headers = {fov: _read_transcript_header(path) for fov, path in sources.items()}
     gene_categories = _gene_categories(tuple(sources.values()), blocksize=blocksize)
     feature_panel = preview.manifest.feature_panel
-    feature_panel_name = _feature_panel_name(output_points_name) if feature_panel is not None else None
     feature_panel_metadata = _feature_panel_metadata(preview) if feature_panel is not None else None
+    feature_panel_name = _feature_panel_name(feature_panel_metadata) if feature_panel_metadata is not None else None
     if feature_panel_name is not None and feature_panel_metadata is not None:
         _validate_feature_panel_collision(sdata, feature_panel_name, feature_panel_metadata)
     code_class_categories = None if feature_panel is None else feature_panel.categories
@@ -188,6 +193,16 @@ def _add_transcript_points(
         }
         if feature_panel_name is not None:
             metadata["feature_panel"] = feature_panel_name
+        if sample_id is not None:
+            metadata.update(
+                {
+                    "sample_id": sample_id,
+                    "mosaic": {
+                        "mode": preview.mosaic_mode,
+                        "adjacency_tolerance_px": preview.adjacency_tolerance_px,
+                    },
+                }
+            )
         points_metadata[element_name] = metadata
     sdata.attrs = attrs
     sdata.write_attrs()
@@ -387,9 +402,22 @@ def _normalize_transcript_partition(
     return result[[*_OUTPUT_COLUMNS, *extras]]
 
 
-def _feature_panel_name(output_points_name: str) -> str:
-    """Derive the store-local shared panel key from the points base name."""
-    return f"{output_points_name}_panel"
+def _feature_panel_name(metadata: Mapping[str, object]) -> str:
+    """Derive a deterministic store-local key from canonical panel contents.
+
+    Content-addressing lets transcript elements from different samples reuse
+    one shared metadata record when their panels are identical, while panels
+    with different contents naturally receive different keys. The identity is
+    deliberately independent of consumer details such as sample IDs, points
+    element names, and sample input order.
+
+    The SHA-256 digest is used for deterministic naming and deduplication, not
+    as a security boundary. Only its first 16 hexadecimal characters are kept
+    in the key, so callers compare the complete canonical metadata whenever a
+    generated key already exists and raise if the contents differ.
+    """
+    canonical = json.dumps(metadata, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return f"feature_panel_{hashlib.sha256(canonical).hexdigest()[:16]}"
 
 
 def _feature_panel_metadata(preview: _CosmxPreview) -> dict[str, object]:
@@ -420,7 +448,7 @@ def _validate_feature_panel_collision(
         return
     assert isinstance(feature_panels, dict)
     if feature_panel_name in feature_panels and feature_panels[feature_panel_name] != feature_panel_metadata:
-        raise ValueError(f"Harpy feature panel {feature_panel_name!r} already exists with incompatible metadata.")
+        raise ValueError(f"Harpy feature-panel hash collision for {feature_panel_name!r}.")
 
 
 def _points_element_name(base: str, mosaic: int) -> str:
