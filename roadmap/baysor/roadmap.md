@@ -268,6 +268,60 @@ prepares its scheduler-neutral input from SpatialData, optionally supplies a Das
 executor, and imports the reconciled result; it does not implement a second
 Harpy-specific tiling or reconciliation algorithm.
 
+### Statistical non-equivalence of tiled Baysor
+
+Independent overlapping Baysor runs are not mathematically equivalent to one
+untiled run. The implementation must therefore treat tiling as a validated
+approximation, not merely as an execution optimization that is assumed to preserve
+the result.
+
+At pinned C++ revision `d7077a7ded6f4b941915badc894f767532d39fd2`, the
+algorithm has both local and invocation-wide dependencies:
+
+- gene filtering and encoding are computed over the invocation;
+- `scale` and `scale_std` may be estimated from all prior-cell centres in the
+  invocation;
+- molecule confidence is obtained by fitting a two-component signal/noise model
+  to KNN-distance statistics over the invocation;
+- molecule-graph edge filtering and weights use invocation-wide edge-length
+  quantiles;
+- initial component placement and automatic component counts depend on the
+  molecules in the invocation;
+- optional molecule clustering is fitted over the invocation; and
+- the BMM assignment update is predominantly local because a molecule considers
+  only components represented among its molecule-graph neighbours.
+
+The final boundary estimator is less globally statistical than its whole-cloud
+signature suggests. For an ordinary cell with at least three assigned molecules,
+it triangulates that cell's assigned molecules and uses non-cell molecules inside
+the cell's bounding box to remove admixture. A dataset-wide mean nearest-neighbour
+distance supplies the offset used for degenerate one- and two-molecule cells. A
+global boundary rebuild can therefore reproduce the untiled boundary semantics
+when final assignments and required local context are the same; the larger source
+of tiled-versus-untiled difference is the assignment calculation that precedes
+the polygon.
+
+A naive implementation that estimates all parameters independently per tile,
+uses no halo, or merges tile polygons is expected to be materially worse. With
+large tiles, a nuclei prior, one global feature panel and scale, disabled molecule
+clustering, sufficient halos, assignment reconciliation, rescue runs, and global
+boundary rebuilding, the working expectation is more limited:
+
+- dense-tissue cells well inside a tile core should often be close to the untiled
+  result;
+- differences should be enriched near seams, sparse or background regions,
+  tissue transitions, unusually large cells, cells without prior nuclei, and
+  ambiguous neighbours; and
+- per-tile confidence/noise fits can produce differences throughout a tile, not
+  only near a seam, particularly when tiles cover biologically different density
+  regimes.
+
+The proposed full expanded UCB tile contains approximately 4.42 million
+transcripts at average density, so sampling variance in tile-wide estimates may
+be small. Spatial non-identical-distribution and algorithmic stochasticity remain
+the concerns. No claim that the difference is scientifically negligible may be
+made until actual-data validation is complete.
+
 ### How tiling artefacts are avoided
 
 The tiled workflow does **not** treat boundary polygons as the objects that must
@@ -342,6 +396,30 @@ Input preparation must happen globally before tiling:
 
 Per-tile gene filtering is not allowed because it would give different gene
 models to different tiles. Per-tile scale estimation is likewise not allowed.
+After global filtering, tile runs must disable any second rare-gene filter that
+could drop globally retained genes in low-count tiles.
+
+Confidence/noise calibration is the largest unresolved global-statistics issue.
+The pinned CLI currently recalculates molecule confidence for every invocation,
+even when a confidence column is present. `baysor-python` should pursue an
+upstream-compatible API that can either:
+
+1. accept and preserve globally precomputed per-molecule confidence; or
+2. accept one globally fitted signal/noise calibration and apply it consistently
+   in every tile.
+
+The global calibration may be fitted exactly or from a reproducible,
+spatially-stratified sample, but sampled calibration must first be compared with
+the untiled fit. If neither capability is available for the first prototype,
+per-tile confidence fitting must be recorded explicitly as an approximation. Tile
+confidence distributions, fitted signal/noise parameters, and noise fractions
+must be included in QC.
+
+The molecule graph is locally constructed, but its edge filtering and weight
+reference are based on per-invocation edge-length distributions. The first
+prototype should record those values per tile and test whether they vary with
+tissue region. A later native API may accept globally calibrated graph thresholds
+if this variation produces material assignment differences.
 
 ### 2. Sample the prior at transcript positions
 
@@ -421,7 +499,11 @@ On the 32 GB benchmark machine, the initial comparison should be:
 Each tile must use:
 
 - the same fixed global scale and scale standard deviation;
-- globally consistent filtering;
+- the globally selected feature panel, with tile-local rare-gene filtering
+  disabled;
+- globally consistent QV and feature-class filtering;
+- the same global confidence/noise calibration when the native API supports it,
+  or otherwise an explicitly recorded per-tile fit;
 - `cluster_method=none` for the first implementation;
 - `--skip-ncv-color`;
 - the same iteration and convergence parameters; and
@@ -596,13 +678,32 @@ required contextual molecules. This capability should preferably be implemented
 in Baysor's public C++ library rather than as a divergent algorithm in the
 binding layer.
 
-### Optional precomputed confidence
+### Global confidence and noise calibration
 
-Noise estimation was a major phase in the exact-size benchmark. An option to
-accept and retain a precomputed molecule-confidence column could support a
-future globally calibrated confidence model and avoid repeated fitting in
-overlapping tiles. This is an optimization, not a requirement for the first
-tiled prototype.
+At the pinned revision, each CLI segmentation invocation recomputes molecule
+confidence from its own KNN-distance distribution and signal/noise mixture fit;
+an input confidence column is not preserved. Consequently, overlapping tile
+runs can acquire tile-wide statistical differences even far from a seam. This
+is the most important remaining difference after gene filtering, scale, and
+clustering have been made globally consistent.
+
+For a mature tiled implementation, Baysor should expose either:
+
+- an option to accept and preserve globally precomputed per-molecule confidence;
+  or
+- a fit/export/apply interface for the signal/noise calibration, so one global
+  calibration can be reused by every tile.
+
+The fit result and provenance should include the KNN definition, mixture-model
+parameters, convergence information, and summary signal/noise proportions. A
+reproducible spatially stratified sample may be used if an exact global fit is
+not practical, but its result must first be compared with the untiled fit.
+
+The first prototype may use tile-local confidence fitting to establish the rest
+of the workflow, but it must be labelled experimental, retain each tile's fitted
+parameters and confidence distribution, and test for spatial discontinuities.
+Global or consistently applied calibration is a scientific-comparability
+requirement before tiled mode is promoted, not merely a runtime optimization.
 
 ## Implementation sequence
 
@@ -615,10 +716,13 @@ crops before deciding whether clustering materially improves segmentation.
 Deliverables:
 
 - selected baseline parameters;
-- an untiled 100-iteration full-mosaic result;
+- repeated untiled runs under locked execution settings to quantify residual
+  stochastic variability;
+- an untiled 100-iteration full-mosaic reference result;
 - resource measurements;
 - visual overlays and biological QC; and
-- a frozen reference molecule-assignment dataset for tiled comparisons.
+- frozen reference molecule-assignment datasets and an untiled-versus-untiled
+  disagreement baseline for tiled comparisons.
 
 Exit criterion: a scientifically plausible untiled result and a parameter set
 worth reproducing in tiled mode.
@@ -672,6 +776,10 @@ Deliverables:
 
 - a scheduler-neutral tiled input/output and executor contract;
 - Harpy-side stable transcript-ID and prior preparation against that contract;
+- one globally filtered feature panel and a contract that disables a second
+  rare-gene filter inside tile runs;
+- a global confidence/noise-calibration input contract, even if the first native
+  backend initially reports it as unsupported;
 - half-open core and halo planner;
 - density/count preflight and adaptive tile splitting;
 - single-pass routing to tile Parquet files;
@@ -690,7 +798,10 @@ Deliverables:
 - an executor protocol and optional Harpy Dask adapter;
 - explicit OpenMP configuration;
 - explicit per-tile `n_cells_init` calculation;
-- retained logs and resource traces;
+- retained logs, resource traces, confidence/noise-fit summaries, and
+  molecule-graph threshold summaries;
+- application of the common global confidence/noise calibration once supported
+  by the native backend;
 - retry/resume behavior; and
 - validation that every expected tile completed with compatible schemas and
   parameters.
@@ -733,6 +844,7 @@ mutually consistent and survive a SpatialData write/read round trip.
 Deliverables:
 
 - tiled-versus-untiled comparison on the actual UCB mosaic;
+- untiled-versus-untiled baseline comparison under the same locked settings;
 - halo-size comparison;
 - tile-size and concurrency benchmarks;
 - a half-tile grid-shift experiment;
@@ -788,6 +900,12 @@ cells, and supported wheel installation.
 
 ### Actual-data validation
 
+Run the untiled reference at least twice under locked parameters and execution
+settings before judging tiled quality. This measures Baysor's ordinary
+stochastic or parallel-execution variability. Tiled-versus-untiled disagreement
+must be interpreted relative to this untiled-versus-untiled baseline rather than
+against an unrealistic requirement of bitwise identity.
+
 Compare the tiled result to the untiled UCB reference using:
 
 - retained and assigned transcript counts;
@@ -800,12 +918,17 @@ Compare the tiled result to the untiled UCB reference using:
 - split nuclei and multi-nucleus cells;
 - cell area and shape distributions;
 - known-marker coherence;
+- unmatched cells and substantial split/merge event rates;
+- per-tile confidence distributions, signal/noise fit parameters, graph
+  thresholds, and noise fractions;
 - disagreement as a function of distance to the nearest seam; and
 - visual overlays at seams and in representative tissue regions.
 
-Repeat the tiled run after shifting the grid by half a core in x and y. A
-scientifically reliable tiled implementation should be nearly invariant to this
-change.
+Run at least the proposed `2 * scale`, `4 * scale`, and `6 * scale` halo
+experiments, and repeat the selected tiled run after shifting the grid by half a
+core in x and y. A scientifically reliable tiled implementation should be
+nearly invariant to grid placement, and its residual disagreement in well
+contextualized interiors should be close to the untiled repeat baseline.
 
 ## Initial acceptance gates
 
@@ -818,6 +941,10 @@ actual-data run, but initial engineering gates are:
 - all shapes and table instances refer to existing global cell IDs;
 - matched-cell count profiles correlate with the untiled reference at greater
   than 0.99;
+- tiled-versus-untiled assignment disagreement in well-contextualized interiors
+  does not materially exceed the untiled-versus-untiled baseline;
+- confidence, graph-threshold, and noise summaries show no unexplained
+  tile-boundary discontinuities or tile-wide shifts;
 - nucleus-ownership metrics do not materially degrade relative to untiled;
 - seam-proximal disagreement is not materially worse than interior
   disagreement; and
@@ -830,12 +957,24 @@ reduced to warnings hidden in logs.
 
 ### Loss of global statistical context
 
-Noise estimation and optional molecule clustering operate independently per
-tile. Halos reduce boundary effects but do not make these models global. The
-first tiled implementation therefore uses `cluster_method=none` and validates
-tile-local noise behavior explicitly. Global or consistently transferred
-clustering can be investigated later if crop experiments show a meaningful
-benefit.
+Global prefiltering, one feature encoding, and fixed global `scale` and
+`scale_std` remove several avoidable sources of drift. Optional molecule
+clustering is disabled initially because fitting it independently per tile would
+introduce another invocation-wide model.
+
+The principal remaining risk is the current CLI's per-invocation confidence and
+noise fit. Halos do not make that model global, so it can shift assignments
+throughout a biologically atypical tile rather than only near its boundary.
+Per-invocation graph thresholds and stochastic component initialization are
+secondary sources of difference. The prototype must retain and compare these
+statistics; the production path should preserve global confidence or apply one
+exported global calibration. If controlled tile runs still exceed the untiled
+repeat baseline, the next steps are globally fixed graph calibration and larger
+or adaptive tiles. Failure after those mitigations is the trigger to investigate
+native domain decomposition rather than silently weakening the quality gates.
+
+Global or consistently transferred clustering can be investigated later only if
+untiled crop experiments show a meaningful scientific benefit.
 
 ### Incorrect cell merging
 
@@ -889,12 +1028,16 @@ Proceed in the following order:
 7. provide a bounded local executor by default, integrate an optional Dask
    executor from Harpy, and import the reconciled results into SpatialData; and
 8. promote tiled mode only after it matches the untiled reference and passes
-   seam and grid-shift validation.
+   untiled-repeat, halo, seam, and grid-shift validation.
 
 Tiling is therefore a planned scalability capability, not the default for the
 current 47-million-transcript sample. The architecture must nevertheless make
 it possible to scale beyond a single machine without changing the authoritative
 data model or scientific interpretation of the result.
+
+Until globally consistent confidence/noise handling and the actual-data quality
+gates are satisfied, tiled output is explicitly experimental and untiled Baysor
+remains the scientific reference.
 
 The selected implementation is explicitly Python-orchestrated tiling with native
 Baysor jobs, not a C++ loop around independent tiles. Native domain decomposition
