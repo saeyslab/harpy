@@ -132,6 +132,8 @@ def _add_label_family(
     - ``orientation``: dataset-wide local x/y-axis flips applied before
       placement;
     - ``pixel_size_um``: physical size of one source pixel coordinate unit;
+    - ``acquisition_timestamp`` when available: the consistent source
+      ``OrigTimeStamp`` value preserved verbatim;
     - ``instance_id_encoding`` for instance labels: background value, complete
       source-dtype range reserved per FOV, and the local-to-global ID formula;
       and
@@ -254,6 +256,8 @@ def _add_label_family(
             }
         else:
             metadata["categories"] = deepcopy(_COMPARTMENT_CATEGORIES)
+        if preview.manifest.run.acquisition_timestamp is not None:
+            metadata["acquisition_timestamp"] = preview.manifest.run.acquisition_timestamp
         labels_metadata[element_name] = metadata
 
     sdata.attrs = attrs

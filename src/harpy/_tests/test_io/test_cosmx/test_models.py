@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from harpy.io._cosmx._models import (
+    CosmxSample,
     _CosmxChannel,
     _CosmxFeatureClass,
     _CosmxFeaturePanel,
@@ -19,9 +20,35 @@ from harpy.io._cosmx._models import (
 )
 
 
+def test_cosmx_sample_copies_sequences_and_normalizes_single_mosaic_tolerance() -> None:
+    fovs = [2, 1]
+    channels = ["U", "B"]
+
+    sample = CosmxSample(
+        path="sample",
+        fovs=fovs,
+        channels=channels,
+        mosaic_mode="single",
+        adjacency_tolerance_px=42,
+    )
+    fovs.append(3)
+    channels.append("G")
+
+    assert sample.fovs == (2, 1)
+    assert sample.channels == ("U", "B")
+    assert sample.adjacency_tolerance_px is None
+
+
+@pytest.mark.parametrize("coordinate_system", ["", "global-name", "1global", " global"])
+def test_cosmx_sample_rejects_invalid_coordinate_system_base(coordinate_system: str) -> None:
+    with pytest.raises(ValueError, match="coordinate-system base name must match"):
+        CosmxSample(path="sample", coordinate_system=coordinate_system)
+
+
 def _run_metadata(**updates: object) -> _CosmxRunMetadata:
     values = {
         "declared_fov_count": 2,
+        "acquisition_timestamp": "20240101_100000_S2",
         "channels": (_CosmxChannel(channel_id="U", name="DNA"),),
         "pixel_size_um": 1.0,
         "tile_shape": (8, 8),
@@ -67,6 +94,7 @@ def _preview() -> _CosmxPreview:
     ("updates", "message"),
     [
         ({"declared_fov_count": 0}, "Declared CosMx FOV count must be positive"),
+        ({"acquisition_timestamp": ""}, "acquisition timestamp must be a non-empty trimmed string"),
         ({"channels": ()}, "at least one channel"),
         (
             {

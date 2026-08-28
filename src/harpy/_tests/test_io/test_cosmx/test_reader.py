@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -10,13 +11,13 @@ from spatialdata.transformations import get_transformation
 
 from harpy import __version__
 from harpy.image._image import get_dataarray
-from harpy.io import cosmx
+from harpy.io import CosmxSample, cosmx
 from harpy.io._cosmx import _reader
 
 
 @pytest.fixture
 def ingestible_cosmx_path(decoded_cosmx_path: Path) -> Path:
-    """Populate the selected synthetic FOVs with minimal valid transcripts."""
+    """Populate positioned synthetic FOVs with minimal valid transcripts."""
     preview = _reader._preview_cosmx(_reader._discover_cosmx(decoded_cosmx_path))
     for fov in preview.included_fovs:
         path = preview.manifest.fovs_by_id[fov].transcripts
@@ -35,14 +36,14 @@ def ingestible_cosmx_path(decoded_cosmx_path: Path) -> Path:
     return decoded_cosmx_path
 
 
-def test_cosmx_reads_all_modalities_into_matching_mosaics(
+def test_cosmx_reads_one_sample_with_sample_scoped_names_and_metadata(
     ingestible_cosmx_path: Path,
     tmp_path: Path,
 ) -> None:
     output = tmp_path / "cosmx.zarr"
 
     sdata = cosmx(
-        ingestible_cosmx_path,
+        {"sample_a": CosmxSample(path=ingestible_cosmx_path)},
         output,
         image_chunks=(1, 4, 4),
         labels_chunks=(4, 4),
@@ -50,195 +51,209 @@ def test_cosmx_reads_all_modalities_into_matching_mosaics(
     )
 
     assert Path(sdata.path) == output
-    assert set(sdata.images) == {"morphology_image_mosaic_1", "morphology_image_mosaic_2"}
+    assert set(sdata.images) == {"sample_a_morphology_image_mosaic_1", "sample_a_morphology_image_mosaic_2"}
     assert set(sdata.labels) == {
-        "instance_labels_mosaic_1",
-        "instance_labels_mosaic_2",
-        "compartment_labels_mosaic_1",
-        "compartment_labels_mosaic_2",
+        "sample_a_instance_labels_mosaic_1",
+        "sample_a_instance_labels_mosaic_2",
+        "sample_a_compartment_labels_mosaic_1",
+        "sample_a_compartment_labels_mosaic_2",
     }
-    assert set(sdata.points) == {"transcripts_mosaic_1", "transcripts_mosaic_2"}
-    assert get_dataarray(sdata, "instance_labels_mosaic_1").dtype == np.dtype(np.uint32)
-    assert get_dataarray(sdata, "compartment_labels_mosaic_1").dtype == np.dtype(np.uint8)
+    assert set(sdata.points) == {"sample_a_transcripts_mosaic_1", "sample_a_transcripts_mosaic_2"}
+    assert get_dataarray(sdata, "sample_a_instance_labels_mosaic_1").dtype == np.dtype(np.uint32)
     assert sum(len(points.compute()) for points in sdata.points.values()) == 3
 
-    for mosaic in (1, 2):
-        expected = {f"global_{mosaic}", f"global_{mosaic}_micron"}
-        assert set(get_transformation(sdata.images[f"morphology_image_mosaic_{mosaic}"], get_all=True)) == expected
-        assert set(get_transformation(sdata.labels[f"instance_labels_mosaic_{mosaic}"], get_all=True)) == expected
-        assert set(get_transformation(sdata.points[f"transcripts_mosaic_{mosaic}"], get_all=True)) == expected
+    expected = {"sample_a_global_1", "sample_a_global_1_micron"}
+    assert set(get_transformation(sdata.images["sample_a_morphology_image_mosaic_1"], get_all=True)) == expected
+    assert set(get_transformation(sdata.labels["sample_a_instance_labels_mosaic_1"], get_all=True)) == expected
+    assert set(get_transformation(sdata.points["sample_a_transcripts_mosaic_1"], get_all=True)) == expected
 
-    assert sdata.attrs["harpy"]["metadata_version"] == 1
-    assert "cosmx" not in sdata.attrs
-    assert sdata.attrs["harpy"]["provenance"] == {
-        "reader": "cosmx",
-        "reader_version": __version__,
-        "mosaic_mode": "spatial_groups",
-        "adjacency_tolerance_px": 1,
-    }
-    assert set(sdata.attrs["harpy"]) == {
-        "metadata_version",
-        "provenance",
-        "images",
-        "labels",
-        "points",
-        "feature_panels",
-    }
-    assert set(sdata.attrs["harpy"]["feature_panels"]) == {"transcripts_panel"}
-    assert {metadata["feature_panel"] for metadata in sdata.attrs["harpy"]["points"].values()} == {"transcripts_panel"}
+    metadata = sdata.attrs["harpy"]
+    assert metadata["provenance"] == {"reader": "cosmx", "reader_version": __version__}
+    image_metadata = metadata["images"]["sample_a_morphology_image_mosaic_1"]
+    assert image_metadata["sample_id"] == "sample_a"
+    assert image_metadata["fovs"] == [1, 2]
+    assert image_metadata["mosaic"] == {"mode": "spatial_groups", "adjacency_tolerance_px": 1}
+    panel_names = set(metadata["feature_panels"])
+    assert len(panel_names) == 1
+    panel_name = panel_names.pop()
+    assert panel_name.startswith("feature_panel_")
+    assert {record["feature_panel"] for record in metadata["points"].values()} == {panel_name}
     assert not _generated_siblings(output)
 
 
-def test_cosmx_applies_fov_and_channel_selection(
+def test_cosmx_writes_two_samples_with_independent_configuration(
     ingestible_cosmx_path: Path,
     tmp_path: Path,
 ) -> None:
-    output = tmp_path / "subset.zarr"
+    output = tmp_path / "multi.zarr"
 
     sdata = cosmx(
-        ingestible_cosmx_path,
+        {
+            "sample_a": CosmxSample(
+                path=ingestible_cosmx_path,
+                fovs=[1, 2],
+                channels=["U"],
+                adjacency_tolerance_px=0,
+                coordinate_system="pixels",
+                flip_x=False,
+            ),
+            "sample_b": CosmxSample(
+                path=ingestible_cosmx_path,
+                fovs=[3],
+                channels=["B"],
+                mosaic_mode="single",
+                adjacency_tolerance_px=99,
+                flip_y=True,
+            ),
+        },
         output,
-        fovs=(2, 1, 2),
-        channels=("U",),
-        adjacency_tolerance_px=0,
-        morphology=True,
         instance_labels=False,
         compartment_labels=False,
         transcripts=False,
         image_chunks=(1, 4, 4),
     )
 
-    assert set(sdata.images) == {"morphology_image_mosaic_1"}
-    image = get_dataarray(sdata, "morphology_image_mosaic_1")
-    assert image.coords["c"].values.tolist() == ["DNA"]
-    assert sdata.attrs["harpy"]["images"]["morphology_image_mosaic_1"]["fovs"] == [1, 2]
-    assert sdata.attrs["harpy"]["provenance"]["mosaic_mode"] == "spatial_groups"
-    assert sdata.attrs["harpy"]["provenance"]["adjacency_tolerance_px"] == 0
+    assert set(sdata.images) == {
+        "sample_a_morphology_image_mosaic_1",
+        "sample_b_morphology_image_mosaic_1",
+    }
+    assert get_dataarray(sdata, "sample_a_morphology_image_mosaic_1").coords["c"].values.tolist() == ["DNA"]
+    assert get_dataarray(sdata, "sample_b_morphology_image_mosaic_1").coords["c"].values.tolist() == ["Histone"]
+    assert set(get_transformation(sdata.images["sample_a_morphology_image_mosaic_1"], get_all=True)) == {
+        "sample_a_pixels_1",
+        "sample_a_pixels_1_micron",
+    }
+    assert set(get_transformation(sdata.images["sample_b_morphology_image_mosaic_1"], get_all=True)) == {
+        "sample_b_global_1",
+        "sample_b_global_1_micron",
+    }
+    metadata = sdata.attrs["harpy"]["images"]
+    assert metadata["sample_a_morphology_image_mosaic_1"]["orientation"] == {"flip_x": False, "flip_y": False}
+    assert metadata["sample_a_morphology_image_mosaic_1"]["mosaic"] == {
+        "mode": "spatial_groups",
+        "adjacency_tolerance_px": 0,
+    }
+    assert metadata["sample_b_morphology_image_mosaic_1"]["orientation"] == {"flip_x": True, "flip_y": True}
+    assert metadata["sample_b_morphology_image_mosaic_1"]["mosaic"] == {
+        "mode": "single",
+        "adjacency_tolerance_px": None,
+    }
 
 
-@pytest.mark.parametrize(
-    "helper_name",
-    [
-        pytest.param("_add_morphology_images", id="morphology"),
-        pytest.param("_add_instance_labels", id="instance-labels-after-morphology"),
-        pytest.param("_add_compartment_labels", id="compartment-labels-after-instance-labels"),
-        pytest.param("_add_transcript_points", id="transcripts-after-rasters"),
-    ],
-)
-def test_cosmx_stage_failure_leaves_new_output_absent(
-    ingestible_cosmx_path: Path,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    helper_name: str,
-) -> None:
-    output = tmp_path / "failed.zarr"
-
-    def fail(*args: object, **kwargs: object) -> None:
-        raise RuntimeError("planned stage failure")
-
-    monkeypatch.setattr(_reader, helper_name, fail)
-    with pytest.raises(RuntimeError, match="planned stage failure"):
-        _reader.cosmx(
-            ingestible_cosmx_path,
-            output,
-            image_chunks=(1, 4, 4),
-            labels_chunks=(4, 4),
-            transcript_blocksize=64,
-        )
-
-    assert not output.exists()
-    assert not _generated_siblings(output)
-
-
-def test_cosmx_failed_overwrite_preserves_existing_store(
-    ingestible_cosmx_path: Path,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    output = tmp_path / "existing.zarr"
-    cosmx(
-        ingestible_cosmx_path,
-        output,
-        morphology=True,
-        instance_labels=False,
-        compartment_labels=False,
-        transcripts=False,
-        image_chunks=(1, 4, 4),
-    )
-    before = _store_snapshot(output)
-
-    def fail(*args: object, **kwargs: object) -> None:
-        raise RuntimeError("planned replacement failure")
-
-    monkeypatch.setattr(_reader, "_add_instance_labels", fail)
-    with pytest.raises(RuntimeError, match="planned replacement failure"):
-        _reader.cosmx(
-            ingestible_cosmx_path,
-            output,
-            morphology=False,
-            instance_labels=True,
-            compartment_labels=False,
-            transcripts=False,
-            labels_chunks=(4, 4),
-            overwrite=True,
-        )
-
-    assert _store_snapshot(output) == before
-    assert set(read_zarr(output).images) == {"morphology_image_mosaic_1", "morphology_image_mosaic_2"}
-    assert not _generated_siblings(output)
-
-
-def test_cosmx_successful_overwrite_replaces_complete_store(
+def test_cosmx_deduplicates_identical_feature_panels_across_samples(
     ingestible_cosmx_path: Path,
     tmp_path: Path,
 ) -> None:
-    output = tmp_path / "replace.zarr"
-    cosmx(
-        ingestible_cosmx_path,
-        output,
-        morphology=True,
-        instance_labels=False,
-        compartment_labels=False,
-        transcripts=False,
-        image_chunks=(1, 4, 4),
-    )
-
     sdata = cosmx(
-        ingestible_cosmx_path,
-        output,
+        {
+            "sample_a": CosmxSample(path=ingestible_cosmx_path, fovs=[1]),
+            "sample_b": CosmxSample(path=ingestible_cosmx_path, fovs=[2]),
+        },
+        tmp_path / "panels.zarr",
         morphology=False,
-        instance_labels=True,
+        instance_labels=False,
         compartment_labels=False,
-        transcripts=False,
-        labels_chunks=(4, 4),
-        overwrite=True,
+        transcripts=True,
+        transcript_blocksize=64,
     )
 
-    assert not sdata.images
-    assert set(sdata.labels) == {"instance_labels_mosaic_1", "instance_labels_mosaic_2"}
-    assert not _generated_siblings(output)
+    panels = sdata.attrs["harpy"]["feature_panels"]
+    references = {record["feature_panel"] for record in sdata.attrs["harpy"]["points"].values()}
+    assert len(panels) == 1
+    assert references == set(panels)
 
 
-def test_cosmx_rejects_public_orchestration_errors_before_staging(
+def test_cosmx_keeps_different_feature_panels_separate(
+    ingestible_cosmx_path: Path,
+    tmp_path: Path,
+) -> None:
+    second_path = tmp_path / "second_sample"
+    shutil.copytree(ingestible_cosmx_path, second_path)
+    plex = second_path / "plex-analysis.txt"
+    plex.write_text(plex.read_text().replace("SystemControl1,SystemControl", "SystemControl2,SystemControl"))
+
+    sdata = cosmx(
+        {
+            "sample_a": CosmxSample(path=ingestible_cosmx_path, fovs=[1]),
+            "sample_b": CosmxSample(path=second_path, fovs=[1]),
+        },
+        tmp_path / "different_panels.zarr",
+        morphology=False,
+        instance_labels=False,
+        compartment_labels=False,
+        transcripts=True,
+        transcript_blocksize=64,
+    )
+
+    panels = sdata.attrs["harpy"]["feature_panels"]
+    references = {record["feature_panel"] for record in sdata.attrs["harpy"]["points"].values()}
+    assert len(panels) == 2
+    assert references == set(panels)
+
+
+def test_cosmx_intersects_fovs_only_across_enabled_modalities(
     decoded_cosmx_path: Path,
     tmp_path: Path,
 ) -> None:
+    (decoded_cosmx_path / "CellStatsDir" / "FOV00002" / "CellLabels_F00002.tif").unlink()
+
+    morphology_only = cosmx(
+        {"sample": CosmxSample(path=decoded_cosmx_path)},
+        tmp_path / "morphology.zarr",
+        instance_labels=False,
+        compartment_labels=False,
+        transcripts=False,
+        image_chunks=(1, 4, 4),
+    )
+    represented = {
+        fov for record in morphology_only.attrs["harpy"]["images"].values() for fov in record["fovs"]
+    }
+    assert represented == {1, 2, 3}
+
+    with_instance_labels = cosmx(
+        {"sample": CosmxSample(path=decoded_cosmx_path)},
+        tmp_path / "labels.zarr",
+        compartment_labels=False,
+        transcripts=False,
+        image_chunks=(1, 4, 4),
+        labels_chunks=(4, 4),
+    )
+    represented = {
+        fov for record in with_instance_labels.attrs["harpy"]["images"].values() for fov in record["fovs"]
+    }
+    assert represented == {1, 3}
+
+
+def test_cosmx_rejects_configuration_errors_before_staging(decoded_cosmx_path: Path, tmp_path: Path) -> None:
     output = tmp_path / "invalid.zarr"
 
+    with pytest.raises(ValueError, match="non-empty mapping"):
+        cosmx({}, output)
+    with pytest.raises(ValueError, match="sample identifier must match"):
+        cosmx({"invalid-id": CosmxSample(path=decoded_cosmx_path)}, output, transcripts=False)
+    with pytest.raises(ValueError, match="planned by both"):
+        cosmx(
+            {
+                "Sample": CosmxSample(path=decoded_cosmx_path),
+                "sample": CosmxSample(path=decoded_cosmx_path),
+            },
+            output,
+            instance_labels=False,
+            compartment_labels=False,
+            transcripts=False,
+        )
     with pytest.raises(ValueError, match="at least one enabled modality"):
         cosmx(
-            decoded_cosmx_path,
+            {"sample": CosmxSample(path=decoded_cosmx_path)},
             output,
             morphology=False,
             instance_labels=False,
             compartment_labels=False,
             transcripts=False,
         )
-    with pytest.raises(ValueError, match="no common positioned FOVs"):
-        cosmx(decoded_cosmx_path, output, fovs=(4,), morphology=True)
     with pytest.raises(ValueError, match="planned by both"):
         cosmx(
-            decoded_cosmx_path,
+            {"sample": CosmxSample(path=decoded_cosmx_path)},
             output,
             output_image_name="shared",
             output_instance_labels_name="shared",
@@ -250,44 +265,62 @@ def test_cosmx_rejects_public_orchestration_errors_before_staging(
     assert not _generated_siblings(output)
 
 
-def test_cosmx_rejects_source_output_alias_and_existing_output_without_overwrite(
+def test_cosmx_failure_while_writing_later_sample_preserves_existing_store(
+    decoded_cosmx_path: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = tmp_path / "existing.zarr"
+    cosmx(
+        {"original": CosmxSample(path=decoded_cosmx_path)},
+        output,
+        instance_labels=False,
+        compartment_labels=False,
+        transcripts=False,
+        image_chunks=(1, 4, 4),
+    )
+    before = _store_snapshot(output)
+    original = _reader._add_morphology_images
+    calls = 0
+
+    def fail_second(*args: object, **kwargs: object) -> SpatialData:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("planned second-sample failure")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(_reader, "_add_morphology_images", fail_second)
+    with pytest.raises(RuntimeError, match="planned second-sample failure"):
+        cosmx(
+            {
+                "sample_a": CosmxSample(path=decoded_cosmx_path),
+                "sample_b": CosmxSample(path=decoded_cosmx_path),
+            },
+            output,
+            instance_labels=False,
+            compartment_labels=False,
+            transcripts=False,
+            image_chunks=(1, 4, 4),
+            overwrite=True,
+        )
+
+    assert _store_snapshot(output) == before
+    assert not _generated_siblings(output)
+
+
+def test_cosmx_rejects_source_output_alias_and_unrecognized_overwrite(
     decoded_cosmx_path: Path,
     tmp_path: Path,
 ) -> None:
     with pytest.raises(ValueError, match="must not equal or contain one another"):
-        cosmx(decoded_cosmx_path, decoded_cosmx_path, morphology=True)
+        cosmx({"sample": CosmxSample(path=decoded_cosmx_path)}, decoded_cosmx_path, transcripts=False)
 
-    output = tmp_path / "existing.zarr"
-    SpatialData().write(output)
-    with pytest.raises(FileExistsError, match="already exists"):
-        cosmx(decoded_cosmx_path, output, morphology=True)
-
-
-def test_cosmx_refuses_to_overwrite_unrecognized_spatialdata(
-    decoded_cosmx_path: Path,
-    tmp_path: Path,
-) -> None:
     output = tmp_path / "unrecognized.zarr"
     SpatialData().write(output)
-
     with pytest.raises(ValueError, match="not created by the CosMx reader"):
-        cosmx(decoded_cosmx_path, output, morphology=True, overwrite=True)
-
+        cosmx({"sample": CosmxSample(path=decoded_cosmx_path)}, output, transcripts=False, overwrite=True)
     assert read_zarr(output).attrs.get("harpy") is None
-
-
-def test_cosmx_refuses_to_overwrite_store_from_another_reader(
-    decoded_cosmx_path: Path,
-    tmp_path: Path,
-) -> None:
-    output = tmp_path / "other-reader.zarr"
-    sdata = SpatialData(attrs={"harpy": {"metadata_version": 1, "provenance": {"reader": "other"}}})
-    sdata.write(output)
-
-    with pytest.raises(ValueError, match="not created by the CosMx reader"):
-        cosmx(decoded_cosmx_path, output, morphology=True, overwrite=True)
-
-    assert read_zarr(output).attrs["harpy"]["provenance"]["reader"] == "other"
 
 
 def _generated_siblings(output: Path) -> list[Path]:

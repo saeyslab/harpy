@@ -29,6 +29,7 @@ def test_add_morphology_images_stitches_groups_and_roundtrips(
     result = _add_morphology_images(
         sdata,
         preview,
+        sample_id="sample",
         channels=("U", "Histone"),
         chunks=(1, 4, 4),
     )
@@ -61,9 +62,15 @@ def test_add_morphology_images_stitches_groups_and_roundtrips(
     metadata = roundtripped.attrs["harpy"]["images"]["morphology_image_mosaic_1"]
     assert metadata == {
         "fovs": [1, 2],
+        "sample_id": "sample",
+        "mosaic": {
+            "mode": preview.mosaic_mode,
+            "adjacency_tolerance_px": preview.adjacency_tolerance_px,
+        },
         "source_origin_px": {"x": 0, "y": 0},
         "orientation": {"flip_x": True, "flip_y": False},
         "pixel_size_um": 1.0,
+        "acquisition_timestamp": "20240101_100000_S2",
         "channels": [
             {
                 "channel_id": "B",
@@ -166,6 +173,7 @@ def test_add_morphology_images_forwards_explicit_orientation(
     _add_morphology_images(
         sdata,
         preview,
+        sample_id="sample",
         channels=("B",),
         flip_x=False,
         flip_y=True,
@@ -196,6 +204,7 @@ def test_morphology_rejects_non_image_name_collision_before_pixel_reads(
         _add_morphology_images(
             sdata,
             preview,
+            sample_id="sample",
             channels=("B",),
             chunks=(1, 4, 4),
             overwrite=overwrite,
@@ -218,6 +227,7 @@ def test_multiscale_morphology_reads_each_source_plane_once(
     _add_morphology_images(
         sdata,
         preview,
+        sample_id="sample",
         channels=("B",),
         chunks=(1, 4, 4),
         scale_factors=[2],
@@ -247,7 +257,7 @@ def test_changed_source_metadata_fails_write_without_leaving_an_element(
     sdata = _backed_sdata(tmp_path)
 
     with pytest.raises(ValueError, match="changed dtype after discovery"):
-        _add_morphology_images(sdata, preview, channels=("B",), chunks=(1, 4, 4))
+        _add_morphology_images(sdata, preview, sample_id="sample", channels=("B",), chunks=(1, 4, 4))
 
     assert "morphology_image_mosaic_1" not in sdata.images
     assert "morphology_image_mosaic_1" not in read_zarr(sdata.path).images

@@ -22,6 +22,7 @@ class _CosmxKeys(ModeEnum):
     PLEX_CLASS_COLUMN = "CodeClass"
     FEATURE_COLUMN = "gene"
     FEATURE_CLASS_COLUMN = "code_class"
+    ACQUISITION_TIMESTAMP = "OrigTimeStamp"
 
 
 _FOV_DIR_RE = re.compile(r"^FOV0*(\d+)$", re.IGNORECASE)

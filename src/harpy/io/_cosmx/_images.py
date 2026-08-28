@@ -70,7 +70,9 @@ def _add_morphology_images(
       metadata, not an active SpatialData transformation;
     - ``orientation``: dataset-wide local x/y-axis flips applied before
       placement;
-    - ``pixel_size_um``: physical size of one source pixel coordinate unit; and
+    - ``pixel_size_um``: physical size of one source pixel coordinate unit;
+    - ``acquisition_timestamp`` when available: the consistent source
+      ``OrigTimeStamp`` value preserved verbatim; and
     - ``channels``: retained acquisition channel IDs and names together with
       their source TIFF planes and output channel coordinates.
 
@@ -186,7 +188,7 @@ def _add_morphology_images(
             c_coords=[channel.output_coordinate for channel in selected_channels],
             overwrite=overwrite,
         )
-        images_metadata[element_name] = {
+        metadata = {
             "fovs": list(mosaic.fovs),
             "sample_id": sample_id,
             "mosaic": {
@@ -198,6 +200,9 @@ def _add_morphology_images(
             "pixel_size_um": preview.manifest.run.pixel_size_um,
             "channels": deepcopy(channel_records),
         }
+        if preview.manifest.run.acquisition_timestamp is not None:
+            metadata["acquisition_timestamp"] = preview.manifest.run.acquisition_timestamp
+        images_metadata[element_name] = metadata
     sdata.attrs = attrs
     sdata.write_attrs()
     return sdata

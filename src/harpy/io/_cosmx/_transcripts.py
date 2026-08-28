@@ -80,7 +80,9 @@ def _add_transcript_points(
       transformation;
     - ``orientation``: dataset-wide local x/y-axis flips applied before each
       FOV placement is added; and
-    - ``pixel_size_um``: physical size of one source x/y coordinate unit; and
+    - ``pixel_size_um``: physical size of one source x/y coordinate unit;
+    - ``acquisition_timestamp`` when available: the consistent source
+      ``OrigTimeStamp`` value preserved verbatim; and
     - ``feature_panel`` when authoritative panel metadata is available: the
       key of the shared record in ``harpy.feature_panels``. That record maps
       every assay-defined transcript target (the feature) to one class,
@@ -200,6 +202,8 @@ def _add_transcript_points(
         }
         if feature_panel_name is not None:
             metadata["feature_panel"] = feature_panel_name
+        if preview.manifest.run.acquisition_timestamp is not None:
+            metadata["acquisition_timestamp"] = preview.manifest.run.acquisition_timestamp
         points_metadata[element_name] = metadata
     sdata.attrs = attrs
     sdata.write_attrs()

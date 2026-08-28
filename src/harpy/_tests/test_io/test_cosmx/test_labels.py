@@ -34,6 +34,7 @@ def test_add_instance_labels_remaps_stitches_and_roundtrips(
     result = _add_instance_labels(
         sdata,
         preview,
+        sample_id="sample",
         chunks=(4, 4),
         scale_factors=[2],
     )
@@ -66,9 +67,15 @@ def test_add_instance_labels_remaps_stitches_and_roundtrips(
     )
     assert roundtripped.attrs["harpy"]["labels"]["instance_labels_mosaic_1"] == {
         "fovs": [1, 2],
+        "sample_id": "sample",
+        "mosaic": {
+            "mode": preview.mosaic_mode,
+            "adjacency_tolerance_px": preview.adjacency_tolerance_px,
+        },
         "source_origin_px": {"x": 0, "y": 0},
         "orientation": {"flip_x": True, "flip_y": False},
         "pixel_size_um": 1.0,
+        "acquisition_timestamp": "20240101_100000_S2",
         "instance_id_encoding": {
             "background": 0,
             "base": 65_536,
@@ -92,7 +99,7 @@ def test_add_compartment_labels_preserves_semantic_values(
     preview = _labelled_preview(decoded_cosmx_path)
     sdata = _backed_sdata(tmp_path)
 
-    _add_compartment_labels(sdata, preview, chunks=(4, 4))
+    _add_compartment_labels(sdata, preview, sample_id="sample", chunks=(4, 4))
 
     values = get_dataarray(sdata, "compartment_labels_mosaic_1").data.compute()
     assert values.dtype == np.dtype(np.uint8)
@@ -122,7 +129,7 @@ def test_unsupported_compartment_value_fails_without_leaving_an_element(
     sdata = _backed_sdata(tmp_path)
 
     with pytest.raises(ValueError, match=r"unsupported category values \[4\]"):
-        _add_compartment_labels(sdata, preview, chunks=(4, 4))
+        _add_compartment_labels(sdata, preview, sample_id="sample", chunks=(4, 4))
 
     assert "compartment_labels_mosaic_1" not in sdata.labels
     assert "compartment_labels_mosaic_1" not in read_zarr(sdata.path).labels
@@ -171,7 +178,7 @@ def test_changed_label_metadata_fails_write_without_leaving_an_element(
     sdata = _backed_sdata(tmp_path)
 
     with pytest.raises(ValueError, match="changed dtype after discovery"):
-        _add_instance_labels(sdata, preview, chunks=(4, 4))
+        _add_instance_labels(sdata, preview, sample_id="sample", chunks=(4, 4))
 
     assert "instance_labels_mosaic_1" not in sdata.labels
     assert "instance_labels_mosaic_1" not in read_zarr(sdata.path).labels
@@ -192,7 +199,7 @@ def test_labels_reject_non_label_name_collision_before_pixel_reads(
     reads = _instrument_label_reads(monkeypatch)
 
     with pytest.raises(ValueError, match="output names already belong to non-label elements"):
-        _add_instance_labels(sdata, preview, chunks=(4, 4), overwrite=overwrite)
+        _add_instance_labels(sdata, preview, sample_id="sample", chunks=(4, 4), overwrite=overwrite)
 
     assert not reads
     assert "instance_labels_mosaic_1" in read_zarr(path).images

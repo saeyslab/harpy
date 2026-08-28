@@ -143,6 +143,7 @@ def cosmx(
         │       │   ├── flip_x: <bool>
         │       │   └── flip_y: <bool>
         │       ├── pixel_size_um: <float>
+        │       ├── acquisition_timestamp: <source OrigTimeStamp>  [optional]
         │       └── channels
         │           └── [<channel record>, ...]
         │               ├── channel_id: <str>
@@ -153,7 +154,7 @@ def cosmx(
         ├── labels
         │   ├── <instance-label element name>
         │   │   ├── sample_id, fovs, mosaic, source_origin_px,
-        │   │   │   orientation, pixel_size_um
+        │   │   │   orientation, pixel_size_um, acquisition_timestamp [optional]
         │   │   └── instance_id_encoding
         │   │       ├── background: 0
         │   │       ├── base: <number of source-dtype values>
@@ -162,7 +163,7 @@ def cosmx(
         │   │
         │   └── <compartment-label element name>
         │       ├── sample_id, fovs, mosaic, source_origin_px,
-        │       │   orientation, pixel_size_um
+        │       │   orientation, pixel_size_um, acquisition_timestamp [optional]
         │       └── categories
         │           ├── 0: "background"
         │           ├── 1: "nuclear"
@@ -172,7 +173,7 @@ def cosmx(
         ├── points
         │   └── <transcript points element name>
         │       ├── sample_id, fovs, mosaic, source_origin_px,
-        │       │   orientation, pixel_size_um
+        │       │   orientation, pixel_size_um, acquisition_timestamp [optional]
         │       └── feature_panel: "feature_panel_<content hash>"  [optional]
         │
         └── feature_panels                                      [optional]
@@ -187,7 +188,10 @@ def cosmx(
     ``labels``, and ``points`` mappings are keyed by exact SpatialData element
     names. Disabled modality registries are omitted. SpatialData coordinate
     systems and transformations are stored with the spatial elements and are
-    not part of this root Harpy metadata tree.
+    not part of this root Harpy metadata tree. ``acquisition_timestamp`` is the
+    source ``OrigTimeStamp`` preserved verbatim when it is non-empty and
+    consistent across all morphology TIFFs for the sample; otherwise the field
+    is omitted.
 
     When an authoritative run-level plex is available, ``feature_panel`` is a
     points-record reference whose value is the key of a content-addressed

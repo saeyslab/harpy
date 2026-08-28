@@ -130,13 +130,14 @@ def test_preview_can_place_all_fovs_in_one_mosaic(decoded_cosmx_path: Path) -> N
     assert preview.adjacency_tolerance_px is None
 
 
-def test_single_mosaic_mode_rejects_adjacency_tolerance(decoded_cosmx_path: Path) -> None:
-    with pytest.raises(ValueError, match="single-mosaic mode does not use an adjacency tolerance"):
-        _preview_cosmx(
-            _discover_cosmx(decoded_cosmx_path),
-            mosaic_mode="single",
-            adjacency_tolerance_px=0,
-        )
+def test_single_mosaic_mode_ignores_adjacency_tolerance(decoded_cosmx_path: Path) -> None:
+    preview = _preview_cosmx(
+        _discover_cosmx(decoded_cosmx_path),
+        mosaic_mode="single",
+        adjacency_tolerance_px=0,
+    )
+
+    assert preview.adjacency_tolerance_px is None
 
 
 @pytest.mark.parametrize("tolerance", [-1, True, 1.5])

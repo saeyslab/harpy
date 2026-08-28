@@ -4,6 +4,7 @@ import builtins
 import json
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -59,6 +60,7 @@ def test_discover_compact_manifest_without_opening_deferred_data(
     assert not hasattr(manifest.fovs[0], "cell_boundaries")
     assert tuple(channel.channel_id for channel in manifest.run.channels) == tuple(_CHANNEL_ORDER)
     assert tuple(channel.name for channel in manifest.run.channels) == ("Histone", "G", "rRNA", "GFAP", "DNA")
+    assert manifest.run.acquisition_timestamp == "20240101_100000_S2"
     assert manifest.run.pixel_size_um == pytest.approx(1.0)
     assert manifest.run.tile_shape == (_TILE_SIZE, _TILE_SIZE)
     assert manifest.run.instance_labels_dtype == "uint16"
@@ -136,13 +138,31 @@ def test_discovery_rejects_invalid_plex(
         _discover_cosmx(decoded_cosmx_path)
 
 
-def test_discovery_allows_varying_non_stitching_metadata(decoded_cosmx_path: Path) -> None:
+def test_discovery_omits_inconsistent_acquisition_timestamp(
+    decoded_cosmx_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    warnings: list[str] = []
+    monkeypatch.setattr(_discovery, "log", SimpleNamespace(warning=warnings.append))
     morphology = decoded_cosmx_path / "CellStatsDir" / "Morphology2D" / "20240101_120000_S2_C001_P01_N01_F00002.TIF"
     _rewrite_morphology_metadata(morphology, OrigTimeStamp="another-acquisition", Slot=99)
 
     manifest = _discover_cosmx(decoded_cosmx_path)
 
     assert manifest.available_fovs("morphology") == (1, 2, 3)
+    assert manifest.run.acquisition_timestamp is None
+    assert len(warnings) == 1
+    assert "acquisition_timestamp metadata will be omitted" in warnings[0]
+
+
+def test_discovery_allows_missing_acquisition_timestamp(decoded_cosmx_path: Path) -> None:
+    morphology_dir = decoded_cosmx_path / "CellStatsDir" / "Morphology2D"
+    for morphology in morphology_dir.glob("*.TIF"):
+        _rewrite_morphology_metadata(morphology, remove=("OrigTimeStamp",))
+
+    manifest = _discover_cosmx(decoded_cosmx_path)
+
+    assert manifest.run.acquisition_timestamp is None
 
 
 def test_discovery_rejects_incompatible_pixel_size(decoded_cosmx_path: Path) -> None:
@@ -170,9 +190,16 @@ def test_discovery_rejects_signed_compartment_labels(decoded_cosmx_path: Path) -
         _discover_cosmx(decoded_cosmx_path)
 
 
-def _rewrite_morphology_metadata(path: Path, **updates: object) -> None:
+def _rewrite_morphology_metadata(
+    path: Path,
+    *,
+    remove: tuple[str, ...] = (),
+    **updates: object,
+) -> None:
     with tifffile.TiffFile(path) as tif:
         metadata = json.loads(tif.pages[0].description)
         data = tif.asarray()
+    for key in remove:
+        metadata.pop(key, None)
     metadata.update(updates)
     tifffile.imwrite(path, data, description=json.dumps(metadata), metadata=None, photometric="minisblack")

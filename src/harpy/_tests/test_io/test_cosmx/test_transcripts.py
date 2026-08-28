@@ -43,7 +43,7 @@ def test_add_transcript_points_splits_mosaics_and_roundtrips(
     # FOV 4 remains deliberately malformed and proves excluded sources are not read.
     sdata = _backed_sdata(tmp_path)
 
-    _add_transcript_points(sdata, preview, blocksize=64)
+    _add_transcript_points(sdata, preview, sample_id="sample", blocksize=64)
 
     assert set(sdata.points) == {"transcripts_mosaic_1", "transcripts_mosaic_2"}
     points_1 = sdata.points["transcripts_mosaic_1"]
@@ -78,12 +78,19 @@ def test_add_transcript_points_splits_mosaics_and_roundtrips(
     assert isinstance(roundtripped_values["gene"].dtype, pd.CategoricalDtype)
     assert roundtripped_values["gene"].cat.categories.tolist() == ["GeneA", "GeneB", "GeneC"]
     metadata = roundtripped.attrs["harpy"]["points"]["transcripts_mosaic_1"]
+    panel_name = metadata["feature_panel"]
     assert metadata == {
         "fovs": [1, 2],
+        "sample_id": "sample",
+        "mosaic": {
+            "mode": preview.mosaic_mode,
+            "adjacency_tolerance_px": preview.adjacency_tolerance_px,
+        },
         "source_origin_px": {"x": 0, "y": 0},
         "orientation": {"flip_x": True, "flip_y": False},
         "pixel_size_um": 1.0,
-        "feature_panel": "transcripts_panel",
+        "acquisition_timestamp": "20240101_100000_S2",
+        "feature_panel": panel_name,
     }
     assert roundtripped_values["code_class"].cat.categories.tolist() == [
         "Endogenous",
@@ -91,7 +98,7 @@ def test_add_transcript_points_splits_mosaics_and_roundtrips(
         "SystemControl",
     ]
     assert roundtripped.attrs["harpy"]["feature_panels"] == {
-        "transcripts_panel": {
+        panel_name: {
             "feature_column": "gene",
             "class_column": "code_class",
             "categories": ["Endogenous", "Negative", "SystemControl"],
@@ -168,7 +175,7 @@ def test_transcript_preflight_rejects_missing_retained_column_without_writing(
     sdata = _backed_sdata(tmp_path)
 
     with pytest.raises(ValueError, match=r"missing required columns \['z'\]"):
-        _add_transcript_points(sdata, preview)
+        _add_transcript_points(sdata, preview, sample_id="sample")
 
     assert not sdata.points
     assert not read_zarr(sdata.path).points
@@ -184,14 +191,14 @@ def test_transcript_ingestion_rejects_invalid_blocksize(
     sdata = _backed_sdata(tmp_path)
 
     with pytest.raises(ValueError, match="blocksize"):
-        _add_transcript_points(sdata, preview, blocksize=blocksize)  # type: ignore[arg-type]
+        _add_transcript_points(sdata, preview, sample_id="sample", blocksize=blocksize)  # type: ignore[arg-type]
 
 
 def test_transcript_ingestion_requires_backed_spatialdata(decoded_cosmx_path: Path) -> None:
     preview = _preview_cosmx(_discover_cosmx(decoded_cosmx_path), fovs=(1,))
 
     with pytest.raises(ValueError, match="requires a backed SpatialData"):
-        _add_transcript_points(SpatialData(), preview)
+        _add_transcript_points(SpatialData(), preview, sample_id="sample")
 
 
 def test_transcript_materialization_rejects_nonfinite_coordinates(
@@ -208,7 +215,7 @@ def test_transcript_materialization_rejects_nonfinite_coordinates(
     sdata = _backed_sdata(tmp_path)
 
     with pytest.raises(ValueError, match="non-finite x or y"):
-        _add_transcript_points(sdata, preview)
+        _add_transcript_points(sdata, preview, sample_id="sample")
 
     assert "transcripts_mosaic_1" not in read_zarr(sdata.path).points
 
@@ -227,7 +234,7 @@ def test_transcript_ingestion_without_plex_keeps_raw_classes(
     )
     sdata = _backed_sdata(tmp_path)
 
-    _add_transcript_points(sdata, preview)
+    _add_transcript_points(sdata, preview, sample_id="sample")
 
     roundtripped = read_zarr(sdata.path)
     values = roundtripped.points["transcripts_mosaic_1"].compute()
@@ -251,7 +258,7 @@ def test_transcript_materialization_rejects_panel_disagreement(
     sdata = _backed_sdata(tmp_path)
 
     with pytest.raises(ValueError, match="disagree with the feature panel"):
-        _add_transcript_points(sdata, preview)
+        _add_transcript_points(sdata, preview, sample_id="sample")
 
     assert "transcripts_mosaic_1" not in read_zarr(sdata.path).points
 
@@ -268,16 +275,18 @@ def test_transcript_preflight_rejects_incompatible_panel_identifier(
         y=(2.0,),
     )
     sdata = _backed_sdata(tmp_path)
+    panel_metadata = _transcripts._feature_panel_metadata(preview)
+    panel_name = _transcripts._feature_panel_name(panel_metadata)
     sdata.attrs = {
         "harpy": {
             "metadata_version": 1,
-            "feature_panels": {"transcripts_panel": {"feature_column": "incompatible"}},
+            "feature_panels": {panel_name: {"feature_column": "incompatible"}},
         }
     }
     sdata.write_attrs()
 
-    with pytest.raises(ValueError, match="already exists with incompatible metadata"):
-        _add_transcript_points(sdata, preview)
+    with pytest.raises(ValueError, match="feature-panel hash collision"):
+        _add_transcript_points(sdata, preview, sample_id="sample")
 
     assert not read_zarr(sdata.path).points
 

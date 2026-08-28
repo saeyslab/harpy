@@ -112,6 +112,7 @@ class _CosmxChannel:
 @dataclass(frozen=True)
 class _CosmxRunMetadata:
     declared_fov_count: int | None
+    acquisition_timestamp: str | None
     channels: tuple[_CosmxChannel, ...]
     pixel_size_um: float
     tile_shape: tuple[int, int]
@@ -122,6 +123,15 @@ class _CosmxRunMetadata:
     def __post_init__(self) -> None:
         if self.declared_fov_count is not None and self.declared_fov_count < 1:
             raise ValueError(f"Declared CosMx FOV count must be positive, found {self.declared_fov_count}.")
+        if self.acquisition_timestamp is not None and (
+            not isinstance(self.acquisition_timestamp, str)
+            or not self.acquisition_timestamp
+            or self.acquisition_timestamp != self.acquisition_timestamp.strip()
+        ):
+            raise ValueError(
+                "CosMx acquisition timestamp must be a non-empty trimmed string or None, "
+                f"found {self.acquisition_timestamp!r}."
+            )
         if not self.channels:
             raise ValueError("CosMx run metadata must contain at least one channel.")
         channel_ids = tuple(channel.channel_id for channel in self.channels)

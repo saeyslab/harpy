@@ -8,6 +8,7 @@ from typing import Any
 
 import numpy as np
 import tifffile
+from loguru import logger as log
 
 from harpy.io._cosmx._constants import (
     _DEFAULT_PIXEL_SIZE_UM,
@@ -261,7 +262,9 @@ def _read_raster_metadata(
     channel order, pixel size, tile dimensions, TIFF shape, and dtype. Instance
     and compartment label TIFF headers are then checked against the morphology
     tile shape and within their respective label families. Pixel arrays are not
-    loaded.
+    loaded. The source ``OrigTimeStamp`` is retained verbatim only when every
+    morphology TIFF provides the same non-empty value; otherwise it is omitted
+    without making the run unreadable.
 
     Parameters
     ----------
@@ -291,6 +294,7 @@ def _read_raster_metadata(
     reference_shape: tuple[int, ...] | None = None
     reference_dtype: str | None = None
     positions: dict[int, _MorphologyPosition] = {}
+    acquisition_timestamp_values: list[object] = []
 
     for fov, file_path in sorted(morphology_files):
         with tifffile.TiffFile(file_path) as tif:
@@ -305,6 +309,8 @@ def _read_raster_metadata(
                 raise ValueError(f"Morphology TIFF description is not a JSON object: {file_path}")
             shape = tuple(int(value) for value in tif.series[0].shape)
             dtype = np.dtype(tif.series[0].dtype).name
+
+        acquisition_timestamp_values.append(metadata.get(_CosmxKeys.ACQUISITION_TIMESTAMP))
 
         metadata_fov = int(metadata.get("Fov", fov))
         if metadata_fov != fov:
@@ -375,6 +381,7 @@ def _read_raster_metadata(
     return (
         _CosmxRunMetadata(
             declared_fov_count=int(reference["NFov"]) if reference.get("NFov") is not None else None,
+            acquisition_timestamp=_consistent_acquisition_timestamp(acquisition_timestamp_values),
             channels=_channel_metadata(reference, channel_order),
             pixel_size_um=_pixel_size_um(reference),
             tile_shape=tile_shape,
@@ -384,6 +391,19 @@ def _read_raster_metadata(
         ),
         positions,
     )
+
+
+def _consistent_acquisition_timestamp(values: list[object]) -> str | None:
+    """Return one verbatim source timestamp, or omit ambiguous optional metadata."""
+    valid = [value for value in values if isinstance(value, str) and value and value == value.strip()]
+    if len(valid) == len(values) and len(set(valid)) == 1:
+        return valid[0]
+    if any(value is not None for value in values):
+        log.warning(
+            "CosMx morphology TIFFs do not provide one consistent non-empty OrigTimeStamp; "
+            "acquisition_timestamp metadata will be omitted."
+        )
+    return None
 
 
 def _validate_morphology_metadata(
