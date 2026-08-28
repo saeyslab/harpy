@@ -311,9 +311,11 @@ The sample configuration owns values that may differ between runs:
 - X/Y orientation.
 
 `adjacency_tolerance_px` applies only to
-`mosaic_mode="spatial_groups"`. It is ignored when `mosaic_mode="single"`,
-because that mode deliberately constructs one mosaic without adjacency-based
-grouping.
+`mosaic_mode="spatial_groups"`. When `mosaic_mode="single"`, normalize the
+value to `None` before constructing the preview and persist `None` in the
+element-level mosaic metadata. Do not reject an explicitly supplied tolerance:
+single-mosaic mode deliberately constructs one mosaic without
+adjacency-based grouping, so that value has no effect.
 
 Arguments that define the complete output remain on `cosmx_samples`: output
 path, modality inclusion, output base names, image and label chunks, raster
@@ -427,6 +429,8 @@ Focused reader tests should establish that:
   sample-prefixed elements and coordinate systems;
 - per-sample FOV, channel, mosaic, tolerance, and orientation settings reach
   only that sample's elements;
+- single-mosaic samples normalize any supplied adjacency tolerance to `None`
+  without rejecting the request;
 - per-element metadata records the correct `sample_id`, represented FOVs, and
   mosaic construction settings, while root provenance remains reader-only;
 - identical panels are stored once and referenced by both samples, whereas
