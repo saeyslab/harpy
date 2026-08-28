@@ -665,6 +665,28 @@ existing Harpy metadata rather than building on an ambiguous store. The caller
 must ensure that no other process writes to the destination during the
 operation.
 
+Root provenance deliberately contains no sample registry. Derive the existing
+CosMx sample identifiers exclusively from the union of the exact `sample_id`
+values stored in the element records under `harpy.images`, `harpy.labels`, and
+`harpy.points`. Do not infer sample identity by parsing element names. Reject a
+requested sample identifier when it already occurs in any of those registries,
+even if the newly configured output base names would otherwise avoid an element
+name collision.
+
+Validate the existing element metadata structurally before accepting additions:
+
+- every key in `harpy.images`, `harpy.labels`, and `harpy.points` must name an
+  existing SpatialData element of the corresponding type;
+- every such element record must contain a valid sample identifier satisfying
+  the Slice 2 identifier contract; and
+- every points-level `feature_panel` reference must resolve to a record in
+  `harpy.feature_panels`.
+
+Allow unrelated SpatialData elements that have no Harpy CosMx element record;
+the store may have been extended by downstream analysis. They do not establish
+CosMx sample identities, but their element names and coordinate systems still
+participate in collision preflight and must never be replaced.
+
 Resolve feature panels against the existing registry using the same canonical
 content contract as Slice 2. Reuse an identical existing panel record; create a
 new stable record for a different panel. Never modify an existing panel in
