@@ -12,7 +12,7 @@ Six implementation slices are planned; Slice 1 is implemented:
 5. add QC functions that summarize the original, unallocated control points;
 6. optimize the generic point-to-label assignment and reduction path.
 
-Slice 2 replaces the initial single-run reader surface with one coherent,
+Slice 2 replaces the current single-run reader surface with one coherent,
 sample-aware creation contract. Slice 3 incrementally extends stores created
 through that sample-aware API without rebuilding their existing samples. Slice
 4 consumes the feature-panel metadata produced by Slice 1 and the sample-aware
@@ -49,23 +49,23 @@ sizes.
 
 ## Compatibility policy
 
-Slices 1–3 define the initial public-ready CosMx reader contract. The current
-experimental reader API, unprefixed element names, metadata layout, and stores
-created from them are not backward-compatibility constraints. Breaking changes
-are acceptable when they produce a smaller and more coherent sample-aware API.
+Slices 1–3 define the canonical CosMx reader contract. The superseded reader
+API, unprefixed element names, metadata layout, and stores created from them are
+not backward-compatibility constraints. Breaking changes are acceptable when
+they produce a smaller and more coherent sample-aware API.
 
 Do not add deprecated aliases, dual metadata layouts, automatic store
-migrations, or special legacy branches solely to preserve the initial
-implementation. Existing experimental stores may be rejected with a clear
-message and rebuilt using the final reader contract. A single-sample
-convenience entry point is useful only if it is a thin application of the same
-sample-aware naming and metadata rules; it must not establish a second,
-unprefixed format.
+migrations, or special legacy branches solely to preserve superseded
+implementations. Stores that do not satisfy the canonical contract may be
+rejected with a clear message and rebuilt using the current reader. A
+single-sample convenience entry point is useful only if it is a thin application
+of the same sample-aware naming and metadata rules; it must not establish a
+second, unprefixed format.
 
 This does not relax product quality. The resulting contract must remain
 explicit, deterministic, validated, documented, tested, and safely versioned.
-Backward-compatibility and deprecation policy can be introduced after this
-initial contract is declared stable.
+Any future backward-compatibility and deprecation policy must preserve those
+same requirements.
 
 ## Slice 1: reader and feature-panel metadata
 
@@ -215,8 +215,8 @@ Dask dataframe may report them as unknown until supplied with the authoritative
 category list. That list is persisted in the shared feature-panel metadata so
 Slice 4 can restore a known categorical dtype lazily without scanning the
 points. The categorical representation is the canonical contract for data
-created by this reader; no compatibility path is required for experimental
-stores that used the earlier Arrow-string representation.
+created by this reader; no compatibility path is required for stores that use
+the superseded Arrow-string representation.
 
 ### Verification
 
@@ -290,7 +290,7 @@ sdata = cosmx_samples(
 )
 ```
 
-Make `cosmx_samples()` the canonical reader contract. The initial
+Make `cosmx_samples()` the canonical reader contract. The current
 `harpy.io.cosmx()` signature and its unprefixed outputs do not need to be
 preserved. It may be removed or redefined as a single-sample convenience
 wrapper, but if retained it must require an explicit sample identity and
@@ -360,6 +360,13 @@ sdata.attrs["harpy"]["provenance"] = {
     "reader_version": "...",
 }
 ```
+
+`reader_version` is the Harpy version that most recently committed a CosMx
+element and its metadata to the store. `metadata_version` remains the
+compatibility gate for the Harpy metadata schema; `reader_version` records the
+writer implementation and must not be used as a schema-version substitute. A
+staged create-or-replace operation records the current Harpy version before
+publishing the completed store.
 
 Do not store source paths, a run registry, a union of selected FOVs, or one
 scalar mosaic setting at the root. Each created image, labels, and points
@@ -433,6 +440,8 @@ Focused reader tests should establish that:
   without rejecting the request;
 - per-element metadata records the correct `sample_id`, represented FOVs, and
   mosaic construction settings, while root provenance remains reader-only;
+- root `reader_version` records the Harpy version that created and published
+  the staged store;
 - identical panels are stored once and referenced by both samples, whereas
   incompatible panels remain separate;
 - overlapping instance IDs in different labels elements are preserved;
@@ -484,7 +493,7 @@ Reject stores that do not satisfy the final sample-aware metadata and naming
 contract, including stores produced by the earlier unprefixed implementation.
 They must be rebuilt with `cosmx_samples()` before incremental addition. Do not
 guess a sample identifier, silently migrate elements, or add compatibility
-logic for those experimental stores.
+logic for stores that use the superseded contract.
 
 The operation is add-only:
 
@@ -531,7 +540,9 @@ own commit boundary:
 
 1. construct the element and its metadata in memory;
 2. write the element with `overwrite=False`;
-3. after that write succeeds, persist the corresponding element metadata; and
+3. after that write succeeds, persist the corresponding element metadata and
+   update `harpy.provenance.reader_version` to the current Harpy version in the
+   same root-attributes write; and
 4. continue to the next element.
 
 Never persist an element metadata record before its element exists on disk.
@@ -555,7 +566,9 @@ overwrite existing elements, or resume automatically. The user decides whether
 to retain or explicitly remove completed elements, or rebuild the store.
 
 Root provenance remains the minimal reader/version record and is not rewritten
-as a sample registry.
+as a sample registry. Because successfully written elements are retained when a
+later element fails, `reader_version` is updated at each successful element
+commit rather than only when the complete incremental call returns.
 
 ### Shared implementation
 
@@ -591,6 +604,8 @@ Focused tests should establish that:
   while elements completed earlier retain both their data and metadata;
 - a metadata-write failure triggers best-effort cleanup only of the newly
   written element and leaves preceding elements unchanged;
+- every successful incremental element commit updates root `reader_version` in
+  the same attributes write, including when a later element fails;
 - a new feature-panel record and its first points reference are persisted
   together only after that points element succeeds;
 - failure in a later requested sample does not remove samples committed earlier
@@ -1204,10 +1219,10 @@ This replaces repeated full-dataframe predicates with one linear block
 classification and one redistribution of the points. Supply explicit Dask
 `meta` throughout. Do not materialize the complete points dataframe, the
 complete labels raster, or a dense instance-by-target matrix. Preserve the
-existing coordinate-system contract initially: points are identity-transformed
-in the selected coordinate system and labels may differ by a pixel-aligned
-translation. Validate any coordinate-to-pixel rounding and translation
-assumptions explicitly rather than relying on integer truncation.
+existing coordinate-system contract in this slice: points are
+identity-transformed in the selected coordinate system and labels may differ by
+a pixel-aligned translation. Validate any coordinate-to-pixel rounding and
+translation assumptions explicitly rather than relying on integer truncation.
 
 The existing `chunks` option may still request a virtual labels rechunk, but
 the natural stored chunks remain the default. Benchmark virtual rechunking
