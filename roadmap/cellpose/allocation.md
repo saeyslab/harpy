@@ -508,16 +508,15 @@ metadata references.
 Validate all requested samples against each other and against the destination
 before decoding raster or transcript payloads. This includes sample-ID,
 element-name, coordinate-system, and modality-type collisions. Reject malformed
-or incomplete existing sample metadata rather than building on an ambiguous
-store. The caller must ensure that no other process writes to the destination
-during the operation.
+existing Harpy metadata rather than building on an ambiguous store. The caller
+must ensure that no other process writes to the destination during the
+operation.
 
 Resolve feature panels against the existing registry using the same canonical
 content contract as Slice 2. Reuse an identical existing panel record; create a
 new stable record for a different panel. Never modify an existing panel in
-place. If a newly created panel becomes unreferenced after failed sample
-cleanup, remove that panel record; never remove a panel still referenced by an
-existing points element.
+place. Do not persist a newly required panel record before its first associated
+points element has been written successfully.
 
 ### Direct writes and failure contract
 
@@ -527,29 +526,36 @@ Do not copy the complete existing Zarr into staging and do not call
 new-store creation and complete replacement in `cosmx_samples()`; incremental
 addition is the only path with the weaker, element-level failure contract.
 
-Process samples sequentially and commit one complete sample at a time. Track
-the exact elements and metadata records created for the current sample. If a
-normal Python exception occurs, perform best-effort cleanup of that sample's
-new elements, element metadata, and newly created orphan panel records, then
-re-raise. Samples committed by earlier calls or earlier in the same call remain
-unchanged.
+Process samples and their planned elements sequentially. Each element is its
+own commit boundary:
 
-The underlying Harpy element writers already remove a partially written
-current element on ordinary write failure. That does not provide sample-level
-rollback: a later mosaic or modality can fail after earlier elements were
-written. The incremental reader therefore owns cleanup across the complete
-current sample.
+1. construct the element and its metadata in memory;
+2. write the element with `overwrite=False`;
+3. after that write succeeds, persist the corresponding element metadata; and
+4. continue to the next element.
 
-Do not claim filesystem-transactional or crash-atomic behavior. Process
-termination, loss of storage, or failed cleanup may leave sample-prefixed
-elements without a complete set of metadata. A later incremental call must
-detect these collisions or incomplete records and report the affected names
-clearly; it must not automatically overwrite or resume them. Recovery is an
-explicit cleanup or complete rebuild.
+Never persist an element metadata record before its element exists on disk.
+For transcript points, persist the points metadata, its `feature_panel`
+reference, and any newly required shared panel record together after the points
+element succeeds.
 
-Only after every enabled modality for one sample succeeds should its
-element-level metadata be considered committed. Root provenance remains the
-minimal reader/version record and is not rewritten as a sample registry.
+The underlying Harpy element writers already perform best-effort removal of the
+current element when its write fails. If persisting metadata fails after an
+element write, make a best-effort attempt to delete only that newly written
+element and restore the preceding root attributes, then re-raise. Do not roll
+back other elements from the current sample: elements completed earlier remain
+on disk together with their already persisted metadata.
+
+Do not introduce pending-sample records or claim sample-level transactional,
+crash-atomic, or automatic recovery behavior. Process termination, loss of
+storage, or failed cleanup can still leave incomplete state. A later call must
+reject collisions with existing sample IDs, element names, or coordinate
+systems; it must not infer whether a previous ingestion was interrupted,
+overwrite existing elements, or resume automatically. The user decides whether
+to retain or explicitly remove completed elements, or rebuild the store.
+
+Root provenance remains the minimal reader/version record and is not rewritten
+as a sample registry.
 
 ### Shared implementation
 
@@ -579,14 +585,18 @@ Focused tests should establish that:
   preflight, before source payload reads or destination writes;
 - identical existing panels are reused and incompatible panels receive
   separate records;
-- failure in one modality removes all elements and metadata created for the
-  current sample while preserving previously committed samples;
+- metadata for an element is never persisted before that element is written
+  successfully;
+- an ordinary element-write failure leaves no metadata for the failed element,
+  while elements completed earlier retain both their data and metadata;
+- a metadata-write failure triggers best-effort cleanup only of the newly
+  written element and leaves preceding elements unchanged;
+- a new feature-panel record and its first points reference are persisted
+  together only after that points element succeeds;
 - failure in a later requested sample does not remove samples committed earlier
   in the same call;
-- orphan panels created solely for a failed sample are removed, while shared
-  panels remain;
-- an incomplete prior sample is detected and reported rather than overwritten
-  or resumed;
+- a retry that collides with existing sample-scoped state raises without
+  inferring interruption, overwriting, or automatically resuming;
 - a non-CosMx, unsupported-metadata, unbacked, or earlier unprefixed
   destination is rejected without a migration attempt; and
 - `cosmx_samples()` retains staged whole-store creation/replacement, whereas
