@@ -262,6 +262,7 @@ class CosmxSample:
     channels: Sequence[str] | None = None
     mosaic_mode: Literal["spatial_groups", "single"] = "spatial_groups"
     adjacency_tolerance_px: int | None = None
+    coordinate_system: str = "global"
     flip_x: bool = True
     flip_y: bool = False
 ```
@@ -307,7 +308,8 @@ The sample configuration owns values that may differ between runs:
 
 - source path;
 - selected FOVs and morphology channels;
-- mosaic mode and adjacency tolerance; and
+- mosaic mode and adjacency tolerance;
+- coordinate-system base name; and
 - X/Y orientation.
 
 `adjacency_tolerance_px` applies only to
@@ -320,7 +322,8 @@ adjacency-based grouping, so that value has no effect.
 Arguments that define the complete output remain on `cosmx`: output
 path, modality inclusion, output base names, image and label chunks, raster
 scale factors, transcript block size, and overwrite behavior. Do not accept a
-list of these output-wide values. Require at least one enabled modality.
+list of these output-wide values. `coordinate_system` is not output-wide; it
+belongs to each `CosmxSample`. Require at least one enabled modality.
 
 For each sample, derive one common FOV set from only the enabled modalities:
 
@@ -359,6 +362,21 @@ sample_a_transcripts_mosaic_1
 sample_a_global_1
 sample_a_global_1_micron
 ```
+
+Treat `CosmxSample.coordinate_system` as a base name rather than a complete
+SpatialData coordinate-system name. For mosaic `n`, construct:
+
+```text
+<sample_id>_<coordinate_system>_<n>
+<sample_id>_<coordinate_system>_<n>_micron
+```
+
+The default base name `"global"` therefore works without additional user
+configuration for any number of samples: samples `sample_a` and `sample_b`
+receive `sample_a_global_1` and `sample_b_global_1`, respectively. Do not
+require the raw base names to differ between samples. Validate that each base
+name is non-empty and suitable for generated SpatialData names, and reject any
+collision among the fully generated coordinate-system names during planning.
 
 Mosaic numbering is local to a sample. The coordinate systems of different
 samples are independent even when their local pixel coordinates, FOV numbers,
