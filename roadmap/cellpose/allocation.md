@@ -6,7 +6,7 @@ Six implementation slices are planned; Slice 1 is implemented:
 
 1. patch the CosMx reader and establish the generic Harpy feature-panel
    metadata contract — implemented;
-2. extend the CosMx reader with an explicit, sample-scoped multi-sample API;
+2. make the canonical `harpy.io.cosmx()` creation API sample-aware;
 3. add new CosMx samples incrementally to a sample-aware store;
 4. add class-aware aggregation to `hp.tb.allocate`;
 5. add QC functions that summarize the original, unallocated control points;
@@ -57,10 +57,9 @@ they produce a smaller and more coherent sample-aware API.
 Do not add deprecated aliases, dual metadata layouts, automatic store
 migrations, or special legacy branches solely to preserve superseded
 implementations. Stores that do not satisfy the canonical contract may be
-rejected with a clear message and rebuilt using the current reader. A
-single-sample convenience entry point is useful only if it is a thin application
-of the same sample-aware naming and metadata rules; it must not establish a
-second, unprefixed format.
+rejected with a clear message and rebuilt using the current reader. The same
+sample-aware API handles one or many samples; do not establish a second
+single-sample entry point or unprefixed format.
 
 This does not relax product quality. The resulting contract must remain
 explicit, deterministic, validated, documented, tested, and safely versioned.
@@ -240,7 +239,7 @@ Focused reader tests should establish that:
 - whole-store overwrite is permitted only when
   `harpy.provenance.reader == "cosmx"`.
 
-## Slice 2: multi-sample CosMx reader
+## Slice 2: sample-aware `harpy.io.cosmx()` creation API
 
 **Status: specified; not implemented.**
 
@@ -267,10 +266,11 @@ class CosmxSample:
     flip_y: bool = False
 ```
 
-Add a multi-sample entry point whose mapping keys are the sample identifiers:
+Change the canonical creation API so that `cosmx()` accepts a `samples` mapping
+whose keys are the sample identifiers:
 
 ```python
-sdata = cosmx_samples(
+sdata = cosmx(
     samples={
         "sample_a": CosmxSample(
             path=sample_a_root,
@@ -290,12 +290,12 @@ sdata = cosmx_samples(
 )
 ```
 
-Make `cosmx_samples()` the canonical reader contract. The current
-`harpy.io.cosmx()` signature and its unprefixed outputs do not need to be
-preserved. It may be removed or redefined as a single-sample convenience
-wrapper, but if retained it must require an explicit sample identity and
-delegate to the same sample-aware preparation, naming, metadata, and writing
-path. Do not maintain separate behavior merely to accept earlier calls.
+Make `harpy.io.cosmx()` the canonical creation API and replace its current
+single-run signature with the sample mapping shown above. `samples` is required
+and always uses the same mapping contract. Reading one sample means passing a
+one-entry mapping; do not add a separate `cosmx_samples()` alias or
+single-sample code path. Every invocation uses the same sample-aware
+preparation, naming, metadata, and writing implementation.
 
 The sample mapping must be non-empty and its keys must be unique, non-empty,
 SpatialData-safe identifiers. Preserve mapping iteration order for predictable
@@ -317,7 +317,7 @@ element-level mosaic metadata. Do not reject an explicitly supplied tolerance:
 single-mosaic mode deliberately constructs one mosaic without
 adjacency-based grouping, so that value has no effect.
 
-Arguments that define the complete output remain on `cosmx_samples`: output
+Arguments that define the complete output remain on `cosmx`: output
 path, modality inclusion, output base names, image and label chunks, raster
 scale factors, transcript block size, and overwrite behavior. Do not accept a
 list of these output-wide values. Require at least one enabled modality.
@@ -347,8 +347,8 @@ is disabled.
 
 ### Sample-scoped elements and coordinate systems
 
-Prefix every element and coordinate system created by the multi-sample API
-with its sample identifier. For example:
+Prefix every element and coordinate system created by `cosmx()` with its sample
+identifier, including when `samples` contains only one entry. For example:
 
 ```text
 sample_a_morphology_image_mosaic_1
@@ -412,8 +412,7 @@ The FOV list describes the exact source tiles represented by that element; it
 is not a duplicate invocation-level selection record. A points element keeps
 its `feature_panel` reference alongside this sample-scoped metadata. The
 `sample_id` field and sample-prefixed names are required for every element
-created through the final reader contract, including use through any retained
-single-sample convenience wrapper.
+created through `cosmx`, including a call whose mapping contains one sample.
 
 ### Feature panels across samples
 
@@ -439,12 +438,12 @@ collision before decoding raster or transcript payloads.
 
 Refactor the single-sample implementation around reusable internal operations
 such as `_prepare_cosmx_sample` and `_write_cosmx_sample`; the exact private
-names may differ. The multi-sample reader must not repeatedly call the public
-`cosmx()` function and then attempt to merge its stores. It must write samples
-sequentially into one staging store to bound peak memory, reopen and validate
-the completed SpatialData object, and publish the store once. A failure in any
-sample removes reader-generated staging data and leaves an existing output
-store intact.
+names may differ. The public `cosmx()` orchestrator calls those private
+operations once per sample; it must not recursively invoke itself or create and
+merge one store per sample. It writes samples sequentially into one staging
+store to bound peak memory, reopens and validates the completed SpatialData
+object, and publishes the store once. A failure in any sample removes
+reader-generated staging data and leaves an existing output store intact.
 
 Do not rely on generic SpatialData concatenation to define this contract.
 Although concatenation can suffix duplicate element names, the reader must
@@ -476,9 +475,8 @@ Focused reader tests should establish that:
   collisions fail before payload materialization;
 - failure while writing a later sample leaves an existing destination intact
   and removes staging data; and
-- any retained single-sample convenience wrapper produces the same
-  sample-prefixed names, coordinate systems, element metadata, and data as an
-  equivalent one-entry `cosmx_samples()` call.
+- a one-entry `cosmx` call follows the same sample-prefixed naming, coordinate
+  system, metadata, and writing contracts as a multi-entry call.
 
 ## Slice 3: incremental CosMx sample addition
 
@@ -486,8 +484,8 @@ Focused reader tests should establish that:
 
 Add an explicit incremental API for appending new, independently named CosMx
 samples to an existing sample-aware SpatialData Zarr store. This is an additive
-operation, distinct from the staged create-or-replace behavior of
-`cosmx_samples()`. It must not re-read, rewrite, or rename samples already in
+operation, distinct from the staged create-or-replace behavior of `cosmx()`.
+It must not re-read, rewrite, or rename samples already in
 the destination.
 
 ### Public contract
@@ -510,15 +508,15 @@ sdata = add_cosmx_samples(
 ```
 
 Reuse the `CosmxSample` configuration and the output-wide modality, naming,
-chunking, multiscale, and transcript-partition options from
-`cosmx_samples()`. `output` must identify an existing, readable, backed
+chunking, multiscale, and transcript-partition options from `cosmx()`. `output`
+must identify an existing, readable, backed
 SpatialData Zarr store created through the sample-aware CosMx API. Require a
 supported Harpy metadata version and
 `harpy.provenance.reader == "cosmx"`.
 
 Reject stores that do not satisfy the final sample-aware metadata and naming
 contract, including stores produced by the earlier unprefixed implementation.
-They must be rebuilt with `cosmx_samples()` before incremental addition. Do not
+They must be rebuilt with `cosmx()` before incremental addition. Do not
 guess a sample identifier, silently migrate elements, or add compatibility
 logic for stores that use the superseded contract.
 
@@ -559,7 +557,7 @@ points element has been written successfully.
 Write new elements directly to the backed destination with `overwrite=False`.
 Do not copy the complete existing Zarr into staging and do not call
 `_publish_staging_store()`. Retain the sibling staging-and-publish workflow for
-new-store creation and complete replacement in `cosmx_samples()`; incremental
+new-store creation and complete replacement in `cosmx()`; incremental
 addition is the only path with the weaker, element-level failure contract.
 
 Process samples and their planned elements sequentially. Each element is its
@@ -605,8 +603,8 @@ maintaining a second reader implementation inside `add_cosmx_samples()`.
 Parameter validation and generated element contents must be identical between:
 
 ```text
-cosmx_samples({"sample_c": config}, new_output)
-add_cosmx_samples(existing_output, {"sample_c": config})
+cosmx(samples={"sample_c": config}, output=new_output)
+add_cosmx_samples(output=existing_output, samples={"sample_c": config})
 ```
 
 The only intentional difference is publication: the first writes a new staged
@@ -641,7 +639,7 @@ Focused tests should establish that:
   inferring interruption, overwriting, or automatically resuming;
 - a non-CosMx, unsupported-metadata, unbacked, or earlier unprefixed
   destination is rejected without a migration attempt; and
-- `cosmx_samples()` retains staged whole-store creation/replacement, whereas
+- `cosmx()` retains staged whole-store creation/replacement, whereas
   `add_cosmx_samples()` performs no whole-store staging or publication swap.
 
 ## Slice 4: class-aware `hp.tb.allocate`
