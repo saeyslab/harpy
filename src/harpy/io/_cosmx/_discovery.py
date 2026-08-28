@@ -3,13 +3,22 @@ from __future__ import annotations
 import csv
 import json
 import math
-import re
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import tifffile
 
+from harpy.io._cosmx._constants import (
+    _DEFAULT_PIXEL_SIZE_UM,
+    _FOV_DIR_RE,
+    _FOV_FILE_RE,
+    _MORPHOLOGY_FILE_RE,
+    _MORPHOLOGY_INVARIANT_KEYS,
+    _PLEX_FILE_RE,
+    _TIFF_SUFFIXES,
+    _CosmxKeys,
+)
 from harpy.io._cosmx._models import (
     _COMPARTMENT_LABELS_PRODUCT,
     _INSTANCE_LABELS_PRODUCT,
@@ -26,29 +35,12 @@ from harpy.io._cosmx._models import (
     _MorphologyPosition,
 )
 
-_FOV_DIR_RE = re.compile(r"^FOV0*(\d+)$", re.IGNORECASE)
-_FOV_FILE_RE = re.compile(r"(?:^|[_-])(?:FOV|F)0*(\d+)(?=[_.-]|$)", re.IGNORECASE)
-_MORPHOLOGY_FILE_RE = re.compile(
-    r"^\d{8}_\d{6}_S\d+.*_F0*(?P<fov>\d+)\.(?:tif|tiff)$",
-    re.IGNORECASE,
-)
-_TRANSCRIPT_SUFFIX = "target_call_coord.csv"
-_DEFAULT_PIXEL_SIZE_UM = 0.120280945
-_CELL_STATS_DIRNAME = "CellStatsDir"
-_MORPHOLOGY_DIRNAME = "Morphology2D"
-_ANALYSIS_RESULTS_DIRNAME = "AnalysisResults"
-_TIFF_SUFFIXES = (".tif", ".tiff")
-_MORPHOLOGY_INVARIANT_KEYS = ("NFov", "ChannelOrder", "ImPixelSize_nm", "ImRows", "ImCols")
-_PLEX_FILE_RE = re.compile(r"^plex(?:[-_].*)?\.txt$", re.IGNORECASE)
-_PLEX_FEATURE_COLUMN = "DisplayName"
-_PLEX_CLASS_COLUMN = "CodeClass"
-_PANEL_FEATURE_COLUMN = "gene"
-_PANEL_CLASS_COLUMN = "code_class"
-
 
 def _is_decoded_cosmx(path: str | Path) -> bool:
     path = Path(path)
-    return (path / _CELL_STATS_DIRNAME / _MORPHOLOGY_DIRNAME).is_dir() and (path / _ANALYSIS_RESULTS_DIRNAME).is_dir()
+    return (path / _CosmxKeys.CELL_STATS_DIR / _CosmxKeys.MORPHOLOGY_DIR).is_dir() and (
+        path / _CosmxKeys.ANALYSIS_RESULTS_DIR
+    ).is_dir()
 
 
 def _resolve_decoded_cosmx_root(path: str | Path) -> Path:
@@ -60,15 +52,16 @@ def _resolve_decoded_cosmx_root(path: str | Path) -> Path:
 
     candidates = sorted(
         candidate.parent.parent
-        for candidate in path.rglob(_MORPHOLOGY_DIRNAME)
+        for candidate in path.rglob(_CosmxKeys.MORPHOLOGY_DIR)
         if candidate.is_dir()
-        and candidate.parent.name == _CELL_STATS_DIRNAME
-        and (candidate.parent.parent / _ANALYSIS_RESULTS_DIRNAME).is_dir()
+        and candidate.parent.name == _CosmxKeys.CELL_STATS_DIR
+        and (candidate.parent.parent / _CosmxKeys.ANALYSIS_RESULTS_DIR).is_dir()
     )
     if not candidates:
         raise ValueError(
             f"Could not find a decoded CosMx run below {path}. Expected "
-            f"{_CELL_STATS_DIRNAME}/{_MORPHOLOGY_DIRNAME} and {_ANALYSIS_RESULTS_DIRNAME} directories."
+            f"{_CosmxKeys.CELL_STATS_DIR}/{_CosmxKeys.MORPHOLOGY_DIR} and "
+            f"{_CosmxKeys.ANALYSIS_RESULTS_DIR} directories."
         )
     if len(candidates) > 1:
         formatted = "\n".join(f"- {candidate}" for candidate in candidates)
@@ -76,7 +69,13 @@ def _resolve_decoded_cosmx_root(path: str | Path) -> Path:
     return candidates[0]
 
 
-def _discover_cosmx(path: str | Path) -> _CosmxManifest:
+def _discover_cosmx(path: str | Path, *, products: tuple[str, ...] = _PRODUCTS) -> _CosmxManifest:
+    products = tuple(products)
+    if not products or len(set(products)) != len(products):
+        raise ValueError(f"CosMx discovery products must be non-empty and unique, found {products}.")
+    unknown_products = set(products) - set(_PRODUCTS)
+    if unknown_products:
+        raise ValueError(f"Unknown CosMx discovery products {sorted(unknown_products)}; expected a subset of {_PRODUCTS}.")
     root = _resolve_decoded_cosmx_root(path)
     discovered: dict[int, dict[str, Path]] = {}
 
@@ -87,7 +86,7 @@ def _discover_cosmx(path: str | Path) -> _CosmxManifest:
             raise ValueError(f"Duplicate {product} files for FOV {fov}: {existing} and {file_path}")
         discovered[fov][product] = file_path
 
-    morphology_dir = root / _CELL_STATS_DIRNAME / _MORPHOLOGY_DIRNAME
+    morphology_dir = root / _CosmxKeys.CELL_STATS_DIR / _CosmxKeys.MORPHOLOGY_DIR
     for file_path in sorted(morphology_dir.iterdir()):
         if not file_path.is_file() or file_path.suffix.lower() not in _TIFF_SUFFIXES:
             continue
@@ -95,7 +94,7 @@ def _discover_cosmx(path: str | Path) -> _CosmxManifest:
         if match is not None:
             assign(int(match.group("fov")), _MORPHOLOGY_PRODUCT, file_path)
 
-    fov_root = root / _CELL_STATS_DIRNAME
+    fov_root = root / _CosmxKeys.CELL_STATS_DIR
     for fov_dir in sorted(fov_root.iterdir()):
         if not fov_dir.is_dir() or (match := _FOV_DIR_RE.match(fov_dir.name)) is None:
             continue
@@ -104,7 +103,7 @@ def _discover_cosmx(path: str | Path) -> _CosmxManifest:
             if not file_path.is_file():
                 continue
             product = _label_product(file_path.name)
-            if product is None:
+            if product is None or product not in products:
                 continue
             filename_fov = _fov_from_name(file_path.name)
             if filename_fov is None:
@@ -115,16 +114,17 @@ def _discover_cosmx(path: str | Path) -> _CosmxManifest:
                 )
             assign(directory_fov, product, file_path)
 
-    analysis_results = root / _ANALYSIS_RESULTS_DIRNAME
-    for file_path in sorted(analysis_results.rglob(f"*{_TRANSCRIPT_SUFFIX}")):
-        if not file_path.is_file():
-            continue
-        fov = _fov_from_path(file_path)
-        if fov is None:
-            raise ValueError(f"Could not determine the FOV from transcript file {file_path}.")
-        assign(fov, _TRANSCRIPTS_PRODUCT, file_path)
+    if _TRANSCRIPTS_PRODUCT in products:
+        analysis_results = root / _CosmxKeys.ANALYSIS_RESULTS_DIR
+        for file_path in sorted(analysis_results.rglob(f"*{_CosmxKeys.TRANSCRIPT_SUFFIX}")):
+            if not file_path.is_file():
+                continue
+            fov = _fov_from_path(file_path)
+            if fov is None:
+                raise ValueError(f"Could not determine the FOV from transcript file {file_path}.")
+            assign(fov, _TRANSCRIPTS_PRODUCT, file_path)
 
-    run_metadata, morphology_positions = _read_raster_metadata(discovered)
+    run_metadata, morphology_positions = _read_raster_metadata(discovered, products=products)
     positions = _normalize_positions(
         morphology_positions,
         pixel_size_um=run_metadata.pixel_size_um,
@@ -148,8 +148,8 @@ def _discover_cosmx(path: str | Path) -> _CosmxManifest:
         )
         for fov in all_fovs
     )
-    diagnostics = _availability_diagnostics(fov_records, positions)
-    feature_panel = _discover_feature_panel(root)
+    diagnostics = _availability_diagnostics(fov_records, positions, products=products)
+    feature_panel = _discover_feature_panel(root) if _TRANSCRIPTS_PRODUCT in products else None
 
     return _CosmxManifest(
         root=root,
@@ -182,7 +182,7 @@ def _read_feature_panel(path: Path) -> _CosmxFeaturePanel:
             raise ValueError(f"CosMx plex file is empty: {path}.")
         if any(not column for column in header) or len(set(header)) != len(header):
             raise ValueError(f"CosMx plex file has invalid column names {header}: {path}.")
-        missing = sorted({_PLEX_FEATURE_COLUMN, _PLEX_CLASS_COLUMN} - set(header))
+        missing = sorted({_CosmxKeys.PLEX_FEATURE_COLUMN, _CosmxKeys.PLEX_CLASS_COLUMN} - set(header))
         if missing:
             raise ValueError(f"CosMx plex file {path} is missing required columns {missing}.")
 
@@ -190,15 +190,17 @@ def _read_feature_panel(path: Path) -> _CosmxFeaturePanel:
         for line_number, row in enumerate(reader, start=2):
             if None in row:
                 raise ValueError(f"CosMx plex file {path} has too many fields on line {line_number}.")
-            target = row[_PLEX_FEATURE_COLUMN]
-            feature_class = row[_PLEX_CLASS_COLUMN]
+            target = row[_CosmxKeys.PLEX_FEATURE_COLUMN]
+            feature_class = row[_CosmxKeys.PLEX_CLASS_COLUMN]
             if target is None or not target or target != target.strip():
                 raise ValueError(
-                    f"CosMx plex file {path} has an empty or untrimmed {_PLEX_FEATURE_COLUMN} on line {line_number}."
+                    f"CosMx plex file {path} has an empty or untrimmed "
+                    f"{_CosmxKeys.PLEX_FEATURE_COLUMN} on line {line_number}."
                 )
             if feature_class is None or not feature_class or feature_class != feature_class.strip():
                 raise ValueError(
-                    f"CosMx plex file {path} has an empty or untrimmed {_PLEX_CLASS_COLUMN} on line {line_number}."
+                    f"CosMx plex file {path} has an empty or untrimmed "
+                    f"{_CosmxKeys.PLEX_CLASS_COLUMN} on line {line_number}."
                 )
             previous = target_classes.get(target)
             if previous is not None:
@@ -219,17 +221,17 @@ def _read_feature_panel(path: Path) -> _CosmxFeaturePanel:
         for feature_class, targets in sorted(targets_by_class.items())
     )
     return _CosmxFeaturePanel(
-        feature_column=_PANEL_FEATURE_COLUMN,
-        class_column=_PANEL_CLASS_COLUMN,
+        feature_column=_CosmxKeys.FEATURE_COLUMN,
+        class_column=_CosmxKeys.FEATURE_CLASS_COLUMN,
         classes=classes,
     )
 
 
 def _label_product(name: str) -> str | None:
     lower = name.lower()
-    if lower.startswith("celllabels_f") and lower.endswith(_TIFF_SUFFIXES):
+    if lower.startswith(_CosmxKeys.INSTANCE_LABEL_PREFIX) and lower.endswith(_TIFF_SUFFIXES):
         return _INSTANCE_LABELS_PRODUCT
-    if lower.startswith("compartmentlabels_f") and lower.endswith(_TIFF_SUFFIXES):
+    if lower.startswith(_CosmxKeys.COMPARTMENT_LABEL_PREFIX) and lower.endswith(_TIFF_SUFFIXES):
         return _COMPARTMENT_LABELS_PRODUCT
     return None
 
@@ -248,6 +250,8 @@ def _fov_from_path(path: Path) -> int | None:
 
 def _read_raster_metadata(
     discovered: dict[int, dict[str, Path]],
+    *,
+    products: tuple[str, ...] = _PRODUCTS,
 ) -> tuple[_CosmxRunMetadata, dict[int, _MorphologyPosition]]:
     """Read the raster headers needed to describe and position a CosMx run.
 
@@ -349,15 +353,23 @@ def _read_raster_metadata(
     if declared_shape != tile_shape:
         raise ValueError(f"Morphology ImRows/ImCols {declared_shape} disagree with TIFF shape {tile_shape}.")
 
-    instance_labels_dtype = _validate_label_metadata(
-        discovered,
-        product=_INSTANCE_LABELS_PRODUCT,
-        expected_shape=tile_shape,
+    instance_labels_dtype = (
+        _validate_label_metadata(
+            discovered,
+            product=_INSTANCE_LABELS_PRODUCT,
+            expected_shape=tile_shape,
+        )
+        if _INSTANCE_LABELS_PRODUCT in products
+        else None
     )
-    compartment_labels_dtype = _validate_label_metadata(
-        discovered,
-        product=_COMPARTMENT_LABELS_PRODUCT,
-        expected_shape=tile_shape,
+    compartment_labels_dtype = (
+        _validate_label_metadata(
+            discovered,
+            product=_COMPARTMENT_LABELS_PRODUCT,
+            expected_shape=tile_shape,
+        )
+        if _COMPARTMENT_LABELS_PRODUCT in products
+        else None
     )
 
     return (
@@ -511,10 +523,12 @@ def _normalize_positions(
 def _availability_diagnostics(
     fovs: tuple[_CosmxFovFiles, ...],
     positions: dict[int, _CosmxFovPosition],
+    *,
+    products: tuple[str, ...] = _PRODUCTS,
 ) -> list[str]:
     diagnostics = []
     fov_ids = {item.fov for item in fovs}
-    for product in _PRODUCTS:
+    for product in products:
         available = {item.fov for item in fovs if getattr(item, product) is not None}
         missing = sorted(fov_ids - available)
         if missing:
