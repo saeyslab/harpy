@@ -170,12 +170,13 @@ def cosmx(
     If no plex is available, transcript ingestion still succeeds and neither
     the shared panel nor its points reference is written.
 
-    When a feature panel is available, every detected transcript target must
-    occur in the panel and its observed feature class must agree with the
-    panel assignment. Panel targets may have zero detections. These row-level
-    checks run when the lazy transcript partitions are materialized during
-    writing. Without a feature panel, this cross-validation is skipped and the
-    transcript-provided targets and classes are retained.
+    When a feature panel is available, every target represented in a transcript
+    points element must occur in the shared feature-panel record referenced by
+    that element. Its observed feature class must also match the class assigned
+    to that target by the panel. Panel targets may have zero detections. These
+    row-level checks run when the lazy transcript partitions are materialized
+    during writing. Without a feature panel, this cross-validation is skipped
+    and the transcript-provided targets and classes are retained.
 
     Notes
     -----
