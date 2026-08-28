@@ -709,14 +709,17 @@ coordinate system in collision preflight.
 
 With `check_point_contents=True`, additionally validate every points element
 that references a feature panel against its actual transcript payload. Project
-only the panel-declared feature and class columns, compute their distinct
-observed pairs out of core, and require:
+only the panel-declared feature and class columns and validate each Dask
+partition independently against the authoritative target-to-class mapping. Each
+partition returns at most one small diagnostic, so this check requires no
+global shuffle and does not collect transcript rows in the client. Require:
 
 - every observed target occurs in the referenced panel;
 - every observed target has exactly the feature class assigned by that panel;
   and
-- null targets or classes and targets associated with multiple observed classes
-  are rejected.
+- null targets or classes are rejected. A target associated with multiple
+  observed classes is necessarily rejected because at least one observed class
+  disagrees with its single authoritative panel assignment.
 
 This remains a one-way inclusion check: authoritative panel targets with zero
 detections are valid. The deep mode must not load spatial columns, materialize a
@@ -746,8 +749,9 @@ Focused tests should establish that:
   their partitions;
 - deep validation accepts detected panel subsets and zero-detection panel
   targets;
-- deep validation rejects unknown targets, target-to-class disagreement,
-  multiple observed classes, and null values; and
+- deep validation rejects unknown targets, target-to-class disagreement
+  (including multiple observed classes), and null values without a global
+  shuffle; and
 - neither successful nor failed validation writes to the destination.
 
 ## Slice 4: incremental CosMx sample addition
