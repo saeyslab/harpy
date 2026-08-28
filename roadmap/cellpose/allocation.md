@@ -319,6 +319,12 @@ and panel identifiers are deterministic for the same logical inputs. Reject a
 sample identifier that would make any planned element or coordinate-system name
 collide.
 
+This is a deliberate CosMx reader contract, not a restatement of SpatialData's
+broader element-name validation. SpatialData also permits names containing
+hyphens and dots and does not require an initial ASCII letter. Sample
+identifiers use the stricter grammar because they are structured prefixes from
+which the reader generates several element and coordinate-system names.
+
 The sample configuration owns values that may differ between runs:
 
 - source path;
@@ -389,9 +395,11 @@ SpatialData coordinate-system name. For mosaic `n`, construct:
 The default base name `"global"` therefore works without additional user
 configuration for any number of samples: samples `sample_a` and `sample_b`
 receive `sample_a_global_1` and `sample_b_global_1`, respectively. Do not
-require the raw base names to differ between samples. Validate that each base
-name is non-empty and suitable for generated SpatialData names, and reject any
-collision among the fully generated coordinate-system names during planning.
+require the raw base names to differ between samples. Require every
+`coordinate_system` base name to match the same exact
+`^[A-Za-z][A-Za-z0-9_]*$` grammar as a sample identifier. Validate the supplied
+value without trimming or otherwise normalizing it. Reject any collision among
+the fully generated coordinate-system names during planning.
 
 Mosaic numbering is local to a sample. The coordinate systems of different
 samples are independent even when their local pixel coordinates, FOV numbers,
