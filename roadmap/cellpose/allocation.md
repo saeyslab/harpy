@@ -375,11 +375,12 @@ enabled modality is then constructed from the same included FOVs and mosaic
 geometries, so corresponding image, labels, and points elements remain
 spatially aligned.
 
-Known FOV positions remain mandatory regardless of which payload modalities
-are enabled because mosaic construction requires them. Validate source dtype,
-shape, channel, and ID-encoding invariants only when they are required by an
-enabled output. A per-sample `channels` selection has no effect when morphology
-is disabled.
+Known FOV positions, pixel size, tile dimensions, and morphology TIFF shape
+remain mandatory regardless of which payload modalities are enabled because
+mosaic construction requires that geometry. Validate morphology channel order
+and dtype only when morphology images are enabled. Validate label dtype and
+instance-ID encoding only when their corresponding label outputs are enabled.
+A per-sample `channels` selection has no effect when morphology is disabled.
 
 ### Sample-scoped elements and coordinate systems
 
