@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import math
+import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -20,6 +22,79 @@ _PRODUCTS = (
 _INSTANCE_ID_DTYPE = np.dtype(np.uint32)
 _MOSAIC_MODES = ("spatial_groups", "single")
 _MosaicMode = Literal["spatial_groups", "single"]
+_IDENTIFIER_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
+
+
+@dataclass(frozen=True)
+class CosmxSample:
+    """Configuration for one independently named decoded CosMx run.
+
+    ``coordinate_system`` is a base name. The reader prefixes it with the
+    sample identifier supplied to :func:`harpy.io.cosmx` and appends the mosaic
+    number. General FOV and channel sequences are copied to tuples so this
+    frozen configuration never retains caller-owned mutable lists.
+
+    Parameters
+    ----------
+    path
+        Decoded CosMx run directory, or a parent containing exactly one
+        decoded run.
+    fovs
+        Optional requested FOV numbers. An ID absent from the run manifest
+        raises an error. A known requested FOV that lacks a position or a
+        source for any enabled modality is excluded. Ingestion proceeds when
+        at least one requested FOV remains usable and raises when none remain.
+    channels
+        Optional morphology channel IDs or unambiguous biological names.
+        Selection preserves acquisition order and has no effect when morphology
+        ingestion is disabled.
+    mosaic_mode
+        ``"spatial_groups"`` derives separate adjacency-based mosaics;
+        ``"single"`` places every included FOV in one bounding canvas.
+    adjacency_tolerance_px
+        Maximum FOV gap bridged in spatial-group mode. ``None`` selects the
+        reader default. The value is normalized to ``None`` in single-mosaic
+        mode because adjacency grouping is not performed.
+    coordinate_system
+        Base name for this sample's independent pixel and micron coordinate
+        systems. It must match ``^[A-Za-z][A-Za-z0-9_]*$``.
+    flip_x, flip_y
+        Local-axis orientation applied consistently to the sample's rasters
+        and transcript coordinates.
+    """
+
+    path: str | Path
+    fovs: Sequence[int] | None = None
+    channels: Sequence[str] | None = None
+    mosaic_mode: _MosaicMode = "spatial_groups"
+    adjacency_tolerance_px: int | None = None
+    coordinate_system: str = "global"
+    flip_x: bool = True
+    flip_y: bool = False
+
+    def __post_init__(self) -> None:
+        if self.fovs is not None:
+            object.__setattr__(self, "fovs", tuple(self.fovs))
+        if self.channels is not None:
+            channels = (self.channels,) if isinstance(self.channels, str) else tuple(self.channels)
+            object.__setattr__(self, "channels", channels)
+        if self.mosaic_mode not in _MOSAIC_MODES:
+            raise ValueError(f"Unknown CosMx mosaic mode {self.mosaic_mode!r}; expected one of {_MOSAIC_MODES}.")
+        if self.mosaic_mode == "single":
+            object.__setattr__(self, "adjacency_tolerance_px", None)
+        elif (
+            self.adjacency_tolerance_px is not None
+            and (
+                not isinstance(self.adjacency_tolerance_px, int)
+                or isinstance(self.adjacency_tolerance_px, bool)
+                or self.adjacency_tolerance_px < 0
+            )
+        ):
+            raise ValueError(
+                "CosMx adjacency tolerance must be a nonnegative integer or None, "
+                f"found {self.adjacency_tolerance_px!r}."
+            )
+        _validate_identifier(self.coordinate_system, name="coordinate-system base name")
 
 
 @dataclass(frozen=True)
@@ -250,10 +325,16 @@ class _CosmxPreview:
     unpositioned_fovs: tuple[int, ...]
     mosaics: tuple[_CosmxMosaicGeometry, ...]
     diagnostics: tuple[str, ...]
+    products: tuple[str, ...] = _PRODUCTS
     mosaic_mode: _MosaicMode = "spatial_groups"
     adjacency_tolerance_px: int | None = 0
 
     def __post_init__(self) -> None:
+        if not self.products or len(set(self.products)) != len(self.products):
+            raise ValueError(f"CosMx preview products must be non-empty and unique, found {self.products}.")
+        unknown_products = set(self.products) - set(_PRODUCTS)
+        if unknown_products:
+            raise ValueError(f"Unknown CosMx preview products {sorted(unknown_products)}; expected a subset of {_PRODUCTS}.")
         if self.mosaic_mode not in _MOSAIC_MODES:
             raise ValueError(f"Unknown CosMx mosaic mode {self.mosaic_mode!r}; expected one of {_MOSAIC_MODES}.")
         if self.mosaic_mode == "spatial_groups" and (
@@ -293,11 +374,13 @@ class _CosmxPreview:
         mosaic_fovs = tuple(fov for mosaic in self.mosaics for fov in mosaic.fovs)
         if len(set(mosaic_fovs)) != len(mosaic_fovs) or set(mosaic_fovs) != included:
             raise ValueError("Every included CosMx FOV must belong to exactly one mosaic.")
-        _validate_preview_mosaics(self.manifest, self.mosaics)
+        _validate_preview_mosaics(self.manifest, self.mosaics, products=self.products)
 
     @property
     def estimated_image_nbytes(self) -> int:
         """Estimated bytes for dense mosaics containing every image channel."""
+        if _MORPHOLOGY_PRODUCT not in self.products:
+            return 0
         return (
             self._mosaic_pixel_count
             * len(self.manifest.run.channels)
@@ -307,12 +390,14 @@ class _CosmxPreview:
     @property
     def estimated_instance_labels_nbytes(self) -> int:
         """Estimated bytes for dense ``uint32`` instance-label mosaics."""
+        if _INSTANCE_LABELS_PRODUCT not in self.products:
+            return 0
         return self._mosaic_pixel_count * _INSTANCE_ID_DTYPE.itemsize
 
     @property
     def estimated_compartment_labels_nbytes(self) -> int:
         """Estimated bytes for dense compartment-label mosaics."""
-        if not self.mosaics:
+        if not self.mosaics or _COMPARTMENT_LABELS_PRODUCT not in self.products:
             return 0
         dtype = self.manifest.run.compartment_labels_dtype
         assert dtype is not None
@@ -356,6 +441,8 @@ def _validate_sorted_unique_fovs(fovs: tuple[int, ...], *, name: str) -> None:
 def _validate_preview_mosaics(
     manifest: _CosmxManifest,
     mosaics: tuple[_CosmxMosaicGeometry, ...],
+    *,
+    products: tuple[str, ...] = _PRODUCTS,
 ) -> None:
     """Validate mosaic sources and geometry against the manifest.
 
@@ -385,18 +472,21 @@ def _validate_preview_mosaics(
     fovs_by_id = manifest.fovs_by_id
     tile_height, tile_width = manifest.run.tile_shape
 
-    if mosaics:
+    if mosaics and _INSTANCE_LABELS_PRODUCT in products:
         instance_labels_dtype = manifest.run.instance_labels_dtype
-        compartment_labels_dtype = manifest.run.compartment_labels_dtype
-        if instance_labels_dtype is None or compartment_labels_dtype is None:
-            raise ValueError("CosMx preview mosaics require instance- and compartment-label dtypes.")
+        if instance_labels_dtype is None:
+            raise ValueError("CosMx preview mosaics require an instance-label dtype when instance labels are enabled.")
         # Reserve one complete source-dtype ID range per FOV:
         # global_id = (fov - 1) * number_of_source_dtype_values + local_id.
         # Validate against the full manifest so IDs remain stable across subsets.
         _validate_instance_id_encoding(instance_labels_dtype, max(manifest.fov_ids))
+    if mosaics and _COMPARTMENT_LABELS_PRODUCT in products and manifest.run.compartment_labels_dtype is None:
+        raise ValueError(
+            "CosMx preview mosaics require a compartment-label dtype when compartment labels are enabled."
+        )
 
     for mosaic in mosaics:
-        for product in _PRODUCTS:
+        for product in products:
             missing_sources = [fov for fov in mosaic.fovs if getattr(fovs_by_id[fov], product) is None]
             if missing_sources:
                 raise ValueError(f"CosMx mosaic {mosaic.mosaic} FOVs have no {product} sources: {missing_sources}.")
@@ -484,3 +574,9 @@ def _instance_id_base(source_dtype: str | np.dtype) -> int:
 def _validate_stage_position(x_mm: float, y_mm: float, *, fov: int) -> None:
     if not math.isfinite(x_mm) or not math.isfinite(y_mm):
         raise ValueError(f"CosMx stage position for FOV {fov} must be finite, found {(x_mm, y_mm)}.")
+
+
+def _validate_identifier(value: object, *, name: str) -> None:
+    """Require an exact identifier accepted by Harpy and SpatialData tooling."""
+    if not isinstance(value, str) or _IDENTIFIER_RE.fullmatch(value) is None:
+        raise ValueError(f"CosMx {name} must match {_IDENTIFIER_RE.pattern!r}, found {value!r}.")

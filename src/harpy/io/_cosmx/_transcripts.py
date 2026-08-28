@@ -49,12 +49,12 @@ def _add_transcript_points(
     sdata: SpatialData,
     preview: _CosmxPreview,
     *,
+    sample_id: str,
     output_points_name: str = "transcripts",
     coordinate_system: str = "global",
     flip_x: bool = True,
     flip_y: bool = False,
     blocksize: str | int = "64MB",
-    sample_id: str | None = None,
     overwrite: bool = False,
 ) -> SpatialData:
     """Add one backed, out-of-core transcript points element per mosaic.
@@ -71,8 +71,8 @@ def _add_transcript_points(
     Each points element receives a root metadata record containing:
 
     - ``fovs``: source FOV numbers contributing to the mosaic;
-    - ``sample_id`` and ``mosaic`` when called by the public reader: the sample
-      identity and the grouping mode/effective adjacency tolerance;
+    - ``sample_id`` and ``mosaic``: the sample identity and the grouping
+      mode/effective adjacency tolerance;
     - ``source_origin_px``: upper-left mosaic bound in the pre-group/source
       pixel coordinate system. This origin is subtracted from every FOV
       position so that the output points use mosaic-local coordinates starting
@@ -93,6 +93,8 @@ def _add_transcript_points(
         Backed SpatialData object receiving the points elements.
     preview
         Validated selection and mosaic geometry shared with raster ingestion.
+    sample_id
+        Identifier of the sample that owns the generated elements.
     output_points_name
         Base points-element name; ``_mosaic_<n>`` is appended per mosaic.
     coordinate_system
@@ -187,22 +189,17 @@ def _add_transcript_points(
     for mosaic, element_name in zip(preview.mosaics, element_names, strict=True):
         metadata = {
             "fovs": list(mosaic.fovs),
+            "sample_id": sample_id,
+            "mosaic": {
+                "mode": preview.mosaic_mode,
+                "adjacency_tolerance_px": preview.adjacency_tolerance_px,
+            },
             "source_origin_px": {"x": mosaic.origin_x_px, "y": mosaic.origin_y_px},
             "orientation": {"flip_x": flip_x, "flip_y": flip_y},
             "pixel_size_um": preview.manifest.run.pixel_size_um,
         }
         if feature_panel_name is not None:
             metadata["feature_panel"] = feature_panel_name
-        if sample_id is not None:
-            metadata.update(
-                {
-                    "sample_id": sample_id,
-                    "mosaic": {
-                        "mode": preview.mosaic_mode,
-                        "adjacency_tolerance_px": preview.adjacency_tolerance_px,
-                    },
-                }
-            )
         points_metadata[element_name] = metadata
     sdata.attrs = attrs
     sdata.write_attrs()

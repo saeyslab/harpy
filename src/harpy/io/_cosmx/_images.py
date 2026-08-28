@@ -40,6 +40,7 @@ def _add_morphology_images(
     sdata: SpatialData,
     preview: _CosmxPreview,
     *,
+    sample_id: str,
     channels: Sequence[str] | None = None,
     output_image_name: str = "morphology_image",
     coordinate_system: str = "global",
@@ -61,6 +62,8 @@ def _add_morphology_images(
     Each image element receives a root metadata record containing:
 
     - ``fovs``: source FOV numbers contributing to the mosaic;
+    - ``sample_id`` and ``mosaic``: the sample identity and the grouping
+      mode/effective adjacency tolerance;
     - ``source_origin_px``: upper-left mosaic bound in the pre-group/source
       pixel coordinate system. This origin is subtracted from every FOV
       position so that the mosaic starts at ``(0, 0)``. It is source-geometry
@@ -77,6 +80,8 @@ def _add_morphology_images(
         Backed SpatialData object receiving the morphology images.
     preview
         Validated CosMx preview defining included FOVs and mosaic geometries.
+    sample_id
+        Identifier of the sample that owns the generated elements.
     channels
         Optional acquisition channel IDs or unambiguous biological names.
         Selection preserves acquisition order. By default all channels are
@@ -183,12 +188,16 @@ def _add_morphology_images(
         )
         images_metadata[element_name] = {
             "fovs": list(mosaic.fovs),
+            "sample_id": sample_id,
+            "mosaic": {
+                "mode": preview.mosaic_mode,
+                "adjacency_tolerance_px": preview.adjacency_tolerance_px,
+            },
             "source_origin_px": {"x": mosaic.origin_x_px, "y": mosaic.origin_y_px},
             "orientation": {"flip_x": flip_x, "flip_y": flip_y},
             "pixel_size_um": preview.manifest.run.pixel_size_um,
             "channels": deepcopy(channel_records),
         }
-
     sdata.attrs = attrs
     sdata.write_attrs()
     return sdata

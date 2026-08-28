@@ -44,13 +44,13 @@ def _add_instance_labels(
     sdata: SpatialData,
     preview: _CosmxPreview,
     *,
+    sample_id: str,
     output_labels_name: str = "instance_labels",
     coordinate_system: str = "global",
     flip_x: bool = True,
     flip_y: bool = False,
     chunks: tuple[int, int] = _DEFAULT_CHUNKS,
     scale_factors: ScaleFactors_t | None = None,
-    sample_id: str | None = None,
     overwrite: bool = False,
 ) -> SpatialData:
     """Add one lazy, globally ID-remapped instance-label raster per mosaic."""
@@ -73,13 +73,13 @@ def _add_compartment_labels(
     sdata: SpatialData,
     preview: _CosmxPreview,
     *,
+    sample_id: str,
     output_labels_name: str = "compartment_labels",
     coordinate_system: str = "global",
     flip_x: bool = True,
     flip_y: bool = False,
     chunks: tuple[int, int] = _DEFAULT_CHUNKS,
     scale_factors: ScaleFactors_t | None = None,
-    sample_id: str | None = None,
     overwrite: bool = False,
 ) -> SpatialData:
     """Add one lazy semantic compartment-label raster per mosaic."""
@@ -109,7 +109,7 @@ def _add_label_family(
     flip_y: bool,
     chunks: tuple[int, int],
     scale_factors: ScaleFactors_t | None,
-    sample_id: str | None,
+    sample_id: str,
     overwrite: bool,
 ) -> SpatialData:
     """Add one lazy label raster per mosaic for a single CosMx label family.
@@ -123,8 +123,8 @@ def _add_label_family(
     Each label element receives a root metadata record containing:
 
     - ``fovs``: source FOV numbers contributing to the mosaic;
-    - ``sample_id`` and ``mosaic`` when called by the public reader: the sample
-      identity and the grouping mode/effective adjacency tolerance;
+    - ``sample_id`` and ``mosaic``: the sample identity and the grouping
+      mode/effective adjacency tolerance;
     - ``source_origin_px``: upper-left mosaic bound in the pre-group/source
       pixel coordinate system. This origin is subtracted from every FOV
       position so that the mosaic starts at ``(0, 0)``. It is source-geometry
@@ -144,6 +144,8 @@ def _add_label_family(
         Backed SpatialData object receiving the label elements.
     preview
         Validated FOV selection and mosaic geometry shared by all modalities.
+    sample_id
+        Identifier of the sample that owns the generated elements.
     family
         Instance- or compartment-label source family to ingest.
     output_labels_name
@@ -234,6 +236,11 @@ def _add_label_family(
         )
         metadata = {
             "fovs": list(mosaic.fovs),
+            "sample_id": sample_id,
+            "mosaic": {
+                "mode": preview.mosaic_mode,
+                "adjacency_tolerance_px": preview.adjacency_tolerance_px,
+            },
             "source_origin_px": {"x": mosaic.origin_x_px, "y": mosaic.origin_y_px},
             "orientation": {"flip_x": flip_x, "flip_y": flip_y},
             "pixel_size_um": preview.manifest.run.pixel_size_um,
@@ -247,16 +254,6 @@ def _add_label_family(
             }
         else:
             metadata["categories"] = deepcopy(_COMPARTMENT_CATEGORIES)
-        if sample_id is not None:
-            metadata.update(
-                {
-                    "sample_id": sample_id,
-                    "mosaic": {
-                        "mode": preview.mosaic_mode,
-                        "adjacency_tolerance_px": preview.adjacency_tolerance_px,
-                    },
-                }
-            )
         labels_metadata[element_name] = metadata
 
     sdata.attrs = attrs
