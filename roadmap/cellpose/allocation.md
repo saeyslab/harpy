@@ -460,9 +460,31 @@ created through `cosmx`, including a call whose mapping contains one sample.
 Canonicalize every discovered panel using the Slice 1 contract before writing
 any points. Samples with identical canonical panel contents should reference
 one shared feature-panel record. Samples with different panels must reference
-separate records. Derive stable panel identifiers from canonical content plus
-a readable base so panel sharing does not depend on sample input order, and
-reject a key collision with incompatible existing content.
+separate records.
+
+Derive the shared record key from the canonical panel contents rather than from
+a sample identifier or points-element base name. Serialize the existing
+allocation-facing panel record as canonical UTF-8 JSON: mapping keys are sorted,
+compact separators are used, category order is retained, and each class's
+already canonical target list remains sorted. Hash those bytes with SHA-256 and
+use a store-local key of the form:
+
+```text
+feature_panel_<first 16 lowercase SHA-256 hex characters>
+```
+
+For example, both `sample_a_transcripts_mosaic_1` and
+`sample_b_transcripts_mosaic_1` reference the same key when their canonical
+panels are identical, regardless of sample input order. A different panel
+produces a different key. Do not include `sample_id`, `output_points_name`, or
+the generated points-element name in the hash or key: those values describe a
+consumer of the panel, not the panel itself.
+
+When the derived key already exists, compare its complete canonical panel
+contents. Reuse the record when they match and raise a hash-collision error when
+they differ. Each points metadata record stores only the resulting
+`feature_panel` reference; do not duplicate the panel contents per sample or
+per mosaic.
 
 Sharing a panel record is a storage optimization, not an assertion that the
 samples are spatially aligned. Conversely, two different registry keys do not
