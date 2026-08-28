@@ -21,6 +21,7 @@ I/O.
 .. autosummary::
     :toctree: generated
 
+    io.CosmxSample
     io.cosmx
     io.validate_cosmx_store
     io.phenocycler
