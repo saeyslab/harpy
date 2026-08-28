@@ -2,25 +2,28 @@
 
 ## Status
 
-Six implementation slices are planned; Slice 1 is implemented:
+Seven implementation slices are planned; Slices 1 and 2 are implemented:
 
 1. patch the CosMx reader and establish the generic Harpy feature-panel
    metadata contract — implemented;
-2. make the canonical `harpy.io.cosmx()` creation API sample-aware;
-3. add new CosMx samples incrementally to a sample-aware store;
-4. add class-aware aggregation to `hp.tb.allocate`;
-5. add QC functions that summarize the original, unallocated control points;
-6. optimize the generic point-to-label assignment and reduction path.
+2. make the canonical `harpy.io.cosmx()` creation API sample-aware —
+   implemented;
+3. validate existing sample-aware CosMx SpatialData stores;
+4. add new CosMx samples incrementally to a validated sample-aware store;
+5. add class-aware aggregation to `hp.tb.allocate`;
+6. add QC functions that summarize the original, unallocated control points;
+7. optimize the generic point-to-label assignment and reduction path.
 
 Slice 2 replaces the current single-run reader surface with one coherent,
-sample-aware creation contract. Slice 3 incrementally extends stores created
-through that sample-aware API without rebuilding their existing samples. Slice
-4 consumes the feature-panel metadata produced by Slice 1 and the sample-aware
-element contracts established by Slices 2 and 3, but also supports an explicit
-denominator mapping for generic points. Slice 5 depends on the reader metadata
-from Slices 1–3, not on allocation, instance labels, or an AnnData table. Slice
-6 preserves the public behavior established by Slice 4 while replacing the
-private allocation execution path.
+sample-aware creation contract. Slice 3 validates that an existing store still
+satisfies that contract. Slice 4 incrementally extends a validated store without
+rebuilding its existing samples. Slice 5 consumes the feature-panel metadata
+produced by Slice 1 and the sample-aware element contracts established by
+Slices 2–4, but also supports an explicit denominator mapping for generic
+points. Slice 6 depends on the reader metadata from Slices 1–4, not on
+allocation, instance labels, or an AnnData table. Slice 7 preserves the public
+behavior established by Slice 5 while replacing the private allocation
+execution path.
 
 ## Goal
 
@@ -49,7 +52,7 @@ sizes.
 
 ## Compatibility policy
 
-Slices 1–3 define the canonical CosMx reader contract. The superseded reader
+Slices 1–4 define the canonical CosMx reader contract. The superseded reader
 API, unprefixed element names, metadata layout, and stores created from them are
 not backward-compatibility constraints. Breaking changes are acceptable when
 they produce a smaller and more coherent sample-aware API.
@@ -187,8 +190,8 @@ both class names and the targets within each class lexicographically so output
 does not depend on row order in the plex; this ordering is deterministic rather
 than a claim of biological precedence.
 
-Slice 4 only needs those derived counts: it uses the length of each class target
-list as the denominator for normalized control metrics. Slice 5 additionally
+Slice 5 only needs those derived counts: it uses the length of each class target
+list as the denominator for normalized control metrics. Slice 6 additionally
 needs the actual target names. A categorical transcript column contains only
 categories represented by the ingested points and cannot, by itself, preserve
 the target-to-class relationship for a panel target with no detected rows.
@@ -221,7 +224,7 @@ for every mosaic points element from the run. Its categories come from the plex
 `CodeClass` values. Parquet preserves the categorical values, but a reopened
 Dask dataframe may report them as unknown until supplied with the authoritative
 category list. That list is persisted in the shared feature-panel metadata so
-Slice 4 can restore a known categorical dtype lazily without scanning the
+Slice 5 can restore a known categorical dtype lazily without scanning the
 points. The categorical representation is the canonical contract for data
 created by this reader; no compatibility path is required for stores that use
 the superseded Arrow-string representation.
@@ -544,7 +547,7 @@ that would describe metadata it does not yet write.
 
 Sharing a panel record is a storage optimization, not an assertion that the
 samples are spatially aligned. Conversely, two different registry keys do not
-necessarily make panels incompatible for allocation: Slice 4 compares the
+necessarily make panels incompatible for allocation: Slice 5 compares the
 canonical feature column, class column, categories, and target-to-class
 contents. One output table may combine only compatible selected panels.
 
@@ -597,15 +600,133 @@ Focused reader tests should establish that:
 - a one-entry `cosmx` call follows the same sample-prefixed naming, coordinate
   system, metadata, and writing contracts as a multi-entry call.
 
-## Slice 3: incremental CosMx sample addition
+## Slice 3: CosMx SpatialData store validation
+
+**Status: specified; not implemented.**
+
+Add a dedicated, non-mutating validator for an existing sample-aware CosMx
+SpatialData Zarr store. Incremental addition must establish that the destination
+still satisfies the reader's metadata contract before it plans or writes new
+samples. Keep this validation reusable outside incremental ingestion so users
+can explicitly audit a store after downstream processing.
+
+### Public contract
+
+Expose:
+
+```python
+validate_cosmx_store(
+    output: str | Path,
+    *,
+    check_point_contents: bool = False,
+) -> None
+```
+
+`output` must identify an existing, readable, backed SpatialData Zarr store.
+The function returns normally for a valid store and raises a clear `ValueError`
+for an invalid contract. It must never create, remove, rewrite, or repair an
+element or root attribute. It is a validator, not a migration or recovery API.
+
+Implement one internal validator over an already opened `SpatialData` object so
+the public function and Slice 4's incremental writer use exactly the same
+rules. The public function opens the path and delegates to that primitive;
+`add_cosmx_samples()` reuses the object it has already opened.
+
+### Structural validation
+
+The default mode validates metadata and dataframe schemas without scanning
+existing transcript rows:
+
+- the destination is backed and its Zarr store can be read;
+- `harpy` is a mapping with the supported `metadata_version`;
+- `harpy.provenance` is a mapping whose `reader` is exactly `"cosmx"` and whose
+  `reader_version` is a non-empty string;
+- `harpy.images`, `harpy.labels`, `harpy.points`, and
+  `harpy.feature_panels`, when present, are mappings;
+- every image, labels, and points registry key names an existing SpatialData
+  element of the corresponding type;
+- every registered element record contains a valid `sample_id` satisfying the
+  Slice 2 identifier contract, plus the required element-level FOV, mosaic,
+  source-origin, orientation, and pixel-size fields with their documented
+  types;
+- image, instance-label, compartment-label, and points-specific metadata fields
+  satisfy their documented structural contracts when present;
+- every feature-panel record has valid `feature_column`, `class_column`,
+  ordered `categories`, and `targets_by_class` values; category keys match
+  exactly, targets are non-empty and unique within and across classes, and the
+  registry key equals the identifier recomputed from the canonical panel
+  contents;
+- every points-level `feature_panel` reference resolves to an existing shared
+  panel record; and
+- each referenced points element contains the panel-declared feature and class
+  columns with categorical dtypes. The structural check may inspect Parquet or
+  Dask schema metadata but must not compute transcript partitions.
+
+Root provenance deliberately contains no sample registry. Derive existing
+CosMx sample identifiers exclusively from the union of the exact `sample_id`
+values stored in the registered image, labels, and points element records. Do
+not infer sample identity by parsing element names.
+
+Allow unrelated SpatialData elements that have no Harpy CosMx element record;
+the store may have been extended by downstream analysis. They do not establish
+CosMx sample identities. The validator checks the reader-owned metadata
+contract, while Slice 4 separately includes every existing element and
+coordinate system in collision preflight.
+
+### Optional feature-panel content validation
+
+With `check_point_contents=True`, additionally validate every points element
+that references a feature panel against its actual transcript payload. Project
+only the panel-declared feature and class columns, compute their distinct
+observed pairs out of core, and require:
+
+- every observed target occurs in the referenced panel;
+- every observed target has exactly the feature class assigned by that panel;
+  and
+- null targets or classes and targets associated with multiple observed classes
+  are rejected.
+
+This remains a one-way inclusion check: authoritative panel targets with zero
+detections are valid. The deep mode must not load spatial columns, materialize a
+complete points dataframe, or modify categorical metadata. It necessarily scans
+the two projected payload columns and can therefore be substantially more
+expensive than structural validation.
+
+Slice 4 invokes structural validation before source discovery and mutation, but
+does not perform the optional points-content scan implicitly. A caller who
+wants a complete payload audit runs `validate_cosmx_store(...,
+check_point_contents=True)` explicitly before incremental addition. This keeps
+ordinary addition from re-reading existing transcript payloads.
+
+### Verification
+
+Focused tests should establish that:
+
+- a valid one- or multi-sample store passes without changing elements or root
+  attributes;
+- unreadable, unbacked, non-CosMx, unsupported-version, and earlier unprefixed
+  stores are rejected;
+- malformed registries, missing or wrong-type registered elements, invalid
+  sample IDs, and malformed required element metadata are rejected;
+- unrelated unregistered downstream elements are accepted;
+- invalid, content-hash-mismatched, and unresolved feature panels are rejected;
+- structural validation checks referenced points schemas without computing
+  their partitions;
+- deep validation accepts detected panel subsets and zero-detection panel
+  targets;
+- deep validation rejects unknown targets, target-to-class disagreement,
+  multiple observed classes, and null values; and
+- neither successful nor failed validation writes to the destination.
+
+## Slice 4: incremental CosMx sample addition
 
 **Status: specified; not implemented.**
 
 Add an explicit incremental API for appending new, independently named CosMx
 samples to an existing sample-aware SpatialData Zarr store. This is an additive
 operation, distinct from the staged create-or-replace behavior of `cosmx()`.
-It must not re-read, rewrite, or rename samples already in
-the destination.
+It must not re-read existing sample payloads or rewrite or rename samples
+already in the destination.
 
 ### Public contract
 
@@ -652,40 +773,20 @@ is outside this slice.
 
 ### Preflight and panel resolution
 
-Before writing any payload, reopen the destination and inspect its element
-metadata and feature-panel registry. Prepare every requested sample exactly as
-in Slice 2: discover and validate manifests, construct previews, canonicalize
-panels, and plan sample-prefixed element names, coordinate systems, and
-metadata references.
+Before discovering requested sources or writing any payload, reopen the
+destination and run Slice 3 structural validation on that backed object. Then
+prepare every requested sample exactly as in Slice 2: discover and validate
+manifests, construct previews, canonicalize panels, and plan sample-prefixed
+element names, coordinate systems, and metadata references.
 
 Validate all requested samples against each other and against the destination
 before decoding raster or transcript payloads. This includes sample-ID,
 element-name, coordinate-system, and modality-type collisions. Reject malformed
-existing Harpy metadata rather than building on an ambiguous store. The caller
-must ensure that no other process writes to the destination during the
-operation.
-
-Root provenance deliberately contains no sample registry. Derive the existing
-CosMx sample identifiers exclusively from the union of the exact `sample_id`
-values stored in the element records under `harpy.images`, `harpy.labels`, and
-`harpy.points`. Do not infer sample identity by parsing element names. Reject a
-requested sample identifier when it already occurs in any of those registries,
-even if the newly configured output base names would otherwise avoid an element
-name collision.
-
-Validate the existing element metadata structurally before accepting additions:
-
-- every key in `harpy.images`, `harpy.labels`, and `harpy.points` must name an
-  existing SpatialData element of the corresponding type;
-- every such element record must contain a valid sample identifier satisfying
-  the Slice 2 identifier contract; and
-- every points-level `feature_panel` reference must resolve to a record in
-  `harpy.feature_panels`.
-
-Allow unrelated SpatialData elements that have no Harpy CosMx element record;
-the store may have been extended by downstream analysis. They do not establish
-CosMx sample identities, but their element names and coordinate systems still
-participate in collision preflight and must never be replaced.
+existing state rather than building on ambiguity. In particular, reject a
+requested sample identifier when it occurs in the validated element metadata,
+even if different output base names would avoid an exact element-name
+collision. The caller must ensure that no other process writes to the
+destination during the operation.
 
 Resolve feature panels against the existing registry using the same canonical
 content contract as Slice 2. Reuse an identical existing panel record; create a
@@ -783,12 +884,12 @@ Focused tests should establish that:
 - `cosmx()` retains staged whole-store creation/replacement, whereas
   `add_cosmx_samples()` performs no whole-store staging or publication swap.
 
-## Slice 4: class-aware `hp.tb.allocate`
+## Slice 5: class-aware `hp.tb.allocate`
 
 **Status: specified; not implemented.**
 
 This slice consumes the generic feature-panel contract established by Slice 1
-and supports the sample-scoped elements created or added by Slices 2 and 3. It
+and supports the sample-scoped elements created or added by Slices 2 and 4. It
 must remain usable with non-reader points through an explicit denominator
 mapping, and it must preserve ordinary allocation behavior when class-aware
 arguments are omitted.
@@ -1137,7 +1238,7 @@ control class with no assigned points is valid and must produce zero counts and
 rates. Validate the complete multi-region request and shared
 `feature_class_allocation` configuration before writing the output table.
 
-### Boundary with Slice 5
+### Boundary with Slice 6
 
 The `.obs` summaries describe only control points that land inside an instance
 mask. They are suitable for cell-level histograms, violin plots, and a hexbin
@@ -1195,14 +1296,14 @@ run. Compare wall time, peak worker memory, task count, and output-table size
 with ordinary allocation. The additional summaries should be small relative to
 the point-to-label lookup and target-count reduction.
 
-## Slice 5: original-point control QC
+## Slice 6: original-point control QC
 
 **Status: specified; not implemented.**
 
 Add separate lightweight QC functions over the original transcript points.
-This slice is implemented after Slice 4 to keep delivery sequential, but its
+This slice is implemented after Slice 5 to keep delivery sequential, but its
 runtime contract depends only on the points and feature-panel metadata from
-Slice 1 and the sample-aware point metadata from Slices 2 and 3. Users may run
+Slice 1 and the sample-aware point metadata from Slices 2–4. Users may run
 it before or after allocation because it does not depend on an instance-label
 raster or an AnnData table.
 
@@ -1291,12 +1392,12 @@ Focused tests should establish that:
 - sample and mosaic coordinate systems remain independent; and
 - the implementation stays lazy until the compact summaries are computed.
 
-## Slice 6: scalable point-to-label assignment and reduction
+## Slice 7: scalable point-to-label assignment and reduction
 
 **Status: specified; not implemented.**
 
 Refactor the private execution path used by `hp.tb.allocate` without changing
-the public or biological contracts established by Slice 4. This optimization
+the public or biological contracts established by Slice 5. This optimization
 must remain generic to raster labels and points elements; it must not depend on
 CosMx FOV identifiers or reader-specific partition metadata.
 
@@ -1403,14 +1504,14 @@ and coordinate statistics from the same assigned-points dataframe. Prefer one
 grouped intermediate keyed by instance and target, carrying at least transcript
 count and the coordinate sums/count needed for instance means. In class-aware
 mode, coordinate statistics use only the configured expression class, as
-specified by Slice 4.
+specified by Slice 5.
 
 Derive instance coordinates from the compact grouped result instead of running
 a second independent groupby over every assigned point. Retain sparse
 instance-by-target construction and compute all compact Dask reductions
 together so the assignment graph is executed once. Pair-level work remains
 independent; the shared feature-axis alignment and final row-wise stacking from
-Slice 4 are unchanged.
+Slice 5 are unchanged.
 
 ### Performance contract and verification
 
