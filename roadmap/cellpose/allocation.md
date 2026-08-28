@@ -630,7 +630,10 @@ element or root attribute. It is a validator, not a migration or recovery API.
 Implement one internal validator over an already opened `SpatialData` object so
 the public function and Slice 4's incremental writer use exactly the same
 rules. The public function opens the path and delegates to that primitive;
-`add_cosmx_samples()` reuses the object it has already opened.
+`add_cosmx_samples()` reuses the object it has already opened. Place both in
+`harpy/io/_cosmx/_validation.py` and export only
+`validate_cosmx_store()` through `harpy.io`; source-run discovery validation
+remains in its existing modules.
 
 ### Structural validation
 
@@ -643,6 +646,9 @@ existing transcript rows:
   `reader_version` is a non-empty string;
 - `harpy.images`, `harpy.labels`, `harpy.points`, and
   `harpy.feature_panels`, when present, are mappings;
+- at least one image, labels, or points element is registered as CosMx-owned;
+  provenance without any registered reader-owned element is not a valid CosMx
+  store;
 - every image, labels, and points registry key names an existing SpatialData
   element of the corresponding type;
 - every registered element record contains a valid `sample_id` satisfying the
@@ -661,6 +667,32 @@ existing transcript rows:
 - each referenced points element contains the panel-declared feature and class
   columns with categorical dtypes. The structural check may inspect Parquet or
   Dask schema metadata but must not compute transcript partitions.
+
+Treat the documented fields as required and validate their exact value types
+and internal constraints, but permit additional keys in element and panel
+records. Compatible metadata extensions must not make a store invalid while
+the same `metadata_version` remains supported.
+
+Determine a registered labels element's family from its metadata, never from
+its configurable element name. Require exactly one family discriminator:
+
+```text
+instance labels      -> instance_id_encoding
+compartment labels   -> categories
+```
+
+Reject a labels record with both or neither discriminator. Validate
+`instance_id_encoding` against the reader's fixed background, positive integer
+base, and formula contract. Validate `categories` against the fixed CosMx
+compartment mapping written by the reader.
+
+A points record without a `feature_panel` reference remains valid and is not
+required to contain categorical feature or class columns; this is the supported
+missing-plex reader result. For a referenced panel, accept either known or
+unknown Dask categorical metadata for the declared columns. Structural
+validation establishes the categorical dtype without calling
+`.cat.as_known()` or computing a partition. The optional deep check performs
+the projected payload scan.
 
 Root provenance deliberately contains no sample registry. Derive existing
 CosMx sample identifiers exclusively from the union of the exact `sample_id`
