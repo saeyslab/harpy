@@ -122,29 +122,78 @@ def cosmx(
     versioned Harpy convention, not part of the SpatialData standard. Its
     structure is::
 
-        harpy
-        ├── metadata_version
+        sdata.attrs["harpy"]
+        ├── metadata_version: 1
+        │
         ├── provenance
+        │   ├── reader: "cosmx"
+        │   └── reader_version: <Harpy version>
+        │
         ├── images
         │   └── <image element name>
+        │       ├── sample_id: <sample identifier>
+        │       ├── fovs: [<source FOVs>]
+        │       ├── mosaic
+        │       │   ├── mode: "spatial_groups" | "single"
+        │       │   └── adjacency_tolerance_px: <int> | None
+        │       ├── source_origin_px
+        │       │   ├── x: <int>
+        │       │   └── y: <int>
+        │       ├── orientation
+        │       │   ├── flip_x: <bool>
+        │       │   └── flip_y: <bool>
+        │       ├── pixel_size_um: <float>
+        │       └── channels
+        │           └── [<channel record>, ...]
+        │               ├── channel_id: <str>
+        │               ├── name: <str>
+        │               ├── source_plane: <int>
+        │               └── output_coordinate: <str>
+        │
         ├── labels
-        │   └── <labels element name>
+        │   ├── <instance-label element name>
+        │   │   ├── sample_id, fovs, mosaic, source_origin_px,
+        │   │   │   orientation, pixel_size_um
+        │   │   └── instance_id_encoding
+        │   │       ├── background: 0
+        │   │       ├── base: <number of source-dtype values>
+        │   │       └── formula:
+        │   │           "global_id = (fov - 1) * base + local_id"
+        │   │
+        │   └── <compartment-label element name>
+        │       ├── sample_id, fovs, mosaic, source_origin_px,
+        │       │   orientation, pixel_size_um
+        │       └── categories
+        │           ├── 0: "background"
+        │           ├── 1: "nuclear"
+        │           ├── 2: "membrane"
+        │           └── 3: "cytoplasmic"
+        │
         ├── points
-        │   └── <points element name>
-        └── feature_panels
-            └── <shared panel name>
+        │   └── <transcript points element name>
+        │       ├── sample_id, fovs, mosaic, source_origin_px,
+        │       │   orientation, pixel_size_um
+        │       └── feature_panel: "feature_panel_<content hash>"  [optional]
+        │
+        └── feature_panels                                      [optional]
+            └── feature_panel_<content hash>
+                ├── feature_column: "gene"
+                ├── class_column: "code_class"
+                ├── categories: [<ordered feature classes>]
+                └── targets_by_class
+                    └── <feature class>: [<authoritative targets>]
 
     ``provenance`` records only the reader and Harpy version. The ``images``,
     ``labels``, and ``points`` mappings are keyed by exact SpatialData element
-    names. Every element record contains ``sample_id``, actual source FOV
-    membership, mosaic mode and effective adjacency tolerance, pre-group/source
-    origin, orientation, and pixel size. Images additionally describe retained
-    channels; instance labels describe their ID encoding; compartment labels
-    describe their semantic categories.
+    names. Disabled modality registries are omitted. SpatialData coordinate
+    systems and transformations are stored with the spatial elements and are
+    not part of this root Harpy metadata tree.
 
-    When an authoritative run-level plex is available, points records refer to
-    one content-addressed shared panel record. Identical panels across samples
-    are stored once::
+    When an authoritative run-level plex is available, ``feature_panel`` is a
+    points-record reference whose value is the key of a content-addressed
+    record in the shared ``feature_panels`` registry. Identical panels across
+    samples are stored once. For example, two transcript points elements can
+    reference the same shared panel record::
 
         sdata.attrs["harpy"]
         ├── points
@@ -160,9 +209,7 @@ def cosmx(
                 ├── categories: [...]
                 └── targets_by_class: {...}
 
-    Here, ``feature_panel`` is a reference field and its value is the key of a
-    record in the shared ``feature_panels`` registry. The relationship can be
-    resolved as follows::
+    The relationship can be resolved exactly as follows::
 
         panel_key = sdata.attrs["harpy"]["points"][points_name]["feature_panel"]
         panel = sdata.attrs["harpy"]["feature_panels"][panel_key]
