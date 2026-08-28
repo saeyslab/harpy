@@ -486,6 +486,43 @@ they differ. Each points metadata record stores only the resulting
 `feature_panel` reference; do not duplicate the panel contents per sample or
 per mosaic.
 
+Both the element-keyed points metadata and the shared panel records live in the
+root `SpatialData.attrs` Harpy namespace. They are not stored as Parquet
+metadata or directly on an individual points object. The agreed reference
+structure is:
+
+```text
+sdata.attrs["harpy"]
+├── points
+│   ├── sample_a_transcripts_mosaic_1
+│   │   └── feature_panel ───────────────┐
+│   ├── sample_a_transcripts_mosaic_2    │
+│   │   └── feature_panel ───────────────┤
+│   └── sample_b_transcripts_mosaic_1    │
+│       └── feature_panel ───────────────┤
+│                                        ▼
+└── feature_panels
+    └── feature_panel_8a31b240c75e
+        ├── feature_column: gene
+        ├── class_column: code_class
+        ├── categories: [...]
+        └── targets_by_class: {...}
+```
+
+In mapping form, the reference is located at
+`sdata.attrs["harpy"]["points"][<points element name>]["feature_panel"]`; it is
+not a single `sdata.attrs["points"]["feature_panel"]` value. The referenced
+record lives at
+`sdata.attrs["harpy"]["feature_panels"][<feature panel key>]`. When no
+authoritative panel is available, omit both the points-level reference and the
+shared panel record.
+
+Update the public `harpy.io.cosmx()` docstring as part of Slice 2 so its metadata
+section includes this reference diagram and paths, alongside the complete
+sample-aware element metadata contract. Do not document the content-derived
+key in the current single-run reader before the implementation changes, because
+that would describe metadata it does not yet write.
+
 Sharing a panel record is a storage optimization, not an assertion that the
 samples are spatially aligned. Conversely, two different registry keys do not
 necessarily make panels incompatible for allocation: Slice 4 compares the
