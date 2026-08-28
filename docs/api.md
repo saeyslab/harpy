@@ -23,6 +23,7 @@ I/O.
 
     io.CosmxSample
     io.cosmx
+    io.add_cosmx_samples
     io.validate_cosmx_store
     io.phenocycler
     io.macsima

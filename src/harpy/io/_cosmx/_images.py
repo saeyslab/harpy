@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Sequence
-from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -15,8 +14,9 @@ from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import Identity, Scale
 
-from harpy._metadata import _IMAGES_METADATA_KEY, _metadata_registry, _validate_metadata_destination
+from harpy._metadata import _IMAGES_METADATA_KEY, _validate_metadata_destination
 from harpy.image._image import add_image
+from harpy.io._cosmx._metadata import _commit_element_metadata
 from harpy.io._cosmx._models import _CosmxMosaicGeometry, _CosmxPreview
 from harpy.io._cosmx._raster import (
     _assemble_raster,
@@ -48,6 +48,7 @@ def _add_morphology_images(
     flip_y: bool = False,
     chunks: tuple[int, int, int] = _DEFAULT_CHUNKS,
     scale_factors: ScaleFactors_t | None = None,
+    reader_version: str | None = None,
     overwrite: bool = False,
 ) -> SpatialData:
     """Add one lazy, backed morphology image per CosMx mosaic group.
@@ -107,6 +108,8 @@ def _add_morphology_images(
     scale_factors
         Optional relative scale factors used to construct a lazy multiscale
         DataTree before the image element is written.
+    reader_version
+        Optional Harpy version persisted with each successfully written element.
     overwrite
         Whether existing planned image elements may be replaced.
 
@@ -143,8 +146,6 @@ def _add_morphology_images(
     if collisions and not overwrite:
         raise ValueError(f"CosMx morphology image elements already exist: {collisions}.")
 
-    attrs = deepcopy(sdata.attrs)
-    images_metadata = _metadata_registry(attrs, _IMAGES_METADATA_KEY)
     channel_records = [
         {
             "channel_id": channel.channel_id,
@@ -156,6 +157,20 @@ def _add_morphology_images(
     ]
 
     for mosaic, element_name in zip(preview.mosaics, element_names, strict=True):
+        metadata = {
+            "fovs": list(mosaic.fovs),
+            "sample_id": sample_id,
+            "mosaic": {
+                "mode": preview.mosaic_mode,
+                "adjacency_tolerance_px": preview.adjacency_tolerance_px,
+            },
+            "source_origin_px": {"x": mosaic.origin_x_px, "y": mosaic.origin_y_px},
+            "orientation": {"flip_x": flip_x, "flip_y": flip_y},
+            "pixel_size_um": preview.manifest.run.pixel_size_um,
+            "channels": [dict(channel) for channel in channel_records],
+        }
+        if preview.manifest.run.acquisition_timestamp is not None:
+            metadata["acquisition_timestamp"] = preview.manifest.run.acquisition_timestamp
         array = _morphology_mosaic(
             preview,
             mosaic,
@@ -188,23 +203,14 @@ def _add_morphology_images(
             c_coords=[channel.output_coordinate for channel in selected_channels],
             overwrite=overwrite,
         )
-        metadata = {
-            "fovs": list(mosaic.fovs),
-            "sample_id": sample_id,
-            "mosaic": {
-                "mode": preview.mosaic_mode,
-                "adjacency_tolerance_px": preview.adjacency_tolerance_px,
-            },
-            "source_origin_px": {"x": mosaic.origin_x_px, "y": mosaic.origin_y_px},
-            "orientation": {"flip_x": flip_x, "flip_y": flip_y},
-            "pixel_size_um": preview.manifest.run.pixel_size_um,
-            "channels": deepcopy(channel_records),
-        }
-        if preview.manifest.run.acquisition_timestamp is not None:
-            metadata["acquisition_timestamp"] = preview.manifest.run.acquisition_timestamp
-        images_metadata[element_name] = metadata
-    sdata.attrs = attrs
-    sdata.write_attrs()
+        _commit_element_metadata(
+            sdata,
+            registry=_IMAGES_METADATA_KEY,
+            element_name=element_name,
+            record=metadata,
+            reader_version=reader_version,
+            cleanup_element_on_failure=not overwrite,
+        )
     return sdata
 
 

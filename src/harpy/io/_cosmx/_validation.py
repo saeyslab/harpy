@@ -40,7 +40,7 @@ class _FeaturePanelContract:
 def validate_cosmx_store(
     output: str | Path,
     *,
-    check_point_contents: bool = False,
+    check_point_contents: bool = True,
 ) -> None:
     """Validate a sample-aware CosMx SpatialData Zarr store without modifying it.
 
@@ -49,11 +49,12 @@ def validate_cosmx_store(
     and referenced points schemas. It reads array and dataframe metadata but
     does not compute raster or transcript partitions.
 
-    The optional content check projects only the feature and feature-class
+    By default, the content check projects only the feature and feature-class
     columns from each panel-associated points element and validates each
     partition independently against the referenced authoritative panel. It
     computes at most one small diagnostic per partition and does not require a
-    global shuffle. Panel targets with zero detections remain valid.
+    global shuffle. Panel targets with zero detections remain valid. Set
+    ``check_point_contents=False`` for a metadata- and schema-only check.
 
     Parameters
     ----------
@@ -62,7 +63,8 @@ def validate_cosmx_store(
         reader.
     check_point_contents
         Whether to scan the two panel-declared categorical columns in referenced
-        points elements. By default only their lazy schemas are checked.
+        points elements. Defaults to ``True``; set to ``False`` to check only
+        their lazy schemas.
 
     Raises
     ------
@@ -93,7 +95,7 @@ def validate_cosmx_store(
 def _validate_cosmx_sdata(
     sdata: SpatialData,
     *,
-    check_point_contents: bool = False,
+    check_point_contents: bool = True,
 ) -> frozenset[str]:
     """Validate an opened store and return its element-declared sample IDs."""
     if not isinstance(check_point_contents, bool):

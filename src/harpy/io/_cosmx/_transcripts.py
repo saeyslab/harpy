@@ -4,7 +4,6 @@ import csv
 import hashlib
 import json
 from collections.abc import Mapping, Sequence
-from copy import deepcopy
 from pathlib import Path
 
 import dask.dataframe as dd
@@ -18,9 +17,9 @@ from spatialdata.transformations import Identity, Scale
 from harpy._metadata import (
     _FEATURE_PANELS_METADATA_KEY,
     _POINTS_METADATA_KEY,
-    _metadata_registry,
     _validate_metadata_destination,
 )
+from harpy.io._cosmx._metadata import _commit_element_metadata
 from harpy.io._cosmx._models import _CosmxPreview
 from harpy.io._cosmx._raster import _mosaic_placements, _pixel_coordinate_system
 from harpy.points._points import add_points
@@ -55,6 +54,7 @@ def _add_transcript_points(
     flip_x: bool = True,
     flip_y: bool = False,
     blocksize: str | int = "64MB",
+    reader_version: str | None = None,
     overwrite: bool = False,
 ) -> SpatialData:
     """Add one backed, out-of-core transcript points element per mosaic.
@@ -107,6 +107,8 @@ def _add_transcript_points(
     blocksize
         Positive byte count or Dask byte-size string used to partition each
         source CSV.
+    reader_version
+        Optional Harpy version persisted with each successfully written element.
     overwrite
         Whether existing points elements with the planned names may be replaced.
 
@@ -150,6 +152,21 @@ def _add_transcript_points(
     target_classes = None if feature_panel is None else feature_panel.target_classes
 
     for mosaic, element_name in zip(preview.mosaics, element_names, strict=True):
+        metadata = {
+            "fovs": list(mosaic.fovs),
+            "sample_id": sample_id,
+            "mosaic": {
+                "mode": preview.mosaic_mode,
+                "adjacency_tolerance_px": preview.adjacency_tolerance_px,
+            },
+            "source_origin_px": {"x": mosaic.origin_x_px, "y": mosaic.origin_y_px},
+            "orientation": {"flip_x": flip_x, "flip_y": flip_y},
+            "pixel_size_um": preview.manifest.run.pixel_size_um,
+        }
+        if feature_panel_name is not None:
+            metadata["feature_panel"] = feature_panel_name
+        if preview.manifest.run.acquisition_timestamp is not None:
+            metadata["acquisition_timestamp"] = preview.manifest.run.acquisition_timestamp
         placements = _mosaic_placements(preview, mosaic)
         frames = [
             _read_fov_transcripts(
@@ -183,30 +200,17 @@ def _add_transcript_points(
             },
             overwrite=overwrite,
         )
-    attrs = deepcopy(sdata.attrs)
-    points_metadata = _metadata_registry(attrs, _POINTS_METADATA_KEY)
-    if feature_panel_name is not None and feature_panel_metadata is not None:
-        feature_panels = _metadata_registry(attrs, _FEATURE_PANELS_METADATA_KEY)
-        feature_panels[feature_panel_name] = feature_panel_metadata
-    for mosaic, element_name in zip(preview.mosaics, element_names, strict=True):
-        metadata = {
-            "fovs": list(mosaic.fovs),
-            "sample_id": sample_id,
-            "mosaic": {
-                "mode": preview.mosaic_mode,
-                "adjacency_tolerance_px": preview.adjacency_tolerance_px,
-            },
-            "source_origin_px": {"x": mosaic.origin_x_px, "y": mosaic.origin_y_px},
-            "orientation": {"flip_x": flip_x, "flip_y": flip_y},
-            "pixel_size_um": preview.manifest.run.pixel_size_um,
-        }
-        if feature_panel_name is not None:
-            metadata["feature_panel"] = feature_panel_name
-        if preview.manifest.run.acquisition_timestamp is not None:
-            metadata["acquisition_timestamp"] = preview.manifest.run.acquisition_timestamp
-        points_metadata[element_name] = metadata
-    sdata.attrs = attrs
-    sdata.write_attrs()
+        _commit_element_metadata(
+            sdata,
+            registry=_POINTS_METADATA_KEY,
+            element_name=element_name,
+            record=metadata,
+            reader_version=reader_version,
+            feature_panel=(feature_panel_name, feature_panel_metadata)
+            if feature_panel_name is not None and feature_panel_metadata is not None
+            else None,
+            cleanup_element_on_failure=not overwrite,
+        )
     return sdata
 
 

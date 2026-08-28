@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from pathlib import Path
 from typing import Literal
 
@@ -13,9 +12,10 @@ from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import Identity, Scale
 
-from harpy._metadata import _LABELS_METADATA_KEY, _metadata_registry, _validate_metadata_destination
+from harpy._metadata import _LABELS_METADATA_KEY, _validate_metadata_destination
 from harpy.image._image import add_labels
 from harpy.io._cosmx._constants import _COMPARTMENT_CATEGORIES, _INSTANCE_ID_FORMULA
+from harpy.io._cosmx._metadata import _commit_element_metadata
 from harpy.io._cosmx._models import (
     _COMPARTMENT_LABELS_PRODUCT,
     _INSTANCE_ID_DTYPE,
@@ -46,6 +46,7 @@ def _add_instance_labels(
     flip_y: bool = False,
     chunks: tuple[int, int] = _DEFAULT_CHUNKS,
     scale_factors: ScaleFactors_t | None = None,
+    reader_version: str | None = None,
     overwrite: bool = False,
 ) -> SpatialData:
     """Add one lazy, globally ID-remapped instance-label raster per mosaic."""
@@ -59,6 +60,7 @@ def _add_instance_labels(
         flip_y=flip_y,
         chunks=chunks,
         scale_factors=scale_factors,
+        reader_version=reader_version,
         sample_id=sample_id,
         overwrite=overwrite,
     )
@@ -75,6 +77,7 @@ def _add_compartment_labels(
     flip_y: bool = False,
     chunks: tuple[int, int] = _DEFAULT_CHUNKS,
     scale_factors: ScaleFactors_t | None = None,
+    reader_version: str | None = None,
     overwrite: bool = False,
 ) -> SpatialData:
     """Add one lazy semantic compartment-label raster per mosaic."""
@@ -88,6 +91,7 @@ def _add_compartment_labels(
         flip_y=flip_y,
         chunks=chunks,
         scale_factors=scale_factors,
+        reader_version=reader_version,
         sample_id=sample_id,
         overwrite=overwrite,
     )
@@ -104,6 +108,7 @@ def _add_label_family(
     flip_y: bool,
     chunks: tuple[int, int],
     scale_factors: ScaleFactors_t | None,
+    reader_version: str | None,
     sample_id: str,
     overwrite: bool,
 ) -> SpatialData:
@@ -155,6 +160,8 @@ def _add_label_family(
         Final two-dimensional ``(y, x)`` Dask/Zarr chunks.
     scale_factors
         Optional relative factors used to construct a lazy label pyramid.
+    reader_version
+        Optional Harpy version persisted with each successfully written element.
     overwrite
         Whether existing label elements with the planned names may be replaced.
 
@@ -194,11 +201,31 @@ def _add_label_family(
     output_dtype = _INSTANCE_ID_DTYPE if family == _INSTANCE_LABELS_PRODUCT else source_dtype
     placements = {mosaic.mosaic: _mosaic_placements(preview, mosaic) for mosaic in preview.mosaics}
 
-    attrs = deepcopy(sdata.attrs)
-    labels_metadata = _metadata_registry(attrs, _LABELS_METADATA_KEY)
     instance_id_base = _instance_id_base(source_dtype) if family == _INSTANCE_LABELS_PRODUCT else None
 
     for mosaic, element_name in zip(preview.mosaics, element_names, strict=True):
+        metadata = {
+            "fovs": list(mosaic.fovs),
+            "sample_id": sample_id,
+            "mosaic": {
+                "mode": preview.mosaic_mode,
+                "adjacency_tolerance_px": preview.adjacency_tolerance_px,
+            },
+            "source_origin_px": {"x": mosaic.origin_x_px, "y": mosaic.origin_y_px},
+            "orientation": {"flip_x": flip_x, "flip_y": flip_y},
+            "pixel_size_um": preview.manifest.run.pixel_size_um,
+        }
+        if family == _INSTANCE_LABELS_PRODUCT:
+            assert instance_id_base is not None
+            metadata["instance_id_encoding"] = {
+                "background": 0,
+                "base": instance_id_base,
+                "formula": _INSTANCE_ID_FORMULA,
+            }
+        else:
+            metadata["categories"] = dict(_COMPARTMENT_CATEGORIES)
+        if preview.manifest.run.acquisition_timestamp is not None:
+            metadata["acquisition_timestamp"] = preview.manifest.run.acquisition_timestamp
         array = _label_mosaic(
             preview,
             mosaic,
@@ -231,32 +258,14 @@ def _add_label_family(
             scale_factors=scale_factors,
             overwrite=overwrite,
         )
-        metadata = {
-            "fovs": list(mosaic.fovs),
-            "sample_id": sample_id,
-            "mosaic": {
-                "mode": preview.mosaic_mode,
-                "adjacency_tolerance_px": preview.adjacency_tolerance_px,
-            },
-            "source_origin_px": {"x": mosaic.origin_x_px, "y": mosaic.origin_y_px},
-            "orientation": {"flip_x": flip_x, "flip_y": flip_y},
-            "pixel_size_um": preview.manifest.run.pixel_size_um,
-        }
-        if family == _INSTANCE_LABELS_PRODUCT:
-            assert instance_id_base is not None
-            metadata["instance_id_encoding"] = {
-                "background": 0,
-                "base": instance_id_base,
-                "formula": _INSTANCE_ID_FORMULA,
-            }
-        else:
-            metadata["categories"] = deepcopy(_COMPARTMENT_CATEGORIES)
-        if preview.manifest.run.acquisition_timestamp is not None:
-            metadata["acquisition_timestamp"] = preview.manifest.run.acquisition_timestamp
-        labels_metadata[element_name] = metadata
-
-    sdata.attrs = attrs
-    sdata.write_attrs()
+        _commit_element_metadata(
+            sdata,
+            registry=_LABELS_METADATA_KEY,
+            element_name=element_name,
+            record=metadata,
+            reader_version=reader_version,
+            cleanup_element_on_failure=not overwrite,
+        )
     return sdata
 
 
