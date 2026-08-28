@@ -4,17 +4,17 @@ Date: 2026-08-28
 
 ## Executive summary
 
-Harpy should integrate the current native C++ Baysor as a points-first CLI
-workflow with two execution modes:
+Harpy should integrate the current native C++ Baysor through a separate
+`baysor_python` package as a points-first workflow with two execution modes:
 
 1. an untiled mode that establishes correctness and provides a reference
    result; and
 2. an optional tiled mode for datasets or deployment environments that cannot
    run Baysor comfortably as one process.
 
-Both modes should share the same input preparation, subprocess runner, output
-contract, provenance model, and SpatialData importer. Tiling should be an
-execution strategy within this integration rather than a separate raster
+Both modes should share the same input preparation, `baysor_python` segmentation
+runner, output contract, provenance model, and SpatialData importer. Tiling should
+be an execution strategy within this integration rather than a separate raster
 segmentation implementation.
 
 The benchmark in [benchmark.md](benchmark.md) showed that an approximately
@@ -32,18 +32,18 @@ and rely primarily on pixel-IoU stitching. Baysor's molecule assignments are the
 authoritative result; cell polygons, count matrices, cell statistics, and
 optional raster labels should be derived globally after reconciliation.
 
-Global cell boundaries will be generated with a minimally vendored, pinned copy
-of Baysor's C++ boundary-estimation kernel in the Harpy repository. A thin native
-companion extension will expose that kernel to Harpy's Python API. This preserves
-Baysor's boundary semantics without rewriting the algorithm in Python or making
-the complete Baysor application a Harpy library dependency.
+The separate `baysor_python` repository will own the pinned Baysor source and
+native build. It will expose segmentation as a Python API backed initially by a
+managed Baysor subprocess, and expose boundary estimation through a direct native
+binding. Harpy will own SpatialData integration, tiling, scheduling,
+reconciliation, and global-product construction, but no Baysor-derived C++ code.
 
 ## Goals
 
 The integration should:
 
-- run a pinned C++ Baysor executable without installing Baysor into Harpy's
-  Python environment;
+- run a pinned C++ Baysor implementation through a versioned `baysor_python`
+  dependency without building or vendoring Baysor inside Harpy;
 - accept a SpatialData points element and an optional labels element as a
   transcript-native prior;
 - support large backed SpatialData objects without materializing the complete
@@ -51,8 +51,8 @@ The integration should:
 - preserve one stable identity for every retained transcript;
 - produce globally consistent molecule assignments, cell identifiers, shapes,
   counts, and cell statistics;
-- reproduce Baysor's boundary semantics through a pinned native C++ kernel with
-  explicit upstream provenance and parity tests;
+- reproduce Baysor's boundary semantics through the `baysor_python` native API,
+  with explicit upstream provenance and parity tests;
 - expose all scale-sensitive and resource-sensitive Baysor parameters;
 - make runs reproducible, inspectable, resumable, and safe to retry; and
 - demonstrate that tiled results are not materially dependent on tile seams or
@@ -82,6 +82,45 @@ A dedicated high-level points operation, conceptually
 `harpy.pt.segment_baysor`, should therefore own the complete workflow. The exact
 public name can be settled during API review. The existing Julia-era callable
 can be deprecated independently after the new integration is established.
+
+## `baysor_python` integration boundary
+
+`baysor_python` will be a separately versioned repository and Python
+distribution. It will own:
+
+- the pinned Baysor source and native dependency build;
+- discovery or distribution of the matching Baysor executable;
+- `segment(...)`, initially implemented as a safe managed subprocess call;
+- `boundaries(...)`, implemented as a direct array-oriented native binding;
+- translation of native failures into documented Python exceptions and result
+  objects; and
+- Baysor-version reporting, build provenance, wheels, and CLI-versus-Python
+  parity tests.
+
+Harpy will own:
+
+- SpatialData input preparation and output import;
+- transcript-stable identity and global prior sampling;
+- tile planning, staging, concurrency, retry, and resume;
+- cross-tile assignment reconciliation;
+- global counts, QC, Shapely/GeoDataFrame conversion, and optional rasterization;
+  and
+- end-to-end scientific and seam validation.
+
+Calling segmentation through Python does not require running the algorithm in the
+Python process. The initial `baysor_python.segment(...)` implementation should
+invoke the pinned executable without a shell and return a structured result. This
+preserves process isolation, complete memory reclamation, independent OpenMP
+configuration, cancellation, retry, and retained logs for each tile.
+
+A direct in-process segmentation API should be added only after Baysor exposes a
+stable C++ entry point returning a segmentation result from in-memory molecule
+data and options. The Baysor CLI and Python binding must both call that same entry
+point; `baysor_python` must not duplicate the CLI's orchestration logic.
+
+During development, the pinned Baysor source may be included as a Git submodule.
+Published source distributions must bundle the exact source snapshot and must not
+require Git, submodule initialization, or network access during installation.
 
 ## Output contract
 
@@ -136,7 +175,8 @@ output.
 
 Harpy metadata should record:
 
-- the Baysor executable path, revision or executable checksum;
+- the `baysor_python` version, embedded Baysor revision, executable path, and
+  executable checksum;
 - all resolved Baysor and Harpy-side parameters;
 - source points, prior labels, and coordinate system;
 - global filtering decisions and feature-panel identity;
@@ -148,10 +188,13 @@ Harpy metadata should record:
 
 ## Common untiled foundation
 
-The first implementation should be a thin untiled wrapper around pinned Baysor
-C++. It should prepare and validate Parquet, invoke the executable using a list
-of subprocess arguments rather than a shell command, capture logs and resource
-measurements, validate the output schemas, and import the result.
+The first implementation should be a thin untiled Harpy wrapper around
+`baysor_python.segment(...)`. Harpy should prepare and validate Parquet and pass a
+structured request to `baysor_python`; the latter should invoke its pinned
+executable using a list of subprocess arguments rather than a shell command and
+return paths, logs, resource measurements, resolved native versions, and status
+in a structured result. Harpy then validates the output schemas and imports the
+result.
 
 At minimum, the public API must expose:
 
@@ -161,7 +204,7 @@ At minimum, the public API must expose:
 - `prior_segmentation_confidence`;
 - `min_molecules_per_cell`;
 - `iters` and `tol`;
-- executable path;
+- `baysor_python` backend and optional executable override;
 - OpenMP thread count;
 - work directory and intermediate-retention policy; and
 - overwrite and resume behavior.
@@ -315,13 +358,16 @@ The staging pass should:
   resolved parameters, and run status.
 
 The manifest makes the workflow resumable. A completed tile may be reused only
-when its input checksum, executable identity, and resolved parameters all match.
+when its input checksum, `baysor_python` version, embedded Baysor/executable
+identity, and resolved parameters all match.
 
-### 5. Run Baysor with resource-aware concurrency
+### 5. Run Baysor through `baysor_python` with resource-aware concurrency
 
-Every tile is an independent Baysor subprocess. The scheduler must limit both
-memory and CPU oversubscription. OpenMP thread counts should be set explicitly
-for each process, and tile concurrency should be derived from a memory budget.
+Harpy calls `baysor_python.segment(...)` for every tile; the initial backend runs
+each tile as an independent Baysor subprocess. The Harpy scheduler must limit
+both memory and CPU oversubscription. OpenMP thread counts should be set
+explicitly for each process, and tile concurrency should be derived from a memory
+budget.
 
 On the 32 GB benchmark machine, the initial comparison should be:
 
@@ -430,17 +476,16 @@ only a subset of target cells, but it must also receive every contextual molecul
 intersecting those cells' required bounding regions. The global boundary-distance
 parameter must be computed once or passed unchanged to every batch.
 
-### Native boundary-estimator decision
+### `baysor_python` boundary-estimator decision
 
-Harpy will not reimplement the estimator in Python and will not merge tile-local
-polygons. Instead, the Harpy repository will contain a minimally extracted,
-pinned copy of Baysor's C++ boundary-estimation kernel and the helper routines
-needed by that kernel. It will not vendor Baysor's CLI, segmentation, clustering,
-configuration, Parquet, HDF5, TIFF, or logging infrastructure.
+Neither Harpy nor `baysor_python` will reimplement the estimator in Python, and
+Harpy will not merge tile-local polygons. The separate `baysor_python` repository
+will build the pinned Baysor source and expose its boundary estimator through a
+thin `pybind11` or `nanobind` extension. Harpy will depend on this public Python
+API rather than owning Baysor-derived C++ code.
 
-The native code will be exposed through a thin `pybind11` or `nanobind` extension.
-The extension boundary must remain array-oriented and independent of SpatialData,
-GeoPandas, Shapely, Arrow, and Parquet. Its conceptual contract is:
+The native extension boundary must remain array-oriented and independent of
+SpatialData, GeoPandas, Shapely, Arrow, and Parquet. Its conceptual contract is:
 
 - input: contiguous molecule coordinates, final global cell labels, optional
   target cell identifiers, and an optional precomputed global boundary-distance
@@ -450,24 +495,21 @@ GeoPandas, Shapely, Arrow, and Parquet. Its conceptual contract is:
 - execution: release the Python GIL, support sparse global cell identifiers, and
   handle empty, one-molecule, two-molecule, and collinear cells explicitly.
 
-A Harpy Python wrapper will prepare the arrays, invoke the native extension,
+A Harpy wrapper will prepare the arrays, call `baysor_python.boundaries(...)`,
 convert the packed result to Shapely polygons and a GeoDataFrame, and add the
 result through Harpy's normal shapes API.
 
-The initial packaging preference is a small native companion distribution built
-from the Harpy repository with CMake and `scikit-build-core`. Harpy itself remains
-the owner of the public Python API and imports the companion lazily. This avoids
-forcing Harpy's current pure-Python Hatchling build to compile CGAL and Eigen on
-every supported platform. Prebuilt wheels should initially cover the supported
-macOS ARM64 and Linux x86-64 environments. Folding the extension into the main
-Harpy distribution can be reconsidered after its build and wheel pipeline is
-stable.
+`baysor_python` should be built with CMake and `scikit-build-core`, and prebuilt
+wheels should initially cover macOS ARM64 and Linux x86-64 for Harpy's supported
+Python versions. Its releases must include Baysor's MIT notice, the exact
+upstream commit and original source paths, an inventory of binding-related Baysor
+changes, and an update procedure. The Python package must report both its own
+version and the embedded Baysor revision.
 
-The vendored source must include Baysor's MIT notice, the exact upstream commit
-and original paths, an inventory of Harpy modifications, and an update procedure.
-Parity tests must compare the generated geometry with the pinned upstream Baysor
-implementation after normalizing irrelevant polygon orientation and starting-
-vertex differences.
+Parity tests must compare the native API geometry with the pinned Baysor CLI
+output after normalizing irrelevant polygon orientation and starting-vertex
+differences. Repeated-call tests must also check memory release, exception
+translation, and OpenMP behavior.
 
 ## Baysor upstream requirements and optimizations
 
@@ -492,13 +534,19 @@ yet Parquet output currently generates them. Upstream switches to skip these
 products would reduce tile runtime, memory, and disk use. A molecules-only mode
 is desirable.
 
-### Optional upstream boundary-only operation
+### Stable native library entry points
 
-The vendored native kernel is the selected implementation and does not depend on
-an upstream CLI change. A future Baysor C++ subcommand or supported linkable
-boundary library would still be useful: after parity and packaging evaluation,
-Harpy could replace the vendored implementation with that maintained upstream
-interface without changing its public Python API.
+The initial `baysor_python` segmentation API is intentionally backed by the CLI.
+A future in-process API requires Baysor to expose one stable C++ segmentation
+entry point accepting in-memory molecule data and options and returning a
+structured result. The CLI and Python binding must share this entry point so
+their parameter resolution and scientific behavior cannot drift.
+
+The boundary API may initially bind the existing boundary functions, but
+bounded-memory use requires explicit target-cell selection while retaining all
+required contextual molecules. This capability should preferably be implemented
+in Baysor's public C++ library rather than as a divergent algorithm in the
+binding layer.
 
 ### Optional precomputed confidence
 
@@ -527,42 +575,47 @@ Deliverables:
 Exit criterion: a scientifically plausible untiled result and a parameter set
 worth reproducing in tiled mode.
 
-### Phase 1: Implement the modern untiled integration
+### Phase 1: Establish `baysor_python` segmentation and the untiled integration
 
-Build the shared foundation before any tile orchestration.
+Build the shared package and Harpy foundation before any tile orchestration.
 
 Deliverables:
 
-- parameter validation and executable preflight;
+- a separately versioned `baysor_python` repository and distribution;
+- pinned Baysor source, initially usable as a development submodule and bundled
+  into release source distributions;
+- `baysor_python.segment(...)` with managed subprocess execution, structured
+  results, documented exceptions, version reporting, and executable preflight;
+- parameter validation shared without duplicating Baysor's scientific logic;
 - global prior sampling and Parquet preparation;
-- safe C++ CLI subprocess execution;
 - output-schema validation;
 - points, shapes, table, and optional-label import;
 - provenance and resource recording; and
-- focused tests using a fake executable plus a small optional Baysor integration
-  test.
+- focused tests using a fake executable, CLI-versus-Python parity tests, and a
+  small Harpy integration test.
 
-Exit criterion: Harpy reproduces a direct pinned-Baysor run without using the
-Julia-era raster callback.
+Exit criterion: `baysor_python.segment(...)` reproduces a direct pinned-Baysor CLI
+run, and Harpy reproduces that result without using the Julia-era raster callback.
 
-### Phase 2: Establish the native boundary component
+### Phase 2: Establish the `baysor_python` native boundary API
 
 Resolve the highest-risk native packaging and semantic-parity questions before
 building the tiled workflow around this component.
 
 Deliverables:
 
-- a minimal, attributed extraction of the pinned Baysor C++ boundary kernel;
-- an array-oriented native extension and lazy Harpy Python wrapper;
+- an array-oriented binding to the pinned Baysor C++ boundary implementation;
+- `baysor_python.boundaries(...)` and a thin Harpy conversion wrapper;
 - explicit full-context and batched-target input contracts;
 - packed polygon output and conversion to Harpy shapes;
-- focused edge-case and upstream-parity tests;
+- focused edge-case, repeated-call, and CLI-parity tests;
 - macOS ARM64 and Linux x86-64 build and wheel smoke tests; and
-- dependency, licence, provenance, and upstream-update documentation.
+- dependency, licence, provenance, source-bundling, and upstream-update
+  documentation.
 
 Exit criterion: for identical molecule coordinates, assignments, and parameters,
-the extension produces geometry equivalent to pinned Baysor and can be installed
-on both initially supported platforms.
+the Python API produces geometry equivalent to pinned Baysor and its wheel can be
+installed on both initially supported platforms.
 
 ### Phase 3: Implement tile planning and staging
 
@@ -583,7 +636,7 @@ expected halo memberships, with no uncovered or unexpectedly duplicated rows.
 
 Deliverables:
 
-- bounded subprocess scheduling;
+- bounded scheduling of `baysor_python.segment(...)` subprocess jobs;
 - explicit OpenMP configuration;
 - explicit per-tile `n_cells_init` calculation;
 - retained logs and resource traces;
@@ -614,8 +667,8 @@ Deliverables:
 
 - global sparse cell-by-gene aggregation;
 - cell statistics and nucleus-ownership QC;
-- global boundary generation through the native kernel, with complete contextual
-  molecules for each exact or batched call;
+- global boundary generation through `baysor_python.boundaries(...)`, with
+  complete contextual molecules for each exact or batched call;
 - SpatialData points, shapes, and table elements;
 - optional rasterization; and
 - complete provenance metadata.
@@ -672,6 +725,12 @@ untiled and tiled Baysor and verify coverage, matching, counts, shapes, and
 round-trip SpatialData integrity. The test should include duplicate coordinates,
 background transcripts, cells without a prior nucleus, and nuclei close to a
 tile boundary.
+
+At the `baysor_python` layer, verify that `segment(...)` matches the direct pinned
+CLI for identical inputs, parameters, and seed, and that `boundaries(...)` matches
+the CLI-generated geometry for identical assignments. Native tests must cover
+repeated calls, exception translation, sparse cell identifiers, noise, degenerate
+cells, and supported wheel installation.
 
 ### Actual-data validation
 
@@ -749,17 +808,31 @@ Row-order preservation is visible in the pinned implementation but is not an
 adequate long-term identity contract. Parquet transcript-ID round-tripping is a
 production requirement.
 
+### `baysor_python` and Baysor version drift
+
+A binding release can silently diverge from its executable if source revisions,
+parameter defaults, or orchestration are not coupled. Every release must pin and
+report one Baysor revision, test Python-versus-CLI parity, and reject incompatible
+executable overrides. In-process segmentation must not be introduced until the
+CLI and binding share the same C++ library entry point.
+
 ## Decision
 
 Proceed in the following order:
 
 1. validate current C++ Baysor untiled on the actual UCB sample;
-2. implement a modern points-first untiled Harpy integration;
-3. add optional core-plus-halo tiling around that shared foundation;
-4. reconcile cells using shared transcript identities and constrained graph
+2. create `baysor_python`, pin and package Baysor, and expose segmentation through
+   a managed-subprocess Python API;
+3. integrate that segmentation API into Harpy's modern points-first untiled
+   workflow;
+4. expose Baysor boundary estimation as an array-oriented native
+   `baysor_python` API and verify CLI parity;
+5. add optional core-plus-halo tiling around the shared foundation;
+6. reconcile cells using shared transcript identities and constrained graph
    matching;
-5. rebuild all global derived products from the reconciled molecule table; and
-6. promote tiled mode only after it matches the untiled reference and passes
+7. rebuild all global derived products from the reconciled molecule table, using
+   `baysor_python` for final boundary estimation; and
+8. promote tiled mode only after it matches the untiled reference and passes
    seam and grid-shift validation.
 
 Tiling is therefore a planned scalability capability, not the default for the

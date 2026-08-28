@@ -50,6 +50,7 @@ def _add_instance_labels(
     flip_y: bool = False,
     chunks: tuple[int, int] = _DEFAULT_CHUNKS,
     scale_factors: ScaleFactors_t | None = None,
+    sample_id: str | None = None,
     overwrite: bool = False,
 ) -> SpatialData:
     """Add one lazy, globally ID-remapped instance-label raster per mosaic."""
@@ -63,6 +64,7 @@ def _add_instance_labels(
         flip_y=flip_y,
         chunks=chunks,
         scale_factors=scale_factors,
+        sample_id=sample_id,
         overwrite=overwrite,
     )
 
@@ -77,6 +79,7 @@ def _add_compartment_labels(
     flip_y: bool = False,
     chunks: tuple[int, int] = _DEFAULT_CHUNKS,
     scale_factors: ScaleFactors_t | None = None,
+    sample_id: str | None = None,
     overwrite: bool = False,
 ) -> SpatialData:
     """Add one lazy semantic compartment-label raster per mosaic."""
@@ -90,6 +93,7 @@ def _add_compartment_labels(
         flip_y=flip_y,
         chunks=chunks,
         scale_factors=scale_factors,
+        sample_id=sample_id,
         overwrite=overwrite,
     )
 
@@ -105,6 +109,7 @@ def _add_label_family(
     flip_y: bool,
     chunks: tuple[int, int],
     scale_factors: ScaleFactors_t | None,
+    sample_id: str | None,
     overwrite: bool,
 ) -> SpatialData:
     """Add one lazy label raster per mosaic for a single CosMx label family.
@@ -118,6 +123,8 @@ def _add_label_family(
     Each label element receives a root metadata record containing:
 
     - ``fovs``: source FOV numbers contributing to the mosaic;
+    - ``sample_id`` and ``mosaic`` when called by the public reader: the sample
+      identity and the grouping mode/effective adjacency tolerance;
     - ``source_origin_px``: upper-left mosaic bound in the pre-group/source
       pixel coordinate system. This origin is subtracted from every FOV
       position so that the mosaic starts at ``(0, 0)``. It is source-geometry
@@ -240,6 +247,16 @@ def _add_label_family(
             }
         else:
             metadata["categories"] = deepcopy(_COMPARTMENT_CATEGORIES)
+        if sample_id is not None:
+            metadata.update(
+                {
+                    "sample_id": sample_id,
+                    "mosaic": {
+                        "mode": preview.mosaic_mode,
+                        "adjacency_tolerance_px": preview.adjacency_tolerance_px,
+                    },
+                }
+            )
         labels_metadata[element_name] = metadata
 
     sdata.attrs = attrs
