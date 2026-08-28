@@ -241,7 +241,7 @@ Focused reader tests should establish that:
 
 ## Slice 2: sample-aware `harpy.io.cosmx()` creation API
 
-**Status: specified; not implemented.**
+**Status: implemented.**
 
 Extend the reader foundation from Slice 1 so several independent CosMx runs
 can be written into one SpatialData store. A sample is an explicit unit of
