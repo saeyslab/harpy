@@ -176,6 +176,61 @@ The initial actual-sample experiment should use:
 
 ## Tiled architecture
 
+### How tiling artefacts are avoided
+
+The tiled workflow does **not** treat boundary polygons as the objects that must
+be stitched. It treats molecule assignments as the authoritative intermediate
+result. Cell identities are reconciled through the stable transcripts shared by
+overlapping tiles, and one new global polygon is generated only after that
+reconciliation is complete.
+
+Consider one biological cell crossing the boundary between two tile cores. The
+halo makes the cell and its surrounding molecule context visible in both Baysor
+runs. Baysor may call it `cell_42` in tile A and `cell_17` in tile B, but many of
+the same stable transcript IDs in the shared halo will be assigned to both local
+cells. Sufficient agreement on those transcripts, supported by assignment
+confidence, spatial proximity, and the prior nucleus, establishes that the two
+local identifiers represent one global cell:
+
+```text
+tile_A/cell_42 ---\
+                   +--- global_cell_9001
+tile_B/cell_17 ---/
+```
+
+After all compatible local identifiers have been mapped to global cells, Harpy
+selects one final assignment for every transcript. It then gathers the complete
+molecule cloud of `global_cell_9001` from both sides of the seam and estimates a
+single new boundary from that global cloud.
+
+The intended flow is therefore:
+
+```text
+overlapping tile context
+          |
+          v
+match local cells using shared transcript identities
+          |
+          v
+select one global cell assignment per transcript
+          |
+          v
+estimate one new global polygon per cell
+```
+
+Tile-local polygons may be retained for diagnostics, but they are not clipped,
+glued together, or unioned to form the final boundary. Direct polygon stitching
+can preserve straight cuts at tile edges, introduce gaps or overlaps, and create
+a shape that disagrees with the final molecule assignments. Re-estimating the
+boundary after transcript reconciliation removes the tile seam from the geometry
+construction altogether.
+
+The halo is the first defence against artefacts because it prevents a core seam
+from also being a Baysor context boundary. Shared-transcript matching is the
+second defence because it resolves duplicate local identities. Global boundary
+re-estimation is the third defence because it prevents tile edges from appearing
+in the final cell geometry.
+
 ### 1. Global preflight and filtering
 
 Input preparation must happen globally before tiling:
@@ -312,6 +367,15 @@ components that would violate the one-cell-per-tile invariant are ambiguous.
 They should be recorded for QC and resolved conservatively rather than merged
 silently.
 
+For example, if tile A splits a region into `cell_A1` and `cell_A2` while tile B
+calls the same region `cell_B1`, the reconciler must not merge all three cells:
+doing so would merge two cells that one Baysor run explicitly kept separate. It
+should accept at most the strongest compatible match and flag the remaining
+conflict. An ambiguous or halo-touching group can be rerun as a rescue region
+centred on the seam with a larger halo, or on a grid shifted so that the seam is
+inside a tile core. If the conflict remains, retaining a conservative separation
+with an explicit QC flag is preferable to an unsupported merge.
+
 Thresholds should be learned from tiled-versus-untiled comparisons. They must
 not be chosen solely from the synthetic resource benchmark.
 
@@ -345,10 +409,12 @@ and unioned because doing so can create visible seams and can disagree with the
 final transcript assignments.
 
 The preferred boundary path is to estimate each final cell polygon from its
-global assigned molecule cloud. This is naturally parallel per cell and keeps
-memory bounded. If exact reuse of Baysor's C++ boundary estimator is required,
-a standalone upstream boundary operation would be preferable to duplicating the
-algorithm indefinitely in Harpy.
+global assigned molecule cloud. Thus, a cell crossing a seam receives one
+boundary calculation over the molecules on both sides, rather than two polygon
+fragments followed by a geometric merge. This is naturally parallel per cell
+and keeps memory bounded. If exact reuse of Baysor's C++ boundary estimator is
+required, a standalone upstream boundary operation would be preferable to
+duplicating the algorithm indefinitely in Harpy.
 
 ## Baysor upstream requirements and optimizations
 
