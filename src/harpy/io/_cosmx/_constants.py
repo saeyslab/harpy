@@ -35,4 +35,5 @@ _PLEX_FILE_RE = re.compile(r"^plex(?:[-_].*)?\.txt$", re.IGNORECASE)
 
 _DEFAULT_PIXEL_SIZE_UM = 0.120280945
 _TIFF_SUFFIXES = (".tif", ".tiff")
-_MORPHOLOGY_INVARIANT_KEYS = ("NFov", "ChannelOrder", "ImPixelSize_nm", "ImRows", "ImCols")
+_MORPHOLOGY_GEOMETRY_INVARIANT_KEYS = ("NFov", "ImPixelSize_nm", "ImRows", "ImCols")
+_MORPHOLOGY_IMAGE_INVARIANT_KEYS = ("ChannelOrder",)

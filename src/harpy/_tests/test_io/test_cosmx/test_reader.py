@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pytest
+import tifffile
 from spatialdata import SpatialData, read_zarr
 from spatialdata.transformations import get_transformation
 
@@ -222,6 +224,54 @@ def test_cosmx_intersects_fovs_only_across_enabled_modalities(
         fov for record in with_instance_labels.attrs["harpy"]["images"].values() for fov in record["fovs"]
     }
     assert represented == {1, 3}
+
+
+@pytest.mark.parametrize(
+    ("inconsistency", "error_message"),
+    [
+        ("channel_order", "Contradictory morphology metadata for ChannelOrder"),
+        ("dtype", "Contradictory morphology raster metadata"),
+    ],
+)
+def test_cosmx_transcript_only_ignores_morphology_image_inconsistencies(
+    ingestible_cosmx_path: Path,
+    tmp_path: Path,
+    inconsistency: str,
+    error_message: str,
+) -> None:
+    morphology = next((ingestible_cosmx_path / "CellStatsDir" / "Morphology2D").glob("*F00002.TIF"))
+    with tifffile.TiffFile(morphology) as tif:
+        metadata = json.loads(tif.pages[0].description)
+        data = tif.asarray()
+    if inconsistency == "channel_order":
+        metadata["ChannelOrder"] = "UGYRB"
+    else:
+        data = data.astype(np.uint8)
+    tifffile.imwrite(
+        morphology,
+        data,
+        description=json.dumps(metadata),
+        metadata=None,
+        photometric="minisblack",
+    )
+
+    with pytest.raises(ValueError, match=error_message):
+        _reader._discover_cosmx(ingestible_cosmx_path)
+
+    sdata = cosmx(
+        {"sample": CosmxSample(path=ingestible_cosmx_path)},
+        tmp_path / f"transcripts_{inconsistency}.zarr",
+        morphology=False,
+        instance_labels=False,
+        compartment_labels=False,
+        transcripts=True,
+        transcript_blocksize=64,
+    )
+
+    assert set(sdata.points) == {
+        "sample_transcripts_mosaic_1",
+        "sample_transcripts_mosaic_2",
+    }
 
 
 def test_cosmx_rejects_configuration_errors_before_staging(decoded_cosmx_path: Path, tmp_path: Path) -> None:

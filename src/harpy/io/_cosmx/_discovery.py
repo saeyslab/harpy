@@ -15,7 +15,8 @@ from harpy.io._cosmx._constants import (
     _FOV_DIR_RE,
     _FOV_FILE_RE,
     _MORPHOLOGY_FILE_RE,
-    _MORPHOLOGY_INVARIANT_KEYS,
+    _MORPHOLOGY_GEOMETRY_INVARIANT_KEYS,
+    _MORPHOLOGY_IMAGE_INVARIANT_KEYS,
     _PLEX_FILE_RE,
     _TIFF_SUFFIXES,
     _CosmxKeys,
@@ -259,12 +260,14 @@ def _read_raster_metadata(
     Morphology TIFFs provide both run-wide metadata and the stage position of
     each imaged FOV. The first morphology TIFF is used as the reference; all
     remaining morphology TIFFs must agree with it on the declared FOV count,
-    channel order, pixel size, tile dimensions, TIFF shape, and dtype. Instance
-    and compartment label TIFF headers are then checked against the morphology
-    tile shape and within their respective label families. Pixel arrays are not
-    loaded. The source ``OrigTimeStamp`` is retained verbatim only when every
-    morphology TIFF provides the same non-empty value; otherwise it is omitted
-    without making the run unreadable.
+    pixel size, tile dimensions, and TIFF shape because every modality uses
+    that geometry. Channel order and TIFF dtype are additionally validated only
+    when morphology output is enabled. Instance and compartment label TIFF
+    headers are checked against the morphology tile shape and within their
+    respective label families only when those outputs are enabled. Pixel arrays
+    are not loaded. The source ``OrigTimeStamp`` is retained verbatim only when
+    every morphology TIFF provides the same non-empty value; otherwise it is
+    omitted without making the run unreadable.
 
     Parameters
     ----------
@@ -295,6 +298,9 @@ def _read_raster_metadata(
     reference_dtype: str | None = None
     positions: dict[int, _MorphologyPosition] = {}
     acquisition_timestamp_values: list[object] = []
+    # Every modality needs geometry from the morphology TIFFs, but channel
+    # order and dtype matter only when morphology images are being ingested.
+    morphology_images_enabled = _MORPHOLOGY_PRODUCT in products
 
     for fov, file_path in sorted(morphology_files):
         with tifffile.TiffFile(file_path) as tif:
@@ -332,7 +338,7 @@ def _read_raster_metadata(
         else:
             assert reference_shape is not None
             assert reference_dtype is not None
-            _validate_morphology_metadata(
+            _validate_morphology_image_metadata(
                 reference,
                 metadata,
                 reference_shape=reference_shape,
@@ -340,6 +346,7 @@ def _read_raster_metadata(
                 reference_dtype=reference_dtype,
                 dtype=dtype,
                 file_path=file_path,
+                validate_channels_and_dtype=morphology_images_enabled,
             )
 
     assert reference is not None
@@ -348,9 +355,17 @@ def _read_raster_metadata(
     if len(reference_shape) != 3:
         raise ValueError(f"Expected morphology TIFF axes compatible with (c, y, x), found {reference_shape}.")
 
-    channel_order = _channel_order(reference.get("ChannelOrder"))
-    if len(channel_order) != reference_shape[0]:
-        raise ValueError(f"ChannelOrder {channel_order} does not match morphology plane count {reference_shape[0]}.")
+    if morphology_images_enabled:
+        channel_order = _channel_order(reference.get("ChannelOrder"))
+        if len(channel_order) != reference_shape[0]:
+            raise ValueError(
+                f"ChannelOrder {channel_order} does not match morphology plane count {reference_shape[0]}."
+            )
+        channels = _channel_metadata(reference, channel_order)
+        morphology_dtype = reference_dtype
+    else:
+        channels = ()
+        morphology_dtype = None
     tile_shape = (reference_shape[-2], reference_shape[-1])
     declared_shape = (
         int(reference.get("ImRows", tile_shape[0])),
@@ -382,10 +397,10 @@ def _read_raster_metadata(
         _CosmxRunMetadata(
             declared_fov_count=int(reference["NFov"]) if reference.get("NFov") is not None else None,
             acquisition_timestamp=_consistent_acquisition_timestamp(acquisition_timestamp_values),
-            channels=_channel_metadata(reference, channel_order),
+            channels=channels,
             pixel_size_um=_pixel_size_um(reference),
             tile_shape=tile_shape,
-            morphology_dtype=reference_dtype,
+            morphology_dtype=morphology_dtype,
             instance_labels_dtype=instance_labels_dtype,
             compartment_labels_dtype=compartment_labels_dtype,
         ),
@@ -406,7 +421,7 @@ def _consistent_acquisition_timestamp(values: list[object]) -> str | None:
     return None
 
 
-def _validate_morphology_metadata(
+def _validate_morphology_image_metadata(
     reference: dict[str, Any],
     metadata: dict[str, Any],
     *,
@@ -415,14 +430,18 @@ def _validate_morphology_metadata(
     reference_dtype: str,
     dtype: str,
     file_path: Path,
+    validate_channels_and_dtype: bool,
 ) -> None:
-    for key in _MORPHOLOGY_INVARIANT_KEYS:
+    invariant_keys = _MORPHOLOGY_GEOMETRY_INVARIANT_KEYS
+    if validate_channels_and_dtype:
+        invariant_keys += _MORPHOLOGY_IMAGE_INVARIANT_KEYS
+    for key in invariant_keys:
         if reference.get(key) != metadata.get(key):
             raise ValueError(
                 f"Contradictory morphology metadata for {key}: {reference.get(key)!r} versus "
                 f"{metadata.get(key)!r} in {file_path}."
             )
-    if reference_shape != shape or reference_dtype != dtype:
+    if reference_shape != shape or (validate_channels_and_dtype and reference_dtype != dtype):
         raise ValueError(
             f"Contradictory morphology raster metadata in {file_path}: {(shape, dtype)} versus "
             f"{(reference_shape, reference_dtype)}."

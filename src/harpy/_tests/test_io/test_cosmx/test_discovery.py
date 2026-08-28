@@ -171,6 +171,8 @@ def test_discovery_rejects_incompatible_pixel_size(decoded_cosmx_path: Path) -> 
 
     with pytest.raises(ValueError, match="Contradictory morphology metadata for ImPixelSize_nm"):
         _discover_cosmx(decoded_cosmx_path)
+    with pytest.raises(ValueError, match="Contradictory morphology metadata for ImPixelSize_nm"):
+        _discover_cosmx(decoded_cosmx_path, products=("transcripts",))
 
 
 def test_discovery_rejects_fov_directory_file_mismatch(decoded_cosmx_path: Path) -> None:

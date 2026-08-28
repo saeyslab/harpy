@@ -117,6 +117,18 @@ def test_run_metadata_rejects_invalid_structure(updates: dict[str, object], mess
         _run_metadata(**updates)
 
 
+def test_run_metadata_allows_geometry_without_morphology_image_metadata() -> None:
+    run = _run_metadata(channels=(), morphology_dtype=None)
+
+    assert run.channels == ()
+    assert run.morphology_dtype is None
+
+
+def test_run_metadata_rejects_channels_without_morphology_dtype() -> None:
+    with pytest.raises(ValueError, match="morphology channels require a morphology dtype"):
+        _run_metadata(morphology_dtype=None)
+
+
 def test_leaf_models_reject_invalid_identifiers_and_coordinates() -> None:
     with pytest.raises(ValueError, match="FOV number must be positive"):
         _CosmxFovFiles(fov=0)

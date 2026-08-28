@@ -116,7 +116,7 @@ class _CosmxRunMetadata:
     channels: tuple[_CosmxChannel, ...]
     pixel_size_um: float
     tile_shape: tuple[int, int]
-    morphology_dtype: str
+    morphology_dtype: str | None
     instance_labels_dtype: str | None
     compartment_labels_dtype: str | None
 
@@ -132,8 +132,10 @@ class _CosmxRunMetadata:
                 "CosMx acquisition timestamp must be a non-empty trimmed string or None, "
                 f"found {self.acquisition_timestamp!r}."
             )
-        if not self.channels:
+        if self.morphology_dtype is not None and not self.channels:
             raise ValueError("CosMx run metadata must contain at least one channel.")
+        if self.morphology_dtype is None and self.channels:
+            raise ValueError("CosMx morphology channels require a morphology dtype.")
         channel_ids = tuple(channel.channel_id for channel in self.channels)
         if len(set(channel_ids)) != len(channel_ids):
             raise ValueError(f"CosMx channel IDs must be unique, found {channel_ids}.")
@@ -141,7 +143,8 @@ class _CosmxRunMetadata:
             raise ValueError(f"CosMx pixel size must be finite and positive, found {self.pixel_size_um}.")
         if len(self.tile_shape) != 2 or any(size <= 0 for size in self.tile_shape):
             raise ValueError(f"CosMx tile shape must contain two positive dimensions, found {self.tile_shape}.")
-        _validate_dtype(self.morphology_dtype, name="morphology")
+        if self.morphology_dtype is not None:
+            _validate_dtype(self.morphology_dtype, name="morphology")
         for name, dtype in (
             ("instance labels", self.instance_labels_dtype),
             ("compartment labels", self.compartment_labels_dtype),
@@ -391,10 +394,12 @@ class _CosmxPreview:
         """Estimated bytes for dense mosaics containing every image channel."""
         if _MORPHOLOGY_PRODUCT not in self.products:
             return 0
+        dtype = self.manifest.run.morphology_dtype
+        assert dtype is not None
         return (
             self._mosaic_pixel_count
             * len(self.manifest.run.channels)
-            * np.dtype(self.manifest.run.morphology_dtype).itemsize
+            * np.dtype(dtype).itemsize
         )
 
     @property
@@ -490,6 +495,10 @@ def _validate_preview_mosaics(
         # global_id = (fov - 1) * number_of_source_dtype_values + local_id.
         # Validate against the full manifest so IDs remain stable across subsets.
         _validate_instance_id_encoding(instance_labels_dtype, max(manifest.fov_ids))
+    if mosaics and _MORPHOLOGY_PRODUCT in products and (
+        manifest.run.morphology_dtype is None or not manifest.run.channels
+    ):
+        raise ValueError("CosMx preview mosaics require morphology dtype and channels when morphology is enabled.")
     if mosaics and _COMPARTMENT_LABELS_PRODUCT in products and manifest.run.compartment_labels_dtype is None:
         raise ValueError(
             "CosMx preview mosaics require a compartment-label dtype when compartment labels are enabled."

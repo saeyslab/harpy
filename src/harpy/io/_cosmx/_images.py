@@ -289,7 +289,9 @@ def _morphology_mosaic(
         placements=placements,
         tile_shape=preview.manifest.run.tile_shape,
     )
-    dtype = np.dtype(preview.manifest.run.morphology_dtype)
+    morphology_dtype = preview.manifest.run.morphology_dtype
+    assert morphology_dtype is not None
+    dtype = np.dtype(morphology_dtype)
     fovs_by_id = preview.manifest.fovs_by_id
     channel_arrays = []
     for channel in channels:
