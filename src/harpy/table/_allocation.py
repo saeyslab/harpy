@@ -237,8 +237,9 @@ def aggregate_points(
         Optional labels-array chunk size used during assignment. Rechunking the
         labels element on disk beforehand is generally more efficient.
     feature_key
-        Column in each points element containing the feature or gene name. In
-        class-aware mode it must equal the panel's ``feature_key``.
+        Column in each points element containing feature identifiers, such as
+        gene names. In class-aware mode it must equal the panel's
+        ``feature_key``.
     expression_class
         Feature class retained in ``adata.X``. If ``None``, feature-panel
         metadata is not consulted and ordinary aggregation retains all observed
