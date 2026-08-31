@@ -588,7 +588,11 @@ def _reduce_aggregation_pair(
         # normalized branch is used only for panel-content validation.
         normalized_points = points.assign(**{class_key: points[class_key].astype(categorical_dtype)})
 
-    assigned = _assign_points_to_labels(
+    # One row per point overlapping a non-background label. Each row retains
+    # its coordinates and requested feature columns, and gains the overlapping
+    # label ID in ``cell_index_name``; for example:
+    # (x=120, y=80, feature="EPCAM", label_id=42).
+    assigned_points = _assign_points_to_labels(
         se=_get_spatial_element(sdata, element_name=pair.labels_name),
         ddf=points,
         value_key=feature_key if class_key is None else [feature_key, class_key],
@@ -597,18 +601,31 @@ def _reduce_aggregation_pair(
         chunks=chunks,
         cell_index_name=cell_index_name,
     )
-    feature_counts_source = assigned.assign(**{feature_key: assigned[feature_key].astype("str")})
-    feature_counts = feature_counts_source.groupby([cell_index_name, feature_key]).size()
+    # Convert categorical features to strings before grouping. Otherwise, the
+    # categorical groupby may emit the Cartesian product of instances and
+    # declared feature categories, including zero-count combinations.
+    points_for_feature_counts = assigned_points.assign(
+        **{feature_key: assigned_points[feature_key].astype("str")}
+    )
+    # Number of assigned points for every (label ID, feature) pair; these
+    # counts become the expression matrix when the output table is assembled,
+    # for example: (label_id=42, feature="EPCAM") -> 7 points.
+    feature_counts = points_for_feature_counts.groupby([cell_index_name, feature_key]).size()
     feature_counts = feature_counts.map_partitions(lambda value: value.astype(np.uint32))
 
     if contract is None:
-        coordinate_source = assigned
+        coordinate_source = assigned_points
         class_counts = None
         errors = None
     else:
-        coordinate_source = assigned[assigned[class_key] == contract.expression_class]
-        class_counts_source = assigned.assign(**{class_key: assigned[class_key].astype("str")})
-        class_counts = class_counts_source.groupby([cell_index_name, class_key]).size()
+        coordinate_source = assigned_points[assigned_points[class_key] == contract.expression_class]
+        points_for_class_counts = assigned_points.assign(
+            **{class_key: assigned_points[class_key].astype("str")}
+        )
+        # Number of assigned points for every (label ID, feature class) pair;
+        # these counts become per-instance QC columns in ``adata.obs``, for
+        # example: (label_id=42, feature_class="Negative") -> 3 points.
+        class_counts = points_for_class_counts.groupby([cell_index_name, class_key]).size()
         class_counts = class_counts.map_partitions(lambda value: value.astype(np.uint32))
         errors = normalized_points[[feature_key, class_key]].map_partitions(
             _feature_panel_partition_errors,
@@ -660,7 +677,45 @@ def _feature_panel_partition_errors(
     feature_class_key: str,
     class_by_feature: Mapping[str, str],
 ) -> pd.Series:
-    """Return compact target/class errors for one source points partition."""
+    """Validate one points partition against its feature-panel assignments.
+
+    Each point must contain a non-null feature and feature class. Its feature
+    must occur in ``class_by_feature``, and its observed feature class must
+    equal the class assigned by that mapping. Validation is partition-wise so
+    the complete points element does not need to be materialized.
+
+    Parameters
+    ----------
+    partition
+        One in-memory pandas partition from the source Dask points element.
+    feature_key
+        Name of the column containing feature identifiers, such as genes.
+    feature_class_key
+        Name of the column containing feature classes.
+    class_by_feature
+        Expected feature class for every feature declared by the panel.
+
+    Returns
+    -------
+    pandas.Series
+        An empty series when the partition is valid, or a one-element series
+        containing the first validation error found in the partition.
+
+    Examples
+    --------
+    ``EPCAM`` is declared endogenous, so observing it as negative produces a
+    compact error that the caller can collect alongside the Dask reductions:
+
+    >>> partition = pd.DataFrame({"gene": ["EPCAM"], "code_class": ["Negative"]})
+    >>> errors = _feature_panel_partition_errors(
+    ...     partition,
+    ...     feature_key="gene",
+    ...     feature_class_key="code_class",
+    ...     class_by_feature={"EPCAM": "Endogenous"},
+    ... )
+    >>> errors.iloc[0]
+    "feature 'EPCAM' has class 'Negative'; expected 'Endogenous'."
+    """
     features = partition[feature_key]
     feature_classes = partition[feature_class_key]
     invalid = features.isna() | feature_classes.isna()
