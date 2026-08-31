@@ -11,7 +11,7 @@ Seven implementation slices are planned; Slices 1 through 5 are implemented:
 3. validate existing sample-aware CosMx SpatialData stores — implemented;
 4. add new CosMx samples incrementally to a validated sample-aware store —
    implemented;
-5. add class-aware aggregation to `hp.tb.allocate` — implemented;
+5. add class-aware aggregation to `hp.tb.aggregate_points` — implemented;
 6. add QC functions that summarize the original, unallocated control points;
 7. optimize the generic point-to-label assignment and reduction path.
 
@@ -77,7 +77,7 @@ same requirements.
 **Status: implemented.**
 
 This slice changes the CosMx reader and the metadata it writes. It does not
-change `hp.tb.allocate` or introduce QC computations.
+change `hp.tb.aggregate_points` or introduce QC computations.
 
 ### Authoritative panel metadata
 
@@ -931,7 +931,7 @@ Focused tests should establish that:
 - `cosmx()` retains staged whole-store creation/replacement, whereas
   `add_cosmx_samples()` performs no whole-store staging or publication swap.
 
-## Slice 5: class-aware `hp.tb.allocate`
+## Slice 5: class-aware `hp.tb.aggregate_points`
 
 **Status: implemented.**
 
@@ -943,7 +943,7 @@ existing behavior when `expression_class` is omitted.
 
 ### Scope and outcome
 
-Generalize `hp.tb.allocate` so one call can allocate one or more explicitly
+Generalize `hp.tb.aggregate_points` so one call can allocate one or more explicitly
 paired labels/points/coordinate-system regions and construct one complete
 AnnData table. In class-aware mode, every point is spatially assigned once, but
 the resulting payload is split by biological role: only the selected expression
@@ -1007,7 +1007,7 @@ to_coordinate_system: str | list[str] = "global"
 output_table_name: str = "table_transcriptomics"
 ```
 
-Extend `hp.tb.allocate` with one optional class-aware argument:
+Extend `hp.tb.aggregate_points` with one optional class-aware argument:
 
 ```python
 expression_class: str | None = None
@@ -1023,7 +1023,7 @@ elements as an unrelated side effect; callers that need shape filtering should
 request that operation separately.
 
 ```python
-sdata = hp.tb.allocate(
+sdata = hp.tb.aggregate_points(
     sdata,
     labels_name=[
         "sample_a_cellpose_labels_mosaic_1",
@@ -1035,7 +1035,7 @@ sdata = hp.tb.allocate(
     ],
     output_table_name="table_transcriptomics",
     to_coordinate_system=["sample_a_global_1", "sample_b_global_1"],
-    name_gene_column="gene",
+    feature_key="gene",
     expression_class="Endogenous",
     overwrite=True,
 )
@@ -1062,7 +1062,7 @@ labels[1]  + points[1]  + coordinate_system[1]
 the switch for class-aware allocation. When `expression_class=None`, allocation
 must branch to the ordinary implementation immediately, before feature-panel
 lookup or any class-specific projection, validation, or aggregation. No
-additional `.obs` columns are created and every `name_gene_column` value remains
+additional `.obs` columns are created and every `feature_key` value remains
 in `adata.X`.
 
 When `expression_class` is provided, every selected points element must have a
@@ -1109,8 +1109,9 @@ sdata.attrs["harpy"]["feature_panels"][feature_panel]
 
 For every normalized labels/points/coordinate-system pair, resolve the points
 record and its referenced panel before spatial lookup. Require the panel's
-`feature_key` to equal `name_gene_column`; read `feature_class_key` directly
-from the panel rather than accepting it as an allocation parameter. Derive the
+`feature_key` to equal the public `feature_key` argument; read
+`feature_class_key` directly from the panel rather than accepting it as an
+aggregation parameter. Derive the
 denominator for every non-expression class from the length of its authoritative
 `features_by_class` list.
 
@@ -1225,8 +1226,9 @@ name, and collisions with existing `.obs` columns or the fixed
 `control_fraction` output. Category order determines output-column order but
 does not affect the calculations.
 
-Allocation resolves panel metadata from every selected `points_name`, verifies
-that the stored feature key matches `name_gene_column`, uses the panel's
+Point aggregation resolves panel metadata from every selected `points_name`,
+verifies that the stored feature key matches the public `feature_key` argument,
+uses the panel's
 `feature_class_key` to select the class column, and derives denominators from
 the `features_by_class` list lengths. It must not silently estimate denominators
 from observed points or accept caller-supplied assay constants.
@@ -1402,7 +1404,7 @@ still informative about sticky tissue, optical crowding, and regional assay
 background. A later QC operation should therefore bin the original control
 points directly in space and visualize separate normalized `Negative` and
 `SystemControl` density maps. This spatial operation must not be folded into
-`hp.tb.allocate`.
+`hp.tb.aggregate_points`.
 
 ### Verification
 
@@ -1463,7 +1465,7 @@ modifying that table.
 This operation complements the instance-level `.obs` metrics. It must use the
 original points element so that controls on label value zero and controls
 outside segmented instances remain visible. It must not create another copy of
-the points or route individual controls through `hp.tb.allocate`.
+the points or route individual controls through `hp.tb.aggregate_points`.
 
 ### Derived per-instance plotting metrics
 
@@ -1574,7 +1576,7 @@ Focused tests should establish that:
 
 **Status: specified; not implemented.**
 
-Refactor the private execution path used by `hp.tb.allocate` without changing
+Refactor the private execution path used by `hp.tb.aggregate_points` without changing
 the public or biological contracts established by Slice 5. This optimization
 must remain generic to raster labels and points elements; it must not depend on
 CosMx FOV identifiers or reader-specific partition metadata.
