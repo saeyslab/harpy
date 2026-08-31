@@ -96,16 +96,16 @@ targets:
 
 The CosMx reader currently does not need the plex to create transcript points,
 because each detected transcript already carries its target and code class.
-Class-normalized allocation introduces a distinct reason to consume it: unlike
-the detected transcript rows, the plex also represents targets with zero
-detections. A denominator derived from observed targets would be biased whenever
-one of those targets has no calls.
+Class-aware allocation and later control QC introduce a distinct reason to
+consume it: unlike the detected transcript rows, the plex also represents
+targets with zero detections. A denominator derived from observed targets would
+be biased whenever one of those targets has no calls.
 
 When transcripts are ingested and a plex file is present, the CosMx reader
 should therefore discover exactly one plex file, read it once, and associate a
 compact feature-panel record with every transcript points element created from
-that run. A missing plex must not prevent raw transcript ingestion; it only
-limits the normalized allocation metrics available later. The record must
+that run. A missing plex must not prevent raw transcript ingestion, but it
+precludes class-aware allocation and panel-normalized QC. The record must
 contain at least:
 
 - the points `feature_key` and `feature_class_key` column bindings;
@@ -192,9 +192,10 @@ reader sorts both class names and the features within each class
 lexicographically so output does not depend on row order in the plex; this
 ordering is deterministic rather than a claim of biological precedence.
 
-Slice 5 only needs those derived counts: it uses the length of each class
-feature list as the denominator for normalized control metrics. Slice 6
-additionally needs the actual feature names. A categorical transcript column
+Slice 5 uses the complete relation to resolve its shared expression axis and
+feature classes, and retains each non-expression feature-list length as a
+table-local denominator snapshot for later QC. Slice 6 additionally uses the
+actual control-feature names. A categorical transcript column
 contains only categories represented by the ingested points and cannot, by
 itself, preserve the feature-to-class relationship for a panel feature with no
 detected rows. Keeping the authoritative names in `features_by_class`
@@ -962,7 +963,7 @@ The resulting table has the following high-level contract:
 ```text
 adata.X       instances x Endogenous features only
 adata.var     the shared Endogenous feature axis
-adata.obs     class counts, normalized control rates, and control_fraction
+adata.obs     class point counts and control_fraction
 adata.obsm    mean coordinates calculated from assigned Endogenous points
 adata.uns     the versioned feature_class_allocation configuration and sources
 ```
@@ -1129,9 +1130,8 @@ There is no per-sample or per-region denominator mapping in one output table.
 Likewise, `code_class` categories may differ between samples stored in the same
 SpatialData object, but samples with different class universes or incompatible
 panels cannot participate in the same class-aware allocation call. They require
-separate output tables. Otherwise, a column such as
-`negative_points_per_feature` would have different normalization semantics in
-different rows.
+separate output tables. Otherwise, later QC would interpret a given class-count
+column against different panel denominators in different rows.
 
 The complete policy is:
 
@@ -1169,8 +1169,8 @@ panel."
 
 Derive one shared denominator mapping from the compatible panel contract for
 the complete allocation call. Per-sample and per-region denominator mappings
-are not supported because they would make the same normalized `.obs` column
-have different meanings in different rows.
+are not supported because later QC must interpret a given class-count column
+against one consistent panel denominator across all rows.
 
 ### Categorical class contract
 
@@ -1190,7 +1190,7 @@ Require that:
 
 Do not silently discard a panel class. An unused categorical class is valid and
 produces zero per-instance counts, but its authoritative panel feature list
-still defines the positive denominator used for the normalized rate.
+still defines the positive denominator retained for later QC calculations.
 
 Normalize each category deterministically to snake case and construct output
 names from that normalized category rather than accepting platform-specific
@@ -1198,23 +1198,21 @@ column names:
 
 ```text
 Endogenous       -> n_endogenous_points
-Negative         -> n_negative_points, negative_points_per_feature
-SystemControl    -> n_system_control_points, system_control_points_per_feature
+Negative         -> n_negative_points
+SystemControl    -> n_system_control_points
 Gene Expression  -> n_gene_expression_points
 ```
 
-The generated names follow two generic patterns:
+The generated count names follow one generic pattern:
 
 ```text
 n_<normalized class>_points
-<normalized class>_points_per_feature
 ```
 
-The first counts assigned rows from the points element. The second divides that
-count by the number of authoritative panel features in the corresponding class.
-Do not include the source `feature_class_key`, such as CosMx `code_class`, in
-the generated name: it identifies the grouping column rather than the measured
-unit and may differ between readers.
+This counts assigned rows from the points element. Do not include the source
+`feature_class_key`, such as CosMx `code_class`, in the generated name: it
+identifies the grouping column rather than the measured unit and may differ
+between readers.
 
 Reject an empty normalized name, two categories that normalize to the same
 name, and collisions with existing `.obs` columns or the fixed
@@ -1235,23 +1233,23 @@ In the example above, the output columns are:
 n_endogenous_points
 n_negative_points
 n_system_control_points
-negative_points_per_feature
-system_control_points_per_feature
 control_fraction
 ```
 
-The class count columns contain assigned point counts. The normalized control
-columns contain the corresponding point count divided by the authoritative
-panel feature count for that control class. For this three-class configuration:
+The class count columns contain assigned point counts. For this three-class
+configuration:
 
 ```text
-negative_points_per_feature = n_negative_points / 10
-system_control_points_per_feature = n_system_control_points / 197
-
 control_fraction =
     (n_negative_points + n_system_control_points)
     / (n_endogenous_points + n_negative_points + n_system_control_points)
 ```
+
+Do not persist `negative_points_per_feature` or
+`system_control_points_per_feature` in `.obs`. They are deterministic rescalings
+of the raw class counts by the panel denominators and add no independent table
+information. Slice 6 QC plotting derives them on demand from the raw count
+columns and the table-local denominator snapshot.
 
 ### Table-local metadata contract
 
@@ -1276,10 +1274,6 @@ adata.uns["feature_class_allocation"] = {
         "Endogenous": "n_endogenous_points",
         "Negative": "n_negative_points",
         "SystemControl": "n_system_control_points",
-    },
-    "normalized_columns": {
-        "Negative": "negative_points_per_feature",
-        "SystemControl": "system_control_points_per_feature",
     },
     "control_fraction_column": "control_fraction",
     "regions": {
@@ -1308,8 +1302,8 @@ than a registry keyed by an arbitrary artifact name. Its generated-column
 mappings bind the metadata to the actual `.obs` payload instead of requiring
 downstream code to reconstruct names. The complete per-class feature lists
 remain in SpatialData root metadata and are not duplicated into the table;
-only the resolved non-expression denominators needed to interpret normalized
-values are retained.
+only the resolved non-expression denominators needed for later on-demand QC
+calculations are retained.
 
 Configuration shared by the complete table lives at the top level. The
 `regions` mapping is keyed by the exact labels element name and records the
@@ -1335,9 +1329,10 @@ computation:
    matrix containing endogenous and control targets;
 3. calculate per-instance class counts by summing the temporary matrix columns
    belonging to each class;
-4. calculate the normalized control metrics and `control_fraction`;
+4. calculate `control_fraction`;
 5. retain only the `expression_class` columns in the final `adata.X`; and
-6. attach the count and normalized metrics to the corresponding `.obs` rows.
+6. attach the class point counts and `control_fraction` to the corresponding
+   `.obs` rows.
 
 After all pairs have been reduced, align their sparse matrices to the previously
 resolved shared feature axis, stack them row-wise, concatenate `.obs` and
@@ -1371,16 +1366,29 @@ endogenous row set and fill missing control counts with zero.
 Unexpected or null feature classes, targets associated with multiple classes,
 non-positive resolved panel feature counts, a missing expression class, and
 collisions with existing output columns must produce clear errors. A panel
-control class with no assigned points is valid and must produce zero counts and
-rates. Validate the complete multi-region request and shared
+control class with no assigned points is valid and must produce a zero count
+column. No control class produces a persisted per-feature rate. Validate the
+complete multi-region request and shared
 `feature_class_allocation` configuration before writing the output table.
 
 ### Boundary with Slice 6
 
 The `.obs` summaries describe only control points that land inside an instance
-mask. They are suitable for cell-level histograms, violin plots, and a hexbin
-comparison of `negative_points_per_feature` against
-`system_control_points_per_feature`.
+mask. They are suitable for cell-level histograms and violin plots of the raw
+class counts and `control_fraction`. Slice 6 may additionally derive the
+following per-instance plotting metrics on demand:
+
+```text
+negative_points_per_feature =
+    n_negative_points / control_class_denominators["Negative"]
+
+system_control_points_per_feature =
+    n_system_control_points / control_class_denominators["SystemControl"]
+```
+
+These derived values are useful for comparing control classes with different
+panel sizes, for example in a hexbin plot. They are temporary QC values and
+must not be written back to `.obs`.
 
 They are not sufficient for a spatial background map. Allocation deliberately
 removes points on label value zero, while unassigned controls outside masks are
@@ -1398,7 +1406,9 @@ Focused tests should establish that:
 - `n_endogenous_points` equals the row sum of the final expression matrix;
 - assigned control counts are correct and zero-filled for instances without a
   control call;
-- normalized rates use the authoritative panel feature counts;
+- no per-feature rate columns are persisted in `.obs`;
+- the table-local denominator snapshot equals the authoritative panel feature
+  counts and is sufficient for later QC derivation;
 - `control_fraction` is correct and finite;
 - non-categorical feature-class columns are rejected, while unknown Dask
   categories are restored lazily from the panel's ordered `classes` before
@@ -1438,14 +1448,39 @@ the point-to-label lookup and target-count reduction.
 Add separate lightweight QC functions over the original transcript points.
 This slice is implemented after Slice 5 to keep delivery sequential, but its
 runtime contract depends only on the points and feature-panel metadata from
-Slice 1 and the sample-aware point metadata from Slices 2–4. Users may run
-it before or after allocation because it does not depend on an instance-label
-raster or an AnnData table.
+Slice 1 and the sample-aware point metadata from Slices 2–4. The original-point
+summaries may run before or after allocation and do not depend on an
+instance-label raster or an AnnData table. The optional per-instance plotting
+view described below requires a Slice 5 table but derives its rates without
+modifying that table.
 
 This operation complements the instance-level `.obs` metrics. It must use the
 original points element so that controls on label value zero and controls
 outside segmented instances remain visible. It must not create another copy of
 the points or route individual controls through `hp.tb.allocate`.
+
+### Derived per-instance plotting metrics
+
+When a Slice 5 allocation table is available, QC plotting may derive
+`negative_points_per_feature` and `system_control_points_per_feature` from the
+persisted raw class counts. Resolve the relevant `.obs` columns through
+`adata.uns["feature_class_allocation"]["count_columns"]` and divide them by the
+corresponding positive values in `control_class_denominators`:
+
+```text
+negative_points_per_feature =
+    n_negative_points / control_class_denominators["Negative"]
+
+system_control_points_per_feature =
+    n_system_control_points / control_class_denominators["SystemControl"]
+```
+
+These rates normalize for the different numbers of panel features in the two
+control classes. They should be temporary series or plotting-dataframe columns;
+do not persist them back into `adata.obs`. The plotting layer must validate
+that the referenced count columns exist and that the stored denominators are
+positive. This optional cell-level view complements, but does not replace, the
+original-point summaries below.
 
 ### Per-target summary
 
@@ -1524,6 +1559,8 @@ Focused tests should establish that:
 - spatial-bin counts conserve the input control-point totals within the chosen
   extent;
 - normalization uses authoritative panel counts and physical bin area;
+- per-instance plotting rates use the table's recorded count-column bindings
+  and authoritative denominator snapshot without modifying `.obs`;
 - sample and mosaic coordinate systems remain independent; and
 - the implementation stays lazy until the compact summaries are computed.
 
