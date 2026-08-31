@@ -357,7 +357,7 @@ adjacency-based grouping, so that value has no effect.
 
 Arguments that define the complete output remain on `cosmx`: output
 path, modality inclusion, output base names, image and label chunks, raster
-scale factors, transcript block size, and overwrite behavior. Do not accept a
+scale factors, points block size, and overwrite behavior. Do not accept a
 list of these output-wide values. `coordinate_system` is not output-wide; it
 belongs to each `CosmxSample`. Require at least one enabled modality.
 
