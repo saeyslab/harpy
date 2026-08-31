@@ -7,7 +7,7 @@ from spatialdata import SpatialData
 from spatialdata.models import TableModel
 from xrspatial import zonal_stats
 
-import harpy.table._allocation_intensity as allocation_intensity_module
+import harpy.table._allocation_intensity as image_aggregation_module
 from harpy.image.segmentation._align_masks import align_labels
 from harpy.table._allocation_intensity import aggregate_image
 from harpy.table._regionprops import add_regionprops
@@ -18,8 +18,8 @@ def test_allocate_intensity_import_warns_and_resolves_to_aggregate_image(monkeyp
     monkeypatch.setattr("harpy.table._allocation_intensity.log", SimpleNamespace(warning=messages.append))
     monkeypatch.setattr("harpy.table._allocation_intensity._DEPRECATED_ATTRIBUTES_WARNED", set())
 
-    alias = allocation_intensity_module.__getattr__("allocate_intensity")
-    repeated_alias = allocation_intensity_module.__getattr__("allocate_intensity")
+    alias = image_aggregation_module.__getattr__("allocate_intensity")
+    repeated_alias = image_aggregation_module.__getattr__("allocate_intensity")
 
     assert alias is repeated_alias is aggregate_image
     assert messages == [
@@ -27,8 +27,8 @@ def test_allocate_intensity_import_warns_and_resolves_to_aggregate_image(monkeyp
     ]
 
 
-def test_integration_allocate_intensity(sdata_multi_c_no_backed: SpatialData):
-    # integration test for process of aligning masks, allocate intensities and add regionprop features to
+def test_integration_aggregate_image(sdata_multi_c_no_backed: SpatialData):
+    # Integration test for aligning masks, aggregating image intensities, and adding region properties to
     # sdata.tables["table_intensities"].obs
 
     sdata_multi_c_no_backed = align_labels(
@@ -84,7 +84,7 @@ def test_integration_allocate_intensity(sdata_multi_c_no_backed: SpatialData):
     assert f"max_{channel_0}" in sdata_multi_c_no_backed.tables["table_intensities"].obs.columns
 
 
-def test_allocate_intensity(sdata_multi_c_no_backed: SpatialData):
+def test_aggregate_image(sdata_multi_c_no_backed: SpatialData):
     sdata_multi_c_no_backed = aggregate_image(
         sdata_multi_c_no_backed,
         image_name="raw_image",
@@ -100,7 +100,7 @@ def test_allocate_intensity(sdata_multi_c_no_backed: SpatialData):
     assert isinstance(sdata_multi_c_no_backed, SpatialData)
 
     # check if calculated values are same as the ones obtained via zonal_stats (used by spatialdata)
-    # note zonal_stats is much slower than allocate_intensity implementation
+    # ``zonal_stats`` is much slower than the ``aggregate_image`` implementation.
     df = zonal_stats(
         sdata_multi_c_no_backed["masks_whole"],
         sdata_multi_c_no_backed["raw_image"][0],
@@ -111,7 +111,7 @@ def test_allocate_intensity(sdata_multi_c_no_backed: SpatialData):
     assert isinstance(sdata_multi_c_no_backed.tables["table_intensities"], AnnData)
 
 
-def test_allocate_intensity_rechunks_labels_when_chunks_differ(sdata_multi_c_no_backed: SpatialData):
+def test_aggregate_image_rechunks_labels_when_chunks_differ(sdata_multi_c_no_backed: SpatialData):
     # Reference values computed when image and labels share chunks.
     reference = (
         aggregate_image(
@@ -151,7 +151,7 @@ def test_allocate_intensity_rechunks_labels_when_chunks_differ(sdata_multi_c_no_
     assert np.allclose(values, reference)
 
 
-def test_allocate_intensity_overwrite(sdata_multi_c: SpatialData):
+def test_aggregate_image_overwrite(sdata_multi_c: SpatialData):
     sdata_multi_c = aggregate_image(
         sdata_multi_c,
         image_name="raw_image",
@@ -178,7 +178,7 @@ def test_allocate_intensity_overwrite(sdata_multi_c: SpatialData):
         )
 
 
-def test_allocate_intensity_raises_instance_key(sdata_pixie: SpatialData):
+def test_aggregate_image_raises_instance_key(sdata_pixie: SpatialData):
     instance_key = "my_instance_key"
     region_key = "my_region_key"
     instance_size_key = "instance_size"
@@ -221,7 +221,7 @@ def test_allocate_intensity_raises_instance_key(sdata_pixie: SpatialData):
         )
 
 
-def test_allocate_intensity_raises_region_key(sdata_pixie: SpatialData):
+def test_aggregate_image_raises_region_key(sdata_pixie: SpatialData):
     instance_key = "my_instance_key"
     region_key = "my_region_key"
     instance_size_key = "instance_size"
