@@ -99,10 +99,10 @@ def test_add_transcript_points_splits_mosaics_and_roundtrips(
     ]
     assert roundtripped.attrs["harpy"]["feature_panels"] == {
         panel_name: {
-            "feature_column": "gene",
-            "class_column": "code_class",
-            "categories": ["Endogenous", "Negative", "SystemControl"],
-            "targets_by_class": {
+            "feature_key": "gene",
+            "feature_class_key": "code_class",
+            "classes": ["Endogenous", "Negative", "SystemControl"],
+            "features_by_class": {
                 "Endogenous": ["Gene1", "Gene2", "Gene3", "GeneA", "GeneB", "GeneC"],
                 "Negative": ["Negative01"],
                 "SystemControl": ["SystemControl1"],
@@ -280,7 +280,7 @@ def test_transcript_preflight_rejects_incompatible_panel_identifier(
     sdata.attrs = {
         "harpy": {
             "metadata_version": 1,
-            "feature_panels": {panel_name: {"feature_column": "incompatible"}},
+            "feature_panels": {panel_name: {"feature_key": "incompatible"}},
         }
     }
     sdata.write_attrs()

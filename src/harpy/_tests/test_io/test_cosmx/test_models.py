@@ -141,17 +141,17 @@ def test_leaf_models_reject_invalid_identifiers_and_coordinates() -> None:
 
 
 def test_feature_panel_models_validate_structure() -> None:
-    with pytest.raises(ValueError, match="at least one target"):
-        _CosmxFeatureClass(name="Endogenous", targets=())
+    with pytest.raises(ValueError, match="at least one feature"):
+        _CosmxFeatureClass(name="Endogenous", features=())
     with pytest.raises(ValueError, match="sorted and unique"):
-        _CosmxFeatureClass(name="Endogenous", targets=("GeneB", "GeneA"))
+        _CosmxFeatureClass(name="Endogenous", features=("GeneB", "GeneA"))
     with pytest.raises(ValueError, match="exactly one feature class"):
         _CosmxFeaturePanel(
-            feature_column="gene",
-            class_column="code_class",
+            feature_key="gene",
+            feature_class_key="code_class",
             classes=(
-                _CosmxFeatureClass(name="Endogenous", targets=("GeneA",)),
-                _CosmxFeatureClass(name="Negative", targets=("GeneA",)),
+                _CosmxFeatureClass(name="Endogenous", features=("GeneA",)),
+                _CosmxFeatureClass(name="Negative", features=("GeneA",)),
             ),
         )
 

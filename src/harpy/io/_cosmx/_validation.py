@@ -31,10 +31,10 @@ _ELEMENT_REGISTRIES = (_IMAGES_METADATA_KEY, _LABELS_METADATA_KEY, _POINTS_METAD
 
 @dataclass(frozen=True)
 class _FeaturePanelContract:
-    feature_column: str
-    class_column: str
-    categories: tuple[str, ...]
-    target_classes: dict[str, str]
+    feature_key: str
+    feature_class_key: str
+    classes: tuple[str, ...]
+    class_by_feature: dict[str, str]
 
 
 def validate_cosmx_store(
@@ -266,7 +266,7 @@ def _validate_points_records(
             raise ValueError(f"CosMx metadata {path}.feature_panel references missing panel {panel_name!r}.")
         panel = panels[panel_name]
         points = sdata.points[element_name]
-        for column in (panel.feature_column, panel.class_column):
+        for column in (panel.feature_key, panel.feature_class_key):
             if column not in points.columns:
                 raise ValueError(f"CosMx points element {element_name!r} is missing panel-declared column {column!r}.")
             dtype = points.dtypes[column]
@@ -285,38 +285,38 @@ def _validate_feature_panels(registry: Mapping[str, object]) -> dict[str, _Featu
         path = _element_path(_FEATURE_PANELS_METADATA_KEY, panel_name)
         panel_name = _require_nonempty_string(panel_name, path=f"{path} key")
         record = _require_mapping(value, path=path)
-        feature_column = _require_nonempty_string(record.get("feature_column"), path=f"{path}.feature_column")
-        class_column = _require_nonempty_string(record.get("class_column"), path=f"{path}.class_column")
-        if feature_column == class_column:
-            raise ValueError(f"CosMx metadata {path} feature and class columns must be different.")
-        categories = _require_sorted_string_list(record.get("categories"), path=f"{path}.categories")
-        targets_by_class = _require_mapping(record.get("targets_by_class"), path=f"{path}.targets_by_class")
-        if set(targets_by_class) != set(categories):
+        feature_key = _require_nonempty_string(record.get("feature_key"), path=f"{path}.feature_key")
+        feature_class_key = _require_nonempty_string(record.get("feature_class_key"), path=f"{path}.feature_class_key")
+        if feature_key == feature_class_key:
+            raise ValueError(f"CosMx metadata {path} feature and feature-class keys must be different.")
+        classes = _require_sorted_string_list(record.get("classes"), path=f"{path}.classes")
+        features_by_class = _require_mapping(record.get("features_by_class"), path=f"{path}.features_by_class")
+        if set(features_by_class) != set(classes):
             raise ValueError(
-                f"CosMx metadata {path}.targets_by_class keys must equal categories {list(categories)}, "
-                f"found {list(targets_by_class)}."
+                f"CosMx metadata {path}.features_by_class keys must equal classes {list(classes)}, "
+                f"found {list(features_by_class)}."
             )
 
-        target_classes: dict[str, str] = {}
-        canonical_targets: dict[str, list[str]] = {}
-        for category in categories:
-            targets = _require_sorted_string_list(
-                targets_by_class[category],
-                path=f"{path}.targets_by_class[{category!r}]",
+        class_by_feature: dict[str, str] = {}
+        canonical_features: dict[str, list[str]] = {}
+        for feature_class in classes:
+            features = _require_sorted_string_list(
+                features_by_class[feature_class],
+                path=f"{path}.features_by_class[{feature_class!r}]",
             )
-            canonical_targets[category] = list(targets)
-            for target in targets:
-                previous = target_classes.setdefault(target, category)
-                if previous != category:
+            canonical_features[feature_class] = list(features)
+            for feature in features:
+                previous = class_by_feature.setdefault(feature, feature_class)
+                if previous != feature_class:
                     raise ValueError(
-                        f"CosMx metadata {path} target {target!r} belongs to both {previous!r} and {category!r}."
+                        f"CosMx metadata {path} feature {feature!r} belongs to both {previous!r} and {feature_class!r}."
                     )
 
         canonical = {
-            "feature_column": feature_column,
-            "class_column": class_column,
-            "categories": list(categories),
-            "targets_by_class": canonical_targets,
+            "feature_key": feature_key,
+            "feature_class_key": feature_class_key,
+            "classes": list(classes),
+            "features_by_class": canonical_features,
         }
         expected_name = _feature_panel_name(canonical)
         if panel_name != expected_name:
@@ -324,10 +324,10 @@ def _validate_feature_panels(registry: Mapping[str, object]) -> dict[str, _Featu
                 f"CosMx feature-panel key {panel_name!r} does not match canonical contents; expected {expected_name!r}."
             )
         panels[panel_name] = _FeaturePanelContract(
-            feature_column=feature_column,
-            class_column=class_column,
-            categories=categories,
-            target_classes=target_classes,
+            feature_key=feature_key,
+            feature_class_key=feature_class_key,
+            classes=classes,
+            class_by_feature=class_by_feature,
         )
     return panels
 
@@ -338,15 +338,15 @@ def _validate_points_panel_contents(
     element_name: str,
     panel: _FeaturePanelContract,
 ) -> None:
-    columns = [panel.feature_column, panel.class_column]
+    columns = [panel.feature_key, panel.feature_class_key]
     try:
         errors = (
             points[columns]
             .map_partitions(
                 _points_panel_partition_error,
-                feature_column=panel.feature_column,
-                class_column=panel.class_column,
-                target_classes=panel.target_classes,
+                feature_key=panel.feature_key,
+                feature_class_key=panel.feature_class_key,
+                class_by_feature=panel.class_by_feature,
                 meta=pd.Series(name="error", dtype="object"),
             )
             .dropna()
@@ -364,17 +364,17 @@ def _validate_points_panel_contents(
 def _points_panel_partition_error(
     partition: pd.DataFrame,
     *,
-    feature_column: str,
-    class_column: str,
-    target_classes: Mapping[str, str],
+    feature_key: str,
+    feature_class_key: str,
+    class_by_feature: Mapping[str, str],
 ) -> pd.Series:
     """Validate one points partition against its authoritative feature panel.
 
-    The feature panel maps every declared target to exactly one feature class.
-    This check therefore requires every observed target to occur in
-    ``target_classes`` and its observed class to equal the corresponding mapped
-    class. Null targets or classes are invalid. Panel targets without detections
-    in this partition remain valid.
+    The feature panel maps every declared feature to exactly one feature class.
+    This check therefore requires every observed feature to occur in
+    ``class_by_feature`` and its observed class to equal the corresponding
+    mapped class. Null features or classes are invalid. Panel features without
+    detections in this partition remain valid.
 
     Only the first violation in a partition is returned. Consequently, the Dask
     computation collects at most one small diagnostic per partition and does
@@ -384,12 +384,12 @@ def _points_panel_partition_error(
     ----------
     partition
         In-memory pandas partition containing the two panel-declared columns.
-    feature_column
-        Name of the column containing observed target identifiers.
-    class_column
+    feature_key
+        Name of the column containing observed feature identifiers.
+    feature_class_key
         Name of the column containing observed feature classes.
-    target_classes
-        Authoritative mapping from every panel target to its feature class.
+    class_by_feature
+        Authoritative mapping from every panel feature to its feature class.
 
     Returns
     -------
@@ -405,28 +405,28 @@ def _points_panel_partition_error(
         GeneA, Endogenous        -> valid
         GeneA, Negative          -> rejected: class disagrees with the panel
         GeneA, UnknownClass      -> rejected: class disagrees with the panel
-        UnknownGene, Endogenous  -> rejected: target is absent from the panel
+        UnknownGene, Endogenous  -> rejected: feature is absent from the panel
     """
     error: str | None = None
     if not partition.empty:
-        features = partition[feature_column]
-        feature_classes = partition[class_column]
+        features = partition[feature_key]
+        feature_classes = partition[feature_class_key]
 
         null = features.isna() | feature_classes.isna()
         if null.any():
-            error = "contains a null panel target or feature class."
+            error = "contains a null panel feature or feature class."
         else:
-            known = features.isin(target_classes)
+            known = features.isin(class_by_feature)
             if not known.all():
                 position = int(np.flatnonzero(~known.to_numpy())[0])
                 feature = features.iloc[position]
                 feature_class = feature_classes.iloc[position]
                 if not isinstance(feature, str) or not isinstance(feature_class, str):
-                    error = f"panel targets and feature classes must be strings, found {(feature, feature_class)!r}."
+                    error = f"panel features and feature classes must be strings, found {(feature, feature_class)!r}."
                 else:
-                    error = f"contains target {feature!r} absent from its feature panel."
+                    error = f"contains feature {feature!r} absent from its feature panel."
             else:
-                expected_classes = features.astype(object).map(target_classes)
+                expected_classes = features.astype(object).map(class_by_feature)
                 mismatch = feature_classes.astype(object) != expected_classes
                 if mismatch.any():
                     position = int(np.flatnonzero(mismatch.to_numpy())[0])
@@ -434,12 +434,12 @@ def _points_panel_partition_error(
                     feature_class = feature_classes.iloc[position]
                     if not isinstance(feature, str) or not isinstance(feature_class, str):
                         error = (
-                            f"panel targets and feature classes must be strings, found {(feature, feature_class)!r}."
+                            f"panel features and feature classes must be strings, found {(feature, feature_class)!r}."
                         )
                     else:
                         error = (
-                            f"target {feature!r} has feature class {feature_class!r}; "
-                            f"expected {target_classes[feature]!r}."
+                            f"feature {feature!r} has feature class {feature_class!r}; "
+                            f"expected {class_by_feature[feature]!r}."
                         )
 
     return pd.Series([error], name="error", dtype="object")

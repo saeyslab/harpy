@@ -85,8 +85,8 @@ def _add_transcript_points(
       ``OrigTimeStamp`` value preserved verbatim; and
     - ``feature_panel`` when authoritative panel metadata is available: the
       key of the shared record in ``harpy.feature_panels``. That record maps
-      every assay-defined transcript target (the feature) to one class,
-      including targets with zero detections. It describes targets, not
+      every assay-defined transcript feature to one class, including features
+      with zero detections. It describes assay features, not
       individual physical probes.
 
     Parameters
@@ -148,8 +148,8 @@ def _add_transcript_points(
     feature_panel_name = _feature_panel_name(feature_panel_metadata) if feature_panel_metadata is not None else None
     if feature_panel_name is not None and feature_panel_metadata is not None:
         _validate_feature_panel_collision(sdata, feature_panel_name, feature_panel_metadata)
-    code_class_categories = None if feature_panel is None else feature_panel.categories
-    target_classes = None if feature_panel is None else feature_panel.target_classes
+    code_class_categories = None if feature_panel is None else feature_panel.class_names
+    class_by_feature = None if feature_panel is None else feature_panel.class_by_feature
 
     for mosaic, element_name in zip(preview.mosaics, element_names, strict=True):
         metadata = {
@@ -179,7 +179,7 @@ def _add_transcript_points(
                 flip_y=flip_y,
                 blocksize=blocksize,
                 code_class_categories=code_class_categories,
-                target_classes=target_classes,
+                class_by_feature=class_by_feature,
             )
             for fov in mosaic.fovs
         ]
@@ -296,7 +296,7 @@ def _read_fov_transcripts(
     flip_y: bool,
     blocksize: str | int,
     code_class_categories: tuple[str, ...] | None,
-    target_classes: Mapping[str, str] | None,
+    class_by_feature: Mapping[str, str] | None,
 ) -> DaskDataFrame:
     """Build a lazy canonical transcript frame for one manifest-routed FOV."""
     retained = [column for column in header if column not in _IGNORED_SOURCE_COLUMNS]
@@ -311,7 +311,7 @@ def _read_fov_transcripts(
         flip_y=flip_y,
         path=path,
         code_class_categories=code_class_categories,
-        target_classes=target_classes,
+        class_by_feature=class_by_feature,
     )
     return raw.map_partitions(
         _normalize_transcript_partition,
@@ -322,7 +322,7 @@ def _read_fov_transcripts(
         flip_y=flip_y,
         path=path,
         code_class_categories=code_class_categories,
-        target_classes=target_classes,
+        class_by_feature=class_by_feature,
         meta=meta,
     )
 
@@ -337,16 +337,16 @@ def _normalize_transcript_partition(
     flip_y: bool,
     path: Path,
     code_class_categories: tuple[str, ...] | None = None,
-    target_classes: Mapping[str, str] | None = None,
+    class_by_feature: Mapping[str, str] | None = None,
 ) -> pd.DataFrame:
     """Validate and normalize one lazy transcript partition.
 
     In addition to renaming retained fields and mapping FOV-local coordinates
     into a mosaic, this function checks transcript classes against the feature
-    panel when one is available. The panel's target-to-class relation is
-    authoritative: every observed target must occur in the panel, and its CSV
+    panel when one is available. The panel's feature-to-class relation is
+    authoritative: every observed feature must occur in the panel, and its CSV
     ``codeclass`` must equal the class assigned by the panel. The reverse is not
-    required, because panel targets may legitimately have zero detections.
+    required, because panel features may legitimately have zero detections.
 
     Dask calls this function when a partition is materialized, so these
     row-level checks run during transcript computation or writing rather than
@@ -359,12 +359,12 @@ def _normalize_transcript_partition(
         raise ValueError(f"CosMx transcript CSV {path} contains non-finite x or y coordinates.")
     if frame["target"].isna().any():
         raise ValueError(f"CosMx transcript CSV {path} contains null gene targets.")
-    if (code_class_categories is None) != (target_classes is None):
-        raise ValueError("CosMx transcript feature-class categories and target mapping must be provided together.")
-    if code_class_categories is not None and target_classes is not None:
+    if (code_class_categories is None) != (class_by_feature is None):
+        raise ValueError("CosMx transcript feature-class categories and feature mapping must be provided together.")
+    if code_class_categories is not None and class_by_feature is not None:
         if frame["codeclass"].isna().any():
             raise ValueError(f"CosMx transcript CSV {path} contains null feature classes.")
-        expected_classes = frame["target"].map(target_classes)
+        expected_classes = frame["target"].map(class_by_feature)
         unknown_targets = sorted(str(value) for value in frame.loc[expected_classes.isna(), "target"].unique())
         if unknown_targets:
             raise ValueError(
@@ -426,15 +426,17 @@ def _feature_panel_name(metadata: Mapping[str, object]) -> str:
 
 
 def _feature_panel_metadata(preview: _CosmxPreview) -> dict[str, object]:
-    """Serialize the authoritative target-to-class relation as Harpy metadata."""
+    """Serialize the authoritative feature-to-class relation as Harpy metadata."""
     panel = preview.manifest.feature_panel
     if panel is None:
         raise ValueError("CosMx manifest has no feature panel.")
     return {
-        "feature_column": panel.feature_column,
-        "class_column": panel.class_column,
-        "categories": list(panel.categories),
-        "targets_by_class": {feature_class: list(targets) for feature_class, targets in panel.targets_by_class.items()},
+        "feature_key": panel.feature_key,
+        "feature_class_key": panel.feature_class_key,
+        "classes": list(panel.class_names),
+        "features_by_class": {
+            feature_class: list(features) for feature_class, features in panel.features_by_class.items()
+        },
     }
 
 

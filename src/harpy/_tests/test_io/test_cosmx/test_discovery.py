@@ -66,10 +66,10 @@ def test_discover_compact_manifest_without_opening_deferred_data(
     assert manifest.run.instance_labels_dtype == "uint16"
     assert manifest.run.compartment_labels_dtype == "uint8"
     assert manifest.feature_panel is not None
-    assert manifest.feature_panel.feature_column == "gene"
-    assert manifest.feature_panel.class_column == "code_class"
-    assert manifest.feature_panel.categories == ("Endogenous", "Negative", "SystemControl")
-    assert manifest.feature_panel.targets_by_class["Negative"] == ("Negative01",)
+    assert manifest.feature_panel.feature_key == "gene"
+    assert manifest.feature_panel.feature_class_key == "code_class"
+    assert manifest.feature_panel.class_names == ("Endogenous", "Negative", "SystemControl")
+    assert manifest.feature_panel.features_by_class["Negative"] == ("Negative01",)
 
 
 def test_resolve_decoded_cosmx_root(decoded_cosmx_path: Path) -> None:

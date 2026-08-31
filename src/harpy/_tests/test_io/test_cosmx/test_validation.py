@@ -18,10 +18,10 @@ from harpy.io._cosmx._validation import _validate_cosmx_sdata
 from harpy.points._points import add_points
 
 _PANEL_METADATA = {
-    "feature_column": "gene",
-    "class_column": "code_class",
-    "categories": ["Endogenous", "Negative"],
-    "targets_by_class": {
+    "feature_key": "gene",
+    "feature_class_key": "code_class",
+    "classes": ["Endogenous", "Negative"],
+    "features_by_class": {
         "Endogenous": ["GeneA", "GeneB"],
         "Negative": ["Negative01"],
     },
@@ -126,6 +126,8 @@ def test_validate_cosmx_store_accepts_panel_less_points_with_string_class(tmp_pa
         ("invalid_sample", "sample_id"),
         ("missing_panel", "references missing panel"),
         ("panel_hash", "does not match canonical contents"),
+        ("legacy_feature_keys", "feature_panels.*feature_key"),
+        ("legacy_grouping_keys", "feature_panels.*classes"),
     ],
 )
 def test_validate_cosmx_store_rejects_invalid_structure(tmp_path: Path, mutation: str, message: str) -> None:
@@ -149,8 +151,16 @@ def test_validate_cosmx_store_rejects_invalid_structure(tmp_path: Path, mutation
         point_record["sample_id"] = "invalid-sample"
     elif mutation == "missing_panel":
         point_record["feature_panel"] = "feature_panel_missing"
+    elif mutation == "panel_hash":
+        harpy_metadata["feature_panels"][panel_name]["features_by_class"]["Endogenous"].append("GeneZ")
+    elif mutation == "legacy_feature_keys":
+        panel = harpy_metadata["feature_panels"][panel_name]
+        panel["feature_column"] = panel.pop("feature_key")
+        panel["class_column"] = panel.pop("feature_class_key")
     else:
-        harpy_metadata["feature_panels"][panel_name]["targets_by_class"]["Endogenous"].append("GeneZ")
+        panel = harpy_metadata["feature_panels"][panel_name]
+        panel["categories"] = panel.pop("classes")
+        panel["targets_by_class"] = panel.pop("features_by_class")
 
     sdata.attrs = attrs
     sdata.write_attrs()
@@ -172,7 +182,7 @@ def test_validate_cosmx_store_default_content_check_validates_each_points_partit
         npartitions=3,
     )
 
-    with pytest.raises(ValueError, match="target 'Unknown' absent from its feature panel"):
+    with pytest.raises(ValueError, match="feature 'Unknown' absent from its feature panel"):
         validate_cosmx_store(output)
 
 
@@ -182,7 +192,7 @@ def test_validate_cosmx_store_default_content_check_validates_each_points_partit
         ([("Unknown", "Endogenous")], "absent from its feature panel"),
         ([("GeneA", "Negative")], "expected 'Endogenous'"),
         ([("GeneA", "Endogenous"), ("GeneA", "Negative")], "expected 'Endogenous'"),
-        ([(None, "Endogenous")], "null panel target or feature class"),
+        ([(None, "Endogenous")], "null panel feature or feature class"),
     ],
 )
 def test_validate_cosmx_store_default_content_check_rejects_inconsistent_points(
@@ -220,21 +230,21 @@ def _write_points_store(
     npartitions: int = 1,
 ) -> Path:
     rows = [("GeneA", "Endogenous")] if rows is None else rows
-    panel_targets = {target for targets in _PANEL_METADATA["targets_by_class"].values() for target in targets}
-    observed_targets = {target for target, _ in rows if target is not None}
+    panel_features = {feature for features in _PANEL_METADATA["features_by_class"].values() for feature in features}
+    observed_features = {feature for feature, _ in rows if feature is not None}
     observed_classes = {feature_class for _, feature_class in rows if feature_class is not None}
     frame = pd.DataFrame(
         {
             "x": [float(index) for index in range(len(rows))],
             "y": [float(index) for index in range(len(rows))],
             "gene": pd.Categorical(
-                [target for target, _ in rows],
-                categories=sorted(panel_targets | observed_targets),
+                [feature for feature, _ in rows],
+                categories=sorted(panel_features | observed_features),
             ),
             "code_class": (
                 pd.Categorical(
                     [feature_class for _, feature_class in rows],
-                    categories=sorted(set(_PANEL_METADATA["categories"]) | observed_classes),
+                    categories=sorted(set(_PANEL_METADATA["classes"]) | observed_classes),
                 )
                 if with_panel
                 else pd.Series([feature_class for _, feature_class in rows], dtype="string[pyarrow]")

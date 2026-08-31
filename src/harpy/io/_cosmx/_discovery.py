@@ -77,7 +77,9 @@ def _discover_cosmx(path: str | Path, *, products: tuple[str, ...] = _PRODUCTS) 
         raise ValueError(f"CosMx discovery products must be non-empty and unique, found {products}.")
     unknown_products = set(products) - set(_PRODUCTS)
     if unknown_products:
-        raise ValueError(f"Unknown CosMx discovery products {sorted(unknown_products)}; expected a subset of {_PRODUCTS}.")
+        raise ValueError(
+            f"Unknown CosMx discovery products {sorted(unknown_products)}; expected a subset of {_PRODUCTS}."
+        )
     root = _resolve_decoded_cosmx_root(path)
     discovered: dict[int, dict[str, Path]] = {}
 
@@ -176,7 +178,7 @@ def _discover_feature_panel(root: Path) -> _CosmxFeaturePanel | None:
 
 
 def _read_feature_panel(path: Path) -> _CosmxFeaturePanel:
-    """Read the authoritative target-to-class relation from a CosMx plex."""
+    """Read the authoritative feature-to-class relation from a CosMx plex."""
     with path.open(newline="", encoding="utf-8-sig") as file:
         reader = csv.DictReader(file)
         header = tuple(reader.fieldnames or ())
@@ -188,13 +190,13 @@ def _read_feature_panel(path: Path) -> _CosmxFeaturePanel:
         if missing:
             raise ValueError(f"CosMx plex file {path} is missing required columns {missing}.")
 
-        target_classes: dict[str, str] = {}
+        class_by_feature: dict[str, str] = {}
         for line_number, row in enumerate(reader, start=2):
             if None in row:
                 raise ValueError(f"CosMx plex file {path} has too many fields on line {line_number}.")
-            target = row[_CosmxKeys.PLEX_FEATURE_COLUMN]
+            feature = row[_CosmxKeys.PLEX_FEATURE_COLUMN]
             feature_class = row[_CosmxKeys.PLEX_CLASS_COLUMN]
-            if target is None or not target or target != target.strip():
+            if feature is None or not feature or feature != feature.strip():
                 raise ValueError(
                     f"CosMx plex file {path} has an empty or untrimmed "
                     f"{_CosmxKeys.PLEX_FEATURE_COLUMN} on line {line_number}."
@@ -204,27 +206,27 @@ def _read_feature_panel(path: Path) -> _CosmxFeaturePanel:
                     f"CosMx plex file {path} has an empty or untrimmed "
                     f"{_CosmxKeys.PLEX_CLASS_COLUMN} on line {line_number}."
                 )
-            previous = target_classes.get(target)
+            previous = class_by_feature.get(feature)
             if previous is not None:
                 raise ValueError(
-                    f"CosMx plex target {target!r} occurs more than once with classes "
+                    f"CosMx plex feature {feature!r} occurs more than once with classes "
                     f"{previous!r} and {feature_class!r}: {path}."
                 )
-            target_classes[target] = feature_class
+            class_by_feature[feature] = feature_class
 
-    if not target_classes:
-        raise ValueError(f"CosMx plex file contains no targets: {path}.")
+    if not class_by_feature:
+        raise ValueError(f"CosMx plex file contains no features: {path}.")
 
-    targets_by_class: dict[str, list[str]] = {}
-    for target, feature_class in target_classes.items():
-        targets_by_class.setdefault(feature_class, []).append(target)
+    features_by_class: dict[str, list[str]] = {}
+    for feature, feature_class in class_by_feature.items():
+        features_by_class.setdefault(feature_class, []).append(feature)
     classes = tuple(
-        _CosmxFeatureClass(name=feature_class, targets=tuple(sorted(targets)))
-        for feature_class, targets in sorted(targets_by_class.items())
+        _CosmxFeatureClass(name=feature_class, features=tuple(sorted(features)))
+        for feature_class, features in sorted(features_by_class.items())
     )
     return _CosmxFeaturePanel(
-        feature_column=_CosmxKeys.FEATURE_COLUMN,
-        class_column=_CosmxKeys.FEATURE_CLASS_COLUMN,
+        feature_key=_CosmxKeys.FEATURE_KEY,
+        feature_class_key=_CosmxKeys.FEATURE_CLASS_KEY,
         classes=classes,
     )
 

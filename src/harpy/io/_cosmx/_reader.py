@@ -178,10 +178,10 @@ def cosmx(
         │
         └── feature_panels                                      [optional]
             └── feature_panel_<content hash>
-                ├── feature_column: "gene"
-                ├── class_column: "code_class"
-                ├── categories: [<ordered feature classes>]
-                └── targets_by_class
+                ├── feature_key: "gene"
+                ├── feature_class_key: "code_class"
+                ├── classes: [<ordered feature classes>]
+                └── features_by_class
                     └── <feature class>: [<authoritative targets>]
 
     ``provenance`` records only the reader and Harpy version. The ``images``,
@@ -208,10 +208,10 @@ def cosmx(
         │
         └── feature_panels
             └── feature_panel_8a31b240c75e1234
-                ├── feature_column: gene
-                ├── class_column: code_class
-                ├── categories: [...]
-                └── targets_by_class: {...}
+                ├── feature_key: gene
+                ├── feature_class_key: code_class
+                ├── classes: [...]
+                └── features_by_class: {...}
 
     The relationship can be resolved exactly as follows::
 
