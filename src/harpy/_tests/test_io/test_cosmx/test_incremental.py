@@ -191,7 +191,7 @@ def test_add_cosmx_samples_reuses_identical_panels_and_separates_different_panel
         images=False,
         instance_labels=False,
         compartment_labels=False,
-        transcript_blocksize=64,
+        points_blocksize=64,
     )
 
     add_cosmx_samples(
@@ -200,7 +200,7 @@ def test_add_cosmx_samples_reuses_identical_panels_and_separates_different_panel
         images=False,
         instance_labels=False,
         compartment_labels=False,
-        transcript_blocksize=64,
+        points_blocksize=64,
     )
     after_reuse = read_zarr(output)
     assert len(after_reuse.attrs["harpy"]["feature_panels"]) == 1
@@ -211,7 +211,7 @@ def test_add_cosmx_samples_reuses_identical_panels_and_separates_different_panel
         images=False,
         instance_labels=False,
         compartment_labels=False,
-        transcript_blocksize=64,
+        points_blocksize=64,
     )
     panel_names = set(result.attrs["harpy"]["feature_panels"])
     assert len(panel_names) == 2
@@ -325,7 +325,7 @@ def test_add_cosmx_samples_commits_new_panel_with_its_first_points_element(
         images=False,
         instance_labels=False,
         compartment_labels=False,
-        transcript_blocksize=64,
+        points_blocksize=64,
     )
     before = read_zarr(output)
     before_attrs = deepcopy(before.attrs)
@@ -347,7 +347,7 @@ def test_add_cosmx_samples_commits_new_panel_with_its_first_points_element(
             images=False,
             instance_labels=False,
             compartment_labels=False,
-            transcript_blocksize=64,
+            points_blocksize=64,
         )
 
     restored = read_zarr(output)

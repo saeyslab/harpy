@@ -49,7 +49,7 @@ def test_cosmx_reads_one_sample_with_sample_scoped_names_and_metadata(
         output,
         image_chunks=(1, 4, 4),
         labels_chunks=(4, 4),
-        transcript_blocksize=64,
+        points_blocksize=64,
     )
 
     assert Path(sdata.path) == output
@@ -156,7 +156,7 @@ def test_cosmx_deduplicates_identical_feature_panels_across_samples(
         instance_labels=False,
         compartment_labels=False,
         points=True,
-        transcript_blocksize=64,
+        points_blocksize=64,
     )
 
     panels = sdata.attrs["harpy"]["feature_panels"]
@@ -184,7 +184,7 @@ def test_cosmx_keeps_different_feature_panels_separate(
         instance_labels=False,
         compartment_labels=False,
         points=True,
-        transcript_blocksize=64,
+        points_blocksize=64,
     )
 
     panels = sdata.attrs["harpy"]["feature_panels"]
@@ -261,7 +261,7 @@ def test_cosmx_transcript_only_ignores_morphology_image_inconsistencies(
         instance_labels=False,
         compartment_labels=False,
         points=True,
-        transcript_blocksize=64,
+        points_blocksize=64,
     )
 
     assert set(sdata.points) == {

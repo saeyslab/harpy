@@ -56,7 +56,7 @@ def cosmx(
     image_chunks: tuple[int, int, int] = (1, 1024, 1024),
     labels_chunks: tuple[int, int] = (1024, 1024),
     raster_scale_factors: ScaleFactors_t | None = None,
-    transcript_blocksize: str | int = "64MB",
+    points_blocksize: str | int = "64MB",
     overwrite: bool = False,
 ) -> SpatialData:
     """Read one or more decoded CosMx samples into a backed SpatialData store.
@@ -105,9 +105,9 @@ def cosmx(
         Final instance- and compartment-label chunks in ``(y, x)`` order.
     raster_scale_factors
         Optional shared relative scale factors for image and label pyramids.
-    transcript_blocksize
-        Positive byte count or Dask byte-size string used to partition each
-        transcript CSV.
+    points_blocksize
+        Approximate byte block used to partition source transcript CSVs into
+        the lazy points dataframe.
     overwrite
         Replace an existing output only if it is a readable SpatialData store
         created by this CosMx reader.
@@ -283,7 +283,7 @@ def cosmx(
                 image_chunks=image_chunks,
                 labels_chunks=labels_chunks,
                 raster_scale_factors=raster_scale_factors,
-                transcript_blocksize=transcript_blocksize,
+                points_blocksize=points_blocksize,
             )
 
         # Reopening validates the final-format staging store before publication.
@@ -309,7 +309,7 @@ def add_cosmx_samples(
     image_chunks: tuple[int, int, int] = (1, 1024, 1024),
     labels_chunks: tuple[int, int] = (1024, 1024),
     raster_scale_factors: ScaleFactors_t | None = None,
-    transcript_blocksize: str | int = "64MB",
+    points_blocksize: str | int = "64MB",
 ) -> SpatialData:
     """Add independently named CosMx samples to an existing reader-created store.
 
@@ -344,9 +344,9 @@ def add_cosmx_samples(
         Final chunks for morphology and label rasters respectively.
     raster_scale_factors
         Optional shared relative scale factors for image and label pyramids.
-    transcript_blocksize
-        Positive byte count or Dask byte-size string used to partition source
-        transcript CSVs.
+    points_blocksize
+        Approximate byte block used to partition source transcript CSVs into
+        the lazy points dataframe.
 
     Returns
     -------
@@ -404,7 +404,7 @@ def add_cosmx_samples(
             image_chunks=image_chunks,
             labels_chunks=labels_chunks,
             raster_scale_factors=raster_scale_factors,
-            transcript_blocksize=transcript_blocksize,
+            points_blocksize=points_blocksize,
         )
     return sdata
 
@@ -532,7 +532,7 @@ def _write_cosmx_sample(
     image_chunks: tuple[int, int, int],
     labels_chunks: tuple[int, int],
     raster_scale_factors: ScaleFactors_t | None,
-    transcript_blocksize: str | int,
+    points_blocksize: str | int,
 ) -> SpatialData:
     """Write one fully prepared sample into the shared backed store."""
     sample_id = sample.sample_id
@@ -601,7 +601,7 @@ def _write_cosmx_sample(
             coordinate_system=coordinate_system,
             flip_x=config.flip_x,
             flip_y=config.flip_y,
-            blocksize=transcript_blocksize,
+            blocksize=points_blocksize,
             sample_id=sample_id,
             reader_version=__version__,
             overwrite=False,
