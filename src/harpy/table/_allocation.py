@@ -155,19 +155,19 @@ class _PairReductions:
     coordinates
         Mean coordinates of the allocated points, indexed by instance ID.
     feature_counts
-        Table mapping each observed ``(instance, feature)`` pair to the number
-        of allocated points carrying that feature.
+        Series mapping each observed ``(instance, feature)`` pair to the
+        number of allocated points carrying that feature.
     class_counts
-        Table mapping each observed ``(instance, feature class)`` pair to the
-        number of allocated points in that class. ``None`` for ordinary,
+        Series mapping each observed ``(instance, feature class)`` pair to
+        the number of allocated points in that class. ``None`` for ordinary,
         non-class-aware aggregation.
     """
 
     pair: _AggregationPair
     coordinate_columns: tuple[str, ...]
     coordinates: pd.DataFrame
-    feature_counts: pd.DataFrame
-    class_counts: pd.DataFrame | None
+    feature_counts: pd.Series
+    class_counts: pd.Series | None
 
 
 def aggregate_points(
@@ -655,18 +655,8 @@ def _reduce_aggregation_pair(
         pair=pair,
         coordinate_columns=coordinate_columns,
         coordinates=computed_coordinates,
-        feature_counts=_count_series_frame(
-            computed_feature_counts,
-            first_key=cell_index_name,
-            second_key=feature_key,
-        ),
-        class_counts=None
-        if computed_class_counts is None
-        else _count_series_frame(
-            computed_class_counts,
-            first_key=cell_index_name,
-            second_key=class_key,
-        ),
+        feature_counts=computed_feature_counts,
+        class_counts=computed_class_counts,
     )
 
 
@@ -740,19 +730,19 @@ def _feature_panel_partition_errors(
     return pd.Series(name="error", dtype="object")
 
 
-def _count_series_frame(series: pd.Series, *, first_key: str, second_key: str) -> pd.DataFrame:
-    if series.empty:
-        return pd.DataFrame(
-            {
-                first_key: pd.Series(dtype=np.int64),
-                second_key: pd.Series(dtype="object"),
-                "values": pd.Series(dtype=np.uint32),
-            }
-        )
-    frame = series.rename("values").reset_index()
-    frame[second_key] = frame[second_key].astype(str)
-    frame["values"] = frame["values"].astype(np.uint32)
-    return frame
+def _count_index_level(counts: pd.Series, *, key: str) -> tuple[pd.Index, np.ndarray]:
+    """Return one count-index level and its compact code per observed pair."""
+    index = counts.index
+    if not isinstance(index, pd.MultiIndex):
+        raise RuntimeError("Reduced point counts must use a MultiIndex.")
+    try:
+        level_number = index.names.index(key)
+    except ValueError as exc:
+        raise RuntimeError(f"Reduced point counts are missing index level {key!r}.") from exc
+    codes = index.codes[level_number]
+    if (codes < 0).any():
+        raise RuntimeError(f"Reduced point counts contain missing values in index level {key!r}.")
+    return index.levels[level_number], codes
 
 
 def _assemble_aggregation_table(
@@ -767,9 +757,12 @@ def _assemble_aggregation_table(
 ) -> AnnData:
     """Align pair reductions to one feature axis and construct one AnnData table."""
     if contract is None:
-        feature_axis = tuple(
-            sorted({feature for result in reductions for feature in result.feature_counts[feature_key]})
-        )
+        observed_features: set[str] = set()
+        for result in reductions:
+            feature_level, feature_codes = _count_index_level(result.feature_counts, key=feature_key)
+            used_feature_codes = np.flatnonzero(np.bincount(feature_codes, minlength=len(feature_level)))
+            observed_features.update(feature_level.take(used_feature_codes))
+        feature_axis = tuple(sorted(observed_features))
     else:
         feature_axis = contract.panel.features_by_class[contract.expression_class]
     if not feature_axis:
@@ -786,10 +779,17 @@ def _assemble_aggregation_table(
     count_columns = {} if contract is None else dict(contract.count_columns)
 
     for result in reductions:
-        selected = result.feature_counts[result.feature_counts[feature_key].isin(feature_axis)]
-        instance_ids = np.sort(selected[cell_index_name].unique())
+        feature_level, feature_codes = _count_index_level(result.feature_counts, key=feature_key)
+        instance_level, instance_codes = _count_index_level(result.feature_counts, key=cell_index_name)
+        # Resolve expression membership once for each unique feature, then use
+        # the compact codes to mark the observed instance-feature pairs.
+        selected_pairs = feature_level.isin(feature_axis)[feature_codes]
+        instance_has_expression = (
+            np.bincount(instance_codes, weights=selected_pairs, minlength=len(instance_level)) > 0
+        )
+        instance_ids = np.sort(instance_level[instance_has_expression].to_numpy())
         matrix = _counts_to_sparse(
-            selected,
+            result.feature_counts,
             instance_ids=instance_ids,
             feature_axis=feature_axis,
             cell_index_name=cell_index_name,
@@ -804,13 +804,24 @@ def _assemble_aggregation_table(
         if contract is not None:
             if result.class_counts is None:
                 raise RuntimeError("Class-aware pair reductions are missing class counts.")
-            for feature_class, column_name in contract.count_columns:
-                values = (
-                    result.class_counts[result.class_counts[contract.panel.feature_class_key] == feature_class]
-                    .set_index(cell_index_name)["values"]
-                    .reindex(instance_ids, fill_value=0)
+            if result.class_counts.empty:
+                aligned_class_counts = pd.DataFrame(
+                    0,
+                    index=instance_ids,
+                    columns=contract.panel.classes,
+                    dtype=np.uint32,
                 )
-                obs[column_name] = values.to_numpy(dtype=np.uint32)
+            else:
+                aligned_class_counts = result.class_counts.unstack(
+                    level=contract.panel.feature_class_key,
+                    fill_value=0,
+                ).reindex(
+                    index=instance_ids,
+                    columns=contract.panel.classes,
+                    fill_value=0,
+                )
+            for feature_class, column_name in contract.count_columns:
+                obs[column_name] = aligned_class_counts[feature_class].to_numpy(dtype=np.uint32)
             denominator = sum(obs[column] for column in count_columns.values())
             controls = sum(
                 obs[count_columns[feature_class]]
@@ -860,21 +871,101 @@ def _assemble_aggregation_table(
 
 
 def _counts_to_sparse(
-    counts: pd.DataFrame,
+    counts: pd.Series,
     *,
     instance_ids: np.ndarray,
     feature_axis: tuple[str, ...],
     cell_index_name: str,
     feature_key: str,
 ) -> sparse.csr_matrix:
+    """Align observed instance-feature counts to a CSR matrix.
+
+    ``counts`` uses a two-level MultiIndex to represent the nonzero count for
+    each observed ``(instance, feature)`` pair. This function maps the unique
+    values in those levels to the requested output axes and then expands only
+    their compact integer codes. A pair is omitted when either its instance is
+    absent from ``instance_ids`` or its feature is absent from
+    ``feature_axis``. In class-aware aggregation, this excludes control
+    features and instances containing only control points from ``adata.X``.
+
+    Parameters
+    ----------
+    counts
+        Nonzero point counts indexed by instance ID and feature identifier.
+    instance_ids
+        Sorted instance IDs defining the rows of the output matrix.
+    feature_axis
+        Ordered feature identifiers defining the columns of the output
+        matrix.
+    cell_index_name
+        Name of the instance-ID level in ``counts.index``.
+    feature_key
+        Name of the feature level in ``counts.index``.
+
+    Returns
+    -------
+    scipy.sparse.csr_matrix
+        A ``uint32`` matrix aligned to ``instance_ids`` and ``feature_axis``.
+
+    Examples
+    --------
+    Consider these observed counts:
+
+    ==========  ===========  =====
+    Instance    Feature      Count
+    ==========  ===========  =====
+    42          EPCAM        7
+    42          Negative1    2
+    51          VIM          3
+    99          Negative1    1
+    ==========  ===========  =====
+
+    The requested output axes are ``instance_ids = [42, 51]`` and
+    ``feature_axis = ("EPCAM", "VIM")``. The MultiIndex represents the table
+    with unique levels and one integer code per observed pair::
+
+        instance_level       = [42, 51, 99]
+        instance_level_codes = [ 0,  0,  1,  2]
+        feature_level        = ["EPCAM", "Negative1", "VIM"]
+        feature_level_codes  = [      0,           1,     2,           1]
+
+    Mapping the unique levels to the requested axes produces ``-1`` for
+    values that should not appear in the output::
+
+        row_lookup    = [0, 1, -1]
+        column_lookup = [0, -1, 1]
+
+    Indexing those lookup tables with the pair codes gives::
+
+        row_codes    = [0,  0, 1, -1]
+        column_codes = [0, -1, 1, -1]
+        selected     = [T,  F, T,  F]
+
+    The retained coordinate triplets are therefore ``(row=0, column=0,
+    value=7)`` and ``(row=1, column=1, value=3)``. They form the matrix::
+
+                  EPCAM  VIM
+        instance
+        42            7    0
+        51            0    3
+
+    ``Negative1`` is excluded because it is not on ``feature_axis``;
+    instance 99 is excluded because it is not in ``instance_ids``.
+    """
     if counts.empty:
         return sparse.csr_matrix((0, len(feature_axis)), dtype=np.uint32)
-    row_codes = pd.Categorical(counts[cell_index_name], categories=instance_ids, ordered=True).codes
-    column_codes = pd.Categorical(counts[feature_key], categories=feature_axis, ordered=True).codes
-    if (row_codes < 0).any() or (column_codes < 0).any():
-        raise ValueError("Allocated counts could not be aligned to the resolved instance or feature axis.")
+    instance_level, instance_level_codes = _count_index_level(counts, key=cell_index_name)
+    feature_level, feature_level_codes = _count_index_level(counts, key=feature_key)
+    code_dtype = np.int32 if max(len(instance_ids), len(feature_axis)) <= np.iinfo(np.int32).max else np.int64
+    # Map each unique level value once; indexing these small lookup tables with
+    # the existing MultiIndex codes avoids expanding repeated strings or IDs.
+    row_lookup = pd.Index(instance_ids).get_indexer(instance_level).astype(code_dtype, copy=False)
+    column_lookup = pd.Index(feature_axis).get_indexer(feature_level).astype(code_dtype, copy=False)
+    row_codes = row_lookup[instance_level_codes]
+    column_codes = column_lookup[feature_level_codes]
+    selected = (row_codes >= 0) & (column_codes >= 0)
     return sparse.coo_matrix(
-        (counts["values"].to_numpy(dtype=np.uint32), (row_codes, column_codes)),
+        (counts.to_numpy(dtype=np.uint32)[selected], (row_codes[selected], column_codes[selected])),
         shape=(len(instance_ids), len(feature_axis)),
         dtype=np.uint32,
     ).tocsr()
