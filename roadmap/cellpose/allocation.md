@@ -106,9 +106,9 @@ that run. A missing plex must not prevent raw transcript ingestion; it only
 limits the normalized allocation metrics available later. The record must
 contain at least:
 
-- the feature and class column names;
-- the ordered feature-class categories; and
-- the authoritative target names grouped by class.
+- the points `feature_key` and `feature_class_key` column bindings;
+- the ordered feature classes; and
+- the authoritative feature names grouped by class.
 
 Introduce a vendor-neutral Harpy metadata convention in the root
 `SpatialData.attrs`. This is a new Harpy contract, not an existing SpatialData
@@ -150,10 +150,10 @@ harpy_metadata.update(
         },
         "feature_panels": {
             "transcripts_panel": {
-                "feature_column": "gene",
-                "class_column": "code_class",
-                "categories": ["Endogenous", "Negative", "SystemControl"],
-                "targets_by_class": {
+                "feature_key": "gene",
+                "feature_class_key": "code_class",
+                "classes": ["Endogenous", "Negative", "SystemControl"],
+                "features_by_class": {
                     "Endogenous": ["Abca2", "Abi1", ...],
                     "Negative": ["Negative01", ..., "Negative10"],
                     "SystemControl": ["SystemControl1", ..., "SystemControl197"],
@@ -181,49 +181,49 @@ and unique. The reader should derive a stable identifier from its transcript
 output base name and avoid a collision with an incompatible existing panel.
 Multiple points elements may reference the same panel.
 
-The `categories` order is the categorical dtype order shared by all associated
-points elements. `targets_by_class` keys must exactly equal those categories;
-each target list must contain unique, non-empty strings; and no target may occur
-under more than one class. Derive target counts from the list lengths instead of
-storing a second potentially inconsistent count mapping. The CosMx reader sorts
-both class names and the targets within each class lexicographically so output
-does not depend on row order in the plex; this ordering is deterministic rather
-than a claim of biological precedence.
+The `classes` order is the categorical dtype order shared by all associated
+points elements. `features_by_class` keys must exactly equal those classes;
+each feature list must contain unique, non-empty strings; and no feature may
+occur under more than one class. Derive feature counts from the list lengths
+instead of storing a second potentially inconsistent count mapping. The CosMx
+reader sorts both class names and the features within each class
+lexicographically so output does not depend on row order in the plex; this
+ordering is deterministic rather than a claim of biological precedence.
 
-Slice 5 only needs those derived counts: it uses the length of each class target
-list as the denominator for normalized control metrics. Slice 6 additionally
-needs the actual target names. A categorical transcript column contains only
-categories represented by the ingested points and cannot, by itself, preserve
-the target-to-class relationship for a panel target with no detected rows.
-Keeping the authoritative names in `targets_by_class` therefore supports both
-uses without storing a separate count mapping.
+Slice 5 only needs those derived counts: it uses the length of each class
+feature list as the denominator for normalized control metrics. Slice 6
+additionally needs the actual feature names. A categorical transcript column
+contains only categories represented by the ingested points and cannot, by
+itself, preserve the feature-to-class relationship for a panel feature with no
+detected rows. Keeping the authoritative names in `features_by_class`
+therefore supports both uses without storing a separate count mapping.
 
 Only the allocation- and QC-relevant `DisplayName`/`CodeClass` relationship is
 persisted. Do not store unused plex fields such as `ProbeID`, and do not
 duplicate the panel under every mosaic record. Although the example originates
 from CosMx, no key in the Harpy contract is vendor-specific. Other readers can
 associate their points with the same structure using their own classes and
-targets.
+features.
 
 Validate that plex display names are unique, class values are non-null, and
-class target counts are positive. Prefix matching is not an acceptable
-fallback: this panel contains a target named `NegativeAdd` whose authoritative
+class feature counts are positive. Prefix matching is not an acceptable
+fallback: this panel contains a feature named `NegativeAdd` whose authoritative
 `CodeClass` is `Endogenous`.
 
 For every transcript points element that references a shared feature-panel
 record, validate the points payload against that specific record: every
-detected target in the points element must occur in the panel, and the detected
-target's feature-class value must equal the class assigned to that target by
-the panel. This is a one-way inclusion requirement; authoritative panel targets
-with zero detected transcripts are valid and remain represented only in the
+detected feature in the points element must occur in the panel, and the
+detected feature's class value must equal the class assigned to that feature by
+the panel. This is a one-way inclusion requirement; authoritative panel
+features with zero detected transcripts are valid and remain represented only in the
 shared panel metadata. When no panel is available, omit the reference and skip
 this cross-validation.
 
 The CosMx reader stores `code_class` categorically with the same category set
-for every mosaic points element from the run. Its categories come from the plex
-`CodeClass` values. Parquet preserves the categorical values, but a reopened
+for every mosaic points element from the run. Its categorical values come from
+the plex `CodeClass` values. Parquet preserves those values, but a reopened
 Dask dataframe may report them as unknown until supplied with the authoritative
-category list. That list is persisted in the shared feature-panel metadata so
+class list. That list is persisted in the shared feature-panel metadata so
 Slice 5 can restore a known categorical dtype lazily without scanning the
 points. The categorical representation is the canonical contract for data
 created by this reader; no compatibility path is required for stores that use
@@ -236,15 +236,15 @@ Focused reader tests should establish that:
 - one valid plex is read once and stored as one shared feature-panel record;
 - every transcript points element references that shared panel without
   duplicating it;
-- every target and feature-class pair represented in a transcript points
-  element agrees with its referenced shared panel record, while panel targets
+- every feature and feature-class pair represented in a transcript points
+  element agrees with its referenced shared panel record, while panel features
   with zero detections remain valid;
 - the persisted `code_class` column has known categorical categories matching
   the panel;
-- target names, classes, and zero-detection panel targets survive a SpatialData
+- feature names, classes, and zero-detection panel features survive a SpatialData
   Zarr round trip;
-- duplicate plex files, duplicate or empty target names, null classes,
-  conflicting target-to-class mappings, and invalid panel categories are
+- duplicate plex files, duplicate or empty feature names, null classes,
+  conflicting feature-to-class mappings, and invalid panel classes are
   rejected before transcript materialization;
 - a missing plex still permits raw transcript ingestion but creates no
   feature-panel reference;
@@ -525,10 +525,10 @@ sdata.attrs["harpy"]
 │                                        ▼
 └── feature_panels
     └── feature_panel_8a31b240c75e
-        ├── feature_column: gene
-        ├── class_column: code_class
-        ├── categories: [...]
-        └── targets_by_class: {...}
+        ├── feature_key: gene
+        ├── feature_class_key: code_class
+        ├── classes: [...]
+        └── features_by_class: {...}
 ```
 
 In mapping form, the reference is located at
@@ -548,7 +548,7 @@ that would describe metadata it does not yet write.
 Sharing a panel record is a storage optimization, not an assertion that the
 samples are spatially aligned. Conversely, two different registry keys do not
 necessarily make panels incompatible for allocation: Slice 5 compares the
-canonical feature column, class column, categories, and target-to-class
+canonical feature key, feature-class key, classes, and feature-to-class
 contents. One output table may combine only compatible selected panels.
 
 ### Validation and atomic publication
@@ -657,9 +657,9 @@ without scanning existing transcript rows:
   types;
 - image, instance-label, compartment-label, and points-specific metadata fields
   satisfy their documented structural contracts when present;
-- every feature-panel record has valid `feature_column`, `class_column`,
-  ordered `categories`, and `targets_by_class` values; category keys match
-  exactly, targets are non-empty and unique within and across classes, and the
+- every feature-panel record has valid `feature_key`, `feature_class_key`,
+  ordered `classes`, and `features_by_class` values; class keys match exactly,
+  features are non-empty and unique within and across classes, and the
   registry key equals the identifier recomputed from the canonical panel
   contents;
 - every points-level `feature_panel` reference resolves to an existing shared
@@ -710,19 +710,19 @@ coordinate system in collision preflight.
 With the default `check_point_contents=True`, additionally validate every
 points element that references a feature panel against its actual transcript
 payload. Project only the panel-declared feature and class columns and validate
-each Dask partition independently against the authoritative target-to-class
+each Dask partition independently against the authoritative feature-to-class
 mapping. Each partition returns at most one small diagnostic, so this check
 requires no global shuffle and does not collect transcript rows in the client.
 Require:
 
-- every observed target occurs in the referenced panel;
-- every observed target has exactly the feature class assigned by that panel;
+- every observed feature occurs in the referenced panel;
+- every observed feature has exactly the feature class assigned by that panel;
   and
-- null targets or classes are rejected. A target associated with multiple
+- null features or classes are rejected. A feature associated with multiple
   observed classes is necessarily rejected because at least one observed class
   disagrees with its single authoritative panel assignment.
 
-This remains a one-way inclusion check: authoritative panel targets with zero
+This remains a one-way inclusion check: authoritative panel features with zero
 detections are valid. The content check must not load spatial columns,
 materialize a complete points dataframe, or modify categorical metadata. It
 necessarily scans the two projected payload columns and can therefore be
@@ -751,8 +751,8 @@ Focused tests should establish that:
 - `check_point_contents=False` checks referenced points schemas without
   computing their partitions;
 - default validation accepts detected panel subsets and zero-detection panel
-  targets;
-- default validation rejects unknown targets, target-to-class disagreement
+  features;
+- default validation rejects unknown features, feature-to-class disagreement
   (including multiple observed classes), and null values without a global
   shuffle; and
 - neither successful nor failed validation writes to the destination.
@@ -1006,7 +1006,7 @@ Their semantics are:
   each target;
 - `expression_class` selects the only class whose targets are retained in
   `adata.X`; and
-- `control_class_denominators` optionally supplies the number of panel targets
+- `control_class_denominators` optionally supplies the number of panel features
   for every non-expression class as a fallback for points without feature-panel
   metadata, or as a consistency assertion when such metadata is available.
 
@@ -1027,7 +1027,7 @@ contract:
 
 | Feature-panel metadata | Explicit mapping   | Result                                                |
 | ---------------------- | ------------------ | ----------------------------------------------------- |
-| available              | `None`             | derive denominators from panel target-list lengths    |
+| available              | `None`             | derive denominators from panel feature-list lengths   |
 | unavailable            | provided           | validate and use the explicit mapping                 |
 | available              | identical values   | accept the assertion and use the panel-derived values |
 | available              | conflicting values | raise `ValueError`                                    |
@@ -1062,8 +1062,8 @@ For class-aware allocation, resolve one shared feature axis before constructing
 the final AnnData:
 
 - when all selected points elements reference compatible feature-panel
-  metadata, use the panel's ordered `expression_class` targets, including
-  targets with zero detections;
+  metadata, use the panel's ordered `expression_class` features, including
+  features with zero detections;
 - without feature-panel metadata, use a deterministic, lexicographically
   sorted union of the observed expression targets across all selected points
   elements; and
@@ -1072,8 +1072,8 @@ the final AnnData:
 
 In class-aware mode, feature-panel metadata must be available for all selected
 points elements or for none of them. When present, all referenced panels must
-agree on the feature column, class column, ordered categories, target-to-class
-mapping, and targets by class. Panels selected from different samples need not
+agree on the feature key, feature-class key, ordered classes, feature-to-class
+mapping, and features by class. Panels selected from different samples need not
 share the same registry key, but their canonical contents must be compatible.
 Reject mixed metadata availability and incompatible panels before spatial
 allocation. This prevents a zero from ambiguously meaning either "assayed but
@@ -1150,7 +1150,7 @@ control_fraction
 
 The class count columns contain assigned transcript counts. The normalized
 control columns contain the corresponding count divided by the authoritative
-panel target count for that control class. For this three-class configuration:
+panel feature count for that control class. For this three-class configuration:
 
 ```text
 negative_per_target = n_negative / 10
@@ -1170,10 +1170,10 @@ dedicated table-local key:
 adata.uns["feature_class_allocation"] = {
     "schema_version": 1,
     "source_kind": "harpy_allocate",
-    "feature_column": "gene",
-    "class_column": "code_class",
+    "feature_key": "gene",
+    "feature_class_key": "code_class",
     "expression_class": "Endogenous",
-    "categories": ["Endogenous", "Negative", "SystemControl"],
+    "classes": ["Endogenous", "Negative", "SystemControl"],
     "control_class_denominators": {
         "Negative": 10,
         "SystemControl": 197,
@@ -1212,7 +1212,7 @@ There is only one class-aware expression matrix and one coherent set of class
 summaries per table, so `feature_class_allocation` is a direct record rather
 than a registry keyed by an arbitrary artifact name. Its generated-column
 mappings bind the metadata to the actual `.obs` payload instead of requiring
-downstream code to reconstruct names. The complete feature-panel target lists
+downstream code to reconstruct names. The complete per-class feature lists
 remain in SpatialData root metadata and are not duplicated into the table;
 only the resolved non-expression denominators needed to interpret normalized
 values are retained.
@@ -1275,7 +1275,7 @@ does not receive an expression-table row. Reindex control summaries to the
 endogenous row set and fill missing control counts with zero.
 
 Unexpected or null feature classes, targets associated with multiple classes,
-non-positive resolved panel target counts, a missing expression class, and
+non-positive resolved panel feature counts, a missing expression class, and
 collisions with existing output columns must produce clear errors. A panel
 control class with no assigned points is valid and must produce zero counts and
 rates. Validate the complete multi-region request and shared
@@ -1303,7 +1303,7 @@ Focused tests should establish that:
 - `n_endogenous` equals the row sum of the final expression matrix;
 - assigned control counts are correct and zero-filled for instances without a
   control call;
-- normalized rates use the authoritative panel target counts;
+- normalized rates use the authoritative panel feature counts;
 - `control_fraction` is correct and finite;
 - non-categorical and unknown-categorical feature-class columns are rejected;
 - missing and additional denominator keys are rejected against the complete
@@ -1313,7 +1313,7 @@ Focused tests should establish that:
   explicit denominator mapping;
 - explicit denominators that conflict with attached panel metadata are
   rejected;
-- conflicting target-to-class mappings and invalid class configuration fail
+- conflicting feature-to-class mappings and invalid class configuration fail
   before writing a table element;
 - the versioned `feature_class_allocation` record and its generated-column
   bindings survive a SpatialData Zarr round trip;
@@ -1375,13 +1375,13 @@ anywhere in a sample. Do not identify controls from target-name prefixes. A
 ranked bar or dot plot of these summaries should make a single unusually noisy
 negative probe or false code immediately visible. Keep `Negative` and
 `SystemControl` in separate facets because they measure different technical
-processes and have different numbers of panel targets.
+processes and have different numbers of panel features.
 
 ### Spatially binned summary
 
 Bin the original control points in the coordinate system of their mosaic and
 produce separate spatial density layers for negative probes and system-control
-codewords. Normalize each layer by its authoritative number of panel targets;
+codewords. Normalize each layer by its authoritative number of panel features;
 when operating in a physical coordinate system, also normalize by bin area.
 
 The bin size must be configurable in coordinate-system units. Choose a default
