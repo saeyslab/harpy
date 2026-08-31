@@ -150,10 +150,10 @@ class _PairReductions:
     pair
         Names and coordinate system identifying the paired labels and points
         elements.
-    coordinate_columns
-        Point-coordinate columns summarized for each retained instance.
     coordinates
         Mean coordinates of the assigned points, indexed by instance ID.
+    coordinate_columns
+        Coordinate column names derived from ``coordinates`` in matrix order.
     feature_counts
         Series mapping each observed ``(instance, feature)`` pair to the
         number of assigned points carrying that feature.
@@ -164,10 +164,56 @@ class _PairReductions:
     """
 
     pair: _AggregationPair
-    coordinate_columns: tuple[str, ...]
     coordinates: pd.DataFrame
     feature_counts: pd.Series
     class_counts: pd.Series | None
+
+    def __post_init__(self) -> None:
+        coordinate_columns = self.coordinate_columns
+        if coordinate_columns not in {("x", "y"), ("x", "y", "z")}:
+            raise ValueError(
+                "Pair-reduction coordinates must use columns ('x', 'y') or ('x', 'y', 'z'), "
+                f"found {coordinate_columns!r}."
+            )
+        if not self.coordinates.index.is_unique:
+            raise ValueError("Pair-reduction coordinate instance IDs must be unique.")
+
+        feature_instances = self._validate_counts(self.feature_counts, name="feature_counts")
+        coordinate_instances = self.coordinates.index
+        if not coordinate_instances.isin(feature_instances).all():
+            raise ValueError("Pair-reduction coordinate instances must occur in feature_counts.")
+        if self.class_counts is None:
+            if len(coordinate_instances) != len(feature_instances) or not feature_instances.isin(
+                coordinate_instances
+            ).all():
+                raise ValueError(
+                    "Ordinary pair reductions must use the same coordinate and feature-count instances."
+                )
+            return
+
+        class_instances = self._validate_counts(self.class_counts, name="class_counts")
+        if len(feature_instances) != len(class_instances) or not feature_instances.isin(class_instances).all():
+            raise ValueError("Pair-reduction feature and class counts must reference compatible instance levels.")
+
+    @property
+    def coordinate_columns(self) -> tuple[str, ...]:
+        """Return the coordinate columns in their stored matrix order."""
+        return tuple(self.coordinates.columns)
+
+    def _validate_counts(self, counts: pd.Series, *, name: str) -> pd.Index:
+        """Validate a count Series without scanning its observed pairs."""
+        if not isinstance(counts, pd.Series):
+            raise ValueError(f"Pair-reduction {name} must be a pandas Series.")
+        if counts.dtype != np.dtype(np.uint32):
+            raise ValueError(f"Pair-reduction {name} must use uint32 values, found {counts.dtype}.")
+        if not isinstance(counts.index, pd.MultiIndex) or counts.index.nlevels != 2:
+            raise ValueError(f"Pair-reduction {name} must use a two-level MultiIndex.")
+        if counts.index.names[0] != self.coordinates.index.name:
+            raise ValueError(
+                f"Pair-reduction {name} instance level {counts.index.names[0]!r} must match "
+                f"coordinate index {self.coordinates.index.name!r}."
+            )
+        return counts.index.levels[0]
 
 
 def aggregate_points(
@@ -653,7 +699,6 @@ def _reduce_aggregation_pair(
 
     return _PairReductions(
         pair=pair,
-        coordinate_columns=coordinate_columns,
         coordinates=computed_coordinates,
         feature_counts=computed_feature_counts,
         class_counts=computed_class_counts,
