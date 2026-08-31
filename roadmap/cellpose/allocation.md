@@ -966,7 +966,7 @@ adata.X       instances x Endogenous features only
 adata.var     the shared Endogenous feature axis
 adata.obs     class point counts and control_fraction
 adata.obsm    mean coordinates calculated from assigned Endogenous points
-adata.uns     the versioned feature_class_allocation configuration and sources
+adata.uns     the versioned feature_class_aggregation configuration and sources
 ```
 
 Multiple regions are combined without an inner feature join:
@@ -992,7 +992,7 @@ original points to provide spatial background QC.
 When `expression_class` is omitted, the same multi-region API follows the
 ordinary allocation path: all observed features remain in `adata.X`, no
 class-derived `.obs` columns are added, and no
-`adata.uns["feature_class_allocation"]` record is written.
+`adata.uns["feature_class_aggregation"]` record is written.
 
 ### Public contract
 
@@ -1121,7 +1121,7 @@ The metadata roles are deliberately distinct:
    definition.
 2. `sdata.attrs["harpy"]["points"][points_name]["feature_panel"]` binds one
    points element to that definition.
-3. `adata.uns["feature_class_allocation"]` is a derived, table-local snapshot of
+3. `adata.uns["feature_class_aggregation"]` is a derived, table-local snapshot of
    the resolved allocation contract. It records how the table was constructed
    and remains interpretable with the AnnData object, but it is not a second
    authoritative panel definition.
@@ -1267,9 +1267,9 @@ derived snapshot of the panel values used for this table; it is not accepted as
 an allocation argument or treated as an authoritative panel definition:
 
 ```python
-adata.uns["feature_class_allocation"] = {
+adata.uns["feature_class_aggregation"] = {
     "schema_version": 1,
-    "source_kind": "harpy_allocate",
+    "source_kind": "harpy_aggregate_points",
     "feature_key": "gene",
     "feature_class_key": "code_class",
     "expression_class": "Endogenous",
@@ -1305,7 +1305,7 @@ this record in `adata.uns["harpy"]`; the root
 metadata contract and may not accompany an AnnData table used independently.
 
 There is only one class-aware expression matrix and one coherent set of class
-summaries per table, so `feature_class_allocation` is a direct record rather
+summaries per table, so `feature_class_aggregation` is a direct record rather
 than a registry keyed by an arbitrary artifact name. Its generated-column
 mappings bind the metadata to the actual `.obs` payload instead of requiring
 downstream code to reconstruct names. The complete per-class feature lists
@@ -1377,7 +1377,7 @@ collisions with existing output columns must produce clear errors. A panel
 control class with no assigned points is valid and must produce a zero count
 column. No control class produces a persisted per-feature rate. Validate the
 complete multi-region request and shared
-`feature_class_allocation` configuration before writing the output table.
+`feature_class_aggregation` configuration before writing the output table.
 
 ### Boundary with Slice 6
 
@@ -1428,7 +1428,7 @@ Focused tests should establish that:
 - category-derived output names are deterministic and collisions are rejected;
 - conflicting feature-to-class mappings and invalid class configuration fail
   before writing a table element;
-- the versioned `feature_class_allocation` record and its generated-column
+- the versioned `feature_class_aggregation` record and its generated-column
   bindings survive a SpatialData Zarr round trip;
 - scalar points and coordinate-system inputs broadcast across labels, while
   incompatible list lengths and duplicate labels are rejected;
@@ -1472,7 +1472,7 @@ the points or route individual controls through `hp.tb.aggregate_points`.
 When a Slice 5 allocation table is available, QC plotting may derive
 `negative_points_per_feature` and `system_control_points_per_feature` from the
 persisted raw class counts. Resolve the relevant `.obs` columns through
-`adata.uns["feature_class_allocation"]["count_columns"]` and divide them by the
+`adata.uns["feature_class_aggregation"]["count_columns"]` and divide them by the
 corresponding positive values in `control_class_denominators`:
 
 ```text
