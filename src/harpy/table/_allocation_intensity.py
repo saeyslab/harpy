@@ -20,8 +20,10 @@ from harpy.table._utils import _sanity_check_append_region
 from harpy.utils._aggregate import RasterAggregator
 from harpy.utils._keys import _CELL_INDEX, _CELLSIZE_KEY, _INSTANCE_KEY, _REGION_KEY, _SPATIAL
 
+_DEPRECATED_ATTRIBUTES_WARNED: set[str] = set()
 
-def allocate_intensity(
+
+def aggregate_image(
     sdata: SpatialData,
     image_name: str | None = None,
     labels_name: str | None = None,
@@ -42,7 +44,7 @@ def allocate_intensity(
     overwrite: bool = True,
 ) -> SpatialData:
     """
-    Allocates intensity values from a specified image element to corresponding cells in a SpatialData object and returns an updated SpatialData object augmented with a table element (`sdata.tables[output_table_name]`) :class:`~anndata.AnnData` object with intensity values for each cell and each (specified) channel.
+    Aggregate image intensities within labeled instances and store the resulting per-instance table in the SpatialData object.
 
     It requires that the image element and the labels element have the same shape and alignment.
 
@@ -121,7 +123,7 @@ def allocate_intensity(
 
     Examples
     --------
-    Allocate intensity statistics into an AnnData table:
+    Aggregate image intensity statistics into an AnnData table:
 
     .. code-block:: python
 
@@ -130,7 +132,7 @@ def allocate_intensity(
         sdata = hp.datasets.pixie_example()
 
         # Compute intensity statistics in coordinate system "fov0"
-        sdata = hp.tb.allocate_intensity(
+        sdata = hp.tb.aggregate_image(
             sdata,
             image_name="raw_image_fov0",
             labels_name="label_whole_fov0",
@@ -142,7 +144,7 @@ def allocate_intensity(
         )
 
         # Append intensity statistics in coordinate system "fov1"
-        sdata = hp.tb.allocate_intensity(
+        sdata = hp.tb.aggregate_image(
             sdata,
             image_name="raw_image_fov1",
             labels_name="label_whole_fov1",
@@ -397,3 +399,12 @@ def allocate_intensity(
     )
 
     return sdata
+
+
+def __getattr__(name: str) -> object:
+    if name == "allocate_intensity":
+        if name not in _DEPRECATED_ATTRIBUTES_WARNED:
+            _DEPRECATED_ATTRIBUTES_WARNED.add(name)
+            log.warning("`harpy.tb.allocate_intensity` is deprecated. Import and use `harpy.tb.aggregate_image` instead.")
+        return aggregate_image
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

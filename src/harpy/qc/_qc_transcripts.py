@@ -94,7 +94,7 @@ def analyse_genes_left_out(
 
     See Also
     --------
-    harpy.tb.allocate
+    harpy.tb.aggregate_points
 
     Examples
     --------

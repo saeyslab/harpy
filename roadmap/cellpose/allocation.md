@@ -2,15 +2,16 @@
 
 ## Status
 
-Seven implementation slices are planned; Slices 1 and 2 are implemented:
+Seven implementation slices are planned; Slices 1 through 5 are implemented:
 
 1. patch the CosMx reader and establish the generic Harpy feature-panel
    metadata contract — implemented;
 2. make the canonical `harpy.io.cosmx()` creation API sample-aware —
    implemented;
-3. validate existing sample-aware CosMx SpatialData stores;
-4. add new CosMx samples incrementally to a validated sample-aware store;
-5. add class-aware aggregation to `hp.tb.allocate`;
+3. validate existing sample-aware CosMx SpatialData stores — implemented;
+4. add new CosMx samples incrementally to a validated sample-aware store —
+   implemented;
+5. add class-aware aggregation to `hp.tb.allocate` — implemented;
 6. add QC functions that summarize the original, unallocated control points;
 7. optimize the generic point-to-label assignment and reduction path.
 
@@ -21,11 +22,11 @@ rebuilding its existing samples. Slice 5 consumes the feature-panel metadata
 produced by Slice 1 and the sample-aware element contracts established by
 Slices 2–4. Class-aware allocation requires that every selected points element
 reference authoritative feature-panel metadata; generic points without that
-metadata remain supported by the ordinary, non-class-aware path. Slice 6
-depends on the reader metadata from Slices 1–4, not on
-allocation, instance labels, or an AnnData table. Slice 7 preserves the public
-behavior established by Slice 5 while replacing the private allocation
-execution path.
+metadata remain supported by the ordinary, non-class-aware path. Slice 6's
+original-point summaries depend on the reader metadata from Slices 1–4 rather
+than allocation or labels; its optional per-instance plotting view derives
+temporary rates from the Slice 5 table. Slice 7 preserves the public behavior
+established by Slice 5 while replacing the private allocation execution path.
 
 ## Goal
 
@@ -932,7 +933,7 @@ Focused tests should establish that:
 
 ## Slice 5: class-aware `hp.tb.allocate`
 
-**Status: specified; not implemented.**
+**Status: implemented.**
 
 This slice consumes the generic feature-panel contract established by Slice 1
 and supports the sample-scoped elements created or added by Slices 2 and 4.
@@ -1015,6 +1016,11 @@ expression_class: str | None = None
 This parameter name, type, and default are final for this slice. The `append`
 parameter is removed; `overwrite` controls only whether the completed table may
 replace an existing table element.
+
+Remove the deprecated `update_shapes_elements` parameter at the same boundary.
+Allocation constructs the requested table and does not also mutate shapes
+elements as an unrelated side effect; callers that need shape filtering should
+request that operation separately.
 
 ```python
 sdata = hp.tb.allocate(

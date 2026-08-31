@@ -110,9 +110,9 @@ Operations on table (`AnnData` object) elements.
     :toctree: generated
 
     tb.add_table
-    tb.allocate
+    tb.aggregate_points
+    tb.aggregate_image
     tb.bin_counts
-    tb.allocate_intensity
     tb.add_regionprops
     tb.add_feature_matrix
     tb.extract_instances

@@ -90,7 +90,7 @@ def cluster_intensity_heatmap(
     >>> cluster_key = "cluster_id"
     >>>
     >>> # Calculate total intensity values for each label in labels_name, for each channel in image_name
-    >>> sdata = hp.tb.allocate_intensity(
+    >>> sdata = hp.tb.aggregate_image(
     ...     sdata,
     ...     image_name=image_name,
     ...     labels_name=labels_name,
@@ -143,7 +143,7 @@ def cluster_intensity_heatmap(
     See Also
     --------
     harpy.tb.cluster_intensity: calculates weighted (by instance size) average intensity per cluster for every channel.
-    harpy.tb.allocate_intensity : calculates total intensity per instance per channel.
+    harpy.tb.aggregate_image : calculates total intensity per instance per channel.
     harpy.tb.preprocess_proteomics: calculates instance size and normalizes intensity by instance size.
     """
     if channels is not None:

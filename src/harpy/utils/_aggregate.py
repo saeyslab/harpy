@@ -177,7 +177,7 @@ class RasterAggregator:
 
         See Also
         --------
-        harpy.tb.allocate_intensity : create an AnnData table from raster data.
+        harpy.tb.aggregate_image : create an AnnData table from raster data.
         """
         if index is None:
             index = _da_unique(self._mask, run_on_gpu=self._run_on_gpu)

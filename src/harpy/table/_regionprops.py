@@ -96,7 +96,7 @@ def add_regionprops(
 
         sdata = hp.datasets.pixie_example()
 
-        sdata = hp.tb.allocate_intensity(
+        sdata = hp.tb.aggregate_image(
             sdata,
             image_name="raw_image_fov0",
             labels_name="label_whole_fov0",
@@ -106,7 +106,7 @@ def add_regionprops(
             overwrite=True,
         )
 
-        sdata = hp.tb.allocate_intensity(
+        sdata = hp.tb.aggregate_image(
             sdata,
             image_name="raw_image_fov1",
             labels_name="label_whole_fov1",
@@ -197,7 +197,7 @@ def add_regionprops(
                 f"Calculated properties of '{extra_cells}' instances obtained from labels element '{labels_name}' "
                 f"will not be added to 'sdata.tables[{table_name}].obs', because their instance IDs ('{instance_key}') are not in 'sdata.tables[{table_name}].obs.[{instance_key}]'. "
                 "This can happen if some instances in the table were filtered prior to calling this function."
-                "If they should be included, then first append their intensities with the 'harpy.tb.allocate_intensity' function."
+                "If they should be included, first append their intensities with 'harpy.tb.aggregate_image'."
             )
     cell_props[region_key] = cell_props[region_key].astype(
         "category"

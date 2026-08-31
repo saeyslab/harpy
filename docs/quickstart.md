@@ -49,7 +49,7 @@ hp.pl.plot_sdata(
  )
 
 # Create the AnnData table
-sdata = hp.tb.allocate_intensity(
+sdata = hp.tb.aggregate_image(
     sdata,
     image_name="HumanLiverH35",
     labels_name="segmentation_mask",

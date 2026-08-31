@@ -362,7 +362,7 @@ def featurize(
 
         # First, create an AnnData table by allocating intensity statistics
         # Note that this step is optional.
-        sdata = hp.tb.allocate_intensity(
+        sdata = hp.tb.aggregate_image(
             sdata,
             image_name=image_name,
             labels_name=labels_name,

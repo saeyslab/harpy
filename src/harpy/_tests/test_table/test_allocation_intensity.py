@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 from anndata import AnnData
@@ -5,11 +7,24 @@ from spatialdata import SpatialData
 from spatialdata.models import TableModel
 from xrspatial import zonal_stats
 
+import harpy.table._allocation_intensity as allocation_intensity_module
 from harpy.image.segmentation._align_masks import align_labels
-from harpy.table._allocation_intensity import (
-    allocate_intensity,
-)
+from harpy.table._allocation_intensity import aggregate_image
 from harpy.table._regionprops import add_regionprops
+
+
+def test_allocate_intensity_import_warns_and_resolves_to_aggregate_image(monkeypatch: pytest.MonkeyPatch):
+    messages: list[str] = []
+    monkeypatch.setattr("harpy.table._allocation_intensity.log", SimpleNamespace(warning=messages.append))
+    monkeypatch.setattr("harpy.table._allocation_intensity._DEPRECATED_ATTRIBUTES_WARNED", set())
+
+    alias = allocation_intensity_module.__getattr__("allocate_intensity")
+    repeated_alias = allocation_intensity_module.__getattr__("allocate_intensity")
+
+    assert alias is repeated_alias is aggregate_image
+    assert messages == [
+        "`harpy.tb.allocate_intensity` is deprecated. Import and use `harpy.tb.aggregate_image` instead."
+    ]
 
 
 def test_integration_allocate_intensity(sdata_multi_c_no_backed: SpatialData):
@@ -29,7 +44,7 @@ def test_integration_allocate_intensity(sdata_multi_c_no_backed: SpatialData):
 
     assert "masks_nuclear_aligned" in sdata_multi_c_no_backed.labels
 
-    sdata_multi_c_no_backed = allocate_intensity(
+    sdata_multi_c_no_backed = aggregate_image(
         sdata_multi_c_no_backed,
         image_name="raw_image",
         labels_name="masks_whole",
@@ -40,7 +55,7 @@ def test_integration_allocate_intensity(sdata_multi_c_no_backed: SpatialData):
         overwrite=True,
     )
 
-    sdata_multi_c_no_backed = allocate_intensity(
+    sdata_multi_c_no_backed = aggregate_image(
         sdata_multi_c_no_backed,
         image_name="raw_image",
         labels_name="masks_nuclear_aligned",
@@ -70,7 +85,7 @@ def test_integration_allocate_intensity(sdata_multi_c_no_backed: SpatialData):
 
 
 def test_allocate_intensity(sdata_multi_c_no_backed: SpatialData):
-    sdata_multi_c_no_backed = allocate_intensity(
+    sdata_multi_c_no_backed = aggregate_image(
         sdata_multi_c_no_backed,
         image_name="raw_image",
         labels_name="masks_whole",
@@ -99,7 +114,7 @@ def test_allocate_intensity(sdata_multi_c_no_backed: SpatialData):
 def test_allocate_intensity_rechunks_labels_when_chunks_differ(sdata_multi_c_no_backed: SpatialData):
     # Reference values computed when image and labels share chunks.
     reference = (
-        allocate_intensity(
+        aggregate_image(
             sdata_multi_c_no_backed,
             image_name="raw_image",
             labels_name="masks_whole",
@@ -119,7 +134,7 @@ def test_allocate_intensity_rechunks_labels_when_chunks_differ(sdata_multi_c_no_
 
     # Previously this raised in RasterAggregator ("Please rechunk"); now the aggregator's
     # labels are auto-aligned onto the image's spatial chunks.
-    sdata_multi_c_no_backed = allocate_intensity(
+    sdata_multi_c_no_backed = aggregate_image(
         sdata_multi_c_no_backed,
         image_name="raw_image",
         labels_name="masks_whole",
@@ -137,7 +152,7 @@ def test_allocate_intensity_rechunks_labels_when_chunks_differ(sdata_multi_c_no_
 
 
 def test_allocate_intensity_overwrite(sdata_multi_c: SpatialData):
-    sdata_multi_c = allocate_intensity(
+    sdata_multi_c = aggregate_image(
         sdata_multi_c,
         image_name="raw_image",
         labels_name="masks_whole",
@@ -152,7 +167,7 @@ def test_allocate_intensity_overwrite(sdata_multi_c: SpatialData):
         match=r'Attempting to overwrite \'sdata\.tables\["table_intensities"\]\', but overwrite is set to False. Set overwrite to True to overwrite the \.zarr store.',
     ):
         # unit test with append to True, and overwrite to False, which should not be allowed
-        sdata_multi_c = allocate_intensity(
+        sdata_multi_c = aggregate_image(
             sdata_multi_c,
             image_name="raw_image",
             labels_name="masks_nuclear_aligned",
@@ -167,7 +182,7 @@ def test_allocate_intensity_raises_instance_key(sdata_pixie: SpatialData):
     instance_key = "my_instance_key"
     region_key = "my_region_key"
     instance_size_key = "instance_size"
-    sdata_pixie = allocate_intensity(
+    sdata_pixie = aggregate_image(
         sdata_pixie,
         image_name="raw_image_fov0",
         labels_name="label_whole_fov0",
@@ -191,7 +206,7 @@ def test_allocate_intensity_raises_instance_key(sdata_pixie: SpatialData):
         ValueError,
         match=f"Provided instance key '{instance_key}' is different than the instance key of the AnnData object you wish to append to.*This is not allowed",
     ):
-        sdata_pixie = allocate_intensity(
+        sdata_pixie = aggregate_image(
             sdata_pixie,
             image_name="raw_image_fov1",
             labels_name="label_whole_fov1",
@@ -210,7 +225,7 @@ def test_allocate_intensity_raises_region_key(sdata_pixie: SpatialData):
     instance_key = "my_instance_key"
     region_key = "my_region_key"
     instance_size_key = "instance_size"
-    sdata_pixie = allocate_intensity(
+    sdata_pixie = aggregate_image(
         sdata_pixie,
         image_name="raw_image_fov0",
         labels_name="label_whole_fov0",
@@ -234,7 +249,7 @@ def test_allocate_intensity_raises_region_key(sdata_pixie: SpatialData):
         ValueError,
         match=f"Provided region key '{region_key}' is different than the region key of the AnnData object you wish to append to.*This is not allowed",
     ):
-        sdata_pixie = allocate_intensity(
+        sdata_pixie = aggregate_image(
             sdata_pixie,
             image_name="raw_image_fov1",
             labels_name="label_whole_fov1",

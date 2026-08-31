@@ -329,7 +329,7 @@ class HarpyPipeline:
 
         log.info("Start allocation.")
 
-        sdata = harpy.tb.allocate(
+        sdata = harpy.tb.aggregate_points(
             sdata=sdata,
             labels_name=self.labels_name,
             output_table_name=self.cfg.allocate.table_name,
