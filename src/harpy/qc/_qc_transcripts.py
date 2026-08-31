@@ -697,7 +697,7 @@ def obs_scatter(
     return ax
 
 
-def _expand_per_metric_option(
+def _expand_per_metric_option[T](
     value: _T | Sequence[_T] | None,
     *,
     n_metrics: int,
