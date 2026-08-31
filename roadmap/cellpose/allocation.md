@@ -1129,8 +1129,9 @@ There is no per-sample or per-region denominator mapping in one output table.
 Likewise, `code_class` categories may differ between samples stored in the same
 SpatialData object, but samples with different class universes or incompatible
 panels cannot participate in the same class-aware allocation call. They require
-separate output tables. Otherwise, a column such as `negative_per_target` would
-have different normalization semantics in different rows.
+separate output tables. Otherwise, a column such as
+`negative_points_per_feature` would have different normalization semantics in
+different rows.
 
 The complete policy is:
 
@@ -1196,11 +1197,24 @@ names from that normalized category rather than accepting platform-specific
 column names:
 
 ```text
-Endogenous       -> n_endogenous
-Negative         -> n_negative, negative_per_target
-SystemControl    -> n_system_control, system_control_per_target
-Gene Expression  -> n_gene_expression
+Endogenous       -> n_endogenous_points
+Negative         -> n_negative_points, negative_points_per_feature
+SystemControl    -> n_system_control_points, system_control_points_per_feature
+Gene Expression  -> n_gene_expression_points
 ```
+
+The generated names follow two generic patterns:
+
+```text
+n_<normalized class>_points
+<normalized class>_points_per_feature
+```
+
+The first counts assigned rows from the points element. The second divides that
+count by the number of authoritative panel features in the corresponding class.
+Do not include the source `feature_class_key`, such as CosMx `code_class`, in
+the generated name: it identifies the grouping column rather than the measured
+unit and may differ between readers.
 
 Reject an empty normalized name, two categories that normalize to the same
 name, and collisions with existing `.obs` columns or the fixed
@@ -1218,25 +1232,25 @@ from observed points or accept caller-supplied assay constants.
 In the example above, the output columns are:
 
 ```text
-n_endogenous
-n_negative
-n_system_control
-negative_per_target
-system_control_per_target
+n_endogenous_points
+n_negative_points
+n_system_control_points
+negative_points_per_feature
+system_control_points_per_feature
 control_fraction
 ```
 
-The class count columns contain assigned transcript counts. The normalized
-control columns contain the corresponding count divided by the authoritative
+The class count columns contain assigned point counts. The normalized control
+columns contain the corresponding point count divided by the authoritative
 panel feature count for that control class. For this three-class configuration:
 
 ```text
-negative_per_target = n_negative / 10
-system_control_per_target = n_system_control / 197
+negative_points_per_feature = n_negative_points / 10
+system_control_points_per_feature = n_system_control_points / 197
 
 control_fraction =
-    (n_negative + n_system_control)
-    / (n_endogenous + n_negative + n_system_control)
+    (n_negative_points + n_system_control_points)
+    / (n_endogenous_points + n_negative_points + n_system_control_points)
 ```
 
 ### Table-local metadata contract
@@ -1259,13 +1273,13 @@ adata.uns["feature_class_allocation"] = {
         "SystemControl": 197,
     },
     "count_columns": {
-        "Endogenous": "n_endogenous",
-        "Negative": "n_negative",
-        "SystemControl": "n_system_control",
+        "Endogenous": "n_endogenous_points",
+        "Negative": "n_negative_points",
+        "SystemControl": "n_system_control_points",
     },
     "normalized_columns": {
-        "Negative": "negative_per_target",
-        "SystemControl": "system_control_per_target",
+        "Negative": "negative_points_per_feature",
+        "SystemControl": "system_control_points_per_feature",
     },
     "control_fraction_column": "control_fraction",
     "regions": {
@@ -1335,9 +1349,9 @@ independent and out of core until the compact sparse results are assembled.
 Conceptually:
 
 ```python
-n_endogenous = X_all[:, endogenous_columns].sum(axis=1)
-n_negative = X_all[:, negative_columns].sum(axis=1)
-n_system_control = X_all[:, system_control_columns].sum(axis=1)
+n_endogenous_points = X_all[:, endogenous_columns].sum(axis=1)
+n_negative_points = X_all[:, negative_columns].sum(axis=1)
+n_system_control_points = X_all[:, system_control_columns].sum(axis=1)
 
 adata = AnnData(X=X_all[:, endogenous_columns], ...)
 ```
@@ -1365,7 +1379,8 @@ rates. Validate the complete multi-region request and shared
 
 The `.obs` summaries describe only control points that land inside an instance
 mask. They are suitable for cell-level histograms, violin plots, and a hexbin
-comparison of `negative_per_target` against `system_control_per_target`.
+comparison of `negative_points_per_feature` against
+`system_control_points_per_feature`.
 
 They are not sufficient for a spatial background map. Allocation deliberately
 removes points on label value zero, while unassigned controls outside masks are
@@ -1380,7 +1395,7 @@ points directly in space and visualize separate normalized `Negative` and
 Focused tests should establish that:
 
 - the final `.var` and `adata.X` contain only the selected expression class;
-- `n_endogenous` equals the row sum of the final expression matrix;
+- `n_endogenous_points` equals the row sum of the final expression matrix;
 - assigned control counts are correct and zero-filled for instances without a
   control call;
 - normalized rates use the authoritative panel feature counts;
