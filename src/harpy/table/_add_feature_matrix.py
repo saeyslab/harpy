@@ -159,7 +159,7 @@ def add_feature_matrix(
     See Also
     --------
     harpy.tb.aggregate_image
-        Allocate intensity-derived features into a table.
+        Aggregate intensity-derived features into a table.
     harpy.tb.add_regionprops
         Add morphology features to table observations.
 

@@ -35,7 +35,7 @@ class ProcessTable:
         if sdata.tables == {}:
             raise ValueError(
                 "Provided SpatialData object 'sdata' does not contain any 'tables'. "
-                "Please create tables via e.g. 'harpy.tb.allocation' or 'harpy.tb.allocation_intensity' functions."
+                "Please create a table via e.g. 'harpy.tb.aggregate_points' or 'harpy.tb.aggregate_image'."
             )
 
         if labels_name is not None:

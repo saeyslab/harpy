@@ -65,7 +65,7 @@ def _add_transcript_points(
     SpatialData writes them as partitioned Parquet inside the backing store.
 
     The vendor ``CellId`` and CSV ``fov`` columns are deliberately excluded at
-    parse time. Instance allocation is a downstream spatial operation against
+    parse time. Instance assignment is a downstream spatial operation against
     the final label raster, while FOV routing comes from the validated manifest.
 
     Each points element receives a root metadata record containing:

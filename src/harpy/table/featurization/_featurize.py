@@ -348,7 +348,7 @@ def featurize(
 
     Examples
     --------
-    Allocate intensity statistics and compute embeddings using a custom model:
+    Aggregate image-intensity statistics and compute embeddings using a custom model:
 
     .. code-block:: python
 
@@ -360,7 +360,7 @@ def featurize(
         image_name = "raw_image_fov0"
         labels_name = "label_whole_fov0"
 
-        # First, create an AnnData table by allocating intensity statistics
+        # First, create an AnnData table by aggregating image-intensity statistics.
         # Note that this step is optional.
         sdata = hp.tb.aggregate_image(
             sdata,

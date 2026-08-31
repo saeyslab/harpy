@@ -111,14 +111,14 @@ def cluster_intensity_SOM(
             f"Some labels labels element {_labels_name} could not be found in the provided pandas Series that maps SOM cluster ID's to metacluster IDs."
         )
 
-        # allocate the intensity to via the clusters labels element
+        # Aggregate image intensities within the cluster-label instances.
 
         if i == 0:
             append = False
         else:
             append = True
         log.info(
-            f"Start allocation of intensities of image element with name '{_image_name}' by labels in labels element with name '{_labels_name}'."
+            f"Start aggregation of image element '{_image_name}' within labels element '{_labels_name}'."
         )
         sdata = aggregate_image(
             sdata,
@@ -137,7 +137,7 @@ def cluster_intensity_SOM(
             overwrite=overwrite,
         )
         log.info(
-            f"End allocation of image element with name '{_image_name}' and labels element with name '{_labels_name}'."
+            f"End aggregation of image element '{_image_name}' within labels element '{_labels_name}'."
         )
 
     log.info("Start preprocessing.")

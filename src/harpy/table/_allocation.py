@@ -35,9 +35,9 @@ from harpy.utils._keys import _CELL_INDEX, _GENES_KEY, _INSTANCE_KEY, _REGION_KE
 from harpy.utils._transformations import _identity_check_transformations_points
 from harpy.utils.utils import _make_list
 
-_FEATURE_CLASS_ALLOCATION_KEY = "feature_class_allocation"
+_FEATURE_CLASS_AGGREGATION_KEY = "feature_class_aggregation"
 _CONTROL_FRACTION_COLUMN = "control_fraction"
-_ALLOCATION_SOURCE_KIND = "harpy_allocate"
+_AGGREGATE_SOURCE_KIND = "harpy_aggregate_points"
 _DEPRECATED_ATTRIBUTES_WARNED: set[str] = set()
 
 
@@ -151,15 +151,15 @@ class _PairReductions:
         Names and coordinate system identifying the paired labels and points
         elements.
     coordinate_columns
-        Point-coordinate columns summarized for each allocated instance.
+        Point-coordinate columns summarized for each retained instance.
     coordinates
-        Mean coordinates of the allocated points, indexed by instance ID.
+        Mean coordinates of the assigned points, indexed by instance ID.
     feature_counts
         Series mapping each observed ``(instance, feature)`` pair to the
-        number of allocated points carrying that feature.
+        number of assigned points carrying that feature.
     class_counts
         Series mapping each observed ``(instance, feature class)`` pair to
-        the number of allocated points in that class. ``None`` for ordinary,
+        the number of assigned points in that class. ``None`` for ordinary,
         non-class-aware aggregation.
     """
 
@@ -194,7 +194,7 @@ def aggregate_points(
     identity transformation, translation, or sequence of translations.
 
     Each value ``adata.X[i, j]`` is the number of input points carrying feature
-    ``j`` that were spatially allocated to instance ``i``. These are point
+    ``j`` that were spatially assigned to instance ``i``. These are point
     counts, not counts of features defined by a panel.
 
     When ``expression_class`` is ``None``, all observed values from
@@ -210,10 +210,10 @@ def aggregate_points(
     ``expression_class`` are retained in ``adata.X``; every panel class is
     summarized as ``n_<class>_points`` in ``adata.obs``, together with
     ``control_fraction``. Each ``n_<class>_points`` value is the number of
-    points in that feature class allocated to the corresponding instance.
+    points in that feature class assigned to the corresponding instance.
     Control denominators are the lengths of the panel's non-expression
     ``features_by_class`` lists. They are recorded in
-    ``adata.uns["feature_class_allocation"]`` for later QC but no per-feature
+    ``adata.uns["feature_class_aggregation"]`` for later QC but no per-feature
     rates are persisted in ``adata.obs``. Class-aware aggregation fails when
     the panel metadata is unavailable, malformed, or incompatible across
     selected points elements.
@@ -833,7 +833,7 @@ def _assemble_aggregation_table(
         coordinates = result.coordinates.reindex(instance_ids)
         if coordinates.isna().any(axis=None):
             raise ValueError(
-                f"Mean expression-point coordinates are missing for allocated instances in {result.pair.labels_name!r}."
+                f"Mean expression-point coordinates are missing for retained instances in {result.pair.labels_name!r}."
             )
         coordinate_blocks.append(coordinates.loc[:, list(coordinate_columns)].to_numpy())
 
@@ -849,9 +849,9 @@ def _assemble_aggregation_table(
     adata.obsm[spatial_key] = np.vstack(coordinate_blocks)
 
     if contract is not None:
-        adata.uns[_FEATURE_CLASS_ALLOCATION_KEY] = {
+        adata.uns[_FEATURE_CLASS_AGGREGATION_KEY] = {
             "schema_version": 1,
-            "source_kind": _ALLOCATION_SOURCE_KIND,
+            "source_kind": _AGGREGATE_SOURCE_KIND,
             "feature_key": contract.panel.feature_key,
             "feature_class_key": contract.panel.feature_class_key,
             "expression_class": contract.expression_class,
