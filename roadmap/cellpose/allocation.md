@@ -19,8 +19,10 @@ sample-aware creation contract. Slice 3 validates that an existing store still
 satisfies that contract. Slice 4 incrementally extends a validated store without
 rebuilding its existing samples. Slice 5 consumes the feature-panel metadata
 produced by Slice 1 and the sample-aware element contracts established by
-Slices 2–4, but also supports an explicit denominator mapping for generic
-points. Slice 6 depends on the reader metadata from Slices 1–4, not on
+Slices 2–4. Class-aware allocation requires that every selected points element
+reference authoritative feature-panel metadata; generic points without that
+metadata remain supported by the ordinary, non-class-aware path. Slice 6
+depends on the reader metadata from Slices 1–4, not on
 allocation, instance labels, or an AnnData table. Slice 7 preserves the public
 behavior established by Slice 5 while replacing the private allocation
 execution path.
@@ -932,10 +934,63 @@ Focused tests should establish that:
 **Status: specified; not implemented.**
 
 This slice consumes the generic feature-panel contract established by Slice 1
-and supports the sample-scoped elements created or added by Slices 2 and 4. It
-must remain usable with non-reader points through an explicit denominator
-mapping, and it must preserve ordinary allocation behavior when class-aware
-arguments are omitted.
+and supports the sample-scoped elements created or added by Slices 2 and 4.
+Class-aware allocation requires that metadata; ordinary allocation remains
+usable with points that do not reference a feature panel and preserves its
+existing behavior when `expression_class` is omitted.
+
+### Scope and outcome
+
+Generalize `hp.tb.allocate` so one call can allocate one or more explicitly
+paired labels/points/coordinate-system regions and construct one complete
+AnnData table. In class-aware mode, every point is spatially assigned once, but
+the resulting payload is split by biological role: only the selected expression
+class is retained as the sparse feature matrix, while every non-expression
+class is reduced to per-instance control summaries.
+
+For example, CosMx points carry both a feature key and a feature-class key:
+
+```text
+gene             code_class
+ACTB             Endogenous
+Negative01       Negative
+SystemControl1   SystemControl
+```
+
+The resulting table has the following high-level contract:
+
+```text
+adata.X       instances x Endogenous features only
+adata.var     the shared Endogenous feature axis
+adata.obs     class counts, normalized control rates, and control_fraction
+adata.obsm    mean coordinates calculated from assigned Endogenous points
+adata.uns     the versioned feature_class_allocation configuration and sources
+```
+
+Multiple regions are combined without an inner feature join:
+
+```text
+labels[0] + points[0] + coordinate_system[0] ┐
+labels[1] + points[1] + coordinate_system[1] ┼──> one AnnData table
+...                                             ┘
+```
+
+Resolve one shared expression-feature axis before constructing any per-region
+matrix. A feature assayed by the compatible shared panel but absent from one
+region is represented by zeros for that region rather than removed. Control
+denominators always come from referenced feature-panel metadata. Class-aware
+allocation has no caller-supplied denominator fallback or override.
+
+The point-to-label lookup is performed once per labels/points pair, carrying
+both the feature and feature-class columns through the assignment. It is never
+repeated once per class. Control points outside every instance are deliberately
+excluded from these cell-level summaries; Slice 6 operates directly on the
+original points to provide spatial background QC.
+
+When `expression_class` is omitted, the same multi-region API follows the
+ordinary allocation path: all observed features remain in `adata.X`, no
+class-derived `.obs` columns are added, and no
+`adata.uns["feature_class_allocation"]` record is written.
 
 ### Public contract
 
@@ -950,17 +1005,15 @@ to_coordinate_system: str | list[str] = "global"
 output_table_name: str = "table_transcriptomics"
 ```
 
-Extend `hp.tb.allocate` with optional class-aware arguments:
+Extend `hp.tb.allocate` with one optional class-aware argument:
 
 ```python
-name_feature_class_column: str | None = None
 expression_class: str | None = None
-control_class_denominators: Mapping[str, int] | None = None
 ```
 
-These parameter names, types, and defaults are final for this slice. The
-`append` parameter is removed; `overwrite` controls only whether the completed
-table may replace an existing table element.
+This parameter name, type, and default are final for this slice. The `append`
+parameter is removed; `overwrite` controls only whether the completed table may
+replace an existing table element.
 
 ```python
 sdata = hp.tb.allocate(
@@ -976,9 +1029,7 @@ sdata = hp.tb.allocate(
     output_table_name="table_transcriptomics",
     to_coordinate_system=["sample_a_global_1", "sample_b_global_1"],
     name_gene_column="gene",
-    name_feature_class_column="code_class",
     expression_class="Endogenous",
-    control_class_denominators=None,
     overwrite=True,
 )
 ```
@@ -1000,56 +1051,96 @@ labels[1]  + points[1]  + coordinate_system[1]
     ...
 ```
 
-Their semantics are:
+`expression_class` selects the only feature class retained in `adata.X` and is
+the switch for class-aware allocation. When `expression_class=None`, allocation
+must branch to the ordinary implementation immediately, before feature-panel
+lookup or any class-specific projection, validation, or aggregation. No
+additional `.obs` columns are created and every `name_gene_column` value remains
+in `adata.X`.
 
-- `name_feature_class_column` identifies the per-point column that classifies
-  each target;
-- `expression_class` selects the only class whose targets are retained in
-  `adata.X`; and
-- `control_class_denominators` optionally supplies the number of panel features
-  for every non-expression class as a fallback for points without feature-panel
-  metadata, or as a consistency assertion when such metadata is available.
+When `expression_class` is provided, every selected points element must have a
+root Harpy points record that references an authoritative shared feature panel.
+The panel supplies `feature_class_key`, the complete ordered classes,
+feature-to-class assignments, and the feature lists whose lengths define the
+control denominators. Missing, malformed, or incompatible panel metadata is an
+error before spatial lookup. Allocation accepts no denominator fallback,
+override, or per-sample mapping.
 
-An ordinary reader-backed call should not contain panel-specific constants. An
-explicit mapping remains available for generic points elements that were not
-created by a reader supplying feature-panel metadata:
-
-```python
-control_class_denominators={
-    "Negative": 10,
-    "SystemControl": 197,
-}
-```
-
-Control denominators are assay facts rather than tunable normalization
-parameters. Allocation must resolve the two possible sources according to this
-contract:
-
-| Feature-panel metadata | Explicit mapping   | Result                                                |
-| ---------------------- | ------------------ | ----------------------------------------------------- |
-| available              | `None`             | derive denominators from panel feature-list lengths   |
-| unavailable            | provided           | validate and use the explicit mapping                 |
-| available              | identical values   | accept the assertion and use the panel-derived values |
-| available              | conflicting values | raise `ValueError`                                    |
-| unavailable            | `None`             | raise `ValueError` before spatial lookup              |
-
-When both sources are present, require exact equality after validation: the
-class keys and positive integer values must match. Partial mappings, missing or
-additional classes, and per-class overrides are not supported. Explicit values
-must never silently replace an attached panel's values. A malformed or
-column-incompatible attached panel is itself an error and cannot be bypassed by
-supplying explicit denominators.
-
-When `name_feature_class_column=None`, allocation must branch to the existing
-implementation immediately, before feature-panel lookup or any class-specific
-projection, validation, or aggregation. No additional `.obs` columns are
-created and every `name_gene_column` value remains in `adata.X`. Other
-class-aware parameters must also be `None` in this mode so that a partially
-specified request is not silently ignored.
+The public `allocate()` docstring must explain both modes and show the exact
+metadata path used in class-aware mode. In particular, it must state that
+`feature_class_key` is not a user argument: it is resolved through
+`sdata.attrs["harpy"]["points"][points_name]["feature_panel"]` and then read
+from the referenced record in `sdata.attrs["harpy"]["feature_panels"]`. The
+docstring must also state that control denominators are derived from the lengths
+of the panel's non-expression `features_by_class` lists and that class-aware
+allocation fails when this metadata is unavailable.
 
 The ordinary path still supports multiple allocation pairs. It uses the
 deterministic union of observed targets as the shared feature axis and fills a
 target absent from one pair with zero counts for that pair.
+
+### Metadata resolution and source of truth
+
+Resolve class-aware metadata from each selected points element rather than from
+a sample identifier or element-name convention:
+
+```text
+points_name
+    │
+    ▼
+sdata.attrs["harpy"]["points"][points_name]
+    │
+    └── feature_panel: "feature_panel_<content hash>"
+                            │
+                            ▼
+sdata.attrs["harpy"]["feature_panels"][feature_panel]
+    ├── feature_key
+    ├── feature_class_key
+    ├── classes
+    └── features_by_class
+```
+
+For every normalized labels/points/coordinate-system pair, resolve the points
+record and its referenced panel before spatial lookup. Require the panel's
+`feature_key` to equal `name_gene_column`; read `feature_class_key` directly
+from the panel rather than accepting it as an allocation parameter. Derive the
+denominator for every non-expression class from the length of its authoritative
+`features_by_class` list.
+
+The metadata roles are deliberately distinct:
+
+1. `sdata.attrs["harpy"]["feature_panels"]` is the authoritative assay
+   definition.
+2. `sdata.attrs["harpy"]["points"][points_name]["feature_panel"]` binds one
+   points element to that definition.
+3. `adata.uns["feature_class_allocation"]` is a derived, table-local snapshot of
+   the resolved allocation contract. It records how the table was constructed
+   and remains interpretable with the AnnData object, but it is not a second
+   authoritative panel definition.
+4. The generated `.obs` columns are derived payload and never a metadata source.
+
+Resolve and validate these inputs once into one immutable internal allocation
+contract before assigning points. Use that same object to define the shared
+feature axis, aggregation behavior, generated `.obs` columns, and table-local
+`.uns` record. Do not independently reinterpret root metadata at separate
+stages of the operation.
+
+There is no per-sample or per-region denominator mapping in one output table.
+Likewise, `code_class` categories may differ between samples stored in the same
+SpatialData object, but samples with different class universes or incompatible
+panels cannot participate in the same class-aware allocation call. They require
+separate output tables. Otherwise, a column such as `negative_per_target` would
+have different normalization semantics in different rows.
+
+The complete policy is:
+
+```text
+all selected points reference compatible panels
+    -> derive one shared class contract and denominator mapping
+
+missing panel metadata or incompatible panels
+    -> reject before spatial lookup
+```
 
 ### Shared feature axis and panel compatibility
 
@@ -1061,39 +1152,31 @@ region.
 For class-aware allocation, resolve one shared feature axis before constructing
 the final AnnData:
 
-- when all selected points elements reference compatible feature-panel
-  metadata, use the panel's ordered `expression_class` features, including
-  features with zero detections;
-- without feature-panel metadata, use a deterministic, lexicographically
-  sorted union of the observed expression targets across all selected points
-  elements; and
+- use the compatible panel's ordered `expression_class` features, including
+  features with zero detections; and
 - construct every per-pair sparse count matrix against this shared axis, so a
   missing target is represented by a zero rather than by dropping the feature.
 
-In class-aware mode, feature-panel metadata must be available for all selected
-points elements or for none of them. When present, all referenced panels must
-agree on the feature key, feature-class key, ordered classes, feature-to-class
-mapping, and features by class. Panels selected from different samples need not
-share the same registry key, but their canonical contents must be compatible.
-Reject mixed metadata availability and incompatible panels before spatial
-allocation. This prevents a zero from ambiguously meaning either "assayed but
-not detected" or "not assayed by this panel."
+In class-aware mode, feature-panel metadata must be available for every selected
+points element. All referenced panels must agree on the feature key,
+feature-class key, ordered classes, feature-to-class mapping, and features by
+class. Panels selected from different samples need not share the same registry
+key, but their canonical contents must be compatible. Reject missing or
+incompatible metadata before spatial allocation. This prevents a zero from
+ambiguously meaning either "assayed but not detected" or "not assayed by this
+panel."
 
-There is one `control_class_denominators` mapping for the complete allocation
-call. When compatible panel metadata is present, derive one shared mapping and
-compare an explicitly supplied mapping with it as a consistency assertion.
-Without panel metadata, require one explicit mapping and apply it to every
-pair. Per-region denominator mappings are not supported because they would make
-the same normalized `.obs` column have different meanings in different rows.
+Derive one shared denominator mapping from the compatible panel contract for
+the complete allocation call. Per-sample and per-region denominator mappings
+are not supported because they would make the same normalized `.obs` column
+have different meanings in different rows.
 
 ### Categorical class contract
 
-When `name_feature_class_column` is provided, its points column must have a
+The points column identified by the panel's `feature_class_key` must have a
 categorical dtype. If its Dask categories are unknown after a Parquet round
-trip, compatible feature-panel metadata must supply the authoritative ordered
-categories and allocation must apply that categorical dtype lazily before
-validation. Without such metadata, the input must already have known Dask
-categories. The category set is the complete feature-class universe for the
+trip, allocation must apply the panel's authoritative ordered classes lazily
+before validation. The class set is the complete feature-class universe for the
 points element, including a class with zero detected or zero assigned points.
 Require that:
 
@@ -1101,14 +1184,12 @@ Require that:
 - `expression_class` is one of the categories;
 - the column contains no null values;
 - every target maps to exactly one feature class; and
-- after metadata resolution or application of an explicit fallback, the keys
-  of `control_class_denominators` are exactly
-  `set(categories) - {expression_class}`.
+- every non-expression class has a non-empty authoritative
+  `features_by_class` list, yielding a positive denominator.
 
-Missing and additional denominator keys are both errors, and every denominator
-must be a positive integer. Do not silently discard an unconfigured class. An
-unused categorical class is valid and produces zero per-instance counts, but it
-still requires its authoritative denominator.
+Do not silently discard a panel class. An unused categorical class is valid and
+produces zero per-instance counts, but its authoritative panel feature list
+still defines the positive denominator used for the normalized rate.
 
 Normalize each category deterministically to snake case and construct output
 names from that normalized category rather than accepting platform-specific
@@ -1126,14 +1207,11 @@ name, and collisions with existing `.obs` columns or the fixed
 `control_fraction` output. Category order determines output-column order but
 does not affect the calculations.
 
-When compatible panel metadata is available, allocation resolves it from the
-selected `points_name`, verifies that the stored feature and class columns match
-the requested columns, and derives denominators from the target-list lengths.
-Callers normally do not pass panel-specific denominators. If they do, the
-mapping is treated only as an assertion and must equal the derived mapping. If
-the metadata is absent, the caller must provide the complete mapping explicitly
-or class-aware allocation fails before the spatial lookup. It must not silently
-estimate missing denominators from observed points.
+Allocation resolves panel metadata from every selected `points_name`, verifies
+that the stored feature key matches `name_gene_column`, uses the panel's
+`feature_class_key` to select the class column, and derives denominators from
+the `features_by_class` list lengths. It must not silently estimate denominators
+from observed points or accept caller-supplied assay constants.
 
 ### Output metrics
 
@@ -1164,7 +1242,9 @@ control_fraction =
 ### Table-local metadata contract
 
 Record the resolved configuration and generated-column bindings under one
-dedicated table-local key:
+dedicated table-local key. The `control_class_denominators` field below is a
+derived snapshot of the panel values used for this table; it is not accepted as
+an allocation argument or treated as an authoritative panel definition:
 
 ```python
 adata.uns["feature_class_allocation"] = {
@@ -1305,14 +1385,14 @@ Focused tests should establish that:
   control call;
 - normalized rates use the authoritative panel feature counts;
 - `control_fraction` is correct and finite;
-- non-categorical and unknown-categorical feature-class columns are rejected;
-- missing and additional denominator keys are rejected against the complete
-  category set;
+- non-categorical feature-class columns are rejected, while unknown Dask
+  categories are restored lazily from the panel's ordered `classes` before
+  validation;
+- the class column is selected from each panel's `feature_class_key` without a
+  caller-supplied column parameter;
+- missing feature-panel references, missing panel-declared columns, and empty
+  non-expression feature lists are rejected before spatial lookup;
 - category-derived output names are deterministic and collisions are rejected;
-- metadata-resolved denominators produce the same result as an equivalent
-  explicit denominator mapping;
-- explicit denominators that conflict with attached panel metadata are
-  rejected;
 - conflicting feature-to-class mappings and invalid class configuration fail
   before writing a table element;
 - the versioned `feature_class_allocation` record and its generated-column
@@ -1323,16 +1403,13 @@ Focused tests should establish that:
   mapping in a single call;
 - pairs from different samples retain their sample-prefixed region, points,
   and coordinate-system bindings, even when their local instance IDs overlap;
-- the final expression matrix uses the panel-defined feature axis when panel
-  metadata is present and the sorted union of observed targets otherwise;
+- the final class-aware expression matrix uses the panel-defined feature axis;
 - expression targets missing from one allocation pair are zero-filled rather
   than removed by an inner join;
-- mixed feature-panel availability and incompatible panels are rejected before
-  spatial lookup;
-- one shared denominator mapping applies to every pair and conflicts from any
-  referenced panel are rejected;
+- missing and incompatible feature panels are rejected before spatial lookup;
+- one panel-derived denominator mapping applies to every pair;
 - an existing output table is replaced only when `overwrite=True`; and
-- omitting class-aware arguments reproduces the existing allocation result.
+- omitting `expression_class` reproduces the existing allocation result.
 
 Benchmark the class-aware path on a representative backed crop before the full
 run. Compare wall time, peak worker memory, task count, and output-table size
