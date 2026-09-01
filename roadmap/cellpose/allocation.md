@@ -12,11 +12,11 @@ Eight implementation slices are planned; Slices 1 through 5 are implemented:
 4. add new CosMx samples incrementally to a validated sample-aware store —
    implemented;
 5. add class-aware aggregation to `hp.tb.aggregate_points` — implemented;
-6. add QC functions that summarize the original, unallocated control points;
-7. preserve per-feature non-expression aggregates and use label centers of
-   mass for the complete assigned-instance row universe; and
-8. optimize the generic point-to-label assignment, reduction and backed table
-   construction path.
+6. preserve per-feature non-expression aggregates and use label centers of
+   mass for the complete assigned-instance row universe;
+7. optimize the generic point-to-label assignment, reduction and backed table
+   construction path; and
+8. add QC functions that summarize the original, unallocated control points.
 
 Slice 2 replaces the current single-run reader surface with one coherent,
 sample-aware creation contract. Slice 3 validates that an existing store still
@@ -25,14 +25,14 @@ rebuilding its existing samples. Slice 5 consumes the feature-panel metadata
 produced by Slice 1 and the sample-aware element contracts established by
 Slices 2–4. Class-aware allocation requires that every selected points element
 reference authoritative feature-panel metadata; generic points without that
-metadata remain supported by the ordinary, non-class-aware path. Slice 6's
-original-point summaries depend on the reader metadata from Slices 1–4 rather
-than allocation or labels; its optional per-instance plotting view derives
-temporary rates from the Slice 5 table. Slice 7 preserves the public behavior
-of `expression_class` while revising the class-aware table payload so
-per-feature non-expression counts and control-only instances are retained.
-Slice 8 preserves the resulting public and biological contracts while replacing
-the private aggregation execution and backed-table construction paths.
+metadata remain supported by the ordinary, non-class-aware path. Slice 6
+preserves the public behavior of `expression_class` while revising the
+class-aware table payload so per-feature non-expression counts and control-only
+instances are retained. Slice 7 preserves the resulting public and biological
+contracts while replacing the private aggregation execution and backed-table
+construction paths. Slice 8's original-point summaries depend on the reader
+metadata from Slices 1–4 rather than aggregation or labels; its optional
+per-instance plotting view derives temporary rates from the class-aware table.
 
 ## Goal
 
@@ -203,7 +203,7 @@ ordering is deterministic rather than a claim of biological precedence.
 
 Slice 5 uses the complete relation to resolve its shared expression axis and
 feature classes, and retains each non-expression feature-list length as a
-table-local denominator snapshot for later QC. Slice 6 additionally uses the
+table-local denominator snapshot for later QC. Slice 8 additionally uses the
 actual control-feature names. A categorical transcript column
 contains only categories represented by the ingested points and cannot, by
 itself, preserve the feature-to-class relationship for a panel feature with no
@@ -943,11 +943,11 @@ Focused tests should establish that:
 
 **Status: implemented.**
 
-This slice records the implemented class-aware baseline. Slice 7 deliberately
+This slice records the implemented class-aware baseline. Slice 6 deliberately
 supersedes two lossy output choices from this baseline: per-feature
 non-expression counts are retained instead of discarded, and the row universe
 includes every instance receiving an assigned point instead of only instances
-with an expression-class point. Until Slice 7 is implemented, the behavior
+with an expression-class point. Until Slice 6 is implemented, the behavior
 described in this Slice 5 section remains the current code behavior.
 
 This slice consumes the generic feature-panel contract established by Slice 1
@@ -1001,7 +1001,7 @@ allocation has no caller-supplied denominator fallback or override.
 The point-to-label lookup is performed once per labels/points pair, carrying
 both the feature and feature-class columns through the assignment. It is never
 repeated once per class. Control points outside every instance are deliberately
-excluded from these cell-level summaries; Slice 6 operates directly on the
+excluded from these cell-level summaries; Slice 8 operates directly on the
 original points to provide spatial background QC.
 
 When `expression_class` is omitted, the same multi-region API follows the
@@ -1271,7 +1271,7 @@ control_fraction =
 Do not persist `negative_points_per_feature` or
 `system_control_points_per_feature` in `.obs`. They are deterministic rescalings
 of the raw class counts by the panel denominators and add no independent table
-information. Slice 6 QC plotting derives them on demand from the raw count
+information. Slice 8 QC plotting derives them on demand from the raw count
 columns and the table-local denominator snapshot.
 
 ### Table-local metadata contract
@@ -1394,11 +1394,11 @@ column. No control class produces a persisted per-feature rate. Validate the
 complete multi-region request and shared
 `feature_class_aggregation` configuration before writing the output table.
 
-### Boundary with Slice 6
+### Boundary with Slice 8
 
 The `.obs` summaries describe only control points that land inside an instance
 mask. They are suitable for cell-level histograms and violin plots of the raw
-class counts and `control_fraction`. Slice 6 may additionally derive the
+class counts and `control_fraction`. Slice 8 may additionally derive the
 following per-instance plotting metrics on demand:
 
 ```text
@@ -1464,130 +1464,7 @@ run. Compare wall time, peak worker memory, task count, and output-table size
 with ordinary allocation. The additional summaries should be small relative to
 the point-to-label lookup and target-count reduction.
 
-## Slice 6: original-point control QC
-
-**Status: specified; not implemented.**
-
-Add separate lightweight QC functions over the original transcript points.
-This slice is implemented after Slice 5 to keep delivery sequential, but its
-runtime contract depends only on the points and feature-panel metadata from
-Slice 1 and the sample-aware point metadata from Slices 2–4. The original-point
-summaries may run before or after allocation and do not depend on an
-instance-label raster or an AnnData table. The optional per-instance plotting
-view described below requires a Slice 5 table but derives its rates without
-modifying that table.
-
-This operation complements the instance-level `.obs` metrics. It must use the
-original points element so that controls on label value zero and controls
-outside segmented instances remain visible. It must not create another copy of
-the points or route individual controls through `hp.tb.aggregate_points`.
-
-### Derived per-instance plotting metrics
-
-When a Slice 5 allocation table is available, QC plotting may derive
-`negative_points_per_feature` and `system_control_points_per_feature` from the
-persisted raw class counts. Resolve the relevant `.obs` columns through
-`adata.uns["feature_class_aggregation"]["count_columns"]` and divide them by the
-corresponding positive values in `control_class_denominators`:
-
-```text
-negative_points_per_feature =
-    n_negative_points / control_class_denominators["Negative"]
-
-system_control_points_per_feature =
-    n_system_control_points / control_class_denominators["SystemControl"]
-```
-
-These rates normalize for the different numbers of panel features in the two
-control classes. They should be temporary series or plotting-dataframe columns;
-do not persist them back into `adata.obs`. The plotting layer must validate
-that the referenced count columns exist and that the stored denominators are
-positive. This optional cell-level view complements, but does not replace, the
-original-point summaries below.
-
-### Per-target summary
-
-Produce one small summary row per control target, sample, and points
-element/mosaic, containing at least:
-
-- target name;
-- authoritative feature class;
-- detected point count;
-- fraction of the corresponding control-class calls; and
-- density per analyzed area when a physical coordinate system is available.
-
-Use the feature-panel metadata to include control targets with zero detections.
-Concretely, aggregate the observed control points by sample, points element,
-class, and target; reindex that result against the authoritative target names
-for every control class; and fill absent counts with zero. This must represent
-both a target that is absent from one mosaic and a target that has no detections
-anywhere in a sample. Do not identify controls from target-name prefixes. A
-ranked bar or dot plot of these summaries should make a single unusually noisy
-negative probe or false code immediately visible. Keep `Negative` and
-`SystemControl` in separate facets because they measure different technical
-processes and have different numbers of panel features.
-
-### Spatially binned summary
-
-Bin the original control points in the coordinate system of their mosaic and
-produce separate spatial density layers for negative probes and system-control
-codewords. Normalize each layer by its authoritative number of panel features;
-when operating in a physical coordinate system, also normalize by bin area.
-
-The bin size must be configurable in coordinate-system units. Choose a default
-that yields a QC overview rather than single-transcript resolution; for this
-dataset, approximately 100-250 micrometres is an appropriate range to evaluate.
-Bins with no controls must remain explicit zeros, and sample/mosaic groups must
-remain in their independent coordinate systems.
-
-The primary visualization should be a matched pair of spatial heatmaps with a
-shared tissue outline or morphology context:
-
-- elevated negative-probe density highlights nonspecific hybridization or
-  sticky tissue regions; and
-- elevated system-control density highlights spot-calling, optical-crowding,
-  or barcode-decoding errors.
-
-Do not render every control transcript as the default visualization. An
-optional point overlay can remain a diagnostic for a selected crop, but the
-production overview should operate on aggregated bins.
-
-### Computation and outputs
-
-Project only the feature, class, and coordinate columns required from the
-backed points element. Construct the per-target and spatial-bin reductions from
-the same lazy Dask input and compute them together so the Parquet partitions do
-not need an independent full scan for each output. Do not materialize the full
-points dataframe in memory.
-
-Keep computation separate from plotting. The computation layer should expose a
-small per-target dataframe and coordinate-aware binned arrays that plotting can
-consume without re-reading the transcript points. The exact public names and
-SpatialData storage representation remain an implementation decision; they
-must not place control targets in the endogenous expression matrix or attach
-spatial bins to the instance-annotating AnnData table.
-
-If authoritative panel metadata is unavailable, emit raw per-target counts and
-raw spatial class counts, clearly mark them as unnormalized, and omit
-per-target normalized rates. Never estimate panel denominators from detected
-targets.
-
-### Verification
-
-Focused tests should establish that:
-
-- unassigned and outside-mask control points contribute to the summaries;
-- panel controls with zero detections appear in the per-target result;
-- per-target counts sum to their corresponding raw class totals;
-- spatial-bin counts conserve the input control-point totals within the chosen
-  extent;
-- normalization uses authoritative panel counts and physical bin area;
-- per-instance plotting rates use the table's recorded count-column bindings
-  and authoritative denominator snapshot without modifying `.obs`;
-- sample and mosaic coordinate systems remain independent; and
-- the implementation stays lazy until the compact summaries are computed.
-
-## Slice 7: lossless feature-class aggregates and label-derived centers
+## Slice 6: lossless feature-class aggregates and label-derived centers
 
 **Status: specified; not implemented.**
 
@@ -1813,7 +1690,7 @@ For each normalized labels/points/coordinate-system pair:
 Apply label-derived centers to both ordinary and class-aware
 `hp.tb.aggregate_points` output so the meaning of `adata.obsm[spatial_key]`
 does not change with `expression_class`. Reuse the labels center-of-mass helper
-rather than maintaining a second numerical implementation. Slice 8 may fuse
+rather than maintaining a second numerical implementation. Slice 7 may fuse
 center-of-mass moment reduction with its chunk-aware labels traversal when this
 preserves exact results and avoids a second raster read, but such fusion is a
 performance optimization rather than a change in the coordinate contract.
@@ -1838,7 +1715,7 @@ instance has no feature from one axis.
 The current implementation computes all per-feature counts before discarding
 the non-expression columns. This slice therefore changes output assembly and
 row selection, not spatial assignment. The source points remain unchanged and
-continue to support Slice 6 QC for unassigned and outside-mask controls.
+continue to support Slice 8 QC for unassigned and outside-mask controls.
 
 ### Verification
 
@@ -1876,16 +1753,16 @@ Focused tests should establish that:
 Benchmark the additional sparse matrix and labels-center calculation on a
 representative backed crop. Record output nonzeros and bytes separately for
 `X` and `auxiliary_feature_counts`, and confirm that the label-derived center
-calculation does not materialize the complete raster unnecessarily. Slice 8
+calculation does not materialize the complete raster unnecessarily. Slice 7
 owns the larger assignment-graph and out-of-core table-construction
 optimizations.
 
-## Slice 8: scalable point-to-label assignment and reduction
+## Slice 7: scalable point-to-label assignment and reduction
 
 **Status: specified; not implemented.**
 
 Refactor the private execution path used by `hp.tb.aggregate_points` without
-changing the public or biological contracts established by Slices 5 and 7.
+changing the public or biological contracts established by Slices 5 and 6.
 This optimization must remain generic to raster labels and points elements; it
 must not depend on CosMx FOV identifiers or reader-specific partition metadata.
 
@@ -1939,7 +1816,7 @@ rather than a single `value_key`, so ordinary and class-aware allocation use the
 same spatial lookup. `_aggregate_assigned_points` owns the count and
 row-selection reductions needed to construct the feature matrices, class
 summaries and retained instance IDs. Instance coordinates come from the labels
-center-of-mass stage required by Slice 7, not from assigned-point coordinate
+center-of-mass stage required by Slice 6, not from assigned-point coordinate
 means. The exact private names may change during implementation, but this
 separation of responsibilities is required.
 
@@ -2001,7 +1878,7 @@ instance-feature counts and class summaries from the same assigned-points
 dataframe. Prefer one grouped intermediate keyed by instance and feature. In
 class-aware mode, construct both the expression and auxiliary matrices from
 that intermediate and retain the union of instances receiving any assigned
-class, as specified by Slice 7.
+class, as specified by Slice 6.
 
 Do not calculate table coordinates with another points groupby. Derive centers
 of mass from the labels raster for the retained instance IDs. Where practical,
@@ -2013,7 +1890,7 @@ coordinates.
 Compute all compact Dask point reductions together so the assignment graph is
 executed once. Pair-level work remains independent. Preserve the two
 panel-defined class-aware feature axes, maximum-preservation row universe and
-label-derived coordinate semantics from Slice 7 while replacing their
+label-derived coordinate semantics from Slice 6 while replacing their
 in-memory alignment and stacking implementation with the out-of-core
 construction path below.
 
@@ -2064,7 +1941,7 @@ The implementation must follow this sequence:
 
 1. Establish every deterministic feature axis before constructing the final
    block matrices. In class-aware mode these are the ordered expression and
-   auxiliary axes from Slice 7, including panel features with zero detections.
+   auxiliary axes from Slice 6, including panel features with zero detections.
    In ordinary mode the single axis remains the sorted union of features
    assigned to non-background instances. Derive the latter union from compact
    partition summaries; never collect the complete instance-feature count
@@ -2119,7 +1996,7 @@ The implementation must follow this sequence:
     matrix must not be materialized on the driver.
 11. Write the final `.uns` mapping with `anndata.io.write_elem`. It includes
     `spatialdata_attrs` and, in class-aware mode, the aggregation and auxiliary
-    feature-matrix contracts established by Slices 5 and 7. The shared `.var`
+    feature-matrix contracts established by Slices 5 and 6. The shared `.var`
     axis was written once by the skeleton in step 6 and must not be independently
     reconstructed or reordered after `X` has been written.
 12. Validate the completed component shapes before publication:
@@ -2206,8 +2083,8 @@ Focused correctness tests should establish that:
 - multiple retained value columns survive assignment with their dtypes and
   categorical metadata intact;
 - ordinary aggregation preserves the Slice 5 feature counts while using the
-  label-derived centers from Slice 7;
-- class-aware aggregation preserves both Slice 7 sparse matrices, its
+  label-derived centers from Slice 6;
+- class-aware aggregation preserves both Slice 6 sparse matrices, its
   maximum-preservation rows, `.obs` summaries, label-derived centers and
   table-local metadata;
 - graph construction performs no point or labels source reads;
@@ -2233,7 +2110,7 @@ Focused correctness tests should establish that:
 - the final `.uns`, `spatialdata_attrs`, table-group metadata, categorical
   columns, `.var` axis, auxiliary feature schema and `.obsm` payloads survive
   an AnnData and SpatialData Zarr round trip; and
-- the scalable path and the Slice 7 in-memory path produce equivalent `AnnData`
+- the scalable path and the Slice 6 in-memory path produce equivalent `AnnData`
   for ordinary and class-aware aggregation.
 
 Do not make unit tests depend on Dask layer names or an exact task count. Use a
@@ -2250,9 +2127,132 @@ that peak driver memory no longer scales with the total number of observed
 instance-feature pairs; record the remaining one-row-per-instance `.obs`
 assembly and publication cost explicitly.
 
-The optimized path is acceptable when it preserves the exact Slice 7
+The optimized path is acceptable when it preserves the exact Slice 6
 aggregation payload and label-derived centers, remains lazy during graph
 construction, avoids the `C * P` predicate fan-out, never materializes the
 complete instance-feature reduction on the driver, and materially improves the
 representative large-mosaic workload without a major regression on the small
 case.
+
+## Slice 8: original-point control QC
+
+**Status: specified; not implemented.**
+
+Add separate lightweight QC functions over the original transcript points.
+This slice is scheduled after Slice 7, but its runtime contract depends only on
+the points and feature-panel metadata from Slice 1 and the sample-aware point
+metadata from Slices 2–4. The original-point summaries may run before or after
+aggregation and do not depend on an instance-label raster or an AnnData table.
+The optional per-instance plotting view described below requires a class-aware
+table produced from the Slice 5 contract but derives its rates without
+modifying that table.
+
+This operation complements the instance-level `.obs` metrics. It must use the
+original points element so that controls on label value zero and controls
+outside segmented instances remain visible. It must not create another copy of
+the points or route individual controls through `hp.tb.aggregate_points`.
+
+### Derived per-instance plotting metrics
+
+When a class-aware aggregation table is available, QC plotting may derive
+`negative_points_per_feature` and `system_control_points_per_feature` from the
+persisted raw class counts. Resolve the relevant `.obs` columns through
+`adata.uns["feature_class_aggregation"]["count_columns"]` and divide them by the
+corresponding positive values in `control_class_denominators`:
+
+```text
+negative_points_per_feature =
+    n_negative_points / control_class_denominators["Negative"]
+
+system_control_points_per_feature =
+    n_system_control_points / control_class_denominators["SystemControl"]
+```
+
+These rates normalize for the different numbers of panel features in the two
+control classes. They should be temporary series or plotting-dataframe columns;
+do not persist them back into `adata.obs`. The plotting layer must validate
+that the referenced count columns exist and that the stored denominators are
+positive. This optional cell-level view complements, but does not replace, the
+original-point summaries below.
+
+### Per-target summary
+
+Produce one small summary row per control target, sample, and points
+element/mosaic, containing at least:
+
+- target name;
+- authoritative feature class;
+- detected point count;
+- fraction of the corresponding control-class calls; and
+- density per analyzed area when a physical coordinate system is available.
+
+Use the feature-panel metadata to include control targets with zero detections.
+Concretely, aggregate the observed control points by sample, points element,
+class, and target; reindex that result against the authoritative target names
+for every control class; and fill absent counts with zero. This must represent
+both a target that is absent from one mosaic and a target that has no detections
+anywhere in a sample. Do not identify controls from target-name prefixes. A
+ranked bar or dot plot of these summaries should make a single unusually noisy
+negative probe or false code immediately visible. Keep `Negative` and
+`SystemControl` in separate facets because they measure different technical
+processes and have different numbers of panel features.
+
+### Spatially binned summary
+
+Bin the original control points in the coordinate system of their mosaic and
+produce separate spatial density layers for negative probes and system-control
+codewords. Normalize each layer by its authoritative number of panel features;
+when operating in a physical coordinate system, also normalize by bin area.
+
+The bin size must be configurable in coordinate-system units. Choose a default
+that yields a QC overview rather than single-transcript resolution; for this
+dataset, approximately 100-250 micrometres is an appropriate range to evaluate.
+Bins with no controls must remain explicit zeros, and sample/mosaic groups must
+remain in their independent coordinate systems.
+
+The primary visualization should be a matched pair of spatial heatmaps with a
+shared tissue outline or morphology context:
+
+- elevated negative-probe density highlights nonspecific hybridization or
+  sticky tissue regions; and
+- elevated system-control density highlights spot-calling, optical-crowding,
+  or barcode-decoding errors.
+
+Do not render every control transcript as the default visualization. An
+optional point overlay can remain a diagnostic for a selected crop, but the
+production overview should operate on aggregated bins.
+
+### Computation and outputs
+
+Project only the feature, class, and coordinate columns required from the
+backed points element. Construct the per-target and spatial-bin reductions from
+the same lazy Dask input and compute them together so the Parquet partitions do
+not need an independent full scan for each output. Do not materialize the full
+points dataframe in memory.
+
+Keep computation separate from plotting. The computation layer should expose a
+small per-target dataframe and coordinate-aware binned arrays that plotting can
+consume without re-reading the transcript points. The exact public names and
+SpatialData storage representation remain an implementation decision; they
+must not place control targets in the endogenous expression matrix or attach
+spatial bins to the instance-annotating AnnData table.
+
+If authoritative panel metadata is unavailable, emit raw per-target counts and
+raw spatial class counts, clearly mark them as unnormalized, and omit
+per-target normalized rates. Never estimate panel denominators from detected
+targets.
+
+### Verification
+
+Focused tests should establish that:
+
+- unassigned and outside-mask control points contribute to the summaries;
+- panel controls with zero detections appear in the per-target result;
+- per-target counts sum to their corresponding raw class totals;
+- spatial-bin counts conserve the input control-point totals within the chosen
+  extent;
+- normalization uses authoritative panel counts and physical bin area;
+- per-instance plotting rates use the table's recorded count-column bindings
+  and authoritative denominator snapshot without modifying `.obs`;
+- sample and mosaic coordinate systems remain independent; and
+- the implementation stays lazy until the compact summaries are computed.
