@@ -1690,8 +1690,176 @@ Derive instance coordinates from the compact grouped result instead of running
 a second independent groupby over every assigned point. Retain sparse
 instance-by-target construction and compute all compact Dask reductions
 together so the assignment graph is executed once. Pair-level work remains
-independent; the shared feature-axis alignment and final row-wise stacking from
-Slice 5 are unchanged.
+independent. Preserve the feature-axis and row-selection semantics from Slice
+5, but replace its in-memory alignment and stacking implementation with the
+out-of-core construction path below.
+
+### Out-of-core AnnData table construction
+
+The optimized assignment graph alone is insufficient for large datasets. The
+current implementation ultimately computes every observed
+`(instance, feature)` count into one driver-resident pandas `Series`, converts
+the complete result to sparse matrices, concatenates all `.obs` frames and
+coordinate arrays, and only then writes the completed `AnnData`. The scalable
+path must instead keep the reduced counts partitioned and construct the table
+in bounded instance blocks.
+
+This is an out-of-core AnnData construction problem, but it is not implemented
+as repeated mutation of one in-memory `AnnData` or with
+`anndata.experimental.concat_on_disk()`. The latter always operates on complete
+AnnData inputs: in the pinned version it streams sparse `X` and array-like
+`.obsm`, but it concatenates `.obs` indices and dataframes in driver memory and
+does not preserve the required `.uns`. It also offers no option to concatenate
+only `X`.
+
+Write the final AnnData components separately with the public
+[`anndata.io.write_elem`](https://anndata.readthedocs.io/en/stable/generated/anndata.io.write_elem.html)
+API instead:
+
+```text
+assigned points
+      │
+      ├── compact partial reductions by instance block
+      │
+      ├── block 0 ── CSR X + obs + coordinates ── staged block 0
+      ├── block 1 ── CSR X + obs + coordinates ── staged block 1
+      └── ...
+                                             │
+                                             ▼
+                         deterministic row-block manifest
+                                             │
+                    ┌────────────────────────┼───────────────────────┐
+                    ▼                        ▼                       ▼
+             write sparse X          write obs once          write obsm lazily
+             in CSR blocks            per-instance rows       in dense blocks
+                    └────────────────────────┼───────────────────────┘
+                                             ▼
+                                  final SpatialData table
+```
+
+The implementation must follow this sequence:
+
+1. Establish one deterministic feature axis before constructing the final
+   block matrices. In class-aware mode this is the ordered set of features for
+   the authoritative expression class in feature-panel metadata, including
+   panel features with zero detections. In ordinary mode it remains the sorted
+   union of features assigned to non-background instances. Derive the latter
+   union from compact partition summaries; never collect the complete
+   instance-feature count series merely to discover the axis.
+2. Reduce assigned points locally by `(instance, feature)` and, when required,
+   feature class. Add an `instance_block` derived from deterministic instance
+   ranges and redistribute these compact partial reductions—not the original
+   points—so all contributions to one instance reach the same final block.
+3. Finalize each instance block on a worker. Build its bounded CSR expression
+   matrix, `.obs` rows and `.obsm[spatial_key]` coordinates against the shared
+   feature axis, then write one Harpy-owned temporary block artifact. A complete
+   temporary AnnData Zarr store is acceptable, but the final publication path
+   must consume its components independently. Return only a small block
+   manifest to the driver, containing the path, row count, nonzero count,
+   instance range, schema information and a feature-axis hash.
+4. Submit the block writers as part of one Dask computation. Iterating over
+   blocks and independently computing each one is not acceptable because that
+   can execute the shared point-to-label assignment repeatedly.
+5. Validate that all successful blocks have the exact same `.var` axis and
+   compatible `.obs`/`.obsm` schemas, that their observation identifiers are
+   globally unique, and that their instance ranges and output ordering are
+   deterministic. Assign every block one explicit half-open row interval from
+   `row_start` to `row_stop`. The exact same block and within-block row order
+   must be used for `X`, `.obs` and `.obsm`.
+6. Initialize a staging AnnData group through `anndata.io.write_elem`, using a
+   small AnnData skeleton containing the shared `.var` axis and required empty
+   mappings. Do not hand-author AnnData root or component encoding attributes
+   when the AnnData writer can create them.
+7. Expose the ordered CSR blocks as one sparse Dask array and write it to `X`
+   with `anndata.io.write_elem`. In the pinned AnnData version, the registered
+   Dask-sparse writer writes the first CSR chunk and appends subsequent chunks
+   through AnnData's backed
+   [`sparse_dataset`](https://anndata.readthedocs.io/en/stable/generated/anndata.io.sparse_dataset.html)
+   implementation. Version-gated tests must confirm CSR format, 64-bit
+   `indices`/`indptr` safety, output shape and values. The block sources must be
+   staged or otherwise independently reusable so the writer's per-chunk
+   computations cannot rerun the point-to-label assignment.
+8. Concatenate only the bounded block `.obs` frames in deterministic order and
+   write the resulting one-row-per-instance pandas dataframe with
+   `anndata.io.write_elem`. This intentionally permits `.obs` to reside in
+   driver memory; it must not contain the much larger per-instance-feature
+   reductions. Measure this remaining memory cost separately.
+9. Expose the ordered coordinate blocks as one dense Dask array and write
+   `.obsm[spatial_key]` with `anndata.io.write_elem`. The pinned AnnData writer
+   stores a dense Dask array into Zarr by chunks, so the complete coordinate
+   matrix must not be materialized on the driver.
+10. Write the final `.uns` mapping with `anndata.io.write_elem`. It includes
+    `spatialdata_attrs` and, in class-aware mode, the aggregation contract
+    established by Slice 5. The shared `.var` axis was written once by the
+    skeleton in step 6 and must not be independently reconstructed or reordered
+    after `X` has been written.
+11. Validate the completed component shapes before publication:
+
+    ```text
+    X.shape[0] == len(obs) == obsm[spatial_key].shape[0]
+    X.shape[1] == len(var) == len(shared_feature_axis)
+    ```
+
+    Also verify the observation identifiers and per-block instance order
+    against the row-block manifest, rather than accepting shape equality as
+    sufficient proof of alignment.
+
+12. Publish the completed group as a SpatialData table only after all component
+    writes and validation have succeeded. Use the same lower-level
+    AnnData-writing approach that `hp.tb.add_feature_matrix` uses for backed
+    table updates: open the table group directly, write AnnData components with
+    `anndata.io.write_elem`, add the required SpatialData table-group metadata
+    through one isolated helper, and consolidate Zarr metadata after the
+    complete table is valid. The scalable path must not pass the completed
+    table through `SpatialData.write_element()`, because that would re-enter
+    SpatialData's ordinary in-memory table-writing path and could defeat the
+    out-of-core construction contract. Remove only Harpy-owned temporary block
+    and staging groups on failure; do not expose a partially constructed table
+    under `output_table_name`.
+
+Use this scalable path automatically when the input `SpatialData` is backed.
+An unbacked object has no destination in which an out-of-core table can be
+constructed, so it retains the current in-memory path and result. This slice
+does not add an output-path parameter to `hp.tb.aggregate_points`.
+
+### AnnData and SpatialData integration boundary
+
+AnnData remains responsible for every AnnData-encoded component. In particular,
+do not write sparse `X` directly with raw Zarr operations. Its documented
+[on-disk encoding](https://anndata.readthedocs.io/en/stable/fileformat-prose.html)
+is a group containing `data`, `indices` and `indptr` arrays plus shape and
+encoding metadata, rather than a regular two-dimensional Zarr array. Correct
+row appends must update the CSR offsets, shape, index widths and all three
+arrays consistently. AnnData's Dask-sparse `write_elem` path already owns this
+logic and supports both Zarr generations used by the supported dependency
+range. Raw resizing would duplicate format-sensitive code in Harpy.
+
+The deliberately non-incremental component is the complete `.obs` dataframe.
+The pinned AnnData writer accepts pandas DataFrames rather than Dask
+DataFrames, so component-wise writing does not make `.obs` incremental. This
+still removes the much larger driver-memory cost proportional to observed
+instance-feature pairs: `.obs` has one row per retained instance and only the
+output annotation columns. If its measured driver-memory cost is unacceptable
+at the target scale, implement or request a complete upstream AnnData
+dataframe-append API. A direct Harpy writer for the columnar AnnData dataframe
+encoding is a last resort and must be isolated behind versioned integration
+tests; it must handle the index, `column-order`, string encodings and
+categorical codes/categories explicitly. Do not add it before the
+one-row-per-instance `.obs` benchmark demonstrates a need.
+
+The pinned SpatialData version also has no public operation that adopts a
+pre-written AnnData group as a table, and its ordinary Zarr reader materializes
+tables with `anndata.read_zarr`. Implement one narrow Harpy publication adapter
+that sets only the SpatialData table-group metadata required around the AnnData
+group after the lower-level AnnData writers have completed and validated it.
+This helper is an integration boundary, not an alternative table serializer:
+AnnData remains responsible for `X`, `.obs`, `.var`, `.obsm` and `.uns`, and
+`SpatialData.write_element()` is not called. Test the completed group against
+`TableModel.validate` and round-trip the complete SpatialData store. The
+same-process result may be attached with AnnData's lazy reader, but fully lazy
+table reopening from `spatialdata.read_zarr` requires upstream SpatialData
+support and is not promised by this slice. Construction itself must
+nevertheless remain out of core.
 
 ### Performance contract and verification
 
@@ -1704,18 +1872,45 @@ Focused correctness tests should establish that:
 - supported translated coordinate systems produce the expected raster lookup;
 - multiple retained value columns survive assignment with their dtypes and
   categorical metadata intact;
-- ordinary and class-aware allocation produce the same counts, rows,
-  coordinates, `.obs` metrics, and table metadata as before the refactor; and
-- graph construction performs no point or labels source reads.
+- ordinary and class-aware aggregation produce the same counts, rows,
+  coordinates, `.obs` metrics, and table metadata as before the refactor;
+- graph construction performs no point or labels source reads;
+- class-aware block stores share the complete panel-derived expression axis,
+  including features with zero detections;
+- ordinary block stores share the exact sorted union of assigned features;
+- an instance whose partial reductions originate in different labels or
+  points chunks occurs in exactly one output row;
+- block construction does not compute the complete instance-feature counts on
+  the driver and does not execute the assignment graph once per block;
+- injected block-write, `X`, `.obs`, `.obsm` and final-metadata failures leave
+  no visible partial table and clean up only Harpy-owned staging paths;
+- the scalable backed path writes through AnnData's lower-level I/O operations
+  and never calls `SpatialData.write_element()` for the completed table;
+- the row-block manifest proves that `X`, `.obs` and `.obsm` use identical row
+  ordering, not merely compatible first-dimension sizes;
+- sparse `X` and `.obsm` are written in bounded blocks while only the
+  one-row-per-instance `.obs` dataframe is assembled on the driver;
+- the final `.uns`, `spatialdata_attrs`, table-group metadata, categorical
+  columns, `.var` axis and `.obsm` coordinates survive an AnnData and
+  SpatialData Zarr round trip; and
+- the scalable and current in-memory paths produce equivalent `AnnData` for
+  ordinary and class-aware aggregation.
 
 Do not make unit tests depend on Dask layer names or an exact task count. Use a
 separate benchmark and source-read instrumentation to compare the old and new
 implementations across increasing point-partition and labels-chunk counts.
 Record at least wall time, peak worker memory, graph construction time, task
-count, bytes read, shuffle bytes, and spill volume. Include both a small case,
-where shuffle overhead can dominate, and a representative full backed mosaic.
+count, bytes read, shuffle bytes, spill volume, peak driver memory during block
+publication, maximum block rows/nonzeros, and temporary-store size. Include
+both a small case, where shuffle and staging overhead can dominate, and a
+representative full backed mosaic. Vary the instance-block size and
+sparse-`X`/coordinate output chunks independently. Confirm that peak driver
+memory no longer scales with the total number of observed instance-feature
+pairs; record the remaining one-row-per-instance `.obs` assembly and
+publication cost explicitly.
 
-The optimized path is acceptable when it preserves exact allocation results,
+The optimized path is acceptable when it preserves exact aggregation results,
 remains lazy during graph construction, avoids the `C * P` predicate fan-out,
-and materially improves the representative large-mosaic workload without a
-major regression on the small case.
+never materializes the complete instance-feature reduction on the driver, and
+materially improves the representative large-mosaic workload without a major
+regression on the small case.
