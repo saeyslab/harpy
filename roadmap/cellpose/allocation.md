@@ -979,7 +979,7 @@ The resulting table has the following high-level contract:
 ```text
 adata.X       instances x Endogenous features only
 adata.var     the shared Endogenous feature axis
-adata.obs     class point counts and control_fraction
+adata.obs     total assigned points per feature class and control_fraction
 adata.obsm    mean coordinates calculated from assigned Endogenous points
 adata.uns     the versioned feature_class_aggregation configuration and sources
 ```
@@ -1354,8 +1354,8 @@ computation:
    belonging to each class;
 4. calculate `control_fraction`;
 5. retain only the `expression_class` columns in the final `adata.X`; and
-6. attach the class point counts and `control_fraction` to the corresponding
-   `.obs` rows.
+6. attach the total assigned points per feature class and `control_fraction` to
+   the corresponding `.obs` rows.
 
 After all pairs have been reduced, align their sparse matrices to the previously
 resolved shared feature axis, stack them row-wise, concatenate `.obs` and
@@ -1622,7 +1622,8 @@ adata.obsm[spatial_key]
     center of mass of each instance in the segmentation labels raster
 
 adata.obs
-    instance/region identity, per-class point counts and control_fraction
+    instance/region identity, total assigned points per feature class and
+    control_fraction
 
 adata.uns["feature_matrices"]["auxiliary_feature_counts"]
     the auxiliary matrix's independent feature-axis schema
@@ -1669,8 +1670,10 @@ named matrix per class. Its columns are ordered deterministically by:
 
 Include panel-declared auxiliary features with zero assigned detections as
 explicit all-zero columns. Store the matrix as CSR with `uint32` counts. The
-parallel feature and class lists in table-local metadata make the independent
-column axis self-describing without placing those features in `adata.var`.
+ordered `feature_columns` in table-local metadata make the independent column
+axis self-describing without placing those features in `adata.var`. Class
+membership is described by the existing `feature_class_aggregation` contract,
+not by a second class schema in the generic feature-matrix registry.
 
 ### Auxiliary feature-matrix metadata
 
@@ -1684,26 +1687,27 @@ adata.uns["feature_matrices"]["auxiliary_feature_counts"] = {
     "source_kind": "harpy_aggregate_points",
     "backend": "scipy_csr",
     "dtype": "uint32",
-    "feature_key": "gene",
-    "feature_class_key": "code_class",
     "feature_columns": [
         "Negative1",
         "Negative2",
         "SystemControl1",
     ],
-    "feature_classes": [
-        "Negative",
-        "Negative",
-        "SystemControl",
-    ],
 }
 ```
 
-`feature_columns` and `feature_classes` are parallel ordered lists and must
-have length equal to the auxiliary matrix's second dimension. Every listed
-class must occur in the resolved panel and must differ from
-`expression_class`. The ordered `(feature, class)` pairs must exactly equal the
-non-expression portion of the compatible panel contract.
+`feature_columns` is the mandatory generic Harpy name for the ordered second
+axis of a matrix registered under `adata.uns["feature_matrices"]`. Its length
+must equal the auxiliary matrix's second dimension, and its values must be
+non-empty and unique. This is deliberately distinct from `feature_key`, which
+names the source points column containing feature identifiers.
+
+Keep this registry entry matrix-specific and generic. Do not duplicate
+`feature_key`, `feature_class_key`, `classes`, `features_by_class`, or a parallel
+`feature_classes` list here. Those fields describe the source panel and the
+class-aware aggregation rather than the physical `.obsm` matrix. The existing
+`feature_class_aggregation` record already owns `feature_key`,
+`feature_class_key`, `expression_class`, the ordered `classes`, and the
+panel-derived `control_class_denominators`.
 
 Add one binding to the existing aggregation record:
 
@@ -1715,10 +1719,28 @@ adata.uns["feature_class_aggregation"]["auxiliary_feature_matrix_key"] = (
 
 This pointer prevents downstream consumers from guessing an `.obsm` key. The
 feature-matrix record owns the auxiliary column schema; the aggregation record
-must not duplicate those ordered lists. Validate the pointer, matrix shape,
-dtype, column metadata and panel-derived class contract together before writing
-and after reading the table. The table-local feature lists are a derived record
-of the matrix axis, not a second authoritative assay panel.
+owns the class semantics and must not duplicate the ordered feature names.
+Interpret the auxiliary columns as contiguous class blocks by:
+
+1. taking the ordered `classes` from `feature_class_aggregation` and removing
+   `expression_class`;
+2. retaining that class order; and
+3. assigning each class the next number of columns given by its
+   `control_class_denominators` value.
+
+Consequently, the sum of the non-expression denominators must equal the number
+of `feature_columns` and the auxiliary matrix width. During construction, the
+ordered columns and derived class blocks must exactly match the
+non-expression portion of the authoritative feature panel. Validate the
+pointer, matrix shape, dtype, column metadata and panel-derived class contract
+together before writing and after reading the table. `feature_columns` is a
+derived record of the matrix axis, not a second authoritative assay panel.
+
+This contract adopts the existing Harpy `feature_matrices` convention so that
+matrix columns can always be discovered consistently. Integrating
+`harpy_aggregate_points` matrices into napari-harpy's object classifier is out
+of scope; napari-harpy does not need to recognize this `source_kind` for this
+slice.
 
 When `expression_class=None`, preserve ordinary aggregation behavior: every
 observed feature remains in `adata.X`, no auxiliary feature matrix or
@@ -1828,8 +1850,11 @@ Focused tests should establish that:
   feature in deterministic class/feature order, including zero-detection
   columns;
 - the auxiliary matrix is `uint32` CSR and its row count equals `adata.n_obs`;
-- its `feature_columns` and `feature_classes` metadata exactly describe every
-  matrix column and survive AnnData and SpatialData Zarr round trips;
+- its `feature_columns` metadata exactly describes every matrix column and
+  survives AnnData and SpatialData Zarr round trips;
+- the ordered non-expression classes and their denominator-derived contiguous
+  column blocks cover `feature_columns` exactly and match the authoritative
+  feature panel;
 - expression-only, non-expression-only and mixed instances are all retained,
   while instances receiving no assigned point and label value zero are absent;
 - non-expression-only instances have all-zero expression rows and are never
