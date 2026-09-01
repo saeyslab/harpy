@@ -2,7 +2,7 @@
 
 ## Status
 
-Eight implementation slices are planned; Slices 1 through 5 are implemented:
+Nine implementation slices are planned; Slices 1 through 6 are implemented:
 
 1. patch the CosMx reader and establish the generic Harpy feature-panel
    metadata contract — implemented;
@@ -13,10 +13,12 @@ Eight implementation slices are planned; Slices 1 through 5 are implemented:
    implemented;
 5. add class-aware aggregation to `hp.tb.aggregate_points` — implemented;
 6. preserve per-feature non-expression aggregates and use label centers of
-   mass for the complete assigned-instance row universe;
+   mass for the complete assigned-instance row universe — implemented;
 7. optimize the generic point-to-label assignment, reduction and backed table
-   construction path; and
-8. add QC functions that summarize the original, unallocated control points.
+   construction path;
+8. promote napari-harpy's canonical-center implementation into Harpy and
+   integrate it with `hp.tb.aggregate_points`; and
+9. add QC functions that summarize the original, unallocated control points.
 
 Slice 2 replaces the current single-run reader surface with one coherent,
 sample-aware creation contract. Slice 3 validates that an existing store still
@@ -30,9 +32,13 @@ preserves the public behavior of `expression_class` while revising the
 class-aware table payload so per-feature non-expression counts and control-only
 instances are retained. Slice 7 preserves the resulting public and biological
 contracts while replacing the private aggregation execution and backed-table
-construction paths. Slice 8's original-point summaries depend on the reader
-metadata from Slices 1–4 rather than aggregation or labels; its optional
-per-instance plotting view derives temporary rates from the class-aware table.
+construction paths. Slice 8 establishes a Harpy-owned canonical-center
+calculation and metadata contract that napari-harpy can consume without a
+reverse dependency, and makes newly aggregated 2D tables immediately usable
+by canonical-center spatial queries. Slice 9's original-point summaries depend
+on the reader metadata from Slices 1–4 rather than aggregation or labels; its
+optional per-instance plotting view derives temporary rates from the
+class-aware table.
 
 ## Goal
 
@@ -203,7 +209,7 @@ ordering is deterministic rather than a claim of biological precedence.
 
 Slice 5 uses the complete relation to resolve its shared expression axis and
 feature classes, and retains each non-expression feature-list length as a
-table-local denominator snapshot for later QC. Slice 8 additionally uses the
+table-local denominator snapshot for later QC. Slice 9 additionally uses the
 actual control-feature names. A categorical transcript column
 contains only categories represented by the ingested points and cannot, by
 itself, preserve the feature-to-class relationship for a panel feature with no
@@ -1001,7 +1007,7 @@ allocation has no caller-supplied denominator fallback or override.
 The point-to-label lookup is performed once per labels/points pair, carrying
 both the feature and feature-class columns through the assignment. It is never
 repeated once per class. Control points outside every instance are deliberately
-excluded from these cell-level summaries; Slice 8 operates directly on the
+excluded from these cell-level summaries; Slice 9 operates directly on the
 original points to provide spatial background QC.
 
 When `expression_class` is omitted, the same multi-region API follows the
@@ -1271,7 +1277,7 @@ control_fraction =
 Do not persist `negative_points_per_feature` or
 `system_control_points_per_feature` in `.obs`. They are deterministic rescalings
 of the raw class counts by the panel denominators and add no independent table
-information. Slice 8 QC plotting derives them on demand from the raw count
+information. Slice 9 QC plotting derives them on demand from the raw count
 columns and the table-local denominator snapshot.
 
 ### Table-local metadata contract
@@ -1394,11 +1400,11 @@ column. No control class produces a persisted per-feature rate. Validate the
 complete multi-region request and shared
 `feature_class_aggregation` configuration before writing the output table.
 
-### Boundary with Slice 8
+### Boundary with Slice 9
 
 The `.obs` summaries describe only control points that land inside an instance
 mask. They are suitable for cell-level histograms and violin plots of the raw
-class counts and `control_fraction`. Slice 8 may additionally derive the
+class counts and `control_fraction`. Slice 9 may additionally derive the
 following per-instance plotting metrics on demand:
 
 ```text
@@ -1466,7 +1472,7 @@ the point-to-label lookup and target-count reduction.
 
 ## Slice 6: lossless feature-class aggregates and label-derived centers
 
-**Status: specified; not implemented.**
+**Status: implemented.**
 
 Revise the class-aware table payload established by Slice 5 so aggregation does
 not discard the per-feature counts of non-expression classes. Preserve
@@ -1624,6 +1630,12 @@ observed feature remains in `adata.X`, no auxiliary feature matrix or
 class-aware metadata is created, and feature-panel metadata is not required.
 This slice introduces no new public parameter.
 
+Class-aware mode requires at least one panel class other than
+`expression_class`. If a panel contains only the selected expression class,
+raise a clear error directing the caller to use `expression_class=None`. This
+keeps the auxiliary matrix contract meaningful and its registered
+`feature_columns` axis non-empty.
+
 ### Maximum-preservation row universe
 
 In class-aware mode, construct rows from the union of instance IDs receiving at
@@ -1715,7 +1727,7 @@ instance has no feature from one axis.
 The current implementation computes all per-feature counts before discarding
 the non-expression columns. This slice therefore changes output assembly and
 row selection, not spatial assignment. The source points remain unchanged and
-continue to support Slice 8 QC for unassigned and outside-mask controls.
+continue to support Slice 9 QC for unassigned and outside-mask controls.
 
 ### Verification
 
@@ -2134,12 +2146,190 @@ complete instance-feature reduction on the driver, and materially improves the
 representative large-mosaic workload without a major regression on the small
 case.
 
-## Slice 8: original-point control QC
+## Slice 8: Harpy-owned canonical centers and `aggregate_points` integration
+
+**Status: specified; not implemented.**
+
+Promote the viewer-independent canonical-center calculation, typed contracts,
+storage schema and validation from napari-harpy into Harpy, then integrate that
+shared implementation into `hp.tb.aggregate_points`. At implementation time,
+fetch and inspect the current main branch of
+[`vibspatial/napari-harpy`](https://github.com/vibspatial/napari-harpy) rather
+than copying from an older installed release or assuming that the local
+checkout still represents the authoritative implementation. Port the focused
+canonical-center tests together with the contract.
+
+The numerical definition remains the center of mass of uniformly weighted,
+non-background pixels belonging to an instance. Napari-harpy already computes
+this through `harpy.utils.RasterAggregator.center_of_mass`; the functionality
+being promoted is principally its source and table binding, cache validation,
+versioned metadata, deterministic instance-set identity and spatial-query
+interoperability.
+
+### Ownership and dependency direction
+
+Harpy must own the reusable, non-UI implementation. Core Harpy code must never
+import `napari_harpy`: napari-harpy already depends on `harpy-analysis`, so the
+reverse import would create a dependency cycle and make a core table operation
+depend on a viewer application.
+
+Separate the main-branch implementation along this boundary:
+
+- move or adapt canonical source signatures, region bindings, instance-set
+  digests, metadata models, storage serialization/parsing, matrix validation
+  and center calculation into an appropriate Harpy table utility module;
+- keep widgets, workers, query-controller state and napari-specific component
+  persistence in napari-harpy;
+- make napari-harpy consume the Harpy-owned canonical contracts and calculation
+  after the Harpy implementation is available; and
+- avoid two independently evolving definitions of canonical coordinates or
+  their metadata schema.
+
+The port should retain the established storage keys and schema semantics so a
+table produced by Harpy is immediately recognized by napari-harpy. It must not
+introduce a second Harpy-specific canonical-center schema.
+
+### Canonical table payload
+
+For supported two-dimensional labels, `hp.tb.aggregate_points` should produce
+both its existing general spatial coordinates and a canonical coordinate
+cache:
+
+```text
+adata.obsm[spatial_key]
+    transformed table coordinates in SpatialData order (x, y)
+
+adata.obsm["spatial_canonical"]
+    dense float64 intrinsic-label coordinates in fixed (z, y, x) order
+
+adata.uns["spatial_coordinates"]["spatial_canonical"]
+    versioned canonical matrix, calculation, source and coverage metadata
+```
+
+The canonical matrix has shape `(adata.n_obs, 3)`. For a 2D source its `z`
+column is exactly zero. Its `y` and `x` values are expressed in the intrinsic
+pixel coordinate frame of the corresponding `scale0` labels element; no
+translation into the selected aggregation coordinate system is applied.
+
+The metadata record should preserve the main-branch schema, including at
+least:
+
+- schema version, fixed `obsm_key`, axes and dtype;
+- the table's `region_key` and `instance_key`;
+- one record for every labels region represented by the table;
+- the source labels element, element type, scale and intrinsic coordinate
+  frame;
+- the center-of-mass method, pixel weighting, background value, pixel-center
+  convention and algorithm version;
+- complete table-row coverage for the region, its row count and deterministic
+  instance-set digest; and
+- the source dimensions, shape and normalized integer dtype.
+
+“All rows for region” means all rows that `aggregate_points` retained for that
+labels region. It does not mean all nonzero IDs present in the labels raster;
+instances receiving no assigned point remain outside the aggregation table as
+specified by Slice 6.
+
+### Relationship to existing `spatial` coordinates
+
+Do not replace `adata.obsm[spatial_key]` with the canonical matrix. The two
+payloads have different contracts:
+
+- `spatial_key` uses `(x, y)` or `(x, y, z)` order and represents coordinates
+  in the aggregation pair's selected coordinate system; and
+- `spatial_canonical` always uses `(z, y, x)` order and remains intrinsic to
+  the labels source so napari-harpy can transform annotation geometry into that
+  frame before evaluating containment.
+
+Refactor the center path so each labels region is reduced once. Retain the raw
+intrinsic `(z, y, x)` result as its canonical block, and derive the existing
+translated and reordered `spatial_key` block from the same result. Do not run
+`RasterAggregator.center_of_mass` independently for the two matrices. Reject a
+caller-provided `spatial_key="spatial_canonical"` because it would collapse two
+different coordinate contracts onto one key.
+
+Apply this behavior to both ordinary and class-aware aggregation. Concatenate
+each region's canonical block in exactly the same normalized pair and instance
+row order as `X`, `.obs`, the optional auxiliary feature matrix and
+`adata.obsm[spatial_key]`.
+
+### Construction and publication
+
+`aggregate_points` creates a complete new table, so construct and validate the
+canonical matrix and metadata in memory before passing the AnnData object to
+`add_table`. The canonical payload should therefore be included in the same
+initial table write rather than adding the table first and invoking a second
+napari-harpy mutation or component write afterwards.
+
+The implementation sequence should be:
+
+1. resolve the exact retained instance IDs and row positions for every labels
+   region;
+2. calculate one intrinsic center block per region through the shared Harpy
+   implementation;
+3. derive the general transformed `spatial_key` coordinates from those same
+   centers;
+4. concatenate all blocks in final table-row order;
+5. construct the complete per-region canonical metadata registry;
+6. validate the matrix, binding, source signatures, coverage and serialized
+   schema together; and
+7. attach both coordinate payloads before the single `add_table` publication.
+
+Napari-harpy's ensure/read path remains useful for older or externally created
+tables without canonical coordinates. For a new Harpy aggregation table,
+napari-harpy cache inspection should report the selected region as valid and
+reuse the stored centers without executing labels-array tasks.
+
+### Dimensional scope
+
+The current napari-harpy schema version 1 and spatial-query path support source
+labels with dimensions `("y", "x")` and represent them in a three-column
+canonical matrix with `z=0`. Preserve that exact compatibility for 2D labels.
+
+`hp.tb.aggregate_points` also supports 3D labels. Do not describe a 3D source
+using the 2D schema or silently change the existing `(x, y, z)` `spatial_key`
+contract. Until a shared canonical schema and napari-harpy query path explicitly
+support 3D, retain the existing label-derived `spatial_key` centers for 3D
+tables and omit `spatial_canonical` plus its metadata. If napari-harpy main has
+gained an authoritative 3D schema by implementation time, evaluate and adopt
+that version as one coordinated compatibility change with focused tests.
+
+### Verification
+
+Focused tests should establish that:
+
+- Harpy imports no `napari_harpy` module and the package dependency direction
+  remains napari-harpy to Harpy;
+- Harpy's port matches the fetched main-branch calculation and serialized
+  schema for representative 2D labels;
+- `spatial_canonical` is dense `float64`, has shape `(n_obs, 3)`, uses exact
+  `(z, y, x)` ordering and has a zero `z` column for 2D labels;
+- the canonical values remain intrinsic when the general `spatial_key`
+  coordinates receive a nonzero SpatialData translation;
+- one labels center-of-mass reduction supplies both coordinate matrices;
+- irregular labels, multiple chunks and requested instance-ID ordering match a
+  simple in-memory reference;
+- multiple regions remain aligned with table rows even when their local
+  instance IDs overlap;
+- every canonical metadata region binds the exact table rows and source labels
+  signature through the expected instance-set digest;
+- malformed matrices, unsupported schema versions, incomplete metadata,
+  missing instance centers and matrix/metadata asymmetry are rejected without
+  publishing a table;
+- the matrix and registry survive AnnData and SpatialData Zarr round trips;
+- napari-harpy recognizes a Harpy-produced 2D table cache as valid and performs
+  a spatial canonical-center query without recalculating labels centers;
+- ordinary and class-aware aggregation receive the same canonical-center
+  contract; and
+- 3D aggregation preserves its existing `spatial_key` output without writing a
+  misleading schema-v1 canonical cache.
+
+## Slice 9: original-point control QC
 
 **Status: specified; not implemented.**
 
 Add separate lightweight QC functions over the original transcript points.
-This slice is scheduled after Slice 7, but its runtime contract depends only on
+This slice is scheduled after Slice 8, but its runtime contract depends only on
 the points and feature-panel metadata from Slice 1 and the sample-aware point
 metadata from Slices 2–4. The original-point summaries may run before or after
 aggregation and do not depend on an instance-label raster or an AnnData table.
