@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 import anndata as ad
 import dask
+import dask.array as da
 import dask.dataframe as dd
 import numpy as np
 import pandas as pd
@@ -31,11 +32,14 @@ from harpy._metadata import (
 from harpy.image._image import _get_spatial_element, _get_translation
 from harpy.table._table import add_table
 from harpy.table._utils import _sanity_check_append_region
-from harpy.utils._keys import _CELL_INDEX, _GENES_KEY, _INSTANCE_KEY, _REGION_KEY, _SPATIAL
+from harpy.utils._aggregate import RasterAggregator
+from harpy.utils._keys import _CELL_INDEX, _FEATURE_MATRICES_KEY, _GENES_KEY, _INSTANCE_KEY, _REGION_KEY, _SPATIAL
 from harpy.utils._transformations import _identity_check_transformations_points
 from harpy.utils.utils import _make_list
 
 _FEATURE_CLASS_AGGREGATION_KEY = "feature_class_aggregation"
+_AUXILIARY_FEATURE_MATRIX_KEY = "auxiliary_feature_counts"
+_FEATURE_MATRIX_SCHEMA_VERSION = 1
 _CONTROL_FRACTION_COLUMN = "control_fraction"
 _AGGREGATE_SOURCE_KIND = "harpy_aggregate_points"
 _DEPRECATED_ATTRIBUTES_WARNED: set[str] = set()
@@ -81,9 +85,7 @@ class _FeaturePanelContract:
     @property
     def class_by_feature(self) -> dict[str, str]:
         return {
-            feature: feature_class
-            for feature_class, features in self.features_by_class_items
-            for feature in features
+            feature: feature_class for feature_class, features in self.features_by_class_items for feature in features
         }
 
 
@@ -118,27 +120,78 @@ class _FeatureClassAggregationContract:
                 f"Expression class {self.expression_class!r} is not present in panel classes "
                 f"{list(self.panel.classes)!r}."
             )
+        if not self.control_classes:
+            raise ValueError(
+                "Class-aware aggregation requires at least one non-expression feature class. "
+                "Use expression_class=None for a panel containing only the expression class."
+            )
         generated = [column for _, column in self.count_columns]
         if len(set(generated)) != len(generated):
             raise ValueError(f"Feature classes produce colliding count-column names: {generated!r}.")
 
     @property
     def count_columns(self) -> tuple[tuple[str, str], ...]:
-        return tuple(
-            (feature_class, f"n_{_snake_case(feature_class)}_points") for feature_class in self.panel.classes
-        )
+        return tuple((feature_class, f"n_{_snake_case(feature_class)}_points") for feature_class in self.panel.classes)
 
     @property
     def control_classes(self) -> tuple[str, ...]:
         return tuple(feature_class for feature_class in self.panel.classes if feature_class != self.expression_class)
 
     @property
-    def control_class_denominators(self) -> tuple[tuple[str, int], ...]:
+    def expression_feature_axis(self) -> tuple[str, ...]:
+        """Return the ordered features defining the columns of ``adata.X``.
+
+        The axis contains every feature assigned to ``expression_class`` in
+        the authoritative panel's order, including features with no observed
+        points. The same ordered values become ``adata.var_names``.
+        """
+        return self.panel.features_by_class[self.expression_class]
+
+    @property
+    def auxiliary_feature_axis(self) -> tuple[str, ...]:
+        """Return the ordered features defining the auxiliary matrix columns.
+
+        Features outside ``expression_class`` are concatenated first in the
+        panel's class order and then in each class's feature order, including
+        features with no observed points. The resulting axis describes
+        ``adata.obsm["auxiliary_feature_counts"]`` and is recorded as that
+        matrix's ``feature_columns`` metadata.
+        """
         features_by_class = self.panel.features_by_class
-        return tuple(
-            (feature_class, len(features_by_class[feature_class]))
-            for feature_class in self.control_classes
-        )
+        return tuple(feature for feature_class in self.control_classes for feature in features_by_class[feature_class])
+
+    @property
+    def auxiliary_class_slices(self) -> tuple[tuple[str, slice], ...]:
+        """Map each non-expression class to its columns on the auxiliary axis.
+
+        Each slice selects that class's contiguous feature block from
+        :attr:`auxiliary_feature_axis`. Because this axis also defines the
+        columns of ``adata.obsm["auxiliary_feature_counts"]``, the same slice
+        selects the class's columns from the auxiliary matrix for calculating
+        per-instance class totals.
+        """
+        result: list[tuple[str, slice]] = []
+        start = 0
+        features_by_class = self.panel.features_by_class
+        for feature_class in self.control_classes:
+            stop = start + len(features_by_class[feature_class])
+            result.append((feature_class, slice(start, stop)))
+            start = stop
+        return tuple(result)
+
+    @property
+    def control_class_denominators(self) -> tuple[tuple[str, int], ...]:
+        """Return the panel-defined feature count for each non-expression class.
+
+        Each denominator is the number of features assigned to that class in
+        the authoritative panel, including panel features for which the
+        selected points elements contain zero transcript detections. These
+        values are recorded with the aggregation metadata so downstream QC can
+        normalize per-class point counts without inferring panel size from the
+        observed data.
+        """
+        features_by_class = self.panel.features_by_class
+        return tuple((feature_class, len(features_by_class[feature_class])) for feature_class in self.control_classes)
 
 
 @dataclass(frozen=True)
@@ -150,23 +203,18 @@ class _PairReductions:
     pair
         Names and coordinate system identifying the paired labels and points
         elements.
-    coordinates
-        Mean coordinates of the assigned points, indexed by instance ID.
+    centers
+        Segmentation-mask centers of mass, indexed by instance ID.
     coordinate_columns
-        Coordinate column names derived from ``coordinates`` in matrix order.
+        Coordinate column names derived from ``centers`` in matrix order.
     feature_counts
         Series mapping each observed ``(instance, feature)`` pair to the
         number of assigned points carrying that feature.
-    class_counts
-        Series mapping each observed ``(instance, feature class)`` pair to
-        the number of assigned points in that class. ``None`` for ordinary,
-        non-class-aware aggregation.
     """
 
     pair: _AggregationPair
-    coordinates: pd.DataFrame
+    centers: pd.DataFrame
     feature_counts: pd.Series
-    class_counts: pd.Series | None
 
     def __post_init__(self) -> None:
         coordinate_columns = self.coordinate_columns
@@ -175,45 +223,46 @@ class _PairReductions:
                 "Pair-reduction coordinates must use columns ('x', 'y') or ('x', 'y', 'z'), "
                 f"found {coordinate_columns!r}."
             )
-        if not self.coordinates.index.is_unique:
-            raise ValueError("Pair-reduction coordinate instance IDs must be unique.")
+        if not self.centers.index.is_unique:
+            raise ValueError("Pair-reduction center instance IDs must be unique.")
 
-        feature_instances = self._validate_counts(self.feature_counts, name="feature_counts")
-        coordinate_instances = self.coordinates.index
-        if not coordinate_instances.isin(feature_instances).all():
-            raise ValueError("Pair-reduction coordinate instances must occur in feature_counts.")
-        if self.class_counts is None:
-            if len(coordinate_instances) != len(feature_instances) or not feature_instances.isin(
-                coordinate_instances
-            ).all():
-                raise ValueError(
-                    "Ordinary pair reductions must use the same coordinate and feature-count instances."
-                )
-            return
-
-        class_instances = self._validate_counts(self.class_counts, name="class_counts")
-        if len(feature_instances) != len(class_instances) or not feature_instances.isin(class_instances).all():
-            raise ValueError("Pair-reduction feature and class counts must reference compatible instance levels.")
+        feature_instances = self._validate_feature_counts()
+        coordinate_instances = self.centers.index
+        if (
+            len(coordinate_instances) != len(feature_instances)
+            or not coordinate_instances.isin(feature_instances).all()
+            or not feature_instances.isin(coordinate_instances).all()
+        ):
+            raise ValueError("Pair-reduction centers and feature counts must use the same instances.")
 
     @property
     def coordinate_columns(self) -> tuple[str, ...]:
         """Return the coordinate columns in their stored matrix order."""
-        return tuple(self.coordinates.columns)
+        return tuple(self.centers.columns)
 
-    def _validate_counts(self, counts: pd.Series, *, name: str) -> pd.Index:
-        """Validate a count Series without scanning its observed pairs."""
+    @property
+    def instance_ids(self) -> np.ndarray:
+        """Return instance IDs in the pair's established output-row order."""
+        return self.centers.index.to_numpy()
+
+    def _validate_feature_counts(self) -> pd.Index:
+        """Validate feature counts and return their referenced instance IDs."""
+        counts = self.feature_counts
         if not isinstance(counts, pd.Series):
-            raise ValueError(f"Pair-reduction {name} must be a pandas Series.")
+            raise ValueError("Pair-reduction feature_counts must be a pandas Series.")
         if counts.dtype != np.dtype(np.uint32):
-            raise ValueError(f"Pair-reduction {name} must use uint32 values, found {counts.dtype}.")
+            raise ValueError(f"Pair-reduction feature_counts must use uint32 values, found {counts.dtype}.")
         if not isinstance(counts.index, pd.MultiIndex) or counts.index.nlevels != 2:
-            raise ValueError(f"Pair-reduction {name} must use a two-level MultiIndex.")
-        if counts.index.names[0] != self.coordinates.index.name:
+            raise ValueError("Pair-reduction feature_counts must use a two-level MultiIndex.")
+        if counts.index.names[0] != self.centers.index.name:
             raise ValueError(
-                f"Pair-reduction {name} instance level {counts.index.names[0]!r} must match "
-                f"coordinate index {self.coordinates.index.name!r}."
+                f"Pair-reduction feature_counts instance level {counts.index.names[0]!r} must match "
+                f"center index {self.centers.index.name!r}."
             )
-        return counts.index.levels[0]
+        level = counts.index.levels[0]
+        codes = counts.index.codes[0]
+        used_codes = np.flatnonzero(np.bincount(codes, minlength=len(level)))
+        return level.take(used_codes)
 
 
 def aggregate_points(
@@ -252,17 +301,33 @@ def aggregate_points(
             -> sdata.attrs["harpy"]["feature_panels"][feature_panel]
 
     The referenced panel supplies ``feature_key``, ``feature_class_key``,
-    ``classes``, and ``features_by_class``. Only features in
-    ``expression_class`` are retained in ``adata.X``; every panel class is
-    summarized as ``n_<class>_points`` in ``adata.obs``, together with
-    ``control_fraction``. Each ``n_<class>_points`` value is the number of
-    points in that feature class assigned to the corresponding instance.
-    Control denominators are the lengths of the panel's non-expression
-    ``features_by_class`` lists. They are recorded in
-    ``adata.uns["feature_class_aggregation"]`` for later QC but no per-feature
+    ``classes``, and ``features_by_class``. Features in ``expression_class``
+    define ``adata.X``. Every remaining panel feature is retained in the
+    independent sparse matrix ``adata.obsm["auxiliary_feature_counts"]``, whose
+    ordered columns are recorded under
+    ``adata.uns["feature_matrices"]["auxiliary_feature_counts"]``. Instances
+    receiving only non-expression points remain in the table with an all-zero
+    expression row.
+
+    Every panel class is also summarized as ``n_<class>_points`` in
+    ``adata.obs``, together with ``control_fraction``. These summaries are
+    derived from the persisted expression and auxiliary matrices. Control
+    denominators are the lengths of the panel's non-expression
+    ``features_by_class`` lists and are recorded in
+    ``adata.uns["feature_class_aggregation"]`` for later QC; no per-feature
     rates are persisted in ``adata.obs``. Class-aware aggregation fails when
     the panel metadata is unavailable, malformed, or incompatible across
     selected points elements.
+
+    Coordinates in ``adata.obsm[spatial_key]`` are geometric centers of mass
+    calculated from the paired labels rasters for the retained instance IDs.
+    This definition is used in both ordinary and class-aware modes and does not
+    depend on point positions or feature classes.
+
+    Table construction does not revalidate the payload it has just assembled.
+    Call :func:`harpy.tb.validate_table` explicitly to check a table against its
+    persisted SpatialData annotation, feature-matrix records, source references,
+    and authoritative feature-panel metadata.
 
     Parameters
     ----------
@@ -295,8 +360,8 @@ def aggregate_points(
     region_key
         Categorical column in ``adata.obs`` holding labels-element names.
     spatial_key
-        Key in ``adata.obsm`` holding mean assigned-point coordinates. In
-        class-aware mode only points from ``expression_class`` contribute.
+        Key in ``adata.obsm`` holding segmentation-label centers of mass in the
+        selected coordinate systems.
     cell_index_name
         Name of the resulting observation index.
     overwrite
@@ -521,7 +586,9 @@ def _resolve_feature_class_contract(
     panel = resolved[0]
     for candidate in resolved[1:]:
         if candidate != panel:
-            raise ValueError("All points elements in one class-aware aggregation call must reference compatible panels.")
+            raise ValueError(
+                "All points elements in one class-aware aggregation call must reference compatible panels."
+            )
     contract = _FeatureClassAggregationContract(
         panel=panel,
         expression_class=expression_class,
@@ -635,14 +702,15 @@ def _reduce_aggregation_pair(
         normalized_points = points.assign(**{class_key: points[class_key].astype(categorical_dtype)})
 
     # One row per point overlapping a non-background label. Each row retains
-    # its coordinates and requested feature columns, and gains the overlapping
-    # label ID in ``cell_index_name``; for example:
-    # (x=120, y=80, feature="EPCAM", label_id=42).
+    # the requested feature columns and gains the overlapping label ID in
+    # ``cell_index_name``; for example: (feature="EPCAM", label_id=42).
+    # Coordinates are dropped because table coordinates are calculated from
+    # the labels raster after the assigned-instance universe is known.
     assigned_points = _assign_points_to_labels(
         se=_get_spatial_element(sdata, element_name=pair.labels_name),
         ddf=points,
         value_key=feature_key if class_key is None else [feature_key, class_key],
-        drop_coordinates=False,
+        drop_coordinates=True,
         to_coordinate_system=pair.coordinate_system,
         chunks=chunks,
         cell_index_name=cell_index_name,
@@ -650,9 +718,7 @@ def _reduce_aggregation_pair(
     # Convert categorical features to strings before grouping. Otherwise, the
     # categorical groupby may emit the Cartesian product of instances and
     # declared feature categories, including zero-count combinations.
-    points_for_feature_counts = assigned_points.assign(
-        **{feature_key: assigned_points[feature_key].astype("str")}
-    )
+    points_for_feature_counts = assigned_points.assign(**{feature_key: assigned_points[feature_key].astype("str")})
     # Number of assigned points for every (label ID, feature) pair; these
     # counts become the expression matrix when the output table is assembled,
     # for example: (label_id=42, feature="EPCAM") -> 7 points.
@@ -660,19 +726,8 @@ def _reduce_aggregation_pair(
     feature_counts = feature_counts.map_partitions(lambda value: value.astype(np.uint32))
 
     if contract is None:
-        coordinate_source = assigned_points
-        class_counts = None
         errors = None
     else:
-        coordinate_source = assigned_points[assigned_points[class_key] == contract.expression_class]
-        points_for_class_counts = assigned_points.assign(
-            **{class_key: assigned_points[class_key].astype("str")}
-        )
-        # Number of assigned points for every (label ID, feature class) pair;
-        # these counts become per-instance QC columns in ``adata.obs``, for
-        # example: (label_id=42, feature_class="Negative") -> 3 points.
-        class_counts = points_for_class_counts.groupby([cell_index_name, class_key]).size()
-        class_counts = class_counts.map_partitions(lambda value: value.astype(np.uint32))
         errors = normalized_points[[feature_key, class_key]].map_partitions(
             _feature_panel_partition_errors,
             feature_key=feature_key,
@@ -681,28 +736,102 @@ def _reduce_aggregation_pair(
             meta=pd.Series(name="error", dtype="object"),
         )
 
-    coordinates = coordinate_source.groupby(cell_index_name)[list(coordinate_columns)].mean()
     if errors is None:
-        computed_coordinates, computed_feature_counts = dask.compute(coordinates, feature_counts)
-        computed_class_counts = None
+        computed_feature_counts = feature_counts.compute()
     else:
-        computed_coordinates, computed_feature_counts, computed_class_counts, computed_errors = dask.compute(
-            coordinates,
-            feature_counts,
-            class_counts,
-            errors,
-        )
+        computed_feature_counts, computed_errors = dask.compute(feature_counts, errors)
         if not computed_errors.empty:
             raise ValueError(
                 f"Points element {pair.points_name!r} disagrees with its feature panel: {computed_errors.iloc[0]}"
             )
 
+    instance_ids = np.sort(_used_count_level(computed_feature_counts, key=cell_index_name).to_numpy())
+    centers = _label_centers(
+        sdata,
+        pair=pair,
+        instance_ids=instance_ids,
+        coordinate_columns=coordinate_columns,
+        cell_index_name=cell_index_name,
+    )
+
     return _PairReductions(
         pair=pair,
-        coordinates=computed_coordinates,
+        centers=centers,
         feature_counts=computed_feature_counts,
-        class_counts=computed_class_counts,
     )
+
+
+def _label_centers(
+    sdata: SpatialData,
+    *,
+    pair: _AggregationPair,
+    instance_ids: np.ndarray,
+    coordinate_columns: tuple[str, ...],
+    cell_index_name: str,
+) -> pd.DataFrame:
+    """Calculate indexed label centers in the pair's coordinate system.
+
+    The labels raster is normalized to ``(z, y, x)`` for
+    :class:`~harpy.utils.RasterAggregator`. Only ``instance_ids`` are reduced.
+    Its local ``(z, y, x)`` results are translated in ``x`` and ``y``, reordered
+    to SpatialData coordinate order, and indexed explicitly so table assembly
+    never relies on raster traversal order.
+
+    Parameters
+    ----------
+    sdata
+        SpatialData object containing the labels element.
+    pair
+        Labels element and target coordinate system for this aggregation pair.
+    instance_ids
+        Sorted nonzero label IDs receiving at least one assigned point.
+    coordinate_columns
+        Output order, either ``("x", "y")`` or ``("x", "y", "z")``.
+    cell_index_name
+        Name used for the returned instance-ID index.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One finite center-of-mass coordinate row per requested instance ID.
+    """
+    if instance_ids.size == 0:
+        return pd.DataFrame(
+            index=pd.Index(instance_ids, name=cell_index_name),
+            columns=coordinate_columns,
+            dtype=np.float64,
+        )
+
+    labels = _get_spatial_element(sdata, element_name=pair.labels_name)
+    label_dims = tuple(labels.dims)
+    mask = da.asarray(labels.data)
+    if label_dims == ("y", "x"):
+        mask = mask[None, ...]
+    elif label_dims != ("z", "y", "x"):
+        raise ValueError(
+            f"Labels element {pair.labels_name!r} must use dimensions ('y', 'x') or ('z', 'y', 'x'), "
+            f"found {label_dims!r}."
+        )
+
+    aggregator = RasterAggregator(
+        mask_dask_array=mask,
+        image_dask_array=None,
+        instance_key=cell_index_name,
+        run_on_gpu=False,
+    )
+    centers = aggregator.center_of_mass(index=instance_ids)
+    centers = centers.rename(columns={0: "z", 1: "y", 2: "x"}).set_index(cell_index_name)
+    if not centers.index.is_unique:
+        raise ValueError(f"Labels element {pair.labels_name!r} produced duplicate center-of-mass instance IDs.")
+    centers = centers.reindex(instance_ids)
+    if centers[["z", "y", "x"]].isna().any(axis=None):
+        raise ValueError(f"Labels centers of mass are missing for assigned instances in {pair.labels_name!r}.")
+
+    translation_x, translation_y = _get_translation(labels, to_coordinate_system=pair.coordinate_system)
+    centers["x"] += translation_x
+    centers["y"] += translation_y
+    centers.index.name = cell_index_name
+    return centers.loc[:, list(coordinate_columns)]
 
 
 def _feature_panel_partition_errors(
@@ -790,6 +919,13 @@ def _count_index_level(counts: pd.Series, *, key: str) -> tuple[pd.Index, np.nda
     return index.levels[level_number], codes
 
 
+def _used_count_level(counts: pd.Series, *, key: str) -> pd.Index:
+    """Return unique level values referenced by at least one observed count pair."""
+    level, codes = _count_index_level(counts, key=key)
+    used_codes = np.flatnonzero(np.bincount(codes, minlength=len(level)))
+    return level.take(used_codes)
+
+
 def _assemble_aggregation_table(
     reductions: tuple[_PairReductions, ...],
     *,
@@ -800,100 +936,111 @@ def _assemble_aggregation_table(
     spatial_key: str,
     contract: _FeatureClassAggregationContract | None,
 ) -> AnnData:
-    """Align pair reductions to one feature axis and construct one AnnData table."""
+    """Align pair reductions to their output axes and construct one AnnData table."""
     if contract is None:
         observed_features: set[str] = set()
         for result in reductions:
-            feature_level, feature_codes = _count_index_level(result.feature_counts, key=feature_key)
-            used_feature_codes = np.flatnonzero(np.bincount(feature_codes, minlength=len(feature_level)))
-            observed_features.update(feature_level.take(used_feature_codes))
-        feature_axis = tuple(sorted(observed_features))
+            # Ordinary mode has no panel-defined feature axis. Collect only
+            # features referenced by each count MultiIndex; _counts_to_sparse
+            # later maps every pair's internal level codes onto the resulting
+            # shared sorted axis, which also becomes adata.var_names.
+            observed_features.update(_used_count_level(result.feature_counts, key=feature_key))
+        expression_feature_axis = tuple(sorted(observed_features))
+        auxiliary_feature_axis: tuple[str, ...] = ()
     else:
-        feature_axis = contract.panel.features_by_class[contract.expression_class]
-    if not feature_axis:
+        expression_feature_axis = contract.expression_feature_axis
+        auxiliary_feature_axis = contract.auxiliary_feature_axis
+    if not expression_feature_axis:
         raise ValueError("Aggregation produced no expression features.")
 
     coordinate_columns = reductions[0].coordinate_columns
     if any(result.coordinate_columns != coordinate_columns for result in reductions[1:]):
         raise ValueError("All aggregation pairs must use the same coordinate dimensions.")
 
-    matrices: list[sparse.csr_matrix] = []
+    expression_matrices: list[sparse.csr_matrix] = []
+    auxiliary_matrices: list[sparse.csr_matrix] = []
     obs_frames: list[pd.DataFrame] = []
     coordinate_blocks: list[np.ndarray] = []
     uuid_value = str(uuid.uuid4())[:8]
-    count_columns = {} if contract is None else dict(contract.count_columns)
 
     for result in reductions:
-        feature_level, feature_codes = _count_index_level(result.feature_counts, key=feature_key)
-        instance_level, instance_codes = _count_index_level(result.feature_counts, key=cell_index_name)
-        # Resolve expression membership once for each unique feature, then use
-        # the compact codes to mark the observed instance-feature pairs.
-        selected_pairs = feature_level.isin(feature_axis)[feature_codes]
-        instance_has_expression = (
-            np.bincount(instance_codes, weights=selected_pairs, minlength=len(instance_level)) > 0
-        )
-        instance_ids = np.sort(instance_level[instance_has_expression].to_numpy())
-        matrix = _counts_to_sparse(
+        # Retain every instance receiving any assigned point. In class-aware
+        # mode this includes control-only instances, whose expression row is
+        # deliberately all zero.
+        instance_ids = result.instance_ids
+        expression_matrix = _counts_to_sparse(
             result.feature_counts,
             instance_ids=instance_ids,
-            feature_axis=feature_axis,
+            feature_axis=expression_feature_axis,
             cell_index_name=cell_index_name,
             feature_key=feature_key,
         )
-        matrices.append(matrix)
+        expression_matrices.append(expression_matrix)
 
         obs_index = [f"{instance}_{result.pair.labels_name}_{uuid_value}" for instance in instance_ids]
         obs = pd.DataFrame(index=pd.Index(obs_index, name=cell_index_name))
         obs[instance_key] = instance_ids.astype(int, copy=False)
         obs[region_key] = result.pair.labels_name
         if contract is not None:
-            if result.class_counts is None:
-                raise RuntimeError("Class-aware pair reductions are missing class counts.")
-            if result.class_counts.empty:
-                aligned_class_counts = pd.DataFrame(
-                    0,
-                    index=instance_ids,
-                    columns=contract.panel.classes,
-                    dtype=np.uint32,
-                )
-            else:
-                aligned_class_counts = result.class_counts.unstack(
-                    level=contract.panel.feature_class_key,
-                    fill_value=0,
-                ).reindex(
-                    index=instance_ids,
-                    columns=contract.panel.classes,
-                    fill_value=0,
-                )
-            for feature_class, column_name in contract.count_columns:
-                obs[column_name] = aligned_class_counts[feature_class].to_numpy(dtype=np.uint32)
-            denominator = sum(obs[column] for column in count_columns.values())
-            controls = sum(
-                obs[count_columns[feature_class]]
-                for feature_class in contract.control_classes
+            auxiliary_matrix = _counts_to_sparse(
+                result.feature_counts,
+                instance_ids=instance_ids,
+                feature_axis=auxiliary_feature_axis,
+                cell_index_name=cell_index_name,
+                feature_key=feature_key,
             )
-            obs[_CONTROL_FRACTION_COLUMN] = controls / denominator
+            auxiliary_matrices.append(auxiliary_matrix)
+
+            class_counts = {
+                contract.expression_class: _sparse_row_counts(expression_matrix),
+                **{
+                    feature_class: _sparse_row_counts(auxiliary_matrix[:, class_slice])
+                    for feature_class, class_slice in contract.auxiliary_class_slices
+                },
+            }
+            for feature_class, column_name in contract.count_columns:
+                obs[column_name] = class_counts[feature_class]
+            total_counts = sum(
+                (class_counts[feature_class].astype(np.uint64) for feature_class in contract.panel.classes),
+                start=np.zeros(len(instance_ids), dtype=np.uint64),
+            )
+            if np.any(total_counts == 0):
+                raise RuntimeError("Retained aggregation rows must contain at least one assigned point.")
+            control_counts = sum(
+                (class_counts[feature_class].astype(np.uint64) for feature_class in contract.control_classes),
+                start=np.zeros(len(instance_ids), dtype=np.uint64),
+            )
+            obs[_CONTROL_FRACTION_COLUMN] = control_counts / total_counts
         obs_frames.append(obs)
 
-        coordinates = result.coordinates.reindex(instance_ids)
-        if coordinates.isna().any(axis=None):
+        centers = result.centers.reindex(instance_ids)
+        if centers.isna().any(axis=None):
             raise ValueError(
-                f"Mean expression-point coordinates are missing for retained instances in {result.pair.labels_name!r}."
+                f"Label centers of mass are missing for retained instances in {result.pair.labels_name!r}."
             )
-        coordinate_blocks.append(coordinates.loc[:, list(coordinate_columns)].to_numpy())
+        coordinate_blocks.append(centers.loc[:, list(coordinate_columns)].to_numpy())
 
-    X = sparse.vstack(matrices, format="csr")
+    X = sparse.vstack(expression_matrices, format="csr")
     obs = pd.concat(obs_frames, axis=0)
     labels_names = [result.pair.labels_name for result in reductions]
     obs[region_key] = pd.Categorical(obs[region_key], categories=labels_names)
     adata = AnnData(
         X=X,
         obs=obs,
-        var=pd.DataFrame(index=pd.Index(feature_axis, name=feature_key)),
+        var=pd.DataFrame(index=pd.Index(expression_feature_axis, name=feature_key)),
     )
     adata.obsm[spatial_key] = np.vstack(coordinate_blocks)
 
     if contract is not None:
+        auxiliary_matrix = sparse.vstack(auxiliary_matrices, format="csr")
+        adata.obsm[_AUXILIARY_FEATURE_MATRIX_KEY] = auxiliary_matrix
+        adata.uns[_FEATURE_MATRICES_KEY] = {
+            _AUXILIARY_FEATURE_MATRIX_KEY: {
+                "schema_version": _FEATURE_MATRIX_SCHEMA_VERSION,
+                "source_kind": _AGGREGATE_SOURCE_KIND,
+                "feature_columns": list(auxiliary_feature_axis),
+            }
+        }
         adata.uns[_FEATURE_CLASS_AGGREGATION_KEY] = {
             "schema_version": 1,
             "source_kind": _AGGREGATE_SOURCE_KIND,
@@ -904,6 +1051,7 @@ def _assemble_aggregation_table(
             "control_class_denominators": dict(contract.control_class_denominators),
             "count_columns": dict(contract.count_columns),
             "control_fraction_column": _CONTROL_FRACTION_COLUMN,
+            "auxiliary_feature_matrix_key": _AUXILIARY_FEATURE_MATRIX_KEY,
             "regions": {
                 result.pair.labels_name: {
                     "points_element": result.pair.points_name,
@@ -913,6 +1061,20 @@ def _assemble_aggregation_table(
             },
         }
     return adata
+
+
+def _sparse_row_counts(matrix: sparse.spmatrix) -> np.ndarray:
+    """Return checked dense ``uint32`` row sums without densifying ``matrix``.
+
+    The sparse input remains sparse; only one sum per matrix row is
+    materialized. SciPy accumulates ``uint32`` values as ``uint64``, allowing
+    overflow to be checked before the result is converted back to the compact
+    ``uint32`` count dtype.
+    """
+    counts = np.asarray(matrix.sum(axis=1)).ravel()
+    if np.any(counts > np.iinfo(np.uint32).max):
+        raise ValueError("Per-instance assigned-point counts exceed the uint32 output range.")
+    return counts.astype(np.uint32, copy=False)
 
 
 def _counts_to_sparse(
@@ -930,8 +1092,8 @@ def _counts_to_sparse(
     values in those levels to the requested output axes and then expands only
     their compact integer codes. A pair is omitted when either its instance is
     absent from ``instance_ids`` or its feature is absent from
-    ``feature_axis``. In class-aware aggregation, this excludes control
-    features and instances containing only control points from ``adata.X``.
+    ``feature_axis``. The caller can therefore construct expression and
+    auxiliary matrices from the same complete count reduction.
 
     Parameters
     ----------

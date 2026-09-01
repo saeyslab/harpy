@@ -115,6 +115,7 @@ Operations on table (`AnnData` object) elements.
     tb.bin_counts
     tb.add_regionprops
     tb.add_feature_matrix
+    tb.validate_table
     tb.extract_instances
     tb.ZarrIterableInstances
     tb.ZarrDataLoader

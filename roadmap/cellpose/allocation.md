@@ -1568,8 +1568,6 @@ table-local `feature_matrices` registry:
 adata.uns["feature_matrices"]["auxiliary_feature_counts"] = {
     "schema_version": 1,
     "source_kind": "harpy_aggregate_points",
-    "backend": "scipy_csr",
-    "dtype": "uint32",
     "feature_columns": [
         "Negative1",
         "Negative2",
@@ -1603,21 +1601,15 @@ adata.uns["feature_class_aggregation"]["auxiliary_feature_matrix_key"] = (
 This pointer prevents downstream consumers from guessing an `.obsm` key. The
 feature-matrix record owns the auxiliary column schema; the aggregation record
 owns the class semantics and must not duplicate the ordered feature names.
-Interpret the auxiliary columns as contiguous class blocks by:
-
-1. taking the ordered `classes` from `feature_class_aggregation` and removing
-   `expression_class`;
-2. retaining that class order; and
-3. assigning each class the next number of columns given by its
-   `control_class_denominators` value.
-
-Consequently, the sum of the non-expression denominators must equal the number
-of `feature_columns` and the auxiliary matrix width. During construction, the
-ordered columns and derived class blocks must exactly match the
-non-expression portion of the authoritative feature panel. Validate the
-pointer, matrix shape, dtype, column metadata and panel-derived class contract
-together before writing and after reading the table. `feature_columns` is a
-derived record of the matrix axis, not a second authoritative assay panel.
+During construction, the ordered columns and derived class blocks must exactly
+match the non-expression portion of the authoritative feature panel. After
+construction, ordinary downstream filtering and reordering are allowed:
+resolve each current `feature_columns` value against the authoritative panel
+rather than inferring its class from a fixed contiguous slice. Validation must
+check the pointer, matrix shape, column metadata and panel membership, but must
+not constrain the current storage backend or dtype. `feature_columns` is a
+derived record of the current matrix axis, not a second authoritative assay
+panel.
 
 This contract adopts the existing Harpy `feature_matrices` convention so that
 matrix columns can always be discovered consistently. Integrating
@@ -1759,8 +1751,10 @@ Focused tests should establish that:
   definition;
 - `expression_class=None` creates neither the auxiliary matrix nor its metadata
   and otherwise retains ordinary feature aggregation; and
-- malformed auxiliary metadata, a dangling aggregation pointer, shape or dtype
-  disagreement, and matrix/summary disagreement are rejected clearly.
+- malformed auxiliary metadata, a dangling aggregation pointer, a
+  feature-column shape mismatch and features assigned to the wrong panel class
+  are rejected clearly, while downstream matrix representation, dtype and
+  recalculated summary values remain valid.
 
 Benchmark the additional sparse matrix and labels-center calculation on a
 representative backed crop. Record output nonzeros and bytes separately for
