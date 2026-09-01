@@ -17,17 +17,20 @@ from harpy._metadata import (
     _POINTS_METADATA_KEY,
 )
 from harpy.table._allocation import (
-    _AGGREGATE_SOURCE_KIND,
-    _AUXILIARY_FEATURE_MATRIX_KEY,
-    _AUXILIARY_POINTS_FRACTION_COLUMN,
-    _FEATURE_CLASS_AGGREGATION_KEY,
-    _FEATURE_MATRIX_SCHEMA_VERSION,
     _FeatureClassAggregationContract,
     _FeaturePanelContract,
     _parse_feature_panel,
     _require_mapping,
     _require_nonempty_string,
     _validate_feature_class_dtype,
+)
+from harpy.table._metadata import (
+    _AGGREGATE_POINTS_SOURCE_KIND,
+    _AUXILIARY_FEATURE_MATRIX_KEY,
+    _AUXILIARY_POINTS_FRACTION_COLUMN,
+    _FEATURE_CLASS_AGGREGATION_KEY,
+    _FEATURE_CLASS_AGGREGATION_SCHEMA_VERSION,
+    _FEATURE_MATRIX_SCHEMA_VERSION,
 )
 from harpy.utils._keys import _FEATURE_MATRICES_KEY
 
@@ -349,7 +352,7 @@ def _validate_feature_class_aggregation(
     )
     expected_record = {
         "schema_version": _FEATURE_MATRIX_SCHEMA_VERSION,
-        "source_kind": _AGGREGATE_SOURCE_KIND,
+        "source_kind": _AGGREGATE_POINTS_SOURCE_KIND,
     }
     if any(feature_matrix_record.get(key) != expected for key, expected in expected_record.items()):
         raise ValueError("Auxiliary feature-matrix metadata disagrees with the aggregation contract.")
@@ -472,8 +475,8 @@ def _validate_feature_class_metadata(
     their auxiliary class's recorded feature count.
     """
     expected = {
-        "schema_version": 1,
-        "source_kind": _AGGREGATE_SOURCE_KIND,
+        "schema_version": _FEATURE_CLASS_AGGREGATION_SCHEMA_VERSION,
+        "source_kind": _AGGREGATE_POINTS_SOURCE_KIND,
         "feature_key": contract.panel.feature_key,
         "feature_class_key": contract.panel.feature_class_key,
         "expression_class": contract.expression_class,

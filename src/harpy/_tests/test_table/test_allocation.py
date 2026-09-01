@@ -30,7 +30,7 @@ _PANEL = {
 def test_allocate_import_warns_and_resolves_to_aggregate_points(monkeypatch: pytest.MonkeyPatch):
     messages: list[str] = []
     monkeypatch.setattr("harpy.table._allocation.log", SimpleNamespace(warning=messages.append))
-    monkeypatch.setattr("harpy.table._allocation._DEPRECATED_ATTRIBUTES_WARNED", set())
+    monkeypatch.setattr("harpy.table._allocation._WARNED_DEPRECATED_ATTRIBUTES", set())
 
     alias = aggregation_module.__getattr__("allocate")
     repeated_alias = aggregation_module.__getattr__("allocate")

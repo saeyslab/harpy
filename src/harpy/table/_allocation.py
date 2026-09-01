@@ -30,6 +30,14 @@ from harpy._metadata import (
     _POINTS_METADATA_KEY,
 )
 from harpy.image._image import _get_spatial_element, _get_translation
+from harpy.table._metadata import (
+    _AGGREGATE_POINTS_SOURCE_KIND,
+    _AUXILIARY_FEATURE_MATRIX_KEY,
+    _AUXILIARY_POINTS_FRACTION_COLUMN,
+    _FEATURE_CLASS_AGGREGATION_KEY,
+    _FEATURE_CLASS_AGGREGATION_SCHEMA_VERSION,
+    _FEATURE_MATRIX_SCHEMA_VERSION,
+)
 from harpy.table._table import add_table
 from harpy.table._utils import _sanity_check_append_region
 from harpy.utils._aggregate import RasterAggregator
@@ -37,12 +45,7 @@ from harpy.utils._keys import _CELL_INDEX, _FEATURE_MATRICES_KEY, _GENES_KEY, _I
 from harpy.utils._transformations import _identity_check_transformations_points
 from harpy.utils.utils import _make_list
 
-_FEATURE_CLASS_AGGREGATION_KEY = "feature_class_aggregation"
-_AUXILIARY_FEATURE_MATRIX_KEY = "auxiliary_feature_counts"
-_FEATURE_MATRIX_SCHEMA_VERSION = 1
-_AUXILIARY_POINTS_FRACTION_COLUMN = "auxiliary_points_fraction"
-_AGGREGATE_SOURCE_KIND = "harpy_aggregate_points"
-_DEPRECATED_ATTRIBUTES_WARNED: set[str] = set()
+_WARNED_DEPRECATED_ATTRIBUTES: set[str] = set()
 
 
 @dataclass(frozen=True)
@@ -446,8 +449,8 @@ def aggregate_points(
 
 def __getattr__(name: str) -> object:
     if name == "allocate":
-        if name not in _DEPRECATED_ATTRIBUTES_WARNED:
-            _DEPRECATED_ATTRIBUTES_WARNED.add(name)
+        if name not in _WARNED_DEPRECATED_ATTRIBUTES:
+            _WARNED_DEPRECATED_ATTRIBUTES.add(name)
             log.warning("`harpy.tb.allocate` is deprecated. Import and use `harpy.tb.aggregate_points` instead.")
         return aggregate_points
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
@@ -1038,13 +1041,13 @@ def _assemble_aggregation_table(
         adata.uns[_FEATURE_MATRICES_KEY] = {
             _AUXILIARY_FEATURE_MATRIX_KEY: {
                 "schema_version": _FEATURE_MATRIX_SCHEMA_VERSION,
-                "source_kind": _AGGREGATE_SOURCE_KIND,
+                "source_kind": _AGGREGATE_POINTS_SOURCE_KIND,
                 "feature_columns": list(auxiliary_feature_axis),
             }
         }
         adata.uns[_FEATURE_CLASS_AGGREGATION_KEY] = {
-            "schema_version": 1,
-            "source_kind": _AGGREGATE_SOURCE_KIND,
+            "schema_version": _FEATURE_CLASS_AGGREGATION_SCHEMA_VERSION,
+            "source_kind": _AGGREGATE_POINTS_SOURCE_KIND,
             "feature_key": contract.panel.feature_key,
             "feature_class_key": contract.panel.feature_class_key,
             "expression_class": contract.expression_class,

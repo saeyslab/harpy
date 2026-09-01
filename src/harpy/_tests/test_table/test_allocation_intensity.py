@@ -16,7 +16,7 @@ from harpy.table._regionprops import add_regionprops
 def test_allocate_intensity_import_warns_and_resolves_to_aggregate_image(monkeypatch: pytest.MonkeyPatch):
     messages: list[str] = []
     monkeypatch.setattr("harpy.table._allocation_intensity.log", SimpleNamespace(warning=messages.append))
-    monkeypatch.setattr("harpy.table._allocation_intensity._DEPRECATED_ATTRIBUTES_WARNED", set())
+    monkeypatch.setattr("harpy.table._allocation_intensity._WARNED_DEPRECATED_ATTRIBUTES", set())
 
     alias = image_aggregation_module.__getattr__("allocate_intensity")
     repeated_alias = image_aggregation_module.__getattr__("allocate_intensity")
