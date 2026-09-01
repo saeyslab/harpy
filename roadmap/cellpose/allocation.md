@@ -209,7 +209,7 @@ ordering is deterministic rather than a claim of biological precedence.
 
 Slice 5 uses the complete relation to resolve its shared expression axis and
 feature classes, and retains each non-expression feature-list length as a
-table-local denominator snapshot for later QC. Slice 9 additionally uses the
+table-local auxiliary-class feature-count snapshot for later QC. Slice 9 additionally uses the
 actual control-feature names. A categorical transcript column
 contains only categories represented by the ingested points and cannot, by
 itself, preserve the feature-to-class relationship for a panel feature with no
@@ -969,7 +969,7 @@ paired labels/points/coordinate-system regions and construct one complete
 AnnData table. In class-aware mode, every point is spatially assigned once, but
 the resulting payload is split by biological role: only the selected expression
 class is retained as the sparse feature matrix, while every non-expression
-class is reduced to per-instance control summaries.
+class is reduced to per-instance auxiliary summaries.
 
 For example, CosMx points carry both a feature key and a feature-class key:
 
@@ -985,7 +985,7 @@ The resulting table has the following high-level contract:
 ```text
 adata.X       instances x Endogenous features only
 adata.var     the shared Endogenous feature axis
-adata.obs     total assigned points per feature class and control_fraction
+adata.obs     total assigned points per feature class and auxiliary_points_fraction
 adata.obsm    mean coordinates calculated from assigned Endogenous points
 adata.uns     the versioned feature_class_aggregation configuration and sources
 ```
@@ -1000,13 +1000,13 @@ labels[1] + points[1] + coordinate_system[1] ┼──> one AnnData table
 
 Resolve one shared expression-feature axis before constructing any per-region
 matrix. A feature assayed by the compatible shared panel but absent from one
-region is represented by zeros for that region rather than removed. Control
-denominators always come from referenced feature-panel metadata. Class-aware
+region is represented by zeros for that region rather than removed. Auxiliary
+class feature counts always come from referenced feature-panel metadata. Class-aware
 allocation has no caller-supplied denominator fallback or override.
 
 The point-to-label lookup is performed once per labels/points pair, carrying
 both the feature and feature-class columns through the assignment. It is never
-repeated once per class. Control points outside every instance are deliberately
+repeated once per class. Auxiliary points outside every instance are deliberately
 excluded from these cell-level summaries; Slice 9 operates directly on the
 original points to provide spatial background QC.
 
@@ -1090,7 +1090,7 @@ When `expression_class` is provided, every selected points element must have a
 root Harpy points record that references an authoritative shared feature panel.
 The panel supplies `feature_class_key`, the complete ordered classes,
 feature-to-class assignments, and the feature lists whose lengths define the
-control denominators. Missing, malformed, or incompatible panel metadata is an
+auxiliary class feature counts. Missing, malformed, or incompatible panel metadata is an
 error before spatial lookup. Allocation accepts no denominator fallback,
 override, or per-sample mapping.
 
@@ -1099,8 +1099,8 @@ metadata path used in class-aware mode. In particular, it must state that
 `feature_class_key` is not a user argument: it is resolved through
 `sdata.attrs["harpy"]["points"][points_name]["feature_panel"]` and then read
 from the referenced record in `sdata.attrs["harpy"]["feature_panels"]`. The
-docstring must also state that control denominators are derived from the lengths
-of the panel's non-expression `features_by_class` lists and that class-aware
+docstring must also state that auxiliary class feature counts are derived from
+the lengths of the panel's non-expression `features_by_class` lists and that class-aware
 allocation fails when this metadata is unavailable.
 
 The ordinary path still supports multiple allocation pairs. It uses the
@@ -1132,9 +1132,8 @@ For every normalized labels/points/coordinate-system pair, resolve the points
 record and its referenced panel before spatial lookup. Require the panel's
 `feature_key` to equal the public `feature_key` argument; read
 `feature_class_key` directly from the panel rather than accepting it as an
-aggregation parameter. Derive the
-denominator for every non-expression class from the length of its authoritative
-`features_by_class` list.
+aggregation parameter. Derive the feature count for every auxiliary class from
+the length of its authoritative `features_by_class` list.
 
 The metadata roles are deliberately distinct:
 
@@ -1154,18 +1153,18 @@ feature axis, aggregation behavior, generated `.obs` columns, and table-local
 `.uns` record. Do not independently reinterpret root metadata at separate
 stages of the operation.
 
-There is no per-sample or per-region denominator mapping in one output table.
+There is no per-sample or per-region auxiliary-class feature-count mapping in one output table.
 Likewise, `code_class` categories may differ between samples stored in the same
 SpatialData object, but samples with different class universes or incompatible
 panels cannot participate in the same class-aware allocation call. They require
 separate output tables. Otherwise, later QC would interpret a given class-count
-column against different panel denominators in different rows.
+column against different panel feature counts in different rows.
 
 The complete policy is:
 
 ```text
 all selected points reference compatible panels
-    -> derive one shared class contract and denominator mapping
+    -> derive one shared class contract and auxiliary-class feature-count mapping
 
 missing panel metadata or incompatible panels
     -> reject before spatial lookup
@@ -1195,10 +1194,10 @@ incompatible metadata before spatial allocation. This prevents a zero from
 ambiguously meaning either "assayed but not detected" or "not assayed by this
 panel."
 
-Derive one shared denominator mapping from the compatible panel contract for
-the complete allocation call. Per-sample and per-region denominator mappings
+Derive one shared auxiliary-class feature-count mapping from the compatible
+panel contract for the complete allocation call. Per-sample and per-region mappings
 are not supported because later QC must interpret a given class-count column
-against one consistent panel denominator across all rows.
+against one consistent panel feature count across all rows.
 
 ### Categorical class contract
 
@@ -1214,11 +1213,11 @@ Require that:
 - the column contains no null values;
 - every target maps to exactly one feature class; and
 - every non-expression class has a non-empty authoritative
-  `features_by_class` list, yielding a positive denominator.
+  `features_by_class` list, yielding a positive feature count.
 
 Do not silently discard a panel class. An unused categorical class is valid and
 produces zero per-instance counts, but its authoritative panel feature list
-still defines the positive denominator retained for later QC calculations.
+still defines the positive feature count retained for later QC calculations.
 
 Normalize each category deterministically to snake case and construct output
 names from that normalized category rather than accepting platform-specific
@@ -1244,14 +1243,14 @@ between readers.
 
 Reject an empty normalized name, two categories that normalize to the same
 name, and collisions with existing `.obs` columns or the fixed
-`control_fraction` output. Category order determines output-column order but
+`auxiliary_points_fraction` output. Category order determines output-column order but
 does not affect the calculations.
 
 Point aggregation resolves panel metadata from every selected `points_name`,
 verifies that the stored feature key matches the public `feature_key` argument,
 uses the panel's
-`feature_class_key` to select the class column, and derives denominators from
-the `features_by_class` list lengths. It must not silently estimate denominators
+`feature_class_key` to select the class column, and derives auxiliary-class
+feature counts from the `features_by_class` list lengths. It must not silently estimate them
 from observed points or accept caller-supplied assay constants.
 
 ### Output metrics
@@ -1262,28 +1261,28 @@ In the example above, the output columns are:
 n_endogenous_points
 n_negative_points
 n_system_control_points
-control_fraction
+auxiliary_points_fraction
 ```
 
 The class count columns contain assigned point counts. For this three-class
 configuration:
 
 ```text
-control_fraction =
+auxiliary_points_fraction =
     (n_negative_points + n_system_control_points)
     / (n_endogenous_points + n_negative_points + n_system_control_points)
 ```
 
 Do not persist `negative_points_per_feature` or
 `system_control_points_per_feature` in `.obs`. They are deterministic rescalings
-of the raw class counts by the panel denominators and add no independent table
+of the raw class counts by the panel feature counts and add no independent table
 information. Slice 9 QC plotting derives them on demand from the raw count
-columns and the table-local denominator snapshot.
+columns and the table-local auxiliary-class feature-count snapshot.
 
 ### Table-local metadata contract
 
 Record the resolved configuration and generated-column bindings under one
-dedicated table-local key. The `control_class_denominators` field below is a
+dedicated table-local key. The `auxiliary_class_feature_counts` field below is a
 derived snapshot of the panel values used for this table; it is not accepted as
 an allocation argument or treated as an authoritative panel definition:
 
@@ -1295,7 +1294,7 @@ adata.uns["feature_class_aggregation"] = {
     "feature_class_key": "code_class",
     "expression_class": "Endogenous",
     "classes": ["Endogenous", "Negative", "SystemControl"],
-    "control_class_denominators": {
+    "auxiliary_class_feature_counts": {
         "Negative": 10,
         "SystemControl": 197,
     },
@@ -1304,7 +1303,7 @@ adata.uns["feature_class_aggregation"] = {
         "Negative": "n_negative_points",
         "SystemControl": "n_system_control_points",
     },
-    "control_fraction_column": "control_fraction",
+    "auxiliary_points_fraction_column": "auxiliary_points_fraction",
     "regions": {
         "sample_a_cellpose_labels_mosaic_1": {
             "points_element": "sample_a_transcripts_mosaic_1",
@@ -1331,7 +1330,7 @@ than a registry keyed by an arbitrary artifact name. Its generated-column
 mappings bind the metadata to the actual `.obs` payload instead of requiring
 downstream code to reconstruct names. The complete per-class feature lists
 remain in SpatialData root metadata and are not duplicated into the table;
-only the resolved non-expression denominators needed for later on-demand QC
+only the resolved auxiliary-class feature counts needed for later on-demand QC
 calculations are retained.
 
 Configuration shared by the complete table lives at the top level. The
@@ -1355,12 +1354,12 @@ computation:
 
 1. validate that every observed target maps to exactly one feature class;
 2. group assigned points by instance and target to build one temporary sparse
-   matrix containing endogenous and control targets;
+   matrix containing expression and auxiliary features;
 3. calculate per-instance class counts by summing the temporary matrix columns
    belonging to each class;
-4. calculate `control_fraction`;
+4. calculate `auxiliary_points_fraction`;
 5. retain only the `expression_class` columns in the final `adata.X`; and
-6. attach the total assigned points per feature class and `control_fraction` to
+6. attach the total assigned points per feature class and `auxiliary_points_fraction` to
    the corresponding `.obs` rows.
 
 After all pairs have been reduced, align their sparse matrices to the previously
@@ -1380,39 +1379,40 @@ n_system_control_points = X_all[:, system_control_columns].sum(axis=1)
 adata = AnnData(X=X_all[:, endogenous_columns], ...)
 ```
 
-The temporary control columns add few sparse entries compared with the
+The temporary auxiliary columns add few sparse entries compared with the
 endogenous matrix and are discarded before the table is written. No complete
 transcript dataframe or dense instance-by-target matrix may be materialized in
 memory.
 
 Coordinates in `adata.obsm[spatial_key]` should continue to mean the average
 position of expression transcripts and must therefore be calculated from the
-selected `expression_class`, not from control points. Preserve the current
+selected `expression_class`, not from auxiliary points. Preserve the current
 allocation row contract: an instance without an assigned endogenous transcript
-does not receive an expression-table row. Reindex control summaries to the
-endogenous row set and fill missing control counts with zero.
+does not receive an expression-table row. Reindex auxiliary summaries to the
+expression row set and fill missing auxiliary counts with zero.
 
 Unexpected or null feature classes, targets associated with multiple classes,
 non-positive resolved panel feature counts, a missing expression class, and
 collisions with existing output columns must produce clear errors. A panel
-control class with no assigned points is valid and must produce a zero count
-column. No control class produces a persisted per-feature rate. Validate the
+auxiliary class with no assigned points is valid and must produce a zero count
+column. No auxiliary class produces a persisted per-feature rate. Validate the
 complete multi-region request and shared
 `feature_class_aggregation` configuration before writing the output table.
 
 ### Boundary with Slice 9
 
-The `.obs` summaries describe only control points that land inside an instance
-mask. They are suitable for cell-level histograms and violin plots of the raw
-class counts and `control_fraction`. Slice 9 may additionally derive the
+The `.obs` summaries describe only auxiliary points that land inside an instance
+mask. For CosMx these auxiliary classes are controls, making the summaries
+suitable for cell-level histograms and violin plots of the raw class counts and
+`auxiliary_points_fraction`. Slice 9 may additionally derive the
 following per-instance plotting metrics on demand:
 
 ```text
 negative_points_per_feature =
-    n_negative_points / control_class_denominators["Negative"]
+    n_negative_points / auxiliary_class_feature_counts["Negative"]
 
 system_control_points_per_feature =
-    n_system_control_points / control_class_denominators["SystemControl"]
+    n_system_control_points / auxiliary_class_feature_counts["SystemControl"]
 ```
 
 These derived values are useful for comparing control classes with different
@@ -1433,12 +1433,12 @@ Focused tests should establish that:
 
 - the final `.var` and `adata.X` contain only the selected expression class;
 - `n_endogenous_points` equals the row sum of the final expression matrix;
-- assigned control counts are correct and zero-filled for instances without a
-  control call;
+- assigned auxiliary-class counts are correct and zero-filled for instances
+  without an auxiliary point;
 - no per-feature rate columns are persisted in `.obs`;
-- the table-local denominator snapshot equals the authoritative panel feature
+- the table-local auxiliary-class feature-count snapshot equals the authoritative panel feature
   counts and is sufficient for later QC derivation;
-- `control_fraction` is correct and finite;
+- `auxiliary_points_fraction` is correct and finite;
 - non-categorical feature-class columns are rejected, while unknown Dask
   categories are restored lazily from the panel's ordered `classes` before
   validation;
@@ -1461,7 +1461,7 @@ Focused tests should establish that:
 - expression targets missing from one allocation pair are zero-filled rather
   than removed by an inner join;
 - missing and incompatible feature panels are rejected before spatial lookup;
-- one panel-derived denominator mapping applies to every pair;
+- one panel-derived auxiliary-class feature-count mapping applies to every pair;
 - an existing output table is replaced only when `overwrite=True`; and
 - omitting `expression_class` reproduces the existing allocation result.
 
@@ -1484,7 +1484,7 @@ feature-class contract and must not assume CosMx class names.
 This slice also replaces point-derived table coordinates with centers of mass
 from the segmentation labels and expands the class-aware row universe to every
 instance receiving at least one assigned point. Users, not the aggregation
-operation, decide whether to filter control-only or expression-empty instances
+operation, decide whether to filter auxiliary-only or expression-empty instances
 downstream.
 
 ### AnnData payload
@@ -1506,7 +1506,7 @@ adata.obsm[spatial_key]
 
 adata.obs
     instance/region identity, total assigned points per feature class and
-    control_fraction
+    auxiliary_points_fraction
 
 adata.uns["feature_matrices"]["auxiliary_feature_counts"]
     the auxiliary matrix's independent feature-axis schema
@@ -1588,7 +1588,7 @@ Keep this registry entry matrix-specific and generic. Do not duplicate
 class-aware aggregation rather than the physical `.obsm` matrix. The existing
 `feature_class_aggregation` record already owns `feature_key`,
 `feature_class_key`, `expression_class`, the ordered `classes`, and the
-panel-derived `control_class_denominators`.
+panel-derived `auxiliary_class_feature_counts`.
 
 Add one binding to the existing aggregation record:
 
@@ -1657,12 +1657,12 @@ n_<expression class>_points == row_sum(adata.X)
 n_<auxiliary class>_points ==
     row_sum(auxiliary_feature_counts[:, columns belonging to that class])
 
-control_fraction ==
+auxiliary_points_fraction ==
     sum(non-expression class counts) / sum(all class counts)
 ```
 
 Every retained row has at least one assigned point, so the
-`control_fraction` denominator is positive. Use the persisted `.obs` summaries
+`auxiliary_points_fraction` denominator is positive. Use the persisted `.obs` summaries
 for convenient plotting, but treat disagreement with the matrices as a corrupt
 table rather than choosing one payload as an implicit correction source.
 
@@ -1733,7 +1733,7 @@ Focused tests should establish that:
 - the auxiliary matrix is `uint32` CSR and its row count equals `adata.n_obs`;
 - its `feature_columns` metadata exactly describes every matrix column and
   survives AnnData and SpatialData Zarr round trips;
-- the ordered non-expression classes and their denominator-derived contiguous
+- the ordered non-expression classes and their panel-feature-count-derived contiguous
   column blocks cover `feature_columns` exactly and match the authoritative
   feature panel;
 - expression-only, non-expression-only and mixed instances are all retained,
@@ -1741,7 +1741,7 @@ Focused tests should establish that:
 - non-expression-only instances have all-zero expression rows and are never
   implicitly removed;
 - every `.obs` class count equals the appropriate persisted matrix row sum and
-  `control_fraction` remains correct and finite;
+  `auxiliary_points_fraction` remains correct and finite;
 - one point-to-label assignment feeds both sparse matrices and class summaries;
 - label-derived centers equal a simple in-memory center-of-mass reference for
   irregular masks and do not depend on point positions or classes;
@@ -2342,21 +2342,21 @@ When a class-aware aggregation table is available, QC plotting may derive
 `negative_points_per_feature` and `system_control_points_per_feature` from the
 persisted raw class counts. Resolve the relevant `.obs` columns through
 `adata.uns["feature_class_aggregation"]["count_columns"]` and divide them by the
-corresponding positive values in `control_class_denominators`:
+corresponding positive values in `auxiliary_class_feature_counts`:
 
 ```text
 negative_points_per_feature =
-    n_negative_points / control_class_denominators["Negative"]
+    n_negative_points / auxiliary_class_feature_counts["Negative"]
 
 system_control_points_per_feature =
-    n_system_control_points / control_class_denominators["SystemControl"]
+    n_system_control_points / auxiliary_class_feature_counts["SystemControl"]
 ```
 
 These rates normalize for the different numbers of panel features in the two
 control classes. They should be temporary series or plotting-dataframe columns;
 do not persist them back into `adata.obs`. The plotting layer must validate
-that the referenced count columns exist and that the stored denominators are
-positive. This optional cell-level view complements, but does not replace, the
+that the referenced count columns exist and that the stored auxiliary class
+feature counts are positive. This optional cell-level view complements, but does not replace, the
 original-point summaries below.
 
 ### Per-target summary
