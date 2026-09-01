@@ -194,7 +194,7 @@ def test_aggregate_points_overwrite(sdata_transcripts: SpatialData):
         )
 
 
-def test_class_aware_aggregation_uses_panel_axis_and_adds_control_summaries(tmp_path):
+def test_class_aware_aggregation_uses_panel_axis_and_adds_auxiliary_summaries(tmp_path):
     sdata = _class_aware_sdata()
     output = tmp_path / "class-aware.zarr"
     sdata.write(output)
@@ -217,7 +217,7 @@ def test_class_aware_aggregation_uses_panel_axis_and_adds_control_summaries(tmp_
     assert adata.obs["n_endogenous_points"].to_list() == [2, 1, 0, 1]
     assert adata.obs["n_negative_points"].to_list() == [1, 1, 1, 0]
     assert adata.obs["n_system_control_points"].to_list() == [1, 0, 0, 2]
-    assert np.allclose(adata.obs["control_fraction"], [0.5, 0.5, 1.0, 2 / 3])
+    assert np.allclose(adata.obs["auxiliary_points_fraction"], [0.5, 0.5, 1.0, 2 / 3])
     assert np.array_equal(np.asarray(adata.X.sum(axis=1)).ravel(), adata.obs["n_endogenous_points"])
     assert not {"negative_points_per_feature", "system_control_points_per_feature"} & set(adata.obs)
     assert np.allclose(adata.obsm[_SPATIAL], [[0.5, 0.5], [3.5, 0.5], [0.5, 2.0], [0.5, 0.5]])
@@ -251,7 +251,8 @@ def test_class_aware_aggregation_uses_panel_axis_and_adds_control_summaries(tmp_
 
     metadata = adata.uns["feature_class_aggregation"]
     assert metadata["source_kind"] == "harpy_aggregate_points"
-    assert metadata["control_class_denominators"] == {"Negative": 3, "SystemControl": 1}
+    assert metadata["auxiliary_class_feature_counts"] == {"Negative": 3, "SystemControl": 1}
+    assert metadata["auxiliary_points_fraction_column"] == "auxiliary_points_fraction"
     assert metadata["auxiliary_feature_matrix_key"] == "auxiliary_feature_counts"
     assert metadata["count_columns"] == {
         "Endogenous": "n_endogenous_points",
@@ -268,7 +269,7 @@ def test_class_aware_aggregation_uses_panel_axis_and_adds_control_summaries(tmp_
     roundtripped_metadata = roundtripped.uns["feature_class_aggregation"]
     assert roundtripped_metadata["expression_class"] == "Endogenous"
     assert roundtripped_metadata["count_columns"] == metadata["count_columns"]
-    assert roundtripped_metadata["control_class_denominators"] == metadata["control_class_denominators"]
+    assert roundtripped_metadata["auxiliary_class_feature_counts"] == metadata["auxiliary_class_feature_counts"]
     assert roundtripped_metadata["regions"] == metadata["regions"]
     assert sparse.isspmatrix_csr(roundtripped.obsm["auxiliary_feature_counts"])
     assert roundtripped.obsm["auxiliary_feature_counts"].dtype == np.dtype(np.uint32)
@@ -359,7 +360,7 @@ def test_validate_table_accepts_recalculated_summary_columns():
     )
     adata = result.tables["table"]
     adata.obs["n_endogenous_points"] = adata.obs["n_endogenous_points"].astype(np.float64) / 2
-    adata.obs["control_fraction"] = np.linspace(0.1, 0.9, adata.n_obs)
+    adata.obs["auxiliary_points_fraction"] = np.linspace(0.1, 0.9, adata.n_obs)
 
     validate_table(result, "table")
 

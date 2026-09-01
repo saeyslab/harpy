@@ -19,7 +19,7 @@ from harpy._metadata import (
 from harpy.table._allocation import (
     _AGGREGATE_SOURCE_KIND,
     _AUXILIARY_FEATURE_MATRIX_KEY,
-    _CONTROL_FRACTION_COLUMN,
+    _AUXILIARY_POINTS_FRACTION_COLUMN,
     _FEATURE_CLASS_AGGREGATION_KEY,
     _FEATURE_MATRIX_SCHEMA_VERSION,
     _FeatureClassAggregationContract,
@@ -49,7 +49,7 @@ def validate_table(sdata: SpatialData, table_name: str) -> None:
             -> sdata.attrs["harpy"]["feature_panels"][panel_name]
 
     The root feature panel is authoritative. Its feature keys, class definitions,
-    and class denominators must agree with the table-local metadata.
+    and auxiliary class feature counts must agree with the table-local metadata.
     The current expression and auxiliary feature axes may be filtered or
     reordered, but every retained feature must still belong to the appropriate
     panel class. Metadata-declared summary columns must remain present in
@@ -260,7 +260,8 @@ def _validate_feature_class_aggregation(
     points element exists in the recorded coordinate system, and resolves the
     authoritative feature panel for every region. All regions contributing to
     one table must resolve to equivalent panel contracts. The table-local
-    feature keys, classes, expression class, control denominators, count-column
+    feature keys, classes, expression class, auxiliary class feature counts,
+    count-column
     names, and auxiliary-matrix registration must agree with that panel.
 
     The expression matrix may contain any unique, reordered subset of the
@@ -367,7 +368,7 @@ def _validate_feature_class_aggregation(
     if not pd.api.types.is_integer_dtype(instances.dtype) or (instances <= 0).any():
         raise ValueError("Class-aware aggregation instance identifiers must be positive integers.")
     required_summary_columns = [column for _, column in contract.count_columns]
-    required_summary_columns.append(_CONTROL_FRACTION_COLUMN)
+    required_summary_columns.append(_AUXILIARY_POINTS_FRACTION_COLUMN)
     missing_summary_columns = sorted(set(required_summary_columns) - set(adata.obs))
     if missing_summary_columns:
         raise ValueError(
@@ -448,9 +449,9 @@ def _validate_feature_class_metadata(
 ) -> None:
     """Compare table-local aggregation metadata with a root panel contract.
 
-    Control denominators are not inferred from observed points. They are
-    derived from the complete authoritative panel in root SpatialData metadata
-    and compared with the values persisted in the AnnData table::
+    Auxiliary class feature counts are not inferred from observed points. They
+    are derived from the complete authoritative panel in root SpatialData
+    metadata and compared with the values persisted in the AnnData table::
 
         sdata.attrs["harpy"]["points"][points_name]["feature_panel"]
                                       |
@@ -461,14 +462,14 @@ def _validate_feature_class_metadata(
                               features_by_class
                                       |
                                       v
-               len(features_by_class[control_class])
+               len(features_by_class[auxiliary_class])
                                       |
                                       v
         adata.uns["feature_class_aggregation"]
-                 ["control_class_denominators"]
+                 ["auxiliary_class_feature_counts"]
 
     Consequently, panel features with zero observed points still contribute to
-    their class denominator.
+    their auxiliary class's recorded feature count.
     """
     expected = {
         "schema_version": 1,
@@ -476,7 +477,7 @@ def _validate_feature_class_metadata(
         "feature_key": contract.panel.feature_key,
         "feature_class_key": contract.panel.feature_class_key,
         "expression_class": contract.expression_class,
-        "control_fraction_column": _CONTROL_FRACTION_COLUMN,
+        "auxiliary_points_fraction_column": _AUXILIARY_POINTS_FRACTION_COLUMN,
         "auxiliary_feature_matrix_key": _AUXILIARY_FEATURE_MATRIX_KEY,
     }
     for key, expected_value in expected.items():
@@ -491,14 +492,16 @@ def _validate_feature_class_metadata(
     )
     if classes != contract.panel.classes:
         raise ValueError("Feature-class aggregation classes disagree with the authoritative feature panel.")
-    denominators = dict(
+    auxiliary_class_feature_counts = dict(
         _require_mapping(
-            aggregation_metadata.get("control_class_denominators"),
-            path=f"{_FEATURE_CLASS_AGGREGATION_KEY}.control_class_denominators",
+            aggregation_metadata.get("auxiliary_class_feature_counts"),
+            path=f"{_FEATURE_CLASS_AGGREGATION_KEY}.auxiliary_class_feature_counts",
         )
     )
-    if denominators != dict(contract.control_class_denominators):
-        raise ValueError("Feature-class aggregation denominators disagree with the authoritative feature panel.")
+    if auxiliary_class_feature_counts != dict(contract.auxiliary_class_feature_counts):
+        raise ValueError(
+            "Feature-class aggregation auxiliary class feature counts disagree with the authoritative feature panel."
+        )
     count_columns = dict(
         _require_mapping(
             aggregation_metadata.get("count_columns"),

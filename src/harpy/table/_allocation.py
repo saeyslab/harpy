@@ -40,7 +40,7 @@ from harpy.utils.utils import _make_list
 _FEATURE_CLASS_AGGREGATION_KEY = "feature_class_aggregation"
 _AUXILIARY_FEATURE_MATRIX_KEY = "auxiliary_feature_counts"
 _FEATURE_MATRIX_SCHEMA_VERSION = 1
-_CONTROL_FRACTION_COLUMN = "control_fraction"
+_AUXILIARY_POINTS_FRACTION_COLUMN = "auxiliary_points_fraction"
 _AGGREGATE_SOURCE_KIND = "harpy_aggregate_points"
 _DEPRECATED_ATTRIBUTES_WARNED: set[str] = set()
 
@@ -94,9 +94,9 @@ class _FeatureClassAggregationContract:
     """Class-aware aggregation configuration for one compatible feature panel.
 
     The contract selects one panel class for ``adata.X``. Every remaining
-    class is treated as a control class. Output count-column names, control
-    classes, and control denominators are derived from the panel so they
-    cannot disagree with its metadata. The contract contains no spatial
+    class is treated as an auxiliary class. Output count-column names,
+    auxiliary classes, and per-class feature counts are derived from the panel,
+    so they cannot disagree with its metadata. The contract contains no spatial
     assignment results or observed point counts.
 
     Attributes
@@ -120,7 +120,7 @@ class _FeatureClassAggregationContract:
                 f"Expression class {self.expression_class!r} is not present in panel classes "
                 f"{list(self.panel.classes)!r}."
             )
-        if not self.control_classes:
+        if not self.auxiliary_classes:
             raise ValueError(
                 "Class-aware aggregation requires at least one non-expression feature class. "
                 "Use expression_class=None for a panel containing only the expression class."
@@ -134,7 +134,7 @@ class _FeatureClassAggregationContract:
         return tuple((feature_class, f"n_{_snake_case(feature_class)}_points") for feature_class in self.panel.classes)
 
     @property
-    def control_classes(self) -> tuple[str, ...]:
+    def auxiliary_classes(self) -> tuple[str, ...]:
         return tuple(feature_class for feature_class in self.panel.classes if feature_class != self.expression_class)
 
     @property
@@ -158,7 +158,9 @@ class _FeatureClassAggregationContract:
         matrix's ``feature_columns`` metadata.
         """
         features_by_class = self.panel.features_by_class
-        return tuple(feature for feature_class in self.control_classes for feature in features_by_class[feature_class])
+        return tuple(
+            feature for feature_class in self.auxiliary_classes for feature in features_by_class[feature_class]
+        )
 
     @property
     def auxiliary_class_slices(self) -> tuple[tuple[str, slice], ...]:
@@ -173,25 +175,24 @@ class _FeatureClassAggregationContract:
         result: list[tuple[str, slice]] = []
         start = 0
         features_by_class = self.panel.features_by_class
-        for feature_class in self.control_classes:
+        for feature_class in self.auxiliary_classes:
             stop = start + len(features_by_class[feature_class])
             result.append((feature_class, slice(start, stop)))
             start = stop
         return tuple(result)
 
     @property
-    def control_class_denominators(self) -> tuple[tuple[str, int], ...]:
+    def auxiliary_class_feature_counts(self) -> tuple[tuple[str, int], ...]:
         """Return the panel-defined feature count for each non-expression class.
 
-        Each denominator is the number of features assigned to that class in
-        the authoritative panel, including panel features for which the
-        selected points elements contain zero transcript detections. These
-        values are recorded with the aggregation metadata so downstream QC can
-        normalize per-class point counts without inferring panel size from the
-        observed data.
+        Each value is the number of features assigned to that auxiliary class
+        in the authoritative panel, including panel features for which the
+        selected points elements contain zero detections. The values are
+        recorded with the aggregation metadata so downstream QC can normalize
+        per-class point counts without inferring panel size from observed data.
         """
         features_by_class = self.panel.features_by_class
-        return tuple((feature_class, len(features_by_class[feature_class])) for feature_class in self.control_classes)
+        return tuple((feature_class, len(features_by_class[feature_class])) for feature_class in self.auxiliary_classes)
 
 
 @dataclass(frozen=True)
@@ -310,9 +311,9 @@ def aggregate_points(
     expression row.
 
     Every panel class is also summarized as ``n_<class>_points`` in
-    ``adata.obs``, together with ``control_fraction``. These summaries are
-    derived from the persisted expression and auxiliary matrices. Control
-    denominators are the lengths of the panel's non-expression
+    ``adata.obs``, together with ``auxiliary_points_fraction``. These summaries
+    are derived from the persisted expression and auxiliary matrices. Auxiliary
+    class feature counts are the lengths of the panel's non-expression
     ``features_by_class`` lists and are recorded in
     ``adata.uns["feature_class_aggregation"]`` for later QC; no per-feature
     rates are persisted in ``adata.obs``. Class-aware aggregation fails when
@@ -594,7 +595,7 @@ def _resolve_feature_class_contract(
         expression_class=expression_class,
     )
     generated = {column for _, column in contract.count_columns}
-    collisions = sorted(generated & {region_key, instance_key, _CONTROL_FRACTION_COLUMN})
+    collisions = sorted(generated & {region_key, instance_key, _AUXILIARY_POINTS_FRACTION_COLUMN})
     if collisions:
         raise ValueError(f"Generated feature-class columns collide with aggregation output columns: {collisions}.")
 
@@ -965,7 +966,7 @@ def _assemble_aggregation_table(
 
     for result in reductions:
         # Retain every instance receiving any assigned point. In class-aware
-        # mode this includes control-only instances, whose expression row is
+        # mode this includes auxiliary-only instances, whose expression row is
         # deliberately all zero.
         instance_ids = result.instance_ids
         expression_matrix = _counts_to_sparse(
@@ -1006,11 +1007,11 @@ def _assemble_aggregation_table(
             )
             if np.any(total_counts == 0):
                 raise RuntimeError("Retained aggregation rows must contain at least one assigned point.")
-            control_counts = sum(
-                (class_counts[feature_class].astype(np.uint64) for feature_class in contract.control_classes),
+            auxiliary_counts = sum(
+                (class_counts[feature_class].astype(np.uint64) for feature_class in contract.auxiliary_classes),
                 start=np.zeros(len(instance_ids), dtype=np.uint64),
             )
-            obs[_CONTROL_FRACTION_COLUMN] = control_counts / total_counts
+            obs[_AUXILIARY_POINTS_FRACTION_COLUMN] = auxiliary_counts / total_counts
         obs_frames.append(obs)
 
         centers = result.centers.reindex(instance_ids)
@@ -1048,9 +1049,9 @@ def _assemble_aggregation_table(
             "feature_class_key": contract.panel.feature_class_key,
             "expression_class": contract.expression_class,
             "classes": list(contract.panel.classes),
-            "control_class_denominators": dict(contract.control_class_denominators),
+            "auxiliary_class_feature_counts": dict(contract.auxiliary_class_feature_counts),
             "count_columns": dict(contract.count_columns),
-            "control_fraction_column": _CONTROL_FRACTION_COLUMN,
+            "auxiliary_points_fraction_column": _AUXILIARY_POINTS_FRACTION_COLUMN,
             "auxiliary_feature_matrix_key": _AUXILIARY_FEATURE_MATRIX_KEY,
             "regions": {
                 result.pair.labels_name: {
