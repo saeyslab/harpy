@@ -2,7 +2,7 @@
 
 ## Status
 
-Seven implementation slices are planned; Slices 1 through 5 are implemented:
+Eight implementation slices are planned; Slices 1 through 5 are implemented:
 
 1. patch the CosMx reader and establish the generic Harpy feature-panel
    metadata contract — implemented;
@@ -13,7 +13,10 @@ Seven implementation slices are planned; Slices 1 through 5 are implemented:
    implemented;
 5. add class-aware aggregation to `hp.tb.aggregate_points` — implemented;
 6. add QC functions that summarize the original, unallocated control points;
-7. optimize the generic point-to-label assignment and reduction path.
+7. preserve per-feature non-expression aggregates and use label centers of
+   mass for the complete assigned-instance row universe; and
+8. optimize the generic point-to-label assignment, reduction and backed table
+   construction path.
 
 Slice 2 replaces the current single-run reader surface with one coherent,
 sample-aware creation contract. Slice 3 validates that an existing store still
@@ -26,15 +29,20 @@ metadata remain supported by the ordinary, non-class-aware path. Slice 6's
 original-point summaries depend on the reader metadata from Slices 1–4 rather
 than allocation or labels; its optional per-instance plotting view derives
 temporary rates from the Slice 5 table. Slice 7 preserves the public behavior
-established by Slice 5 while replacing the private allocation execution path.
+of `expression_class` while revising the class-aware table payload so
+per-feature non-expression counts and control-only instances are retained.
+Slice 8 preserves the resulting public and biological contracts while replacing
+the private aggregation execution and backed-table construction paths.
 
 ## Goal
 
 Establish a general control-aware transcript workflow: readers preserve
 authoritative panel information for one or more sample-scoped runs, allocation
 creates an AnnData expression matrix containing only the selected biological
-class while retaining compact per-instance control summaries in `.obs`, and
-separate QC functions summarize all original control points. The raw points
+class, retains sparse per-feature non-expression counts in an auxiliary
+observation-aligned matrix, keeps compact per-instance class summaries in
+`.obs`, and uses segmentation-mask centers of mass as instance coordinates.
+Separate QC functions summarize all original control points. The raw points
 elements remain unchanged and continue to contain biological and control
 transcripts.
 
@@ -935,6 +943,13 @@ Focused tests should establish that:
 
 **Status: implemented.**
 
+This slice records the implemented class-aware baseline. Slice 7 deliberately
+supersedes two lossy output choices from this baseline: per-feature
+non-expression counts are retained instead of discarded, and the row universe
+includes every instance receiving an assigned point instead of only instances
+with an expression-class point. Until Slice 7 is implemented, the behavior
+described in this Slice 5 section remains the current code behavior.
+
 This slice consumes the generic feature-panel contract established by Slice 1
 and supports the sample-scoped elements created or added by Slices 2 and 4.
 Class-aware allocation requires that metadata; ordinary allocation remains
@@ -1572,14 +1587,282 @@ Focused tests should establish that:
 - sample and mosaic coordinate systems remain independent; and
 - the implementation stays lazy until the compact summaries are computed.
 
-## Slice 7: scalable point-to-label assignment and reduction
+## Slice 7: lossless feature-class aggregates and label-derived centers
 
 **Status: specified; not implemented.**
 
-Refactor the private execution path used by `hp.tb.aggregate_points` without changing
-the public or biological contracts established by Slice 5. This optimization
-must remain generic to raster labels and points elements; it must not depend on
-CosMx FOV identifiers or reader-specific partition metadata.
+Revise the class-aware table payload established by Slice 5 so aggregation does
+not discard the per-feature counts of non-expression classes. Preserve
+`expression_class` as the selector for the primary expression matrix, retain
+all other panel features in one sparse auxiliary matrix, and keep the existing
+per-class `.obs` summaries as convenient QC columns. This remains a generic
+feature-class contract and must not assume CosMx class names.
+
+This slice also replaces point-derived table coordinates with centers of mass
+from the segmentation labels and expands the class-aware row universe to every
+instance receiving at least one assigned point. Users, not the aggregation
+operation, decide whether to filter control-only or expression-empty instances
+downstream.
+
+### AnnData payload
+
+For class-aware aggregation, the resulting table has this contract:
+
+```text
+adata.X
+    sparse counts for features in expression_class
+
+adata.var
+    the complete panel-defined expression feature axis
+
+adata.obsm["auxiliary_feature_counts"]
+    sparse counts for every feature outside expression_class
+
+adata.obsm[spatial_key]
+    center of mass of each instance in the segmentation labels raster
+
+adata.obs
+    instance/region identity, per-class point counts and control_fraction
+
+adata.uns["feature_matrices"]["auxiliary_feature_counts"]
+    the auxiliary matrix's independent feature-axis schema
+
+adata.uns["feature_class_aggregation"]
+    class-aware construction, summary-column and source bindings
+```
+
+For example:
+
+```text
+adata.X
+
+instance    EPCAM    VIM
+42              7      1
+51              0      3
+99              0      0
+
+adata.obsm["auxiliary_feature_counts"]
+
+instance    Negative1    Negative2    SystemControl1
+42                  2            0                 1
+51                  0            1                 0
+99                  1            0                 2
+```
+
+Instance 99 is retained even though its expression row is all zero because it
+received assigned non-expression points. Its `.obs` summaries and auxiliary
+feature counts remain available for QC and downstream user-defined filtering.
+
+Do not store the auxiliary counts in `.layers`. AnnData layers must have the
+same `(n_obs, n_vars)` shape and variable axis as `X`, whereas the expression
+and auxiliary matrices deliberately have different feature axes. Expanding
+`.var` to the union of expression and auxiliary features would introduce
+artificial all-zero control columns into `X` and expose them as ordinary
+expression variables to downstream tooling. `.obsm` is observation-aligned but
+permits an independent second axis, making it the appropriate location.
+
+Use one fixed `auxiliary_feature_counts` matrix rather than one dynamically
+named matrix per class. Its columns are ordered deterministically by:
+
+1. the authoritative panel's class order with `expression_class` removed; and
+2. the authoritative `features_by_class` order within each retained class.
+
+Include panel-declared auxiliary features with zero assigned detections as
+explicit all-zero columns. Store the matrix as CSR with `uint32` counts. The
+parallel feature and class lists in table-local metadata make the independent
+column axis self-describing without placing those features in `adata.var`.
+
+### Auxiliary feature-matrix metadata
+
+Follow the Harpy convention already used by `hp.tb.add_feature_matrix`: the
+numeric matrix lives in `.obsm`, while its column schema lives under the
+table-local `feature_matrices` registry:
+
+```python
+adata.uns["feature_matrices"]["auxiliary_feature_counts"] = {
+    "schema_version": 1,
+    "source_kind": "harpy_aggregate_points",
+    "backend": "scipy_csr",
+    "dtype": "uint32",
+    "feature_key": "gene",
+    "feature_class_key": "code_class",
+    "feature_columns": [
+        "Negative1",
+        "Negative2",
+        "SystemControl1",
+    ],
+    "feature_classes": [
+        "Negative",
+        "Negative",
+        "SystemControl",
+    ],
+}
+```
+
+`feature_columns` and `feature_classes` are parallel ordered lists and must
+have length equal to the auxiliary matrix's second dimension. Every listed
+class must occur in the resolved panel and must differ from
+`expression_class`. The ordered `(feature, class)` pairs must exactly equal the
+non-expression portion of the compatible panel contract.
+
+Add one binding to the existing aggregation record:
+
+```python
+adata.uns["feature_class_aggregation"]["auxiliary_feature_matrix_key"] = (
+    "auxiliary_feature_counts"
+)
+```
+
+This pointer prevents downstream consumers from guessing an `.obsm` key. The
+feature-matrix record owns the auxiliary column schema; the aggregation record
+must not duplicate those ordered lists. Validate the pointer, matrix shape,
+dtype, column metadata and panel-derived class contract together before writing
+and after reading the table. The table-local feature lists are a derived record
+of the matrix axis, not a second authoritative assay panel.
+
+When `expression_class=None`, preserve ordinary aggregation behavior: every
+observed feature remains in `adata.X`, no auxiliary feature matrix or
+class-aware metadata is created, and feature-panel metadata is not required.
+This slice introduces no new public parameter.
+
+### Maximum-preservation row universe
+
+In class-aware mode, construct rows from the union of instance IDs receiving at
+least one assigned point from any panel class. Do not require an assigned
+expression-class point. The row rules are:
+
+- expression-only instances have an all-zero auxiliary row;
+- non-expression-only instances have an all-zero `adata.X` row;
+- instances with both classes retain both matrices;
+- label value zero and points outside every instance remain excluded; and
+- segmented instances receiving no assigned point from any class are not added
+  by this operation.
+
+The last rule keeps the operation defined as aggregation of points rather than
+enumeration of an entire labels raster. A separate table-construction operation
+may include completely empty segmented instances if that becomes a required
+workflow. `hp.tb.aggregate_points` must not silently filter zero-expression
+rows after constructing the class-aware table; downstream filtering belongs to
+the caller.
+
+For every output row, retain the Slice 5 summaries. They must be arithmetically
+consistent with the persisted matrices:
+
+```text
+n_<expression class>_points == row_sum(adata.X)
+
+n_<auxiliary class>_points ==
+    row_sum(auxiliary_feature_counts[:, columns belonging to that class])
+
+control_fraction ==
+    sum(non-expression class counts) / sum(all class counts)
+```
+
+Every retained row has at least one assigned point, so the
+`control_fraction` denominator is positive. Use the persisted `.obs` summaries
+for convenient plotting, but treat disagreement with the matrices as a corrupt
+table rather than choosing one payload as an implicit correction source.
+
+### Segmentation-mask centers of mass
+
+Coordinates in `adata.obsm[spatial_key]` must no longer be the mean location of
+assigned expression points. Calculate the geometric center of mass of each
+retained instance directly from the corresponding labels raster, using the
+same `RasterAggregator.center_of_mass` approach and coordinate handling as
+`hp.tb.aggregate_image`.
+
+For an integer instance-label raster, every pixel belonging to one instance has
+the same nonzero label value, so its center of mass is the geometric centroid
+of that mask. This definition is independent of transcript abundance and is
+therefore available and biologically stable for expression-only,
+non-expression-only and mixed instances alike.
+
+For each normalized labels/points/coordinate-system pair:
+
+1. derive the retained instance IDs from all assigned point classes;
+2. calculate labels centers of mass only for those IDs where the raster helper
+   supports indexed calculation;
+3. account for the labels element's pixel-aligned translation into the selected
+   coordinate system in the same way as `aggregate_image`;
+4. store coordinates in SpatialData order `(x, y)` or `(x, y, z)`; and
+5. align them to the exact table row order by `(region_key, instance_key)`,
+   never by incidental dataframe or raster traversal order.
+
+Apply label-derived centers to both ordinary and class-aware
+`hp.tb.aggregate_points` output so the meaning of `adata.obsm[spatial_key]`
+does not change with `expression_class`. Reuse the labels center-of-mass helper
+rather than maintaining a second numerical implementation. Slice 8 may fuse
+center-of-mass moment reduction with its chunk-aware labels traversal when this
+preserves exact results and avoids a second raster read, but such fusion is a
+performance optimization rather than a change in the coordinate contract.
+
+### Single-assignment implementation
+
+Do not perform another point-to-label lookup for the auxiliary matrix. The
+existing class-aware reduction already groups assigned points by instance and
+feature before filtering to the expression axis. Reuse that one grouped result
+to construct:
+
+1. the expression CSR matrix against the panel-defined expression axis;
+2. the auxiliary CSR matrix against the panel-defined non-expression axis; and
+3. the `.obs` class summaries by summing the corresponding matrix columns.
+
+Resolve both feature axes before per-region matrices are constructed. All
+selected points elements must continue to reference compatible panels, so the
+same expression and auxiliary axes apply to every region. Stack region matrices
+row-wise in normalized pair order, with all-zero sparse rows where a retained
+instance has no feature from one axis.
+
+The current implementation computes all per-feature counts before discarding
+the non-expression columns. This slice therefore changes output assembly and
+row selection, not spatial assignment. The source points remain unchanged and
+continue to support Slice 6 QC for unassigned and outside-mask controls.
+
+### Verification
+
+Focused tests should establish that:
+
+- `adata.X` and `.var` contain the complete panel-defined expression axis and
+  no auxiliary features;
+- `auxiliary_feature_counts` contains every panel-defined non-expression
+  feature in deterministic class/feature order, including zero-detection
+  columns;
+- the auxiliary matrix is `uint32` CSR and its row count equals `adata.n_obs`;
+- its `feature_columns` and `feature_classes` metadata exactly describe every
+  matrix column and survive AnnData and SpatialData Zarr round trips;
+- expression-only, non-expression-only and mixed instances are all retained,
+  while instances receiving no assigned point and label value zero are absent;
+- non-expression-only instances have all-zero expression rows and are never
+  implicitly removed;
+- every `.obs` class count equals the appropriate persisted matrix row sum and
+  `control_fraction` remains correct and finite;
+- one point-to-label assignment feeds both sparse matrices and class summaries;
+- label-derived centers equal a simple in-memory center-of-mass reference for
+  irregular masks and do not depend on point positions or classes;
+- centers are correctly translated, axis-ordered and aligned by region and
+  instance ID for multiple aggregation pairs;
+- ordinary and class-aware modes use the same labels-center coordinate
+  definition;
+- `expression_class=None` creates neither the auxiliary matrix nor its metadata
+  and otherwise retains ordinary feature aggregation; and
+- malformed auxiliary metadata, a dangling aggregation pointer, shape or dtype
+  disagreement, and matrix/summary disagreement are rejected clearly.
+
+Benchmark the additional sparse matrix and labels-center calculation on a
+representative backed crop. Record output nonzeros and bytes separately for
+`X` and `auxiliary_feature_counts`, and confirm that the label-derived center
+calculation does not materialize the complete raster unnecessarily. Slice 8
+owns the larger assignment-graph and out-of-core table-construction
+optimizations.
+
+## Slice 8: scalable point-to-label assignment and reduction
+
+**Status: specified; not implemented.**
+
+Refactor the private execution path used by `hp.tb.aggregate_points` without
+changing the public or biological contracts established by Slices 5 and 7.
+This optimization must remain generic to raster labels and points elements; it
+must not depend on CosMx FOV identifiers or reader-specific partition metadata.
 
 ### Current scaling limitation
 
@@ -1617,13 +1900,22 @@ assigned_points = _assign_points_to_labels(
 )
 
 aggregates = _aggregate_assigned_points(assigned_points, ...)
+
+centers = _label_centers_of_mass(
+    labels=...,
+    instance_ids=aggregates.instance_ids,
+    to_coordinate_system=...,
+)
 ```
 
 `_assign_points_to_labels` assigns the raster value underneath each point and
 filters label value zero. It accepts all value columns needed by the caller,
 rather than a single `value_key`, so ordinary and class-aware allocation use the
-same spatial lookup. `_aggregate_assigned_points` owns the count and coordinate
-reductions. The exact private names may change during implementation, but this
+same spatial lookup. `_aggregate_assigned_points` owns the count and
+row-selection reductions needed to construct the feature matrices, class
+summaries and retained instance IDs. Instance coordinates come from the labels
+center-of-mass stage required by Slice 7, not from assigned-point coordinate
+means. The exact private names may change during implementation, but this
 separation of responsibilities is required.
 
 ### Chunk-aware assignment
@@ -1679,20 +1971,26 @@ tasks.
 
 ### Combined reductions
 
-For each normalized labels/points/coordinate-system pair, derive feature counts
-and coordinate statistics from the same assigned-points dataframe. Prefer one
-grouped intermediate keyed by instance and target, carrying at least transcript
-count and the coordinate sums/count needed for instance means. In class-aware
-mode, coordinate statistics use only the configured expression class, as
-specified by Slice 5.
+For each normalized labels/points/coordinate-system pair, derive all
+instance-feature counts and class summaries from the same assigned-points
+dataframe. Prefer one grouped intermediate keyed by instance and feature. In
+class-aware mode, construct both the expression and auxiliary matrices from
+that intermediate and retain the union of instances receiving any assigned
+class, as specified by Slice 7.
 
-Derive instance coordinates from the compact grouped result instead of running
-a second independent groupby over every assigned point. Retain sparse
-instance-by-target construction and compute all compact Dask reductions
-together so the assignment graph is executed once. Pair-level work remains
-independent. Preserve the feature-axis and row-selection semantics from Slice
-5, but replace its in-memory alignment and stacking implementation with the
-out-of-core construction path below.
+Do not calculate table coordinates with another points groupby. Derive centers
+of mass from the labels raster for the retained instance IDs. Where practical,
+accumulate the required label pixel counts and coordinate moments while the
+same labels chunks are already being read for assignment. The fused and
+standalone center-of-mass paths must produce exactly the same translated
+coordinates.
+
+Compute all compact Dask point reductions together so the assignment graph is
+executed once. Pair-level work remains independent. Preserve the two
+panel-defined class-aware feature axes, maximum-preservation row universe and
+label-derived coordinate semantics from Slice 7 while replacing their
+in-memory alignment and stacking implementation with the out-of-core
+construction path below.
 
 ### Out-of-core AnnData table construction
 
@@ -1721,51 +2019,53 @@ assigned points
       │
       ├── compact partial reductions by instance block
       │
-      ├── block 0 ── CSR X + obs + coordinates ── staged block 0
-      ├── block 1 ── CSR X + obs + coordinates ── staged block 1
+      ├── block 0 ── CSR X + CSR auxiliary + obs + centers ── staged block 0
+      ├── block 1 ── CSR X + CSR auxiliary + obs + centers ── staged block 1
       └── ...
                                              │
                                              ▼
                          deterministic row-block manifest
                                              │
-                    ┌────────────────────────┼───────────────────────┐
-                    ▼                        ▼                       ▼
-             write sparse X          write obs once          write obsm lazily
-             in CSR blocks            per-instance rows       in dense blocks
-                    └────────────────────────┼───────────────────────┘
+               ┌──────────────────┬──────────┼──────────┬───────────────────┐
+               ▼                  ▼          ▼          ▼                   ▼
+       write sparse X   write auxiliary X  write obs  write centers   write metadata
+       in CSR blocks      in CSR blocks       once     in dense blocks       once
+               └──────────────────┴──────────┼──────────┴───────────────────┘
                                              ▼
                                   final SpatialData table
 ```
 
 The implementation must follow this sequence:
 
-1. Establish one deterministic feature axis before constructing the final
-   block matrices. In class-aware mode this is the ordered set of features for
-   the authoritative expression class in feature-panel metadata, including
-   panel features with zero detections. In ordinary mode it remains the sorted
-   union of features assigned to non-background instances. Derive the latter
-   union from compact partition summaries; never collect the complete
-   instance-feature count series merely to discover the axis.
+1. Establish every deterministic feature axis before constructing the final
+   block matrices. In class-aware mode these are the ordered expression and
+   auxiliary axes from Slice 7, including panel features with zero detections.
+   In ordinary mode the single axis remains the sorted union of features
+   assigned to non-background instances. Derive the latter union from compact
+   partition summaries; never collect the complete instance-feature count
+   series merely to discover the axis.
 2. Reduce assigned points locally by `(instance, feature)` and, when required,
    feature class. Add an `instance_block` derived from deterministic instance
    ranges and redistribute these compact partial reductions—not the original
    points—so all contributions to one instance reach the same final block.
 3. Finalize each instance block on a worker. Build its bounded CSR expression
-   matrix, `.obs` rows and `.obsm[spatial_key]` coordinates against the shared
-   feature axis, then write one Harpy-owned temporary block artifact. A complete
-   temporary AnnData Zarr store is acceptable, but the final publication path
-   must consume its components independently. Return only a small block
-   manifest to the driver, containing the path, row count, nonzero count,
-   instance range, schema information and a feature-axis hash.
+   matrix, class-aware auxiliary CSR matrix, `.obs` rows and label-derived
+   `.obsm[spatial_key]` centers against the shared axes, then write one
+   Harpy-owned temporary block artifact. A complete temporary AnnData Zarr store
+   is acceptable, but the final publication path must consume its components
+   independently. Return only a small block manifest to the driver, containing
+   the path, row count, nonzero counts for both matrices, instance range, schema
+   information and hashes for every feature axis.
 4. Submit the block writers as part of one Dask computation. Iterating over
    blocks and independently computing each one is not acceptable because that
    can execute the shared point-to-label assignment repeatedly.
-5. Validate that all successful blocks have the exact same `.var` axis and
-   compatible `.obs`/`.obsm` schemas, that their observation identifiers are
-   globally unique, and that their instance ranges and output ordering are
-   deterministic. Assign every block one explicit half-open row interval from
-   `row_start` to `row_stop`. The exact same block and within-block row order
-   must be used for `X`, `.obs` and `.obsm`.
+5. Validate that all successful blocks have the exact same `.var` and auxiliary
+   feature axes and compatible `.obs`/`.obsm` schemas, that their observation
+   identifiers are globally unique, and that their instance ranges and output
+   ordering are deterministic. Assign every block one explicit half-open row
+   interval from `row_start` to `row_stop`. The exact same block and
+   within-block row order must be used for `X`, `.obs`,
+   `.obsm["auxiliary_feature_counts"]` and `.obsm[spatial_key]`.
 6. Initialize a staging AnnData group through `anndata.io.write_elem`, using a
    small AnnData skeleton containing the shared `.var` axis and required empty
    mappings. Do not hand-author AnnData root or component encoding attributes
@@ -1784,27 +2084,35 @@ The implementation must follow this sequence:
    `anndata.io.write_elem`. This intentionally permits `.obs` to reside in
    driver memory; it must not contain the much larger per-instance-feature
    reductions. Measure this remaining memory cost separately.
-9. Expose the ordered coordinate blocks as one dense Dask array and write
-   `.obsm[spatial_key]` with `anndata.io.write_elem`. The pinned AnnData writer
-   stores a dense Dask array into Zarr by chunks, so the complete coordinate
-   matrix must not be materialized on the driver.
-10. Write the final `.uns` mapping with `anndata.io.write_elem`. It includes
-    `spatialdata_attrs` and, in class-aware mode, the aggregation contract
-    established by Slice 5. The shared `.var` axis was written once by the
-    skeleton in step 6 and must not be independently reconstructed or reordered
-    after `X` has been written.
-11. Validate the completed component shapes before publication:
+9. In class-aware mode, expose the ordered auxiliary CSR blocks as another
+   sparse Dask array and write `.obsm["auxiliary_feature_counts"]` with
+   `anndata.io.write_elem`. Apply the same CSR format, index-width, independent
+   block-source and value checks as for `X`. Ordinary mode omits this component.
+10. Expose the ordered label-center blocks as one dense Dask array and write
+    `.obsm[spatial_key]` with `anndata.io.write_elem`. The pinned AnnData writer
+    stores a dense Dask array into Zarr by chunks, so the complete coordinate
+    matrix must not be materialized on the driver.
+11. Write the final `.uns` mapping with `anndata.io.write_elem`. It includes
+    `spatialdata_attrs` and, in class-aware mode, the aggregation and auxiliary
+    feature-matrix contracts established by Slices 5 and 7. The shared `.var`
+    axis was written once by the skeleton in step 6 and must not be independently
+    reconstructed or reordered after `X` has been written.
+12. Validate the completed component shapes before publication:
 
     ```text
     X.shape[0] == len(obs) == obsm[spatial_key].shape[0]
     X.shape[1] == len(var) == len(shared_feature_axis)
+
+    # class-aware mode
+    obsm["auxiliary_feature_counts"].shape ==
+        (len(obs), len(shared_auxiliary_feature_axis))
     ```
 
     Also verify the observation identifiers and per-block instance order
     against the row-block manifest, rather than accepting shape equality as
     sufficient proof of alignment.
 
-12. Publish the completed group as a SpatialData table only after all component
+13. Publish the completed group as a SpatialData table only after all component
     writes and validation have succeeded. Use the same lower-level
     AnnData-writing approach that `hp.tb.add_feature_matrix` uses for backed
     table updates: open the table group directly, write AnnData components with
@@ -1872,11 +2180,14 @@ Focused correctness tests should establish that:
 - supported translated coordinate systems produce the expected raster lookup;
 - multiple retained value columns survive assignment with their dtypes and
   categorical metadata intact;
-- ordinary and class-aware aggregation produce the same counts, rows,
-  coordinates, `.obs` metrics, and table metadata as before the refactor;
+- ordinary aggregation preserves the Slice 5 feature counts while using the
+  label-derived centers from Slice 7;
+- class-aware aggregation preserves both Slice 7 sparse matrices, its
+  maximum-preservation rows, `.obs` summaries, label-derived centers and
+  table-local metadata;
 - graph construction performs no point or labels source reads;
-- class-aware block stores share the complete panel-derived expression axis,
-  including features with zero detections;
+- class-aware block stores share the complete panel-derived expression and
+  auxiliary axes, including features with zero detections on either axis;
 - ordinary block stores share the exact sorted union of assigned features;
 - an instance whose partial reductions originate in different labels or
   points chunks occurs in exactly one output row;
@@ -1886,31 +2197,37 @@ Focused correctness tests should establish that:
   no visible partial table and clean up only Harpy-owned staging paths;
 - the scalable backed path writes through AnnData's lower-level I/O operations
   and never calls `SpatialData.write_element()` for the completed table;
-- the row-block manifest proves that `X`, `.obs` and `.obsm` use identical row
-  ordering, not merely compatible first-dimension sizes;
-- sparse `X` and `.obsm` are written in bounded blocks while only the
-  one-row-per-instance `.obs` dataframe is assembled on the driver;
+- the row-block manifest proves that `X`, `.obs`, the auxiliary feature matrix
+  and spatial centers use identical row ordering, not merely compatible
+  first-dimension sizes;
+- sparse `X`, sparse auxiliary counts and dense spatial centers are written in
+  bounded blocks while only the one-row-per-instance `.obs` dataframe is
+  assembled on the driver;
+- a fused label-moment implementation and the standalone
+  `RasterAggregator.center_of_mass` path produce identical centers;
 - the final `.uns`, `spatialdata_attrs`, table-group metadata, categorical
-  columns, `.var` axis and `.obsm` coordinates survive an AnnData and
-  SpatialData Zarr round trip; and
-- the scalable and current in-memory paths produce equivalent `AnnData` for
-  ordinary and class-aware aggregation.
+  columns, `.var` axis, auxiliary feature schema and `.obsm` payloads survive
+  an AnnData and SpatialData Zarr round trip; and
+- the scalable path and the Slice 7 in-memory path produce equivalent `AnnData`
+  for ordinary and class-aware aggregation.
 
 Do not make unit tests depend on Dask layer names or an exact task count. Use a
 separate benchmark and source-read instrumentation to compare the old and new
 implementations across increasing point-partition and labels-chunk counts.
 Record at least wall time, peak worker memory, graph construction time, task
 count, bytes read, shuffle bytes, spill volume, peak driver memory during block
-publication, maximum block rows/nonzeros, and temporary-store size. Include
+publication, maximum block rows/nonzeros, expression and auxiliary output
+bytes, labels reads for center calculation, and temporary-store size. Include
 both a small case, where shuffle and staging overhead can dominate, and a
-representative full backed mosaic. Vary the instance-block size and
-sparse-`X`/coordinate output chunks independently. Confirm that peak driver
-memory no longer scales with the total number of observed instance-feature
-pairs; record the remaining one-row-per-instance `.obs` assembly and
-publication cost explicitly.
+representative full backed mosaic. Vary the instance-block size and sparse
+expression/auxiliary and dense-coordinate output chunks independently. Confirm
+that peak driver memory no longer scales with the total number of observed
+instance-feature pairs; record the remaining one-row-per-instance `.obs`
+assembly and publication cost explicitly.
 
-The optimized path is acceptable when it preserves exact aggregation results,
-remains lazy during graph construction, avoids the `C * P` predicate fan-out,
-never materializes the complete instance-feature reduction on the driver, and
-materially improves the representative large-mosaic workload without a major
-regression on the small case.
+The optimized path is acceptable when it preserves the exact Slice 7
+aggregation payload and label-derived centers, remains lazy during graph
+construction, avoids the `C * P` predicate fan-out, never materializes the
+complete instance-feature reduction on the driver, and materially improves the
+representative large-mosaic workload without a major regression on the small
+case.
