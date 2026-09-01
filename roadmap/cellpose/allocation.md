@@ -29,10 +29,11 @@ Slices 2–4. Class-aware allocation requires that every selected points element
 reference authoritative feature-panel metadata; generic points without that
 metadata remain supported by the ordinary, non-class-aware path. Slice 6
 preserves the public behavior of `expression_class` while revising the
-class-aware table payload so per-feature non-expression counts and control-only
-instances are retained. Slice 7 preserves the resulting public and biological
-contracts while replacing the private aggregation execution and backed-table
-construction paths. Slice 8 establishes a Harpy-owned canonical-center
+class-aware table payload so per-feature non-expression counts and auxiliary-only
+instances are retained. Slice 7a optimizes the private point-to-label assignment
+while preserving that payload through the existing in-memory path. Slice 7b
+then adds partitioned reductions and out-of-core backed-table construction.
+Slice 8 establishes a Harpy-owned canonical-center
 calculation and metadata contract that napari-harpy can consume without a
 reverse dependency, and makes newly aggregated 2D tables immediately usable
 by canonical-center spatial queries. Slice 9's original-point summaries depend
@@ -1694,10 +1695,11 @@ For each normalized labels/points/coordinate-system pair:
 Apply label-derived centers to both ordinary and class-aware
 `hp.tb.aggregate_points` output so the meaning of `adata.obsm[spatial_key]`
 does not change with `expression_class`. Reuse the labels center-of-mass helper
-rather than maintaining a second numerical implementation. Slice 7 may fuse
-center-of-mass moment reduction with its chunk-aware labels traversal when this
-preserves exact results and avoids a second raster read, but such fusion is a
-performance optimization rather than a change in the coordinate contract.
+rather than maintaining a second numerical implementation. Slices 7a and 7b
+must preserve this standalone center contract rather than coupling the assignment
+handoff to an optional fused label-moment implementation. Any later fusion is a
+separate measured optimization and must preserve the canonical-center contract
+introduced by Slice 8.
 
 ### Single-assignment implementation
 
@@ -1759,18 +1761,26 @@ Focused tests should establish that:
 Benchmark the additional sparse matrix and labels-center calculation on a
 representative backed crop. Record output nonzeros and bytes separately for
 `X` and `auxiliary_feature_counts`, and confirm that the label-derived center
-calculation does not materialize the complete raster unnecessarily. Slice 7
-owns the larger assignment-graph and out-of-core table-construction
-optimizations.
+calculation does not materialize the complete raster unnecessarily. Slices 7a
+and 7b own the assignment-graph and out-of-core table-construction
+optimizations, respectively.
 
-## Slice 7: scalable point-to-label assignment and reduction
+## Slice 7a: chunk-aware point-to-label assignment
 
 **Status: specified; not implemented.**
 
-Refactor the private execution path used by `hp.tb.aggregate_points` without
-changing the public or biological contracts established by Slices 5 and 6.
-This optimization must remain generic to raster labels and points elements; it
-must not depend on CosMx FOV identifiers or reader-specific partition metadata.
+Refactor the private spatial-assignment path used by `hp.tb.aggregate_points`
+without changing the public or biological contracts established by Slices 5
+and 6. This optimization must remain generic to raster labels and points
+elements; it must not depend on CosMx FOV identifiers or reader-specific
+partition metadata.
+
+This slice changes only point-to-label assignment and the private boundary
+between assignment and downstream reduction. It deliberately retains the
+current reduction and in-memory AnnData construction path. Consequently, Slice
+7a removes the labels-chunk by points-partition graph fan-out, but does not yet
+remove the driver-memory cost of materializing the complete reduced
+instance-feature counts. Slice 7b owns that separate problem.
 
 ### Current scaling limitation
 
@@ -1797,7 +1807,8 @@ read points or labels merely to build the graph.
 
 ### Separate assignment from reduction
 
-Replace the overloaded private helper with two explicit stages:
+Replace the overloaded private helper with an explicit assignment boundary and
+a separate downstream reduction stage:
 
 ```python
 assigned_points = _assign_points_to_labels(
@@ -1818,13 +1829,19 @@ centers = _label_centers_of_mass(
 
 `_assign_points_to_labels` assigns the raster value underneath each point and
 filters label value zero. It accepts all value columns needed by the caller,
-rather than a single `value_key`, so ordinary and class-aware allocation use the
-same spatial lookup. `_aggregate_assigned_points` owns the count and
-row-selection reductions needed to construct the feature matrices, class
-summaries and retained instance IDs. Instance coordinates come from the labels
-center-of-mass stage required by Slice 6, not from assigned-point coordinate
-means. The exact private names may change during implementation, but this
-separation of responsibilities is required.
+rather than a single `value_key`, so ordinary and class-aware aggregation use
+the same spatial lookup. Its output is a lazy assigned-points dataframe with
+one row per retained point, the assigned instance ID and the requested value
+columns. This dataframe is the stable private handoff from Slice 7a to Slice
+7b.
+
+During Slice 7a, the existing count and row-selection reductions continue to
+consume this handoff and the current in-memory AnnData assembly remains in use.
+Slice 7b replaces those downstream internals with partitioned reductions and
+incremental component writes. Instance coordinates continue to come from the
+labels center-of-mass stage required by Slice 6, not from assigned-point
+coordinate means. The exact private names may change during implementation,
+but this separation of responsibilities is required.
 
 ### Chunk-aware assignment
 
@@ -1877,7 +1894,47 @@ carefully because smaller blocks reduce the size of each labels task while
 increasing the number of point buckets, shuffle partitions, and scheduler
 tasks.
 
-### Combined reductions
+### 7a verification and performance contract
+
+Focused correctness tests must establish that:
+
+- optimized assignment matches a simple in-memory reference for 2D labels;
+- half-open chunk edges assign every in-bounds point exactly once;
+- background and out-of-bounds points are excluded;
+- irregular final chunks and empty spatial buckets are handled correctly;
+- supported translated coordinate systems produce the expected raster lookup;
+- multiple retained value columns survive assignment with their dtypes and
+  categorical metadata intact;
+- graph construction performs no point or labels source reads; and
+- the unchanged downstream reduction and in-memory assembly produce the exact
+  Slice 6 result for ordinary and class-aware aggregation.
+
+Do not make unit tests depend on Dask layer names or an exact task count. Use a
+separate benchmark and source-read instrumentation to compare the old and new
+assignment implementations across increasing point-partition and labels-chunk
+counts. Record wall time, graph-construction time, task count, bytes read,
+shuffle bytes, spill volume and worker memory. Include both a small case, where
+shuffle overhead can dominate, and a representative full backed mosaic. Vary
+the labels chunking independently and document the point at which smaller
+virtual chunks become counterproductive.
+
+Slice 7a is complete when assignment remains lazy during graph construction,
+avoids the `C * P` predicate fan-out, preserves every Slice 6 table value through
+the unchanged downstream path and materially improves the representative
+large-mosaic assignment without a major regression on the small case. It does
+not claim bounded driver memory for the reduced counts or final table.
+
+## Slice 7b: out-of-core reduction and AnnData table construction
+
+**Status: specified; not implemented.**
+
+Consume the lazy assigned-points dataframe established by Slice 7a and replace
+the driver-resident count reduction and AnnData assembly with deterministic,
+bounded instance blocks and component-wise writes. Do not alter the public or
+biological contracts established by Slices 5 and 6, and do not reimplement the
+spatial assignment optimized by Slice 7a.
+
+### Partitioned reductions
 
 For each normalized labels/points/coordinate-system pair, derive all
 instance-feature counts and class summaries from the same assigned-points
@@ -1887,14 +1944,13 @@ that intermediate and retain the union of instances receiving any assigned
 class, as specified by Slice 6.
 
 Do not calculate table coordinates with another points groupby. Derive centers
-of mass from the labels raster for the retained instance IDs. Where practical,
-accumulate the required label pixel counts and coordinate moments while the
-same labels chunks are already being read for assignment. The fused and
-standalone center-of-mass paths must produce exactly the same translated
-coordinates.
+of mass from the labels raster for the retained instance IDs using the existing
+standalone labels-center path. Write those centers in bounded row blocks, but do
+not reach back into or change the Slice 7a assignment graph to fuse label
+moments across the private handoff.
 
-Compute all compact Dask point reductions together so the assignment graph is
-executed once. Pair-level work remains independent. Preserve the two
+Compute all compact Dask point reductions together so the Slice 7a assignment
+graph is executed once. Pair-level work remains independent. Preserve the two
 panel-defined class-aware feature axes, maximum-preservation row universe and
 label-derived coordinate semantics from Slice 6 while replacing their
 in-memory alignment and stacking implementation with the out-of-core
@@ -2077,23 +2133,10 @@ table reopening from `spatialdata.read_zarr` requires upstream SpatialData
 support and is not promised by this slice. Construction itself must
 nevertheless remain out of core.
 
-### Performance contract and verification
+### 7b verification and performance contract
 
 Focused correctness tests should establish that:
 
-- optimized assignment matches a simple in-memory reference for 2D labels;
-- half-open chunk edges assign every in-bounds point exactly once;
-- background and out-of-bounds points are excluded;
-- irregular final chunks and empty spatial buckets are handled correctly;
-- supported translated coordinate systems produce the expected raster lookup;
-- multiple retained value columns survive assignment with their dtypes and
-  categorical metadata intact;
-- ordinary aggregation preserves the Slice 5 feature counts while using the
-  label-derived centers from Slice 6;
-- class-aware aggregation preserves both Slice 6 sparse matrices, its
-  maximum-preservation rows, `.obs` summaries, label-derived centers and
-  table-local metadata;
-- graph construction performs no point or labels source reads;
 - class-aware block stores share the complete panel-derived expression and
   auxiliary axes, including features with zero detections on either axis;
 - ordinary block stores share the exact sorted union of assigned features;
@@ -2111,32 +2154,27 @@ Focused correctness tests should establish that:
 - sparse `X`, sparse auxiliary counts and dense spatial centers are written in
   bounded blocks while only the one-row-per-instance `.obs` dataframe is
   assembled on the driver;
-- a fused label-moment implementation and the standalone
-  `RasterAggregator.center_of_mass` path produce identical centers;
 - the final `.uns`, `spatialdata_attrs`, table-group metadata, categorical
   columns, `.var` axis, auxiliary feature schema and `.obsm` payloads survive
   an AnnData and SpatialData Zarr round trip; and
 - the scalable path and the Slice 6 in-memory path produce equivalent `AnnData`
   for ordinary and class-aware aggregation.
 
-Do not make unit tests depend on Dask layer names or an exact task count. Use a
-separate benchmark and source-read instrumentation to compare the old and new
-implementations across increasing point-partition and labels-chunk counts.
-Record at least wall time, peak worker memory, graph construction time, task
-count, bytes read, shuffle bytes, spill volume, peak driver memory during block
-publication, maximum block rows/nonzeros, expression and auxiliary output
-bytes, labels reads for center calculation, and temporary-store size. Include
-both a small case, where shuffle and staging overhead can dominate, and a
-representative full backed mosaic. Vary the instance-block size and sparse
-expression/auxiliary and dense-coordinate output chunks independently. Confirm
-that peak driver memory no longer scales with the total number of observed
-instance-feature pairs; record the remaining one-row-per-instance `.obs`
-assembly and publication cost explicitly.
+Benchmark the Slice 7b reduction and publication path independently from the
+Slice 7a assignment benchmark. Record wall time, peak worker memory, spill
+volume, peak driver memory during block publication, maximum block
+rows/nonzeros, expression and auxiliary output bytes, labels reads for center
+calculation, temporary-store size and the remaining one-row-per-instance `.obs`
+assembly cost. Include both a small case, where staging overhead can dominate,
+and a representative full backed mosaic. Vary the instance-block size and
+sparse expression/auxiliary and dense-coordinate output chunks independently.
+Confirm that peak driver memory no longer scales with the total number of
+observed instance-feature pairs.
 
-The optimized path is acceptable when it preserves the exact Slice 6
-aggregation payload and label-derived centers, remains lazy during graph
-construction, avoids the `C * P` predicate fan-out, never materializes the
-complete instance-feature reduction on the driver, and materially improves the
+Slice 7b is complete when it consumes the Slice 7a handoff exactly once,
+preserves the complete Slice 6 aggregation payload and label-derived centers,
+never materializes the complete instance-feature reduction on the driver,
+publishes no partial table on failure and materially lowers peak memory on the
 representative large-mosaic workload without a major regression on the small
 case.
 
