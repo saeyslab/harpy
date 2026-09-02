@@ -2260,11 +2260,45 @@ not an alternative table serializer.
 
 After publication, `aggregate_points` must make the new table available on the
 returned `SpatialData` without materializing the newly written sparse matrices.
-A narrow same-process attachment assembled through existing public AnnData
-component readers is acceptable and does not establish a general SpatialData
-lazy-reading contract. Making a later `spatialdata.read_zarr()` call reopen
-tables lazily is explicitly deferred to a separate follow-up slice and must not
-require changes to SpatialData internals in Slice 7b.
+Do not use Harpy's existing post-write `spatialdata.read_zarr()` reload for this
+path because it would read the completed table back into memory and negate the
+out-of-core construction benefit.
+
+Instead, open the final published table group and construct one same-process
+backed AnnData shell. Reuse the `.obs`, `.var`, `.uns` and dense center arrays
+that were already assembled for the component writes. Bind `adata.X` and, in
+class-aware mode, `adata.obsm["auxiliary_feature_counts"]` directly to their
+published on-disk CSR groups with the public
+[`anndata.io.sparse_dataset`](https://anndata.readthedocs.io/en/stable/generated/anndata.io.sparse_dataset.html)
+API:
+
+```python
+adata = AnnData(
+    X=sparse_dataset(table_group["X"]),
+    obs=obs,
+    var=var,
+    uns=uns,
+    obsm={
+        "auxiliary_feature_counts": sparse_dataset(
+            table_group["obsm"]["auxiliary_feature_counts"]
+        ),
+        spatial_key: centers,
+    },
+)
+```
+
+Ordinary mode omits the auxiliary entry. Validate this shell with
+`TableModel.validate()` and attach it to
+`sdata.tables[output_table_name]` only after the final table has been published.
+Open the final group after publication so no attached sparse handle refers to a
+temporary staging path. This is a narrow same-process binding required by the
+existing `aggregate_points` return contract; it neither calls an experimental
+AnnData lazy reader nor establishes a general SpatialData lazy-reading
+contract.
+
+Making a later `spatialdata.read_zarr()` call reopen tables lazily is explicitly
+deferred to a separate follow-up slice and must not require changes to
+SpatialData internals in Slice 7b.
 
 ### 7b verification and performance contract
 
@@ -2290,6 +2324,9 @@ Focused correctness tests should establish that:
   paths;
 - the scalable backed path uses AnnData's lower-level component writers and
   never calls `SpatialData.write_element()` for the completed table;
+- the returned same-process AnnData uses backed `sparse_dataset` handles for
+  `X` and the optional auxiliary matrix, reuses the already-constructed small
+  components and does not call `spatialdata.read_zarr()`;
 - `X`, `.obs`, the auxiliary feature matrix and spatial centers use the exact
   row order declared by the manifest, rather than merely compatible first-axis
   sizes;
@@ -2634,8 +2671,8 @@ Focused tests should establish that:
 Make persisted AnnData tables reopen lazily when a user later calls
 `spatialdata.read_zarr()`. This is separate from Slice 7b's out-of-core writer:
 Slice 7b must construct and publish a table without materializing its sparse
-matrices and may attach that table to the same-process result through a narrow
-AnnData component reader, but it does not change SpatialData's general Zarr
+matrices and attach that table to the same-process result with backed AnnData
+`sparse_dataset` handles, but it does not change SpatialData's general Zarr
 reader.
 
 Investigate the current SpatialData table I/O boundary and prefer an upstream
