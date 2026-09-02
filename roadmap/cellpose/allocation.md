@@ -2031,7 +2031,7 @@ counts.
 
 ## Slice 7b: out-of-core reduction and AnnData table construction
 
-**Status: specified; not implemented.**
+**Status: specified and ready for implementation; not implemented.**
 
 Consume the lazy assigned-points dataframe established by Slice 7a and replace
 the driver-resident instance-feature reduction and sparse-matrix assembly with
@@ -2086,49 +2086,40 @@ redistributions with different keys:
 1. Slice 7a shuffles original points by spatial labels-block ID so each point
    can be looked up in the appropriate labels-array chunk.
 2. Phase A of Slice 7b shuffles the locally reduced count rows by aggregation
-   pair and instance-ID row block so partial counts for the same instance can
-   be merged.
+   pair and instance ID so every feature count for one instance is colocated and
+   its partial counts can be merged.
 
 The partition-local groupby between these redistributions requires no worker
 communication. Phase B performs no further global shuffle.
 
 Keep these partition-local reductions inside the Dask graph; do not write one
-Harpy-managed artifact per input or spatial partition. The local reductions are
-an intermediate optimization, not a persistent staging format. Writing them
-individually would make temporary-file count scale with the upstream partition
-count and can create many tiny files even when each reduction contains little
-data.
+Harpy-managed artifact before the shuffle. The local reductions are an
+intermediate optimization, not a persistent staging format. Writing them would
+create an additional collection of temporary files that Phase A would
+immediately need to read and redistribute.
 
-An **instance-ID row block** is a private, one-dimensional grouping of possible
-instance IDs within one normalized aggregation pair. It is not an image tile, a
-labels-array chunk, a spatial region or a biological grouping. For an
-illustrative internal ID span of 50,000, the routing could be calculated as:
+Perform one Dask hash shuffle on `(aggregation_pair, instance_id)`. Leave
+`npartitions=None`, so Dask preserves the compact-count dataframe's existing
+partition count and chooses its configured shuffle implementation. This key is
+intentional: shuffling by the full `(aggregation_pair, instance_id, feature)`
+key could send different features belonging to one instance to different
+partitions, which would prevent Phase B from constructing that instance's
+complete sparse row locally.
 
-```text
-Slice 7a spatial labels block: point (x, y[, z]) → labels lookup
-Slice 7b instance-ID row block: assigned instance ID → count/output-row group
-```
+Dask's default is a partition **count**, not an adaptive byte-size target, and
+it does not guarantee equal row or byte sizes. Accept that behavior in this
+slice. Normal Dask spilling can control broader intermediate pressure, although
+it cannot subdivide one pathologically large pandas partition. Do not add an
+instance-ID span, perform an eager
+`repartition(partition_size=...)`, or compact checkpoint fragments. Benchmark
+the resulting distribution first; explicit sizing is a future optimization
+only if representative data demonstrate problematic skew or file counts.
 
-```text
-instance_row_block = (instance_id - 1) // 50,000
-
-aggregation pair 0, instance     42 → routing key (0, 0)
-aggregation pair 0, instance 50,001 → routing key (0, 1)
-aggregation pair 1, instance     42 → routing key (1, 0)
-```
-
-The span is illustrative rather than a public or fixed API value. Harpy stores
-only observed instances; it does not allocate rows for every possible ID in a
-span. Including the aggregation-pair ordinal in the routing key keeps equal
-numeric instance IDs from different labels elements distinct.
-
-Assign the compact rows to deterministic instance-ID row blocks and perform one
-Dask redistribution by aggregation-pair ordinal and row-block identifier.
-Merge duplicate `(instance, feature)` rows after that redistribution, while all
-partials for one instance are colocated. Only then establish the durable
-computation boundary by writing the merged long-form counts to one logical,
-Harpy-owned temporary Parquet dataset. The staged data are not AnnData objects
-and do not contain the original points.
+After the shuffle, merge duplicate `(aggregation_pair, instance_id, feature)`
+rows within each resulting partition. All partials for one instance are now
+colocated. Only then establish the durable computation boundary by writing the
+merged long-form counts to one logical, Harpy-owned temporary Parquet dataset.
+The staged data are not AnnData objects and do not contain the original points.
 
 For example, suppose Slice 7a has already routed the original points by spatial
 labels block and attached the looked-up instance IDs:
@@ -2150,67 +2141,83 @@ pair instance feature count            pair instance feature count
              │                                     │
              └──────────────────┬──────────────────┘
                                 ▼
-                shuffle compact rows by (pair, block)
+              shuffle compact rows by (pair, instance)
                                 │
                                 ▼
                  merge by (pair, instance, feature)
                                 │
                                 ▼
 checkpoint rows
-pair block instance feature count
-0    0     42       EPCAM       4
-0    0     42       VIM         1
-0    0     51       VIM         2
+pair instance feature count
+0    42       EPCAM       4
+0    42       VIM         1
+0    51       VIM         2
 ```
 
-If aggregation pair 1 also contains numeric instance ID 42, its routing key is
-`(1, 0)` rather than `(0, 0)`, so it cannot be merged with the rows above. At
-the checkpoint boundary, `(pair, instance, feature)` is globally unique.
+If aggregation pair 1 also contains numeric instance ID 42, its shuffle key is
+`(1, 42)` rather than `(0, 42)`, so it cannot be merged with the rows above. At
+the checkpoint boundary, `(pair, instance, feature)` is globally unique and all
+rows for one `(pair, instance)` occur in exactly one physical partition.
 
-The checkpoint is one logical dataset, with physical files sized independently
-of the input partitions:
+The checkpoint is one logical dataset written with Dask's ordinary Parquet
+writer:
 
 ```text
 <Harpy-owned temporary directory>/merged_counts/
-├── part-00000.parquet
-├── part-00001.parquet
-└── part-00002.parquet
+└── <Dask-managed Parquet part files>
 ```
 
-Its conceptual columns are `aggregation_pair`, `instance_row_block`,
-`instance_id`, `feature` and `count`. File boundaries need not equal logical
-instance-ID row-block boundaries: one reasonably sized Parquet file may contain
-several adjacent small logical blocks.
+The physical layout normally follows the output Dask partitions. Empty output
+partitions may be omitted or represented by an empty part according to the
+pinned Dask/Parquet implementation; Phase B ignores either representation.
 
-Storage partitioning must follow a private, tested row/byte target rather than
-the upstream Dask partitioning. Skip empty blocks and coalesce adjacent small
-logical row blocks when necessary, so the checkpoint comprises a modest number
-of reasonably sized Parquet files rather than one small file per input
-partition. Retain logical row-block boundaries in the manifests even when
-several logical blocks share one storage partition. Do not add a public tuning
-parameter for this internal storage policy.
+The merged checkpoint has this internal schema:
 
-Each staged storage partition returns only a small manifest containing its
-dataset fragment, aggregation pair, logical row blocks, observed feature names,
-retained instance summary, schema and row-count information. Submit local
-reduction, compact-row redistribution, duplicate merging, checkpoint writing
-and manifest construction as one Dask computation so the shared point-to-label
-assignment graph executes exactly once. Dask may use its own scheduler-managed
-shuffle or spill files during this computation; those transient files are not
-part of Harpy's staging contract. Do not call `.compute()` once to discover
-axes and then call it again to construct the checkpoint.
+| Column | Dtype | Contract |
+| --- | --- | --- |
+| `aggregation_pair` | `int64` | Zero-based ordinal of the normalized labels/points/coordinate-system pair. |
+| `instance_id` | `uint64` | Positive label value; background zero is absent. |
+| `feature` | non-null UTF-8 string | Normalized value from the requested points `feature_key`. |
+| `count` | `uint64` | Merged assigned-point count for this instance and feature. |
+
+At the checkpoint boundary, `(aggregation_pair, instance_id, feature)` must be
+globally unique. Keep local and merged counts as `uint64`; do not cast the
+partition-local groupby directly to the final matrix dtype. Before constructing
+a CSR block, reject any merged count greater than `uint32` maximum and only then
+cast its values to the persisted `uint32` matrix dtype. Reject null features,
+non-integral or non-positive retained instance IDs and malformed pair keys
+before publishing any table.
+
+Each final staged fragment returns only a small manifest containing its path,
+output-partition ordinal, represented aggregation pairs, retained composite
+instance identities, schema and row-count information. Empty output partitions
+do not contribute an output row block. Do not return every fragment's complete
+observed-feature set to the driver. In ordinary mode, calculate fragment-local
+feature sets and combine them through a Dask tree reduction, returning one
+global sorted feature axis. Class-aware mode uses the panel-defined axes and
+does not calculate an observed-feature union.
+
+Submit local reduction, compact-count shuffling, duplicate merging,
+checkpoint writing, manifest construction and the ordinary feature-set tree
+reduction as one Dask computation so the shared point-to-label assignment graph
+executes exactly once. Dask may use its own scheduler-managed shuffle or spill
+files during this computation; those transient files are not part of Harpy's
+staging contract. In particular, do not run an eager byte-sizing computation or
+call `.compute()` once to discover axes and then call it again to construct the
+checkpoint.
 
 In class-aware mode, the expression and auxiliary feature axes are already
 defined by the panel and include features with zero detections. In ordinary
-mode, derive the single sorted feature axis from the union of the merged-block
-manifest feature summaries. Never collect the complete instance-feature count
-series merely to discover that axis.
+mode, use the single sorted result of the distributed feature-set tree
+reduction. Never collect either every fragment's repeated feature set or the
+complete instance-feature count series merely to discover that axis.
 
 ### Phase B: construct AnnData blocks from the merged checkpoint
 
 Read only the staged merged-count dataset; Phase B must have no dependency on
-the original points or the Slice 7a assignment graph. Finalize each logical row
-block on a worker against the shared feature axes. Build its CSR expression
+the original points or the Slice 7a assignment graph. Treat each non-empty
+checkpoint partition as one output row block and finalize it on a worker
+against the shared feature axes. Build its CSR expression
 matrix and, in class-aware mode, its CSR auxiliary matrix and class summary
 columns. Expose these conversions as delayed, independently reusable block
 readers backed by the merged checkpoint rather than writing a second collection
@@ -2218,19 +2225,28 @@ of temporary CSR artifacts. Reading a compact merged-count fragment again for
 separate `X` and auxiliary component writes is acceptable; rerunning assignment
 or the compact-count shuffle is not.
 
-Instance-ID row blocking remains a private construction detail in this slice.
-Use a fixed, tested internal row target, preserve normalized aggregation-pair
-order and ascending instance-ID order within each pair, and assign each logical
-block an explicit half-open output row interval. A later benchmark may justify
-changing the internal target, but the public API must not acquire a tuning
-parameter pre-emptively.
+Within each checkpoint partition, sort the unique composite
+`(aggregation_pair, instance_id)` identities and assign that partition an
+explicit half-open output row interval. Concatenate partitions in checkpoint
+partition order. This partition-major row order is the manifest's source of
+truth for all output components; it is not a promise of globally ascending
+instance IDs and need not remain identical if a future Dask partition plan
+changes. Consumers identify observations through their composite identity, not
+their physical row position.
 
 The complete row universe is the union of instances receiving any assigned
 feature class. Observation identity and cross-component alignment use the
 composite `(labels_name, instance_id)` key because different labels elements
-may contain the same numeric instance ID. The final row order from the block
-manifests must be shared by `X`, `.obs`, the optional auxiliary feature matrix
-and the center matrix.
+may contain the same numeric instance ID. The final row order from the
+checkpoint manifests must be shared by `X`, `.obs`, the optional auxiliary
+feature matrix and the center matrix.
+
+Every normalized aggregation pair must contribute at least one retained,
+non-background instance. If a requested labels/points pair produces none,
+raise a clear `ValueError` naming both elements before any table is published.
+Do not silently omit the empty pair: doing so would make the requested regions,
+the aggregation metadata and SpatialData's table annotation disagree. This
+also defines the all-empty call without a separate special case.
 
 ### Label-derived centers
 
@@ -2282,8 +2298,8 @@ Phase A checkpoint: merged long-form count blocks
 The component writer must follow this sequence:
 
 1. Validate that all merged-count manifests have the expected long-form schema,
-   unique composite instance identities, disjoint logical instance ranges
-   within each aggregation pair and disjoint deterministic output intervals.
+   no composite instance identity represented by more than one checkpoint
+   partition, and disjoint output intervals in checkpoint-partition order.
    Each delayed CSR conversion must use the shared feature-axis hash and the
    same within-block ordering for every output component.
 2. Initialize a staging AnnData group through `anndata.io.write_elem`, using a
@@ -2299,9 +2315,18 @@ The component writer must follow this sequence:
    `indices`/`indptr` safety, output shape and values. The independently reusable
    staged merged-count sources ensure these per-chunk computations cannot rerun
    point assignment or the compact-count shuffle.
-4. Concatenate the bounded block `.obs` frames in deterministic order and write
-   the resulting one-row-per-instance pandas dataframe once. It must not contain
-   the much larger per-instance-feature reductions.
+
+   Every delayed CSR chunk must have shape
+   `(block_n_obs, len(shared_feature_axis))`: chunks partition rows only and
+   each chunk spans the complete feature axis. The Dask array therefore has one
+   column chunk and ordered row chunks matching the row manifests. Apply the
+   same full-width rule to the auxiliary matrix against
+   `shared_auxiliary_feature_axis`; this keeps AnnData's sequential CSR append
+   path well-defined and prevents independently constructed column blocks from
+   drifting out of alignment.
+4. Concatenate the bounded checkpoint-partition `.obs` frames in manifest order
+   and write the resulting one-row-per-instance pandas dataframe once. It must
+   not contain the much larger per-instance-feature reductions.
 5. In class-aware mode, expose the ordered auxiliary CSR blocks as another
    sparse Dask array and write `.obsm["auxiliary_feature_counts"]` through
    `anndata.io.write_elem`. Ordinary mode omits this component.
@@ -2323,8 +2348,8 @@ The component writer must follow this sequence:
        (len(obs), len(shared_auxiliary_feature_axis))
    ```
 
-   Also verify observation identities and per-pair instance order against the
-   row manifest; compatible shapes alone do not prove alignment.
+   Also verify the exact observation-identity sequence against the row
+   manifest; compatible shapes alone do not prove alignment.
 
 9. Publish the completed group as a SpatialData table only after all component
    writes and validation have succeeded. Use the same lower-level
@@ -2340,8 +2365,67 @@ The component writer must follow this sequence:
 Use this out-of-core writing path for every supported call. An unbacked object
 has no destination in which to construct the table and is rejected; there is no
 fallback in-memory implementation. This slice does not add an output-path
-parameter or a public instance-block tuning parameter to
+parameter or a public checkpoint-partition sizing parameter to
 `hp.tb.aggregate_points`.
+
+### Temporary store and publication contract
+
+The implementation targets the local filesystem-backed Zarr stores accepted by
+the current `SpatialData.path` API. Before constructing the Slice 7a graph,
+validate `output_table_name` and its overwrite policy against both the in-memory
+object and `<sdata.path>/tables`. Create one unique, hidden, Harpy-owned working
+directory beneath the tables directory:
+
+```text
+<sdata.path>/tables/
+├── <existing visible tables>
+└── .harpy-aggregate-<uuid>/
+    ├── merged_counts/     # Phase A checkpoint
+    └── table/             # Phase B AnnData group
+```
+
+The hidden directory is not a SpatialData table and must never be registered in
+`sdata.tables`. Record every path created by this call and restrict failure
+cleanup to those paths. The checkpoint and staged AnnData group share one
+working directory so their ownership and cleanup boundary is unambiguous.
+
+After AnnData has written every component and Harpy has validated the completed
+staged group, an isolated publication helper must add exactly the SpatialData
+table-group attributes used by `SpatialData.write_table`:
+
+```yaml
+spatialdata-encoding-type: ngff:regions_table
+version: "0.2"
+region: [...]
+region_key: region
+instance_key: instance_id
+```
+
+The actual `region`, `region_key` and `instance_key` values come from the
+validated table annotation rather than from these illustrative values. Those
+group attributes are the adoption boundary; Harpy must not duplicate AnnData's
+component encodings.
+
+Publication uses local directory renames, not `zarr.Group.move()`, which is not
+implemented by the pinned Zarr version:
+
+- for a new output, rename the staged `table/` directory to
+  `tables/<output_table_name>`;
+- for `overwrite=True`, rename the existing table to a unique hidden backup,
+  rename the completed staged table to the final name, restore the backup if
+  the second rename fails, and remove the backup only after successful
+  publication; and
+- for `overwrite=False`, reject the collision before assignment or reduction
+  begins.
+
+Consolidate Zarr metadata only after the final directory is in place. Then open
+the final published group and create the `sparse_dataset` handles used by the
+returned same-process AnnData shell. Never retain or attach a sparse handle
+opened against `table/` before its rename, because its stored path becomes
+stale. Once the final table has been attached successfully, remove the
+checkpoint and the now-empty working directory. On any earlier failure, leave
+the previous visible table intact or restore it and remove only paths owned by
+the current call.
 
 ### AnnData and SpatialData integration boundary
 
@@ -2409,40 +2493,80 @@ Making a later `spatialdata.read_zarr()` call reopen tables lazily is explicitly
 deferred to a separate follow-up slice and must not require changes to
 SpatialData internals in Slice 7b.
 
+### Implementation structure
+
+Do not add the complete out-of-core implementation to the already large
+`_allocation.py` module. Keep responsibilities separated as follows:
+
+- `_allocation.py` retains the public API, normalized aggregation-pair and
+  feature-panel contracts, Slice 7a handoff, and high-level orchestration;
+- a private `_aggregation_checkpoint.py` module owns Phase A schemas,
+  pair-and-instance shuffling, compact-count merging, Parquet manifests and the
+  ordinary feature-axis tree reduction; and
+- a private `_aggregation_writer.py` module owns Phase B CSR block readers,
+  component-wise AnnData writes, SpatialData table-group adoption and local
+  publication/rollback.
+
+Put shared immutable payload models in the lowest-level module that owns their
+contract, or in a narrowly scoped private contracts module if both phases need
+them. Keep dependency direction from orchestration to checkpoint/writer code;
+the public table validator may consume their persisted schemas, but these
+modules must not import the validator and create a cycle.
+
 ### 7b verification and performance contract
 
 Focused correctness tests should establish that:
 
 - Phase A executes the Slice 7a assignment graph exactly once, keeps local
   partial reductions graph-internal and writes only merged long-form count
-  blocks, not copies of the original assigned points;
-- checkpoint file count follows the merged storage-block target rather than the
-  upstream points or labels partition count; empty blocks are omitted and small
-  adjacent logical blocks can share one storage partition;
+  blocks, not copies of the original assigned points; no eager byte-size
+  repartition prepass is allowed to trigger a second execution;
+- the pair-and-instance shuffle uses Dask's default preserved output-partition
+  count, lets the ordinary Dask Parquet writer determine the corresponding part
+  files, ignores empty results and does not perform custom sizing or
+  post-checkpoint compaction;
+- checkpoint rows have the exact declared schema, contain no null features,
+  use positive `uint64` instance IDs and `uint64` counts, and are globally
+  unique by `(aggregation_pair, instance_id, feature)`; all rows for one
+  `(aggregation_pair, instance_id)` occur in one checkpoint partition;
 - an unbacked `SpatialData` is rejected before pair normalization or Dask graph
   construction with an error that demonstrates `sdata.write("sdata.zarr")`;
-- class-aware instance-ID row blocks share the complete panel-derived
+- class-aware checkpoint partitions share the complete panel-derived
   expression and auxiliary axes, including features with zero detections on
   either axis;
-- ordinary instance-ID row blocks share the exact sorted union from merged-block
-  Phase A feature summaries;
+- ordinary checkpoint partitions share the exact sorted result of a
+  distributed feature-set tree union; complete per-fragment feature lists are
+  not all copied to the driver;
 - partial counts for one instance that originate in different input partitions
-  are merged into exactly one output row;
-- output rows retain normalized pair order and ascending instance-ID order, and
-  composite `(labels_name, instance_id)` identities prevent collisions across
-  regions;
+  are merged into exactly one output row, and a merged value above `uint32`
+  maximum is rejected before CSR conversion rather than wrapped by a cast;
+- any requested aggregation pair with no retained non-background instance is
+  rejected by an error naming its labels and points elements, with no partial
+  table publication;
+- output rows follow the checkpoint manifest's partition-major order, every
+  output component uses that exact order, and composite
+  `(labels_name, instance_id)` identities prevent collisions across regions;
 - no complete instance-feature count series or sparse expression/auxiliary
   matrix is materialized on the driver;
+- every delayed CSR block spans its complete shared feature axis and partitions
+  rows only, with `uint32` values and 64-bit-safe index arrays;
 - one center calculation per labels element supplies a complete finite center
   dataframe, which is aligned through composite identities and written once;
 - injected local-reduction, merged-checkpoint, block-conversion, `X`, `.obs`,
-  `.obsm` and metadata failures leave no visible partial table and clean up only
-  Harpy-owned staging paths;
+  `.obsm`, metadata and directory-rename failures leave no visible partial
+  table, preserve or restore an overwritten table and clean up only paths
+  recorded as owned by the current call;
 - the out-of-core path uses AnnData's lower-level component writers and
-  never calls `SpatialData.write_element()` for the completed table;
+  never calls `SpatialData.write_element()` for the completed table; its
+  isolated publication helper writes the same table-group attributes as
+  `SpatialData.write_table()`;
 - the returned same-process AnnData uses backed `sparse_dataset` handles for
   `X` and the optional auxiliary matrix, reuses the already-constructed small
-  components and does not call `spatialdata.read_zarr()`;
+  components, opens those handles from the final path only and does not call
+  `spatialdata.read_zarr()`;
+- supported Zarr v2 and v3 stores, where both are supported by the pinned
+  AnnData/SpatialData stack, receive equivalent AnnData and SpatialData table
+  metadata and survive reopening;
 - `X`, `.obs`, the auxiliary feature matrix and spatial centers use the exact
   row order declared by the manifests, rather than merely compatible first-axis
   sizes;
@@ -2455,25 +2579,30 @@ Focused correctness tests should establish that:
 
 Benchmark Slice 7b independently from the Slice 7a assignment benchmark. Record
 wall time, peak worker memory, spill volume, peak driver memory during Phase A,
-Phase B and component publication, maximum row-block rows/nonzeros, expression
-and auxiliary output bytes, center calculation time and bytes, temporary-store
-size, checkpoint file count and size distribution, and `.obs` assembly cost.
+Phase B and component publication, maximum checkpoint-partition rows/nonzeros,
+expression and auxiliary output bytes, center calculation time and bytes,
+temporary-store size, checkpoint file count and size distribution, and `.obs`
+assembly cost.
 Include both a small case, where staging overhead can dominate, and a
-representative full backed mosaic. Confirm that checkpoint objects remain
-reasonably sized and do not scale one-for-one with upstream partitions, that
-peak driver memory no longer scales with the total number of observed
+representative full backed mosaic. Report partition skew and checkpoint file
+sizes, but do not make equal partition sizes a correctness requirement. Confirm
+that Dask's preserved partition count and normal spilling are adequate for the
+representative workload. Treat custom repartitioning or compaction as a future
+optimization only if those measurements reveal a concrete problem. Confirm
+that peak driver memory no longer scales with the total number of observed
 instance-feature pairs and that materializing the one-row-per-instance `.obs`
 and center payloads is acceptable.
 
 Slice 7b is complete when it executes the Slice 7a handoff exactly once, merges
-compact reductions before creating one block-sized long-form checkpoint,
-preserves the complete Slice 6 payload and label-derived centers, never writes
-one staging artifact per upstream partition, never materializes the complete
-instance-feature reduction or final sparse matrices on the driver, publishes no
-partial table on failure and materially lowers peak memory on the
-representative large-mosaic workload without a major regression on the small
-case. General lazy reopening of persisted SpatialData tables is not part of
-this completion criterion.
+compact reductions into the specified validated long-form checkpoint,
+preserves the complete Slice 6 payload and label-derived centers,
+never materializes the complete instance-feature reduction or final sparse
+matrices on the driver, rejects empty requested pairs and count overflow,
+publishes through the defined local staging/rollback contract without exposing
+a partial table, and materially lowers peak memory on the representative
+large-mosaic workload without a major regression on the small case. General
+lazy reopening of persisted SpatialData tables is not part of this completion
+criterion.
 
 ## Slice 8: Harpy-owned canonical centers and `aggregate_points` integration
 
