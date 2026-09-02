@@ -1,6 +1,8 @@
 from copy import deepcopy
 from types import SimpleNamespace
 
+import dask
+import dask.array as da
 import dask.dataframe as dd
 import numpy as np
 import pandas as pd
@@ -464,6 +466,252 @@ def test_aggregate_points_uses_xyz_label_center_order():
     )
 
     assert np.allclose(result.tables["table"].obsm[_SPATIAL], [[0.5, 0.5, 0.5]])
+
+
+def test_assign_points_to_labels_routes_once_across_irregular_chunks():
+    labels_data = np.arange(1, 36, dtype=np.uint32).reshape(5, 7)
+    labels_data[1, 1] = 0
+    labels = Labels2DModel.parse(
+        da.from_array(labels_data, chunks=((2, 3), (3, 2, 2))),
+        dims=("y", "x"),
+        transformations={"sample": Identity()},
+    )
+    categories = pd.CategoricalDtype(categories=["A", "B", "C"])
+    points = PointsModel.parse(
+        dd.from_pandas(
+            pd.DataFrame(
+                {
+                    "point_id": np.arange(10),
+                    "x": [0, 3, 5, 7, -1, 1, 0.5, 1.5, 4, 6],
+                    "y": [0, 0, 2, 0, 0, 1, 0.5, 1.5, 4, 4],
+                    "feature": pd.Series(["A", "B", "C", "A", "B", "C", "A", "B", "C", "A"], dtype=categories),
+                }
+            ),
+            npartitions=3,
+        ),
+        transformations={"sample": Identity()},
+    )
+
+    assigned = aggregation_module._assign_points_to_labels(
+        labels,
+        points,
+        value_key=["point_id", "feature"],
+        chunks=None,
+        to_coordinate_system="sample",
+    )
+    result = assigned.compute().sort_values("point_id").reset_index(drop=True)
+
+    assert assigned.npartitions == 6
+    assert result.columns.to_list() == ["x", "y", "point_id", "feature", "cells"]
+    assert result["point_id"].to_list() == [0, 1, 2, 6, 7, 8, 9]
+    assert result["cells"].to_list() == [1, 4, 20, 1, 17, 33, 35]
+    assert result[["x", "y"]].to_numpy().tolist() == [[0, 0], [3, 0], [5, 2], [0, 0], [2, 2], [4, 4], [6, 4]]
+    assert result["feature"].dtype == categories
+    assert not any("block_id" in column for column in result.columns)
+
+
+def test_classify_points_by_label_block_uses_half_open_irregular_grid():
+    feature_dtype = pd.CategoricalDtype(categories=["A", "B", "C"])
+    partition = pd.DataFrame(
+        {
+            "point_id": np.arange(7),
+            "x": [10, 12.5, 13, 15, 17, 10, 16],
+            "y": [20, 21.5, 20, 24, 20, 19, 21],
+            "feature": pd.Series(["A", "B", "C", "A", "B", "C", "A"], dtype=feature_dtype),
+        }
+    )
+
+    result = aggregation_module._classify_points_by_label_block(
+        partition,
+        coordinate_keys=("y", "x"),
+        boundaries=((0, 2, 5), (0, 3, 5, 7)),
+        translations=(20, 10),
+        grid_shape=(2, 3),
+        block_id_key="block_id",
+    )
+
+    assert result["point_id"].to_list() == [0, 1, 2, 3, 6]
+    assert result[["x", "y"]].to_numpy().tolist() == [[10, 20], [12, 22], [13, 20], [15, 24], [16, 21]]
+    assert result["block_id"].to_list() == [0, 3, 1, 5, 2]
+    assert result["block_id"].dtype == np.dtype(np.int64)
+    assert result["feature"].dtype == feature_dtype
+
+
+def test_classify_points_by_label_block_preserves_empty_schema():
+    partition = pd.DataFrame(
+        {
+            "x": pd.Series([-1, 4], dtype=np.float64),
+            "y": pd.Series([0, 0], dtype=np.float64),
+            "feature": pd.Series(["A", "B"], dtype="string"),
+        }
+    )
+
+    result = aggregation_module._classify_points_by_label_block(
+        partition,
+        coordinate_keys=("y", "x"),
+        boundaries=((0, 2), (0, 4)),
+        translations=(0, 0),
+        grid_shape=(1, 1),
+        block_id_key="block_id",
+    )
+
+    assert result.empty
+    assert result.columns.to_list() == ["x", "y", "feature", "block_id"]
+    assert result.dtypes.to_dict() == {
+        "x": np.dtype(np.int64),
+        "y": np.dtype(np.int64),
+        "feature": pd.StringDtype(),
+        "block_id": np.dtype(np.int64),
+    }
+
+
+def test_assign_points_to_labels_applies_integer_translation():
+    labels = Labels2DModel.parse(
+        da.from_array(np.array([[1, 2], [3, 4]], dtype=np.uint32), chunks=(1, 1)),
+        dims=("y", "x"),
+        transformations={"translated": Translation([10, 20], axes=("x", "y"))},
+    )
+    points = PointsModel.parse(
+        pd.DataFrame({"x": [10, 11], "y": [20, 21], "feature": ["A", "B"]}),
+        transformations={"translated": Identity()},
+    )
+
+    result = aggregation_module._assign_points_to_labels(
+        labels,
+        points,
+        value_key="feature",
+        to_coordinate_system="translated",
+    ).compute()
+
+    assert result.sort_values("feature")["cells"].to_list() == [1, 4]
+
+
+def test_assign_points_to_labels_routes_three_dimensional_blocks():
+    labels_data = np.arange(1, 25, dtype=np.uint32).reshape(2, 3, 4)
+    labels = Labels3DModel.parse(
+        da.from_array(labels_data, chunks=(1, 2, 2)),
+        dims=("z", "y", "x"),
+        transformations={"volume": Identity()},
+    )
+    points = PointsModel.parse(
+        pd.DataFrame(
+            {
+                "point_id": [0, 1, 2],
+                "x": [0, 2, 3],
+                "y": [0, 2, 2],
+                "z": [0, 0, 1],
+            }
+        ),
+        transformations={"volume": Identity()},
+    )
+
+    assigned = aggregation_module._assign_points_to_labels(
+        labels,
+        points,
+        value_key="point_id",
+        to_coordinate_system="volume",
+    )
+    result = assigned.compute().sort_values("point_id")
+
+    assert assigned.npartitions == 8
+    assert result["cells"].to_list() == [1, 11, 24]
+
+
+def test_assign_points_to_labels_rejects_fractional_translation():
+    labels = Labels2DModel.parse(
+        np.ones((2, 2), dtype=np.uint32),
+        dims=("y", "x"),
+        transformations={"translated": Translation([0.25, 0], axes=("x", "y"))},
+    )
+    points = PointsModel.parse(
+        pd.DataFrame({"x": [0], "y": [0], "feature": ["A"]}),
+        transformations={"translated": Identity()},
+    )
+
+    with pytest.raises(ValueError, match="translation along 'x' must be pixel-aligned"):
+        aggregation_module._assign_points_to_labels(
+            labels,
+            points,
+            value_key="feature",
+            to_coordinate_system="translated",
+        )
+
+
+@pytest.mark.parametrize("labels_ndim", [2, 3])
+def test_assign_points_to_labels_rejects_dimension_mismatch(labels_ndim: int):
+    if labels_ndim == 2:
+        labels = Labels2DModel.parse(
+            np.ones((2, 2), dtype=np.uint32),
+            dims=("y", "x"),
+            transformations={"sample": Identity()},
+        )
+        frame = pd.DataFrame({"x": [0], "y": [0], "z": [0], "feature": ["A"]})
+        message = "Two-dimensional labels require only"
+    else:
+        labels = Labels3DModel.parse(
+            np.ones((2, 2, 2), dtype=np.uint32),
+            dims=("z", "y", "x"),
+            transformations={"sample": Identity()},
+        )
+        frame = pd.DataFrame({"x": [0], "y": [0], "feature": ["A"]})
+        message = "Three-dimensional labels require"
+    points = PointsModel.parse(frame, transformations={"sample": Identity()})
+
+    with pytest.raises(ValueError, match=message):
+        aggregation_module._assign_points_to_labels(
+            labels,
+            points,
+            value_key="feature",
+            to_coordinate_system="sample",
+        )
+
+
+def test_assign_points_to_labels_graph_construction_does_not_read_sources():
+    reads: list[str] = []
+
+    @dask.delayed
+    def read_labels():
+        reads.append("labels")
+        return np.array([[1, 0], [0, 2]], dtype=np.uint32)
+
+    @dask.delayed
+    def read_points():
+        reads.append("points")
+        return pd.DataFrame(
+            {
+                "x": [0, 1],
+                "y": [0, 1],
+                "feature": pd.Series(["A", "B"], dtype="string"),
+            }
+        )
+
+    labels = Labels2DModel.parse(
+        da.from_delayed(read_labels(), shape=(2, 2), dtype=np.uint32),
+        dims=("y", "x"),
+        transformations={"sample": Identity()},
+    )
+    points = dd.from_delayed(
+        [read_points()],
+        meta=pd.DataFrame(
+            {
+                "x": pd.Series(dtype=np.int64),
+                "y": pd.Series(dtype=np.int64),
+                "feature": pd.Series(dtype="string"),
+            }
+        ),
+    )
+    points.attrs["transform"] = {"sample": Identity()}
+
+    assigned = aggregation_module._assign_points_to_labels(
+        labels,
+        points,
+        value_key="feature",
+        to_coordinate_system="sample",
+    )
+
+    assert reads == []
+    assert assigned.compute()["cells"].to_list() == [1, 2]
+    assert sorted(reads) == ["labels", "points"]
 
 
 def test_class_aware_aggregation_assigns_points_once(monkeypatch: pytest.MonkeyPatch):
