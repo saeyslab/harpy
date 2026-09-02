@@ -2071,7 +2071,7 @@ label-derived center matrix have only one row per retained instance or one row
 per feature; they may be assembled on the driver and written once after their
 alignment has been validated.
 
-### Phase A: assign once and stage compact partial counts
+### Phase A: assign once and stage merged count blocks
 
 For each normalized labels/points/coordinate-system pair, use the Slice 7a
 handoff once and reduce every assigned-points partition locally by
@@ -2080,9 +2080,43 @@ partition become one compact count row. In class-aware mode, perform the
 feature-panel content validation in the same submitted computation and derive
 both the expression and auxiliary payloads from the same feature counts.
 
-Write each partition-local reduction to a Harpy-owned temporary artifact. These
-artifacts are not AnnData objects and do not contain the original points. For
-example:
+Keep these partition-local reductions inside the Dask graph; do not write one
+Harpy-managed artifact per input or spatial partition. The local reductions are
+an intermediate optimization, not a persistent staging format. Writing them
+individually would make temporary-file count scale with the upstream partition
+count and can create many tiny files even when each reduction contains little
+data.
+
+An **instance-ID row block** is a private, one-dimensional grouping of possible
+instance IDs within one normalized aggregation pair. It is not an image tile, a
+labels-array chunk, a spatial region or a biological grouping. For an
+illustrative internal ID span of 50,000, the routing could be calculated as:
+
+```text
+Slice 7a spatial labels block: point (x, y[, z]) → labels lookup
+Slice 7b instance-ID row block: assigned instance ID → count/output-row group
+```
+
+```text
+instance_row_block = (instance_id - 1) // 50,000
+
+aggregation pair 0, instance     42 → routing key (0, 0)
+aggregation pair 0, instance 50,001 → routing key (0, 1)
+aggregation pair 1, instance     42 → routing key (1, 0)
+```
+
+The span is illustrative rather than a public or fixed API value. Harpy stores
+only observed instances; it does not allocate rows for every possible ID in a
+span. Including the aggregation-pair ordinal in the routing key keeps equal
+numeric instance IDs from different labels elements distinct.
+
+Assign the compact rows to deterministic instance-ID row blocks and perform one
+Dask redistribution by aggregation-pair ordinal and row-block identifier.
+Merge duplicate `(instance, feature)` rows after that redistribution, while all
+partials for one instance are colocated. Only then establish the durable
+computation boundary by writing the merged long-form counts to one logical,
+Harpy-owned temporary Parquet dataset. The staged data are not AnnData objects
+and do not contain the original points. For example:
 
 ```text
 assigned partition 0             assigned partition 1
@@ -2096,53 +2130,68 @@ partial counts 0                 partial counts 1
 instance feature count           instance feature count
 42       EPCAM       2           42       EPCAM       2
 42       VIM         1           51       VIM         1
+        │                                │
+        └──────────────┬─────────────────┘
+                       ▼
+          redistribute compact rows
+          by instance-ID row block
+                       │
+                       ▼
+             merged staged counts
+          instance feature count
+          42       EPCAM       4
+          42       VIM         1
+          51       VIM         1
 ```
 
-Each task returns only a small manifest containing its artifact path, observed
-feature names, retained instance summary, schema and row-count information.
-Compute all partition-local reductions and manifests together so the shared
-point-to-label assignment graph executes exactly once. Do not call `.compute()`
-once to discover axes and then call it again to construct matrices.
+Storage partitioning must follow a private, tested row/byte target rather than
+the upstream Dask partitioning. Skip empty blocks and coalesce adjacent small
+logical row blocks when necessary, so the checkpoint comprises a modest number
+of reasonably sized Parquet files rather than one small file per input
+partition. Retain logical row-block boundaries in the manifests even when
+several logical blocks share one storage partition. Do not add a public tuning
+parameter for this internal storage policy.
+
+Each staged storage partition returns only a small manifest containing its
+dataset fragment, aggregation pair, logical row blocks, observed feature names,
+retained instance summary, schema and row-count information. Submit local
+reduction, compact-row redistribution, duplicate merging, checkpoint writing
+and manifest construction as one Dask computation so the shared point-to-label
+assignment graph executes exactly once. Dask may use its own scheduler-managed
+shuffle or spill files during this computation; those transient files are not
+part of Harpy's staging contract. Do not call `.compute()` once to discover
+axes and then call it again to construct the checkpoint.
 
 In class-aware mode, the expression and auxiliary feature axes are already
 defined by the panel and include features with zero detections. In ordinary
-mode, derive the single sorted feature axis from the union of the compact
+mode, derive the single sorted feature axis from the union of the merged-block
 manifest feature summaries. Never collect the complete instance-feature count
 series merely to discover that axis.
 
-### Phase B: merge compact counts and construct row blocks
+### Phase B: construct AnnData blocks from the merged checkpoint
 
-Read only the staged partial counts. Assign them to deterministic instance row
-blocks and redistribute these compact rows—not the original points—so partial
-counts for one instance reach the same worker. The example above then reduces
-to:
+Read only the staged merged-count dataset; Phase B must have no dependency on
+the original points or the Slice 7a assignment graph. Finalize each logical row
+block on a worker against the shared feature axes. Build its CSR expression
+matrix and, in class-aware mode, its CSR auxiliary matrix and class summary
+columns. Expose these conversions as delayed, independently reusable block
+readers backed by the merged checkpoint rather than writing a second collection
+of temporary CSR artifacts. Reading a compact merged-count fragment again for
+separate `X` and auxiliary component writes is acceptable; rerunning assignment
+or the compact-count shuffle is not.
 
-```text
-instance feature count
-42       EPCAM       4
-42       VIM         1
-51       VIM         1
-```
-
-Instance blocking is a private construction detail in this slice. Use a fixed,
-tested internal row target rather than adding another public parameter. Preserve
-normalized aggregation-pair order and ascending instance-ID order within each
-pair. A later benchmark may justify exposing block sizing, but the public API
-must not acquire a tuning parameter pre-emptively.
-
-Finalize each block on a worker against the shared feature axes. Build its CSR
-expression matrix and, in class-aware mode, its CSR auxiliary matrix and class
-summary columns. Write one Harpy-owned temporary block artifact and return only
-a small block manifest containing its path, row count, nonzero counts, pair,
-instance range, schema, feature-axis hashes and explicit half-open output row
-interval. Submit all final block writers in one Dask computation; never iterate
-over blocks and independently recompute their upstream graph.
+Instance-ID row blocking remains a private construction detail in this slice.
+Use a fixed, tested internal row target, preserve normalized aggregation-pair
+order and ascending instance-ID order within each pair, and assign each logical
+block an explicit half-open output row interval. A later benchmark may justify
+changing the internal target, but the public API must not acquire a tuning
+parameter pre-emptively.
 
 The complete row universe is the union of instances receiving any assigned
 feature class. Observation identity and cross-component alignment use the
 composite `(labels_name, instance_id)` key because different labels elements
 may contain the same numeric instance ID. The final row order from the block
-manifest must be shared by `X`, `.obs`, the optional auxiliary feature matrix
+manifests must be shared by `X`, `.obs`, the optional auxiliary feature matrix
 and the center matrix.
 
 ### Label-derived centers
@@ -2167,8 +2216,8 @@ The optimized assignment graph alone is insufficient for large datasets. The
 current implementation computes every observed `(instance, feature)` count into
 one driver-resident pandas `Series`, converts the complete result to sparse
 matrices, and only then writes the completed `AnnData`. The scalable backed path
-must instead consume the staged row blocks and write the final components
-separately with the public
+must instead consume the staged merged-count blocks and write the final
+components separately with the public
 [`anndata.io.write_elem`](https://anndata.readthedocs.io/en/stable/generated/anndata.io.write_elem.html)
 API:
 
@@ -2176,33 +2225,29 @@ API:
 assigned points
       │
       ▼
-Phase A: local reductions ── staged compact partial counts
-                                      │
-                                      ▼
-                         axes + retained instances
-                                      │
-                                      ▼
-Phase B: merged row blocks ── staged CSR block artifacts
-                                      │
-                    ┌─────────────────┼──────────────────┐
-                    ▼                 ▼                  ▼
-               sparse X       sparse auxiliary      row manifest
-              block write        block write              │
-                    │                 │              ┌─────┴─────┐
-                    │                 │              ▼           ▼
-                    │                 │          obs once   centers once
-                    └─────────────────┴──────────────┬───────────┘
-                                                    ▼
-                                         final SpatialData table
+local reductions (Dask graph only; no per-partition artifacts)
+      │
+      ▼
+compact-row shuffle + duplicate merge
+      │
+      ▼
+Phase A checkpoint: merged long-form count blocks
+      ├──► axes + row manifest ──► obs + centers ─────────┐
+      │                                                   │
+      └──► Phase B: delayed CSR conversion                │
+                    ├──► sparse X block write ────────────┤
+                    └──► sparse auxiliary block write ───┤
+                                                          ▼
+                                               final SpatialData table
 ```
 
 The component writer must follow this sequence:
 
-1. Validate that all successful row blocks have the expected feature-axis
-   hashes, CSR schemas, unique composite instance identities, disjoint instance
-   ranges within each aggregation pair and disjoint deterministic output
-   intervals. The same within-block ordering must be used by every output
-   component.
+1. Validate that all merged-count manifests have the expected long-form schema,
+   unique composite instance identities, disjoint logical instance ranges
+   within each aggregation pair and disjoint deterministic output intervals.
+   Each delayed CSR conversion must use the shared feature-axis hash and the
+   same within-block ordering for every output component.
 2. Initialize a staging AnnData group through `anndata.io.write_elem`, using a
    small AnnData skeleton containing the shared `.var` axis and required empty
    mappings. Do not hand-author AnnData root or component encoding attributes
@@ -2214,8 +2259,8 @@ The component writer must follow this sequence:
    [`sparse_dataset`](https://anndata.readthedocs.io/en/stable/generated/anndata.io.sparse_dataset.html)
    implementation. Version-gated tests must confirm CSR format, 64-bit
    `indices`/`indptr` safety, output shape and values. The independently reusable
-   staged block sources ensure these per-chunk computations cannot rerun point
-   assignment.
+   staged merged-count sources ensure these per-chunk computations cannot rerun
+   point assignment or the compact-count shuffle.
 4. Concatenate the bounded block `.obs` frames in deterministic order and write
    the resulting one-row-per-instance pandas dataframe once. It must not contain
    the much larger per-instance-feature reductions.
@@ -2330,14 +2375,19 @@ SpatialData internals in Slice 7b.
 
 Focused correctness tests should establish that:
 
-- Phase A executes the Slice 7a assignment graph exactly once and writes only
-  compact partial reductions, not copies of the original assigned points;
+- Phase A executes the Slice 7a assignment graph exactly once, keeps local
+  partial reductions graph-internal and writes only merged long-form count
+  blocks, not copies of the original assigned points;
+- checkpoint file count follows the merged storage-block target rather than the
+  upstream points or labels partition count; empty blocks are omitted and small
+  adjacent logical blocks can share one storage partition;
 - an unbacked `SpatialData` is rejected before pair normalization or Dask graph
   construction with an error that demonstrates `sdata.write("sdata.zarr")`;
-- class-aware row blocks share the complete panel-derived expression and
-  auxiliary axes, including features with zero detections on either axis;
-- ordinary row blocks share the exact sorted union from compact Phase A feature
-  summaries;
+- class-aware instance-ID row blocks share the complete panel-derived
+  expression and auxiliary axes, including features with zero detections on
+  either axis;
+- ordinary instance-ID row blocks share the exact sorted union from merged-block
+  Phase A feature summaries;
 - partial counts for one instance that originate in different input partitions
   are merged into exactly one output row;
 - output rows retain normalized pair order and ascending instance-ID order, and
@@ -2347,16 +2397,16 @@ Focused correctness tests should establish that:
   matrix is materialized on the driver;
 - one center calculation per labels element supplies a complete finite center
   dataframe, which is aligned through composite identities and written once;
-- injected partial-reduction, row-block, `X`, `.obs`, `.obsm` and metadata
-  failures leave no visible partial table and clean up only Harpy-owned staging
-  paths;
+- injected local-reduction, merged-checkpoint, block-conversion, `X`, `.obs`,
+  `.obsm` and metadata failures leave no visible partial table and clean up only
+  Harpy-owned staging paths;
 - the out-of-core path uses AnnData's lower-level component writers and
   never calls `SpatialData.write_element()` for the completed table;
 - the returned same-process AnnData uses backed `sparse_dataset` handles for
   `X` and the optional auxiliary matrix, reuses the already-constructed small
   components and does not call `spatialdata.read_zarr()`;
 - `X`, `.obs`, the auxiliary feature matrix and spatial centers use the exact
-  row order declared by the manifest, rather than merely compatible first-axis
+  row order declared by the manifests, rather than merely compatible first-axis
   sizes;
 - the final `.uns`, `spatialdata_attrs`, table-group metadata, categorical
   columns, `.var` axis, auxiliary schema and `.obsm` payloads survive AnnData
@@ -2369,19 +2419,23 @@ Benchmark Slice 7b independently from the Slice 7a assignment benchmark. Record
 wall time, peak worker memory, spill volume, peak driver memory during Phase A,
 Phase B and component publication, maximum row-block rows/nonzeros, expression
 and auxiliary output bytes, center calculation time and bytes, temporary-store
-size and `.obs` assembly cost. Include both a small case, where staging overhead
-can dominate, and a representative full backed mosaic. Confirm that peak driver
-memory no longer scales with the total number of observed instance-feature
-pairs and that materializing the one-row-per-instance `.obs` and center payloads
-is acceptable.
+size, checkpoint file count and size distribution, and `.obs` assembly cost.
+Include both a small case, where staging overhead can dominate, and a
+representative full backed mosaic. Confirm that checkpoint objects remain
+reasonably sized and do not scale one-for-one with upstream partitions, that
+peak driver memory no longer scales with the total number of observed
+instance-feature pairs and that materializing the one-row-per-instance `.obs`
+and center payloads is acceptable.
 
-Slice 7b is complete when it stages the Slice 7a handoff exactly once, merges
-only compact reductions thereafter, preserves the complete Slice 6 payload and
-label-derived centers, never materializes the complete instance-feature
-reduction or final sparse matrices on the driver, publishes no partial table on
-failure and materially lowers peak memory on the representative large-mosaic
-workload without a major regression on the small case. General lazy reopening
-of persisted SpatialData tables is not part of this completion criterion.
+Slice 7b is complete when it executes the Slice 7a handoff exactly once, merges
+compact reductions before creating one block-sized long-form checkpoint,
+preserves the complete Slice 6 payload and label-derived centers, never writes
+one staging artifact per upstream partition, never materializes the complete
+instance-feature reduction or final sparse matrices on the driver, publishes no
+partial table on failure and materially lowers peak memory on the
+representative large-mosaic workload without a major regression on the small
+case. General lazy reopening of persisted SpatialData tables is not part of
+this completion criterion.
 
 ## Slice 8: Harpy-owned canonical centers and `aggregate_points` integration
 
