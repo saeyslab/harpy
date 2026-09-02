@@ -1784,8 +1784,7 @@ instance-feature counts. Slice 7b owns that separate problem.
 
 ### Current scaling limitation
 
-The current `_aggregate` helper is primarily a point-to-label assignment
-operation rather than an aggregation. It enumerates every labels-array chunk
+The current `_assign_points_to_labels` helper enumerates every labels-array chunk
 and builds a complete points-dataframe bounding-box query for each chunk. With
 `C` labels chunks and `P` effective points partitions, the graph therefore
 contains approximately `C * P` spatial-filter tasks. The Parquet read nodes may
@@ -1843,6 +1842,12 @@ labels center-of-mass stage required by Slice 6, not from assigned-point
 coordinate means. The exact private names may change during implementation,
 but this separation of responsibilities is required.
 
+The existing `_assign_points_to_labels` helper is also used by `bin_counts()`.
+Keep one shared assignment implementation and preserve both callers' behavior:
+`aggregate_points()` may drop source coordinates after assignment, whereas
+`bin_counts()` retains them for its existing barcode-coordinate reductions.
+Slice 7a must not silently optimize one caller while changing the other.
+
 ### Chunk-aware assignment
 
 Use the existing scale-zero labels chunks by default. Given their cumulative
@@ -1879,6 +1884,47 @@ points
                     └── ...
 ```
 
+For a two-dimensional labels raster, number blocks in row-major chunk order.
+For example:
+
+```text
+                 x chunk
+                0       1
+            ┌───────┬───────┐
+y chunk 0   │ id 0  │ id 1  │
+            ├───────┼───────┤
+y chunk 1   │ id 2  │ id 3  │
+            └───────┴───────┘
+```
+
+After applying the labels translation and the agreed coordinate-to-pixel
+rounding, use the cumulative chunk boundaries to derive each point's chunk
+indices. Flatten them deterministically:
+
+```text
+# 2D
+block_id = y_chunk * number_of_x_chunks + x_chunk
+
+# 3D
+block_id = (z_chunk * number_of_y_chunks + y_chunk)
+           * number_of_x_chunks + x_chunk
+```
+
+The same row-major ordering must index `arr.to_delayed()` so every `block_id`
+selects exactly one corresponding labels chunk. A point on a chunk boundary
+belongs to the chunk whose half-open interval starts at that boundary. A point
+inside the overall labels extent therefore receives exactly one valid
+`block_id`; a point outside it is removed before redistribution.
+
+The NumPy-style docstring of the implemented `_assign_points_to_labels` helper
+must explain this classification and lookup algorithm rather than merely state
+that points are assigned to labels. Include the two-dimensional chunk-grid
+scheme above, the half-open boundary rule, the labels-translation convention,
+the optional 3D extension, the returned lazy dataframe schema, background
+filtering and the effect of retaining or dropping coordinate columns. It must
+also state that graph construction performs no source reads and that the
+temporary `block_id` is not part of the returned dataframe.
+
 This replaces repeated full-dataframe predicates with one linear block
 classification and one redistribution of the points. Supply explicit Dask
 `meta` throughout. Do not materialize the complete points dataframe, the
@@ -1905,7 +1951,9 @@ Focused correctness tests must establish that:
 - supported translated coordinate systems produce the expected raster lookup;
 - multiple retained value columns survive assignment with their dtypes and
   categorical metadata intact;
-- graph construction performs no point or labels source reads; and
+- graph construction performs no point or labels source reads;
+- `bin_counts()` preserves its barcode assignment, retained-coordinate and
+  exactly-once behavior through the shared helper; and
 - the unchanged downstream reduction and in-memory assembly produce the exact
   Slice 6 result for ordinary and class-aware aggregation.
 
