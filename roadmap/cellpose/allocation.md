@@ -2080,6 +2080,18 @@ partition become one compact count row. In class-aware mode, perform the
 feature-panel content validation in the same submitted computation and derive
 both the expression and auxiliary payloads from the same feature counts.
 
+Across Slices 7a and 7b, the intended dataflow contains two global
+redistributions with different keys:
+
+1. Slice 7a shuffles original points by spatial labels-block ID so each point
+   can be looked up in the appropriate labels-array chunk.
+2. Phase A of Slice 7b shuffles the locally reduced count rows by aggregation
+   pair and instance-ID row block so partial counts for the same instance can
+   be merged.
+
+The partition-local groupby between these redistributions requires no worker
+communication. Phase B performs no further global shuffle.
+
 Keep these partition-local reductions inside the Dask graph; do not write one
 Harpy-managed artifact per input or spatial partition. The local reductions are
 an intermediate optimization, not a persistent staging format. Writing them
@@ -2116,33 +2128,59 @@ Merge duplicate `(instance, feature)` rows after that redistribution, while all
 partials for one instance are colocated. Only then establish the durable
 computation boundary by writing the merged long-form counts to one logical,
 Harpy-owned temporary Parquet dataset. The staged data are not AnnData objects
-and do not contain the original points. For example:
+and do not contain the original points.
+
+For example, suppose Slice 7a has already routed the original points by spatial
+labels block and attached the looked-up instance IDs:
 
 ```text
-assigned partition 0             assigned partition 1
-instance feature                 instance feature
-42       EPCAM                   42       EPCAM
-42       EPCAM                   42       EPCAM
-42       VIM                     51       VIM
-        │                                │
-        ▼                                ▼
-partial counts 0                 partial counts 1
-instance feature count           instance feature count
-42       EPCAM       2           42       EPCAM       2
-42       VIM         1           51       VIM         1
-        │                                │
-        └──────────────┬─────────────────┘
-                       ▼
-          redistribute compact rows
-          by instance-ID row block
-                       │
-                       ▼
-             merged staged counts
-          instance feature count
-          42       EPCAM       4
-          42       VIM         1
-          51       VIM         1
+assigned partition 0                  assigned partition 1
+pair instance feature                 pair instance feature
+0    42       EPCAM                   0    42       EPCAM
+0    42       EPCAM                   0    42       EPCAM
+0    42       VIM                     0    51       VIM
+0    51       VIM
+             │                                     │
+             ▼                                     ▼
+partition-local partial counts         partition-local partial counts
+pair instance feature count            pair instance feature count
+0    42       EPCAM       2            0    42       EPCAM       2
+0    42       VIM         1            0    51       VIM         1
+0    51       VIM         1
+             │                                     │
+             └──────────────────┬──────────────────┘
+                                ▼
+                shuffle compact rows by (pair, block)
+                                │
+                                ▼
+                 merge by (pair, instance, feature)
+                                │
+                                ▼
+checkpoint rows
+pair block instance feature count
+0    0     42       EPCAM       4
+0    0     42       VIM         1
+0    0     51       VIM         2
 ```
+
+If aggregation pair 1 also contains numeric instance ID 42, its routing key is
+`(1, 0)` rather than `(0, 0)`, so it cannot be merged with the rows above. At
+the checkpoint boundary, `(pair, instance, feature)` is globally unique.
+
+The checkpoint is one logical dataset, with physical files sized independently
+of the input partitions:
+
+```text
+<Harpy-owned temporary directory>/merged_counts/
+├── part-00000.parquet
+├── part-00001.parquet
+└── part-00002.parquet
+```
+
+Its conceptual columns are `aggregation_pair`, `instance_row_block`,
+`instance_id`, `feature` and `count`. File boundaries need not equal logical
+instance-ID row-block boundaries: one reasonably sized Parquet file may contain
+several adjacent small logical blocks.
 
 Storage partitioning must follow a private, tested row/byte target rather than
 the upstream Dask partitioning. Skip empty blocks and coalesce adjacent small
