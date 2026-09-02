@@ -2,7 +2,7 @@
 
 ## Status
 
-Nine implementation slices are planned; Slices 1 through 6 are implemented:
+Ten implementation slices are planned; Slices 1 through 6 are implemented:
 
 1. patch the CosMx reader and establish the generic Harpy feature-panel
    metadata contract — implemented;
@@ -17,8 +17,11 @@ Nine implementation slices are planned; Slices 1 through 6 are implemented:
 7. optimize the generic point-to-label assignment, reduction and backed table
    construction path;
 8. promote napari-harpy's canonical-center implementation into Harpy and
-   integrate it with `hp.tb.aggregate_points`; and
-9. add QC functions that summarize the original, unallocated control points.
+   integrate it with `hp.tb.aggregate_points`;
+9. add QC functions that summarize the original, unallocated control points;
+   and
+10. support general lazy reopening of persisted AnnData tables through
+    SpatialData.
 
 Slice 2 replaces the current single-run reader surface with one coherent,
 sample-aware creation contract. Slice 3 validates that an existing store still
@@ -39,7 +42,9 @@ reverse dependency, and makes newly aggregated 2D tables immediately usable
 by canonical-center spatial queries. Slice 9's original-point summaries depend
 on the reader metadata from Slices 1–4 rather than aggregation or labels; its
 optional per-instance plotting view derives temporary rates from the
-class-aware table.
+class-aware table. Slice 10 is an independent integration follow-up that makes
+later SpatialData Zarr reads retain lazy AnnData matrices; it is not required
+for Slice 7b's out-of-core writing or same-process result.
 
 ## Goal
 
@@ -2028,170 +2033,206 @@ counts.
 **Status: specified; not implemented.**
 
 Consume the lazy assigned-points dataframe established by Slice 7a and replace
-the driver-resident count reduction and AnnData assembly with deterministic,
-bounded instance blocks and component-wise writes. Do not alter the public or
-biological contracts established by Slices 5 and 6, and do not reimplement the
-spatial assignment optimized by Slice 7a.
+the driver-resident instance-feature reduction and sparse-matrix assembly with
+a two-phase, out-of-core count path. Preserve the public and biological
+contracts established by Slices 5 and 6. This slice does not reimplement the
+spatial assignment optimized by Slice 7a and does not attempt to make general
+SpatialData table reopening lazy.
 
-### Partitioned reductions
+The large payload is the set of observed `(instance, feature)` counts. Keep that
+payload partitioned and on disk. The complete `.obs`, `.var`, `.uns` and
+label-derived center matrix have only one row per retained instance or one row
+per feature; they may be assembled on the driver and written once after their
+alignment has been validated.
 
-For each normalized labels/points/coordinate-system pair, derive all
-instance-feature counts and class summaries from the same assigned-points
-dataframe. Prefer one grouped intermediate keyed by instance and feature. In
-class-aware mode, construct both the expression and auxiliary matrices from
-that intermediate and retain the union of instances receiving any assigned
-class, as specified by Slice 6.
+### Phase A: assign once and stage compact partial counts
 
-Do not calculate table coordinates with another points groupby. Derive centers
-of mass from the labels raster for the retained instance IDs using the existing
-standalone labels-center path. Write those centers in bounded row blocks, but do
-not reach back into or change the Slice 7a assignment graph to fuse label
-moments across the private handoff.
+For each normalized labels/points/coordinate-system pair, use the Slice 7a
+handoff once and reduce every assigned-points partition locally by
+`(instance, feature)`. Duplicate points belonging to the same pair within a
+partition become one compact count row. In class-aware mode, perform the
+feature-panel content validation in the same submitted computation and derive
+both the expression and auxiliary payloads from the same feature counts.
 
-Compute all compact Dask point reductions together so the Slice 7a assignment
-graph is executed once. Pair-level work remains independent. Preserve the two
-panel-defined class-aware feature axes, maximum-preservation row universe and
-label-derived coordinate semantics from Slice 6 while replacing their
-in-memory alignment and stacking implementation with the out-of-core
-construction path below.
+Write each partition-local reduction to a Harpy-owned temporary artifact. These
+artifacts are not AnnData objects and do not contain the original points. For
+example:
 
-### Out-of-core AnnData table construction
+```text
+assigned partition 0             assigned partition 1
+instance feature                 instance feature
+42       EPCAM                   42       EPCAM
+42       EPCAM                   42       EPCAM
+42       VIM                     51       VIM
+        │                                │
+        ▼                                ▼
+partial counts 0                 partial counts 1
+instance feature count           instance feature count
+42       EPCAM       2           42       EPCAM       2
+42       VIM         1           51       VIM         1
+```
+
+Each task returns only a small manifest containing its artifact path, observed
+feature names, retained instance summary, schema and row-count information.
+Compute all partition-local reductions and manifests together so the shared
+point-to-label assignment graph executes exactly once. Do not call `.compute()`
+once to discover axes and then call it again to construct matrices.
+
+In class-aware mode, the expression and auxiliary feature axes are already
+defined by the panel and include features with zero detections. In ordinary
+mode, derive the single sorted feature axis from the union of the compact
+manifest feature summaries. Never collect the complete instance-feature count
+series merely to discover that axis.
+
+### Phase B: merge compact counts and construct row blocks
+
+Read only the staged partial counts. Assign them to deterministic instance row
+blocks and redistribute these compact rows—not the original points—so partial
+counts for one instance reach the same worker. The example above then reduces
+to:
+
+```text
+instance feature count
+42       EPCAM       4
+42       VIM         1
+51       VIM         1
+```
+
+Instance blocking is a private construction detail in this slice. Use a fixed,
+tested internal row target rather than adding another public parameter. Preserve
+normalized aggregation-pair order and ascending instance-ID order within each
+pair. A later benchmark may justify exposing block sizing, but the public API
+must not acquire a tuning parameter pre-emptively.
+
+Finalize each block on a worker against the shared feature axes. Build its CSR
+expression matrix and, in class-aware mode, its CSR auxiliary matrix and class
+summary columns. Write one Harpy-owned temporary block artifact and return only
+a small block manifest containing its path, row count, nonzero counts, pair,
+instance range, schema, feature-axis hashes and explicit half-open output row
+interval. Submit all final block writers in one Dask computation; never iterate
+over blocks and independently recompute their upstream graph.
+
+The complete row universe is the union of instances receiving any assigned
+feature class. Observation identity and cross-component alignment use the
+composite `(labels_name, instance_id)` key because different labels elements
+may contain the same numeric instance ID. The final row order from the block
+manifest must be shared by `X`, `.obs`, the optional auxiliary feature matrix
+and the center matrix.
+
+### Label-derived centers
+
+Centers are deliberately not part of the partitioned count path. Once Phase A
+has established the retained instance IDs, loop over the normalized labels
+elements, calculate the requested centers of mass once per labels element with
+the existing standalone labels-center implementation and concatenate the
+resulting dataframes in pair order. Align the concatenated centers to the final
+row manifest through `(labels_name, instance_id)` and reject missing, duplicate
+or non-finite centers.
+
+The complete dense center matrix may reside on the driver: its size is
+proportional to retained instances times spatial dimensions, rather than to the
+much larger number of observed instance-feature pairs. Write
+`.obsm[spatial_key]` once with `anndata.io.write_elem`; do not recalculate
+centers per count block or rescan a labels raster for every output block.
+
+### Component-wise AnnData writing
 
 The optimized assignment graph alone is insufficient for large datasets. The
-current implementation ultimately computes every observed
-`(instance, feature)` count into one driver-resident pandas `Series`, converts
-the complete result to sparse matrices, concatenates all `.obs` frames and
-coordinate arrays, and only then writes the completed `AnnData`. The scalable
-path must instead keep the reduced counts partitioned and construct the table
-in bounded instance blocks.
-
-This is an out-of-core AnnData construction problem, but it is not implemented
-as repeated mutation of one in-memory `AnnData` or with
-`anndata.experimental.concat_on_disk()`. The latter always operates on complete
-AnnData inputs: in the pinned version it streams sparse `X` and array-like
-`.obsm`, but it concatenates `.obs` indices and dataframes in driver memory and
-does not preserve the required `.uns`. It also offers no option to concatenate
-only `X`.
-
-Write the final AnnData components separately with the public
+current implementation computes every observed `(instance, feature)` count into
+one driver-resident pandas `Series`, converts the complete result to sparse
+matrices, and only then writes the completed `AnnData`. The scalable backed path
+must instead consume the staged row blocks and write the final components
+separately with the public
 [`anndata.io.write_elem`](https://anndata.readthedocs.io/en/stable/generated/anndata.io.write_elem.html)
-API instead:
+API:
 
 ```text
 assigned points
       │
-      ├── compact partial reductions by instance block
-      │
-      ├── block 0 ── CSR X + CSR auxiliary + obs + centers ── staged block 0
-      ├── block 1 ── CSR X + CSR auxiliary + obs + centers ── staged block 1
-      └── ...
-                                             │
-                                             ▼
-                         deterministic row-block manifest
-                                             │
-               ┌──────────────────┬──────────┼──────────┬───────────────────┐
-               ▼                  ▼          ▼          ▼                   ▼
-       write sparse X   write auxiliary X  write obs  write centers   write metadata
-       in CSR blocks      in CSR blocks       once     in dense blocks       once
-               └──────────────────┴──────────┼──────────┴───────────────────┘
-                                             ▼
-                                  final SpatialData table
+      ▼
+Phase A: local reductions ── staged compact partial counts
+                                      │
+                                      ▼
+                         axes + retained instances
+                                      │
+                                      ▼
+Phase B: merged row blocks ── staged CSR block artifacts
+                                      │
+                    ┌─────────────────┼──────────────────┐
+                    ▼                 ▼                  ▼
+               sparse X       sparse auxiliary      row manifest
+              block write        block write              │
+                    │                 │              ┌─────┴─────┐
+                    │                 │              ▼           ▼
+                    │                 │          obs once   centers once
+                    └─────────────────┴──────────────┬───────────┘
+                                                    ▼
+                                         final SpatialData table
 ```
 
-The implementation must follow this sequence:
+The component writer must follow this sequence:
 
-1. Establish every deterministic feature axis before constructing the final
-   block matrices. In class-aware mode these are the ordered expression and
-   auxiliary axes from Slice 6, including panel features with zero detections.
-   In ordinary mode the single axis remains the sorted union of features
-   assigned to non-background instances. Derive the latter union from compact
-   partition summaries; never collect the complete instance-feature count
-   series merely to discover the axis.
-2. Reduce assigned points locally by `(instance, feature)` and, when required,
-   feature class. Add an `instance_block` derived from deterministic instance
-   ranges and redistribute these compact partial reductions—not the original
-   points—so all contributions to one instance reach the same final block.
-3. Finalize each instance block on a worker. Build its bounded CSR expression
-   matrix, class-aware auxiliary CSR matrix, `.obs` rows and label-derived
-   `.obsm[spatial_key]` centers against the shared axes, then write one
-   Harpy-owned temporary block artifact. A complete temporary AnnData Zarr store
-   is acceptable, but the final publication path must consume its components
-   independently. Return only a small block manifest to the driver, containing
-   the path, row count, nonzero counts for both matrices, instance range, schema
-   information and hashes for every feature axis.
-4. Submit the block writers as part of one Dask computation. Iterating over
-   blocks and independently computing each one is not acceptable because that
-   can execute the shared point-to-label assignment repeatedly.
-5. Validate that all successful blocks have the exact same `.var` and auxiliary
-   feature axes and compatible `.obs`/`.obsm` schemas, that their observation
-   identifiers are globally unique, and that their instance ranges and output
-   ordering are deterministic. Assign every block one explicit half-open row
-   interval from `row_start` to `row_stop`. The exact same block and
-   within-block row order must be used for `X`, `.obs`,
-   `.obsm["auxiliary_feature_counts"]` and `.obsm[spatial_key]`.
-6. Initialize a staging AnnData group through `anndata.io.write_elem`, using a
+1. Validate that all successful row blocks have the expected feature-axis
+   hashes, CSR schemas, unique composite instance identities, disjoint instance
+   ranges within each aggregation pair and disjoint deterministic output
+   intervals. The same within-block ordering must be used by every output
+   component.
+2. Initialize a staging AnnData group through `anndata.io.write_elem`, using a
    small AnnData skeleton containing the shared `.var` axis and required empty
    mappings. Do not hand-author AnnData root or component encoding attributes
    when the AnnData writer can create them.
-7. Expose the ordered CSR blocks as one sparse Dask array and write it to `X`
-   with `anndata.io.write_elem`. In the pinned AnnData version, the registered
-   Dask-sparse writer writes the first CSR chunk and appends subsequent chunks
-   through AnnData's backed
+3. Expose the ordered expression CSR blocks as one sparse Dask array and write
+   it to `X` with `anndata.io.write_elem`. In the pinned AnnData version, the
+   registered Dask-sparse writer writes the first CSR chunk and appends later
+   chunks through AnnData's backed
    [`sparse_dataset`](https://anndata.readthedocs.io/en/stable/generated/anndata.io.sparse_dataset.html)
    implementation. Version-gated tests must confirm CSR format, 64-bit
-   `indices`/`indptr` safety, output shape and values. The block sources must be
-   staged or otherwise independently reusable so the writer's per-chunk
-   computations cannot rerun the point-to-label assignment.
-8. Concatenate only the bounded block `.obs` frames in deterministic order and
-   write the resulting one-row-per-instance pandas dataframe with
-   `anndata.io.write_elem`. This intentionally permits `.obs` to reside in
-   driver memory; it must not contain the much larger per-instance-feature
-   reductions. Measure this remaining memory cost separately.
-9. In class-aware mode, expose the ordered auxiliary CSR blocks as another
-   sparse Dask array and write `.obsm["auxiliary_feature_counts"]` with
-   `anndata.io.write_elem`. Apply the same CSR format, index-width, independent
-   block-source and value checks as for `X`. Ordinary mode omits this component.
-10. Expose the ordered label-center blocks as one dense Dask array and write
-    `.obsm[spatial_key]` with `anndata.io.write_elem`. The pinned AnnData writer
-    stores a dense Dask array into Zarr by chunks, so the complete coordinate
-    matrix must not be materialized on the driver.
-11. Write the final `.uns` mapping with `anndata.io.write_elem`. It includes
-    `spatialdata_attrs` and, in class-aware mode, the aggregation and auxiliary
-    feature-matrix contracts established by Slices 5 and 6. The shared `.var`
-    axis was written once by the skeleton in step 6 and must not be independently
-    reconstructed or reordered after `X` has been written.
-12. Validate the completed component shapes before publication:
+   `indices`/`indptr` safety, output shape and values. The independently reusable
+   staged block sources ensure these per-chunk computations cannot rerun point
+   assignment.
+4. Concatenate the bounded block `.obs` frames in deterministic order and write
+   the resulting one-row-per-instance pandas dataframe once. It must not contain
+   the much larger per-instance-feature reductions.
+5. In class-aware mode, expose the ordered auxiliary CSR blocks as another
+   sparse Dask array and write `.obsm["auxiliary_feature_counts"]` through
+   `anndata.io.write_elem`. Ordinary mode omits this component.
+6. Align the complete concatenated labels-center dataframe to the row manifest
+   and write `.obsm[spatial_key]` once.
+7. Write the final `.uns` mapping once. It includes `spatialdata_attrs` and, in
+   class-aware mode, the aggregation and auxiliary feature-matrix contracts
+   established by Slices 5 and 6. The shared `.var` axis was written by the
+   skeleton and must not be independently reconstructed or reordered after `X`
+   has been written.
+8. Validate the completed component shapes before publication:
 
-    ```text
-    X.shape[0] == len(obs) == obsm[spatial_key].shape[0]
-    X.shape[1] == len(var) == len(shared_feature_axis)
+   ```text
+   X.shape[0] == len(obs) == obsm[spatial_key].shape[0]
+   X.shape[1] == len(var) == len(shared_feature_axis)
 
-    # class-aware mode
-    obsm["auxiliary_feature_counts"].shape ==
-        (len(obs), len(shared_auxiliary_feature_axis))
-    ```
+   # class-aware mode
+   obsm["auxiliary_feature_counts"].shape ==
+       (len(obs), len(shared_auxiliary_feature_axis))
+   ```
 
-    Also verify the observation identifiers and per-block instance order
-    against the row-block manifest, rather than accepting shape equality as
-    sufficient proof of alignment.
+   Also verify observation identities and per-pair instance order against the
+   row manifest; compatible shapes alone do not prove alignment.
 
-13. Publish the completed group as a SpatialData table only after all component
-    writes and validation have succeeded. Use the same lower-level
-    AnnData-writing approach that `hp.tb.add_feature_matrix` uses for backed
-    table updates: open the table group directly, write AnnData components with
-    `anndata.io.write_elem`, add the required SpatialData table-group metadata
-    through one isolated helper, and consolidate Zarr metadata after the
-    complete table is valid. The scalable path must not pass the completed
-    table through `SpatialData.write_element()`, because that would re-enter
-    SpatialData's ordinary in-memory table-writing path and could defeat the
-    out-of-core construction contract. Remove only Harpy-owned temporary block
-    and staging groups on failure; do not expose a partially constructed table
-    under `output_table_name`.
+9. Publish the completed group as a SpatialData table only after all component
+   writes and validation have succeeded. Use the same lower-level
+   AnnData-writing approach that `hp.tb.add_feature_matrix` uses for backed
+   table updates: write AnnData components with `anndata.io.write_elem`, add the
+   required SpatialData table-group metadata through one isolated helper, and
+   consolidate Zarr metadata only after the complete table is valid. Do not pass
+   the completed table through `SpatialData.write_element()`, because that would
+   re-enter the ordinary in-memory table-writing path. Remove only Harpy-owned
+   staging artifacts on failure and do not leave a partial table visible under
+   `output_table_name`.
 
-Use this scalable path automatically when the input `SpatialData` is backed.
-An unbacked object has no destination in which an out-of-core table can be
-constructed, so it retains the current in-memory path and result. This slice
-does not add an output-path parameter to `hp.tb.aggregate_points`.
+Use this scalable writing path automatically when the input `SpatialData` is
+backed. An unbacked object has no destination in which to construct an
+out-of-core table, so it retains the current in-memory implementation. This
+slice does not add an output-path parameter or a public instance-block tuning
+parameter to `hp.tb.aggregate_points`.
 
 ### AnnData and SpatialData integration boundary
 
@@ -2202,80 +2243,79 @@ is a group containing `data`, `indices` and `indptr` arrays plus shape and
 encoding metadata, rather than a regular two-dimensional Zarr array. Correct
 row appends must update the CSR offsets, shape, index widths and all three
 arrays consistently. AnnData's Dask-sparse `write_elem` path already owns this
-logic and supports both Zarr generations used by the supported dependency
-range. Raw resizing would duplicate format-sensitive code in Harpy.
+logic. Raw resizing would duplicate format-sensitive code in Harpy.
 
-The deliberately non-incremental component is the complete `.obs` dataframe.
-The pinned AnnData writer accepts pandas DataFrames rather than Dask
-DataFrames, so component-wise writing does not make `.obs` incremental. This
-still removes the much larger driver-memory cost proportional to observed
-instance-feature pairs: `.obs` has one row per retained instance and only the
-output annotation columns. If its measured driver-memory cost is unacceptable
-at the target scale, implement or request a complete upstream AnnData
-dataframe-append API. A direct Harpy writer for the columnar AnnData dataframe
-encoding is a last resort and must be isolated behind versioned integration
-tests; it must handle the index, `column-order`, string encodings and
-categorical codes/categories explicitly. Do not add it before the
-one-row-per-instance `.obs` benchmark demonstrates a need.
+The deliberately driver-resident components are `.obs`, `.var`, `.uns` and the
+dense labels-center matrix. Their memory scales with retained instances,
+features or metadata, not with observed instance-feature pairs. Measure `.obs`
+and center memory separately. Do not add a private AnnData dataframe appender or
+partition the center calculation unless representative benchmarks demonstrate
+a separate problem.
 
-The pinned SpatialData version also has no public operation that adopts a
-pre-written AnnData group as a table, and its ordinary Zarr reader materializes
-tables with `anndata.read_zarr`. Implement one narrow Harpy publication adapter
-that sets only the SpatialData table-group metadata required around the AnnData
-group after the lower-level AnnData writers have completed and validated it.
-This helper is an integration boundary, not an alternative table serializer:
-AnnData remains responsible for `X`, `.obs`, `.var`, `.obsm` and `.uns`, and
-`SpatialData.write_element()` is not called. Test the completed group against
-`TableModel.validate` and round-trip the complete SpatialData store. The
-same-process result may be attached with AnnData's lazy reader, but fully lazy
-table reopening from `spatialdata.read_zarr` requires upstream SpatialData
-support and is not promised by this slice. Construction itself must
-nevertheless remain out of core.
+The pinned SpatialData version has no public operation that adopts a prewritten
+AnnData group as a table. Implement one narrow Harpy publication adapter that
+sets only the required SpatialData table-group metadata after AnnData has
+written and validated the components. This helper is an integration boundary,
+not an alternative table serializer.
+
+After publication, `aggregate_points` must make the new table available on the
+returned `SpatialData` without materializing the newly written sparse matrices.
+A narrow same-process attachment assembled through existing public AnnData
+component readers is acceptable and does not establish a general SpatialData
+lazy-reading contract. Making a later `spatialdata.read_zarr()` call reopen
+tables lazily is explicitly deferred to a separate follow-up slice and must not
+require changes to SpatialData internals in Slice 7b.
 
 ### 7b verification and performance contract
 
 Focused correctness tests should establish that:
 
-- class-aware block stores share the complete panel-derived expression and
+- Phase A executes the Slice 7a assignment graph exactly once and writes only
+  compact partial reductions, not copies of the original assigned points;
+- class-aware row blocks share the complete panel-derived expression and
   auxiliary axes, including features with zero detections on either axis;
-- ordinary block stores share the exact sorted union of assigned features;
-- an instance whose partial reductions originate in different labels or
-  points chunks occurs in exactly one output row;
-- block construction does not compute the complete instance-feature counts on
-  the driver and does not execute the assignment graph once per block;
-- injected block-write, `X`, `.obs`, `.obsm` and final-metadata failures leave
-  no visible partial table and clean up only Harpy-owned staging paths;
-- the scalable backed path writes through AnnData's lower-level I/O operations
-  and never calls `SpatialData.write_element()` for the completed table;
-- the row-block manifest proves that `X`, `.obs`, the auxiliary feature matrix
-  and spatial centers use identical row ordering, not merely compatible
-  first-dimension sizes;
-- sparse `X`, sparse auxiliary counts and dense spatial centers are written in
-  bounded blocks while only the one-row-per-instance `.obs` dataframe is
-  assembled on the driver;
+- ordinary row blocks share the exact sorted union from compact Phase A feature
+  summaries;
+- partial counts for one instance that originate in different input partitions
+  are merged into exactly one output row;
+- output rows retain normalized pair order and ascending instance-ID order, and
+  composite `(labels_name, instance_id)` identities prevent collisions across
+  regions;
+- no complete instance-feature count series or sparse expression/auxiliary
+  matrix is materialized on the driver;
+- one center calculation per labels element supplies a complete finite center
+  dataframe, which is aligned through composite identities and written once;
+- injected partial-reduction, row-block, `X`, `.obs`, `.obsm` and metadata
+  failures leave no visible partial table and clean up only Harpy-owned staging
+  paths;
+- the scalable backed path uses AnnData's lower-level component writers and
+  never calls `SpatialData.write_element()` for the completed table;
+- `X`, `.obs`, the auxiliary feature matrix and spatial centers use the exact
+  row order declared by the manifest, rather than merely compatible first-axis
+  sizes;
 - the final `.uns`, `spatialdata_attrs`, table-group metadata, categorical
-  columns, `.var` axis, auxiliary feature schema and `.obsm` payloads survive
-  an AnnData and SpatialData Zarr round trip; and
-- the scalable path and the Slice 6 in-memory path produce equivalent `AnnData`
-  for ordinary and class-aware aggregation.
+  columns, `.var` axis, auxiliary schema and `.obsm` payloads survive AnnData
+  and SpatialData Zarr round trips; and
+- the scalable backed path and Slice 6's in-memory path produce equivalent
+  `AnnData` payloads in ordinary and class-aware modes.
 
-Benchmark the Slice 7b reduction and publication path independently from the
-Slice 7a assignment benchmark. Record wall time, peak worker memory, spill
-volume, peak driver memory during block publication, maximum block
-rows/nonzeros, expression and auxiliary output bytes, labels reads for center
-calculation, temporary-store size and the remaining one-row-per-instance `.obs`
-assembly cost. Include both a small case, where staging overhead can dominate,
-and a representative full backed mosaic. Vary the instance-block size and
-sparse expression/auxiliary and dense-coordinate output chunks independently.
-Confirm that peak driver memory no longer scales with the total number of
-observed instance-feature pairs.
+Benchmark Slice 7b independently from the Slice 7a assignment benchmark. Record
+wall time, peak worker memory, spill volume, peak driver memory during Phase A,
+Phase B and component publication, maximum row-block rows/nonzeros, expression
+and auxiliary output bytes, center calculation time and bytes, temporary-store
+size and `.obs` assembly cost. Include both a small case, where staging overhead
+can dominate, and a representative full backed mosaic. Confirm that peak driver
+memory no longer scales with the total number of observed instance-feature
+pairs and that materializing the one-row-per-instance `.obs` and center payloads
+is acceptable.
 
-Slice 7b is complete when it consumes the Slice 7a handoff exactly once,
-preserves the complete Slice 6 aggregation payload and label-derived centers,
-never materializes the complete instance-feature reduction on the driver,
-publishes no partial table on failure and materially lowers peak memory on the
-representative large-mosaic workload without a major regression on the small
-case.
+Slice 7b is complete when it stages the Slice 7a handoff exactly once, merges
+only compact reductions thereafter, preserves the complete Slice 6 payload and
+label-derived centers, never materializes the complete instance-feature
+reduction or final sparse matrices on the driver, publishes no partial table on
+failure and materially lowers peak memory on the representative large-mosaic
+workload without a major regression on the small case. General lazy reopening
+of persisted SpatialData tables is not part of this completion criterion.
 
 ## Slice 8: Harpy-owned canonical centers and `aggregate_points` integration
 
@@ -2386,11 +2426,18 @@ row order as `X`, `.obs`, the optional auxiliary feature matrix and
 
 ### Construction and publication
 
-`aggregate_points` creates a complete new table, so construct and validate the
-canonical matrix and metadata in memory before passing the AnnData object to
-`add_table`. The canonical payload should therefore be included in the same
-initial table write rather than adding the table first and invoking a second
-napari-harpy mutation or component write afterwards.
+Calculate and validate the canonical matrix and metadata as part of the same
+table-construction operation as the existing transformed centers. The canonical
+payload must be present before the table is published rather than being added
+through a later napari-harpy mutation.
+
+For unbacked `SpatialData`, retain the existing in-memory construction path and
+attach both coordinate matrices before the single `add_table` call. For backed
+`SpatialData`, integrate with Slice 7b's component writer: both complete dense
+center matrices may reside on the driver, must use the established row manifest
+and are written once through `anndata.io.write_elem` before publication. Do not
+route a backed table through the old in-memory `add_table` path merely to add
+canonical centers.
 
 The implementation sequence should be:
 
@@ -2400,11 +2447,13 @@ The implementation sequence should be:
    implementation;
 3. derive the general transformed `spatial_key` coordinates from those same
    centers;
-4. concatenate all blocks in final table-row order;
+4. concatenate all blocks in final table-row order and align them through the
+   composite `(labels_name, instance_id)` identity;
 5. construct the complete per-region canonical metadata registry;
 6. validate the matrix, binding, source signatures, coverage and serialized
    schema together; and
-7. attach both coordinate payloads before the single `add_table` publication.
+7. attach both coordinate payloads before the single unbacked `add_table`
+   publication or write both once through Slice 7b's backed component writer.
 
 Napari-harpy's ensure/read path remains useful for older or externally created
 tables without canonical coordinates. For a new Harpy aggregation table,
@@ -2577,3 +2626,28 @@ Focused tests should establish that:
   and authoritative denominator snapshot without modifying `.obs`;
 - sample and mosaic coordinate systems remain independent; and
 - the implementation stays lazy until the compact summaries are computed.
+
+## Slice 10: lazy SpatialData table reopening
+
+**Status: follow-up; not implemented.**
+
+Make persisted AnnData tables reopen lazily when a user later calls
+`spatialdata.read_zarr()`. This is separate from Slice 7b's out-of-core writer:
+Slice 7b must construct and publish a table without materializing its sparse
+matrices and may attach that table to the same-process result through a narrow
+AnnData component reader, but it does not change SpatialData's general Zarr
+reader.
+
+Investigate the current SpatialData table I/O boundary and prefer an upstream
+public integration over patching private reader internals in Harpy. A reopened
+table should retain lazy or backed `X`, sparse auxiliary feature matrices and
+dense coordinate matrices while preserving pandas-compatible `.obs` and
+`.var`, `TableModel` validation, table annotations and the existing
+`SpatialData` mapping interface. The implementation must work for ordinary and
+class-aware aggregation tables without depending on CosMx metadata.
+
+Focused tests should establish that a table written by Slice 7b can be reopened
+without loading its complete matrices, passes the SpatialData table contract,
+supports normal row and feature access, and produces the same materialized
+values as `anndata.read_zarr`. Benchmark store-open time and driver memory
+independently from Slice 7b's construction benchmark.
