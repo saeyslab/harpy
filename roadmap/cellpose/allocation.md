@@ -34,8 +34,9 @@ metadata remain supported by the ordinary, non-class-aware path. Slice 6
 preserves the public behavior of `expression_class` while revising the
 class-aware table payload so per-feature non-expression counts and auxiliary-only
 instances are retained. Slice 7a optimizes the private point-to-label assignment
-while preserving that payload through the existing in-memory path. Slice 7b
-then adds partitioned reductions and out-of-core backed-table construction.
+while preserving that payload through the then-existing in-memory path. Slice
+7b replaces that path with one backed-only implementation for partitioned
+reduction and out-of-core table construction.
 Slice 8 establishes a Harpy-owned canonical-center
 calculation and metadata contract that napari-harpy can consume without a
 reverse dependency, and makes newly aggregated 2D tables immediately usable
@@ -2039,6 +2040,31 @@ contracts established by Slices 5 and 6. This slice does not reimplement the
 spatial assignment optimized by Slice 7a and does not attempt to make general
 SpatialData table reopening lazy.
 
+`hp.tb.aggregate_points` requires a `SpatialData` object backed by a writable
+Zarr store. Validate this precondition before normalizing aggregation pairs or
+constructing any Dask graph. An unbacked object must raise a clear error that
+also gives the user the remedy, for example:
+
+```text
+hp.tb.aggregate_points requires a SpatialData object backed by a writable Zarr
+store. Write it first with:
+
+    sdata.write("sdata.zarr")
+```
+
+`SpatialData.write()` updates `sdata.path` by default. Reopening the written
+store with `sdata = spatialdata.read_zarr("sdata.zarr")` remains recommended
+when the original object contains lazy elements backed by other locations,
+because the reopened object is self-contained. The error does not need to
+require this additional step. Reader-created backed objects can be passed
+directly.
+
+Do not preserve the previous unbacked reduction and AnnData assembly path. This
+slice establishes one production implementation and replaces the private
+driver-materializing `_reduce_aggregation_pair()` and
+`_assemble_aggregation_table()` flow rather than maintaining two execution
+paths.
+
 The large payload is the set of observed `(instance, feature)` counts. Keep that
 payload partitioned and on disk. The complete `.obs`, `.var`, `.uns` and
 label-derived center matrix have only one row per retained instance or one row
@@ -2228,11 +2254,11 @@ The component writer must follow this sequence:
    staging artifacts on failure and do not leave a partial table visible under
    `output_table_name`.
 
-Use this scalable writing path automatically when the input `SpatialData` is
-backed. An unbacked object has no destination in which to construct an
-out-of-core table, so it retains the current in-memory implementation. This
-slice does not add an output-path parameter or a public instance-block tuning
-parameter to `hp.tb.aggregate_points`.
+Use this out-of-core writing path for every supported call. An unbacked object
+has no destination in which to construct the table and is rejected; there is no
+fallback in-memory implementation. This slice does not add an output-path
+parameter or a public instance-block tuning parameter to
+`hp.tb.aggregate_points`.
 
 ### AnnData and SpatialData integration boundary
 
@@ -2306,6 +2332,8 @@ Focused correctness tests should establish that:
 
 - Phase A executes the Slice 7a assignment graph exactly once and writes only
   compact partial reductions, not copies of the original assigned points;
+- an unbacked `SpatialData` is rejected before pair normalization or Dask graph
+  construction with an error that demonstrates `sdata.write("sdata.zarr")`;
 - class-aware row blocks share the complete panel-derived expression and
   auxiliary axes, including features with zero detections on either axis;
 - ordinary row blocks share the exact sorted union from compact Phase A feature
@@ -2322,7 +2350,7 @@ Focused correctness tests should establish that:
 - injected partial-reduction, row-block, `X`, `.obs`, `.obsm` and metadata
   failures leave no visible partial table and clean up only Harpy-owned staging
   paths;
-- the scalable backed path uses AnnData's lower-level component writers and
+- the out-of-core path uses AnnData's lower-level component writers and
   never calls `SpatialData.write_element()` for the completed table;
 - the returned same-process AnnData uses backed `sparse_dataset` handles for
   `X` and the optional auxiliary matrix, reuses the already-constructed small
@@ -2333,8 +2361,9 @@ Focused correctness tests should establish that:
 - the final `.uns`, `spatialdata_attrs`, table-group metadata, categorical
   columns, `.var` axis, auxiliary schema and `.obsm` payloads survive AnnData
   and SpatialData Zarr round trips; and
-- the scalable backed path and Slice 6's in-memory path produce equivalent
-  `AnnData` payloads in ordinary and class-aware modes.
+- the out-of-core implementation produces the same values as focused
+  in-memory reference calculations in ordinary and class-aware tests; the
+  reference is test code, not a supported production branch.
 
 Benchmark Slice 7b independently from the Slice 7a assignment benchmark. Record
 wall time, peak worker memory, spill volume, peak driver memory during Phase A,
@@ -2468,13 +2497,11 @@ table-construction operation as the existing transformed centers. The canonical
 payload must be present before the table is published rather than being added
 through a later napari-harpy mutation.
 
-For unbacked `SpatialData`, retain the existing in-memory construction path and
-attach both coordinate matrices before the single `add_table` call. For backed
-`SpatialData`, integrate with Slice 7b's component writer: both complete dense
+Integrate with Slice 7b's required backed component writer. Both complete dense
 center matrices may reside on the driver, must use the established row manifest
 and are written once through `anndata.io.write_elem` before publication. Do not
-route a backed table through the old in-memory `add_table` path merely to add
-canonical centers.
+reintroduce an unbacked or in-memory `add_table` branch merely to add canonical
+centers.
 
 The implementation sequence should be:
 
@@ -2489,8 +2516,8 @@ The implementation sequence should be:
 5. construct the complete per-region canonical metadata registry;
 6. validate the matrix, binding, source signatures, coverage and serialized
    schema together; and
-7. attach both coordinate payloads before the single unbacked `add_table`
-   publication or write both once through Slice 7b's backed component writer.
+7. write both coordinate payloads once through Slice 7b's backed component
+   writer before publication.
 
 Napari-harpy's ensure/read path remains useful for older or externally created
 tables without canonical coordinates. For a new Harpy aggregation table,
