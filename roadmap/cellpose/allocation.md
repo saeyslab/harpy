@@ -1767,7 +1767,7 @@ optimizations, respectively.
 
 ## Slice 7a: chunk-aware point-to-label assignment
 
-**Status: specified; not implemented.**
+**Status: implemented.**
 
 Refactor the private spatial-assignment path used by `hp.tb.aggregate_points`
 without changing the public or biological contracts established by Slices 5
@@ -2008,6 +2008,20 @@ avoids the `C * P` predicate fan-out, preserves every Slice 6 table value throug
 the unchanged downstream path and materially improves the representative
 large-mosaic assignment without a major regression on the small case. It does
 not claim bounded driver memory for the reduced counts or final table.
+
+The implemented router preserves the natural labels chunks by default,
+classifies every point once, redistributes by explicit integer block divisions,
+and joins each resulting points partition to one row-major delayed labels
+chunk. On the representative backed mosaic used for the diagnostic baseline,
+the assignment graph contains 517 tasks for 78 labels chunks instead of
+approximately 2,000, and 6,949 tasks for 1,150 chunks instead of approximately
+28,000. A focused local threaded benchmark with a 4,096 by 4,096 raster, 64
+labels chunks, 16 points partitions and 250,000 points produced identical
+238,158 retained rows while reducing graph construction from 0.292 to 0.031
+seconds, the graph from 1,856 to 434 tasks and assignment computation from
+1.147 to 0.402 seconds. These timings are diagnostic rather than stable test
+thresholds; correctness tests do not depend on task-layer names or exact task
+counts.
 
 ## Slice 7b: out-of-core reduction and AnnData table construction
 
