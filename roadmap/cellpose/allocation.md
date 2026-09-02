@@ -1916,6 +1916,28 @@ belongs to the chunk whose half-open interval starts at that boundary. A point
 inside the overall labels extent therefore receives exactly one valid
 `block_id`; a point outside it is removed before redistribution.
 
+Preserve the current coordinate-to-pixel rounding semantics exactly:
+coordinate values are rounded with pandas/NumPy `round()` semantics before
+conversion to an integer pixel index. A labels transformation may contribute
+only a pixel-aligned translation. Each translation component must be within an
+absolute tolerance of `1e-6` pixels of its nearest integer; normalize an
+accepted component to that integer and reject fractional translations rather
+than silently truncating them.
+
+Dimensionality must be unambiguous. Two-dimensional labels require point
+coordinates `x` and `y`; three-dimensional labels require `x`, `y`, and `z`.
+Reject a missing required coordinate or an unexpected spatial coordinate that
+would otherwise be silently ignored. The block calculation and vectorized
+lookup must use the same ordered raster axes as the labels array.
+
+Implement the redistribution with the temporary integer `block_id` as the
+Dask index and explicit divisions `0, 1, ..., number_of_blocks`. Explicit
+divisions prevent Dask from sampling or eagerly calculating quantiles merely
+to plan the shuffle and produce exactly one partition for every labels block,
+including an empty one. Do not hard-code a shuffle backend: allow Dask to use
+its configured implementation, such as disk for a local scheduler or
+peer-to-peer for a distributed client.
+
 The NumPy-style docstring of the implemented `_assign_points_to_labels` helper
 must explain this classification and lookup algorithm rather than merely state
 that points are assigned to labels. Include the two-dimensional chunk-grid
@@ -1924,6 +1946,13 @@ the optional 3D extension, the returned lazy dataframe schema, background
 filtering and the effect of retaining or dropping coordinate columns. It must
 also state that graph construction performs no source reads and that the
 temporary `block_id` is not part of the returned dataframe.
+
+The returned dataframe's index, row order and partition order are deliberately
+not part of the private contract because redistribution by `block_id` changes
+them. Callers may rely only on exactly-once retained rows, the documented
+columns and their dtypes. Any input column that callers need as an identifier
+must therefore be carried explicitly as a value column rather than inferred
+from the dataframe index.
 
 This replaces repeated full-dataframe predicates with one linear block
 classification and one redistribution of the points. Supply explicit Dask
@@ -1948,9 +1977,17 @@ Focused correctness tests must establish that:
 - half-open chunk edges assign every in-bounds point exactly once;
 - background and out-of-bounds points are excluded;
 - irregular final chunks and empty spatial buckets are handled correctly;
+- current half-to-even coordinate rounding is preserved and fractional labels
+  translations outside the accepted numerical tolerance are rejected;
+- 2D and 3D inputs accept exactly their required spatial coordinates and reject
+  dimensional mismatches;
 - supported translated coordinate systems produce the expected raster lookup;
 - multiple retained value columns survive assignment with their dtypes and
   categorical metadata intact;
+- assignment does not promise to preserve the input dataframe index or row and
+  partition ordering;
+- explicit integer divisions avoid an eager quantile calculation, while the
+  configured Dask shuffle backend remains selectable;
 - graph construction performs no point or labels source reads;
 - `bin_counts()` preserves its barcode assignment, retained-coordinate and
   exactly-once behavior through the shared helper; and
