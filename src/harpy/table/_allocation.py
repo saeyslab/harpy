@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from collections import Counter, namedtuple
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
@@ -1200,7 +1200,7 @@ def bin_counts(
     labels_name: str,
     output_table_name: str,
     to_coordinate_system: str = "global",
-    chunks: str | tuple[int, ...] | int | None = 10000,
+    chunks: str | tuple[int, ...] | int | None = None,
     append: bool = True,
     region_key: str = _REGION_KEY,
     instance_key: str = _INSTANCE_KEY,
@@ -1402,108 +1402,306 @@ def _assign_points_to_labels(
     ddf: DaskDataFrame,
     value_key: str | Sequence[str],
     drop_coordinates: bool = False,  # if set to True, will drop ((z),y,x) in resulting dask dataframe
-    chunks: str | tuple[int, ...] | int | None = 10000,
+    chunks: str | tuple[int, ...] | int | None = None,
     to_coordinate_system: str = "global",
     name_x: str = "x",
     name_y: str = "y",
     name_z: str = "z",
     cell_index_name: str = _CELL_INDEX,
 ) -> DaskDataFrame:
-    """Assign each spatially overlapping point to the corresponding nonzero label ID."""
-    assert np.issubdtype(se.data.dtype, np.integer), "Only integer arrays are supported."
-    assert name_y in ddf and name_x in ddf, f"Dask Dataframe must contain '{name_y}' and '{name_x}' columns."
-    Coords = namedtuple("Coords", ["x0", "y0"])
-    coords = Coords(*_get_translation(se, to_coordinate_system=to_coordinate_system))
+    """Assign points to non-background labels through the labels chunk grid.
+
+    Points are first rounded to integer pixel coordinates and mapped once to a
+    temporary row-major labels-block ID. For a two-dimensional raster the
+    mapping is:
+
+    ::
+
+                     x chunk
+                    0       1
+                +-------+-------+
+        y chunk 0 | id 0  | id 1  |
+                +-------+-------+
+        y chunk 1 | id 2  | id 3  |
+                +-------+-------+
+
+    Chunk intervals are half-open, so a point exactly on an internal boundary
+    belongs to the chunk beginning at that boundary. Points outside the full
+    labels extent are removed before the points are redistributed once by
+    block ID. Each resulting points partition is paired with the corresponding
+    delayed labels chunk and looked up vectorially. Three-dimensional labels
+    apply the same rule in row-major ``(z, y, x)`` order.
+
+    Labels may have an integer-pixel translation in ``to_coordinate_system``;
+    points must have an identity transformation there. Graph construction does
+    not read either source. The returned Dask dataframe contains one row per
+    point assigned to a nonzero label, the requested value columns, the
+    assigned ``cell_index_name`` column and, unless ``drop_coordinates=True``,
+    the rounded spatial-coordinate columns. Requested categorical dtypes are
+    preserved.
+
+    Redistribution does not preserve the input index, row order, or partition
+    order. The temporary block ID is absent from the returned dataframe.
+
+    Parameters
+    ----------
+    se
+        Two- or three-dimensional integer labels raster in ``(y, x)`` or
+        ``(z, y, x)`` order.
+    ddf
+        Points dataframe with an identity transformation to
+        ``to_coordinate_system``.
+    value_key
+        Column or columns retained alongside the assigned label ID.
+    drop_coordinates
+        Whether to omit the rounded point coordinates from the result.
+    chunks
+        Optional virtual rechunking of the labels raster. ``None`` preserves
+        its existing chunks.
+    to_coordinate_system
+        Coordinate system in which points and translated labels are aligned.
+    name_x, name_y, name_z
+        Point coordinate-column names.
+    cell_index_name
+        Name of the output label-ID column.
+
+    Returns
+    -------
+    Lazy assigned-points dataframe. Its index and ordering are unspecified.
+    """
+    if not np.issubdtype(se.data.dtype, np.integer):
+        raise ValueError(f"Labels must use an integer dtype, found {se.data.dtype}.")
+    missing_xy = [key for key in (name_x, name_y) if key not in ddf.columns]
+    if missing_xy:
+        raise ValueError(f"Points dataframe is missing required coordinate columns: {missing_xy}.")
     _identity_check_transformations_points(ddf, to_coordinate_system=to_coordinate_system)
 
-    requested_value_keys = [value_key] if isinstance(value_key, str) else list(value_key)
+    requested_value_keys = list(dict.fromkeys([value_key] if isinstance(value_key, str) else value_key))
     missing_value_keys = [key for key in requested_value_keys if key not in ddf.columns]
     if missing_value_keys:
         raise ValueError(f"Dask DataFrame does not contain requested value columns: {missing_value_keys}.")
-    coordinate_keys = [name_x, name_y, name_z] if name_z in ddf.columns else [name_x, name_y]
+    dimensions = tuple(se.dims)
+    if dimensions == ("y", "x"):
+        if name_z in ddf.columns:
+            raise ValueError(
+                f"Two-dimensional labels require only '{name_x}' and '{name_y}' point coordinates; "
+                f"unexpected column '{name_z}' was found."
+            )
+        coordinate_keys = [name_x, name_y]
+    elif dimensions == ("z", "y", "x"):
+        if name_z not in ddf.columns:
+            raise ValueError(f"Three-dimensional labels require point coordinate column '{name_z}'.")
+        coordinate_keys = [name_x, name_y, name_z]
+    else:
+        raise ValueError(f"Labels dimensions must be ('y', 'x') or ('z', 'y', 'x'), found {dimensions!r}.")
+
+    translation_x, translation_y = _get_translation(se, to_coordinate_system=to_coordinate_system)
+    translations = {
+        "x": _normalize_pixel_translation(translation_x, axis="x"),
+        "y": _normalize_pixel_translation(translation_y, axis="y"),
+        "z": 0,
+    }
+
     value_keys = list(dict.fromkeys([*coordinate_keys, *requested_value_keys]))
-
-    ddf = ddf[value_keys]
-
     arr = se.data
-
     if chunks is not None:
         arr = arr.rechunk(chunks)
-    else:
-        arr = arr.rechunk(arr.chunksize)
-
-    if arr.ndim == 2:
-        arr = arr[None, ...]
-
-    ddf[name_x] = ddf[name_x].round().astype(int)
-    ddf[name_y] = ddf[name_y].round().astype(int)
-    if name_z in ddf.columns:
-        ddf[name_z] = ddf[name_z].round().astype(int)
-
-    delayed_chunks = arr.to_delayed().flatten()
-
-    # chunk info needed for querying
-    chunk_info = []
-    _chunks = arr.chunks
-
-    # Iterate over each chunk and compute its coordinates and size, needed for query
-    for i in range(delayed_chunks.shape[0]):
-        z, y, x = np.unravel_index(i, [len(_chunks[0]), len(_chunks[1]), len(_chunks[2])])
-        size = (_chunks[0][z], _chunks[1][y], _chunks[2][x])
-        start_coords = (sum(_chunks[0][:z]), sum(_chunks[1][:y]), sum(_chunks[2][:x]))
-        chunk_info.append((start_coords, size))
 
     log.info("Calculating cell counts.")
 
-    @dask.delayed
-    def _process_partition(_chunk, _chunk_info, ddf_partition):
-        ddf_partition = ddf_partition.copy()
+    projected = ddf[value_keys]
+    block_id_key = "__harpy_block_id"
+    while block_id_key in projected.columns:
+        block_id_key = f"_{block_id_key}"
+    boundaries = tuple(tuple(np.cumsum((0, *axis_chunks), dtype=np.int64).tolist()) for axis_chunks in arr.chunks)
+    grid_shape = tuple(len(axis_chunks) for axis_chunks in arr.chunks)
+    number_of_blocks = int(np.prod(grid_shape))
+    translation_by_dimension = tuple(translations[dimension] for dimension in dimensions)
+    coordinate_key_by_dimension = tuple({"x": name_x, "y": name_y, "z": name_z}[dimension] for dimension in dimensions)
 
-        z_start, y_start, x_start = _chunk_info[0]
+    classified_meta = projected._meta.copy()
+    for key in coordinate_keys:
+        classified_meta[key] = pd.Series(index=classified_meta.index, dtype=np.int64)
+    classified_meta[block_id_key] = pd.Series(index=classified_meta.index, dtype=np.int64)
+    classified = projected.map_partitions(
+        _classify_points_by_label_block,
+        coordinate_keys=coordinate_key_by_dimension,
+        boundaries=boundaries,
+        translations=translation_by_dimension,
+        grid_shape=grid_shape,
+        block_id_key=block_id_key,
+        meta=classified_meta,
+    )
 
-        if name_z in ddf_partition.columns:
-            z_coords = ddf_partition[name_z].values.astype(int) - z_start
-        else:
-            z_coords = 0
+    # Explicit divisions prevent Dask from sampling the points to estimate
+    # quantiles. They also give one points partition per labels chunk, so both
+    # collections can be paired positionally in row-major block order.
+    # This remains a full shuffle because arbitrary input partitions may contain
+    # points from any block. If points elements later expose a trusted spatial
+    # partition index aligned with the labels-block grid, those already aligned
+    # partitions can be paired directly and this redistribution can be skipped.
+    routed = classified.set_index(
+        block_id_key,
+        divisions=tuple(range(number_of_blocks + 1)),
+    )
 
-        y_coords = ddf_partition[name_y].values.astype(int) - (int(coords.y0) + y_start)
-        x_coords = ddf_partition[name_x].values.astype(int) - (int(coords.x0) + x_start)
+    # One division per labels block guarantees spatial alignment, not balanced
+    # row counts: a dense block can produce a much larger points partition.
+    # This is mainly a concern for pathologically concentrated point
+    # distributions; users can normally reduce ``chunks`` to subdivide dense
+    # spatial blocks. Multiple point shards per labels block could provide a
+    # future safeguard while allowing every shard to reuse the same labels
+    # chunk.
+    point_blocks = routed.to_delayed()
+    label_blocks = arr.to_delayed().ravel()
 
-        ddf_partition.loc[:, cell_index_name] = _chunk[
-            z_coords,
-            y_coords,
-            x_coords,
-        ]
+    returned_columns = [*requested_value_keys, cell_index_name] if drop_coordinates else [*value_keys, cell_index_name]
+    result_meta = projected._meta[value_keys].copy()
+    for key in coordinate_keys:
+        result_meta[key] = pd.Series(index=result_meta.index, dtype=np.int64)
+    result_meta[cell_index_name] = pd.Series(index=result_meta.index, dtype=arr.dtype)
+    result_meta = result_meta[returned_columns]
+    result_meta.index = pd.RangeIndex(0)
 
-        return ddf_partition
+    starts_by_dimension = tuple(
+        tuple(np.cumsum((0, *axis_chunks[:-1]), dtype=np.int64).tolist()) for axis_chunks in arr.chunks
+    )
+    assigned_blocks = []
+    for block_indices, point_block, label_block in zip(np.ndindex(grid_shape), point_blocks, label_blocks, strict=True):
+        block_start = tuple(
+            starts[block_index] for starts, block_index in zip(starts_by_dimension, block_indices, strict=True)
+        )
+        assigned_blocks.append(
+            dask.delayed(_lookup_points_in_label_block)(
+                point_block,
+                label_block,
+                coordinate_keys=coordinate_key_by_dimension,
+                translations=translation_by_dimension,
+                block_start=block_start,
+                requested_columns=returned_columns,
+                cell_index_name=cell_index_name,
+                label_dtype=arr.dtype,
+            )
+        )
 
-    # Create a list to store delayed operations
-    delayed_objects = []
+    return dd.from_delayed(assigned_blocks, meta=result_meta)
 
-    for _chunk, _chunk_info in zip(delayed_chunks, chunk_info, strict=True):
-        # Query the partition lazily without computing it
-        z_start, y_start, x_start = _chunk_info[0]
-        _chunk_shape = _chunk_info[1]
 
-        y_query = f"{y_start + coords.y0} <= {name_y} < {y_start + coords.y0 + _chunk_shape[1]}"
-        x_query = f"{x_start + coords.x0} <= {name_x} < {x_start + coords.x0 + _chunk_shape[2]}"
-        query = f"{y_query} and {x_query}"
+def _normalize_pixel_translation(value: float, *, axis: str) -> int:
+    """Normalize a numerically integral labels translation to pixel units."""
+    if not np.isfinite(value):
+        raise ValueError(f"Labels translation along {axis!r} must be finite, found {value!r}.")
+    nearest = int(np.rint(value))
+    if not np.isclose(value, nearest, rtol=0, atol=1e-6):
+        raise ValueError(f"Labels translation along {axis!r} must be pixel-aligned, found {value!r}.")
+    return nearest
 
-        if name_z in ddf.columns:
-            z_query = f"{z_start} <= {name_z} < {z_start + _chunk_shape[0]}"
-            query = f"{z_query} and {query}"
 
-        ddf_partition = ddf.query(query)
-        delayed_partition = _process_partition(_chunk, _chunk_info, ddf_partition)
-        delayed_objects.append(delayed_partition)
+def _classify_points_by_label_block(
+    partition: pd.DataFrame,
+    *,
+    coordinate_keys: tuple[str, ...],
+    boundaries: tuple[tuple[int, ...], ...],
+    translations: tuple[int, ...],
+    grid_shape: tuple[int, ...],
+    block_id_key: str,
+) -> pd.DataFrame:
+    """Round and classify one points partition into row-major labels blocks."""
+    result = partition.copy()
+    local_coordinates = []
+    inside = np.ones(len(result), dtype=bool)
+    for key, axis_boundaries, translation in zip(coordinate_keys, boundaries, translations, strict=True):
+        result[key] = result[key].round().astype(np.int64)
+        local = result[key].to_numpy(dtype=np.int64, copy=False) - translation
+        local_coordinates.append(local)
+        inside &= (local >= axis_boundaries[0]) & (local < axis_boundaries[-1])
 
-    # Combine the delayed partitions into a single Dask DataFrame
-    combined_partitions = dd.from_delayed(delayed_objects)
+    result = result.loc[inside].copy()
+    if result.empty:
+        result[block_id_key] = pd.Series(index=result.index, dtype=np.int64)
+        return result
 
-    # remove background
-    combined_partitions = combined_partitions[combined_partitions[cell_index_name] != 0]
+    block_indices = tuple(
+        np.searchsorted(axis_boundaries[1:], local[inside], side="right")
+        for local, axis_boundaries in zip(local_coordinates, boundaries, strict=True)
+    )
+    result[block_id_key] = np.ravel_multi_index(block_indices, grid_shape).astype(np.int64, copy=False)
+    return result
 
-    if drop_coordinates:
-        combined_partitions = combined_partitions[[*requested_value_keys, cell_index_name]]
 
-    return combined_partitions
+def _lookup_points_in_label_block(
+    points: pd.DataFrame,
+    labels: np.ndarray,
+    *,
+    coordinate_keys: tuple[str, ...],
+    translations: tuple[int, ...],
+    block_start: tuple[int, ...],
+    requested_columns: list[str],
+    cell_index_name: str,
+    label_dtype: np.dtype,
+) -> pd.DataFrame:
+    """Assign one routed points partition from its corresponding labels block.
+
+    The preceding block-classification and shuffle stages guarantee that every
+    row in ``points`` lies within the spatial extent of ``labels``. Point
+    coordinates are still expressed in the selected coordinate system, whereas
+    ``labels`` is the NumPy array for one chunk of the untranslated labels
+    raster. For each spatial axis, the coordinate inside that chunk is
+
+    ::
+
+        chunk_coordinate = point_coordinate - translation - block_start
+
+    The resulting coordinate arrays are used together for one vectorized,
+    pointwise lookup. For example, coordinates ``y=[1, 2]`` and ``x=[3, 4]``
+    retrieve ``labels[1, 3]`` and ``labels[2, 4]``; they do not select their
+    Cartesian product. The retrieved raster value is written to
+    ``cell_index_name`` and rows assigned to background label zero are removed.
+
+    An empty points block returns an empty dataframe with the same schema and a
+    label-ID column using ``label_dtype``. The returned dataframe contains only
+    ``requested_columns`` and receives a fresh, partition-local range index;
+    neither its input index nor row ordering is part of the contract.
+
+    Parameters
+    ----------
+    points
+        In-memory points partition routed to this labels block. Its coordinates
+        are rounded integer positions in the selected coordinate system.
+    labels
+        In-memory two- or three-dimensional array containing the corresponding
+        labels chunk.
+    coordinate_keys
+        Coordinate columns in labels-array axis order: ``(y, x)`` for 2D or
+        ``(z, y, x)`` for 3D.
+    translations
+        Integer origin of the complete labels raster in the selected coordinate
+        system, ordered like ``coordinate_keys``. The z translation is zero.
+    block_start
+        Origin of this chunk within the untranslated labels raster, ordered like
+        ``coordinate_keys``.
+    requested_columns
+        Ordered columns retained in the returned dataframe, including
+        ``cell_index_name``.
+    cell_index_name
+        Name of the column receiving the overlapping label ID.
+    label_dtype
+        Labels dtype used to construct the label-ID column for an empty block.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Points assigned to nonzero labels, projected to ``requested_columns``.
+    """
+    result = points.copy()
+    if result.empty:
+        result[cell_index_name] = pd.Series(index=result.index, dtype=label_dtype)
+    else:
+        local_coordinates = tuple(
+            result[key].to_numpy(dtype=np.int64, copy=False) - translation - start
+            for key, translation, start in zip(coordinate_keys, translations, block_start, strict=True)
+        )
+        result[cell_index_name] = labels[local_coordinates]
+        result = result.loc[result[cell_index_name] != 0]
+
+    return result[requested_columns].reset_index(drop=True)
