@@ -547,7 +547,40 @@ def _publish_aggregation_table(
     spatial_key: str,
     has_auxiliary: bool,
 ) -> SpatialData:
-    """Atomically publish a staged local table and attach backed sparse handles."""
+    """Publish a staged table with rollback and attach its backed sparse handles.
+
+    The staged table is complete before publication starts. When replacing an
+    existing table, the filesystem state changes as follows::
+
+        Before publication
+        ------------------
+        destination.output       -> existing table
+        workspace/table          -> staged new table
+        backup                   -> absent
+
+        Publish
+        -------
+        destination.output.rename(backup)
+        workspace/table.rename(destination.output)
+
+        After success
+        -------------
+        destination.output       -> new table
+        backup                   -> removed
+        workspace                -> removed
+
+        On failure
+        ----------
+        new destination.output   -> removed, if already published
+        backup                   -> restored to destination.output
+        in-memory table          -> restored
+
+    Each rename is atomic because the source and destination are on the same
+    filesystem. The complete two-rename replacement is rollback-safe, but it is
+    not one indivisible filesystem operation. Consolidated metadata is rebuilt
+    only after the new table has been attached to the in-memory SpatialData
+    object; the backup remains recoverable until that process succeeds.
+    """
     staging = workspace / "table"
     # Keep the rollback copy beside, rather than inside, the Zarr root. It is
     # on the same filesystem for atomic renames but cannot be discovered as a
