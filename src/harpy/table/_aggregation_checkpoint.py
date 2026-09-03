@@ -300,13 +300,13 @@ def _stage_aggregation_checkpoint(
 
     if discover_features:
         feature_tasks = [dask.delayed(_partition_features)(partition) for partition in delayed_partitions]
-        feature_axis_task = _tree_union(feature_tasks)
+        observed_features_task = _tree_union(feature_tasks)
     else:
-        feature_axis_task = None
+        observed_features_task = None
 
     # All checkpoint consumers originate from the same ``delayed_partitions``
     # objects created above, allowing Dask to execute each merged partition once.
-    computed = dask.compute(write_task.to_delayed(), manifest_tasks, feature_axis_task)
+    computed = dask.compute(write_task.to_delayed(), manifest_tasks, observed_features_task)
     _, manifests, observed_features = computed
 
     nonempty_manifests: list[_CheckpointPartition] = []
@@ -317,6 +317,8 @@ def _stage_aggregation_checkpoint(
         manifest = replace(manifest, row_start=row_start)
         nonempty_manifests.append(manifest)
         row_start = manifest.row_stop
+    # Feature discovery produces an unordered set. Establish one deterministic
+    # ordinary-mode matrix-column axis before storing it in the checkpoint.
     return _AggregationCheckpoint(
         path=path,
         pairs=pairs,

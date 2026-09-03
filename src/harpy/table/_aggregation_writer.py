@@ -277,7 +277,18 @@ def _checkpoint_partition_to_csr(
     feature_axis: tuple[str, ...],
     feature_axis_hash: str,
 ) -> sparse.csr_matrix:
-    """Convert one merged-count Parquet part to a verified full-width CSR block."""
+    """Convert one merged-count Parquet part to an axis-aligned CSR block.
+
+    ``feature_axis`` is the authoritative matrix-column order. Each long-form
+    checkpoint feature is looked up by name and placed at its corresponding
+    column index, so checkpoint row order cannot affect matrix-column order. The
+    caller also uses this same axis for ``adata.var_names`` or the auxiliary
+    matrix's ``feature_columns`` metadata.
+
+    ``feature_axis_hash`` binds every delayed block to the axis with which it was
+    constructed and rejects an inconsistent axis before reading the checkpoint
+    partition.
+    """
     if _feature_axis_hash(feature_axis) != feature_axis_hash:
         raise ValueError("Checkpoint CSR conversion received an inconsistent feature axis.")
     frame = pd.read_parquet(
