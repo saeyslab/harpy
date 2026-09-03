@@ -176,10 +176,12 @@ def _write_aggregation_table(
         raise ValueError("Aggregation produced no expression features.")
     auxiliary_axis = () if class_contract is None else class_contract.auxiliary_feature_axis
 
-    identities = tuple(identity for partition in checkpoint.partitions for identity in partition.identities)
+    output_row_keys = tuple(
+        output_row_key for partition in checkpoint.partitions for output_row_key in partition.output_row_keys
+    )
     obs = _aggregation_obs(
         checkpoint,
-        identities=identities,
+        output_row_keys=output_row_keys,
         table_index_name=table_index_name,
         region_key=region_key,
         instance_key=instance_key,
@@ -187,7 +189,7 @@ def _write_aggregation_table(
     )
     centers = _aligned_centers(
         checkpoint,
-        identities=identities,
+        output_row_keys=output_row_keys,
         centers_by_pair=centers_by_pair,
     )
     var = pd.DataFrame(index=pd.Index(expression_axis, name=feature_key))
@@ -224,7 +226,7 @@ def _write_aggregation_table(
 
     _validate_staged_table(
         staging_group,
-        n_obs=len(identities),
+        n_obs=len(output_row_keys),
         n_vars=len(expression_axis),
         n_auxiliary=len(auxiliary_axis) if class_contract is not None else None,
     )
@@ -262,7 +264,7 @@ def _checkpoint_sparse_array(
                 feature_axis=feature_axis,
                 feature_axis_hash=feature_axis_hash,
             ),
-            shape=(len(partition.identities), len(feature_axis)),
+            shape=(len(partition.output_row_keys), len(feature_axis)),
             dtype=np.uint32,
             meta=sparse.csr_matrix((0, 0), dtype=np.uint32),
         )
@@ -295,12 +297,14 @@ def _checkpoint_partition_to_csr(
         partition.path,
         columns=[_PAIR_COLUMN, _CHECKPOINT_INSTANCE_COLUMN, _FEATURE_COLUMN, _COUNT_COLUMN],
     )
-    row_by_identity = {identity: row for row, identity in enumerate(partition.identities)}
+    row_by_output_row_key = {
+        output_row_key: row for row, output_row_key in enumerate(partition.output_row_keys)
+    }
     column_by_feature = {feature: column for column, feature in enumerate(feature_axis)}
 
     rows = np.fromiter(
         (
-            row_by_identity[(int(pair), int(instance))]
+            row_by_output_row_key[(int(pair), int(instance))]
             for pair, instance in frame[[_PAIR_COLUMN, _CHECKPOINT_INSTANCE_COLUMN]].itertuples(index=False, name=None)
         ),
         dtype=np.int64,
@@ -316,7 +320,7 @@ def _checkpoint_partition_to_csr(
             values[selected].astype(np.uint32, copy=False),
             (rows[selected], columns.loc[selected].to_numpy(dtype=np.int64, copy=False)),
         ),
-        shape=(len(partition.identities), len(feature_axis)),
+        shape=(len(partition.output_row_keys), len(feature_axis)),
         dtype=np.uint32,
     ).tocsr()
     matrix.indices = matrix.indices.astype(np.int64, copy=False)
@@ -333,15 +337,15 @@ def _feature_axis_hash(feature_axis: tuple[str, ...]) -> str:
 def _aggregation_obs(
     checkpoint: _AggregationCheckpoint,
     *,
-    identities: tuple[tuple[int, int], ...],
+    output_row_keys: tuple[tuple[int, int], ...],
     table_index_name: str,
     region_key: str,
     instance_key: str,
     class_contract: _FeatureClassWriteContract | None,
 ) -> pd.DataFrame:
     token = str(uuid.uuid4())[:8]
-    labels_names = [checkpoint.pairs[pair].labels_name for pair, _ in identities]
-    instance_ids = np.asarray([instance for _, instance in identities], dtype=np.uint64)
+    labels_names = [checkpoint.pairs[pair].labels_name for pair, _ in output_row_keys]
+    instance_ids = np.asarray([instance for _, instance in output_row_keys], dtype=np.uint64)
     obs_names = [
         f"{instance}_{labels_name}_{token}" for labels_name, instance in zip(labels_names, instance_ids, strict=True)
     ]
@@ -356,7 +360,7 @@ def _aggregation_obs(
                 for partition in checkpoint.partitions
             )
         )
-        class_counts = pd.concat(summaries).reindex(pd.MultiIndex.from_tuples(identities))
+        class_counts = pd.concat(summaries).reindex(pd.MultiIndex.from_tuples(output_row_keys))
         if class_counts.isna().any(axis=None):
             raise ValueError("Checkpoint class summaries do not cover the complete output-row manifest.")
         for feature_class, column_name in class_contract.count_columns:
@@ -414,7 +418,7 @@ def _checkpoint_partition_class_counts(
         observed=True,
     )
     values = values.reindex(
-        index=pd.MultiIndex.from_tuples(partition.identities), columns=contract.classes, fill_value=0
+        index=pd.MultiIndex.from_tuples(partition.output_row_keys), columns=contract.classes, fill_value=0
     )
     values.index.names = [_PAIR_COLUMN, _CHECKPOINT_INSTANCE_COLUMN]
     return values.astype(np.uint64, copy=False)
@@ -423,7 +427,7 @@ def _checkpoint_partition_class_counts(
 def _aligned_centers(
     checkpoint: _AggregationCheckpoint,
     *,
-    identities: tuple[tuple[int, int], ...],
+    output_row_keys: tuple[tuple[int, int], ...],
     centers_by_pair: Mapping[int, pd.DataFrame],
 ) -> np.ndarray:
     coordinate_columns = checkpoint.pairs[0].coordinate_columns
@@ -443,7 +447,7 @@ def _aligned_centers(
         )
         indexed_centers.append(centers)
 
-    requested = pd.MultiIndex.from_tuples(identities, names=[_PAIR_COLUMN, _CHECKPOINT_INSTANCE_COLUMN])
+    requested = pd.MultiIndex.from_tuples(output_row_keys, names=[_PAIR_COLUMN, _CHECKPOINT_INSTANCE_COLUMN])
     aligned = pd.concat(indexed_centers).reindex(requested)
     if aligned.isna().any(axis=None):
         missing = requested[aligned.isna().any(axis=1)][0]

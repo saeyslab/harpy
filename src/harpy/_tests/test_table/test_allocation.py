@@ -93,7 +93,10 @@ def test_aggregation_checkpoint_merges_counts_across_input_partitions(tmp_path):
     }
     assert pd.api.types.is_string_dtype(result["feature"].dtype)
     assert checkpoint.observed_features == ("EPCAM", "VIM")
-    assert sorted(identity for part in checkpoint.partitions for identity in part.identities) == [(0, 42), (0, 51)]
+    assert sorted(output_row_key for part in checkpoint.partitions for output_row_key in part.output_row_keys) == [
+        (0, 42),
+        (0, 51),
+    ]
 
 
 def test_aggregation_checkpoint_accepts_feature_key_matching_internal_instance_column(tmp_path):
@@ -139,7 +142,7 @@ def test_checkpoint_partition_to_csr_aligns_the_requested_feature_axis(tmp_path)
     partition = checkpoint_module._CheckpointPartition(
         ordinal=0,
         path=path,
-        identities=((0, 42), (0, 51)),
+        output_row_keys=((0, 42), (0, 51)),
         row_count=3,
     )
 
@@ -253,7 +256,7 @@ def test_checkpoint_partition_to_csr_rejects_uint32_overflow(tmp_path):
     partition = checkpoint_module._CheckpointPartition(
         ordinal=0,
         path=path,
-        identities=((0, 1),),
+        output_row_keys=((0, 1),),
         row_count=1,
     )
 

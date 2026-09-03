@@ -51,10 +51,11 @@ class _CheckpointPartition:
     """Describe one non-empty physical partition of merged feature counts.
 
     A checkpoint Parquet partition stores long-form ``(aggregation pair,
-    instance, feature, count)`` rows. ``identities`` records the sorted unique
-    ``(aggregation pair, instance)`` pairs represented by those rows; each
-    identity becomes one output matrix row. Consequently, ``row_count`` can be
-    greater than ``len(identities)``.
+    instance, feature, count)`` rows. ``output_row_keys`` records the sorted
+    unique ``(aggregation pair, instance)`` pairs represented by those rows;
+    each key becomes one aligned row in the final AnnData ``obs``, ``X`` and
+    ``obsm`` payloads. Consequently, ``row_count`` can be greater than
+    ``len(output_row_keys)``.
 
     For example, the following physical partition::
 
@@ -68,7 +69,7 @@ class _CheckpointPartition:
         _CheckpointPartition(
             ordinal=0,
             path=Path(".../part-00000.parquet"),
-            identities=((0, 42), (0, 51)),
+            output_row_keys=((0, 42), (0, 51)),
             row_count=3,
         )
 
@@ -80,27 +81,27 @@ class _CheckpointPartition:
         Position of this physical partition in the merged Dask dataframe.
     path
         Path of the corresponding checkpoint Parquet part.
-    identities
+    output_row_keys
         Sorted unique ``(aggregation pair, instance ID)`` pairs owned by this
-        partition, in output matrix-row order.
+        partition, in final AnnData row order.
     row_count
         Number of long-form count rows in the physical partition.
     """
 
     ordinal: int
     path: Path
-    identities: tuple[tuple[int, int], ...]
+    output_row_keys: tuple[tuple[int, int], ...]
     row_count: int
 
     def __post_init__(self) -> None:
         if self.ordinal < 0:
             raise ValueError(f"Checkpoint partition ordinal must be non-negative, found {self.ordinal}.")
-        if self.row_count < len(self.identities):
+        if self.row_count < len(self.output_row_keys):
             raise ValueError("A checkpoint partition cannot contain fewer rows than represented instances.")
-        if not self.identities:
+        if not self.output_row_keys:
             raise ValueError("Checkpoint manifests describe only non-empty partitions.")
-        if tuple(sorted(set(self.identities))) != self.identities:
-            raise ValueError("Checkpoint partition identities must be sorted and unique.")
+        if tuple(sorted(set(self.output_row_keys))) != self.output_row_keys:
+            raise ValueError("Checkpoint partition output-row keys must be sorted and unique.")
 
 
 @dataclass(frozen=True)
@@ -121,19 +122,20 @@ class _AggregationCheckpoint:
         if partition_ordinals != tuple(sorted(set(partition_ordinals))):
             raise ValueError("Checkpoint partition ordinals must be sorted and unique.")
 
-        owner_by_identity: dict[tuple[int, int], int] = {}
+        owner_by_output_row_key: dict[tuple[int, int], int] = {}
         represented_pairs: set[int] = set()
         for partition in self.partitions:
-            for identity in partition.identities:
-                pair_ordinal, instance_id = identity
+            for output_row_key in partition.output_row_keys:
+                pair_ordinal, instance_id = output_row_key
                 if pair_ordinal not in range(len(self.pairs)):
                     raise ValueError(f"Checkpoint references unknown aggregation pair {pair_ordinal}.")
                 if instance_id <= 0:
                     raise ValueError(f"Checkpoint instance IDs must be positive, found {instance_id}.")
-                previous = owner_by_identity.setdefault(identity, partition.ordinal)
+                previous = owner_by_output_row_key.setdefault(output_row_key, partition.ordinal)
                 if previous != partition.ordinal:
                     raise ValueError(
-                        f"Checkpoint identity {identity!r} occurs in partitions {previous} and {partition.ordinal}."
+                        f"Checkpoint output-row key {output_row_key!r} occurs in partitions "
+                        f"{previous} and {partition.ordinal}."
                     )
                 represented_pairs.add(pair_ordinal)
 
@@ -157,7 +159,7 @@ class _AggregationCheckpoint:
             sorted(
                 instance_id
                 for partition in self.partitions
-                for candidate_pair, instance_id in partition.identities
+                for candidate_pair, instance_id in partition.output_row_keys
                 if candidate_pair == pair_ordinal
             ),
             dtype=np.uint64,
@@ -442,7 +444,7 @@ def _checkpoint_partition_manifest(
     This function validates one materialized Dask partition and returns its
     small in-memory :class:`_CheckpointPartition` descriptor; it does not write
     a separate manifest file. Output row order follows the ordered non-empty
-    partitions and each partition's ordered ``identities``.
+    partitions and each partition's ordered ``output_row_keys``.
 
     Parameters
     ----------
@@ -459,8 +461,8 @@ def _checkpoint_partition_manifest(
     Returns
     -------
     A descriptor containing the partition path, sorted unique
-    ``(aggregation_pair, instance_id)`` identities and long-form row count, or
-    ``None`` when the partition is empty.
+    ``(aggregation_pair, instance_id)`` output-row keys and long-form row count,
+    or ``None`` when the partition is empty.
     """
     if partition.empty:
         return None
@@ -475,7 +477,7 @@ def _checkpoint_partition_manifest(
     if partition.duplicated([_PAIR_COLUMN, _CHECKPOINT_INSTANCE_COLUMN, _FEATURE_COLUMN]).any():
         raise ValueError("Checkpoint partition contains duplicate aggregation-pair/instance/feature rows.")
 
-    identities = tuple(
+    output_row_keys = tuple(
         sorted(
             {
                 (int(pair_ordinal), int(instance_id))
@@ -488,7 +490,7 @@ def _checkpoint_partition_manifest(
     return _CheckpointPartition(
         ordinal=ordinal,
         path=path,
-        identities=identities,
+        output_row_keys=output_row_keys,
         row_count=len(partition),
     )
 
