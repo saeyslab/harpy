@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 
 import dask
@@ -54,24 +54,16 @@ class _CheckpointPartition:
     path: Path
     identities: tuple[tuple[int, int], ...]
     row_count: int
-    row_start: int = 0
 
     def __post_init__(self) -> None:
         if self.ordinal < 0:
             raise ValueError(f"Checkpoint partition ordinal must be non-negative, found {self.ordinal}.")
         if self.row_count < len(self.identities):
             raise ValueError("A checkpoint partition cannot contain fewer rows than represented instances.")
-        if self.row_start < 0:
-            raise ValueError(f"Checkpoint output row start must be non-negative, found {self.row_start}.")
         if not self.identities:
             raise ValueError("Checkpoint manifests describe only non-empty partitions.")
         if tuple(sorted(set(self.identities))) != self.identities:
             raise ValueError("Checkpoint partition identities must be sorted and unique.")
-
-    @property
-    def row_stop(self) -> int:
-        """Return the exclusive end of this partition's output-row interval."""
-        return self.row_start + len(self.identities)
 
 
 @dataclass(frozen=True)
@@ -94,11 +86,7 @@ class _AggregationCheckpoint:
 
         owner_by_identity: dict[tuple[int, int], int] = {}
         represented_pairs: set[int] = set()
-        expected_row_start = 0
         for partition in self.partitions:
-            if partition.row_start != expected_row_start:
-                raise ValueError("Checkpoint output-row intervals must be consecutive and non-overlapping.")
-            expected_row_start = partition.row_stop
             for identity in partition.identities:
                 pair_ordinal, instance_id = identity
                 if pair_ordinal not in range(len(self.pairs)):
@@ -309,20 +297,13 @@ def _stage_aggregation_checkpoint(
     computed = dask.compute(write_task.to_delayed(), manifest_tasks, observed_features_task)
     _, manifests, observed_features = computed
 
-    nonempty_manifests: list[_CheckpointPartition] = []
-    row_start = 0
-    for manifest in manifests:
-        if manifest is None:
-            continue
-        manifest = replace(manifest, row_start=row_start)
-        nonempty_manifests.append(manifest)
-        row_start = manifest.row_stop
+    nonempty_manifests = tuple(manifest for manifest in manifests if manifest is not None)
     # Feature discovery produces an unordered set. Establish one deterministic
     # ordinary-mode matrix-column axis before storing it in the checkpoint.
     return _AggregationCheckpoint(
         path=path,
         pairs=pairs,
-        partitions=tuple(nonempty_manifests),
+        partitions=nonempty_manifests,
         observed_features=None if observed_features is None else tuple(sorted(observed_features)),
     )
 
@@ -437,14 +418,12 @@ def _checkpoint_partition_manifest(
             path=Path(".../part-00000.parquet"),
             identities=((0, 42), (0, 51)),
             row_count=3,
-            row_start=0,
         )
 
     ``row_count`` is the number of long-form ``(instance, feature)`` rows in
     the Parquet partition, whereas ``len(identities)`` is the number of output
-    matrix rows it owns. ``row_start`` initially uses its default of zero;
-    :func:`_stage_aggregation_checkpoint` later assigns consecutive output-row
-    intervals after discarding empty partitions.
+    matrix rows it owns. Output row order follows the ordered non-empty
+    partitions and each partition's ordered ``identities``.
 
     Parameters
     ----------

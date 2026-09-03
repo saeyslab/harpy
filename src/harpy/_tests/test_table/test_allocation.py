@@ -94,9 +94,6 @@ def test_aggregation_checkpoint_merges_counts_across_input_partitions(tmp_path):
     assert pd.api.types.is_string_dtype(result["feature"].dtype)
     assert checkpoint.observed_features == ("EPCAM", "VIM")
     assert sorted(identity for part in checkpoint.partitions for identity in part.identities) == [(0, 42), (0, 51)]
-    row_stops = np.cumsum([len(part.identities) for part in checkpoint.partitions])
-    assert [part.row_start for part in checkpoint.partitions] == [0, *row_stops[:-1]]
-    assert [part.row_stop for part in checkpoint.partitions] == row_stops.tolist()
 
 
 def test_aggregation_checkpoint_accepts_feature_key_matching_internal_instance_column(tmp_path):
