@@ -1,3 +1,44 @@
+"""Point-to-label aggregation orchestration.
+
+The class-aware :func:`aggregate_points` implementation uses the following
+private data flow::
+
+    source points (coordinates, feature, class)
+            |
+            +-- _feature_panel_partition_errors()
+            |       validate source (feature, class) pairs
+            |
+            +-- _assign_points_to_labels()
+                    produce lazy (instance, feature) rows
+                              |
+                              v
+                   _local_feature_counts()
+                    partition-local reduction
+                              |
+                              v
+                _stage_aggregation_checkpoint()
+                    +-- Dask shuffle by (pair, instance)
+                    +-- _merge_count_partition()
+                    +-- write merged counts to temporary Parquet on disk:
+                        tables/.harpy-aggregate-<uuid>/merged_counts/
+                              |
+                              v
+                   _write_aggregation_table()
+                    +-- _checkpoint_sparse_array(expression axis)
+                    |       `-- adata.X
+                    +-- _checkpoint_sparse_array(auxiliary axis)
+                    |       `-- auxiliary_feature_counts
+                    `-- _checkpoint_partition_class_counts()
+                            `-- per-class totals in adata.obs
+                              |
+                              v
+                _remove_aggregation_workspace()
+                    remove the temporary checkpoint, including after failure
+
+The source class column establishes and validates the feature-to-class mapping;
+it is not carried through spatial assignment or stored in the count checkpoint.
+"""
+
 from __future__ import annotations
 
 import re
@@ -265,9 +306,9 @@ def aggregate_points(
     depend on point positions or feature classes.
 
     This operation requires ``sdata`` to be backed by a writable local Zarr
-    store. Assigned-point counts remain partitioned through an intermediate
-    merged-count checkpoint, and the final sparse matrices are written in row
-    blocks without materializing the complete reductions on the driver.
+    store. Aggregation remains partitioned and the final sparse matrices are
+    written in row blocks without materializing the complete reductions on the
+    driver.
 
     Table construction does not revalidate the payload it has just assembled.
     Call :func:`harpy.tb.validate_table` explicitly to check a table against its
@@ -386,15 +427,16 @@ def aggregate_points(
             points = sdata.points[pair.points_name]
             class_key = None if contract is None else contract.panel.feature_class_key
             # Lazily map every point to the nonzero label at its rounded pixel.
-            # The result contains one row per assigned point: (feature,
-            # instance_id) in ordinary mode or (feature, feature_class,
-            # instance_id) in class-aware mode. Coordinates, outside points and
+            # The result contains one (feature, instance) row per assigned
+            # point. The source class column is validated separately against
+            # the panel; downstream class totals are derived from the panel's
+            # feature-to-class mapping. Coordinates, outside points and
             # background assignments are omitted; aggregation into compact
             # (instance, feature, count) rows happens below.
             assigned_points = _assign_points_to_labels(
                 se=_get_spatial_element(sdata, element_name=pair.labels_name),
                 ddf=points,
-                value_key=feature_key if class_key is None else [feature_key, class_key],
+                value_key=feature_key,
                 drop_coordinates=True,
                 to_coordinate_system=pair.coordinate_system,
                 chunks=chunks,

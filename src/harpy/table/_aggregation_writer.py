@@ -163,7 +163,14 @@ def _write_aggregation_table(
     table_index_name: str,
     class_contract: _FeatureClassWriteContract | None,
 ) -> SpatialData:
-    """Construct, publish, and attach one table from a merged-count checkpoint."""
+    """Construct, publish, and attach one table from a merged-count checkpoint.
+
+    In ordinary mode, the checkpoint's observed features define ``adata.X``.
+    In class-aware mode, the panel-defined expression feature axis defines
+    ``adata.X`` and the concatenated non-expression axes define
+    ``adata.obsm["auxiliary_feature_counts"]``. Both matrices select their
+    counts from the same lossless checkpoint.
+    """
     expression_axis = checkpoint.observed_features if class_contract is None else class_contract.expression_feature_axis
     if not expression_axis:
         raise ValueError("Aggregation produced no expression features.")
@@ -359,6 +366,27 @@ def _checkpoint_partition_class_counts(
     *,
     contract: _FeatureClassWriteContract,
 ) -> pd.DataFrame:
+    """Derive per-instance feature-class totals for one checkpoint partition.
+
+    The checkpoint stores ``(instance, feature, count)`` rows rather than a
+    separate class reduction. This function maps each feature to its class
+    through the validated panel contract, then sums the feature counts by
+    ``(aggregation pair, instance, class)``. Its columns follow the complete
+    panel class order, including zero totals.
+
+    Parameters
+    ----------
+    partition
+        Merged-count checkpoint partition whose instances are owned entirely
+        by that partition.
+    contract
+        Validated feature panel and expression-class selection.
+
+    Returns
+    -------
+    Dataframe indexed by ``(aggregation_pair, instance_id)`` with one unsigned
+    count column for every panel class.
+    """
     frame = pd.read_parquet(
         partition.path,
         columns=[_PAIR_COLUMN, _CHECKPOINT_INSTANCE_COLUMN, _FEATURE_COLUMN, _COUNT_COLUMN],

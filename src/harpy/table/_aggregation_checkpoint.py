@@ -215,6 +215,47 @@ def _stage_aggregation_checkpoint(
     Dask preserves the compact-count partition count; Harpy does not inspect or
     rebalance partition byte sizes before writing the checkpoint.
 
+    For example, partition-local reductions from two aggregation pairs can
+    contain the following rows::
+
+        partial_counts[0], partition A    partial_counts[0], partition B
+        pair  instance  feature  count    pair  instance  feature  count
+        0     42        EPCAM    2        0     42        EPCAM    3
+        0     42        VIM      1        0     51        VIM      4
+
+        partial_counts[1]
+        pair  instance  feature  count
+        1     42        EPCAM    5
+
+    The shuffle hashes ``(pair, instance)`` to an output-partition number. All
+    three rows keyed by ``(0, 42)`` therefore move into the same routed
+    partition, irrespective of their input partitions::
+
+        routed partition containing (0, 42)
+        pair  instance  feature  count
+        0     42        EPCAM    2
+        0     42        VIM      1
+        0     42        EPCAM    3
+
+        one or more other routed partitions
+        pair  instance  feature  count
+        0     51        VIM      4
+        1     42        EPCAM    5
+
+    Different keys may share an output partition, but one key cannot be split
+    across output partitions. :func:`_merge_count_partition` can consequently
+    merge duplicate feature rows locally into the following canonical counts::
+
+        pair  instance  feature  count
+        0     42        EPCAM    5
+        0     42        VIM      1
+        0     51        VIM      4
+        1     42        EPCAM    5
+
+    Instance 42 in pair 0 remains distinct from instance 42 in pair 1. The
+    example shows the logical merged rows; their physical Parquet partitioning
+    is determined by the Dask shuffle.
+
     The deferred Parquet write, manifests, optional feature-axis tree reduction
     and feature-panel diagnostics are submitted through one ``dask.compute``
     call. Shared upstream assignment and shuffle tasks therefore execute once.
@@ -225,6 +266,9 @@ def _stage_aggregation_checkpoint(
         raise ValueError(f"Checkpoint path already exists: {path}.")
 
     compact_counts = dd.concat(list(partial_counts), interleave_partitions=True)
+    # Hash routing gives one output partition complete ownership of every
+    # (aggregation pair, instance), so the following partition-local merge is
+    # globally complete.
     routed = compact_counts.shuffle(on=[_PAIR_COLUMN, _CHECKPOINT_INSTANCE_COLUMN], ignore_index=True)
     merged = routed.map_partitions(_merge_count_partition, meta=_checkpoint_meta())
 
@@ -346,6 +390,14 @@ def _local_feature_count_partition(
 
 
 def _merge_count_partition(partition: pd.DataFrame) -> pd.DataFrame:
+    """Merge duplicate feature counts within one shuffled partition.
+
+    :func:`_stage_aggregation_checkpoint` first shuffles by
+    ``(aggregation_pair, instance_id)``, so every feature row for one instance
+    is owned by exactly one output partition. A partition-local groupby on
+    ``(aggregation_pair, instance_id, feature)`` is therefore sufficient to
+    produce globally merged feature counts without another shuffle.
+    """
     if partition.empty:
         return _checkpoint_meta()
     merged = (
@@ -368,6 +420,51 @@ def _checkpoint_partition_manifest(
     ordinal: int,
     path: Path,
 ) -> _CheckpointPartition | None:
+    """Describe the matrix-row ownership of one merged-count partition.
+
+    This function validates one materialized Dask partition and returns a small
+    in-memory descriptor; it does not write a separate manifest file. For
+    example, a physical Parquet partition containing::
+
+        pair  instance  feature  count
+        0     42        EPCAM    5
+        0     42        VIM      1
+        0     51        VIM      4
+
+    produces a descriptor equivalent to::
+
+        _CheckpointPartition(
+            ordinal=0,
+            path=Path(".../part-00000.parquet"),
+            identities=((0, 42), (0, 51)),
+            row_count=3,
+            row_start=0,
+        )
+
+    ``row_count`` is the number of long-form ``(instance, feature)`` rows in
+    the Parquet partition, whereas ``len(identities)`` is the number of output
+    matrix rows it owns. ``row_start`` initially uses its default of zero;
+    :func:`_stage_aggregation_checkpoint` later assigns consecutive output-row
+    intervals after discarding empty partitions.
+
+    Parameters
+    ----------
+    partition
+        One merged-count pandas partition. It must use the canonical checkpoint
+        schema, contain no nulls or non-positive IDs/counts, and contain at most
+        one row for each ``(aggregation_pair, instance_id, feature)`` key.
+    ordinal
+        Position of the physical partition in the merged Dask dataframe.
+    path
+        Expected path of the corresponding Parquet part written by the shared
+        checkpoint computation.
+
+    Returns
+    -------
+    A descriptor containing the partition path, sorted unique
+    ``(aggregation_pair, instance_id)`` identities and long-form row count, or
+    ``None`` when the partition is empty.
+    """
     if partition.empty:
         return None
     if tuple(partition.columns) != _CHECKPOINT_COLUMNS:
