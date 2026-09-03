@@ -7,11 +7,15 @@ import dask.dataframe as dd
 import numpy as np
 import pandas as pd
 import pytest
+from anndata.abc import CSRDataset
 from scipy import sparse
 from spatialdata import SpatialData, read_zarr
+from spatialdata._io.format import SpatialDataContainerFormatV01
 from spatialdata.models import Labels2DModel, Labels3DModel, PointsModel, TableModel
 from spatialdata.transformations import Identity, Translation
 
+import harpy.table._aggregation_checkpoint as checkpoint_module
+import harpy.table._aggregation_writer as writer_module
 import harpy.table._allocation as aggregation_module
 from harpy.table import validate_table
 from harpy.table._allocation import aggregate_points, bin_counts
@@ -41,78 +45,161 @@ def test_allocate_import_warns_and_resolves_to_aggregate_points(monkeypatch: pyt
     assert messages == ["`harpy.tb.allocate` is deprecated. Import and use `harpy.tb.aggregate_points` instead."]
 
 
-@pytest.mark.parametrize("coordinate_columns", [("x", "y"), ("x", "y", "z")])
-def test_pair_reductions_derives_coordinate_columns(coordinate_columns: tuple[str, ...]):
-    reductions = aggregation_module._PairReductions(**_pair_reduction_inputs(coordinate_columns=coordinate_columns))
-
-    assert reductions.coordinate_columns == coordinate_columns
-    np.testing.assert_array_equal(reductions.instance_ids, [1, 2])
-
-
-@pytest.mark.parametrize(
-    ("mutation", "message"),
-    [
-        ("coordinate_columns", "must use columns"),
-        ("duplicate_centers", "instance IDs must be unique"),
-        ("center_instances", "must use the same instances"),
-        ("feature_index", "feature_counts must use a two-level MultiIndex"),
-        ("feature_dtype", "feature_counts must use uint32"),
-        ("feature_instance_name", "must match center index"),
-    ],
-)
-def test_pair_reductions_rejects_structural_inconsistency(mutation: str, message: str):
-    values = _pair_reduction_inputs()
-    centers = values["centers"]
-    feature_counts = values["feature_counts"]
-    assert isinstance(centers, pd.DataFrame)
-    assert isinstance(feature_counts, pd.Series)
-
-    if mutation == "coordinate_columns":
-        centers.columns = ["y", "x"]
-    elif mutation == "duplicate_centers":
-        centers.index = pd.Index([1, 1], name="cell_id")
-    elif mutation == "center_instances":
-        centers.index = pd.Index([1, 3], name="cell_id")
-    elif mutation == "feature_index":
-        feature_counts.index = pd.Index([1, 2], name="cell_id")
-    elif mutation == "feature_dtype":
-        values["feature_counts"] = feature_counts.astype(np.uint64)
-    elif mutation == "feature_instance_name":
-        feature_counts.index = feature_counts.index.set_names(["instance", "gene"])
-
-    with pytest.raises(ValueError, match=message):
-        aggregation_module._PairReductions(**values)
-
-
-def test_counts_to_sparse_aligns_permuted_feature_levels_to_output_axis():
-    counts = pd.Series(
-        np.array([3, 7, 5], dtype=np.uint32),
-        index=pd.MultiIndex(
-            levels=[[1, 2], ["VIM", "EPCAM", "KRT8", "Unused"]],
-            codes=[[0, 0, 1], [0, 1, 2]],
-            names=["cell_id", "gene"],
+def test_aggregation_checkpoint_merges_partial_counts_and_records_manifests(tmp_path):
+    assigned = dd.from_pandas(
+        pd.DataFrame(
+            {
+                "cells": [42, 42, 51, 42],
+                "gene": ["EPCAM", "EPCAM", "VIM", "EPCAM"],
+            }
         ),
+        npartitions=2,
+    )
+    local = checkpoint_module._local_feature_counts(
+        assigned,
+        pair_ordinal=0,
+        instance_key="cells",
+        feature_key="gene",
+    )
+    checkpoint = checkpoint_module._stage_aggregation_checkpoint(
+        [local],
+        path=tmp_path / "counts",
+        pairs=(checkpoint_module._CheckpointPair(0, "labels", "points", "global", ("x", "y")),),
+        discover_features=True,
     )
 
-    matrix = aggregation_module._counts_to_sparse(
-        counts,
-        instance_ids=np.array([1, 2]),
+    result = dd.read_parquet(checkpoint.path).compute().sort_values(["instance_id", "feature"])
+    assert result.to_dict("records") == [
+        {"aggregation_pair": 0, "instance_id": 42, "feature": "EPCAM", "count": 3},
+        {"aggregation_pair": 0, "instance_id": 51, "feature": "VIM", "count": 1},
+    ]
+    assert result.dtypes[["aggregation_pair", "instance_id", "count"]].to_dict() == {
+        "aggregation_pair": np.dtype(np.int64),
+        "instance_id": np.dtype(np.uint64),
+        "count": np.dtype(np.uint64),
+    }
+    assert pd.api.types.is_string_dtype(result["feature"].dtype)
+    assert checkpoint.observed_features == ("EPCAM", "VIM")
+    assert sorted(identity for part in checkpoint.partitions for identity in part.identities) == [(0, 42), (0, 51)]
+    row_stops = np.cumsum([len(part.identities) for part in checkpoint.partitions])
+    assert [part.row_start for part in checkpoint.partitions] == [0, *row_stops[:-1]]
+    assert [part.row_stop for part in checkpoint.partitions] == row_stops.tolist()
+
+
+def test_checkpoint_partition_to_csr_aligns_the_requested_feature_axis(tmp_path):
+    path = tmp_path / "part.parquet"
+    pd.DataFrame(
+        {
+            "aggregation_pair": np.array([0, 0, 0], dtype=np.int64),
+            "instance_id": np.array([42, 42, 51], dtype=np.uint64),
+            "feature": pd.Series(["VIM", "EPCAM", "KRT8"], dtype="string"),
+            "count": np.array([3, 7, 5], dtype=np.uint64),
+        }
+    ).to_parquet(path, index=False)
+    partition = checkpoint_module._CheckpointPartition(
+        ordinal=0,
+        path=path,
+        identities=((0, 42), (0, 51)),
+        row_count=3,
+    )
+
+    matrix = writer_module._checkpoint_partition_to_csr(
+        partition,
         feature_axis=("EPCAM", "KRT8", "VIM"),
-        cell_index_name="cell_id",
-        feature_key="gene",
+        feature_axis_hash=writer_module._feature_axis_hash(("EPCAM", "KRT8", "VIM")),
     )
 
     assert sparse.isspmatrix_csr(matrix)
-    np.testing.assert_array_equal(
-        matrix.toarray(),
-        np.array(
-            [
-                [7, 0, 3],
-                [0, 5, 0],
-            ],
-            dtype=np.uint32,
-        ),
+    assert matrix.indices.dtype == np.dtype(np.int64)
+    assert matrix.indptr.dtype == np.dtype(np.int64)
+    np.testing.assert_array_equal(matrix.toarray(), [[7, 0, 3], [0, 5, 0]])
+
+
+def test_aggregation_checkpoint_executes_each_source_partition_once(tmp_path):
+    reads: list[int] = []
+
+    @dask.delayed
+    def read_partition(ordinal: int) -> pd.DataFrame:
+        reads.append(ordinal)
+        return pd.DataFrame(
+            {
+                "cells": pd.Series([ordinal + 1], dtype=np.uint32),
+                "gene": pd.Series([f"Gene{ordinal}"], dtype="string"),
+            }
+        )
+
+    assigned = dd.from_delayed(
+        [read_partition(0), read_partition(1)],
+        meta=pd.DataFrame({"cells": pd.Series(dtype=np.uint32), "gene": pd.Series(dtype="string")}),
     )
+    local = checkpoint_module._local_feature_counts(
+        assigned,
+        pair_ordinal=0,
+        instance_key="cells",
+        feature_key="gene",
+    )
+
+    checkpoint_module._stage_aggregation_checkpoint(
+        [local],
+        path=tmp_path / "counts",
+        pairs=(checkpoint_module._CheckpointPair(0, "labels", "points", "global", ("x", "y")),),
+        discover_features=True,
+    )
+
+    assert sorted(reads) == [0, 1]
+
+
+def test_aggregation_checkpoint_rejects_a_pair_without_assigned_instances(tmp_path):
+    populated = dd.from_pandas(pd.DataFrame({"cells": [1], "gene": ["GeneA"]}), npartitions=1)
+    empty = dd.from_pandas(
+        pd.DataFrame({"cells": pd.Series(dtype=np.uint32), "gene": pd.Series(dtype="string")}),
+        npartitions=1,
+    )
+    partial_counts = [
+        checkpoint_module._local_feature_counts(
+            points,
+            pair_ordinal=ordinal,
+            instance_key="cells",
+            feature_key="gene",
+        )
+        for ordinal, points in enumerate((populated, empty))
+    ]
+
+    with pytest.raises(ValueError, match=r"labels_empty.*points_empty"):
+        checkpoint_module._stage_aggregation_checkpoint(
+            partial_counts,
+            path=tmp_path / "counts",
+            pairs=(
+                checkpoint_module._CheckpointPair(0, "labels", "points", "global", ("x", "y")),
+                checkpoint_module._CheckpointPair(1, "labels_empty", "points_empty", "global", ("x", "y")),
+            ),
+            discover_features=True,
+        )
+
+
+def test_checkpoint_partition_to_csr_rejects_uint32_overflow(tmp_path):
+    path = tmp_path / "part.parquet"
+    pd.DataFrame(
+        {
+            "aggregation_pair": np.array([0], dtype=np.int64),
+            "instance_id": np.array([1], dtype=np.uint64),
+            "feature": pd.Series(["GeneA"], dtype="string"),
+            "count": np.array([np.iinfo(np.uint32).max + 1], dtype=np.uint64),
+        }
+    ).to_parquet(path, index=False)
+    partition = checkpoint_module._CheckpointPartition(
+        ordinal=0,
+        path=path,
+        identities=((0, 1),),
+        row_count=1,
+    )
+
+    with pytest.raises(ValueError, match="exceed the uint32"):
+        writer_module._checkpoint_partition_to_csr(
+            partition,
+            feature_axis=("GeneA",),
+            feature_axis_hash=writer_module._feature_axis_hash(("GeneA",)),
+        )
 
 
 def test_aggregate_points(sdata_transcripts: SpatialData):
@@ -127,11 +214,15 @@ def test_aggregate_points(sdata_transcripts: SpatialData):
     )
 
     assert "table_transcriptomics_recompute" in [*sdata_transcripts.tables]
-    assert sdata_transcripts["table_transcriptomics_recompute"].shape == (649, 96)
+    recomputed = sdata_transcripts["table_transcriptomics_recompute"]
+    expected = sdata_transcripts["table_transcriptomics"]
+    assert recomputed.shape == (649, 96)
+    recomputed_order = np.argsort(recomputed.obs[_INSTANCE_KEY].to_numpy())
+    expected_order = np.argsort(expected.obs[_INSTANCE_KEY].to_numpy())
 
     assert np.array_equal(
-        sdata_transcripts["table_transcriptomics_recompute"].X.toarray(),
-        sdata_transcripts["table_transcriptomics"].X.toarray(),
+        _to_memory(recomputed.X)[recomputed_order].toarray(),
+        expected.X[expected_order].toarray(),
     )
 
 
@@ -168,18 +259,28 @@ def test_aggregate_points_multiple_pairs_create_one_table(sdata_transcripts: Spa
     ],
 )
 def test_aggregate_points_rejects_invalid_pairs(
-    sdata_transcripts_no_backed: SpatialData,
+    sdata_transcripts: SpatialData,
     labels_name: list[str],
     points_name: str | list[str],
     message: str,
 ):
     with pytest.raises(ValueError, match=message):
         aggregate_points(
-            sdata_transcripts_no_backed,
+            sdata_transcripts,
             labels_name=labels_name,
             points_name=points_name,
             output_table_name="new_table",
         )
+
+
+def test_aggregate_points_rejects_unbacked_input_before_pair_validation(sdata_transcripts_no_backed: SpatialData):
+    with pytest.raises(ValueError, match="requires a SpatialData object backed") as error:
+        aggregate_points(
+            sdata_transcripts_no_backed,
+            labels_name=["missing", "missing"],
+            output_table_name="new_table",
+        )
+    assert 'sdata.write("sdata.zarr")' in str(error.value)
 
 
 def test_aggregate_points_overwrite(sdata_transcripts: SpatialData):
@@ -194,6 +295,36 @@ def test_aggregate_points_overwrite(sdata_transcripts: SpatialData):
             chunks=20000,
             overwrite=False,
         )
+
+
+def test_aggregation_write_failure_preserves_existing_table_and_cleans_workspace(monkeypatch, tmp_path):
+    sdata = _backed(_class_aware_sdata(), tmp_path)
+    sdata = aggregate_points(
+        sdata,
+        labels_name="labels_a",
+        points_name="points_a",
+        to_coordinate_system="sample_a",
+        output_table_name="table",
+    )
+    expected = sdata.tables["table"].X.to_memory()
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("injected metadata failure")
+
+    monkeypatch.setattr(writer_module, "_set_spatialdata_table_attrs", fail)
+    with pytest.raises(RuntimeError, match="injected metadata failure"):
+        aggregate_points(
+            sdata,
+            labels_name="labels_a",
+            points_name="points_a",
+            to_coordinate_system="sample_a",
+            output_table_name="table",
+            overwrite=True,
+        )
+
+    reopened = read_zarr(sdata.path)
+    assert (reopened.tables["table"].X != expected).nnz == 0
+    assert not list((tmp_path / "input.zarr" / "tables").glob(".harpy-aggregate-*"))
 
 
 def test_class_aware_aggregation_uses_panel_axis_and_adds_auxiliary_summaries(tmp_path):
@@ -213,22 +344,35 @@ def test_class_aware_aggregation_uses_panel_axis_and_adds_auxiliary_summaries(tm
     )
 
     adata = sdata.tables["table"]
+    assert isinstance(adata.X, CSRDataset)
     assert adata.var_names.to_list() == ["GeneA", "GeneB", "GeneZero"]
     assert adata.obs[_REGION_KEY].cat.categories.to_list() == ["labels_a", "labels_b"]
-    assert adata.obs[_INSTANCE_KEY].to_list() == [1, 2, 3, 1]
-    assert adata.obs["n_endogenous_points"].to_list() == [2, 1, 0, 1]
-    assert adata.obs["n_negative_points"].to_list() == [1, 1, 1, 0]
-    assert adata.obs["n_system_control_points"].to_list() == [1, 0, 0, 2]
-    assert np.allclose(adata.obs["auxiliary_points_fraction"], [0.5, 0.5, 1.0, 2 / 3])
-    assert np.array_equal(np.asarray(adata.X.sum(axis=1)).ravel(), adata.obs["n_endogenous_points"])
+    order = sorted(
+        range(adata.n_obs),
+        key=lambda row: (
+            adata.obs[_REGION_KEY].cat.categories.get_loc(adata.obs[_REGION_KEY].iloc[row]),
+            adata.obs[_INSTANCE_KEY].iloc[row],
+        ),
+    )
+    obs = adata.obs.iloc[order]
+    expression = adata.X.to_memory()[order]
+    assert obs[_INSTANCE_KEY].to_list() == [1, 2, 3, 1]
+    assert obs["n_endogenous_points"].to_list() == [2, 1, 0, 1]
+    assert obs["n_negative_points"].to_list() == [1, 1, 1, 0]
+    assert obs["n_system_control_points"].to_list() == [1, 0, 0, 2]
+    assert np.allclose(obs["auxiliary_points_fraction"], [0.5, 0.5, 1.0, 2 / 3])
+    assert np.array_equal(np.asarray(expression.sum(axis=1)).ravel(), obs["n_endogenous_points"])
     assert not {"negative_points_per_feature", "system_control_points_per_feature"} & set(adata.obs)
-    assert np.allclose(adata.obsm[_SPATIAL], [[0.5, 0.5], [3.5, 0.5], [0.5, 2.0], [0.5, 0.5]])
+    assert np.allclose(
+        adata.obsm[_SPATIAL][order],
+        [[0.5, 0.5], [3.5, 0.5], [0.5, 2.0], [0.5, 0.5]],
+    )
 
     auxiliary = adata.obsm["auxiliary_feature_counts"]
-    assert sparse.isspmatrix_csr(auxiliary)
+    assert isinstance(auxiliary, CSRDataset)
     assert auxiliary.dtype == np.dtype(np.uint32)
     assert np.array_equal(
-        auxiliary.toarray(),
+        auxiliary.to_memory()[order].toarray(),
         np.array(
             [
                 [1, 0, 0, 1],
@@ -284,9 +428,49 @@ def test_class_aware_aggregation_uses_panel_axis_and_adds_auxiliary_summaries(tm
     validate_table(roundtripped_sdata, "table")
 
 
-def test_ordinary_aggregation_uses_label_centers_without_class_metadata():
+def test_aggregate_points_writes_a_reopenable_zarr_v2_table(tmp_path):
+    path = tmp_path / "zarr-v2.zarr"
+    _class_aware_sdata().write(path, sdata_formats=SpatialDataContainerFormatV01())
+    sdata = aggregate_points(
+        read_zarr(path),
+        labels_name="labels_a",
+        points_name="points_a",
+        to_coordinate_system="sample_a",
+        output_table_name="table",
+        expression_class="Endogenous",
+    )
+
+    assert isinstance(sdata.tables["table"].X, CSRDataset)
+    reopened = read_zarr(path)
+    assert reopened.tables["table"].shape == (3, 3)
+    assert reopened.tables["table"].uns[TableModel.ATTRS_KEY] == {
+        "region": ["labels_a"],
+        "region_key": _REGION_KEY,
+        "instance_key": _INSTANCE_KEY,
+    }
+
+
+def test_aggregate_points_publishes_without_spatialdata_write_element(monkeypatch, tmp_path):
+    sdata = _backed(_class_aware_sdata(), tmp_path)
+
+    def fail(*args, **kwargs):
+        raise AssertionError("SpatialData.write_element() must not write the assembled table.")
+
+    monkeypatch.setattr(sdata, "write_element", fail)
     result = aggregate_points(
-        _class_aware_sdata(),
+        sdata,
+        labels_name="labels_a",
+        points_name="points_a",
+        to_coordinate_system="sample_a",
+        output_table_name="table",
+    )
+
+    assert isinstance(result.tables["table"].X, CSRDataset)
+
+
+def test_ordinary_aggregation_uses_label_centers_without_class_metadata(tmp_path):
+    result = aggregate_points(
+        _backed(_class_aware_sdata(), tmp_path),
         labels_name="labels_a",
         points_name="points_a",
         to_coordinate_system="sample_a",
@@ -294,17 +478,18 @@ def test_ordinary_aggregation_uses_label_centers_without_class_metadata():
     )
 
     adata = result.tables["table"]
-    assert adata.obs[_INSTANCE_KEY].to_list() == [1, 2, 3]
-    assert np.allclose(adata.obsm[_SPATIAL], [[0.5, 0.5], [3.5, 0.5], [0.5, 2.0]])
+    order = np.argsort(adata.obs[_INSTANCE_KEY].to_numpy())
+    assert adata.obs[_INSTANCE_KEY].iloc[order].to_list() == [1, 2, 3]
+    assert np.allclose(adata.obsm[_SPATIAL][order], [[0.5, 0.5], [3.5, 0.5], [0.5, 2.0]])
     assert "auxiliary_feature_counts" not in adata.obsm
     assert "feature_class_aggregation" not in adata.uns
     assert "feature_matrices" not in adata.uns
     validate_table(result, "table")
 
 
-def test_validate_table_accepts_a_registered_generic_feature_matrix():
+def test_validate_table_accepts_a_registered_generic_feature_matrix(tmp_path):
     result = aggregate_points(
-        _class_aware_sdata(),
+        _backed(_class_aware_sdata(), tmp_path),
         labels_name="labels_a",
         points_name="points_a",
         to_coordinate_system="sample_a",
@@ -325,9 +510,9 @@ def test_validate_table_accepts_a_registered_generic_feature_matrix():
     validate_table(result, "table")
 
 
-def test_validate_table_accepts_filtered_and_reordered_feature_axes():
+def test_validate_table_accepts_filtered_and_reordered_feature_axes(tmp_path):
     result = aggregate_points(
-        _class_aware_sdata(),
+        _backed(_class_aware_sdata(), tmp_path),
         labels_name="labels_a",
         points_name="points_a",
         to_coordinate_system="sample_a",
@@ -351,9 +536,9 @@ def test_validate_table_accepts_filtered_and_reordered_feature_axes():
     validate_table(result, "table")
 
 
-def test_validate_table_accepts_recalculated_summary_columns():
+def test_validate_table_accepts_recalculated_summary_columns(tmp_path):
     result = aggregate_points(
-        _class_aware_sdata(),
+        _backed(_class_aware_sdata(), tmp_path),
         labels_name="labels_a",
         points_name="points_a",
         to_coordinate_system="sample_a",
@@ -367,9 +552,9 @@ def test_validate_table_accepts_recalculated_summary_columns():
     validate_table(result, "table")
 
 
-def test_validate_table_accepts_preprocessed_matrix_representations():
+def test_validate_table_accepts_preprocessed_matrix_representations(tmp_path):
     result = aggregate_points(
-        _class_aware_sdata(),
+        _backed(_class_aware_sdata(), tmp_path),
         labels_name="labels_a",
         points_name="points_a",
         to_coordinate_system="sample_a",
@@ -377,9 +562,9 @@ def test_validate_table_accepts_preprocessed_matrix_representations():
         expression_class="Endogenous",
     )
     adata = result.tables["table"]
-    adata.X = adata.X.toarray().astype(np.float32)
+    adata.X = _to_memory(adata.X).toarray().astype(np.float32)
     auxiliary = adata.obsm["auxiliary_feature_counts"]
-    adata.obsm["auxiliary_feature_counts"] = auxiliary.toarray().astype(np.float64)
+    adata.obsm["auxiliary_feature_counts"] = _to_memory(auxiliary).toarray().astype(np.float64)
 
     assert set(adata.uns["feature_matrices"]["auxiliary_feature_counts"]) == {
         "schema_version",
@@ -389,7 +574,7 @@ def test_validate_table_accepts_preprocessed_matrix_representations():
     validate_table(result, "table")
 
 
-def test_aggregate_points_uses_irregular_label_center_instead_of_point_position():
+def test_aggregate_points_uses_irregular_label_center_instead_of_point_position(tmp_path):
     labels = Labels2DModel.parse(
         np.array(
             [
@@ -407,8 +592,9 @@ def test_aggregate_points_uses_irregular_label_center_instead_of_point_position(
         transformations={"sample": Identity()},
     )
 
+    sdata = _backed(SpatialData(labels={"labels": labels}, points={"points": points}), tmp_path)
     result = aggregate_points(
-        SpatialData(labels={"labels": labels}, points={"points": points}),
+        sdata,
         labels_name="labels",
         points_name="points",
         to_coordinate_system="sample",
@@ -418,7 +604,7 @@ def test_aggregate_points_uses_irregular_label_center_instead_of_point_position(
     assert np.allclose(result.tables["table"].obsm[_SPATIAL], [[1 / 3, 1 / 3]])
 
 
-def test_label_centers_apply_pair_translation():
+def test_label_centers_apply_pair_translation(tmp_path):
     sdata = _class_aware_sdata()
     labels = sdata.labels["labels_a"]
     sdata.labels["labels_a"] = Labels2DModel.parse(
@@ -433,6 +619,7 @@ def test_label_centers_apply_pair_translation():
         dd.from_pandas(points, npartitions=2),
         transformations={"translated": Identity()},
     )
+    sdata = _backed(sdata, tmp_path)
 
     result = aggregate_points(
         sdata,
@@ -446,7 +633,7 @@ def test_label_centers_apply_pair_translation():
     assert np.allclose(result.tables["table"].obsm[_SPATIAL], [[10.5, 20.5], [13.5, 20.5], [10.5, 22.0]])
 
 
-def test_aggregate_points_uses_xyz_label_center_order():
+def test_aggregate_points_uses_xyz_label_center_order(tmp_path):
     labels = Labels3DModel.parse(
         np.ones((2, 2, 2), dtype=np.uint32),
         dims=("z", "y", "x"),
@@ -457,8 +644,9 @@ def test_aggregate_points_uses_xyz_label_center_order():
         transformations={"volume": Identity()},
     )
 
+    sdata = _backed(SpatialData(labels={"labels": labels}, points={"points": points}), tmp_path)
     result = aggregate_points(
-        SpatialData(labels={"labels": labels}, points={"points": points}),
+        sdata,
         labels_name="labels",
         points_name="points",
         to_coordinate_system="volume",
@@ -502,9 +690,9 @@ def test_assign_points_to_labels_routes_once_across_irregular_chunks():
     result = assigned.compute().sort_values("point_id").reset_index(drop=True)
 
     assert assigned.npartitions == 6
-    assert result.columns.to_list() == ["x", "y", "point_id", "feature", "cells"]
+    assert result.columns.to_list() == ["x", "y", "point_id", "feature", _INSTANCE_KEY]
     assert result["point_id"].to_list() == [0, 1, 2, 6, 7, 8, 9]
-    assert result["cells"].to_list() == [1, 4, 20, 1, 17, 33, 35]
+    assert result[_INSTANCE_KEY].to_list() == [1, 4, 20, 1, 17, 33, 35]
     assert result[["x", "y"]].to_numpy().tolist() == [[0, 0], [3, 0], [5, 2], [0, 0], [2, 2], [4, 4], [6, 4]]
     assert result["feature"].dtype == categories
     assert not any("block_id" in column for column in result.columns)
@@ -583,7 +771,7 @@ def test_assign_points_to_labels_applies_integer_translation():
         to_coordinate_system="translated",
     ).compute()
 
-    assert result.sort_values("feature")["cells"].to_list() == [1, 4]
+    assert result.sort_values("feature")[_INSTANCE_KEY].to_list() == [1, 4]
 
 
 def test_assign_points_to_labels_routes_three_dimensional_blocks():
@@ -614,7 +802,7 @@ def test_assign_points_to_labels_routes_three_dimensional_blocks():
     result = assigned.compute().sort_values("point_id")
 
     assert assigned.npartitions == 8
-    assert result["cells"].to_list() == [1, 11, 24]
+    assert result[_INSTANCE_KEY].to_list() == [1, 11, 24]
 
 
 def test_assign_points_to_labels_rejects_fractional_translation():
@@ -710,11 +898,11 @@ def test_assign_points_to_labels_graph_construction_does_not_read_sources():
     )
 
     assert reads == []
-    assert assigned.compute()["cells"].to_list() == [1, 2]
+    assert assigned.compute()[_INSTANCE_KEY].to_list() == [1, 2]
     assert sorted(reads) == ["labels", "points"]
 
 
-def test_class_aware_aggregation_assigns_points_once(monkeypatch: pytest.MonkeyPatch):
+def test_class_aware_aggregation_assigns_points_once(monkeypatch: pytest.MonkeyPatch, tmp_path):
     calls = 0
     assign_points_to_labels = aggregation_module._assign_points_to_labels
 
@@ -725,7 +913,7 @@ def test_class_aware_aggregation_assigns_points_once(monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr(aggregation_module, "_assign_points_to_labels", wrapped_assign_points_to_labels)
     aggregate_points(
-        _class_aware_sdata(),
+        _backed(_class_aware_sdata(), tmp_path),
         labels_name="labels_a",
         points_name="points_a",
         to_coordinate_system="sample_a",
@@ -748,9 +936,9 @@ def test_class_aware_aggregation_assigns_points_once(monkeypatch: pytest.MonkeyP
         "auxiliary_class",
     ],
 )
-def test_validate_table_rejects_class_aware_inconsistency(mutation: str):
+def test_validate_table_rejects_class_aware_inconsistency(mutation: str, tmp_path):
     result = aggregate_points(
-        _class_aware_sdata(),
+        _backed(_class_aware_sdata(), tmp_path),
         labels_name="labels_a",
         points_name="points_a",
         to_coordinate_system="sample_a",
@@ -796,12 +984,13 @@ def test_class_aware_contract_requires_an_auxiliary_class():
         )
 
 
-def test_class_aware_aggregation_rejects_source_points_that_disagree_with_panel():
+def test_class_aware_aggregation_rejects_source_points_that_disagree_with_panel(tmp_path):
     sdata = _class_aware_sdata()
     points = sdata.points["points_a"].compute()
     points.loc[len(points)] = [4, 4, "Unknown", "Endogenous"]
     points["code_class"] = points["code_class"].astype(pd.CategoricalDtype(categories=_PANEL["classes"]))
     sdata.points["points_a"] = PointsModel.parse(points, transformations={"sample_a": Identity()})
+    sdata = _backed(sdata, tmp_path)
 
     with pytest.raises(ValueError, match="feature 'Unknown' is absent from the panel"):
         aggregate_points(
@@ -814,8 +1003,8 @@ def test_class_aware_aggregation_rejects_source_points_that_disagree_with_panel(
         )
 
 
-def test_class_aware_aggregation_restores_unknown_dask_categories():
-    sdata = _class_aware_sdata()
+def test_class_aware_aggregation_restores_unknown_dask_categories(tmp_path):
+    sdata = _backed(_class_aware_sdata(), tmp_path)
     points = sdata.points["points_a"]
     points = points.assign(code_class=points["code_class"].cat.as_unknown())
     sdata.points["points_a"] = PointsModel.parse(points, transformations={"sample_a": Identity()})
@@ -829,12 +1018,12 @@ def test_class_aware_aggregation_restores_unknown_dask_categories():
         expression_class="Endogenous",
     )
 
-    assert result.tables["table"].obs["n_negative_points"].to_list() == [1, 1, 1]
+    assert sorted(result.tables["table"].obs["n_negative_points"].to_list()) == [1, 1, 1]
 
 
-def test_aggregation_preserves_custom_table_annotation_keys():
+def test_aggregation_preserves_custom_table_annotation_keys(tmp_path):
     result = aggregate_points(
-        _class_aware_sdata(),
+        _backed(_class_aware_sdata(), tmp_path),
         labels_name="labels_a",
         points_name="points_a",
         to_coordinate_system="sample_a",
@@ -846,6 +1035,47 @@ def test_aggregation_preserves_custom_table_annotation_keys():
     attrs = result.tables["table"].uns[TableModel.ATTRS_KEY]
     assert attrs[TableModel.REGION_KEY_KEY] == "region"
     assert attrs[TableModel.INSTANCE_KEY] == "instance"
+    assert result.tables["table"].obs.index.name == "instance_index"
+
+
+def test_aggregation_accepts_an_explicit_table_index_name(tmp_path):
+    result = aggregate_points(
+        _backed(_class_aware_sdata(), tmp_path),
+        labels_name="labels_a",
+        points_name="points_a",
+        to_coordinate_system="sample_a",
+        output_table_name="table",
+        table_index_name="observations",
+    )
+
+    assert result.tables["table"].obs.index.name == "observations"
+    assert read_zarr(result.path).tables["table"].obs.index.name == "observations"
+
+
+@pytest.mark.parametrize("table_index_name", ["", _INSTANCE_KEY, _REGION_KEY, "auxiliary_points_fraction"])
+def test_aggregation_rejects_an_invalid_table_index_name(tmp_path, table_index_name: str):
+    with pytest.raises(ValueError, match="table_index_name"):
+        aggregate_points(
+            _backed(_class_aware_sdata(), tmp_path),
+            labels_name="labels_a",
+            points_name="points_a",
+            to_coordinate_system="sample_a",
+            output_table_name="table",
+            table_index_name=table_index_name,
+        )
+
+
+def test_class_aware_aggregation_rejects_a_table_index_name_colliding_with_a_summary(tmp_path):
+    with pytest.raises(ValueError, match="Generated feature-class columns collide"):
+        aggregate_points(
+            _backed(_class_aware_sdata(), tmp_path),
+            labels_name="labels_a",
+            points_name="points_a",
+            to_coordinate_system="sample_a",
+            output_table_name="table",
+            expression_class="Endogenous",
+            table_index_name="n_negative_points",
+        )
 
 
 @pytest.mark.parametrize(
@@ -861,6 +1091,7 @@ def test_class_aware_aggregation_rejects_invalid_panel_contract_before_assignmen
     mutation: str,
     message: str,
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
 ):
     sdata = _class_aware_sdata()
     if mutation == "missing_reference":
@@ -876,6 +1107,7 @@ def test_class_aware_aggregation_rejects_invalid_panel_contract_before_assignmen
         incompatible["features_by_class"]["Endogenous"].append("GeneC")
         sdata.attrs["harpy"]["feature_panels"]["feature_panel_other"] = incompatible
         sdata.attrs["harpy"]["points"]["points_b"]["feature_panel"] = "feature_panel_other"
+    sdata = _backed(sdata, tmp_path)
 
     def fail(*args, **kwargs):
         raise AssertionError("Spatial assignment started before panel validation completed.")
@@ -892,28 +1124,14 @@ def test_class_aware_aggregation_rejects_invalid_panel_contract_before_assignmen
         )
 
 
-def _pair_reduction_inputs(*, coordinate_columns: tuple[str, ...] = ("x", "y")) -> dict[str, object]:
-    centers = pd.DataFrame(
-        np.arange(2 * len(coordinate_columns), dtype=float).reshape(2, len(coordinate_columns)),
-        index=pd.Index([1, 2], name="cell_id"),
-        columns=coordinate_columns,
-    )
-    feature_counts = pd.Series(
-        np.array([2, 3], dtype=np.uint32),
-        index=pd.MultiIndex.from_tuples(
-            [(1, "GeneA"), (2, "GeneB")],
-            names=["cell_id", "gene"],
-        ),
-    )
-    return {
-        "pair": aggregation_module._AggregationPair(
-            labels_name="labels",
-            points_name="points",
-            coordinate_system="global",
-        ),
-        "centers": centers,
-        "feature_counts": feature_counts,
-    }
+def _backed(sdata: SpatialData, tmp_path, *, name: str = "input.zarr") -> SpatialData:
+    path = tmp_path / name
+    sdata.write(path)
+    return read_zarr(path)
+
+
+def _to_memory(matrix):
+    return matrix.to_memory() if isinstance(matrix, CSRDataset) else matrix
 
 
 def _class_aware_sdata() -> SpatialData:

@@ -20,9 +20,9 @@ from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
 from harpy.table._aggregation_checkpoint import (
+    _CHECKPOINT_INSTANCE_COLUMN,
     _COUNT_COLUMN,
     _FEATURE_COLUMN,
-    _INSTANCE_COLUMN,
     _PAIR_COLUMN,
     _AggregationCheckpoint,
     _CheckpointPartition,
@@ -160,7 +160,7 @@ def _write_aggregation_table(
     region_key: str,
     instance_key: str,
     spatial_key: str,
-    cell_index_name: str,
+    table_index_name: str,
     class_contract: _FeatureClassWriteContract | None,
 ) -> SpatialData:
     """Construct, publish, and attach one table from a merged-count checkpoint."""
@@ -173,7 +173,7 @@ def _write_aggregation_table(
     obs = _aggregation_obs(
         checkpoint,
         identities=identities,
-        cell_index_name=cell_index_name,
+        table_index_name=table_index_name,
         region_key=region_key,
         instance_key=instance_key,
         class_contract=class_contract,
@@ -273,14 +273,17 @@ def _checkpoint_partition_to_csr(
     """Convert one merged-count Parquet part to a verified full-width CSR block."""
     if _feature_axis_hash(feature_axis) != feature_axis_hash:
         raise ValueError("Checkpoint CSR conversion received an inconsistent feature axis.")
-    frame = pd.read_parquet(partition.path, columns=[_PAIR_COLUMN, _INSTANCE_COLUMN, _FEATURE_COLUMN, _COUNT_COLUMN])
+    frame = pd.read_parquet(
+        partition.path,
+        columns=[_PAIR_COLUMN, _CHECKPOINT_INSTANCE_COLUMN, _FEATURE_COLUMN, _COUNT_COLUMN],
+    )
     row_by_identity = {identity: row for row, identity in enumerate(partition.identities)}
     column_by_feature = {feature: column for column, feature in enumerate(feature_axis)}
 
     rows = np.fromiter(
         (
             row_by_identity[(int(pair), int(instance))]
-            for pair, instance in frame[[_PAIR_COLUMN, _INSTANCE_COLUMN]].itertuples(index=False, name=None)
+            for pair, instance in frame[[_PAIR_COLUMN, _CHECKPOINT_INSTANCE_COLUMN]].itertuples(index=False, name=None)
         ),
         dtype=np.int64,
         count=len(frame),
@@ -313,7 +316,7 @@ def _aggregation_obs(
     checkpoint: _AggregationCheckpoint,
     *,
     identities: tuple[tuple[int, int], ...],
-    cell_index_name: str,
+    table_index_name: str,
     region_key: str,
     instance_key: str,
     class_contract: _FeatureClassWriteContract | None,
@@ -324,7 +327,7 @@ def _aggregation_obs(
     obs_names = [
         f"{instance}_{labels_name}_{token}" for labels_name, instance in zip(labels_names, instance_ids, strict=True)
     ]
-    obs = pd.DataFrame(index=pd.Index(obs_names, name=cell_index_name))
+    obs = pd.DataFrame(index=pd.Index(obs_names, name=table_index_name))
     obs[instance_key] = instance_ids
     obs[region_key] = pd.Categorical(labels_names, categories=[pair.labels_name for pair in checkpoint.pairs])
 
@@ -356,12 +359,15 @@ def _checkpoint_partition_class_counts(
     *,
     contract: _FeatureClassWriteContract,
 ) -> pd.DataFrame:
-    frame = pd.read_parquet(partition.path, columns=[_PAIR_COLUMN, _INSTANCE_COLUMN, _FEATURE_COLUMN, _COUNT_COLUMN])
+    frame = pd.read_parquet(
+        partition.path,
+        columns=[_PAIR_COLUMN, _CHECKPOINT_INSTANCE_COLUMN, _FEATURE_COLUMN, _COUNT_COLUMN],
+    )
     feature_classes = frame[_FEATURE_COLUMN].map(contract.class_by_feature)
     if feature_classes.isna().any():
         raise ValueError("Checkpoint contains a feature absent from its feature-panel contract.")
     values = frame.assign(feature_class=feature_classes).pivot_table(
-        index=[_PAIR_COLUMN, _INSTANCE_COLUMN],
+        index=[_PAIR_COLUMN, _CHECKPOINT_INSTANCE_COLUMN],
         columns="feature_class",
         values=_COUNT_COLUMN,
         aggfunc="sum",
@@ -371,7 +377,7 @@ def _checkpoint_partition_class_counts(
     values = values.reindex(
         index=pd.MultiIndex.from_tuples(partition.identities), columns=contract.classes, fill_value=0
     )
-    values.index.names = [_PAIR_COLUMN, _INSTANCE_COLUMN]
+    values.index.names = [_PAIR_COLUMN, _CHECKPOINT_INSTANCE_COLUMN]
     return values.astype(np.uint64, copy=False)
 
 
@@ -394,11 +400,11 @@ def _aligned_centers(
             raise ValueError(f"Labels element {pair.labels_name!r} produced duplicate center instance IDs.")
         centers.index = pd.MultiIndex.from_arrays(
             [np.full(len(centers), pair.ordinal, dtype=np.int64), centers.index.to_numpy()],
-            names=[_PAIR_COLUMN, _INSTANCE_COLUMN],
+            names=[_PAIR_COLUMN, _CHECKPOINT_INSTANCE_COLUMN],
         )
         indexed_centers.append(centers)
 
-    requested = pd.MultiIndex.from_tuples(identities, names=[_PAIR_COLUMN, _INSTANCE_COLUMN])
+    requested = pd.MultiIndex.from_tuples(identities, names=[_PAIR_COLUMN, _CHECKPOINT_INSTANCE_COLUMN])
     aligned = pd.concat(indexed_centers).reindex(requested)
     if aligned.isna().any(axis=None):
         missing = requested[aligned.isna().any(axis=1)][0]

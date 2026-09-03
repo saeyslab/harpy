@@ -217,7 +217,7 @@ def aggregate_points(
     region_key: str = _REGION_KEY,
     instance_key: str = _INSTANCE_KEY,
     spatial_key: str = _SPATIAL,
-    cell_index_name: str = _CELL_INDEX,
+    table_index_name: str | None = None,
     overwrite: bool = False,
 ) -> SpatialData:
     """Aggregate one or more points elements within paired labels elements.
@@ -308,8 +308,10 @@ def aggregate_points(
     spatial_key
         Key in ``adata.obsm`` holding segmentation-label centers of mass in the
         selected coordinate systems.
-    cell_index_name
-        Name of the resulting observation index.
+    table_index_name
+        Name of the resulting ``adata.obs`` index. If ``None``, defaults to
+        ``f"{instance_key}_index"``. It must not collide with an ``adata.obs``
+        column produced by aggregation.
     overwrite
         Whether an existing ``output_table_name`` may be replaced.
 
@@ -338,6 +340,11 @@ def aggregate_points(
         output_table_name=output_table_name,
         overwrite=overwrite,
     )
+    table_index_name = _resolve_table_index_name(
+        table_index_name,
+        instance_key=instance_key,
+        region_key=region_key,
+    )
     pairs = _normalize_aggregation_pairs(
         sdata,
         labels_name=labels_name,
@@ -355,6 +362,7 @@ def aggregate_points(
             expression_class=expression_class,
             region_key=region_key,
             instance_key=instance_key,
+            table_index_name=table_index_name,
         )
 
     checkpoint_pairs = tuple(
@@ -374,6 +382,12 @@ def aggregate_points(
         for pair_ordinal, pair in enumerate(pairs):
             points = sdata.points[pair.points_name]
             class_key = None if contract is None else contract.panel.feature_class_key
+            # Lazily map every point to the nonzero label at its rounded pixel.
+            # The result contains one row per assigned point: (feature,
+            # instance_id) in ordinary mode or (feature, feature_class,
+            # instance_id) in class-aware mode. Coordinates, outside points and
+            # background assignments are omitted; aggregation into compact
+            # (instance, feature, count) rows happens below.
             assigned_points = _assign_points_to_labels(
                 se=_get_spatial_element(sdata, element_name=pair.labels_name),
                 ddf=points,
@@ -381,13 +395,13 @@ def aggregate_points(
                 drop_coordinates=True,
                 to_coordinate_system=pair.coordinate_system,
                 chunks=chunks,
-                cell_index_name=cell_index_name,
+                instance_key=instance_key,
             )
             partial_counts.append(
                 _local_feature_counts(
                     assigned_points,
                     pair_ordinal=pair_ordinal,
-                    instance_key=cell_index_name,
+                    instance_key=instance_key,
                     feature_key=feature_key,
                 )
             )
@@ -420,7 +434,7 @@ def aggregate_points(
                 pair=pairs[pair.ordinal],
                 instance_ids=checkpoint.instance_ids(pair.ordinal),
                 coordinate_columns=pair.coordinate_columns,
-                cell_index_name=cell_index_name,
+                instance_key=instance_key,
             )
             for pair in checkpoint.pairs
         }
@@ -445,7 +459,7 @@ def aggregate_points(
             region_key=region_key,
             instance_key=instance_key,
             spatial_key=spatial_key,
-            cell_index_name=cell_index_name,
+            table_index_name=table_index_name,
             class_contract=class_write_contract,
         )
     finally:
@@ -537,6 +551,24 @@ def _broadcast_names(value: str | list[str], size: int, *, parameter_name: str) 
     return values
 
 
+def _resolve_table_index_name(
+    table_index_name: str | None,
+    *,
+    instance_key: str,
+    region_key: str,
+) -> str:
+    """Resolve and validate the name of the output AnnData observation index."""
+    result = f"{instance_key}_index" if table_index_name is None else table_index_name
+    if not isinstance(result, str) or not result:
+        raise ValueError(f"Parameter 'table_index_name' must be a non-empty string or None, found {result!r}.")
+    reserved = {instance_key, region_key, _AUXILIARY_POINTS_FRACTION_COLUMN}
+    if result in reserved:
+        raise ValueError(
+            f"Parameter 'table_index_name' must not collide with an aggregation output column, found {result!r}."
+        )
+    return result
+
+
 def _resolve_feature_class_contract(
     sdata: SpatialData,
     *,
@@ -545,6 +577,7 @@ def _resolve_feature_class_contract(
     expression_class: str,
     region_key: str,
     instance_key: str,
+    table_index_name: str,
 ) -> _FeatureClassAggregationContract:
     """Resolve one immutable feature-panel contract for class-aware aggregation."""
     harpy_metadata = _require_mapping(sdata.attrs.get(_HARPY_METADATA_KEY), path=_HARPY_METADATA_KEY)
@@ -603,7 +636,7 @@ def _resolve_feature_class_contract(
         expression_class=expression_class,
     )
     generated = {column for _, column in contract.count_columns}
-    collisions = sorted(generated & {region_key, instance_key, _AUXILIARY_POINTS_FRACTION_COLUMN})
+    collisions = sorted(generated & {region_key, instance_key, table_index_name, _AUXILIARY_POINTS_FRACTION_COLUMN})
     if collisions:
         raise ValueError(f"Generated feature-class columns collide with aggregation output columns: {collisions}.")
 
@@ -695,7 +728,7 @@ def _label_centers(
     pair: _AggregationPair,
     instance_ids: np.ndarray,
     coordinate_columns: tuple[str, ...],
-    cell_index_name: str,
+    instance_key: str,
 ) -> pd.DataFrame:
     """Calculate indexed label centers in the pair's coordinate system.
 
@@ -715,7 +748,7 @@ def _label_centers(
         Sorted nonzero label IDs receiving at least one assigned point.
     coordinate_columns
         Output order, either ``("x", "y")`` or ``("x", "y", "z")``.
-    cell_index_name
+    instance_key
         Name used for the returned instance-ID index.
 
     Returns
@@ -725,7 +758,7 @@ def _label_centers(
     """
     if instance_ids.size == 0:
         return pd.DataFrame(
-            index=pd.Index(instance_ids, name=cell_index_name),
+            index=pd.Index(instance_ids, name=instance_key),
             columns=coordinate_columns,
             dtype=np.float64,
         )
@@ -744,11 +777,11 @@ def _label_centers(
     aggregator = RasterAggregator(
         mask_dask_array=mask,
         image_dask_array=None,
-        instance_key=cell_index_name,
+        instance_key=instance_key,
         run_on_gpu=False,
     )
     centers = aggregator.center_of_mass(index=instance_ids)
-    centers = centers.rename(columns={0: "z", 1: "y", 2: "x"}).set_index(cell_index_name)
+    centers = centers.rename(columns={0: "z", 1: "y", 2: "x"}).set_index(instance_key)
     if not centers.index.is_unique:
         raise ValueError(f"Labels element {pair.labels_name!r} produced duplicate center-of-mass instance IDs.")
     centers = centers.reindex(instance_ids)
@@ -758,7 +791,7 @@ def _label_centers(
     translation_x, translation_y = _get_translation(labels, to_coordinate_system=pair.coordinate_system)
     centers["x"] += translation_x
     centers["y"] += translation_y
-    centers.index.name = cell_index_name
+    centers.index.name = instance_key
     return centers.loc[:, list(coordinate_columns)]
 
 
@@ -949,6 +982,7 @@ def bin_counts(
         name_y=name_y,
         drop_coordinates=False,
         value_key=name_barcode_id,
+        instance_key=cell_index_name,
     )
 
     coordinates = combined_partitions.groupby(cell_index_name)[name_x, name_y].mean()
@@ -1057,7 +1091,7 @@ def _assign_points_to_labels(
     name_x: str = "x",
     name_y: str = "y",
     name_z: str = "z",
-    cell_index_name: str = _CELL_INDEX,
+    instance_key: str = _INSTANCE_KEY,
 ) -> DaskDataFrame:
     """Assign points to non-background labels through the labels chunk grid.
 
@@ -1086,7 +1120,7 @@ def _assign_points_to_labels(
     points must have an identity transformation there. Graph construction does
     not read either source. The returned Dask dataframe contains one row per
     point assigned to a nonzero label, the requested value columns, the
-    assigned ``cell_index_name`` column and, unless ``drop_coordinates=True``,
+    assigned ``instance_key`` column and, unless ``drop_coordinates=True``,
     the rounded spatial-coordinate columns. Requested categorical dtypes are
     preserved.
 
@@ -1112,12 +1146,31 @@ def _assign_points_to_labels(
         Coordinate system in which points and translated labels are aligned.
     name_x, name_y, name_z
         Point coordinate-column names.
-    cell_index_name
+    instance_key
         Name of the output label-ID column.
 
     Returns
     -------
     Lazy assigned-points dataframe. Its index and ordering are unspecified.
+
+    Examples
+    --------
+    For class-aware aggregation, the raster lookup conceptually transforms
+    individual input points as follows. ``cell_ID`` contains the label value at
+    the rounded point coordinate::
+
+        input points                         assigned points
+        x     y    gene   code_class         gene   code_class   cell_ID
+        12.1  8.9  EPCAM  Endogenous   -->   EPCAM  Endogenous   42
+        14.2  9.1  EPCAM  Endogenous   -->   EPCAM  Endogenous   42
+        80.0  4.0  Neg01  Negative     -->   omitted: label 0
+
+    With ``drop_coordinates=True``, the conceptual shape is
+    ``(N_assigned_points, 2)`` for ordinary aggregation and
+    ``(N_assigned_points, 3)`` for class-aware aggregation. The exact row count
+    remains unknown until computation and cannot exceed the input point count.
+    This function performs assignment only; the repeated ``(cell_ID, gene)``
+    rows are aggregated into counts by the caller.
     """
     if not np.issubdtype(se.data.dtype, np.integer):
         raise ValueError(f"Labels must use an integer dtype, found {se.data.dtype}.")
@@ -1205,11 +1258,11 @@ def _assign_points_to_labels(
     point_blocks = routed.to_delayed()
     label_blocks = arr.to_delayed().ravel()
 
-    returned_columns = [*requested_value_keys, cell_index_name] if drop_coordinates else [*value_keys, cell_index_name]
+    returned_columns = [*requested_value_keys, instance_key] if drop_coordinates else [*value_keys, instance_key]
     result_meta = projected._meta[value_keys].copy()
     for key in coordinate_keys:
         result_meta[key] = pd.Series(index=result_meta.index, dtype=np.int64)
-    result_meta[cell_index_name] = pd.Series(index=result_meta.index, dtype=arr.dtype)
+    result_meta[instance_key] = pd.Series(index=result_meta.index, dtype=arr.dtype)
     result_meta = result_meta[returned_columns]
     result_meta.index = pd.RangeIndex(0)
 
@@ -1229,7 +1282,7 @@ def _assign_points_to_labels(
                 translations=translation_by_dimension,
                 block_start=block_start,
                 requested_columns=returned_columns,
-                cell_index_name=cell_index_name,
+                instance_key=instance_key,
                 label_dtype=arr.dtype,
             )
         )
@@ -1287,7 +1340,7 @@ def _lookup_points_in_label_block(
     translations: tuple[int, ...],
     block_start: tuple[int, ...],
     requested_columns: list[str],
-    cell_index_name: str,
+    instance_key: str,
     label_dtype: np.dtype,
 ) -> pd.DataFrame:
     """Assign one routed points partition from its corresponding labels block.
@@ -1306,7 +1359,7 @@ def _lookup_points_in_label_block(
     pointwise lookup. For example, coordinates ``y=[1, 2]`` and ``x=[3, 4]``
     retrieve ``labels[1, 3]`` and ``labels[2, 4]``; they do not select their
     Cartesian product. The retrieved raster value is written to
-    ``cell_index_name`` and rows assigned to background label zero are removed.
+    ``instance_key`` and rows assigned to background label zero are removed.
 
     An empty points block returns an empty dataframe with the same schema and a
     label-ID column using ``label_dtype``. The returned dataframe contains only
@@ -1332,8 +1385,8 @@ def _lookup_points_in_label_block(
         ``coordinate_keys``.
     requested_columns
         Ordered columns retained in the returned dataframe, including
-        ``cell_index_name``.
-    cell_index_name
+        ``instance_key``.
+    instance_key
         Name of the column receiving the overlapping label ID.
     label_dtype
         Labels dtype used to construct the label-ID column for an empty block.
@@ -1345,13 +1398,13 @@ def _lookup_points_in_label_block(
     """
     result = points.copy()
     if result.empty:
-        result[cell_index_name] = pd.Series(index=result.index, dtype=label_dtype)
+        result[instance_key] = pd.Series(index=result.index, dtype=label_dtype)
     else:
         local_coordinates = tuple(
             result[key].to_numpy(dtype=np.int64, copy=False) - translation - start
             for key, translation, start in zip(coordinate_keys, translations, block_start, strict=True)
         )
-        result[cell_index_name] = labels[local_coordinates]
-        result = result.loc[result[cell_index_name] != 0]
+        result[instance_key] = labels[local_coordinates]
+        result = result.loc[result[instance_key] != 0]
 
     return result[requested_columns].reset_index(drop=True)

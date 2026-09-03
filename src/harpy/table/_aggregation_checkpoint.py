@@ -12,10 +12,10 @@ import pyarrow as pa
 from dask.dataframe import DataFrame as DaskDataFrame
 
 _PAIR_COLUMN = "aggregation_pair"
-_INSTANCE_COLUMN = "instance_id"
+_CHECKPOINT_INSTANCE_COLUMN = "instance_id"
 _FEATURE_COLUMN = "feature"
 _COUNT_COLUMN = "count"
-_CHECKPOINT_COLUMNS = (_PAIR_COLUMN, _INSTANCE_COLUMN, _FEATURE_COLUMN, _COUNT_COLUMN)
+_CHECKPOINT_COLUMNS = (_PAIR_COLUMN, _CHECKPOINT_INSTANCE_COLUMN, _FEATURE_COLUMN, _COUNT_COLUMN)
 
 
 @dataclass(frozen=True)
@@ -216,7 +216,7 @@ def _stage_aggregation_checkpoint(
         raise ValueError(f"Checkpoint path already exists: {path}.")
 
     compact_counts = dd.concat(list(partial_counts), interleave_partitions=True)
-    routed = compact_counts.shuffle(on=[_PAIR_COLUMN, _INSTANCE_COLUMN], ignore_index=True)
+    routed = compact_counts.shuffle(on=[_PAIR_COLUMN, _CHECKPOINT_INSTANCE_COLUMN], ignore_index=True)
     merged = routed.map_partitions(_merge_count_partition, meta=_checkpoint_meta())
 
     def name_function(ordinal: int) -> str:
@@ -279,7 +279,7 @@ def _checkpoint_meta() -> pd.DataFrame:
     return pd.DataFrame(
         {
             _PAIR_COLUMN: pd.Series(dtype=np.int64),
-            _INSTANCE_COLUMN: pd.Series(dtype=np.uint64),
+            _CHECKPOINT_INSTANCE_COLUMN: pd.Series(dtype=np.uint64),
             _FEATURE_COLUMN: pd.Series(dtype="string"),
             _COUNT_COLUMN: pd.Series(dtype=np.uint64),
         }
@@ -290,7 +290,7 @@ def _checkpoint_schema() -> pa.Schema:
     return pa.schema(
         [
             pa.field(_PAIR_COLUMN, pa.int64(), nullable=False),
-            pa.field(_INSTANCE_COLUMN, pa.uint64(), nullable=False),
+            pa.field(_CHECKPOINT_INSTANCE_COLUMN, pa.uint64(), nullable=False),
             pa.field(_FEATURE_COLUMN, pa.string(), nullable=False),
             pa.field(_COUNT_COLUMN, pa.uint64(), nullable=False),
         ]
@@ -314,10 +314,10 @@ def _local_feature_count_partition(
     if (values[instance_key] <= 0).any():
         raise ValueError("Assigned instance IDs must be positive; background zero must be absent.")
 
-    values[_INSTANCE_COLUMN] = values.pop(instance_key).astype(np.uint64, copy=False)
+    values[_CHECKPOINT_INSTANCE_COLUMN] = values.pop(instance_key).astype(np.uint64, copy=False)
     values[_FEATURE_COLUMN] = values.pop(feature_key).astype("string")
     counts = (
-        values.groupby([_INSTANCE_COLUMN, _FEATURE_COLUMN], observed=True, sort=False)
+        values.groupby([_CHECKPOINT_INSTANCE_COLUMN, _FEATURE_COLUMN], observed=True, sort=False)
         .size()
         .rename(_COUNT_COLUMN)
         .reset_index()
@@ -331,12 +331,14 @@ def _merge_count_partition(partition: pd.DataFrame) -> pd.DataFrame:
     if partition.empty:
         return _checkpoint_meta()
     merged = (
-        partition.groupby([_PAIR_COLUMN, _INSTANCE_COLUMN, _FEATURE_COLUMN], observed=True, sort=False)[_COUNT_COLUMN]
+        partition.groupby([_PAIR_COLUMN, _CHECKPOINT_INSTANCE_COLUMN, _FEATURE_COLUMN], observed=True, sort=False)[
+            _COUNT_COLUMN
+        ]
         .sum()
         .reset_index()
     )
     merged[_PAIR_COLUMN] = merged[_PAIR_COLUMN].astype(np.int64, copy=False)
-    merged[_INSTANCE_COLUMN] = merged[_INSTANCE_COLUMN].astype(np.uint64, copy=False)
+    merged[_CHECKPOINT_INSTANCE_COLUMN] = merged[_CHECKPOINT_INSTANCE_COLUMN].astype(np.uint64, copy=False)
     merged[_FEATURE_COLUMN] = merged[_FEATURE_COLUMN].astype("string")
     merged[_COUNT_COLUMN] = merged[_COUNT_COLUMN].astype(np.uint64, copy=False)
     return merged.loc[:, list(_CHECKPOINT_COLUMNS)]
@@ -356,16 +358,16 @@ def _checkpoint_partition_manifest(
         )
     if partition[list(_CHECKPOINT_COLUMNS)].isna().any(axis=None):
         raise ValueError("Checkpoint partitions must not contain null values.")
-    if (partition[_INSTANCE_COLUMN] <= 0).any() or (partition[_COUNT_COLUMN] <= 0).any():
+    if (partition[_CHECKPOINT_INSTANCE_COLUMN] <= 0).any() or (partition[_COUNT_COLUMN] <= 0).any():
         raise ValueError("Checkpoint instance IDs and counts must be positive.")
-    if partition.duplicated([_PAIR_COLUMN, _INSTANCE_COLUMN, _FEATURE_COLUMN]).any():
+    if partition.duplicated([_PAIR_COLUMN, _CHECKPOINT_INSTANCE_COLUMN, _FEATURE_COLUMN]).any():
         raise ValueError("Checkpoint partition contains duplicate aggregation-pair/instance/feature rows.")
 
     identities = tuple(
         sorted(
             {
                 (int(pair_ordinal), int(instance_id))
-                for pair_ordinal, instance_id in partition[[_PAIR_COLUMN, _INSTANCE_COLUMN]].itertuples(
+                for pair_ordinal, instance_id in partition[[_PAIR_COLUMN, _CHECKPOINT_INSTANCE_COLUMN]].itertuples(
                     index=False, name=None
                 )
             }
