@@ -138,9 +138,13 @@ def _validate_aggregation_destination(
 
 
 def _create_aggregation_workspace(destination: _AggregationDestination) -> Path:
-    """Create the hidden directory owned exclusively by one aggregation call."""
-    # SpatialData stores without tables do not yet have this group. Create the
-    # empty container only after all public request validation has completed.
+    """Create a temporary per-call workspace inside the store's tables group.
+
+    The workspace holds the merged-count Parquet checkpoint and the staged
+    AnnData Zarr group. Successful publication moves the staged table to its
+    final element path; the remaining workspace is removed after either success
+    or failure.
+    """
     root = zarr.open_group(store=str(destination.root), mode="r+", use_consolidated=False)
     root.require_group("tables")
     workspace = destination.tables / f".harpy-aggregate-{uuid.uuid4()}"
