@@ -7,6 +7,7 @@ import dask.dataframe as dd
 import numpy as np
 import pandas as pd
 import pytest
+import zarr
 from anndata.abc import CSRDataset
 from scipy import sparse
 from spatialdata import SpatialData, read_zarr
@@ -373,7 +374,7 @@ def test_aggregation_write_failure_preserves_existing_table_and_cleans_workspace
     def fail(*args, **kwargs):
         raise RuntimeError("injected metadata failure")
 
-    monkeypatch.setattr(writer_module, "_set_spatialdata_table_attrs", fail)
+    monkeypatch.setattr(writer_module, "_write_spatialdata_table_attrs", fail)
     with pytest.raises(RuntimeError, match="injected metadata failure"):
         aggregate_points(
             sdata,
@@ -509,6 +510,18 @@ def test_aggregate_points_writes_a_reopenable_zarr_v2_table(tmp_path):
         "region": ["labels_a"],
         "region_key": _REGION_KEY,
         "instance_key": _INSTANCE_KEY,
+    }
+    table_group = zarr.open_group(store=str(path / "tables" / "table"), mode="r", use_consolidated=False)
+    spatialdata_attrs = {
+        key: table_group.attrs[key]
+        for key in ("instance_key", "region", "region_key", "spatialdata-encoding-type", "version")
+    }
+    assert spatialdata_attrs == {
+        "instance_key": _INSTANCE_KEY,
+        "region": ["labels_a"],
+        "region_key": _REGION_KEY,
+        "spatialdata-encoding-type": "ngff:regions_table",
+        "version": "0.2",
     }
 
 
