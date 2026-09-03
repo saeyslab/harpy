@@ -48,7 +48,44 @@ class _CheckpointPair:
 
 @dataclass(frozen=True)
 class _CheckpointPartition:
-    """Describe one non-empty physical partition of merged feature counts."""
+    """Describe one non-empty physical partition of merged feature counts.
+
+    A checkpoint Parquet partition stores long-form ``(aggregation pair,
+    instance, feature, count)`` rows. ``identities`` records the sorted unique
+    ``(aggregation pair, instance)`` pairs represented by those rows; each
+    identity becomes one output matrix row. Consequently, ``row_count`` can be
+    greater than ``len(identities)``.
+
+    For example, the following physical partition::
+
+        pair  instance  feature  count
+        0     42        EPCAM    5
+        0     42        VIM      1
+        0     51        VIM      4
+
+    is described by::
+
+        _CheckpointPartition(
+            ordinal=0,
+            path=Path(".../part-00000.parquet"),
+            identities=((0, 42), (0, 51)),
+            row_count=3,
+        )
+
+    It contains three long-form count rows but owns two output matrix rows.
+
+    Parameters
+    ----------
+    ordinal
+        Position of this physical partition in the merged Dask dataframe.
+    path
+        Path of the corresponding checkpoint Parquet part.
+    identities
+        Sorted unique ``(aggregation pair, instance ID)`` pairs owned by this
+        partition, in output matrix-row order.
+    row_count
+        Number of long-form count rows in the physical partition.
+    """
 
     ordinal: int
     path: Path
@@ -402,27 +439,9 @@ def _checkpoint_partition_manifest(
 ) -> _CheckpointPartition | None:
     """Describe the matrix-row ownership of one merged-count partition.
 
-    This function validates one materialized Dask partition and returns a small
-    in-memory descriptor; it does not write a separate manifest file. For
-    example, a physical Parquet partition containing::
-
-        pair  instance  feature  count
-        0     42        EPCAM    5
-        0     42        VIM      1
-        0     51        VIM      4
-
-    produces a descriptor equivalent to::
-
-        _CheckpointPartition(
-            ordinal=0,
-            path=Path(".../part-00000.parquet"),
-            identities=((0, 42), (0, 51)),
-            row_count=3,
-        )
-
-    ``row_count`` is the number of long-form ``(instance, feature)`` rows in
-    the Parquet partition, whereas ``len(identities)`` is the number of output
-    matrix rows it owns. Output row order follows the ordered non-empty
+    This function validates one materialized Dask partition and returns its
+    small in-memory :class:`_CheckpointPartition` descriptor; it does not write
+    a separate manifest file. Output row order follows the ordered non-empty
     partitions and each partition's ordered ``identities``.
 
     Parameters
