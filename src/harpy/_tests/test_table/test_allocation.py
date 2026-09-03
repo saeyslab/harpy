@@ -1050,7 +1050,10 @@ def test_class_aware_contract_requires_an_auxiliary_class():
         )
 
 
-def test_class_aware_aggregation_rejects_source_points_that_disagree_with_panel(tmp_path):
+def test_class_aware_aggregation_rejects_source_points_before_assignment(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+):
     sdata = _class_aware_sdata()
     points = sdata.points["points_a"].compute()
     points.loc[len(points)] = [4, 4, "Unknown", "Endogenous"]
@@ -1058,6 +1061,10 @@ def test_class_aware_aggregation_rejects_source_points_that_disagree_with_panel(
     sdata.points["points_a"] = PointsModel.parse(points, transformations={"sample_a": Identity()})
     sdata = _backed(sdata, tmp_path)
 
+    def fail(*args, **kwargs):
+        raise AssertionError("Spatial assignment started before panel content validation completed.")
+
+    monkeypatch.setattr(aggregation_module, "_assign_points_to_labels", fail)
     with pytest.raises(ValueError, match="feature 'Unknown' is absent from the panel"):
         aggregate_points(
             sdata,

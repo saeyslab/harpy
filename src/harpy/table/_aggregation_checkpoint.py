@@ -204,7 +204,6 @@ def _stage_aggregation_checkpoint(
     *,
     path: Path,
     pairs: tuple[_CheckpointPair, ...],
-    validation_errors: Sequence[tuple[str, object]] = (),
     discover_features: bool,
 ) -> _AggregationCheckpoint:
     """Shuffle, merge and persist compact counts while executing assignment once.
@@ -258,9 +257,8 @@ def _stage_aggregation_checkpoint(
 
     The merged dataframe is converted to delayed partitions once before the
     Parquet write, manifests and optional feature-axis reduction branch from it.
-    These outputs and feature-panel diagnostics are submitted through one
-    ``dask.compute`` call, so shared assignment, shuffle and merge tasks execute
-    once.
+    These outputs are submitted through one ``dask.compute`` call, so shared
+    assignment, shuffle and merge tasks execute once.
     """
     if not partial_counts:
         raise ValueError("At least one aggregation pair is required to construct a checkpoint.")
@@ -306,18 +304,10 @@ def _stage_aggregation_checkpoint(
     else:
         feature_axis_task = None
 
-    error_tasks = tuple(
-        dask.delayed(_first_partition_error)(*collection.to_delayed()) for _, collection in validation_errors
-    )
-    # The checkpoint consumers now share exact delayed merged-partition keys.
-    # Convert the remaining dataframe expressions before combining them so Dask
-    # need not optimize mixed expression and HighLevelGraph collections.
-    computed = dask.compute(write_task.to_delayed(), manifest_tasks, feature_axis_task, error_tasks)
-    _, manifests, observed_features, computed_errors = computed
-
-    for (points_name, _), error in zip(validation_errors, computed_errors, strict=True):
-        if error is not None:
-            raise ValueError(f"Points element {points_name!r} disagrees with its feature panel: {error}")
+    # All checkpoint consumers originate from the same ``delayed_partitions``
+    # objects created above, allowing Dask to execute each merged partition once.
+    computed = dask.compute(write_task.to_delayed(), manifest_tasks, feature_axis_task)
+    _, manifests, observed_features = computed
 
     nonempty_manifests: list[_CheckpointPartition] = []
     row_start = 0
@@ -507,13 +497,6 @@ def _partition_features(partition: pd.DataFrame) -> frozenset[str]:
     if partition.empty:
         return frozenset()
     return frozenset(partition[_FEATURE_COLUMN].astype(str).unique())
-
-
-def _first_partition_error(*partitions: pd.Series) -> object | None:
-    for partition in partitions:
-        if len(partition):
-            return partition.iloc[0]
-    return None
 
 
 def _tree_union(tasks: Sequence[object], *, fan_in: int = 8) -> object:

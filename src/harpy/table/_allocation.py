@@ -5,10 +5,11 @@ private data flow::
 
     source points (coordinates, feature, class)
             |
-            +-- _feature_panel_partition_errors()
-            |       validate source (feature, class) pairs
+            +-- _validate_feature_panel_contents()
+            |       `-- _feature_panel_partition_errors()
+            |               validate source (feature, class) pairs before assignment
             |
-            +-- _assign_points_to_labels()
+            `-- _assign_points_to_labels()
                     produce lazy (instance, feature) rows
                               |
                               v
@@ -408,6 +409,7 @@ def aggregate_points(
             instance_key=instance_key,
             table_index_name=table_index_name,
         )
+        _validate_feature_panel_contents(sdata, pairs=pairs, panel=contract.panel)
 
     checkpoint_pairs = tuple(
         _CheckpointPair(
@@ -422,10 +424,8 @@ def aggregate_points(
     workspace = _create_aggregation_workspace(destination)
     try:
         partial_counts: list[DaskDataFrame] = []
-        validation_errors: list[tuple[str, object]] = []
         for pair_ordinal, pair in enumerate(pairs):
             points = sdata.points[pair.points_name]
-            class_key = None if contract is None else contract.panel.feature_class_key
             # Lazily map every point to the nonzero label at its rounded pixel.
             # The result contains one (feature, instance) row per assigned
             # point. The source class column is validated separately against
@@ -450,27 +450,11 @@ def aggregate_points(
                     feature_key=feature_key,
                 )
             )
-            if contract is not None:
-                categorical_dtype = pd.CategoricalDtype(categories=contract.panel.classes)
-                normalized_points = points.assign(**{class_key: points[class_key].astype(categorical_dtype)})
-                validation_errors.append(
-                    (
-                        pair.points_name,
-                        normalized_points[[feature_key, class_key]].map_partitions(
-                            _feature_panel_partition_errors,
-                            feature_key=feature_key,
-                            feature_class_key=class_key,
-                            class_by_feature=contract.panel.class_by_feature,
-                            meta=pd.Series(name="error", dtype="object"),
-                        ),
-                    )
-                )
 
         checkpoint = _stage_aggregation_checkpoint(
             partial_counts,
             path=workspace / "merged_counts",
             pairs=checkpoint_pairs,
-            validation_errors=validation_errors,
             discover_features=contract is None,
         )
         centers_by_pair = {
@@ -849,6 +833,50 @@ def _label_centers(
     centers["y"] += translation_y
     centers.index.name = instance_key
     return centers.loc[:, list(coordinate_columns)]
+
+
+def _validate_feature_panel_contents(
+    sdata: SpatialData,
+    *,
+    pairs: tuple[_AggregationPair, ...],
+    panel: _FeaturePanelContract,
+) -> None:
+    """Validate each unique source points element against its feature panel.
+
+    Validation is computed before spatial assignment starts. A points element
+    reused by multiple aggregation pairs is scanned only once, and every source
+    point is checked, including points that would later fall outside the labels
+    raster or on background.
+    """
+    points_names = tuple(dict.fromkeys(pair.points_name for pair in pairs))
+    categorical_dtype = pd.CategoricalDtype(categories=panel.classes)
+    error_tasks = []
+    for points_name in points_names:
+        points = sdata.points[points_name]
+        normalized_points = points.assign(
+            **{panel.feature_class_key: points[panel.feature_class_key].astype(categorical_dtype)}
+        )
+        partition_errors = normalized_points[[panel.feature_key, panel.feature_class_key]].map_partitions(
+            _feature_panel_partition_errors,
+            feature_key=panel.feature_key,
+            feature_class_key=panel.feature_class_key,
+            class_by_feature=panel.class_by_feature,
+            meta=pd.Series(name="error", dtype="object"),
+        )
+        error_tasks.append(dask.delayed(_first_partition_error)(*partition_errors.to_delayed()))
+
+    computed_errors = dask.compute(*error_tasks)
+    for points_name, error in zip(points_names, computed_errors, strict=True):
+        if error is not None:
+            raise ValueError(f"Points element {points_name!r} disagrees with its feature panel: {error}")
+
+
+def _first_partition_error(*partitions: pd.Series) -> object | None:
+    """Return the first compact error emitted by a partition-wise validation."""
+    for partition in partitions:
+        if len(partition):
+            return partition.iloc[0]
+    return None
 
 
 def _feature_panel_partition_errors(
