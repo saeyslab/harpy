@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-import json
 import shutil
 import uuid
 from collections.abc import Mapping
@@ -285,13 +283,11 @@ def _checkpoint_sparse_array(
     feature_axis: tuple[str, ...],
 ) -> da.Array:
     """Expose checkpoint partitions as full-width delayed CSR row blocks."""
-    feature_axis_hash = _feature_axis_hash(feature_axis)
     blocks = [
         da.from_delayed(
             dask.delayed(_checkpoint_partition_to_csr)(
                 partition,
                 feature_axis=feature_axis,
-                feature_axis_hash=feature_axis_hash,
             ),
             shape=(len(partition.output_row_keys), len(feature_axis)),
             dtype=np.uint32,
@@ -306,7 +302,6 @@ def _checkpoint_partition_to_csr(
     partition: _CheckpointPartition,
     *,
     feature_axis: tuple[str, ...],
-    feature_axis_hash: str,
 ) -> sparse.csr_matrix:
     """Convert one merged-count Parquet part to an axis-aligned CSR block.
 
@@ -315,13 +310,7 @@ def _checkpoint_partition_to_csr(
     column index, so checkpoint row order cannot affect matrix-column order. The
     caller also uses this same axis for ``adata.var_names`` or the auxiliary
     matrix's ``feature_columns`` metadata.
-
-    ``feature_axis_hash`` binds every delayed block to the axis with which it was
-    constructed and rejects an inconsistent axis before reading the checkpoint
-    partition.
     """
-    if _feature_axis_hash(feature_axis) != feature_axis_hash:
-        raise ValueError("Checkpoint CSR conversion received an inconsistent feature axis.")
     frame = pd.read_parquet(
         partition.path,
         columns=[_PAIR_COLUMN, _CHECKPOINT_INSTANCE_COLUMN, _FEATURE_COLUMN, _COUNT_COLUMN],
@@ -355,12 +344,6 @@ def _checkpoint_partition_to_csr(
     matrix.indices = matrix.indices.astype(np.int64, copy=False)
     matrix.indptr = matrix.indptr.astype(np.int64, copy=False)
     return matrix
-
-
-def _feature_axis_hash(feature_axis: tuple[str, ...]) -> str:
-    """Return a stable digest binding every CSR row block to one column axis."""
-    payload = json.dumps(feature_axis, ensure_ascii=False, separators=(",", ":")).encode()
-    return hashlib.sha256(payload).hexdigest()
 
 
 def _aggregation_obs(
