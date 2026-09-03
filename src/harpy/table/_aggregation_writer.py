@@ -182,6 +182,11 @@ def _write_aggregation_table(
     output_row_keys = tuple(
         output_row_key for partition in checkpoint.partitions for output_row_key in partition.output_row_keys
     )
+    # Class-aware construction currently scans each checkpoint Parquet part
+    # three times: once for the ``.obs`` class summaries and once for each sparse
+    # output (``.X`` and ``.obsm["auxiliary_feature_counts"]``). Separate passes
+    # keep component writes memory-bounded, but a future single-pass block writer
+    # could derive all three outputs from one checkpoint read.
     log.info(f"Constructing AnnData '.obs' for table '{output_table_name}'.")
     obs = _aggregation_obs(
         checkpoint,

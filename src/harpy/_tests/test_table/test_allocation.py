@@ -148,7 +148,6 @@ def test_checkpoint_partition_to_csr_aligns_the_requested_feature_axis(tmp_path)
     matrix = writer_module._checkpoint_partition_to_csr(
         partition,
         feature_axis=("EPCAM", "KRT8", "VIM"),
-        feature_axis_hash=writer_module._feature_axis_hash(("EPCAM", "KRT8", "VIM")),
     )
 
     assert sparse.isspmatrix_csr(matrix)
@@ -262,7 +261,6 @@ def test_checkpoint_partition_to_csr_rejects_uint32_overflow(tmp_path):
         writer_module._checkpoint_partition_to_csr(
             partition,
             feature_axis=("GeneA",),
-            feature_axis_hash=writer_module._feature_axis_hash(("GeneA",)),
         )
 
 
