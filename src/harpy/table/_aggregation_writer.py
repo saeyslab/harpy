@@ -15,6 +15,7 @@ import pandas as pd
 import zarr
 from anndata import AnnData
 from anndata.io import sparse_dataset, write_elem
+from loguru import logger as log
 from scipy import sparse
 from spatialdata import SpatialData
 from spatialdata.models import TableModel
@@ -183,6 +184,7 @@ def _write_aggregation_table(
     output_row_keys = tuple(
         output_row_key for partition in checkpoint.partitions for output_row_key in partition.output_row_keys
     )
+    log.info(f"Constructing AnnData '.obs' for table '{output_table_name}'.")
     obs = _aggregation_obs(
         checkpoint,
         output_row_keys=output_row_keys,
@@ -191,6 +193,7 @@ def _write_aggregation_table(
         instance_key=instance_key,
         class_contract=class_contract,
     )
+    log.info(f"Finished constructing AnnData '.obs' for table '{output_table_name}'.")
     centers = _aligned_centers(
         checkpoint,
         output_row_keys=output_row_keys,
@@ -213,20 +216,42 @@ def _write_aggregation_table(
         region=[pair.labels_name for pair in checkpoint.pairs],
         instance_key=instance_key,
     )
+    staging_table_path = workspace / "table"
+    log.info(
+        f"Writing AnnData '.obs', '.var', '.uns' and '.obsm[{spatial_key}]' to staged table at "
+        f"'{staging_table_path}'."
+    )
     write_elem(staging_root, "table", table)
+    log.info(
+        f"Finished writing AnnData '.obs', '.var', '.uns' and '.obsm[{spatial_key}]' to staged table at "
+        f"'{staging_table_path}'."
+    )
     staging_group = staging_root["table"]
 
     expression = _checkpoint_sparse_array(
         checkpoint,
         feature_axis=expression_axis,
     )
+    log.info(f"Writing AnnData '.X' to staged table at '{staging_table_path / 'X'}'.")
+    # AnnData recognizes this as a Dask array with CSR chunks. Its sparse
+    # writer computes and appends one row chunk at a time: this bounds memory,
+    # but the ordered CSR append serializes the chunk writes.
     write_elem(staging_group, "X", expression)
+    log.info(f"Finished writing AnnData '.X' to staged table at '{staging_table_path / 'X'}'.")
     if class_contract is not None:
         auxiliary = _checkpoint_sparse_array(
             checkpoint,
             feature_axis=auxiliary_axis,
         )
+        auxiliary_path = staging_table_path / "obsm" / _AUXILIARY_FEATURE_MATRIX_KEY
+        log.info(
+            f"Writing AnnData '.obsm[{_AUXILIARY_FEATURE_MATRIX_KEY}]' to staged table at '{auxiliary_path}'."
+        )
         write_elem(staging_group["obsm"], _AUXILIARY_FEATURE_MATRIX_KEY, auxiliary)
+        log.info(
+            f"Finished writing AnnData '.obsm[{_AUXILIARY_FEATURE_MATRIX_KEY}]' to staged table at "
+            f"'{auxiliary_path}'."
+        )
 
     _validate_staged_table(
         staging_group,

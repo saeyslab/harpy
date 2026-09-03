@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 from dask.dataframe import DataFrame as DaskDataFrame
+from loguru import logger as log
 
 _PAIR_COLUMN = "aggregation_pair"
 # Configurable ``instance_key`` names are normalized to this stable checkpoint
@@ -347,10 +348,18 @@ def _stage_aggregation_checkpoint(
 
     # All checkpoint consumers originate from the same ``delayed_partitions``
     # objects created above, allowing Dask to execute each merged partition once.
+    log.info(
+        f"Writing intermediate aggregation counts to Parquet checkpoint at '{path}' "
+        f"({merged.npartitions} partitions)."
+    )
     computed = dask.compute(write_task.to_delayed(), manifest_tasks, observed_features_task)
     _, manifests, observed_features = computed
 
     nonempty_manifests = tuple(manifest for manifest in manifests if manifest is not None)
+    log.info(
+        f"Finished writing intermediate aggregation counts to Parquet checkpoint at '{path}' "
+        f"({len(nonempty_manifests)} non-empty partitions)."
+    )
     # Feature discovery produces an unordered set. Establish one deterministic
     # ordinary-mode matrix-column axis before returning it to the caller.
     observed_feature_axis = None if observed_features is None else tuple(sorted(observed_features))
