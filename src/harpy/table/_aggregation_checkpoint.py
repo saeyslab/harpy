@@ -224,9 +224,10 @@ def _stage_aggregation_checkpoint(
 
     Every local count row is shuffled by ``(aggregation_pair, instance_id)``.
     Consequently, all feature rows for one retained instance arrive in one
-    output partition and can be converted to one complete CSR row in Phase B.
-    Dask preserves the compact-count partition count; Harpy does not inspect or
-    rebalance partition byte sizes before writing the checkpoint.
+    output partition and can later be converted to one complete CSR row during
+    table construction. Dask preserves the compact-count partition count; Harpy
+    does not inspect or rebalance partition byte sizes before writing the
+    checkpoint.
 
     For example, partition-local reductions from two aggregation pairs can
     contain the following rows::

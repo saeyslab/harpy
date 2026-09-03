@@ -199,9 +199,9 @@ def _write_aggregation_table(
         auxiliary_axis=auxiliary_axis,
     )
 
-    # Phase A already owns ``workspace/merged_counts``. Open the workspace in
-    # append mode so initializing the AnnData group cannot erase that durable
-    # checkpoint before the delayed CSR readers consume it.
+    # The workspace already contains ``merged_counts``. Open it in append mode
+    # so initializing the AnnData group cannot erase that durable checkpoint
+    # before the delayed CSR readers consume it.
     staging_root = zarr.open_group(store=str(workspace), mode="a", zarr_format=destination.zarr_format)
     table = TableModel.parse(
         AnnData(X=None, obs=obs, var=var, uns=uns, obsm={spatial_key: centers}),
