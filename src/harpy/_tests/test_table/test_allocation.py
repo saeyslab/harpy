@@ -74,7 +74,7 @@ def test_aggregation_checkpoint_merges_counts_across_input_partitions(tmp_path):
         instance_key="cells",
         feature_key="gene",
     )
-    checkpoint = checkpoint_module._stage_aggregation_checkpoint(
+    checkpoint, observed_feature_axis = checkpoint_module._stage_aggregation_checkpoint(
         [local],
         path=tmp_path / "counts",
         pairs=(checkpoint_module._CheckpointPair(0, "labels", "points", "global", ("x", "y")),),
@@ -92,7 +92,7 @@ def test_aggregation_checkpoint_merges_counts_across_input_partitions(tmp_path):
         "count": np.dtype(np.uint64),
     }
     assert pd.api.types.is_string_dtype(result["feature"].dtype)
-    assert checkpoint.observed_features == ("EPCAM", "VIM")
+    assert observed_feature_axis == ("EPCAM", "VIM")
     assert sorted(output_row_key for part in checkpoint.partitions for output_row_key in part.output_row_keys) == [
         (0, 42),
         (0, 51),
@@ -115,7 +115,7 @@ def test_aggregation_checkpoint_accepts_feature_key_matching_internal_instance_c
         instance_key="label_id",
         feature_key="instance_id",
     )
-    checkpoint = checkpoint_module._stage_aggregation_checkpoint(
+    checkpoint, _ = checkpoint_module._stage_aggregation_checkpoint(
         [local],
         path=tmp_path / "counts",
         pairs=(checkpoint_module._CheckpointPair(0, "labels", "points", "global", ("x", "y")),),

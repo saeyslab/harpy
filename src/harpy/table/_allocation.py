@@ -476,7 +476,7 @@ def aggregate_points(
                 )
             )
 
-        checkpoint = _stage_aggregation_checkpoint(
+        checkpoint, observed_feature_axis = _stage_aggregation_checkpoint(
             partial_counts,
             path=workspace / "merged_counts",
             pairs=checkpoint_pairs,
@@ -493,7 +493,12 @@ def aggregate_points(
             for pair in checkpoint.pairs
         }
         class_write_contract = None
-        if contract is not None:
+        if contract is None:
+            if observed_feature_axis is None:
+                raise RuntimeError("Ordinary aggregation did not produce an observed feature axis.")
+            expression_axis = observed_feature_axis
+        else:
+            expression_axis = contract.expression_feature_axis
             class_write_contract = _FeatureClassWriteContract(
                 feature_key=contract.panel.feature_key,
                 feature_class_key=contract.panel.feature_class_key,
@@ -507,6 +512,7 @@ def aggregate_points(
             destination=destination,
             workspace=workspace,
             checkpoint=checkpoint,
+            expression_axis=expression_axis,
             centers_by_pair=centers_by_pair,
             output_table_name=output_table_name,
             feature_key=feature_key,

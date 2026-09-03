@@ -154,6 +154,7 @@ def _write_aggregation_table(
     destination: _AggregationDestination,
     workspace: Path,
     checkpoint: _AggregationCheckpoint,
+    expression_axis: tuple[str, ...],
     centers_by_pair: Mapping[int, pd.DataFrame],
     output_table_name: str,
     feature_key: str,
@@ -165,13 +166,12 @@ def _write_aggregation_table(
 ) -> SpatialData:
     """Construct, publish, and attach one table from a merged-count checkpoint.
 
-    In ordinary mode, the checkpoint's observed features define ``adata.X``.
-    In class-aware mode, the panel-defined expression feature axis defines
-    ``adata.X`` and the concatenated non-expression axes define
-    ``adata.obsm["auxiliary_feature_counts"]``. Both matrices select their
-    counts from the same lossless checkpoint.
+    The caller supplies the resolved feature axis defining ``adata.X``: observed
+    assigned-point features in ordinary mode or the panel-defined expression
+    axis in class-aware mode. In class-aware mode, the concatenated
+    non-expression axes define ``adata.obsm["auxiliary_feature_counts"]``. Both
+    matrices select their counts from the same lossless checkpoint.
     """
-    expression_axis = checkpoint.observed_features if class_contract is None else class_contract.expression_feature_axis
     if not expression_axis:
         raise ValueError("Aggregation produced no expression features.")
     auxiliary_axis = () if class_contract is None else class_contract.auxiliary_feature_axis

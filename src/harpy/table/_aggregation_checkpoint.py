@@ -104,7 +104,6 @@ class _AggregationCheckpoint:
     path: Path
     pairs: tuple[_CheckpointPair, ...]
     partitions: tuple[_CheckpointPartition, ...]
-    observed_features: tuple[str, ...] | None
 
     def __post_init__(self) -> None:
         if not self.pairs:
@@ -140,11 +139,6 @@ class _AggregationCheckpoint:
                 "Aggregation produced no retained non-background instances for labels/points pair(s): "
                 f"{missing_pairs!r}."
             )
-        if self.observed_features is not None:
-            if not self.observed_features:
-                raise ValueError("Ordinary aggregation produced no observed features.")
-            if self.observed_features != tuple(sorted(set(self.observed_features))):
-                raise ValueError("Checkpoint observed features must be sorted and unique.")
 
     def instance_ids(self, pair_ordinal: int) -> np.ndarray:
         """Return sorted retained instance IDs for one aggregation pair."""
@@ -225,7 +219,7 @@ def _stage_aggregation_checkpoint(
     path: Path,
     pairs: tuple[_CheckpointPair, ...],
     discover_features: bool,
-) -> _AggregationCheckpoint:
+) -> tuple[_AggregationCheckpoint, tuple[str, ...] | None]:
     """Shuffle, merge and persist compact counts while executing assignment once.
 
     Every local count row is shuffled by ``(aggregation_pair, instance_id)``.
@@ -279,6 +273,14 @@ def _stage_aggregation_checkpoint(
     Parquet write, manifests and optional feature-axis reduction branch from it.
     These outputs are submitted through one ``dask.compute`` call, so shared
     assignment, shuffle and merge tasks execute once.
+
+    Returns
+    -------
+    checkpoint
+        Physical checkpoint and output-row ownership metadata.
+    observed_feature_axis
+        Deterministically ordered features observed in the merged assigned-point
+        counts when ``discover_features`` is true; otherwise ``None``.
     """
     if not partial_counts:
         raise ValueError("At least one aggregation pair is required to construct a checkpoint.")
@@ -331,13 +333,16 @@ def _stage_aggregation_checkpoint(
 
     nonempty_manifests = tuple(manifest for manifest in manifests if manifest is not None)
     # Feature discovery produces an unordered set. Establish one deterministic
-    # ordinary-mode matrix-column axis before storing it in the checkpoint.
-    return _AggregationCheckpoint(
+    # ordinary-mode matrix-column axis before returning it to the caller.
+    observed_feature_axis = None if observed_features is None else tuple(sorted(observed_features))
+    if discover_features and not observed_feature_axis:
+        raise ValueError("Ordinary aggregation produced no observed features.")
+    checkpoint = _AggregationCheckpoint(
         path=path,
         pairs=pairs,
         partitions=nonempty_manifests,
-        observed_features=None if observed_features is None else tuple(sorted(observed_features)),
     )
+    return checkpoint, observed_feature_axis
 
 
 def _checkpoint_meta() -> pd.DataFrame:
