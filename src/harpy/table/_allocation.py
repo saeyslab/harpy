@@ -296,13 +296,15 @@ def aggregate_points(
     feature_key
         Column in each points element containing feature identifiers, such as
         gene names. In class-aware mode it must equal the panel's
-        ``feature_key``.
+        ``feature_key``. It must differ from ``instance_key``.
     expression_class
         Feature class retained in ``adata.X``. If ``None``, feature-panel
         metadata is not consulted and ordinary aggregation retains all observed
         features.
     instance_key
-        Column in ``adata.obs`` holding instance identifiers.
+        Column in ``adata.obs`` holding instance identifiers. It must differ
+        from ``feature_key`` and, in class-aware mode, from the panel's
+        ``feature_class_key``.
     region_key
         Categorical column in ``adata.obs`` holding labels-element names.
     spatial_key
@@ -340,6 +342,7 @@ def aggregate_points(
         output_table_name=output_table_name,
         overwrite=overwrite,
     )
+    _validate_aggregation_column_keys(feature_key=feature_key, instance_key=instance_key)
     table_index_name = _resolve_table_index_name(
         table_index_name,
         instance_key=instance_key,
@@ -493,9 +496,6 @@ def _normalize_aggregation_pairs(
         len(labels_names),
         parameter_name="to_coordinate_system",
     )
-    if not isinstance(feature_key, str) or not feature_key:
-        raise ValueError(f"Parameter 'feature_key' must be a non-empty string, found {feature_key!r}.")
-
     missing_labels = sorted(set(labels_names) - set(sdata.labels))
     if missing_labels:
         raise ValueError(f"Labels elements are not present in 'sdata.labels': {missing_labels}.")
@@ -528,6 +528,15 @@ def _normalize_aggregation_pairs(
             strict=True,
         )
     )
+
+
+def _validate_aggregation_column_keys(*, feature_key: str, instance_key: str) -> None:
+    """Validate distinct public columns used for features and assigned instances."""
+    for parameter_name, value in (("feature_key", feature_key), ("instance_key", instance_key)):
+        if not isinstance(value, str) or not value:
+            raise ValueError(f"Parameter {parameter_name!r} must be a non-empty string, found {value!r}.")
+    if feature_key == instance_key:
+        raise ValueError("Parameters 'feature_key' and 'instance_key' must refer to different columns.")
 
 
 def _require_name_list(value: str | list[str], *, parameter_name: str) -> list[str]:
@@ -615,6 +624,11 @@ def _resolve_feature_class_contract(
             raise ValueError(
                 f"Feature panel {panel_name!r} declares feature_key={panel.feature_key!r}, "
                 f"which does not match feature_key={feature_key!r}."
+            )
+        if panel.feature_class_key == instance_key:
+            raise ValueError(
+                f"Feature panel {panel_name!r} declares feature_class_key={panel.feature_class_key!r}, "
+                "which must differ from instance_key."
             )
         points = sdata.points[points_name]
         if panel.feature_class_key not in points.columns:

@@ -86,6 +86,36 @@ def test_aggregation_checkpoint_merges_partial_counts_and_records_manifests(tmp_
     assert [part.row_stop for part in checkpoint.partitions] == row_stops.tolist()
 
 
+def test_aggregation_checkpoint_accepts_feature_key_matching_internal_instance_column(tmp_path):
+    assigned = dd.from_pandas(
+        pd.DataFrame(
+            {
+                "label_id": [42, 42, 51],
+                "instance_id": ["GeneA", "GeneA", "GeneB"],
+            }
+        ),
+        npartitions=2,
+    )
+    local = checkpoint_module._local_feature_counts(
+        assigned,
+        pair_ordinal=0,
+        instance_key="label_id",
+        feature_key="instance_id",
+    )
+    checkpoint = checkpoint_module._stage_aggregation_checkpoint(
+        [local],
+        path=tmp_path / "counts",
+        pairs=(checkpoint_module._CheckpointPair(0, "labels", "points", "global", ("x", "y")),),
+        discover_features=True,
+    )
+
+    result = dd.read_parquet(checkpoint.path).compute().sort_values(["instance_id", "feature"])
+    assert result[["instance_id", "feature", "count"]].to_dict("records") == [
+        {"instance_id": 42, "feature": "GeneA", "count": 2},
+        {"instance_id": 51, "feature": "GeneB", "count": 1},
+    ]
+
+
 def test_checkpoint_partition_to_csr_aligns_the_requested_feature_axis(tmp_path):
     path = tmp_path / "part.parquet"
     pd.DataFrame(
@@ -1075,6 +1105,32 @@ def test_class_aware_aggregation_rejects_a_table_index_name_colliding_with_a_sum
             output_table_name="table",
             expression_class="Endogenous",
             table_index_name="n_negative_points",
+        )
+
+
+def test_aggregation_rejects_matching_feature_and_instance_keys(tmp_path):
+    with pytest.raises(ValueError, match="feature_key.*instance_key.*different"):
+        aggregate_points(
+            _backed(_class_aware_sdata(), tmp_path),
+            labels_name="labels_a",
+            points_name="points_a",
+            to_coordinate_system="sample_a",
+            output_table_name="table",
+            feature_key="gene",
+            instance_key="gene",
+        )
+
+
+def test_class_aware_aggregation_rejects_instance_key_matching_feature_class_key(tmp_path):
+    with pytest.raises(ValueError, match="feature_class_key=.*must differ from instance_key"):
+        aggregate_points(
+            _backed(_class_aware_sdata(), tmp_path),
+            labels_name="labels_a",
+            points_name="points_a",
+            to_coordinate_system="sample_a",
+            output_table_name="table",
+            expression_class="Endogenous",
+            instance_key="code_class",
         )
 
 

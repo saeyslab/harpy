@@ -12,6 +12,9 @@ import pyarrow as pa
 from dask.dataframe import DataFrame as DaskDataFrame
 
 _PAIR_COLUMN = "aggregation_pair"
+# Configurable ``instance_key`` names are normalized to this stable checkpoint
+# column. The label IDs themselves remain unchanged and are later written to
+# ``adata.obs`` under the user-configured name.
 _CHECKPOINT_INSTANCE_COLUMN = "instance_id"
 _FEATURE_COLUMN = "feature"
 _COUNT_COLUMN = "count"
@@ -148,13 +151,19 @@ def _local_feature_counts(
     ``assigned_points`` contains one row per point assigned to a non-background
     labels instance. This function independently groups every pandas partition
     by ``(instance_key, feature_key)`` and replaces repeated point rows with one
-    count row. For example::
+    count row. For example, with Harpy's default ``instance_key="cell_ID"``,
+    ``feature_key="gene"`` and ``pair_ordinal=0``::
 
-        assigned points                 partition-local counts
-        cells  gene                     instance_id  feature  count
-        42     EPCAM                    42           EPCAM    2
-        42     EPCAM          ---->     42           VIM      1
-        42     VIM
+        assigned points          canonical partition-local checkpoint counts
+        cell_ID  gene            aggregation_pair  instance_id  feature  count
+        42       EPCAM           0                 42           EPCAM    2
+        42       EPCAM  ---->    0                 42           VIM      1
+        42       VIM
+
+    Here ``instance_id`` is the fixed transient checkpoint column named by
+    :data:`_CHECKPOINT_INSTANCE_COLUMN`. It contains the values copied unchanged
+    from ``cell_ID``; final table construction writes them to ``adata.obs`` under
+    the configured ``instance_key``.
 
     The returned Dask dataframe remains lazy and uses the checkpoint's
     canonical ``(aggregation_pair, instance_id, feature, count)`` schema. Counts
@@ -306,16 +315,25 @@ def _local_feature_count_partition(
 ) -> pd.DataFrame:
     if partition.empty:
         return _checkpoint_meta()
-    values = partition.loc[:, [instance_key, feature_key]].copy()
-    if values[instance_key].isna().any() or values[feature_key].isna().any():
+    instance_values = partition[instance_key]
+    feature_values = partition[feature_key]
+    if instance_values.isna().any() or feature_values.isna().any():
         raise ValueError("Assigned points must not contain null instance or feature values.")
-    if not pd.api.types.is_integer_dtype(values[instance_key].dtype):
-        raise ValueError(f"Assigned instance IDs must be integral, found {values[instance_key].dtype}.")
-    if (values[instance_key] <= 0).any():
+    if not pd.api.types.is_integer_dtype(instance_values.dtype):
+        raise ValueError(f"Assigned instance IDs must be integral, found {instance_values.dtype}.")
+    if (instance_values <= 0).any():
         raise ValueError("Assigned instance IDs must be positive; background zero must be absent.")
 
-    values[_CHECKPOINT_INSTANCE_COLUMN] = values.pop(instance_key).astype(np.uint64, copy=False)
-    values[_FEATURE_COLUMN] = values.pop(feature_key).astype("string")
+    # Construct the canonical checkpoint fields from the source Series instead
+    # of renaming in place: a valid source feature key may equal one of these
+    # private checkpoint column names.
+    values = pd.DataFrame(
+        {
+            _CHECKPOINT_INSTANCE_COLUMN: instance_values.astype(np.uint64, copy=False),
+            _FEATURE_COLUMN: feature_values.astype("string"),
+        },
+        index=partition.index,
+    )
     counts = (
         values.groupby([_CHECKPOINT_INSTANCE_COLUMN, _FEATURE_COLUMN], observed=True, sort=False)
         .size()
