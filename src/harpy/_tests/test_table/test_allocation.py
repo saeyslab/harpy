@@ -143,7 +143,6 @@ def test_checkpoint_partition_to_csr_aligns_the_requested_feature_axis(tmp_path)
         ordinal=0,
         path=path,
         output_row_keys=((0, 42), (0, 51)),
-        row_count=3,
     )
 
     matrix = writer_module._checkpoint_partition_to_csr(
@@ -257,7 +256,6 @@ def test_checkpoint_partition_to_csr_rejects_uint32_overflow(tmp_path):
         ordinal=0,
         path=path,
         output_row_keys=((0, 1),),
-        row_count=1,
     )
 
     with pytest.raises(ValueError, match="exceed the uint32"):

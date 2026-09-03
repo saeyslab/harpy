@@ -54,8 +54,7 @@ class _CheckpointPartition:
     instance, feature, count)`` rows. ``output_row_keys`` records the sorted
     unique ``(aggregation pair, instance)`` pairs represented by those rows;
     each key becomes one aligned row in the final AnnData ``obs``, ``X`` and
-    ``obsm`` payloads. Consequently, ``row_count`` can be greater than
-    ``len(output_row_keys)``.
+    ``obsm`` payloads.
 
     For example, the following physical partition::
 
@@ -70,7 +69,6 @@ class _CheckpointPartition:
             ordinal=0,
             path=Path(".../part-00000.parquet"),
             output_row_keys=((0, 42), (0, 51)),
-            row_count=3,
         )
 
     It contains three long-form count rows but owns two output matrix rows.
@@ -84,20 +82,15 @@ class _CheckpointPartition:
     output_row_keys
         Sorted unique ``(aggregation pair, instance ID)`` pairs owned by this
         partition, in final AnnData row order.
-    row_count
-        Number of long-form count rows in the physical partition.
     """
 
     ordinal: int
     path: Path
     output_row_keys: tuple[tuple[int, int], ...]
-    row_count: int
 
     def __post_init__(self) -> None:
         if self.ordinal < 0:
             raise ValueError(f"Checkpoint partition ordinal must be non-negative, found {self.ordinal}.")
-        if self.row_count < len(self.output_row_keys):
-            raise ValueError("A checkpoint partition cannot contain fewer rows than represented instances.")
         if not self.output_row_keys:
             raise ValueError("Checkpoint manifests describe only non-empty partitions.")
         if tuple(sorted(set(self.output_row_keys))) != self.output_row_keys:
@@ -460,9 +453,9 @@ def _checkpoint_partition_manifest(
 
     Returns
     -------
-    A descriptor containing the partition path, sorted unique
-    ``(aggregation_pair, instance_id)`` output-row keys and long-form row count,
-    or ``None`` when the partition is empty.
+    A descriptor containing the partition path and sorted unique
+    ``(aggregation_pair, instance_id)`` output-row keys, or ``None`` when the
+    partition is empty.
     """
     if partition.empty:
         return None
@@ -491,7 +484,6 @@ def _checkpoint_partition_manifest(
         ordinal=ordinal,
         path=path,
         output_row_keys=output_row_keys,
-        row_count=len(partition),
     )
 
 
