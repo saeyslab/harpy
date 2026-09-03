@@ -45,16 +45,29 @@ def test_allocate_import_warns_and_resolves_to_aggregate_points(monkeypatch: pyt
     assert messages == ["`harpy.tb.allocate` is deprecated. Import and use `harpy.tb.aggregate_points` instead."]
 
 
-def test_aggregation_checkpoint_merges_partial_counts_and_records_manifests(tmp_path):
-    assigned = dd.from_pandas(
+def test_aggregation_checkpoint_merges_counts_across_input_partitions(tmp_path):
+    # The same (instance, feature) key is deliberately split across two input
+    # partitions so this test exercises the shuffle-and-merge contract.
+    input_partitions = (
         pd.DataFrame(
             {
-                "cells": [42, 42, 51, 42],
-                "gene": ["EPCAM", "EPCAM", "VIM", "EPCAM"],
+                "cells": [42, 42],
+                "gene": ["EPCAM", "EPCAM"],
             }
         ),
-        npartitions=2,
+        pd.DataFrame(
+            {
+                "cells": [51, 42],
+                "gene": ["VIM", "EPCAM"],
+            }
+        ),
     )
+    assigned = dd.from_delayed(
+        [dask.delayed(partition) for partition in input_partitions],
+        meta=input_partitions[0].iloc[:0],
+    )
+    assert assigned.npartitions == 2
+
     local = checkpoint_module._local_feature_counts(
         assigned,
         pair_ordinal=0,
