@@ -274,23 +274,34 @@ def aggregate_points(
     ``j`` that were spatially assigned to instance ``i``. These are point
     counts, not counts of features defined by a panel.
 
-    When ``expression_class`` is ``None``, all observed values from
-    ``feature_key`` are retained in the expression matrix. When an
-    expression class is selected, aggregation resolves the points element's
-    feature panel through::
+    Aggregation has exactly two mutually exclusive modes, selected solely by
+    ``expression_class``:
+
+    - **Ordinary mode** is selected by ``expression_class=None``. Feature-panel
+      metadata is ignored even when present. The sorted union of observed
+      ``feature_key`` values across the selected points elements defines
+      ``adata.X``. No auxiliary feature matrix or per-class summaries are
+      created.
+    - **Class-aware mode** is selected by a non-empty ``expression_class``.
+      Feature-panel metadata is mandatory and validated. Features assigned to
+      the selected class define ``adata.X``; features in all other panel classes
+      define ``adata.obsm["auxiliary_feature_counts"]`` and the per-class
+      summaries in ``adata.obs``.
+
+    In class-aware mode, aggregation resolves each points element's feature
+    panel through::
 
         sdata.attrs["harpy"]["points"][points_name]["feature_panel"]
             -> sdata.attrs["harpy"]["feature_panels"][feature_panel]
 
-    When ``expression_class`` is specified, Harpy validates every selected
-    points element against its referenced feature panel before spatial
-    assignment. The panel's ``feature_key`` must match the requested
-    ``feature_key``; its ``feature_class_key`` column must exist in the points,
-    be categorical, and use the panel's ordered classes. Every source point must
-    contain a non-null feature and class, its feature must occur in the panel,
-    and its class must match that feature's panel assignment. All selected
-    points elements must resolve compatible panel contracts. Panel features do
-    not need to have observed points.
+    Harpy validates every selected points element against its referenced feature
+    panel before spatial assignment. The panel's ``feature_key`` must match the
+    requested ``feature_key``; its ``feature_class_key`` column must exist in
+    the points, be categorical, and use the panel's ordered classes. Every
+    source point must contain a non-null feature and class, its feature must
+    occur in the panel, and its class must match that feature's panel
+    assignment. All selected points elements must resolve compatible panel
+    contracts. Panel features do not need to have observed points.
 
     The referenced panel supplies ``feature_key``, ``feature_class_key``,
     ``classes``, and ``features_by_class``. Features in ``expression_class``
@@ -301,13 +312,12 @@ def aggregate_points(
     receiving only non-expression points remain in the table with an all-zero
     expression row.
 
-    When ``expression_class`` is specified, matrix columns are panel-defined
-    rather than observation-derived. Every panel feature is retained even when
-    it is absent from all selected points elements. An unobserved expression
-    feature remains in ``adata.var_names`` with an all-zero column in
-    ``adata.X``; an unobserved auxiliary feature remains in the auxiliary
-    ``feature_columns`` metadata with an all-zero auxiliary-matrix column.
-    For example::
+    In class-aware mode, matrix columns are panel-defined rather than
+    observation-derived. Every panel feature is retained even when it is absent
+    from all selected points elements. An unobserved expression feature remains
+    in ``adata.var_names`` with an all-zero column in ``adata.X``; an unobserved
+    auxiliary feature remains in the auxiliary ``feature_columns`` metadata
+    with an all-zero auxiliary-matrix column. For example::
 
         panel                              resulting feature axes
         Endogenous: [GeneA, GeneZero]      adata.var_names:
@@ -365,9 +375,11 @@ def aggregate_points(
         gene names. In class-aware mode it must equal the panel's
         ``feature_key``. It must differ from ``instance_key``.
     expression_class
-        Feature class retained in ``adata.X``. If ``None``, feature-panel
-        metadata is not consulted and ordinary aggregation retains all observed
-        features.
+        Selects the aggregation mode. ``None`` selects ordinary mode, which
+        ignores feature-panel metadata and retains all observed features in
+        ``adata.X``. A non-empty string selects class-aware mode and names the
+        panel class retained in ``adata.X``; all other panel classes are
+        retained in the auxiliary feature matrix.
     instance_key
         Column in ``adata.obs`` holding instance identifiers. It must differ
         from ``feature_key`` and, in class-aware mode, from the panel's
@@ -1270,22 +1282,21 @@ def _assign_points_to_labels(
 
     Examples
     --------
-    For class-aware aggregation, the raster lookup conceptually transforms
+    With ``value_key="gene"``, the raster lookup conceptually transforms
     individual input points as follows. ``cell_ID`` contains the label value at
     the rounded point coordinate::
 
-        input points                         assigned points
-        x     y    gene   code_class         gene   code_class   cell_ID
-        12.1  8.9  EPCAM  Endogenous   -->   EPCAM  Endogenous   42
-        14.2  9.1  EPCAM  Endogenous   -->   EPCAM  Endogenous   42
-        80.0  4.0  Neg01  Negative     -->   omitted: label 0
+        input points                  assigned points
+        x     y    gene               gene    cell_ID
+        12.1  8.9  EPCAM       -->    EPCAM   42
+        14.2  9.1  EPCAM       -->    EPCAM   42
+        80.0  4.0  Neg01       -->    omitted: label 0
 
-    With ``drop_coordinates=True``, the conceptual shape is
-    ``(N_assigned_points, 2)`` for ordinary aggregation and
-    ``(N_assigned_points, 3)`` for class-aware aggregation. The exact row count
-    remains unknown until computation and cannot exceed the input point count.
-    This function performs assignment only; the repeated ``(cell_ID, gene)``
-    rows are aggregated into counts by the caller.
+    With ``drop_coordinates=True``, the output has one column for every
+    requested ``value_key`` plus the assigned instance-ID column. The exact row
+    count remains unknown until computation and cannot exceed the input point
+    count. This function performs assignment only; repeated
+    ``(cell_ID, gene)`` rows are aggregated into counts by the caller.
     """
     if not np.issubdtype(se.data.dtype, np.integer):
         raise ValueError(f"Labels must use an integer dtype, found {se.data.dtype}.")
