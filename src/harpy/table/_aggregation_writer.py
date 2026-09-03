@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import shutil
 import uuid
-from collections.abc import Mapping
+from collections.abc import Generator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -34,7 +35,7 @@ from harpy.table._metadata import (
     _FEATURE_CLASS_AGGREGATION_SCHEMA_VERSION,
     _FEATURE_MATRIX_SCHEMA_VERSION,
 )
-from harpy.table._zarr import _write_spatialdata_table_attrs
+from harpy.table._zarr import _read_backed_table, _write_spatialdata_table_attrs
 from harpy.utils._keys import _FEATURE_MATRICES_KEY
 
 
@@ -269,17 +270,14 @@ def _write_aggregation_table(
         region_key=region_key,
         instance_key=instance_key,
     )
-    return _publish_aggregation_table(
+    # The final in-memory table is reconstructed from the serialized group so
+    # disk, rather than these construction objects, is the source of truth.
+    del table, obs, var, uns, centers
+    return _install_aggregation_table(
         sdata,
         destination=destination,
         workspace=workspace,
         output_table_name=output_table_name,
-        obs=table.obs,
-        var=table.var,
-        uns=table.uns,
-        centers=centers,
-        spatial_key=spatial_key,
-        has_auxiliary=class_contract is not None,
     )
 
 
@@ -534,52 +532,118 @@ def _validate_staged_table(
             raise ValueError(f"Staged auxiliary matrix has shape {auxiliary.shape}, expected {(n_obs, n_auxiliary)}.")
 
 
-def _publish_aggregation_table(
+def _install_aggregation_table(
     sdata: SpatialData,
     *,
     destination: _AggregationDestination,
     workspace: Path,
     output_table_name: str,
-    obs: pd.DataFrame,
-    var: pd.DataFrame,
-    uns: Mapping[str, object],
-    centers: np.ndarray,
-    spatial_key: str,
-    has_auxiliary: bool,
 ) -> SpatialData:
-    """Publish a staged table with rollback and attach its backed sparse handles.
+    """Publish, reopen and attach one fully staged aggregation table.
+
+    Filesystem publication is isolated in
+    :func:`_publish_staged_aggregation_table`. The table is then reconstructed
+    exclusively from its published Zarr group by :func:`_read_backed_table`,
+    validated, and attached to the in-memory SpatialData object. Any failure in
+    reading, validation, attachment, or consolidated-metadata writing propagates
+    through the publication context and restores the previous on-disk table::
+
+        _publish_staged_aggregation_table()
+            |
+            |-- preserve previous table
+            |-- publish staged table
+            `-- yield published Zarr group
+                     |
+                     v
+               _read_backed_table()
+                     |
+                     v
+               TableModel.validate()
+                     |
+                     v
+               attach to sdata.tables
+                     |
+                     v
+               write consolidated metadata
+                     |
+               +-----+-----+
+               |           |
+            success      failure
+               |           |
+        delete backup   restore table on disk
+                        restore table in memory
+                        re-raise the original error
+    """
+    previous_table = sdata.tables.get(output_table_name)
+    attached = False
+    try:
+        with _publish_staged_aggregation_table(destination=destination, workspace=workspace) as table_group:
+            backed_table = _read_backed_table(table_group)
+            TableModel.validate(backed_table)
+            sdata.tables[output_table_name] = backed_table
+            attached = True
+            sdata.write_consolidated_metadata()
+    except Exception:
+        if attached:
+            if previous_table is None:
+                del sdata.tables[output_table_name]
+            else:
+                sdata.tables[output_table_name] = previous_table
+        try:
+            sdata.write_consolidated_metadata()
+        except (OSError, RuntimeError, TypeError, ValueError):
+            pass
+        raise
+    return sdata
+
+
+@contextmanager
+def _publish_staged_aggregation_table(
+    *,
+    destination: _AggregationDestination,
+    workspace: Path,
+) -> Generator[zarr.Group, None, None]:
+    """Temporarily publish a staged table and roll it back on failure.
 
     The staged table is complete before publication starts. When replacing an
-    existing table, the filesystem state changes as follows::
+    existing table, it is first moved to ``backup``; when creating a table,
+    ``backup`` remains absent. Publication then follows this flow::
 
-        Before publication
-        ------------------
-        destination.output       -> existing table
-        workspace/table          -> staged new table
-        backup                   -> absent
+        destination.output (previous table) --rename--> backup
+                                                only when replacing
 
-        Publish
-        -------
-        destination.output.rename(backup)
-        workspace/table.rename(destination.output)
-
-        After success
-        -------------
-        destination.output       -> new table
-        backup                   -> removed
-        workspace                -> removed
-
-        On failure
-        ----------
-        new destination.output   -> removed, if already published
-        backup                   -> restored to destination.output
-        in-memory table          -> restored
+        workspace/table       --rename--> destination.output
+                                           |
+                                           v
+                                  remove remaining workspace
+                                           |
+                                           v
+                                  yield published Zarr group
+                                           |
+                                           v
+                                  caller reads, validates,
+                                  attaches and consolidates
+                                           |
+                                  did the body succeed?
+                                     /           \
+                                   yes            no
+                                    |              |
+                                    v              v
+                             remove backup    remove destination
+                             if present       if it was published
+                                                   |
+                                                   v
+                                            restore backup
+                                            if one existed
+                                                   |
+                                                   v
+                                            re-raise exception
 
     Each rename is atomic because the source and destination are on the same
     filesystem. The complete two-rename replacement is rollback-safe, but it is
-    not one indivisible filesystem operation. Consolidated metadata is rebuilt
-    only after the new table has been attached to the in-memory SpatialData
-    object; the backup remains recoverable until that process succeeds.
+    not one indivisible filesystem operation. The context keeps the backup until
+    its caller has read, validated and attached the new table and rebuilt
+    consolidated metadata.
     """
     staging = workspace / "table"
     # Keep the rollback copy beside, rather than inside, the Zarr root. It is
@@ -587,59 +651,28 @@ def _publish_aggregation_table(
     # table while consolidated metadata is rebuilt.
     backup = destination.root.parent / f".{destination.root.name}.harpy-aggregate-backup-{uuid.uuid4().hex[:8]}"
     published = False
-    attached = False
-    previous_table = sdata.tables.get(output_table_name)
     log.info(f"Publishing staged AnnData table from '{staging}' to '{destination.output}'.")
     try:
         if destination.replace_existing:
             destination.output.rename(backup)
-        try:
-            staging.rename(destination.output)
-            published = True
-        except Exception:
-            if backup.exists():
-                backup.rename(destination.output)
-            raise
+        staging.rename(destination.output)
+        published = True
 
         # No checkpoint input remains live after component writing. Remove the
         # hidden workspace before consolidating so it cannot be mistaken for a
         # SpatialData/Zarr child in consolidated metadata.
         _remove_aggregation_workspace(workspace)
         root = zarr.open_group(store=str(destination.root), mode="r+", use_consolidated=False)
-        table_group = root["tables"][output_table_name]
-        obsm: dict[str, object] = {spatial_key: centers}
-        if has_auxiliary:
-            obsm[_AUXILIARY_FEATURE_MATRIX_KEY] = sparse_dataset(table_group["obsm"][_AUXILIARY_FEATURE_MATRIX_KEY])
-        backed_table = AnnData(
-            X=sparse_dataset(table_group["X"]),
-            obs=obs,
-            var=var,
-            uns=uns,
-            obsm=obsm,
-        )
-        TableModel.validate(backed_table)
-        sdata.tables[output_table_name] = backed_table
-        attached = True
-        sdata.write_consolidated_metadata()
+        yield root["tables"][destination.output.name]
     except Exception:
-        if attached:
-            if previous_table is None:
-                del sdata.tables[output_table_name]
-            else:
-                sdata.tables[output_table_name] = previous_table
         if published and destination.output.exists():
             shutil.rmtree(destination.output)
         if backup.exists():
             backup.rename(destination.output)
-        try:
-            sdata.write_consolidated_metadata()
-        except (OSError, RuntimeError, TypeError, ValueError):
-            pass
         raise
     if backup.exists():
         shutil.rmtree(backup)
     log.info(f"Finished publishing AnnData table to '{destination.output}'.")
-    return sdata
 
 
 def _remove_aggregation_workspace(workspace: Path) -> None:
