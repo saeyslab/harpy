@@ -30,18 +30,25 @@ from harpy._metadata import (
     _POINTS_METADATA_KEY,
 )
 from harpy.image._image import _get_spatial_element, _get_translation
+from harpy.table._aggregation_checkpoint import (
+    _CheckpointPair,
+    _local_feature_counts,
+    _stage_aggregation_checkpoint,
+)
+from harpy.table._aggregation_writer import (
+    _create_aggregation_workspace,
+    _FeatureClassWriteContract,
+    _remove_aggregation_workspace,
+    _validate_aggregation_destination,
+    _write_aggregation_table,
+)
 from harpy.table._metadata import (
-    _AGGREGATE_POINTS_SOURCE_KIND,
-    _AUXILIARY_FEATURE_MATRIX_KEY,
     _AUXILIARY_POINTS_FRACTION_COLUMN,
-    _FEATURE_CLASS_AGGREGATION_KEY,
-    _FEATURE_CLASS_AGGREGATION_SCHEMA_VERSION,
-    _FEATURE_MATRIX_SCHEMA_VERSION,
 )
 from harpy.table._table import add_table
 from harpy.table._utils import _sanity_check_append_region
 from harpy.utils._aggregate import RasterAggregator
-from harpy.utils._keys import _CELL_INDEX, _FEATURE_MATRICES_KEY, _GENES_KEY, _INSTANCE_KEY, _REGION_KEY, _SPATIAL
+from harpy.utils._keys import _CELL_INDEX, _GENES_KEY, _INSTANCE_KEY, _REGION_KEY, _SPATIAL
 from harpy.utils._transformations import _identity_check_transformations_points
 from harpy.utils.utils import _make_list
 
@@ -198,77 +205,6 @@ class _FeatureClassAggregationContract:
         return tuple((feature_class, len(features_by_class[feature_class])) for feature_class in self.auxiliary_classes)
 
 
-@dataclass(frozen=True)
-class _PairReductions:
-    """Materialized reductions for one paired points and labels aggregation.
-
-    Attributes
-    ----------
-    pair
-        Names and coordinate system identifying the paired labels and points
-        elements.
-    centers
-        Segmentation-mask centers of mass, indexed by instance ID.
-    coordinate_columns
-        Coordinate column names derived from ``centers`` in matrix order.
-    feature_counts
-        Series mapping each observed ``(instance, feature)`` pair to the
-        number of assigned points carrying that feature.
-    """
-
-    pair: _AggregationPair
-    centers: pd.DataFrame
-    feature_counts: pd.Series
-
-    def __post_init__(self) -> None:
-        coordinate_columns = self.coordinate_columns
-        if coordinate_columns not in {("x", "y"), ("x", "y", "z")}:
-            raise ValueError(
-                "Pair-reduction coordinates must use columns ('x', 'y') or ('x', 'y', 'z'), "
-                f"found {coordinate_columns!r}."
-            )
-        if not self.centers.index.is_unique:
-            raise ValueError("Pair-reduction center instance IDs must be unique.")
-
-        feature_instances = self._validate_feature_counts()
-        coordinate_instances = self.centers.index
-        if (
-            len(coordinate_instances) != len(feature_instances)
-            or not coordinate_instances.isin(feature_instances).all()
-            or not feature_instances.isin(coordinate_instances).all()
-        ):
-            raise ValueError("Pair-reduction centers and feature counts must use the same instances.")
-
-    @property
-    def coordinate_columns(self) -> tuple[str, ...]:
-        """Return the coordinate columns in their stored matrix order."""
-        return tuple(self.centers.columns)
-
-    @property
-    def instance_ids(self) -> np.ndarray:
-        """Return instance IDs in the pair's established output-row order."""
-        return self.centers.index.to_numpy()
-
-    def _validate_feature_counts(self) -> pd.Index:
-        """Validate feature counts and return their referenced instance IDs."""
-        counts = self.feature_counts
-        if not isinstance(counts, pd.Series):
-            raise ValueError("Pair-reduction feature_counts must be a pandas Series.")
-        if counts.dtype != np.dtype(np.uint32):
-            raise ValueError(f"Pair-reduction feature_counts must use uint32 values, found {counts.dtype}.")
-        if not isinstance(counts.index, pd.MultiIndex) or counts.index.nlevels != 2:
-            raise ValueError("Pair-reduction feature_counts must use a two-level MultiIndex.")
-        if counts.index.names[0] != self.centers.index.name:
-            raise ValueError(
-                f"Pair-reduction feature_counts instance level {counts.index.names[0]!r} must match "
-                f"center index {self.centers.index.name!r}."
-            )
-        level = counts.index.levels[0]
-        codes = counts.index.codes[0]
-        used_codes = np.flatnonzero(np.bincount(codes, minlength=len(level)))
-        return level.take(used_codes)
-
-
 def aggregate_points(
     sdata: SpatialData,
     labels_name: str | list[str],
@@ -328,6 +264,11 @@ def aggregate_points(
     This definition is used in both ordinary and class-aware modes and does not
     depend on point positions or feature classes.
 
+    This operation requires ``sdata`` to be backed by a writable local Zarr
+    store. Assigned-point counts remain partitioned through an intermediate
+    merged-count checkpoint, and the final sparse matrices are written in row
+    blocks without materializing the complete reductions on the driver.
+
     Table construction does not revalidate the payload it has just assembled.
     Call :func:`harpy.tb.validate_table` explicitly to check a table against its
     persisted SpatialData annotation, feature-matrix records, source references,
@@ -336,7 +277,8 @@ def aggregate_points(
     Parameters
     ----------
     sdata
-        The SpatialData object.
+        SpatialData object backed by a writable local Zarr store. Write an
+        unbacked object first with ``sdata.write("sdata.zarr")``.
     labels_name
         Labels element or ordered list of labels elements whose instances are
         used to aggregate the points. Duplicate labels names are rejected.
@@ -391,6 +333,11 @@ def aggregate_points(
             overwrite=True,
         )
     """
+    destination = _validate_aggregation_destination(
+        sdata,
+        output_table_name=output_table_name,
+        overwrite=overwrite,
+    )
     pairs = _normalize_aggregation_pairs(
         sdata,
         labels_name=labels_name,
@@ -398,10 +345,6 @@ def aggregate_points(
         to_coordinate_system=to_coordinate_system,
         feature_key=feature_key,
     )
-    if output_table_name in sdata.tables and not overwrite:
-        raise ValueError(
-            f"Table element {output_table_name!r} already exists in 'sdata.tables'. Set 'overwrite=True' to replace it."
-        )
     if expression_class is None:
         contract = None
     else:
@@ -414,37 +357,99 @@ def aggregate_points(
             instance_key=instance_key,
         )
 
-    reductions = tuple(
-        _reduce_aggregation_pair(
-            sdata,
-            pair=pair,
-            feature_key=feature_key,
-            cell_index_name=cell_index_name,
-            chunks=chunks,
-            contract=contract,
+    checkpoint_pairs = tuple(
+        _CheckpointPair(
+            ordinal=ordinal,
+            labels_name=pair.labels_name,
+            points_name=pair.points_name,
+            coordinate_system=pair.coordinate_system,
+            coordinate_columns=("x", "y", "z") if "z" in sdata.points[pair.points_name].columns else ("x", "y"),
         )
-        for pair in pairs
+        for ordinal, pair in enumerate(pairs)
     )
-    adata = _assemble_aggregation_table(
-        reductions,
-        feature_key=feature_key,
-        cell_index_name=cell_index_name,
-        region_key=region_key,
-        instance_key=instance_key,
-        spatial_key=spatial_key,
-        contract=contract,
-    )
+    workspace = _create_aggregation_workspace(destination)
+    try:
+        partial_counts: list[DaskDataFrame] = []
+        validation_errors: list[tuple[str, object]] = []
+        for pair_ordinal, pair in enumerate(pairs):
+            points = sdata.points[pair.points_name]
+            class_key = None if contract is None else contract.panel.feature_class_key
+            assigned_points = _assign_points_to_labels(
+                se=_get_spatial_element(sdata, element_name=pair.labels_name),
+                ddf=points,
+                value_key=feature_key if class_key is None else [feature_key, class_key],
+                drop_coordinates=True,
+                to_coordinate_system=pair.coordinate_system,
+                chunks=chunks,
+                cell_index_name=cell_index_name,
+            )
+            partial_counts.append(
+                _local_feature_counts(
+                    assigned_points,
+                    pair_ordinal=pair_ordinal,
+                    instance_key=cell_index_name,
+                    feature_key=feature_key,
+                )
+            )
+            if contract is not None:
+                categorical_dtype = pd.CategoricalDtype(categories=contract.panel.classes)
+                normalized_points = points.assign(**{class_key: points[class_key].astype(categorical_dtype)})
+                validation_errors.append(
+                    (
+                        pair.points_name,
+                        normalized_points[[feature_key, class_key]].map_partitions(
+                            _feature_panel_partition_errors,
+                            feature_key=feature_key,
+                            feature_class_key=class_key,
+                            class_by_feature=contract.panel.class_by_feature,
+                            meta=pd.Series(name="error", dtype="object"),
+                        ),
+                    )
+                )
 
-    sdata = add_table(
-        sdata,
-        adata=adata,
-        output_table_name=output_table_name,
-        region=[pair.labels_name for pair in pairs],
-        instance_key=instance_key,
-        region_key=region_key,
-        overwrite=overwrite,
-    )
-    return sdata
+        checkpoint = _stage_aggregation_checkpoint(
+            partial_counts,
+            path=workspace / "merged_counts",
+            pairs=checkpoint_pairs,
+            validation_errors=validation_errors,
+            discover_features=contract is None,
+        )
+        centers_by_pair = {
+            pair.ordinal: _label_centers(
+                sdata,
+                pair=pairs[pair.ordinal],
+                instance_ids=checkpoint.instance_ids(pair.ordinal),
+                coordinate_columns=pair.coordinate_columns,
+                cell_index_name=cell_index_name,
+            )
+            for pair in checkpoint.pairs
+        }
+        class_write_contract = None
+        if contract is not None:
+            class_write_contract = _FeatureClassWriteContract(
+                feature_key=contract.panel.feature_key,
+                feature_class_key=contract.panel.feature_class_key,
+                classes=contract.panel.classes,
+                expression_class=contract.expression_class,
+                features_by_class_items=contract.panel.features_by_class_items,
+                count_columns=contract.count_columns,
+            )
+        return _write_aggregation_table(
+            sdata,
+            destination=destination,
+            workspace=workspace,
+            checkpoint=checkpoint,
+            centers_by_pair=centers_by_pair,
+            output_table_name=output_table_name,
+            feature_key=feature_key,
+            region_key=region_key,
+            instance_key=instance_key,
+            spatial_key=spatial_key,
+            cell_index_name=cell_index_name,
+            class_contract=class_write_contract,
+        )
+    finally:
+        _remove_aggregation_workspace(workspace)
 
 
 def __getattr__(name: str) -> object:
@@ -684,87 +689,6 @@ def _snake_case(value: str) -> str:
     return value
 
 
-def _reduce_aggregation_pair(
-    sdata: SpatialData,
-    *,
-    pair: _AggregationPair,
-    feature_key: str,
-    cell_index_name: str,
-    chunks: str | tuple[int, ...] | int | None,
-    contract: _FeatureClassAggregationContract | None,
-) -> _PairReductions:
-    """Assign one points element once and compute its compact pair-level reductions."""
-    points = sdata.points[pair.points_name]
-    coordinate_columns = ("x", "y", "z") if "z" in points.columns else ("x", "y")
-    class_key = None if contract is None else contract.panel.feature_class_key
-    normalized_points = points
-    if contract is not None:
-        categorical_dtype = pd.CategoricalDtype(categories=contract.panel.classes)
-        # Keep the SpatialData-owned points object unchanged because Dask
-        # ``assign`` does not preserve its transformation metadata. The
-        # normalized branch is used only for panel-content validation.
-        normalized_points = points.assign(**{class_key: points[class_key].astype(categorical_dtype)})
-
-    # One row per point overlapping a non-background label. Each row retains
-    # the requested feature columns and gains the overlapping label ID in
-    # ``cell_index_name``; for example: (feature="EPCAM", label_id=42).
-    # Coordinates are dropped because table coordinates are calculated from
-    # the labels raster after the assigned-instance universe is known.
-    assigned_points = _assign_points_to_labels(
-        se=_get_spatial_element(sdata, element_name=pair.labels_name),
-        ddf=points,
-        value_key=feature_key if class_key is None else [feature_key, class_key],
-        drop_coordinates=True,
-        to_coordinate_system=pair.coordinate_system,
-        chunks=chunks,
-        cell_index_name=cell_index_name,
-    )
-    # Convert categorical features to strings before grouping. Otherwise, the
-    # categorical groupby may emit the Cartesian product of instances and
-    # declared feature categories, including zero-count combinations.
-    points_for_feature_counts = assigned_points.assign(**{feature_key: assigned_points[feature_key].astype("str")})
-    # Number of assigned points for every (label ID, feature) pair; these
-    # counts become the expression matrix when the output table is assembled,
-    # for example: (label_id=42, feature="EPCAM") -> 7 points.
-    feature_counts = points_for_feature_counts.groupby([cell_index_name, feature_key]).size()
-    feature_counts = feature_counts.map_partitions(lambda value: value.astype(np.uint32))
-
-    if contract is None:
-        errors = None
-    else:
-        errors = normalized_points[[feature_key, class_key]].map_partitions(
-            _feature_panel_partition_errors,
-            feature_key=feature_key,
-            feature_class_key=class_key,
-            class_by_feature=contract.panel.class_by_feature,
-            meta=pd.Series(name="error", dtype="object"),
-        )
-
-    if errors is None:
-        computed_feature_counts = feature_counts.compute()
-    else:
-        computed_feature_counts, computed_errors = dask.compute(feature_counts, errors)
-        if not computed_errors.empty:
-            raise ValueError(
-                f"Points element {pair.points_name!r} disagrees with its feature panel: {computed_errors.iloc[0]}"
-            )
-
-    instance_ids = np.sort(_used_count_level(computed_feature_counts, key=cell_index_name).to_numpy())
-    centers = _label_centers(
-        sdata,
-        pair=pair,
-        instance_ids=instance_ids,
-        coordinate_columns=coordinate_columns,
-        cell_index_name=cell_index_name,
-    )
-
-    return _PairReductions(
-        pair=pair,
-        centers=centers,
-        feature_counts=computed_feature_counts,
-    )
-
-
 def _label_centers(
     sdata: SpatialData,
     *,
@@ -906,280 +830,6 @@ def _feature_panel_partition_errors(
             dtype="object",
         )
     return pd.Series(name="error", dtype="object")
-
-
-def _count_index_level(counts: pd.Series, *, key: str) -> tuple[pd.Index, np.ndarray]:
-    """Return one count-index level and its compact code per observed pair."""
-    index = counts.index
-    if not isinstance(index, pd.MultiIndex):
-        raise RuntimeError("Reduced point counts must use a MultiIndex.")
-    try:
-        level_number = index.names.index(key)
-    except ValueError as exc:
-        raise RuntimeError(f"Reduced point counts are missing index level {key!r}.") from exc
-    codes = index.codes[level_number]
-    if (codes < 0).any():
-        raise RuntimeError(f"Reduced point counts contain missing values in index level {key!r}.")
-    return index.levels[level_number], codes
-
-
-def _used_count_level(counts: pd.Series, *, key: str) -> pd.Index:
-    """Return unique level values referenced by at least one observed count pair."""
-    level, codes = _count_index_level(counts, key=key)
-    used_codes = np.flatnonzero(np.bincount(codes, minlength=len(level)))
-    return level.take(used_codes)
-
-
-def _assemble_aggregation_table(
-    reductions: tuple[_PairReductions, ...],
-    *,
-    feature_key: str,
-    cell_index_name: str,
-    region_key: str,
-    instance_key: str,
-    spatial_key: str,
-    contract: _FeatureClassAggregationContract | None,
-) -> AnnData:
-    """Align pair reductions to their output axes and construct one AnnData table."""
-    if contract is None:
-        observed_features: set[str] = set()
-        for result in reductions:
-            # Ordinary mode has no panel-defined feature axis. Collect only
-            # features referenced by each count MultiIndex; _counts_to_sparse
-            # later maps every pair's internal level codes onto the resulting
-            # shared sorted axis, which also becomes adata.var_names.
-            observed_features.update(_used_count_level(result.feature_counts, key=feature_key))
-        expression_feature_axis = tuple(sorted(observed_features))
-        auxiliary_feature_axis: tuple[str, ...] = ()
-    else:
-        expression_feature_axis = contract.expression_feature_axis
-        auxiliary_feature_axis = contract.auxiliary_feature_axis
-    if not expression_feature_axis:
-        raise ValueError("Aggregation produced no expression features.")
-
-    coordinate_columns = reductions[0].coordinate_columns
-    if any(result.coordinate_columns != coordinate_columns for result in reductions[1:]):
-        raise ValueError("All aggregation pairs must use the same coordinate dimensions.")
-
-    expression_matrices: list[sparse.csr_matrix] = []
-    auxiliary_matrices: list[sparse.csr_matrix] = []
-    obs_frames: list[pd.DataFrame] = []
-    coordinate_blocks: list[np.ndarray] = []
-    uuid_value = str(uuid.uuid4())[:8]
-
-    for result in reductions:
-        # Retain every instance receiving any assigned point. In class-aware
-        # mode this includes auxiliary-only instances, whose expression row is
-        # deliberately all zero.
-        instance_ids = result.instance_ids
-        expression_matrix = _counts_to_sparse(
-            result.feature_counts,
-            instance_ids=instance_ids,
-            feature_axis=expression_feature_axis,
-            cell_index_name=cell_index_name,
-            feature_key=feature_key,
-        )
-        expression_matrices.append(expression_matrix)
-
-        obs_index = [f"{instance}_{result.pair.labels_name}_{uuid_value}" for instance in instance_ids]
-        obs = pd.DataFrame(index=pd.Index(obs_index, name=cell_index_name))
-        obs[instance_key] = instance_ids.astype(int, copy=False)
-        obs[region_key] = result.pair.labels_name
-        if contract is not None:
-            auxiliary_matrix = _counts_to_sparse(
-                result.feature_counts,
-                instance_ids=instance_ids,
-                feature_axis=auxiliary_feature_axis,
-                cell_index_name=cell_index_name,
-                feature_key=feature_key,
-            )
-            auxiliary_matrices.append(auxiliary_matrix)
-
-            class_counts = {
-                contract.expression_class: _sparse_row_counts(expression_matrix),
-                **{
-                    feature_class: _sparse_row_counts(auxiliary_matrix[:, class_slice])
-                    for feature_class, class_slice in contract.auxiliary_class_slices
-                },
-            }
-            for feature_class, column_name in contract.count_columns:
-                obs[column_name] = class_counts[feature_class]
-            total_counts = sum(
-                (class_counts[feature_class].astype(np.uint64) for feature_class in contract.panel.classes),
-                start=np.zeros(len(instance_ids), dtype=np.uint64),
-            )
-            if np.any(total_counts == 0):
-                raise RuntimeError("Retained aggregation rows must contain at least one assigned point.")
-            auxiliary_counts = sum(
-                (class_counts[feature_class].astype(np.uint64) for feature_class in contract.auxiliary_classes),
-                start=np.zeros(len(instance_ids), dtype=np.uint64),
-            )
-            obs[_AUXILIARY_POINTS_FRACTION_COLUMN] = auxiliary_counts / total_counts
-        obs_frames.append(obs)
-
-        centers = result.centers.reindex(instance_ids)
-        if centers.isna().any(axis=None):
-            raise ValueError(
-                f"Label centers of mass are missing for retained instances in {result.pair.labels_name!r}."
-            )
-        coordinate_blocks.append(centers.loc[:, list(coordinate_columns)].to_numpy())
-
-    X = sparse.vstack(expression_matrices, format="csr")
-    obs = pd.concat(obs_frames, axis=0)
-    labels_names = [result.pair.labels_name for result in reductions]
-    obs[region_key] = pd.Categorical(obs[region_key], categories=labels_names)
-    adata = AnnData(
-        X=X,
-        obs=obs,
-        var=pd.DataFrame(index=pd.Index(expression_feature_axis, name=feature_key)),
-    )
-    adata.obsm[spatial_key] = np.vstack(coordinate_blocks)
-
-    if contract is not None:
-        auxiliary_matrix = sparse.vstack(auxiliary_matrices, format="csr")
-        adata.obsm[_AUXILIARY_FEATURE_MATRIX_KEY] = auxiliary_matrix
-        adata.uns[_FEATURE_MATRICES_KEY] = {
-            _AUXILIARY_FEATURE_MATRIX_KEY: {
-                "schema_version": _FEATURE_MATRIX_SCHEMA_VERSION,
-                "source_kind": _AGGREGATE_POINTS_SOURCE_KIND,
-                "feature_columns": list(auxiliary_feature_axis),
-            }
-        }
-        adata.uns[_FEATURE_CLASS_AGGREGATION_KEY] = {
-            "schema_version": _FEATURE_CLASS_AGGREGATION_SCHEMA_VERSION,
-            "source_kind": _AGGREGATE_POINTS_SOURCE_KIND,
-            "feature_key": contract.panel.feature_key,
-            "feature_class_key": contract.panel.feature_class_key,
-            "expression_class": contract.expression_class,
-            "classes": list(contract.panel.classes),
-            "auxiliary_class_feature_counts": dict(contract.auxiliary_class_feature_counts),
-            "count_columns": dict(contract.count_columns),
-            "auxiliary_points_fraction_column": _AUXILIARY_POINTS_FRACTION_COLUMN,
-            "auxiliary_feature_matrix_key": _AUXILIARY_FEATURE_MATRIX_KEY,
-            "regions": {
-                result.pair.labels_name: {
-                    "points_element": result.pair.points_name,
-                    "coordinate_system": result.pair.coordinate_system,
-                }
-                for result in reductions
-            },
-        }
-    return adata
-
-
-def _sparse_row_counts(matrix: sparse.spmatrix) -> np.ndarray:
-    """Return checked dense ``uint32`` row sums without densifying ``matrix``.
-
-    The sparse input remains sparse; only one sum per matrix row is
-    materialized. SciPy accumulates ``uint32`` values as ``uint64``, allowing
-    overflow to be checked before the result is converted back to the compact
-    ``uint32`` count dtype.
-    """
-    counts = np.asarray(matrix.sum(axis=1)).ravel()
-    if np.any(counts > np.iinfo(np.uint32).max):
-        raise ValueError("Per-instance assigned-point counts exceed the uint32 output range.")
-    return counts.astype(np.uint32, copy=False)
-
-
-def _counts_to_sparse(
-    counts: pd.Series,
-    *,
-    instance_ids: np.ndarray,
-    feature_axis: tuple[str, ...],
-    cell_index_name: str,
-    feature_key: str,
-) -> sparse.csr_matrix:
-    """Align observed instance-feature counts to a CSR matrix.
-
-    ``counts`` uses a two-level MultiIndex to represent the nonzero count for
-    each observed ``(instance, feature)`` pair. This function maps the unique
-    values in those levels to the requested output axes and then expands only
-    their compact integer codes. A pair is omitted when either its instance is
-    absent from ``instance_ids`` or its feature is absent from
-    ``feature_axis``. The caller can therefore construct expression and
-    auxiliary matrices from the same complete count reduction.
-
-    Parameters
-    ----------
-    counts
-        Nonzero point counts indexed by instance ID and feature identifier.
-    instance_ids
-        Sorted instance IDs defining the rows of the output matrix.
-    feature_axis
-        Ordered feature identifiers defining the columns of the output
-        matrix.
-    cell_index_name
-        Name of the instance-ID level in ``counts.index``.
-    feature_key
-        Name of the feature level in ``counts.index``.
-
-    Returns
-    -------
-    scipy.sparse.csr_matrix
-        A ``uint32`` matrix aligned to ``instance_ids`` and ``feature_axis``.
-
-    Examples
-    --------
-    Consider these observed counts:
-
-    ==========  ===========  =====
-    Instance    Feature      Count
-    ==========  ===========  =====
-    42          EPCAM        7
-    42          Negative1    2
-    51          VIM          3
-    99          Negative1    1
-    ==========  ===========  =====
-
-    The requested output axes are ``instance_ids = [42, 51]`` and
-    ``feature_axis = ("EPCAM", "VIM")``. The MultiIndex represents the table
-    with unique levels and one integer code per observed pair::
-
-        instance_level       = [42, 51, 99]
-        instance_level_codes = [ 0,  0,  1,  2]
-        feature_level        = ["EPCAM", "Negative1", "VIM"]
-        feature_level_codes  = [      0,           1,     2,           1]
-
-    Mapping the unique levels to the requested axes produces ``-1`` for
-    values that should not appear in the output::
-
-        row_lookup    = [0, 1, -1]
-        column_lookup = [0, -1, 1]
-
-    Indexing those lookup tables with the pair codes gives::
-
-        row_codes    = [0,  0, 1, -1]
-        column_codes = [0, -1, 1, -1]
-        selected     = [T,  F, T,  F]
-
-    The retained coordinate triplets are therefore ``(row=0, column=0,
-    value=7)`` and ``(row=1, column=1, value=3)``. They form the matrix::
-
-                  EPCAM  VIM
-        instance
-        42            7    0
-        51            0    3
-
-    ``Negative1`` is excluded because it is not on ``feature_axis``;
-    instance 99 is excluded because it is not in ``instance_ids``.
-    """
-    if counts.empty:
-        return sparse.csr_matrix((0, len(feature_axis)), dtype=np.uint32)
-    instance_level, instance_level_codes = _count_index_level(counts, key=cell_index_name)
-    feature_level, feature_level_codes = _count_index_level(counts, key=feature_key)
-    code_dtype = np.int32 if max(len(instance_ids), len(feature_axis)) <= np.iinfo(np.int32).max else np.int64
-    # Map each unique level value once; indexing these small lookup tables with
-    # the existing MultiIndex codes avoids expanding repeated strings or IDs.
-    row_lookup = pd.Index(instance_ids).get_indexer(instance_level).astype(code_dtype, copy=False)
-    column_lookup = pd.Index(feature_axis).get_indexer(feature_level).astype(code_dtype, copy=False)
-    row_codes = row_lookup[instance_level_codes]
-    column_codes = column_lookup[feature_level_codes]
-    selected = (row_codes >= 0) & (column_codes >= 0)
-    return sparse.coo_matrix(
-        (counts.to_numpy(dtype=np.uint32)[selected], (row_codes[selected], column_codes[selected])),
-        shape=(len(instance_ids), len(feature_axis)),
-        dtype=np.uint32,
-    ).tocsr()
 
 
 def _require_mapping(value: object, *, path: str) -> Mapping[str, object]:
