@@ -34,6 +34,7 @@ from harpy.table._metadata import (
     _FEATURE_CLASS_AGGREGATION_SCHEMA_VERSION,
     _FEATURE_MATRIX_SCHEMA_VERSION,
 )
+from harpy.table._zarr import _write_spatialdata_table_attrs
 from harpy.utils._keys import _FEATURE_MATRICES_KEY
 
 
@@ -262,7 +263,7 @@ def _write_aggregation_table(
         n_vars=len(expression_axis),
         n_auxiliary=len(auxiliary_axis) if class_contract is not None else None,
     )
-    _set_spatialdata_table_attrs(
+    _write_spatialdata_table_attrs(
         staging_group,
         regions=[pair.labels_name for pair in checkpoint.pairs],
         region_key=region_key,
@@ -531,21 +532,6 @@ def _validate_staged_table(
         auxiliary = sparse_dataset(group["obsm"][_AUXILIARY_FEATURE_MATRIX_KEY])
         if auxiliary.shape != (n_obs, n_auxiliary):
             raise ValueError(f"Staged auxiliary matrix has shape {auxiliary.shape}, expected {(n_obs, n_auxiliary)}.")
-
-
-def _set_spatialdata_table_attrs(
-    group: zarr.Group,
-    *,
-    regions: list[str],
-    region_key: str,
-    instance_key: str,
-) -> None:
-    """Adopt an AnnData group using SpatialData's current table attributes."""
-    group.attrs["spatialdata-encoding-type"] = "ngff:regions_table"
-    group.attrs["region"] = regions
-    group.attrs["region_key"] = region_key
-    group.attrs["instance_key"] = instance_key
-    group.attrs["version"] = "0.2"
 
 
 def _publish_aggregation_table(
