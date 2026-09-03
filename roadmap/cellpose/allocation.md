@@ -2,7 +2,7 @@
 
 ## Status
 
-Ten implementation slices are planned; Slices 1 through 6 are implemented:
+Eleven implementation slices are planned; Slices 1 through 7b are implemented:
 
 1. patch the CosMx reader and establish the generic Harpy feature-panel
    metadata contract — implemented;
@@ -19,9 +19,10 @@ Ten implementation slices are planned; Slices 1 through 6 are implemented:
 8. promote napari-harpy's canonical-center implementation into Harpy and
    integrate it with `hp.tb.aggregate_points`;
 9. add QC functions that summarize the original, unallocated control points;
-   and
 10. support general lazy reopening of persisted AnnData tables through
-    SpatialData.
+    SpatialData; and
+11. optionally optimize Slice 7b's latency after phase-level benchmarks identify
+    material checkpoint or writer overhead.
 
 Slice 2 replaces the current single-run reader surface with one coherent,
 sample-aware creation contract. Slice 3 validates that an existing store still
@@ -45,7 +46,10 @@ on the reader metadata from Slices 1–4 rather than aggregation or labels; its
 optional per-instance plotting view derives temporary rates from the
 class-aware table. Slice 10 is an independent integration follow-up that makes
 later SpatialData Zarr reads retain lazy AnnData matrices; it is not required
-for Slice 7b's out-of-core writing or same-process result.
+for Slice 7b's out-of-core writing or same-process result. Slice 11 is an
+optional, benchmark-driven follow-up: it may reduce repeated checkpoint reads
+and small-partition overhead, but must preserve Slice 7b's bounded-memory and
+publication contracts.
 
 ## Goal
 
@@ -1045,6 +1049,23 @@ This parameter name, type, and default are final for this slice. The `append`
 parameter is removed; `overwrite` controls only whether the completed table may
 replace an existing table element.
 
+Keep semantic instance IDs and the AnnData observation-index name separate:
+
+```python
+instance_key: str = "cell_ID"
+table_index_name: str | None = None
+```
+
+`instance_key` names the label-ID column throughout point assignment,
+label-center construction and `adata.obs`. `table_index_name` names only
+`adata.obs.index`; when it is `None`, resolve it to
+`f"{instance_key}_index"`. Require an explicit table index name to be a
+non-empty string and reject collisions with `instance_key`, `region_key`, the
+auxiliary-points fraction column or generated per-class summary columns. The
+temporary merged-count checkpoint retains a fixed internal
+`_CHECKPOINT_INSTANCE_COLUMN = "instance_id"` so its canonical Parquet schema
+does not depend on user-facing AnnData names.
+
 Remove the deprecated `update_shapes_elements` parameter at the same boundary.
 Allocation constructs the requested table and does not also mutate shapes
 elements as an unrelated side effect; callers that need shape filtering should
@@ -2031,7 +2052,25 @@ counts.
 
 ## Slice 7b: out-of-core reduction and AnnData table construction
 
-**Status: specified and ready for implementation; not implemented.**
+**Status: implemented.**
+
+The implementation replaces the former driver-materializing pair reductions
+with `_aggregation_checkpoint.py` and `_aggregation_writer.py`. Phase A reduces
+assigned points locally, shuffles compact rows by aggregation pair and instance,
+merges duplicate feature counts, and writes the validated Parquet checkpoint in
+one shared computation. Phase B converts each non-empty checkpoint partition to
+full-width delayed CSR blocks and writes `X` and the optional auxiliary matrix
+through AnnData's component writer. Observation metadata and one center per
+retained labels instance remain bounded driver-resident payloads.
+
+Publication uses a hidden workspace below `tables/`, adopts the completed
+AnnData group with SpatialData's table attributes, and only then renames it to
+the requested table name. The returned same-process table uses backed
+`sparse_dataset` handles. Focused tests cover ordinary and class-aware values,
+partition-major row alignment, a single Phase A source execution, merged-count
+manifests, empty-pair and overflow rejection, Zarr v2/v3 reopening, failure
+cleanup, preservation of an existing table, and bypassing
+`SpatialData.write_element()`.
 
 Consume the lazy assigned-points dataframe established by Slice 7a and replace
 the driver-resident instance-feature reduction and sparse-matrix assembly with
@@ -2173,12 +2212,12 @@ pinned Dask/Parquet implementation; Phase B ignores either representation.
 
 The merged checkpoint has this internal schema:
 
-| Column | Dtype | Contract |
-| --- | --- | --- |
-| `aggregation_pair` | `int64` | Zero-based ordinal of the normalized labels/points/coordinate-system pair. |
-| `instance_id` | `uint64` | Positive label value; background zero is absent. |
-| `feature` | non-null UTF-8 string | Normalized value from the requested points `feature_key`. |
-| `count` | `uint64` | Merged assigned-point count for this instance and feature. |
+| Column             | Dtype                 | Contract                                                                   |
+| ------------------ | --------------------- | -------------------------------------------------------------------------- |
+| `aggregation_pair` | `int64`               | Zero-based ordinal of the normalized labels/points/coordinate-system pair. |
+| `instance_id`      | `uint64`              | Positive label value; background zero is absent.                           |
+| `feature`          | non-null UTF-8 string | Normalized value from the requested points `feature_key`.                  |
+| `count`            | `uint64`              | Merged assigned-point count for this instance and feature.                 |
 
 At the checkpoint boundary, `(aggregation_pair, instance_id, feature)` must be
 globally unique. Keep local and merged counts as `uint64`; do not cast the
@@ -2324,6 +2363,7 @@ The component writer must follow this sequence:
    `shared_auxiliary_feature_axis`; this keeps AnnData's sequential CSR append
    path well-defined and prevents independently constructed column blocks from
    drifting out of alignment.
+
 4. Concatenate the bounded checkpoint-partition `.obs` frames in manifest order
    and write the resulting one-row-per-instance pandas dataframe once. It must
    not contain the much larger per-instance-feature reductions.
@@ -2936,3 +2976,97 @@ without loading its complete matrices, passes the SpatialData table contract,
 supports normal row and feature access, and produces the same materialized
 values as `anndata.read_zarr`. Benchmark store-open time and driver memory
 independently from Slice 7b's construction benchmark.
+
+## Slice 11: optional Slice 7b latency optimization
+
+**Status: optional follow-up; not implemented.**
+
+Optimize wall-clock performance of the Slice 7b out-of-core path only where
+measurements show material overhead. Slice 7b deliberately exchanges some
+latency for bounded driver memory: it writes a durable merged-count Parquet
+checkpoint and later consumes that checkpoint to construct the AnnData
+components. On datasets whose reduced instance-feature counts would already
+fit comfortably in memory, checkpoint serialization, repeated decoding and
+Dask task scheduling can therefore make the scalable path slower than the
+former driver-materializing implementation. This is an expected trade-off, not
+by itself evidence that the count results are incorrect.
+
+Do not introduce a second in-memory implementation as the default response.
+First profile the existing generic path on representative small, medium and
+large datasets. Record wall-clock time, peak driver and worker memory, task
+count, checkpoint partition count and sizes, and bytes read and written for at
+least these phases:
+
+1. chunk-aware point-to-label assignment and local count reduction;
+2. compact-count shuffle, duplicate merge and Parquet checkpoint publication;
+3. label-derived center calculation;
+4. class-summary construction;
+5. expression-matrix construction and write;
+6. auxiliary-matrix construction and write; and
+7. staged publication and consolidated-metadata update.
+
+Compare ordinary and class-aware aggregation separately. Also record the input
+points partition count and labels chunk grid, because Slice 7a creates one
+routed points partition per labels block and Slice 7b currently carries that
+partitioning into the compact-count shuffle. A moderate number of large blocks
+may be efficient, while many tiny non-empty checkpoint parts can make Parquet,
+Dask scheduling and AnnData component-write overhead dominate.
+
+### Candidate optimizations
+
+Apply the following only in response to the measurements, in this order:
+
+1. **Reuse Phase A class summaries.** While each merged-count partition is
+   already available for its checkpoint manifest, derive its compact
+   one-row-per-instance class totals and retain those bounded summaries in the
+   manifest or a companion artifact. Phase B can then construct the `.obs`
+   class columns without rereading every Parquet part.
+2. **Decode a checkpoint partition once for both sparse matrices.** In
+   class-aware mode, expression `X` and `auxiliary_feature_counts` currently
+   trigger independent component writes. Arrange a shared Phase B computation
+   that maps one checkpoint decode to both CSR row blocks and writes both
+   components without keeping the complete matrices on the driver. Merely
+   sharing a delayed parent is insufficient if two sequential `write_elem`
+   calls recompute it; the write graphs must execute together or use another
+   public AnnData-compatible mechanism with equivalent safety.
+3. **Coalesce demonstrably tiny checkpoint partitions.** Use observed
+   checkpoint sizes rather than a fixed assumed Dask partition size. Coalescing
+   must retain complete `(aggregation_pair, instance_id)` ownership within one
+   output partition, the established partition-major row manifest and bounded
+   worker memory. Do not expose a user-facing partition-tuning parameter unless
+   benchmarks demonstrate that an automatic policy is insufficient.
+4. **Measure publication overhead independently.** Consolidated-metadata
+   updates and staged renames should not be optimized speculatively. If they
+   are material, improve them without weakening rollback or exposing the hidden
+   workspace as a SpatialData element.
+
+The preferred result is at most one checkpoint decode per non-empty partition
+during class-aware Phase B, producing its expression block, auxiliary block and
+compact class summary from the same input. It must retain the durable Phase A
+checkpoint; removing it would give up the recomputation and memory-pressure
+boundary established by Slice 7b.
+
+### Required invariants
+
+Any optimization must preserve:
+
+- one execution of the source assignment graph;
+- globally merged and unique `(aggregation_pair, instance_id, feature)` count
+  rows with checked `uint32` output conversion;
+- the exact expression and auxiliary feature axes and partition-major row
+  alignment;
+- the complete assigned-instance row universe and label-derived centers;
+- feature-panel validation and all class-aware `.obs`, `.obsm` and `.uns`
+  contracts;
+- backed sparse matrices in the same-process result;
+- Zarr v2 and v3 output, staged publication, overwrite rollback and workspace
+  cleanup; and
+- bounded driver memory without materializing the complete instance-feature
+  count relation or either complete sparse matrix.
+
+Focused performance tests should prove numerical and metadata equivalence with
+Slice 7b, verify that every checkpoint part is decoded no more than once during
+the optimized class-aware Phase B, and report timing and peak-memory results
+rather than relying on task-count reductions alone. A change should be retained
+only when it gives a reproducible improvement on at least one representative
+workload without a material regression in the large out-of-core case.

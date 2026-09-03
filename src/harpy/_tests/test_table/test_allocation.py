@@ -158,12 +158,26 @@ def test_checkpoint_partition_to_csr_aligns_the_requested_feature_axis(tmp_path)
     np.testing.assert_array_equal(matrix.toarray(), [[7, 0, 3], [0, 5, 0]])
 
 
-def test_aggregation_checkpoint_executes_each_source_partition_once(tmp_path):
-    reads: list[int] = []
+def test_aggregation_checkpoint_executes_each_input_and_merged_partition_once(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Protect the shared checkpoint graph from duplicate partition execution.
+
+    Parquet writing, partition manifests and feature discovery all consume the
+    same merged partitions. Constructing the Parquet and delayed-partition
+    branches independently previously caused each post-shuffle merge to execute
+    twice, despite submitting both branches through one ``dask.compute`` call.
+    This regression test requires one execution per assigned-points input
+    partition and one merge per checkpoint output partition, without depending
+    on Dask's internal task names.
+    """
+    input_partition_executions: list[int] = []
+    merges: list[int] = []
 
     @dask.delayed
-    def read_partition(ordinal: int) -> pd.DataFrame:
-        reads.append(ordinal)
+    def produce_assigned_partition(ordinal: int) -> pd.DataFrame:
+        input_partition_executions.append(ordinal)
         return pd.DataFrame(
             {
                 "cells": pd.Series([ordinal + 1], dtype=np.uint32),
@@ -172,7 +186,7 @@ def test_aggregation_checkpoint_executes_each_source_partition_once(tmp_path):
         )
 
     assigned = dd.from_delayed(
-        [read_partition(0), read_partition(1)],
+        [produce_assigned_partition(0), produce_assigned_partition(1)],
         meta=pd.DataFrame({"cells": pd.Series(dtype=np.uint32), "gene": pd.Series(dtype="string")}),
     )
     local = checkpoint_module._local_feature_counts(
@@ -182,6 +196,14 @@ def test_aggregation_checkpoint_executes_each_source_partition_once(tmp_path):
         feature_key="gene",
     )
 
+    original_merge = checkpoint_module._merge_count_partition
+
+    def record_merge(partition: pd.DataFrame) -> pd.DataFrame:
+        merges.append(len(partition))
+        return original_merge(partition)
+
+    monkeypatch.setattr(checkpoint_module, "_merge_count_partition", record_merge)
+
     checkpoint_module._stage_aggregation_checkpoint(
         [local],
         path=tmp_path / "counts",
@@ -189,7 +211,8 @@ def test_aggregation_checkpoint_executes_each_source_partition_once(tmp_path):
         discover_features=True,
     )
 
-    assert sorted(reads) == [0, 1]
+    assert sorted(input_partition_executions) == [0, 1]
+    assert len(merges) == local.npartitions
 
 
 def test_aggregation_checkpoint_rejects_a_pair_without_assigned_instances(tmp_path):

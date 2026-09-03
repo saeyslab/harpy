@@ -256,9 +256,11 @@ def _stage_aggregation_checkpoint(
     example shows the logical merged rows; their physical Parquet partitioning
     is determined by the Dask shuffle.
 
-    The deferred Parquet write, manifests, optional feature-axis tree reduction
-    and feature-panel diagnostics are submitted through one ``dask.compute``
-    call. Shared upstream assignment and shuffle tasks therefore execute once.
+    The merged dataframe is converted to delayed partitions once before the
+    Parquet write, manifests and optional feature-axis reduction branch from it.
+    These outputs and feature-panel diagnostics are submitted through one
+    ``dask.compute`` call, so shared assignment, shuffle and merge tasks execute
+    once.
     """
     if not partial_counts:
         raise ValueError("At least one aggregation pair is required to construct a checkpoint.")
@@ -272,10 +274,16 @@ def _stage_aggregation_checkpoint(
     routed = compact_counts.shuffle(on=[_PAIR_COLUMN, _CHECKPOINT_INSTANCE_COLUMN], ignore_index=True)
     merged = routed.map_partitions(_merge_count_partition, meta=_checkpoint_meta())
 
+    # Establish one optimized delayed-partition boundary before constructing
+    # multiple consumers. Building to_parquet() and to_delayed() independently
+    # can fuse the same merge into differently keyed tasks and execute it twice.
+    delayed_partitions = merged.to_delayed()
+    checkpoint_counts = dd.from_delayed(delayed_partitions, meta=_checkpoint_meta())
+
     def name_function(ordinal: int) -> str:
         return f"part-{ordinal:05d}.parquet"
 
-    write_task = merged.to_parquet(
+    write_task = checkpoint_counts.to_parquet(
         path,
         compute=False,
         name_function=name_function,
@@ -283,7 +291,6 @@ def _stage_aggregation_checkpoint(
         write_index=False,
         write_metadata_file=False,
     )
-    delayed_partitions = merged.to_delayed()
     manifest_tasks = tuple(
         dask.delayed(_checkpoint_partition_manifest)(
             partition,
@@ -302,9 +309,9 @@ def _stage_aggregation_checkpoint(
     error_tasks = tuple(
         dask.delayed(_first_partition_error)(*collection.to_delayed()) for _, collection in validation_errors
     )
-    # Convert dataframe expressions to delayed objects before combining them.
-    # This preserves their shared assignment/shuffle keys without asking Dask
-    # to optimize mixed expression and HighLevelGraph collections.
+    # The checkpoint consumers now share exact delayed merged-partition keys.
+    # Convert the remaining dataframe expressions before combining them so Dask
+    # need not optimize mixed expression and HighLevelGraph collections.
     computed = dask.compute(write_task.to_delayed(), manifest_tasks, feature_axis_task, error_tasks)
     _, manifests, observed_features, computed_errors = computed
 
