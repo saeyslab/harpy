@@ -282,6 +282,16 @@ def aggregate_points(
         sdata.attrs["harpy"]["points"][points_name]["feature_panel"]
             -> sdata.attrs["harpy"]["feature_panels"][feature_panel]
 
+    When ``expression_class`` is specified, Harpy validates every selected
+    points element against its referenced feature panel before spatial
+    assignment. The panel's ``feature_key`` must match the requested
+    ``feature_key``; its ``feature_class_key`` column must exist in the points,
+    be categorical, and use the panel's ordered classes. Every source point must
+    contain a non-null feature and class, its feature must occur in the panel,
+    and its class must match that feature's panel assignment. All selected
+    points elements must resolve compatible panel contracts. Panel features do
+    not need to have observed points.
+
     The referenced panel supplies ``feature_key``, ``feature_class_key``,
     ``classes``, and ``features_by_class``. Features in ``expression_class``
     define ``adata.X``. Every remaining panel feature is retained in the
@@ -297,8 +307,7 @@ def aggregate_points(
     feature remains in ``adata.var_names`` with an all-zero column in
     ``adata.X``; an unobserved auxiliary feature remains in the auxiliary
     ``feature_columns`` metadata with an all-zero auxiliary-matrix column.
-    Validation requires every observed points feature to occur in the panel, but
-    does not require every panel feature to be observed::
+    For example::
 
         panel                              resulting feature axes
         Endogenous: [GeneA, GeneZero]      adata.var_names:
@@ -315,9 +324,7 @@ def aggregate_points(
     class feature counts are the lengths of the panel's non-expression
     ``features_by_class`` lists and are recorded in
     ``adata.uns["feature_class_aggregation"]`` for later QC; no per-feature
-    rates are persisted in ``adata.obs``. Class-aware aggregation fails when
-    the panel metadata is unavailable, malformed, or incompatible across
-    selected points elements.
+    rates are persisted in ``adata.obs``.
 
     Coordinates in ``adata.obsm[spatial_key]`` are geometric centers of mass
     calculated from the paired labels rasters for the retained instance IDs.
