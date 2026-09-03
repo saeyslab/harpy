@@ -390,6 +390,38 @@ def test_aggregation_write_failure_preserves_existing_table_and_cleans_workspace
     assert not list((tmp_path / "input.zarr" / "tables").glob(".harpy-aggregate-*"))
 
 
+def test_aggregation_reopen_failure_rolls_back_published_table(monkeypatch, tmp_path):
+    sdata = _backed(_class_aware_sdata(), tmp_path)
+    sdata = aggregate_points(
+        sdata,
+        labels_name="labels_a",
+        points_name="points_a",
+        to_coordinate_system="sample_a",
+        output_table_name="table",
+    )
+    expected = sdata.tables["table"].X.to_memory()
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("injected table reopen failure")
+
+    monkeypatch.setattr(writer_module, "_read_backed_table", fail)
+    with pytest.raises(RuntimeError, match="injected table reopen failure"):
+        aggregate_points(
+            sdata,
+            labels_name="labels_a",
+            points_name="points_a",
+            to_coordinate_system="sample_a",
+            output_table_name="table",
+            overwrite=True,
+        )
+
+    assert (sdata.tables["table"].X.to_memory() != expected).nnz == 0
+    reopened = read_zarr(sdata.path)
+    assert (reopened.tables["table"].X != expected).nnz == 0
+    assert not list((tmp_path / "input.zarr" / "tables").glob(".harpy-aggregate-*"))
+    assert not list(tmp_path.glob(".input.zarr.harpy-aggregate-backup-*"))
+
+
 def test_class_aware_aggregation_uses_panel_axis_and_adds_auxiliary_summaries(tmp_path):
     sdata = _class_aware_sdata()
     output = tmp_path / "class-aware.zarr"
@@ -408,6 +440,8 @@ def test_class_aware_aggregation_uses_panel_axis_and_adds_auxiliary_summaries(tm
 
     adata = sdata.tables["table"]
     assert isinstance(adata.X, CSRDataset)
+    assert isinstance(adata.obsm[_SPATIAL], zarr.Array)
+    assert isinstance(adata.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY], list)
     assert adata.var_names.to_list() == ["GeneA", "GeneB", "GeneZero"]
     assert adata.obs[_REGION_KEY].cat.categories.to_list() == ["labels_a", "labels_b"]
     order = sorted(
