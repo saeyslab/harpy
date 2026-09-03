@@ -146,7 +146,7 @@ def _create_aggregation_workspace(destination: _AggregationDestination) -> Path:
     """
     root = zarr.open_group(store=str(destination.root), mode="r+", use_consolidated=False)
     root.require_group("tables")
-    workspace = destination.tables / f".harpy-aggregate-{uuid.uuid4()}"
+    workspace = destination.tables / f".harpy-aggregate-{uuid.uuid4().hex[:8]}"
     workspace.mkdir()
     return workspace
 
@@ -566,10 +566,11 @@ def _publish_aggregation_table(
     # Keep the rollback copy beside, rather than inside, the Zarr root. It is
     # on the same filesystem for atomic renames but cannot be discovered as a
     # table while consolidated metadata is rebuilt.
-    backup = destination.root.parent / f".{destination.root.name}.harpy-aggregate-backup-{uuid.uuid4()}"
+    backup = destination.root.parent / f".{destination.root.name}.harpy-aggregate-backup-{uuid.uuid4().hex[:8]}"
     published = False
     attached = False
     previous_table = sdata.tables.get(output_table_name)
+    log.info(f"Publishing staged AnnData table from '{staging}' to '{destination.output}'.")
     try:
         if destination.replace_existing:
             destination.output.rename(backup)
@@ -584,7 +585,7 @@ def _publish_aggregation_table(
         # No checkpoint input remains live after component writing. Remove the
         # hidden workspace before consolidating so it cannot be mistaken for a
         # SpatialData/Zarr child in consolidated metadata.
-        shutil.rmtree(workspace)
+        _remove_aggregation_workspace(workspace)
         root = zarr.open_group(store=str(destination.root), mode="r+", use_consolidated=False)
         table_group = root["tables"][output_table_name]
         obsm: dict[str, object] = {spatial_key: centers}
@@ -618,10 +619,13 @@ def _publish_aggregation_table(
         raise
     if backup.exists():
         shutil.rmtree(backup)
+    log.info(f"Finished publishing AnnData table to '{destination.output}'.")
     return sdata
 
 
 def _remove_aggregation_workspace(workspace: Path) -> None:
     """Remove only the hidden workspace owned by the current call."""
     if workspace.exists():
+        log.info(f"Removing temporary aggregation workspace at '{workspace}'.")
         shutil.rmtree(workspace)
+        log.info(f"Finished removing temporary aggregation workspace at '{workspace}'.")
