@@ -78,7 +78,7 @@ def test_aggregation_checkpoint_merges_counts_across_input_partitions(tmp_path):
         [local],
         path=tmp_path / "counts",
         pairs=(checkpoint_module._CheckpointPair(0, "labels", "points", "global", ("x", "y")),),
-        discover_features=True,
+        discover_observed_features=True,
     )
 
     result = dd.read_parquet(checkpoint.path).compute().sort_values(["instance_id", "feature"])
@@ -119,7 +119,7 @@ def test_aggregation_checkpoint_accepts_feature_key_matching_internal_instance_c
         [local],
         path=tmp_path / "counts",
         pairs=(checkpoint_module._CheckpointPair(0, "labels", "points", "global", ("x", "y")),),
-        discover_features=True,
+        discover_observed_features=True,
     )
 
     result = dd.read_parquet(checkpoint.path).compute().sort_values(["instance_id", "feature"])
@@ -207,7 +207,7 @@ def test_aggregation_checkpoint_executes_each_input_and_merged_partition_once(
         [local],
         path=tmp_path / "counts",
         pairs=(checkpoint_module._CheckpointPair(0, "labels", "points", "global", ("x", "y")),),
-        discover_features=True,
+        discover_observed_features=True,
     )
 
     assert sorted(input_partition_executions) == [0, 1]
@@ -238,7 +238,7 @@ def test_aggregation_checkpoint_rejects_a_pair_without_assigned_instances(tmp_pa
                 checkpoint_module._CheckpointPair(0, "labels", "points", "global", ("x", "y")),
                 checkpoint_module._CheckpointPair(1, "labels_empty", "points_empty", "global", ("x", "y")),
             ),
-            discover_features=True,
+            discover_observed_features=True,
         )
 
 

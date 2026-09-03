@@ -480,7 +480,7 @@ def aggregate_points(
             partial_counts,
             path=workspace / "merged_counts",
             pairs=checkpoint_pairs,
-            discover_features=contract is None,
+            discover_observed_features=contract is None,
         )
         centers_by_pair = {
             pair.ordinal: _label_centers(

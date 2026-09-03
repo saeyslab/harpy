@@ -218,7 +218,7 @@ def _stage_aggregation_checkpoint(
     *,
     path: Path,
     pairs: tuple[_CheckpointPair, ...],
-    discover_features: bool,
+    discover_observed_features: bool,
 ) -> tuple[_AggregationCheckpoint, tuple[str, ...] | None]:
     """Shuffle, merge and persist compact counts while executing assignment once.
 
@@ -274,13 +274,31 @@ def _stage_aggregation_checkpoint(
     These outputs are submitted through one ``dask.compute`` call, so shared
     assignment, shuffle and merge tasks execute once.
 
+    Parameters
+    ----------
+    partial_counts
+        Partitioned local ``(aggregation pair, instance, feature, count)``
+        reductions produced from the assigned points.
+    path
+        New directory in which to write the merged-count Parquet checkpoint.
+    pairs
+        Ordered labels/points pair descriptions represented by the counts.
+    discover_observed_features
+        Whether to discover the sorted union of features occurring in the
+        merged assigned-point counts. The caller enables this for ordinary
+        aggregation, where no feature panel defines the matrix columns. It
+        disables discovery when ``expression_class`` is specified because the
+        feature panel supplies the complete expression and auxiliary axes,
+        including unobserved features. When disabled, no feature-discovery tasks
+        are constructed and the returned ``observed_feature_axis`` is ``None``.
+
     Returns
     -------
     checkpoint
         Physical checkpoint and output-row ownership metadata.
     observed_feature_axis
         Deterministically ordered features observed in the merged assigned-point
-        counts when ``discover_features`` is true; otherwise ``None``.
+        counts when ``discover_observed_features`` is true; otherwise ``None``.
     """
     if not partial_counts:
         raise ValueError("At least one aggregation pair is required to construct a checkpoint.")
@@ -320,7 +338,7 @@ def _stage_aggregation_checkpoint(
         for ordinal, partition in enumerate(delayed_partitions)
     )
 
-    if discover_features:
+    if discover_observed_features:
         feature_tasks = [dask.delayed(_partition_features)(partition) for partition in delayed_partitions]
         observed_features_task = _tree_union(feature_tasks)
     else:
@@ -335,7 +353,7 @@ def _stage_aggregation_checkpoint(
     # Feature discovery produces an unordered set. Establish one deterministic
     # ordinary-mode matrix-column axis before returning it to the caller.
     observed_feature_axis = None if observed_features is None else tuple(sorted(observed_features))
-    if discover_features and not observed_feature_axis:
+    if discover_observed_features and not observed_feature_axis:
         raise ValueError("Ordinary aggregation produced no observed features.")
     checkpoint = _AggregationCheckpoint(
         path=path,
