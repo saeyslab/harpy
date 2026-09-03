@@ -291,6 +291,24 @@ def aggregate_points(
     receiving only non-expression points remain in the table with an all-zero
     expression row.
 
+    When ``expression_class`` is specified, matrix columns are panel-defined
+    rather than observation-derived. Every panel feature is retained even when
+    it is absent from all selected points elements. An unobserved expression
+    feature remains in ``adata.var_names`` with an all-zero column in
+    ``adata.X``; an unobserved auxiliary feature remains in the auxiliary
+    ``feature_columns`` metadata with an all-zero auxiliary-matrix column.
+    Validation requires every observed points feature to occur in the panel, but
+    does not require every panel feature to be observed::
+
+        panel                              resulting feature axes
+        Endogenous: [GeneA, GeneZero]      adata.var_names:
+          observed: GeneA                    [GeneA, GeneZero]
+          unobserved: GeneZero               GeneZero column is all zero
+
+        Negative: [Neg1, NegZero]          auxiliary feature_columns:
+          observed: Neg1                     [Neg1, NegZero]
+          unobserved: NegZero                NegZero column is all zero
+
     Every panel class is also summarized as ``n_<class>_points`` in
     ``adata.obs``, together with ``auxiliary_points_fraction``. These summaries
     are derived from the persisted expression and auxiliary matrices. Auxiliary
