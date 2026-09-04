@@ -218,6 +218,15 @@ def cosmx(
         panel_key = sdata.attrs["harpy"]["points"][points_name]["feature_panel"]
         panel = sdata.attrs["harpy"]["feature_panels"][panel_key]
 
+    The shared feature-panel record is authoritative for the complete
+    feature-to-class relation, including panel features with zero detected
+    transcripts. The points column named by ``feature_class_key`` is a
+    materialized, denormalized annotation retained for direct inspection and
+    filtering. The reader validates that column against the panel before
+    writing; it is not an independent panel definition. ``expression_class``
+    is not stored in either representation: it is selected later when
+    constructing a class-aware aggregation table.
+
     If no plex is available, transcript ingestion still succeeds and neither
     the shared panel nor its points reference is written.
 

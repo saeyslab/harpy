@@ -301,7 +301,10 @@ def aggregate_points(
     source point must contain a non-null feature and class, its feature must
     occur in the panel, and its class must match that feature's panel
     assignment. All selected points elements must resolve compatible panel
-    contracts. Panel features do not need to have observed points.
+    contracts. Panel features do not need to have observed points. The panel is
+    authoritative: the materialized points feature-class column is checked for
+    consistency, but matrix axes, feature placement and class summaries are
+    derived from the panel rather than from that column.
 
     The referenced panel supplies ``feature_key``, ``feature_class_key``,
     ``classes``, and ``features_by_class``. Features in ``expression_class``
