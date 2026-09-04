@@ -167,17 +167,10 @@ class _AggregationCheckpoint:
                 f"{missing_pairs!r}."
             )
 
-    def instance_ids(self, pair_ordinal: int) -> np.ndarray:
-        """Return sorted retained instance IDs for one aggregation pair."""
-        return np.asarray(
-            sorted(
-                instance_id
-                for partition in self.partitions
-                for candidate_pair, instance_id in partition.output_row_keys
-                if candidate_pair == pair_ordinal
-            ),
-            dtype=np.uint64,
-        )
+    @property
+    def output_row_keys(self) -> tuple[tuple[int, int], ...]:
+        """Return all ``(aggregation pair, instance)`` keys in final row order."""
+        return tuple(output_row_key for partition in self.partitions for output_row_key in partition.output_row_keys)
 
 
 def _local_feature_counts(
@@ -375,8 +368,7 @@ def _stage_aggregation_checkpoint(
     # All checkpoint consumers originate from the same ``delayed_partitions``
     # objects created above, allowing Dask to execute each merged partition once.
     log.info(
-        f"Writing intermediate aggregation counts to Parquet checkpoint at '{path}' "
-        f"({merged.npartitions} partitions)."
+        f"Writing intermediate aggregation counts to Parquet checkpoint at '{path}' ({merged.npartitions} partitions)."
     )
     computed = dask.compute(write_task.to_delayed(), manifest_tasks, observed_features_task)
     _, manifests, observed_features = computed
