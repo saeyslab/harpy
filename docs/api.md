@@ -112,6 +112,7 @@ Operations on table (`AnnData` object) elements.
     tb.add_table
     tb.aggregate_points
     tb.aggregate_image
+    tb.add_canonical_centers
     tb.bin_counts
     tb.add_regionprops
     tb.add_feature_matrix

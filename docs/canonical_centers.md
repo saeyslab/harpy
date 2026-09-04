@@ -3,8 +3,9 @@
 This page documents the stable integration contract used to exchange
 label-instance centers between Harpy and downstream packages such as
 napari-harpy. It is intended for integration authors. Most Harpy users should
-obtain canonical centers through `harpy.tb.aggregate_points` and do not need to
-call the symbols below directly.
+obtain canonical centers through `harpy.tb.aggregate_points`, or attach them to
+an existing regions table with `harpy.tb.add_canonical_centers`, and do not need
+to call the symbols below directly.
 
 Canonical centers are stored as two coordinated AnnData components:
 
