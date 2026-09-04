@@ -2,7 +2,7 @@
 
 ## Status
 
-Eleven implementation slices are planned; Slices 1 through 7b are implemented:
+Twelve implementation slices are planned; Slices 1 through 8 are implemented:
 
 1. patch the CosMx reader and establish the generic Harpy feature-panel
    metadata contract — implemented;
@@ -17,11 +17,12 @@ Eleven implementation slices are planned; Slices 1 through 7b are implemented:
 7. optimize the generic point-to-label assignment, reduction and backed table
    construction path;
 8. promote napari-harpy's canonical-center implementation into Harpy and
-   integrate it with `hp.tb.aggregate_points`;
-9. add QC functions that summarize the original, unallocated control points;
-10. support general lazy reopening of persisted AnnData tables through
+   integrate it with `hp.tb.aggregate_points` — implemented;
+9. add canonical centers to compatible existing SpatialData tables;
+10. add QC functions that summarize the original, unallocated control points;
+11. support general lazy reopening of persisted AnnData tables through
     SpatialData; and
-11. optionally optimize Slice 7b's latency after phase-level benchmarks identify
+12. optionally optimize Slice 7b's latency after phase-level benchmarks identify
     material checkpoint or writer overhead.
 
 Slice 2 replaces the current single-run reader surface with one coherent,
@@ -42,13 +43,16 @@ Slice 8 establishes a Harpy-owned canonical-center calculation and metadata
 contract that napari-harpy can consume without a reverse dependency. Newly
 aggregated 2D and 3D tables receive canonical centers through the same contract;
 the 2D case is immediately usable by canonical-center spatial queries, while
-the annotation-query boundary explicitly rejects 3D sources. Slice 9's
+the annotation-query boundary explicitly rejects 3D sources. Slice 9 provides
+the same contract for compatible tables created outside `aggregate_points`
+without making canonical-center attachment a required post-processing step for
+new aggregation tables. Slice 10's
 original-point summaries depend on the reader metadata from Slices 1–4 rather
 than aggregation or labels; its optional per-instance plotting view derives
-temporary rates from the class-aware table. Slice 10 is an independent
+temporary rates from the class-aware table. Slice 11 is an independent
 integration follow-up that makes later SpatialData Zarr reads retain lazy
 AnnData matrices. It is not required for Slice 7b's out-of-core writing or
-same-process result. Slice 11 is an
+same-process result. Slice 12 is an
 optional, benchmark-driven follow-up: it may reduce repeated checkpoint reads
 and small-partition overhead, but must preserve Slice 7b's bounded-memory and
 publication contracts.
@@ -222,7 +226,7 @@ ordering is deterministic rather than a claim of biological precedence.
 
 Slice 5 uses the complete relation to resolve its shared expression axis and
 feature classes, and retains each non-expression feature-list length as a
-table-local auxiliary-class feature-count snapshot for later QC. Slice 9 additionally uses the
+table-local auxiliary-class feature-count snapshot for later QC. Slice 10 additionally uses the
 actual control-feature names. A categorical transcript column
 contains only categories represented by the ingested points and cannot, by
 itself, preserve the feature-to-class relationship for a panel feature with no
@@ -1020,7 +1024,7 @@ allocation has no caller-supplied denominator fallback or override.
 The point-to-label lookup is performed once per labels/points pair, carrying
 both the feature and feature-class columns through the assignment. It is never
 repeated once per class. Auxiliary points outside every instance are deliberately
-excluded from these cell-level summaries; Slice 9 operates directly on the
+excluded from these cell-level summaries; Slice 10 operates directly on the
 original points to provide spatial background QC.
 
 When `expression_class` is omitted, the same multi-region API follows the
@@ -1306,7 +1310,7 @@ auxiliary_points_fraction =
 Do not persist `negative_points_per_feature` or
 `system_control_points_per_feature` in `.obs`. They are deterministic rescalings
 of the raw class counts by the panel feature counts and add no independent table
-information. Slice 9 QC plotting derives them on demand from the raw count
+information. Slice 10 QC plotting derives them on demand from the raw count
 columns and the table-local auxiliary-class feature-count snapshot.
 
 ### Table-local metadata contract
@@ -1429,12 +1433,12 @@ column. No auxiliary class produces a persisted per-feature rate. Validate the
 complete multi-region request and shared
 `feature_class_aggregation` configuration before writing the output table.
 
-### Boundary with Slice 9
+### Boundary with Slice 10
 
 The `.obs` summaries describe only auxiliary points that land inside an instance
 mask. For CosMx these auxiliary classes are controls, making the summaries
 suitable for cell-level histograms and violin plots of the raw class counts and
-`auxiliary_points_fraction`. Slice 9 may additionally derive the
+`auxiliary_points_fraction`. Slice 10 may additionally derive the
 following per-instance plotting metrics on demand:
 
 ```text
@@ -1750,7 +1754,7 @@ instance has no feature from one axis.
 The current implementation computes all per-feature counts before discarding
 the non-expression columns. This slice therefore changes output assembly and
 row selection, not spatial assignment. The source points remain unchanged and
-continue to support Slice 9 QC for unassigned and outside-mask controls.
+continue to support Slice 10 QC for unassigned and outside-mask controls.
 
 ### Verification
 
@@ -2656,7 +2660,13 @@ criterion.
 
 ## Slice 8: Harpy-owned canonical centers and `aggregate_points` integration
 
-**Status: specified; not implemented.**
+**Status: implemented.**
+
+The Harpy-owned implementation was ported against napari-harpy main commit
+`698a51dd54d80cf5707aa625f5c353cd24ff2dd7`. Migrating napari-harpy's imports
+and annotation-query boundary to consume this public Harpy package is a
+coordinated downstream change in that repository; it does not block completion
+of the Harpy package and `aggregate_points` integration described here.
 
 Promote the viewer-independent canonical-center calculation, typed contracts,
 storage schema and validation from napari-harpy into Harpy, then integrate that
@@ -2931,12 +2941,133 @@ Focused tests should establish that:
 - napari-harpy recognizes that 3D payload structurally but rejects it at the
   annotation-query boundary with a clear dimensionality error.
 
-## Slice 9: original-point control QC
+## Slice 9: canonical centers for existing SpatialData tables
+
+**Status: follow-up; not implemented.**
+
+Add a high-level operation that attaches the canonical-center contract from
+Slice 8 to a compatible table created outside `hp.tb.aggregate_points`. This is
+a complementary entry point, not a replacement for constructing canonical
+centers inside `aggregate_points`: newly aggregated tables must continue to be
+published with their canonical payload already present and valid.
+
+The public API should be:
+
+```python
+hp.tb.add_canonical_centers(
+    sdata,
+    table_name="table",
+    labels_name=None,
+    overwrite=False,
+)
+```
+
+with the corresponding parameter contract:
+
+```python
+table_name: str
+labels_name: str | Sequence[str] | None = None
+overwrite: bool = False
+```
+
+`labels_name=None` derives all source labels names from the SpatialData table
+annotation. An explicit string or sequence is an assertion about those source
+regions and must resolve to the complete set registered by the table; it does
+not define a partial output or change table-row order. Reject duplicate,
+missing, additional or non-label elements. The first implementation supports
+2D and 3D labels sources only. Shapes or other instance representations remain
+outside its scope.
+
+### Table-bound calculation
+
+Canonical centers are table-aligned label-instance centers rather than an
+unqualified list of every centroid in a labels raster. The operation must
+therefore require a valid SpatialData table annotation and derive:
+
+- `region_key` and `instance_key` from `TableModel` metadata;
+- the registered labels region for each observation;
+- the exact positive instance IDs retained by the table; and
+- the final row positions to which each region's centers belong.
+
+Use the public `harpy.table.canonical_centers` models, schema and calculation
+from Slice 8. Calculate only the instance IDs represented by table rows, retain
+the exact table order, and persist intrinsic `scale0` coordinates in fixed
+`(z, y, x)` order. A 2D source receives `z=0`; a 3D source keeps its measured
+`z` center. No points element is needed, and no point-to-label assignment is
+performed.
+
+The existing pure
+`hp.tb.canonical_centers.calculate_canonical_centers()` function remains the
+non-mutating calculation primitive for an established region binding. Do not
+introduce a second numerical center-of-mass implementation or make callers
+construct low-level cache reports for the high-level add operation.
+
+### Metadata and collision contract
+
+Write exactly the same two coordinated components as `aggregate_points`:
+
+```text
+adata.obsm["spatial_canonical"]
+adata.uns["spatial_coordinates"]["spatial_canonical"]
+```
+
+Treat `adata.uns["spatial_coordinates"]` as a registry. Preserve any unrelated
+records already stored beneath it; the relevant collision is the nested
+`"spatial_canonical"` record, not the registry key itself. Likewise, preserve
+all unrelated `.obsm`, `.uns`, `.obs`, `.var`, `.layers` and `X` content.
+
+When either canonical component already exists, `overwrite=False` must raise a
+clear collision or incomplete-payload error without changing the table. With
+`overwrite=True`, recalculate and replace both canonical components together,
+including when the previous payload is stale or asymmetric. Never retain a new
+matrix with old metadata, or new metadata with an old matrix.
+
+Validate the source table and labels bindings before calculation, then validate
+the complete newly constructed payload with the shared Slice 8 validator before
+publication. The persisted result must cover every annotated table row and
+region. A missing label ID, unsupported labels layout, non-integer labels
+dtype, invalid table identity, non-finite center or source-signature mismatch
+must fail without publishing a partial update.
+
+### Backed publication
+
+Initially require a SpatialData object backed by a writable local Zarr store,
+matching the bounded-memory publication boundary of `aggregate_points`. Update
+the canonical matrix and registry through a staged component replacement with
+rollback across both coordinated writes. Do not rewrite or materialize the
+table's expression and auxiliary matrices merely to add the small dense center
+matrix and metadata record. On success, refresh the in-memory table handles and
+consolidated SpatialData metadata; on failure, restore the previous canonical
+components when they existed.
+
+### Verification
+
+Focused tests should establish that:
+
+- a valid externally created single-region table receives the same canonical
+  matrix and metadata as an equivalent `aggregate_points` table;
+- a multi-region table remains aligned when local instance IDs overlap;
+- `labels_name=None` derives all annotated labels regions and an explicit
+  mismatching selection is rejected before calculation;
+- only table-retained instance IDs are calculated and every table row receives
+  exactly one center;
+- 2D and 3D labels use the shared schema-v1 dimensional contract;
+- unrelated `spatial_coordinates` registry entries and all other AnnData
+  components survive the operation unchanged;
+- collision, stale and asymmetric payload cases obey `overwrite` exactly;
+- a failed calculation, validation or component write leaves the prior table
+  and canonical payload intact;
+- the result passes `hp.tb.validate_table()` and survives an AnnData and
+  SpatialData Zarr round trip; and
+- `aggregate_points` continues to create canonical centers directly without
+  requiring this follow-up API call.
+
+## Slice 10: original-point control QC
 
 **Status: specified; not implemented.**
 
 Add separate lightweight QC functions over the original transcript points.
-This slice is scheduled after Slice 8, but its runtime contract depends only on
+This slice is scheduled after Slice 9, but its runtime contract depends only on
 the points and feature-panel metadata from Slice 1 and the sample-aware point
 metadata from Slices 2–4. The original-point summaries may run before or after
 aggregation and do not depend on an instance-label raster or an AnnData table.
@@ -3054,7 +3185,7 @@ Focused tests should establish that:
 - sample and mosaic coordinate systems remain independent; and
 - the implementation stays lazy until the compact summaries are computed.
 
-## Slice 10: lazy SpatialData table reopening
+## Slice 11: lazy SpatialData table reopening
 
 **Status: follow-up; not implemented.**
 
@@ -3079,7 +3210,7 @@ supports normal row and feature access, and produces the same materialized
 values as `anndata.read_zarr`. Benchmark store-open time and driver memory
 independently from Slice 7b's construction benchmark.
 
-## Slice 11: optional Slice 7b latency optimization
+## Slice 12: optional Slice 7b latency optimization
 
 **Status: optional follow-up; not implemented.**
 
