@@ -1,3 +1,4 @@
+from . import canonical_centers
 from ._add_feature_matrix import add_feature_matrix
 from ._allocation import aggregate_points, allocate, bin_counts
 from ._allocation_intensity import aggregate_image, allocate_intensity
@@ -20,6 +21,7 @@ from .pixel_clustering._cluster_intensity import cluster_intensity_SOM
 from .pixel_clustering._neighbors import spatial_pixel_neighbors
 
 __all__ = [
+    "canonical_centers",
     "add_table",
     "correct_marker_genes",
     "extract_instances",

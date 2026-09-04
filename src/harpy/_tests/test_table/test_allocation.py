@@ -20,6 +20,7 @@ import harpy.table._aggregation_writer as writer_module
 import harpy.table._allocation as aggregation_module
 from harpy.table import validate_table
 from harpy.table._allocation import aggregate_points, bin_counts
+from harpy.table.canonical_centers import CANONICAL_OBSM_KEY, SPATIAL_COORDINATES_KEY
 from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY, _SPATIAL
 
 _PANEL = {
@@ -440,7 +441,8 @@ def test_class_aware_aggregation_uses_panel_axis_and_adds_auxiliary_summaries(tm
 
     adata = sdata.tables["table"]
     assert isinstance(adata.X, CSRDataset)
-    assert isinstance(adata.obsm[_SPATIAL], zarr.Array)
+    assert isinstance(adata.obsm[CANONICAL_OBSM_KEY], zarr.Array)
+    assert _SPATIAL not in adata.obsm
     assert isinstance(adata.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY], list)
     assert adata.var_names.to_list() == ["GeneA", "GeneB", "GeneZero"]
     assert adata.obs[_REGION_KEY].cat.categories.to_list() == ["labels_a", "labels_b"]
@@ -461,9 +463,13 @@ def test_class_aware_aggregation_uses_panel_axis_and_adds_auxiliary_summaries(tm
     assert np.array_equal(np.asarray(expression.sum(axis=1)).ravel(), obs["n_endogenous_points"])
     assert not {"negative_points_per_feature", "system_control_points_per_feature"} & set(adata.obs)
     assert np.allclose(
-        adata.obsm[_SPATIAL][order],
-        [[0.5, 0.5], [3.5, 0.5], [0.5, 2.0], [0.5, 0.5]],
+        adata.obsm[CANONICAL_OBSM_KEY][order],
+        [[0.0, 0.5, 0.5], [0.0, 0.5, 3.5], [0.0, 2.0, 0.5], [0.0, 0.5, 0.5]],
     )
+    assert set(adata.uns[SPATIAL_COORDINATES_KEY][CANONICAL_OBSM_KEY]["regions"]) == {
+        "labels_a",
+        "labels_b",
+    }
 
     auxiliary = adata.obsm["auxiliary_feature_counts"]
     assert isinstance(auxiliary, CSRDataset)
@@ -589,7 +595,11 @@ def test_ordinary_aggregation_uses_label_centers_without_class_metadata(tmp_path
     adata = result.tables["table"]
     order = np.argsort(adata.obs[_INSTANCE_KEY].to_numpy())
     assert adata.obs[_INSTANCE_KEY].iloc[order].to_list() == [1, 2, 3]
-    assert np.allclose(adata.obsm[_SPATIAL][order], [[0.5, 0.5], [3.5, 0.5], [0.5, 2.0]])
+    assert np.allclose(
+        adata.obsm[CANONICAL_OBSM_KEY][order],
+        [[0.0, 0.5, 0.5], [0.0, 0.5, 3.5], [0.0, 2.0, 0.5]],
+    )
+    assert _SPATIAL not in adata.obsm
     assert "auxiliary_feature_counts" not in adata.obsm
     assert "feature_class_aggregation" not in adata.uns
     assert "feature_matrices" not in adata.uns
@@ -710,10 +720,10 @@ def test_aggregate_points_uses_irregular_label_center_instead_of_point_position(
         output_table_name="table",
     )
 
-    assert np.allclose(result.tables["table"].obsm[_SPATIAL], [[1 / 3, 1 / 3]])
+    assert np.allclose(result.tables["table"].obsm[CANONICAL_OBSM_KEY], [[0.0, 1 / 3, 1 / 3]])
 
 
-def test_label_centers_apply_pair_translation(tmp_path):
+def test_canonical_centers_remain_intrinsic_under_pair_translation(tmp_path):
     sdata = _class_aware_sdata()
     labels = sdata.labels["labels_a"]
     sdata.labels["labels_a"] = Labels2DModel.parse(
@@ -739,7 +749,10 @@ def test_label_centers_apply_pair_translation(tmp_path):
         expression_class="Endogenous",
     )
 
-    assert np.allclose(result.tables["table"].obsm[_SPATIAL], [[10.5, 20.5], [13.5, 20.5], [10.5, 22.0]])
+    assert np.allclose(
+        result.tables["table"].obsm[CANONICAL_OBSM_KEY],
+        [[0.0, 0.5, 0.5], [0.0, 0.5, 3.5], [0.0, 2.0, 0.5]],
+    )
 
 
 def test_aggregate_points_uses_xyz_label_center_order(tmp_path):
@@ -762,7 +775,14 @@ def test_aggregate_points_uses_xyz_label_center_order(tmp_path):
         output_table_name="table",
     )
 
-    assert np.allclose(result.tables["table"].obsm[_SPATIAL], [[0.5, 0.5, 0.5]])
+    table = result.tables["table"]
+    assert np.allclose(table.obsm[CANONICAL_OBSM_KEY], [[0.5, 0.5, 0.5]])
+    assert tuple(table.uns[SPATIAL_COORDINATES_KEY][CANONICAL_OBSM_KEY]["regions"]["labels"]["source"]["dims"]) == (
+        "z",
+        "y",
+        "x",
+    )
+    validate_table(result, "table")
 
 
 def test_assign_points_to_labels_routes_once_across_irregular_chunks():

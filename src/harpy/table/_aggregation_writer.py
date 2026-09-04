@@ -36,6 +36,16 @@ from harpy.table._metadata import (
     _FEATURE_MATRIX_SCHEMA_VERSION,
 )
 from harpy.table._zarr import _read_backed_table, _write_spatialdata_table_attrs
+from harpy.table.canonical_centers import (
+    CANONICAL_ALGORITHM_VERSION,
+    CANONICAL_OBSM_KEY,
+    SPATIAL_COORDINATES_KEY,
+    CanonicalCacheUpdatePayload,
+    CanonicalRegionMetadata,
+    build_canonical_metadata,
+    canonical_metadata_to_storage,
+    validate_canonical_payload,
+)
 from harpy.utils._keys import _FEATURE_MATRICES_KEY
 
 
@@ -160,12 +170,11 @@ def _write_aggregation_table(
     workspace: Path,
     checkpoint: _AggregationCheckpoint,
     expression_axis: tuple[str, ...],
-    centers_by_pair: Mapping[int, pd.DataFrame],
+    canonical_payloads_by_pair: Mapping[int, CanonicalCacheUpdatePayload],
     output_table_name: str,
     feature_key: str,
     region_key: str,
     instance_key: str,
-    spatial_key: str,
     table_index_name: str,
     class_contract: _FeatureClassWriteContract | None,
 ) -> SpatialData:
@@ -181,9 +190,7 @@ def _write_aggregation_table(
         raise ValueError("Aggregation produced no expression features.")
     auxiliary_axis = () if class_contract is None else class_contract.auxiliary_feature_axis
 
-    output_row_keys = tuple(
-        output_row_key for partition in checkpoint.partitions for output_row_key in partition.output_row_keys
-    )
+    output_row_keys = checkpoint.output_row_keys
     # Class-aware construction currently scans each checkpoint Parquet part
     # three times: once for the ``.obs`` class summaries and once for each sparse
     # output (``.X`` and ``.obsm["auxiliary_feature_counts"]``). Separate passes
@@ -199,10 +206,12 @@ def _write_aggregation_table(
         class_contract=class_contract,
     )
     log.info(f"Finished constructing AnnData '.obs' for table '{output_table_name}'.")
-    centers = _aligned_centers(
+    canonical_centers, canonical_metadata = _canonical_table_payload(
         checkpoint,
         output_row_keys=output_row_keys,
-        centers_by_pair=centers_by_pair,
+        payloads_by_pair=canonical_payloads_by_pair,
+        region_key=region_key,
+        instance_key=instance_key,
     )
     var = pd.DataFrame(index=pd.Index(expression_axis, name=feature_key))
     uns = _aggregation_uns(
@@ -210,25 +219,26 @@ def _write_aggregation_table(
         class_contract=class_contract,
         auxiliary_axis=auxiliary_axis,
     )
+    uns[SPATIAL_COORDINATES_KEY] = {CANONICAL_OBSM_KEY: canonical_metadata}
 
     # The workspace already contains ``merged_counts``. Open it in append mode
     # so initializing the AnnData group cannot erase that durable checkpoint
     # before the delayed CSR readers consume it.
     staging_root = zarr.open_group(store=str(workspace), mode="a", zarr_format=destination.zarr_format)
     table = TableModel.parse(
-        AnnData(X=None, obs=obs, var=var, uns=uns, obsm={spatial_key: centers}),
+        AnnData(X=None, obs=obs, var=var, uns=uns, obsm={CANONICAL_OBSM_KEY: canonical_centers}),
         region_key=region_key,
         region=[pair.labels_name for pair in checkpoint.pairs],
         instance_key=instance_key,
     )
     staging_table_path = workspace / "table"
     log.info(
-        f"Writing AnnData '.obs', '.var', '.uns' and '.obsm[{spatial_key}]' to staged table at "
+        f"Writing AnnData '.obs', '.var', '.uns' and '.obsm[{CANONICAL_OBSM_KEY}]' to staged table at "
         f"'{staging_table_path}'."
     )
     write_elem(staging_root, "table", table)
     log.info(
-        f"Finished writing AnnData '.obs', '.var', '.uns' and '.obsm[{spatial_key}]' to staged table at "
+        f"Finished writing AnnData '.obs', '.var', '.uns' and '.obsm[{CANONICAL_OBSM_KEY}]' to staged table at "
         f"'{staging_table_path}'."
     )
     staging_group = staging_root["table"]
@@ -249,13 +259,10 @@ def _write_aggregation_table(
             feature_axis=auxiliary_axis,
         )
         auxiliary_path = staging_table_path / "obsm" / _AUXILIARY_FEATURE_MATRIX_KEY
-        log.info(
-            f"Writing AnnData '.obsm[{_AUXILIARY_FEATURE_MATRIX_KEY}]' to staged table at '{auxiliary_path}'."
-        )
+        log.info(f"Writing AnnData '.obsm[{_AUXILIARY_FEATURE_MATRIX_KEY}]' to staged table at '{auxiliary_path}'.")
         write_elem(staging_group["obsm"], _AUXILIARY_FEATURE_MATRIX_KEY, auxiliary)
         log.info(
-            f"Finished writing AnnData '.obsm[{_AUXILIARY_FEATURE_MATRIX_KEY}]' to staged table at "
-            f"'{auxiliary_path}'."
+            f"Finished writing AnnData '.obsm[{_AUXILIARY_FEATURE_MATRIX_KEY}]' to staged table at '{auxiliary_path}'."
         )
 
     _validate_staged_table(
@@ -263,6 +270,18 @@ def _write_aggregation_table(
         n_obs=len(output_row_keys),
         n_vars=len(expression_axis),
         n_auxiliary=len(auxiliary_axis) if class_contract is not None else None,
+    )
+    staged_table = _read_backed_table(staging_group)
+    # Validate the reopened serialized payload before publication, so the Zarr
+    # representation must satisfy the same canonical contract as the in-memory
+    # construction rather than relying only on construction-time checks.
+    validate_canonical_payload(
+        sdata,
+        staged_table,
+        table_name=output_table_name,
+        region_key=region_key,
+        instance_key=instance_key,
+        regions=[pair.labels_name for pair in checkpoint.pairs],
     )
     _write_spatialdata_table_attrs(
         staging_group,
@@ -272,7 +291,7 @@ def _write_aggregation_table(
     )
     # The final in-memory table is reconstructed from the serialized group so
     # disk, rather than these construction objects, is the source of truth.
-    del table, obs, var, uns, centers
+    del table, staged_table, obs, var, uns, canonical_centers, canonical_metadata
     return _install_aggregation_table(
         sdata,
         destination=destination,
@@ -319,9 +338,7 @@ def _checkpoint_partition_to_csr(
         partition.path,
         columns=[_PAIR_COLUMN, _CHECKPOINT_INSTANCE_COLUMN, _FEATURE_COLUMN, _COUNT_COLUMN],
     )
-    row_by_output_row_key = {
-        output_row_key: row for row, output_row_key in enumerate(partition.output_row_keys)
-    }
+    row_by_output_row_key = {output_row_key: row for row, output_row_key in enumerate(partition.output_row_keys)}
     column_by_feature = {feature: column for column, feature in enumerate(feature_axis)}
 
     rows = np.fromiter(
@@ -440,42 +457,53 @@ def _checkpoint_partition_class_counts(
     return values.astype(np.uint64, copy=False)
 
 
-def _aligned_centers(
+def _canonical_table_payload(
     checkpoint: _AggregationCheckpoint,
     *,
     output_row_keys: tuple[tuple[int, int], ...],
-    centers_by_pair: Mapping[int, pd.DataFrame],
-) -> np.ndarray:
-    coordinate_columns = checkpoint.pairs[0].coordinate_columns
-    if any(pair.coordinate_columns != coordinate_columns for pair in checkpoint.pairs[1:]):
-        raise ValueError("All aggregation pairs must use the same coordinate dimensions.")
-    indexed_centers: list[pd.DataFrame] = []
-    for pair in checkpoint.pairs:
-        try:
-            centers = centers_by_pair[pair.ordinal].loc[:, list(coordinate_columns)].copy()
-        except KeyError as exc:
-            raise ValueError(f"Centers are missing for aggregation pair {pair.ordinal}.") from exc
-        if not centers.index.is_unique:
-            raise ValueError(f"Labels element {pair.labels_name!r} produced duplicate center instance IDs.")
-        centers.index = pd.MultiIndex.from_arrays(
-            [np.full(len(centers), pair.ordinal, dtype=np.int64), centers.index.to_numpy()],
-            names=[_PAIR_COLUMN, _CHECKPOINT_INSTANCE_COLUMN],
-        )
-        indexed_centers.append(centers)
+    payloads_by_pair: Mapping[int, CanonicalCacheUpdatePayload],
+    region_key: str,
+    instance_key: str,
+) -> tuple[np.ndarray, dict[str, object]]:
+    """Align region payloads to table rows and serialize their shared metadata."""
+    expected_ordinals = {pair.ordinal for pair in checkpoint.pairs}
+    if set(payloads_by_pair) != expected_ordinals:
+        raise ValueError("Canonical center payloads must cover every aggregation pair exactly once.")
 
-    requested = pd.MultiIndex.from_tuples(output_row_keys, names=[_PAIR_COLUMN, _CHECKPOINT_INSTANCE_COLUMN])
-    aligned = pd.concat(indexed_centers).reindex(requested)
-    if aligned.isna().any(axis=None):
-        missing = requested[aligned.isna().any(axis=1)][0]
-        pair_ordinal, instance_id = missing
-        raise ValueError(
-            f"Label centers of mass are missing for retained instance {instance_id} in "
-            f"{checkpoint.pairs[pair_ordinal].labels_name!r}."
+    centers = np.full((len(output_row_keys), 3), np.nan, dtype=np.float64)
+    regions: dict[str, CanonicalRegionMetadata] = {}
+    for pair in checkpoint.pairs:
+        payload = payloads_by_pair[pair.ordinal]
+        binding = payload.binding
+        expected_positions = np.asarray(
+            [row for row, (pair_ordinal, _) in enumerate(output_row_keys) if pair_ordinal == pair.ordinal],
+            dtype=np.intp,
         )
-    result = aligned.to_numpy(dtype=np.float64, copy=False)
-    if not np.isfinite(result).all():
-        raise ValueError("Label centers of mass must be finite for every retained instance.")
-    return result
+        expected_ids = np.asarray([output_row_keys[row][1] for row in expected_positions], dtype=np.uint64)
+        if (
+            binding.labels_name != pair.labels_name
+            or binding.region_key != region_key
+            or binding.instance_key != instance_key
+            or not np.array_equal(binding.row_positions, expected_positions)
+            or not np.array_equal(binding.instance_ids, expected_ids)
+        ):
+            raise ValueError(f"Canonical center binding for aggregation pair {pair.ordinal} is not row-aligned.")
+        centers[binding.row_positions] = payload.centers
+        regions[pair.labels_name] = CanonicalRegionMetadata(
+            source_signature=payload.source_signature,
+            n_obs=binding.n_obs,
+            instance_set_digest=binding.instance_set_digest,
+            algorithm_version=CANONICAL_ALGORITHM_VERSION,
+        )
+    if not np.isfinite(centers).all():
+        raise ValueError("Canonical centers must cover every retained aggregation row with finite coordinates.")
+
+    metadata = build_canonical_metadata(
+        region_key=region_key,
+        instance_key=instance_key,
+        regions=regions,
+    )
+    return centers, canonical_metadata_to_storage(metadata)
 
 
 def _aggregation_uns(

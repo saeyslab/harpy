@@ -61,7 +61,6 @@ from dataclasses import dataclass
 
 import anndata as ad
 import dask
-import dask.array as da
 import dask.dataframe as dd
 import numpy as np
 import pandas as pd
@@ -84,6 +83,7 @@ from harpy._metadata import (
 )
 from harpy.image._image import _get_spatial_element, _get_translation
 from harpy.table._aggregation_checkpoint import (
+    _AggregationCheckpoint,
     _CheckpointPair,
     _local_feature_counts,
     _stage_aggregation_checkpoint,
@@ -100,7 +100,13 @@ from harpy.table._metadata import (
 )
 from harpy.table._table import add_table
 from harpy.table._utils import _sanity_check_append_region
-from harpy.utils._aggregate import RasterAggregator
+from harpy.table.canonical_centers import (
+    CanonicalCacheReport,
+    CanonicalCacheUpdatePayload,
+    CanonicalRegionBinding,
+    build_canonical_source_signature,
+    calculate_canonical_centers,
+)
 from harpy.utils._keys import _CELL_INDEX, _GENES_KEY, _INSTANCE_KEY, _REGION_KEY, _SPATIAL
 from harpy.utils._transformations import _identity_check_transformations_points
 from harpy.utils.utils import _make_list
@@ -269,7 +275,6 @@ def aggregate_points(
     expression_class: str | None = None,
     region_key: str = _REGION_KEY,
     instance_key: str = _INSTANCE_KEY,
-    spatial_key: str = _SPATIAL,
     table_index_name: str | None = None,
     overwrite: bool = False,
 ) -> SpatialData:
@@ -350,10 +355,13 @@ def aggregate_points(
     ``adata.uns["feature_class_aggregation"]`` for later QC; no per-feature
     rates are persisted in ``adata.obs``.
 
-    Coordinates in ``adata.obsm[spatial_key]`` are geometric centers of mass
-    calculated from the paired labels rasters for the retained instance IDs.
-    This definition is used in both ordinary and class-aware modes and does not
-    depend on point positions or feature classes.
+    Both modes store exactly one canonical center matrix at
+    ``adata.obsm["spatial_canonical"]``. Its dense ``float64`` columns are
+    always ordered ``(z, y, x)`` and contain geometric centers of mass for the
+    retained instance IDs in each source labels element's intrinsic ``scale0``
+    pixel frame. A 2D labels source uses ``z=0``. Per-region source and coverage
+    metadata is stored under
+    ``adata.uns["spatial_coordinates"]["spatial_canonical"]``.
 
     This operation requires ``sdata`` to be backed by a writable local Zarr
     store. Aggregation remains partitioned and the final sparse matrices are
@@ -400,9 +408,6 @@ def aggregate_points(
         ``feature_class_key``.
     region_key
         Categorical column in ``adata.obs`` holding labels-element names.
-    spatial_key
-        Key in ``adata.obsm`` holding segmentation-label centers of mass in the
-        selected coordinate systems.
     table_index_name
         Name of the resulting ``adata.obs`` index. If ``None``, defaults to
         ``f"{instance_key}_index"``. It must not collide with an ``adata.obs``
@@ -508,16 +513,13 @@ def aggregate_points(
             pairs=checkpoint_pairs,
             discover_observed_features=contract is None,
         )
-        centers_by_pair = {
-            pair.ordinal: _label_centers(
-                sdata,
-                pair=pairs[pair.ordinal],
-                instance_ids=checkpoint.instance_ids(pair.ordinal),
-                coordinate_columns=pair.coordinate_columns,
-                instance_key=instance_key,
-            )
-            for pair in checkpoint.pairs
-        }
+        canonical_payloads_by_pair = _canonical_center_payloads(
+            sdata,
+            checkpoint=checkpoint,
+            output_table_name=output_table_name,
+            region_key=region_key,
+            instance_key=instance_key,
+        )
         class_write_contract = None
         if contract is None:
             if observed_feature_axis is None:
@@ -539,12 +541,11 @@ def aggregate_points(
             workspace=workspace,
             checkpoint=checkpoint,
             expression_axis=expression_axis,
-            centers_by_pair=centers_by_pair,
+            canonical_payloads_by_pair=canonical_payloads_by_pair,
             output_table_name=output_table_name,
             feature_key=feature_key,
             region_key=region_key,
             instance_key=instance_key,
-            spatial_key=spatial_key,
             table_index_name=table_index_name,
             class_contract=class_write_contract,
         )
@@ -819,77 +820,69 @@ def _snake_case(value: str) -> str:
     return value
 
 
-def _label_centers(
+def _canonical_center_payloads(
     sdata: SpatialData,
     *,
-    pair: _AggregationPair,
-    instance_ids: np.ndarray,
-    coordinate_columns: tuple[str, ...],
+    checkpoint: _AggregationCheckpoint,
+    output_table_name: str,
+    region_key: str,
     instance_key: str,
-) -> pd.DataFrame:
-    """Calculate indexed label centers in the pair's coordinate system.
+) -> dict[int, CanonicalCacheUpdatePayload]:
+    """Calculate one intrinsic canonical-center payload per aggregation pair.
 
-    The labels raster is normalized to ``(z, y, x)`` for
-    :class:`~harpy.utils.RasterAggregator`. Only ``instance_ids`` are reduced.
-    Its local ``(z, y, x)`` results are translated in ``x`` and ``y``, reordered
-    to SpatialData coordinate order, and indexed explicitly so table assembly
-    never relies on raster traversal order.
+    Bindings use the checkpoint's final output-row positions and instance IDs,
+    so their coverage metadata describes the table that will be written rather
+    than the order in which labels happen to be traversed.
 
     Parameters
     ----------
     sdata
-        SpatialData object containing the labels element.
-    pair
-        Labels element and target coordinate system for this aggregation pair.
-    instance_ids
-        Sorted nonzero label IDs receiving at least one assigned point.
-    coordinate_columns
-        Output order, either ``("x", "y")`` or ``("x", "y", "z")``.
+        SpatialData object containing the source labels elements.
+    checkpoint
+        Merged counts and final row ownership for every aggregation pair.
+    output_table_name
+        Name of the table being constructed.
+    region_key
+        Observation column containing labels-region names.
     instance_key
-        Name used for the returned instance-ID index.
+        Observation column containing labels instance IDs.
 
     Returns
     -------
-    pandas.DataFrame
-        One finite center-of-mass coordinate row per requested instance ID.
+    Mapping from aggregation-pair ordinal to an immutable center payload in
+    intrinsic ``(z, y, x)`` coordinates.
     """
-    if instance_ids.size == 0:
-        return pd.DataFrame(
-            index=pd.Index(instance_ids, name=instance_key),
-            columns=coordinate_columns,
-            dtype=np.float64,
-        )
-
-    labels = _get_spatial_element(sdata, element_name=pair.labels_name)
-    label_dims = tuple(labels.dims)
-    mask = da.asarray(labels.data)
-    if label_dims == ("y", "x"):
-        mask = mask[None, ...]
-    elif label_dims != ("z", "y", "x"):
-        raise ValueError(
-            f"Labels element {pair.labels_name!r} must use dimensions ('y', 'x') or ('z', 'y', 'x'), "
-            f"found {label_dims!r}."
-        )
-
-    aggregator = RasterAggregator(
-        mask_dask_array=mask,
-        image_dask_array=None,
-        instance_key=instance_key,
-        run_on_gpu=False,
+    output_row_keys = checkpoint.output_row_keys
+    log.info(
+        f"Calculating canonical label centers for table {output_table_name!r} from {len(checkpoint.pairs)} "
+        f"labels region(s) and {len(output_row_keys)} retained instance(s)."
     )
-    centers = aggregator.center_of_mass(index=instance_ids)
-    centers = centers.rename(columns={0: "z", 1: "y", 2: "x"}).set_index(instance_key)
-    if not centers.index.is_unique:
-        raise ValueError(f"Labels element {pair.labels_name!r} produced duplicate center-of-mass instance IDs.")
-    centers = centers.reindex(instance_ids)
-    if centers[["z", "y", "x"]].isna().any(axis=None):
-        raise ValueError(f"Labels centers of mass are missing for assigned instances in {pair.labels_name!r}.")
-
-    translation_x, translation_y = _get_translation(labels, to_coordinate_system=pair.coordinate_system)
-    centers["x"] += translation_x
-    centers["y"] += translation_y
-    centers.index.name = instance_key
-    return centers.loc[:, list(coordinate_columns)]
+    payloads: dict[int, CanonicalCacheUpdatePayload] = {}
+    for pair in checkpoint.pairs:
+        row_positions = np.asarray(
+            [row for row, (pair_ordinal, _) in enumerate(output_row_keys) if pair_ordinal == pair.ordinal],
+            dtype=np.intp,
+        )
+        instance_ids = np.asarray([output_row_keys[row][1] for row in row_positions], dtype=np.uint64)
+        binding = CanonicalRegionBinding(
+            table_name=output_table_name,
+            labels_name=pair.labels_name,
+            region_key=region_key,
+            instance_key=instance_key,
+            row_positions=row_positions,
+            instance_ids=instance_ids,
+        )
+        source_signature = build_canonical_source_signature(sdata, pair.labels_name)
+        payloads[pair.ordinal] = calculate_canonical_centers(
+            sdata,
+            CanonicalCacheReport(
+                stored_metadata=None,
+                source_signature=source_signature,
+                binding=binding,
+            ),
+        )
+    log.info(f"Finished calculating canonical label centers for table {output_table_name!r}.")
+    return payloads
 
 
 def _validate_feature_panel_contents(

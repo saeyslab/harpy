@@ -32,6 +32,11 @@ from harpy.table._metadata import (
     _FEATURE_CLASS_AGGREGATION_SCHEMA_VERSION,
     _FEATURE_MATRIX_SCHEMA_VERSION,
 )
+from harpy.table.canonical_centers import (
+    CANONICAL_OBSM_KEY,
+    SPATIAL_COORDINATES_KEY,
+    validate_canonical_payload,
+)
 from harpy.utils._keys import _FEATURE_MATRICES_KEY
 
 
@@ -60,6 +65,11 @@ def validate_table(sdata: SpatialData, table_name: str) -> None:
     derived summaries may be recalculated downstream. Matrix storage format and
     dtype are likewise not validation constraints because preprocessing may
     legitimately change either representation.
+
+    When the canonical-center matrix or its metadata record is present, both
+    must be present. Their fixed axes, dtype, shape, region coverage, instance
+    digests and labels ``scale0`` source signatures are checked without
+    recomputing centers or reading labels pixels.
 
     This function does not recompute point-to-label assignment, scan points
     partitions, inspect label pixels, repair metadata, or write to ``sdata``.
@@ -95,6 +105,24 @@ def validate_table(sdata: SpatialData, table_name: str) -> None:
     adata = sdata.tables[table_name]
     annotation = _validate_table_annotation(sdata, adata, table_name=table_name)
     feature_matrices = _validate_feature_matrices(adata)
+
+    has_canonical_component = CANONICAL_OBSM_KEY in adata.obsm or (
+        isinstance(adata.uns.get(SPATIAL_COORDINATES_KEY), Mapping)
+        and CANONICAL_OBSM_KEY in adata.uns[SPATIAL_COORDINATES_KEY]
+    )
+    if annotation is None:
+        if has_canonical_component:
+            raise ValueError("Canonical centers require a SpatialData table annotation.")
+    else:
+        region_key, instance_key, regions = annotation
+        validate_canonical_payload(
+            sdata,
+            adata,
+            table_name=table_name,
+            region_key=region_key,
+            instance_key=instance_key,
+            regions=regions,
+        )
 
     aggregation_metadata = adata.uns.get(_FEATURE_CLASS_AGGREGATION_KEY)
     if aggregation_metadata is None:
@@ -140,8 +168,9 @@ def _validate_table_annotation(
         annotation.get(TableModel.INSTANCE_KEY),
         path=f"tables.{table_name}.uns.{TableModel.ATTRS_KEY}.{TableModel.INSTANCE_KEY}",
     )
+    raw_regions = annotation.get(TableModel.REGION_KEY)
     regions = _metadata_string_sequence(
-        annotation.get(TableModel.REGION_KEY),
+        [raw_regions] if isinstance(raw_regions, str) else raw_regions,
         path=f"tables.{table_name}.uns.{TableModel.ATTRS_KEY}.{TableModel.REGION_KEY}",
     )
 
