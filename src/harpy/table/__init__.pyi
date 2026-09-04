@@ -3,6 +3,7 @@ from ._add_feature_matrix import add_feature_matrix
 from ._allocation import aggregate_points, allocate, bin_counts
 from ._allocation_intensity import aggregate_image, allocate_intensity
 from ._annotation import cluster_cleanliness, score_genes, score_genes_iter
+from ._canonical_centers import add_canonical_centers
 from ._cluster_intensity import cluster_intensity
 from ._clustering import kmeans, leiden
 from ._enrichment import nhood_enrichment
@@ -22,6 +23,7 @@ from .pixel_clustering._neighbors import spatial_pixel_neighbors
 
 __all__ = [
     "canonical_centers",
+    "add_canonical_centers",
     "add_table",
     "correct_marker_genes",
     "extract_instances",
