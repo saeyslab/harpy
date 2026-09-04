@@ -2965,10 +2965,18 @@ hp.tb.add_canonical_centers(
 with the corresponding parameter contract:
 
 ```python
-table_name: str
-labels_name: str | Sequence[str] | None = None
-overwrite: bool = False
+def add_canonical_centers(
+    sdata: SpatialData,
+    *,
+    table_name: str,
+    labels_name: str | Sequence[str] | None = None,
+    overwrite: bool = False,
+) -> SpatialData: ...
 ```
+
+The operation mutates the selected table in the supplied `SpatialData` object
+and returns that same object, following the convention of other Harpy table
+operations.
 
 `labels_name=None` derives all source labels names from the SpatialData table
 annotation. An explicit string or sequence is an assertion about those source
@@ -2976,7 +2984,9 @@ regions and must resolve to the complete set registered by the table; it does
 not define a partial output or change table-row order. Reject duplicate,
 missing, additional or non-label elements. The first implementation supports
 2D and 3D labels sources only. Shapes or other instance representations remain
-outside its scope.
+outside its scope. Every labels region declared by the table annotation must
+own at least one observation; reject an annotation containing a declared region
+with no table rows rather than creating empty canonical-region metadata.
 
 ### Table-bound calculation
 
@@ -3022,12 +3032,36 @@ clear collision or incomplete-payload error without changing the table. With
 including when the previous payload is stale or asymmetric. Never retain a new
 matrix with old metadata, or new metadata with an old matrix.
 
-Validate the source table and labels bindings before calculation, then validate
-the complete newly constructed payload with the shared Slice 8 validator before
-publication. The persisted result must cover every annotated table row and
-region. A missing label ID, unsupported labels layout, non-integer labels
-dtype, invalid table identity, non-finite center or source-signature mismatch
-must fail without publishing a partial update.
+Preflight validation must distinguish the table being updated from the
+canonical payload being repaired. Refactor the shared table-validation internals
+so this operation can validate the SpatialData annotation, registered feature
+matrices, feature-class aggregation metadata and all other recognized Harpy
+contracts without first requiring the existing canonical pair to be valid. Do
+not add a permissive option to the public `hp.tb.validate_table()` API; that
+validator must remain strict.
+
+Apply validation and collision handling in this order:
+
+1. validate the arguments, local writable backing store and in-memory/on-disk
+   table identity;
+2. validate the table annotation and every recognized non-canonical table
+   contract;
+3. resolve the complete annotated labels-region set and its row bindings;
+4. inspect whether either existing canonical component is present;
+5. with `overwrite=False`, reject any complete or incomplete canonical
+   collision without calculating centers;
+6. with `overwrite=True`, allow the old canonical pair to be absent, valid,
+   stale, malformed or asymmetric, but do not ignore an unrelated table
+   inconsistency;
+7. calculate and assemble a complete replacement payload for every annotated
+   region; and
+8. validate that newly constructed payload with the shared Slice 8 validator
+   before publication.
+
+The persisted result must cover every annotated table row and region. A missing
+label ID, unsupported labels layout, non-integer labels dtype, invalid table
+identity, non-finite center or source-signature mismatch must fail without
+publishing a partial update.
 
 ### Backed publication
 
@@ -3039,6 +3073,29 @@ table's expression and auxiliary matrices merely to add the small dense center
 matrix and metadata record. On success, refresh the in-memory table handles and
 consolidated SpatialData metadata; on failure, restore the previous canonical
 components when they existed.
+
+Stage and publish only these two component paths:
+
+```text
+tables/<table_name>/obsm/spatial_canonical
+tables/<table_name>/uns/spatial_coordinates/spatial_canonical
+```
+
+The second path is one entry in a registry: create its parent registry when
+absent and preserve every unrelated child when it already exists. Keep rollback
+copies until both component replacements, the in-memory refresh and
+consolidated-metadata write have succeeded. A failure at any of those steps must
+restore both previous disk components and both previous in-memory values,
+including the asymmetric case in which only one component existed.
+
+Do not use the aggregation-specific `_read_backed_table()` helper or a general
+`anndata.read_zarr()` call to reconstruct the existing table. The former only
+covers components written by Harpy's aggregation path, while the latter could
+materialize unrelated data. Instead, attach the newly published storage-backed
+canonical array and decoded canonical metadata record to the existing in-memory
+AnnData table. This preserves its object payload—including `X`, `.layers`,
+`.raw`, `.obsp`, `.varm`, `.varp` and unrelated `.obsm`/`.uns` entries—without
+reading or rewriting those components.
 
 ### Verification
 
@@ -3055,8 +3112,13 @@ Focused tests should establish that:
 - unrelated `spatial_coordinates` registry entries and all other AnnData
   components survive the operation unchanged;
 - collision, stale and asymmetric payload cases obey `overwrite` exactly;
+- `overwrite=True` repairs an invalid canonical payload but still rejects an
+  unrelated invalid table contract;
+- a declared labels region without table observations is rejected before
+  calculation;
 - a failed calculation, validation or component write leaves the prior table
   and canonical payload intact;
+- the function returns the same updated `SpatialData` object;
 - the result passes `hp.tb.validate_table()` and survives an AnnData and
   SpatialData Zarr round trip; and
 - `aggregate_points` continues to create canonical centers directly without
