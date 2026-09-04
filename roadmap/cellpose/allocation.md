@@ -2,7 +2,7 @@
 
 ## Status
 
-Twelve implementation slices are planned; Slices 1 through 9 are implemented:
+Thirteen implementation slices are planned; Slices 1 through 9 are implemented:
 
 1. patch the CosMx reader and establish the generic Harpy feature-panel
    metadata contract — implemented;
@@ -20,10 +20,12 @@ Twelve implementation slices are planned; Slices 1 through 9 are implemented:
    integrate it with `hp.tb.aggregate_points` — implemented;
 9. add canonical centers to compatible existing SpatialData tables —
    implemented;
-10. add QC functions that summarize the original, unallocated control points;
-11. support general lazy reopening of persisted AnnData tables through
+10. support point-to-label assignment through general invertible SpatialData
+    transformations into a shared coordinate system;
+11. add QC functions that summarize the original, unallocated control points;
+12. support general lazy reopening of persisted AnnData tables through
     SpatialData; and
-12. optionally optimize Slice 7b's latency after phase-level benchmarks identify
+13. optionally optimize Slice 7b's latency after phase-level benchmarks identify
     material checkpoint or writer overhead.
 
 Slice 2 replaces the current single-run reader surface with one coherent,
@@ -47,13 +49,15 @@ the 2D case is immediately usable by canonical-center spatial queries, while
 the annotation-query boundary explicitly rejects 3D sources. Slice 9 provides
 the same contract for compatible tables created outside `aggregate_points`
 without making canonical-center attachment a required post-processing step for
-new aggregation tables. Slice 10's
+new aggregation tables. Slice 10 generalizes the spatial-assignment contract by
+mapping point coordinates through the selected shared coordinate system into
+the intrinsic labels frame, without resampling the labels raster. Slice 11's
 original-point summaries depend on the reader metadata from Slices 1–4 rather
 than aggregation or labels; its optional per-instance plotting view derives
-temporary rates from the class-aware table. Slice 11 is an independent
+temporary rates from the class-aware table. Slice 12 is an independent
 integration follow-up that makes later SpatialData Zarr reads retain lazy
 AnnData matrices. It is not required for Slice 7b's out-of-core writing or
-same-process result. Slice 12 is an
+same-process result. Slice 13 is an
 optional, benchmark-driven follow-up: it may reduce repeated checkpoint reads
 and small-partition overhead, but must preserve Slice 7b's bounded-memory and
 publication contracts.
@@ -227,7 +231,7 @@ ordering is deterministic rather than a claim of biological precedence.
 
 Slice 5 uses the complete relation to resolve its shared expression axis and
 feature classes, and retains each non-expression feature-list length as a
-table-local auxiliary-class feature-count snapshot for later QC. Slice 10 additionally uses the
+table-local auxiliary-class feature-count snapshot for later QC. Slice 11 additionally uses the
 actual control-feature names. A categorical transcript column
 contains only categories represented by the ingested points and cannot, by
 itself, preserve the feature-to-class relationship for a panel feature with no
@@ -1025,7 +1029,7 @@ allocation has no caller-supplied denominator fallback or override.
 The point-to-label lookup is performed once per labels/points pair, carrying
 both the feature and feature-class columns through the assignment. It is never
 repeated once per class. Auxiliary points outside every instance are deliberately
-excluded from these cell-level summaries; Slice 10 operates directly on the
+excluded from these cell-level summaries; Slice 11 operates directly on the
 original points to provide spatial background QC.
 
 When `expression_class` is omitted, the same multi-region API follows the
@@ -1311,7 +1315,7 @@ auxiliary_points_fraction =
 Do not persist `negative_points_per_feature` or
 `system_control_points_per_feature` in `.obs`. They are deterministic rescalings
 of the raw class counts by the panel feature counts and add no independent table
-information. Slice 10 QC plotting derives them on demand from the raw count
+information. Slice 11 QC plotting derives them on demand from the raw count
 columns and the table-local auxiliary-class feature-count snapshot.
 
 ### Table-local metadata contract
@@ -1434,12 +1438,12 @@ column. No auxiliary class produces a persisted per-feature rate. Validate the
 complete multi-region request and shared
 `feature_class_aggregation` configuration before writing the output table.
 
-### Boundary with Slice 10
+### Boundary with Slice 11
 
 The `.obs` summaries describe only auxiliary points that land inside an instance
 mask. For CosMx these auxiliary classes are controls, making the summaries
 suitable for cell-level histograms and violin plots of the raw class counts and
-`auxiliary_points_fraction`. Slice 10 may additionally derive the
+`auxiliary_points_fraction`. Slice 11 may additionally derive the
 following per-instance plotting metrics on demand:
 
 ```text
@@ -1755,7 +1759,7 @@ instance has no feature from one axis.
 The current implementation computes all per-feature counts before discarding
 the non-expression columns. This slice therefore changes output assembly and
 row selection, not spatial assignment. The source points remain unchanged and
-continue to support Slice 10 QC for unassigned and outside-mask controls.
+continue to support Slice 11 QC for unassigned and outside-mask controls.
 
 ### Verification
 
@@ -3125,12 +3129,225 @@ Focused tests should establish that:
 - `aggregate_points` continues to create canonical centers directly without
   requiring this follow-up API call.
 
-## Slice 10: original-point control QC
+## Slice 10: general point-to-label transformations
+
+**Status: specified; not implemented.**
+
+Generalize the spatial-assignment boundary used by `hp.tb.aggregate_points`
+and `hp.tb.bin_counts`. Points and labels must still share the selected
+`to_coordinate_system`, but neither element should be required to use a
+particular transformation into it. Replace the current requirement that points
+use an identity transformation and labels use only a pixel-aligned translation
+with one relative, invertible transformation from the intrinsic points frame to
+the intrinsic labels frame.
+
+This slice changes coordinate normalization before the Slice 7a chunk-routing
+algorithm. It does not change feature aggregation, checkpoint construction,
+AnnData publication, canonical-center storage, or the biological meaning of an
+assigned point.
+
+### Relative transformation contract
+
+For one normalized aggregation pair, let:
+
+- `T_points` map intrinsic point coordinates into `to_coordinate_system`; and
+- `T_labels` map intrinsic labels coordinates into the same coordinate system.
+
+Map every point into the labels raster's intrinsic pixel frame as follows:
+
+```text
+points intrinsic -- T_points --> selected shared coordinate system
+                                             ^
+                                             | T_labels
+                                             |
+labels intrinsic <-- T_labels^-1 ------------+
+
+points intrinsic -- T_labels^-1 o T_points --> labels intrinsic
+```
+
+Equivalently, for a point coordinate vector `p`:
+
+```text
+p_labels = T_labels^-1(T_points(p))
+```
+
+With homogeneous column-vector matrices, the relative matrix is therefore:
+
+```text
+M_points_to_labels = inverse(M_labels) @ M_points
+```
+
+For example, suppose one labels pixel spans `0.5` shared-coordinate units and
+the labels origin is `(100, 50)`. A point at shared coordinate `(102, 51)` maps
+to intrinsic labels coordinate `(4, 2)` and is looked up as
+`labels[y=2, x=4]`.
+
+Resolve this relation through SpatialData's public transformation API. The
+selected `to_coordinate_system` is an explicit part of the aggregation pair;
+the resolved path must pass through that coordinate system rather than silently
+choosing another registration path. Prefer
+`get_transformation_between_coordinate_systems()` with the points and labels
+elements as the source and target and `to_coordinate_system` as the required
+intermediate coordinate system. An equivalent explicit composition of the two
+element-to-coordinate-system transformations is acceptable when it preserves
+the same path and error semantics.
+
+Resolve and validate the relative transformation once per aggregation pair,
+before constructing the assignment graph. Convert it to one small homogeneous
+affine matrix in canonical `(x, y)` or `(x, y, z)` coordinate order and pass
+that resolved value to the private assignment implementation. Do not repeatedly
+inspect transformation metadata inside Dask partitions.
+
+### Partition-wise assignment
+
+Do not resample or transform the labels raster. Instead, extend the
+partition-local classification phase from Slice 7a:
+
+```text
+points partition
+      |
+      v
+apply M_points_to_labels vectorially
+      |
+      v
+continuous intrinsic labels coordinates
+      |
+      v
+round once to integer labels-pixel indices
+      |
+      v
+extent filter and labels-block classification
+      |
+      v
+existing block shuffle and vectorized labels lookup
+```
+
+The matrix application must remain lazy and partition-wise. It may allocate
+coordinate arrays proportional to one points partition, but must not materialize
+the complete points element. Do not implement this by calling a whole-element
+SpatialData points transformation when that operation materializes Dask
+partitions or non-coordinate columns. Reuse SpatialData's transformation
+definitions and composition semantics while retaining Harpy's bounded,
+partition-local execution.
+
+Apply the relative transformation before rounding. Rounding coordinates in the
+shared coordinate system before inverse scaling or rotation would select the
+wrong labels pixel. Preserve the existing half-to-even `round()` convention for
+the final intrinsic labels coordinates, then reorder `(x, y[, z])` values into
+the raster's `(y, x)` or `(z, y, x)` indexing order. The existing half-open
+extent and chunk-boundary rules, row-major block IDs, one shuffle by block ID,
+background filtering, and one vectorized lookup per labels block remain
+unchanged.
+
+Store labels-local floating and integer coordinates in collision-safe temporary
+columns and remove them after lookup. Do not overwrite retained source
+point-coordinate columns with labels-local values. When `drop_coordinates=True`,
+as in `aggregate_points`, return only the requested value columns and assigned
+instance ID. When coordinates are retained by another caller, document that
+they remain the source point coordinates; intrinsic lookup coordinates are an
+internal implementation detail.
+
+Resampling labels into the shared coordinate system is explicitly out of scope.
+It would allocate a new raster, require nearest-neighbour interpolation to
+preserve IDs, potentially change segmentation boundaries, and decouple the
+assignment graph from the stored labels chunks. Inverse point mapping preserves
+the original integer labels and naturally reuses the existing chunk-aware
+lookup.
+
+### Supported transformations and validation
+
+Support same-dimensional SpatialData transformations that can be represented
+as a finite, invertible affine matrix, including:
+
+- identity and arbitrary finite translation;
+- scale;
+- rotation, reflection, and shear;
+- invertible axis permutation; and
+- sequences composed from those transformations.
+
+This removes the pixel-aligned-translation restriction. A fractional labels
+translation is valid because the complete relative transform is applied before
+the final labels-pixel rounding.
+
+Reject clearly, before source computation or output mutation:
+
+- either element missing `to_coordinate_system`;
+- a singular or otherwise non-invertible labels transformation;
+- a transformation that cannot be represented as an affine matrix;
+- non-finite matrix entries or transformed coordinates;
+- incompatible point and labels dimensionality;
+- dimension-adding or dimension-dropping mappings; and
+- unsupported labels dimensions outside `(y, x)` and `(z, y, x)`.
+
+“General transformation” in this contract means any compatible, invertible
+SpatialData affine transformation. It does not promise support for arbitrary
+nonlinear deformation fields. A future nonlinear implementation would require
+an explicit inverse-coordinate API with the same partition-wise and
+pixel-sampling semantics.
+
+Keep `to_coordinate_system` as the public selection mechanism; no public matrix
+or transformation parameter is needed. The SpatialData element registrations
+remain authoritative, so do not duplicate the composed relative matrix in table
+metadata. Aggregation-region metadata continues to record the selected shared
+coordinate system.
+
+Canonical centers are unaffected. They remain in each labels element's
+intrinsic `scale0` pixel frame under the Slice 8 contract, regardless of the
+transformations used to establish point-to-label correspondence. Generalized
+assignment must not introduce a second transformed center matrix.
+
+### Verification and performance contract
+
+Focused tests must establish that:
+
+- identity points plus translated labels produce the exact existing assignment
+  result;
+- translated or scaled points and independently translated or scaled labels are
+  composed in the correct direction;
+- rotation, reflection, shear, and invertible axis permutation match a simple
+  in-memory reference;
+- 2D and 3D transformations respect `(x, y[, z])` matrix order and
+  `(z, y, x)` raster indexing order;
+- points crossing labels-chunk boundaries after transformation are routed and
+  assigned exactly once;
+- background and out-of-bounds points after inverse mapping are removed;
+- rounding happens only after mapping into the intrinsic labels frame;
+- source point-coordinate columns are not replaced by transient labels-local
+  coordinates;
+- missing coordinate systems, dimensional mismatch, non-finite matrices, and
+  singular transformations fail before graph execution or output mutation;
+- graph construction performs no source reads and the complete points or labels
+  elements are never materialized;
+- ordinary and class-aware `aggregate_points` produce unchanged feature and
+  metadata contracts apart from accepting the broader registrations;
+- `bin_counts` preserves its assignment and retained-coordinate behavior; and
+- canonical centers remain intrinsic and unchanged for non-identity
+  registrations.
+
+Include an invariance regression test that prepends the same invertible affine
+transformation `A` to both element registrations. Assignments must not change,
+because:
+
+```text
+inverse(A o T_labels) o (A o T_points)
+    = inverse(T_labels) o T_points
+```
+
+Benchmark the generalized partition transform against the existing
+identity/translation case on representative 2D and 3D point partitions. Record
+assignment wall time, graph-construction time, task count, shuffle volume, and
+peak worker memory. The additional work should remain linear in the number of
+points and bounded by one partition. Retain a specialized identity/translation
+fast path only if measurements show that the general vectorized affine path
+causes a material regression; both paths must share the same rounding, bounds,
+and lookup contracts.
+
+## Slice 11: original-point control QC
 
 **Status: specified; not implemented.**
 
 Add separate lightweight QC functions over the original transcript points.
-This slice is scheduled after Slice 9, but its runtime contract depends only on
+This slice is scheduled after Slice 10, but its runtime contract depends only on
 the points and feature-panel metadata from Slice 1 and the sample-aware point
 metadata from Slices 2–4. The original-point summaries may run before or after
 aggregation and do not depend on an instance-label raster or an AnnData table.
@@ -3248,7 +3465,7 @@ Focused tests should establish that:
 - sample and mosaic coordinate systems remain independent; and
 - the implementation stays lazy until the compact summaries are computed.
 
-## Slice 11: lazy SpatialData table reopening
+## Slice 12: lazy SpatialData table reopening
 
 **Status: follow-up; not implemented.**
 
@@ -3273,7 +3490,7 @@ supports normal row and feature access, and produces the same materialized
 values as `anndata.read_zarr`. Benchmark store-open time and driver memory
 independently from Slice 7b's construction benchmark.
 
-## Slice 12: optional Slice 7b latency optimization
+## Slice 13: optional Slice 7b latency optimization
 
 **Status: optional follow-up; not implemented.**
 
