@@ -2800,10 +2800,8 @@ reuse the stored centers without executing labels-array tasks.
 
 ### Dimensional scope
 
-The current napari-harpy schema version 1 accepts only source labels with
-dimensions `("y", "x")`. Do not silently broaden the meaning of that persisted
-schema version. Promote the contract into Harpy as schema version 2, preserving
-the existing keys and semantics while allowing exactly these source layouts:
+Use schema version 1 for the Harpy-owned canonical-center contract and allow
+exactly these source layouts:
 
 ```text
 2D source dims: (y, x)     -> canonical axes: (z, y, x), with z = 0
@@ -2816,12 +2814,19 @@ axis before `RasterAggregator.center_of_mass`; pass a 3D `(z, y, x)` source
 through directly. Reject other dimension orders rather than transposing them
 implicitly.
 
-Update napari-harpy to parse and validate the shared schema-v2 representation.
-Its cache inspection may recognize both 2D and 3D canonical payloads as valid,
-but the annotation spatial-query entry point must explicitly require a 2D
-`("y", "x")` source and raise a clear unsupported-dimensionality error for 3D.
-The limitation belongs to the two-dimensional polygon-query operation, not to
-canonical-center construction or storage.
+The napari-harpy implementation being promoted currently restricts its
+schema-v1 parser to 2D. Broaden that validation as part of moving ownership to
+Harpy; do not introduce schema version 2, a compatibility parser or a migration
+path. The 2D serialized representation does not change, while 3D becomes an
+additional valid source dimensionality under the same Harpy-owned schema.
+
+Update napari-harpy to consume and validate the shared schema-v1
+representation. Its cache inspection may recognize both 2D and 3D canonical
+payloads as valid, but the annotation spatial-query entry point must explicitly
+require a 2D `("y", "x")` source and raise a clear
+unsupported-dimensionality error for 3D. The limitation belongs to the
+two-dimensional polygon-query operation, not to canonical-center construction
+or storage.
 
 ### Verification
 
@@ -2830,8 +2835,7 @@ Focused tests should establish that:
 - Harpy imports no `napari_harpy` module and the package dependency direction
   remains napari-harpy to Harpy;
 - Harpy's port matches the fetched main-branch calculation and serialized
-  semantics for representative 2D labels, apart from the deliberate schema-v2
-  extension;
+  semantics for representative 2D labels;
 - `spatial_canonical` is dense `float64`, has shape `(n_obs, 3)`, uses exact
   `(z, y, x)` ordering and has a zero `z` column for 2D labels;
 - 3D labels produce the same matrix shape and axis order with their measured
@@ -2854,7 +2858,7 @@ Focused tests should establish that:
   a spatial canonical-center query without recalculating labels centers;
 - ordinary and class-aware aggregation receive the same canonical-center
   contract;
-- Harpy accepts and validates a schema-v2 3D canonical payload; and
+- Harpy accepts and validates a schema-v1 3D canonical payload; and
 - napari-harpy recognizes that 3D payload structurally but rejects it at the
   annotation-query boundary with a clear dimensionality error.
 
