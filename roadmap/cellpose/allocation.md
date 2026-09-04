@@ -2691,20 +2691,17 @@ Separate the main-branch implementation along this boundary:
 - avoid two independently evolving definitions of canonical coordinates or
   their metadata schema.
 
-The port should retain the established storage keys and schema semantics so a
-table produced by Harpy is immediately recognized by napari-harpy. It must not
-introduce a second Harpy-specific canonical-center schema.
+The port should retain the established storage keys and schema semantics rather
+than introduce a second Harpy-specific canonical-center representation. Extend
+the owned schema deliberately for three-dimensional labels as described below,
+and update napari-harpy to consume that shared Harpy contract.
 
 ### Canonical table payload
 
-For supported two-dimensional labels, `hp.tb.aggregate_points` should produce
-both its existing general spatial coordinates and a canonical coordinate
-cache:
+For supported two- and three-dimensional labels, `hp.tb.aggregate_points`
+should produce exactly one center-coordinate payload:
 
 ```text
-adata.obsm[spatial_key]
-    transformed table coordinates in SpatialData order (x, y)
-
 adata.obsm["spatial_canonical"]
     dense float64 intrinsic-label coordinates in fixed (z, y, x) order
 
@@ -2712,10 +2709,19 @@ adata.uns["spatial_coordinates"]["spatial_canonical"]
     versioned canonical matrix, calculation, source and coverage metadata
 ```
 
-The canonical matrix has shape `(adata.n_obs, 3)`. For a 2D source its `z`
-column is exactly zero. Its `y` and `x` values are expressed in the intrinsic
-pixel coordinate frame of the corresponding `scale0` labels element; no
-translation into the selected aggregation coordinate system is applied.
+The canonical matrix always has shape `(adata.n_obs, 3)`. For a 2D source its
+`z` column is exactly zero; for a 3D source it contains the measured center of
+mass along the source `z` axis. All values are expressed in the intrinsic pixel
+coordinate frame of the corresponding `scale0` labels element. Do not apply
+the scale, translation or other SpatialData transformation into the selected
+aggregation coordinate system. Integer array indices represent pixel centers,
+so a one-pixel 2D instance at row 10 and column 20 has canonical center
+`(0.0, 10.0, 20.0)`.
+
+For a table spanning multiple labels regions, rows may therefore refer to
+different intrinsic labels frames. The per-region metadata binds every row to
+its source labels element; the matrix must not be interpreted as one shared
+global coordinate system.
 
 The metadata record should preserve the main-branch schema, including at
 least:
@@ -2736,41 +2742,42 @@ labels region. It does not mean all nonzero IDs present in the labels raster;
 instances receiving no assigned point remain outside the aggregation table as
 specified by Slice 6.
 
-### Relationship to existing `spatial` coordinates
+### Single canonical-coordinate contract
 
-Do not replace `adata.obsm[spatial_key]` with the canonical matrix. The two
-payloads have different contracts:
+Replace the existing configurable `adata.obsm[spatial_key]` center payload with
+the fixed `adata.obsm["spatial_canonical"]` contract. Do not retain a second
+translated `spatial` matrix. Remove the `spatial_key` parameter from
+`hp.tb.aggregate_points`; the canonical key is an interoperability contract and
+is not user-configurable.
 
-- `spatial_key` uses `(x, y)` or `(x, y, z)` order and represents coordinates
-  in the aggregation pair's selected coordinate system; and
-- `spatial_canonical` always uses `(z, y, x)` order and remains intrinsic to
-  the labels source so napari-harpy can transform annotation geometry into that
-  frame before evaluating containment.
+`to_coordinate_system` remains necessary for assigning points to labels and is
+recorded with the aggregation-region metadata. It does not determine the
+stored center coordinates. Canonical centers always remain in the source
+labels element's intrinsic `scale0` frame.
 
-Refactor the center path so each labels region is reduced once. Retain the raw
-intrinsic `(z, y, x)` result as its canonical block, and derive the existing
-translated and reordered `spatial_key` block from the same result. Do not run
-`RasterAggregator.center_of_mass` independently for the two matrices. Reject a
-caller-provided `spatial_key="spatial_canonical"` because it would collapse two
-different coordinate contracts onto one key.
+This is the frame expected by the spatial-query path. Annotation geometry is
+transformed from the selected query coordinate system into the relevant labels
+element's intrinsic frame before containment is evaluated against the
+canonical `x` and `y` columns. No global or pair-coordinate-system copy of the
+centers is needed.
 
-Apply this behavior to both ordinary and class-aware aggregation. Concatenate
-each region's canonical block in exactly the same normalized pair and instance
-row order as `X`, `.obs`, the optional auxiliary feature matrix and
-`adata.obsm[spatial_key]`.
+Apply the single canonical payload to both ordinary and class-aware
+aggregation. Concatenate each region's canonical block in exactly the same
+normalized pair and instance row order as `X`, `.obs` and the optional
+auxiliary feature matrix.
 
 ### Construction and publication
 
-Calculate and validate the canonical matrix and metadata as part of the same
-table-construction operation as the existing transformed centers. The canonical
+Calculate and validate the canonical matrix and metadata as part of table
+construction, replacing the existing transformed-center payload. The canonical
 payload must be present before the table is published rather than being added
 through a later napari-harpy mutation.
 
-Integrate with Slice 7b's required backed component writer. Both complete dense
-center matrices may reside on the driver, must use the established row manifest
-and are written once through `anndata.io.write_elem` before publication. Do not
-reintroduce an unbacked or in-memory `add_table` branch merely to add canonical
-centers.
+Integrate with Slice 7b's required backed component writer. The complete dense
+canonical matrix may reside on the driver, must use the established row
+manifest and is written once through `anndata.io.write_elem` before
+publication. Do not reintroduce an unbacked or in-memory `add_table` branch
+merely to add canonical centers.
 
 The implementation sequence should be:
 
@@ -2778,15 +2785,13 @@ The implementation sequence should be:
    region;
 2. calculate one intrinsic center block per region through the shared Harpy
    implementation;
-3. derive the general transformed `spatial_key` coordinates from those same
-   centers;
-4. concatenate all blocks in final table-row order and align them through the
+3. concatenate all blocks in final table-row order and align them through the
    composite `(labels_name, instance_id)` identity;
-5. construct the complete per-region canonical metadata registry;
-6. validate the matrix, binding, source signatures, coverage and serialized
+4. construct the complete per-region canonical metadata registry;
+5. validate the matrix, binding, source signatures, coverage and serialized
    schema together; and
-7. write both coordinate payloads once through Slice 7b's backed component
-   writer before publication.
+6. write the canonical coordinate payload once through Slice 7b's backed
+   component writer before publication.
 
 Napari-harpy's ensure/read path remains useful for older or externally created
 tables without canonical coordinates. For a new Harpy aggregation table,
@@ -2795,17 +2800,28 @@ reuse the stored centers without executing labels-array tasks.
 
 ### Dimensional scope
 
-The current napari-harpy schema version 1 and spatial-query path support source
-labels with dimensions `("y", "x")` and represent them in a three-column
-canonical matrix with `z=0`. Preserve that exact compatibility for 2D labels.
+The current napari-harpy schema version 1 accepts only source labels with
+dimensions `("y", "x")`. Do not silently broaden the meaning of that persisted
+schema version. Promote the contract into Harpy as schema version 2, preserving
+the existing keys and semantics while allowing exactly these source layouts:
 
-`hp.tb.aggregate_points` also supports 3D labels. Do not describe a 3D source
-using the 2D schema or silently change the existing `(x, y, z)` `spatial_key`
-contract. Until a shared canonical schema and napari-harpy query path explicitly
-support 3D, retain the existing label-derived `spatial_key` centers for 3D
-tables and omit `spatial_canonical` plus its metadata. If napari-harpy main has
-gained an authoritative 3D schema by implementation time, evaluate and adopt
-that version as one coordinated compatibility change with focused tests.
+```text
+2D source dims: (y, x)     -> canonical axes: (z, y, x), with z = 0
+3D source dims: (z, y, x)  -> canonical axes: (z, y, x)
+```
+
+Both dimensions use the same calculation, alignment, metadata and AnnData
+integration path. Normalize a 2D labels array by prepending a singleton `z`
+axis before `RasterAggregator.center_of_mass`; pass a 3D `(z, y, x)` source
+through directly. Reject other dimension orders rather than transposing them
+implicitly.
+
+Update napari-harpy to parse and validate the shared schema-v2 representation.
+Its cache inspection may recognize both 2D and 3D canonical payloads as valid,
+but the annotation spatial-query entry point must explicitly require a 2D
+`("y", "x")` source and raise a clear unsupported-dimensionality error for 3D.
+The limitation belongs to the two-dimensional polygon-query operation, not to
+canonical-center construction or storage.
 
 ### Verification
 
@@ -2814,12 +2830,16 @@ Focused tests should establish that:
 - Harpy imports no `napari_harpy` module and the package dependency direction
   remains napari-harpy to Harpy;
 - Harpy's port matches the fetched main-branch calculation and serialized
-  schema for representative 2D labels;
+  semantics for representative 2D labels, apart from the deliberate schema-v2
+  extension;
 - `spatial_canonical` is dense `float64`, has shape `(n_obs, 3)`, uses exact
   `(z, y, x)` ordering and has a zero `z` column for 2D labels;
-- the canonical values remain intrinsic when the general `spatial_key`
-  coordinates receive a nonzero SpatialData translation;
-- one labels center-of-mass reduction supplies both coordinate matrices;
+- 3D labels produce the same matrix shape and axis order with their measured
+  `z` centers rather than a synthetic zero column;
+- canonical values remain intrinsic when their labels elements have nonzero
+  SpatialData transformations;
+- exactly one labels center-of-mass reduction supplies the single canonical
+  matrix and no translated center matrix is written;
 - irregular labels, multiple chunks and requested instance-ID ordering match a
   simple in-memory reference;
 - multiple regions remain aligned with table rows even when their local
@@ -2833,9 +2853,10 @@ Focused tests should establish that:
 - napari-harpy recognizes a Harpy-produced 2D table cache as valid and performs
   a spatial canonical-center query without recalculating labels centers;
 - ordinary and class-aware aggregation receive the same canonical-center
-  contract; and
-- 3D aggregation preserves its existing `spatial_key` output without writing a
-  misleading schema-v1 canonical cache.
+  contract;
+- Harpy accepts and validates a schema-v2 3D canonical payload; and
+- napari-harpy recognizes that 3D payload structurally but rejects it at the
+  annotation-query boundary with a clear dimensionality error.
 
 ## Slice 9: original-point control QC
 
