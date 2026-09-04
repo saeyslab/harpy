@@ -3131,7 +3131,7 @@ Focused tests should establish that:
 
 ## Slice 10: general point-to-label transformations
 
-**Status: specified; not implemented.**
+**Status: implemented.**
 
 Generalize the spatial-assignment boundary used by `hp.tb.aggregate_points`
 and `hp.tb.bin_counts`. Points and labels must still share the selected
