@@ -44,8 +44,8 @@ from harpy.image.segmentation.segmentation_models._baysor import baysor_callable
 from harpy.image.segmentation.segmentation_models._cellpose import cellpose_callable as _model
 from harpy.points._points import add_points
 from harpy.shape._shape import add_shapes
+from harpy.transformations._transformations import _identity_check_transformations_points
 from harpy.utils._keys import _GENES_KEY
-from harpy.utils._transformations import _identity_check_transformations_points
 
 
 def segment(

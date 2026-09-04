@@ -10,7 +10,7 @@ from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import Translation
 
 from harpy.image._image import _get_boundary, add_image, get_dataarray
-from harpy.utils._transformations import _identity_check_transformations_points
+from harpy.transformations._transformations import _identity_check_transformations_points
 
 
 def _build_density_chunk(

@@ -17,8 +17,8 @@ from spatialdata.models import TableModel
 
 from harpy.image._image import _get_boundary, _get_spatial_element
 from harpy.table._table import ProcessTable
+from harpy.transformations._transformations import _identity_check_transformations_points
 from harpy.utils._keys import _CELLSIZE_KEY, _GENES_KEY, _RAW_COUNTS_KEY
-from harpy.utils._transformations import _identity_check_transformations_points
 
 _DEFAULT_COLUMN_COLORS = {
     "log1p_total_counts": "#577590",

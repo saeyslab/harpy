@@ -22,7 +22,7 @@ from spatialdata.transformations import get_transformation
 
 from harpy.image._image import _apply_transform, _get_boundary, _get_spatial_element, _unapply_transform
 from harpy.shape import intersect_rectangles
-from harpy.utils._transformations import _get_translation_values
+from harpy.transformations._transformations import _get_translation_values
 
 
 def plot_image(
