@@ -13,11 +13,12 @@ from scipy import sparse
 from spatialdata import SpatialData, read_zarr
 from spatialdata._io.format import SpatialDataContainerFormatV01
 from spatialdata.models import Labels2DModel, Labels3DModel, PointsModel, TableModel
-from spatialdata.transformations import Identity, Translation
+from spatialdata.transformations import Affine, Identity, Scale, Sequence, Translation, set_transformation
 
 import harpy.table._aggregation_checkpoint as checkpoint_module
 import harpy.table._aggregation_writer as writer_module
 import harpy.table._allocation as aggregation_module
+import harpy.transformations._transformations as transformation_module
 from harpy.table import validate_table
 from harpy.table._allocation import aggregate_points, bin_counts
 from harpy.table.canonical_centers import CANONICAL_OBSM_KEY, SPATIAL_COORDINATES_KEY
@@ -755,6 +756,38 @@ def test_canonical_centers_remain_intrinsic_under_pair_translation(tmp_path):
     )
 
 
+def test_class_aware_aggregation_accepts_shared_general_affine_and_keeps_intrinsic_centers(tmp_path):
+    sdata = _class_aware_sdata()
+    outer = Affine(
+        np.array([[0, -2, 100], [3, 0, 200], [0, 0, 1]], dtype=np.float64),
+        input_axes=("x", "y"),
+        output_axes=("x", "y"),
+    )
+    set_transformation(sdata.labels["labels_a"], outer, to_coordinate_system="sample_a")
+    set_transformation(sdata.points["points_a"], outer, to_coordinate_system="sample_a")
+    sdata = _backed(sdata, tmp_path)
+
+    result = aggregate_points(
+        sdata,
+        labels_name="labels_a",
+        points_name="points_a",
+        to_coordinate_system="sample_a",
+        output_table_name="table",
+        expression_class="Endogenous",
+    )
+
+    table = result.tables["table"]
+    order = np.argsort(table.obs[_INSTANCE_KEY].to_numpy())
+    assert np.array_equal(
+        table.X.to_memory()[order].toarray(),
+        np.array([[2, 0, 0], [0, 1, 0], [0, 0, 0]], dtype=np.uint32),
+    )
+    assert np.allclose(
+        table.obsm[CANONICAL_OBSM_KEY][order],
+        [[0.0, 0.5, 0.5], [0.0, 0.5, 3.5], [0.0, 2.0, 0.5]],
+    )
+
+
 def test_aggregate_points_uses_xyz_label_center_order(tmp_path):
     labels = Labels3DModel.parse(
         np.ones((2, 2, 2), dtype=np.uint32),
@@ -812,9 +845,13 @@ def test_assign_points_to_labels_routes_once_across_irregular_chunks():
     assigned = aggregation_module._assign_points_to_labels(
         labels,
         points,
+        point_to_labels_transform=transformation_module._resolve_point_to_labels_transform(
+            points,
+            labels,
+            to_coordinate_system="sample",
+        ),
         value_key=["point_id", "feature"],
         chunks=None,
-        to_coordinate_system="sample",
     )
     result = assigned.compute().sort_values("point_id").reset_index(drop=True)
 
@@ -822,7 +859,15 @@ def test_assign_points_to_labels_routes_once_across_irregular_chunks():
     assert result.columns.to_list() == ["x", "y", "point_id", "feature", _INSTANCE_KEY]
     assert result["point_id"].to_list() == [0, 1, 2, 6, 7, 8, 9]
     assert result[_INSTANCE_KEY].to_list() == [1, 4, 20, 1, 17, 33, 35]
-    assert result[["x", "y"]].to_numpy().tolist() == [[0, 0], [3, 0], [5, 2], [0, 0], [2, 2], [4, 4], [6, 4]]
+    assert result[["x", "y"]].to_numpy().tolist() == [
+        [0, 0],
+        [3, 0],
+        [5, 2],
+        [0.5, 0.5],
+        [1.5, 1.5],
+        [4, 4],
+        [6, 4],
+    ]
     assert result["feature"].dtype == categories
     assert not any("block_id" in column for column in result.columns)
 
@@ -840,15 +885,29 @@ def test_classify_points_by_label_block_uses_half_open_irregular_grid():
 
     result = aggregation_module._classify_points_by_label_block(
         partition,
-        coordinate_keys=("y", "x"),
+        point_coordinate_keys=("x", "y"),
+        label_local_coordinate_keys=("labels_y", "labels_x"),
+        point_to_labels_matrix=np.array(
+            [
+                [1.0, 0.0, -10.0],
+                [0.0, 1.0, -20.0],
+                [0.0, 0.0, 1.0],
+            ]
+        ),
         boundaries=((0, 2, 5), (0, 3, 5, 7)),
-        translations=(20, 10),
         grid_shape=(2, 3),
         block_id_key="block_id",
     )
 
     assert result["point_id"].to_list() == [0, 1, 2, 3, 6]
-    assert result[["x", "y"]].to_numpy().tolist() == [[10, 20], [12, 22], [13, 20], [15, 24], [16, 21]]
+    assert result[["x", "y"]].to_numpy().tolist() == [
+        [10, 20],
+        [12.5, 21.5],
+        [13, 20],
+        [15, 24],
+        [16, 21],
+    ]
+    assert result[["labels_x", "labels_y"]].to_numpy().tolist() == [[0, 0], [2, 2], [3, 0], [5, 4], [6, 1]]
     assert result["block_id"].to_list() == [0, 3, 1, 5, 2]
     assert result["block_id"].dtype == np.dtype(np.int64)
     assert result["feature"].dtype == feature_dtype
@@ -865,19 +924,22 @@ def test_classify_points_by_label_block_preserves_empty_schema():
 
     result = aggregation_module._classify_points_by_label_block(
         partition,
-        coordinate_keys=("y", "x"),
+        point_coordinate_keys=("x", "y"),
+        label_local_coordinate_keys=("labels_y", "labels_x"),
+        point_to_labels_matrix=np.eye(3),
         boundaries=((0, 2), (0, 4)),
-        translations=(0, 0),
         grid_shape=(1, 1),
         block_id_key="block_id",
     )
 
     assert result.empty
-    assert result.columns.to_list() == ["x", "y", "feature", "block_id"]
+    assert result.columns.to_list() == ["x", "y", "feature", "labels_y", "labels_x", "block_id"]
     assert result.dtypes.to_dict() == {
-        "x": np.dtype(np.int64),
-        "y": np.dtype(np.int64),
+        "x": np.dtype(np.float64),
+        "y": np.dtype(np.float64),
         "feature": pd.StringDtype(),
+        "labels_y": np.dtype(np.int64),
+        "labels_x": np.dtype(np.int64),
         "block_id": np.dtype(np.int64),
     }
 
@@ -896,11 +958,109 @@ def test_assign_points_to_labels_applies_integer_translation():
     result = aggregation_module._assign_points_to_labels(
         labels,
         points,
+        point_to_labels_transform=transformation_module._resolve_point_to_labels_transform(
+            points,
+            labels,
+            to_coordinate_system="translated",
+        ),
         value_key="feature",
-        to_coordinate_system="translated",
     ).compute()
 
     assert result.sort_values("feature")[_INSTANCE_KEY].to_list() == [1, 4]
+
+
+def test_assign_points_to_labels_composes_independent_scale_and_translation():
+    labels_data = np.arange(1, 21, dtype=np.uint32).reshape(4, 5)
+    labels = Labels2DModel.parse(
+        da.from_array(labels_data, chunks=(2, (2, 3))),
+        dims=("y", "x"),
+        transformations={
+            "sample": Sequence(
+                [
+                    Scale([2, 3], axes=("x", "y")),
+                    Translation([100, 200], axes=("x", "y")),
+                ]
+            )
+        },
+    )
+    points = PointsModel.parse(
+        pd.DataFrame(
+            {
+                "point_id": [0, 1, 2],
+                "x": [90.0, 94.0, 98.0],
+                "y": [180.0, 183.0, 189.0],
+            }
+        ),
+        transformations={"sample": Translation([10, 20], axes=("x", "y"))},
+    )
+
+    assigned = aggregation_module._assign_points_to_labels(
+        labels,
+        points,
+        point_to_labels_transform=transformation_module._resolve_point_to_labels_transform(
+            points,
+            labels,
+            to_coordinate_system="sample",
+        ),
+        value_key="point_id",
+    )
+    result = assigned.compute().sort_values("point_id")
+
+    assert assigned.npartitions == 4
+    assert result[_INSTANCE_KEY].to_list() == [1, 8, 20]
+    assert result[["x", "y"]].to_numpy().tolist() == [[90.0, 180.0], [94.0, 183.0], [98.0, 189.0]]
+
+
+@pytest.mark.parametrize(
+    ("matrix", "point", "expected_instance"),
+    [
+        (
+            np.array([[0, -1, 3], [1, 0, 0], [0, 0, 1]], dtype=np.float64),
+            (1, 2),
+            6,
+        ),
+        (
+            np.array([[-1, 0, 3], [0, 1, 0], [0, 0, 1]], dtype=np.float64),
+            (1, 2),
+            11,
+        ),
+        (
+            np.array([[1, 1, 0], [0, 1, 0], [0, 0, 1]], dtype=np.float64),
+            (1, 1),
+            7,
+        ),
+        (
+            np.array([[0, 1, 0], [1, 0, 0], [0, 0, 1]], dtype=np.float64),
+            (1, 2),
+            7,
+        ),
+    ],
+    ids=["rotation", "reflection", "shear", "axis-permutation"],
+)
+def test_assign_points_to_labels_supports_general_affines(matrix, point, expected_instance):
+    labels = Labels2DModel.parse(
+        da.from_array(np.arange(1, 17, dtype=np.uint32).reshape(4, 4), chunks=(2, 2)),
+        dims=("y", "x"),
+        transformations={"sample": Identity()},
+    )
+    points = PointsModel.parse(
+        pd.DataFrame({"x": [point[0]], "y": [point[1]], "feature": ["A"]}),
+        transformations={"sample": Affine(matrix, input_axes=("x", "y"), output_axes=("x", "y"))},
+    )
+
+    result = aggregation_module._assign_points_to_labels(
+        labels,
+        points,
+        point_to_labels_transform=transformation_module._resolve_point_to_labels_transform(
+            points,
+            labels,
+            to_coordinate_system="sample",
+        ),
+        value_key="feature",
+    ).compute()
+
+    assert result[_INSTANCE_KEY].to_list() == [expected_instance]
+    assert result[["x", "y"]].to_numpy().tolist() == [[point[0], point[1]]]
 
 
 def test_assign_points_to_labels_routes_three_dimensional_blocks():
@@ -908,25 +1068,29 @@ def test_assign_points_to_labels_routes_three_dimensional_blocks():
     labels = Labels3DModel.parse(
         da.from_array(labels_data, chunks=(1, 2, 2)),
         dims=("z", "y", "x"),
-        transformations={"volume": Identity()},
+        transformations={"volume": Translation([10, 20, 30], axes=("x", "y", "z"))},
     )
     points = PointsModel.parse(
         pd.DataFrame(
             {
                 "point_id": [0, 1, 2],
-                "x": [0, 2, 3],
-                "y": [0, 2, 2],
-                "z": [0, 0, 1],
+                "x": [5, 6, 6.5],
+                "y": [10, 11, 11],
+                "z": [15, 15, 15.5],
             }
         ),
-        transformations={"volume": Identity()},
+        transformations={"volume": Scale([2, 2, 2], axes=("x", "y", "z"))},
     )
 
     assigned = aggregation_module._assign_points_to_labels(
         labels,
         points,
+        point_to_labels_transform=transformation_module._resolve_point_to_labels_transform(
+            points,
+            labels,
+            to_coordinate_system="volume",
+        ),
         value_key="point_id",
-        to_coordinate_system="volume",
     )
     result = assigned.compute().sort_values("point_id")
 
@@ -934,24 +1098,85 @@ def test_assign_points_to_labels_routes_three_dimensional_blocks():
     assert result[_INSTANCE_KEY].to_list() == [1, 11, 24]
 
 
-def test_assign_points_to_labels_rejects_fractional_translation():
+def test_point_to_labels_transform_is_invariant_to_shared_outer_affine():
+    labels_transformation = Scale([2, 3], axes=("x", "y")).compose_with(Translation([100, 200], axes=("x", "y")))
+    points_transformation = Translation([10, 20], axes=("x", "y"))
+    outer = Affine(
+        np.array([[0, -1, 500], [1, 0, 25], [0, 0, 1]], dtype=np.float64),
+        input_axes=("x", "y"),
+        output_axes=("x", "y"),
+    )
+    frame = pd.DataFrame({"x": [90.0, 94.0, 98.0], "y": [180.0, 183.0, 189.0], "feature": ["A", "B", "C"]})
+
     labels = Labels2DModel.parse(
-        np.ones((2, 2), dtype=np.uint32),
+        np.arange(1, 21, dtype=np.uint32).reshape(4, 5),
+        dims=("y", "x"),
+        transformations={"sample": labels_transformation},
+    )
+    points = PointsModel.parse(frame, transformations={"sample": points_transformation})
+    outer_labels = Labels2DModel.parse(
+        labels.data,
+        dims=("y", "x"),
+        transformations={"sample": labels_transformation.compose_with(outer)},
+    )
+    outer_points = PointsModel.parse(
+        frame,
+        transformations={"sample": points_transformation.compose_with(outer)},
+    )
+
+    base_transform = transformation_module._resolve_point_to_labels_transform(
+        points,
+        labels,
+        to_coordinate_system="sample",
+    )
+    outer_transform = transformation_module._resolve_point_to_labels_transform(
+        outer_points,
+        outer_labels,
+        to_coordinate_system="sample",
+    )
+    np.testing.assert_allclose(outer_transform.affine_matrix, base_transform.affine_matrix)
+
+    base = aggregation_module._assign_points_to_labels(
+        labels,
+        points,
+        point_to_labels_transform=base_transform,
+        value_key="feature",
+    ).compute()
+    transformed = aggregation_module._assign_points_to_labels(
+        outer_labels,
+        outer_points,
+        point_to_labels_transform=outer_transform,
+        value_key="feature",
+    ).compute()
+    assert (
+        base.sort_values("feature")[_INSTANCE_KEY].to_list()
+        == transformed.sort_values("feature")[_INSTANCE_KEY].to_list()
+    )
+
+
+def test_assign_points_to_labels_accepts_fractional_translation():
+    labels = Labels2DModel.parse(
+        np.array([[1, 2], [3, 4]], dtype=np.uint32),
         dims=("y", "x"),
         transformations={"translated": Translation([0.25, 0], axes=("x", "y"))},
     )
     points = PointsModel.parse(
-        pd.DataFrame({"x": [0], "y": [0], "feature": ["A"]}),
+        pd.DataFrame({"x": [0.75, 1.25], "y": [0, 0], "feature": ["A", "B"]}),
         transformations={"translated": Identity()},
     )
 
-    with pytest.raises(ValueError, match="translation along 'x' must be pixel-aligned"):
-        aggregation_module._assign_points_to_labels(
-            labels,
+    result = aggregation_module._assign_points_to_labels(
+        labels,
+        points,
+        point_to_labels_transform=transformation_module._resolve_point_to_labels_transform(
             points,
-            value_key="feature",
+            labels,
             to_coordinate_system="translated",
-        )
+        ),
+        value_key="feature",
+    ).compute()
+
+    assert result.sort_values("feature")[_INSTANCE_KEY].to_list() == [1, 2]
 
 
 @pytest.mark.parametrize("labels_ndim", [2, 3])
@@ -963,7 +1188,6 @@ def test_assign_points_to_labels_rejects_dimension_mismatch(labels_ndim: int):
             transformations={"sample": Identity()},
         )
         frame = pd.DataFrame({"x": [0], "y": [0], "z": [0], "feature": ["A"]})
-        message = "Two-dimensional labels require only"
     else:
         labels = Labels3DModel.parse(
             np.ones((2, 2, 2), dtype=np.uint32),
@@ -971,16 +1195,194 @@ def test_assign_points_to_labels_rejects_dimension_mismatch(labels_ndim: int):
             transformations={"sample": Identity()},
         )
         frame = pd.DataFrame({"x": [0], "y": [0], "feature": ["A"]})
-        message = "Three-dimensional labels require"
     points = PointsModel.parse(frame, transformations={"sample": Identity()})
 
-    with pytest.raises(ValueError, match=message):
-        aggregation_module._assign_points_to_labels(
-            labels,
+    with pytest.raises(ValueError, match="same spatial dimensionality"):
+        transformation_module._resolve_point_to_labels_transform(
             points,
-            value_key="feature",
+            labels,
             to_coordinate_system="sample",
         )
+
+
+@pytest.mark.parametrize("singular_element", ["points", "labels"])
+def test_point_to_labels_transform_rejects_singular_registration(singular_element: str):
+    points_transformation = Scale([0, 1], axes=("x", "y")) if singular_element == "points" else Identity()
+    labels_transformation = Scale([0, 1], axes=("x", "y")) if singular_element == "labels" else Identity()
+    points = PointsModel.parse(
+        pd.DataFrame({"x": [0], "y": [0], "feature": ["A"]}),
+        transformations={"sample": points_transformation},
+    )
+    labels = Labels2DModel.parse(
+        np.ones((2, 2), dtype=np.uint32),
+        dims=("y", "x"),
+        transformations={"sample": labels_transformation},
+    )
+
+    with pytest.raises(ValueError, match=rf"{singular_element.title()} transformation matrix must be invertible"):
+        transformation_module._resolve_point_to_labels_transform(
+            points,
+            labels,
+            to_coordinate_system="sample",
+        )
+
+
+def test_point_to_labels_transform_rejects_nonfinite_matrix():
+    points = PointsModel.parse(
+        pd.DataFrame({"x": [0], "y": [0], "feature": ["A"]}),
+        transformations={
+            "sample": Affine(
+                np.array([[1, 0, np.nan], [0, 1, 0], [0, 0, 1]], dtype=np.float64),
+                input_axes=("x", "y"),
+                output_axes=("x", "y"),
+            )
+        },
+    )
+    labels = Labels2DModel.parse(
+        np.ones((2, 2), dtype=np.uint32),
+        dims=("y", "x"),
+        transformations={"sample": Identity()},
+    )
+
+    with pytest.raises(ValueError, match="Points transformation matrix must contain only finite values"):
+        transformation_module._resolve_point_to_labels_transform(
+            points,
+            labels,
+            to_coordinate_system="sample",
+        )
+
+
+def test_point_to_labels_transform_rejects_dimension_adding_affine():
+    points = PointsModel.parse(
+        pd.DataFrame({"x": [0], "y": [0], "feature": ["A"]}),
+        transformations={
+            "sample": Affine(
+                np.array([[1, 0, 0], [0, 1, 0], [0, 0, 0], [0, 0, 1]], dtype=np.float64),
+                input_axes=("x", "y"),
+                output_axes=("x", "y", "z"),
+            )
+        },
+    )
+    labels = Labels2DModel.parse(
+        np.ones((2, 2), dtype=np.uint32),
+        dims=("y", "x"),
+        transformations={"sample": Identity()},
+    )
+
+    with pytest.raises(ValueError, match="dimension-adding or dimension-dropping"):
+        transformation_module._resolve_point_to_labels_transform(
+            points,
+            labels,
+            to_coordinate_system="sample",
+        )
+
+
+@pytest.mark.parametrize("missing_element", ["points", "labels"])
+def test_point_to_labels_transform_requires_selected_coordinate_system(missing_element: str):
+    points_system = "other" if missing_element == "points" else "sample"
+    labels_system = "other" if missing_element == "labels" else "sample"
+    points = PointsModel.parse(
+        pd.DataFrame({"x": [0], "y": [0], "feature": ["A"]}),
+        transformations={points_system: Identity()},
+    )
+    labels = Labels2DModel.parse(
+        np.ones((2, 2), dtype=np.uint32),
+        dims=("y", "x"),
+        transformations={labels_system: Identity()},
+    )
+
+    with pytest.raises(
+        ValueError, match=rf"{missing_element.title()} element does not define coordinate system 'sample'"
+    ):
+        transformation_module._resolve_point_to_labels_transform(
+            points,
+            labels,
+            to_coordinate_system="sample",
+        )
+
+
+@pytest.mark.parametrize(
+    ("coordinate", "point_transformation", "message"),
+    [
+        (np.nan, Identity(), "Point coordinates must be finite"),
+        (1e308, Scale([2, 1], axes=("x", "y")), "Transformed labels coordinates must be finite"),
+    ],
+)
+def test_assign_points_to_labels_rejects_nonfinite_coordinates_during_partition_execution(
+    coordinate,
+    point_transformation,
+    message,
+):
+    labels = Labels2DModel.parse(
+        np.ones((2, 2), dtype=np.uint32),
+        dims=("y", "x"),
+        transformations={"sample": Identity()},
+    )
+    points = dd.from_pandas(
+        pd.DataFrame({"x": [coordinate], "y": [0.0], "feature": pd.Series(["A"], dtype="string")}),
+        npartitions=1,
+    )
+    points.attrs["transform"] = {"sample": point_transformation}
+    assigned = aggregation_module._assign_points_to_labels(
+        labels,
+        points,
+        point_to_labels_transform=transformation_module._resolve_point_to_labels_transform(
+            points,
+            labels,
+            to_coordinate_system="sample",
+        ),
+        value_key="feature",
+    )
+
+    with pytest.raises(ValueError, match=message):
+        assigned.compute()
+
+
+def test_aggregate_points_rejects_singular_transform_before_workspace_creation(monkeypatch, tmp_path):
+    sdata = _backed(_class_aware_sdata(), tmp_path)
+    set_transformation(
+        sdata.points["points_a"],
+        Scale([0, 1], axes=("x", "y")),
+        to_coordinate_system="sample_a",
+    )
+
+    def unexpected_workspace(*args, **kwargs):
+        raise AssertionError("Aggregation workspace was created before transformation validation.")
+
+    monkeypatch.setattr(aggregation_module, "_create_aggregation_workspace", unexpected_workspace)
+    with pytest.raises(ValueError, match="Points transformation matrix must be invertible"):
+        aggregate_points(
+            sdata,
+            labels_name="labels_a",
+            points_name="points_a",
+            to_coordinate_system="sample_a",
+            output_table_name="table",
+        )
+
+
+def test_nonfinite_source_coordinates_fail_without_publishing_table_and_clean_workspace(tmp_path):
+    labels = Labels2DModel.parse(
+        np.ones((2, 2), dtype=np.uint32),
+        dims=("y", "x"),
+        transformations={"sample": Identity()},
+    )
+    points = PointsModel.parse(
+        pd.DataFrame({"x": [np.nan], "y": [0.0], "gene": ["GeneA"]}),
+        transformations={"sample": Identity()},
+    )
+    sdata = _backed(SpatialData(labels={"labels": labels}, points={"points": points}), tmp_path)
+
+    with pytest.raises(ValueError, match="Point coordinates must be finite"):
+        aggregate_points(
+            sdata,
+            labels_name="labels",
+            points_name="points",
+            to_coordinate_system="sample",
+            output_table_name="table",
+        )
+
+    assert "table" not in sdata.tables
+    assert not list((tmp_path / "input.zarr" / "tables").glob(".harpy-aggregate-*"))
 
 
 def test_assign_points_to_labels_graph_construction_does_not_read_sources():
@@ -1022,8 +1424,12 @@ def test_assign_points_to_labels_graph_construction_does_not_read_sources():
     assigned = aggregation_module._assign_points_to_labels(
         labels,
         points,
+        point_to_labels_transform=transformation_module._resolve_point_to_labels_transform(
+            points,
+            labels,
+            to_coordinate_system="sample",
+        ),
         value_key="feature",
-        to_coordinate_system="sample",
     )
 
     assert reads == []
@@ -1410,4 +1816,11 @@ def test_bin_counts(
 
     assert (matrix1 != matrix2).nnz == 0
 
-    assert np.array_equal(sdata_bin[table_name].obsm[_SPATIAL], sdata_bin[output_table_name].obsm[_SPATIAL])
+    # Assignment now keeps the original subpixel spot coordinates. The fixture's
+    # reference table averaged rounded lookup pixels, so centers can differ by
+    # less than half a pixel while counts and bin identities remain identical.
+    assert np.allclose(
+        sdata_bin[table_name].obsm[_SPATIAL],
+        sdata_bin[output_table_name].obsm[_SPATIAL],
+        atol=0.5,
+    )

@@ -20,7 +20,12 @@ private data flow::
             |       `-- _feature_panel_partition_errors()
             |               validate each source feature-to-class assignment
             |
-            `-- _assign_points_to_labels()
+            `-- _resolve_point_to_labels_transform()
+                    compose the selected element registrations once
+                              |
+                              v
+                 _assign_points_to_labels()
+                    map each source point into intrinsic labels coordinates
                     produce lazy (instance, feature) rows
                               |
                               v
@@ -81,7 +86,7 @@ from harpy._metadata import (
     _METADATA_VERSION_KEY,
     _POINTS_METADATA_KEY,
 )
-from harpy.image._image import _get_spatial_element, _get_translation
+from harpy.image._image import _get_spatial_element
 from harpy.table._aggregation_checkpoint import (
     _AggregationCheckpoint,
     _CheckpointPair,
@@ -107,8 +112,8 @@ from harpy.table.canonical_centers import (
     build_canonical_source_signature,
     calculate_canonical_centers,
 )
+from harpy.transformations._transformations import _PointToLabelsTransform, _resolve_point_to_labels_transform
 from harpy.utils._keys import _CELL_INDEX, _GENES_KEY, _INSTANCE_KEY, _REGION_KEY, _SPATIAL
-from harpy.utils._transformations import _identity_check_transformations_points
 from harpy.utils.utils import _make_list
 
 _WARNED_DEPRECATED_ATTRIBUTES: set[str] = set()
@@ -119,6 +124,7 @@ class _AggregationPair:
     labels_name: str
     points_name: str
     coordinate_system: str
+    point_to_labels_transform: _PointToLabelsTransform
 
 
 @dataclass(frozen=True)
@@ -282,9 +288,11 @@ def aggregate_points(
 
     One aggregation call constructs one complete table. Scalar ``points_name``
     and ``to_coordinate_system`` values are broadcast across ``labels_name``;
-    lists are paired positionally. The points must have an identity
-    transformation to the selected coordinate system. Labels may have an
-    identity transformation, translation, or sequence of translations.
+    lists are paired positionally. Each paired points and labels element must
+    define a finite, invertible affine transformation to the selected shared
+    coordinate system. Harpy composes those registrations to map intrinsic
+    point coordinates directly into intrinsic labels pixels; labels are never
+    resampled.
 
     Each value ``adata.X[i, j]`` is the number of input points carrying feature
     ``j`` that were spatially assigned to instance ``i``. These are point
@@ -387,8 +395,10 @@ def aggregate_points(
     output_table_name
         Table element in which to store the resulting AnnData object.
     to_coordinate_system
-        Coordinate system or ordered list of coordinate systems pairing each
-        labels and points element. A scalar is broadcast across all pairs.
+        Shared coordinate system or ordered list of shared coordinate systems
+        pairing each labels and points element. A scalar is broadcast across
+        all pairs. Both elements in a pair must define compatible, finite and
+        invertible same-dimensional affine transformations to that system.
     chunks
         Optional labels-array chunk size used during assignment. Rechunking the
         labels element on disk beforehand is generally more efficient.
@@ -492,9 +502,9 @@ def aggregate_points(
             assigned_points = _assign_points_to_labels(
                 se=_get_spatial_element(sdata, element_name=pair.labels_name),
                 ddf=points,
+                point_to_labels_transform=pair.point_to_labels_transform,
                 value_key=feature_key,
                 drop_coordinates=True,
-                to_coordinate_system=pair.coordinate_system,
                 chunks=chunks,
                 instance_key=instance_key,
             )
@@ -603,15 +613,28 @@ def _normalize_aggregation_pairs(
                 f"found {coordinate_columns} and {current}."
             )
 
-    return tuple(
-        _AggregationPair(labels_name=labels, points_name=points, coordinate_system=coordinate_system)
-        for labels, points, coordinate_system in zip(
-            labels_names,
-            points_names,
-            coordinate_systems,
-            strict=True,
+    pairs = []
+    for labels, points, coordinate_system in zip(
+        labels_names,
+        points_names,
+        coordinate_systems,
+        strict=True,
+    ):
+        points_element = sdata.points[points]
+        labels_element = _get_spatial_element(sdata, element_name=labels)
+        pairs.append(
+            _AggregationPair(
+                labels_name=labels,
+                points_name=points,
+                coordinate_system=coordinate_system,
+                point_to_labels_transform=_resolve_point_to_labels_transform(
+                    points_element,
+                    labels_element,
+                    to_coordinate_system=coordinate_system,
+                ),
+            )
         )
-    )
+    return tuple(pairs)
 
 
 def _validate_aggregation_column_keys(*, feature_key: str, instance_key: str) -> None:
@@ -1041,7 +1064,10 @@ def bin_counts(
     output_table_name
         The table element in `sdata` in which to save the AnnData object with the binned counts per cell or region defined by `labels_name`.
     to_coordinate_system
-        The coordinate system that holds `labels_name`.
+        Shared coordinate system containing the table's spatial coordinates and
+        ``labels_name``. The table coordinates are interpreted as identity in
+        this system; the labels may use any compatible, finite and invertible
+        same-dimensional affine transformation into it.
     chunks
         Chunk sizes for processing. Can be a string, integer, or tuple of integers.
         Consider setting the chunks to a relatively high value to speed up processing,
@@ -1106,12 +1132,17 @@ def bin_counts(
         df,
         transformations={to_coordinate_system: Identity()},
     )
+    point_to_labels_transform = _resolve_point_to_labels_transform(
+        ddf,
+        se,
+        to_coordinate_system=to_coordinate_system,
+    )
 
     combined_partitions = _assign_points_to_labels(
         se=se,
         ddf=ddf,
+        point_to_labels_transform=point_to_labels_transform,
         chunks=chunks,
-        to_coordinate_system=to_coordinate_system,
         name_x=name_x,
         name_y=name_y,
         drop_coordinates=False,
@@ -1218,10 +1249,10 @@ def bin_counts(
 def _assign_points_to_labels(
     se: DataArray,
     ddf: DaskDataFrame,
+    point_to_labels_transform: _PointToLabelsTransform,
     value_key: str | Sequence[str],
     drop_coordinates: bool = False,  # if set to True, will drop ((z),y,x) in resulting dask dataframe
     chunks: str | tuple[int, ...] | int | None = None,
-    to_coordinate_system: str = "global",
     name_x: str = "x",
     name_y: str = "y",
     name_z: str = "z",
@@ -1229,9 +1260,35 @@ def _assign_points_to_labels(
 ) -> DaskDataFrame:
     """Assign points to non-background labels through the labels chunk grid.
 
-    Points are first rounded to integer pixel coordinates and mapped once to a
-    temporary row-major labels-block ID. For a two-dimensional raster the
-    mapping is:
+    The supplied transformation maps intrinsic source point coordinates through
+    their selected shared coordinate system into the intrinsic pixel frame of
+    ``se``. It is applied vectorially within each points partition before the
+    resulting continuous labels coordinates are rounded once to integer pixel
+    indices. Source point-coordinate columns remain unchanged; collision-safe
+    temporary columns carry labels-local lookup coordinates.
+
+    ::
+
+        source x/y[/z] columns
+                | retained unchanged
+                v
+        apply point-to-label affine
+                |
+                v
+        continuous coordinates in (x, y[, z]) order
+                | reorder and round once
+                v
+        temporary columns in labels-array order: (y, x) or (z, y, x)
+        (__harpy_labels_y/x or __harpy_labels_z/y/x)
+                |
+                v
+        labels-chunk routing and vectorized lookup
+                |
+                v
+        temporary columns discarded
+
+    Each transformed point is mapped once to a temporary row-major labels-block
+    ID. For a two-dimensional raster the mapping is:
 
     ::
 
@@ -1250,13 +1307,11 @@ def _assign_points_to_labels(
     delayed labels chunk and looked up vectorially. Three-dimensional labels
     apply the same rule in row-major ``(z, y, x)`` order.
 
-    Labels may have an integer-pixel translation in ``to_coordinate_system``;
-    points must have an identity transformation there. Graph construction does
-    not read either source. The returned Dask dataframe contains one row per
-    point assigned to a nonzero label, the requested value columns, the
-    assigned ``instance_key`` column and, unless ``drop_coordinates=True``,
-    the rounded spatial-coordinate columns. Requested categorical dtypes are
-    preserved.
+    Graph construction does not read either source. The returned Dask dataframe
+    contains one row per point assigned to a nonzero label, the requested value
+    columns, the assigned ``instance_key`` column and, unless
+    ``drop_coordinates=True``, the unchanged source point-coordinate columns.
+    Requested categorical dtypes are preserved.
 
     Redistribution does not preserve the input index, row order, or partition
     order. The temporary block ID is absent from the returned dataframe.
@@ -1267,17 +1322,18 @@ def _assign_points_to_labels(
         Two- or three-dimensional integer labels raster in ``(y, x)`` or
         ``(z, y, x)`` order.
     ddf
-        Points dataframe with an identity transformation to
-        ``to_coordinate_system``.
+        Points dataframe whose coordinate columns are expressed in the
+        intrinsic points frame described by ``point_to_labels_transform``.
+    point_to_labels_transform
+        Validated affine mapping from intrinsic points coordinates to intrinsic
+        labels pixel coordinates.
     value_key
         Column or columns retained alongside the assigned label ID.
     drop_coordinates
-        Whether to omit the rounded point coordinates from the result.
+        Whether to omit the unchanged source point coordinates from the result.
     chunks
         Optional virtual rechunking of the labels raster. ``None`` preserves
         its existing chunks.
-    to_coordinate_system
-        Coordinate system in which points and translated labels are aligned.
     name_x, name_y, name_z
         Point coordinate-column names.
     instance_key
@@ -1291,7 +1347,7 @@ def _assign_points_to_labels(
     --------
     With ``value_key="gene"``, the raster lookup conceptually transforms
     individual input points as follows. ``cell_ID`` contains the label value at
-    the rounded point coordinate::
+    the transformed and rounded intrinsic labels coordinate::
 
         input points                  assigned points
         x     y    gene               gene    cell_ID
@@ -1307,38 +1363,31 @@ def _assign_points_to_labels(
     """
     if not np.issubdtype(se.data.dtype, np.integer):
         raise ValueError(f"Labels must use an integer dtype, found {se.data.dtype}.")
-    missing_xy = [key for key in (name_x, name_y) if key not in ddf.columns]
-    if missing_xy:
-        raise ValueError(f"Points dataframe is missing required coordinate columns: {missing_xy}.")
-    _identity_check_transformations_points(ddf, to_coordinate_system=to_coordinate_system)
+    dimensions = tuple(se.dims)
+    if dimensions == ("y", "x"):
+        expected_labels_axes = ("x", "y")
+    elif dimensions == ("z", "y", "x"):
+        expected_labels_axes = ("x", "y", "z")
+    else:
+        raise ValueError(f"Labels dimensions must be ('y', 'x') or ('z', 'y', 'x'), found {dimensions!r}.")
+    if point_to_labels_transform.labels_axes != expected_labels_axes:
+        raise ValueError(
+            "Point-to-label transformation axes do not match the labels raster, "
+            f"found {point_to_labels_transform.labels_axes!r} for dimensions {dimensions!r}."
+        )
+
+    coordinate_name_by_axis = {"x": name_x, "y": name_y, "z": name_z}
+    point_coordinate_keys = tuple(coordinate_name_by_axis[axis] for axis in point_to_labels_transform.point_axes)
+    missing_coordinates = [key for key in point_coordinate_keys if key not in ddf.columns]
+    if missing_coordinates:
+        raise ValueError(f"Points dataframe is missing required coordinate columns: {missing_coordinates}.")
 
     requested_value_keys = list(dict.fromkeys([value_key] if isinstance(value_key, str) else value_key))
     missing_value_keys = [key for key in requested_value_keys if key not in ddf.columns]
     if missing_value_keys:
         raise ValueError(f"Dask DataFrame does not contain requested value columns: {missing_value_keys}.")
-    dimensions = tuple(se.dims)
-    if dimensions == ("y", "x"):
-        if name_z in ddf.columns:
-            raise ValueError(
-                f"Two-dimensional labels require only '{name_x}' and '{name_y}' point coordinates; "
-                f"unexpected column '{name_z}' was found."
-            )
-        coordinate_keys = [name_x, name_y]
-    elif dimensions == ("z", "y", "x"):
-        if name_z not in ddf.columns:
-            raise ValueError(f"Three-dimensional labels require point coordinate column '{name_z}'.")
-        coordinate_keys = [name_x, name_y, name_z]
-    else:
-        raise ValueError(f"Labels dimensions must be ('y', 'x') or ('z', 'y', 'x'), found {dimensions!r}.")
 
-    translation_x, translation_y = _get_translation(se, to_coordinate_system=to_coordinate_system)
-    translations = {
-        "x": _normalize_pixel_translation(translation_x, axis="x"),
-        "y": _normalize_pixel_translation(translation_y, axis="y"),
-        "z": 0,
-    }
-
-    value_keys = list(dict.fromkeys([*coordinate_keys, *requested_value_keys]))
+    value_keys = list(dict.fromkeys([*point_coordinate_keys, *requested_value_keys]))
     arr = se.data
     if chunks is not None:
         arr = arr.rechunk(chunks)
@@ -1346,24 +1395,36 @@ def _assign_points_to_labels(
     log.info("Calculating cell counts.")
 
     projected = ddf[value_keys]
+    occupied_columns = set(projected.columns)
+    # Reserve collision-safe temporary columns for the transformed, rounded
+    # coordinates in labels-array order: (y, x) or (z, y, x). These columns
+    # are used only for chunk routing and lookup; source coordinates remain unchanged.
+    label_local_coordinate_keys = []
+    for dimension in dimensions:
+        candidate = f"__harpy_labels_{dimension}"
+        while candidate in occupied_columns:
+            candidate = f"_{candidate}"
+        occupied_columns.add(candidate)
+        label_local_coordinate_keys.append(candidate)
+    label_local_coordinate_keys = tuple(label_local_coordinate_keys)
+
     block_id_key = "__harpy_block_id"
-    while block_id_key in projected.columns:
+    while block_id_key in occupied_columns:
         block_id_key = f"_{block_id_key}"
     boundaries = tuple(tuple(np.cumsum((0, *axis_chunks), dtype=np.int64).tolist()) for axis_chunks in arr.chunks)
     grid_shape = tuple(len(axis_chunks) for axis_chunks in arr.chunks)
     number_of_blocks = int(np.prod(grid_shape))
-    translation_by_dimension = tuple(translations[dimension] for dimension in dimensions)
-    coordinate_key_by_dimension = tuple({"x": name_x, "y": name_y, "z": name_z}[dimension] for dimension in dimensions)
 
     classified_meta = projected._meta.copy()
-    for key in coordinate_keys:
+    for key in label_local_coordinate_keys:
         classified_meta[key] = pd.Series(index=classified_meta.index, dtype=np.int64)
     classified_meta[block_id_key] = pd.Series(index=classified_meta.index, dtype=np.int64)
     classified = projected.map_partitions(
         _classify_points_by_label_block,
-        coordinate_keys=coordinate_key_by_dimension,
+        point_coordinate_keys=point_coordinate_keys,
+        label_local_coordinate_keys=label_local_coordinate_keys,
+        point_to_labels_matrix=point_to_labels_transform.affine_matrix,
         boundaries=boundaries,
-        translations=translation_by_dimension,
         grid_shape=grid_shape,
         block_id_key=block_id_key,
         meta=classified_meta,
@@ -1393,8 +1454,6 @@ def _assign_points_to_labels(
 
     returned_columns = [*requested_value_keys, instance_key] if drop_coordinates else [*value_keys, instance_key]
     result_meta = projected._meta[value_keys].copy()
-    for key in coordinate_keys:
-        result_meta[key] = pd.Series(index=result_meta.index, dtype=np.int64)
     result_meta[instance_key] = pd.Series(index=result_meta.index, dtype=arr.dtype)
     result_meta = result_meta[returned_columns]
     result_meta.index = pd.RangeIndex(0)
@@ -1411,8 +1470,7 @@ def _assign_points_to_labels(
             dask.delayed(_lookup_points_in_label_block)(
                 point_block,
                 label_block,
-                coordinate_keys=coordinate_key_by_dimension,
-                translations=translation_by_dimension,
+                label_local_coordinate_keys=label_local_coordinate_keys,
                 block_start=block_start,
                 requested_columns=returned_columns,
                 instance_key=instance_key,
@@ -1423,43 +1481,81 @@ def _assign_points_to_labels(
     return dd.from_delayed(assigned_blocks, meta=result_meta)
 
 
-def _normalize_pixel_translation(value: float, *, axis: str) -> int:
-    """Normalize a numerically integral labels translation to pixel units."""
-    if not np.isfinite(value):
-        raise ValueError(f"Labels translation along {axis!r} must be finite, found {value!r}.")
-    nearest = int(np.rint(value))
-    if not np.isclose(value, nearest, rtol=0, atol=1e-6):
-        raise ValueError(f"Labels translation along {axis!r} must be pixel-aligned, found {value!r}.")
-    return nearest
-
-
 def _classify_points_by_label_block(
     partition: pd.DataFrame,
     *,
-    coordinate_keys: tuple[str, ...],
+    point_coordinate_keys: tuple[str, ...],
+    label_local_coordinate_keys: tuple[str, ...],
+    point_to_labels_matrix: np.ndarray,
     boundaries: tuple[tuple[int, ...], ...],
-    translations: tuple[int, ...],
     grid_shape: tuple[int, ...],
     block_id_key: str,
 ) -> pd.DataFrame:
-    """Round and classify one points partition into row-major labels blocks."""
+    """Transform and classify one points partition into row-major labels blocks.
+
+    Source point coordinates remain unchanged. The affine matrix produces
+    intrinsic labels coordinates in canonical ``(x, y[, z])`` order. These are
+    reordered into labels-array order, rounded once, and stored in the temporary
+    columns ``label_local_coordinate_keys``, which follow ``(y, x)`` or
+    ``(z, y, x)``. The coordinates are filtered against the complete raster
+    extent and converted to a row-major ``block_id_key`` using the irregular
+    chunk ``boundaries``. Non-finite source or transformed coordinates fail in
+    the executing partition rather than triggering a separate eager validation
+    pass over the complete points element.
+
+    The first and last value of each boundary sequence define the complete,
+    half-open raster extent. All dimensions are combined with logical AND before
+    surviving coordinates are converted to ``int64``. For example::
+
+        labels shape: (y=5, x=7)
+        boundaries:   y=(0, 2, 5), x=(0, 3, 5, 7)
+
+        rounded (y, x)    retained?
+        (0, 0)            yes
+        (4, 6)            yes
+        (5, 2)            no: y upper bound is exclusive
+        (-1, 1)           no: y is negative
+
+    The later ``searchsorted`` step uses the internal boundary values to assign
+    each surviving point to one labels chunk. An empty partition returns the
+    complete expected schema without attempting that classification.
+    """
     result = partition.copy()
-    local_coordinates = []
+    try:
+        point_coordinates = result[list(point_coordinate_keys)].to_numpy(dtype=np.float64, copy=False)
+    except (TypeError, ValueError) as e:
+        raise ValueError("Point coordinates must be numeric and finite.") from e
+    if not np.isfinite(point_coordinates).all():
+        raise ValueError("Point coordinates must be finite.")
+
+    with np.errstate(over="ignore", invalid="ignore"):
+        labels_coordinates = point_coordinates @ point_to_labels_matrix[:-1, :-1].T + point_to_labels_matrix[:-1, -1]
+    if not np.isfinite(labels_coordinates).all():
+        raise ValueError("Transformed labels coordinates must be finite.")
+    # Affine output is (x, y[, z]); reversing once aligns every following
+    # operation with the labels array and chunk order (y, x) or (z, y, x).
+    rounded_coordinates = np.rint(labels_coordinates[:, ::-1])
+
+    # First filter against the complete raster; internal boundaries are used
+    # below to classify surviving points into individual labels chunks.
     inside = np.ones(len(result), dtype=bool)
-    for key, axis_boundaries, translation in zip(coordinate_keys, boundaries, translations, strict=True):
-        result[key] = result[key].round().astype(np.int64)
-        local = result[key].to_numpy(dtype=np.int64, copy=False) - translation
-        local_coordinates.append(local)
-        inside &= (local >= axis_boundaries[0]) & (local < axis_boundaries[-1])
+    for coordinates, axis_boundaries in zip(rounded_coordinates.T, boundaries, strict=True):
+        inside &= (coordinates >= axis_boundaries[0]) & (coordinates < axis_boundaries[-1])
 
     result = result.loc[inside].copy()
+    for key, coordinates in zip(label_local_coordinate_keys, rounded_coordinates.T, strict=True):
+        result[key] = coordinates[inside].astype(np.int64, copy=False)
     if result.empty:
         result[block_id_key] = pd.Series(index=result.index, dtype=np.int64)
         return result
 
     block_indices = tuple(
-        np.searchsorted(axis_boundaries[1:], local[inside], side="right")
-        for local, axis_boundaries in zip(local_coordinates, boundaries, strict=True)
+        np.searchsorted(
+            axis_boundaries[1:],
+            result[key].to_numpy(dtype=np.int64, copy=False),
+            side="right",
+        )
+        for key, axis_boundaries in zip(label_local_coordinate_keys, boundaries, strict=True)
     )
     result[block_id_key] = np.ravel_multi_index(block_indices, grid_shape).astype(np.int64, copy=False)
     return result
@@ -1469,8 +1565,7 @@ def _lookup_points_in_label_block(
     points: pd.DataFrame,
     labels: np.ndarray,
     *,
-    coordinate_keys: tuple[str, ...],
-    translations: tuple[int, ...],
+    label_local_coordinate_keys: tuple[str, ...],
     block_start: tuple[int, ...],
     requested_columns: list[str],
     instance_key: str,
@@ -1479,14 +1574,14 @@ def _lookup_points_in_label_block(
     """Assign one routed points partition from its corresponding labels block.
 
     The preceding block-classification and shuffle stages guarantee that every
-    row in ``points`` lies within the spatial extent of ``labels``. Point
-    coordinates are still expressed in the selected coordinate system, whereas
-    ``labels`` is the NumPy array for one chunk of the untranslated labels
-    raster. For each spatial axis, the coordinate inside that chunk is
+    row in ``points`` lies within the spatial extent of ``labels``. Temporary
+    coordinate columns are integer positions in the complete intrinsic labels
+    raster, whereas ``labels`` is the NumPy array for one chunk of that raster.
+    For each spatial axis, the coordinate inside that chunk is
 
     ::
 
-        chunk_coordinate = point_coordinate - translation - block_start
+        chunk_coordinate = labels_coordinate - block_start
 
     The resulting coordinate arrays are used together for one vectorized,
     pointwise lookup. For example, coordinates ``y=[1, 2]`` and ``x=[3, 4]``
@@ -1502,20 +1597,18 @@ def _lookup_points_in_label_block(
     Parameters
     ----------
     points
-        In-memory points partition routed to this labels block. Its coordinates
-        are rounded integer positions in the selected coordinate system.
+        In-memory points partition routed to this labels block. It contains the
+        requested source columns and temporary integer coordinates in the
+        intrinsic labels frame.
     labels
         In-memory two- or three-dimensional array containing the corresponding
         labels chunk.
-    coordinate_keys
-        Coordinate columns in labels-array axis order: ``(y, x)`` for 2D or
-        ``(z, y, x)`` for 3D.
-    translations
-        Integer origin of the complete labels raster in the selected coordinate
-        system, ordered like ``coordinate_keys``. The z translation is zero.
+    label_local_coordinate_keys
+        Temporary intrinsic-label coordinate columns in labels-array axis
+        order: ``(y, x)`` for 2D or ``(z, y, x)`` for 3D.
     block_start
         Origin of this chunk within the untranslated labels raster, ordered like
-        ``coordinate_keys``.
+        ``label_local_coordinate_keys``.
     requested_columns
         Ordered columns retained in the returned dataframe, including
         ``instance_key``.
@@ -1534,8 +1627,8 @@ def _lookup_points_in_label_block(
         result[instance_key] = pd.Series(index=result.index, dtype=label_dtype)
     else:
         local_coordinates = tuple(
-            result[key].to_numpy(dtype=np.int64, copy=False) - translation - start
-            for key, translation, start in zip(coordinate_keys, translations, block_start, strict=True)
+            result[key].to_numpy(dtype=np.int64, copy=False) - start
+            for key, start in zip(label_local_coordinate_keys, block_start, strict=True)
         )
         result[instance_key] = labels[local_coordinates]
         result = result.loc[result[instance_key] != 0]
