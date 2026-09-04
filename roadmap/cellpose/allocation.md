@@ -2,7 +2,7 @@
 
 ## Status
 
-Twelve implementation slices are planned; Slices 1 through 8 are implemented:
+Twelve implementation slices are planned; Slices 1 through 9 are implemented:
 
 1. patch the CosMx reader and establish the generic Harpy feature-panel
    metadata contract — implemented;
@@ -15,10 +15,11 @@ Twelve implementation slices are planned; Slices 1 through 8 are implemented:
 6. preserve per-feature non-expression aggregates and use label centers of
    mass for the complete assigned-instance row universe — implemented;
 7. optimize the generic point-to-label assignment, reduction and backed table
-   construction path;
+   construction path — implemented;
 8. promote napari-harpy's canonical-center implementation into Harpy and
    integrate it with `hp.tb.aggregate_points` — implemented;
-9. add canonical centers to compatible existing SpatialData tables;
+9. add canonical centers to compatible existing SpatialData tables —
+   implemented;
 10. add QC functions that summarize the original, unallocated control points;
 11. support general lazy reopening of persisted AnnData tables through
     SpatialData; and
@@ -2943,7 +2944,7 @@ Focused tests should establish that:
 
 ## Slice 9: canonical centers for existing SpatialData tables
 
-**Status: follow-up; not implemented.**
+**Status: implemented.**
 
 Add a high-level operation that attaches the canonical-center contract from
 Slice 8 to a compatible table created outside `hp.tb.aggregate_points`. This is
