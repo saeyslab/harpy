@@ -38,15 +38,17 @@ instances are retained. Slice 7a optimizes the private point-to-label assignment
 while preserving that payload through the then-existing in-memory path. Slice
 7b replaces that path with one backed-only implementation for partitioned
 reduction and out-of-core table construction.
-Slice 8 establishes a Harpy-owned canonical-center
-calculation and metadata contract that napari-harpy can consume without a
-reverse dependency, and makes newly aggregated 2D tables immediately usable
-by canonical-center spatial queries. Slice 9's original-point summaries depend
-on the reader metadata from Slices 1–4 rather than aggregation or labels; its
-optional per-instance plotting view derives temporary rates from the
-class-aware table. Slice 10 is an independent integration follow-up that makes
-later SpatialData Zarr reads retain lazy AnnData matrices; it is not required
-for Slice 7b's out-of-core writing or same-process result. Slice 11 is an
+Slice 8 establishes a Harpy-owned canonical-center calculation and metadata
+contract that napari-harpy can consume without a reverse dependency. Newly
+aggregated 2D and 3D tables receive canonical centers through the same contract;
+the 2D case is immediately usable by canonical-center spatial queries, while
+the annotation-query boundary explicitly rejects 3D sources. Slice 9's
+original-point summaries depend on the reader metadata from Slices 1–4 rather
+than aggregation or labels; its optional per-instance plotting view derives
+temporary rates from the class-aware table. Slice 10 is an independent
+integration follow-up that makes later SpatialData Zarr reads retain lazy
+AnnData matrices. It is not required for Slice 7b's out-of-core writing or
+same-process result. Slice 11 is an
 optional, benchmark-driven follow-up: it may reduce repeated checkpoint reads
 and small-partition overhead, but must preserve Slice 7b's bounded-memory and
 publication contracts.
@@ -2844,6 +2846,21 @@ The implementation sequence should be:
    schema together; and
 6. write the canonical coordinate payload once through Slice 7b's backed
    component writer before publication.
+
+Extend the public `hp.tb.validate_table()` validator to check the canonical
+contract whenever either `adata.obsm["spatial_canonical"]` or its
+`adata.uns["spatial_coordinates"]["spatial_canonical"]` metadata record is
+present. Reuse the Harpy-owned schema validation used during construction and
+require matrix/metadata symmetry, schema version 1, the fixed matrix key and
+`(z, y, x)` axes, dense `float64` shape, valid table region/instance linkage,
+resolvable per-region source labels, matching source dimensions, shape and
+dtype, complete row coverage, and the expected instance-set digest.
+
+This is a structural and metadata-consistency check. `validate_table()` must
+not recompute centers of mass or scan labels pixel values. Tables containing
+neither canonical component remain valid generic SpatialData tables; tables
+with only one component, or with an inconsistent canonical payload, are
+rejected.
 
 Napari-harpy's ensure/read path remains useful for older or externally created
 tables without canonical coordinates. For a new Harpy aggregation table,
