@@ -1,5 +1,16 @@
 """Point-to-label aggregation orchestration.
 
+An *aggregation pair* is one positional combination of a labels element, a
+points element and the coordinate system in which they are joined. For
+example::
+
+    pair 0 = (labels_a, points_a, sample_a)
+    pair 1 = (labels_b, points_b, sample_b)
+
+Each pair receives a zero-based ordinal. The ordinal remains part of the
+checkpoint row key so equal instance IDs from different labels elements do not
+collapse into one output row.
+
 The class-aware :func:`aggregate_points` implementation uses the following
 private data flow::
 
@@ -7,7 +18,7 @@ private data flow::
             |
             +-- _validate_feature_panel_contents()
             |       `-- _feature_panel_partition_errors()
-            |               validate source (feature, class) pairs before assignment
+            |               validate each source feature-to-class assignment
             |
             `-- _assign_points_to_labels()
                     produce lazy (instance, feature) rows
@@ -18,7 +29,7 @@ private data flow::
                               |
                               v
                 _stage_aggregation_checkpoint()
-                    +-- Dask shuffle by (pair, instance)
+                    +-- Dask shuffle by (aggregation-pair ordinal, instance ID)
                     +-- _merge_count_partition()
                     +-- write merged counts to temporary Parquet on disk:
                         tables/.harpy-aggregate-<uuid>/merged_counts/

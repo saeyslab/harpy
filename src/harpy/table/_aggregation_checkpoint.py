@@ -24,7 +24,33 @@ _CHECKPOINT_COLUMNS = (_PAIR_COLUMN, _CHECKPOINT_INSTANCE_COLUMN, _FEATURE_COLUM
 
 @dataclass(frozen=True)
 class _CheckpointPair:
-    """Describe one normalized labels/points pair represented in a checkpoint."""
+    """Describe one normalized aggregation pair represented in a checkpoint.
+
+    An aggregation pair is one positional combination of a labels element, a
+    points element and the coordinate system in which they are joined. Its
+    zero-based ``ordinal`` is stored with checkpoint count rows so the same
+    instance ID occurring in different labels elements remains distinct. For
+    example::
+
+        ordinal 0 = (labels_a, points_a, sample_a)
+        ordinal 1 = (labels_b, points_b, sample_b)
+
+    An instance ID of ``42`` in both pairs therefore produces separate
+    checkpoint keys ``(0, 42)`` and ``(1, 42)``.
+
+    Parameters
+    ----------
+    ordinal
+        Zero-based identity of the aggregation pair within this call.
+    labels_name
+        Name of the labels element receiving the points.
+    points_name
+        Name of the points element assigned to the labels.
+    coordinate_system
+        Coordinate system in which assignment is performed.
+    coordinate_columns
+        Point-coordinate columns used for the two- or three-dimensional join.
+    """
 
     ordinal: int
     labels_name: str
