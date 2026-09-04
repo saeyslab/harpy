@@ -3182,21 +3182,42 @@ the labels origin is `(100, 50)`. A point at shared coordinate `(102, 51)` maps
 to intrinsic labels coordinate `(4, 2)` and is looked up as
 `labels[y=2, x=4]`.
 
-Resolve this relation through SpatialData's public transformation API. The
-selected `to_coordinate_system` is an explicit part of the aggregation pair;
-the resolved path must pass through that coordinate system rather than silently
-choosing another registration path. Prefer
-`get_transformation_between_coordinate_systems()` with the points and labels
-elements as the source and target and `to_coordinate_system` as the required
-intermediate coordinate system. An equivalent explicit composition of the two
-element-to-coordinate-system transformations is acceptable when it preserves
-the same path and error semantics.
+Resolve this relation directly through SpatialData's public transformation API.
+Fetch each element's transformation to the explicitly selected shared system:
+
+```python
+T_points = get_transformation(points, to_coordinate_system=to_coordinate_system)
+T_labels = get_transformation(labels, to_coordinate_system=to_coordinate_system)
+```
+
+Direct lookup is the shared implementation contract because
+`hp.tb.bin_counts` constructs a temporary points element that is not registered
+in the supplied `SpatialData` object. A graph operation such as
+`get_transformation_between_coordinate_systems()` may be used only when both
+elements are registered and the path is explicitly constrained through
+`to_coordinate_system`; it must not be the sole resolver used by the common
+assignment helper.
+
+Convert `T_points` and `T_labels` separately to homogeneous matrices using the
+same canonical axes. Calculate the relative matrix with a linear solve rather
+than forming an explicit numerical inverse:
+
+```python
+M_points_to_labels = np.linalg.solve(M_labels, M_points)
+```
+
+This implements `inverse(M_labels) @ M_points` while providing a direct failure
+for a singular labels transformation. Validate the point transformation's
+invertibility separately so both element registrations satisfy the stated
+coordinate-system contract.
 
 Resolve and validate the relative transformation once per aggregation pair,
-before constructing the assignment graph. Convert it to one small homogeneous
-affine matrix in canonical `(x, y)` or `(x, y, z)` coordinate order and pass
-that resolved value to the private assignment implementation. Do not repeatedly
-inspect transformation metadata inside Dask partitions.
+before creating the aggregation workspace or constructing the assignment graph.
+Represent the result as one small immutable private contract containing the
+point axes, labels axes, and homogeneous point-to-label matrix in canonical
+`(x, y)` or `(x, y, z)` coordinate order. Pass that resolved contract to the
+private assignment implementation. Do not repeatedly inspect transformation
+metadata inside Dask partitions.
 
 ### Partition-wise assignment
 
@@ -3269,15 +3290,26 @@ This removes the pixel-aligned-translation restriction. A fractional labels
 translation is valid because the complete relative transform is applied before
 the final labels-pixel rounding.
 
-Reject clearly, before source computation or output mutation:
+Reject clearly during pair preflight, before creating the aggregation workspace,
+constructing the assignment graph, or reading either source:
 
 - either element missing `to_coordinate_system`;
-- a singular or otherwise non-invertible labels transformation;
+- a singular or otherwise non-invertible points or labels transformation;
 - a transformation that cannot be represented as an affine matrix;
-- non-finite matrix entries or transformed coordinates;
+- a matrix with non-finite entries;
 - incompatible point and labels dimensionality;
 - dimension-adding or dimension-dropping mappings; and
 - unsupported labels dimensions outside `(y, x)` and `(z, y, x)`.
+
+Source-coordinate validity is necessarily a partition-time check. Reject a
+point partition containing non-finite source coordinates or producing
+non-finite labels-local coordinates when that partition executes. This failure
+may occur while the checkpoint graph is executing, so other partitions may
+already have written temporary files in the call-owned workspace. The
+checkpoint must not be accepted or consumed, the final table must not be
+published, and the complete owned workspace must be cleaned normally. Do not
+add a separate eager scan solely to validate coordinate values, because that
+would read every points partition twice.
 
 “General transformation” in this contract means any compatible, invertible
 SpatialData affine transformation. It does not promise support for arbitrary
@@ -3315,7 +3347,11 @@ Focused tests must establish that:
 - source point-coordinate columns are not replaced by transient labels-local
   coordinates;
 - missing coordinate systems, dimensional mismatch, non-finite matrices, and
-  singular transformations fail before graph execution or output mutation;
+  singular transformations fail during pair preflight before workspace creation
+  or graph execution;
+- non-finite source or transformed point coordinates fail in their executing
+  partition before checkpoint publication, without an additional validation
+  scan;
 - graph construction performs no source reads and the complete points or labels
   elements are never materialized;
 - ordinary and class-aware `aggregate_points` produce unchanged feature and
