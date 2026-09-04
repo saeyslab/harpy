@@ -26,14 +26,14 @@ _CHECKPOINT_COLUMNS = (_PAIR_COLUMN, _CHECKPOINT_INSTANCE_COLUMN, _FEATURE_COLUM
 class _CheckpointPair:
     """Describe one normalized aggregation pair represented in a checkpoint.
 
-    An aggregation pair is one positional combination of a labels element, a
-    points element and the coordinate system in which they are joined. Its
-    zero-based ``ordinal`` is stored with checkpoint count rows so the same
-    instance ID occurring in different labels elements remains distinct. For
-    example::
+    An aggregation pair associates one points element with one labels element.
+    Its coordinate system specifies where that assignment is performed. The
+    pair's zero-based ``ordinal`` is stored with checkpoint count rows so the
+    same instance ID occurring in different labels elements remains distinct.
+    For example::
 
-        ordinal 0 = (labels_a, points_a, sample_a)
-        ordinal 1 = (labels_b, points_b, sample_b)
+        ordinal 0: points_a -> labels_a in sample_a
+        ordinal 1: points_b -> labels_b in sample_b
 
     An instance ID of ``42`` in both pairs therefore produces separate
     checkpoint keys ``(0, 42)`` and ``(1, 42)``.

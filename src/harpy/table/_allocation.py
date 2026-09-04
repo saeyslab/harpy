@@ -1,11 +1,11 @@
 """Point-to-label aggregation orchestration.
 
-An *aggregation pair* is one positional combination of a labels element, a
-points element and the coordinate system in which they are joined. For
+An *aggregation pair* associates one points element with one labels element.
+Its coordinate system specifies where that assignment is performed. For
 example::
 
-    pair 0 = (labels_a, points_a, sample_a)
-    pair 1 = (labels_b, points_b, sample_b)
+    pair 0: points_a -> labels_a in sample_a
+    pair 1: points_b -> labels_b in sample_b
 
 Each pair receives a zero-based ordinal. The ordinal remains part of the
 checkpoint row key so equal instance IDs from different labels elements do not
