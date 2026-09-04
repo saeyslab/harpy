@@ -10,12 +10,16 @@ from pathlib import Path
 import numpy as np
 import zarr
 from anndata import AnnData
-from anndata.io import read_elem, write_elem
 from loguru import logger as log
 from spatialdata import SpatialData
 
 from harpy.table._validation import _validate_table_without_canonical
-from harpy.table._zarr import _read_backed_array
+from harpy.table._zarr import (
+    _publish_staged_anndata_elements,
+    _read_anndata_element,
+    _StagedAnnDataElement,
+    _write_anndata_element,
+)
 from harpy.table.canonical_centers import (
     CANONICAL_ALGORITHM_VERSION,
     CANONICAL_OBSM_KEY,
@@ -29,6 +33,9 @@ from harpy.table.canonical_centers import (
     validate_canonical_payload,
 )
 
+_CANONICAL_MATRIX_PATH = ("obsm", CANONICAL_OBSM_KEY)
+_CANONICAL_METADATA_PATH = ("uns", SPATIAL_COORDINATES_KEY, CANONICAL_OBSM_KEY)
+
 
 @dataclass(frozen=True)
 class _CanonicalCentersDestination:
@@ -40,15 +47,15 @@ class _CanonicalCentersDestination:
 
     @property
     def matrix(self) -> Path:
-        return self.table / "obsm" / CANONICAL_OBSM_KEY
+        return self.table.joinpath(*_CANONICAL_MATRIX_PATH)
 
     @property
     def registry(self) -> Path:
-        return self.table / "uns" / SPATIAL_COORDINATES_KEY
+        return self.table.joinpath(*_CANONICAL_METADATA_PATH[:-1])
 
     @property
     def metadata(self) -> Path:
-        return self.registry / CANONICAL_OBSM_KEY
+        return self.table.joinpath(*_CANONICAL_METADATA_PATH)
 
 
 def add_canonical_centers(
@@ -398,13 +405,26 @@ def _stage_canonical_components(
     centers: np.ndarray,
     metadata: Mapping[str, object],
 ) -> Path:
-    """Write the two replacement components to a same-filesystem workspace."""
+    """Write both components to a temporary store in their final hierarchy.
+
+    The staging store mirrors the logical paths the components will eventually
+    occupy in the existing AnnData table::
+
+        staging/
+        |-- obsm/spatial_canonical
+        `-- uns/spatial_coordinates/spatial_canonical
+
+    This makes staged validation use the same paths and AnnData encodings as
+    the published representation. Publication later moves only these two
+    encoded leaves into the existing table; it does not replace or reconstruct
+    the table itself.
+    """
     workspace = destination.root.parent / f".{destination.root.name}.harpy-canonical-{uuid.uuid4().hex[:8]}"
     try:
         staging = zarr.open_group(store=str(workspace), mode="w", zarr_format=destination.zarr_format)
         log.info(f"Writing staged canonical-center components to '{workspace}'.")
-        write_elem(staging, "matrix", centers)
-        write_elem(staging, "metadata", dict(metadata))
+        _write_anndata_element(staging, _CANONICAL_MATRIX_PATH, centers, create_parents=True)
+        _write_anndata_element(staging, _CANONICAL_METADATA_PATH, dict(metadata), create_parents=True)
         log.info(f"Finished writing staged canonical-center components to '{workspace}'.")
     except Exception:
         _remove_generated_path(workspace)
@@ -424,7 +444,10 @@ def _validate_staged_canonical_components(
 ) -> None:
     """Reopen and validate the exact serialized replacement components."""
     staging = zarr.open_group(store=str(workspace), mode="r", use_consolidated=False)
-    metadata = read_elem(staging["metadata"])
+    metadata = _read_anndata_element(staging, _CANONICAL_METADATA_PATH)
+    # Dense centers reopen as a storage-backed Zarr array. Canonical validation
+    # intentionally materializes this small ``(n_obs, 3)`` matrix temporarily.
+    centers = _read_anndata_element(staging, _CANONICAL_MATRIX_PATH)
     _validate_candidate_payload(
         sdata,
         source_table,
@@ -432,7 +455,7 @@ def _validate_staged_canonical_components(
         region_key=region_key,
         instance_key=instance_key,
         labels_names=labels_names,
-        centers=_read_backed_array(staging["matrix"]),
+        centers=centers,
         metadata=metadata,
     )
 
@@ -456,8 +479,8 @@ def _install_canonical_components(
 
     try:
         with _publish_staged_canonical_components(destination=destination, workspace=workspace) as table_group:
-            matrix = _read_backed_array(table_group["obsm"][CANONICAL_OBSM_KEY])
-            metadata = read_elem(table_group["uns"][SPATIAL_COORDINATES_KEY][CANONICAL_OBSM_KEY])
+            matrix = _read_anndata_element(table_group, _CANONICAL_MATRIX_PATH)
+            metadata = _read_anndata_element(table_group, _CANONICAL_METADATA_PATH)
             registry = dict(previous_registry) if isinstance(previous_registry, Mapping) else {}
             registry[CANONICAL_OBSM_KEY] = metadata
             table.obsm[CANONICAL_OBSM_KEY] = matrix
@@ -493,14 +516,13 @@ def _publish_staged_canonical_components(
     destination: _CanonicalCentersDestination,
     workspace: Path,
 ) -> Generator[zarr.Group, None, None]:
-    """Publish two staged table components and restore both on failure.
+    """Publish two canonical components through the shared element transaction.
 
     Existing canonical components, including an asymmetric old payload, are
-    moved into the same-filesystem workspace before the replacements become
-    visible. The rollback copies remain available while the caller refreshes
-    the in-memory table, validates it and writes consolidated metadata::
+    preserved as rollback copies while the caller refreshes the in-memory
+    table, validates it and writes consolidated metadata::
 
-        existing components --rename--> workspace backups
+        existing components --rename--> same-filesystem backups
         staged components   --rename--> table component paths
                                       |
                                       v
@@ -512,46 +534,42 @@ def _publish_staged_canonical_components(
                          |                         |
                  remove workspace       remove replacements,
                                         restore backups
-    """
-    staged_matrix = workspace / "matrix"
-    staged_metadata = workspace / "metadata"
-    backup_matrix = workspace / "previous_matrix"
-    backup_metadata = workspace / "previous_metadata"
-    registry_created = not destination.registry.exists()
-    matrix_published = False
-    metadata_published = False
 
-    log.info(f"Publishing canonical-center components to '{destination.table}'.")
+    The filesystem transaction itself is implemented by
+    :func:`_publish_staged_anndata_elements`; this wrapper additionally creates
+    and, on failure, removes the nested ``uns["spatial_coordinates"]`` mapping
+    when the table did not already contain it.
+    """
+    registry_created = not destination.registry.exists()
     try:
-        if destination.matrix.exists():
-            destination.matrix.rename(backup_matrix)
-        if destination.metadata.exists():
-            destination.metadata.rename(backup_metadata)
         if registry_created:
             root = zarr.open_group(store=str(destination.root), mode="r+", use_consolidated=False)
-            write_elem(root["tables"][destination.table.name]["uns"], SPATIAL_COORDINATES_KEY, {})
+            _write_anndata_element(
+                root["tables"][destination.table.name]["uns"],
+                (SPATIAL_COORDINATES_KEY,),
+                {},
+            )
 
-        staged_matrix.rename(destination.matrix)
-        matrix_published = True
-        staged_metadata.rename(destination.metadata)
-        metadata_published = True
-
-        root = zarr.open_group(store=str(destination.root), mode="r+", use_consolidated=False)
-        yield root["tables"][destination.table.name]
-    except Exception:
-        if matrix_published:
-            _remove_generated_path(destination.matrix)
-        if metadata_published:
-            _remove_generated_path(destination.metadata)
-        if backup_matrix.exists():
-            backup_matrix.rename(destination.matrix)
-        if backup_metadata.exists():
-            backup_metadata.rename(destination.metadata)
+        with _publish_staged_anndata_elements(
+            root=destination.root,
+            workspace=workspace,
+            elements=(
+                _StagedAnnDataElement(
+                    staged=workspace.joinpath(*_CANONICAL_MATRIX_PATH),
+                    destination=destination.matrix,
+                ),
+                _StagedAnnDataElement(
+                    staged=workspace.joinpath(*_CANONICAL_METADATA_PATH),
+                    destination=destination.metadata,
+                ),
+            ),
+            operation="canonical",
+        ) as root:
+            yield root["tables"][destination.table.name]
+    except BaseException:
         if registry_created:
             _remove_generated_path(destination.registry)
         raise
-    _remove_generated_path(workspace)
-    log.info(f"Finished publishing canonical-center components to '{destination.table}'.")
 
 
 def _remove_generated_path(path: Path) -> None:

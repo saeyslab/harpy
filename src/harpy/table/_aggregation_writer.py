@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 import zarr
 from anndata import AnnData
-from anndata.io import sparse_dataset, write_elem
+from anndata.io import sparse_dataset
 from loguru import logger as log
 from scipy import sparse
 from spatialdata import SpatialData
@@ -35,7 +35,13 @@ from harpy.table._metadata import (
     _FEATURE_CLASS_AGGREGATION_SCHEMA_VERSION,
     _FEATURE_MATRIX_SCHEMA_VERSION,
 )
-from harpy.table._zarr import _read_backed_table, _write_spatialdata_table_attrs
+from harpy.table._zarr import (
+    _publish_staged_anndata_elements,
+    _read_backed_table,
+    _StagedAnnDataElement,
+    _write_anndata_element,
+    _write_spatialdata_table_attrs,
+)
 from harpy.table.canonical_centers import (
     CANONICAL_ALGORITHM_VERSION,
     CANONICAL_OBSM_KEY,
@@ -57,7 +63,6 @@ class _AggregationDestination:
     tables: Path
     output: Path
     zarr_format: int
-    replace_existing: bool
 
 
 @dataclass(frozen=True)
@@ -144,7 +149,6 @@ def _validate_aggregation_destination(
         tables=tables,
         output=output,
         zarr_format=zarr_format,
-        replace_existing=memory_collision,
     )
 
 
@@ -236,7 +240,7 @@ def _write_aggregation_table(
         f"Writing AnnData '.obs', '.var', '.uns' and '.obsm[{CANONICAL_OBSM_KEY}]' to staged table at "
         f"'{staging_table_path}'."
     )
-    write_elem(staging_root, "table", table)
+    _write_anndata_element(staging_root, ("table",), table)
     log.info(
         f"Finished writing AnnData '.obs', '.var', '.uns' and '.obsm[{CANONICAL_OBSM_KEY}]' to staged table at "
         f"'{staging_table_path}'."
@@ -251,7 +255,7 @@ def _write_aggregation_table(
     # AnnData recognizes this as a Dask array with CSR chunks. Its sparse
     # writer computes and appends one row chunk at a time: this bounds memory,
     # but the ordered CSR append serializes the chunk writes.
-    write_elem(staging_group, "X", expression)
+    _write_anndata_element(staging_group, ("X",), expression)
     log.info(f"Finished writing AnnData '.X' to staged table at '{staging_table_path / 'X'}'.")
     if class_contract is not None:
         auxiliary = _checkpoint_sparse_array(
@@ -260,7 +264,7 @@ def _write_aggregation_table(
         )
         auxiliary_path = staging_table_path / "obsm" / _AUXILIARY_FEATURE_MATRIX_KEY
         log.info(f"Writing AnnData '.obsm[{_AUXILIARY_FEATURE_MATRIX_KEY}]' to staged table at '{auxiliary_path}'.")
-        write_elem(staging_group["obsm"], _AUXILIARY_FEATURE_MATRIX_KEY, auxiliary)
+        _write_anndata_element(staging_group, ("obsm", _AUXILIARY_FEATURE_MATRIX_KEY), auxiliary)
         log.info(
             f"Finished writing AnnData '.obsm[{_AUXILIARY_FEATURE_MATRIX_KEY}]' to staged table at '{auxiliary_path}'."
         )
@@ -631,11 +635,12 @@ def _publish_staged_aggregation_table(
     destination: _AggregationDestination,
     workspace: Path,
 ) -> Generator[zarr.Group, None, None]:
-    """Temporarily publish a staged table and roll it back on failure.
+    """Publish a complete staged table through the shared element transaction.
 
     The staged table is complete before publication starts. When replacing an
-    existing table, it is first moved to ``backup``; when creating a table,
-    ``backup`` remains absent. Publication then follows this flow::
+    existing table, the shared publisher keeps it as a rollback copy until the
+    caller has read, validated and attached the replacement and rebuilt
+    consolidated metadata::
 
         destination.output (previous table) --rename--> backup
                                                 only when replacing
@@ -667,40 +672,18 @@ def _publish_staged_aggregation_table(
                                                    v
                                             re-raise exception
 
-    Each rename is atomic because the source and destination are on the same
-    filesystem. The complete two-rename replacement is rollback-safe, but it is
-    not one indivisible filesystem operation. The context keeps the backup until
-    its caller has read, validated and attached the new table and rebuilt
-    consolidated metadata.
+    The filesystem transaction itself is implemented by
+    :func:`_publish_staged_anndata_elements`; this wrapper only maps the staged
+    complete table to its SpatialData destination and returns that table group.
     """
     staging = workspace / "table"
-    # Keep the rollback copy beside, rather than inside, the Zarr root. It is
-    # on the same filesystem for atomic renames but cannot be discovered as a
-    # table while consolidated metadata is rebuilt.
-    backup = destination.root.parent / f".{destination.root.name}.harpy-aggregate-backup-{uuid.uuid4().hex[:8]}"
-    published = False
-    log.info(f"Publishing staged AnnData table from '{staging}' to '{destination.output}'.")
-    try:
-        if destination.replace_existing:
-            destination.output.rename(backup)
-        staging.rename(destination.output)
-        published = True
-
-        # No checkpoint input remains live after component writing. Remove the
-        # hidden workspace before consolidating so it cannot be mistaken for a
-        # SpatialData/Zarr child in consolidated metadata.
-        _remove_aggregation_workspace(workspace)
-        root = zarr.open_group(store=str(destination.root), mode="r+", use_consolidated=False)
+    with _publish_staged_anndata_elements(
+        root=destination.root,
+        workspace=workspace,
+        elements=(_StagedAnnDataElement(staged=staging, destination=destination.output),),
+        operation="aggregate",
+    ) as root:
         yield root["tables"][destination.output.name]
-    except Exception:
-        if published and destination.output.exists():
-            shutil.rmtree(destination.output)
-        if backup.exists():
-            backup.rename(destination.output)
-        raise
-    if backup.exists():
-        shutil.rmtree(backup)
-    log.info(f"Finished publishing AnnData table to '{destination.output}'.")
 
 
 def _remove_aggregation_workspace(workspace: Path) -> None:

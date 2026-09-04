@@ -95,17 +95,8 @@ def validate_table(sdata: SpatialData, table_name: str) -> None:
 
         hp.tb.validate_table(sdata, "table")
     """
-    if not isinstance(sdata, SpatialData):
-        raise ValueError(f"Parameter 'sdata' must be a SpatialData object, found {type(sdata).__name__}.")
-    if not isinstance(table_name, str) or not table_name:
-        raise ValueError(f"Parameter 'table_name' must be a non-empty string, found {table_name!r}.")
-    if table_name not in sdata.tables:
-        raise ValueError(f"Table element {table_name!r} is not present in 'sdata.tables'.")
-
+    annotation = _validate_table_without_canonical(sdata, table_name)
     adata = sdata.tables[table_name]
-    annotation = _validate_table_annotation(sdata, adata, table_name=table_name)
-    feature_matrices = _validate_feature_matrices(adata)
-
     has_canonical_component = CANONICAL_OBSM_KEY in adata.obsm or (
         isinstance(adata.uns.get(SPATIAL_COORDINATES_KEY), Mapping)
         and CANONICAL_OBSM_KEY in adata.uns[SPATIAL_COORDINATES_KEY]
@@ -124,6 +115,36 @@ def validate_table(sdata: SpatialData, table_name: str) -> None:
             regions=regions,
         )
 
+
+def _validate_table_without_canonical(
+    sdata: SpatialData,
+    table_name: str,
+) -> tuple[str, str, tuple[str, ...]] | None:
+    """Validate a table's annotation and non-canonical Harpy contracts.
+
+    This is the shared preflight for strict table validation and operations
+    that intentionally create or repair the coordinated canonical-center
+    components. It validates every recognized contract except
+    ``obsm["spatial_canonical"]`` and its matching metadata record; callers
+    remain responsible for handling that pair explicitly.
+
+    Returns
+    -------
+    tuple[str, str, tuple[str, ...]] | None
+        The normalized ``(region_key, instance_key, regions)`` annotation, or
+        ``None`` when the table is not a SpatialData regions table.
+    """
+    if not isinstance(sdata, SpatialData):
+        raise ValueError(f"Parameter 'sdata' must be a SpatialData object, found {type(sdata).__name__}.")
+    if not isinstance(table_name, str) or not table_name:
+        raise ValueError(f"Parameter 'table_name' must be a non-empty string, found {table_name!r}.")
+    if table_name not in sdata.tables:
+        raise ValueError(f"Table element {table_name!r} is not present in 'sdata.tables'.")
+
+    adata = sdata.tables[table_name]
+    annotation = _validate_table_annotation(sdata, adata, table_name=table_name)
+    feature_matrices = _validate_feature_matrices(adata)
+
     aggregation_metadata = adata.uns.get(_FEATURE_CLASS_AGGREGATION_KEY)
     if aggregation_metadata is None:
         if _AUXILIARY_FEATURE_MATRIX_KEY in adata.obsm:
@@ -131,7 +152,7 @@ def validate_table(sdata: SpatialData, table_name: str) -> None:
                 f"Table {table_name!r} contains {_AUXILIARY_FEATURE_MATRIX_KEY!r} without "
                 f"{_FEATURE_CLASS_AGGREGATION_KEY!r} metadata."
             )
-        return
+        return annotation
 
     if annotation is None:
         raise ValueError("Feature-class aggregation metadata requires a SpatialData table annotation.")
@@ -145,6 +166,7 @@ def validate_table(sdata: SpatialData, table_name: str) -> None:
         instance_key=instance_key,
         annotated_regions=regions,
     )
+    return annotation
 
 
 def _validate_table_annotation(
