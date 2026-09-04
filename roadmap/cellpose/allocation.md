@@ -2665,6 +2665,15 @@ than copying from an older installed release or assuming that the local
 checkout still represents the authoritative implementation. Port the focused
 canonical-center tests together with the contract.
 
+Treat that current main-branch implementation as the source implementation,
+not merely as design inspiration. Copy its viewer-independent models, schema
+handling, validation, calculation logic, error semantics and focused tests into
+Harpy with minimal changes. Limit adaptations to package ownership and imports,
+the agreed 3D extension, the single-canonical-payload contract and direct
+`aggregate_points` integration. Do not independently redesign equivalent
+contracts during the port. Widget/controller behavior and napari-specific
+mutation or persistence remain outside the copied core.
+
 The numerical definition remains the center of mass of uniformly weighted,
 non-background pixels belonging to an instance. Napari-harpy already computes
 this through `harpy.utils.RasterAggregator.center_of_mass`; the functionality
@@ -2683,7 +2692,8 @@ Separate the main-branch implementation along this boundary:
 
 - move or adapt canonical source signatures, region bindings, instance-set
   digests, metadata models, storage serialization/parsing, matrix validation
-  and center calculation into an appropriate Harpy table utility module;
+  and center calculation into the public
+  `harpy.table.canonical_centers` package;
 - keep widgets, workers, query-controller state and napari-specific component
   persistence in napari-harpy;
 - make napari-harpy consume the Harpy-owned canonical contracts and calculation
@@ -2695,6 +2705,48 @@ The port should retain the established storage keys and schema semantics rather
 than introduce a second Harpy-specific canonical-center representation. Extend
 the owned schema deliberately for three-dimensional labels as described below,
 and update napari-harpy to consume that shared Harpy contract.
+
+### Module and public API boundary
+
+Use a dedicated public package rather than adding this substantial contract to
+`_allocation.py` or placing it in one private `_canonical_centers.py` module:
+
+```text
+src/harpy/table/canonical_centers/
+├── __init__.py
+├── _models.py
+├── _schema.py
+└── _calculation.py
+```
+
+The responsibilities are:
+
+- `_models.py` owns the immutable source-signature, region-binding, metadata,
+  cache-report and result models together with deterministic instance-set
+  identity;
+- `_schema.py` owns the fixed storage keys, schema version, source-signature
+  construction, serialization, parsing and matrix/metadata validation;
+- `_calculation.py` normalizes 2D and 3D labels, calls
+  `harpy.utils.RasterAggregator.center_of_mass` and validates instance ordering
+  and finite coordinates; and
+- `__init__.py` exposes the stable symbols that napari-harpy and Harpy's table
+  aggregation code are allowed to consume.
+
+The center-of-mass numerical engine remains
+`harpy.utils.RasterAggregator.center_of_mass`; the new package owns the
+canonical semantics around that calculation: fixed axes, intrinsic source
+frame, labels/table binding, persisted metadata and validation. Because
+napari-harpy is an external consumer of this contract, it must import from
+`harpy.table.canonical_centers`, not from a private Harpy module.
+
+Keep aggregation orchestration and component writing outside this package.
+`_allocation.py` should replace its private `_label_centers()` path with the
+shared canonical calculation and assemble one payload per aggregation pair.
+`_aggregation_writer.py` should align those payloads to the checkpoint row
+manifest and write `spatial_canonical` plus its metadata. Focused Harpy tests
+for the reusable contract should live in
+`src/harpy/_tests/test_table/test_canonical_centers.py`; aggregation integration
+tests remain with the existing table-aggregation tests.
 
 ### Canonical table payload
 
