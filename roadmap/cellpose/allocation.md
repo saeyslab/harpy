@@ -2112,12 +2112,15 @@ alignment has been validated.
 
 ### Phase A: assign once and stage merged count blocks
 
-For each normalized labels/points/coordinate-system pair, use the Slice 7a
-handoff once and reduce every assigned-points partition locally by
+For each normalized aggregation pair, use the Slice 7a handoff once in that
+pair's coordinate system and reduce every assigned-points partition locally by
 `(instance, feature)`. Duplicate points belonging to the same pair within a
-partition become one compact count row. In class-aware mode, perform the
-feature-panel content validation in the same submitted computation and derive
-both the expression and auxiliary payloads from the same feature counts.
+partition become one compact count row. In class-aware mode, validate each
+unique source points element against the shared feature panel in a separate
+computation before spatial assignment. This intentional early validation lets
+an invalid source fail before the assignment graph or temporary workspace is
+constructed. Derive both the expression and auxiliary payloads from the same
+subsequent feature counts.
 
 Across Slices 7a and 7b, the intended dataflow contains two global
 redistributions with different keys:
@@ -2212,12 +2215,12 @@ pinned Dask/Parquet implementation; Phase B ignores either representation.
 
 The merged checkpoint has this internal schema:
 
-| Column             | Dtype                 | Contract                                                                   |
-| ------------------ | --------------------- | -------------------------------------------------------------------------- |
-| `aggregation_pair` | `int64`               | Zero-based ordinal of the normalized labels/points/coordinate-system pair. |
-| `instance_id`      | `uint64`              | Positive label value; background zero is absent.                           |
-| `feature`          | non-null UTF-8 string | Normalized value from the requested points `feature_key`.                  |
-| `count`            | `uint64`              | Merged assigned-point count for this instance and feature.                 |
+| Column             | Dtype                 | Contract                                                                |
+| ------------------ | --------------------- | ----------------------------------------------------------------------- |
+| `aggregation_pair` | `int64`               | Zero-based ordinal of the normalized points-to-labels aggregation pair. |
+| `instance_id`      | `uint64`              | Positive label value; background zero is absent.                        |
+| `feature`          | non-null UTF-8 string | Normalized value from the requested points `feature_key`.               |
+| `count`            | `uint64`              | Merged assigned-point count for this instance and feature.              |
 
 At the checkpoint boundary, `(aggregation_pair, instance_id, feature)` must be
 globally unique. Keep local and merged counts as `uint64`; do not cast the
@@ -2227,14 +2230,16 @@ cast its values to the persisted `uint32` matrix dtype. Reject null features,
 non-integral or non-positive retained instance IDs and malformed pair keys
 before publishing any table.
 
-Each final staged fragment returns only a small manifest containing its path,
-output-partition ordinal, represented aggregation pairs, retained composite
-instance identities, schema and row-count information. Empty output partitions
-do not contribute an output row block. Do not return every fragment's complete
-observed-feature set to the driver. In ordinary mode, calculate fragment-local
-feature sets and combine them through a Dask tree reduction, returning one
-global sorted feature axis. Class-aware mode uses the panel-defined axes and
-does not calculate an observed-feature union.
+Each non-empty checkpoint partition returns only a small manifest containing
+its path, output-partition ordinal and sorted composite
+`(aggregation_pair, instance_id)` output-row keys. The partition contents are
+validated while this manifest is constructed; schema and row-count fields are
+not retained in the manifest. Empty output partitions do not contribute an
+output row block. Do not return every fragment's complete observed-feature set
+to the driver. In ordinary mode, calculate fragment-local feature sets and
+combine them through a Dask tree reduction, returning one global sorted feature
+axis. Class-aware mode uses the panel-defined axes and does not calculate an
+observed-feature union.
 
 Submit local reduction, compact-count shuffling, duplicate merging,
 checkpoint writing, manifest construction and the ordinary feature-set tree
@@ -2265,13 +2270,15 @@ separate `X` and auxiliary component writes is acceptable; rerunning assignment
 or the compact-count shuffle is not.
 
 Within each checkpoint partition, sort the unique composite
-`(aggregation_pair, instance_id)` identities and assign that partition an
-explicit half-open output row interval. Concatenate partitions in checkpoint
-partition order. This partition-major row order is the manifest's source of
-truth for all output components; it is not a promise of globally ascending
-instance IDs and need not remain identical if a future Dask partition plan
-changes. Consumers identify observations through their composite identity, not
-their physical row position.
+`(aggregation_pair, instance_id)` identities and retain them as that
+partition's `output_row_keys`. Concatenate these keys in checkpoint-partition
+order to establish the final row order. Their cumulative lengths determine the
+corresponding CSR row blocks; no explicit `row_start` or half-open row interval
+is stored. This partition-major row order is the manifest's source of truth for
+all output components; it is not a promise of globally ascending instance IDs
+and need not remain identical if a future Dask partition plan changes.
+Consumers identify observations through their composite identity, not their
+physical row position.
 
 The complete row universe is the union of instances receiving any assigned
 feature class. Observation identity and cross-component alignment use the
@@ -2336,11 +2343,12 @@ Phase A checkpoint: merged long-form count blocks
 
 The component writer must follow this sequence:
 
-1. Validate that all merged-count manifests have the expected long-form schema,
-   no composite instance identity represented by more than one checkpoint
-   partition, and disjoint output intervals in checkpoint-partition order.
-   Each delayed CSR conversion must use the shared feature-axis hash and the
-   same within-block ordering for every output component.
+1. Validate each merged-count partition against the expected long-form schema
+   while constructing its manifest. Require every composite instance identity
+   to be owned by exactly one checkpoint partition and use each manifest's
+   sorted `output_row_keys` as the same within-block ordering for every output
+   component. CSR conversion receives the authoritative feature axis directly;
+   it does not persist or compare a separate feature-axis hash.
 2. Initialize a staging AnnData group through `anndata.io.write_elem`, using a
    small AnnData skeleton containing the shared `.var` axis and required empty
    mappings. Do not hand-author AnnData root or component encoding attributes
