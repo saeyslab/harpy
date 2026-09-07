@@ -9,6 +9,13 @@ from spatialdata import SpatialData
 from spatialdata.models import TableModel
 from spatialdata.transformations import get_transformation
 
+from harpy._feature_panels import (
+    _FeaturePanelContract,
+    _parse_feature_panel,
+    _require_mapping,
+    _require_nonempty_string,
+    _validate_feature_class_dtype,
+)
 from harpy._metadata import (
     _FEATURE_PANELS_METADATA_KEY,
     _HARPY_METADATA_KEY,
@@ -16,14 +23,7 @@ from harpy._metadata import (
     _METADATA_VERSION_KEY,
     _POINTS_METADATA_KEY,
 )
-from harpy.table._allocation import (
-    _FeatureClassAggregationContract,
-    _FeaturePanelContract,
-    _parse_feature_panel,
-    _require_mapping,
-    _require_nonempty_string,
-    _validate_feature_class_dtype,
-)
+from harpy.table._allocation import _FeatureClassAggregationContract
 from harpy.table._metadata import (
     _AGGREGATE_POINTS_SOURCE_KIND,
     _AUXILIARY_FEATURE_MATRIX_KEY,
