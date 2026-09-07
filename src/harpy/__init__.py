@@ -49,9 +49,11 @@ from harpy import points as pt  # noqa: E402
 from harpy import qc  # noqa: E402
 from harpy import shape as sh  # noqa: E402
 from harpy import table as tb  # noqa: E402
+from harpy._spatial_bounds import SpatialBounds  # noqa: E402
 # isort: on
 
 __all__ = [
+    "SpatialBounds",
     "utils",
     "externals",
     "io",
