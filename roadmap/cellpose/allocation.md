@@ -3414,18 +3414,87 @@ element/mosaic, containing at least:
 - authoritative feature class;
 - detected point count;
 - fraction of the corresponding control-class calls; and
-- density per analyzed area when a physical coordinate system is available.
+- density per analyzed area when a physical coordinate system and a reliably
+  defined analyzed area are available.
 
 Use the feature-panel metadata to include control targets with zero detections.
 Concretely, aggregate the observed control points by sample, points element,
 class, and target; reindex that result against the authoritative target names
 for every control class; and fill absent counts with zero. This must represent
 both a target that is absent from one mosaic and a target that has no detections
-anywhere in a sample. Do not identify controls from target-name prefixes. A
-ranked bar or dot plot of these summaries should make a single unusually noisy
-negative probe or false code immediately visible. Keep `Negative` and
-`SystemControl` in separate facets because they measure different technical
-processes and have different numbers of panel features.
+anywhere in a sample. Do not identify controls from target-name prefixes. Keep
+the complete per-target dataframe available for inspection and export, but do
+not make a large dataframe or a plot with thousands of target labels the only
+overview. The routine QC overview consists of the whole-panel ECDF and compact
+class-summary table below, alongside the spatial density plots. Keep outputs
+separate for each sample, points element/mosaic, and selected feature class.
+For CosMx, keep `Negative` and `SystemControl` in separate facets because they
+measure different technical processes and have different numbers of panel
+features.
+
+Do not implement a dedicated labelled top-N target plot in Slice 11a. Control
+identifiers such as `Control_200` often carry little biological meaning for
+routine QC; the overview should show the distribution, concentration, and
+spatial location of the signal without requiring users to inspect those names.
+Individual target identities remain available in the full per-target dataframe
+for diagnostic follow-up, such as checking whether the same control repeatedly
+has high counts across samples. Defer a labelled target plot until there is a
+concrete diagnostic need; it is not a required output or acceptance criterion
+for this slice.
+
+#### Whole-panel count distribution
+
+Provide an empirical cumulative distribution plot (ECDF) over the point counts
+of all targets in the selected panel class:
+
+- horizontal axis: detected points per target;
+- vertical axis: percentage of panel targets with that count or fewer; and
+- each target contributes equally, including targets with zero detections.
+
+Do not weight the ECDF by detected point count or restrict it to the top N.
+For example, a curve might show that "60% of Negative targets have zero
+detections, and 90% have at most five." No histogram bin size or smoothing
+parameter is needed. Together with the concentration statistic in the compact
+class-summary table, this distinguishes a small number of high-count targets
+from elevated counts across much of the panel. These are descriptive QC views:
+do not automatically label a target as failing QC without a separately defined
+criterion.
+
+#### Compact class-summary table
+
+Return a second, compact dataframe with one row per sample, points
+element/mosaic, and selected feature class, containing:
+
+- number of panel targets;
+- number and percentage of panel targets with zero detections;
+- total detected points;
+- mean, median, and 95th-percentile detected point count per target; and
+- percentage of class points contributed by the top N targets, with N recorded
+  so that the statistic remains interpretable.
+
+Retain this top-N concentration statistic without plotting individual target
+names. Use a configurable N, defaulting to 20, and include all targets if the
+class has fewer than N targets. For example, "Top 20 targets account for 60% of
+Negative points" describes concentration without listing the target IDs. Its
+denominator is the complete class point total, not the number of panel targets.
+Changing N affects only this statistic, not the full per-target dataframe,
+ECDF, or other whole-panel statistics.
+
+Compute target-level statistics over the full panel-defined target set,
+including zeros, not just the detected targets. If an entire class has no
+detected points, its point counts, mean, median, and percentile are zero; all
+its panel targets contribute to the ECDF at zero. Its top-N point fraction and
+per-target fractions of class points are undefined and should be represented
+as missing values, displayed as "N/A", rather than dividing by zero or claiming
+a zero concentration.
+
+For comparisons between samples, make clear that raw point counts also reflect
+the analyzed area. Offer area normalization explicitly only when that area is
+reliably defined; physical coordinate units alone do not establish the sampled
+area, and a mosaic bounding box may contain unmeasured gaps. Label normalized
+units and retain the panel identity so different panels are not silently pooled
+or presented as equivalent. These quantitative summaries complement the
+spatial density plots, which show where the signal occurs.
 
 ### Class selection through `plot_transcript_density`
 
@@ -3525,11 +3594,18 @@ classes together and render their grids separately; a multi-class QC report
 must not scan the points again for every class plot. Do not materialize the full
 points dataframe in memory.
 
-Keep computation separate from plotting. The computation layer should expose a
-small per-target dataframe and coordinate-aware binned arrays that plotting can
-consume without re-reading the transcript points. Reuse this computation layer
-from `plot_transcript_density`; plotting already computed QC results must not
-trigger a second reduction. The exact summary-function names, interface for
+Keep computation separate from plotting. The computation layer should expose
+the complete per-target dataframe, the compact class-summary dataframe, and
+coordinate-aware binned arrays that plotting can consume without re-reading
+the transcript points. Derive the ECDF and class-summary statistics, including
+the top-N concentration statistic, from the same zero-filled per-target result;
+these outputs must not trigger new point reductions or scans. Do not create an
+artificial AnnData table solely to reuse table-based plotting helpers such as
+`metric_histogram`.
+
+Reuse this computation layer from `plot_transcript_density`; plotting already
+computed QC results must not trigger a second reduction. The exact
+summary-function names, interface for
 precomputed grids, and SpatialData storage representation remain implementation
 decisions. They must not place control targets in the endogenous expression
 matrix or attach spatial bins to the instance-annotating AnnData table.
@@ -3548,6 +3624,15 @@ Focused tests should establish that:
 - unassigned and outside-mask control points contribute to the summaries;
 - panel controls with zero detections appear in the per-target result;
 - per-target counts sum to their corresponding raw class totals;
+- changing N affects only the concentration statistic, without truncating the
+  returned per-target result, ECDF, or other whole-panel statistics;
+- the top-N point fraction uses the complete class point total, while the ECDF
+  weights every panel target equally, including zero-detection targets;
+- class-summary statistics agree with the full per-target result, including
+  mean, median, percentile, and zero-detection percentage;
+- an entirely zero-detection class remains visible in the plots and summary,
+  with undefined point fractions represented as missing rather than causing
+  division-by-zero errors;
 - spatial-bin counts conserve the input control-point totals within the chosen
   extent;
 - `feature_class=None` retains the generic all-class plotting behavior;
@@ -3559,8 +3644,8 @@ Focused tests should establish that:
   bin area when requested;
 - sample and mosaic coordinate systems remain independent; and
 - the implementation stays lazy until the compact summaries are computed,
-  shares reductions across outputs, and plots precomputed grids without
-  re-reading the original points.
+  shares reductions across outputs, and renders ECDFs and precomputed spatial
+  grids without re-reading the original points.
 
 ## Slice 11b: per-instance QC plotting
 
