@@ -3393,7 +3393,14 @@ and lookup contracts.
 
 ## Slice 11a: original-point summary computation
 
-**Status: specified; not implemented.**
+**Status: implemented.**
+
+Implemented by `hp.qc.summarize_points` and `hp.qc.PointsSummary` in
+`src/harpy/qc/_summarize_points.py`, with panel-independent coordinate/bin
+helpers in `_points_binning.py`. Shared feature-panel parsing and point-content
+validation live in `src/harpy/_feature_panels.py` and are reused by aggregation
+and table validation. Focused tests live in
+`src/harpy/_tests/test_qc/test_summarize_points.py`. Plotting remains separate.
 
 Implement `hp.qc.summarize_points` and its `PointsSummary` result: lightweight
 per-target and per-class summaries plus optional raw spatial-bin counts over
@@ -3424,9 +3431,9 @@ def summarize_points(
     *,
     feature_classes: str | Sequence[str] | None = None,
     bin_size: float | None = None,
+    max_grid_bytes: int | None = 1024**3,
     to_coordinate_system: str = "global",
-    crd: tuple[float, float, float, float] | None = None,
-    z_plane: float | None = None,
+    crd: SpatialBounds | tuple[float, ...] | None = None,
     top_n: int = 20,
     analyzed_area_um2: float | None = None,
 ) -> PointsSummary:
@@ -3443,15 +3450,36 @@ def summarize_points(
 - `bin_size` is the spatial bin width in `to_coordinate_system` units. `None`
   skips spatial binning and returns only the two summary dataframes, with
   `spatial_counts=None`.
+- `max_grid_bytes` limits the final dense uint64 count grid to 1 GiB by default.
+  Accept a positive integer or `None` to disable the limit. If
+  `n_selected_classes * n_y_bins * n_x_bins * 8` exceeds it, raise `ValueError`
+  before allocating bin-edge arrays or reducing point counts. Derive exact bin
+  counts using scalar arithmetic, including terminal-bin clipping and
+  floating-point edge corrections. Without `crd`, the coordinate-only extent
+  reduction must happen first. The error reports shape, required bytes, and
+  the limit, and suggests coarser bins, a smaller crop, fewer classes, disabling
+  binning, or explicitly raising/disabling the limit. This is not a total peak
+  memory budget: intermediate summaries and coordinates require additional
+  memory. No grid limit is enforced when `bin_size=None`.
 - `to_coordinate_system` defines the coordinates used for cropping and spatial
   binning. It does not change source coordinates in the points element.
-- `crd` is an optional `(xmin, xmax, ymin, ymax)` crop in that coordinate
-  system. All outputs summarize the same selected crop, while retaining zeros
-  for panel targets not detected inside it.
-- `z_plane` optionally selects rows by their source points `z` value before
-  spatial projection; it requires a source `z` column. The spatial output is
-  an XY grid, not a volumetric histogram. With `z_plane=None`, no source-z
-  filter is applied.
+- `crd` accepts `hp.SpatialBounds(x=(xmin, xmax), y=(ymin, ymax), z=None)`.
+  The optional `z=(zmin, zmax)` interval restricts 3D points; `z=None` leaves z
+  unrestricted. Four-value `(xmin, xmax, ymin, ymax)` and six-value
+  `(xmin, xmax, ymin, ymax, zmin, zmax)` tuples use the same validation.
+  `SpatialBounds` is a frozen, keyword-only dataclass centralized in
+  `src/harpy/_spatial_bounds.py` and exported from the Harpy root. Its
+  `__post_init__` requires two finite, increasing bounds for each supplied
+  axis and normalizes them to immutable float tuples. Only `summarize_points`
+  consumes this shared type for now; other Harpy `crd` APIs remain unchanged.
+  All bounds apply in `to_coordinate_system`, **after the full coordinate
+  transformation and before XY projection**. They are half-open on every
+  supplied axis. Z bounds on a 2D points element raise a clear error. All
+  outputs use the same selected points, retaining panel-defined zeros.
+  Result metadata stores normalized four/six-value tuples for either input form.
+  The source-coordinate `z_plane` parameter has been removed from this API;
+  the z interval replaces exact source-plane selection. The output grid
+  remains XY, not volumetric. Existing plotting APIs are not changed here.
 - `top_n` selects N for the concentration statistic only. It never removes
   features from the per-target dataframe, ECDF, or other whole-panel metrics.
 - `analyzed_area_um2` is an optional, explicitly known analyzed area in square
@@ -3499,12 +3527,12 @@ the corresponding class has no detected points. Add `points_per_um2` only when
 For example, a hypothetical result could contain the following count columns
 (source identity columns omitted here for readability):
 
-| feature | feature_class | n_points | fraction_of_class_points |
-| --- | --- | ---: | ---: |
-| NegativeA | Negative | 12 | 0.8 |
-| NegativeB | Negative | 3 | 0.2 |
-| NegativeC | Negative | 0 | 0.0 |
-| SystemControlA | SystemControl | 5 | 1.0 |
+| feature        | feature_class | n_points | fraction_of_class_points |
+| -------------- | ------------- | -------: | -----------------------: |
+| NegativeA      | Negative      |       12 |                      0.8 |
+| NegativeB      | Negative      |        3 |                      0.2 |
+| NegativeC      | Negative      |        0 |                      0.0 |
+| SystemControlA | SystemControl |        5 |                      1.0 |
 
 `NegativeC` remains present because it belongs to the panel, even without any
 observed points. This complete dataframe is the input to the ECDF and supports
@@ -3535,6 +3563,28 @@ edges, extent, coordinate system, and source identity. These are raw counts,
 not smoothed values, probability densities, or panel-normalized rates. Plotting
 can derive normalized views from these counts and the summary's panel sizes
 and bin geometry without re-reading points or changing the raw result.
+
+The implemented grid uses bin-center `x`/`y` coordinates and attributes
+`x_edges`, `y_edges`, `extent`, and `bin_size`. Counts use `uint64`.
+Both dataframe attributes and grid attributes retain source identity,
+`to_coordinate_system`, `crd`, `analyzed_area_um2`, and
+`panel_feature_counts` for the selected classes. These are metadata on the
+returned summary only; no records are added to the source SpatialData object.
+`crd` retains any z interval in the same normalized tuple as the x/y bounds;
+the grid's `extent` and bin edges describe only its XY projection.
+
+Explicit crops and bins are half-open (minima included, maxima excluded).
+The last bin is clipped to the crop and can be narrower than `bin_size`.
+Without a crop, a preliminary coordinate-only reduction discovers transformed
+XY bounds before class filtering; automatic bins extend
+beyond observed maxima to include every point, even when a maximum lies on
+a bin edge. Constant coordinates produce one bin along that axis. An entirely
+empty points element needs explicit `crd` for spatial binning; without
+binning it still returns the complete panel-defined zero-count summaries.
+Actual bin-edge comparisons preserve this convention under floating-point
+rounding at nonzero origins.
+An explicit XYZ crop selecting no points still returns zero-filled panel
+summaries and a zero-filled grid over its supplied XY extent.
 
 For example:
 
@@ -3590,6 +3640,13 @@ element/mosaic, and selected feature class, containing:
 - percentage of class points contributed by the top N targets, with N recorded
   so that the statistic remains interpretable.
 
+The implemented column names are `feature_class`, `n_features`,
+`n_zero_features`, `pct_zero_features`, `n_points`, `mean_points_per_feature`,
+`median_points_per_feature`, `p95_points_per_feature`, `top_n` (requested N),
+`n_top_features` (the smaller of N and panel size), and
+`pct_points_top_n_features`. Percentage columns use 0–100; the per-target
+`fraction_of_class_points` uses 0–1.
+
 Retain this top-N concentration statistic without plotting individual target
 names. Use a configurable N, defaulting to 20, and include all targets if the
 class has fewer than N targets. For example, "Top 20 targets account for 60% of
@@ -3623,9 +3680,9 @@ normalized displays without new point reductions. Do not smooth or normalize
 `spatial_counts` during summary construction.
 
 Spatial binning is coordinate-based, not raster-based point-to-label
-assignment. After any source-z selection, transform points into
-`to_coordinate_system`, apply the requested crop, and count the selected
-classes in regular rectangular coordinate bins. No morphology image or
+assignment. Transform the full point coordinates into `to_coordinate_system`,
+apply every requested x/y/z interval, then project the selected points to XY
+and count the selected classes in regular rectangular coordinate bins. No morphology image or
 segmentation-label raster is required. Do not construct a synthetic
 labels raster for the bins or call `hp.tb.aggregate_points` to produce this
 summary.
@@ -3709,7 +3766,11 @@ Focused tests should establish that:
   a sequence reduces the requested classes together;
 - missing panels and invalid observed feature/class assignments fail clearly,
   including assignments that would otherwise be hidden by class filtering;
-- crop and source-z selection apply consistently to every output;
+- x/y/z bounds apply consistently to every output in `to_coordinate_system`,
+  including affines where transformed z depends on source x/y;
+- optional z bounds are half-open, reject 2D points, retain panel zeros when
+  nothing is selected, and leave z unrestricted when omitted;
+- named bounds and four/six-value tuples produce identical results and metadata;
 - fixed summary-column names remain independent of the source panel's feature
   and class column names, while source and panel identity remain available;
 - `points_per_um2` is added only for an explicitly supplied analyzed area and
