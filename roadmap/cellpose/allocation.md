@@ -30,7 +30,8 @@ implemented:
       `hp.qc.summarize_points` and `PointsSummary`, without plotting changes;
     - **11b:** original-point summary visualization, including the ECDF and
       precomputed-summary support in `hp.pl.plot_transcript_density`;
-    - **11c:** per-instance QC plotting from existing aggregation tables;
+    - **11c:** table-level summary computation through `hp.qc.summarize_table`
+      and `TableSummary`, with plotting integration;
 
 12. support general lazy reopening of persisted AnnData tables through
     SpatialData; and
@@ -63,8 +64,9 @@ mapping point coordinates through the selected shared coordinate system into
 the intrinsic labels frame, without resampling the labels raster. Slice 11a's
 original-point summaries depend on the reader metadata from Slices 1–4 rather
 than aggregation or labels. Slice 11b consumes these summaries for plotting
-without re-reading the source points. Slice 11c separately derives temporary
-per-instance plotting rates from the class-aware table. Slice 12 is an
+without re-reading the source points. Slice 11c provides the symmetric
+read-only table-summary workflow, deriving per-instance metrics and class-level
+overviews from the class-aware table before plotting. Slice 12 is an
 independent integration follow-up that makes later SpatialData Zarr reads retain lazy
 AnnData matrices. It is not required for Slice 7b's out-of-core writing or
 same-process result. Slice 13 is an
@@ -1325,8 +1327,9 @@ auxiliary_points_fraction =
 Do not persist `negative_points_per_feature` or
 `system_control_points_per_feature` in `.obs`. They are deterministic rescalings
 of the raw class counts by the panel feature counts and add no independent table
-information. Slice 11c QC plotting derives them on demand from the raw count
-columns and the table-local auxiliary-class feature-count snapshot.
+information. Slice 11c table summarization derives them on demand from the raw
+count columns and the table-local auxiliary-class feature-count snapshot for
+downstream plotting.
 
 ### Table-local metadata contract
 
@@ -3402,8 +3405,8 @@ This slice is scheduled after Slice 10, but its runtime contract depends only on
 the points and feature-panel metadata from Slice 1 and the sample-aware point
 metadata from Slices 2–4. The original-point summaries may run before or after
 segmentation or aggregation and do not depend on an instance-label raster or an
-AnnData table. Per-instance plotting from an existing aggregation table belongs
-to Slice 11c and is not required to implement either Slice 11a or Slice 11b.
+AnnData table. Table-level summary computation and plotting belong to Slice
+11c and are not required to implement either Slice 11a or Slice 11b.
 
 This operation complements the instance-level `.obs` metrics. It must use the
 original points element so that controls on label value zero and controls
@@ -3884,19 +3887,103 @@ Focused tests should establish that:
 - sample, mosaic, and panel identities remain distinguishable; and
 - plotting precomputed results triggers no source-point reads or reductions.
 
-## Slice 11c: per-instance QC plotting
+## Slice 11c: table-level summary computation and plotting integration
 
 **Status: specified; not implemented.**
 
-Add QC plots over existing class-aware aggregation tables, separately from
-the original-point computation in Slice 11a and its visualizations in Slice
-11b. This slice consumes aggregation tables, not `PointsSummary`, and uses the
-raw per-class `.obs` counts, `auxiliary_points_fraction`, and table-local
-aggregation metadata
-established by Slice 5 and retained by later aggregation slices. It does not
-require a new aggregation, re-read the original points, or modify `.obs`.
+Implement a read-only `hp.qc.summarize_table` computation API and a
+`TableSummary` result, followed by integration with table-level QC plotting.
+This is the table-based counterpart of `summarize_points`, not a cell mode
+inside that function. It consumes existing class-aware aggregation tables,
+not original points or `PointsSummary`, and uses the raw per-class `.obs`
+counts, `auxiliary_points_fraction`, and table-local aggregation metadata
+established by Slice 5 and retained by later aggregation slices.
 
-### Derived plotting metrics
+The computation must remain separate from plotting. A caller can inspect or
+export the returned metrics and reuse them for several plots without writing
+derived columns to `.obs`, repeating point-to-label assignment, or scanning
+the source points.
+
+### Symmetric computation APIs, distinct units of analysis
+
+The intended entry points are:
+
+```python
+points_summary = hp.qc.summarize_points(
+    sdata,
+    points_name=points_name,
+    feature_classes=feature_classes,
+    bin_size=bin_size,
+)
+
+table_summary = hp.qc.summarize_table(
+    sdata,
+    table_name=table_name,
+    feature_classes=feature_classes,
+)
+```
+
+Both resolve feature-class information from metadata, preserve source identity
+and selection context, return derived results without mutating their inputs,
+and support separate downstream plotting. They need not have identical
+parameters or result shapes:
+
+- `summarize_points` describes original detections, including points outside
+  cells, with per-target/class summaries and optional spatial bins.
+- `summarize_table` describes the instances represented by the selected AnnData
+  observations, using their already-aggregated measurements. It has no spatial
+  `bin_size` parameter for this instance-level operation.
+
+For the class-aware table path, `feature_classes` selects exact classes from
+`adata.uns["feature_class_aggregation"]["classes"]`; `None` includes all
+recorded classes. Resolve class-count columns through that metadata rather
+than guessing names. The final complete signature and any observation/region
+selection parameters should follow the existing table-QC conventions and be
+specified before implementation; the calls above establish the entry points
+and shared class-selection meaning, not an additional raw-point fallback.
+
+The summary must identify the selected table and regions and retain the
+relevant class/panel association from the aggregation metadata. Its row
+universe is the selected AnnData observations, including retained instances
+with zero points in a particular class. Do not invent rows for labels absent
+from the table or imply that these statistics include unassigned points.
+
+### Return contract: `TableSummary`
+
+Return a result container with two dataframes:
+
+```python
+@dataclass(frozen=True)
+class TableSummary:
+    per_instance: pd.DataFrame
+    per_class: pd.DataFrame
+```
+
+`per_instance` contains the selected observation index and instance/region
+identity, selected existing class-count metrics, `auxiliary_points_fraction`,
+and the derived per-feature rates below. Preserve observation alignment and
+retain these derived values only in the result, not in the source `.obs`.
+
+`per_class` provides an overview across the selected instances, grouped by
+region and feature class so distinct sources remain identifiable. Include the
+number of selected instances, total assigned points for the class, and
+explicitly named statistics such as `mean_points_per_instance` and
+`median_points_per_instance`. Include instances with zero points in that class
+when calculating these statistics. Class selection does not silently filter
+out those instances.
+
+Do not use ambiguous metric names or imply that `per_class` has the same
+statistical population in both summary types. Labels and result columns must
+distinguish points **per target**, **per spatial bin**, and **per instance**.
+For example, an ECDF over `PointsSummary.per_target` gives each panel target
+equal weight; an instance-level ECDF gives each selected instance equal weight.
+
+### Existing measurements and derived instance metrics
+
+Reuse persisted `.obs` class counts and fractions rather than recomputing them
+from the points or count matrices. The metrics in this slice need `.obs` and
+table-local aggregation metadata; they do not require reading `.X` or the
+auxiliary feature-count matrix.
 
 Derive per-feature rates for the requested auxiliary classes from the persisted
 raw class counts. Resolve the relevant `.obs` columns through
@@ -3913,11 +4000,35 @@ system_control_points_per_feature =
 ```
 
 These rates normalize for the different numbers of panel features in the two
-control classes, including panel features with no detections. Keep them as
-temporary series or plotting-dataframe columns; do not persist them back into
-`adata.obs`. Use metadata bindings rather than hard-coded CosMx column names,
-and validate that the referenced count columns exist and the stored auxiliary
-class feature counts are positive.
+control classes, including panel features with no detections. Keep them in
+`TableSummary.per_instance`; do not persist them back into `adata.obs`. Use
+metadata bindings rather than hard-coded CosMx column names, and validate that
+the referenced count columns exist and the stored auxiliary class feature
+counts are positive.
+
+The persisted counts describe the aggregation-time feature population for the
+retained instances. Do not silently replace them with sums from a filtered or
+normalized `.X`. Additional metrics requiring feature-level measurements, such
+as the number of detected features per instance, need an explicitly specified
+raw-count matrix or layer contract before they are added. Such matrix-based
+metrics are not implicitly calculated by this slice; a normalized `.X` must
+never be interpreted as transcript counts. Summarizing a selected subset of
+instances uses that subset's metrics without claiming to restore filtered-out
+instances or features.
+
+### Plotting integration
+
+Existing `hp.qc.obs_scatter` and `hp.qc.metric_histogram` remain useful for
+metrics already stored in `.obs` (and, for the histogram, `.var`). They select
+and plot existing columns; they do not calculate the underlying class counts
+or panel-normalized rates. Preserve those direct table-input use cases.
+
+To plot temporary derived metrics without modifying the table, extend the
+consumption interface or share dataframe-based rendering helpers so plots can
+consume `TableSummary.per_instance`. The exact public precomputed-result
+interface is to be finalized for this slice. Keep one computation/rendering
+boundary: plotting an available summary must not call `summarize_table` again,
+read the original points, or write derived metrics to `.obs`.
 
 Support cell-level views such as histograms or violin plots of class counts
 and `auxiliary_points_fraction`, and comparisons of per-feature rates in a
@@ -3929,13 +4040,27 @@ maps, which retain unassigned and outside-mask controls.
 
 Focused tests should establish that:
 
-- plotted metrics use the table's recorded count-column bindings and
+- `summarize_table` returns aligned instance metrics and class-level overviews
+  without mutating `.obs`, `.uns`, matrices, SpatialData metadata, or the store;
+- exact class selection resolves the table's recorded classes and column
+  bindings, including custom class names, without guessing CosMx-specific keys;
+- summaries retain observation, instance, region, and source identity and use
+  only the selected table rows, including zeros for a selected feature class;
+- per-class totals, means, and medians agree with the selected per-instance
+  metrics, with names clearly indicating an instance-level denominator;
+- derived metrics use the table's recorded count-column bindings and
   authoritative auxiliary-class feature-count snapshot;
 - normalized rates use full panel feature counts, including features with no
   detections, and are not estimated from observed targets;
-- missing count columns and invalid denominators produce clear errors; and
-- plotting leaves the aggregation table and its metadata unchanged and does
-  not require scanning the original points.
+- missing required metadata/count columns and invalid denominators produce
+  clear errors;
+- the specified metrics use `.obs` and aggregation metadata without scanning
+  points, label rasters, `.X`, or the auxiliary count matrix, even when `.X`
+  has subsequently been normalized;
+- existing table-input plotting remains usable for ordinary stored metrics; and
+- plotting precomputed table summaries leaves both the summary and source
+  table unchanged, does not repeat summary computation, and does not require
+  writing temporary metrics to `.obs`.
 
 ## Slice 12: lazy SpatialData table reopening
 
