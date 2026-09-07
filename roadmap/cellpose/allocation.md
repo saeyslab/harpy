@@ -3622,6 +3622,33 @@ sizes and bin geometry in the result contract so Slice 11b can derive
 normalized displays without new point reductions. Do not smooth or normalize
 `spatial_counts` during summary construction.
 
+Spatial binning is coordinate-based, not raster-based point-to-label
+assignment. After any source-z selection, transform points into
+`to_coordinate_system`, apply the requested crop, and count the selected
+classes in regular rectangular coordinate bins. No morphology image or
+segmentation-label raster is required. Do not construct a synthetic
+labels raster for the bins or call `hp.tb.aggregate_points` to produce this
+summary.
+
+For points within the selected extent, regular-bin indices can be calculated
+directly from transformed coordinates:
+
+```python
+x_bin = floor((x - xmin) / bin_size)
+y_bin = floor((y - ymin) / bin_size)
+```
+
+For example, with an origin of `(0, 0)` and 200-micrometre bins, a point at
+`(250, 80)` belongs to bin `(1, 0)`. The class-specific count is accumulated at
+`spatial_counts[feature_class, y_bin, x_bin]`. These are coordinate bins, not
+image pixels or cell IDs; do not round points to segmentation-raster pixels.
+
+Perform the per-target and spatial reductions partition-wise with Dask:
+per-target counts group selected points by feature/class, while spatial counts
+group them by feature class and coordinate bin. Merge partial counts into the
+compact results. Points outside segmented instances remain included whenever
+they satisfy the requested crop and other point selections.
+
 The bin size is expressed in coordinate-system units and must be supplied to
 request `spatial_counts`; `summarize_points(bin_size=None)` does not select an
 automatic numeric default. For the example dataset, approximately 100-250
@@ -3672,6 +3699,10 @@ Focused tests should establish that:
 
 - `summarize_points` returns the two reduced dataframes and optional raw spatial
   grid without modifying source points, metadata, tables, or the backing store;
+- summary computation works without image or labels elements and never calls
+  `aggregate_points` or raster-based point-to-label assignment;
+- coordinate-bin counts agree with a small known example in the requested
+  coordinate system, independently of any segmentation;
 - `bin_size=None` skips spatial binning, while an explicit bin size produces
   `(feature_class, y, x)` counts with coordinate-system and bin metadata;
 - `feature_classes=None` includes all panel classes, a string selects one, and
@@ -3712,7 +3743,9 @@ the whole-panel ECDF and precomputed-summary support in
 `hp.pl.plot_transcript_density`. Reuse the existing density-plot surface rather
 than introducing a parallel control-density plot API. This slice depends on
 the summary result, not segmentation or an aggregation table, and must not
-repeat point reductions when that result is already available.
+repeat point reductions when that result is already available. Rendering a
+precomputed grid does not perform raster-based assignment or call
+`aggregate_points`.
 
 ### Consumption contract
 
@@ -3984,6 +4017,13 @@ Reuse persisted `.obs` class counts and fractions rather than recomputing them
 from the points or count matrices. The metrics in this slice need `.obs` and
 table-local aggregation metadata; they do not require reading `.X` or the
 auxiliary feature-count matrix.
+
+An earlier `hp.tb.aggregate_points` call may have created the input table by
+assigning points to a segmentation-label raster. That assignment is upstream
+of table QC: `summarize_table` does not call it again, look up labels at point
+coordinates, or re-read a segmentation raster. Original-point binning in
+Slice 11a and existing-instance summaries here therefore use distinct inputs,
+without either QC operation rerunning raster-based aggregation.
 
 Derive per-feature rates for the requested auxiliary classes from the persisted
 raw class counts. Resolve the relevant `.obs` columns through
