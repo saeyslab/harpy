@@ -2,7 +2,8 @@
 
 ## Status
 
-Thirteen implementation slices are planned; Slices 1 through 9 are implemented:
+Thirteen numbered implementation slices are planned, with Slices 7 and 11 each
+split into parts a and b; Slices 1 through 9 are implemented:
 
 1. patch the CosMx reader and establish the generic Harpy feature-panel
    metadata contract — implemented;
@@ -22,7 +23,12 @@ Thirteen implementation slices are planned; Slices 1 through 9 are implemented:
    implemented;
 10. support point-to-label assignment through general invertible SpatialData
     transformations into a shared coordinate system;
-11. add QC functions that summarize the original, unallocated control points;
+11. add QC in two independently scoped steps:
+
+    - **11a:** original-point per-target summaries and spatially binned density
+      plots, reusing `hp.pl.plot_transcript_density`;
+    - **11b:** per-instance QC plotting from existing aggregation tables;
+
 12. support general lazy reopening of persisted AnnData tables through
     SpatialData; and
 13. optionally optimize Slice 7b's latency after phase-level benchmarks identify
@@ -51,10 +57,10 @@ the same contract for compatible tables created outside `aggregate_points`
 without making canonical-center attachment a required post-processing step for
 new aggregation tables. Slice 10 generalizes the spatial-assignment contract by
 mapping point coordinates through the selected shared coordinate system into
-the intrinsic labels frame, without resampling the labels raster. Slice 11's
+the intrinsic labels frame, without resampling the labels raster. Slice 11a's
 original-point summaries depend on the reader metadata from Slices 1–4 rather
-than aggregation or labels; its optional per-instance plotting view derives
-temporary rates from the class-aware table. Slice 12 is an independent
+than aggregation or labels. Slice 11b separately derives temporary per-instance
+plotting rates from the class-aware table. Slice 12 is an independent
 integration follow-up that makes later SpatialData Zarr reads retain lazy
 AnnData matrices. It is not required for Slice 7b's out-of-core writing or
 same-process result. Slice 13 is an
@@ -231,8 +237,8 @@ ordering is deterministic rather than a claim of biological precedence.
 
 Slice 5 uses the complete relation to resolve its shared expression axis and
 feature classes, and retains each non-expression feature-list length as a
-table-local auxiliary-class feature-count snapshot for later QC. Slice 11 additionally uses the
-actual control-feature names. A categorical transcript column
+table-local auxiliary-class feature-count snapshot for Slice 11b QC. Slice 11a
+additionally uses the actual control-feature names. A categorical transcript column
 contains only categories represented by the ingested points and cannot, by
 itself, preserve the feature-to-class relationship for a panel feature with no
 detected rows. Keeping the authoritative names in `features_by_class`
@@ -1029,7 +1035,7 @@ allocation has no caller-supplied denominator fallback or override.
 The point-to-label lookup is performed once per labels/points pair, carrying
 both the feature and feature-class columns through the assignment. It is never
 repeated once per class. Auxiliary points outside every instance are deliberately
-excluded from these cell-level summaries; Slice 11 operates directly on the
+excluded from these cell-level summaries; Slice 11a operates directly on the
 original points to provide spatial background QC.
 
 When `expression_class` is omitted, the same multi-region API follows the
@@ -1315,7 +1321,7 @@ auxiliary_points_fraction =
 Do not persist `negative_points_per_feature` or
 `system_control_points_per_feature` in `.obs`. They are deterministic rescalings
 of the raw class counts by the panel feature counts and add no independent table
-information. Slice 11 QC plotting derives them on demand from the raw count
+information. Slice 11b QC plotting derives them on demand from the raw count
 columns and the table-local auxiliary-class feature-count snapshot.
 
 ### Table-local metadata contract
@@ -1438,12 +1444,12 @@ column. No auxiliary class produces a persisted per-feature rate. Validate the
 complete multi-region request and shared
 `feature_class_aggregation` configuration before writing the output table.
 
-### Boundary with Slice 11
+### Boundary with Slices 11a and 11b
 
 The `.obs` summaries describe only auxiliary points that land inside an instance
 mask. For CosMx these auxiliary classes are controls, making the summaries
 suitable for cell-level histograms and violin plots of the raw class counts and
-`auxiliary_points_fraction`. Slice 11 may additionally derive the
+`auxiliary_points_fraction`. Slice 11b may additionally derive the
 following per-instance plotting metrics on demand:
 
 ```text
@@ -1461,8 +1467,8 @@ must not be written back to `.obs`.
 They are not sufficient for a spatial background map. Allocation deliberately
 removes points on label value zero, while unassigned controls outside masks are
 still informative about sticky tissue, optical crowding, and regional assay
-background. A later QC operation should therefore bin the original control
-points directly in space and visualize separate normalized `Negative` and
+background. Slice 11a should therefore bin the original control points directly
+in space and visualize separate normalized `Negative` and
 `SystemControl` density maps. This spatial operation must not be folded into
 `hp.tb.aggregate_points`.
 
@@ -1759,7 +1765,7 @@ instance has no feature from one axis.
 The current implementation computes all per-feature counts before discarding
 the non-expression columns. This slice therefore changes output assembly and
 row selection, not spatial assignment. The source points remain unchanged and
-continue to support Slice 11 QC for unassigned and outside-mask controls.
+continue to support Slice 11a QC for unassigned and outside-mask controls.
 
 ### Verification
 
@@ -3378,46 +3384,26 @@ fast path only if measurements show that the general vectorized affine path
 causes a material regression; both paths must share the same rounding, bounds,
 and lookup contracts.
 
-## Slice 11: original-point control QC
+## Slice 11a: original-point summaries and density plots
 
 **Status: specified; not implemented.**
 
-Add separate lightweight QC functions over the original transcript points.
+Add lightweight per-target summaries, spatially binned summaries, and their
+visualizations over the original transcript points. Extend the existing
+`hp.pl.plot_transcript_density` for class selection and reuse its plotting
+surface rather than introducing a parallel control-density plot API.
+
 This slice is scheduled after Slice 10, but its runtime contract depends only on
 the points and feature-panel metadata from Slice 1 and the sample-aware point
 metadata from Slices 2–4. The original-point summaries may run before or after
-aggregation and do not depend on an instance-label raster or an AnnData table.
-The optional per-instance plotting view described below requires a class-aware
-table produced from the Slice 5 contract but derives its rates without
-modifying that table.
+segmentation or aggregation and do not depend on an instance-label raster or an
+AnnData table. Per-instance plotting from an existing aggregation table belongs
+to Slice 11b and is not required to implement this slice.
 
 This operation complements the instance-level `.obs` metrics. It must use the
 original points element so that controls on label value zero and controls
 outside segmented instances remain visible. It must not create another copy of
 the points or route individual controls through `hp.tb.aggregate_points`.
-
-### Derived per-instance plotting metrics
-
-When a class-aware aggregation table is available, QC plotting may derive
-`negative_points_per_feature` and `system_control_points_per_feature` from the
-persisted raw class counts. Resolve the relevant `.obs` columns through
-`adata.uns["feature_class_aggregation"]["count_columns"]` and divide them by the
-corresponding positive values in `auxiliary_class_feature_counts`:
-
-```text
-negative_points_per_feature =
-    n_negative_points / auxiliary_class_feature_counts["Negative"]
-
-system_control_points_per_feature =
-    n_system_control_points / auxiliary_class_feature_counts["SystemControl"]
-```
-
-These rates normalize for the different numbers of panel features in the two
-control classes. They should be temporary series or plotting-dataframe columns;
-do not persist them back into `adata.obs`. The plotting layer must validate
-that the referenced count columns exist and that the stored auxiliary class
-feature counts are positive. This optional cell-level view complements, but does not replace, the
-original-point summaries below.
 
 ### Per-target summary
 
@@ -3441,18 +3427,75 @@ negative probe or false code immediately visible. Keep `Negative` and
 `SystemControl` in separate facets because they measure different technical
 processes and have different numbers of panel features.
 
+### Class selection through `plot_transcript_density`
+
+Add the optional parameter:
+
+```python
+feature_class: str | None = None
+```
+
+`None` retains all classes and preserves the existing generic plotting use
+case without requiring feature-panel metadata. A string selects an exact class
+name from the points element's referenced panel, such as `"Endogenous"`,
+`"Negative"`, or `"SystemControl"`. Use `feature_class`, not the Python keyword
+`class`, and do not introduce aliases such as `"endogenous_class"`. This is a
+generic feature-class selection, not a control-only switch: do not hard-code
+CosMx classes or assume every non-expression class represents a control.
+
+Resolve the points class-column name from the authoritative panel metadata:
+
+```text
+sdata.attrs["harpy"]["points"][points_name]["feature_panel"]
+                              |
+                              v
+sdata.attrs["harpy"]["feature_panels"][panel_name]
+    ["feature_class_key"]                 e.g. "code_class"
+                              |
+                              v
+filter points[feature_class_key] == feature_class
+```
+
+A requested class must occur in the panel's `classes`; a missing panel or class
+column must produce a clear error rather than guessing from column names or
+feature-name prefixes. An authoritative class with no detected points is valid.
+
+For example, the proposed call selects negative-control points in a physical
+coordinate system:
+
+```python
+hp.pl.plot_transcript_density(
+    sdata,
+    points_name="sample_a_transcripts_mosaic_1",
+    to_coordinate_system="sample_a_global_1_micron",
+    bin_size=200,
+    feature_class="Negative",
+)
+```
+
+Class selection and normalization are separate choices. This call must not
+silently divide counts by panel size or bin area because it selects
+`"Negative"`. Expose normalization explicitly and label its units; the exact
+normalization parameter names remain to be specified.
+
 ### Spatially binned summary
 
 Bin the original control points in the coordinate system of their mosaic and
-produce separate spatial density layers for negative probes and system-control
-codewords. Normalize each layer by its authoritative number of panel features;
-when operating in a physical coordinate system, also normalize by bin area.
+produce separate spatial grids for the requested feature classes. Retain raw
+bin counts, with explicit options to normalize by the authoritative number of
+panel features and, in a physical coordinate system, by bin area. For the CosMx
+control comparison, produce separate negative-probe and system-control grids
+using the same chosen normalization.
 
 The bin size must be configurable in coordinate-system units. Choose a default
 that yields a QC overview rather than single-transcript resolution; for this
 dataset, approximately 100-250 micrometres is an appropriate range to evaluate.
 Bins with no controls must remain explicit zeros, and sample/mosaic groups must
-remain in their independent coordinate systems.
+remain in their independent coordinate systems. Matched class plots must share
+one extent and identical bin edges, derived from an explicit requested extent
+or the unfiltered mosaic point domain, not independently from each selected
+class. A selected class with no detections produces an all-zero grid over that
+shared extent. It must not fail simply because its filtered points are empty.
 
 The primary visualization should be a matched pair of spatial heatmaps with a
 shared tissue outline or morphology context:
@@ -3468,23 +3511,35 @@ production overview should operate on aggregated bins.
 
 ### Computation and outputs
 
+The current `plot_transcript_density` filters points and then calls
+`ddf.compute()` before constructing a NumPy histogram. Adding a class filter
+alone would retain that full-point materialization. Refactor the shared
+computation/rendering boundary so the public plot renders a compact precomputed
+grid produced by lazy, partition-wise reductions.
+
 Project only the feature, class, and coordinate columns required from the
 backed points element. Construct the per-target and spatial-bin reductions from
 the same lazy Dask input and compute them together so the Parquet partitions do
-not need an independent full scan for each output. Do not materialize the full
+not need an independent full scan for each output. Reduce multiple requested
+classes together and render their grids separately; a multi-class QC report
+must not scan the points again for every class plot. Do not materialize the full
 points dataframe in memory.
 
 Keep computation separate from plotting. The computation layer should expose a
 small per-target dataframe and coordinate-aware binned arrays that plotting can
-consume without re-reading the transcript points. The exact public names and
-SpatialData storage representation remain an implementation decision; they
-must not place control targets in the endogenous expression matrix or attach
-spatial bins to the instance-annotating AnnData table.
+consume without re-reading the transcript points. Reuse this computation layer
+from `plot_transcript_density`; plotting already computed QC results must not
+trigger a second reduction. The exact summary-function names, interface for
+precomputed grids, and SpatialData storage representation remain implementation
+decisions. They must not place control targets in the endogenous expression
+matrix or attach spatial bins to the instance-annotating AnnData table.
 
-If authoritative panel metadata is unavailable, emit raw per-target counts and
-raw spatial class counts, clearly mark them as unnormalized, and omit
-per-target normalized rates. Never estimate panel denominators from detected
-targets.
+If authoritative panel metadata is unavailable, raw summaries remain possible
+for the feature/class information explicitly available to the operation. Mark
+them as unnormalized and omit panel-normalized rates and claims about
+undetected panel features. This fallback does not make metadata-backed
+`feature_class` selection infer a panel or class column. Never estimate panel
+denominators from detected targets.
 
 ### Verification
 
@@ -3495,11 +3550,68 @@ Focused tests should establish that:
 - per-target counts sum to their corresponding raw class totals;
 - spatial-bin counts conserve the input control-point totals within the chosen
   extent;
-- normalization uses authoritative panel counts and physical bin area;
-- per-instance plotting rates use the table's recorded count-column bindings
-  and authoritative denominator snapshot without modifying `.obs`;
+- `feature_class=None` retains the generic all-class plotting behavior;
+- exact class selection uses the panel's `feature_class_key`, including for
+  biological classes, with clear errors for missing metadata or unknown classes;
+- matched class grids have identical extents and bin edges, including an
+  all-zero grid for a valid class with no detections;
+- normalization is explicit and uses authoritative panel counts and physical
+  bin area when requested;
 - sample and mosaic coordinate systems remain independent; and
-- the implementation stays lazy until the compact summaries are computed.
+- the implementation stays lazy until the compact summaries are computed,
+  shares reductions across outputs, and plots precomputed grids without
+  re-reading the original points.
+
+## Slice 11b: per-instance QC plotting
+
+**Status: specified; not implemented.**
+
+Add QC plots over existing class-aware aggregation tables, separately from
+Slice 11a's original-point summaries. This slice uses the raw per-class `.obs`
+counts, `auxiliary_points_fraction`, and table-local aggregation metadata
+established by Slice 5 and retained by later aggregation slices. It does not
+require a new aggregation, re-read the original points, or modify `.obs`.
+
+### Derived plotting metrics
+
+Derive per-feature rates for the requested auxiliary classes from the persisted
+raw class counts. Resolve the relevant `.obs` columns through
+`adata.uns["feature_class_aggregation"]["count_columns"]` and divide them by the
+corresponding positive values in that record's `auxiliary_class_feature_counts`.
+For the CosMx example:
+
+```text
+negative_points_per_feature =
+    n_negative_points / auxiliary_class_feature_counts["Negative"]
+
+system_control_points_per_feature =
+    n_system_control_points / auxiliary_class_feature_counts["SystemControl"]
+```
+
+These rates normalize for the different numbers of panel features in the two
+control classes, including panel features with no detections. Keep them as
+temporary series or plotting-dataframe columns; do not persist them back into
+`adata.obs`. Use metadata bindings rather than hard-coded CosMx column names,
+and validate that the referenced count columns exist and the stored auxiliary
+class feature counts are positive.
+
+Support cell-level views such as histograms or violin plots of class counts
+and `auxiliary_points_fraction`, and comparisons of per-feature rates in a
+scatter or hexbin plot. These describe assigned points only; they complement
+Slice 11a and cannot replace its spatial background maps, which retain
+unassigned and outside-mask controls.
+
+### Verification
+
+Focused tests should establish that:
+
+- plotted metrics use the table's recorded count-column bindings and
+  authoritative auxiliary-class feature-count snapshot;
+- normalized rates use full panel feature counts, including features with no
+  detections, and are not estimated from observed targets;
+- missing count columns and invalid denominators produce clear errors; and
+- plotting leaves the aggregation table and its metadata unchanged and does
+  not require scanning the original points.
 
 ## Slice 12: lazy SpatialData table reopening
 
