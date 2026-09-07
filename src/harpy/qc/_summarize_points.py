@@ -46,7 +46,9 @@ class PointsSummary:
     per_target
         One row per selected panel feature, including zero detections. Columns
         are ``feature``, ``feature_class``, ``n_points``, and
-        ``fraction_of_class_points`` (0–1, missing for a zero-point class).
+        ``within_class_fraction``: this feature's point count divided by the
+        total point count of its own class, after selection. Values range
+        from 0 to 1; NaN when the class has no points.
         ``points_per_um2`` is present only when an analyzed area was supplied.
     per_class
         One row per selected class: ``n_features``, ``n_zero_features``,
@@ -57,9 +59,15 @@ class PointsSummary:
         missing for a zero-point class). All target statistics include zeros.
     spatial_counts
         Optional in-memory uint64 DataArray with dimensions
-        ``(feature_class, y, x)`` and bin-center x/y coordinates. Attributes
-        ``x_edges``, ``y_edges``, ``extent``, and ``bin_size`` describe the
-        geometry, including narrower terminal bins for explicit crops.
+        ``(feature_class, y, x)`` and bin-center x/y coordinates. These
+        coordinates and the geometry attributes ``x_edges``, ``y_edges``,
+        ``extent``, and ``bin_size`` are expressed in the requested
+        ``to_coordinate_system`` and its units, after transforming the source
+        points. Coordinates are not rebased to zero or replaced by bin indices.
+        The coordinate-system name is stored in
+        ``spatial_counts.attrs["to_coordinate_system"]``. Terminal bins may be
+        narrower for explicit crops. This is a standalone DataArray, not a
+        registered SpatialData image element.
         Counts are raw, unsmoothed, and not normalized by area or panel size.
 
     Notes
@@ -184,7 +192,7 @@ def summarize_points(
 
     Target and bin counts are computed together from each selected source
     partition. No raster lookup, aggregation table, smoothing, plotting, or
-    persistence is performed. Fractions with zero class totals are missing.
+    persistence is performed.
 
     Examples
     --------
@@ -432,7 +440,7 @@ def _summary_frames(
                     "feature": features,
                     "feature_class": name,
                     "n_points": values,
-                    "fraction_of_class_points": values / total if total else np.full(len(values), np.nan),
+                    "within_class_fraction": values / total if total else np.full(len(values), np.nan),
                 }
             )
         )

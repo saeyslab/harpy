@@ -76,9 +76,9 @@ def test_summary_returns_complete_panel_counts_and_class_statistics():
     assert targets.index.tolist() == ["GeneB", "GeneA", "ZeroGene", "NegA", "NegB", "NegC", "SysA", "SysB", "NoCalls"]
     assert targets.n_points.tolist() == [1, 2, 0, 3, 1, 0, 1, 0, 0]
     assert targets.n_points.dtype == np.dtype("uint64")
-    assert targets.loc["NegA", "fraction_of_class_points"] == 0.75
-    assert targets.loc["NegC", "fraction_of_class_points"] == 0
-    assert np.isnan(targets.loc["NoCalls", "fraction_of_class_points"])
+    assert targets.loc["NegA", "within_class_fraction"] == 0.75
+    assert targets.loc["NegC", "within_class_fraction"] == 0
+    assert np.isnan(targets.loc["NoCalls", "within_class_fraction"])
     classes = result.per_class.set_index("feature_class")
     negative = classes.loc["Negative"]
     assert negative.n_features == 3
@@ -286,7 +286,7 @@ def test_empty_z_interval_retains_panel_zeros_and_explicit_xy_grid():
     )
     assert len(result.per_target) == 9
     assert not result.per_target.n_points.any()
-    assert result.per_target.fraction_of_class_points.isna().all()
+    assert result.per_target.within_class_fraction.isna().all()
     assert result.spatial_counts.shape == (4, 1, 4)
     assert not result.spatial_counts.values.any()
 
@@ -543,7 +543,7 @@ def test_empty_points_need_extent_only_for_spatial_grid():
     result = hp.qc.summarize_points(sdata, "calls")
     assert len(result.per_target) == 9
     assert not result.per_target.n_points.any()
-    assert result.per_target.fraction_of_class_points.isna().all()
+    assert result.per_target.within_class_fraction.isna().all()
     with pytest.raises(ValueError, match="supply crd"):
         hp.qc.summarize_points(sdata, "calls", bin_size=2)
     result = hp.qc.summarize_points(sdata, "calls", bin_size=2, crd=(0, 4, 0, 2))

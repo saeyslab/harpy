@@ -3518,21 +3518,23 @@ class PointsSummary:
 
 One row per panel target in each selected class, using fixed summary-column
 names `feature`, `feature_class`, `n_points`, and
-`fraction_of_class_points`. Source columns can still be named `gene` and
+`within_class_fraction`. Source columns can still be named `gene` and
 `code_class`; they are read through the panel's keys and remain unchanged.
-`fraction_of_class_points` is a fraction in `[0, 1]`, with missing values when
-the corresponding class has no detected points. Add `points_per_um2` only when
+`within_class_fraction` is the feature's point count divided by the total
+point count of its own class after selection, not by the total across all
+classes. Values range from 0 to 1; NaN when the class has no detected points.
+Add `points_per_um2` only when
 `analyzed_area_um2` is supplied, calculated as `n_points / analyzed_area_um2`.
 
 For example, a hypothetical result could contain the following count columns
 (source identity columns omitted here for readability):
 
-| feature        | feature_class | n_points | fraction_of_class_points |
-| -------------- | ------------- | -------: | -----------------------: |
-| NegativeA      | Negative      |       12 |                      0.8 |
-| NegativeB      | Negative      |        3 |                      0.2 |
-| NegativeC      | Negative      |        0 |                      0.0 |
-| SystemControlA | SystemControl |        5 |                      1.0 |
+| feature        | feature_class | n_points | within_class_fraction |
+| -------------- | ------------- | -------: | --------------------: |
+| NegativeA      | Negative      |       12 |                   0.8 |
+| NegativeB      | Negative      |        3 |                   0.2 |
+| NegativeC      | Negative      |        0 |                   0.0 |
+| SystemControlA | SystemControl |        5 |                   1.0 |
 
 `NegativeC` remains present because it belongs to the panel, even without any
 observed points. This complete dataframe is the input to the ECDF and supports
@@ -3645,7 +3647,7 @@ The implemented column names are `feature_class`, `n_features`,
 `median_points_per_feature`, `p95_points_per_feature`, `top_n` (requested N),
 `n_top_features` (the smaller of N and panel size), and
 `pct_points_top_n_features`. Percentage columns use 0–100; the per-target
-`fraction_of_class_points` uses 0–1.
+`within_class_fraction` uses 0–1.
 
 Retain this top-N concentration statistic without plotting individual target
 names. Use a configurable N, defaulting to 20, and include all targets if the
