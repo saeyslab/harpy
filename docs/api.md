@@ -9,6 +9,18 @@ Import Harpy as::
 .. module:: harpy
 ```
 
+## Spatial bounds
+
+```{eval-rst}
+
+.. currentmodule:: harpy
+
+.. autosummary::
+    :toctree: generated
+
+    SpatialBounds
+```
+
 ## IO
 
 I/O.
@@ -189,6 +201,8 @@ Quality control functions.
     metric_histogram
     metrics_histogram
     obs_scatter
+    summarize_points
+    PointsSummary
 ```
 
 ## Plotting
