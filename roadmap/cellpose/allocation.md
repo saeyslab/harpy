@@ -2,7 +2,7 @@
 
 ## Status
 
-Thirteen numbered implementation slices are planned, with Slice 7 split into
+Fourteen numbered implementation slices are planned, with Slice 7 split into
 parts a and b and Slice 11 into parts a, b, and c; Slices 1 through 9 are
 implemented:
 
@@ -33,9 +33,11 @@ implemented:
     - **11c:** table-level summary computation through `hp.qc.summarize_table`
       and `TableSummary`, with plotting integration;
 
-12. support general lazy reopening of persisted AnnData tables through
+12. register authoritative feature panels for existing points elements through
+    a generic `hp.pt.add_feature_panel` convenience API;
+13. support general lazy reopening of persisted AnnData tables through
     SpatialData; and
-13. optionally optimize Slice 7b's latency after phase-level benchmarks identify
+14. optionally optimize Slice 7b's latency after phase-level benchmarks identify
     material checkpoint or writer overhead.
 
 Slice 2 replaces the current single-run reader surface with one coherent,
@@ -62,16 +64,19 @@ without making canonical-center attachment a required post-processing step for
 new aggregation tables. Slice 10 generalizes the spatial-assignment contract by
 mapping point coordinates through the selected shared coordinate system into
 the intrinsic labels frame, without resampling the labels raster. Slice 11a's
-original-point summaries depend on the reader metadata from Slices 1–4 rather
-than aggregation or labels. Slice 11b consumes these summaries for plotting
+original-point summaries depend on the generic feature-panel contract, supplied
+by the readers in Slices 1–4 or explicitly attached by Slice 12, rather than
+aggregation or labels. Slice 11b consumes these summaries for plotting
 without re-reading the source points. Slice 11c provides the symmetric
 read-only table-summary workflow, deriving per-instance metrics and class-level
-overviews from the class-aware table before plotting. Slice 12 is an
-independent integration follow-up that makes later SpatialData Zarr reads retain lazy
-AnnData matrices. It is not required for Slice 7b's out-of-core writing or
-same-process result. Slice 13 is an
-optional, benchmark-driven follow-up: it may reduce repeated checkpoint reads
-and small-partition overhead, but must preserve Slice 7b's bounded-memory and
+overviews from the class-aware table before plotting. Slice 12 makes existing
+points elements created outside Harpy compatible with this same panel contract,
+without introducing automatic panel inference in summary or aggregation APIs.
+Slice 13 is an independent integration follow-up that makes later SpatialData
+Zarr reads retain lazy AnnData matrices. It is not required for Slice 7b's
+out-of-core writing or same-process result. Slice 14 is an optional,
+benchmark-driven follow-up: it may reduce repeated checkpoint reads and
+small-partition overhead, but must preserve Slice 7b's bounded-memory and
 publication contracts.
 
 ## Goal
@@ -154,8 +159,9 @@ When transcripts are ingested and a plex file is present, the CosMx reader
 should therefore discover exactly one plex file, read it once, and associate a
 compact feature-panel record with every transcript points element created from
 that run. A missing plex must not prevent raw transcript ingestion, but it
-precludes class-aware allocation and panel-normalized QC. The record must
-contain at least:
+precludes class-aware allocation and panel-normalized QC until an authoritative
+panel is supplied explicitly, for example through the Slice 12 helper. The
+record must contain at least:
 
 - the points `feature_key` and `feature_class_key` column bindings;
 - the ordered feature classes; and
@@ -3409,11 +3415,14 @@ computation API. It makes no plotting changes; the ECDF and density-plot
 consumers are implemented separately in Slice 11b.
 
 This slice is scheduled after Slice 10, but its runtime contract depends only on
-the points and feature-panel metadata from Slice 1 and the sample-aware point
-metadata from Slices 2–4. The original-point summaries may run before or after
-segmentation or aggregation and do not depend on an instance-label raster or an
-AnnData table. Table-level summary computation and plotting belong to Slice
-11c and are not required to implement either Slice 11a or Slice 11b.
+the points and generic feature-panel metadata established in Slice 1. Readers
+from Slices 2–4 also provide optional sample identity; CosMx-specific metadata
+is not required. Slice 12 adds explicit panel registration for existing points
+created outside Harpy without changing this summary contract. The original-point
+summaries may run before or after segmentation or aggregation and do not depend
+on an instance-label raster or an AnnData table. Table-level summary computation
+and plotting belong to Slice 11c and are not required to implement either
+Slice 11a or Slice 11b.
 
 This operation complements the instance-level `.obs` metrics. It must use the
 original points element so that controls on label value zero and controls
@@ -4165,7 +4174,152 @@ Focused tests should establish that:
   table unchanged, does not repeat summary computation, and does not require
   writing temporary metrics to `.obs`.
 
-## Slice 12: lazy SpatialData table reopening
+## Slice 12: feature-panel registration for existing points
+
+**Status: follow-up; not implemented.**
+
+Add a generic `hp.pt.add_feature_panel` convenience function for points elements
+created outside Harpy or ingested without panel metadata. It explicitly prepares
+those elements for `hp.qc.summarize_points` and class-aware
+`hp.tb.aggregate_points`; neither consumer should infer or register a panel as
+a side effect. Keep `summarize_points` read-only and retain its strict
+feature-panel requirement.
+
+### Public contract
+
+The proposed API accepts one existing points element and a complete, explicit
+feature-to-class mapping:
+
+```python
+sdata = hp.pt.add_feature_panel(
+    sdata,
+    points_name="transcripts",
+    feature_key="gene",
+    feature_class_key="feature_class",
+    features_by_class={
+        "Endogenous": ["EPCAM", "VIM", "CD3D"],
+        "Negative": ["Negative1", "Negative2"],
+    },
+)
+```
+
+- `sdata` and `points_name` identify the existing points element. No labels,
+  images, table, sample identifier, or CosMx provenance are required.
+- `feature_key` names its existing feature-identifier column.
+- `feature_class_key` names the existing class column to validate, or the new
+  categorical column to create from the mapping when absent.
+- `features_by_class: Mapping[str, Sequence[str]]` supplies the complete panel,
+  including features with no observed points. Derive the ordered classes and
+  per-class feature counts from this mapping, not additional arguments.
+- Return the updated `SpatialData` object. Support both unbacked objects and
+  backed stores; persist changes for a backed object.
+
+For data without meaningful feature classes, users can explicitly supply one
+neutral class, such as `features_by_class={"All": complete_feature_names}`.
+`"All"` is an example user-supplied name, not a special biological class.
+Do not assume `"Endogenous"`, guess controls from feature names, or require
+CosMx-specific class names.
+
+### Authoritative panel and points consistency
+
+Use the existing generic panel contract: distinct non-empty column names,
+non-empty unique class and feature names, and exactly one class per feature.
+Canonicalize class names and features within each class consistently with the
+CosMx reader, so equivalent supplied panels receive the same metadata and key.
+
+Validate the source points partition-wise without collecting the complete
+points dataframe or performing a global distinct-pair shuffle:
+
+- every observed feature is non-null and occurs in the supplied panel;
+- if the class column exists, every observed class is non-null and agrees with
+  the feature's panel assignment; do not silently replace conflicting values;
+- after validation, normalize the class column to a categorical dtype with
+  the complete canonical class order, including classes with zero detections;
+- if the class column is absent, derive it lazily from the mapping with that
+  same known categorical dtype.
+
+Preserve point rows, feature identifiers, other columns, coordinates, and
+SpatialData transformations. A panel feature may legitimately have no points;
+for example, `Negative2` remains in the panel and in `summary.per_target` with
+`n_points=0` even if no source row contains it. A contradictory row such as
+`("EPCAM", "Negative")` must fail before publishing changes.
+
+Do not offer an implicit observed-only "default panel" in this slice. Distinct
+observed features cannot reveal assay features with zero detections, so treating
+them as a complete panel would make zero-detection statistics and per-feature
+denominators misleading. The caller supplies the complete feature universe;
+Harpy validates its structure and agreement with observations, but cannot prove
+assay completeness from those observations. Any future observed-only mode must
+be explicitly requested and distinguish its incomplete scope rather than
+silently weakening the authoritative-panel contract.
+
+### Shared metadata and implementation
+
+Use the existing versioned root namespace and content-addressed panel registry:
+
+```python
+sdata.attrs["harpy"]["points"][points_name]["feature_panel"] = panel_name
+sdata.attrs["harpy"]["feature_panels"][panel_name] = {
+    "feature_key": feature_key,
+    "feature_class_key": feature_class_key,
+    "classes": classes,
+    "features_by_class": features_by_class,
+}
+```
+
+Reuse identical shared panels and compare complete contents when a generated
+key already exists. Preserve unrelated root metadata and fields in the points
+record. Do not fabricate reader provenance, sample/FOV metadata, acquisition
+timestamps, or duplicate feature-count mappings. Re-registering an identical
+association is safe; reject a conflicting existing association rather than
+silently replacing it or mutating a shared panel used by other elements.
+Panel replacement and migration of existing aggregation tables are outside
+this slice.
+
+Implement the public helper in the points package. Reuse generic panel parsing
+and partition-wise point validation from `src/harpy/_feature_panels.py` and the
+root registry helpers from `src/harpy/_metadata.py`. Extract CosMx's generic panel
+serialization, canonical content hashing, and collision handling into shared
+helpers, then make both the reader and this API use them. Preserve the reader's
+existing panel contents, identifiers, and validation behavior. The generic
+points API must not depend on a CosMx manifest or preview.
+
+Metadata registration alone suffices when the points columns already satisfy
+the contract. Creating a class column or changing its categorical encoding also
+requires persisting the updated points element for a backed store. Reuse the
+existing points-writing machinery, write the points payload successfully before
+committing its panel metadata, and propagate failures clearly. Do not reuse the
+CosMx metadata commit helper unchanged: its reader-provenance updates and
+newly-created-element cleanup are not appropriate defaults for an existing
+points element. In particular, metadata failure must not trigger deletion of
+the original points element. Define focused failure handling at this boundary
+without introducing a whole-store atomic replacement mechanism.
+
+### Verification
+
+Focused tests should establish that:
+
+- a generic external points element with no Harpy metadata can be registered
+  and then summarized through the unchanged `summarize_points` API;
+- a missing class column is derived categorically from the mapping, while
+  compatible existing values are retained and incompatible values rejected;
+- custom column/class names and an explicit single-class panel work without
+  CosMx metadata;
+- undetected panel features remain represented with zero counts, and class
+  feature counts reflect the supplied panel rather than observed targets;
+- null/unknown features, null/mismatched classes, duplicate feature assignments,
+  and conflicting existing panel associations fail clearly;
+- identical panels deduplicate deterministically, including between CosMx and
+  generic registration, without changing other points associations;
+- coordinates, transformations, other point columns, and unrelated root
+  metadata survive both unbacked use and a backed write/read round trip;
+- source validation remains partition-wise, and write failures are reported
+  without deleting the original points element or publishing a new panel
+  reference before a required points write succeeds; and
+- the CosMx reader's existing panel-writing behavior remains unchanged after
+  extracting the shared helpers.
+
+## Slice 13: lazy SpatialData table reopening
 
 **Status: follow-up; not implemented.**
 
@@ -4190,7 +4344,7 @@ supports normal row and feature access, and produces the same materialized
 values as `anndata.read_zarr`. Benchmark store-open time and driver memory
 independently from Slice 7b's construction benchmark.
 
-## Slice 13: optional Slice 7b latency optimization
+## Slice 14: optional Slice 7b latency optimization
 
 **Status: optional follow-up; not implemented.**
 
