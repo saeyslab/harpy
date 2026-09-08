@@ -3877,8 +3877,9 @@ points dataframe or performing a global distinct-pair shuffle:
 - every observed feature is non-null and occurs in the supplied panel;
 - if the class column exists, every observed class is non-null and agrees with
   the feature's panel assignment; do not silently replace conflicting values;
-- after validation, normalize the class column to a categorical dtype with
-  the complete canonical class order, including classes with zero detections;
+- after validation, normalize the class column only where needed to obtain a
+  categorical dtype with the complete canonical class order, including classes
+  with zero detections; leave an already compatible column unchanged;
 - if the class column is absent, derive it lazily from the mapping with that
   same known categorical dtype.
 
@@ -3928,16 +3929,41 @@ helpers, then make both the reader and this API use them. Preserve the reader's
 existing panel contents, identifiers, and validation behavior. The generic
 points API must not depend on a CosMx manifest or preview.
 
-Metadata registration alone suffices when the points columns already satisfy
-the contract. Creating a class column or changing its categorical encoding also
-requires persisting the updated points element for a backed store. Reuse the
-existing points-writing machinery, write the points payload successfully before
-committing its panel metadata, and propagate failures clearly. Do not reuse the
-CosMx metadata commit helper unchanged: its reader-provenance updates and
-newly-created-element cleanup are not appropriate defaults for an existing
-points element. In particular, metadata failure must not trigger deletion of
-the original points element. Define focused failure handling at this boundary
-without introducing a whole-store atomic replacement mechanism.
+### Persistence contract
+
+Choose between exactly two paths after validating the supplied panel and source
+feature/class assignments:
+
+1. **Class column already compatible: validate and write panel metadata only.**
+   The column already has the required categorical dtype and canonical class
+   categories, and its values agree with the panel. Register the shared panel
+   and points-element reference without rewriting, staging, or replacing the
+   points payload. Validation may read the required source columns; this is a
+   no-points-write path, not a no-read path.
+2. **Class column missing or needing categorical normalization: rewrite only
+   that points element, safely and partition-wise.** Derive the missing column
+   or normalize a compatible-valued existing column lazily. For a backed store,
+   persist the complete updated points dataframe through the supported points
+   writer, partition by partition, without materializing it in driver memory.
+   Stage the updated element while retaining the original, and publish its
+   panel metadata only after the points write succeeds. Preserve or restore
+   the original points if the replacement fails, and propagate the error.
+
+SpatialData stores points as Parquet, not as independently writable Zarr arrays
+per column. Persisting a new or normalized class column therefore rewrites the
+selected points element, including its unchanged columns; it is not an in-place
+single-column update. Do not introduce a separate column file, custom reader,
+or append-based workaround. Images, labels, tables, and all other points
+elements remain untouched. For an unbacked object, update only its in-memory
+points and metadata; no on-disk staging is needed.
+
+Reuse the supported points-writing machinery for the staged payload, but not
+an overwrite flow that deletes the original before the replacement succeeds.
+Do not reuse the CosMx metadata commit helper unchanged: its reader-provenance
+updates and newly-created-element cleanup are not appropriate defaults for an
+existing points element. In particular, metadata failure must not trigger
+deletion of the original points element. Define focused failure handling at
+this boundary without introducing a whole-store atomic replacement mechanism.
 
 ### Verification
 
@@ -3949,6 +3975,12 @@ Focused tests should establish that:
   actionable guidance toward `hp.pt.add_feature_panel`, without mutating input;
 - a missing class column is derived categorically from the mapping, while
   compatible existing values are retained and incompatible values rejected;
+- an already compatible categorical class column takes the metadata-only path:
+  source assignments are still validated, but no points writer or staging path
+  is invoked and the existing points files remain unchanged;
+- a missing class column or a column requiring categorical normalization takes
+  the partition-wise rewrite path for only the selected points element, without
+  collecting the complete points dataframe in driver memory;
 - custom column/class names and an explicit single-class panel work without
   CosMx metadata;
 - undetected panel features remain represented with zero counts, and class
@@ -3959,6 +3991,8 @@ Focused tests should establish that:
   generic registration, without changing other points associations;
 - coordinates, transformations, other point columns, and unrelated root
   metadata survive both unbacked use and a backed write/read round trip;
+- both persistence paths leave images, labels, tables, and other points
+  elements unchanged;
 - source validation remains partition-wise, and write failures are reported
   without deleting the original points element or publishing a new panel
   reference before a required points write succeeds; and
