@@ -104,7 +104,7 @@ def _write_anndata_element(
     partial hierarchy in an isolated staging store. Keeping path traversal here
     gives full table writers and partial component writers the same encoding
     boundary; safe replacement is provided separately by
-    :func:`harpy._storage._publication._publish_staged_elements`.
+    :func:`harpy._storage._publication._publish_staged_paths`.
     """
     parent, key = _resolve_anndata_parent(group, path, create_parents=create_parents)
     write_elem(parent, key, value)
