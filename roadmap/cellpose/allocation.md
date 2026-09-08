@@ -3,7 +3,7 @@
 ## Status
 
 Thirteen numbered implementation slices are planned, with Slice 7 split into
-parts a and b and Slice 11 into parts a, b, c, and d; Slices 1 through 9 are
+parts a and b and Slice 11 into parts a, b, c, d, and e; Slices 1 through 9 are
 implemented:
 
 1. patch the CosMx reader and establish the generic Harpy feature-panel
@@ -24,15 +24,18 @@ implemented:
    implemented;
 10. support point-to-label assignment through general invertible SpatialData
     transformations into a shared coordinate system;
-11. add QC and its generic panel-preparation API in four independently scoped steps:
+11. add QC, shared element I/O, and generic panel preparation in five
+    independently scoped steps:
 
     - **11a:** original-point summary computation through
       `hp.qc.summarize_points` and `PointsSummary`, without plotting changes;
-    - **11b:** register authoritative feature panels for existing points
+    - **11b:** share element publication and rollback across existing I/O
+      workflows, including `_incremental_io_on_disk`;
+    - **11c:** register authoritative feature panels for existing points
       elements through `hp.pt.add_feature_panel`;
-    - **11c:** original-point summary visualization, including the ECDF and
+    - **11d:** original-point summary visualization, including the ECDF and
       direct spatial-count-array input to `hp.pl.plot_transcript_density`;
-    - **11d:** table-level summary computation through `hp.qc.summarize_table`
+    - **11e:** table-level summary computation through `hp.qc.summarize_table`
       and `TableSummary`, with plotting integration;
 
 12. support general lazy reopening of persisted AnnData tables through
@@ -65,14 +68,17 @@ new aggregation tables. Slice 10 generalizes the spatial-assignment contract by
 mapping point coordinates through the selected shared coordinate system into
 the intrinsic labels frame, without resampling the labels raster. Slice 11a's
 original-point summaries depend on the generic feature-panel contract, supplied
-by the readers in Slices 1–4 or explicitly attached by Slice 11b, rather than
-aggregation or labels. Slice 11b makes existing points elements created outside
-Harpy compatible with this same panel contract, without introducing automatic
-panel inference in summary or aggregation APIs. Implement it before Slice 11c,
+by the readers in Slices 1–4 or explicitly attached by Slice 11c, rather than
+aggregation or labels. Slice 11b extracts shared publication and rollback from
+the table implementation and refactors existing element-overwrite workflows to
+use it, while retaining format-specific writers and readers. Slice 11c builds
+on that I/O foundation to make existing points elements created outside Harpy
+compatible with the panel contract, without automatic panel inference in
+summary or aggregation APIs. Implement these before Slice 11d,
 which renders the summary outputs directly: density plotting accepts
 `summary.spatial_counts`, not a SpatialData object or a full `PointsSummary`.
 It neither reads the source points nor resolves a live panel registry. Slice
-11d provides the symmetric read-only table-summary workflow, deriving
+11e provides the symmetric read-only table-summary workflow, deriving
 per-instance metrics and class-level overviews from the class-aware table before
 plotting. Slice 12 is an independent integration follow-up that makes later
 SpatialData Zarr reads retain lazy AnnData matrices. It is not required for Slice 7b's
@@ -162,7 +168,7 @@ should therefore discover exactly one plex file, read it once, and associate a
 compact feature-panel record with every transcript points element created from
 that run. A missing plex must not prevent raw transcript ingestion, but it
 precludes class-aware allocation and panel-normalized QC until an authoritative
-panel is supplied explicitly, for example through the Slice 11b helper. The
+panel is supplied explicitly, for example through the Slice 11c helper. The
 record must contain at least:
 
 - the points `feature_key` and `feature_class_key` column bindings;
@@ -251,7 +257,7 @@ ordering is deterministic rather than a claim of biological precedence.
 
 Slice 5 uses the complete relation to resolve its shared expression axis and
 feature classes, and retains each non-expression feature-list length as a
-table-local auxiliary-class feature-count snapshot for Slice 11d QC. Slice 11a
+table-local auxiliary-class feature-count snapshot for Slice 11e QC. Slice 11a
 additionally uses the actual control-feature names. A categorical transcript column
 contains only categories represented by the ingested points and cannot, by
 itself, preserve the feature-to-class relationship for a panel feature with no
@@ -1335,7 +1341,7 @@ auxiliary_points_fraction =
 Do not persist `negative_points_per_feature` or
 `system_control_points_per_feature` in `.obs`. They are deterministic rescalings
 of the raw class counts by the panel feature counts and add no independent table
-information. Slice 11d table summarization derives them on demand from the raw
+information. Slice 11e table summarization derives them on demand from the raw
 count columns and the table-local auxiliary-class feature-count snapshot for
 downstream plotting.
 
@@ -1459,12 +1465,12 @@ column. No auxiliary class produces a persisted per-feature rate. Validate the
 complete multi-region request and shared
 `feature_class_aggregation` configuration before writing the output table.
 
-### Boundary with Slices 11a, 11c, and 11d
+### Boundary with Slices 11a, 11d, and 11e
 
 The `.obs` summaries describe only auxiliary points that land inside an instance
 mask. For CosMx these auxiliary classes are controls, making the summaries
 suitable for cell-level histograms and violin plots of the raw class counts and
-`auxiliary_points_fraction`. Slice 11d may additionally derive the
+`auxiliary_points_fraction`. Slice 11e may additionally derive the
 following per-instance plotting metrics on demand:
 
 ```text
@@ -1483,7 +1489,7 @@ They are not sufficient for a spatial background map. Allocation deliberately
 removes points on label value zero, while unassigned controls outside masks are
 still informative about sticky tissue, optical crowding, and regional assay
 background. Slice 11a should therefore bin the original control points directly
-in space, and Slice 11c visualizes separate normalized `Negative` and
+in space, and Slice 11d visualizes separate normalized `Negative` and
 `SystemControl` density maps from those counts. Neither operation belongs in
 `hp.tb.aggregate_points`.
 
@@ -3414,17 +3420,17 @@ Implement `hp.qc.summarize_points` and its `PointsSummary` result: lightweight
 per-target and per-class summaries plus optional raw spatial-bin counts over
 the original points. This slice delivers an independently usable, testable
 computation API. It makes no plotting changes; the ECDF and density-plot
-consumers are implemented separately in Slice 11c.
+consumers are implemented separately in Slice 11d.
 
 This slice is scheduled after Slice 10, but its runtime contract depends only on
 the points and generic feature-panel metadata established in Slice 1. Readers
 from Slices 2–4 also provide optional sample identity; CosMx-specific metadata
-is not required. Slice 11b adds explicit panel registration for existing points
+is not required. Slice 11c adds explicit panel registration for existing points
 created outside Harpy without changing this summary contract. The original-point
 summaries may run before or after segmentation or aggregation and do not depend
 on an instance-label raster or an AnnData table. Table-level summary computation
-and plotting belong to Slice 11d and are not required to implement either
-Slice 11a or Slice 11c.
+and plotting belong to Slice 11e and are not required to implement either
+Slice 11a or Slice 11d.
 
 This operation complements the instance-level `.obs` metrics. It must use the
 original points element so that controls on label value zero and controls
@@ -3505,7 +3511,7 @@ complete feature lists from that panel; do not accept duplicate column-name or
 panel-denominator arguments. Validate observed feature/class assignments
 partition-wise before filtering classes, so a disagreement is not hidden by
 class selection. Missing panels, unknown requested classes, and inconsistent
-feature/class assignments produce clear errors. Once Slice 11b is available,
+feature/class assignments produce clear errors. Once Slice 11c is available,
 the missing-panel error must direct the user to explicitly register a complete
 panel through `hp.pt.add_feature_panel(..., features_by_class=...)` before
 retrying. This guidance belongs in summary computation, not density rendering;
@@ -3643,7 +3649,7 @@ for every control class; and fill absent counts with zero. This must represent
 both a target that is absent from one mosaic and a target that has no detections
 anywhere in a sample. Do not identify controls from target-name prefixes. Keep
 the complete per-target dataframe available for inspection, export, and the
-downstream ECDF in Slice 11c. Keep outputs separate for each sample, points
+downstream ECDF in Slice 11d. Keep outputs separate for each sample, points
 element/mosaic, and selected feature class; do not pool different panels.
 
 ### Compact class-summary table
@@ -3679,7 +3685,7 @@ detected points, its point counts, mean, median, and percentile are zero, and
 all its panel targets remain present with zero counts. Its top-N point fraction
 and per-target fractions of class points are undefined and should be
 represented as missing values rather than dividing by zero or claiming a zero
-concentration. Slice 11c displays these missing fractions as "N/A".
+concentration. Slice 11d displays these missing fractions as "N/A".
 
 For comparisons between samples, make clear that raw point counts also reflect
 the analyzed area. Offer area normalization explicitly only when that area is
@@ -3687,13 +3693,13 @@ reliably defined; physical coordinate units alone do not establish the sampled
 area, and a mosaic bounding box may contain unmeasured gaps. Label normalized
 units and retain the panel identity so different panels are not silently pooled
 or presented as equivalent. These quantitative summaries support the density
-plots in Slice 11c without requiring their implementation in this slice.
+plots in Slice 11d without requiring their implementation in this slice.
 
 ### Spatially binned summary
 
 Bin the original points in the coordinate system of their mosaic and produce
 separate raw-count grids for the requested feature classes. Include the panel
-sizes and bin geometry in the result contract so Slice 11c can derive
+sizes and bin geometry in the result contract so Slice 11d can derive
 normalized displays without new point reductions. Do not smooth or normalize
 `spatial_counts` during summary construction.
 
@@ -3759,13 +3765,13 @@ artificial AnnData table solely to reuse table-based plotting helpers such as
 does not persist QC results as SpatialData elements or root metadata. Do not
 place control targets in the endogenous expression matrix or attach spatial
 bins to the instance-annotating AnnData table. The independent plotting work
-in Slice 11c consumes this contract; no plotting function is required to use or
+in Slice 11d consumes this contract; no plotting function is required to use or
 test Slice 11a.
 
 `summarize_points` has no fallback when panel metadata is missing: authoritative
 panel metadata is required even when `feature_classes=None`. Keep reusable raw
 spatial-binning helpers independent of panel metadata, but do not expose a
-separate no-panel computation path through the density plot. Slice 11c renders
+separate no-panel computation path through the density plot. Slice 11d renders
 the already computed `spatial_counts` array and needs no access to the original
 panel registry. Never estimate panel denominators from detected targets.
 
@@ -3814,7 +3820,128 @@ Focused tests should establish that:
   shares reductions across outputs, and returns results without invoking any
   plotting function.
 
-## Slice 11b: feature-panel registration for existing points
+## Slice 11b: shared element publication and rollback
+
+**Status: specified; not implemented.**
+
+Refactor Harpy's existing element-overwrite workflows to share one publication
+and rollback mechanism before implementing feature-panel registration in Slice
+11c. Reuse the table implementation rather than adding another points-specific
+I/O path. This slice introduces no public feature-panel API and makes no changes
+to the panel metadata contract or summary/plotting behavior.
+
+### Existing implementation and reuse boundary
+
+`src/harpy/table/_zarr.py` already implements
+`_publish_staged_anndata_elements`, used for both complete aggregation tables
+and canonical-center components. Its reusable core handles staged/destination
+path bindings, backups, publication, cleanup, and rollback; it does not encode
+the payload itself. Table installation already keeps the publication context
+open while reopening the table, attaching it, and updating consolidated
+metadata.
+
+In contrast, `src/harpy/utils/_io.py::_incremental_io_on_disk` writes the
+replacement to a temporary element, deletes the original, and writes the
+replacement again at the destination. Refactor this flow to use the same shared
+publisher as tables. Do not leave the delete-and-rewrite implementation beside
+a separate safer overwrite implementation for feature-panel registration.
+
+### Shared publication, format-specific serialization
+
+Move the generic publication machinery into a private cross-modality module,
+such as `src/harpy/_storage.py`. Use generic names such as `_StagedElement` and
+`_publish_staged_elements`, including the associated path validation and owned
+workspace/backup cleanup. This is shared internal infrastructure, not a new
+public storage API.
+
+Keep format-specific operations separate:
+
+- points continue to use SpatialData's supported Parquet writer and reader;
+- images, labels, and shapes retain their appropriate SpatialData writers and
+  readers;
+- component-wise table writing retains AnnData's encoding APIs and Harpy's
+  existing storage-backed table reader;
+- AnnData path traversal, encoding-aware reads, and SpatialData table-format
+  attributes remain in the table I/O module, not in the generic publisher.
+
+Update aggregation and canonical-center publication to use the extracted
+publisher. Their thin wrappers may still select table/component destinations
+and return the appropriate published group. Share backup and rollback logic,
+not a universal serialization implementation that treats Parquet and AnnData
+as the same format.
+
+### Replacement lifecycle and caller integration
+
+For an existing element, the shared replacement workflow must:
+
+1. Write the complete replacement once to an isolated Harpy-owned staging
+   location using the appropriate format writer. Leave the original available
+   during this write, including when the lazy replacement graph reads it.
+2. After staging succeeds, move the original destination to a backup and move
+   the staged payload into its permanent destination. Do not serialize the
+   replacement a second time merely to give it the final name.
+3. Keep the backup available while the caller reopens from the permanent path,
+   validates and attaches the result, and performs any associated metadata
+   updates. Returned lazy/backed handles must reference the permanent path,
+   not a staging location that will be removed.
+4. If publication or the caller's context body raises, remove only newly
+   published paths, restore the previous destinations, and propagate the error.
+   The operation-specific wrapper also restores its affected in-memory state
+   and metadata snapshots and refreshes consolidated metadata as necessary.
+5. Discard backups only after successful completion; clean up only paths owned
+   by this operation. Report cleanup or rollback failures without silently
+   claiming that restoration succeeded.
+
+The path publisher does not automatically snapshot arbitrary `sdata.attrs` or
+in-memory objects. Keep those responsibilities explicit in the calling
+operation. In particular, a metadata update must run inside the rollback window,
+not after a replacement helper has already discarded its backup.
+
+Expose a shared private replacement context for callers needing this lifecycle.
+Refactor `_incremental_io_on_disk` into an adapter over that workflow for its
+existing callers, preserving their public behavior and return conventions.
+Slice 11c can use the same context to commit panel metadata after the points
+write succeeds, without inventing a panel-specific writer or another
+backup/rename implementation.
+
+Limit the publication mechanism to local stores and same-filesystem moves,
+consistent with the existing table implementation. Preserve its distinction
+between rollback on raised exceptions and crash atomicity: multiple path moves
+plus metadata updates are not one crash-atomic operation. Do not introduce
+whole-store replacement, remote-store transactions, crash-recovery journals,
+or a new concurrent-writer protocol in this slice.
+
+### Verification
+
+Run focused tests for the shared publisher and its existing callers, covering:
+
+- successful creation/replacement and rollback for both complete element paths
+  and the multiple component paths used by canonical centers;
+- staging failures leave the original untouched; publication, reopen,
+  attachment, and metadata-update failures restore the previous destination
+  and the caller's affected in-memory/metadata state;
+- complete replacement data are serialized to staging once, with no second
+  payload write during publication;
+- successful reads use the permanent destination and remain usable after
+  staging and backup cleanup;
+- existing points, image, labels, shapes, and table overwrite callers retain
+  their data, coordinate transformations, and format-specific metadata;
+- aggregation tables retain backed matrix handles and canonical-center
+  updates retain their component-wise behavior, without loading complete
+  matrices or rewriting unrelated table components;
+- supported Zarr v2/v3 round trips and consolidated metadata remain consistent;
+- unrelated elements and paths are unchanged, and cleanup touches only owned
+  staging, backup, or newly published paths; and
+- a caller can include a metadata update in the replacement context without
+  requiring any feature-panel-specific code in the publisher.
+
+Move generic publication tests out of the table-only test scope when extracting
+the implementation; retain AnnData encoding and table-read tests there. This
+slice is complete when existing overwrite and table/component publication
+workflows use the shared mechanism and their focused regression tests pass.
+Feature-panel registration is implemented and tested separately in Slice 11c.
+
+## Slice 11c: feature-panel registration for existing points
 
 **Status: follow-up; not implemented.**
 
@@ -3823,9 +3950,10 @@ created outside Harpy or ingested without panel metadata. It explicitly prepares
 those elements for `hp.qc.summarize_points` and class-aware
 `hp.tb.aggregate_points`; neither consumer should infer or register a panel as
 a side effect. Keep `summarize_points` read-only and retain its strict
-feature-panel requirement. Implement this helper before the plotting API change
-in Slice 11c, so external datasets have an available preparation step. As part
-of this slice, make the missing-panel error in `summarize_points` point users to
+feature-panel requirement. Build this helper on the shared element I/O from
+Slice 11b and implement it before the plotting API change in Slice 11d, so
+external datasets have an available preparation step. As part of this slice,
+make the missing-panel error in `summarize_points` point users to
 `hp.pt.add_feature_panel(..., features_by_class=...)`; do not add a panel fallback
 or an automatic registration call.
 
@@ -3945,9 +4073,11 @@ feature/class assignments:
    or normalize a compatible-valued existing column lazily. For a backed store,
    persist the complete updated points dataframe through the supported points
    writer, partition by partition, without materializing it in driver memory.
-   Stage the updated element while retaining the original, and publish its
-   panel metadata only after the points write succeeds. Preserve or restore
-   the original points if the replacement fails, and propagate the error.
+   Use the shared replacement context from Slice 11b to stage the updated
+   element while retaining the original. Commit panel metadata after the points
+   write succeeds, while that context still retains the rollback copy. Preserve
+   or restore the original points if replacement or metadata commit fails, and
+   propagate the error.
 
 SpatialData stores points as Parquet, not as independently writable Zarr arrays
 per column. Persisting a new or normalized class column therefore rewrites the
@@ -3957,13 +4087,15 @@ or append-based workaround. Images, labels, tables, and all other points
 elements remain untouched. For an unbacked object, update only its in-memory
 points and metadata; no on-disk staging is needed.
 
-Reuse the supported points-writing machinery for the staged payload, but not
-an overwrite flow that deletes the original before the replacement succeeds.
-Do not reuse the CosMx metadata commit helper unchanged: its reader-provenance
-updates and newly-created-element cleanup are not appropriate defaults for an
-existing points element. In particular, metadata failure must not trigger
-deletion of the original points element. Define focused failure handling at
-this boundary without introducing a whole-store atomic replacement mechanism.
+Reuse the points writer and shared publication/rollback infrastructure delivered
+by Slice 11b; do not implement a second points-overwrite path or duplicate its
+backup, rename, and cleanup logic. The registration operation owns restoration
+of its affected points attachment and root-metadata snapshot if its context
+body fails. Do not reuse the CosMx metadata commit helper unchanged: its
+reader-provenance updates and newly-created-element cleanup are not appropriate
+defaults for an existing points element. In particular, metadata failure must
+not delete the original points element. The metadata-only path needs no
+element-replacement context and must not stage or rewrite points.
 
 ### Verification
 
@@ -3999,7 +4131,7 @@ Focused tests should establish that:
 - the CosMx reader's existing panel-writing behavior remains unchanged after
   extracting the shared helpers.
 
-## Slice 11c: original-point summary visualization
+## Slice 11d: original-point summary visualization
 
 **Status: specified; not implemented.**
 
@@ -4009,7 +4141,7 @@ the whole-panel ECDF and direct spatial-count-array input to
 its SpatialData-input signature with a renderer over `summary.spatial_counts`.
 Do not accept a SpatialData object or a full `PointsSummary` as an alternative
 computation path. This slice follows the panel-registration helper in Slice
-11b and depends at runtime only on the supplied summary outputs, not
+11c and depends at runtime only on the supplied summary outputs, not
 segmentation, an aggregation table, or a live feature-panel registry. Rendering
 a precomputed grid never scans source points, calculates new bins, performs
 raster-based assignment, or calls `summarize_points` or `aggregate_points`.
@@ -4056,7 +4188,7 @@ signal without requiring users to inspect those names. Individual target
 identities remain available in `per_target` for diagnostic follow-up, such as
 checking whether the same control repeatedly has high counts across samples.
 Defer a labelled target plot until there is a concrete diagnostic need; it is
-not a required output or acceptance criterion for either Slice 11a or 11c.
+not a required output or acceptance criterion for either Slice 11a or 11d.
 
 ### Whole-panel count distribution
 
@@ -4100,7 +4232,7 @@ scan or panel lookup. A class present with all-zero counts is valid. The panel
 requirement and source feature/class validation belong to `summarize_points`;
 they are not repeated by the renderer. When summary computation finds a missing
 panel, its error directs the user to the `hp.pt.add_feature_panel` helper from
-Slice 11b.
+Slice 11c.
 
 For example, compute once in a physical coordinate system, then render the
 negative-control grid:
@@ -4194,7 +4326,7 @@ Focused tests should establish that:
   point reductions, or panel-registry resolution, including when several
   classes are rendered from the same array.
 
-## Slice 11d: table-level summary computation and plotting integration
+## Slice 11e: table-level summary computation and plotting integration
 
 **Status: specified; not implemented.**
 
@@ -4347,7 +4479,7 @@ read the original points, or write derived metrics to `.obs`.
 Support cell-level views such as histograms or violin plots of class counts
 and `auxiliary_points_fraction`, and comparisons of per-feature rates in a
 scatter or hexbin plot. These describe assigned points only; they complement
-Slices 11a and 11c and cannot replace their original-point spatial background
+Slices 11a and 11d and cannot replace their original-point spatial background
 maps, which retain unassigned and outside-mask controls.
 
 ### Verification
