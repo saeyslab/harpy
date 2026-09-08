@@ -57,6 +57,8 @@ def _publish_staged_elements(
     Only filesystem paths are restored here. Callers must restore their own
     affected in-memory objects and metadata and refresh consolidated metadata
     after rollback. Multiple moves are not one crash-atomic transaction.
+    Staging workspaces and element paths must not themselves be symbolic
+    links; symlinks in ancestor directories are allowed.
 
     Parameters
     ----------
@@ -118,6 +120,16 @@ def _validate_staged_elements(
         raise ValueError(f"Publication operation must be a non-empty path-safe name, found {operation!r}.")
     if not elements:
         raise ValueError("At least one staged element is required for publication.")
+    # Check the explicit paths before resolve() follows links, including broken
+    # ones. Ancestor aliases (for example macOS /tmp) remain supported.
+    managed_paths = (
+        workspace,
+        *(element.staged for element in elements),
+        *(element.destination for element in elements),
+    )
+    symlinks = [str(path) for path in managed_paths if path.is_symlink()]
+    if symlinks:
+        raise ValueError(f"Symbolic links are not supported for staging workspaces or element paths: {symlinks!r}.")
     if not root.is_dir() or not workspace.is_dir():
         raise ValueError("Publication root and staging workspace must be existing directories.")
 
@@ -156,9 +168,9 @@ def _paths_overlap(paths: tuple[Path, ...]) -> bool:
 
 
 def _remove_owned_path(path: Path) -> None:
-    """Remove one explicitly owned staging, backup or newly published path."""
+    """Remove an owned path, refusing symlinks without changing the link or target."""
     if path.is_symlink():
-        path.unlink()
+        raise ValueError(f"Refusing to remove symbolic link '{path}'.")
     elif path.is_dir():
         shutil.rmtree(path)
     elif path.exists():
@@ -172,5 +184,5 @@ def _cleanup_owned_path(path: Path) -> None:
             log.info(f"Removing temporary storage path '{path}'.")
             _remove_owned_path(path)
             log.info(f"Finished removing temporary storage path '{path}'.")
-    except OSError as error:
+    except (OSError, ValueError) as error:
         log.warning(f"Could not remove temporary storage path '{path}': {error}")
