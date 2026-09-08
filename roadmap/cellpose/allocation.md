@@ -26,11 +26,10 @@ implemented:
     transformations into a shared coordinate system;
 11. add QC, shared element I/O, and generic panel preparation in five
     independently scoped steps:
-
     - **11a:** original-point summary computation through
       `hp.qc.summarize_points` and `PointsSummary`, without plotting changes;
     - **11b:** share element publication and rollback across existing I/O
-      workflows, including `_incremental_io_on_disk`;
+      workflows, including `_incremental_io_on_disk` — implemented;
     - **11c:** register authoritative feature panels for existing points
       elements through `hp.pt.add_feature_panel`;
     - **11d:** original-point summary visualization, including the ECDF and
@@ -3822,37 +3821,39 @@ Focused tests should establish that:
 
 ## Slice 11b: shared element publication and rollback
 
-**Status: specified; not implemented.**
+**Status: implemented.**
 
-Refactor Harpy's existing element-overwrite workflows to share one publication
-and rollback mechanism before implementing feature-panel registration in Slice
-11c. Reuse the table implementation rather than adding another points-specific
-I/O path. This slice introduces no public feature-panel API and makes no changes
+Harpy's element-overwrite workflows share one publication and rollback
+mechanism, extracted from the table implementation, for reuse by feature-panel
+registration in Slice 11c. This slice introduces no public feature-panel API and makes no changes
 to the panel metadata contract or summary/plotting behavior.
 
-### Existing implementation and reuse boundary
+### Implemented structure and reuse boundary
 
-`src/harpy/table/_zarr.py` already implements
-`_publish_staged_anndata_elements`, used for both complete aggregation tables
-and canonical-center components. Its reusable core handles staged/destination
-path bindings, backups, publication, cleanup, and rollback; it does not encode
-the payload itself. Table installation already keeps the publication context
-open while reopening the table, attaching it, and updating consolidated
-metadata.
+`src/harpy/_storage.py` implements `_StagedElement` and
+`_publish_staged_elements`, shared by complete aggregation tables,
+canonical-center components, and SpatialData element replacements. The reusable
+core handles path bindings, ownership/same-filesystem validation, backups,
+publication, cleanup, and rollback. It neither encodes nor reads the payload.
+Format-specific callers keep the publication context open while reopening,
+attaching, and updating consolidated metadata.
 
-In contrast, `src/harpy/utils/_io.py::_incremental_io_on_disk` writes the
-replacement to a temporary element, deletes the original, and writes the
-replacement again at the destination. Refactor this flow to use the same shared
-publisher as tables. Do not leave the delete-and-rewrite implementation beside
-a separate safer overwrite implementation for feature-panel registration.
+`src/harpy/utils/_io.py::_replace_element_on_disk` writes a replacement once to
+an isolated sibling staging container using the final element name and the
+backing store's Zarr format. It publishes through the shared context, refreshes
+consolidated metadata before reopening, and attaches the permanent-path element.
+`_incremental_io_on_disk` is a thin adapter retaining existing callers' return
+convention. The former delete-and-rewrite implementation has been removed.
+Replacements retain SpatialData's safeguard against changing backing files
+still used by another attached lazy element; such dependencies are rejected
+before staging. The replacement's own lazy dependency on the original is
+allowed because staging completes before publication.
 
 ### Shared publication, format-specific serialization
 
-Move the generic publication machinery into a private cross-modality module,
-such as `src/harpy/_storage.py`. Use generic names such as `_StagedElement` and
-`_publish_staged_elements`, including the associated path validation and owned
-workspace/backup cleanup. This is shared internal infrastructure, not a new
-public storage API.
+The generic machinery and owned-path cleanup live in private
+`src/harpy/_storage.py`. This is shared internal infrastructure, not a new public
+storage API.
 
 Keep format-specific operations separate:
 
@@ -3896,6 +3897,10 @@ The path publisher does not automatically snapshot arbitrary `sdata.attrs` or
 in-memory objects. Keep those responsibilities explicit in the calling
 operation. In particular, a metadata update must run inside the rollback window,
 not after a replacement helper has already discarded its backup.
+The SpatialData replacement adapter restores its selected in-memory element;
+callers modifying additional metadata must catch errors around the entire
+context, restore both persisted and in-memory metadata, and consolidate it.
+This also covers final-consolidation errors raised when exiting the context.
 
 Expose a shared private replacement context for callers needing this lifecycle.
 Refactor `_incremental_io_on_disk` into an adapter over that workflow for its
@@ -3935,11 +3940,12 @@ Run focused tests for the shared publisher and its existing callers, covering:
 - a caller can include a metadata update in the replacement context without
   requiring any feature-panel-specific code in the publisher.
 
-Move generic publication tests out of the table-only test scope when extracting
-the implementation; retain AnnData encoding and table-read tests there. This
-slice is complete when existing overwrite and table/component publication
-workflows use the shared mechanism and their focused regression tests pass.
-Feature-panel registration is implemented and tested separately in Slice 11c.
+Generic publication tests now live in `src/harpy/_tests/test_storage.py`;
+SpatialData replacement integration tests live in
+`src/harpy/_tests/test_utils/test_io.py`. AnnData encoding and table-read tests
+remain in the table test scope, alongside aggregation and canonical-center
+regressions. Feature-panel registration remains a separate implementation in
+Slice 11c.
 
 ## Slice 11c: feature-panel registration for existing points
 
