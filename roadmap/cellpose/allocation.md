@@ -3998,9 +3998,11 @@ sdata = hp.pt.add_feature_panel(
 - `feature_key` names its existing feature-identifier column.
 - `feature_class_key` names the existing class column to validate, or the new
   categorical column to create from the mapping when absent.
-- `features_by_class: Mapping[str, Sequence[str]]` supplies the complete panel,
-  including features with no observed points. Derive the ordered classes and
-  per-class feature counts from this mapping, not additional arguments.
+- `features_by_class: Mapping[str, Sequence[str]]` supplies the complete assay
+  panel. The panel can contain features absent from the points element; these
+  are retained for zero-detection summaries. Every observed feature must belong
+  to the panel. Derive the ordered classes and per-class feature counts from
+  this mapping, not additional arguments.
 - Return the updated `SpatialData` object. Support both unbacked objects and
   backed stores; persist changes for a backed object.
 
@@ -4031,8 +4033,9 @@ points dataframe or performing a global distinct-pair shuffle:
 
 Preserve point rows, feature identifiers, other columns, coordinates, and
 SpatialData transformations. A panel feature may legitimately have no points;
-for example, `Negative2` remains in the panel and in `summary.per_target` with
-`n_points=0` even if no source row contains it. A contradictory row such as
+there is no requirement that the panel contain any undetected features. For
+example, `Negative2` remains in the panel and in `summary.per_target` with
+`n_points=0` if no source row contains it. A contradictory row such as
 `("EPCAM", "Negative")` must fail before publishing changes.
 
 Do not offer an implicit observed-only "default panel" in this slice. Distinct
