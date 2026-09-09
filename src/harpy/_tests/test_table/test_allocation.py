@@ -20,6 +20,7 @@ import harpy.table._aggregation_writer as writer_module
 import harpy.table._allocation as aggregation_module
 import harpy.transformations._transformations as transformation_module
 from harpy.table import validate_table
+from harpy.table._aggregation_contracts import _FeatureClassAggregationContract
 from harpy.table._allocation import aggregate_points, bin_counts
 from harpy.table.canonical_centers import CANONICAL_OBSM_KEY, SPATIAL_COORDINATES_KEY
 from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY, _SPATIAL
@@ -421,6 +422,54 @@ def test_aggregation_reopen_failure_rolls_back_published_table(monkeypatch, tmp_
     reopened = read_zarr(sdata.path)
     assert (reopened.tables["table"].X != expected).nnz == 0
     assert not list((tmp_path / "input.zarr" / "tables").glob(".harpy-aggregate-*"))
+    assert not list(tmp_path.glob(".input.zarr.harpy-aggregate-backup-*"))
+
+
+@pytest.mark.parametrize("replace_existing", [False, True])
+def test_aggregation_metadata_validation_failure_rolls_back_published_table(monkeypatch, tmp_path, replace_existing):
+    """Invalid Harpy metadata must roll back publication, even when the SpatialData model is valid."""
+    sdata = _backed(_class_aware_sdata(), tmp_path)
+    if replace_existing:
+        aggregate_points(
+            sdata,
+            labels_name="labels_a",
+            points_name="points_a",
+            to_coordinate_system="sample_a",
+            output_table_name="table",
+        )
+    previous_table = sdata.tables.get("table")
+    expected = None if previous_table is None else previous_table.X.to_memory()
+    aggregation_uns = writer_module._aggregation_uns
+
+    def incompatible_metadata(*args, **kwargs):
+        metadata = aggregation_uns(*args, **kwargs)
+        metadata["feature_class_aggregation"]["auxiliary_class_feature_counts"]["Negative"] = 999
+        return metadata
+
+    monkeypatch.setattr(writer_module, "_aggregation_uns", incompatible_metadata)
+    with pytest.raises(ValueError, match="auxiliary class feature counts disagree"):
+        aggregate_points(
+            sdata,
+            labels_name="labels_a",
+            points_name="points_a",
+            to_coordinate_system="sample_a",
+            output_table_name="table",
+            expression_class="Endogenous",
+            overwrite=replace_existing,
+        )
+
+    reopened = read_zarr(sdata.path)
+    if previous_table is None:
+        assert "table" not in sdata.tables
+        assert "table" not in reopened.tables
+        assert not (sdata.path / "tables" / "table").exists()
+    else:
+        assert sdata.tables["table"] is previous_table
+        assert (previous_table.X.to_memory() != expected).nnz == 0
+        assert (reopened.tables["table"].X != expected).nnz == 0
+        assert "feature_class_aggregation" not in reopened.tables["table"].uns
+        validate_table(reopened, "table")
+    assert not list((sdata.path / "tables").glob(".harpy-aggregate-*"))
     assert not list(tmp_path.glob(".input.zarr.harpy-aggregate-backup-*"))
 
 
@@ -1513,7 +1562,7 @@ def test_class_aware_contract_requires_an_auxiliary_class():
     panel["features_by_class"] = {"Endogenous": panel["features_by_class"]["Endogenous"]}
 
     with pytest.raises(ValueError, match="at least one non-expression"):
-        aggregation_module._FeatureClassAggregationContract(
+        _FeatureClassAggregationContract(
             panel=aggregation_module._parse_feature_panel(panel, panel_name="expression_only"),
             expression_class="Endogenous",
         )

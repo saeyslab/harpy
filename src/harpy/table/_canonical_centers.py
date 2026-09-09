@@ -163,32 +163,38 @@ def add_canonical_centers(
         labels_names=labels_names,
         payloads=payloads,
     )
-    _validate_candidate_payload(
-        sdata,
-        table,
-        table_name=table_name,
-        region_key=region_key,
-        instance_key=instance_key,
-        labels_names=labels_names,
-        centers=centers,
-        metadata=metadata,
-    )
-
     workspace = _stage_canonical_components(
         destination,
         centers=centers,
         metadata=metadata,
     )
     try:
-        _validate_staged_canonical_components(
+        # Full payload validation uses the reopened serialized components,
+        # before publication can replace the original data.
+        staging_group = zarr.open_group(store=str(workspace), mode="r", use_consolidated=False)
+        staged_metadata = _read_anndata_element(staging_group, _CANONICAL_METADATA_PATH)
+        # Dense centers reopen as a storage-backed Zarr array. Canonical validation
+        # intentionally materializes this small ``(n_obs, 3)`` matrix temporarily.
+        staged_centers = _read_anndata_element(staging_group, _CANONICAL_MATRIX_PATH)
+        # Combine the reopened components with copied observations to validate
+        # their table-row binding without modifying the existing table.
+        staged_table = AnnData(
+            X=None,
+            obs=table.obs.copy(),
+            obsm={CANONICAL_OBSM_KEY: staged_centers},
+            uns={SPATIAL_COORDINATES_KEY: {CANONICAL_OBSM_KEY: staged_metadata}},
+        )
+        validate_canonical_payload(
             sdata,
-            table,
-            workspace=workspace,
+            staged_table,
             table_name=table_name,
             region_key=region_key,
             instance_key=instance_key,
-            labels_names=labels_names,
+            regions=labels_names,
         )
+        # Release the copied observations and staging handles before publication.
+        del staged_table, staged_centers, staged_metadata, staging_group
+
         _install_canonical_components(
             sdata,
             table_name=table_name,
@@ -376,34 +382,6 @@ def _assemble_canonical_table_payload(
     return centers, canonical_metadata_to_storage(metadata)
 
 
-def _validate_candidate_payload(
-    sdata: SpatialData,
-    source_table: AnnData,
-    *,
-    table_name: str,
-    region_key: str,
-    instance_key: str,
-    labels_names: tuple[str, ...],
-    centers: object,
-    metadata: object,
-) -> None:
-    """Validate a replacement payload without mutating the source table."""
-    candidate = AnnData(
-        X=None,
-        obs=source_table.obs.copy(),
-        obsm={CANONICAL_OBSM_KEY: centers},
-        uns={SPATIAL_COORDINATES_KEY: {CANONICAL_OBSM_KEY: metadata}},
-    )
-    validate_canonical_payload(
-        sdata,
-        candidate,
-        table_name=table_name,
-        region_key=region_key,
-        instance_key=instance_key,
-        regions=labels_names,
-    )
-
-
 def _stage_canonical_components(
     destination: _CanonicalCentersDestination,
     *,
@@ -437,34 +415,6 @@ def _stage_canonical_components(
     return workspace
 
 
-def _validate_staged_canonical_components(
-    sdata: SpatialData,
-    source_table: AnnData,
-    *,
-    workspace: Path,
-    table_name: str,
-    region_key: str,
-    instance_key: str,
-    labels_names: tuple[str, ...],
-) -> None:
-    """Reopen and validate the exact serialized replacement components."""
-    staging = zarr.open_group(store=str(workspace), mode="r", use_consolidated=False)
-    metadata = _read_anndata_element(staging, _CANONICAL_METADATA_PATH)
-    # Dense centers reopen as a storage-backed Zarr array. Canonical validation
-    # intentionally materializes this small ``(n_obs, 3)`` matrix temporarily.
-    centers = _read_anndata_element(staging, _CANONICAL_MATRIX_PATH)
-    _validate_candidate_payload(
-        sdata,
-        source_table,
-        table_name=table_name,
-        region_key=region_key,
-        instance_key=instance_key,
-        labels_names=labels_names,
-        centers=centers,
-        metadata=metadata,
-    )
-
-
 def _install_canonical_components(
     sdata: SpatialData,
     *,
@@ -476,6 +426,10 @@ def _install_canonical_components(
     labels_names: tuple[str, ...],
 ) -> None:
     """Install staged canonical components into an existing backed table.
+
+    Non-canonical table contracts must have been validated beforehand with
+    :func:`harpy.table._validation._validate_table_without_canonical`, and the
+    data and metadata they cover must remain unchanged.
 
     Publish the centers matrix and metadata, reopen them from their permanent
     paths, and update the existing AnnData object in place. Preserve sibling
@@ -503,6 +457,9 @@ def _install_canonical_components(
             registry[CANONICAL_OBSM_KEY] = metadata
             table.obsm[CANONICAL_OBSM_KEY] = matrix
             table.uns[SPATIAL_COORDINATES_KEY] = registry
+            # Non-canonical table contracts have already been validated and remain
+            # unchanged. Validate only the installed canonical components while
+            # rollback remains available.
             validate_canonical_payload(
                 sdata,
                 table,

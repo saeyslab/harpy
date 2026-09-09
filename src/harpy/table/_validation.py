@@ -23,7 +23,7 @@ from harpy._metadata import (
     _METADATA_VERSION_KEY,
     _POINTS_METADATA_KEY,
 )
-from harpy.table._allocation import _FeatureClassAggregationContract
+from harpy.table._aggregation_contracts import _FeatureClassAggregationContract
 from harpy.table._metadata import (
     _AGGREGATE_POINTS_SOURCE_KIND,
     _AUXILIARY_FEATURE_MATRIX_KEY,
@@ -126,12 +126,13 @@ def _validate_table_without_canonical(
 ) -> tuple[str, str, tuple[str, ...]] | None:
     """Validate the SpatialData table model, annotation and non-canonical Harpy contracts.
 
-    This is the shared preflight for strict table validation and operations
-    that intentionally create or repair the coordinated canonical-center
-    components. SpatialData's model is checked before the Harpy-specific
-    contracts. It validates every recognized contract except
-    ``obsm["spatial_canonical"]`` and its matching metadata record; callers
-    remain responsible for handling that pair explicitly.
+    SpatialData's model is checked before the Harpy-specific contracts. This
+    deliberately partial validator excludes ``obsm["spatial_canonical"]`` and
+    its matching metadata record. Successful return does not establish complete
+    table validity: canonical components must be validated separately.
+
+    Previously validated contracts need not be checked again when the data and
+    metadata they cover remain unchanged.
 
     Returns
     -------

@@ -40,6 +40,7 @@ from harpy.table._metadata import (
     _FEATURE_CLASS_AGGREGATION_SCHEMA_VERSION,
     _FEATURE_MATRIX_SCHEMA_VERSION,
 )
+from harpy.table._validation import _validate_table_without_canonical
 from harpy.table.canonical_centers import (
     CANONICAL_ALGORITHM_VERSION,
     CANONICAL_OBSM_KEY,
@@ -574,7 +575,9 @@ def _install_aggregation_table(
     Filesystem publication is isolated in
     :func:`_publish_staged_aggregation_table`. The table is then reconstructed
     exclusively from its published Zarr group by :func:`_read_backed_table`,
-    validated, and attached to the in-memory SpatialData object. Any failure in
+    attached to the in-memory SpatialData object, and validated against the
+    non-canonical table contracts. Canonical components have already been
+    validated after reopening the staged table. Any failure in
     reading, validation, attachment, or consolidated-metadata writing propagates
     through the publication context and restores the previous on-disk table::
 
@@ -588,10 +591,10 @@ def _install_aggregation_table(
                _read_backed_table()
                      |
                      v
-               TableModel.validate()
+               attach to sdata.tables
                      |
                      v
-               attach to sdata.tables
+               _validate_table_without_canonical()
                      |
                      v
                write consolidated metadata
@@ -609,9 +612,13 @@ def _install_aggregation_table(
     try:
         with _publish_staged_aggregation_table(destination=destination, workspace=workspace) as table_group:
             backed_table = _read_backed_table(table_group)
-            TableModel.validate(backed_table)
             sdata.tables[output_table_name] = backed_table
             attached = True
+            # _write_aggregation_table() already validated the serialized
+            # canonical components after reopening the staged table; publication
+            # only moved that payload. Validate the remaining table contracts
+            # here while disk and in-memory rollback are still available.
+            _validate_table_without_canonical(sdata, output_table_name)
             sdata.write_consolidated_metadata()
     except BaseException:
         if attached:
