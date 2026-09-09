@@ -5,9 +5,9 @@ from loguru import logger as log
 from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
-from harpy.utils._io import (
-    _incremental_io_on_disk,
+from harpy._storage._spatialdata import (
     _read_zarr_with_annotating_table_warning_suppressed,
+    _replace_element_on_disk,
     _write_element_with_cleanup,
 )
 from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY
@@ -73,9 +73,10 @@ class TableElementManager:
         if output_table_name in [*sdata.tables]:
             if sdata.is_backed():
                 if overwrite:
-                    sdata = _incremental_io_on_disk(
+                    with _replace_element_on_disk(
                         sdata, element_name=output_table_name, element=adata, element_type="tables"
-                    )
+                    ):
+                        pass
                 else:
                     raise ValueError(
                         f"Attempting to overwrite 'sdata.tables[\"{output_table_name}\"]', but overwrite is set to False. Set overwrite to True to overwrite the .zarr store."

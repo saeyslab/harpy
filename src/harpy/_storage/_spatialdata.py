@@ -76,7 +76,8 @@ def _replace_element_on_disk(
 ) -> Generator[SpatialData, None, None]:
     """Replace a backed element through staging, retaining its backup until the context succeeds.
 
-    Flow (using the backing store's Zarr format)::
+    Write the staged replacement using the same Zarr format version as the
+    existing SpatialData store. Flow::
 
         element (data + metadata)
             | SpatialData.write

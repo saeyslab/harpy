@@ -29,7 +29,7 @@ implemented:
     - **11a:** original-point summary computation through
       `hp.qc.summarize_points` and `PointsSummary`, without plotting changes;
     - **11b:** share element publication and rollback across existing I/O
-      workflows, including `_incremental_io_on_disk` — implemented;
+      workflows through `_replace_element_on_disk` — implemented;
     - **11c:** register authoritative feature panels for existing points
       elements through `hp.pt.add_feature_panel`;
     - **11d:** original-point summary visualization, including the ECDF and
@@ -3830,20 +3830,27 @@ to the panel metadata contract or summary/plotting behavior.
 
 ### Implemented structure and reuse boundary
 
-`src/harpy/_storage.py` implements `_StagedElement` and
-`_publish_staged_elements`, shared by complete aggregation tables,
+The private `src/harpy/_storage/` package groups reusable storage operations:
+
+- `_publication.py`: format-independent filesystem publication and rollback;
+- `_spatialdata.py`: whole-element SpatialData serialization and reopening;
+- `_anndata.py`: AnnData component encoding and storage-backed reading in Zarr.
+
+`src/harpy/_storage/_publication.py` implements `_StagedPath` and
+`_publish_staged_paths`, shared by complete aggregation tables,
 canonical-center components, and SpatialData element replacements. The reusable
 core handles path bindings, ownership/same-filesystem validation, backups,
 publication, cleanup, and rollback. It neither encodes nor reads the payload.
 Format-specific callers keep the publication context open while reopening,
 attaching, and updating consolidated metadata.
 
-`src/harpy/utils/_io.py::_replace_element_on_disk` writes a replacement once to
+`src/harpy/_storage/_spatialdata.py::_replace_element_on_disk` writes a replacement once to
 an isolated sibling staging container using the final element name and the
 backing store's Zarr format. It publishes through the shared context, refreshes
 consolidated metadata before reopening, and attaches the permanent-path element.
-`_incremental_io_on_disk` is a thin adapter retaining existing callers' return
-convention. The former delete-and-rewrite implementation has been removed.
+Existing overwrite callers use this context directly with an empty body,
+preserving their public behavior and return conventions. The former
+delete-and-rewrite implementation has been removed.
 Replacements retain SpatialData's safeguard against changing backing files
 still used by another attached lazy element; such dependencies are rejected
 before staging. The replacement's own lazy dependency on the original is
@@ -3852,8 +3859,12 @@ allowed because staging completes before publication.
 ### Shared publication, format-specific serialization
 
 The generic machinery and owned-path cleanup live in private
-`src/harpy/_storage.py`. This is shared internal infrastructure, not a new public
+`src/harpy/_storage/_publication.py`. This is shared internal infrastructure, not a new public
 storage API.
+
+Aggregation and canonical-center orchestration remain in their table modules;
+they use the shared publication and AnnData/Zarr helpers. The package layout
+does not change storage behavior or introduce a public API.
 
 Keep format-specific operations separate:
 
@@ -3902,9 +3913,10 @@ callers modifying additional metadata must catch errors around the entire
 context, restore both persisted and in-memory metadata, and consolidate it.
 This also covers final-consolidation errors raised when exiting the context.
 
-Expose a shared private replacement context for callers needing this lifecycle.
-Refactor `_incremental_io_on_disk` into an adapter over that workflow for its
-existing callers, preserving their public behavior and return conventions.
+Use the shared private `_replace_element_on_disk` context directly for existing
+overwrite callers, preserving their public behavior and return conventions.
+An empty context body keeps replacement as the entire operation; related work
+can run inside the context when it must remain within the rollback window.
 Slice 11c can use the same context to commit panel metadata after the points
 write succeeds, without inventing a panel-specific writer or another
 backup/rename implementation.
@@ -3940,12 +3952,12 @@ Run focused tests for the shared publisher and its existing callers, covering:
 - a caller can include a metadata update in the replacement context without
   requiring any feature-panel-specific code in the publisher.
 
-Generic publication tests now live in `src/harpy/_tests/test_storage.py`;
-SpatialData replacement integration tests live in
-`src/harpy/_tests/test_utils/test_io.py`. AnnData encoding and table-read tests
-remain in the table test scope, alongside aggregation and canonical-center
-regressions. Feature-panel registration remains a separate implementation in
-Slice 11c.
+Storage tests live together in `src/harpy/_tests/test_storage/`:
+`test_publication.py` covers generic publication, `test_spatialdata.py` covers
+SpatialData replacement integration, and `test_anndata.py` covers AnnData
+encoding and table reading. Aggregation and canonical-center regressions remain
+in the table test scope. Feature-panel registration remains a separate
+implementation in Slice 11c.
 
 ## Slice 11c: feature-panel registration for existing points
 
