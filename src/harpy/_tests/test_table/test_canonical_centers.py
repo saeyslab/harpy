@@ -9,6 +9,7 @@ import zarr
 from anndata import AnnData
 from scipy import sparse
 from spatialdata import SpatialData, read_zarr
+from spatialdata._io.format import SpatialDataContainerFormatV01
 from spatialdata.models import Labels2DModel, Labels3DModel, TableModel
 from spatialdata.transformations import Identity
 
@@ -229,8 +230,9 @@ def test_validate_canonical_payload_rejects_malformed_components(mutation: str) 
         )
 
 
-def test_add_canonical_centers_updates_only_the_canonical_components(tmp_path) -> None:
-    sdata = _backed_external_sdata(tmp_path)
+@pytest.mark.parametrize("zarr_format", [2, 3])
+def test_add_canonical_centers_updates_only_the_canonical_components(tmp_path, zarr_format) -> None:
+    sdata = _backed_external_sdata(tmp_path, zarr_format=zarr_format)
     table = sdata.tables["table"]
     previous_x = table.X
     previous_layer = table.layers["counts"]
@@ -512,7 +514,7 @@ def _canonical_sdata() -> SpatialData:
     return SpatialData(labels={"labels": labels}, tables={"table": table})
 
 
-def _backed_external_sdata(tmp_path) -> SpatialData:
+def _backed_external_sdata(tmp_path, *, zarr_format=3) -> SpatialData:
     labels = Labels2DModel.parse(
         np.array([[1, 1, 2], [1, 2, 2]], dtype=np.uint32),
         dims=("y", "x"),
@@ -541,5 +543,5 @@ def _backed_external_sdata(tmp_path) -> SpatialData:
     )
     sdata = SpatialData(labels={"labels": labels}, tables={"table": table})
     output = tmp_path / "external.zarr"
-    sdata.write(output)
+    sdata.write(output, sdata_formats=SpatialDataContainerFormatV01() if zarr_format == 2 else None)
     return read_zarr(output)
