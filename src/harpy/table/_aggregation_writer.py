@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import shutil
 import uuid
 from collections.abc import Generator, Mapping
 from contextlib import contextmanager
@@ -19,6 +18,12 @@ from scipy import sparse
 from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
+from harpy._storage._anndata import (
+    _read_backed_table,
+    _write_anndata_element,
+    _write_spatialdata_table_attrs,
+)
+from harpy._storage._publication import _cleanup_owned_path, _publish_staged_paths, _StagedPath
 from harpy.table._aggregation_checkpoint import (
     _CHECKPOINT_INSTANCE_COLUMN,
     _COUNT_COLUMN,
@@ -34,13 +39,6 @@ from harpy.table._metadata import (
     _FEATURE_CLASS_AGGREGATION_KEY,
     _FEATURE_CLASS_AGGREGATION_SCHEMA_VERSION,
     _FEATURE_MATRIX_SCHEMA_VERSION,
-)
-from harpy.table._zarr import (
-    _publish_staged_anndata_elements,
-    _read_backed_table,
-    _StagedAnnDataElement,
-    _write_anndata_element,
-    _write_spatialdata_table_attrs,
 )
 from harpy.table.canonical_centers import (
     CANONICAL_ALGORITHM_VERSION,
@@ -615,7 +613,7 @@ def _install_aggregation_table(
             sdata.tables[output_table_name] = backed_table
             attached = True
             sdata.write_consolidated_metadata()
-    except Exception:
+    except BaseException:
         if attached:
             if previous_table is None:
                 del sdata.tables[output_table_name]
@@ -623,8 +621,8 @@ def _install_aggregation_table(
                 sdata.tables[output_table_name] = previous_table
         try:
             sdata.write_consolidated_metadata()
-        except (OSError, RuntimeError, TypeError, ValueError):
-            pass
+        except Exception as error:  # noqa: BLE001
+            log.warning(f"Could not refresh consolidated metadata after aggregation rollback: {error}")
         raise
     return sdata
 
@@ -673,22 +671,20 @@ def _publish_staged_aggregation_table(
                                             re-raise exception
 
     The filesystem transaction itself is implemented by
-    :func:`_publish_staged_anndata_elements`; this wrapper only maps the staged
+    :func:`_publish_staged_paths`; this wrapper only maps the staged
     complete table to its SpatialData destination and returns that table group.
     """
     staging = workspace / "table"
-    with _publish_staged_anndata_elements(
+    with _publish_staged_paths(
         root=destination.root,
         workspace=workspace,
-        elements=(_StagedAnnDataElement(staged=staging, destination=destination.output),),
+        paths=(_StagedPath(staged=staging, destination=destination.output),),
         operation="aggregate",
-    ) as root:
+    ):
+        root = zarr.open_group(store=str(destination.root), mode="r+", use_consolidated=False)
         yield root["tables"][destination.output.name]
 
 
 def _remove_aggregation_workspace(workspace: Path) -> None:
     """Remove only the hidden workspace owned by the current call."""
-    if workspace.exists():
-        log.info(f"Removing temporary aggregation workspace at '{workspace}'.")
-        shutil.rmtree(workspace)
-        log.info(f"Finished removing temporary aggregation workspace at '{workspace}'.")
+    _cleanup_owned_path(workspace)
