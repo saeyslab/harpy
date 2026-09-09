@@ -1,5 +1,17 @@
 # Development
 
+## Storage internals
+
+See [Storage writes and overwrite guarantees](development/storage.md) for the
+shared storage architecture, whole-element versus component updates, and the
+responsibilities of writers and the publication layer during recovery.
+
+```{toctree}
+:hidden: true
+
+development/storage
+```
+
 ## Setting up a development environment
 
 First clone the GitHub repo and set it as the current directory:
