@@ -133,10 +133,39 @@ This helper does not create a workspace, publish paths, retain backups or
 automatically read the result. The caller supplies the target group, normally
 in staging when preparing a replacement.
 
-For tables assembled through direct AnnData I/O,
-`_write_spatialdata_table_attrs()` writes the table group's disk-level format
-and region attributes. This keeps the SpatialData table-format boundary in
-one place; AnnData component encoding alone does not supply those attributes.
+#### SpatialData-specific table metadata
+
+AnnData's writer stores the table's components and their AnnData encodings.
+This includes `adata.uns["spatialdata_attrs"]`, where `TableModel.parse()`
+records which spatial elements the table annotates and which `.obs` columns
+identify regions and instances.
+
+SpatialData's on-disk table format also uses attributes on the **table's Zarr
+group itself**, in addition to AnnData's encoding attributes. For example, the
+group at `sdata.zarr/tables/my_table` receives:
+
+```json
+{
+  "spatialdata-encoding-type": "ngff:regions_table",
+  "version": "0.2",
+  "region": ["my_labels"],
+  "region_key": "region",
+  "instance_key": "cell_ID"
+}
+```
+
+Here, `region` lists the annotated spatial elements; `region_key` and
+`instance_key` name the `.obs` columns identifying the region and instance.
+`version` is the SpatialData table-format version, not the Zarr or Harpy version.
+These attributes belong to the **table group**, not `sdata.attrs` at the store
+root, and are separate from the entry in `.uns`.
+
+SpatialData's own table writer writes the AnnData contents and then adds these
+group attributes. AnnData's writer alone does not copy the relationship from
+`.uns` into the group attributes. When writing a table through direct AnnData
+I/O, Harpy supplies that additional step with `_write_spatialdata_table_attrs()`.
+This helper centralizes the extra attributes required by SpatialData; it does
+not rewrite the table's components or publish the table.
 
 ### Reading AnnData components and tables
 
@@ -177,10 +206,31 @@ Caller-owned changes outside that element, such as root attributes, still need
 explicit recovery by the caller. This adapter handles existing elements, not
 first-time creation. The old element must exist both in memory and on disk.
 
-`_incremental_io_on_disk()` is the convenience wrapper that enters and exits
-this context without additional work, then returns `sdata`. Callers that must
-update associated metadata while backups are retained should use
-`_replace_element_on_disk()` directly.
+When replacement is the entire update, enter this context with an empty body:
+
+```python
+with _replace_element_on_disk(
+    sdata, element_name=element_name, element=replacement, element_type=element_type
+):
+    pass
+```
+
+The `pass` means **no additional caller-side work**, not "do nothing". Entering
+and exiting the context still performs replacement, attachment and finalization.
+Data and metadata inside the replacement element are written together; the
+empty body means there are no extra updates to coordinate. There is no need to
+reassign `sdata`, because the existing object is updated.
+
+Run related metadata updates inside the body if they must succeed together with
+the replacement, and let failures propagate out of the context to trigger
+rollback. Being inside the body does **not** automatically protect root
+attributes: the caller must snapshot and restore that metadata in memory and
+on disk, catching failures around the entire `with` statement. See
+[Metadata outside the published paths](#metadata-outside-the-published-paths)
+for the recovery responsibilities.
+
+Successful context exit completes publication and backup cleanup. A later
+failure cannot trigger rollback of that completed replacement.
 
 ### Publishing prepared paths
 
