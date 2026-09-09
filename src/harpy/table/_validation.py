@@ -44,10 +44,11 @@ def validate_table(sdata: SpatialData, table_name: str) -> None:
     """Validate a SpatialData table and recognized Harpy table metadata.
 
     The validator is read-only and independent from table construction. It
-    checks a SpatialData table annotation when present, including the
-    registered regions and unique ``(region, instance)`` observation keys, and
-    validates every matrix registered in ``adata.uns["feature_matrices"]``
-    against its corresponding ``adata.obsm`` value.
+    first validates SpatialData's table model, then checks its annotation when
+    present, including the registered regions and unique ``(region, instance)``
+    observation keys. It also validates every matrix registered in
+    ``adata.uns["feature_matrices"]`` against its corresponding ``adata.obsm``
+    value.
 
     For a class-aware table created by :func:`harpy.tb.aggregate_points`, it
     additionally follows each region's points-element reference through::
@@ -84,6 +85,9 @@ def validate_table(sdata: SpatialData, table_name: str) -> None:
 
     Raises
     ------
+    TypeError
+        If the table or its instance identifiers violate SpatialData's model
+        type requirements.
     ValueError
         If the table is missing or its annotation, registered feature matrices,
         source references, feature-panel metadata, matrices, or summaries are
@@ -120,11 +124,12 @@ def _validate_table_without_canonical(
     sdata: SpatialData,
     table_name: str,
 ) -> tuple[str, str, tuple[str, ...]] | None:
-    """Validate a table's annotation and non-canonical Harpy contracts.
+    """Validate the SpatialData table model, annotation and non-canonical Harpy contracts.
 
     This is the shared preflight for strict table validation and operations
     that intentionally create or repair the coordinated canonical-center
-    components. It validates every recognized contract except
+    components. SpatialData's model is checked before the Harpy-specific
+    contracts. It validates every recognized contract except
     ``obsm["spatial_canonical"]`` and its matching metadata record; callers
     remain responsible for handling that pair explicitly.
 
@@ -142,6 +147,7 @@ def _validate_table_without_canonical(
         raise ValueError(f"Table element {table_name!r} is not present in 'sdata.tables'.")
 
     adata = sdata.tables[table_name]
+    TableModel.validate(adata)
     annotation = _validate_table_annotation(sdata, adata, table_name=table_name)
     feature_matrices = _validate_feature_matrices(adata)
 
@@ -175,7 +181,7 @@ def _validate_table_annotation(
     *,
     table_name: str,
 ) -> tuple[str, str, tuple[str, ...]] | None:
-    """Validate and normalize the SpatialData annotation of one table."""
+    """Validate the annotation, requiring declared and observed region sets to match."""
     if TableModel.ATTRS_KEY not in adata.uns:
         return None
     annotation = _require_mapping(
@@ -208,6 +214,9 @@ def _validate_table_annotation(
     undeclared = sorted(observed_regions - set(regions))
     if undeclared:
         raise ValueError(f"Table {table_name!r} contains regions absent from its annotation: {undeclared!r}.")
+    unobserved = sorted(set(regions) - observed_regions)
+    if unobserved:
+        raise ValueError(f"Table {table_name!r} declares regions without observations: {unobserved!r}.")
     missing_elements = sorted(region for region in regions if region not in sdata)
     if missing_elements:
         raise ValueError(f"Table {table_name!r} annotation references missing spatial elements: {missing_elements!r}.")

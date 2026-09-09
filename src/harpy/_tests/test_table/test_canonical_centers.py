@@ -14,6 +14,7 @@ from spatialdata.models import Labels2DModel, Labels3DModel, TableModel
 from spatialdata.transformations import Identity
 
 from harpy.table import add_canonical_centers, validate_table
+from harpy.table._validation import _validate_table_annotation
 from harpy.table.canonical_centers import (
     CANONICAL_ALGORITHM_VERSION,
     CANONICAL_OBSM_KEY,
@@ -204,6 +205,25 @@ def test_validate_table_rejects_an_incomplete_canonical_contract() -> None:
 
     with pytest.raises(ValueError, match="both the matrix"):
         validate_table(sdata, "table")
+
+
+@pytest.mark.parametrize(
+    ("observed_regions", "declared_regions", "message"),
+    [
+        (["labels", "other_labels"], ["labels"], "regions absent from its annotation:.*other_labels"),
+        (["labels", "labels"], ["labels", "other_labels"], "declares regions without observations:.*other_labels"),
+    ],
+)
+def test_validate_table_annotation_rejects_region_mismatches(observed_regions, declared_regions, message) -> None:
+    """Harpy rejects both mismatch directions independently of TableModel.validate()."""
+    sdata = _canonical_sdata()
+    sdata.labels["other_labels"] = sdata.labels["labels"]
+    table = sdata.tables["table"]
+    table.obs["region"] = pd.Categorical(observed_regions)
+    table.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY] = declared_regions
+
+    with pytest.raises(ValueError, match=message):
+        _validate_table_annotation(sdata, table, table_name="table")
 
 
 @pytest.mark.parametrize("mutation", ["dtype", "shape", "schema", "coordinates"])
@@ -435,6 +455,23 @@ def test_add_canonical_centers_does_not_ignore_an_unrelated_table_error(tmp_path
     assert CANONICAL_OBSM_KEY not in table.obsm
 
 
+@pytest.mark.parametrize("operation", [validate_table, add_canonical_centers])
+def test_table_preflight_rejects_a_non_categorical_region_column(tmp_path, operation) -> None:
+    """Both entry points enforce SpatialData's model after an in-place table edit."""
+    sdata = _backed_external_sdata(tmp_path)
+    table = sdata.tables["table"]
+    table.obs["region"] = table.obs["region"].astype("string")
+
+    with pytest.raises(ValueError, match="must be of type `categorical`"):
+        operation(sdata, table_name="table")
+
+    assert CANONICAL_OBSM_KEY not in table.obsm
+    assert CANONICAL_OBSM_KEY not in table.uns[SPATIAL_COORDINATES_KEY]
+    reopened = read_zarr(sdata.path)
+    assert CANONICAL_OBSM_KEY not in reopened.tables["table"].obsm
+    assert CANONICAL_OBSM_KEY not in reopened.tables["table"].uns[SPATIAL_COORDINATES_KEY]
+
+
 def test_add_canonical_centers_rejects_a_declared_region_without_rows(tmp_path) -> None:
     sdata = _backed_external_sdata(tmp_path)
     sdata.labels["empty_labels"] = Labels2DModel.parse(
@@ -444,7 +481,7 @@ def test_add_canonical_centers_rejects_a_declared_region_without_rows(tmp_path) 
     )
     sdata.tables["table"].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY] = ["labels", "empty_labels"]
 
-    with pytest.raises(ValueError, match="without observations"):
+    with pytest.raises(ValueError, match="Regions.*do not match"):
         add_canonical_centers(sdata, table_name="table")
 
 
