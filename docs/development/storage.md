@@ -1,10 +1,11 @@
 # Storage writes and overwrite guarantees
 
 Harpy separates **serializing new data** from **replacing existing data**. This
-overview describes the shared local-filesystem storage helpers and their use by
-table aggregation, canonical-center updates and ordinary element overwrites.
+document defines replacement scope, staging, publication and recovery
+responsibilities for writers using the shared local-filesystem storage helpers.
 It is an internal developer contract, not a public storage API or a guarantee
-about every Harpy reader and writer.
+about every Harpy reader and writer. It does not cover replacing an entire
+SpatialData store.
 
 > Writing a table component-by-component does not imply updating the existing
 > table component-by-component. The paths supplied to the publisher determine
@@ -15,7 +16,7 @@ about every Harpy reader and writer.
 - **SpatialData element:** one named image, labels, points, shapes or table
   element, such as `tables/my_table`.
 - **AnnData component:** a part of a table, such as `X`, `obs`,
-  `obsm/spatial_canonical` or `uns/spatial_coordinates/spatial_canonical`.
+  `obsm/my_matrix` or `uns/my_matrix_metadata`.
   AnnData's `write_elem` uses "element" for these encoded values; that does not
   necessarily mean a whole SpatialData element.
 - **Workspace:** a temporary, writer-owned directory containing newly prepared
@@ -30,139 +31,190 @@ about every Harpy reader and writer.
 - **Installation:** reopening the published data, attaching it to the in-memory
   object, validating it as appropriate and refreshing consolidated metadata.
 
+## Replacement scope
+
+A table is a SpatialData element; an AnnData component is something inside that
+table. The writer must declare which paths form one logical update:
+
+| Scope                      | Example destinations inside `sdata.zarr`                                      | What is replaced                                                                     |
+| -------------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Whole SpatialData element  | `tables/my_table` or `points/my_points`                                       | The complete element, including all data and metadata inside its directory           |
+| One AnnData component      | `tables/my_table/X`                                                           | Only that component; sibling components remain untouched                             |
+| Several related components | `tables/my_table/obsm/my_matrix` and `tables/my_table/uns/my_matrix_metadata` | Both components within one rollback context; the rest of the table remains untouched |
+
+These paths are illustrative, not required names. Replacement does not merge
+old and new contents. To preserve anything inside a replaced directory, the
+writer must include it in the staged replacement. For example, replacing an
+entire table does not implicitly preserve its previous custom `.obs` columns
+or `.obsm` entries.
+
+When several components must change together, their paths must be included in
+the same publication context. Success means all are installed; a caught failure
+triggers rollback across the supplied paths, subject to the limitations below.
+It does not make multiple filesystem moves crash-atomic.
+
+An overwrite option authorizes replacement; it does not itself provide rollback.
+The calling API owns collision checks and overwrite policy. The publisher acts
+on the exact paths it receives, which may include both existing destinations
+and new ones. Direct writes that bypass staging and publication do not acquire
+these protections automatically.
+
 ## Responsibilities
 
-The private package lives at `src/harpy/_storage/`:
+- **Writer:** choose the replacement scope, validate the request and payload,
+  finish serialization into an owned workspace, and clean up failed staging.
+- **Publisher:** validate path ownership, preserve existing destinations, move
+  staged data and attempt disk-path rollback on failure.
+- **Caller installing the update:** attach the published data, perform any
+  required validation and metadata updates, and restore affected in-memory
+  state and metadata outside the published paths on failure.
 
-| Module            | Owns                                                                                                            | Does not own                                                                                 |
-| ----------------- | --------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `_anndata.py`     | AnnData component encoding, storage-backed reading and SpatialData's disk-level table attributes                | Choosing replacement scope, publication or rollback                                          |
-| `_spatialdata.py` | Whole-element replacement using SpatialData's serializers and readers; restoring the affected in-memory element | Specialized aggregation or canonical-center computation; restoring arbitrary caller metadata |
-| `_publication.py` | Path validation, filesystem moves, backups, disk-path rollback and owned-path cleanup                           | Serialization, reopening, scientific validation or in-memory state                           |
+One function or adapter may perform several of these roles. The private package
+at `src/harpy/_storage/` separates the reusable responsibilities:
 
-Operation-specific orchestration stays in `src/harpy/table/_aggregation_writer.py`
-and `src/harpy/table/_canonical_centers.py`. These modules choose the payload and
-destination paths, use `_anndata` for serialization and reading, and call the
-shared publisher through small operation-specific wrappers.
+- `_anndata.py` owns AnnData encoding and reading contracts, including
+  disk-level table format metadata. Serialization alone is not a transaction.
+- `_spatialdata.py` owns whole-element replacement through SpatialData and
+  restoration of the affected in-memory element. It does not restore arbitrary
+  caller-owned metadata.
+- `_publication.py` owns filesystem publication, backups and disk-path rollback.
+  It does not serialize, reopen or understand the scientific payload.
 
-These are separate write paths sharing publication, not a pipeline through all
-three storage modules:
+## Shared storage APIs and how they interact
+
+There are two ways to coordinate a replacement: the caller can combine AnnData
+I/O helpers with the publisher, or use the whole-element SpatialData adapter.
+Arrows below mean **calls/uses**, not execution order:
 
 ```text
-aggregate_points
-    _aggregation_writer: build complete table using _anndata
-        -- one whole-table path -------------------+
-                                                   |
-add_canonical_centers                               |
-    _canonical_centers: stage two components        |
-                       using _anndata              |
-        -- two component paths --------------------+--> _publication
-                                                   |    _publish_staged_paths
-ordinary backed element overwrite                  |        |
-    _spatialdata: stage element using SpatialData   |        v
-        -- one whole-element path -----------------+    caller reopens,
-                                                        attaches and
-                                                        consolidates
+A. AnnData component or table update
+
+┌──────────────────────────────┐
+│ Caller coordinates update    │
+└─────────────┬────────────────┘
+              │
+              ├── write/read ──► _anndata helpers
+              │
+              └── publish ─────► _publish_staged_paths
+
+
+B. Whole SpatialData element replacement
+
+┌──────────────────────────────┐
+│ Caller                       │
+└─────────────┬────────────────┘
+              │ delegates update
+              ▼
+┌──────────────────────────────┐
+│ _replace_element_on_disk     │
+└─────────────┬────────────────┘
+              │
+              ├── write/read ──► SpatialData I/O
+              │
+              └── publish ─────► _publish_staged_paths
 ```
 
-## The three write paths
+The publisher is shown in both panels for readability: both refer to the
+**same `_publish_staged_paths()` implementation**, not separate publishers.
 
-### Aggregation: replace a complete table
+With the AnnData helpers, the caller coordinates staging, publication and
+reading. With `_replace_element_on_disk()`, the adapter coordinates that
+workflow. Neither route requires `_anndata.py` and `_spatialdata.py` to call
+each other; both routes use the same publisher.
 
-`aggregate_points()` prepares the counts and canonical-center payload, then
-hands table construction to `_write_aggregation_table()`:
+### Writing AnnData components
 
-1. The aggregation workspace holds the merged-count Parquet checkpoint and a
-   staged AnnData group at `workspace/table`.
-2. `_write_anndata_element()` writes `.obs`, `.var`, `.uns` and canonical centers
-   as a table without `.X`, then writes `.X` and the optional
-   `.obsm["auxiliary_feature_counts"]` separately. The sparse outputs are Dask
-   arrays of CSR row blocks; AnnData computes and appends those blocks rather
-   than materializing the complete matrix for one write.
-3. The writer validates the staged payload and calls
-   `_write_spatialdata_table_attrs()`. `TableModel.parse()` records the semantic
-   table relationship in `.uns`; this helper supplies the additional disk-level
-   attributes needed by SpatialData's reader.
-4. `_install_aggregation_table()` enters
-   `_publish_staged_aggregation_table()`, which passes **one** `_StagedPath` to
-   `_publish_staged_paths()`:
-   `workspace/table` -> `sdata.zarr/tables/<output_table_name>`.
-5. While the backup is retained, `_read_backed_table()` reopens the published
-   table. The installer validates and attaches it to `sdata.tables`, then calls
-   `sdata.write_consolidated_metadata()`.
+`_write_anndata_element(group, path, value, ...)` writes a value at a logical
+AnnData path, such as `("obsm", "my_matrix")`, and returns `None`. It centralizes
+path handling and AnnData encoding through `write_elem`. The optional
+`create_parents=True` creates missing parents as AnnData-encoded mappings.
 
-The existing table remains untouched while its replacement is being built.
-With `overwrite=True`, the **whole output table** is replaced, not merged with
-the previous table. Previous custom columns or matrices are not implicitly
-preserved. Without an existing output, the same publication path installs a new
-table without an old table to back up.
+This helper does not create a workspace, publish paths, retain backups or
+automatically read the result. The caller supplies the target group, normally
+in staging when preparing a replacement.
 
-Aggregation includes canonical centers in the table it constructs; it does not
-call the public `add_canonical_centers()` afterward.
+For tables assembled through direct AnnData I/O,
+`_write_spatialdata_table_attrs()` writes the table group's disk-level format
+and region attributes. This keeps the SpatialData table-format boundary in
+one place; AnnData component encoding alone does not supply those attributes.
 
-### Canonical centers: replace two components
+### Reading AnnData components and tables
 
-`add_canonical_centers()` operates on an existing table. After computing and
-aligning centers to its observation rows:
+The reading helpers provide two entry points with one shared decoding policy:
 
-1. `_stage_canonical_components()` uses `_write_anndata_element()` to write only:
+- `_read_anndata_element(group, path)` locates **one component** and returns
+  its decoded value. It delegates decoding to `_read_backed_element()`, so
+  callers reading a component by path do not repeat path traversal or encoding
+  checks. It does not construct a table or attach the result to an object.
+- `_read_backed_element(element)` accepts a Zarr array or group and implements
+  the **shared decoding policy**. Dense arrays remain Zarr arrays; encoded
+  CSR/CSC matrices become AnnData sparse-dataset handles. Dataframes and
+  mappings are decoded into memory through `read_elem`. This keeps matrix
+  reads storage-backed without treating every encoded value as lazy.
+- `_read_backed_table(group)` returns an **AnnData object** from a table group,
+  using `_read_backed_element()` for `X` and entries in `obsm`, and `read_elem`
+  for `obs`, `var` and `uns`. It exists to reconstruct a table without loading
+  its complete matrices into memory. It covers these five slots, not arbitrary
+  AnnData stores containing other slots such as `layers` or `raw`.
 
-   ```text
-   workspace/
-   |-- obsm/spatial_canonical
-   `-- uns/spatial_coordinates/spatial_canonical
-   ```
+The component reader and table reader both use `_read_backed_element()`; the
+table reader does not call `_read_anndata_element()`. None of these readers
+writes, publishes or restores data. The caller chooses when to read and must
+use permanent backing paths for installed objects, as described below.
 
-2. `_validate_staged_canonical_components()` reopens and validates those values.
-3. `_install_canonical_components()` enters
-   `_publish_staged_canonical_components()`. The wrapper passes **two**
-   `_StagedPath` entries to the shared publisher, mapping each staged component
-   to the matching path inside the existing table.
-4. The installer uses `_read_anndata_element()` at the published paths, updates
-   the in-memory `.obsm` and `.uns` entries, validates the canonical payload and
-   refreshes consolidated metadata.
+### Replacing a whole SpatialData element
 
-The rest of the table, including `.X`, `.obs`, layers and unrelated metadata,
-is not rewritten. Both the center matrix and its metadata participate in the
-same rollback context. If the `uns/spatial_coordinates` parent mapping is
-missing, the wrapper creates it and removes it on failure; this parent cleanup
-is separate from the publisher's two component paths.
+`_replace_element_on_disk(sdata, element_name, element, ...)` takes an existing
+backed element's name and its replacement value. It is a context manager that
+yields the **same SpatialData object with the replacement attached**. It
+centralizes the whole-element workflow: write to staging through SpatialData,
+publish one element path, reopen through SpatialData and update the in-memory
+collection while the backup remains available.
 
-### Ordinary overwrites: replace one SpatialData element
+On failure, the publisher attempts disk-path rollback and the adapter restores
+the previous in-memory element and attempts to refresh consolidated metadata.
+Caller-owned changes outside that element, such as root attributes, still need
+explicit recovery by the caller. This adapter handles existing elements, not
+first-time creation. The old element must exist both in memory and on disk.
 
-`_incremental_io_on_disk()` delegates to `_replace_element_on_disk()` for an
-existing backed image, labels, points, shapes or table element:
+`_incremental_io_on_disk()` is the convenience wrapper that enters and exits
+this context without additional work, then returns `sdata`. Callers that must
+update associated metadata while backups are retained should use
+`_replace_element_on_disk()` directly.
 
-1. `_replace_element_on_disk()` builds a temporary SpatialData container holding
-   the replacement element and calls `SpatialData.write()` once.
-2. It passes **one** `_StagedPath` to `_publish_staged_paths()`, mapping the staged
-   element directory to `sdata.zarr/<element_type>/<element_name>`.
-3. It refreshes consolidated metadata before reopening through SpatialData's
-   reader, attaches the replacement and yields to its caller. After the caller's
-   context body succeeds, it refreshes consolidated metadata again before the
-   publisher releases the backup.
+### Publishing prepared paths
 
-The replacement's lazy computation may read from the old element during
-staging. The adapter rejects replacement if other attached elements still have
-lazy dependencies on that destination.
+`_publish_staged_paths(root=..., workspace=..., paths=..., operation=...)` accepts
+fully written `_StagedPath` entries and provides the shared filesystem
+publication and rollback context. It yields control, not a Zarr group, AnnData
+table or SpatialData object. It exists so format-specific writers do not need
+separate backup-and-rename implementations.
 
-This adapter is not used by the specialized aggregation and canonical-center
-writers. Also, a first-time ordinary element write through
-`_write_element_with_cleanup()` writes the new element directly and attempts
-cleanup on failure; it does not use this replacement workflow.
+Both callers managing AnnData updates and the whole-element SpatialData adapter
+use this helper. Its staging requirements, protected scope and recovery limits
+are the contracts in the following sections.
 
-## Writing AnnData components
+## Staging requirements
 
-`_write_anndata_element()` encodes a value at the supplied group and component
-path using AnnData's `write_elem`. It does not create backups, provide rollback
-or automatically read the result. The caller chooses the staging location and
-coordinates writing, validation and publication as separate operations.
+The writer must finish preparing and validating the replacement before
+publication starts. Staged data must be fully written to disk, not just described
+by an unevaluated computation. The old payload remains available during staging.
+
+Each `_StagedPath` pairs a prepared `staged` path with its permanent
+`destination`. Staged paths must be inside the writer-owned workspace;
+destinations must be inside the store and outside the workspace. Paths must be
+unique and non-overlapping within each set. For example, do not publish both a
+whole table and its `X` child as separate entries in the same update.
+
+Destination parent directories must already exist. Creating missing parents,
+and any cleanup they require on failure, is the writer's responsibility; the
+publisher does not track them. Such setup may modify container metadata even
+though the old payload has not been replaced.
 
 ## Publication and failure handling
 
-All three publication paths eventually call `_publish_staged_paths()` with
-already-written data. For each entry, `entry.staged` is the new data and
-`entry.destination` is its permanent path:
+`_publish_staged_paths()` receives already-written data. For each entry,
+`entry.staged` is the new data and `entry.destination` is its permanent path:
 
 ```text
 existing entry.destination --rename--> backup (only when present)
@@ -185,13 +237,12 @@ entry.staged               --rename--> entry.destination
 ```
 
 All existing destinations are backed up before any staged paths are moved.
-The shared context manager yields no data itself. The table-specific wrappers
-open and yield the relevant published Zarr group; the SpatialData adapter
-reopens and yields the updated SpatialData object.
+The context manager yields control while those backups are retained, allowing
+the caller to complete installation. The publisher does not reopen any data.
 
 The workspace is removed **before yielding**, after its payloads have moved.
-Rollback needs the separate backups, not the workspace. This also removes
-aggregation's intermediate count checkpoint once it is no longer needed.
+Rollback needs the separate backups, not the workspace. Remaining temporary
+artifacts inside the workspace are removed along with it.
 
 Responsibility depends on when a failure happens:
 
@@ -201,56 +252,41 @@ Responsibility depends on when a failure happens:
 - **During publication or the caller's context body:** the publisher catches
   `BaseException`, attempts to remove published replacements and restores old
   destinations. A newly created destination has no backup and is removed.
-- **After disk rollback:** the operation-specific installer or SpatialData
-  adapter restores the affected in-memory objects and attempts to refresh
-  consolidated metadata. The exception is propagated to the caller.
+- **After disk rollback:** the caller or adapter restores the affected
+  in-memory objects and attempts to refresh consolidated metadata. The exception
+  is propagated to the caller.
 
-For example, if canonical metadata publication fails after the new center
-matrix has moved, both component paths are covered by the publisher: it removes
-the new matrix and restores the previous matrix and metadata, when present.
-If a staged aggregation `.X` write fails, publication has not begun, so the
-previous output table remains in place.
+For example, consider a matrix and its metadata published together. If moving
+the metadata fails after the new matrix has moved, the publisher attempts to
+remove the new matrix and restore both previous destinations, when present.
+If writing that matrix fails while it is still in staging, publication has not
+begun and the previous destinations remain in place.
 
 ### Metadata outside the published paths
 
 The publisher restores **only the supplied paths**. Metadata inside a replaced
-whole table moves with it; canonical metadata is protected because its path is
-explicitly included. Arbitrary changes to `sdata.attrs`, other elements or
-in-memory objects are not automatically restored by the publisher.
+whole table moves with it. Metadata stored elsewhere must either be included
+as another published path or explicitly restored by the caller. Arbitrary
+changes to `sdata.attrs`, other elements or in-memory objects are not
+automatically restored by the publisher.
 
 A caller modifying such metadata must snapshot its previous state, perform the
 updates while the backup is retained and restore both its in-memory and
 persisted state on failure. Catch failures around the **entire** `with`
-statement: reopening or final consolidation can fail outside the caller's
-context body. `_replace_element_on_disk()` provides that context;
-`_incremental_io_on_disk()` simply enters and exits it with no additional work.
+statement: reopening or final consolidation in an adapter can fail outside
+the caller's context body. Writing associated metadata after the publication
+context has successfully exited is too late to use its backups for rollback.
 
 Consolidated metadata is the store's metadata index, not another copy of the
 matrix data. It must be refreshed after paths change and after rollback so
 readers do not use stale descriptions of the store. Refresh after rollback is
 best-effort; a failure is logged rather than hidden by a claim of full recovery.
 
-## Reading after publication
-
-The reading helpers either return one component or reconstruct a table. They
-do not write or publish data:
-
-- `_read_anndata_element()` locates one component by its path, such as
-  `obsm/spatial_canonical`, and delegates decoding to `_read_backed_element()`.
-- `_read_backed_element()` decides how to represent that stored value: dense
-  arrays remain Zarr arrays and encoded sparse matrices become AnnData
-  sparse-dataset handles. Dataframes and mappings are decoded into memory with
-  `read_elem`.
-- `_read_backed_table()` reconstructs the components used by the out-of-core
-  aggregation writer into an AnnData object. It uses `_read_backed_element()`
-  for `X` and entries in `obsm`, and `read_elem` for `obs`, `var` and `uns`.
-  It is not a general reader for arbitrary AnnData stores containing other slots.
+## Storage-backed references after publication
 
 The object installed in `sdata` must use handles opened at the **permanent
 destination**, because those handles retain their backing location. Handles
 opened in staging may be used for validation but must not survive installation.
-Storage-backed does not mean Dask-backed here. Canonical validation may
-temporarily materialize the relatively small `(n_obs, 3)` center matrix.
 
 ## Limits of the guarantee
 
@@ -280,9 +316,3 @@ This is rollback for caught failures, not a crash-atomic transaction:
    while the backups are still retained.
 5. Restore caller-owned memory and metadata on failure, and handle staging/setup
    cleanup. Do not implement a second filesystem backup-and-rename mechanism.
-
-Storage tests live in `src/harpy/_tests/test_storage/`: `test_publication.py`
-covers filesystem publication and rollback, `test_spatialdata.py` covers the
-whole-element adapter, and `test_anndata.py` covers AnnData/SpatialData encoding
-and reading contracts. Operation-specific tests cover table aggregation and
-canonical-center installation in `src/harpy/_tests/test_table/`.
