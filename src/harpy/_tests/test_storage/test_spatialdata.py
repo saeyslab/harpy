@@ -172,25 +172,30 @@ def test_existing_overwrite_callers_serialize_once_and_reopen_final_paths(tmp_pa
     assert group[kind]["element"].metadata.zarr_format == zarr_format
 
 
-@pytest.mark.parametrize("kind", ["points", "images", "labels"])
+@pytest.mark.parametrize("kind", ["points", "images", "labels", "shapes", "tables"])
 @pytest.mark.parametrize("failure", ["staging", "reopen", "attach", "consolidate"])
 def test_replacement_failure_restores_disk_memory_and_consolidation(tmp_path, monkeypatch, kind, failure):
-    """Check rollback of a failed points, image or labels replacement.
+    """Check rollback of a failed whole-element replacement for all supported types.
 
     Inject an error after staging, during reopening, after attachment, or after
     final metadata consolidation. The error must propagate while the original
-    in-memory object, values and transformations are preserved or restored.
+    in-memory object, values and element metadata are preserved or restored.
     A fresh ``read_zarr()`` checks disk recovery through normal metadata reading.
     Root attributes must remain unchanged, with no staging or backup directories
     left behind.
     """
     sdata = _backed_sdata(tmp_path, kind=kind)
     original = sdata["element"]
-    transformations = deepcopy(get_transformation(original, get_all=True))
-    if kind == "points":
-        expected = original.compute()
+    transformations = None if kind == "tables" else deepcopy(get_transformation(original, get_all=True))
+    if kind in {"points", "shapes"}:
+        expected = original.compute() if kind == "points" else original.copy()
         replacement = original.assign(quality=original.quality + 1)
         replacement.attrs.update(original.attrs)
+    elif kind == "tables":
+        expected = original.copy()
+        replacement = original.copy()
+        replacement.X += 1
+        replacement.uns["note"] = "replacement"
     else:
         source = get_dataarray(sdata, "element")
         expected = source.values.copy()
@@ -241,11 +246,20 @@ def test_replacement_failure_restores_disk_memory_and_consolidation(tmp_path, mo
             pass
     assert sdata["element"] is original
     for restored in (sdata, read_zarr(sdata.path)):
+        actual = restored["element"]
         if kind == "points":
-            pd.testing.assert_frame_equal(restored["element"].compute(), expected)
+            pd.testing.assert_frame_equal(actual.compute(), expected)
+        elif kind == "shapes":
+            assert_geodataframe_equal(actual, expected)
+        elif kind == "tables":
+            np.testing.assert_array_equal(actual.X, expected.X)
+            pd.testing.assert_frame_equal(actual.obs, expected.obs)
+            pd.testing.assert_frame_equal(actual.var, expected.var)
+            assert actual.uns == expected.uns
         else:
             np.testing.assert_array_equal(get_dataarray(restored, "element").values, expected)
-        assert get_transformation(restored["element"], get_all=True) == transformations
+        if transformations is not None:
+            assert get_transformation(actual, get_all=True) == transformations
         assert restored.attrs == {"keep": {"value": 1}}
     _assert_clean(tmp_path)
 
