@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import shutil
 import uuid
 from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
@@ -13,13 +12,17 @@ from anndata import AnnData
 from loguru import logger as log
 from spatialdata import SpatialData
 
-from harpy.table._validation import _validate_table_without_canonical
-from harpy.table._zarr import (
-    _publish_staged_anndata_elements,
+from harpy._storage._anndata import (
     _read_anndata_element,
-    _StagedAnnDataElement,
     _write_anndata_element,
 )
+from harpy._storage._publication import (
+    _cleanup_owned_path,
+    _publish_staged_paths,
+    _remove_owned_path,
+    _StagedPath,
+)
+from harpy.table._validation import _validate_table_without_canonical
 from harpy.table.canonical_centers import (
     CANONICAL_ALGORITHM_VERSION,
     CANONICAL_OBSM_KEY,
@@ -100,7 +103,9 @@ def add_canonical_centers(
     overwrite
         Replace an existing complete, stale, malformed or asymmetric canonical
         payload. If ``False``, either existing canonical component is a
-        collision.
+        collision. The canonical metadata record is replaced entirely, not
+        merged with previous metadata. Other entries under
+        ``uns["spatial_coordinates"]`` remain unchanged.
 
     Returns
     -------
@@ -194,7 +199,7 @@ def add_canonical_centers(
             labels_names=labels_names,
         )
     finally:
-        _remove_generated_path(workspace)
+        _cleanup_owned_path(workspace)
     return sdata
 
 
@@ -426,8 +431,8 @@ def _stage_canonical_components(
         _write_anndata_element(staging, _CANONICAL_MATRIX_PATH, centers, create_parents=True)
         _write_anndata_element(staging, _CANONICAL_METADATA_PATH, dict(metadata), create_parents=True)
         log.info(f"Finished writing staged canonical-center components to '{workspace}'.")
-    except Exception:
-        _remove_generated_path(workspace)
+    except BaseException:
+        _cleanup_owned_path(workspace)
         raise
     return workspace
 
@@ -470,7 +475,19 @@ def _install_canonical_components(
     instance_key: str,
     labels_names: tuple[str, ...],
 ) -> None:
-    """Publish, attach and consolidate the staged canonical components."""
+    """Install staged canonical components into an existing backed table.
+
+    Publish the centers matrix and metadata, reopen them from their permanent
+    paths, and update the existing AnnData object in place. Preserve sibling
+    metadata records, but replace the canonical record entirely. Validate the
+    installed payload and refresh consolidated metadata while backups remain
+    available.
+
+    On failure, the publication context attempts disk rollback. This function
+    restores the previous in-memory entries, removing newly added entries when
+    none existed before, then attempts to refresh consolidated metadata and
+    re-raises the exception. Unrelated table contents remain unchanged.
+    """
     table = sdata.tables[table_name]
     previous_matrix_exists = CANONICAL_OBSM_KEY in table.obsm
     previous_matrix = table.obsm.get(CANONICAL_OBSM_KEY)
@@ -481,6 +498,7 @@ def _install_canonical_components(
         with _publish_staged_canonical_components(destination=destination, workspace=workspace) as table_group:
             matrix = _read_anndata_element(table_group, _CANONICAL_MATRIX_PATH)
             metadata = _read_anndata_element(table_group, _CANONICAL_METADATA_PATH)
+            # Preserve sibling records, but replace the entire canonical metadata record.
             registry = dict(previous_registry) if isinstance(previous_registry, Mapping) else {}
             registry[CANONICAL_OBSM_KEY] = metadata
             table.obsm[CANONICAL_OBSM_KEY] = matrix
@@ -494,7 +512,7 @@ def _install_canonical_components(
                 regions=labels_names,
             )
             sdata.write_consolidated_metadata()
-    except Exception:
+    except BaseException:
         if previous_matrix_exists:
             table.obsm[CANONICAL_OBSM_KEY] = previous_matrix
         elif CANONICAL_OBSM_KEY in table.obsm:
@@ -505,8 +523,8 @@ def _install_canonical_components(
             table.uns.pop(SPATIAL_COORDINATES_KEY, None)
         try:
             sdata.write_consolidated_metadata()
-        except (OSError, RuntimeError, TypeError, ValueError):
-            pass
+        except Exception as error:  # noqa: BLE001
+            log.warning(f"Could not refresh consolidated metadata after canonical-center rollback: {error}")
         raise
 
 
@@ -536,10 +554,13 @@ def _publish_staged_canonical_components(
                                         restore backups
 
     The filesystem transaction itself is implemented by
-    :func:`_publish_staged_anndata_elements`; this wrapper additionally creates
+    :func:`_publish_staged_paths`; this wrapper additionally creates
     and, on failure, removes the nested ``uns["spatial_coordinates"]`` mapping
     when the table did not already contain it.
     """
+    # Component publication does not cover the parent uns["spatial_coordinates"]
+    # mapping. Track whether this call creates it so failure cleanup removes only
+    # a newly created mapping, preserving any pre-existing metadata.
     registry_created = not destination.registry.exists()
     try:
         if registry_created:
@@ -550,31 +571,24 @@ def _publish_staged_canonical_components(
                 {},
             )
 
-        with _publish_staged_anndata_elements(
+        with _publish_staged_paths(
             root=destination.root,
             workspace=workspace,
-            elements=(
-                _StagedAnnDataElement(
+            paths=(
+                _StagedPath(
                     staged=workspace.joinpath(*_CANONICAL_MATRIX_PATH),
                     destination=destination.matrix,
                 ),
-                _StagedAnnDataElement(
+                _StagedPath(
                     staged=workspace.joinpath(*_CANONICAL_METADATA_PATH),
                     destination=destination.metadata,
                 ),
             ),
             operation="canonical",
-        ) as root:
+        ):
+            root = zarr.open_group(store=str(destination.root), mode="r+", use_consolidated=False)
             yield root["tables"][destination.table.name]
     except BaseException:
         if registry_created:
-            _remove_generated_path(destination.registry)
+            _remove_owned_path(destination.registry)
         raise
-
-
-def _remove_generated_path(path: Path) -> None:
-    """Remove one explicitly generated workspace or component path."""
-    if path.is_dir():
-        shutil.rmtree(path)
-    elif path.exists():
-        path.unlink()
