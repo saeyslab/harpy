@@ -3,7 +3,7 @@ from dask.dataframe import DataFrame as DaskDataFrame
 from spatialdata import SpatialData, read_zarr
 from spatialdata.models._utils import MappingToCoordinateSystem_t
 
-from harpy.utils._io import _incremental_io_on_disk, _write_element_with_cleanup
+from harpy._storage._spatialdata import _replace_element_on_disk, _write_element_with_cleanup
 
 
 def add_points(
@@ -52,9 +52,10 @@ def add_points(
     if output_points_name in [*sdata.points]:
         if sdata.is_backed():
             if overwrite:
-                sdata = _incremental_io_on_disk(
+                with _replace_element_on_disk(
                     sdata, element_name=output_points_name, element=points, element_type="points"
-                )
+                ):
+                    pass
             else:
                 raise ValueError(
                     f"Attempting to overwrite 'sdata.points[\"{output_points_name}\"]', but overwrite is set to False. Set overwrite to True to overwrite the .zarr store."

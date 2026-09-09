@@ -34,60 +34,71 @@ def _publish_staged_paths(
     paths: Sequence[_StagedPath],
     operation: str,
 ) -> Generator[None, None, None]:
-    """Publish one logical update, keeping backups until the caller succeeds.
+    """Move already-written files or directories from staging to permanent destinations.
 
-    The temporary directories have distinct roles:
+    Keep previous destination data in backups until the caller succeeds,
+    restoring it if publication or the caller's work fails.
 
-    - ``workspace`` holds the newly prepared data awaiting publication. It is
-      created and populated by the writer before calling this function.
-    - The backup directory temporarily holds previous destination data, moved
-      there by this function so it can be restored if publication or the
-      caller's work fails. It is separate from the workspace and is retained
-      until the caller completes successfully.
+    For entries in ``paths``, first back up all existing destinations, then
+    publish all prepared paths::
 
-    Each entry in ``paths`` pairs a prepared file or directory with its final
-    destination. Multiple entries describe related paths that must be published
-    within the same rollback context, not necessarily multiple SpatialData
-    elements.
-
-    The payload can be a complete SpatialData element or several coordinated
-    components, such as an AnnData matrix and its metadata. Writers must finish
-    serialization before entering this context. Readers must reopen from the
-    permanent destination inside it, never retain handles to staging paths::
-
-        existing destinations --rename--> backups (when present)
-        workspace payloads    --rename--> permanent destinations
-                                          |
-                              yield to caller: reopen, attach,
-                              validate, update metadata
-                                          |
-                                +---------+---------+
-                                |                   |
-                             success              failure
-                                |                   |
-                         remove backups     remove replacements,
-                                            restore backups, raise
-
-    Only filesystem paths are restored here. Callers must restore their own
-    affected in-memory objects and metadata and refresh consolidated metadata
-    after rollback. Multiple moves are not one crash-atomic transaction.
-    Staging workspaces and staged/destination paths must not themselves be symbolic
-    links; symlinks in ancestor directories are allowed.
+        entry.destination (inside root) --rename--> backup directory
+                                                   (previous data; created here)
+        entry.staged (inside workspace) --rename--> entry.destination
+                      (new data)                           |
+                                                   remove workspace
+                                                           |
+                                             yield to caller: reopen final
+                                             paths, attach, validate,
+                                             update metadata
+                                                           |
+                                                +----------+----------+
+                                                |                     |
+                                             success                failure
+                                                |                     |
+                                          remove backup      remove published paths,
+                                                             restore destinations,
+                                                             clean up, raise
 
     Parameters
     ----------
     root
         Local store containing the permanent destinations.
     workspace
-        Directory owned exclusively by this operation, containing newly
-        prepared data, not backups of previous destination data. Removed after
-        publication, or on a publication/body failure.
-        The writer remains responsible for cleanup if staging itself fails.
+        Writer-owned directory containing fully written new data. Removed
+        after its prepared paths move to their permanent destinations.
     paths
-        Non-overlapping staged/destination pairs on the same filesystem,
-        published within one rollback context.
+        Non-overlapping file/directory pairs on the same filesystem, published
+        within one rollback context. Each entry's ``staged`` points to the new
+        data already fully written on disk inside ``workspace``; ``destination``
+        is its permanent location inside ``root``. This function moves the
+        prepared data; it does not serialize it.
     operation
         Path-safe operation label for backup names and logging.
+
+    Notes
+    -----
+    Rollback is attempted for exceptions during renames, workspace removal or
+    the caller's work, including failures before ``yield``. Its limits are:
+
+    - Recovery requires Python to run the exception handler. Forced termination
+      without cleanup (for example ``SIGKILL``), an interpreter/OS crash or
+      power loss can leave some destinations updated or missing, with staging
+      or backup data left behind. Recovery bookkeeping exists only in memory;
+      there is no automatic repair when the store is reopened, and no
+      power-loss durability guarantee.
+    - If filesystem operations also fail during rollback, the previous state
+      may not be fully restored. A ``RuntimeError`` reports the location of
+      retained backup data for manual recovery.
+    - Only the supplied paths are restored. Callers must restore affected
+      in-memory objects and metadata written elsewhere (such as store-root
+      attributes), and refresh consolidated metadata after rollback.
+    - No locking coordinates concurrent access. Other readers may observe an
+      intermediate state, and concurrent writers can interfere with recovery.
+
+    The writer handles cleanup if staging or setup fails before publication.
+    Workspace and staged/destination paths must not themselves be symlinks;
+    symlinks in ancestor directories are allowed.
     """
     replacements = tuple(paths)
     _validate_staged_paths(root=root, workspace=workspace, paths=replacements, operation=operation)

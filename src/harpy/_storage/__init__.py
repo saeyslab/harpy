@@ -7,4 +7,7 @@ encodes AnnData components in Zarr and reopens matrices with storage backing.
 
 Format-specific callers use the shared publisher and remain responsible for
 restoring their affected in-memory objects and metadata after a failure.
+
+See ``docs/development/storage.md`` ("Storage writes and overwrite guarantees")
+for replacement scopes, the staging lifecycle and recovery responsibilities.
 """
