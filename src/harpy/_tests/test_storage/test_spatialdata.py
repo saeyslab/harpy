@@ -172,13 +172,34 @@ def test_existing_overwrite_callers_serialize_once_and_reopen_final_paths(tmp_pa
     assert group[kind]["element"].metadata.zarr_format == zarr_format
 
 
+@pytest.mark.parametrize("kind", ["points", "images", "labels"])
 @pytest.mark.parametrize("failure", ["staging", "reopen", "attach", "consolidate"])
-def test_replacement_failure_restores_disk_memory_and_consolidation(tmp_path, monkeypatch, failure):
-    sdata = _backed_sdata(tmp_path)
+def test_replacement_failure_restores_disk_memory_and_consolidation(tmp_path, monkeypatch, kind, failure):
+    """Check rollback of a failed points, image or labels replacement.
+
+    Inject an error after staging, during reopening, after attachment, or after
+    final metadata consolidation. The error must propagate while the original
+    in-memory object, values and transformations are preserved or restored.
+    A fresh ``read_zarr()`` checks disk recovery through normal metadata reading.
+    Root attributes must remain unchanged, with no staging or backup directories
+    left behind.
+    """
+    sdata = _backed_sdata(tmp_path, kind=kind)
     original = sdata["element"]
-    expected = original.compute()
-    replacement = original.assign(quality=original.quality + 1)
-    replacement.attrs.update(original.attrs)
+    transformations = deepcopy(get_transformation(original, get_all=True))
+    if kind == "points":
+        expected = original.compute()
+        replacement = original.assign(quality=original.quality + 1)
+        replacement.attrs.update(original.attrs)
+    else:
+        source = get_dataarray(sdata, "element")
+        expected = source.values.copy()
+        if kind == "images":
+            replacement = Image2DModel.parse(
+                source.data + 1, dims=source.dims, c_coords=source.c.values, transformations=transformations
+            )
+        else:
+            replacement = Labels2DModel.parse(source.data + 1, dims=source.dims, transformations=transformations)
     if failure == "staging":
         writer = SpatialData.write
 
@@ -216,12 +237,16 @@ def test_replacement_failure_restores_disk_memory_and_consolidation(tmp_path, mo
         monkeypatch.setattr(SpatialData, "write_consolidated_metadata", fail_consolidation)
 
     with pytest.raises(RuntimeError, match="injected"):
-        with _spatialdata._replace_element_on_disk(sdata, "element", replacement, element_type="points"):
+        with _spatialdata._replace_element_on_disk(sdata, "element", replacement, element_type=kind):
             pass
     assert sdata["element"] is original
-    pd.testing.assert_frame_equal(original.compute(), expected)
-    pd.testing.assert_frame_equal(read_zarr(sdata.path)["element"].compute(), expected)
-    assert sdata.attrs == {"keep": {"value": 1}}
+    for restored in (sdata, read_zarr(sdata.path)):
+        if kind == "points":
+            pd.testing.assert_frame_equal(restored["element"].compute(), expected)
+        else:
+            np.testing.assert_array_equal(get_dataarray(restored, "element").values, expected)
+        assert get_transformation(restored["element"], get_all=True) == transformations
+        assert restored.attrs == {"keep": {"value": 1}}
     _assert_clean(tmp_path)
 
 
