@@ -34,20 +34,38 @@ def add_feature_panel(
     feature_class_key: str,
     features_by_class: Mapping[str, Sequence[str]],
 ) -> SpatialData:
-    """Register a complete assay panel for one existing points element.
+    """Register a shared panel, updating metadata and normalizing points when needed.
 
-    Prepare points for ``hp.qc.summarize_points`` and feature-class-aware
-    ``hp.tb.aggregate_points``. No images, labels, tables, sample identifiers,
-    or reader-specific metadata are required. This function does not aggregate
-    points or select an expression class.
+    Modify the input ``sdata`` in place and return it. Source features, existing
+    class values and metadata are validated before publishing any changes.
+    On success:
+
+    - Root metadata: add or reuse the shared panel record in
+      ``sdata.attrs["harpy"]["feature_panels"]`` and set its reference in
+      ``sdata.attrs["harpy"]["points"][points_name]["feature_panel"]``.
+    - Already-compatible points: if every partition has a categorical
+      ``feature_class_key`` column with exactly all sorted panel classes and
+      ``ordered=False``, leave the points element unchanged. Only root metadata
+      is updated; validation still reads the source feature/class columns.
+    - Points needing normalization: if the class column is missing or its dtype
+      or categories differ, replace ``sdata.points[points_name]`` with a lazy
+      dataframe that derives or normalizes that column. Other columns and rows
+      are preserved. For a backed object, rewrite the entire selected points
+      element's Parquet data, partition-wise; this is not a single-column write.
+      Conflicting feature/class values raise an error rather than being replaced.
+
+    Local filesystem-backed objects persist these changes automatically.
+    For unbacked objects, update root metadata and, when normalization is needed,
+    attach a lazy replacement points dataframe. The replacement remains
+    uncomputed, and nothing is written to disk. Source validation is still
+    evaluated. No other elements are modified.
 
     Parameters
     ----------
     sdata
-        SpatialData containing the points. Update unbacked objects in memory;
-        persist changes for local filesystem-backed objects. In a backed object,
-        the selected points must already be saved to the store. Save pending
-        point edits before using the metadata-only registration path.
+        SpatialData containing the points. In a backed object, the selected
+        points must already be saved to the store. Save pending point edits
+        before using the metadata-only registration path.
     points_name
         Name of the existing points element to associate with the panel.
     feature_key
@@ -77,6 +95,11 @@ def add_feature_panel(
         The updated input object. Point rows, other columns, coordinates,
         transformations, unrelated metadata and other elements are preserved.
 
+    See Also
+    --------
+    harpy.qc.summarize_points : Summarize points using their feature panel.
+    harpy.tb.aggregate_points : Aggregate points into an instance-by-feature table.
+
     Notes
     -----
     The versioned root metadata associates points with a shared panel::
@@ -91,23 +114,17 @@ def add_feature_panel(
 
     Identical panels share a content-derived key. Re-registering an identical
     association is safe; conflicting associations or panel contents raise an
-    error. No reader provenance is added, and existing tables are not migrated.
+    error. No images, labels, tables, sample identifiers or reader-specific
+    metadata are required. No reader provenance is added, existing tables are
+    not migrated, and no expression class is selected.
 
-    Validate source features and existing class values partition-wise before
-    publishing changes. If the class column already has the required categorical
-    dtype and categories, write metadata only: validation reads source columns,
-    but no points files are rewritten. Otherwise, derive or normalize the class
-    column lazily and rewrite only the selected points element, partition-wise.
-    Parquet stores the complete dataframe, so this is not a single-column write.
     Dask may report unknown categories after reopening Parquet, and empty
     partitions may have no category values. The panel metadata retains the
     complete class list for downstream consumers in either case.
 
-    During replacement, retain the original points until the metadata commit and
-    context finalization succeed. On an exception, restore affected in-memory
-    state and attempt to restore root metadata on disk; the shared replacement
-    context handles points rollback. This does not provide crash recovery or
-    concurrent-writer isolation.
+    If an update fails, Harpy attempts to restore the original points and metadata.
+    Recovery from process crashes and protection against concurrent writes are
+    not provided.
 
     Examples
     --------
@@ -206,6 +223,10 @@ def add_feature_panel(
             if backed:
                 sdata.write_attrs()
                 if not rewrite_points:
+                    # If rewrite_points is True, the _replace_element_on_disk()
+                    # context refreshes consolidated metadata on exit, after the
+                    # write_attrs() above. Here rewrite_points is False, so that
+                    # context is not used and we must perform the refresh ourselves.
                     sdata.write_consolidated_metadata()
     except BaseException:
         # Catch context-exit failures too. The publisher restores points on
