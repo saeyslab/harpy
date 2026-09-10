@@ -4172,7 +4172,15 @@ Focused tests should establish that:
 
 ## Slice 11d: standalone points and feature-panel validation
 
-**Status: specified; not implemented.**
+**Status: implemented.**
+
+The public `hp.pt.validate_points()` API lives in
+`src/harpy/points/_validation.py` and reuses the shared panel-resolution,
+categorical and partition-wise assignment checks. Focused tests cover backed
+and unbacked objects, empty points, missing inputs, propagated partition errors,
+read-only behavior and a single projected validation scan. Individual panel
+rules are covered by shared-helper tests. Existing registration,
+QC, aggregation and storage paths do not invoke this validator automatically.
 
 Add a public, read-only validator for the relationship between an existing
 points element and its registered assay panel. Keep shared panels in
