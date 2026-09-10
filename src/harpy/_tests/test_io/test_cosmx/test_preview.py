@@ -67,8 +67,7 @@ def test_preview_accepts_non_overlapping_fov_relationships(
 ) -> None:
     manifest = _discover_cosmx(decoded_cosmx_path)
     positions = tuple(
-        replace(position, x_px=x_px, y_px=y_px) if position.fov == 2 else position
-        for position in manifest.positions
+        replace(position, x_px=x_px, y_px=y_px) if position.fov == 2 else position for position in manifest.positions
     )
 
     preview = _preview_cosmx(replace(manifest, positions=positions))
@@ -79,8 +78,7 @@ def test_preview_accepts_non_overlapping_fov_relationships(
 def test_preview_rejects_positive_area_fov_overlap(decoded_cosmx_path: Path) -> None:
     manifest = _discover_cosmx(decoded_cosmx_path)
     positions = tuple(
-        replace(position, x_px=7, y_px=0) if position.fov == 2 else position
-        for position in manifest.positions
+        replace(position, x_px=7, y_px=0) if position.fov == 2 else position for position in manifest.positions
     )
 
     with pytest.raises(ValueError, match=r"overlap between FOVs 1 and 2.*x=\[7, 8\)"):
@@ -105,10 +103,7 @@ def test_preview_selects_common_positioned_fovs(decoded_cosmx_path: Path) -> Non
 
 def test_preview_uses_configurable_adjacency_tolerance(decoded_cosmx_path: Path) -> None:
     manifest = _discover_cosmx(decoded_cosmx_path)
-    positions = tuple(
-        replace(position, x_px=9) if position.fov == 2 else position
-        for position in manifest.positions
-    )
+    positions = tuple(replace(position, x_px=9) if position.fov == 2 else position for position in manifest.positions)
     manifest = replace(manifest, positions=positions)
 
     default_preview = _preview_cosmx(manifest)

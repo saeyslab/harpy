@@ -117,9 +117,7 @@ def cluster_intensity_SOM(
             append = False
         else:
             append = True
-        log.info(
-            f"Start aggregation of image element '{_image_name}' within labels element '{_labels_name}'."
-        )
+        log.info(f"Start aggregation of image element '{_image_name}' within labels element '{_labels_name}'.")
         sdata = aggregate_image(
             sdata,
             image_name=_image_name,
@@ -136,9 +134,7 @@ def cluster_intensity_SOM(
             cell_index_name=index_name,
             overwrite=overwrite,
         )
-        log.info(
-            f"End aggregation of image element '{_image_name}' within labels element '{_labels_name}'."
-        )
+        log.info(f"End aggregation of image element '{_image_name}' within labels element '{_labels_name}'.")
 
     log.info("Start preprocessing.")
     # for size normalization of cluster intensities

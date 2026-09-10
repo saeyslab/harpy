@@ -17,6 +17,7 @@ their `.venv/bin/` path rather than sourcing `activate`:
 Run only the focused unit tests directly affected by a change.
 
 Do not run the full test suite by default. Run it only when:
+
 - the user explicitly requests it; or
 - the change is sufficiently broad that focused tests cannot provide reasonable coverage, in which case ask the user first.
 

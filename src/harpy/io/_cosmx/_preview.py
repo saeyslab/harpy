@@ -79,7 +79,9 @@ def _preview_cosmx(
         raise ValueError(f"CosMx preview products must be non-empty and unique, found {products}.")
     unknown_products = set(products) - set(_PRODUCTS)
     if unknown_products:
-        raise ValueError(f"Unknown CosMx preview products {sorted(unknown_products)}; expected a subset of {_PRODUCTS}.")
+        raise ValueError(
+            f"Unknown CosMx preview products {sorted(unknown_products)}; expected a subset of {_PRODUCTS}."
+        )
 
     positions_by_fov = manifest.positions_by_fov
     positioned = set(positions_by_fov)

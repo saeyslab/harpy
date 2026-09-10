@@ -4305,7 +4305,7 @@ computation path. This slice follows the panel-registration helper in Slice
 11c and depends at runtime only on the supplied summary outputs, not
 segmentation, an aggregation table, or a live feature-panel registry. Rendering
 a precomputed grid never scans source points, calculates new bins, performs
-raster-based assignment, or calls `summarize_points` or `aggregate_points`. 
+raster-based assignment, or calls `summarize_points` or `aggregate_points`.
 
 ### Consumption contract
 
