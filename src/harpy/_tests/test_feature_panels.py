@@ -1,6 +1,7 @@
 from copy import deepcopy
 from dataclasses import replace
 
+import dask.dataframe as dd
 import pandas as pd
 import pytest
 
@@ -11,6 +12,7 @@ from harpy._feature_panels import (
     _make_feature_panel,
     _parse_feature_panel,
     _parse_feature_panel_registry,
+    _validate_feature_class_dtype,
     _validate_feature_panel_collision,
 )
 
@@ -231,6 +233,41 @@ def test_parse_feature_panel_retains_storage_structure_checks(changes, match):
     panel_record.update(changes)
     with pytest.raises(ValueError, match=match):
         _parse_feature_panel(panel_record, panel_name="stored")
+
+
+@pytest.mark.parametrize(
+    "schema, error",
+    [
+        ("compatible", None),
+        ("unknown_categories", None),
+        ("noncategorical", "must be categorical"),
+        ("reordered_categories", "do not match panel classes"),
+    ],
+)
+def test_feature_class_dtype_checks_categories_without_normalizing(schema, error):
+    """Known classes must match the panel; unknown categories defer to content checks."""
+    panel = _make_feature_panel(
+        feature_key="target",
+        feature_class_key="kind",
+        features_by_class={"Expression": ["GeneA"], "Control": ["Undetected"]},
+    )
+    frame = pd.DataFrame({"kind": pd.Categorical(["Expression"], categories=panel.classes)})
+    points = dd.from_pandas(frame, npartitions=1)
+    if schema == "unknown_categories":
+        points["kind"] = points["kind"].cat.as_unknown()
+    elif schema == "noncategorical":
+        points["kind"] = points["kind"].astype("string")
+    elif schema == "reordered_categories":
+        points["kind"] = points["kind"].cat.set_categories(list(reversed(panel.classes)))
+    original_dtype = points.dtypes["kind"]
+
+    if error is None:
+        _validate_feature_class_dtype(points, points_name="calls", panel=panel)
+    else:
+        with pytest.raises(ValueError, match=error):
+            _validate_feature_class_dtype(points, points_name="calls", panel=panel)
+
+    assert points.dtypes["kind"] == original_dtype
 
 
 @pytest.mark.parametrize(
