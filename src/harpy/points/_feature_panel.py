@@ -97,6 +97,7 @@ def add_feature_panel(
 
     See Also
     --------
+    harpy.pt.validate_points : Validate points and their registered panel without changes.
     harpy.qc.summarize_points : Summarize points using their feature panel.
     harpy.tb.aggregate_points : Aggregate points into an instance-by-feature table.
 
