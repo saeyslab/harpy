@@ -165,6 +165,7 @@ Operations on points (`Dask` `DataFrame` object) elements.
     :toctree: generated
 
     pt.add_points
+    pt.add_feature_panel
 ```
 
 ## Externals

@@ -7,6 +7,9 @@ It is an internal developer contract, not a public storage API or a guarantee
 about every Harpy reader and writer. It does not cover replacing an entire
 SpatialData store.
 
+For where metadata lives and which data it describes, see
+[Metadata ownership and layout](metadata.md).
+
 > Writing a table component-by-component does not imply updating the existing
 > table component-by-component. The paths supplied to the publisher determine
 > the replacement scope.
