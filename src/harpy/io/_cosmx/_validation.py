@@ -284,13 +284,15 @@ def _validate_feature_panels(registry: Mapping[str, object]) -> dict[str, _Featu
     for panel_name, value in registry.items():
         path = _element_path(_FEATURE_PANELS_METADATA_KEY, panel_name)
         panel_name = _require_nonempty_string(panel_name, path=f"{path} key")
-        record = _require_mapping(value, path=path)
-        feature_key = _require_nonempty_string(record.get("feature_key"), path=f"{path}.feature_key")
-        feature_class_key = _require_nonempty_string(record.get("feature_class_key"), path=f"{path}.feature_class_key")
+        panel_record = _require_mapping(value, path=path)
+        feature_key = _require_nonempty_string(panel_record.get("feature_key"), path=f"{path}.feature_key")
+        feature_class_key = _require_nonempty_string(
+            panel_record.get("feature_class_key"), path=f"{path}.feature_class_key"
+        )
         if feature_key == feature_class_key:
             raise ValueError(f"CosMx metadata {path} feature and feature-class keys must be different.")
-        classes = _require_sorted_string_list(record.get("classes"), path=f"{path}.classes")
-        features_by_class = _require_mapping(record.get("features_by_class"), path=f"{path}.features_by_class")
+        classes = _require_sorted_string_list(panel_record.get("classes"), path=f"{path}.classes")
+        features_by_class = _require_mapping(panel_record.get("features_by_class"), path=f"{path}.features_by_class")
         if set(features_by_class) != set(classes):
             raise ValueError(
                 f"CosMx metadata {path}.features_by_class keys must equal classes {list(classes)}, "
@@ -312,13 +314,13 @@ def _validate_feature_panels(registry: Mapping[str, object]) -> dict[str, _Featu
                         f"CosMx metadata {path} feature {feature!r} belongs to both {previous!r} and {feature_class!r}."
                     )
 
-        canonical = {
+        canonical_panel_record = {
             "feature_key": feature_key,
             "feature_class_key": feature_class_key,
             "classes": list(classes),
             "features_by_class": canonical_features,
         }
-        expected_name = _feature_panel_name(canonical)
+        expected_name = _feature_panel_name(canonical_panel_record)
         if panel_name != expected_name:
             raise ValueError(
                 f"CosMx feature-panel key {panel_name!r} does not match canonical contents; expected {expected_name!r}."
