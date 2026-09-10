@@ -1,6 +1,8 @@
-"""Shared, read-only feature-panel contracts for point consumers."""
+"""Shared feature-panel serialization, identity and read-only validation."""
 
-from collections.abc import Mapping
+import hashlib
+import json
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 import numpy as np
@@ -58,16 +60,95 @@ def _resolve_points_feature_panel(
     sdata: SpatialData, points_name: str
 ) -> tuple[str, _FeaturePanelContract, Mapping[str, object]]:
     """Resolve a points element's authoritative panel and source metadata, without writes."""
-    root = _require_mapping(sdata.attrs.get(_HARPY_METADATA_KEY), path=_HARPY_METADATA_KEY)
+    missing_panel = (
+        f"Points element {points_name!r} has no feature-panel mapping. Register its complete assay panel with "
+        "hp.pt.add_feature_panel(sdata, points_name=..., feature_key=..., feature_class_key=..., "
+        "features_by_class=...)."
+    )
+    if sdata.attrs.get(_HARPY_METADATA_KEY) is None:
+        raise ValueError(missing_panel)
+    root = _require_mapping(sdata.attrs[_HARPY_METADATA_KEY], path=_HARPY_METADATA_KEY)
     version = root.get(_METADATA_VERSION_KEY)
     if isinstance(version, bool) or not isinstance(version, int) or version != _METADATA_VERSION:
         raise ValueError(f"Harpy metadata version must equal {_METADATA_VERSION}, found {version!r}.")
-    points_records = _require_mapping(root.get(_POINTS_METADATA_KEY), path="harpy.points")
-    record = _require_mapping(points_records.get(points_name), path=f"harpy.points.{points_name}")
+    points_records = _require_mapping(root.get(_POINTS_METADATA_KEY, {}), path="harpy.points")
+    record = _require_mapping(points_records.get(points_name, {}), path=f"harpy.points.{points_name}")
+    if record.get("feature_panel") is None:
+        raise ValueError(missing_panel)
     panel_name = _require_nonempty_string(record.get("feature_panel"), path=f"harpy.points.{points_name}.feature_panel")
-    panels = _require_mapping(root.get(_FEATURE_PANELS_METADATA_KEY), path="harpy.feature_panels")
+    panels = _require_mapping(root.get(_FEATURE_PANELS_METADATA_KEY, {}), path="harpy.feature_panels")
+    if panel_name not in panels:
+        raise ValueError(missing_panel)
     panel_record = _require_mapping(panels.get(panel_name), path=f"harpy.feature_panels.{panel_name}")
     return panel_name, _parse_feature_panel(panel_record, panel_name=panel_name), record
+
+
+def _serialize_feature_panel(
+    *,
+    feature_key: str,
+    feature_class_key: str,
+    features_by_class: Mapping[str, Sequence[str]],
+) -> dict[str, object]:
+    """Validate a supplied panel and serialize it with sorted classes and features.
+
+    Sorting makes panel identity independent of input ordering. Names are kept
+    exactly as supplied, and duplicates are rejected rather than discarded.
+    The output is shared by readers and registration of existing points.
+    """
+    if not isinstance(features_by_class, Mapping):
+        raise ValueError("features_by_class must be a mapping from classes to sequences of feature names.")
+    grouped = {}
+    for feature_class, features in features_by_class.items():
+        if isinstance(features, (str, bytes)) or not isinstance(features, Sequence):
+            raise ValueError(f"features_by_class[{feature_class!r}] must be a non-string sequence of feature names.")
+        grouped[feature_class] = list(features)
+    record = {
+        "feature_key": feature_key,
+        "feature_class_key": feature_class_key,
+        "classes": list(grouped),
+        "features_by_class": grouped,
+    }
+    panel = _parse_feature_panel(record, panel_name="supplied")
+    classes = sorted(panel.classes)
+    return {
+        "feature_key": panel.feature_key,
+        "feature_class_key": panel.feature_class_key,
+        "classes": classes,
+        "features_by_class": {name: sorted(grouped[name]) for name in classes},
+    }
+
+
+def _feature_panel_name(metadata: Mapping[str, object]) -> str:
+    """Derive a deterministic store-local key from canonical panel contents.
+
+    Identical panels share one record, independently of sample IDs, points
+    element names or input ordering. This requires canonical serialization
+    through ``_serialize_feature_panel()`` before generating the key.
+
+    The SHA-256 digest is used for naming and deduplication, not as a security
+    boundary. Only its first 16 hexadecimal characters are kept, so callers
+    compare complete metadata on reuse and reject conflicting contents.
+    """
+    canonical = json.dumps(metadata, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return f"feature_panel_{hashlib.sha256(canonical).hexdigest()[:16]}"
+
+
+def _validate_feature_panel_collision(
+    sdata: SpatialData,
+    feature_panel_name: str,
+    feature_panel_metadata: Mapping[str, object],
+) -> None:
+    """Reject reuse of a panel identifier for different canonical contents."""
+    root = sdata.attrs.get(_HARPY_METADATA_KEY)
+    if root is None:
+        return
+    root = _require_mapping(root, path=_HARPY_METADATA_KEY)
+    panels = root.get(_FEATURE_PANELS_METADATA_KEY)
+    if panels is None:
+        return
+    panels = _require_mapping(panels, path="harpy.feature_panels")
+    if feature_panel_name in panels and panels[feature_panel_name] != feature_panel_metadata:
+        raise ValueError(f"Harpy feature-panel hash collision for {feature_panel_name!r}.")
 
 
 def _parse_feature_panel(record: Mapping[str, object], *, panel_name: str) -> _FeaturePanelContract:
@@ -139,6 +220,61 @@ def _validate_feature_class_dtype(
             )
 
 
+def _feature_membership_partition_errors(
+    partition: pd.DataFrame,
+    *,
+    feature_key: str,
+    class_by_feature: Mapping[str, str],
+) -> pd.Series:
+    """Check that one points partition contains only declared, non-null features.
+
+    No class column is inspected. Use this check before deriving a missing
+    class column from ``class_by_feature``.
+
+    Parameters
+    ----------
+    partition
+        One in-memory pandas partition from the source Dask points element.
+    feature_key
+        Name of the points column containing feature identifiers.
+    class_by_feature
+        The panel's feature-to-class mapping, e.g.
+        ``{"EPCAM": "Endogenous", "Negative1": "Negative"}``. This is the
+        relevant part of the panel, not its complete metadata record. Keys
+        define the allowed features; this helper does not inspect the values.
+
+    Returns
+    -------
+    pandas.Series
+        An empty series when all features are valid, or a one-element series
+        containing the first feature-validation error found in the partition.
+
+    Examples
+    --------
+    No class column is needed. ``EPCAM`` occurs in ``class_by_feature``, but
+    ``UnknownGene`` does not, so the partition produces an error:
+
+    .. code-block:: python
+
+        partition = pd.DataFrame({"gene": ["EPCAM", "UnknownGene"]})
+        errors = _feature_membership_partition_errors(
+            partition,
+            feature_key="gene",
+            class_by_feature={"EPCAM": "Endogenous"},
+        )
+        errors.iloc[0]
+        # "feature 'UnknownGene' is absent from the panel."
+    """
+    features = partition[feature_key]
+    if features.isna().any():
+        return pd.Series(["feature values must not be null."], name="error", dtype="object")
+    missing = ~features.isin(class_by_feature)
+    if missing.any():
+        feature = features.loc[missing].iloc[0]
+        return pd.Series([f"feature {feature!r} is absent from the panel."], name="error", dtype="object")
+    return pd.Series(name="error", dtype="object")
+
+
 def _feature_panel_partition_errors(
     partition: pd.DataFrame,
     *,
@@ -148,10 +284,11 @@ def _feature_panel_partition_errors(
 ) -> pd.Series:
     """Validate one points partition against its feature-panel assignments.
 
-    Each point must contain a non-null feature and feature class. Its feature
-    must occur in ``class_by_feature``, and its observed feature class must
-    equal the class assigned by that mapping. Validation is partition-wise so
-    the complete points element does not need to be materialized.
+    Each point must contain a non-null feature declared in ``class_by_feature``.
+    Its observed class must also be non-null and equal the value assigned by
+    that mapping. Feature membership is checked by
+    ``_feature_membership_partition_errors()`` within the same partition task;
+    this does not introduce another Dask scan of the points.
 
     Parameters
     ----------
@@ -160,9 +297,14 @@ def _feature_panel_partition_errors(
     feature_key
         Name of the column containing feature identifiers, such as genes.
     feature_class_key
-        Name of the column containing feature classes.
+        Name of the existing points column containing observed feature classes.
+        To validate features before creating a missing class column, use
+        ``_feature_membership_partition_errors()`` instead.
     class_by_feature
-        Expected feature class for every feature declared by the panel.
+        The panel's feature-to-class mapping, e.g.
+        ``{"EPCAM": "Endogenous", "Negative1": "Negative"}``. This is the
+        relevant part of the panel, not its complete metadata record. Keys
+        define the allowed features and values define their expected classes.
 
     Returns
     -------
@@ -175,26 +317,26 @@ def _feature_panel_partition_errors(
     ``EPCAM`` is declared endogenous, so observing it as negative produces a
     compact error that the caller can collect alongside the Dask reductions:
 
-    >>> partition = pd.DataFrame({"gene": ["EPCAM"], "code_class": ["Negative"]})
-    >>> errors = _feature_panel_partition_errors(
-    ...     partition,
-    ...     feature_key="gene",
-    ...     feature_class_key="code_class",
-    ...     class_by_feature={"EPCAM": "Endogenous"},
-    ... )
-    >>> errors.iloc[0]
-    "feature 'EPCAM' has class 'Negative'; expected 'Endogenous'."
+    .. code-block:: python
+
+        partition = pd.DataFrame({"gene": ["EPCAM"], "code_class": ["Negative"]})
+        errors = _feature_panel_partition_errors(
+            partition,
+            feature_key="gene",
+            feature_class_key="code_class",
+            class_by_feature={"EPCAM": "Endogenous"},
+        )
+        errors.iloc[0]
+        # "feature 'EPCAM' has class 'Negative'; expected 'Endogenous'."
     """
+    errors = _feature_membership_partition_errors(partition, feature_key=feature_key, class_by_feature=class_by_feature)
+    if not errors.empty:
+        return errors
     features = partition[feature_key]
     feature_classes = partition[feature_class_key]
-    invalid = features.isna() | feature_classes.isna()
-    if invalid.any():
-        return pd.Series(["feature and feature-class values must not be null."], name="error", dtype="object")
+    if feature_classes.isna().any():
+        return pd.Series(["feature-class values must not be null."], name="error", dtype="object")
     expected = features.astype(object).map(class_by_feature)
-    missing = expected.isna()
-    if missing.any():
-        feature = features.loc[missing].iloc[0]
-        return pd.Series([f"feature {feature!r} is absent from the panel."], name="error", dtype="object")
     mismatched = feature_classes.astype(object) != expected
     if mismatched.any():
         position = int(np.flatnonzero(mismatched.to_numpy())[0])
