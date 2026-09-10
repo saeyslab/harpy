@@ -45,10 +45,10 @@ class HarpyPipeline:
         sdata = self.segment(sdata)
         log.info("Segmentation step finished.")
 
-        # Allocate
-        log.info("Allocation step started.")
+        # Aggregate points within segmented instances.
+        log.info("Point aggregation step started.")
         sdata = self.allocate(sdata)
-        log.info("Allocation step finished.")
+        log.info("Point aggregation step finished.")
 
         if self.cfg.dataset.markers is not None:
             # Annotate
@@ -311,7 +311,7 @@ class HarpyPipeline:
         return sdata
 
     def allocate(self, sdata: SpatialData) -> SpatialData:
-        """Allocation step, the fourth step of the pipeline, creates the adata object from the mask and allocates the transcripts from the supplied file."""
+        """Create an AnnData table by assigning supplied transcripts to segmented instances."""
         sdata = harpy.io.read_transcripts(
             sdata,
             path_count_matrix=self.cfg.dataset.coords,
@@ -327,16 +327,16 @@ class HarpyPipeline:
             column_midcount=self.cfg.allocate.column_midcount,
         )
 
-        log.info("Start allocation.")
+        log.info("Start point aggregation.")
 
-        sdata = harpy.tb.allocate(
+        sdata = harpy.tb.aggregate_points(
             sdata=sdata,
             labels_name=self.labels_name,
             output_table_name=self.cfg.allocate.table_name,
             overwrite=self.cfg.allocate.overwrite,
         )
 
-        log.info("Allocation finished.")
+        log.info("Point aggregation finished.")
 
         harpy.pl.plot_shapes(
             sdata,

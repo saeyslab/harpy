@@ -1,5 +1,21 @@
 # Development
 
+## Storage internals
+
+See [Metadata ownership and layout](development/metadata.md) for a schematic
+overview of shared panels, element records and table metadata.
+
+See [Storage writes and overwrite guarantees](development/storage.md) for the
+shared storage architecture, whole-element versus component updates, and the
+responsibilities of writers and the publication layer during recovery.
+
+```{toctree}
+:hidden: true
+
+development/storage
+development/metadata
+```
+
 ## Setting up a development environment
 
 First clone the GitHub repo and set it as the current directory:

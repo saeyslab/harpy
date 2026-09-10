@@ -17,8 +17,8 @@ from spatialdata.models import TableModel
 
 from harpy.image._image import _get_boundary, _get_spatial_element
 from harpy.table._table import ProcessTable
+from harpy.transformations._transformations import _identity_check_transformations_points
 from harpy.utils._keys import _CELLSIZE_KEY, _GENES_KEY, _RAW_COUNTS_KEY
-from harpy.utils._transformations import _identity_check_transformations_points
 
 _DEFAULT_COLUMN_COLORS = {
     "log1p_total_counts": "#577590",
@@ -46,7 +46,7 @@ def analyse_genes_left_out(
     output: str | Path | None = None,
 ) -> pd.DataFrame:
     """
-    Analyse and visualize the proportion of genes that could not be assigned to an instance during allocation step.
+    Analyse and visualize the proportion of genes that were not assigned to an instance during point aggregation.
 
     Parameters
     ----------
@@ -94,7 +94,7 @@ def analyse_genes_left_out(
 
     See Also
     --------
-    harpy.tb.allocate
+    harpy.tb.aggregate_points
 
     Examples
     --------
@@ -117,7 +117,7 @@ def analyse_genes_left_out(
 
     if not hasattr(sdata, "points"):
         raise AttributeError(
-            "Provided SpatialData object does not have the attribute 'points', please run allocation step before using this function."
+            "Provided SpatialData object does not have the attribute 'points', please run point aggregation before using this function."
         )
 
     if not np.issubdtype(sdata.tables[table_name].X.dtype, np.integer):
@@ -146,7 +146,7 @@ def analyse_genes_left_out(
 
     if not missing_indices.empty:
         raise ValueError(
-            f"There are genes found in '.var' of table element '{table_name}' that are not found in the points element '{points_name}'. Please verify that allocation '(harpy.tb.allocation)' is performed using the correct points element."
+            f"There are genes found in '.var' of table element '{table_name}' that are not found in the points element '{points_name}'. Please verify that 'harpy.tb.aggregate_points' was called with the correct points element."
         )
 
     raw_counts = _raw_counts[adata.var.index]

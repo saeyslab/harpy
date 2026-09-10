@@ -13,7 +13,7 @@ from spatialdata.transformations.transformations import Affine, Identity, Sequen
 from xarray import DataArray, DataTree
 
 from harpy.image._manager import ImageElementManager, LabelsElementManager
-from harpy.utils._transformations import _get_translation_values
+from harpy.transformations._transformations import _get_translation_values
 
 
 def _substract_translation_crd(

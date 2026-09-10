@@ -184,5 +184,6 @@ quickstart.md
 usage.md
 tutorials/index.md
 api.md
+canonical_centers.md
 contributing.md
 ```

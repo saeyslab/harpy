@@ -9,6 +9,18 @@ Import Harpy as::
 .. module:: harpy
 ```
 
+## Spatial bounds
+
+```{eval-rst}
+
+.. currentmodule:: harpy
+
+.. autosummary::
+    :toctree: generated
+
+    SpatialBounds
+```
+
 ## IO
 
 I/O.
@@ -21,6 +33,10 @@ I/O.
 .. autosummary::
     :toctree: generated
 
+    io.CosmxSample
+    io.cosmx
+    io.add_cosmx_samples
+    io.validate_cosmx_store
     io.phenocycler
     io.macsima
     io.merscope
@@ -106,11 +122,13 @@ Operations on table (`AnnData` object) elements.
     :toctree: generated
 
     tb.add_table
-    tb.allocate
+    tb.aggregate_points
+    tb.aggregate_image
+    tb.add_canonical_centers
     tb.bin_counts
-    tb.allocate_intensity
     tb.add_regionprops
     tb.add_feature_matrix
+    tb.validate_table
     tb.extract_instances
     tb.ZarrIterableInstances
     tb.ZarrDataLoader
@@ -147,6 +165,8 @@ Operations on points (`Dask` `DataFrame` object) elements.
     :toctree: generated
 
     pt.add_points
+    pt.add_feature_panel
+    pt.validate_points
 ```
 
 ## Externals
@@ -183,6 +203,8 @@ Quality control functions.
     metric_histogram
     metrics_histogram
     obs_scatter
+    summarize_points
+    PointsSummary
 ```
 
 ## Plotting

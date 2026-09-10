@@ -377,7 +377,7 @@ def merscope(
 
                 adata = _merge_adata_and_shapes(adata=adata, shapes=shapes, instance_key=instance_key)
 
-                # set adata.obs.index in same way as we set it in hp.tb.allocate, for consistency
+                # set adata.obs.index in the same way as hp.tb.aggregate_points, for consistency
                 _uuid_value = str(uuid.uuid4())[:8]
                 adata.obs.index = adata.obs.index.map(
                     lambda x, labels_name=_output_labels_name, uid=_uuid_value: f"{str(x)}_{labels_name}_{uid}"
@@ -474,7 +474,7 @@ def merscope(
                     how="inner",
                     on=[instance_key],
                 )
-                # set adata.obs.index in same way as we set it in hp.tb.allocate, just for consistency
+                # set adata.obs.index in the same way as hp.tb.aggregate_points, for consistency
                 adata_preprocessed.obs.index = adata_preprocessed.obs.index.map(
                     lambda x, labels_name=_output_labels_name, uid=_uuid_value: f"{str(x)}_{labels_name}_{uid}"
                 )

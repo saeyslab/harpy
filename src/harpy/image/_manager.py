@@ -11,7 +11,7 @@ from spatialdata.models._utils import MappingToCoordinateSystem_t
 from spatialdata.models.models import ScaleFactors_t
 from xarray import DataArray, DataTree
 
-from harpy.utils._io import _incremental_io_on_disk, _write_element_with_cleanup
+from harpy._storage._spatialdata import _replace_element_on_disk, _write_element_with_cleanup
 
 
 class ElementManager(ABC):
@@ -138,9 +138,10 @@ class ImageElementManager(ElementManager):
         if element_name in [*sdata.images]:
             if sdata.is_backed():
                 if overwrite:
-                    sdata = _incremental_io_on_disk(
+                    with _replace_element_on_disk(
                         sdata, element_name=element_name, element=spatial_element, element_type="images"
-                    )
+                    ):
+                        pass
                 else:
                     raise ValueError(
                         f"Attempting to overwrite 'sdata.images[\"{element_name}\"]', but overwrite is set to False. Set overwrite to True to overwrite the .zarr store."
@@ -210,9 +211,10 @@ class LabelsElementManager(ElementManager):
         if element_name in [*sdata.labels]:
             if sdata.is_backed():
                 if overwrite:
-                    sdata = _incremental_io_on_disk(
+                    with _replace_element_on_disk(
                         sdata, element_name=element_name, element=spatial_element, element_type="labels"
-                    )
+                    ):
+                        pass
                 else:
                     raise ValueError(
                         f"Attempting to overwrite 'sdata.labels[\"{element_name}\"]', but overwrite is set to False. Set overwrite to True to overwrite the .zarr store."

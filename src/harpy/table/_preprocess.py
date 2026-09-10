@@ -114,7 +114,7 @@ def preprocess_transcriptomics(
 
     See Also
     --------
-    harpy.tb.allocate : create an AnnData table in `sdata` using a `points_name` and a `labels_name`.
+    harpy.tb.aggregate_points : create an AnnData table in `sdata` using a `points_name` and a `labels_name`.
     """
     preprocess_instance = Preprocess(sdata, labels_name=labels_name, table_name=table_name)
     sdata = preprocess_instance.preprocess(
@@ -237,7 +237,7 @@ def preprocess_proteomics(
 
     See Also
     --------
-    harpy.tb.allocate_intensity : create an AnnData table in `sdata` using an `image_name` and a `labels_name`.
+    harpy.tb.aggregate_image : create an AnnData table in `sdata` using an `image_name` and a `labels_name`.
     """
     preprocess_instance = Preprocess(sdata, labels_name=labels_name, table_name=table_name)
     sdata = preprocess_instance.preprocess(

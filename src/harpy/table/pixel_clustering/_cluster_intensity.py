@@ -13,7 +13,7 @@ from loguru import logger as log
 from spatialdata import SpatialData
 
 from harpy.image._image import _get_spatial_element
-from harpy.table._allocation_intensity import allocate_intensity
+from harpy.table._allocation_intensity import aggregate_image
 from harpy.table._preprocess import preprocess_proteomics
 from harpy.table._table import add_table
 from harpy.utils._keys import _RAW_COUNTS_KEY, ClusteringKey
@@ -111,16 +111,14 @@ def cluster_intensity_SOM(
             f"Some labels labels element {_labels_name} could not be found in the provided pandas Series that maps SOM cluster ID's to metacluster IDs."
         )
 
-        # allocate the intensity to via the clusters labels element
+        # Aggregate image intensities within the cluster-label instances.
 
         if i == 0:
             append = False
         else:
             append = True
-        log.info(
-            f"Start allocation of intensities of image element with name '{_image_name}' by labels in labels element with name '{_labels_name}'."
-        )
-        sdata = allocate_intensity(
+        log.info(f"Start aggregation of image element '{_image_name}' within labels element '{_labels_name}'.")
+        sdata = aggregate_image(
             sdata,
             image_name=_image_name,
             labels_name=_labels_name,
@@ -136,13 +134,12 @@ def cluster_intensity_SOM(
             cell_index_name=index_name,
             overwrite=overwrite,
         )
-        log.info(
-            f"End allocation of image element with name '{_image_name}' and labels element with name '{_labels_name}'."
-        )
+        log.info(f"End aggregation of image element '{_image_name}' within labels element '{_labels_name}'.")
 
     log.info("Start preprocessing.")
     # for size normalization of cluster intensities
-    # note, we could also have done allocate_intensity( mode="sum", obs_stats="counts"), instead of also having to run preprocess_proteomics.
+    # note, we could also have used aggregate_image(mode="sum", obs_stats="counts"),
+    # instead of also having to run preprocess_proteomics.
     sdata = preprocess_proteomics(
         sdata,
         labels_name=labels_name,

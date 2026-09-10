@@ -1,7 +1,67 @@
+"""Point-to-label aggregation orchestration.
+
+An *aggregation pair* associates one points element with one labels element.
+Its coordinate system specifies where that assignment is performed. For
+example::
+
+    pair 0: points_a -> labels_a in sample_a
+    pair 1: points_b -> labels_b in sample_b
+
+Each pair receives a zero-based ordinal. The ordinal remains part of the
+checkpoint row key so equal instance IDs from different labels elements do not
+collapse into one output row.
+
+The class-aware :func:`aggregate_points` implementation uses the following
+private data flow::
+
+    source points (coordinates, feature, class)
+            |
+            +-- _validate_feature_panel_contents()
+            |       `-- _feature_panel_partition_errors()
+            |               validate each source feature-to-class assignment
+            |
+            `-- _resolve_point_to_labels_transform()
+                    compose the selected element registrations once
+                              |
+                              v
+                 _assign_points_to_labels()
+                    map each source point into intrinsic labels coordinates
+                    produce lazy (instance, feature) rows
+                              |
+                              v
+                   _local_feature_counts()
+                    partition-local reduction
+                              |
+                              v
+                _stage_aggregation_checkpoint()
+                    +-- Dask shuffle by (aggregation-pair ordinal, instance ID)
+                    +-- _merge_count_partition()
+                    +-- write merged counts to temporary Parquet on disk:
+                        tables/.harpy-aggregate-<uuid>/merged_counts/
+                              |
+                              v
+                   _write_aggregation_table()
+                    +-- _checkpoint_sparse_array(expression axis)
+                    |       `-- adata.X
+                    +-- _checkpoint_sparse_array(auxiliary axis)
+                    |       `-- auxiliary_feature_counts
+                    `-- _checkpoint_partition_class_counts()
+                            `-- per-class totals in adata.obs
+                              |
+                              v
+                _remove_aggregation_workspace()
+                    remove the temporary checkpoint, including after failure
+
+The source class column establishes and validates the feature-to-class mapping;
+it is not carried through spatial assignment or stored in the count checkpoint.
+"""
+
 from __future__ import annotations
 
 import uuid
-from collections import Counter, namedtuple
+from collections import Counter
+from collections.abc import Sequence
+from dataclasses import dataclass
 
 import anndata as ad
 import dask
@@ -18,78 +78,223 @@ from spatialdata.models import PointsModel, TableModel
 from spatialdata.transformations import Identity
 from xarray import DataArray
 
-from harpy.image._image import _get_spatial_element, _get_translation
-from harpy.shape._shape import filter_shapes
+from harpy._feature_panels import (
+    _feature_panel_partition_errors,
+    _FeaturePanelContract,
+    _parse_feature_panel,
+    _require_mapping,
+    _require_nonempty_string,
+    _validate_feature_class_dtype,
+)
+from harpy._metadata import (
+    _FEATURE_PANELS_METADATA_KEY,
+    _HARPY_METADATA_KEY,
+    _METADATA_VERSION,
+    _METADATA_VERSION_KEY,
+    _POINTS_METADATA_KEY,
+)
+from harpy.image._image import _get_spatial_element
+from harpy.table._aggregation_checkpoint import (
+    _AggregationCheckpoint,
+    _CheckpointPair,
+    _local_feature_counts,
+    _stage_aggregation_checkpoint,
+)
+from harpy.table._aggregation_contracts import _FeatureClassAggregationContract
+from harpy.table._aggregation_writer import (
+    _create_aggregation_workspace,
+    _FeatureClassWriteContract,
+    _remove_aggregation_workspace,
+    _validate_aggregation_destination,
+    _write_aggregation_table,
+)
+from harpy.table._metadata import (
+    _AUXILIARY_POINTS_FRACTION_COLUMN,
+)
 from harpy.table._table import add_table
 from harpy.table._utils import _sanity_check_append_region
+from harpy.table.canonical_centers import (
+    CanonicalCacheReport,
+    CanonicalCacheUpdatePayload,
+    CanonicalRegionBinding,
+    build_canonical_source_signature,
+    calculate_canonical_centers,
+)
+from harpy.transformations._transformations import _PointToLabelsTransform, _resolve_point_to_labels_transform
 from harpy.utils._keys import _CELL_INDEX, _GENES_KEY, _INSTANCE_KEY, _REGION_KEY, _SPATIAL
-from harpy.utils._transformations import _identity_check_transformations_points
+from harpy.utils.utils import _make_list
+
+_WARNED_DEPRECATED_ATTRIBUTES: set[str] = set()
 
 
-def allocate(
+@dataclass(frozen=True)
+class _AggregationPair:
+    labels_name: str
+    points_name: str
+    coordinate_system: str
+    point_to_labels_transform: _PointToLabelsTransform
+
+
+def aggregate_points(
     sdata: SpatialData,
-    labels_name: str,
-    points_name: str = "transcripts",
+    labels_name: str | list[str],
+    points_name: str | list[str] = "transcripts",
     output_table_name: str = "table_transcriptomics",
-    to_coordinate_system: str = "global",
+    to_coordinate_system: str | list[str] = "global",
     chunks: str | tuple[int, ...] | int | None = None,
-    name_gene_column: str = _GENES_KEY,
-    append: bool = False,
-    update_shapes_elements: bool = False,
+    feature_key: str = _GENES_KEY,
+    expression_class: str | None = None,
     region_key: str = _REGION_KEY,
     instance_key: str = _INSTANCE_KEY,
-    spatial_key: str = _SPATIAL,
-    cell_index_name: str = _CELL_INDEX,
+    table_index_name: str | None = None,
     overwrite: bool = False,
 ) -> SpatialData:
-    """
-    Allocates transcripts to instances via provided `labels_name` and `points_name` and returns updated SpatialData object with a table element (`sdata.tables[output_table_name]`) holding the :class:`anndata.AnnData` object with transcript counts.
+    """Aggregate one or more points elements within paired labels elements.
 
-    It requires that `labels_name` and `points_name` are registered.
-    Relation between `to_coordinate_system` and `points_name` should be a `spatialdata.transformations.Identity` transformation.
-    Relation between `to_coordinate_system` and `labels_name` can be a `spatialdata.transformations.Identity`, `spatialdata.transformations.Translation`, or a `spatialdata.transformation.Sequence` of translations.
+    One aggregation call constructs one complete table. Scalar ``points_name``
+    and ``to_coordinate_system`` values are broadcast across ``labels_name``;
+    lists are paired positionally. Each paired points and labels element must
+    define a finite, invertible affine transformation to the selected shared
+    coordinate system. Harpy composes those registrations to map intrinsic
+    point coordinates directly into intrinsic labels pixels; labels are never
+    resampled.
+
+    Each value ``adata.X[i, j]`` is the number of input points carrying feature
+    ``j`` that were spatially assigned to instance ``i``. These are point
+    counts, not counts of features defined by a panel.
+
+    Aggregation has exactly two mutually exclusive modes, selected solely by
+    ``expression_class``:
+
+    - **Ordinary mode** is selected by ``expression_class=None``. Feature-panel
+      metadata is ignored even when present. The sorted union of observed
+      ``feature_key`` values across the selected points elements defines
+      ``adata.X``. No auxiliary feature matrix or per-class summaries are
+      created.
+    - **Class-aware mode** is selected by a non-empty ``expression_class``.
+      Feature-panel metadata is mandatory and validated. Features assigned to
+      the selected class define ``adata.X``; features in all other panel classes
+      define ``adata.obsm["auxiliary_feature_counts"]`` and the per-class
+      summaries in ``adata.obs``.
+
+    In class-aware mode, aggregation resolves each points element's feature
+    panel through::
+
+        sdata.attrs["harpy"]["points"][points_name]["feature_panel"]
+            -> sdata.attrs["harpy"]["feature_panels"][feature_panel]
+
+    Harpy validates every selected points element against its referenced feature
+    panel before spatial assignment. The panel's ``feature_key`` must match the
+    requested ``feature_key``; its ``feature_class_key`` column must exist in
+    the points, be categorical, and use the panel's ordered classes. Every
+    source point must contain a non-null feature and class, its feature must
+    occur in the panel, and its class must match that feature's panel
+    assignment. All selected points elements must resolve compatible panel
+    contracts. Panel features do not need to have observed points. The panel is
+    authoritative: the materialized points feature-class column is checked for
+    consistency, but matrix axes, feature placement and class summaries are
+    derived from the panel rather than from that column.
+
+    The referenced panel supplies ``feature_key``, ``feature_class_key``,
+    ``classes``, and ``features_by_class``. Features in ``expression_class``
+    define ``adata.X``. Every remaining panel feature is retained in the
+    independent sparse matrix ``adata.obsm["auxiliary_feature_counts"]``, whose
+    ordered columns are recorded under
+    ``adata.uns["feature_matrices"]["auxiliary_feature_counts"]``. Instances
+    receiving only non-expression points remain in the table with an all-zero
+    expression row.
+
+    In class-aware mode, matrix columns are panel-defined rather than
+    observation-derived. Every panel feature is retained even when it is absent
+    from all selected points elements. An unobserved expression feature remains
+    in ``adata.var_names`` with an all-zero column in ``adata.X``; an unobserved
+    auxiliary feature remains in the auxiliary ``feature_columns`` metadata
+    with an all-zero auxiliary-matrix column. For example::
+
+        panel                              resulting feature axes
+        Endogenous: [GeneA, GeneZero]      adata.var_names:
+          observed: GeneA                    [GeneA, GeneZero]
+          unobserved: GeneZero               GeneZero column is all zero
+
+        Negative: [Neg1, NegZero]          auxiliary feature_columns:
+          observed: Neg1                     [Neg1, NegZero]
+          unobserved: NegZero                NegZero column is all zero
+
+    Every panel class is also summarized as ``n_<class>_points`` in
+    ``adata.obs``, together with ``auxiliary_points_fraction``. These summaries
+    are derived from the persisted expression and auxiliary matrices. Auxiliary
+    class feature counts are the lengths of the panel's non-expression
+    ``features_by_class`` lists and are recorded in
+    ``adata.uns["feature_class_aggregation"]`` for later QC; no per-feature
+    rates are persisted in ``adata.obs``.
+
+    Both modes store exactly one canonical center matrix at
+    ``adata.obsm["spatial_canonical"]``. Its dense ``float64`` columns are
+    always ordered ``(z, y, x)`` and contain geometric centers of mass for the
+    retained instance IDs in each source labels element's intrinsic ``scale0``
+    pixel frame. A 2D labels source uses ``z=0``. Per-region source and coverage
+    metadata is stored under
+    ``adata.uns["spatial_coordinates"]["spatial_canonical"]``.
+
+    This operation requires ``sdata`` to be backed by a writable local Zarr
+    store. Aggregation remains partitioned and the final sparse matrices are
+    written in row blocks without materializing the complete reductions on the
+    driver.
+
+    The serialized canonical centers and their metadata are validated before
+    publication. The remaining table contracts (SpatialData annotation,
+    feature-matrix records, source references, and authoritative feature-panel
+    metadata) are validated before publication is committed. Call
+    :func:`harpy.tb.validate_table` to repeat the complete validation later.
 
     Parameters
     ----------
     sdata
-        The SpatialData object.
+        SpatialData object backed by a writable local Zarr store. Write an
+        unbacked object first with ``sdata.write("sdata.zarr")``.
     labels_name
-        The labels element (i.e. segmentation mask) in `sdata` to be used to allocate the transcripts to cells.
+        Labels element or ordered list of labels elements whose instances are
+        used to aggregate the points. Duplicate labels names are rejected.
     points_name
-        The points element in `sdata` that contains the transcripts.
+        Points element or ordered list of points elements. A scalar is
+        broadcast across all labels elements; a list must match their length.
     output_table_name
-        The table element in `sdata` in which to save the AnnData object with the transcripts counts per cell.
+        Table element in which to store the resulting AnnData object.
     to_coordinate_system
-        The coordinate system that holds `labels_name` and `points_name`.
-        This should be the intrinsic coordinate system in pixels.
+        Shared coordinate system or ordered list of shared coordinate systems
+        pairing each labels and points element. A scalar is broadcast across
+        all pairs. Both elements in a pair must define compatible, finite and
+        invertible same-dimensional affine transformations to that system.
     chunks
-        Chunk size for processing. Consider setting 'chunks' to 'None' and rechunk the 'labels_name' to the desired chunk size on disk, e.g. with :func:`harpy.im.add_labels`.
-    name_gene_column
-        Column name in the `points_name` representing gene information.
-    append
-        If set to True, and the `labels_name` does not yet exist as a `region_key` in `sdata.tables[output_table_name].obs`,
-        the transcripts counts obtained during the current function call will be appended (along axis=0) to any existing transcript count values.
-        within the SpatialData object's table attribute. If False, and overwrite is set to True any existing data in `sdata.tables[output_table_name]` will be overwritten by the newly extracted transcripts counts.
-    update_shapes_elements
-        Whether to filter the shapes elements associated with `labels_name`.
-        If set to `True`, cells that do not appear in resulting `output_table_name` (with `region_key` equal to `labels_name`) will be removed from the shapes elements (via `instance_key`) in the `sdata` object.
-        Filtered shapes will be added to `sdata` with prefix 'filtered_segmentation'.
-        This parameter is deprecated, and will be removed in a future version.
+        Optional labels-array chunk size used during assignment. Rechunking the
+        labels element on disk beforehand is generally more efficient.
+    feature_key
+        Column in each points element containing feature identifiers, such as
+        gene names. In class-aware mode it must equal the panel's
+        ``feature_key``. It must differ from ``instance_key``.
+    expression_class
+        Selects the aggregation mode. ``None`` selects ordinary mode, which
+        ignores feature-panel metadata and retains all observed features in
+        ``adata.X``. A non-empty string selects class-aware mode and names the
+        panel class retained in ``adata.X``; all other panel classes are
+        retained in the auxiliary feature matrix.
     instance_key
-        Instance key. The name of the column in :class:`~anndata.AnnData` table `.obs` that will hold the instance ids.
+        Column in ``adata.obs`` holding instance identifiers. It must differ
+        from ``feature_key`` and, in class-aware mode, from the panel's
+        ``feature_class_key``.
     region_key
-        Region key. The name of the column in  :class:`~anndata.AnnData` table `.obs` that will hold the name of the element(s) that are annotated by the resulting table.
-    spatial_key
-        The key in the :class:`~anndata.AnnData` table `.obsm` that will hold the `x` and `y` center of the instances.
-        This center is calculated by taking the average x,y coordinate of the transcripts found inside the cell.
-    cell_index_name
-        The name of the index of the resulting :class:`~anndata.AnnData` table.
+        Categorical column in ``adata.obs`` holding labels-element names.
+    table_index_name
+        Name of the resulting ``adata.obs`` index. If ``None``, defaults to
+        ``f"{instance_key}_index"``. It must not collide with an ``adata.obs``
+        column produced by aggregation.
     overwrite
-        If True, overwrites the `output_table_name` if it already exists in `sdata`.
+        Whether an existing ``output_table_name`` may be replaced.
 
     Returns
     -------
-    An updated SpatialData object with an AnnData table added to `sdata.tables` at slot `output_table_name`.
+    The updated SpatialData object with one AnnData table at
+    ``sdata.tables[output_table_name]``.
 
     Example
     --------
@@ -97,144 +302,441 @@ def allocate(
 
         sdata = hp.datasets.resolve_example_multiple_coordinate_systems()
 
-        # Create an AnnData table with transcript count per cell with name 'my_table'
-        sdata = hp.tb.allocate(
+        sdata = hp.tb.aggregate_points(
             sdata,
-            labels_name="labels_a1_1",
-            points_name="points_a1_1",
+            labels_name=["labels_a1_1", "labels_a1_2"],
+            points_name=["points_a1_1", "points_a1_2"],
             output_table_name="my_table",
-            to_coordinate_system="a1_1",
-            overwrite=True,
-        )
-
-        # Append transcript count per cell from different sample to 'my_table'
-        sdata = hp.tb.allocate(
-            sdata,
-            labels_name="labels_a1_2",
-            points_name="points_a1_2",
-            output_table_name="my_table",
-            to_coordinate_system="a1_2",
-            append=True,
+            to_coordinate_system=["a1_1", "a1_2"],
             overwrite=True,
         )
     """
-    if labels_name not in [*sdata.labels]:
-        raise ValueError(
-            f"Provided labels element '{labels_name}' not in 'sdata', please specify a labels element from '{[*sdata.labels]}'"
-        )
-    ddf = sdata.points[points_name]
-
-    se = _get_spatial_element(sdata, element_name=labels_name)
-
-    combined_partitions = _aggregate(
-        se=se,
-        ddf=ddf,
-        value_key=name_gene_column,
-        drop_coordinates=False,
-        to_coordinate_system=to_coordinate_system,
-        chunks=chunks,
-        cell_index_name=cell_index_name,
-    )
-
-    if "z" in combined_partitions:
-        coordinates = combined_partitions.groupby(cell_index_name)["x", "y", "z"].mean()
-    else:
-        coordinates = combined_partitions.groupby(cell_index_name)["x", "y"].mean()
-
-    # make sure combined_partiions[ name_gene_column ] is not categorical,
-    # because otherwise resulting cell_counts dataframe will contain zero counts for each gene for each cells (which would results in a huge dataframe)
-    combined_partitions[name_gene_column] = combined_partitions[name_gene_column].astype("str")
-
-    cell_counts = combined_partitions.groupby([cell_index_name, name_gene_column]).size()
-
-    cell_counts = cell_counts.map_partitions(lambda x: x.astype(np.uint32))
-
-    coordinates, cell_counts = dask.compute(coordinates, cell_counts)
-
-    cell_counts = cell_counts.to_frame(name="values")
-    cell_counts = cell_counts.reset_index()
-
-    cell_counts[name_gene_column] = cell_counts[name_gene_column].astype("object")
-    cell_counts[name_gene_column] = pd.Categorical(cell_counts[name_gene_column])
-
-    columns_categories = cell_counts[name_gene_column].cat.categories.to_list()
-    columns_nodes = pd.Categorical(cell_counts[name_gene_column], categories=columns_categories, ordered=True)
-
-    indices_of_aggregated_rows = np.array(cell_counts[cell_index_name])
-    rows_categories = np.unique(indices_of_aggregated_rows)
-
-    rows_nodes = pd.Categorical(indices_of_aggregated_rows, categories=rows_categories, ordered=True)
-
-    X = sparse.coo_matrix(
-        (
-            cell_counts["values"].values.ravel(),
-            (rows_nodes.codes, columns_nodes.codes),
-        ),
-        shape=(len(rows_categories), len(columns_categories)),
-    ).tocsr()
-
-    adata = AnnData(
-        X,
-        obs=pd.DataFrame(index=rows_categories),
-        var=pd.DataFrame(index=columns_categories),
-        dtype=X.dtype,
-    )
-
-    coordinates.index = coordinates.index.map(str)
-
-    # sanity check
-    assert np.array_equal(np.unique(coordinates.index), np.unique(adata.obs.index))
-
-    # make sure coordinates is in same order as adata
-    coordinates = coordinates.reindex(adata.obs.index)
-
-    adata.obsm[spatial_key] = coordinates.values
-
-    adata.obs[instance_key] = adata.obs.index.astype(int)
-
-    adata.obs[region_key] = pd.Categorical([labels_name] * len(adata.obs))
-
-    _uuid_value = str(uuid.uuid4())[:8]
-    adata.obs.index = adata.obs.index.map(lambda x: f"{x}_{labels_name}_{_uuid_value}")
-
-    adata.obs.index.name = cell_index_name
-
-    if append:
-        region = []
-        if output_table_name in [*sdata.tables]:
-            _sanity_check_append_region(
-                adata=sdata.tables[output_table_name],
-                region_key=region_key,
-                instance_key=instance_key,
-                region=labels_name,
-            )
-            adata = ad.concat([sdata.tables[output_table_name], adata], axis=0)
-            # get the regions already in sdata, and append the new one
-            region = sdata.tables[output_table_name].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY]
-        region.append(labels_name)
-
-    else:
-        region = [labels_name]
-
-    sdata = add_table(
+    destination = _validate_aggregation_destination(
         sdata,
-        adata=adata,
         output_table_name=output_table_name,
-        region=region,
-        instance_key=instance_key,
-        region_key=region_key,
         overwrite=overwrite,
     )
-
-    if update_shapes_elements:
-        sdata = filter_shapes(
+    _validate_aggregation_column_keys(feature_key=feature_key, instance_key=instance_key)
+    table_index_name = _resolve_table_index_name(
+        table_index_name,
+        instance_key=instance_key,
+        region_key=region_key,
+    )
+    pairs = _normalize_aggregation_pairs(
+        sdata,
+        labels_name=labels_name,
+        points_name=points_name,
+        to_coordinate_system=to_coordinate_system,
+        feature_key=feature_key,
+    )
+    if expression_class is None:
+        contract = None
+    else:
+        contract = _resolve_feature_class_contract(
             sdata,
-            table_name=output_table_name,
-            labels_name=labels_name,
-            prefix_filtered_shapes_name="filtered_segmentation",
+            pairs=pairs,
+            feature_key=feature_key,
+            expression_class=expression_class,
+            region_key=region_key,
+            instance_key=instance_key,
+            table_index_name=table_index_name,
         )
+        _validate_feature_panel_contents(sdata, pairs=pairs, panel=contract.panel)
 
-    return sdata
+    checkpoint_pairs = tuple(
+        _CheckpointPair(
+            ordinal=ordinal,
+            labels_name=pair.labels_name,
+            points_name=pair.points_name,
+            coordinate_system=pair.coordinate_system,
+            coordinate_columns=("x", "y", "z") if "z" in sdata.points[pair.points_name].columns else ("x", "y"),
+        )
+        for ordinal, pair in enumerate(pairs)
+    )
+    workspace = _create_aggregation_workspace(destination)
+    try:
+        partial_counts: list[DaskDataFrame] = []
+        for pair_ordinal, pair in enumerate(pairs):
+            points = sdata.points[pair.points_name]
+            # Lazily map every point to the nonzero label at its rounded pixel.
+            # The result contains one (feature, instance) row per assigned
+            # point. The source class column is validated separately against
+            # the panel; downstream class totals are derived from the panel's
+            # feature-to-class mapping. Coordinates, outside points and
+            # background assignments are omitted; aggregation into compact
+            # (instance, feature, count) rows happens below.
+            assigned_points = _assign_points_to_labels(
+                se=_get_spatial_element(sdata, element_name=pair.labels_name),
+                ddf=points,
+                point_to_labels_transform=pair.point_to_labels_transform,
+                value_key=feature_key,
+                drop_coordinates=True,
+                chunks=chunks,
+                instance_key=instance_key,
+            )
+            partial_counts.append(
+                _local_feature_counts(
+                    assigned_points,
+                    pair_ordinal=pair_ordinal,
+                    instance_key=instance_key,
+                    feature_key=feature_key,
+                )
+            )
+
+        checkpoint, observed_feature_axis = _stage_aggregation_checkpoint(
+            partial_counts,
+            path=workspace / "merged_counts",
+            pairs=checkpoint_pairs,
+            discover_observed_features=contract is None,
+        )
+        canonical_payloads_by_pair = _canonical_center_payloads(
+            sdata,
+            checkpoint=checkpoint,
+            output_table_name=output_table_name,
+            region_key=region_key,
+            instance_key=instance_key,
+        )
+        class_write_contract = None
+        if contract is None:
+            if observed_feature_axis is None:
+                raise RuntimeError("Ordinary aggregation did not produce an observed feature axis.")
+            expression_axis = observed_feature_axis
+        else:
+            expression_axis = contract.expression_feature_axis
+            class_write_contract = _FeatureClassWriteContract(
+                feature_key=contract.panel.feature_key,
+                feature_class_key=contract.panel.feature_class_key,
+                classes=contract.panel.classes,
+                expression_class=contract.expression_class,
+                features_by_class_items=contract.panel.features_by_class_items,
+                count_columns=contract.count_columns,
+            )
+        return _write_aggregation_table(
+            sdata,
+            destination=destination,
+            workspace=workspace,
+            checkpoint=checkpoint,
+            expression_axis=expression_axis,
+            canonical_payloads_by_pair=canonical_payloads_by_pair,
+            output_table_name=output_table_name,
+            feature_key=feature_key,
+            region_key=region_key,
+            instance_key=instance_key,
+            table_index_name=table_index_name,
+            class_contract=class_write_contract,
+        )
+    finally:
+        _remove_aggregation_workspace(workspace)
+
+
+def __getattr__(name: str) -> object:
+    if name == "allocate":
+        if name not in _WARNED_DEPRECATED_ATTRIBUTES:
+            _WARNED_DEPRECATED_ATTRIBUTES.add(name)
+            log.warning("`harpy.tb.allocate` is deprecated. Import and use `harpy.tb.aggregate_points` instead.")
+        return aggregate_points
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def _normalize_aggregation_pairs(
+    sdata: SpatialData,
+    *,
+    labels_name: str | list[str],
+    points_name: str | list[str],
+    to_coordinate_system: str | list[str],
+    feature_key: str,
+) -> tuple[_AggregationPair, ...]:
+    """Normalize scalar/list inputs into validated positional aggregation pairs."""
+    labels_names = _require_name_list(labels_name, parameter_name="labels_name")
+    if len(set(labels_names)) != len(labels_names):
+        raise ValueError("Duplicate labels elements are not supported in a single aggregation call.")
+    points_names = _broadcast_names(points_name, len(labels_names), parameter_name="points_name")
+    coordinate_systems = _broadcast_names(
+        to_coordinate_system,
+        len(labels_names),
+        parameter_name="to_coordinate_system",
+    )
+    missing_labels = sorted(set(labels_names) - set(sdata.labels))
+    if missing_labels:
+        raise ValueError(f"Labels elements are not present in 'sdata.labels': {missing_labels}.")
+    missing_points = sorted(set(points_names) - set(sdata.points))
+    if missing_points:
+        raise ValueError(f"Points elements are not present in 'sdata.points': {missing_points}.")
+
+    coordinate_columns: tuple[str, ...] | None = None
+    for points in dict.fromkeys(points_names):
+        columns = sdata.points[points].columns
+        if feature_key not in columns:
+            raise ValueError(f"Points element {points!r} does not contain feature column {feature_key!r}.")
+        current = ("x", "y", "z") if "z" in columns else ("x", "y")
+        if not all(column in columns for column in current):
+            raise ValueError(f"Points element {points!r} must contain coordinate columns 'x' and 'y'.")
+        if coordinate_columns is None:
+            coordinate_columns = current
+        elif coordinate_columns != current:
+            raise ValueError(
+                "All selected points elements must use the same coordinate dimensions, "
+                f"found {coordinate_columns} and {current}."
+            )
+
+    pairs = []
+    for labels, points, coordinate_system in zip(
+        labels_names,
+        points_names,
+        coordinate_systems,
+        strict=True,
+    ):
+        points_element = sdata.points[points]
+        labels_element = _get_spatial_element(sdata, element_name=labels)
+        pairs.append(
+            _AggregationPair(
+                labels_name=labels,
+                points_name=points,
+                coordinate_system=coordinate_system,
+                point_to_labels_transform=_resolve_point_to_labels_transform(
+                    points_element,
+                    labels_element,
+                    to_coordinate_system=coordinate_system,
+                ),
+            )
+        )
+    return tuple(pairs)
+
+
+def _validate_aggregation_column_keys(*, feature_key: str, instance_key: str) -> None:
+    """Validate distinct public columns used for features and assigned instances."""
+    for parameter_name, value in (("feature_key", feature_key), ("instance_key", instance_key)):
+        if not isinstance(value, str) or not value:
+            raise ValueError(f"Parameter {parameter_name!r} must be a non-empty string, found {value!r}.")
+    if feature_key == instance_key:
+        raise ValueError("Parameters 'feature_key' and 'instance_key' must refer to different columns.")
+
+
+def _require_name_list(value: str | list[str], *, parameter_name: str) -> list[str]:
+    values = _make_list(value)
+    if not values:
+        raise ValueError(f"Parameter {parameter_name!r} must contain at least one name.")
+    if any(not isinstance(item, str) or not item for item in values):
+        raise ValueError(f"Parameter {parameter_name!r} must contain only non-empty strings, found {values!r}.")
+    return values
+
+
+def _broadcast_names(value: str | list[str], size: int, *, parameter_name: str) -> list[str]:
+    values = _require_name_list(value, parameter_name=parameter_name)
+    if len(values) == 1:
+        return values * size
+    if len(values) != size:
+        raise ValueError(
+            f"Parameter {parameter_name!r} must have length 1 or match the number of labels elements "
+            f"({size}), found {len(values)}."
+        )
+    return values
+
+
+def _resolve_table_index_name(
+    table_index_name: str | None,
+    *,
+    instance_key: str,
+    region_key: str,
+) -> str:
+    """Resolve and validate the name of the output AnnData observation index."""
+    result = f"{instance_key}_index" if table_index_name is None else table_index_name
+    if not isinstance(result, str) or not result:
+        raise ValueError(f"Parameter 'table_index_name' must be a non-empty string or None, found {result!r}.")
+    reserved = {instance_key, region_key, _AUXILIARY_POINTS_FRACTION_COLUMN}
+    if result in reserved:
+        raise ValueError(
+            f"Parameter 'table_index_name' must not collide with an aggregation output column, found {result!r}."
+        )
+    return result
+
+
+def _resolve_feature_class_contract(
+    sdata: SpatialData,
+    *,
+    pairs: tuple[_AggregationPair, ...],
+    feature_key: str,
+    expression_class: str,
+    region_key: str,
+    instance_key: str,
+    table_index_name: str,
+) -> _FeatureClassAggregationContract:
+    """Resolve one immutable feature-panel contract for class-aware aggregation."""
+    harpy_metadata = _require_mapping(sdata.attrs.get(_HARPY_METADATA_KEY), path=_HARPY_METADATA_KEY)
+    version = harpy_metadata.get(_METADATA_VERSION_KEY)
+    if isinstance(version, bool) or not isinstance(version, int) or version != _METADATA_VERSION:
+        raise ValueError(
+            f"Harpy metadata {_HARPY_METADATA_KEY}.{_METADATA_VERSION_KEY} must equal "
+            f"{_METADATA_VERSION}, found {version!r}."
+        )
+    points_registry = _require_mapping(
+        harpy_metadata.get(_POINTS_METADATA_KEY),
+        path=f"{_HARPY_METADATA_KEY}.{_POINTS_METADATA_KEY}",
+    )
+    panel_registry = _require_mapping(
+        harpy_metadata.get(_FEATURE_PANELS_METADATA_KEY),
+        path=f"{_HARPY_METADATA_KEY}.{_FEATURE_PANELS_METADATA_KEY}",
+    )
+
+    resolved: list[_FeaturePanelContract] = []
+    for points_name in dict.fromkeys(pair.points_name for pair in pairs):
+        points_record = _require_mapping(
+            points_registry.get(points_name),
+            path=f"{_HARPY_METADATA_KEY}.{_POINTS_METADATA_KEY}.{points_name}",
+        )
+        panel_name = _require_nonempty_string(
+            points_record.get("feature_panel"),
+            path=f"{_HARPY_METADATA_KEY}.{_POINTS_METADATA_KEY}.{points_name}.feature_panel",
+        )
+        panel_record = _require_mapping(
+            panel_registry.get(panel_name),
+            path=f"{_HARPY_METADATA_KEY}.{_FEATURE_PANELS_METADATA_KEY}.{panel_name}",
+        )
+        panel = _parse_feature_panel(panel_record, panel_name=panel_name)
+        if panel.feature_key != feature_key:
+            raise ValueError(
+                f"Feature panel {panel_name!r} declares feature_key={panel.feature_key!r}, "
+                f"which does not match feature_key={feature_key!r}."
+            )
+        if panel.feature_class_key == instance_key:
+            raise ValueError(
+                f"Feature panel {panel_name!r} declares feature_class_key={panel.feature_class_key!r}, "
+                "which must differ from instance_key."
+            )
+        points = sdata.points[points_name]
+        if panel.feature_class_key not in points.columns:
+            raise ValueError(
+                f"Points element {points_name!r} does not contain panel feature-class column "
+                f"{panel.feature_class_key!r}."
+            )
+        _validate_feature_class_dtype(points, points_name=points_name, panel=panel)
+        resolved.append(panel)
+
+    panel = resolved[0]
+    for candidate in resolved[1:]:
+        if candidate != panel:
+            raise ValueError(
+                "All points elements in one class-aware aggregation call must reference compatible panels."
+            )
+    contract = _FeatureClassAggregationContract(
+        panel=panel,
+        expression_class=expression_class,
+    )
+    generated = {column for _, column in contract.count_columns}
+    collisions = sorted(generated & {region_key, instance_key, table_index_name, _AUXILIARY_POINTS_FRACTION_COLUMN})
+    if collisions:
+        raise ValueError(f"Generated feature-class columns collide with aggregation output columns: {collisions}.")
+
+    return contract
+
+
+def _canonical_center_payloads(
+    sdata: SpatialData,
+    *,
+    checkpoint: _AggregationCheckpoint,
+    output_table_name: str,
+    region_key: str,
+    instance_key: str,
+) -> dict[int, CanonicalCacheUpdatePayload]:
+    """Calculate one intrinsic canonical-center payload per aggregation pair.
+
+    Bindings use the checkpoint's final output-row positions and instance IDs,
+    so their coverage metadata describes the table that will be written rather
+    than the order in which labels happen to be traversed.
+
+    Parameters
+    ----------
+    sdata
+        SpatialData object containing the source labels elements.
+    checkpoint
+        Merged counts and final row ownership for every aggregation pair.
+    output_table_name
+        Name of the table being constructed.
+    region_key
+        Observation column containing labels-region names.
+    instance_key
+        Observation column containing labels instance IDs.
+
+    Returns
+    -------
+    Mapping from aggregation-pair ordinal to an immutable center payload in
+    intrinsic ``(z, y, x)`` coordinates.
+    """
+    output_row_keys = checkpoint.output_row_keys
+    log.info(
+        f"Calculating canonical label centers for table {output_table_name!r} from {len(checkpoint.pairs)} "
+        f"labels region(s) and {len(output_row_keys)} retained instance(s)."
+    )
+    payloads: dict[int, CanonicalCacheUpdatePayload] = {}
+    for pair in checkpoint.pairs:
+        row_positions = np.asarray(
+            [row for row, (pair_ordinal, _) in enumerate(output_row_keys) if pair_ordinal == pair.ordinal],
+            dtype=np.intp,
+        )
+        instance_ids = np.asarray([output_row_keys[row][1] for row in row_positions], dtype=np.uint64)
+        binding = CanonicalRegionBinding(
+            table_name=output_table_name,
+            labels_name=pair.labels_name,
+            region_key=region_key,
+            instance_key=instance_key,
+            row_positions=row_positions,
+            instance_ids=instance_ids,
+        )
+        source_signature = build_canonical_source_signature(sdata, pair.labels_name)
+        payloads[pair.ordinal] = calculate_canonical_centers(
+            sdata,
+            CanonicalCacheReport(
+                stored_metadata=None,
+                source_signature=source_signature,
+                binding=binding,
+            ),
+        )
+    log.info(f"Finished calculating canonical label centers for table {output_table_name!r}.")
+    return payloads
+
+
+def _validate_feature_panel_contents(
+    sdata: SpatialData,
+    *,
+    pairs: tuple[_AggregationPair, ...],
+    panel: _FeaturePanelContract,
+) -> None:
+    """Validate each unique source points element against its feature panel.
+
+    Validation is computed before spatial assignment starts. A points element
+    reused by multiple aggregation pairs is scanned only once, and every source
+    point is checked, including points that would later fall outside the labels
+    raster or on background.
+    """
+    points_names = tuple(dict.fromkeys(pair.points_name for pair in pairs))
+    categorical_dtype = pd.CategoricalDtype(categories=panel.classes)
+    error_tasks = []
+    for points_name in points_names:
+        points = sdata.points[points_name]
+        normalized_points = points.assign(
+            **{panel.feature_class_key: points[panel.feature_class_key].astype(categorical_dtype)}
+        )
+        partition_errors = normalized_points[[panel.feature_key, panel.feature_class_key]].map_partitions(
+            _feature_panel_partition_errors,
+            feature_key=panel.feature_key,
+            feature_class_key=panel.feature_class_key,
+            class_by_feature=panel.class_by_feature,
+            meta=pd.Series(name="error", dtype="object"),
+        )
+        error_tasks.append(dask.delayed(_first_partition_error)(*partition_errors.to_delayed()))
+
+    computed_errors = dask.compute(*error_tasks)
+    for points_name, error in zip(points_names, computed_errors, strict=True):
+        if error is not None:
+            raise ValueError(f"Points element {points_name!r} disagrees with its feature panel: {error}")
+
+
+def _first_partition_error(*partitions: pd.Series) -> object | None:
+    """Return the first compact error emitted by a partition-wise validation."""
+    for partition in partitions:
+        if len(partition):
+            return partition.iloc[0]
+    return None
 
 
 def bin_counts(
@@ -243,7 +745,7 @@ def bin_counts(
     labels_name: str,
     output_table_name: str,
     to_coordinate_system: str = "global",
-    chunks: str | tuple[int, ...] | int | None = 10000,
+    chunks: str | tuple[int, ...] | int | None = None,
     append: bool = True,
     region_key: str = _REGION_KEY,
     instance_key: str = _INSTANCE_KEY,
@@ -267,7 +769,10 @@ def bin_counts(
     output_table_name
         The table element in `sdata` in which to save the AnnData object with the binned counts per cell or region defined by `labels_name`.
     to_coordinate_system
-        The coordinate system that holds `labels_name`.
+        Shared coordinate system containing the table's spatial coordinates and
+        ``labels_name``. The table coordinates are interpreted as identity in
+        this system; the labels may use any compatible, finite and invertible
+        same-dimensional affine transformation into it.
     chunks
         Chunk sizes for processing. Can be a string, integer, or tuple of integers.
         Consider setting the chunks to a relatively high value to speed up processing,
@@ -332,16 +837,22 @@ def bin_counts(
         df,
         transformations={to_coordinate_system: Identity()},
     )
+    point_to_labels_transform = _resolve_point_to_labels_transform(
+        ddf,
+        se,
+        to_coordinate_system=to_coordinate_system,
+    )
 
-    combined_partitions = _aggregate(
+    combined_partitions = _assign_points_to_labels(
         se=se,
         ddf=ddf,
+        point_to_labels_transform=point_to_labels_transform,
         chunks=chunks,
-        to_coordinate_system=to_coordinate_system,
         name_x=name_x,
         name_y=name_y,
         drop_coordinates=False,
         value_key=name_barcode_id,
+        instance_key=cell_index_name,
     )
 
     coordinates = combined_partitions.groupby(cell_index_name)[name_x, name_y].mean()
@@ -440,108 +951,391 @@ def bin_counts(
     return sdata
 
 
-def _aggregate(
+def _assign_points_to_labels(
     se: DataArray,
     ddf: DaskDataFrame,
-    value_key: str,
+    point_to_labels_transform: _PointToLabelsTransform,
+    value_key: str | Sequence[str],
     drop_coordinates: bool = False,  # if set to True, will drop ((z),y,x) in resulting dask dataframe
-    chunks: str | tuple[int, ...] | int | None = 10000,
-    to_coordinate_system: str = "global",
+    chunks: str | tuple[int, ...] | int | None = None,
     name_x: str = "x",
     name_y: str = "y",
     name_z: str = "z",
-    cell_index_name: str = _CELL_INDEX,
+    instance_key: str = _INSTANCE_KEY,
 ) -> DaskDataFrame:
-    # helper function to do an aggregation between a dask array containing ints, and a dask dataframe containing coordinates ((z), y, x).
-    assert np.issubdtype(se.data.dtype, np.integer), "Only integer arrays are supported."
-    assert name_y in ddf and name_x in ddf, f"Dask Dataframe must contain '{name_y}' and '{name_x}' columns."
-    Coords = namedtuple("Coords", ["x0", "y0"])
-    coords = Coords(*_get_translation(se, to_coordinate_system=to_coordinate_system))
-    _identity_check_transformations_points(ddf, to_coordinate_system=to_coordinate_system)
+    """Assign points to non-background labels through the labels chunk grid.
 
-    value_keys = [name_x, name_y, name_z, value_key] if name_z in ddf.columns else [name_x, name_y, value_key]
+    The supplied transformation maps intrinsic source point coordinates through
+    their selected shared coordinate system into the intrinsic pixel frame of
+    ``se``. It is applied vectorially within each points partition before the
+    resulting continuous labels coordinates are rounded once to integer pixel
+    indices. Source point-coordinate columns remain unchanged; collision-safe
+    temporary columns carry labels-local lookup coordinates.
 
-    ddf = ddf[value_keys]
+    ::
 
+        source x/y[/z] columns
+                | retained unchanged
+                v
+        apply point-to-label affine
+                |
+                v
+        continuous coordinates in (x, y[, z]) order
+                | reorder and round once
+                v
+        temporary columns in labels-array order: (y, x) or (z, y, x)
+        (__harpy_labels_y/x or __harpy_labels_z/y/x)
+                |
+                v
+        labels-chunk routing and vectorized lookup
+                |
+                v
+        temporary columns discarded
+
+    Each transformed point is mapped once to a temporary row-major labels-block
+    ID. For a two-dimensional raster the mapping is:
+
+    ::
+
+                     x chunk
+                    0       1
+                +-------+-------+
+        y chunk 0 | id 0  | id 1  |
+                +-------+-------+
+        y chunk 1 | id 2  | id 3  |
+                +-------+-------+
+
+    Chunk intervals are half-open, so a point exactly on an internal boundary
+    belongs to the chunk beginning at that boundary. Points outside the full
+    labels extent are removed before the points are redistributed once by
+    block ID. Each resulting points partition is paired with the corresponding
+    delayed labels chunk and looked up vectorially. Three-dimensional labels
+    apply the same rule in row-major ``(z, y, x)`` order.
+
+    Graph construction does not read either source. The returned Dask dataframe
+    contains one row per point assigned to a nonzero label, the requested value
+    columns, the assigned ``instance_key`` column and, unless
+    ``drop_coordinates=True``, the unchanged source point-coordinate columns.
+    Requested categorical dtypes are preserved.
+
+    Redistribution does not preserve the input index, row order, or partition
+    order. The temporary block ID is absent from the returned dataframe.
+
+    Parameters
+    ----------
+    se
+        Two- or three-dimensional integer labels raster in ``(y, x)`` or
+        ``(z, y, x)`` order.
+    ddf
+        Points dataframe whose coordinate columns are expressed in the
+        intrinsic points frame described by ``point_to_labels_transform``.
+    point_to_labels_transform
+        Validated affine mapping from intrinsic points coordinates to intrinsic
+        labels pixel coordinates.
+    value_key
+        Column or columns retained alongside the assigned label ID.
+    drop_coordinates
+        Whether to omit the unchanged source point coordinates from the result.
+    chunks
+        Optional virtual rechunking of the labels raster. ``None`` preserves
+        its existing chunks.
+    name_x, name_y, name_z
+        Point coordinate-column names.
+    instance_key
+        Name of the output label-ID column.
+
+    Returns
+    -------
+    Lazy assigned-points dataframe. Its index and ordering are unspecified.
+
+    Examples
+    --------
+    With ``value_key="gene"``, the raster lookup conceptually transforms
+    individual input points as follows. ``cell_ID`` contains the label value at
+    the transformed and rounded intrinsic labels coordinate::
+
+        input points                  assigned points
+        x     y    gene               gene    cell_ID
+        12.1  8.9  EPCAM       -->    EPCAM   42
+        14.2  9.1  EPCAM       -->    EPCAM   42
+        80.0  4.0  Neg01       -->    omitted: label 0
+
+    With ``drop_coordinates=True``, the output has one column for every
+    requested ``value_key`` plus the assigned instance-ID column. The exact row
+    count remains unknown until computation and cannot exceed the input point
+    count. This function performs assignment only; repeated
+    ``(cell_ID, gene)`` rows are aggregated into counts by the caller.
+    """
+    if not np.issubdtype(se.data.dtype, np.integer):
+        raise ValueError(f"Labels must use an integer dtype, found {se.data.dtype}.")
+    dimensions = tuple(se.dims)
+    if dimensions == ("y", "x"):
+        expected_labels_axes = ("x", "y")
+    elif dimensions == ("z", "y", "x"):
+        expected_labels_axes = ("x", "y", "z")
+    else:
+        raise ValueError(f"Labels dimensions must be ('y', 'x') or ('z', 'y', 'x'), found {dimensions!r}.")
+    if point_to_labels_transform.labels_axes != expected_labels_axes:
+        raise ValueError(
+            "Point-to-label transformation axes do not match the labels raster, "
+            f"found {point_to_labels_transform.labels_axes!r} for dimensions {dimensions!r}."
+        )
+
+    coordinate_name_by_axis = {"x": name_x, "y": name_y, "z": name_z}
+    point_coordinate_keys = tuple(coordinate_name_by_axis[axis] for axis in point_to_labels_transform.point_axes)
+    missing_coordinates = [key for key in point_coordinate_keys if key not in ddf.columns]
+    if missing_coordinates:
+        raise ValueError(f"Points dataframe is missing required coordinate columns: {missing_coordinates}.")
+
+    requested_value_keys = list(dict.fromkeys([value_key] if isinstance(value_key, str) else value_key))
+    missing_value_keys = [key for key in requested_value_keys if key not in ddf.columns]
+    if missing_value_keys:
+        raise ValueError(f"Dask DataFrame does not contain requested value columns: {missing_value_keys}.")
+
+    value_keys = list(dict.fromkeys([*point_coordinate_keys, *requested_value_keys]))
     arr = se.data
-
     if chunks is not None:
         arr = arr.rechunk(chunks)
-    else:
-        arr = arr.rechunk(arr.chunksize)
-
-    if arr.ndim == 2:
-        arr = arr[None, ...]
-
-    ddf[name_x] = ddf[name_x].round().astype(int)
-    ddf[name_y] = ddf[name_y].round().astype(int)
-    if name_z in ddf.columns:
-        ddf[name_z] = ddf[name_z].round().astype(int)
-
-    delayed_chunks = arr.to_delayed().flatten()
-
-    # chunk info needed for querying
-    chunk_info = []
-    _chunks = arr.chunks
-
-    # Iterate over each chunk and compute its coordinates and size, needed for query
-    for i in range(delayed_chunks.shape[0]):
-        z, y, x = np.unravel_index(i, [len(_chunks[0]), len(_chunks[1]), len(_chunks[2])])
-        size = (_chunks[0][z], _chunks[1][y], _chunks[2][x])
-        start_coords = (sum(_chunks[0][:z]), sum(_chunks[1][:y]), sum(_chunks[2][:x]))
-        chunk_info.append((start_coords, size))
 
     log.info("Calculating cell counts.")
 
-    @dask.delayed
-    def _process_partition(_chunk, _chunk_info, ddf_partition):
-        ddf_partition = ddf_partition.copy()
+    projected = ddf[value_keys]
+    occupied_columns = set(projected.columns)
+    # Reserve collision-safe temporary columns for the transformed, rounded
+    # coordinates in labels-array order: (y, x) or (z, y, x). These columns
+    # are used only for chunk routing and lookup; source coordinates remain unchanged.
+    label_local_coordinate_keys = []
+    for dimension in dimensions:
+        candidate = f"__harpy_labels_{dimension}"
+        while candidate in occupied_columns:
+            candidate = f"_{candidate}"
+        occupied_columns.add(candidate)
+        label_local_coordinate_keys.append(candidate)
+    label_local_coordinate_keys = tuple(label_local_coordinate_keys)
 
-        z_start, y_start, x_start = _chunk_info[0]
+    block_id_key = "__harpy_block_id"
+    while block_id_key in occupied_columns:
+        block_id_key = f"_{block_id_key}"
+    boundaries = tuple(tuple(np.cumsum((0, *axis_chunks), dtype=np.int64).tolist()) for axis_chunks in arr.chunks)
+    grid_shape = tuple(len(axis_chunks) for axis_chunks in arr.chunks)
+    number_of_blocks = int(np.prod(grid_shape))
 
-        if name_z in ddf_partition.columns:
-            z_coords = ddf_partition[name_z].values.astype(int) - z_start
-        else:
-            z_coords = 0
+    classified_meta = projected._meta.copy()
+    for key in label_local_coordinate_keys:
+        classified_meta[key] = pd.Series(index=classified_meta.index, dtype=np.int64)
+    classified_meta[block_id_key] = pd.Series(index=classified_meta.index, dtype=np.int64)
+    classified = projected.map_partitions(
+        _classify_points_by_label_block,
+        point_coordinate_keys=point_coordinate_keys,
+        label_local_coordinate_keys=label_local_coordinate_keys,
+        point_to_labels_matrix=point_to_labels_transform.affine_matrix,
+        boundaries=boundaries,
+        grid_shape=grid_shape,
+        block_id_key=block_id_key,
+        meta=classified_meta,
+    )
 
-        y_coords = ddf_partition[name_y].values.astype(int) - (int(coords.y0) + y_start)
-        x_coords = ddf_partition[name_x].values.astype(int) - (int(coords.x0) + x_start)
+    # Explicit divisions prevent Dask from sampling the points to estimate
+    # quantiles. They also give one points partition per labels chunk, so both
+    # collections can be paired positionally in row-major block order.
+    # This remains a full shuffle because arbitrary input partitions may contain
+    # points from any block. If points elements later expose a trusted spatial
+    # partition index aligned with the labels-block grid, those already aligned
+    # partitions can be paired directly and this redistribution can be skipped.
+    routed = classified.set_index(
+        block_id_key,
+        divisions=tuple(range(number_of_blocks + 1)),
+    )
 
-        ddf_partition.loc[:, cell_index_name] = _chunk[
-            z_coords,
-            y_coords,
-            x_coords,
-        ]
+    # One division per labels block guarantees spatial alignment, not balanced
+    # row counts: a dense block can produce a much larger points partition.
+    # This is mainly a concern for pathologically concentrated point
+    # distributions; users can normally reduce ``chunks`` to subdivide dense
+    # spatial blocks. Multiple point shards per labels block could provide a
+    # future safeguard while allowing every shard to reuse the same labels
+    # chunk.
+    point_blocks = routed.to_delayed()
+    label_blocks = arr.to_delayed().ravel()
 
-        return ddf_partition
+    returned_columns = [*requested_value_keys, instance_key] if drop_coordinates else [*value_keys, instance_key]
+    result_meta = projected._meta[value_keys].copy()
+    result_meta[instance_key] = pd.Series(index=result_meta.index, dtype=arr.dtype)
+    result_meta = result_meta[returned_columns]
+    result_meta.index = pd.RangeIndex(0)
 
-    # Create a list to store delayed operations
-    delayed_objects = []
+    starts_by_dimension = tuple(
+        tuple(np.cumsum((0, *axis_chunks[:-1]), dtype=np.int64).tolist()) for axis_chunks in arr.chunks
+    )
+    assigned_blocks = []
+    for block_indices, point_block, label_block in zip(np.ndindex(grid_shape), point_blocks, label_blocks, strict=True):
+        block_start = tuple(
+            starts[block_index] for starts, block_index in zip(starts_by_dimension, block_indices, strict=True)
+        )
+        assigned_blocks.append(
+            dask.delayed(_lookup_points_in_label_block)(
+                point_block,
+                label_block,
+                label_local_coordinate_keys=label_local_coordinate_keys,
+                block_start=block_start,
+                requested_columns=returned_columns,
+                instance_key=instance_key,
+                label_dtype=arr.dtype,
+            )
+        )
 
-    for _chunk, _chunk_info in zip(delayed_chunks, chunk_info, strict=True):
-        # Query the partition lazily without computing it
-        z_start, y_start, x_start = _chunk_info[0]
-        _chunk_shape = _chunk_info[1]
+    return dd.from_delayed(assigned_blocks, meta=result_meta)
 
-        y_query = f"{y_start + coords.y0} <= {name_y} < {y_start + coords.y0 + _chunk_shape[1]}"
-        x_query = f"{x_start + coords.x0} <= {name_x} < {x_start + coords.x0 + _chunk_shape[2]}"
-        query = f"{y_query} and {x_query}"
 
-        if name_z in ddf.columns:
-            z_query = f"{z_start} <= {name_z} < {z_start + _chunk_shape[0]}"
-            query = f"{z_query} and {query}"
+def _classify_points_by_label_block(
+    partition: pd.DataFrame,
+    *,
+    point_coordinate_keys: tuple[str, ...],
+    label_local_coordinate_keys: tuple[str, ...],
+    point_to_labels_matrix: np.ndarray,
+    boundaries: tuple[tuple[int, ...], ...],
+    grid_shape: tuple[int, ...],
+    block_id_key: str,
+) -> pd.DataFrame:
+    """Transform and classify one points partition into row-major labels blocks.
 
-        ddf_partition = ddf.query(query)
-        delayed_partition = _process_partition(_chunk, _chunk_info, ddf_partition)
-        delayed_objects.append(delayed_partition)
+    Source point coordinates remain unchanged. The affine matrix produces
+    intrinsic labels coordinates in canonical ``(x, y[, z])`` order. These are
+    reordered into labels-array order, rounded once, and stored in the temporary
+    columns ``label_local_coordinate_keys``, which follow ``(y, x)`` or
+    ``(z, y, x)``. The coordinates are filtered against the complete raster
+    extent and converted to a row-major ``block_id_key`` using the irregular
+    chunk ``boundaries``. Non-finite source or transformed coordinates fail in
+    the executing partition rather than triggering a separate eager validation
+    pass over the complete points element.
 
-    # Combine the delayed partitions into a single Dask DataFrame
-    combined_partitions = dd.from_delayed(delayed_objects)
+    The first and last value of each boundary sequence define the complete,
+    half-open raster extent. All dimensions are combined with logical AND before
+    surviving coordinates are converted to ``int64``. For example::
 
-    # remove background
-    combined_partitions = combined_partitions[combined_partitions[cell_index_name] != 0]
+        labels shape: (y=5, x=7)
+        boundaries:   y=(0, 2, 5), x=(0, 3, 5, 7)
 
-    if drop_coordinates:
-        combined_partitions = combined_partitions[[value_key, cell_index_name]]
+        rounded (y, x)    retained?
+        (0, 0)            yes
+        (4, 6)            yes
+        (5, 2)            no: y upper bound is exclusive
+        (-1, 1)           no: y is negative
 
-    return combined_partitions
+    The later ``searchsorted`` step uses the internal boundary values to assign
+    each surviving point to one labels chunk. An empty partition returns the
+    complete expected schema without attempting that classification.
+    """
+    result = partition.copy()
+    try:
+        point_coordinates = result[list(point_coordinate_keys)].to_numpy(dtype=np.float64, copy=False)
+    except (TypeError, ValueError) as e:
+        raise ValueError("Point coordinates must be numeric and finite.") from e
+    if not np.isfinite(point_coordinates).all():
+        raise ValueError("Point coordinates must be finite.")
+
+    with np.errstate(over="ignore", invalid="ignore"):
+        labels_coordinates = point_coordinates @ point_to_labels_matrix[:-1, :-1].T + point_to_labels_matrix[:-1, -1]
+    if not np.isfinite(labels_coordinates).all():
+        raise ValueError("Transformed labels coordinates must be finite.")
+    # Affine output is (x, y[, z]); reversing once aligns every following
+    # operation with the labels array and chunk order (y, x) or (z, y, x).
+    rounded_coordinates = np.rint(labels_coordinates[:, ::-1])
+
+    # First filter against the complete raster; internal boundaries are used
+    # below to classify surviving points into individual labels chunks.
+    inside = np.ones(len(result), dtype=bool)
+    for coordinates, axis_boundaries in zip(rounded_coordinates.T, boundaries, strict=True):
+        inside &= (coordinates >= axis_boundaries[0]) & (coordinates < axis_boundaries[-1])
+
+    result = result.loc[inside].copy()
+    for key, coordinates in zip(label_local_coordinate_keys, rounded_coordinates.T, strict=True):
+        result[key] = coordinates[inside].astype(np.int64, copy=False)
+    if result.empty:
+        result[block_id_key] = pd.Series(index=result.index, dtype=np.int64)
+        return result
+
+    block_indices = tuple(
+        np.searchsorted(
+            axis_boundaries[1:],
+            result[key].to_numpy(dtype=np.int64, copy=False),
+            side="right",
+        )
+        for key, axis_boundaries in zip(label_local_coordinate_keys, boundaries, strict=True)
+    )
+    result[block_id_key] = np.ravel_multi_index(block_indices, grid_shape).astype(np.int64, copy=False)
+    return result
+
+
+def _lookup_points_in_label_block(
+    points: pd.DataFrame,
+    labels: np.ndarray,
+    *,
+    label_local_coordinate_keys: tuple[str, ...],
+    block_start: tuple[int, ...],
+    requested_columns: list[str],
+    instance_key: str,
+    label_dtype: np.dtype,
+) -> pd.DataFrame:
+    """Assign one routed points partition from its corresponding labels block.
+
+    The preceding block-classification and shuffle stages guarantee that every
+    row in ``points`` lies within the spatial extent of ``labels``. Temporary
+    coordinate columns are integer positions in the complete intrinsic labels
+    raster, whereas ``labels`` is the NumPy array for one chunk of that raster.
+    For each spatial axis, the coordinate inside that chunk is
+
+    ::
+
+        chunk_coordinate = labels_coordinate - block_start
+
+    The resulting coordinate arrays are used together for one vectorized,
+    pointwise lookup. For example, coordinates ``y=[1, 2]`` and ``x=[3, 4]``
+    retrieve ``labels[1, 3]`` and ``labels[2, 4]``; they do not select their
+    Cartesian product. The retrieved raster value is written to
+    ``instance_key`` and rows assigned to background label zero are removed.
+
+    An empty points block returns an empty dataframe with the same schema and a
+    label-ID column using ``label_dtype``. The returned dataframe contains only
+    ``requested_columns`` and receives a fresh, partition-local range index;
+    neither its input index nor row ordering is part of the contract.
+
+    Parameters
+    ----------
+    points
+        In-memory points partition routed to this labels block. It contains the
+        requested source columns and temporary integer coordinates in the
+        intrinsic labels frame.
+    labels
+        In-memory two- or three-dimensional array containing the corresponding
+        labels chunk.
+    label_local_coordinate_keys
+        Temporary intrinsic-label coordinate columns in labels-array axis
+        order: ``(y, x)`` for 2D or ``(z, y, x)`` for 3D.
+    block_start
+        Origin of this chunk within the untranslated labels raster, ordered like
+        ``label_local_coordinate_keys``.
+    requested_columns
+        Ordered columns retained in the returned dataframe, including
+        ``instance_key``.
+    instance_key
+        Name of the column receiving the overlapping label ID.
+    label_dtype
+        Labels dtype used to construct the label-ID column for an empty block.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Points assigned to nonzero labels, projected to ``requested_columns``.
+    """
+    result = points.copy()
+    if result.empty:
+        result[instance_key] = pd.Series(index=result.index, dtype=label_dtype)
+    else:
+        local_coordinates = tuple(
+            result[key].to_numpy(dtype=np.int64, copy=False) - start
+            for key, start in zip(label_local_coordinate_keys, block_start, strict=True)
+        )
+        result[instance_key] = labels[local_coordinates]
+        result = result.loc[result[instance_key] != 0]
+
+    return result[requested_columns].reset_index(drop=True)

@@ -18,8 +18,8 @@ from harpy.image._image import (
 from harpy.plot._plot import _get_translation_values_shapes, _get_z_slice_polygons
 from harpy.shape import intersect_rectangles
 from harpy.shape._shape import _extract_boundaries_from_geometry_collection
+from harpy.transformations._transformations import _identity_check_transformations_points
 from harpy.utils._keys import _GENES_KEY
-from harpy.utils._transformations import _identity_check_transformations_points
 
 
 def sanity(

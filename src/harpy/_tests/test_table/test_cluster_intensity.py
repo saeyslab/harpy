@@ -1,6 +1,6 @@
 import numpy as np
 
-from harpy.table._allocation_intensity import allocate_intensity
+from harpy.table._allocation_intensity import aggregate_image
 from harpy.table._cluster_intensity import cluster_intensity
 from harpy.utils._keys import _CELLSIZE_KEY
 
@@ -17,7 +17,7 @@ def test_cluster_intensity(sdata_pixie):
     for _image_name, _labels_name, _to_coordinate_system in zip(
         image_name, labels_name, to_coordinate_system, strict=True
     ):
-        sdata = allocate_intensity(
+        sdata = aggregate_image(
             sdata,
             image_name=_image_name,
             labels_name=_labels_name,

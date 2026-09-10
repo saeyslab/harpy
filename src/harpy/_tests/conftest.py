@@ -18,7 +18,7 @@ from harpy.datasets.transcriptomics import (
     resolve_example_multiple_coordinate_systems,
     visium_hd_example_custom_binning,
 )
-from harpy.table._allocation_intensity import allocate_intensity
+from harpy.table._allocation_intensity import aggregate_image
 
 
 @pytest.fixture(scope="function")
@@ -148,7 +148,7 @@ def sdata_pixie():
 @pytest.fixture
 def sdata_pixie_intensities():
     sdata = pixie_example()
-    sdata = allocate_intensity(
+    sdata = aggregate_image(
         sdata,
         image_name="raw_image_fov0",
         labels_name="label_whole_fov0",
@@ -157,7 +157,7 @@ def sdata_pixie_intensities():
         output_table_name="table_intensities",
         overwrite=True,
     )
-    sdata = allocate_intensity(
+    sdata = aggregate_image(
         sdata,
         image_name="raw_image_fov1",
         labels_name="label_whole_fov1",

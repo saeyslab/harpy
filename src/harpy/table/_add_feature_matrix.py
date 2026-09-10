@@ -14,6 +14,7 @@ from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
 from harpy.image._image import _get_translation, _precondition, get_dataarray
+from harpy.table._metadata import _FEATURE_MATRIX_SCHEMA_VERSION
 from harpy.table._regionprops import _calculate_regionprop_features
 from harpy.table._table import ProcessTable, add_table
 from harpy.utils._aggregate import RasterAggregator, _get_mask_area
@@ -158,8 +159,8 @@ def add_feature_matrix(
 
     See Also
     --------
-    harpy.tb.allocate_intensity
-        Allocate intensity-derived features into a table.
+    harpy.tb.aggregate_image
+        Aggregate intensity-derived features into a table.
     harpy.tb.add_regionprops
         Add morphology features to table observations.
 
@@ -339,7 +340,7 @@ def add_feature_matrix(
     # the metadata schema does not depend on how many pairs were requested.
     metadata = {
         "feature_columns": list(columns),
-        "schema_version": 1,
+        "schema_version": _FEATURE_MATRIX_SCHEMA_VERSION,
         "backend": "numpy",
         "source_kind": _SOURCE_KIND,
         "dtype": str(matrix.dtype),

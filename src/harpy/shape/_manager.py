@@ -21,7 +21,7 @@ from spatialdata.models import TableModel
 from spatialdata.models._utils import MappingToCoordinateSystem_t
 from spatialdata.transformations import get_transformation
 
-from harpy.utils._io import _incremental_io_on_disk, _write_element_with_cleanup
+from harpy._storage._spatialdata import _replace_element_on_disk, _write_element_with_cleanup
 from harpy.utils._keys import _INSTANCE_KEY
 
 
@@ -197,9 +197,10 @@ class ShapesElementManager:
         if output_shapes_name in [*sdata.shapes]:
             if sdata.is_backed():
                 if overwrite:
-                    sdata = _incremental_io_on_disk(
+                    with _replace_element_on_disk(
                         sdata, element_name=output_shapes_name, element=spatial_element, element_type="shapes"
-                    )
+                    ):
+                        pass
                 else:
                     raise ValueError(
                         f"Attempting to overwrite 'sdata.shapes[\"{output_shapes_name}\"]', but overwrite is set to False. Set overwrite to True to overwrite the .zarr store."
