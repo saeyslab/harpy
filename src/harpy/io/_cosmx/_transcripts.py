@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import csv
-import hashlib
-import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
@@ -14,6 +12,7 @@ from dask.utils import parse_bytes
 from spatialdata import SpatialData
 from spatialdata.transformations import Identity, Scale
 
+from harpy._feature_panels import _feature_panel_name, _serialize_feature_panel, _validate_feature_panel_collision
 from harpy._metadata import (
     _FEATURE_PANELS_METADATA_KEY,
     _POINTS_METADATA_KEY,
@@ -144,10 +143,16 @@ def _add_transcript_points(
     headers = {fov: _read_transcript_header(path) for fov, path in sources.items()}
     gene_categories = _gene_categories(tuple(sources.values()), blocksize=blocksize)
     feature_panel = preview.manifest.feature_panel
-    feature_panel_metadata = _feature_panel_metadata(preview) if feature_panel is not None else None
-    feature_panel_name = _feature_panel_name(feature_panel_metadata) if feature_panel_metadata is not None else None
-    if feature_panel_name is not None and feature_panel_metadata is not None:
-        _validate_feature_panel_collision(sdata, feature_panel_name, feature_panel_metadata)
+    panel_record = None
+    if feature_panel is not None:
+        panel_record = _serialize_feature_panel(
+            feature_key=feature_panel.feature_key,
+            feature_class_key=feature_panel.feature_class_key,
+            features_by_class=feature_panel.features_by_class,
+        )
+    panel_name = _feature_panel_name(panel_record) if panel_record is not None else None
+    if panel_name is not None and panel_record is not None:
+        _validate_feature_panel_collision(sdata, panel_name, panel_record)
     code_class_categories = None if feature_panel is None else feature_panel.class_names
     class_by_feature = None if feature_panel is None else feature_panel.class_by_feature
 
@@ -163,8 +168,8 @@ def _add_transcript_points(
             "orientation": {"flip_x": flip_x, "flip_y": flip_y},
             "pixel_size_um": preview.manifest.run.pixel_size_um,
         }
-        if feature_panel_name is not None:
-            metadata["feature_panel"] = feature_panel_name
+        if panel_name is not None:
+            metadata["feature_panel"] = panel_name
         if preview.manifest.run.acquisition_timestamp is not None:
             metadata["acquisition_timestamp"] = preview.manifest.run.acquisition_timestamp
         placements = _mosaic_placements(preview, mosaic)
@@ -206,9 +211,7 @@ def _add_transcript_points(
             element_name=element_name,
             record=metadata,
             reader_version=reader_version,
-            feature_panel=(feature_panel_name, feature_panel_metadata)
-            if feature_panel_name is not None and feature_panel_metadata is not None
-            else None,
+            feature_panel=(panel_name, panel_record) if panel_name is not None and panel_record is not None else None,
             cleanup_element_on_failure=not overwrite,
         )
     return sdata
@@ -405,57 +408,6 @@ def _normalize_transcript_partition(
     result["y"] = y + placement_y
     extras = [column for column in result.columns if column not in _OUTPUT_COLUMNS]
     return result[[*_OUTPUT_COLUMNS, *extras]]
-
-
-def _feature_panel_name(metadata: Mapping[str, object]) -> str:
-    """Derive a deterministic store-local key from canonical panel contents.
-
-    Content-addressing lets transcript elements from different samples reuse
-    one shared metadata record when their panels are identical, while panels
-    with different contents naturally receive different keys. The identity is
-    deliberately independent of consumer details such as sample IDs, points
-    element names, and sample input order.
-
-    The SHA-256 digest is used for deterministic naming and deduplication, not
-    as a security boundary. Only its first 16 hexadecimal characters are kept
-    in the key, so callers compare the complete canonical metadata whenever a
-    generated key already exists and raise if the contents differ.
-    """
-    canonical = json.dumps(metadata, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    return f"feature_panel_{hashlib.sha256(canonical).hexdigest()[:16]}"
-
-
-def _feature_panel_metadata(preview: _CosmxPreview) -> dict[str, object]:
-    """Serialize the authoritative feature-to-class relation as Harpy metadata."""
-    panel = preview.manifest.feature_panel
-    if panel is None:
-        raise ValueError("CosMx manifest has no feature panel.")
-    return {
-        "feature_key": panel.feature_key,
-        "feature_class_key": panel.feature_class_key,
-        "classes": list(panel.class_names),
-        "features_by_class": {
-            feature_class: list(features) for feature_class, features in panel.features_by_class.items()
-        },
-    }
-
-
-def _validate_feature_panel_collision(
-    sdata: SpatialData,
-    feature_panel_name: str,
-    feature_panel_metadata: dict[str, object],
-) -> None:
-    """Reject reuse of a panel identifier for a different panel."""
-    harpy_metadata = sdata.attrs.get("harpy")
-    if harpy_metadata is None:
-        return
-    assert isinstance(harpy_metadata, dict)
-    feature_panels = harpy_metadata.get(_FEATURE_PANELS_METADATA_KEY)
-    if feature_panels is None:
-        return
-    assert isinstance(feature_panels, dict)
-    if feature_panel_name in feature_panels and feature_panels[feature_panel_name] != feature_panel_metadata:
-        raise ValueError(f"Harpy feature-panel hash collision for {feature_panel_name!r}.")
 
 
 def _points_element_name(base: str, mosaic: int) -> str:
