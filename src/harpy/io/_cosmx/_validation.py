@@ -11,6 +11,7 @@ import pandas as pd
 from dask.dataframe import DataFrame as DaskDataFrame
 from spatialdata import SpatialData, read_zarr
 
+from harpy._feature_panels import _feature_panel_name
 from harpy._metadata import (
     _FEATURE_PANELS_METADATA_KEY,
     _HARPY_METADATA_KEY,
@@ -24,7 +25,6 @@ from harpy._metadata import (
 from harpy.image._image import get_dataarray
 from harpy.io._cosmx._constants import _COMPARTMENT_CATEGORIES, _INSTANCE_ID_FORMULA
 from harpy.io._cosmx._models import _INSTANCE_ID_DTYPE, _MOSAIC_MODES, _validate_identifier
-from harpy.io._cosmx._transcripts import _feature_panel_name
 
 _ELEMENT_REGISTRIES = (_IMAGES_METADATA_KEY, _LABELS_METADATA_KEY, _POINTS_METADATA_KEY)
 
