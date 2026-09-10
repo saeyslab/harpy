@@ -155,6 +155,8 @@ def add_feature_panel(
             f"Points element {points_name!r} already references a different feature panel {previous_panel!r}. "
             "Panel replacement is not supported."
         )
+    # The checks above reject conflicting panel contents or an existing reference
+    # to a different panel. This only sets an unset reference or repeats the same one.
     record["feature_panel"] = panel_name
     panel_records.setdefault(panel_name, panel_record)
 
@@ -173,9 +175,16 @@ def add_feature_panel(
     errors = status["error"].dropna()
     if not errors.empty:
         raise ValueError(f"Points element {points_name!r}: {errors.iloc[0]}")
+    # After value validation, leave points unchanged if every partition already
+    # has a categorical class column with exactly panel.classes in that order
+    # and ordered=False. Then only the panel metadata and reference need updating.
     rewrite_points = not status["compatible"].all()
     replacement = points
     if rewrite_points:
+        log.info(
+            f"Preparing replacement for points element {points_name!r}: "
+            f"derive or normalize feature-class column {feature_class_key!r} to match the panel."
+        )
         meta = points._meta.copy()
         meta[feature_class_key] = pd.Series(index=meta.index, dtype=pd.CategoricalDtype(panel.classes))
         replacement = points.map_partitions(_normalize_feature_classes, panel=panel, meta=meta)
