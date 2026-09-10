@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 import tifffile
 
+from harpy._feature_panels import _FeaturePanelContract, _parse_feature_panel
 from harpy.io._cosmx import _discovery
 from harpy.io._cosmx._discovery import _discover_cosmx, _is_decoded_cosmx, _resolve_decoded_cosmx_root
 
@@ -65,11 +66,21 @@ def test_discover_compact_manifest_without_opening_deferred_data(
     assert manifest.run.tile_shape == (_TILE_SIZE, _TILE_SIZE)
     assert manifest.run.instance_labels_dtype == "uint16"
     assert manifest.run.compartment_labels_dtype == "uint8"
-    assert manifest.feature_panel is not None
+    assert isinstance(manifest.feature_panel, _FeaturePanelContract)
     assert manifest.feature_panel.feature_key == "gene"
     assert manifest.feature_panel.feature_class_key == "code_class"
-    assert manifest.feature_panel.class_names == ("Endogenous", "Negative", "SystemControl")
+    assert manifest.feature_panel.classes == ("Endogenous", "Negative", "SystemControl")
     assert manifest.feature_panel.features_by_class["Negative"] == ("Negative01",)
+    assert manifest.feature_panel.features_by_class["Endogenous"] == (
+        "Gene1",
+        "Gene2",
+        "Gene3",
+        "GeneA",
+        "GeneB",
+        "GeneC",
+    )
+    panel = manifest.feature_panel
+    assert _parse_feature_panel(panel.to_dict(), panel_name=panel.storage_key) == panel
 
 
 def test_resolve_decoded_cosmx_root(decoded_cosmx_path: Path) -> None:
@@ -123,6 +134,9 @@ def test_discovery_rejects_multiple_plex_files(decoded_cosmx_path: Path) -> None
     ("content", "message"),
     [
         ("DisplayName,CodeClass\nGeneA,Endogenous\nGeneA,Endogenous\n", "occurs more than once"),
+        ("DisplayName,CodeClass\nGeneA,Endogenous\nGeneA,Negative\n", "occurs more than once"),
+        ("DisplayName,CodeClass\n GeneA,Endogenous\n", "empty or untrimmed DisplayName"),
+        ("DisplayName,CodeClass\nGeneA,Endogenous \n", "empty or untrimmed CodeClass"),
         ("DisplayName,CodeClass\nGeneA,\n", "empty or untrimmed CodeClass"),
         ("DisplayName,ProbeID\nGeneA,NA\n", "missing required columns.*CodeClass"),
     ],

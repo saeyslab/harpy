@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -15,6 +16,7 @@ from harpy import __version__
 from harpy.image._image import get_dataarray
 from harpy.io import CosmxSample, cosmx
 from harpy.io._cosmx import _reader
+from harpy.io._cosmx._models import _TRANSCRIPTS_PRODUCT
 
 
 @pytest.fixture
@@ -163,6 +165,24 @@ def test_cosmx_deduplicates_identical_feature_panels_across_samples(
     references = {record["feature_panel"] for record in sdata.attrs["harpy"]["points"].values()}
     assert len(panels) == 1
     assert references == set(panels)
+
+
+def test_planned_panels_compare_contracts_without_changing_existing_registry(decoded_cosmx_path, tmp_path):
+    prepared = _reader._prepare_cosmx_samples(
+        {"sample": CosmxSample(path=decoded_cosmx_path)},
+        output=tmp_path / "output.zarr",
+        products=(_TRANSCRIPTS_PRODUCT,),
+    )
+    panel = prepared[0].preview.manifest.feature_panel
+    assert panel is not None
+    panels = {panel.storage_key: panel}
+
+    _reader._validate_planned_panels(prepared, existing_panels=panels)
+
+    assert panels == {panel.storage_key: panel}
+    panels[panel.storage_key] = replace(panel, feature_key="different_feature_key")
+    with pytest.raises(ValueError, match="hash collision"):
+        _reader._validate_planned_panels(prepared, existing_panels=panels)
 
 
 def test_cosmx_keeps_different_feature_panels_separate(

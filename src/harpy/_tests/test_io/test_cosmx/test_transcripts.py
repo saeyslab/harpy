@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 
 import dask.dataframe as dd
@@ -7,9 +8,11 @@ import numpy as np
 import pandas as pd
 import pytest
 from spatialdata import SpatialData, read_zarr
+from spatialdata.models import PointsModel
 from spatialdata.transformations import Identity, Scale, get_transformation
 
 from harpy.io._cosmx import _add_transcript_points, _discover_cosmx, _preview_cosmx, _transcripts
+from harpy.points import add_feature_panel
 
 
 def test_add_transcript_points_splits_mosaics_and_roundtrips(
@@ -263,7 +266,7 @@ def test_transcript_materialization_rejects_panel_disagreement(
     assert "transcripts_mosaic_1" not in read_zarr(sdata.path).points
 
 
-def test_transcript_preflight_rejects_incompatible_panel_identifier(
+def test_transcript_preflight_rejects_malformed_stored_panel(
     decoded_cosmx_path: Path,
     tmp_path: Path,
 ) -> None:
@@ -275,8 +278,9 @@ def test_transcript_preflight_rejects_incompatible_panel_identifier(
         y=(2.0,),
     )
     sdata = _backed_sdata(tmp_path)
-    panel_metadata = _transcripts._feature_panel_metadata(preview)
-    panel_name = _transcripts._feature_panel_name(panel_metadata)
+    panel = preview.manifest.feature_panel
+    assert panel is not None
+    panel_name = panel.storage_key
     sdata.attrs = {
         "harpy": {
             "metadata_version": 1,
@@ -285,10 +289,62 @@ def test_transcript_preflight_rejects_incompatible_panel_identifier(
     }
     sdata.write_attrs()
 
-    with pytest.raises(ValueError, match="feature-panel hash collision"):
+    with pytest.raises(ValueError, match=r"harpy.feature_panels.*feature_class_key.*non-empty"):
         _add_transcript_points(sdata, preview, sample_id="sample")
 
     assert not read_zarr(sdata.path).points
+
+
+def test_transcript_ingestion_rejects_unsorted_stored_panel(decoded_cosmx_path, tmp_path):
+    """Invalid persisted ordering fails before points or panel metadata are written."""
+    preview = _preview_cosmx(_discover_cosmx(decoded_cosmx_path), fovs=(1,))
+    _write_transcript_csv(preview.manifest.fovs_by_id[1].transcripts, genes=("GeneA",), x=(1.0,), y=(2.0,))
+    panel = preview.manifest.feature_panel
+    assert panel is not None
+    record = panel.to_dict()
+    record["classes"].reverse()
+    sdata = _backed_sdata(tmp_path)
+    sdata.attrs["harpy"] = {"metadata_version": 1, "feature_panels": {panel.storage_key: deepcopy(record)}}
+    sdata.write_attrs()
+    previous_attrs = deepcopy(sdata.attrs)
+
+    with pytest.raises(ValueError, match="must be sorted"):
+        _add_transcript_points(sdata, preview, sample_id="sample")
+
+    reopened = read_zarr(sdata.path)
+    assert sdata.attrs == reopened.attrs == previous_attrs
+    assert not reopened.points
+
+
+def test_cosmx_and_existing_points_share_identical_panel_metadata(decoded_cosmx_path, tmp_path):
+    """Generic registration reuses a reader's panel without changing its key or source records."""
+    preview = _preview_cosmx(_discover_cosmx(decoded_cosmx_path), fovs=(1,))
+    _write_transcript_csv(preview.manifest.fovs_by_id[1].transcripts, genes=("GeneA",), x=(1.0,), y=(2.0,))
+    sdata = _add_transcript_points(_backed_sdata(tmp_path), preview, sample_id="sample")
+    previous_attrs = deepcopy(sdata.attrs)
+    panel_name = sdata.attrs["harpy"]["points"]["transcripts_mosaic_1"]["feature_panel"]
+    panel_record = sdata.attrs["harpy"]["feature_panels"][panel_name]
+    sdata.points["external"] = PointsModel.parse(
+        pd.DataFrame({"x": [1.0], "y": [2.0], "gene": ["GeneA"]}), transformations={"global": Identity()}
+    )
+    sdata.write_element("external")
+    add_feature_panel(
+        sdata,
+        "external",
+        feature_key="gene",
+        feature_class_key="code_class",
+        features_by_class={
+            key: list(reversed(values)) for key, values in reversed(panel_record["features_by_class"].items())
+        },
+    )
+    reopened = read_zarr(sdata.path)
+    assert reopened.attrs["harpy"]["feature_panels"] == previous_attrs["harpy"]["feature_panels"]
+    assert (
+        reopened.attrs["harpy"]["points"]["transcripts_mosaic_1"]
+        == previous_attrs["harpy"]["points"]["transcripts_mosaic_1"]
+    )
+    assert reopened.attrs["harpy"]["points"]["external"]["feature_panel"] == panel_name
+    assert reopened.points["external"].compute().code_class.tolist() == ["Endogenous"]
 
 
 def _write_transcript_csv(

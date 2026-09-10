@@ -12,12 +12,12 @@ from spatialdata import SpatialData, read_zarr
 from spatialdata.transformations import Identity
 
 from harpy import __version__
+from harpy._feature_panels import _parse_feature_panel
 from harpy.io import CosmxSample, cosmx, validate_cosmx_store
-from harpy.io._cosmx._transcripts import _feature_panel_name
 from harpy.io._cosmx._validation import _validate_cosmx_sdata
 from harpy.points._points import add_points
 
-_PANEL_METADATA = {
+_PANEL_RECORD = {
     "feature_key": "gene",
     "feature_class_key": "code_class",
     "classes": ["Endogenous", "Negative"],
@@ -126,6 +126,8 @@ def test_validate_cosmx_store_accepts_panel_less_points_with_string_class(tmp_pa
         ("invalid_sample", "sample_id"),
         ("missing_panel", "references missing panel"),
         ("panel_hash", "does not match canonical contents"),
+        ("ambiguous_feature", "belongs to both"),
+        ("same_columns", "different feature and feature-class keys"),
         ("legacy_feature_keys", "feature_panels.*feature_key"),
         ("legacy_grouping_keys", "feature_panels.*classes"),
     ],
@@ -153,6 +155,10 @@ def test_validate_cosmx_store_rejects_invalid_structure(tmp_path: Path, mutation
         point_record["feature_panel"] = "feature_panel_missing"
     elif mutation == "panel_hash":
         harpy_metadata["feature_panels"][panel_name]["features_by_class"]["Endogenous"].append("GeneZ")
+    elif mutation == "ambiguous_feature":
+        harpy_metadata["feature_panels"][panel_name]["features_by_class"]["Negative"].insert(0, "GeneA")
+    elif mutation == "same_columns":
+        harpy_metadata["feature_panels"][panel_name]["feature_class_key"] = "gene"
     elif mutation == "legacy_feature_keys":
         panel = harpy_metadata["feature_panels"][panel_name]
         panel["feature_column"] = panel.pop("feature_key")
@@ -230,7 +236,7 @@ def _write_points_store(
     npartitions: int = 1,
 ) -> Path:
     rows = [("GeneA", "Endogenous")] if rows is None else rows
-    panel_features = {feature for features in _PANEL_METADATA["features_by_class"].values() for feature in features}
+    panel_features = {feature for features in _PANEL_RECORD["features_by_class"].values() for feature in features}
     observed_features = {feature for feature, _ in rows if feature is not None}
     observed_classes = {feature_class for _, feature_class in rows if feature_class is not None}
     frame = pd.DataFrame(
@@ -244,7 +250,7 @@ def _write_points_store(
             "code_class": (
                 pd.Categorical(
                     [feature_class for _, feature_class in rows],
-                    categories=sorted(set(_PANEL_METADATA["classes"]) | observed_classes),
+                    categories=sorted(set(_PANEL_RECORD["classes"]) | observed_classes),
                 )
                 if with_panel
                 else pd.Series([feature_class for _, feature_class in rows], dtype="string[pyarrow]")
@@ -263,8 +269,8 @@ def _write_points_store(
         overwrite=False,
     )
 
-    panel_metadata: dict[str, Any] = deepcopy(_PANEL_METADATA)
-    panel_name = _feature_panel_name(panel_metadata)
+    panel_record: dict[str, Any] = deepcopy(_PANEL_RECORD)
+    panel_name = _parse_feature_panel(panel_record, panel_name="test_panel").storage_key
     point_metadata = {
         "sample_id": "sample",
         "fovs": [1],
@@ -280,7 +286,7 @@ def _write_points_store(
     }
     if with_panel:
         point_metadata["feature_panel"] = panel_name
-        harpy_metadata["feature_panels"] = {panel_name: panel_metadata}
+        harpy_metadata["feature_panels"] = {panel_name: panel_record}
     sdata.attrs = {"harpy": harpy_metadata}
     sdata.write_attrs()
     return output

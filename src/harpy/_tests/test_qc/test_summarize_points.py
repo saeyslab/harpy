@@ -17,9 +17,9 @@ from harpy.qc._points_binning import _count_point_bins, _point_bin_edges
 PANEL = {
     "feature_key": "gene",
     "feature_class_key": "code_class",
-    "classes": ["Endogenous", "Negative", "SystemControl", "EmptyClass"],
+    "classes": ["EmptyClass", "Endogenous", "Negative", "SystemControl"],
     "features_by_class": {
-        "Endogenous": ["GeneB", "GeneA", "ZeroGene"],
+        "Endogenous": ["GeneA", "GeneB", "ZeroGene"],
         "Negative": ["NegA", "NegB", "NegC"],
         "SystemControl": ["SysA", "SysB"],
         "EmptyClass": ["NoCalls"],
@@ -73,8 +73,8 @@ def test_summary_returns_complete_panel_counts_and_class_statistics():
     assert isinstance(result, hp.qc.PointsSummary)
     assert result.spatial_counts is None
     targets = result.per_target.set_index("feature")
-    assert targets.index.tolist() == ["GeneB", "GeneA", "ZeroGene", "NegA", "NegB", "NegC", "SysA", "SysB", "NoCalls"]
-    assert targets.n_points.tolist() == [1, 2, 0, 3, 1, 0, 1, 0, 0]
+    assert targets.index.tolist() == ["NoCalls", "GeneA", "GeneB", "ZeroGene", "NegA", "NegB", "NegC", "SysA", "SysB"]
+    assert targets.n_points.tolist() == [0, 2, 1, 0, 3, 1, 0, 1, 0]
     assert targets.n_points.dtype == np.dtype("uint64")
     assert targets.loc["NegA", "within_class_fraction"] == 0.75
     assert targets.loc["NegC", "within_class_fraction"] == 0

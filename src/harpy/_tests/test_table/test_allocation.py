@@ -1539,9 +1539,9 @@ def test_validate_table_rejects_class_aware_inconsistency(mutation: str, tmp_pat
     elif mutation == "missing_summary":
         adata.obs.drop(columns="n_negative_points", inplace=True)
     elif mutation == "panel":
-        result.attrs["harpy"]["feature_panels"]["feature_panel_test"]["features_by_class"]["Negative"].append(
-            "NegativeAddedLater"
-        )
+        features = result.attrs["harpy"]["feature_panels"]["feature_panel_test"]["features_by_class"]["Negative"]
+        features.append("NegativeAddedLater")
+        features.sort()
     elif mutation == "expression_class":
         adata.var_names = pd.Index(["Negative01", "GeneB", "GeneZero"], name="gene")
     else:
@@ -1702,6 +1702,8 @@ def test_class_aware_aggregation_rejects_instance_key_matching_feature_class_key
         ("missing_panel", "must be a mapping"),
         ("non_categorical", "must be categorical"),
         ("incompatible", "compatible panels"),
+        ("unsorted_classes", "classes must be sorted"),
+        ("unsorted_features", "must be sorted"),
     ],
 )
 def test_class_aware_aggregation_rejects_invalid_panel_contract_before_assignment(
@@ -1719,9 +1721,14 @@ def test_class_aware_aggregation_rejects_invalid_panel_contract_before_assignmen
         points = sdata.points["points_a"].compute()
         points["code_class"] = points["code_class"].astype(str)
         sdata.points["points_a"] = PointsModel.parse(points, transformations={"sample_a": Identity()})
+    elif mutation == "unsorted_classes":
+        sdata.attrs["harpy"]["feature_panels"]["feature_panel_test"]["classes"].reverse()
+    elif mutation == "unsorted_features":
+        sdata.attrs["harpy"]["feature_panels"]["feature_panel_test"]["features_by_class"]["Endogenous"].reverse()
     else:
         incompatible = deepcopy(_PANEL)
         incompatible["features_by_class"]["Endogenous"].append("GeneC")
+        incompatible["features_by_class"]["Endogenous"].sort()
         sdata.attrs["harpy"]["feature_panels"]["feature_panel_other"] = incompatible
         sdata.attrs["harpy"]["points"]["points_b"]["feature_panel"] = "feature_panel_other"
     sdata = _backed(sdata, tmp_path)
