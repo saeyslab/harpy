@@ -166,6 +166,7 @@ Operations on points (`Dask` `DataFrame` object) elements.
 
     pt.add_points
     pt.add_feature_panel
+    pt.validate_points
 ```
 
 ## Externals
