@@ -12,7 +12,7 @@ from spatialdata import SpatialData, read_zarr
 from spatialdata.models.models import ScaleFactors_t
 
 from harpy import __version__
-from harpy._feature_panels import _feature_panel_name
+from harpy._feature_panels import _feature_panel_name, _serialize_feature_panel
 from harpy._metadata import _FEATURE_PANELS_METADATA_KEY, _HARPY_METADATA_KEY, _PROVENANCE_METADATA_KEY
 from harpy.io._cosmx._discovery import _discover_cosmx
 from harpy.io._cosmx._images import _add_morphology_images, _select_channels
@@ -27,10 +27,7 @@ from harpy.io._cosmx._models import (
     _validate_identifier,
 )
 from harpy.io._cosmx._preview import _preview_cosmx
-from harpy.io._cosmx._transcripts import (
-    _add_transcript_points,
-    _feature_panel_metadata,
-)
+from harpy.io._cosmx._transcripts import _add_transcript_points
 from harpy.io._cosmx._validation import _validate_cosmx_sdata
 
 
@@ -711,13 +708,18 @@ def _validate_planned_panels(
     """Resolve planned panels and detect truncated content-hash collisions."""
     panels: dict[str, object] = {} if existing_panels is None else dict(existing_panels)
     for sample in samples:
-        if sample.preview.manifest.feature_panel is None:
+        panel = sample.preview.manifest.feature_panel
+        if panel is None:
             continue
-        metadata = _feature_panel_metadata(sample.preview)
-        name = _feature_panel_name(metadata)
-        existing = panels.setdefault(name, metadata)
-        if existing != metadata:
-            raise ValueError(f"CosMx feature-panel hash collision for {name!r}.")
+        panel_record = _serialize_feature_panel(
+            feature_key=panel.feature_key,
+            feature_class_key=panel.feature_class_key,
+            features_by_class=panel.features_by_class,
+        )
+        panel_name = _feature_panel_name(panel_record)
+        existing = panels.setdefault(panel_name, panel_record)
+        if existing != panel_record:
+            raise ValueError(f"CosMx feature-panel hash collision for {panel_name!r}.")
 
 
 def _validate_replaceable_output(output: Path) -> None:
