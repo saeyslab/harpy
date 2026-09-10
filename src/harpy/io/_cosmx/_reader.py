@@ -12,6 +12,7 @@ from spatialdata import SpatialData, read_zarr
 from spatialdata.models.models import ScaleFactors_t
 
 from harpy import __version__
+from harpy._feature_panels import _feature_panel_name
 from harpy._metadata import _FEATURE_PANELS_METADATA_KEY, _HARPY_METADATA_KEY, _PROVENANCE_METADATA_KEY
 from harpy.io._cosmx._discovery import _discover_cosmx
 from harpy.io._cosmx._images import _add_morphology_images, _select_channels
@@ -29,7 +30,6 @@ from harpy.io._cosmx._preview import _preview_cosmx
 from harpy.io._cosmx._transcripts import (
     _add_transcript_points,
     _feature_panel_metadata,
-    _feature_panel_name,
 )
 from harpy.io._cosmx._validation import _validate_cosmx_sdata
 
