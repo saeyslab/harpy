@@ -105,7 +105,9 @@ def summarize_points(
 
     Requires the selected points element to reference a feature panel in
     ``sdata.attrs["harpy"]``. Points elements without this metadata are not
-    supported, including when ``feature_classes=None``.
+    supported, including when ``feature_classes=None``. Register a complete
+    assay panel explicitly with ``hp.pt.add_feature_panel()`` before calling
+    this function; no panel is inferred or registered here.
 
     Include every selected panel feature, even with no detected points. This
     is independent of segmentation: points outside cells are included, and no
