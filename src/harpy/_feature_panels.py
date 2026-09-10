@@ -102,13 +102,13 @@ def _serialize_feature_panel(
         if isinstance(features, (str, bytes)) or not isinstance(features, Sequence):
             raise ValueError(f"features_by_class[{feature_class!r}] must be a non-string sequence of feature names.")
         grouped[feature_class] = list(features)
-    record = {
+    panel_record = {
         "feature_key": feature_key,
         "feature_class_key": feature_class_key,
         "classes": list(grouped),
         "features_by_class": grouped,
     }
-    panel = _parse_feature_panel(record, panel_name="supplied")
+    panel = _parse_feature_panel(panel_record, panel_name="supplied")
     classes = sorted(panel.classes)
     return {
         "feature_key": panel.feature_key,
@@ -118,7 +118,7 @@ def _serialize_feature_panel(
     }
 
 
-def _feature_panel_name(metadata: Mapping[str, object]) -> str:
+def _feature_panel_name(panel_record: Mapping[str, object]) -> str:
     """Derive a deterministic store-local key from canonical panel contents.
 
     Identical panels share one record, independently of sample IDs, points
@@ -127,16 +127,16 @@ def _feature_panel_name(metadata: Mapping[str, object]) -> str:
 
     The SHA-256 digest is used for naming and deduplication, not as a security
     boundary. Only its first 16 hexadecimal characters are kept, so callers
-    compare complete metadata on reuse and reject conflicting contents.
+    compare complete panel records on reuse and reject conflicting contents.
     """
-    canonical = json.dumps(metadata, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    canonical = json.dumps(panel_record, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return f"feature_panel_{hashlib.sha256(canonical).hexdigest()[:16]}"
 
 
 def _validate_feature_panel_collision(
     sdata: SpatialData,
-    feature_panel_name: str,
-    feature_panel_metadata: Mapping[str, object],
+    panel_name: str,
+    panel_record: Mapping[str, object],
 ) -> None:
     """Reject reuse of a panel identifier for different canonical contents."""
     root = sdata.attrs.get(_HARPY_METADATA_KEY)
@@ -147,28 +147,28 @@ def _validate_feature_panel_collision(
     if panels is None:
         return
     panels = _require_mapping(panels, path="harpy.feature_panels")
-    if feature_panel_name in panels and panels[feature_panel_name] != feature_panel_metadata:
-        raise ValueError(f"Harpy feature-panel hash collision for {feature_panel_name!r}.")
+    if panel_name in panels and panels[panel_name] != panel_record:
+        raise ValueError(f"Harpy feature-panel hash collision for {panel_name!r}.")
 
 
-def _parse_feature_panel(record: Mapping[str, object], *, panel_name: str) -> _FeaturePanelContract:
+def _parse_feature_panel(panel_record: Mapping[str, object], *, panel_name: str) -> _FeaturePanelContract:
     path = f"{_HARPY_METADATA_KEY}.{_FEATURE_PANELS_METADATA_KEY}.{panel_name}"
-    feature_key = _require_nonempty_string(record.get("feature_key"), path=f"{path}.feature_key")
+    feature_key = _require_nonempty_string(panel_record.get("feature_key"), path=f"{path}.feature_key")
     feature_class_key = _require_nonempty_string(
-        record.get("feature_class_key"),
+        panel_record.get("feature_class_key"),
         path=f"{path}.feature_class_key",
     )
     if feature_key == feature_class_key:
         raise ValueError(f"Feature panel {panel_name!r} must use different feature and feature-class keys.")
 
-    classes_value = record.get("classes")
+    classes_value = panel_record.get("classes")
     if not isinstance(classes_value, list) or not classes_value:
         raise ValueError(f"Harpy metadata {path}.classes must be a non-empty list of strings.")
     classes = tuple(_require_nonempty_string(value, path=f"{path}.classes item") for value in classes_value)
     if len(set(classes)) != len(classes):
         raise ValueError(f"Harpy metadata {path}.classes must contain unique values.")
 
-    grouped = _require_mapping(record.get("features_by_class"), path=f"{path}.features_by_class")
+    grouped = _require_mapping(panel_record.get("features_by_class"), path=f"{path}.features_by_class")
     if set(grouped) != set(classes):
         raise ValueError(f"Harpy metadata {path}.features_by_class must contain exactly the declared classes.")
     features_by_class_items: list[tuple[str, tuple[str, ...]]] = []
