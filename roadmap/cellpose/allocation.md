@@ -34,8 +34,9 @@ implemented:
       elements through `hp.pt.add_feature_panel` — implemented;
     - **11d:** validate existing points against their registered feature panel
       through the read-only `hp.pt.validate_points` API;
-    - **11e:** original-point summary visualization, including the ECDF and
-      direct spatial-count-array input to `hp.pl.plot_transcript_density`;
+    - **11e:** original-point summary visualization, in three separate parts:
+      **11e.i** ECDF plot, **11e.ii** compact class summary, and **11e.iii**
+      spatial density heatmaps from `summary.spatial_counts`;
     - **11f:** table-level summary computation through `hp.qc.summarize_table`
       and `TableSummary`, with plotting integration;
 
@@ -4296,16 +4297,21 @@ Focused tests should cover:
 
 **Status: specified; not implemented.**
 
-Implement downstream consumers of the `PointsSummary` contract from Slice 11a:
-the whole-panel ECDF and direct spatial-count-array input to
-`hp.pl.plot_transcript_density`. Retain that public plotting name, but replace
-its SpatialData-input signature with a renderer over `summary.spatial_counts`.
-Do not accept a SpatialData object or a full `PointsSummary` as an alternative
-computation path. This slice follows the panel-registration helper in Slice
-11c and depends at runtime only on the supplied summary outputs, not
-segmentation, an aggregation table, or a live feature-panel registry. Rendering
-a precomputed grid never scans source points, calculates new bins, performs
-raster-based assignment, or calls `summarize_points` or `aggregate_points`.
+Implement three separately scoped consumers of the `PointsSummary` contract
+from Slice 11a:
+
+1. **11e.i: ECDF plot** — consume `summary.per_target`.
+2. **11e.ii: compact class summary** — consume `summary.per_class`.
+3. **11e.iii: spatial density heatmaps** — render `summary.spatial_counts`
+   through `hp.pl.plot_transcript_density`.
+
+Implement and verify each part independently; none requires the other two to
+be implemented. Keep them within Slice 11e so later slice numbers remain
+unchanged. This slice follows the panel-registration helper in Slice 11c and
+depends at runtime only on the supplied summary outputs, not segmentation,
+an aggregation table, or a live feature-panel registry. These consumers never
+scan source points, calculate new bins, perform raster-based assignment, or
+call `summarize_points` or `aggregate_points`.
 
 ### Consumption contract
 
@@ -4323,17 +4329,7 @@ raster-based assignment, or calls `summarize_points` or `aggregate_points`.
 These precomputed-result paths must work without access to the original
 points, root `.attrs`, or the containing `PointsSummary`, and must not modify
 the supplied counts or metadata. Any optional morphology overlay is a separate
-plotting input; it does not justify a source-point read or panel lookup. The
-exact ECDF plotting function name and display-only parameters remain decisions
-for this slice. The density input contract is fixed: a spatial-count DataArray,
-not a dispatch between source-data and precomputed-result APIs.
-
-For density rendering, validate only the array's dimensions, coordinates, and
-metadata needed for the requested display. Read bin geometry and
-`to_coordinate_system` from the array; do not accept a second bin size, crop, or
-coordinate transformation that could disagree with the computed grid. Any
-source filtering belongs to computation, not rendering. There is no raw points
-fallback, source-gene-column argument, or in-plot subsampling path.
+plotting input; it does not justify a source-point read or panel lookup.
 
 The routine overview consists of the ECDF, compact class-summary table, and
 spatial density plots. Keep samples, points elements/mosaics, and selected
@@ -4351,7 +4347,13 @@ checking whether the same control repeatedly has high counts across samples.
 Defer a labelled target plot until there is a concrete diagnostic need; it is
 not a required output or acceptance criterion for either Slice 11a or 11e.
 
-### Whole-panel count distribution
+### Part 11e.i: ECDF plot
+
+**Status: specified; not implemented.**
+
+Consume the standalone `summary.per_target` dataframe. The exact plotting
+function name and display-only parameters remain decisions for this part.
+Neither `summary.per_class` nor a spatial grid is required.
 
 Provide an empirical cumulative distribution plot (ECDF) over the point counts
 of all targets in the selected panel class:
@@ -4370,7 +4372,65 @@ do not automatically label a target as failing QC without a separately defined
 criterion. If a class has no detections, all its panel targets contribute to
 the ECDF at zero rather than disappearing from the plot.
 
-### Class selection through `plot_transcript_density`
+#### Verification
+
+Focused tests should establish that:
+
+- every panel target contributes equally, including zero detections; the input
+  is not weighted by point count or restricted to the top N;
+- all-zero classes remain visible at zero, and sample, points-element and
+  feature-class identities remain distinguishable; and
+- plotting works from the standalone dataframe without mutating it or reading
+  source points, resolving a panel, or invoking summary computation.
+
+### Part 11e.ii: compact class summary
+
+**Status: specified; not implemented.**
+
+Provide a compact, readable tabular overview of the standalone
+`summary.per_class` dataframe. Display the statistics already computed by
+`summarize_points`, rather than recomputing them from `per_target` or source
+points. No ECDF implementation or spatial grid is required.
+
+Include panel feature count, zero-detection feature count and percentage,
+total points, mean/median/95th-percentile points per feature, and the percentage
+of points contributed by the top-N features. Identify the requested N and the
+actual number of top features when the class contains fewer than N. Preserve
+sample, points-element/mosaic, panel and class identity where supplied.
+
+Show undefined fractions as "N/A", not zero. Keep this an overview of classes,
+not a labelled ranking of individual targets. The exact display entry point
+and formatting options remain decisions for this part.
+
+#### Verification
+
+Focused tests should establish that:
+
+- displayed statistics and top-N information match the supplied `per_class`
+  values, without recalculating them;
+- all-zero classes remain present, undefined fractions display as "N/A", and
+  identities remain distinguishable; and
+- the standalone dataframe is sufficient and remains unchanged, with no
+  source-point access, panel lookup, or summary computation.
+
+### Part 11e.iii: spatial density heatmaps
+
+**Status: specified; not implemented.**
+
+Retain the public `hp.pl.plot_transcript_density` name, but replace its
+SpatialData-input signature with a renderer over `summary.spatial_counts`.
+Do not accept a SpatialData object or a full `PointsSummary` as an alternative
+computation path. Neither the ECDF nor the compact class-summary display is
+required to implement this part.
+
+Validate only the array's dimensions, coordinates, and metadata needed for
+the requested display. Read bin geometry and `to_coordinate_system` from the
+array; do not accept a second bin size, crop, or coordinate transformation that
+could disagree with the computed grid. Any source filtering belongs to
+computation, not rendering. There is no raw points fallback, source-gene-column
+argument, or in-plot subsampling path.
+
+#### Class selection through `plot_transcript_density`
 
 Add the optional parameter:
 
@@ -4415,12 +4475,12 @@ hp.pl.plot_transcript_density(
 The same array can then be plotted with `feature_class="SystemControl"`
 without recomputing the summary or accessing `sdata`.
 
-### Density display and normalization
+#### Density display and normalization
 
 Class selection and normalization are separate choices. Selecting `"Negative"`
 must not silently divide counts by panel size or bin area. Expose normalization
 explicitly and label its units; the exact normalization parameter names remain
-to be specified for this slice.
+to be specified for this part.
 
 Derive display values from raw bins, optionally dividing by the authoritative
 class feature counts already captured in the array's
@@ -4448,7 +4508,7 @@ individual-point overlay belongs to separate diagnostic plotting for a selected
 crop; this density renderer does not fetch those points. The production
 overview operates on the precomputed bins.
 
-### Reuse of summary computation
+#### Reuse of summary computation
 
 The current `plot_transcript_density` filters points and then calls
 `ddf.compute()` before constructing a NumPy histogram. Replace that computation
@@ -4464,14 +4524,11 @@ resolution, or source-point validation is called from density rendering. Do
 not create an artificial AnnData table merely to reuse table-based plotting
 helpers. Other plotting APIs are not changed solely to implement this contract.
 
-### Verification
+#### Verification
 
 Focused tests should establish that:
 
-- ECDFs weight every panel target equally, include zeros, and use the complete
-  per-target result rather than a top-N subset;
-- all-zero classes remain visible in ECDFs and density plots, and undefined
-  fractions are displayed as missing rather than coerced to zero;
+- all-zero classes remain visible in density plots;
 - density plotting accepts the standalone `summary.spatial_counts` DataArray,
   without its containing summary, SpatialData object, or root panel registry;
 - `None` spatial counts produce actionable guidance to compute with `bin_size`,
