@@ -4351,15 +4351,64 @@ not a required output or acceptance criterion for either Slice 11a or 11e.
 
 **Status: specified; not implemented.**
 
-Consume the standalone `summary.per_target` dataframe. The exact plotting
-function name and display-only parameters remain decisions for this part.
-Neither `summary.per_class` nor a spatial grid is required.
+Implement `hp.pl.ecdf_points_per_feature`, consuming the standalone
+`summary.per_target` dataframe. The docstring must make clear that this is a per-target count
+summary, not a feature-panel metadata record. Neither `summary.per_class`
+nor a spatial grid is required.
+
+#### Public API
+
+```python
+def ecdf_points_per_feature(
+    per_target: pd.DataFrame,
+    *,
+    feature_class: str,
+    label: str | None = None,
+    color: str | None = None,
+    figsize: tuple[float, float] = (6, 4),
+    ax: Axes | None = None,
+) -> Axes:
+```
+
+- `per_target`: the complete `summary.per_target` dataframe for one points
+  element, retaining panel features with zero detections. Read `feature_class`
+  and `n_points` from this summary; do not retrieve the panel or source points.
+- `feature_class`: required exact class name. Each call draws one curve for
+  that class, without pooling classes or points elements. A class absent from
+  the dataframe raises a clear error; a present all-zero class is valid.
+- `label`: optional legend label. By default, derive it from the points-element
+  identity and selected class stored in the dataframe.
+- `color`: optional curve color; None uses the normal Matplotlib color cycle.
+- `figsize`: figure size used only when creating new axes.
+- `ax`: draw on these axes when supplied; otherwise create new axes. Always
+  return the axes used for plotting.
+
+For example:
+
+```python
+ax = hp.pl.ecdf_points_per_feature(
+    summary.per_target,
+    feature_class="Negative",
+)
+```
+
+Different classes can be displayed on separate caller-supplied axes. To compare
+samples, call the function with each sample's summary on the same axes and
+use distinguishable labels. Preserve existing curves when reusing axes; do not
+introduce automatic multi-sample pooling or subplot creation.
+
+Do not expose configurable value columns, weighting, binning, smoothing, or
+count normalization. This API has one statistical meaning and leaves the
+supplied dataframe and metadata unchanged.
+
+#### Count-distribution contract
 
 Provide an empirical cumulative distribution plot (ECDF) over the point counts
 of all targets in the selected panel class:
 
-- horizontal axis: detected points per target;
-- vertical axis: percentage of panel targets with that count or fewer; and
+- horizontal axis: detected points per feature;
+- vertical axis: percentage of panel features with that count or fewer, from
+  0 to 100%; and
 - each target contributes equally, including targets with zero detections.
 
 Do not weight the ECDF by detected point count or restrict it to the top N.
@@ -4378,8 +4427,14 @@ Focused tests should establish that:
 
 - every panel target contributes equally, including zero detections; the input
   is not weighted by point count or restricted to the top N;
-- all-zero classes remain visible at zero, and sample, points-element and
-  feature-class identities remain distinguishable; and
+- exact class selection draws only the requested class and rejects absent
+  classes; all-zero classes remain visible at zero;
+- default labels identify the points element and class, and explicit labels
+  and colors are respected;
+- supplied axes are returned unchanged in identity, repeated calls preserve
+  existing curves, and new axes use `figsize` when no axes are supplied;
+- axes have the fixed count and percentage meanings above, and sample,
+  points-element and feature-class identities remain distinguishable; and
 - plotting works from the standalone dataframe without mutating it or reading
   source points, resolving a panel, or invoking summary computation.
 
