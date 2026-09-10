@@ -27,6 +27,9 @@ class _FeaturePanelContract:
     elements. It does not select which feature class contributes to an
     expression matrix and contains no observed point counts.
 
+    Construction validates immutable structure, class alignment and unique
+    feature membership. It does not sort fields or inspect any points or store.
+
     Attributes
     ----------
     feature_key
@@ -45,6 +48,40 @@ class _FeaturePanelContract:
     classes: tuple[str, ...]
     features_by_class_items: tuple[tuple[str, tuple[str, ...]], ...]
 
+    def __post_init__(self) -> None:
+        """Enforce panel invariants without changing the supplied ordering."""
+        _require_nonempty_string(self.feature_key, path="feature_key")
+        _require_nonempty_string(self.feature_class_key, path="feature_class_key")
+        if self.feature_key == self.feature_class_key:
+            raise ValueError("Feature panels must use different feature and feature-class keys.")
+        if not isinstance(self.classes, tuple) or not self.classes:
+            raise ValueError("Feature-panel classes must be a non-empty tuple of strings.")
+        for feature_class in self.classes:
+            _require_nonempty_string(feature_class, path="classes item")
+        if len(set(self.classes)) != len(self.classes):
+            raise ValueError("Feature-panel classes must contain unique values.")
+        if not isinstance(self.features_by_class_items, tuple):
+            raise ValueError("Feature-panel features_by_class_items must be a tuple.")
+        for item in self.features_by_class_items:
+            if not isinstance(item, tuple) or len(item) != 2:
+                raise ValueError("Feature-panel items must be (class, features) tuples.")
+            _require_nonempty_string(item[0], path="features_by_class_items class")
+        if tuple(item[0] for item in self.features_by_class_items) != self.classes:
+            raise ValueError("Feature-panel items must contain exactly the declared classes, in the same order.")
+
+        seen_features: dict[str, str] = {}
+        for feature_class, features in self.features_by_class_items:
+            if not isinstance(features, tuple) or not features:
+                raise ValueError(f"Feature-panel features for {feature_class!r} must be a non-empty tuple.")
+            for feature in features:
+                _require_nonempty_string(feature, path=f"features_by_class[{feature_class!r}] item")
+            if len(set(features)) != len(features):
+                raise ValueError(f"Feature-panel features for {feature_class!r} must contain unique values.")
+            for feature in features:
+                previous = seen_features.setdefault(feature, feature_class)
+                if previous != feature_class:
+                    raise ValueError(f"Feature {feature!r} belongs to both {previous!r} and {feature_class!r}.")
+
     @property
     def features_by_class(self) -> dict[str, tuple[str, ...]]:
         return dict(self.features_by_class_items)
@@ -54,6 +91,47 @@ class _FeaturePanelContract:
         return {
             feature: feature_class for feature_class, features in self.features_by_class_items for feature in features
         }
+
+    @property
+    def storage_key(self) -> str:
+        """Derive an order-independent feature-panel registry key from its contents.
+
+        Sort a fresh record's classes and features for hashing, without changing
+        this panel's ordering. The key is also independent of sample IDs and
+        points element names, including for panels read from existing metadata.
+
+        The first 16 hexadecimal characters of the SHA-256 digest identify
+        contents for deduplication, not security. Callers must still compare
+        normalized records before reusing a key and reject conflicting contents.
+        """
+        canonical = json.dumps(
+            self._canonical_record(), ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        return f"feature_panel_{hashlib.sha256(canonical).hexdigest()[:16]}"
+
+    def to_dict(self) -> dict[str, object]:
+        """Return a fresh storage record, not a dictionary of internal dataclass fields.
+
+        Convert the immutable class/feature pairs to ``features_by_class`` and
+        lists, preserving class and feature order. This performs no validation,
+        hashing or disk writes. Order-independent identity is handled separately
+        by ``storage_key``.
+        """
+        return {
+            "feature_key": self.feature_key,
+            "feature_class_key": self.feature_class_key,
+            "classes": list(self.classes),
+            "features_by_class": {name: list(features) for name, features in self.features_by_class_items},
+        }
+
+    def _canonical_record(self) -> dict[str, object]:
+        """Normalize a fresh record for hashing and content comparison only."""
+        record = self.to_dict()
+        record["classes"] = sorted(self.classes)
+        record["features_by_class"] = {
+            feature_class: sorted(features) for feature_class, features in self.features_by_class_items
+        }
+        return record
 
 
 def _resolve_points_feature_panel(
@@ -83,119 +161,102 @@ def _resolve_points_feature_panel(
     return panel_name, _parse_feature_panel(panel_record, panel_name=panel_name), record
 
 
-def _serialize_feature_panel(
+def _make_feature_panel(
     *,
     feature_key: str,
     feature_class_key: str,
     features_by_class: Mapping[str, Sequence[str]],
-) -> dict[str, object]:
-    """Validate a supplied panel and serialize it with sorted classes and features.
+) -> _FeaturePanelContract:
+    """Validate supplied panel fields and construct a canonical in-memory panel.
 
-    Sorting makes panel identity independent of input ordering. Names are kept
-    exactly as supplied, and duplicates are rejected rather than discarded.
-    The output is shared by readers and registration of existing points.
+    Classes and their features are sorted as the default storage ordering for
+    new panels. Identity hashing is independently order-insensitive. Names are
+    kept exactly as supplied, and duplicates are rejected rather than discarded.
+    Input containers are converted here; the dataclass validates panel invariants on construction.
+    No storage record is built or parsed here.
     """
     if not isinstance(features_by_class, Mapping):
         raise ValueError("features_by_class must be a mapping from classes to sequences of feature names.")
-    grouped = {}
+    items = []
     for feature_class, features in features_by_class.items():
         if isinstance(features, (str, bytes)) or not isinstance(features, Sequence):
             raise ValueError(f"features_by_class[{feature_class!r}] must be a non-string sequence of feature names.")
-        grouped[feature_class] = list(features)
-    panel_record = {
-        "feature_key": feature_key,
-        "feature_class_key": feature_class_key,
-        "classes": list(grouped),
-        "features_by_class": grouped,
-    }
-    panel = _parse_feature_panel(panel_record, panel_name="supplied")
-    classes = sorted(panel.classes)
-    return {
-        "feature_key": panel.feature_key,
-        "feature_class_key": panel.feature_class_key,
-        "classes": classes,
-        "features_by_class": {name: sorted(grouped[name]) for name in classes},
-    }
-
-
-def _feature_panel_name(panel_record: Mapping[str, object]) -> str:
-    """Derive a deterministic store-local key from canonical panel contents.
-
-    Identical panels share one record, independently of sample IDs, points
-    element names or input ordering. This requires canonical serialization
-    through ``_serialize_feature_panel()`` before generating the key.
-
-    The SHA-256 digest is used for naming and deduplication, not as a security
-    boundary. Only its first 16 hexadecimal characters are kept, so callers
-    compare complete panel records on reuse and reject conflicting contents.
-    """
-    canonical = json.dumps(panel_record, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    return f"feature_panel_{hashlib.sha256(canonical).hexdigest()[:16]}"
+        items.append((feature_class, tuple(features)))
+    try:
+        canonical_items = tuple((feature_class, tuple(sorted(features))) for feature_class, features in sorted(items))
+    except TypeError as error:
+        # Mixed types may fail sorting before the dataclass can check them.
+        raise ValueError("Feature-panel classes and feature identifiers must be strings.") from error
+    return _FeaturePanelContract(
+        feature_key=feature_key,
+        feature_class_key=feature_class_key,
+        classes=tuple(feature_class for feature_class, _ in canonical_items),
+        features_by_class_items=canonical_items,
+    )
 
 
 def _validate_feature_panel_collision(
-    sdata: SpatialData,
+    panels: Mapping[str, object],
     panel_name: str,
-    panel_record: Mapping[str, object],
-) -> None:
-    """Reject reuse of a panel identifier for different canonical contents."""
-    root = sdata.attrs.get(_HARPY_METADATA_KEY)
-    if root is None:
-        return
-    root = _require_mapping(root, path=_HARPY_METADATA_KEY)
-    panels = root.get(_FEATURE_PANELS_METADATA_KEY)
-    if panels is None:
-        return
-    panels = _require_mapping(panels, path="harpy.feature_panels")
-    if panel_name in panels and panels[panel_name] != panel_record:
+    panel: _FeaturePanelContract,
+) -> _FeaturePanelContract:
+    """Check key reuse by normalized contents and retain the stored panel's order.
+
+    Return the supplied panel when its key is absent. Otherwise parse and compare
+    the stored record, ignoring only class and feature ordering, not differences
+    in other fields. Matching hashes alone are insufficient. Return the existing
+    panel on a match so callers can align categorical columns with its stored
+    ordering. Neither the registry nor its records are modified here.
+    """
+    if panel_name not in panels:
+        return panel
+    try:
+        existing_record = _require_mapping(panels[panel_name], path=f"harpy.feature_panels.{panel_name}")
+        existing_panel = _parse_feature_panel(existing_record, panel_name=panel_name)
+    except ValueError as error:
+        raise ValueError(f"Harpy feature-panel hash collision for {panel_name!r}: {error}") from error
+    # Preserve extension fields in the comparison: only ordering is ignored.
+    existing_canonical = dict(existing_record)
+    existing_canonical.update(existing_panel._canonical_record())
+    if existing_canonical != panel._canonical_record():
         raise ValueError(f"Harpy feature-panel hash collision for {panel_name!r}.")
+    return existing_panel
 
 
 def _parse_feature_panel(panel_record: Mapping[str, object], *, panel_name: str) -> _FeaturePanelContract:
+    """Validate a stored panel record and restore its declared ordering.
+
+    Storage-specific checks cover list encoding and mapping coverage. The
+    dataclass validates panel invariants on construction. Stored ordering is
+    retained because downstream consumers may rely on it.
+    """
     path = f"{_HARPY_METADATA_KEY}.{_FEATURE_PANELS_METADATA_KEY}.{panel_name}"
     feature_key = _require_nonempty_string(panel_record.get("feature_key"), path=f"{path}.feature_key")
     feature_class_key = _require_nonempty_string(
         panel_record.get("feature_class_key"),
         path=f"{path}.feature_class_key",
     )
-    if feature_key == feature_class_key:
-        raise ValueError(f"Feature panel {panel_name!r} must use different feature and feature-class keys.")
-
     classes_value = panel_record.get("classes")
-    if not isinstance(classes_value, list) or not classes_value:
-        raise ValueError(f"Harpy metadata {path}.classes must be a non-empty list of strings.")
+    if not isinstance(classes_value, list):
+        raise ValueError(f"Harpy metadata {path}.classes must be a list of strings.")
     classes = tuple(_require_nonempty_string(value, path=f"{path}.classes item") for value in classes_value)
-    if len(set(classes)) != len(classes):
-        raise ValueError(f"Harpy metadata {path}.classes must contain unique values.")
 
     grouped = _require_mapping(panel_record.get("features_by_class"), path=f"{path}.features_by_class")
     if set(grouped) != set(classes):
         raise ValueError(f"Harpy metadata {path}.features_by_class must contain exactly the declared classes.")
-    features_by_class_items: list[tuple[str, tuple[str, ...]]] = []
-    seen_features: dict[str, str] = {}
     for feature_class in classes:
         values = grouped[feature_class]
-        if not isinstance(values, list) or not values:
-            raise ValueError(f"Harpy metadata {path}.features_by_class[{feature_class!r}] must be non-empty.")
-        features = tuple(
-            _require_nonempty_string(value, path=f"{path}.features_by_class[{feature_class!r}] item")
-            for value in values
+        if not isinstance(values, list):
+            raise ValueError(f"Harpy metadata {path}.features_by_class[{feature_class!r}] must be a list of strings.")
+    try:
+        return _FeaturePanelContract(
+            feature_key=feature_key,
+            feature_class_key=feature_class_key,
+            classes=classes,
+            features_by_class_items=tuple((feature_class, tuple(grouped[feature_class])) for feature_class in classes),
         )
-        if len(set(features)) != len(features):
-            raise ValueError(f"Harpy metadata {path}.features_by_class[{feature_class!r}] must contain unique values.")
-        for feature in features:
-            previous = seen_features.setdefault(feature, feature_class)
-            if previous != feature_class:
-                raise ValueError(
-                    f"Feature {feature!r} belongs to both {previous!r} and {feature_class!r} in panel {panel_name!r}."
-                )
-        features_by_class_items.append((feature_class, features))
-    return _FeaturePanelContract(
-        feature_key=feature_key,
-        feature_class_key=feature_class_key,
-        classes=classes,
-        features_by_class_items=tuple(features_by_class_items),
-    )
+    except ValueError as error:
+        raise ValueError(f"Harpy metadata {path}: {error}") from error
 
 
 def _validate_feature_class_dtype(

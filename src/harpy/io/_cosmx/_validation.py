@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -11,7 +10,7 @@ import pandas as pd
 from dask.dataframe import DataFrame as DaskDataFrame
 from spatialdata import SpatialData, read_zarr
 
-from harpy._feature_panels import _feature_panel_name
+from harpy._feature_panels import _FeaturePanelContract
 from harpy._metadata import (
     _FEATURE_PANELS_METADATA_KEY,
     _HARPY_METADATA_KEY,
@@ -27,14 +26,6 @@ from harpy.io._cosmx._constants import _COMPARTMENT_CATEGORIES, _INSTANCE_ID_FOR
 from harpy.io._cosmx._models import _INSTANCE_ID_DTYPE, _MOSAIC_MODES, _validate_identifier
 
 _ELEMENT_REGISTRIES = (_IMAGES_METADATA_KEY, _LABELS_METADATA_KEY, _POINTS_METADATA_KEY)
-
-
-@dataclass(frozen=True)
-class _FeaturePanelContract:
-    feature_key: str
-    feature_class_key: str
-    classes: tuple[str, ...]
-    class_by_feature: dict[str, str]
 
 
 def validate_cosmx_store(
@@ -300,13 +291,13 @@ def _validate_feature_panels(registry: Mapping[str, object]) -> dict[str, _Featu
             )
 
         class_by_feature: dict[str, str] = {}
-        canonical_features: dict[str, list[str]] = {}
+        features_by_class_items: list[tuple[str, tuple[str, ...]]] = []
         for feature_class in classes:
             features = _require_sorted_string_list(
                 features_by_class[feature_class],
                 path=f"{path}.features_by_class[{feature_class!r}]",
             )
-            canonical_features[feature_class] = list(features)
+            features_by_class_items.append((feature_class, features))
             for feature in features:
                 previous = class_by_feature.setdefault(feature, feature_class)
                 if previous != feature_class:
@@ -314,23 +305,18 @@ def _validate_feature_panels(registry: Mapping[str, object]) -> dict[str, _Featu
                         f"CosMx metadata {path} feature {feature!r} belongs to both {previous!r} and {feature_class!r}."
                     )
 
-        canonical_panel_record = {
-            "feature_key": feature_key,
-            "feature_class_key": feature_class_key,
-            "classes": list(classes),
-            "features_by_class": canonical_features,
-        }
-        expected_name = _feature_panel_name(canonical_panel_record)
+        panel = _FeaturePanelContract(
+            feature_key=feature_key,
+            feature_class_key=feature_class_key,
+            classes=classes,
+            features_by_class_items=tuple(features_by_class_items),
+        )
+        expected_name = panel.storage_key
         if panel_name != expected_name:
             raise ValueError(
                 f"CosMx feature-panel key {panel_name!r} does not match canonical contents; expected {expected_name!r}."
             )
-        panels[panel_name] = _FeaturePanelContract(
-            feature_key=feature_key,
-            feature_class_key=feature_class_key,
-            classes=classes,
-            class_by_feature=class_by_feature,
-        )
+        panels[panel_name] = panel
     return panels
 
 

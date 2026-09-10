@@ -12,7 +12,7 @@ from spatialdata import SpatialData, read_zarr
 from spatialdata.models.models import ScaleFactors_t
 
 from harpy import __version__
-from harpy._feature_panels import _feature_panel_name, _serialize_feature_panel
+from harpy._feature_panels import _make_feature_panel
 from harpy._metadata import _FEATURE_PANELS_METADATA_KEY, _HARPY_METADATA_KEY, _PROVENANCE_METADATA_KEY
 from harpy.io._cosmx._discovery import _discover_cosmx
 from harpy.io._cosmx._images import _add_morphology_images, _select_channels
@@ -708,15 +708,16 @@ def _validate_planned_panels(
     """Resolve planned panels and detect truncated content-hash collisions."""
     panels: dict[str, object] = {} if existing_panels is None else dict(existing_panels)
     for sample in samples:
-        panel = sample.preview.manifest.feature_panel
-        if panel is None:
+        feature_panel = sample.preview.manifest.feature_panel
+        if feature_panel is None:
             continue
-        panel_record = _serialize_feature_panel(
-            feature_key=panel.feature_key,
-            feature_class_key=panel.feature_class_key,
-            features_by_class=panel.features_by_class,
+        panel = _make_feature_panel(
+            feature_key=feature_panel.feature_key,
+            feature_class_key=feature_panel.feature_class_key,
+            features_by_class=feature_panel.features_by_class,
         )
-        panel_name = _feature_panel_name(panel_record)
+        panel_record = panel.to_dict()
+        panel_name = panel.storage_key
         existing = panels.setdefault(panel_name, panel_record)
         if existing != panel_record:
             raise ValueError(f"CosMx feature-panel hash collision for {panel_name!r}.")

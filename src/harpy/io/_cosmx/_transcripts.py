@@ -12,7 +12,10 @@ from dask.utils import parse_bytes
 from spatialdata import SpatialData
 from spatialdata.transformations import Identity, Scale
 
-from harpy._feature_panels import _feature_panel_name, _serialize_feature_panel, _validate_feature_panel_collision
+from harpy._feature_panels import (
+    _make_feature_panel,
+    _validate_feature_panel_collision,
+)
 from harpy._metadata import (
     _FEATURE_PANELS_METADATA_KEY,
     _POINTS_METADATA_KEY,
@@ -144,13 +147,15 @@ def _add_transcript_points(
     gene_categories = _gene_categories(tuple(sources.values()), blocksize=blocksize)
     feature_panel = preview.manifest.feature_panel
     panel_record = None
+    panel_name = None
     if feature_panel is not None:
-        panel_record = _serialize_feature_panel(
+        panel = _make_feature_panel(
             feature_key=feature_panel.feature_key,
             feature_class_key=feature_panel.feature_class_key,
             features_by_class=feature_panel.features_by_class,
         )
-    panel_name = _feature_panel_name(panel_record) if panel_record is not None else None
+        panel_record = panel.to_dict()
+        panel_name = panel.storage_key
     if panel_name is not None and panel_record is not None:
         _validate_feature_panel_collision(sdata, panel_name, panel_record)
     code_class_categories = None if feature_panel is None else feature_panel.class_names
