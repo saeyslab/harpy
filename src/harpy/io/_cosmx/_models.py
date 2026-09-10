@@ -9,6 +9,8 @@ from typing import Literal
 
 import numpy as np
 
+from harpy._feature_panels import _FeaturePanelContract
+
 _MORPHOLOGY_PRODUCT = "morphology"
 _INSTANCE_LABELS_PRODUCT = "instance_labels"
 _COMPARTMENT_LABELS_PRODUCT = "compartment_labels"
@@ -151,110 +153,6 @@ class _CosmxRunMetadata:
 
 
 @dataclass(frozen=True)
-class _CosmxFeatureClass:
-    """One authoritative feature class and its sorted panel features.
-
-    ``features`` contains the CosMx plex display names assigned to this class.
-    These are biological gene targets for an endogenous class, but they are
-    negative-target or system-control identifiers for the corresponding control
-    classes. Consequently, not every feature is a gene.
-    """
-
-    name: str
-    features: tuple[str, ...]
-
-    def __post_init__(self) -> None:
-        if not self.name or self.name != self.name.strip():
-            raise ValueError(f"CosMx feature-class name must be a non-empty trimmed string, found {self.name!r}.")
-        if not self.features:
-            raise ValueError(f"CosMx feature class {self.name!r} must contain at least one feature.")
-        if tuple(sorted(self.features)) != self.features or len(set(self.features)) != len(self.features):
-            raise ValueError(f"CosMx features for feature class {self.name!r} must be sorted and unique.")
-        invalid = [feature for feature in self.features if not feature or feature != feature.strip()]
-        if invalid:
-            raise ValueError(
-                f"CosMx features for feature class {self.name!r} must be non-empty trimmed strings, found {invalid}."
-            )
-
-
-@dataclass(frozen=True)
-class _CosmxFeaturePanel:
-    """Authoritative relation between transcript features and assay classes.
-
-    A feature is the named assay entry stored in the transcript points element,
-    such as a gene or control target. The panel records every feature defined by
-    the assay, including features with zero detected transcripts, and assigns
-    each one to exactly one feature class. It is feature-level metadata rather
-    than a description of individual physical probes; fields such as
-    ``ProbeID`` are intentionally not represented.
-
-    The relation is parsed once from the run-level plex and shared by all
-    transcript mosaic elements from the run.
-
-    For example, a CosMx feature panel is represented conceptually as::
-
-        {
-            "feature_key": "gene",
-            "feature_class_key": "code_class",
-            "classes": ["Endogenous", "Negative", "SystemControl"],
-            "features_by_class": {
-                "Endogenous": ["ACTB", "GAPDH", ...],
-                "Negative": ["Negative1", "Negative2", ...],
-                "SystemControl": ["SystemControl1", "SystemControl2", ...],
-            },
-        }
-
-    For example, the smaller stored relation::
-
-        {
-            "features_by_class": {
-                "Endogenous": ["GeneA"],
-                "Negative": ["Negative01"],
-            },
-        }
-
-    defines the authoritative feature-to-class lookup::
-
-        {
-            "GeneA": "Endogenous",
-            "Negative01": "Negative",
-        }
-
-    Transcript ingestion and store validation use this inverse lookup to check
-    each observed feature/class pair.
-    """
-
-    feature_key: str
-    feature_class_key: str
-    classes: tuple[_CosmxFeatureClass, ...]
-
-    def __post_init__(self) -> None:
-        for field_name, value in (("feature key", self.feature_key), ("feature-class key", self.feature_class_key)):
-            if not value or value != value.strip():
-                raise ValueError(f"CosMx panel {field_name} must be a non-empty trimmed string, found {value!r}.")
-        if not self.classes:
-            raise ValueError("CosMx feature panel must contain at least one feature class.")
-        class_names = self.class_names
-        if tuple(sorted(class_names)) != class_names or len(set(class_names)) != len(class_names):
-            raise ValueError(f"CosMx feature classes must be sorted and unique, found {class_names}.")
-        all_features = tuple(feature for feature_class in self.classes for feature in feature_class.features)
-        if len(set(all_features)) != len(all_features):
-            raise ValueError("Each CosMx panel feature must belong to exactly one feature class.")
-
-    @property
-    def class_names(self) -> tuple[str, ...]:
-        return tuple(feature_class.name for feature_class in self.classes)
-
-    @property
-    def class_by_feature(self) -> dict[str, str]:
-        return {feature: feature_class.name for feature_class in self.classes for feature in feature_class.features}
-
-    @property
-    def features_by_class(self) -> dict[str, tuple[str, ...]]:
-        return {feature_class.name: feature_class.features for feature_class in self.classes}
-
-
-@dataclass(frozen=True)
 class _CosmxFovFiles:
     fov: int
     morphology: Path | None = None
@@ -286,7 +184,7 @@ class _CosmxManifest:
     positions: tuple[_CosmxFovPosition, ...]
     run: _CosmxRunMetadata
     diagnostics: tuple[str, ...]
-    feature_panel: _CosmxFeaturePanel | None = None
+    feature_panel: _FeaturePanelContract | None = None
 
     def __post_init__(self) -> None:
         fov_ids = self.fov_ids

@@ -12,7 +12,11 @@ from spatialdata import SpatialData, read_zarr
 from spatialdata.models.models import ScaleFactors_t
 
 from harpy import __version__
-from harpy._feature_panels import _make_feature_panel
+from harpy._feature_panels import (
+    _FeaturePanelContract,
+    _parse_feature_panel_registry,
+    _validate_feature_panel_collision,
+)
 from harpy._metadata import _FEATURE_PANELS_METADATA_KEY, _HARPY_METADATA_KEY, _PROVENANCE_METADATA_KEY
 from harpy.io._cosmx._discovery import _discover_cosmx
 from harpy.io._cosmx._images import _add_morphology_images, _select_channels
@@ -397,8 +401,9 @@ def add_cosmx_samples(
     )
     harpy_metadata = sdata.attrs[_HARPY_METADATA_KEY]
     assert isinstance(harpy_metadata, dict)
-    existing_panels = harpy_metadata.get(_FEATURE_PANELS_METADATA_KEY, {})
-    assert isinstance(existing_panels, dict)
+    panel_records = harpy_metadata.get(_FEATURE_PANELS_METADATA_KEY, {})
+    assert isinstance(panel_records, dict)
+    existing_panels = _parse_feature_panel_registry(panel_records)
     _validate_planned_panels(prepared, existing_panels=existing_panels)
     _log_prepared_samples(prepared)
 
@@ -703,24 +708,16 @@ def _register_planned_name(
 def _validate_planned_panels(
     samples: tuple[_PreparedCosmxSample, ...],
     *,
-    existing_panels: Mapping[str, object] | None = None,
+    existing_panels: Mapping[str, _FeaturePanelContract] | None = None,
 ) -> None:
-    """Resolve planned panels and detect truncated content-hash collisions."""
-    panels: dict[str, object] = {} if existing_panels is None else dict(existing_panels)
+    """Compare manifest panels with existing and earlier planned contracts by key."""
+    panels = {} if existing_panels is None else dict(existing_panels)
     for sample in samples:
-        feature_panel = sample.preview.manifest.feature_panel
-        if feature_panel is None:
+        panel = sample.preview.manifest.feature_panel
+        if panel is None:
             continue
-        panel = _make_feature_panel(
-            feature_key=feature_panel.feature_key,
-            feature_class_key=feature_panel.feature_class_key,
-            features_by_class=feature_panel.features_by_class,
-        )
-        panel_record = panel.to_dict()
-        panel_name = panel.storage_key
-        existing = panels.setdefault(panel_name, panel_record)
-        if existing != panel_record:
-            raise ValueError(f"CosMx feature-panel hash collision for {panel_name!r}.")
+        _validate_feature_panel_collision(panel, existing_panels=panels)
+        panels.setdefault(panel.storage_key, panel)
 
 
 def _validate_replaceable_output(output: Path) -> None:

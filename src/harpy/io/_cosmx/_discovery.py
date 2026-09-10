@@ -10,6 +10,7 @@ import numpy as np
 import tifffile
 from loguru import logger as log
 
+from harpy._feature_panels import _FeaturePanelContract, _make_feature_panel
 from harpy.io._cosmx._constants import (
     _DEFAULT_PIXEL_SIZE_UM,
     _FOV_DIR_RE,
@@ -28,8 +29,6 @@ from harpy.io._cosmx._models import (
     _PRODUCTS,
     _TRANSCRIPTS_PRODUCT,
     _CosmxChannel,
-    _CosmxFeatureClass,
-    _CosmxFeaturePanel,
     _CosmxFovFiles,
     _CosmxFovPosition,
     _CosmxManifest,
@@ -165,7 +164,7 @@ def _discover_cosmx(path: str | Path, *, products: tuple[str, ...] = _PRODUCTS) 
     )
 
 
-def _discover_feature_panel(root: Path) -> _CosmxFeaturePanel | None:
+def _discover_feature_panel(root: Path) -> _FeaturePanelContract | None:
     """Discover and parse the optional run-level plex exactly once."""
     candidates = sorted(
         path for path in root.iterdir() if path.is_file() and _PLEX_FILE_RE.fullmatch(path.name) is not None
@@ -177,8 +176,27 @@ def _discover_feature_panel(root: Path) -> _CosmxFeaturePanel | None:
     return _read_feature_panel(candidates[0])
 
 
-def _read_feature_panel(path: Path) -> _CosmxFeaturePanel:
-    """Read the authoritative feature-to-class relation from a CosMx plex."""
+def _read_feature_panel(path: Path) -> _FeaturePanelContract:
+    """Read a CosMx plex into the shared, canonical feature-panel contract.
+
+    Validate the source columns, names and duplicate rows here. Construction
+    then validates and sorts the panel, independently of source row order.
+    The manifest retains this contract for reuse in planning and ingestion.
+
+    Features are plex display names: genes, negative targets or system controls,
+    including assay features with no detected transcripts. Each belongs to one
+    class. Physical probe identifiers such as ``ProbeID`` are not represented.
+    For example, the panel's ``features_by_class`` mapping::
+
+        {"Endogenous": ("GeneA",), "Negative": ("Negative01",)}
+
+    defines its inverse ``class_by_feature`` lookup::
+
+        {"GeneA": "Endogenous", "Negative01": "Negative"}
+
+    Ingestion and store validation use that lookup to check observed
+    feature/class pairs in the transcript points elements.
+    """
     with path.open(newline="", encoding="utf-8-sig") as file:
         reader = csv.DictReader(file)
         header = tuple(reader.fieldnames or ())
@@ -220,14 +238,10 @@ def _read_feature_panel(path: Path) -> _CosmxFeaturePanel:
     features_by_class: dict[str, list[str]] = {}
     for feature, feature_class in class_by_feature.items():
         features_by_class.setdefault(feature_class, []).append(feature)
-    classes = tuple(
-        _CosmxFeatureClass(name=feature_class, features=tuple(sorted(features)))
-        for feature_class, features in sorted(features_by_class.items())
-    )
-    return _CosmxFeaturePanel(
+    return _make_feature_panel(
         feature_key=_CosmxKeys.FEATURE_KEY,
         feature_class_key=_CosmxKeys.FEATURE_CLASS_KEY,
-        classes=classes,
+        features_by_class=features_by_class,
     )
 
 

@@ -280,8 +280,6 @@ def _validate_feature_panels(registry: Mapping[str, object]) -> dict[str, _Featu
         feature_class_key = _require_nonempty_string(
             panel_record.get("feature_class_key"), path=f"{path}.feature_class_key"
         )
-        if feature_key == feature_class_key:
-            raise ValueError(f"CosMx metadata {path} feature and feature-class keys must be different.")
         classes = _require_sorted_string_list(panel_record.get("classes"), path=f"{path}.classes")
         features_by_class = _require_mapping(panel_record.get("features_by_class"), path=f"{path}.features_by_class")
         if set(features_by_class) != set(classes):
@@ -290,7 +288,6 @@ def _validate_feature_panels(registry: Mapping[str, object]) -> dict[str, _Featu
                 f"found {list(features_by_class)}."
             )
 
-        class_by_feature: dict[str, str] = {}
         features_by_class_items: list[tuple[str, tuple[str, ...]]] = []
         for feature_class in classes:
             features = _require_sorted_string_list(
@@ -298,19 +295,15 @@ def _validate_feature_panels(registry: Mapping[str, object]) -> dict[str, _Featu
                 path=f"{path}.features_by_class[{feature_class!r}]",
             )
             features_by_class_items.append((feature_class, features))
-            for feature in features:
-                previous = class_by_feature.setdefault(feature, feature_class)
-                if previous != feature_class:
-                    raise ValueError(
-                        f"CosMx metadata {path} feature {feature!r} belongs to both {previous!r} and {feature_class!r}."
-                    )
-
-        panel = _FeaturePanelContract(
-            feature_key=feature_key,
-            feature_class_key=feature_class_key,
-            classes=classes,
-            features_by_class_items=tuple(features_by_class_items),
-        )
+        try:
+            panel = _FeaturePanelContract(
+                feature_key=feature_key,
+                feature_class_key=feature_class_key,
+                classes=classes,
+                features_by_class_items=tuple(features_by_class_items),
+            )
+        except ValueError as error:
+            raise ValueError(f"CosMx metadata {path}: {error}") from error
         expected_name = panel.storage_key
         if panel_name != expected_name:
             raise ValueError(

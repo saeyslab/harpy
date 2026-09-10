@@ -30,6 +30,10 @@ def _commit_element_metadata(
     committed in one root-attributes write. If that write fails, restore the
     preceding attributes and make a best-effort attempt to delete only the newly
     written element before re-raising the original error.
+
+    Callers validate existing panels and check for key collisions beforehand.
+    Insert a panel only if absent; otherwise retain the validated shared record,
+    including any additional metadata fields.
     """
     previous_attrs = deepcopy(sdata.attrs)
     try:
@@ -37,7 +41,7 @@ def _commit_element_metadata(
         _metadata_registry(attrs, registry)[element_name] = dict(record)
         if feature_panel is not None:
             panel_name, panel_record = feature_panel
-            _metadata_registry(attrs, _FEATURE_PANELS_METADATA_KEY)[panel_name] = dict(panel_record)
+            _metadata_registry(attrs, _FEATURE_PANELS_METADATA_KEY).setdefault(panel_name, dict(panel_record))
         if reader_version is not None:
             _harpy_metadata(attrs)[_PROVENANCE_METADATA_KEY] = {
                 "reader": "cosmx",
