@@ -49,7 +49,6 @@ class PointsSummary:
         ``within_class_fraction``: this feature's point count divided by the
         total point count of its own class, after selection. Values range
         from 0 to 1; NaN when the class has no points.
-        ``points_per_um2`` is present only when an analyzed area was supplied.
     per_class
         One row per selected class: ``n_features``, ``n_zero_features``,
         ``pct_zero_features`` (0–100), ``n_points``,
@@ -74,9 +73,9 @@ class PointsSummary:
     -----
     Both dataframes contain ``points_name``, ``feature_panel``, and ``sample_id``
     when available. Their ``attrs`` and the grid's ``attrs`` record those same
-    identities plus ``to_coordinate_system``, ``crd``,
-    ``analyzed_area_um2``, and selected ``panel_feature_counts``. No source
-    element name is parsed to guess sample identity or physical units.
+    identities plus ``to_coordinate_system``, ``crd``, and selected
+    ``panel_feature_counts``. No source element name is parsed to guess sample
+    identity or physical units.
     ``crd`` is None or normalized ``(xmin, xmax, ymin, ymax)`` bounds, with
     ``zmin, zmax`` appended when supplied, all in ``to_coordinate_system``.
 
@@ -99,7 +98,6 @@ def summarize_points(
     to_coordinate_system: str = "global",
     crd: SpatialBounds | tuple[float, ...] | None = None,
     top_n: int = 20,
-    analyzed_area_um2: float | None = None,
 ) -> PointsSummary:
     """Summarize original points by panel feature/class and optional spatial bins.
 
@@ -156,10 +154,6 @@ def summarize_points(
     top_n
         Positive integer used only for the top-N concentration statistic.
         It does not truncate per-target results or other class statistics.
-    analyzed_area_um2
-        Optional positive finite analyzed area of the selected data in square
-        micrometres. Adds per-target ``points_per_um2 = n_points / area``.
-        Never inferred from point bounds or the (possibly gapped) mosaic extent.
 
     Returns
     -------
@@ -220,9 +214,8 @@ def summarize_points(
         if isinstance(max_grid_bytes, bool) or not isinstance(max_grid_bytes, Integral) or max_grid_bytes < 1:
             raise ValueError("max_grid_bytes must be a positive integer or None.")
         max_grid_bytes = int(max_grid_bytes)
-    for name, value in (("bin_size", bin_size), ("analyzed_area_um2", analyzed_area_um2)):
-        if value is not None and (not np.isfinite(value) or value <= 0):
-            raise ValueError(f"{name} must be positive and finite.")
+    if bin_size is not None and (not np.isfinite(bin_size) or bin_size <= 0):
+        raise ValueError("bin_size must be positive and finite.")
     crd = _normalize_spatial_bounds(crd)
 
     axes = ()
@@ -283,8 +276,6 @@ def summarize_points(
     ]
     target_counts, bin_counts = dask.compute(_tree_reduce(tasks, _merge_point_summaries))[0]
     per_target, per_class = _summary_frames(target_counts, panel=panel, classes=classes, top_n=int(top_n))
-    if analyzed_area_um2 is not None:
-        per_target["points_per_um2"] = per_target["n_points"] / analyzed_area_um2
     identity = {"points_name": points_name, "feature_panel": panel_name}
     if points_record.get("sample_id") is not None:
         identity["sample_id"] = points_record["sample_id"]
@@ -292,7 +283,6 @@ def summarize_points(
         **identity,
         "to_coordinate_system": to_coordinate_system,
         "crd": None if crd is None else crd.as_tuple(),
-        "analyzed_area_um2": analyzed_area_um2,
         "panel_feature_counts": {name: len(panel.features_by_class[name]) for name in classes},
     }
     for frame in (per_target, per_class):
