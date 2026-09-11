@@ -4295,7 +4295,8 @@ Focused tests should cover:
 
 ## Slice 11e: original-point summary visualization
 
-**Status: specified; not implemented.**
+**Status: partially implemented — Part 11e.i is implemented; Parts 11e.ii and
+11e.iii remain specified.**
 
 Implement three separately scoped consumers of the `PointsSummary` contract
 from Slice 11a:
@@ -4349,12 +4350,12 @@ not a required output or acceptance criterion for either Slice 11a or 11e.
 
 ### Part 11e.i: ECDF plot
 
-**Status: specified; not implemented.**
+**Status: implemented.**
 
 Implement `hp.pl.ecdf_points_per_feature`, consuming the standalone
-`summary.per_target` dataframe. The docstring must make clear that this is a per-target count
-summary, not a feature-panel metadata record. Neither `summary.per_class`
-nor a spatial grid is required.
+`summary.per_target` dataframe. The docstring must make clear that this is a
+per-target count summary, not a feature-panel metadata record. Neither
+`summary.per_class` nor a spatial grid is required.
 
 #### Public API
 
