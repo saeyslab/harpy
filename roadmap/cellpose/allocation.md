@@ -3460,7 +3460,6 @@ def summarize_points(
     to_coordinate_system: str = "global",
     crd: SpatialBounds | tuple[float, ...] | None = None,
     top_n: int = 20,
-    analyzed_area_um2: float | None = None,
 ) -> PointsSummary:
     ...
 ```
@@ -3507,11 +3506,10 @@ def summarize_points(
   remains XY, not volumetric. Existing plotting APIs are not changed here.
 - `top_n` selects N for the concentration statistic only. It never removes
   features from the per-target dataframe or other whole-panel metrics.
-- `analyzed_area_um2` is an optional, explicitly known analyzed area in square
-  micrometres for the selected data, including any crop or z selection. When
-  supplied, it enables per-target `points_per_um2`. Do not infer it from a
-  bounding box. This physical area is distinct from spatial-bin area, which
-  follows from the bin geometry and coordinate-system units.
+
+No total analyzed-area argument is accepted. Spatial counts remain raw;
+Slice 11e derives optional geometric densities from bin edges with an explicit
+physical-unit calibration, not from a separately supplied tissue or mosaic area.
 
 The function requires authoritative feature-panel metadata referenced by the
 selected points element. Resolve `feature_key`, `feature_class_key`, and the
@@ -3552,8 +3550,6 @@ names `feature`, `feature_class`, `n_points`, and
 `within_class_fraction` is the feature's point count divided by the total
 point count of its own class after selection, not by the total across all
 classes. Values range from 0 to 1; NaN when the class has no detected points.
-Add `points_per_um2` only when
-`analyzed_area_um2` is supplied, calculated as `n_points / analyzed_area_um2`.
 
 For example, a hypothetical result could contain the following count columns
 (source identity columns omitted here for readability):
@@ -3599,9 +3595,9 @@ a live panel lookup, a point read, or changes to the raw result.
 The implemented grid uses bin-center `x`/`y` coordinates and attributes
 `x_edges`, `y_edges`, `extent`, and `bin_size`. Counts use `uint64`.
 Both dataframe attributes and grid attributes retain source identity,
-`to_coordinate_system`, `crd`, `analyzed_area_um2`, and
-`panel_feature_counts` for the selected classes. These are metadata on the
-returned summary only; no records are added to the source SpatialData object.
+`to_coordinate_system`, `crd`, and `panel_feature_counts` for the selected
+classes. These are metadata on the returned summary only; no records are added
+to the source SpatialData object.
 `crd` retains any z interval in the same normalized tuple as the x/y bounds;
 the grid's `extent` and bin edges describe only its XY projection.
 
@@ -3648,9 +3644,8 @@ element/mosaic, containing at least:
 
 - target name;
 - authoritative feature class;
-- detected point count;
-- fraction of the corresponding control-class calls; and
-- density per analyzed area when `analyzed_area_um2` is supplied.
+- detected point count; and
+- fraction of the corresponding control-class calls.
 
 Use the feature-panel metadata to include control targets with zero detections.
 Concretely, aggregate the observed control points by sample, points element,
@@ -3699,12 +3694,12 @@ concentration. Consumers of these feature-level outputs should display missing
 fractions as "N/A"; Slice 11e instead summarizes spatial bins.
 
 For comparisons between samples, make clear that raw point counts also reflect
-the analyzed area. Offer area normalization explicitly only when that area is
-reliably defined; physical coordinate units alone do not establish the sampled
-area, and a mosaic bounding box may contain unmeasured gaps. Label normalized
-units and retain the panel identity so different panels are not silently pooled
-or presented as equivalent. These existing feature-level summaries are separate
-from the bin-level statistics introduced by Slice 11e.
+the analyzed area. Retain panel identity so different panels are not silently
+pooled or presented as equivalent. These existing feature-level summaries do
+not calculate area-normalized rates. Optional geometric density normalization
+belongs to the bin-level statistics introduced by Slice 11e; it requires
+explicit physical calibration and does not infer tissue area from a mosaic
+bounding box, which may contain unmeasured gaps.
 
 ### Spatially binned summary
 
@@ -3809,8 +3804,6 @@ Focused tests should establish that:
 - named bounds and four/six-value tuples produce identical results and metadata;
 - fixed summary-column names remain independent of the source panel's feature
   and class column names, while source and panel identity remain available;
-- `points_per_um2` is added only for an explicitly supplied analyzed area and
-  does not alter raw counts or substitute for geometric bin area;
 - unassigned and outside-mask control points contribute to the summaries;
 - panel controls with zero detections appear in the per-target result;
 - per-target counts sum to their corresponding raw class totals;
@@ -4446,8 +4439,8 @@ points_per_100_um2 = 100 × class_count / bin_area_um2
 
 Use actual edge differences, including narrower terminal bins. The
 denominator is the **full geometric area of each retained bin**, including
-any outside-tissue portion. Never label it tissue area or substitute
-`analyzed_area_um2` for per-bin area. Do not infer physical units from a
+any outside-tissue portion. Never label it tissue area or substitute a total
+analyzed area for per-bin area. Do not infer physical units from a
 coordinate-system name; the exact API must provide an explicit unit/scale
 contract when the supplied array lacks one. Raw-count summaries remain usable
 without physical calibration. Do not silently normalize by panel size.
@@ -4636,7 +4629,7 @@ geometric bin area, using the explicit physical calibration contract from
 11e.i rather than inferring units from a coordinate-system name. These are
 summary snapshots; never resolve them again from a live panel registry or
 estimate them from observed features. Require the relevant attached metadata when a selected
-normalization needs it. Do not substitute whole-mosaic `analyzed_area_um2` for
+normalization needs it. Do not substitute a whole-mosaic area for
 individual bin area. Keep the array's raw counts unchanged; any smoothing
 applies to the display only. Matched class plots must use the common extent and
 bin edges already stored in the array, including all-zero grids for valid
