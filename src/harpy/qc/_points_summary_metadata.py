@@ -23,7 +23,8 @@ class PointsSummaryMetadata:
         ``to_coordinate_system`` units. The crop need not equal the grid extent.
     microns_per_unit
         Optional physical calibration of the selected coordinate system.
-        It changes area/density reporting, not coordinates or raw counts.
+        It enables physical bin-area reporting, without changing coordinates
+        or count statistics.
     bin_size
         Requested bin width, or None when binning was not requested.
     x_edges, y_edges

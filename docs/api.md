@@ -205,6 +205,8 @@ Quality control functions.
     obs_scatter
     summarize_points
     PointsSummary
+    PointsSummaryMetadata
+    SpatialBinSummary
 ```
 
 ## Plotting

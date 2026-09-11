@@ -165,14 +165,12 @@ def summarize_points(
         same-dimensional affine transformation before projecting to XY. The
         registration is only required when cropping or binning is requested.
     microns_per_unit
-        Physical size in micrometers of one unit in ``to_coordinate_system``,
-        using the same scale for x and y. A positive finite value enables
-        physical bin areas and densities in ``spatial_bins``; None leaves only
-        raw counts and coordinate-unit areas. Use 1.0 for micron coordinates
-        or the calibrated micrometers per pixel for pixel coordinates. This
-        does not transform points, change bins, or rescale raw counts. Units
-        are never inferred from frame names or reader metadata. Without
-        binning, this parameter adds no statistics.
+        Positive finite micrometers per unit of ``to_coordinate_system``,
+        shared by x and y. Adds ``bin_area_um2`` to ``spatial_bins.per_bin``
+        when binning; None omits it. Use 1.0 for micron coordinates or the
+        calibrated micrometers per pixel for pixel coordinates. Units are
+        not inferred. ``bin_area`` remains width × height in coordinate units
+        squared. Coordinates, bins, and count statistics are unchanged.
     crd
         Optional :class:`harpy.SpatialBounds`, for example
         ``hp.SpatialBounds(x=(xmin, xmax), y=(ymin, ymax), z=(zmin, zmax))``.
@@ -182,11 +180,9 @@ def summarize_points(
         All bounds use ``to_coordinate_system`` and apply after the full
         coordinate transformation, before projecting to XY for binning.
         Supplying z bounds for 2D points raises ValueError.
-        Both forms require finite, increasing bounds on each axis. The crop
-        is half-open: minima included, maxima excluded. Every output uses
-        this crop. Last bins may be narrower than bin_size. Result metadata
-        retains a validated ``SpatialBounds`` object, regardless of the input
-        form; None when no crop was supplied.
+        Every output uses this crop. Last bins may be narrower than bin_size.
+        Result metadata retains a validated ``SpatialBounds`` object, regardless
+        of the input form; None when no crop was supplied.
     top_n
         Positive integer used only for the top-N concentration statistic.
         It does not truncate per-target results or other class statistics.
@@ -211,11 +207,6 @@ def summarize_points(
     partition-wise before class, crop, or z filtering, so selection cannot hide
     invalid feature/class assignments.
 
-    Bins are half-open, including on internal edges. Without ``crd``, a
-    preliminary reduction discovers bounds from selected-class coordinates.
-    Full-width bins extend beyond their observed maxima so every selected
-    point is included; a constant coordinate needs one bin.
-
     Separate class-only calls can use different grids and bin populations.
     For comparisons over one population, compute the relevant classes together
     and select from the returned summaries. An explicit crop fixes the grid,
@@ -227,15 +218,21 @@ def summarize_points(
 
     Examples
     --------
-    >>> summary = hp.qc.summarize_points(
-    ...     sdata, "transcripts", feature_classes=["Negative", "SystemControl"],
-    ...     bin_size=200, to_coordinate_system="sample_micron", microns_per_unit=1.0,
-    ... )
-    >>> summary.per_target  # includes panel features with zero detections
-    >>> summary.spatial_counts  # raw (feature_class, y, x) bin counts
-    >>> summary.spatial_bins.per_bin  # prepared histogram measurements
-    >>> summary.spatial_bins.per_class  # overview across included bins
-    >>> summary.metadata.to_coordinate_system  # shared coordinate context
+    .. code-block:: python
+
+        summary = hp.qc.summarize_points(
+            sdata,
+            "transcripts",
+            feature_classes=["Negative", "SystemControl"],
+            bin_size=200,
+            to_coordinate_system="sample_micron",
+            microns_per_unit=1.0,
+        )
+        summary.per_target  # includes panel features with zero detections
+        summary.spatial_counts  # raw (feature_class, y, x) bin counts
+        summary.spatial_bins.per_bin  # prepared histogram measurements
+        summary.spatial_bins.per_class  # overview across included bins
+        summary.metadata.to_coordinate_system  # shared coordinate context
     """
     if points_name not in sdata.points:
         raise ValueError(f"Points element {points_name!r} does not exist.")
