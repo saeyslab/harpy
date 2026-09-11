@@ -34,10 +34,11 @@ implemented:
       elements through `hp.pt.add_feature_panel` — implemented;
     - **11d:** validate existing points against their registered feature panel
       through the read-only `hp.pt.validate_points` API;
-    - **11e:** transcript-positive bin summaries and visualization, in three
+    - **11e:** transcript-positive bin summaries and visualization, in four
       separate parts: **11e.i** construct `summary.spatial_bins` inside
       `summarize_points`, **11e.ii** histograms and a compact bin-based
-      class overview, and **11e.iii** spatial density heatmaps;
+      class overview, **11e.iii** feature-specific spatial counts through
+      `hp.qc.bin_points_by_feature`, and **11e.iv** spatial density heatmaps;
     - **11f:** table-level summary computation through `hp.qc.summarize_table`
       and `TableSummary`, with plotting integration;
 
@@ -4305,23 +4306,28 @@ Focused tests should cover:
 **Status: specified; not implemented.**
 
 Implement an annotation-free overview of transcript-positive spatial bins,
-using the existing `PointsSummary.spatial_counts` from Slice 11a:
+using the existing `PointsSummary.spatial_counts` from Slice 11a, plus an
+explicit computation path for feature-specific grids:
 
 1. **11e.i: transcript-positive bin summaries** — construct a
    `SpatialBinSummary` inside `hp.qc.summarize_points` and return it as
    `PointsSummary.spatial_bins`, alongside the raw spatial-count array.
 2. **11e.ii: histograms and compact bin-summary overview** — visualize the
    results of 11e.i, with one shared bin population across feature classes.
-3. **11e.iii: spatial density heatmaps** — render the spatial-count array
-   through `hp.pl.plot_transcript_density`.
+3. **11e.iii: feature-specific spatial counts** — compute one count plane per
+   requested feature through `hp.qc.bin_points_by_feature`.
+4. **11e.iv: spatial density heatmaps** — render class-level or feature-level
+   spatial-count arrays through `hp.pl.plot_transcript_density`.
 
 Part 11e.ii depends on the computed result of 11e.i; neither requires density
-rendering to be implemented first. Keep the parts within Slice 11e so later
-slice numbers remain unchanged. Replace the former per-feature distribution
+rendering to be implemented first. Part 11e.iv consumes the class-grid contract
+from 11e.i and the feature-grid contract from 11e.iii. Keep the parts within
+Slice 11e so later slice numbers remain unchanged. Replace the former per-feature distribution
 plot and per-feature class-summary display with this bin-based workflow.
-There is no per-target plot, ranking, or new per-target statistic in this
-slice. The existing `summarize_points` outputs need not be removed or
-reimplemented to provide it.
+Feature-specific spatial maps do not reinstate per-target distribution plots,
+rankings, or additional per-target summary dataframes. The existing
+`summarize_points` outputs need not be removed or reimplemented to provide
+these maps.
 
 The bin-summary helper consumes the counts already reduced inside
 `summarize_points`; it does not trigger another source-point scan or panel
@@ -4331,6 +4337,10 @@ points or a live panel registry. Neither bin-summary postprocessing nor
 plotting performs point-to-label assignment, constructs an AnnData table, or
 writes SpatialData metadata. Computation remains separate from plotting, so
 the result can be inspected, exported, and reused for several figures.
+The new feature-grid computation does read original points: individual
+features' spatial distributions cannot be recovered from class totals. It
+shares the binning implementation, rather than calling `summarize_points`
+and trying to recover feature planes from its class grid.
 Keep each source grid's result separate; plotting multiple samples must not
 silently pool their bins, classes, or panels. Leave input counts and metadata
 unchanged.
@@ -4693,15 +4703,140 @@ and population. Check axes reuse, explicit class selection, and that display
 limits do not change summary denominators. Plotting must neither mutate the
 result nor invoke source reads, panel lookup, or summary computation.
 
-### Part 11e.iii: spatial density heatmaps
+### Part 11e.iii: feature-specific spatial counts
+
+**Status: specified; not implemented.**
+
+Add a read-only `hp.qc.bin_points_by_feature` computation API. It produces
+spatial counts for explicitly selected panel features, including genes,
+negative targets, and other controls. Keep this separate from the class-level
+QC summaries: do not add a potentially panel-wide feature dimension to
+`PointsSummary.spatial_counts`.
+
+#### Public computation API
+
+```python
+def bin_points_by_feature(
+    sdata: SpatialData,
+    points_name: str,
+    *,
+    features: str | Sequence[str],
+    bin_size: float,
+    max_grid_bytes: int | None = 1024**3,
+    to_coordinate_system: str = "global",
+    microns_per_unit: float | None = None,
+    crd: SpatialBounds | tuple[float, ...] | None = None,
+) -> xr.DataArray:
+    ...
+```
+
+Reuse the corresponding `summarize_points` parameter meanings, with these
+differences:
+
+- `features` replaces `feature_classes`: require an explicit feature name or
+  a nonempty sequence of distinct panel feature names. Do not default to
+  allocating a grid for every panel feature.
+- `bin_size` is required and positive/finite; there is no no-binning mode.
+- Omit `top_n`, which only serves statistics this function does not compute.
+- Return only the count DataArray, not a `PointsSummary`, `SpatialBinSummary`,
+  or per-target/per-class dataframe. Do not calculate those unused summaries.
+
+Require the same authoritative feature-panel metadata as `summarize_points`.
+Resolve feature and class columns from the panel, reuse source feature/class
+validation before feature filtering, and direct users with no panel to
+`hp.pt.add_feature_panel`. Unknown requested features raise an error. A valid
+panel feature with no detections, including none inside the crop, produces
+an all-zero plane rather than an error.
+
+#### Output and geometry
+
+Return raw, unsmoothed, in-memory uint64 counts with dimensions
+`(feature, y, x)`, one plane per requested feature. Preserve the `feature`
+dimension even for a single feature. Multiple requested features are counted
+separately, not pooled during computation.
+
+Retain bin-center coordinates, actual x/y edges, extent, bin size, normalized
+crop, coordinate system, source/panel/sample identity, and the supplied
+`microns_per_unit`. Physical calibration describes the selected coordinate
+system and does not change points, edges, or raw counts; downstream rendering
+uses this captured value for optional density normalization.
+
+All selected features share one grid. Use the explicit crop, or derive the
+transformed extent before feature filtering, with the same edge convention
+as `summarize_points`: full-width bins beyond observed maxima without a crop,
+and potentially narrower terminal bins with a crop. An entirely empty source
+requires an explicit crop to define its grid.
+
+Capture the shared all-panel-class occupancy mask during the same reduction,
+before restricting counts to requested features. Keep this mask and its
+occupancy classes with the array, as for class grids. A bin containing only
+other features therefore remains included with zero counts for the selected
+feature. Neither extent nor occupancy is redefined from a selected feature's
+positive detections.
+
+For example:
+
+```python
+feature_counts = hp.qc.bin_points_by_feature(
+    sdata,
+    points_name="sample_a_transcripts_mosaic_1",
+    features=["EPCAM", "VIM"],
+    bin_size=100,
+    to_coordinate_system="sample_a_global_1_micron",
+    microns_per_unit=1.0,
+)
+
+feature_counts.sel(feature="EPCAM")  # one feature's XY grid
+```
+
+#### Shared implementation and memory
+
+Reuse feature-panel resolution/validation, coordinate transformations,
+`SpatialBounds` handling, bin-edge construction, and partition-wise bin
+counting. Generalize the private grouping/array helpers only as needed to
+support either a feature-class or feature axis; do not maintain an independent
+binning implementation or introduce a public grouping-mode framework.
+
+Reduce all requested features together in one partition-wise count pass,
+including shared occupancy. A preliminary coordinate-only extent reduction
+may still be needed without an explicit crop. Never scan separately for each
+requested feature, collect the full points dataframe on the driver, or call
+point-to-label assignment. A separate call to this API reads original points;
+it cannot obtain feature-specific counts from a previously returned class grid.
+
+Apply `max_grid_bytes` to
+`n_requested_features * n_y_bins * n_x_bins * uint64.itemsize` before allocating
+the dense feature grid. Do not allocate all panel features or all class planes
+merely to determine occupancy. As in `summarize_points`, this limits the final
+count grid, not total peak memory or intermediate reductions.
+
+#### Verification
+
+Focused tests should establish that:
+
+- requested features have separate count planes, with no implicit pooling;
+- valid undetected features retain all-zero planes; unknown features and
+  invalid source feature/class assignments raise;
+- coordinate transforms, crops, edge conventions, and calibration match the
+  shared summary contract;
+- feature filtering does not change extent or all-class occupancy, and zeros
+  within that population remain explicit;
+- the memory limit counts requested feature planes, not classes;
+- multiple features share a count reduction without full points materialization;
+  no per-target/per-class summary, table construction, or plotting is invoked; and
+- source elements and metadata remain unchanged.
+
+### Part 11e.iv: spatial density heatmaps
 
 **Status: specified; not implemented.**
 
 Retain the public `hp.pl.plot_transcript_density` name, but replace its
-SpatialData-input signature with a renderer over `summary.spatial_counts`.
+SpatialData-input signature with a renderer over either
+`summary.spatial_counts` (`feature_class, y, x`) or the feature grid returned
+by `bin_points_by_feature` (`feature, y, x`).
 Do not accept a SpatialData object or a full `PointsSummary` as an alternative
 computation path. Reuse the shared transcript-positive-bin definition from
-11e.i; the histogram/overview renderer need not be implemented first.
+11e.i and 11e.iii; the histogram/overview renderer need not be implemented first.
 
 Validate only the array's dimensions, coordinates, and metadata needed for
 the requested display. Read bin geometry and `to_coordinate_system` from the
@@ -4710,17 +4845,18 @@ could disagree with the computed grid. Any source filtering belongs to
 computation, not rendering. There is no raw points fallback, source-gene-column
 argument, or in-plot subsampling path.
 
-#### Class selection through `plot_transcript_density`
+#### Class and feature selection through `plot_transcript_density`
 
-Add the optional parameter:
+Use selectors for already computed planes:
 
 ```python
 feature_class: str | None = None
+features: str | Sequence[str] | None = None
 ```
 
 Use the all-class inclusion mask captured during summary computation, before
-class selection. Class selection operates only on the `feature_class`
-coordinate of that array. `None` sums the counts across its classes for the
+display selection. For a class grid, class selection operates only on the
+`feature_class` coordinate of that array. `None` sums the counts across its classes for the
 display; it does not recover classes excluded during summary computation.
 A string selects an exact available class, such as `"Endogenous"`, `"Negative"`,
 or `"SystemControl"`. Use `feature_class`, not the Python keyword `class`, and
@@ -4729,12 +4865,26 @@ such as `"endogenous_class"`. This is a generic feature-class selection, not a
 control-only switch: do not hard-code CosMx classes or assume every
 non-expression class represents a control.
 
-Requesting a class absent from the array raises a clear error without a source
-scan or panel lookup. A class present with all-zero counts is valid. The panel
-requirement and source feature/class validation belong to `summarize_points`;
-they are not repeated by the renderer. When summary computation finds a missing
-panel, its error directs the user to the `hp.pt.add_feature_panel` helper from
-Slice 11c.
+For a feature grid, `features` selects exact names from its `feature`
+coordinate. A string displays one plane; an explicit sequence displays the
+sum of those planes, clearly labelled as a combined map. If the array has
+one feature, `features=None` may select it; for multiple feature planes,
+require explicit selection rather than silently pooling them. Reject a
+`features` selector on a class grid or a `feature_class` selector on a feature
+grid. Do not try to recover individual features from class totals.
+
+Use `features`, not the former `genes` parameter. The old function filtered
+original points and pooled all selected genes into one histogram; the new
+selector only combines or selects precomputed feature planes. Computing
+separate planes first permits both individual and explicitly combined maps
+without another point scan.
+
+Requesting a class or feature absent from the array raises a clear error
+without a source scan or panel lookup. An available all-zero plane is valid.
+The panel requirement and source feature/class validation belong to
+`summarize_points` or `bin_points_by_feature`, not the renderer. When either
+computation finds a missing panel, its error directs the user to the
+`hp.pt.add_feature_panel` helper from Slice 11c.
 
 For example, compute once in a physical coordinate system, then render the
 negative-control grid:
@@ -4758,32 +4908,47 @@ hp.pl.plot_transcript_density(
 The same array can then be plotted with `feature_class="SystemControl"`
 without recomputing the summary or accessing `sdata`.
 
+Likewise, reuse the feature grid from 11e.iii:
+
+```python
+hp.pl.plot_transcript_density(feature_counts, features="EPCAM")
+hp.pl.plot_transcript_density(feature_counts, features="VIM")
+hp.pl.plot_transcript_density(feature_counts, features=["EPCAM", "VIM"])
+```
+
+The final call explicitly combines both count planes; it does not change
+the source grid or produce a new reduction over original points.
+
 #### Density display and normalization
 
-Class selection, bin inclusion, and normalization are separate choices.
-Selecting `"Negative"` must not silently divide counts by panel size or bin
-area. Expose normalization
-explicitly and label its units; the exact normalization parameter names remain
-to be specified for this part.
+Class/feature selection, bin inclusion, and normalization are separate choices.
+Selecting `"Negative"` or a feature must not silently divide counts by panel
+size or bin area. Expose normalization explicitly and label its units; the
+exact normalization parameter names remain to be specified for this part.
 
-Derive display values from raw bins, optionally dividing by the authoritative
-class feature counts already captured in the array's
+For class grids, derive display values from raw bins, optionally dividing by
+the authoritative class feature counts already captured in the array's
 `.attrs["panel_feature_counts"]` and, when `.attrs["microns_per_unit"]`
 is not `None`, by physical geometric bin area, using the calibration contract
 from 11e.i rather than inferring units from a coordinate-system name. These are
 summary snapshots; never resolve them again from a live panel registry or
-estimate them from observed features. Require the relevant attached metadata when a selected
-normalization needs it. Do not substitute a whole-mosaic area for
+estimate them from observed features. Require the relevant attached metadata
+when a selected normalization needs it. Do not substitute a whole-mosaic area for
 individual bin area. Keep the array's raw counts unchanged; any smoothing
 applies to the display only. Matched class plots must use the common extent and
 bin edges already stored in the array, including all-zero grids for valid
 classes without detections. For the CosMx control comparison, use the same
 chosen normalization for the separate negative-probe and system-control maps.
 
+For feature grids, support raw counts or explicitly requested physical-area
+normalization using the captured calibration and bin geometry. Do not divide
+individual feature counts or a selected feature sum by a whole-class panel
+size; class-panel normalization applies only to class grids.
+
 Render bins excluded by the shared mask as transparent or otherwise clearly
-unreported. Keep class-specific zeros inside that mask visible as zero, not
-missing data; do not mask each class by its own positive counts. A completely
-empty population gets an explicit empty-state message. The raw zero-filled
+unreported. Keep class- and feature-specific zeros inside that mask visible
+as zero, not missing data; do not mask each plane by its own positive counts.
+A completely empty population gets an explicit empty-state message. The raw zero-filled
 array remains unchanged. Any optional smoothing is display-only, must respect
 the shared mask, and never changes the statistics or histogram inputs.
 
@@ -4802,19 +4967,21 @@ individual-point overlay belongs to separate diagnostic plotting for a selected
 crop; this density renderer does not fetch those points. The production
 overview operates on the precomputed bins.
 
-#### Reuse of summary computation
+#### Reuse of precomputed grids
 
 The current `plot_transcript_density` filters points and then calls
 `ddf.compute()` before constructing a NumPy histogram. Replace that computation
 path with direct rendering of the compact spatial-count array produced by
-Slice 11a. Update affected examples, documentation, and tests to the explicit
-compute-then-plot workflow; do not retain the previous source-data signature
+`summarize_points` or `bin_points_by_feature`. Update affected examples,
+documentation, and tests to the explicit compute-then-plot workflow; do not
+retain the previous source-data signature
 through a compatibility branch or add an optional convenience shortcut.
 
-Users call `summarize_points` explicitly and can reuse its spatial-count array
-across plots. A multi-class report computes once and then renders its classes
-separately without another source-point scan. No binning helper, panel
-resolution, or source-point validation is called from density rendering. Do
+Users call the appropriate computation API explicitly and reuse its array
+across plots. A multi-class or multi-feature report computes its requested
+planes together and then renders them without another source-point scan.
+No binning helper, panel resolution, or source-point validation is called
+from density rendering. Do
 not create an artificial AnnData table merely to reuse table-based plotting
 helpers. Other plotting APIs are not changed solely to implement this contract.
 
@@ -4822,23 +4989,30 @@ helpers. Other plotting APIs are not changed solely to implement this contract.
 
 Focused tests should establish that:
 
-- all-zero classes remain visible inside a nonempty shared population, while
-  completely empty bins/populations are distinguished from class-specific zeros;
-- density plotting accepts the standalone `summary.spatial_counts` DataArray,
-  without its containing summary, SpatialData object, or root panel registry;
+- all-zero classes/features remain visible inside a nonempty shared population,
+  while completely empty bins/populations are distinguished from
+  plane-specific zeros;
+- density plotting accepts standalone class-grid and feature-grid DataArrays,
+  without a containing summary, SpatialData object, or root panel registry;
 - `None` spatial counts produce actionable guidance to compute with `bin_size`,
   and malformed grid/coordinate metadata produce display-specific errors;
 - class selection only selects classes already in the array; `None` selects
   and sums all available classes, missing requested classes raise without a
   scan, and class selection never changes the shared occupancy mask;
+- `features` selects existing feature planes, an explicit list combines their
+  counts, and incompatible selectors or ambiguous multi-feature defaults raise;
+  feature selection never changes occupancy or invokes source filtering;
 - source-data input is not accepted as an alternative computation path;
-- normalized displays use the array's captured authoritative panel sizes and bin
-  geometry, with correct labels/units, axes, and common extents across classes;
+- normalized displays use the corresponding captured metadata: authoritative
+  panel sizes for class normalization, calibration and bin geometry for
+  physical-area normalization; class-panel normalization is not applied to
+  feature grids;
+- labels/units, axes, and common extents remain correct for both grid kinds;
 - normalization and smoothing do not mutate raw counts or summary metadata;
 - sample, mosaic, and panel identities remain distinguishable; and
 - density rendering never calls summary computation, source-point reads,
   point reductions, or panel-registry resolution, including when several
-  classes are rendered from the same array.
+  classes or features are rendered from the same array.
 
 ## Slice 11f: table-level summary computation and plotting integration
 
