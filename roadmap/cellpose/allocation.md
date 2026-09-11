@@ -4447,9 +4447,11 @@ When binning is requested, populate `spatial_bins` even for an empty grid;
 `PointsSummary.per_class`: its means and percentiles describe panel features,
 whereas `PointsSummary.spatial_bins.per_class` describes spatial bins.
 
-- **Per-bin values:** retain bin identity/location, geometric area, and raw
-  counts for each reported class over the shared included-bin population.
-  These are sufficient to draw histograms without repeating the reduction.
+- **Per-bin values:** one row per included bin and reported feature class,
+  retaining bin identity/location, geometric area, and raw `n_points`.
+  These are class-level aggregates, not individual points or per-gene counts.
+  Include the optional calibrated densities defined below. These values
+  suffice for histograms without repeating bin-summary computation.
 - **Per-class overview:** total points, mean, median, and 95th-percentile
   points per transcript-positive bin, plus the number and percentage of
   included bins with zero points in that particular class.
@@ -4460,6 +4462,38 @@ whereas `PointsSummary.spatial_bins.per_class` describes spatial bins.
   Keep this context with the returned dataframes so they can be inspected
   independently. The raw grid also records the supplied calibration for
   standalone density rendering.
+
+#### Computation, reuse, and memory
+
+Prepare the tabular measurements once inside `summarize_points`:
+
+1. Construct `per_bin` from the reduced bin counts and shared inclusion mask,
+   retaining class-specific zeros and calculating optional physical areas
+   and densities.
+2. Derive `per_class` from those same per-bin measurements, so its totals,
+   distribution statistics, and density summaries describe the values used
+   for histograms. Preserve the separate empty-population and pooled-density
+   rules below.
+3. Return both dataframes in `SpatialBinSummary`. Histogram renderers select
+   a class and an existing value column; they do not reconstruct bin
+   inclusion, bin areas, or physical calibration.
+
+Keep `spatial_counts` for spatial rendering. Returning `per_bin` intentionally
+duplicates some grid values in exchange for an inspectable, reusable table
+and a clear computation/plotting boundary. A grid-only histogram could reuse
+a private helper without duplicating code, but would repeat measurement
+extraction and optional density calculation; this API instead prepares those
+measurements once.
+
+The dataframe scales with **included bins × reported classes**, not panel
+genes, but can still be large. Construct it compactly, use categorical class
+labels, avoid unnecessary intermediate copies, and keep shared context in
+dataframe attributes rather than repeating large metadata records per row.
+The existing `max_grid_bytes` contract limits only the raw dense grid; it
+does not cap `per_bin` or total peak memory. Do not describe the complete
+returned result as bounded by that grid limit.
+
+#### Statistical interpretation
 
 Give statistics explicit names such as `mean_points_per_bin` and
 `median_points_per_bin`; their documentation and display labels must specify
@@ -4581,6 +4615,8 @@ Focused tests should establish that:
   beside a detected class;
 - bin counts, totals, distribution statistics, and empty-grid missing values
   follow the declared denominators;
+- `per_class` statistics agree with the corresponding `per_bin` measurements,
+  including class-specific zeros and optional densities;
 - `microns_per_unit=None` keeps raw summaries without physical densities;
   invalid calibration raises, and equivalent pixel/micron bin configurations
   produce equivalent physical areas and densities without double scaling;
@@ -4595,7 +4631,10 @@ Focused tests should establish that:
 **Status: specified; not implemented. Depends on Part 11e.i.**
 
 Consume `summary.spatial_bins.per_bin` and `summary.spatial_bins.per_class`
-produced by 11e.i.
+produced by 11e.i. Histograms select the requested class from `per_bin` and
+use its existing `n_points` or `points_per_100_um2` values; the compact overview
+uses `per_class`. Selecting physical density without supplied calibration
+must raise a clear error, not infer units or calculate missing densities.
 Do not render `summary.per_target` or its existing per-feature
 `summary.per_class` as this new overview. Do not repeat bin-summary
 computation in each plot.
