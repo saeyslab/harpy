@@ -1,5 +1,6 @@
 from collections import Counter
 from copy import deepcopy
+from dataclasses import FrozenInstanceError, replace
 
 import dask
 import dask.dataframe as dd
@@ -9,7 +10,7 @@ import pytest
 import xarray as xr
 from spatialdata import SpatialData, read_zarr
 from spatialdata.models import PointsModel
-from spatialdata.transformations import Affine, Identity, set_transformation
+from spatialdata.transformations import Affine, Identity, Scale, set_transformation
 
 import harpy as hp
 from harpy.qc._points_binning import _count_point_bins, _point_bin_edges
@@ -72,6 +73,8 @@ def test_summary_returns_complete_panel_counts_and_class_statistics():
     result = hp.qc.summarize_points(sdata, "calls", top_n=1)
     assert isinstance(result, hp.qc.PointsSummary)
     assert result.spatial_counts is None
+    assert result.spatial_bins is None
+    assert result.retained_bin_mask is None
     targets = result.per_target.set_index("feature")
     assert targets.index.tolist() == ["NoCalls", "GeneA", "GeneB", "ZeroGene", "NegA", "NegB", "NegC", "SysA", "SysB"]
     assert targets.n_points.tolist() == [0, 2, 1, 0, 3, 1, 0, 1, 0]
@@ -94,11 +97,72 @@ def test_summary_returns_complete_panel_counts_and_class_statistics():
     assert classes.loc["EmptyClass", "pct_zero_features"] == 100
     assert classes.loc["EmptyClass", "mean_points_per_feature"] == 0
     assert np.isnan(classes.loc["EmptyClass", "pct_points_top_n_features"])
-    for frame in (result.per_class, result.per_target):
-        assert set(frame.points_name) == {"calls"}
-        assert set(frame.sample_id) == {"sample_a"}
-        assert set(frame.feature_panel) == {"panel_a"}
+    assert result.metadata.points_name == "calls"
+    assert result.metadata.sample_id == "sample_a"
+    assert result.metadata.feature_panel == "panel_a"
+    assert result.metadata.crd is None
+    assert result.metadata.extent is None
     assert result.per_target.n_points.sum() == result.per_class.n_points.sum() == 8
+
+
+@pytest.mark.parametrize("bin_size", [None, 2])
+def test_summary_metadata_matches_request(bin_size):
+    """Return the requested context and panel sizes without duplicating metadata."""
+    result = hp.qc.summarize_points(
+        _sdata(), "calls", feature_classes="Negative", bin_size=bin_size, microns_per_unit=0.5, crd=(0, 8, 0, 2)
+    )
+    metadata = result.metadata
+    assert isinstance(metadata, hp.qc.PointsSummaryMetadata)
+    assert metadata.points_name == "calls"
+    assert metadata.feature_panel == "panel_a"
+    assert metadata.sample_id == "sample_a"
+    assert metadata.to_coordinate_system == "global"
+    assert metadata.crd == hp.SpatialBounds(x=(0, 8), y=(0, 2))
+    assert metadata.microns_per_unit == 0.5
+    assert metadata.bin_size == bin_size
+    assert result.panel_feature_counts == {"Negative": 3}  # includes the undetected NegC
+    frames = [result.per_target, result.per_class]
+    if bin_size is None:
+        assert metadata.x_edges is metadata.y_edges is metadata.extent is None
+    else:
+        assert metadata.x_edges == (0, 2, 4, 6, 8)
+        assert metadata.y_edges == (0, 2)
+        assert metadata.extent == (0, 8, 0, 2)
+        assert not result.spatial_counts.attrs
+        frames.extend([result.spatial_bins.per_bin, result.spatial_bins.per_class])
+    for frame in frames:
+        assert not frame.attrs
+        assert not {"points_name", "sample_id", "feature_panel", "to_coordinate_system"} & set(frame.columns)
+
+
+def test_retained_bin_mask_uses_any_selected_class_and_preserves_coordinates():
+    """Any selected class can retain a bin; all-empty bins are excluded without modifying the grid."""
+    result = hp.qc.summarize_points(
+        _sdata(), "calls", feature_classes=["Endogenous", "Negative"], bin_size=2, crd=(0, 10, 0, 2)
+    )
+    grid_before = result.spatial_counts.copy(deep=True)
+    mask = result.retained_bin_mask
+    assert mask.dims == ("y", "x")
+    assert mask.dtype == np.dtype(bool)
+    # Bin 1 has only Negative points, bin 2 only Endogenous; bin 4 is empty.
+    np.testing.assert_array_equal(mask, [[True, True, True, True, False]])
+    xr.testing.assert_identical(mask.x, result.spatial_counts.x)
+    xr.testing.assert_identical(mask.y, result.spatial_counts.y)
+    xr.testing.assert_identical(result.spatial_counts, grid_before)
+
+
+def test_summary_metadata_is_frozen_and_normalizes_sequences_to_tuples():
+    original = hp.qc.summarize_points(_sdata(), "calls", bin_size=2).metadata
+    edges = [0, 2, 3]
+    crop = hp.SpatialBounds(x=(0, 3), y=(0, 2))
+    metadata = replace(original, x_edges=edges, crd=crop)
+    edges[0] = -999
+    assert metadata.x_edges == (0, 2, 3)
+    assert metadata.crd is crop
+    assert metadata.extent == (0, 3, 0, 2)
+    assert original.extent == (0, 8, 0, 2)
+    with pytest.raises(FrozenInstanceError):
+        metadata.points_name = "changed"
 
 
 @pytest.mark.parametrize(
@@ -110,15 +174,15 @@ def test_summary_returns_complete_panel_counts_and_class_statistics():
     ],
 )
 def test_class_selection_keeps_panel_order_and_shared_bins(selection, expected):
-    result = hp.qc.summarize_points(_sdata(), "calls", feature_classes=selection, bin_size=2)
+    result = hp.qc.summarize_points(_sdata(), "calls", feature_classes=selection, bin_size=2, crd=(0, 8, 0, 2))
     assert result.per_class.feature_class.tolist() == expected
     grid = result.spatial_counts
     assert grid.dims == ("feature_class", "y", "x")
     assert grid.feature_class.values.tolist() == expected
-    assert grid.attrs["x_edges"] == [0, 2, 4, 6, 8]
-    assert grid.attrs["y_edges"] == [0, 2]
-    assert grid.attrs["extent"] == (0, 8, 0, 2)
-    assert grid.attrs["to_coordinate_system"] == "global"
+    assert result.metadata.x_edges == (0, 2, 4, 6, 8)
+    assert result.metadata.y_edges == (0, 2)
+    assert result.metadata.extent == (0, 8, 0, 2)
+    assert result.metadata.to_coordinate_system == "global"
     np.testing.assert_array_equal(grid.x, [1, 3, 5, 7])
     for name in expected:
         total = result.per_class.set_index("feature_class").loc[name, "n_points"]
@@ -127,16 +191,115 @@ def test_class_selection_keeps_panel_order_and_shared_bins(selection, expected):
         np.testing.assert_array_equal(grid.sel(feature_class="Negative"), [[1, 2, 0, 1]])
 
 
-def test_zero_detection_class_uses_unfiltered_extent():
-    result = hp.qc.summarize_points(_sdata(), "calls", feature_classes="EmptyClass", bin_size=2)
-    assert result.spatial_counts.shape == (1, 1, 4)
-    assert not result.spatial_counts.values.any()
-    assert result.per_target.feature.tolist() == ["NoCalls"]
+@pytest.mark.parametrize("bin_size", [None, 2])
+@pytest.mark.parametrize(
+    "empty_source, kwargs",
+    [
+        (True, {}),
+        (False, {"feature_classes": "EmptyClass"}),
+        (False, {"feature_classes": "EmptyClass", "crd": (0, 8, 0, 2)}),
+        (False, {"crd": (20, 30, 0, 2)}),
+        (False, {"crd": hp.SpatialBounds(x=(0, 8), y=(0, 2), z=(3, 4))}),
+    ],
+    ids=["empty_source", "empty_class", "empty_class_with_crop", "empty_xy_crop", "empty_z_crop"],
+)
+def test_empty_selection_always_raises(bin_size, empty_source, kwargs):
+    """Reject an entirely empty selection, with or without a grid or explicit crop."""
+    frame = _frame()
+    frame["z"] = 1.0
+    if empty_source:
+        frame = frame.iloc[:0]
+    with pytest.raises(ValueError, match="No points remain"):
+        hp.qc.summarize_points(_sdata(frame), "calls", bin_size=bin_size, **kwargs)
+
+
+def test_spatial_bin_population_uses_only_selected_classes():
+    """Negative alone uses five positive bins; a joint call retains 95 class-specific zeros."""
+    frame = pd.DataFrame(
+        {
+            "x": np.concatenate([np.arange(100) + 0.25, np.repeat(np.arange(5) + 0.25, 2)]),
+            "y": 0.25,
+            "gene": ["GeneA"] * 100 + ["NegA"] * 10,
+            "code_class": pd.Categorical(["Endogenous"] * 100 + ["Negative"] * 10, categories=PANEL["classes"]),
+        }
+    )
+    sdata = _sdata(frame, npartitions=7)
+    all_classes = hp.qc.summarize_points(sdata, "calls", bin_size=1, crd=(0, 101, 0, 1))
+    negative = hp.qc.summarize_points(sdata, "calls", feature_classes="Negative", bin_size=1, crd=(0, 101, 0, 1))
+    np.testing.assert_array_equal(
+        all_classes.spatial_counts.sel(feature_class="Negative"), negative.spatial_counts.sel(feature_class="Negative")
+    )
+    for result, retained, mean, median, n_zero in (
+        (all_classes, 100, 0.1, 0, 95),
+        (negative, 5, 2, 2, 0),
+    ):
+        mask = result.retained_bin_mask
+        assert mask.dims == ("y", "x")
+        np.testing.assert_array_equal(mask, [[True] * retained + [False] * (101 - retained)])
+        row = result.spatial_bins.per_class.set_index("feature_class").loc["Negative"]
+        assert row.n_points == 10
+        assert row.mean_points_per_bin == mean
+        assert row.median_points_per_bin == median
+        assert row.n_retained_bins_without_class == n_zero
+        assert row.pct_retained_bins_without_class == 100 * n_zero / retained
+        for key, value in {
+            "n_total_bins": 101,
+            "n_retained_bins": retained,
+            "n_excluded_bins": 101 - retained,
+            "pct_excluded_bins": 100 * (101 - retained) / 101,
+        }.items():
+            np.testing.assert_allclose(result.spatial_bins.per_class[key], value)
+        bins = result.spatial_bins.per_bin
+        counts = bins.loc[bins.feature_class == "Negative", "n_points"].to_numpy()
+        np.testing.assert_array_equal(counts, [2] * 5 + [0] * n_zero)
+    assert negative.spatial_counts.feature_class.values.tolist() == ["Negative"]
+    assert len(negative.spatial_bins.per_bin) == 5
+
+
+def test_pixel_and_micron_bins_have_equivalent_counts_and_physical_areas():
+    sdata = _sdata()
+    set_transformation(sdata.points["calls"], Scale([0.25, 0.25], axes=("x", "y")), to_coordinate_system="micron")
+    pixels = hp.qc.summarize_points(sdata, "calls", bin_size=2, crd=(0, 8, 0, 2), microns_per_unit=0.25)
+    microns = hp.qc.summarize_points(
+        sdata, "calls", bin_size=0.5, crd=(0, 2, 0, 0.5), to_coordinate_system="micron", microns_per_unit=1
+    )
+    raw = hp.qc.summarize_points(sdata, "calls", bin_size=2, crd=(0, 8, 0, 2))
+    np.testing.assert_array_equal(pixels.spatial_counts.values, microns.spatial_counts.values)
+    np.testing.assert_array_equal(pixels.spatial_counts.values, raw.spatial_counts.values)
+    for name in ("n_points", "bin_area_um2"):
+        np.testing.assert_allclose(pixels.spatial_bins.per_bin[name], microns.spatial_bins.per_bin[name])
+    pd.testing.assert_frame_equal(pixels.spatial_bins.per_class, microns.spatial_bins.per_class)
+    pd.testing.assert_frame_equal(pixels.spatial_bins.per_class, raw.spatial_bins.per_class)
+    pd.testing.assert_frame_equal(pixels.per_target, raw.per_target)
+    pd.testing.assert_frame_equal(pixels.per_class, raw.per_class)
+    assert "bin_area_um2" not in raw.spatial_bins.per_bin
+    assert raw.metadata.microns_per_unit is None
+
+
+@pytest.mark.parametrize("calibration", [0, -1, np.nan, np.inf, True, "1", 1j])
+def test_invalid_physical_calibration_fails_before_reduction(calibration, monkeypatch):
+    from harpy.qc import _summarize_points as module
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Invalid calibration should fail before reducing points.")
+
+    monkeypatch.setattr(module, "_summarize_point_partition", forbidden)
+    with pytest.raises(ValueError, match="microns_per_unit"):
+        hp.qc.summarize_points(_sdata(), "calls", bin_size=2, microns_per_unit=calibration)
+
+
+def test_calibration_does_not_enable_binning_or_add_feature_statistics():
+    result = hp.qc.summarize_points(_sdata(), "calls", microns_per_unit=1)
+    assert result.spatial_counts is None
+    assert result.spatial_bins is None
+    assert not any("um2" in column for column in result.per_target)
+    assert not any("um2" in column for column in result.per_class)
 
 
 @pytest.mark.parametrize("ndim", [2, 3])
-def test_automatic_extent_uses_transformed_coordinates(ndim):
-    """Infer bounds after an affine mixing axes, including source z for XYZ."""
+@pytest.mark.parametrize("selection", [None, "Negative"])
+def test_automatic_extent_uses_selected_transformed_coordinates(ndim, selection):
+    """Infer bounds from selected classes after an affine, including source z for XYZ."""
     frame = _frame()
     if ndim == 2:
         axes = ("x", "y")
@@ -151,17 +314,19 @@ def test_automatic_extent_uses_transformed_coordinates(ndim):
         Affine(matrix, input_axes=axes, output_axes=axes),
         to_coordinate_system="world",
     )
-    result = hp.qc.summarize_points(sdata, "calls", bin_size=2, to_coordinate_system="world")
+    result = hp.qc.summarize_points(sdata, "calls", bin_size=2, feature_classes=selection, to_coordinate_system="world")
+    if selection is not None:
+        frame = frame.loc[frame.code_class == selection]
     xy = (frame[list(axes)].to_numpy() @ matrix[:-1, :-1].T + matrix[:-1, -1])[:, :2]
     grid = result.spatial_counts
     for column, axis in enumerate(("x", "y")):
         minimum, maximum = xy[:, column].min(), xy[:, column].max()
         count = int(np.floor((maximum - minimum) / 2)) + 1
-        np.testing.assert_array_equal(grid.attrs[f"{axis}_edges"], minimum + 2 * np.arange(count + 1))
-    for name in PANEL["classes"]:
+        np.testing.assert_array_equal(getattr(result.metadata, f"{axis}_edges"), minimum + 2 * np.arange(count + 1))
+    for name in grid.feature_class.values:
         selected_xy = xy[frame.code_class == name]
         expected, _, _ = np.histogram2d(
-            selected_xy[:, 1], selected_xy[:, 0], bins=[grid.attrs["y_edges"], grid.attrs["x_edges"]]
+            selected_xy[:, 1], selected_xy[:, 0], bins=[result.metadata.y_edges, result.metadata.x_edges]
         )
         np.testing.assert_array_equal(grid.sel(feature_class=name), expected)
     assert grid.sum().item() == len(frame)
@@ -207,11 +372,11 @@ def test_affine_xy_crop_of_xyz_points_applies_to_every_output(bin_size, crd):
     assert result.per_class.n_points.sum() == 2
     if bin_size is not None:
         grid = result.spatial_counts
-        assert grid.attrs["x_edges"] == [7, 9, 10]
+        assert result.metadata.x_edges == (7, 9, 10)
         expected = np.zeros((5, 2), dtype=np.uint64)
         expected[1, 0] = expected[4, 0] = 1
         np.testing.assert_array_equal(grid.sel(feature_class="Negative"), expected)
-        assert grid.attrs["crd"] == (7, 10, -5, 5)
+    assert result.metadata.crd == hp.SpatialBounds(x=(7, 10), y=(-5, 5))
 
 
 @pytest.mark.parametrize("bin_size", [None, 2.0])
@@ -223,12 +388,13 @@ def test_named_and_tuple_crops_produce_identical_summaries_and_metadata(bin_size
     positional = hp.qc.summarize_points(sdata, "calls", bin_size=bin_size, crd=(1, 6, 0, 1))
     pd.testing.assert_frame_equal(named.per_target, positional.per_target)
     pd.testing.assert_frame_equal(named.per_class, positional.per_class)
-    assert named.per_target.attrs == positional.per_target.attrs
-    assert named.per_class.attrs == positional.per_class.attrs
-    assert named.per_target.attrs["crd"] == (1.0, 6.0, 0.0, 1.0)
+    assert named.metadata == positional.metadata
+    assert named.metadata.crd is crop
+    assert positional.metadata.crd.x == (1.0, 6.0)
+    assert positional.metadata.crd.y == (0.0, 1.0)
+    assert positional.metadata.crd.z is None
     if bin_size is not None:
         xr.testing.assert_identical(named.spatial_counts, positional.spatial_counts)
-        assert named.spatial_counts.attrs["crd"] == crop.as_tuple()
     assert sdata.attrs == before_attrs
     assert crop == hp.SpatialBounds(x=(1, 6), y=(0, 1))
 
@@ -261,32 +427,17 @@ def test_xyz_bounds_filter_transformed_z_before_xy_projection(bin_size, use_tupl
     assert targets.loc["NegA", "n_points"] == 2
     assert targets.loc["NegB", "n_points"] == 1
     assert result.per_class.n_points.sum() == 3
-    assert result.per_target.attrs["crd"] == bounds.as_tuple()
-    assert result.per_class.attrs["crd"] == bounds.as_tuple()
-    assert "z_plane" not in result.per_class.attrs
+    assert result.metadata.crd == bounds
+    assert result.metadata.crd.z == (15.0, 21.0)
     if bin_size is not None:
         assert result.spatial_counts.dims == ("feature_class", "y", "x")
         np.testing.assert_array_equal(result.spatial_counts.sel(feature_class="Negative"), [[1, 2, 0, 0]])
         assert result.spatial_counts.sum().item() == 3
-        assert result.spatial_counts.attrs["crd"] == bounds.as_tuple()
     unrestricted = hp.qc.summarize_points(
         sdata, "calls", crd=hp.SpatialBounds(x=bounds.x, y=bounds.y), to_coordinate_system="world"
     )
     assert unrestricted.per_target.n_points.sum() == 8
     pd.testing.assert_frame_equal(sdata.points["calls"].compute(), before)
-
-
-def test_empty_z_interval_retains_panel_zeros_and_explicit_xy_grid():
-    frame = _frame()
-    frame["z"] = 1.0
-    result = hp.qc.summarize_points(
-        _sdata(frame), "calls", bin_size=2, crd=hp.SpatialBounds(x=(0, 8), y=(0, 2), z=(3, 4))
-    )
-    assert len(result.per_target) == 9
-    assert not result.per_target.n_points.any()
-    assert result.per_target.within_class_fraction.isna().all()
-    assert result.spatial_counts.shape == (4, 1, 4)
-    assert not result.spatial_counts.values.any()
 
 
 def test_z_bounds_do_not_hide_invalid_source_panel_assignments():
@@ -413,7 +564,9 @@ def test_grid_budget_allows_exact_limit():
 
 def test_grid_budget_uses_selected_classes_and_is_not_enforced_without_binning():
     sdata = _sdata()
-    selected = hp.qc.summarize_points(sdata, "calls", feature_classes="Negative", bin_size=2, max_grid_bytes=32)
+    selected = hp.qc.summarize_points(
+        sdata, "calls", feature_classes="Negative", bin_size=2, crd=(0, 8, 0, 2), max_grid_bytes=32
+    )
     assert selected.spatial_counts.nbytes == 32
     with pytest.raises(ValueError, match="requires 128 bytes"):
         hp.qc.summarize_points(sdata, "calls", bin_size=2, max_grid_bytes=32)
@@ -422,20 +575,33 @@ def test_grid_budget_uses_selected_classes_and_is_not_enforced_without_binning()
     assert result.per_target.n_points.sum() == 8
 
 
-def test_random_partitioned_counts_match_direct_numpy_histogram():
+@pytest.mark.parametrize("selection", [None, "Negative", ["Negative", "SystemControl"]])
+def test_random_partitioned_counts_match_direct_numpy_histogram(selection):
     rng = np.random.default_rng(42)
     frame = pd.concat([_frame()] * 50, ignore_index=True)
     frame["x"] = rng.uniform(-5, 30, len(frame))
     frame["y"] = rng.uniform(-10, 12, len(frame))
-    result = hp.qc.summarize_points(_sdata(frame, npartitions=19), "calls", bin_size=2.7, crd=(-2, 25, -7, 8))
+    result = hp.qc.summarize_points(
+        _sdata(frame, npartitions=19), "calls", feature_classes=selection, bin_size=2.7, crd=(-2, 25, -7, 8)
+    )
+    frame = frame.loc[frame.code_class.isin(result.spatial_counts.feature_class.values)]
     selected = frame.loc[(frame.x >= -2) & (frame.x < 25) & (frame.y >= -7) & (frame.y < 8)]
-    for name in PANEL["classes"]:
+    edges = [result.metadata.y_edges, result.metadata.x_edges]
+    total, _, _ = np.histogram2d(selected.y, selected.x, bins=edges)
+    included = total > 0
+    for name in result.spatial_counts.feature_class.values:
         rows = selected.loc[selected.code_class == name]
-        expected, _, _ = np.histogram2d(
-            rows.y, rows.x, bins=[result.spatial_counts.attrs["y_edges"], result.spatial_counts.attrs["x_edges"]]
-        )
+        expected, _, _ = np.histogram2d(rows.y, rows.x, bins=edges)
         np.testing.assert_array_equal(result.spatial_counts.sel(feature_class=name), expected)
         assert result.per_class.set_index("feature_class").loc[name, "n_points"] == len(rows)
+        bins = result.spatial_bins.per_bin.loc[result.spatial_bins.per_bin.feature_class == name]
+        np.testing.assert_array_equal(bins.n_points, expected[included])
+        y_bin, x_bin = np.nonzero(included)
+        np.testing.assert_array_equal(bins.y_bin, y_bin)
+        np.testing.assert_array_equal(bins.x_bin, x_bin)
+        overview = result.spatial_bins.per_class.set_index("feature_class").loc[name]
+        assert overview.n_points == len(rows)
+        assert overview.mean_points_per_bin == expected[included].mean()
 
 
 @pytest.mark.parametrize("crd", [None, (0, 8, 0, 2)])
@@ -467,6 +633,7 @@ def test_custom_source_keys_and_unknown_dask_categories():
     result = hp.qc.summarize_points(sdata, "calls")
     assert {"feature", "feature_class", "n_points"} <= set(result.per_target.columns)
     assert not {"marker", "kind", "sample_id"} & set(result.per_target.columns)
+    assert result.metadata.sample_id is None
     assert result.per_target.n_points.sum() == 8
 
 
@@ -535,19 +702,6 @@ def test_invalid_requests(kwargs, match):
         hp.qc.summarize_points(_sdata(), "calls", **kwargs)
 
 
-def test_empty_points_need_extent_only_for_spatial_grid():
-    sdata = _sdata(_frame().iloc[:0])
-    result = hp.qc.summarize_points(sdata, "calls")
-    assert len(result.per_target) == 9
-    assert not result.per_target.n_points.any()
-    assert result.per_target.within_class_fraction.isna().all()
-    with pytest.raises(ValueError, match="supply crd"):
-        hp.qc.summarize_points(sdata, "calls", bin_size=2)
-    result = hp.qc.summarize_points(sdata, "calls", bin_size=2, crd=(0, 4, 0, 2))
-    assert result.spatial_counts.shape == (4, 1, 2)
-    assert not result.spatial_counts.values.any()
-
-
 def test_constant_xy_coordinates_include_all_source_z_values():
     frame = _frame()
     frame["z"] = [0, 0, 0, 0, 1, 0, 0, 0]
@@ -556,7 +710,7 @@ def test_constant_xy_coordinates_include_all_source_z_values():
     sdata = _sdata(frame)
     result = hp.qc.summarize_points(sdata, "calls", bin_size=2)
     assert result.spatial_counts.shape == (4, 1, 1)
-    assert result.spatial_counts.attrs["extent"] == (4, 6, 0, 2)
+    assert result.metadata.extent == (4, 6, 0, 2)
     assert result.spatial_counts.sum().item() == len(frame)
 
 
@@ -565,8 +719,9 @@ def test_joint_reductions_share_source_reads(monkeypatch, crd):
     """Protect shared input work across validation, target counts, bins, and classes.
 
     Seventeen delayed source partitions exercise multiple merge-tree levels.
-    Automatic bounds add one coordinate-only pass, shared by min and max;
+    Automatic bounds add one class-filtered coordinate pass, shared by min and max;
     explicit bounds avoid it. The subsequent count reductions share one pass.
+    Bin inclusion and the derived spatial-bin dataframes add no scans.
     Count source evaluations, not Dask task names or graph layout.
     """
     reads = Counter()
@@ -600,9 +755,10 @@ def test_joint_reductions_share_source_reads(monkeypatch, crd):
     monkeypatch.setattr(module, "_transformed_point_xy", check_coordinate_projection)
     assert not reads
     with dask.config.set(scheduler="synchronous"):
-        result = hp.qc.summarize_points(sdata, "calls", bin_size=2, crd=crd)
+        result = hp.qc.summarize_points(sdata, "calls", feature_classes="Negative", bin_size=2, crd=crd)
     assert reads == Counter(dict.fromkeys(range(17), 2 if crd is None else 1))
-    assert result.per_target.n_points.sum() == result.spatial_counts.sum().item() == 17 * 8
+    assert result.per_target.n_points.sum() == result.spatial_counts.sum().item() == 17 * 4
+    assert result.spatial_bins.per_bin.n_points.sum() == result.spatial_bins.per_class.n_points.sum() == 17 * 4
 
 
 def test_nonspatial_summary_does_not_project_coordinates_or_require_registration(monkeypatch):
@@ -639,6 +795,9 @@ def test_summary_does_not_mutate_points_metadata_or_backing_store(tmp_path, monk
     monkeypatch.setattr(plt, "subplots", forbidden)
     result = hp.qc.summarize_points(sdata, "calls", bin_size=2)
     result.per_target.loc[0, "n_points"] = 999
+    grid_before = result.spatial_counts.copy(deep=True)
+    result.spatial_bins.per_bin.loc[0, "n_points"] = 999
+    xr.testing.assert_identical(result.spatial_counts, grid_before)
     result.spatial_counts.values[:] = 999
     assert sdata.attrs == before_attrs
     pd.testing.assert_frame_equal(sdata.points["calls"].compute(), before_points)
@@ -656,7 +815,9 @@ def test_separate_results_do_not_pool_sample_identity_or_coordinate_frames():
     )
     a = hp.qc.summarize_points(first, "calls", bin_size=2)
     b = hp.qc.summarize_points(second, "calls", bin_size=2, to_coordinate_system="other")
-    assert a.spatial_counts.attrs["sample_id"] == "sample_a"
-    assert b.spatial_counts.attrs["sample_id"] == "sample_b"
-    assert b.spatial_counts.attrs["extent"] == (100, 108, -30, -28)
+    assert a.metadata.sample_id == "sample_a"
+    assert b.metadata.sample_id == "sample_b"
+    assert a.metadata.to_coordinate_system == "global"
+    assert b.metadata.to_coordinate_system == "other"
+    assert b.metadata.extent == (100, 108, -30, -28)
     np.testing.assert_array_equal(a.spatial_counts.values, b.spatial_counts.values)
