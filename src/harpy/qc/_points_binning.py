@@ -43,7 +43,8 @@ def _transformed_point_xy(partition: pd.DataFrame, *, axes: tuple[str, ...], mat
     """Return transformed XY coordinates for lazy dataframe extent reductions.
 
     Validate finite source and transformed coordinates before min/max, which
-    would otherwise silently skip NaNs. Keep every row, regardless of class.
+    would otherwise silently skip NaNs. Keep every supplied row; the caller
+    applies any class selection before invoking this helper.
     """
     _, xy = _select_point_coordinates(partition, axes=axes, matrix=matrix, crd=None)
     return pd.DataFrame(xy, columns=["x", "y"], index=partition.index)
