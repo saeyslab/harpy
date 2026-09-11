@@ -35,8 +35,8 @@ implemented:
     - **11d:** validate existing points against their registered feature panel
       through the read-only `hp.pt.validate_points` API;
     - **11e:** transcript-positive bin summaries and visualization, in three
-      separate parts: **11e.i** derive bin statistics from
-      `summary.spatial_counts`, **11e.ii** histograms and a compact bin-based
+      separate parts: **11e.i** construct `summary.spatial_bins` inside
+      `summarize_points`, **11e.ii** histograms and a compact bin-based
       class overview, and **11e.iii** spatial density heatmaps;
     - **11f:** table-level summary computation through `hp.qc.summarize_table`
       and `TableSummary`, with plotting integration;
@@ -3509,7 +3509,10 @@ def summarize_points(
 
 No total analyzed-area argument is accepted. Spatial counts remain raw;
 Slice 11e derives optional geometric densities from bin edges with an explicit
-physical-unit calibration, not from a separately supplied tissue or mosaic area.
+`microns_per_unit` argument on this same function, not from a separately
+supplied tissue or mosaic area. This argument and the nested `spatial_bins`
+result are planned extensions in Part 11e.i, not part of the implemented
+Slice 11a signature above.
 
 The function requires authoritative feature-panel metadata referenced by the
 selected points element. Resolve `feature_key`, `feature_class_key`, and the
@@ -3540,6 +3543,9 @@ class PointsSummary:
     per_class: pd.DataFrame
     spatial_counts: xr.DataArray | None
 ```
+
+Part 11e.i extends this container with `spatial_bins: SpatialBinSummary | None`
+without changing the meaning of these existing fields.
 
 #### `per_target`
 
@@ -3631,11 +3637,12 @@ summary.spatial_counts
 ```
 
 Omit `bin_size` when only the per-target and per-class summaries are needed.
-Slice 11e derives its bin-based overview, histograms, and density plots from
-`spatial_counts`. Compute all classes together for that workflow; class
-selection for reporting happens after its shared bin-inclusion rule. The
-existing `per_target` and `per_class` remain independently inspectable. None
-of these consumers should trigger a new source-point scan.
+Part 11e.i extends this same call to construct `summary.spatial_bins` from
+the bin counts. Its overview and histogram renderers consume that nested
+result; density plots consume `spatial_counts`. Occupancy must use all panel
+classes before reporting-class selection. The existing `per_target` and
+`per_class` remain independently inspectable. None of these consumers should
+trigger a new source-point scan.
 
 ### Per-target summary
 
@@ -4300,8 +4307,9 @@ Focused tests should cover:
 Implement an annotation-free overview of transcript-positive spatial bins,
 using the existing `PointsSummary.spatial_counts` from Slice 11a:
 
-1. **11e.i: transcript-positive bin summaries** — derive bin-level and
-   class-level statistics from the standalone spatial-count array.
+1. **11e.i: transcript-positive bin summaries** — construct a
+   `SpatialBinSummary` inside `hp.qc.summarize_points` and return it as
+   `PointsSummary.spatial_bins`, alongside the raw spatial-count array.
 2. **11e.ii: histograms and compact bin-summary overview** — visualize the
    results of 11e.i, with one shared bin population across feature classes.
 3. **11e.iii: spatial density heatmaps** — render the spatial-count array
@@ -4315,25 +4323,30 @@ There is no per-target plot, ranking, or new per-target statistic in this
 slice. The existing `summarize_points` outputs need not be removed or
 reimplemented to provide it.
 
-These operations consume precomputed results. They never read source points,
-resolve a live panel registry, perform point-to-label assignment, construct an
-AnnData table, write SpatialData metadata, or call `summarize_points` or
-`aggregate_points`. Bin-summary computation is separate from plotting, so its
-result can be inspected, exported, and reused for several figures.
+The bin-summary helper consumes the counts already reduced inside
+`summarize_points`; it does not trigger another source-point scan or panel
+lookup. Plotters consume only the returned summaries or standalone array,
+never call `summarize_points` or `aggregate_points`, and never read source
+points or a live panel registry. Neither bin-summary postprocessing nor
+plotting performs point-to-label assignment, constructs an AnnData table, or
+writes SpatialData metadata. Computation remains separate from plotting, so
+the result can be inspected, exported, and reused for several figures.
 Keep each source grid's result separate; plotting multiple samples must not
 silently pool their bins, classes, or panels. Leave input counts and metadata
 unchanged.
 
 ### Shared input and population contract
 
-The computation input is `summary.spatial_counts`: the standalone
-`xr.DataArray` with dimensions `(feature_class, y, x)`, class labels,
-bin-center coordinates, and attached source and geometry metadata. If it is
-`None`, explain that `summarize_points` must be called with `bin_size`;
-do not compute a grid inside this consumer.
+Use the bin counts and geometry already calculated by `summarize_points`.
+Its `spatial_counts` remains a standalone `xr.DataArray` with dimensions
+`(feature_class, y, x)`, class labels, bin-center coordinates, and attached
+source and geometry metadata. Construct the bin summary before returning
+`PointsSummary`. When `bin_size=None`, both `spatial_counts` and
+`spatial_bins` are `None`. A renderer receiving no required result should
+explain that `summarize_points` must be called with `bin_size`, not compute
+bins itself.
 
-For this workflow, compute the upstream summary with
-`feature_classes=None`, retaining **all panel classes**:
+For example, compute all class outputs once:
 
 ```python
 summary = hp.qc.summarize_points(
@@ -4342,16 +4355,19 @@ summary = hp.qc.summarize_points(
     feature_classes=None,
     bin_size=100,
     to_coordinate_system="sample_a_global_1_micron",
+    microns_per_unit=1.0,
 )
-# Derive the bin summary once from summary.spatial_counts.
-# Then select classes for the overview, histograms, or density maps.
+summary.spatial_counts
+summary.spatial_bins.per_bin
+summary.spatial_bins.per_class
+# Reuse these results for the overview, histograms, and density maps.
 ```
 
 The numerical bin size above is an example, not a new automatic default.
 Compute one shared inclusion mask before class selection:
 
 ```text
-total_count[y, x] = sum(spatial_counts[class, y, x] for every class)
+total_count[y, x] = sum(bin_counts[class, y, x] for every panel class)
 included[y, x] = total_count[y, x] > 0
 ```
 
@@ -4361,30 +4377,75 @@ class's mean, median, percentiles, and histogram. A class that is entirely
 zero remains present whenever any other class has detections. Selecting a
 class for reporting must never recalculate the inclusion mask from that class.
 
-Record the exact classes used to define occupancy. The all-class input is an
-explicit upstream requirement: an already class-filtered array cannot recover
-omitted counts. The current array metadata describes its selected classes,
-not an independent full-panel inventory; do not claim that completeness can
-be proved from it or silently consult the live panel registry to fill gaps.
-Examples must pass the complete array into bin-summary computation rather
-than selecting a class with `.sel()` beforehand.
+Record the exact classes used to define occupancy. Because the bin summary is
+now constructed inside `summarize_points`, collect all-class occupancy during
+the existing partition-wise reduction, before applying `feature_classes` to
+reported counts. Retain the requested classes in the output statistics and
+raw grid, but keep the shared inclusion mask with the grid so standalone
+renderers do not need omitted counts to reconstruct it. This must not add
+another source-point scan. Class-specific zeros remain included even when
+`summarize_points(feature_classes="Negative")` is called.
+
+An already class-filtered array alone cannot recover all-class occupancy.
+Consumers use the captured mask and occupancy classes rather than consulting
+the live panel registry or redefining the population from displayed classes.
 
 ### Part 11e.i: transcript-positive bin summaries
 
 **Status: specified; not implemented.**
 
-Add a read-only postprocessing operation over the existing in-memory grid.
-It performs compact NumPy/xarray/pandas reductions, not a second Dask
-reduction over source points. Its public name and exact signature are to be
-finalized before implementation; the input, population, and output meanings
-below define the contract.
+Extend `hp.qc.summarize_points`; do **not** introduce a public
+`hp.qc.summarize_spatial_bins` function. A private helper derives the bin
+statistics using compact NumPy/xarray/pandas reductions over the in-memory
+counts and shared inclusion mask, not a second Dask reduction over points.
+
+The extended public signature is:
+
+```python
+def summarize_points(
+    sdata: SpatialData,
+    points_name: str,
+    *,
+    feature_classes: str | Sequence[str] | None = None,
+    bin_size: float | None = None,
+    max_grid_bytes: int | None = 1024**3,
+    to_coordinate_system: str = "global",
+    microns_per_unit: float | None = None,
+    crd: SpatialBounds | tuple[float, ...] | None = None,
+    top_n: int = 20,
+) -> PointsSummary:
+    ...
+```
+
+`microns_per_unit` declares the physical size, in micrometers, of one unit in
+`to_coordinate_system`, using the same scale for x and y. It does not
+transform points, change bin edges, or change raw counts. Its effect is
+limited to physical-area and density statistics, as specified below.
 
 #### Statistics and output
 
-Return independently inspectable per-bin and per-class results, together with
-the shared population and geometry context. Do not reuse
-`PointsSummary.per_class` for this: its means and percentiles describe panel
-features, not spatial bins.
+Return independently inspectable per-bin and per-class results in the nested
+container, together with the shared population and geometry context:
+
+```python
+@dataclass(frozen=True)
+class SpatialBinSummary:
+    per_bin: pd.DataFrame
+    per_class: pd.DataFrame
+
+
+@dataclass(frozen=True)
+class PointsSummary:
+    per_target: pd.DataFrame
+    per_class: pd.DataFrame
+    spatial_counts: xr.DataArray | None
+    spatial_bins: SpatialBinSummary | None
+```
+
+When binning is requested, populate `spatial_bins` even for an empty grid;
+`None` means that binning was not requested. Do not repurpose
+`PointsSummary.per_class`: its means and percentiles describe panel features,
+whereas `PointsSummary.spatial_bins.per_class` describes spatial bins.
 
 - **Per-bin values:** retain bin identity/location, geometric area, and raw
   counts for each reported class over the shared included-bin population.
@@ -4395,7 +4456,10 @@ features, not spatial bins.
 - **Population context:** total grid-bin count, included-bin count,
   excluded-empty-bin count, and excluded percentage. Retain source
   `points_name`, panel and optional sample identity, occupancy classes,
-  coordinate system, crop, bin edges, and bin size.
+  coordinate system, crop, bin edges, bin size, and `microns_per_unit`.
+  Keep this context with the returned dataframes so they can be inspected
+  independently. The raw grid also records the supplied calibration for
+  standalone density rendering.
 
 Give statistics explicit names such as `mean_points_per_bin` and
 `median_points_per_bin`; their documentation and display labels must specify
@@ -4430,20 +4494,54 @@ Keep spatial bin width separate from reporting units. A 100 × 100 µm bin
 covers 10,000 µm²; "points per 100 µm²" is a normalized density, not a bin-size
 specification.
 
-When physical units are explicitly established, derive:
+The `microns_per_unit` contract is explicit:
+
+- `None`: return raw-count summaries and geometric areas in squared
+  coordinate-system units, without physical-area or density statistics.
+- A positive, finite value: also calculate areas in µm² and corresponding
+  densities. Reject zero, negative, or non-finite values.
+- The value calibrates the **selected coordinate system**, not necessarily
+  the source points. In a micron coordinate system, pass `1.0`; in a pixel
+  coordinate system, pass its micrometers-per-pixel value. Do not apply the
+  pixel size again after points have already been transformed into microns.
+- When `bin_size=None`, there are no bin-area or density outputs; supplying
+  calibration does not enable binning or add feature-level density columns.
+
+For example, these configurations describe different physical bin widths:
+
+```python
+# 100 × 100 µm bins; full-bin area is 10,000 µm².
+micron_bins = dict(
+    bin_size=100,
+    to_coordinate_system="sample_a_global_1_micron",
+    microns_per_unit=1.0,
+)
+
+# 100 × 100 pixel bins; use this dataset's calibrated pixel size.
+pixel_bins = dict(
+    bin_size=100,
+    to_coordinate_system="sample_a_global_1",
+    microns_per_unit=0.120280945,
+)
+```
+
+When calibration is supplied, derive:
 
 ```text
-bin_area_um2 = bin_width_um × bin_height_um
+bin_area_um2 = bin_width × bin_height × microns_per_unit²
 points_per_100_um2 = 100 × class_count / bin_area_um2
 ```
 
-Use actual edge differences, including narrower terminal bins. The
+Here bin width and height are actual edge differences in
+`to_coordinate_system` units, including narrower terminal bins. The
 denominator is the **full geometric area of each retained bin**, including
 any outside-tissue portion. Never label it tissue area or substitute a total
-analyzed area for per-bin area. Do not infer physical units from a
-coordinate-system name; the exact API must provide an explicit unit/scale
-contract when the supplied array lacks one. Raw-count summaries remain usable
-without physical calibration. Do not silently normalize by panel size.
+analyzed area for per-bin area. The caller supplies physical calibration;
+do not infer it from a coordinate-system name, a numeric transformation, or
+reader-specific metadata. Plotters use the captured `microns_per_unit`
+rather than accepting a second calibration that could disagree with it.
+Raw-count summaries remain usable without physical calibration. Do not
+silently normalize by panel size.
 
 Keep per-bin densities available for histograms and descriptive distribution
 statistics. If reporting a pooled density across retained bins, use
@@ -4478,20 +4576,26 @@ FOV-coverage machinery is required by this slice.
 Focused tests should establish that:
 
 - bins empty across all classes are excluded, but class-specific zeros remain;
-- class selection after inclusion leaves the population unchanged, including
-  the 100-bin example and an all-zero class beside a detected class;
+- class selection in `summarize_points` or later reporting leaves the shared
+  population unchanged, including the 100-bin example and an all-zero class
+  beside a detected class;
 - bin counts, totals, distribution statistics, and empty-grid missing values
   follow the declared denominators;
+- `microns_per_unit=None` keeps raw summaries without physical densities;
+  invalid calibration raises, and equivalent pixel/micron bin configurations
+  produce equivalent physical areas and densities without double scaling;
 - geometric densities use calibrated actual bin areas, including terminal
-  bins, and pooled density is distinguished from the mean bin density; and
-- the standalone array suffices, inputs remain unchanged, and no point read,
-  live panel lookup, aggregation, or upstream summary computation occurs.
+  bins, and pooled density is distinguished from the mean bin density;
+- the nested result is populated with binning and is `None` without it; and
+- bin postprocessing adds no source-point scan or panel lookup; its inputs
+  remain unchanged, and renderers need only the captured results.
 
 ### Part 11e.ii: histograms and compact bin-summary overview
 
 **Status: specified; not implemented. Depends on Part 11e.i.**
 
-Consume the per-bin values and per-class overview produced by 11e.i.
+Consume `summary.spatial_bins.per_bin` and `summary.spatial_bins.per_class`
+produced by 11e.i.
 Do not render `summary.per_target` or its existing per-feature
 `summary.per_class` as this new overview. Do not repeat bin-summary
 computation in each plot.
@@ -4575,7 +4679,7 @@ Add the optional parameter:
 feature_class: str | None = None
 ```
 
-Establish the shared inclusion mask from the complete all-class array before
+Use the all-class inclusion mask captured during summary computation, before
 class selection. Class selection operates only on the `feature_class`
 coordinate of that array. `None` sums the counts across its classes for the
 display; it does not recover classes excluded during summary computation.
@@ -4603,6 +4707,7 @@ summary = hp.qc.summarize_points(
     feature_classes=None,
     to_coordinate_system="sample_a_global_1_micron",
     bin_size=100,
+    microns_per_unit=1.0,
 )
 
 hp.pl.plot_transcript_density(
@@ -4624,9 +4729,9 @@ to be specified for this part.
 
 Derive display values from raw bins, optionally dividing by the authoritative
 class feature counts already captured in the array's
-`.attrs["panel_feature_counts"]` and, in a physical coordinate system, by
-geometric bin area, using the explicit physical calibration contract from
-11e.i rather than inferring units from a coordinate-system name. These are
+`.attrs["panel_feature_counts"]` and, when `.attrs["microns_per_unit"]`
+is not `None`, by physical geometric bin area, using the calibration contract
+from 11e.i rather than inferring units from a coordinate-system name. These are
 summary snapshots; never resolve them again from a live panel registry or
 estimate them from observed features. Require the relevant attached metadata when a selected
 normalization needs it. Do not substitute a whole-mosaic area for
