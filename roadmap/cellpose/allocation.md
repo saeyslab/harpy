@@ -4550,6 +4550,10 @@ whereas `PointsSummary.spatial_bins.per_class` describes spatial bins.
   and express that count as a percentage of retained bins, respectively.
   They do not count bins excluded for being empty across the selected classes.
   Calibration does not change these statistics or add density columns.
+  Part 11e.ii will add `std_points_per_bin` here for histogram annotations;
+  it is not part of the currently implemented 11e.i output. Compute this
+  alongside the other per-bin statistics, using sample SD (`ddof=1`), so
+  plotting does not recalculate it.
 - **Population context:** each `per_class` row includes `n_total_bins`
   (all grid bins before exclusion), `n_retained_bins` (bins with at least one
   point across any selected class), `n_excluded_bins`, and `pct_excluded_bins`
@@ -4748,6 +4752,22 @@ Do not render `summary.per_target` or its existing per-feature
 `summary.per_class` as this new overview. Do not repeat bin-summary
 computation in each plot.
 
+#### Public entry points
+
+Use `hp.qc.spatial_bin_histogram` for one class's histogram and
+`hp.qc.spatial_bin_overview` for a compact table-style plot. Both accept
+`PointsSummary`, support caller-supplied Matplotlib axes, and return the axes
+used. Source identity and bin geometry come from `summary.metadata`.
+
+```python
+hp.qc.spatial_bin_histogram(summary, feature_class="Negative", ax=ax)
+hp.qc.spatial_bin_overview(summary, ax=ax)
+```
+
+When `summary.spatial_bins` is `None`, raise a clear error explaining that
+`summarize_points` must be called with `bin_size`. Do not reread points,
+validate panels again, or create an AnnData table to render either result.
+
 #### Histogram contract
 
 Draw one selected feature class per axes:
@@ -4765,12 +4785,20 @@ An all-zero class with a nonempty shared population must visibly retain its
 zero mass. An entirely empty population gets a clear empty-state message,
 not a fabricated histogram.
 
-Use `hp.qc.metric_histogram` as the existing plotting-convention precedent:
-histogram-edge selection, optional mean/median guides, labels, colors,
-figure size, and caller-supplied axes. `hp.qc.obs_scatter` is a two-metric
-scatter plot, not the histogram API. Reuse suitable rendering helpers where
-useful, without creating an AnnData table or forcing bin statistics into
-`.obs`. Preserve the existing table-input plotting APIs.
+Preserve the visual style of `hp.qc.metrics_histogram`: histogram styling,
+optional KDE overlay, dashed median line, median/SD annotation, labels,
+colors, figure size, and caller-supplied axes. Enable KDE, median, and SD by
+default, with the existing `histplot_kwargs`, `show_median`, `show_std`,
+`median_line_kwargs`, and `median_text_kwargs` conventions for customization.
+`hp.qc.obs_scatter` is a two-metric scatter plot, not the histogram API.
+
+KDE is an optional **display-only** smoothing of the count distribution,
+not smoothing of the spatial grid or a change to any stored measurements.
+Omit KDE for insufficient or constant values, including all-zero classes,
+while retaining the histogram and applicable annotations. Preserve zeros
+in both histogram input and distribution statistics. The KDE overlay must
+use a scale consistent with the histogram's percentage axis, not a separate
+probability-density scale.
 
 Histogram `bins` controls intervals along the value axis; it must not be
 confused with the spatial `bin_size` used upstream. Display limits must not
@@ -4778,16 +4806,53 @@ redefine the included-bin population or its summary statistics. If a display
 range hides values, make that explicit and keep percentage denominators tied
 to the full included population rather than silently renormalizing visible
 values. Do not use a logarithmic display that silently discards zeros.
+Median and SD annotations describe all retained bins for the selected class,
+including its zeros, not only values within display limits. Likewise, range
+limits must not silently renormalize the KDE to the visible subset.
 
-Finalize the public precomputed-result plotting entry point and exact
-signature before implementation; do not reinstate the removed per-feature
-distribution plotting API.
+Finalize the exact signatures and histogram options before implementation;
+do not reinstate the removed per-feature distribution plotting API.
+
+#### Shared histogram renderer and precomputed annotations
+
+Extract a private numerical histogram renderer from `metric_histogram`,
+for example into `src/harpy/qc/_histogram.py`. Centralize axes creation,
+histogram/KDE drawing, median-line and annotation styling, labels, and
+axis styling. Keep source selection outside this helper:
+
+- `metric_histogram` extracts the requested table column and supplies its
+  median and SD using the existing conventions.
+- `metrics_histogram` continues to arrange subplots and call
+  `metric_histogram`, thereby using the same renderer indirectly.
+- `spatial_bin_histogram` selects one class's `per_bin["n_points"]` and
+  supplies its already computed median and SD from `spatial_bins.per_class`.
+- The shared helper accepts numerical values, plotting options, and supplied
+  annotation values. It does not inspect SpatialData, feature panels, or
+  spatial-bin metadata.
+
+Keep the existing table-input APIs and their defaults unchanged. In
+particular, their default histogram scaling is counts; the spatial-bin
+adapter requests percentages over its full retained-bin population. Do not
+reuse the existing range-filtering path unchanged if it would renormalize
+the spatial histogram to only the visible values. Share rendering without
+forcing these different population contracts to become identical.
+
+As part of 11e.ii, extend `_summarize_spatial_bins` to compute
+`std_points_per_bin` from the same raw counts used for mean/median/p95.
+Use sample SD (`ddof=1`), matching the existing `values.std()` convention in
+`metric_histogram`. Fewer than two retained bins yield NaN, displayed as
+"N/A"; constant counts across at least two bins yield zero SD. This adds no
+source-point scan and does not change bin inclusion. The spatial plotting
+adapter uses the supplied statistics rather than recomputing them or
+silently filling missing summary fields. Histogram construction and optional
+KDE estimation operate only on the captured per-bin values.
 
 #### Compact overview
 
-Display the already computed class totals, mean/median/95th-percentile points
-per included bin, and class-specific zero-bin percentages, alongside shared
-included/excluded grid-bin counts and bin geometry. Label measurements as
+Display one row per class with its already computed total points,
+mean/median/SD/95th-percentile points per included bin, and class-specific
+zero-bin percentage. Show shared included/excluded grid-bin counts and bin
+geometry once alongside the table. Label measurements as
 points per bin and retain the physical bin size when available. Display undefined
 statistics as "N/A". No per-feature distribution, top-N concentration, or
 labelled control-target ranking is required.
@@ -4798,8 +4863,14 @@ Focused tests should establish that the supplied summaries determine the
 histogram values and overview statistics, that class-specific zeros and empty
 populations are handled as specified, and that labels state the correct units
 and population. Check axes reuse, explicit class selection, and that display
-limits do not change summary denominators. Plotting must neither mutate the
-result nor invoke source reads, panel lookup, or summary computation.
+limits do not change summary denominators or median/SD annotations. Verify
+that sample SD includes class-specific zeros and handles single-bin and
+constant distributions correctly. Check KDE enable/disable behavior and
+omission for insufficient/constant data without losing the histogram.
+Focused renderer/refactor tests should protect existing table-histogram
+defaults and the shared styling, without testing Seaborn's KDE estimator
+itself. Plotting must neither mutate the result nor invoke source reads,
+panel lookup, or summary-statistic computation.
 
 ### Part 11e.iii: feature-specific spatial counts
 
