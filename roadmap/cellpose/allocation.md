@@ -36,8 +36,8 @@ implemented:
       through the read-only `hp.pt.validate_points` API;
     - **11e:** transcript-positive bin summaries and visualization, in four
       separate parts: **11e.i** construct `summary.spatial_bins` inside
-      `summarize_points` — implemented; **11e.ii** histograms and a compact bin-based
-      class overview, **11e.iii** feature-specific spatial counts through
+      `summarize_points` — implemented; **11e.ii** spatial-bin histograms,
+      **11e.iii** feature-specific spatial counts through
       `hp.qc.bin_points_by_feature`, and **11e.iv** spatial density heatmaps;
     - **11f:** table-level summary computation through `hp.qc.summarize_table`
       and `TableSummary`, with plotting integration;
@@ -3629,7 +3629,7 @@ For example, a hypothetical result could contain:
 
 `NegativeC` remains present because it belongs to the panel, even without any
 observed points. This complete dataframe supports individual-target inspection
-or export; it is not an input to the bin-based overview in Slice 11e.
+or export; it is not an input to the spatial-bin histograms in Slice 11e.
 
 #### `per_class`
 
@@ -3695,7 +3695,7 @@ summary.spatial_counts
 
 Omit `bin_size` when only the per-target and per-class summaries are needed.
 Part 11e.i constructs `summary.spatial_bins` in this same call from
-the bin counts. Its overview and histogram renderers consume that nested
+the bin counts. Its histogram renderer consumes that nested
 result; density plots consume `spatial_counts`. Occupancy must use all panel
 classes before reporting-class selection. The existing `per_target` and
 `per_class` remain independently inspectable. None of these consumers should
@@ -3833,7 +3833,7 @@ the transcript points. Derive class-summary statistics, including the top-N
 concentration statistic, from the same zero-filled per-target result; these
 outputs must not trigger new point reductions or scans. Do not create an
 artificial AnnData table solely to reuse table-based plotting helpers such as
-`metric_histogram`.
+`table_histogram` (the name introduced in Part 11e.ii for `metric_histogram`).
 
 `summarize_points` returns the in-memory `PointsSummary` described above and
 does not persist QC results as SpatialData elements or root metadata. Do not
@@ -4368,14 +4368,14 @@ Focused tests should cover:
 
 **Status: Part 11e.i implemented; Parts 11e.ii–iv specified, not implemented.**
 
-Implement an annotation-free overview of transcript-positive spatial bins,
+Implement annotation-free QC of transcript-positive spatial bins,
 using the existing `PointsSummary.spatial_counts` from Slice 11a, plus an
 explicit computation path for feature-specific grids:
 
 1. **11e.i: transcript-positive bin summaries** — construct a
    `SpatialBinSummary` inside `hp.qc.summarize_points` and return it as
    `PointsSummary.spatial_bins`, alongside the raw spatial-count array.
-2. **11e.ii: histograms and compact bin-summary overview** — visualize the
+2. **11e.ii: spatial-bin histograms** — visualize the
    results of 11e.i, with one shared bin population across feature classes.
 3. **11e.iii: feature-specific spatial counts** — compute one count plane per
    requested feature through `hp.qc.bin_points_by_feature`.
@@ -4435,7 +4435,7 @@ summary = hp.qc.summarize_points(
 summary.spatial_counts
 summary.spatial_bins.per_bin
 summary.spatial_bins.per_class
-# Reuse these results for the overview, histograms, and density maps.
+# Inspect the dataframes directly; reuse the results for histograms and density maps.
 ```
 
 The numerical bin size above is an example, not a new automatic default.
@@ -4687,8 +4687,8 @@ rather than accepting a second calibration that could disagree with it.
 Raw-count summaries remain usable without physical calibration. Do not
 silently normalize by panel size.
 
-Do not add `per_100_um2` columns to either dataframe. Histogram and compact
-overview consumers use raw counts and their per-bin statistics. Use the same
+Do not add `per_100_um2` columns to either dataframe. Histograms use raw
+counts and their per-bin statistics. Use the same
 physical bin size and class-selection rule when comparing samples.
 
 #### Interpretation and reproducibility
@@ -4738,7 +4738,7 @@ Focused tests should establish that:
 - bin postprocessing adds no source-point scan or panel lookup; its inputs
   remain unchanged, and renderers need only the captured results.
 
-### Part 11e.ii: histograms and compact bin-summary overview
+### Part 11e.ii: spatial-bin histograms
 
 **Status: specified; not implemented. Depends on Part 11e.i.**
 
@@ -4746,27 +4746,59 @@ Accept the parent `PointsSummary` and consume its `spatial_bins.per_bin` and
 `spatial_bins.per_class` produced by 11e.i, using `summary.metadata` for source
 identity, units, and geometry. Do not require detached frames to carry `.attrs`.
 Histograms select the requested class from `per_bin` and use its existing
-`n_points` values; the compact overview uses `per_class`. Do not introduce
+`n_points` values, with median/SD annotations from `per_class`. Do not introduce
 fixed-area normalization in these plots or calculate additional density summaries.
 Do not render `summary.per_target` or its existing per-feature
-`summary.per_class` as this new overview. Do not repeat bin-summary
-computation in each plot.
+`summary.per_class` as spatial-bin histograms. Do not repeat bin-summary
+computation in each plot. The numerical overview is already available in
+`summary.spatial_bins.per_class` for direct inspection or export; do not
+implement a separate `hp.qc.spatial_bin_overview` table-style plotting API.
 
-#### Public entry points
+#### Public histogram entry point
 
-Use `hp.qc.spatial_bin_histogram` for one class's histogram and
-`hp.qc.spatial_bin_overview` for a compact table-style plot. Both accept
-`PointsSummary`, support caller-supplied Matplotlib axes, and return the axes
+Use `hp.qc.spatial_bin_histogram` for one class's histogram. It accepts
+`PointsSummary`, supports caller-supplied Matplotlib axes, and returns the axes
 used. Source identity and bin geometry come from `summary.metadata`.
 
 ```python
 hp.qc.spatial_bin_histogram(summary, feature_class="Negative", ax=ax)
-hp.qc.spatial_bin_overview(summary, ax=ax)
 ```
 
 When `summary.spatial_bins` is `None`, raise a clear error explaining that
 `summarize_points` must be called with `bin_size`. Do not reread points,
-validate panels again, or create an AnnData table to render either result.
+validate panels again, or create an AnnData table to render the histogram.
+
+#### Table-histogram naming and deprecation
+
+As part of 11e.ii, align the table-input names with `spatial_bin_histogram`.
+The prefix identifies the source; singular/plural distinguishes one histogram
+from a collection of histograms:
+
+| Current name                           | Canonical name           | Purpose                                             |
+| -------------------------------------- | ------------------------ | --------------------------------------------------- |
+| `hp.qc.metric_histogram`               | `hp.qc.table_histogram`  | One metric column from a table's `.obs` or `.var`.  |
+| `hp.qc.metrics_histogram`              | `hp.qc.table_histograms` | Multiple table metrics arranged in subplots.        |
+| Proposed `hp.qc.spatial_bin_histogram` | Unchanged                | One feature class's spatial-bin count distribution. |
+
+`table_histogram`, not the multi-plot wrapper, is the direct counterpart to
+`spatial_bin_histogram`. Avoid a cell-specific name because table metrics may
+also come from `.var`. Preserve the table functions' parameters, defaults,
+return types, and behavior under their new names.
+
+Keep both old names as deprecated aliases, following the existing
+`hp.tb.allocate` deprecation pattern. Importing or accessing an old name logs
+one warning per alias per process and resolves to the corresponding new
+function; calling the alias continues to work. Use these explicit messages:
+
+```text
+`harpy.qc.metric_histogram` is deprecated. Import and use `harpy.qc.table_histogram` instead.
+`harpy.qc.metrics_histogram` is deprecated. Import and use `harpy.qc.table_histograms` instead.
+```
+
+Cover both public namespace access and explicit imports. Using the new names
+must not log a deprecation warning. Update public exports, type stubs, API
+documentation, examples, and internal callers to the canonical names; keep
+compatibility handling limited to the aliases rather than duplicate implementations.
 
 #### Histogram contract
 
@@ -4785,7 +4817,8 @@ An all-zero class with a nonempty shared population must visibly retain its
 zero mass. An entirely empty population gets a clear empty-state message,
 not a fabricated histogram.
 
-Preserve the visual style of `hp.qc.metrics_histogram`: histogram styling,
+Preserve the visual style of the existing `hp.qc.metrics_histogram` (renamed
+`hp.qc.table_histograms`): histogram styling,
 optional KDE overlay, dashed median line, median/SD annotation, labels,
 colors, figure size, and caller-supplied axes. Enable KDE, median, and SD by
 default, with the existing `histplot_kwargs`, `show_median`, `show_std`,
@@ -4815,22 +4848,24 @@ do not reinstate the removed per-feature distribution plotting API.
 
 #### Shared histogram renderer and precomputed annotations
 
-Extract a private numerical histogram renderer from `metric_histogram`,
+Extract a private numerical histogram renderer from the existing
+`metric_histogram` implementation as it becomes `table_histogram`,
 for example into `src/harpy/qc/_histogram.py`. Centralize axes creation,
 histogram/KDE drawing, median-line and annotation styling, labels, and
 axis styling. Keep source selection outside this helper:
 
-- `metric_histogram` extracts the requested table column and supplies its
+- `table_histogram` extracts the requested table column and supplies its
   median and SD using the existing conventions.
-- `metrics_histogram` continues to arrange subplots and call
-  `metric_histogram`, thereby using the same renderer indirectly.
+- `table_histograms` arranges subplots and calls
+  `table_histogram`, thereby using the same renderer indirectly.
 - `spatial_bin_histogram` selects one class's `per_bin["n_points"]` and
   supplies its already computed median and SD from `spatial_bins.per_class`.
 - The shared helper accepts numerical values, plotting options, and supplied
   annotation values. It does not inspect SpatialData, feature panels, or
   spatial-bin metadata.
 
-Keep the existing table-input APIs and their defaults unchanged. In
+Apart from the canonical names and deprecated aliases, keep the existing
+table-input APIs and their defaults unchanged. In
 particular, their default histogram scaling is counts; the spatial-bin
 adapter requests percentages over its full retained-bin population. Do not
 reuse the existing range-filtering path unchanged if it would renormalize
@@ -4840,27 +4875,17 @@ forcing these different population contracts to become identical.
 As part of 11e.ii, extend `_summarize_spatial_bins` to compute
 `std_points_per_bin` from the same raw counts used for mean/median/p95.
 Use sample SD (`ddof=1`), matching the existing `values.std()` convention in
-`metric_histogram`. Fewer than two retained bins yield NaN, displayed as
+`metric_histogram` / renamed `table_histogram`. Fewer than two retained bins yield NaN, displayed as
 "N/A"; constant counts across at least two bins yield zero SD. This adds no
 source-point scan and does not change bin inclusion. The spatial plotting
 adapter uses the supplied statistics rather than recomputing them or
 silently filling missing summary fields. Histogram construction and optional
 KDE estimation operate only on the captured per-bin values.
 
-#### Compact overview
-
-Display one row per class with its already computed total points,
-mean/median/SD/95th-percentile points per included bin, and class-specific
-zero-bin percentage. Show shared included/excluded grid-bin counts and bin
-geometry once alongside the table. Label measurements as
-points per bin and retain the physical bin size when available. Display undefined
-statistics as "N/A". No per-feature distribution, top-N concentration, or
-labelled control-target ranking is required.
-
 #### Verification
 
 Focused tests should establish that the supplied summaries determine the
-histogram values and overview statistics, that class-specific zeros and empty
+histogram values and annotations, that class-specific zeros and empty
 populations are handled as specified, and that labels state the correct units
 and population. Check axes reuse, explicit class selection, and that display
 limits do not change summary denominators or median/SD annotations. Verify
@@ -4871,6 +4896,11 @@ Focused renderer/refactor tests should protect existing table-histogram
 defaults and the shared styling, without testing Seaborn's KDE estimator
 itself. Plotting must neither mutate the result nor invoke source reads,
 panel lookup, or summary-statistic computation.
+
+Also verify that both deprecated aliases resolve to the corresponding new
+functions, emit the specified warning only once per alias, and remain usable
+through public access and explicit imports. Canonical names must remain
+warning-free.
 
 ### Part 11e.iii: feature-specific spatial counts
 
@@ -5023,7 +5053,7 @@ SpatialData-input signature with a renderer accepting a `PointsSummary` or
 or `feature, y, x`) and `metadata` together; a bare DataArray no longer carries
 the required context. Neither parent input is an alternative computation
 path: do not accept SpatialData or compute missing results. Reuse the shared
-transcript-positive-bin definition from 11e.i and 11e.iii; the histogram/overview
+transcript-positive-bin definition from 11e.i and 11e.iii; the histogram
 renderer need not be implemented first.
 
 Validate only the array's dimensions/coordinates and the parent's metadata
@@ -5153,8 +5183,8 @@ follow-up checks:
 
 Do not render every control transcript as the default visualization. An
 individual-point overlay belongs to separate diagnostic plotting for a selected
-crop; this density renderer does not fetch those points. The production
-overview operates on the precomputed bins.
+crop; this density renderer does not fetch those points. The density maps
+operate on the precomputed bins.
 
 #### Reuse of precomputed grids
 
@@ -5356,7 +5386,8 @@ instances or features.
 
 ### Plotting integration
 
-Existing `hp.qc.obs_scatter` and `hp.qc.metric_histogram` remain useful for
+`hp.qc.obs_scatter` and `hp.qc.table_histogram` (renamed from
+`hp.qc.metric_histogram` in Part 11e.ii) remain useful for
 metrics already stored in `.obs` (and, for the histogram, `.var`). They select
 and plot existing columns; they do not calculate the underlying class counts
 or panel-normalized rates. Preserve those direct table-input use cases.
