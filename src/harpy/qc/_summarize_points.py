@@ -1,17 +1,8 @@
-"""Read-only, panel-aware reductions of original points.
-
-``_summarize_point_partition`` validates source feature/class assignments,
-selects points, and returns only compact target and occupied-bin counts.
-``_merge_point_summaries`` combines these reductions in a bounded-fan-in tree;
-no original point rows reach the driver. Class statistics are then derived
-from the zero-filled panel counts, without another source scan. If no explicit
-extent is supplied, spatial binning first reduces coordinates to four bounds.
-"""
+"""Read-only, panel-aware summaries of original points."""
 
 from collections.abc import Sequence
-from copy import deepcopy
 from dataclasses import dataclass
-from numbers import Integral
+from numbers import Integral, Real
 
 import dask
 import numpy as np
@@ -34,6 +25,8 @@ from harpy.qc._points_binning import (
     _select_point_coordinates,
     _transformed_point_xy,
 )
+from harpy.qc._points_summary_metadata import PointsSummaryMetadata
+from harpy.qc._spatial_bin_summary import SpatialBinSummary, _summarize_spatial_bins
 from harpy.transformations._transformations import _invertible_affine_matrix
 
 
@@ -43,6 +36,9 @@ class PointsSummary:
 
     Attributes
     ----------
+    metadata
+        One :class:`PointsSummaryMetadata` record containing source identity,
+        coordinate system, crop, calibration, and bin edges.
     per_target
         One row per selected panel feature, including zero detections. Columns
         are ``feature``, ``feature_class``, ``n_points``, and
@@ -59,33 +55,56 @@ class PointsSummary:
     spatial_counts
         Optional in-memory uint64 DataArray with dimensions
         ``(feature_class, y, x)`` and bin-center x/y coordinates. These
-        coordinates and the geometry attributes ``x_edges``, ``y_edges``,
-        ``extent``, and ``bin_size`` are expressed in the requested
-        ``to_coordinate_system`` and its units, after transforming the source
-        points. Coordinates are not rebased to zero or replaced by bin indices.
-        The coordinate-system name is stored in
-        ``spatial_counts.attrs["to_coordinate_system"]``. Terminal bins may be
-        narrower for explicit crops. This is a standalone DataArray, not a
-        registered SpatialData image element.
+        coordinates use ``metadata.to_coordinate_system`` and its units,
+        after transforming the source points. Coordinates are not rebased
+        to zero or replaced by bin indices. See ``metadata.x_edges`` and
+        ``metadata.y_edges`` for grid boundaries. This is not a registered
+        SpatialData image element.
         Counts are raw, unsmoothed, and not normalized by area or panel size.
+        Empty bins remain in the grid; ``retained_bin_mask`` identifies bins
+        included in ``spatial_bins``.
+    spatial_bins
+        Optional :class:`SpatialBinSummary` with per-bin measurements and
+        statistics across bins containing at least one point from the selected
+        feature classes.
+        Its ``per_class`` describes spatial bins, unlike this container's
+        feature-level ``per_class``. None when binning was not requested.
 
     Notes
     -----
-    Both dataframes contain ``points_name``, ``feature_panel``, and ``sample_id``
-    when available. Their ``attrs`` and the grid's ``attrs`` record those same
-    identities plus ``to_coordinate_system``, ``crd``, and selected
-    ``panel_feature_counts``. No source element name is parsed to guess sample
-    identity or physical units.
-    ``crd`` is None or normalized ``(xmin, xmax, ymin, ymax)`` bounds, with
-    ``zmin, zmax`` appended when supplied, all in ``to_coordinate_system``.
-
-    The container is frozen, but its pandas/xarray contents remain editable.
-    Editing them never updates the source SpatialData object or backing store.
+    Retain this parent result when interpreting detached tables or arrays;
+    source and geometry context live only in ``metadata``, not in nested
+    ``attrs`` or repeated source-identity columns. Add identity columns
+    explicitly if an exported table needs them. Selected panel sizes
+    are available through the derived ``panel_feature_counts`` property.
     """
 
+    metadata: PointsSummaryMetadata
     per_target: pd.DataFrame
     per_class: pd.DataFrame
     spatial_counts: xr.DataArray | None
+    spatial_bins: SpatialBinSummary | None
+
+    @property
+    def panel_feature_counts(self) -> dict[str, int]:
+        """Return selected panel sizes from ``per_class.n_features``, including undetected features."""
+        return {
+            str(name): int(count)
+            for name, count in zip(self.per_class["feature_class"], self.per_class["n_features"], strict=True)
+        }
+
+    @property
+    def retained_bin_mask(self) -> xr.DataArray | None:
+        """Return a boolean XY mask of bins with any selected-class points, or None without binning.
+
+        Preserve the grid's x/y coordinates. Derive the mask from the current
+        ``spatial_counts`` on each access, without caching or reading source
+        points. Grid edits affect this mask but do not recalculate the stored
+        ``spatial_bins`` statistics.
+        """
+        if self.spatial_counts is None:
+            return None
+        return self.spatial_counts.any(dim="feature_class")
 
 
 def summarize_points(
@@ -96,6 +115,7 @@ def summarize_points(
     bin_size: float | None = None,
     max_grid_bytes: int | None = 1024**3,
     to_coordinate_system: str = "global",
+    microns_per_unit: float | None = None,
     crd: SpatialBounds | tuple[float, ...] | None = None,
     top_n: int = 20,
 ) -> PointsSummary:
@@ -110,6 +130,8 @@ def summarize_points(
     Include every selected panel feature, even with no detected points. This
     is independent of segmentation: points outside cells are included, and no
     labels, images, or AnnData table are required. The operation is read-only.
+    Raise ValueError if no points remain after class and spatial selection,
+    regardless of ``bin_size`` or whether ``crd`` was supplied.
 
     Parameters
     ----------
@@ -122,22 +144,35 @@ def summarize_points(
         Exact panel class name or non-empty sequence of distinct names. None
         selects all classes, including endogenous features. Results retain
         panel class/feature order, regardless of selection order.
+        Only selected classes contribute to counts, inferred extent, and bin
+        inclusion. Retain bins containing at least one point from the selected
+        classes, including each class's zeros within that shared population.
     bin_size
         Positive finite bin width in ``to_coordinate_system`` units. None
-        skips binning and returns ``spatial_counts=None``. No units are inferred.
+        skips binning and returns ``spatial_counts=None`` and ``spatial_bins=None``.
     max_grid_bytes
         Maximum bytes for the final dense uint64 count grid; defaults to 1 GiB.
         A positive integer, or None to disable the limit. When binning is
         requested, raise ValueError if ``n_classes * n_y_bins * n_x_bins * 8``
         exceeds this limit, before allocating bin edges or reducing counts.
-        Without ``crd``, the coordinate-only extent calculation happens first.
+        Without ``crd``, the selected-class extent calculation happens first.
         This bounds only the final count array, not total peak memory: pandas
-        summaries, coordinates, and other intermediate objects require more.
+        summaries (including ``spatial_bins.per_bin``), the occupancy mask,
+        coordinates, and other intermediate objects require more.
         The limit is not enforced when ``bin_size=None``.
     to_coordinate_system
         Registered coordinate system used for crop and bins. Apply the full
         same-dimensional affine transformation before projecting to XY. The
         registration is only required when cropping or binning is requested.
+    microns_per_unit
+        Physical size in micrometers of one unit in ``to_coordinate_system``,
+        using the same scale for x and y. A positive finite value enables
+        physical bin areas and densities in ``spatial_bins``; None leaves only
+        raw counts and coordinate-unit areas. Use 1.0 for micron coordinates
+        or the calibrated micrometers per pixel for pixel coordinates. This
+        does not transform points, change bins, or rescale raw counts. Units
+        are never inferred from frame names or reader metadata. Without
+        binning, this parameter adds no statistics.
     crd
         Optional :class:`harpy.SpatialBounds`, for example
         ``hp.SpatialBounds(x=(xmin, xmax), y=(ymin, ymax), z=(zmin, zmax))``.
@@ -150,7 +185,8 @@ def summarize_points(
         Both forms require finite, increasing bounds on each axis. The crop
         is half-open: minima included, maxima excluded. Every output uses
         this crop. Last bins may be narrower than bin_size. Result metadata
-        stores the normalized tuple, regardless of the input form.
+        retains a validated ``SpatialBounds`` object, regardless of the input
+        form; None when no crop was supplied.
     top_n
         Positive integer used only for the top-N concentration statistic.
         It does not truncate per-target results or other class statistics.
@@ -159,8 +195,8 @@ def summarize_points(
     -------
     PointsSummary
         Computed per-target and per-class dataframes and optional raw-count
-        spatial grid. Only compact reductions reach driver memory, not the
-        original points. Grid memory scales with extent, bin size, and classes.
+        spatial grid and bin summaries. See :class:`PointsSummary` for output
+        columns. Only reduced results reach driver memory, not the original points.
 
     Notes
     -----
@@ -173,31 +209,33 @@ def summarize_points(
     classes, and complete feature lists. Every source point's feature must
     occur in the panel and its observed class must match. These checks run
     partition-wise before class, crop, or z filtering, so selection cannot hide
-    invalid feature/class assignments. A panel is required even when selecting
-    all classes. Panel features without detections contribute explicit zeros.
+    invalid feature/class assignments.
 
     Bins are half-open, including on internal edges. Without ``crd``, a
-    preliminary coordinate-only reduction discovers shared bounds before class
-    filtering. The grid extends beyond the observed
-    maxima so every point is included; a constant coordinate needs one bin.
-    An empty points element requires explicit ``crd`` to define a grid.
-    Without binning, empty selections still yield panel-defined zero counts.
-    The optional z interval filters points in the requested coordinate system;
-    it does not select an exact plane in the source coordinates. Spatial counts
-    remain an XY grid of the selected points, not a volumetric histogram.
+    preliminary reduction discovers bounds from selected-class coordinates.
+    Full-width bins extend beyond their observed maxima so every selected
+    point is included; a constant coordinate needs one bin.
 
-    Target and bin counts are computed together from each selected source
-    partition. No raster lookup, aggregation table, smoothing, plotting, or
-    persistence is performed.
+    Separate class-only calls can use different grids and bin populations.
+    For comparisons over one population, compute the relevant classes together
+    and select from the returned summaries. An explicit crop fixes the grid,
+    not bin inclusion.
+    This is not a tissue mask: residual background detections from selected
+    classes remain included, and empty tissue bins are excluded. Bin areas
+    include the full geometric bin, not only tissue.
+    No smoothing or plotting is performed.
 
     Examples
     --------
     >>> summary = hp.qc.summarize_points(
     ...     sdata, "transcripts", feature_classes=["Negative", "SystemControl"],
-    ...     bin_size=200, to_coordinate_system="sample_micron",
+    ...     bin_size=200, to_coordinate_system="sample_micron", microns_per_unit=1.0,
     ... )
     >>> summary.per_target  # includes panel features with zero detections
     >>> summary.spatial_counts  # raw (feature_class, y, x) bin counts
+    >>> summary.spatial_bins.per_bin  # prepared histogram measurements
+    >>> summary.spatial_bins.per_class  # overview across included bins
+    >>> summary.metadata.to_coordinate_system  # shared coordinate context
     """
     if points_name not in sdata.points:
         raise ValueError(f"Points element {points_name!r} does not exist.")
@@ -216,6 +254,12 @@ def summarize_points(
         max_grid_bytes = int(max_grid_bytes)
     if bin_size is not None and (not np.isfinite(bin_size) or bin_size <= 0):
         raise ValueError("bin_size must be positive and finite.")
+    if microns_per_unit is not None:
+        if isinstance(microns_per_unit, (bool, np.bool_)) or not isinstance(microns_per_unit, Real):
+            raise ValueError("microns_per_unit must be a positive finite number or None.")
+        if not np.isfinite(microns_per_unit) or microns_per_unit <= 0:
+            raise ValueError("microns_per_unit must be a positive finite number or None.")
+        microns_per_unit = float(microns_per_unit)
     crd = _normalize_spatial_bounds(crd)
 
     axes = ()
@@ -238,9 +282,10 @@ def summarize_points(
     if bin_size is not None:
         bounds = None if crd is None else (*crd.x, *crd.y)
         if bounds is None:
-            # Reduce coordinates in the requested coordinate system, not the
-            # source frame. Both reductions share the lazy transformation.
-            transformed_xy = points[list(axes)].map_partitions(
+            # Only selected classes determine extent. Min/max share the lazy
+            # transformation into the requested coordinate system.
+            selected_points = points[points[panel.feature_class_key].isin(classes)]
+            transformed_xy = selected_points[list(axes)].map_partitions(
                 _transformed_point_xy,
                 axes=axes,
                 matrix=matrix,
@@ -249,7 +294,10 @@ def summarize_points(
             minimum, maximum = dask.compute(transformed_xy.min(), transformed_xy.max())
             bounds = (minimum["x"], maximum["x"], minimum["y"], maximum["y"])
             if not np.isfinite(bounds).all():
-                raise ValueError("Cannot infer spatial extent from empty points; supply crd or use bin_size=None.")
+                raise ValueError(
+                    "No points remain for the selected feature_classes; cannot infer spatial extent. "
+                    "Check the selected classes and source points."
+                )
         edges = _point_bin_edges(
             bounds,
             bin_size,
@@ -275,26 +323,29 @@ def summarize_points(
         for part in points[columns].to_delayed()
     ]
     target_counts, bin_counts = dask.compute(_tree_reduce(tasks, _merge_point_summaries))[0]
+    # Counts contain only observed selected features, before panel zero-filling.
+    if target_counts.empty:
+        raise ValueError(
+            "No points remain after applying feature_classes and crd. "
+            "Check the selection, crop bounds, and coordinate system."
+        )
     per_target, per_class = _summary_frames(target_counts, panel=panel, classes=classes, top_n=int(top_n))
-    identity = {"points_name": points_name, "feature_panel": panel_name}
-    if points_record.get("sample_id") is not None:
-        identity["sample_id"] = points_record["sample_id"]
-    metadata = {
-        **identity,
-        "to_coordinate_system": to_coordinate_system,
-        "crd": None if crd is None else crd.as_tuple(),
-        "panel_feature_counts": {name: len(panel.features_by_class[name]) for name in classes},
-    }
-    for frame in (per_target, per_class):
-        for name, value in identity.items():
-            frame[name] = value
-        frame.attrs = deepcopy(metadata)
-    grid = (
-        None
-        if edges is None
-        else _spatial_count_array(bin_counts, classes=classes, edges=edges, bin_size=bin_size, metadata=metadata)
+    metadata = PointsSummaryMetadata(
+        points_name=points_name,
+        sample_id=points_record.get("sample_id"),
+        feature_panel=panel_name,
+        to_coordinate_system=to_coordinate_system,
+        crd=crd,
+        microns_per_unit=microns_per_unit,
+        bin_size=None if bin_size is None else float(bin_size),
+        x_edges=None if edges is None else tuple(float(value) for value in edges[0]),
+        y_edges=None if edges is None else tuple(float(value) for value in edges[1]),
     )
-    return PointsSummary(per_target=per_target, per_class=per_class, spatial_counts=grid)
+    grid = None if edges is None else _spatial_count_array(bin_counts, classes=classes, edges=edges)
+    spatial_bins = None if grid is None else _summarize_spatial_bins(grid, metadata=metadata)
+    return PointsSummary(
+        metadata=metadata, per_target=per_target, per_class=per_class, spatial_counts=grid, spatial_bins=spatial_bins
+    )
 
 
 def _selected_feature_classes(selection: str | Sequence[str] | None, classes: tuple[str, ...]) -> tuple[str, ...]:
@@ -348,8 +399,9 @@ def _tree_reduce(tasks, merge, *, fan_in: int = 8):
     The arrows represent task dependencies, not computation performed by
     this function. Dask executes the graph when the returned task is computed.
     For point summaries, every partition and merged result has the same
-    ``(target_counts, bin_counts)`` structure, so the same merge function works
-    at each level. The final task therefore depends on all input partitions.
+    ``(target_counts, bin_counts)`` structure, so the same
+    merge function works at each level. The final task therefore depends on
+    all input partitions.
     """
     level = list(tasks)
     while len(level) > 1:
@@ -380,6 +432,9 @@ def _summarize_point_partition(
     counts. The feature-to-class mapping is fixed by the validated panel, so
     grouping targets by feature alone cannot mix classes. Non-selected classes
     and out-of-crop points still undergo source feature/class validation.
+
+    After validation, filter classes before transforming, cropping, and
+    counting. Excluded classes contribute neither counts nor bin inclusion.
     """
     errors = _feature_panel_partition_errors(
         partition,
@@ -389,22 +444,17 @@ def _summarize_point_partition(
     )
     if len(errors):
         raise ValueError(f"Points element {points_name!r}: {errors.iloc[0]}")
-    keep, xy = _select_point_coordinates(partition, axes=axes, matrix=matrix, crd=crd)
-    selected = partition.loc[keep]
-    selected_classes = selected[panel.feature_class_key].isin(classes).to_numpy()
-    selected = selected.loc[selected_classes]
+    selected = partition.loc[partition[panel.feature_class_key].isin(classes)]
+    keep, xy = _select_point_coordinates(selected, axes=axes, matrix=matrix, crd=crd)
+    selected = selected.loc[keep]
+    bins = None
+    if edges is not None:
+        bins = _count_point_bins(xy, selected[panel.feature_class_key].to_numpy(dtype=object), edges=edges)
     # Count observed strings only: categorical value_counts would otherwise
     # include unused source categories independently of the authoritative panel.
     targets = selected[panel.feature_key].astype(object).value_counts(sort=False).astype(np.uint64)
     targets.index.name = "feature"
     targets.name = "n_points"
-    bins = None
-    if edges is not None:
-        bins = _count_point_bins(
-            xy[selected_classes],
-            selected[panel.feature_class_key].to_numpy(dtype=object),
-            edges=edges,
-        )
     return targets, bins
 
 
@@ -456,7 +506,7 @@ def _summary_frames(
     return pd.concat(target_frames, ignore_index=True), pd.DataFrame(class_rows)
 
 
-def _spatial_count_array(counts: pd.Series, *, classes, edges, bin_size, metadata) -> xr.DataArray:
+def _spatial_count_array(counts: pd.Series, *, classes, edges) -> xr.DataArray:
     """Expand merged occupied-bin counts once into a zero-filled, coordinate-aware grid."""
     x_edges, y_edges = edges
     grid = np.zeros((len(classes), len(y_edges) - 1, len(x_edges) - 1), dtype=np.uint64)
@@ -473,12 +523,5 @@ def _spatial_count_array(counts: pd.Series, *, classes, edges, bin_size, metadat
             "feature_class": list(classes),
             "x": x_edges[:-1] + np.diff(x_edges) / 2,
             "y": y_edges[:-1] + np.diff(y_edges) / 2,
-        },
-        attrs={
-            **deepcopy(metadata),
-            "bin_size": bin_size,
-            "x_edges": x_edges.tolist(),
-            "y_edges": y_edges.tolist(),
-            "extent": (float(x_edges[0]), float(x_edges[-1]), float(y_edges[0]), float(y_edges[-1])),
         },
     )
