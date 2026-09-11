@@ -98,7 +98,6 @@ def test_summary_returns_complete_panel_counts_and_class_statistics():
         assert set(frame.points_name) == {"calls"}
         assert set(frame.sample_id) == {"sample_a"}
         assert set(frame.feature_panel) == {"panel_a"}
-        assert "points_per_um2" not in frame
     assert result.per_target.n_points.sum() == result.per_class.n_points.sum() == 8
 
 
@@ -168,12 +167,11 @@ def test_automatic_extent_uses_transformed_coordinates(ndim):
     assert grid.sum().item() == len(frame)
 
 
-def test_top_n_and_area_do_not_change_raw_counts_or_other_statistics():
+def test_top_n_does_not_change_raw_counts_or_other_statistics():
     sdata = _sdata()
     small = hp.qc.summarize_points(sdata, "calls", top_n=1)
-    large = hp.qc.summarize_points(sdata, "calls", top_n=20, analyzed_area_um2=4)
-    pd.testing.assert_frame_equal(small.per_target, large.per_target.drop(columns="points_per_um2"))
-    np.testing.assert_array_equal(large.per_target.points_per_um2, large.per_target.n_points / 4)
+    large = hp.qc.summarize_points(sdata, "calls", top_n=20)
+    pd.testing.assert_frame_equal(small.per_target, large.per_target)
     stable = [
         "feature_class",
         "n_features",
@@ -523,7 +521,6 @@ def test_panel_errors_are_not_hidden_by_class_or_spatial_filters(mutation, match
         ({"max_grid_bytes": 0}, "max_grid_bytes"),
         ({"max_grid_bytes": 1.5}, "max_grid_bytes"),
         ({"max_grid_bytes": True}, "max_grid_bytes"),
-        ({"analyzed_area_um2": -1}, "analyzed_area_um2"),
         ({"top_n": 0}, "top_n"),
         ({"top_n": 1.5}, "top_n"),
         ({"crd": (1, 0, 0, 2)}, "crd"),
