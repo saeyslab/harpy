@@ -4771,11 +4771,14 @@ ax = hp.qc.spatial_bin_histogram(
 
 Counts are the default. To display percentages instead, use
 `histplot_kwargs={"stat": "percent"}`; this changes only the Y-axis scaling.
+The same option and normalization rule apply to `table_histogram` and
+`table_histograms`. Do not introduce another public parameter for choosing
+the percentage denominator.
 
 `histplot_kwargs` configures Seaborn's `histplot` through the shared renderer,
 as in the existing table histograms. Copy the mapping, fill in missing defaults,
 and forward plotting options such as `color`, `alpha`, and `kde` without
-mutating the caller's mapping. The spatial-bin percentage mode requires
+mutating the caller's mapping. Percentage mode for both table and spatial-bin plots requires
 additional normalization handling, rather than unconditional forwarding of
 `stat="percent"`, as described below.
 
@@ -4798,7 +4801,9 @@ from a collection of histograms:
 `table_histogram`, not the multi-plot wrapper, is the direct counterpart to
 `spatial_bin_histogram`. Avoid a cell-specific name because table metrics may
 also come from `.var`. Preserve the table functions' parameters, defaults,
-return types, and behavior under their new names.
+return types, and default count-plot behavior under their new names. The
+percentage-with-display-filtering behavior deliberately changes to the shared
+normalization rule specified below.
 
 Keep both old names as deprecated aliases, following the existing
 `hp.tb.allocate` deprecation pattern. Importing or accessing an old name logs
@@ -4856,10 +4861,9 @@ selection rules are comparable.
 
 Do not simply pass `stat="percent"` to Seaborn after filtering values for
 display: that would normalize against the supplied, filtered values instead
-of all retained spatial bins. Harpy must retain the original population size
+of the full selected input population. Harpy must retain the original population size
 and ensure both histogram bars and KDE use the agreed full-population scaling.
-This is a spatial-bin display contract, not a change to the existing table
-histograms' normalization behavior.
+Apply this rule consistently to table and spatial-bin histograms.
 
 Show classes separately by default so endogenous counts do not compress sparse
 control distributions. Preserve class, points-element/mosaic, and optional
@@ -4926,17 +4930,32 @@ axis styling. Keep source selection outside this helper:
   annotation values. It does not inspect SpatialData, feature panels, or
   spatial-bin metadata.
 
-When percentage display is requested for spatial bins, pass the full retained
-population size from the adapter to the renderer as numerical context; the
-renderer must not need to inspect `PointsSummary` to preserve the denominator.
+When percentage display is requested, both adapters pass the full selected
+population size **before display filtering** to the renderer as numerical
+context:
 
-Apart from the canonical names and deprecated aliases, keep the existing
-table-input APIs and their defaults unchanged. Both table and spatial-bin
-histograms default to counts and share the display-range and styling logic;
-only the source values, labels, and supplied annotations differ. The spatial
-adapter must not request percentage scaling implicitly. In percentage mode,
-preserve its explicit full-population denominator
-without changing existing table-input behavior.
+- For table histograms, count the selected metric's non-missing `.obs` or
+  `.var` values after any applicable `labels_name` selection and `dropna()`,
+  but before `range` or `quantile_range` filtering. This is not necessarily
+  every row in the original table. Include zero values. Each subplot in
+  `table_histograms` uses its own metric population, which may differ between
+  `.obs` and `.var` metrics or because of missing values.
+- For spatial-bin histograms, use all retained spatial bins represented for
+  the requested class, including its zero counts.
+
+The renderer applies the same percentage calculation to either numeric
+population; it must not inspect SpatialData or `PointsSummary` to determine
+the denominator. Keep counts as the default for both APIs and share their
+display-range and styling logic. No separate normalization mode or denominator
+parameter is added to the public table APIs.
+
+Explicitly document this behavior change in the table-histogram docstrings:
+previously, percentage plots normalized over the display-filtered values
+forwarded to Seaborn; now they normalize over the full selected, non-missing
+metric population. Consequently, clipped percentage bars may sum to less than
+100%, while default count plots and full-population median/SD annotations
+remain unchanged. Deprecated aliases use the same new behavior, not a separate
+legacy normalization path.
 
 As part of 11e.ii, extend `_summarize_spatial_bins` to compute
 `std_points_per_bin` from the same raw counts used for mean/median/p95.
@@ -4963,8 +4982,11 @@ input summaries. Verify that sample SD includes class-specific zeros and handles
 constant distributions correctly. Check KDE enable/disable behavior and
 omission for insufficient/constant data without losing the histogram.
 Focused renderer/refactor tests should protect existing table-histogram
-defaults and the shared styling, without testing Seaborn's KDE estimator
-itself. Plotting must neither mutate the result nor invoke source reads,
+count defaults and the shared styling, and cover the deliberate change to
+percentage normalization under display filtering. Check table denominators
+after applicable region selection and missing-value removal, and verify
+equivalent numeric populations use the same percentage scaling in both APIs,
+without testing Seaborn's KDE estimator itself. Plotting must neither mutate the result nor invoke source reads,
 panel lookup, or summary-statistic computation.
 
 Also verify that both deprecated aliases resolve to the corresponding new
