@@ -4769,6 +4769,9 @@ ax = hp.qc.spatial_bin_histogram(
 )
 ```
 
+Counts are the default. To display percentages instead, use
+`histplot_kwargs={"stat": "percent"}`; this changes only the Y-axis scaling.
+
 When `summary.spatial_bins` is `None`, raise a clear error explaining that
 `summarize_points` must be called with `bin_size`. Do not reread points,
 validate panels again, or create an AnnData table to render the histogram.
@@ -4825,9 +4828,24 @@ established by `summarize_points`: a bin remains included if any class selected
 during summary computation has a point. Its zero count for the plotted class
 must remain part of the histogram input and annotations.
 
-Percentage scaling is optional, not the default. If offered, explicitly label
-the Y-axis and use the full retained-bin population as the denominator, even
-when display limits hide some values.
+Provide percentage scaling as an opt-in display choice, not the default:
+
+```text
+bar height (%) = 100 × spatial bins in the count interval / all retained spatial bins
+```
+
+For example, 250 of 1,000 retained bins gives a bar height of 25% rather than 250. This is the percentage of spatial bins, not of points, tissue area, or
+panel features. Explicitly label the Y-axis as a percentage. Apply the same
+`100 / n_retained_bins` scaling to the KDE overlay so it matches the histogram.
+
+Keep the full retained-bin population as the denominator even when `range`
+or `quantile_range` hides values. Histogram bar heights sum to 100% when all
+values are shown; after display filtering they may sum to less than 100%.
+The X-axis, histogram intervals, retained population, and median/SD annotations
+remain unchanged. Do not store percentages in `PointsSummary` or modify its
+dataframes. This display mode supports distribution comparisons between
+samples with different numbers of bins, provided spatial bin sizes and
+selection rules are comparable.
 
 Show classes separately by default so endogenous counts do not compress sparse
 control distributions. Preserve class, points-element/mosaic, and optional
@@ -4870,7 +4888,7 @@ a logarithmic display.
 Median and SD annotations describe all retained bins for the selected class,
 including its zeros, not only displayed values. The histogram and KDE use the
 displayed values with the chosen histogram scaling, as in the existing table
-plot; any optional percentage mode must preserve the full-population
+plot; percentage mode must preserve the full-population
 denominator described above.
 
 Finalize the exact signatures and histogram options before implementation;
@@ -4898,8 +4916,8 @@ Apart from the canonical names and deprecated aliases, keep the existing
 table-input APIs and their defaults unchanged. Both table and spatial-bin
 histograms default to counts and share the display-range and styling logic;
 only the source values, labels, and supplied annotations differ. The spatial
-adapter must not request percentage scaling implicitly. If optional percentage
-display is supported, preserve its explicit full-population denominator
+adapter must not request percentage scaling implicitly. In percentage mode,
+preserve its explicit full-population denominator
 without changing existing table-input behavior.
 
 As part of 11e.ii, extend `_summarize_spatial_bins` to compute
@@ -4920,9 +4938,10 @@ populations are handled as specified, and that labels state the correct units
 and population. Check that default bar heights count spatial bins rather than
 points or percentages. Check axes reuse, explicit class selection, `range`
 precedence, and `quantile_range` filtering. Display limits must not change the
-stored population or median/SD annotations; any optional percentage mode must
-retain its full-population denominator. Verify
-that sample SD includes class-specific zeros and handles single-bin and
+stored population or median/SD annotations. Verify percentage-mode bar heights
+and labels, full-population normalization under display filtering, and matching
+KDE scaling. Switching display modes must not change the X-axis intervals or
+input summaries. Verify that sample SD includes class-specific zeros and handles single-bin and
 constant distributions correctly. Check KDE enable/disable behavior and
 omission for insufficient/constant data without losing the histogram.
 Focused renderer/refactor tests should protect existing table-histogram
