@@ -4772,6 +4772,13 @@ ax = hp.qc.spatial_bin_histogram(
 Counts are the default. To display percentages instead, use
 `histplot_kwargs={"stat": "percent"}`; this changes only the Y-axis scaling.
 
+`histplot_kwargs` configures Seaborn's `histplot` through the shared renderer,
+as in the existing table histograms. Copy the mapping, fill in missing defaults,
+and forward plotting options such as `color`, `alpha`, and `kde` without
+mutating the caller's mapping. The spatial-bin percentage mode requires
+additional normalization handling, rather than unconditional forwarding of
+`stat="percent"`, as described below.
+
 When `summary.spatial_bins` is `None`, raise a clear error explaining that
 `summarize_points` must be called with `bin_size`. Do not reread points,
 validate panels again, or create an AnnData table to render the histogram.
@@ -4847,6 +4854,13 @@ dataframes. This display mode supports distribution comparisons between
 samples with different numbers of bins, provided spatial bin sizes and
 selection rules are comparable.
 
+Do not simply pass `stat="percent"` to Seaborn after filtering values for
+display: that would normalize against the supplied, filtered values instead
+of all retained spatial bins. Harpy must retain the original population size
+and ensure both histogram bars and KDE use the agreed full-population scaling.
+This is a spatial-bin display contract, not a change to the existing table
+histograms' normalization behavior.
+
 Show classes separately by default so endogenous counts do not compress sparse
 control distributions. Preserve class, points-element/mosaic, and optional
 sample identity in titles or legends. Permit caller-supplied axes and return
@@ -4911,6 +4925,10 @@ axis styling. Keep source selection outside this helper:
 - The shared helper accepts numerical values, plotting options, and supplied
   annotation values. It does not inspect SpatialData, feature panels, or
   spatial-bin metadata.
+
+When percentage display is requested for spatial bins, pass the full retained
+population size from the adapter to the renderer as numerical context; the
+renderer must not need to inspect `PointsSummary` to preserve the denominator.
 
 Apart from the canonical names and deprecated aliases, keep the existing
 table-input APIs and their defaults unchanged. Both table and spatial-bin
