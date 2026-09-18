@@ -34,11 +34,11 @@ implemented:
       elements through `hp.pt.add_feature_panel` — implemented;
     - **11d:** validate existing points against their registered feature panel
       through the read-only `hp.pt.validate_points` API;
-    - **11e:** transcript-positive bin summaries and visualization, in five
+    - **11e:** transcript-positive bin summaries and visualization, in four
       separate parts: **11e.i** construct `summary.spatial_bins` inside
-      `summarize_points` — implemented; **11e.ii** detected features per spatial bin;
-      **11e.iii** spatial-bin histograms; **11e.iv** feature-specific spatial
-      counts through `hp.qc.bin_points_by_feature`; and **11e.v** spatial density
+      `summarize_points` — implemented; **11e.ii** spatial-bin histograms;
+      **11e.iii** feature-specific spatial counts through
+      `hp.qc.bin_points_by_feature`; and **11e.iv** spatial density
       heatmaps;
     - **11f:** table-level summary computation through `hp.qc.summarize_table`
       and `TableSummary`, with plotting integration;
@@ -3834,7 +3834,7 @@ the transcript points. Derive class-summary statistics, including the top-N
 concentration statistic, from the same zero-filled per-target result; these
 outputs must not trigger new point reductions or scans. Do not create an
 artificial AnnData table solely to reuse table-based plotting helpers such as
-`table_histogram` (the name introduced in Part 11e.iii for `metric_histogram`).
+`table_histogram` (the name introduced in Part 11e.ii for `metric_histogram`).
 
 `summarize_points` returns the in-memory `PointsSummary` described above and
 does not persist QC results as SpatialData elements or root metadata. Do not
@@ -4367,30 +4367,25 @@ Focused tests should cover:
 
 ## Slice 11e: original-point summary visualization
 
-**Status: Part 11e.i implemented; Parts 11e.ii–v specified, not implemented.**
+**Status: Part 11e.i implemented; Parts 11e.ii–iv specified, not implemented.**
 
 Implement annotation-free QC of transcript-positive spatial bins,
-using the existing `PointsSummary.spatial_counts` from Slice 11a, an extension
-for distinct detected features per bin, and an explicit computation path for
-feature-specific grids:
+using the existing `PointsSummary.spatial_counts` from Slice 11a, plus an
+explicit computation path for feature-specific grids:
 
 1. **11e.i: transcript-positive bin summaries** — construct a
    `SpatialBinSummary` inside `hp.qc.summarize_points` and return it as
    `PointsSummary.spatial_bins`, alongside the raw spatial-count array.
-2. **11e.ii: detected features per spatial bin** — extend `summarize_points`
-   with exact distinct-feature counts in `spatial_bins.per_bin` and precomputed
-   distribution statistics for histogram annotations.
-3. **11e.iii: spatial-bin histograms** — visualize the
-   results of 11e.i–ii, with one shared bin population across feature classes.
-4. **11e.iv: feature-specific spatial counts** — compute one count plane per
+2. **11e.ii: spatial-bin histograms** — visualize the
+   results of 11e.i, with one shared bin population across feature classes.
+3. **11e.iii: feature-specific spatial counts** — compute one count plane per
    requested feature through `hp.qc.bin_points_by_feature`.
-5. **11e.v: spatial density heatmaps** — render class-level or feature-level
+4. **11e.iv: spatial density heatmaps** — render class-level or feature-level
    spatial-count arrays through `hp.pl.plot_transcript_density`.
 
-Part 11e.ii extends the computation from 11e.i; Part 11e.iii consumes their
-combined result. None requires density rendering to be implemented first.
-Part 11e.v consumes the class-grid contract from 11e.i and the feature-grid
-contract from 11e.iv. Keep the parts within
+Part 11e.ii depends on the computed result of 11e.i; neither requires density
+rendering to be implemented first. Part 11e.iv consumes the class-grid contract
+from 11e.i and the feature-grid contract from 11e.iii. Keep the parts within
 Slice 11e so later slice numbers remain unchanged. Replace the former per-feature distribution
 plot and per-feature class-summary display with this bin-based workflow.
 Feature-specific spatial maps do not reinstate per-target distribution plots,
@@ -4400,9 +4395,7 @@ these maps.
 
 The bin-summary helper consumes the counts already reduced inside
 `summarize_points`; it does not trigger another source-point scan or panel
-lookup. Part 11e.ii computes feature presence during that source reduction,
-before class totals discard feature identity; it cannot derive distinct-feature
-counts from the completed class grid. Plotters consume the parent results, which retain both measurements
+lookup. Plotters consume the parent results, which retain both measurements
 and the single shared metadata record,
 never call `summarize_points` or `aggregate_points`, and never read source
 points or a live panel registry. Neither bin-summary postprocessing nor
@@ -4550,8 +4543,7 @@ whereas `PointsSummary.spatial_bins.per_class` describes spatial bins.
   in squared coordinate-system units, and raw uint64 `n_points`.
   These are class-level aggregates, not individual points or per-gene counts.
   Calibration adds only `bin_area_um2`. Raw `n_points` values suffice for
-  point-count histograms without repeating bin-summary computation. Part 11e.ii
-  will add `n_detected_features`; it is not present in the implemented 11e.i output.
+  point-count histograms without repeating bin-summary computation.
 - **Per-class overview:** categorical `feature_class`, uint64 `n_points`,
   `mean_points_per_bin`, `median_points_per_bin`, `p95_points_per_bin`,
   `n_retained_bins_without_class`, and `pct_retained_bins_without_class`.
@@ -4562,8 +4554,7 @@ whereas `PointsSummary.spatial_bins.per_class` describes spatial bins.
   Part 11e.ii will add `std_points_per_bin` here for histogram annotations;
   it is not part of the currently implemented 11e.i output. Compute this
   alongside the other per-bin statistics, using sample SD (`ddof=1`), so
-  plotting does not recalculate it. That part also adds distribution statistics
-  for `n_detected_features` on the same retained-bin population.
+  plotting does not recalculate it.
 - **Population context:** each `per_class` row includes `n_total_bins`
   (all grid bins before exclusion), `n_retained_bins` (bins with at least one
   point across any selected class), `n_excluded_bins`, and `pct_excluded_bins`
@@ -4748,130 +4739,15 @@ Focused tests should establish that:
 - bin postprocessing adds no source-point scan or panel lookup; its inputs
   remain unchanged, and renderers need only the captured results.
 
-### Part 11e.ii: detected features per spatial bin
+### Part 11e.ii: spatial-bin histograms
 
 **Status: specified; not implemented. Depends on Part 11e.i.**
 
-Extend `hp.qc.summarize_points` so each row of
-`summary.spatial_bins.per_bin` also reports the exact number of distinct
-features detected in that spatial bin and feature class. For endogenous
-features this typically counts unique genes; for other classes it counts
-distinct control targets. It complements total points without returning
-per-gene spatial counts or a bin-by-feature matrix.
-
-#### Computation API and output contract
-
-Keep the public `summarize_points` signature and `PointsSummary` hierarchy.
-When `bin_size` is supplied, compute the additional measurement as part of
-the same summary call. With `bin_size=None`, skip this spatial reduction and
-continue returning `spatial_bins=None`. No separate public computation API,
-plotting, or source/store mutation is introduced by this part.
-
-- Add uint64 `n_detected_features` to `spatial_bins.per_bin`: the number of
-  distinct feature identifiers with at least one selected point in the row's
-  `(feature_class, y_bin, x_bin)` group.
-- Use exactly the existing class selection, transformed coordinates, crop,
-  bin edges, retained-bin mask, and row order. A retained bin with no points
-  of one class has both `n_points=0` and `n_detected_features=0` for that class.
-  Do not change bin inclusion or omit these class-specific zero rows.
-- Repeated detections of one feature count once, including when distributed
-  across input partitions. A panel feature with no detections contributes
-  nothing to this measurement; its zero-filled entry in `per_target` remains.
-- Preserve `spatial_counts` as raw point counts with dimensions
-  `(feature_class, y, x)`. Do not overload it with distinct-feature counts or
-  add a feature dimension. Source and geometry metadata remain on the parent.
-- Extend `spatial_bins.per_class` with `mean_detected_features_per_bin`,
-  `median_detected_features_per_bin`, `std_detected_features_per_bin`, and
-  `p95_detected_features_per_bin`, computed over the same retained-bin rows.
-  Also add `std_points_per_bin` alongside the existing point-count statistics.
-  These precomputed values support Part 11e.iii without plotting-time reduction.
-
-Use sample SD (`ddof=1`) for both measurements, consistent with the existing
-table histograms. Fewer than two retained bins yield NaN for SD; constant
-values over at least two bins yield zero SD. Keep the existing linear
-percentile convention and include class-specific zeros. Do not sum per-bin
-distinct counts and describe the result as the number of distinct features
-across the whole sample; a feature may occur in many bins.
-
-#### Exact partition-wise reduction
-
-The current class-bin point totals and per-target sample totals cannot
-recover which features occurred in each bin. Extend the source reduction
-before that information is discarded:
-
-1. Reuse source feature/class validation, selection, transformed XY coordinates,
-   and bin assignment from `_summarize_point_partition` / `_count_point_bins`.
-   Factor shared bin assignment as needed rather than calculating different
-   grids for point counts and distinct-feature counts.
-2. Reduce each partition to compact observed bin-feature records. Repeated
-   points for the same feature and bin need not travel through the global
-   reduction as separate rows. Stable panel feature codes may replace strings.
-3. Merge duplicate bin-feature keys across partitions before counting distinct
-   features per class and bin. Local distinct counts are not additive: an exact
-   distributed deduplication/grouping step may require a shuffle.
-4. Return compact per-bin scalar results to the driver, align them with the
-   established retained-bin rows, and derive the per-class statistics once.
-   Keep feature identities used for deduplication internal.
-
-For example, for the same Endogenous spatial bin:
-
-```text
-partition A: EPCAM, EPCAM, VIM
-partition B: EPCAM, KRT8
-
-combined n_points            = 5
-combined n_detected_features = 3  (EPCAM, VIM, KRT8)
-```
-
-Summing the partition-local distinct counts would incorrectly give 4. A
-feature present in another bin must still count separately in that other bin.
-
-Share source reads and coordinate processing with the existing summary
-reduction in one Dask computation graph; do not scan points once per feature
-or materialize all source rows. The existing preliminary extent reduction
-without an explicit crop remains allowed. Do not collect all observed
-bin-feature identities on the driver or allocate a dense bins-by-panel matrix.
-Only the final scalar measurements belong in the returned summary.
-
-#### Cost and interpretation
-
-The returned `per_bin` grows by one integer column. Intermediate work instead
-scales with observed bin-feature combinations, which can be much larger than
-the current class-bin totals and can approach the number of points. Avoid
-claiming that exact distinct counting is free or that the existing
-`max_grid_bytes` bound covers these intermediates; it still limits only the
-dense class count grid.
-
-Measure runtime and peak memory against the current summary on representative
-data before considering this part complete. Compare a fixed crop and bin size
-so the extra reduction cost is distinguishable from extent discovery. This
-measurement complements point counts but depends on panel composition, bin
-size, and detection depth; it is not an independent tissue-quality score.
-
-#### Verification
-
-Focused tests should cover repeated features within and across partitions,
-multiple features in one bin, the same feature in different bins, and independent
-features from different classes. Compare with
-a small direct distinct-count reference after identical selection and binning.
-Assert `0 <= n_detected_features <= min(n_points, class_panel_size)` and that
-zero point counts correspond to zero detected features. Verify unchanged row
-order, retained-bin population, point counts, and existing per-target results;
-test class-specific zeros and transformed/cropped edge membership. Check the
-new per-class statistics, including single-bin and constant distributions,
-and prove results are independent of source partitioning. No-binning calls
-must avoid the additional spatial reduction. Protect shared source processing
-with a focused execution check, not a full-source performance test in unit tests.
-
-### Part 11e.iii: spatial-bin histograms
-
-**Status: specified; not implemented. Depends on Parts 11e.i–ii.**
-
 Accept the parent `PointsSummary` and consume its `spatial_bins.per_bin` and
-`spatial_bins.per_class` produced by 11e.i–ii, using `summary.metadata` for source
+`spatial_bins.per_class` produced by 11e.i, using `summary.metadata` for source
 identity, units, and geometry. Do not require detached frames to carry `.attrs`.
 Histograms select the requested class from `per_bin` and use its existing
-measurement values, with matching median/SD annotations from `per_class`. Do not introduce
+`n_points` values, with median/SD annotations from `per_class`. Do not introduce
 fixed-area normalization in these plots or calculate additional density summaries.
 Do not render `summary.per_target` or its existing per-feature
 `summary.per_class` as spatial-bin histograms. Do not repeat bin-summary
@@ -4884,12 +4760,6 @@ implement a separate `hp.qc.spatial_bin_overview` table-style plotting API.
 Use `hp.qc.spatial_bin_histogram` for one class's histogram. It accepts
 `PointsSummary`, supports caller-supplied Matplotlib axes, and returns the axes
 used. Source identity and bin geometry come from `summary.metadata`.
-
-Accept `column: Literal["n_points", "n_detected_features"] = "n_points"` to
-select points per bin or distinct detected features per bin. Both use the same
-retained-bin population, including class-specific zeros. Label the X-axis for
-the selected measurement; do not infer one measurement from the other or
-compute missing measurements inside the plot.
 
 ```python
 ax = hp.qc.spatial_bin_histogram(
@@ -4919,7 +4789,7 @@ validate panels again, or create an AnnData table to render the histogram.
 
 #### Table-histogram naming and deprecation
 
-As part of 11e.iii, align the table-input names with `spatial_bin_histogram`.
+As part of 11e.ii, align the table-input names with `spatial_bin_histogram`.
 The prefix identifies the source; singular/plural distinguishes one histogram
 from a collection of histograms:
 
@@ -4960,11 +4830,6 @@ Draw one selected feature class per axes, using the same default
 - y-axis: number of retained spatial bins in each histogram count interval; and
 - every included bin contributes equally, including its zero count for the
   selected class. Histograms are not area-weighted.
-
-With `column="n_detected_features"`, the X-axis instead shows distinct detected
-features per retained bin. The Y-axis still counts spatial bins, not features.
-All display-range, percentage-scaling, and zero-inclusion rules apply to both
-measurements. The following point-count examples describe the default column.
 
 For example, a bar covering `[20, 30)` with height 250 means that 250 spatial
 bins each contain 20–29 points of the requested class. This is analogous to
@@ -5031,7 +4896,7 @@ selection nor display limits change the spatial grid or stored summaries.
 
 Support `range` and `quantile_range` consistently with `table_histogram`:
 an explicit `range` takes precedence; otherwise derive the display range from
-the selected class's chosen per-bin measurement quantiles. For example,
+the selected class's per-bin count quantiles. For example,
 `quantile_range=(0.1, 0.99)` plots values between the 10th and 99th percentiles,
 including the boundary values. This is display filtering, not a new selection
 of spatial bins in `PointsSummary`. State when values are hidden; a lower
@@ -5060,11 +4925,8 @@ axis styling. Keep source selection outside this helper:
   median and SD using the existing conventions.
 - `table_histograms` arranges subplots and calls
   `table_histogram`, thereby using the same renderer indirectly.
-- `spatial_bin_histogram` selects one class's `per_bin[column]` and supplies
-  the matching precomputed median and SD from `spatial_bins.per_class`:
-  `median_points_per_bin` / `std_points_per_bin` for `n_points`, or
-  `median_detected_features_per_bin` / `std_detected_features_per_bin` for
-  `n_detected_features`.
+- `spatial_bin_histogram` selects one class's `per_bin["n_points"]` and
+  supplies its already computed median and SD from `spatial_bins.per_class`.
 - The shared helper accepts numerical values, plotting options, and supplied
   annotation values. It does not inspect SpatialData, feature panels, or
   spatial-bin metadata.
@@ -5096,29 +4958,29 @@ metric population. Consequently, clipped percentage bars may sum to less than
 remain unchanged. Deprecated aliases use the same new behavior, not a separate
 legacy normalization path.
 
-Part 11e.ii supplies sample SD (`ddof=1`) for both supported measurements.
-Display NaN annotations as "N/A". Use the supplied statistics rather than
+As part of 11e.ii, extend `_summarize_spatial_bins` to compute
+`std_points_per_bin` from the same raw counts used for mean/median/p95.
+Use sample SD (`ddof=1`), matching the existing `values.std()` convention in
+`metric_histogram` / renamed `table_histogram`. Fewer than two retained bins
+yield NaN, displayed as "N/A"; constant counts across at least two bins yield
+zero SD. This adds no source-point scan and does not change bin inclusion.
+The spatial plotting adapter uses the supplied statistics rather than
 recomputing them or silently filling missing summary fields. Histogram
-construction and optional KDE estimation operate only on the captured per-bin
-values; no source-point scan, distinct-feature reduction, or bin-inclusion
-change belongs in the plotting implementation.
+construction and optional KDE estimation operate only on the captured per-bin values.
 
 #### Verification
 
 Focused tests should establish that the supplied summaries determine the
 histogram values and annotations, that class-specific zeros and empty
 populations are handled as specified, and that labels state the correct units
-and population. Check both supported columns use their matching values,
-annotations, and X-axis labels, without recomputing distinct features. Check
-that default bar heights count spatial bins rather than points, features, or
-percentages. Check axes reuse, explicit class selection, `range`
+and population. Check that default bar heights count spatial bins rather than
+points or percentages. Check axes reuse, explicit class selection, `range`
 precedence, and `quantile_range` filtering. Display limits must not change the
 stored population or median/SD annotations. Verify percentage-mode bar heights
 and labels, full-population normalization under display filtering, and matching
 KDE scaling. Switching display modes must not change the X-axis intervals or
-input summaries. The computation tests in 11e.ii establish the numerical
-SD contract; here check the correct precomputed annotation and "N/A" display.
-Check KDE enable/disable behavior and
+input summaries. Verify that sample SD includes class-specific zeros and handles
+single-bin and constant distributions correctly. Check KDE enable/disable behavior and
 omission for insufficient/constant data without losing the histogram.
 Focused renderer/refactor tests should protect existing table-histogram
 count defaults and the shared styling, and cover the deliberate change to
@@ -5133,7 +4995,7 @@ functions, emit the specified warning only once per alias, and remain usable
 through public access and explicit imports. Canonical names must remain
 warning-free.
 
-### Part 11e.iv: feature-specific spatial counts
+### Part 11e.iii: feature-specific spatial counts
 
 **Status: specified; not implemented.**
 
@@ -5274,7 +5136,7 @@ Focused tests should establish that:
   no per-target/per-class summary, table construction, or plotting is invoked; and
 - source elements and metadata remain unchanged.
 
-### Part 11e.v: spatial density heatmaps
+### Part 11e.iv: spatial density heatmaps
 
 **Status: specified; not implemented.**
 
@@ -5284,7 +5146,7 @@ SpatialData-input signature with a renderer accepting a `PointsSummary` or
 or `feature, y, x`) and `metadata` together; a bare DataArray no longer carries
 the required context. Neither parent input is an alternative computation
 path: do not accept SpatialData or compute missing results. Reuse the shared
-transcript-positive-bin definition from 11e.i and 11e.iv; the histogram
+transcript-positive-bin definition from 11e.i and 11e.iii; the histogram
 renderer need not be implemented first.
 
 Validate only the array's dimensions/coordinates and the parent's metadata
@@ -5358,7 +5220,7 @@ hp.pl.plot_transcript_density(
 The same summary can then be plotted with `feature_class="SystemControl"`
 without recomputing the summary or accessing `sdata`.
 
-Likewise, reuse the feature grid from 11e.iv:
+Likewise, reuse the feature grid from 11e.iii:
 
 ```python
 hp.pl.plot_transcript_density(feature_counts, features="EPCAM")
@@ -5618,7 +5480,7 @@ instances or features.
 ### Plotting integration
 
 `hp.qc.obs_scatter` and `hp.qc.table_histogram` (renamed from
-`hp.qc.metric_histogram` in Part 11e.iii) remain useful for
+`hp.qc.metric_histogram` in Part 11e.ii) remain useful for
 metrics already stored in `.obs` (and, for the histogram, `.var`). They select
 and plot existing columns; they do not calculate the underlying class counts
 or panel-normalized rates. Preserve those direct table-input use cases.
