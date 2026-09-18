@@ -1,7 +1,14 @@
+from ._histogram import (
+    metric_histogram,
+    metrics_histogram,
+    spatial_bin_histogram,
+    table_histogram,
+    table_histograms,
+)
 from ._points_summary_metadata import PointsSummaryMetadata
 from ._qc_image_histogram import image_histogram
 from ._qc_segmentation import segmentation_coverage, segmentation_histogram
-from ._qc_transcripts import analyse_genes_left_out, metric_histogram, metrics_histogram, obs_scatter
+from ._qc_transcripts import analyse_genes_left_out, obs_scatter
 from ._spatial_bin_summary import SpatialBinSummary
 from ._summarize_points import PointsSummary, summarize_points
 
@@ -16,5 +23,8 @@ __all__ = [
     "segmentation_histogram",
     "metric_histogram",
     "metrics_histogram",
+    "table_histogram",
+    "table_histograms",
+    "spatial_bin_histogram",
     "obs_scatter",
 ]

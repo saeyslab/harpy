@@ -34,8 +34,9 @@ class SpatialBinSummary:
         ``n_retained_bins_without_class`` counts retained bins with zero points
         of this row's class; ``pct_retained_bins_without_class`` is 100 times
         that count / retained bins. These bins contain other selected classes' points.
-        ``n_points``, ``mean_points_per_bin``, ``median_points_per_bin``, and
-        ``p95_points_per_bin`` also use the shared retained-bin population.
+        ``n_points``, ``mean_points_per_bin``, ``median_points_per_bin``,
+        ``std_points_per_bin``, and ``p95_points_per_bin`` also use the shared
+        retained-bin population. SD uses ``ddof=1``; NaN for fewer than two bins.
         An all-zero class in a nonempty population has zero-valued count
         statistics and ``pct_retained_bins_without_class=100``. Percentiles
         use linear interpolation.
@@ -123,6 +124,7 @@ def _summarize_spatial_bins(grid: xr.DataArray, *, metadata: PointsSummaryMetada
             "pct_retained_bins_without_class": 100 * n_zero / n_retained if n_retained else np.nan,
             "mean_points_per_bin": float(counts.mean()) if n_retained else np.nan,
             "median_points_per_bin": float(np.median(counts)) if n_retained else np.nan,
+            "std_points_per_bin": float(counts.std(ddof=1)) if n_retained > 1 else np.nan,
             "p95_points_per_bin": float(np.percentile(counts, 95)) if n_retained else np.nan,
         }
         class_rows.append(row)

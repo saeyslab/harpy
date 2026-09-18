@@ -3,7 +3,8 @@ from __future__ import annotations
 import matplotlib.pyplot as plt
 from spatialdata import SpatialData
 
-from harpy.qc._qc_transcripts import metric_histogram, obs_scatter
+from harpy.qc._histogram import table_histogram
+from harpy.qc._qc_transcripts import obs_scatter
 from harpy.utils._keys import _CELLSIZE_KEY
 
 
@@ -41,7 +42,7 @@ def preprocess_transcriptomics(
     harpy.tb.preprocess_transcriptomics: preprocess.
     """
     _, axs = plt.subplots(1, 2, figsize=(10, 4))
-    metric_histogram(
+    table_histogram(
         sdata,
         table_name=table_name,
         column="total_counts",
@@ -53,7 +54,7 @@ def preprocess_transcriptomics(
         title=None,
         show_median=True,
     )
-    metric_histogram(
+    table_histogram(
         sdata,
         table_name=table_name,
         column="n_genes_by_counts",
