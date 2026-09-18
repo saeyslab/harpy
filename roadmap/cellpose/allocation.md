@@ -4754,6 +4754,9 @@ Do not render `summary.per_target` or its existing per-feature
 computation in each plot. The numerical overview is already available in
 `summary.spatial_bins.per_class` for direct inspection or export; do not
 implement a separate `hp.qc.spatial_bin_overview` table-style plotting API.
+`FeatureSpatialCounts` from Part 11e.iii is not an input to this histogram API.
+Per-feature spatial-bin histograms would require a separately specified
+extension; producing feature grids does not implicitly add that capability.
 
 #### Public histogram entry point
 
@@ -5005,6 +5008,28 @@ negative targets, and other controls. Keep this separate from the class-level
 QC summaries: do not add a potentially panel-wide feature dimension to
 `PointsSummary.spatial_counts`.
 
+#### Separate public contracts
+
+Keep two public APIs with stable result meanings. Do not add a `features`
+parameter mutually exclusive with `feature_classes` to `summarize_points`:
+
+- `summarize_points(...) -> PointsSummary` remains the panel-aware QC API.
+  Its optional spatial grid always uses `(feature_class, y, x)`; its
+  per-target/per-class tables and spatial-bin summaries retain their existing
+  class-selection semantics. In particular, `panel_feature_counts` describes
+  complete selected-class panel sizes, not a requested feature subset.
+- `bin_points_by_feature(...) -> FeatureSpatialCounts` computes explicitly
+  selected features' grids, always using `(feature, y, x)`. Return only the
+  grid and shared metadata, without per-feature bin-summary tables or the
+  other `PointsSummary` outputs.
+
+This separation avoids making array dimensions, summary meanings, and panel
+denominators depend on which selection parameter was supplied. Feature
+membership and class assignments still come from the authoritative panel;
+users do not supply another feature-to-class mapping. Part 11e.iv consumes
+either result for density rendering, whereas Part 11e.ii consumes only the
+class-level bin summaries in `PointsSummary`.
+
 #### Public computation API
 
 ```python
@@ -5110,6 +5135,9 @@ may still be needed without an explicit crop. Never scan separately for each
 requested feature, collect the full points dataframe on the driver, or call
 point-to-label assignment. A separate call to this API reads original points;
 it cannot obtain feature-specific counts from a previously returned class grid.
+Calling both public APIs may therefore scan the source separately. Sharing
+private helpers means sharing implementation, not caching results or sharing
+execution across calls.
 
 Apply `max_grid_bytes` to
 `n_requested_features * n_y_bins * n_x_bins * uint64.itemsize` before allocating
