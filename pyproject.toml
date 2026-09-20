@@ -108,6 +108,7 @@ cli = [
     "hydra-submitit-launcher>=1.2.0"
 ]
 notebook = [
+    "marimo>=0.24.2",
     "ipywidgets",
     "tqdm",
     "bokeh",

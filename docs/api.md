@@ -200,8 +200,9 @@ Quality control functions.
     segmentation_coverage
     segmentation_histogram
     analyse_genes_left_out
-    metric_histogram
-    metrics_histogram
+    table_histogram
+    table_histograms
+    spatial_bin_histogram
     obs_scatter
     summarize_points
     PointsSummary
