@@ -88,7 +88,8 @@ def spatial_bin_histogram(
         ``(0.1, 0.99)``. Filtering affects only the display.
     histplot_kwargs
         Seaborn histogram options, including ``kde``, ``alpha``, and ``color``.
-        Defaults to ``stat="count"`` (number of spatial bins) with KDE.
+        Defaults to a borderless filled-step histogram with ``alpha=0.5``,
+        ``stat="count"`` (number of spatial bins), and a KDE of line width 2.
         ``stat="percent"`` uses all retained bins as the denominator, so
         clipped bars may sum to less than 100%. Other statistics, data selection,
         grouping, and weights cannot be supplied here. KDE is omitted for
@@ -219,8 +220,9 @@ def table_histogram(
         Values outside this interval are excluded from the plotted histogram, but are still included when
         calculating the median and standard deviation annotations.
     histplot_kwargs
-        Plotting options passed to :func:`seaborn.histplot`; defaults to count
-        bars with KDE. ``stat="percent"`` uses the full selected, non-null
+        Plotting options passed to :func:`seaborn.histplot`; defaults to a
+        borderless filled-step count histogram with ``alpha=0.5`` and a KDE
+        of line width 2. ``stat="percent"`` uses the full selected, non-null
         metric population, before display filtering, as its denominator.
         Unlike direct Seaborn normalization, clipped bars may sum to less
         than 100%. Data selection, grouping, and weights cannot be overridden.
@@ -530,7 +532,7 @@ def _plot_histogram(
     Callers select the population and remove missing values. Display limits
     only filter what is drawn, not the percentage denominator or annotations.
     No source data or summary objects are accessed here. Seaborn draws count
-    bars and the matching KDE in percentage mode; scale both by 100 / N,
+    histograms and the matching KDE in percentage mode; scale both by 100 / N,
     where N is the population size before display filtering.
     """
     options = dict(histplot_kwargs)
@@ -541,15 +543,22 @@ def _plot_histogram(
         raise ValueError("histplot_kwargs multiple='fill' would change the histogram's population normalization.")
     options.setdefault("kde", True)
     options.setdefault("stat", "count")
-    if options.get("element", "bars") == "bars" or options.get("fill", True):
-        options.setdefault("edgecolor", "white")
-    options.setdefault("linewidth", 0.8)
-    options.setdefault("alpha", 0.9)
+    options.setdefault("element", "step")
+    options.setdefault("fill", True)
+    if options["fill"]:
+        options.setdefault("edgecolor", "none")
+    # Unfilled histograms need a visible outline; filled ones omit borders.
+    if "lw" not in options:
+        options.setdefault("linewidth", 0 if options["fill"] else 1.5)
+    options.setdefault("alpha", 0.5)
     options.setdefault("color", color)
     # Seaborn can update these nested dictionaries while constructing its KDE.
     for key in ("kde_kws", "line_kws"):
         if key in options:
             options[key] = dict(options[key])
+    kde_line_options = options.setdefault("line_kws", {})
+    if "lw" not in kde_line_options:
+        kde_line_options.setdefault("linewidth", 2)
 
     plot_range = range
     if plot_range is None and quantile_range is not None:
@@ -650,11 +659,20 @@ def _scale_histogram_artists(ax: Axes, *, starts: tuple[int, int, int], factor: 
     for line in ax.lines[line_start:]:
         line.set_ydata(np.asarray(line.get_ydata()) * factor)
     ax.relim()
-    # Axes.relim() does not include collections (filled step/poly histograms).
-    for collection in ax.collections:
+    # Axes.relim() ignores collections. Existing ones retain their limits,
+    # but filled histograms can cache the pre-scaling bounds, so derive the
+    # new histogram limits from its scaled vertices instead.
+    for collection in ax.collections[:collection_start]:
         bounds = collection.get_datalim(ax.transData)
         if np.isfinite(bounds.get_points()).all():
             ax.update_datalim(bounds.get_points())
+    for collection in ax.collections[collection_start:]:
+        # Convert the scaled vertices to data coordinates so axis limits reflect
+        # percentages, not the original counts. Transform subtraction composes
+        # with the inverse of ax.transData; it is not numeric subtraction.
+        to_data = collection.get_transform() - ax.transData
+        for path in collection.get_paths():
+            ax.update_datalim(to_data.transform(path.vertices))
     ax.autoscale_view()
 
 

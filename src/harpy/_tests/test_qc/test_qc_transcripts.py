@@ -4,12 +4,12 @@ import matplotlib.pyplot as plt
 import harpy as hp
 
 
-def test_metrics_histogram(sdata_transcripts_no_backed, tmp_path):
+def test_table_histograms(sdata_transcripts_no_backed, tmp_path):
     matplotlib.use("Agg")
 
     fig = plt.figure()
     try:
-        axes = hp.qc.metrics_histogram(
+        axes = hp.qc.table_histograms(
             sdata_transcripts_no_backed,
             table_name="table_transcriptomics_preprocessed",
             quantile_range=(0.1, 0.95),
@@ -21,7 +21,7 @@ def test_metrics_histogram(sdata_transcripts_no_backed, tmp_path):
         assert axes[0].get_xlabel() == "Total Counts"
         assert axes[1].get_xlabel() == "N Genes By Counts"
         fig = axes[0].figure
-        fig.savefig(tmp_path / "metrics_histogram.png")
+        fig.savefig(tmp_path / "table_histograms.png")
     finally:
         plt.close(fig)
 
