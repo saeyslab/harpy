@@ -36,7 +36,7 @@ implemented:
       through the read-only `hp.pt.validate_points` API;
     - **11e:** transcript-positive bin summaries and visualization, in four
       separate parts: **11e.i** construct `summary.spatial_bins` inside
-      `summarize_points` — implemented; **11e.ii** spatial-bin histograms;
+      `summarize_points` — implemented; **11e.ii** spatial-bin histograms — implemented;
       **11e.iii** feature-specific spatial counts and bin summaries through
       `hp.qc.bin_points_by_feature`; and **11e.iv** spatial density
       heatmaps;
@@ -4371,7 +4371,7 @@ Focused tests should cover:
 
 ## Slice 11e: original-point summary visualization
 
-**Status: Part 11e.i implemented; Parts 11e.ii–iv specified, not implemented.**
+**Status: Parts 11e.i–ii implemented; Parts 11e.iii–iv specified, not implemented.**
 
 Implement annotation-free QC of transcript-positive spatial bins,
 using the existing `PointsSummary.spatial_counts` from Slice 11a, plus an
@@ -4559,7 +4559,7 @@ whereas `PointsSummary.spatial_bins.per_class` describes spatial bins.
   and express that count as a percentage of retained bins, respectively.
   They do not count bins excluded for being empty across the selected classes.
   Calibration does not change these statistics or add density columns.
-  Part 11e.ii will add `std_points_per_bin` here for histogram annotations;
+  Part 11e.ii adds `std_points_per_bin` here for histogram annotations;
   it is not part of the currently implemented 11e.i output. Compute this
   alongside the other per-bin statistics, using sample SD (`ddof=1`), so
   plotting does not recalculate it.
@@ -4749,12 +4749,20 @@ Focused tests should establish that:
 
 ### Part 11e.ii: spatial-bin histograms
 
-**Status: specified; not implemented. Class histograms depend on Part 11e.i;
-feature-summary integration is completed in Part 11e.iii.**
+**Status: implemented for class histograms; feature-summary integration remains
+specified in Part 11e.iii.**
+
+Implemented in `src/harpy/qc/_histogram.py`, which contains
+`spatial_bin_histogram`, `table_histogram`, `table_histograms`, and their
+shared numerical renderer `_plot_histogram`. Bin summaries now provide sample SD.
+The old table-histogram names remain deprecated aliases. Focused tests in
+`test_histograms.py` cover populations, clipping/percentage scaling, KDE,
+styling, and aliases; existing summary and table-QC tests cover integration.
 
 Accept the parent `PointsSummary` and consume its `spatial_bins.per_bin` and
-`spatial_bins.per_class` produced by 11e.i, using `summary.metadata` for source
-identity, units, and geometry. Do not require detached frames to carry `.attrs`.
+`spatial_bins.per_class` produced by 11e.i. Source identity, units, and geometry
+remain available in `summary.metadata` for caller-supplied titles or captions.
+Do not require detached frames to carry `.attrs`.
 Histograms select the requested class from `per_bin` and use its existing
 `n_points` values, with median/SD annotations from `per_class`. Do not introduce
 fixed-area normalization in these plots or calculate additional density summaries.
@@ -4770,10 +4778,18 @@ statistics in the plotting adapter.
 
 #### Public histogram entry point
 
-Use `hp.qc.spatial_bin_histogram` for one class's or one feature's histogram.
-It accepts `PointsSummary` or `FeaturePointsSummary`, supports caller-supplied
-Matplotlib axes, and returns the axes used. Source identity and bin geometry
-come from `summary.metadata`.
+Use `hp.qc.spatial_bin_histogram` for one class's histogram, extending it to
+one feature's histogram in Part 11e.iii. The implemented input is `PointsSummary`
+with required keyword-only `feature_class`; `FeaturePointsSummary` and its
+`feature` selector remain planned. It supports caller-supplied Matplotlib axes
+and returns the axes used. Do not generate an automatic title: `title=None`
+leaves the axes title unchanged, including on reused axes. An explicit string
+sets the title. Callers can use `summary.metadata` for source or geometry context.
+Both `spatial_bin_histogram` and `table_histogram` supply default axis labels,
+including count/percentage Y-axis labels. Neither exposes a `ylabel` parameter;
+customize labels through the returned axes, for example
+`ax.set(xlabel="Points per bin", ylabel="Number of bins")`. Remove the old
+`ylabel` argument without a compatibility shim.
 
 ```python
 ax = hp.qc.spatial_bin_histogram(
@@ -4787,7 +4803,7 @@ ax = hp.qc.spatial_bin_histogram(
 ax = hp.qc.spatial_bin_histogram(feature_summary, feature="EPCAM", ax=ax)
 ```
 
-Require exactly one explicit selector: `feature_class` for `PointsSummary`,
+The eventual combined API requires exactly one explicit selector: `feature_class` for `PointsSummary`,
 or `feature` for `FeaturePointsSummary`. Reject both selectors together, a
 selector incompatible with the result type, or a name absent from the result.
 Do not implicitly pool features/classes or look up additional source data.
@@ -4804,6 +4820,11 @@ and forward plotting options such as `color`, `alpha`, and `kde` without
 mutating the caller's mapping. Percentage mode for both table and spatial-bin plots requires
 additional normalization handling, rather than unconditional forwarding of
 `stat="percent"`, as described below.
+The renderer owns data selection and weighting: reject `data`, `x`, `y`,
+`hue`, `weights`, and `ax` overrides in this mapping, and reject
+`multiple="fill"`, which replaces the population normalization. The spatial
+API accepts only `stat="count"` and `stat="percent"`; table histograms retain
+other Seaborn statistics. These restrictions leave display styling configurable.
 
 When `summary.spatial_bins` is `None`, raise a clear error explaining that
 `summarize_points` must be called with `bin_size`. Do not reread points,
@@ -4824,7 +4845,8 @@ from a collection of histograms:
 `table_histogram`, not the multi-plot wrapper, is the direct counterpart to
 `spatial_bin_histogram`. Avoid a cell-specific name because table metrics may
 also come from `.var`. Preserve the table functions' parameters, defaults,
-return types, and default count-plot behavior under their new names. The
+return types, and default count-plot behavior under their new names, except
+for the removal of `ylabel` described above. The
 percentage-with-display-filtering behavior deliberately changes to the shared
 normalization rule specified below.
 
@@ -4893,8 +4915,8 @@ and ensure both histogram bars and KDE use the agreed full-population scaling.
 Apply this rule consistently to table and spatial-bin histograms.
 
 Show classes separately by default so endogenous counts do not compress sparse
-control distributions. Preserve class, points-element/mosaic, and optional
-sample identity in titles or legends. Permit caller-supplied axes and return
+control distributions. Identify the class on the X-axis; leave source/sample
+titles or legends to the caller. Permit caller-supplied axes and return
 the axes used, allowing matched panels or explicitly labelled sample overlays.
 An all-zero class with a nonempty shared population must visibly retain its
 zero mass. An entirely empty population gets a clear empty-state message,
@@ -4907,6 +4929,15 @@ colors, figure size, and caller-supplied axes. Enable KDE, median, and SD by
 default, with the existing `histplot_kwargs`, `show_median`, `show_std`,
 `median_line_kwargs`, and `median_text_kwargs` conventions for customization.
 `hp.qc.obs_scatter` is a two-metric scatter plot, not the histogram API.
+
+Use a borderless filled-step histogram by default (`element="step"`,
+`fill=True`, `edgecolor="none"`, `alpha=0.5`, `linewidth=0`) and a KDE line
+of width 2 for spatial-bin and table histograms. Preserve explicit caller
+overrides, including nested `line_kws`, without mutating their mappings.
+If `fill=False`, default to a visible outline instead of zero line width.
+Keep `bins="auto"` unchanged: this is a rendering change, not a bin-count cap
+or a change to observations, annotations, or percentage normalization.
+Image and segmentation histograms are outside this styling change.
 
 KDE is an optional **display-only** smoothing of the count distribution,
 not smoothing of the spatial grid or a change to any stored measurements.
@@ -4936,9 +4967,11 @@ displayed values with the chosen histogram scaling, as in the existing table
 plot; percentage mode must preserve the full-population
 denominator described above.
 
-Finalize the remaining histogram options before implementation. A feature
-histogram describes bins for one feature, not the removed distribution of
-total counts across panel features.
+Use the table histogram's plotting options and defaults for the spatial API,
+without table/column selectors; `feature_class` is required and keyword-only.
+As with the table API, `show_std` controls SD inside the median annotation.
+A future feature histogram describes bins for one feature, not the removed
+distribution of total counts across panel features.
 
 #### Shared histogram renderer and precomputed annotations
 
