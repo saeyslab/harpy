@@ -1,5 +1,6 @@
 """Tabular measurements derived from a computed spatial-count grid."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 import numpy as np
@@ -46,6 +47,48 @@ class SpatialBinSummary:
     per_class: pd.DataFrame
 
 
+@dataclass(frozen=True)
+class FeatureSpatialBinSummary:
+    """Per-feature counts and statistics over bins with any requested-feature points.
+
+    Attributes
+    ----------
+    per_bin
+        One row per retained bin and selected ``feature`` (categorical), in
+        feature order then row-major ``(y_bin, x_bin)`` order. ``n_points`` is
+        that feature's uint64 point count, not the number of distinct features.
+        Individual zeros are retained. ``x``/``y`` are bin centers;
+        ``bin_area`` is the actual area in squared coordinate-system units.
+        ``bin_area_um2`` is present with physical calibration. Counts are raw;
+        cropped terminal bins may be smaller. Geometry context lives in the
+        parent result's metadata, not in dataframe attributes.
+    per_feature
+        One row per requested feature, including undetected features, with
+        its panel-defined ``feature_class``. ``n_total_bins``, ``n_retained_bins``,
+        ``n_excluded_bins`` and ``pct_excluded_bins`` describe the shared bin
+        population. Excluded bins have no points from any requested feature.
+        ``n_retained_bins_without_feature`` and ``pct_retained_bins_without_feature``
+        count this feature's zeros within that population (percentage 0–100).
+        ``n_points``, ``mean_points_per_bin``, ``median_points_per_bin``,
+        ``std_points_per_bin`` and ``p95_points_per_bin`` include those zeros.
+        Percentiles use linear interpolation; sample SD uses ``ddof=1`` and
+        is NaN for fewer than two bins.
+    """
+
+    per_bin: pd.DataFrame
+    per_feature: pd.DataFrame
+
+
+def _summarize_feature_bins(
+    grid: xr.DataArray, *, metadata: PointsSummaryMetadata, class_by_feature: Mapping[str, str]
+) -> FeatureSpatialBinSummary:
+    """Summarize the feature grid and attach each feature's authoritative panel class once."""
+    per_bin, per_feature = _spatial_bin_frames(grid, metadata=metadata, group_axis="feature")
+    feature_classes = per_feature["feature"].astype(object).map(class_by_feature)
+    per_feature.insert(1, "feature_class", pd.Categorical(feature_classes))
+    return FeatureSpatialBinSummary(per_bin=per_bin, per_feature=per_feature)
+
+
 def _summarize_spatial_bins(grid: xr.DataArray, *, metadata: PointsSummaryMetadata) -> SpatialBinSummary:
     """Prepare retained-bin measurements once, then summarize those same rows.
 
@@ -63,7 +106,21 @@ def _summarize_spatial_bins(grid: xr.DataArray, *, metadata: PointsSummaryMetada
     empty, class point counts and ``n_retained_bins_without_class`` are zero,
     and distribution statistics and ``pct_retained_bins_without_class`` are NaN.
     """
-    classes = tuple(grid.feature_class.values)
+    per_bin, per_class = _spatial_bin_frames(grid, metadata=metadata, group_axis="feature_class")
+    return SpatialBinSummary(per_bin=per_bin, per_class=per_class)
+
+
+def _spatial_bin_frames(
+    grid: xr.DataArray, *, metadata: PointsSummaryMetadata, group_axis: str
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Reduce a completed class/feature grid into bin rows and per-group statistics.
+
+    Every selected group uses the same bins: any nonzero plane retains a bin,
+    including zeros in the other planes. This calculation uses no source
+    points. Rows follow group order, then row-major spatial order.
+    """
+    groups = tuple(grid.coords[group_axis].values)
+    zero_suffix = "class" if group_axis == "feature_class" else "feature"
     retained = grid.values.any(axis=0)
     y_bin, x_bin = np.nonzero(retained)
     n_retained = len(y_bin)
@@ -75,20 +132,18 @@ def _summarize_spatial_bins(grid: xr.DataArray, *, metadata: PointsSummaryMetada
         raise ValueError("Spatial bin areas must be positive and finite; rescale the coordinate system or bin size.")
 
     # Only retained-bin rows are expanded. The categorical codes avoid
-    # repeating class strings, and geometry is derived from actual edges.
-    point_counts = np.empty(len(classes) * n_retained, dtype=np.uint64)
+    # repeating feature/class strings, and geometry is derived from actual edges.
+    point_counts = np.empty(len(groups) * n_retained, dtype=np.uint64)
     for ordinal, plane in enumerate(grid.values):
         point_counts[ordinal * n_retained : (ordinal + 1) * n_retained] = plane[retained]
     per_bin = pd.DataFrame(
         {
-            "feature_class": pd.Categorical.from_codes(
-                np.repeat(np.arange(len(classes)), n_retained), categories=classes
-            ),
-            "y_bin": np.tile(y_bin, len(classes)),
-            "x_bin": np.tile(x_bin, len(classes)),
-            "x": np.tile(grid.x.values[x_bin], len(classes)),
-            "y": np.tile(grid.y.values[y_bin], len(classes)),
-            "bin_area": np.tile(areas, len(classes)),
+            group_axis: pd.Categorical.from_codes(np.repeat(np.arange(len(groups)), n_retained), categories=groups),
+            "y_bin": np.tile(y_bin, len(groups)),
+            "x_bin": np.tile(x_bin, len(groups)),
+            "x": np.tile(grid.x.values[x_bin], len(groups)),
+            "y": np.tile(grid.y.values[y_bin], len(groups)),
+            "bin_area": np.tile(areas, len(groups)),
             "n_points": point_counts,
         },
         copy=False,
@@ -99,7 +154,7 @@ def _summarize_spatial_bins(grid: xr.DataArray, *, metadata: PointsSummaryMetada
             areas_um2 = (widths * microns_per_unit) * (heights * microns_per_unit)
         if not (np.isfinite(areas_um2) & (areas_um2 > 0)).all():
             raise ValueError("Calibrated spatial bin areas must be positive and finite; check microns_per_unit.")
-        per_bin["bin_area_um2"] = np.tile(areas_um2, len(classes))
+        per_bin["bin_area_um2"] = np.tile(areas_um2, len(groups))
 
     n_total = retained.size
     population = {
@@ -108,27 +163,27 @@ def _summarize_spatial_bins(grid: xr.DataArray, *, metadata: PointsSummaryMetada
         "n_excluded_bins": n_total - n_retained,
         "pct_excluded_bins": 100 * (n_total - n_retained) / n_total,
     }
-    class_rows = []
-    for ordinal, feature_class in enumerate(classes):
-        # Each class occupies n_retained consecutive rows, so select its block
+    group_rows = []
+    for ordinal, group in enumerate(groups):
+        # Each group occupies n_retained consecutive rows, so select its block
         # directly instead of grouping or filtering the entire per-bin frame.
-        class_bins = per_bin.iloc[ordinal * n_retained : (ordinal + 1) * n_retained]
-        counts = class_bins["n_points"].to_numpy(copy=False)
+        group_bins = per_bin.iloc[ordinal * n_retained : (ordinal + 1) * n_retained]
+        counts = group_bins["n_points"].to_numpy(copy=False)
         total = counts.sum(dtype=np.uint64)
         n_zero = int(np.count_nonzero(counts == 0))
         row = {
-            "feature_class": feature_class,
+            group_axis: group,
             **population,
             "n_points": total,
-            "n_retained_bins_without_class": n_zero,
-            "pct_retained_bins_without_class": 100 * n_zero / n_retained if n_retained else np.nan,
+            f"n_retained_bins_without_{zero_suffix}": n_zero,
+            f"pct_retained_bins_without_{zero_suffix}": 100 * n_zero / n_retained if n_retained else np.nan,
             "mean_points_per_bin": float(counts.mean()) if n_retained else np.nan,
             "median_points_per_bin": float(np.median(counts)) if n_retained else np.nan,
             "std_points_per_bin": float(counts.std(ddof=1)) if n_retained > 1 else np.nan,
             "p95_points_per_bin": float(np.percentile(counts, 95)) if n_retained else np.nan,
         }
-        class_rows.append(row)
-    per_class = pd.DataFrame(class_rows)
-    per_class["feature_class"] = pd.Categorical(per_class["feature_class"], categories=classes)
+        group_rows.append(row)
+    per_group = pd.DataFrame(group_rows)
+    per_group[group_axis] = pd.Categorical(per_group[group_axis], categories=groups)
 
-    return SpatialBinSummary(per_bin=per_bin, per_class=per_class)
+    return per_bin, per_group
