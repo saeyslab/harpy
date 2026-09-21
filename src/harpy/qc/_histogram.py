@@ -15,6 +15,7 @@ from matplotlib.axes import Axes
 from spatialdata import SpatialData
 
 from harpy.qc._summarize_points import PointsSummary
+from harpy.qc._summarize_points_by_feature import FeaturePointsSummary
 from harpy.table._table import ProcessTable
 
 _DEFAULT_COLUMN_COLORS = {
@@ -63,19 +64,19 @@ def spatial_bin_histogram(
 
     Each retained bin contributes one value, including zeros for the selected
     class. Bins were retained when any class selected during summary computation
-    had points; choosing a class here never changes that population. Bin
+    had points; choosing one here never changes that population. Bin
     inclusion is based on detected points, not a tissue annotation. No source
     points are read or summaries recalculated.
 
     Parameters
     ----------
     summary
-        Result of :func:`harpy.qc.summarize_points` computed with ``bin_size``. Uses
-        ``spatial_bins.per_bin`` for counts, ``spatial_bins.per_class`` for
-        median/SD annotations. Source and geometry context remain available
+        Result of :func:`harpy.qc.summarize_points`, computed with ``bin_size``.
+        Uses ``spatial_bins.per_bin`` for counts and ``spatial_bins.per_class``
+        for median/SD annotations. Source and geometry context remain available
         in ``metadata`` for caller-supplied titles or figure captions.
     feature_class
-        Exact class name present in the summary; no classes are pooled.
+        Required exact class name present in the summary; classes are not pooled.
     ax
         Axes to reuse, or None to create a figure.
     bins
@@ -118,6 +119,7 @@ def spatial_bin_histogram(
     See Also
     --------
     harpy.qc.summarize_points
+    harpy.qc.spatial_bin_histogram_by_feature
     harpy.qc.table_histogram
 
     Examples
@@ -130,18 +132,184 @@ def spatial_bin_histogram(
         )
     """
     if not isinstance(summary, PointsSummary):
-        raise TypeError("summary must be a PointsSummary returned by hp.qc.summarize_points().")
+        raise TypeError(
+            "summary must be a PointsSummary; use spatial_bin_histogram_by_feature() for a FeaturePointsSummary."
+        )
     spatial_bins = summary.spatial_bins
     if spatial_bins is None:
         raise ValueError("Spatial-bin measurements are missing; call hp.qc.summarize_points() with bin_size.")
-    statistics = spatial_bins.per_class.loc[spatial_bins.per_class["feature_class"] == feature_class]
+    return _plot_spatial_bin_histogram(
+        spatial_bins.per_bin,
+        spatial_bins.per_class,
+        group_axis="feature_class",
+        selected=feature_class,
+        compute_name="summarize_points",
+        ax=ax,
+        bins=bins,
+        range=range,
+        quantile_range=quantile_range,
+        histplot_kwargs=histplot_kwargs,
+        median_line_kwargs=median_line_kwargs,
+        median_text_kwargs=median_text_kwargs,
+        figsize=figsize,
+        title=title,
+        color=color,
+        show_median=show_median,
+        show_std=show_std,
+    )
+
+
+def spatial_bin_histogram_by_feature(
+    summary: FeaturePointsSummary,
+    *,
+    feature: str,
+    ax: Axes | None = None,
+    bins: int | str = "auto",
+    range: tuple[float, float] | None = None,
+    quantile_range: tuple[float, float] | None = None,
+    histplot_kwargs: Mapping[str, Any] = MappingProxyType({}),
+    median_line_kwargs: Mapping[str, Any] = MappingProxyType({}),
+    median_text_kwargs: Mapping[str, Any] = MappingProxyType({}),
+    figsize: tuple[float, float] = (5.5, 4.5),
+    title: str | None = None,
+    color: str | None = None,
+    show_median: bool = True,
+    show_std: bool = True,
+) -> Axes:
+    """Plot one feature's point counts across retained spatial bins.
+
+    Each retained bin contributes one value, including zeros for the selected
+    feature. Bins were retained when any feature requested during summary
+    computation had points; choosing one here never changes that population.
+    Bin inclusion is based on detected points, not a tissue annotation.
+    No source points are read or summaries recalculated.
+
+    Parameters
+    ----------
+    summary
+        Result of :func:`harpy.qc.summarize_points_by_feature`, computed with
+        ``bin_size``. Uses ``spatial_bins.per_bin`` for counts and
+        ``spatial_bins.per_feature`` for median/SD annotations, not the top-level
+        feature totals. Source and geometry context remain available in
+        ``metadata`` for caller-supplied titles or figure captions.
+    feature
+        Required exact feature name present in the summary; features are not pooled.
+    ax
+        Axes to reuse, or None to create a figure.
+    bins
+        Histogram intervals along the point-count axis, not spatial bin size.
+    range
+        Inclusive display bounds. Values outside them are hidden, but still
+        contribute to the percentage denominator and median/SD annotations.
+    quantile_range
+        Quantiles defining display bounds when ``range`` is None; for example
+        ``(0.1, 0.99)``. Filtering affects only the display.
+    histplot_kwargs
+        Seaborn histogram options, including ``kde``, ``alpha``, and ``color``.
+        Defaults to a borderless filled-step histogram with ``alpha=0.5``,
+        ``stat="count"`` (number of spatial bins), and a KDE of line width 2.
+        ``stat="percent"`` uses all retained bins as the denominator, so
+        clipped bars may sum to less than 100%. Other statistics, data selection,
+        grouping, and weights cannot be supplied here. KDE is omitted for
+        constant or insufficient displayed data. Counts are not area-normalized.
+    median_line_kwargs, median_text_kwargs
+        Matplotlib styling for the median line and annotation box.
+    figsize
+        Figure size when creating axes.
+    title
+        Optional plot title. None leaves the axes title unchanged; no title
+        is generated automatically.
+    color
+        Histogram color, unless overridden by ``histplot_kwargs``.
+    show_median
+        Draw the full retained-population median and annotation.
+    show_std
+        Include sample SD in the median annotation; fewer than two bins shows N/A.
+
+    Returns
+    -------
+    matplotlib.axes.Axes
+        Axes containing the histogram, or an empty-state message when no bins
+        are retained. Input data and plotting-option mappings remain unchanged.
+        Customize axis labels on the returned axes with ``ax.set(...)``.
+
+    See Also
+    --------
+    harpy.qc.summarize_points_by_feature
+    harpy.qc.spatial_bin_histogram
+    harpy.qc.table_histogram
+
+    Examples
+    --------
+    .. code-block:: python
+
+        features = hp.qc.summarize_points_by_feature(
+            sdata, "transcripts", features=["EPCAM", "VIM"], bin_size=100
+        )
+        ax = hp.qc.spatial_bin_histogram_by_feature(features, feature="EPCAM")
+    """
+    if not isinstance(summary, FeaturePointsSummary):
+        raise TypeError("summary must be a FeaturePointsSummary; use spatial_bin_histogram() for a PointsSummary.")
+    spatial_bins = summary.spatial_bins
+    if spatial_bins is None:
+        raise ValueError(
+            "Spatial-bin measurements are missing; call hp.qc.summarize_points_by_feature() with bin_size."
+        )
+    return _plot_spatial_bin_histogram(
+        spatial_bins.per_bin,
+        spatial_bins.per_feature,
+        group_axis="feature",
+        selected=feature,
+        compute_name="summarize_points_by_feature",
+        ax=ax,
+        bins=bins,
+        range=range,
+        quantile_range=quantile_range,
+        histplot_kwargs=histplot_kwargs,
+        median_line_kwargs=median_line_kwargs,
+        median_text_kwargs=median_text_kwargs,
+        figsize=figsize,
+        title=title,
+        color=color,
+        show_median=show_median,
+        show_std=show_std,
+    )
+
+
+def _plot_spatial_bin_histogram(
+    per_bin: pd.DataFrame,
+    overview: pd.DataFrame,
+    *,
+    group_axis: Literal["feature_class", "feature"],
+    selected: str,
+    compute_name: str,
+    ax: Axes | None,
+    bins: int | str,
+    range: tuple[float, float] | None,
+    quantile_range: tuple[float, float] | None,
+    histplot_kwargs: Mapping[str, Any],
+    median_line_kwargs: Mapping[str, Any],
+    median_text_kwargs: Mapping[str, Any],
+    figsize: tuple[float, float],
+    title: str | None,
+    color: str | None,
+    show_median: bool,
+    show_std: bool,
+) -> Axes:
+    """Select prepared class/feature measurements and share the histogram renderer.
+
+    ``group_axis`` identifies the summary column, not a source points column.
+    Use stored median/SD and every retained bin's count, including zeros; only
+    the renderer applies display filtering. No summaries are recomputed here.
+    """
+    statistics = overview.loc[overview[group_axis] == selected]
     if statistics.empty:
-        raise ValueError(f"Feature class {feature_class!r} is absent from the spatial-bin summary.")
+        raise ValueError(f"Selected {group_axis} {selected!r} is absent from the spatial-bin summary.")
     if "std_points_per_bin" not in statistics:
-        raise ValueError("Spatial-bin SD is missing; recompute the summary with hp.qc.summarize_points().")
+        raise ValueError(f"Spatial-bin SD is missing; recompute the summary with hp.qc.{compute_name}().")
     if histplot_kwargs.get("stat", "count") not in {"count", "percent"}:
         raise ValueError("Spatial-bin histograms support stat='count' or stat='percent'.")
-    values = spatial_bins.per_bin.loc[spatial_bins.per_bin["feature_class"] == feature_class, "n_points"]
+    values = per_bin.loc[per_bin[group_axis] == selected, "n_points"]
     row = statistics.iloc[0]
     return _plot_histogram(
         values,
@@ -159,7 +327,7 @@ def spatial_bin_histogram(
         color=color if color is not None else "#4C78A8",
         show_median=show_median,
         show_std=show_std,
-        xlabel=f"{feature_class} points per spatial bin",
+        xlabel=f"{selected} points per spatial bin",
         count_ylabel="Number of spatial bins",
         percent_ylabel="Percentage of spatial bins (%)",
     )
