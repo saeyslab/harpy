@@ -141,7 +141,7 @@ def spatial_bin_histogram(
     return _plot_spatial_bin_histogram(
         spatial_bins.per_bin,
         spatial_bins.per_class,
-        group_axis="feature_class",
+        summary_axis="feature_class",
         selected=feature_class,
         compute_name="summarize_points",
         ax=ax,
@@ -258,7 +258,7 @@ def spatial_bin_histogram_by_feature(
     return _plot_spatial_bin_histogram(
         spatial_bins.per_bin,
         spatial_bins.per_feature,
-        group_axis="feature",
+        summary_axis="feature",
         selected=feature,
         compute_name="summarize_points_by_feature",
         ax=ax,
@@ -280,7 +280,7 @@ def _plot_spatial_bin_histogram(
     per_bin: pd.DataFrame,
     overview: pd.DataFrame,
     *,
-    group_axis: Literal["feature_class", "feature"],
+    summary_axis: Literal["feature_class", "feature"],
     selected: str,
     compute_name: str,
     ax: Axes | None,
@@ -298,18 +298,18 @@ def _plot_spatial_bin_histogram(
 ) -> Axes:
     """Select prepared class/feature measurements and share the histogram renderer.
 
-    ``group_axis`` identifies the summary column, not a source points column.
+    ``summary_axis`` identifies the summary column, not a source points column.
     Use stored median/SD and every retained bin's count, including zeros; only
     the renderer applies display filtering. No summaries are recomputed here.
     """
-    statistics = overview.loc[overview[group_axis] == selected]
+    statistics = overview.loc[overview[summary_axis] == selected]
     if statistics.empty:
-        raise ValueError(f"Selected {group_axis} {selected!r} is absent from the spatial-bin summary.")
+        raise ValueError(f"Selected {summary_axis} {selected!r} is absent from the spatial-bin summary.")
     if "std_points_per_bin" not in statistics:
         raise ValueError(f"Spatial-bin SD is missing; recompute the summary with hp.qc.{compute_name}().")
     if histplot_kwargs.get("stat", "count") not in {"count", "percent"}:
         raise ValueError("Spatial-bin histograms support stat='count' or stat='percent'.")
-    values = per_bin.loc[per_bin[group_axis] == selected, "n_points"]
+    values = per_bin.loc[per_bin[summary_axis] == selected, "n_points"]
     row = statistics.iloc[0]
     return _plot_histogram(
         values,
