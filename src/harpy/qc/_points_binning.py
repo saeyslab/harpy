@@ -108,8 +108,8 @@ def _point_bin_edges(
     return edges[0], edges[1]
 
 
-def _empty_bin_counts(group_axis: str) -> pd.Series:
-    index = pd.MultiIndex.from_arrays([[], [], []], names=[group_axis, "y_bin", "x_bin"])
+def _empty_bin_counts(summary_axis: str) -> pd.Series:
+    index = pd.MultiIndex.from_arrays([[], [], []], names=[summary_axis, "y_bin", "x_bin"])
     return pd.Series(index=index, dtype=np.uint64, name="n_points")
 
 
@@ -118,18 +118,18 @@ def _count_point_bins(
     groups: np.ndarray,
     *,
     edges: tuple[np.ndarray, np.ndarray],
-    group_axis: str = "feature_class",
+    summary_axis: str = "feature_class",
 ) -> pd.Series:
     """Reduce selected XY points to observed (group, y-bin, x-bin) counts.
 
     For origin (0, 0) and bin_size=200, point (250, 80) increments bin (y=0,
     x=1). No pixel rounding, raster lookup, smoothing, or normalization occurs.
     Only occupied bins are represented here; the final grid fills the rest
-    with zeros. ``groups`` contains feature or class names; ``group_axis``
+    with zeros. ``groups`` contains feature or class names; ``summary_axis``
     names that index level in the compact result, not a source points column.
     """
     if not len(xy):
-        return _empty_bin_counts(group_axis)
+        return _empty_bin_counts(summary_axis)
     x_edges, y_edges = edges
     # This is floor((coordinate - origin) / bin_size) for regular bins, but
     # comparing actual edges preserves half-open membership despite floating-
@@ -138,9 +138,9 @@ def _count_point_bins(
     y_bin = np.searchsorted(y_edges[1:], xy[:, 1], side="right")
     frame = pd.DataFrame(
         {
-            group_axis: groups,
+            summary_axis: groups,
             "y_bin": y_bin,
             "x_bin": x_bin,
         }
     )
-    return frame.groupby([group_axis, "y_bin", "x_bin"], observed=True).size().astype(np.uint64).rename("n_points")
+    return frame.groupby([summary_axis, "y_bin", "x_bin"], observed=True).size().astype(np.uint64).rename("n_points")
