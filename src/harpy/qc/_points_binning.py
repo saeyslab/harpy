@@ -44,7 +44,7 @@ def _transformed_point_xy(partition: pd.DataFrame, *, axes: tuple[str, ...], mat
 
     Validate finite source and transformed coordinates before min/max, which
     would otherwise silently skip NaNs. Keep every supplied row; the caller
-    applies any class selection before invoking this helper.
+    applies any feature or class selection before invoking this helper.
     """
     _, xy = _select_point_coordinates(partition, axes=axes, matrix=matrix, crd=None)
     return pd.DataFrame(xy, columns=["x", "y"], index=partition.index)
@@ -55,7 +55,7 @@ def _point_bin_edges(
     bin_size: float,
     *,
     explicit_extent: bool,
-    class_count: int = 1,
+    group_count: int = 1,
     max_grid_bytes: int | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Build common edges; include observed maxima or clip the final bin to an explicit crop.
@@ -66,7 +66,7 @@ def _point_bin_edges(
 
     Calculate both axis lengths using scalars before allocating edge arrays.
     If supplied, ``max_grid_bytes`` limits the final dense uint64 array for
-    ``class_count`` classes, not total peak memory. This also catches tiny bin
+    ``group_count`` feature/class planes, not total peak memory. This also catches tiny bin
     sizes before they can create oversized edge arrays themselves.
     """
     axis_bounds = (bounds[:2], bounds[2:])
@@ -87,13 +87,13 @@ def _point_bin_edges(
             count += 1
         counts.append(count)
 
-    grid_shape = (class_count, counts[1], counts[0])
-    grid_bytes = class_count * counts[1] * counts[0] * np.dtype(np.uint64).itemsize
+    grid_shape = (group_count, counts[1], counts[0])
+    grid_bytes = group_count * counts[1] * counts[0] * np.dtype(np.uint64).itemsize
     if max_grid_bytes is not None and grid_bytes > max_grid_bytes:
         raise ValueError(
             f"Spatial count grid shape {grid_shape} requires {grid_bytes:,} bytes (uint64), "
             f"exceeding max_grid_bytes={max_grid_bytes:,}. Increase bin_size, restrict crd, "
-            "select fewer feature_classes, set bin_size=None, or raise max_grid_bytes "
+            "select fewer features/classes, or raise max_grid_bytes "
             "(None disables this limit)."
         )
 
@@ -108,21 +108,28 @@ def _point_bin_edges(
     return edges[0], edges[1]
 
 
-def _empty_bin_counts() -> pd.Series:
-    index = pd.MultiIndex.from_arrays([[], [], []], names=["feature_class", "y_bin", "x_bin"])
+def _empty_bin_counts(group_axis: str) -> pd.Series:
+    index = pd.MultiIndex.from_arrays([[], [], []], names=[group_axis, "y_bin", "x_bin"])
     return pd.Series(index=index, dtype=np.uint64, name="n_points")
 
 
-def _count_point_bins(xy: np.ndarray, classes: np.ndarray, *, edges: tuple[np.ndarray, np.ndarray]) -> pd.Series:
-    """Reduce selected XY points to observed (class, y-bin, x-bin) counts.
+def _count_point_bins(
+    xy: np.ndarray,
+    groups: np.ndarray,
+    *,
+    edges: tuple[np.ndarray, np.ndarray],
+    group_axis: str = "feature_class",
+) -> pd.Series:
+    """Reduce selected XY points to observed (group, y-bin, x-bin) counts.
 
     For origin (0, 0) and bin_size=200, point (250, 80) increments bin (y=0,
     x=1). No pixel rounding, raster lookup, smoothing, or normalization occurs.
     Only occupied bins are represented here; the final grid fills the rest
-    with zeros. ``classes`` are arbitrary group names, not panel metadata.
+    with zeros. ``groups`` contains feature or class names; ``group_axis``
+    names that index level in the compact result, not a source points column.
     """
     if not len(xy):
-        return _empty_bin_counts()
+        return _empty_bin_counts(group_axis)
     x_edges, y_edges = edges
     # This is floor((coordinate - origin) / bin_size) for regular bins, but
     # comparing actual edges preserves half-open membership despite floating-
@@ -131,9 +138,9 @@ def _count_point_bins(xy: np.ndarray, classes: np.ndarray, *, edges: tuple[np.nd
     y_bin = np.searchsorted(y_edges[1:], xy[:, 1], side="right")
     frame = pd.DataFrame(
         {
-            "feature_class": classes,
+            group_axis: groups,
             "y_bin": y_bin,
             "x_bin": x_bin,
         }
     )
-    return frame.groupby(["feature_class", "y_bin", "x_bin"], observed=True).size().astype(np.uint64).rename("n_points")
+    return frame.groupby([group_axis, "y_bin", "x_bin"], observed=True).size().astype(np.uint64).rename("n_points")
