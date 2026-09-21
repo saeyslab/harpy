@@ -13,8 +13,17 @@ from spatialdata import SpatialData
 from spatialdata.models import Labels2DModel, TableModel
 
 import harpy.qc as qc
-from harpy.qc import PointsSummary, PointsSummaryMetadata, spatial_bin_histogram, table_histogram, table_histograms
-from harpy.qc._spatial_bin_summary import _summarize_spatial_bins
+from harpy._feature_panels import _make_feature_panel
+from harpy.qc import (
+    FeaturePointsSummary,
+    PointsSummary,
+    PointsSummaryMetadata,
+    spatial_bin_histogram,
+    spatial_bin_histogram_by_feature,
+    table_histogram,
+    table_histograms,
+)
+from harpy.qc._spatial_bin_summary import _summarize_feature_bins, _summarize_spatial_bins
 
 matplotlib.use("Agg")
 
@@ -48,10 +57,26 @@ def _summary(counts):
     )
     return PointsSummary(
         metadata=metadata,
-        per_target=pd.DataFrame(),
+        per_feature=pd.DataFrame(),
         per_class=pd.DataFrame(),
         spatial_counts=grid,
         spatial_bins=_summarize_spatial_bins(grid, metadata=metadata),
+    )
+
+
+def _feature_summary(counts):
+    original = _summary(counts)
+    grid = original.spatial_counts.rename({"feature_class": "feature"}).assign_coords(feature=["EPCAM", "VIM"])
+    panel = _make_feature_panel(
+        feature_key="gene",
+        feature_class_key="code_class",
+        features_by_class={"Endogenous": ("EPCAM", "VIM")},
+    )
+    return FeaturePointsSummary(
+        metadata=original.metadata,
+        per_feature=pd.DataFrame(),
+        spatial_counts=grid,
+        spatial_bins=_summarize_feature_bins(grid, metadata=original.metadata, panel=panel),
     )
 
 
@@ -81,10 +106,14 @@ def _heights(ax):
     return np.array([patch.get_height() for patch in ax.patches])
 
 
-@pytest.mark.parametrize("source", ["spatial", "table"])
+@pytest.mark.parametrize("source", ["spatial", "feature", "table"])
 def test_histogram_defaults_to_borderless_filled_step_with_kde(source):
     if source == "spatial":
         ax = spatial_bin_histogram(_summary([0, 1, 1, 2]), feature_class="Control", bins=3, show_median=False)
+    elif source == "feature":
+        ax = spatial_bin_histogram_by_feature(
+            _feature_summary([0, 1, 1, 2]), feature="EPCAM", bins=3, show_median=False
+        )
     else:
         ax = table_histogram(_table(), "table", column="metric", dataframe="obs", bins=3, show_median=False)
     assert not ax.patches
@@ -238,11 +267,59 @@ def test_percentage_scales_histogram_and_kde_without_rescaling_existing_axes(ele
 
 
 @pytest.mark.parametrize("counts", [[0, 0, 0], [2], [2, 2]])
-def test_constant_and_single_bin_histograms_skip_kde_but_keep_counts(counts):
-    ax = spatial_bin_histogram(_summary(counts), feature_class="Control", quantile_range=(0.1, 0.99))
+@pytest.mark.parametrize("feature_result", [False, True])
+def test_constant_and_single_bin_histograms_skip_kde_but_keep_counts(counts, feature_result):
+    summary = _feature_summary(counts) if feature_result else _summary(counts)
+    selector = {"feature": "EPCAM"} if feature_result else {"feature_class": "Control"}
+    plotter = spatial_bin_histogram_by_feature if feature_result else spatial_bin_histogram
+    ax = plotter(summary, **selector, quantile_range=(0.1, 0.99))
     assert ax.collections[0].get_paths()[0].vertices[:, 1].max() == len(counts)
     assert len(ax.lines) == 1  # Only the median guide remains.
     assert ("N/A" in ax.texts[0].get_text()) == (len(counts) == 1)
+
+
+@pytest.mark.parametrize("stat, expected", [("count", [1, 1, 1, 0]), ("percent", [25, 25, 25, 0])])
+def test_feature_histogram_uses_prepared_statistics_and_shared_bins_without_source_reads(monkeypatch, stat, expected):
+    summary = _feature_summary([0, 1, 2, 10])
+    summary.spatial_bins.per_feature.loc[0, ["median_points_per_bin", "std_points_per_bin"]] = [3, 7]
+    before = deepcopy(summary)
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Plotting must consume prepared summaries without recomputing them.")
+
+    monkeypatch.setattr(qc, "summarize_points_by_feature", forbidden)
+    monkeypatch.setattr(qc, "summarize_points", forbidden)
+    options = {"element": "bars", "bins": [-0.5, 0.5, 1.5, 2.5, 10.5], "stat": stat, "kde": True}
+    original_options = deepcopy(options)
+    _, ax = plt.subplots()
+    ax.set_title("Keep this title")
+    result = spatial_bin_histogram_by_feature(summary, feature="EPCAM", range=(0, 2), ax=ax, histplot_kwargs=options)
+    assert result is ax
+    np.testing.assert_allclose(_heights(ax), expected)
+    assert "Median: 3" in ax.texts[0].get_text()
+    assert "SD    : 7" in ax.texts[0].get_text()
+    assert ax.texts[1].get_text() == "Displayed: 3 / 4"
+    assert ax.get_xlabel() == "EPCAM points per spatial bin"
+    assert ax.get_ylabel() == ("Number of spatial bins" if stat == "count" else "Percentage of spatial bins (%)")
+    assert ax.get_title() == "Keep this title"
+    assert len(ax.lines) == 2  # KDE and median; zeros remain in the population.
+    assert options == original_options
+    pd.testing.assert_frame_equal(summary.spatial_bins.per_bin, before.spatial_bins.per_bin)
+    pd.testing.assert_frame_equal(summary.spatial_bins.per_feature, before.spatial_bins.per_feature)
+    xr.testing.assert_identical(summary.spatial_counts, before.spatial_counts)
+    assert summary.metadata == before.metadata
+
+
+@pytest.mark.parametrize(
+    "plotter, summary_factory, selector, required_type",
+    [
+        (spatial_bin_histogram, _feature_summary, {"feature_class": "Control"}, "PointsSummary"),
+        (spatial_bin_histogram_by_feature, _summary, {"feature": "EPCAM"}, "FeaturePointsSummary"),
+    ],
+)
+def test_spatial_histogram_entry_points_reject_wrong_summary_types(plotter, summary_factory, selector, required_type):
+    with pytest.raises(TypeError, match=f"summary must be a {required_type}"):
+        plotter(summary_factory([0, 1]), **selector)
 
 
 def test_empty_population_and_invalid_spatial_histogram_requests():
@@ -252,8 +329,12 @@ def test_empty_population_and_invalid_spatial_histogram_requests():
     assert "No retained spatial bins" in empty.texts[0].get_text()
     with pytest.raises(ValueError, match="bin_size"):
         spatial_bin_histogram(replace(summary, spatial_bins=None), feature_class="Control")
+    with pytest.raises(ValueError, match=r"summarize_points_by_feature\(\) with bin_size"):
+        spatial_bin_histogram_by_feature(replace(_feature_summary([0, 1]), spatial_bins=None), feature="EPCAM")
     with pytest.raises(ValueError, match="absent"):
         spatial_bin_histogram(summary, feature_class="Missing")
+    with pytest.raises(ValueError, match="absent"):
+        spatial_bin_histogram_by_feature(_feature_summary([0, 1]), feature="Missing")
     with pytest.raises(ValueError, match="No values remaining"):
         spatial_bin_histogram(summary, feature_class="Control", range=(100, 200))
     with pytest.raises(ValueError, match="logarithmic"):
