@@ -7,7 +7,7 @@ from harpy._spatial_bounds import SpatialBounds
 
 @dataclass(frozen=True, kw_only=True)
 class PointsSummaryMetadata:
-    """Immutable context owned by a :class:`~harpy.qc.PointsSummary`.
+    """Immutable context owned by a class- or feature-level point summary.
 
     Attributes
     ----------
