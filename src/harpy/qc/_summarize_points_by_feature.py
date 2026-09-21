@@ -31,9 +31,12 @@ class FeaturePointsSummary:
         independent of binning. No complete-class statistics or within-class
         fractions are computed for this requested subset.
     spatial_counts
-        Optional in-memory uint64 DataArray with dimensions ``(feature, y, x)``,
-        including empty bins and undetected selected features. Even a single feature keeps
-        the feature dimension. Bin-center x/y coordinates use the requested
+        Optional in-memory uint64 DataArray containing one XY count grid per
+        selected feature. Dimensions are ``(feature, y, x)``: ``feature`` identifies
+        the selected feature names, and each value counts that feature's points
+        in one spatial bin. Includes empty bins and undetected selected features.
+        Even a single feature keeps the feature dimension.
+        Bin-center x/y coordinates use the requested
         coordinate system; counts are raw, unsmoothed and not area-normalized.
         None when binning was not requested.
     spatial_bins
