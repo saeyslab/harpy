@@ -75,7 +75,7 @@ def test_summary_returns_complete_panel_counts_and_class_statistics():
     assert result.spatial_counts is None
     assert result.spatial_bins is None
     assert result.retained_bin_mask is None
-    targets = result.per_target.set_index("feature")
+    targets = result.per_feature.set_index("feature")
     assert targets.index.tolist() == ["NoCalls", "GeneA", "GeneB", "ZeroGene", "NegA", "NegB", "NegC", "SysA", "SysB"]
     assert targets.n_points.tolist() == [0, 2, 1, 0, 3, 1, 0, 1, 0]
     assert targets.n_points.dtype == np.dtype("uint64")
@@ -102,7 +102,7 @@ def test_summary_returns_complete_panel_counts_and_class_statistics():
     assert result.metadata.feature_panel == "panel_a"
     assert result.metadata.crd is None
     assert result.metadata.extent is None
-    assert result.per_target.n_points.sum() == result.per_class.n_points.sum() == 8
+    assert result.per_feature.n_points.sum() == result.per_class.n_points.sum() == 8
 
 
 @pytest.mark.parametrize("bin_size", [None, 2])
@@ -121,7 +121,7 @@ def test_summary_metadata_matches_request(bin_size):
     assert metadata.microns_per_unit == 0.5
     assert metadata.bin_size == bin_size
     assert result.panel_feature_counts == {"Negative": 3}  # includes the undetected NegC
-    frames = [result.per_target, result.per_class]
+    frames = [result.per_feature, result.per_class]
     if bin_size is None:
         assert metadata.x_edges is metadata.y_edges is metadata.extent is None
     else:
@@ -270,7 +270,7 @@ def test_pixel_and_micron_bins_have_equivalent_counts_and_physical_areas():
         np.testing.assert_allclose(pixels.spatial_bins.per_bin[name], microns.spatial_bins.per_bin[name])
     pd.testing.assert_frame_equal(pixels.spatial_bins.per_class, microns.spatial_bins.per_class)
     pd.testing.assert_frame_equal(pixels.spatial_bins.per_class, raw.spatial_bins.per_class)
-    pd.testing.assert_frame_equal(pixels.per_target, raw.per_target)
+    pd.testing.assert_frame_equal(pixels.per_feature, raw.per_feature)
     pd.testing.assert_frame_equal(pixels.per_class, raw.per_class)
     assert "bin_area_um2" not in raw.spatial_bins.per_bin
     assert raw.metadata.microns_per_unit is None
@@ -278,7 +278,7 @@ def test_pixel_and_micron_bins_have_equivalent_counts_and_physical_areas():
 
 @pytest.mark.parametrize("calibration", [0, -1, np.nan, np.inf, True, "1", 1j])
 def test_invalid_physical_calibration_fails_before_reduction(calibration, monkeypatch):
-    from harpy.qc import _summarize_points as module
+    from harpy.qc import _points_reduction as module
 
     def forbidden(*args, **kwargs):
         pytest.fail("Invalid calibration should fail before reducing points.")
@@ -292,7 +292,7 @@ def test_calibration_does_not_enable_binning_or_add_feature_statistics():
     result = hp.qc.summarize_points(_sdata(), "calls", microns_per_unit=1)
     assert result.spatial_counts is None
     assert result.spatial_bins is None
-    assert not any("um2" in column for column in result.per_target)
+    assert not any("um2" in column for column in result.per_feature)
     assert not any("um2" in column for column in result.per_class)
 
 
@@ -336,7 +336,7 @@ def test_top_n_does_not_change_raw_counts_or_other_statistics():
     sdata = _sdata()
     small = hp.qc.summarize_points(sdata, "calls", top_n=1)
     large = hp.qc.summarize_points(sdata, "calls", top_n=20)
-    pd.testing.assert_frame_equal(small.per_target, large.per_target)
+    pd.testing.assert_frame_equal(small.per_feature, large.per_feature)
     stable = [
         "feature_class",
         "n_features",
@@ -366,7 +366,7 @@ def test_affine_xy_crop_of_xyz_points_applies_to_every_output(bin_size, crd):
     )
     result = hp.qc.summarize_points(sdata, "calls", bin_size=bin_size, crd=crd, to_coordinate_system="world")
     # Source rows 1 and 3 remain: transformed XY=(8,-2) and (8,4).
-    counts = result.per_target.set_index("feature")
+    counts = result.per_feature.set_index("feature")
     assert counts.loc["NegA", "n_points"] == 1
     assert counts.loc["NegB", "n_points"] == 1
     assert result.per_class.n_points.sum() == 2
@@ -386,7 +386,7 @@ def test_named_and_tuple_crops_produce_identical_summaries_and_metadata(bin_size
     crop = hp.SpatialBounds(x=(1, 6), y=(0, 1))
     named = hp.qc.summarize_points(sdata, "calls", bin_size=bin_size, crd=crop)
     positional = hp.qc.summarize_points(sdata, "calls", bin_size=bin_size, crd=(1, 6, 0, 1))
-    pd.testing.assert_frame_equal(named.per_target, positional.per_target)
+    pd.testing.assert_frame_equal(named.per_feature, positional.per_feature)
     pd.testing.assert_frame_equal(named.per_class, positional.per_class)
     assert named.metadata == positional.metadata
     assert named.metadata.crd is crop
@@ -423,7 +423,7 @@ def test_xyz_bounds_filter_transformed_z_before_xy_projection(bin_size, use_tupl
         crd=bounds.as_tuple() if use_tuple else bounds,
         to_coordinate_system="world",
     )
-    targets = result.per_target.set_index("feature")
+    targets = result.per_feature.set_index("feature")
     assert targets.loc["NegA", "n_points"] == 2
     assert targets.loc["NegB", "n_points"] == 1
     assert result.per_class.n_points.sum() == 3
@@ -436,7 +436,7 @@ def test_xyz_bounds_filter_transformed_z_before_xy_projection(bin_size, use_tupl
     unrestricted = hp.qc.summarize_points(
         sdata, "calls", crd=hp.SpatialBounds(x=bounds.x, y=bounds.y), to_coordinate_system="world"
     )
-    assert unrestricted.per_target.n_points.sum() == 8
+    assert unrestricted.per_feature.n_points.sum() == 8
     pd.testing.assert_frame_equal(sdata.points["calls"].compute(), before)
 
 
@@ -488,7 +488,7 @@ def test_grid_budget_matches_exact_bin_shape_before_edge_allocation(
     """Budget the actual bins, including clipping and floating-point edge corrections."""
     required = 3 * shape_xy[0] * shape_xy[1] * np.dtype(np.uint64).itemsize
     x_edges, y_edges = _point_bin_edges(
-        bounds, bin_size, explicit_extent=explicit_extent, class_count=3, max_grid_bytes=required
+        bounds, bin_size, explicit_extent=explicit_extent, group_count=3, max_grid_bytes=required
     )
     assert (len(x_edges) - 1, len(y_edges) - 1) == shape_xy
 
@@ -497,7 +497,7 @@ def test_grid_budget_matches_exact_bin_shape_before_edge_allocation(
 
     monkeypatch.setattr(np, "arange", forbidden)
     with pytest.raises(ValueError, match=f"requires {required:,} bytes"):
-        _point_bin_edges(bounds, bin_size, explicit_extent=explicit_extent, class_count=3, max_grid_bytes=required - 1)
+        _point_bin_edges(bounds, bin_size, explicit_extent=explicit_extent, group_count=3, max_grid_bytes=required - 1)
 
 
 def test_grid_budget_rejects_extreme_extent_without_overflow_or_edge_allocation(monkeypatch):
@@ -507,13 +507,13 @@ def test_grid_budget_rejects_extreme_extent_without_overflow_or_edge_allocation(
     monkeypatch.setattr(np, "arange", forbidden)
     required = 4 * 10**12 * 10**12 * 8  # larger than a uint64 integer can represent
     with pytest.raises(ValueError, match=f"requires {required:,} bytes"):
-        _point_bin_edges((0, 1e12, 0, 1e12), 1, explicit_extent=True, class_count=4, max_grid_bytes=1024)
+        _point_bin_edges((0, 1e12, 0, 1e12), 1, explicit_extent=True, group_count=4, max_grid_bytes=1024)
 
 
 @pytest.mark.parametrize("crd", [None, (0, 8, 0, 2)])
 def test_grid_budget_fails_before_count_reduction(crd, monkeypatch):
     """Only automatic extent discovery may read points before rejecting the grid."""
-    from harpy.qc import _summarize_points as module
+    from harpy.qc import _points_reduction as module
 
     reads = []
 
@@ -540,7 +540,7 @@ def test_default_grid_budget_can_be_disabled_without_allocating_large_grid(monke
     Intercept only final dense-grid construction to avoid a large allocation;
     real edge construction and point reductions run with the limit disabled.
     """
-    from harpy.qc import _summarize_points as module
+    from harpy.qc import _points_reduction as module
 
     class GridAllocationReached(Exception):
         pass
@@ -559,7 +559,7 @@ def test_default_grid_budget_can_be_disabled_without_allocating_large_grid(monke
 def test_grid_budget_allows_exact_limit():
     result = hp.qc.summarize_points(_sdata(), "calls", bin_size=2, max_grid_bytes=128)
     assert result.spatial_counts.nbytes == 128
-    assert result.spatial_counts.sum().item() == result.per_target.n_points.sum() == 8
+    assert result.spatial_counts.sum().item() == result.per_feature.n_points.sum() == 8
 
 
 def test_grid_budget_uses_selected_classes_and_is_not_enforced_without_binning():
@@ -572,7 +572,7 @@ def test_grid_budget_uses_selected_classes_and_is_not_enforced_without_binning()
         hp.qc.summarize_points(sdata, "calls", bin_size=2, max_grid_bytes=32)
     result = hp.qc.summarize_points(sdata, "calls", max_grid_bytes=1)
     assert result.spatial_counts is None
-    assert result.per_target.n_points.sum() == 8
+    assert result.per_feature.n_points.sum() == 8
 
 
 @pytest.mark.parametrize("selection", [None, "Negative", ["Negative", "SystemControl"]])
@@ -617,9 +617,9 @@ def test_categorical_feature_values_do_not_introduce_unused_source_targets():
     frame = _frame()
     frame["gene"] = pd.Categorical(frame.gene, categories=[*frame.gene.unique(), "NotInPanel"])
     result = hp.qc.summarize_points(_sdata(frame), "calls")
-    assert "NotInPanel" not in result.per_target.feature.to_list()
-    assert "ZeroGene" in result.per_target.feature.to_list()
-    assert result.per_target.n_points.sum() == 8
+    assert "NotInPanel" not in result.per_feature.feature.to_list()
+    assert "ZeroGene" in result.per_feature.feature.to_list()
+    assert result.per_feature.n_points.sum() == 8
 
 
 def test_custom_source_keys_and_unknown_dask_categories():
@@ -631,10 +631,10 @@ def test_custom_source_keys_and_unknown_dask_categories():
     sdata = _sdata(points, panel=panel)
     del sdata.attrs["harpy"]["points"]["calls"]["sample_id"]
     result = hp.qc.summarize_points(sdata, "calls")
-    assert {"feature", "feature_class", "n_points"} <= set(result.per_target.columns)
-    assert not {"marker", "kind", "sample_id"} & set(result.per_target.columns)
+    assert {"feature", "feature_class", "n_points"} <= set(result.per_feature.columns)
+    assert not {"marker", "kind", "sample_id"} & set(result.per_feature.columns)
     assert result.metadata.sample_id is None
-    assert result.per_target.n_points.sum() == 8
+    assert result.per_feature.n_points.sum() == 8
 
 
 @pytest.mark.parametrize(
@@ -737,7 +737,7 @@ def test_joint_reductions_share_source_reads(monkeypatch, crd):
     # PointsModel.parse may inspect source indices while preparing the fixture;
     # only source reads performed by summarize_points belong to this contract.
     reads.clear()
-    from harpy.qc import _summarize_points as module
+    from harpy.qc import _points_reduction as module
 
     original = module._summarize_point_partition
 
@@ -757,13 +757,13 @@ def test_joint_reductions_share_source_reads(monkeypatch, crd):
     with dask.config.set(scheduler="synchronous"):
         result = hp.qc.summarize_points(sdata, "calls", feature_classes="Negative", bin_size=2, crd=crd)
     assert reads == Counter(dict.fromkeys(range(17), 2 if crd is None else 1))
-    assert result.per_target.n_points.sum() == result.spatial_counts.sum().item() == 17 * 4
+    assert result.per_feature.n_points.sum() == result.spatial_counts.sum().item() == 17 * 4
     assert result.spatial_bins.per_bin.n_points.sum() == result.spatial_bins.per_class.n_points.sum() == 17 * 4
 
 
 def test_nonspatial_summary_does_not_project_coordinates_or_require_registration(monkeypatch):
     sdata = _sdata()
-    from harpy.qc import _summarize_points as module
+    from harpy.qc import _points_reduction as module
 
     original = module._summarize_point_partition
 
@@ -773,7 +773,7 @@ def test_nonspatial_summary_does_not_project_coordinates_or_require_registration
 
     monkeypatch.setattr(module, "_summarize_point_partition", check_projection)
     result = hp.qc.summarize_points(sdata, "calls", to_coordinate_system="unused")
-    assert result.per_target.n_points.sum() == 8
+    assert result.per_feature.n_points.sum() == 8
 
 
 def test_summary_does_not_mutate_points_metadata_or_backing_store(tmp_path, monkeypatch):
@@ -794,7 +794,7 @@ def test_summary_does_not_mutate_points_metadata_or_backing_store(tmp_path, monk
 
     monkeypatch.setattr(plt, "subplots", forbidden)
     result = hp.qc.summarize_points(sdata, "calls", bin_size=2)
-    result.per_target.loc[0, "n_points"] = 999
+    result.per_feature.loc[0, "n_points"] = 999
     grid_before = result.spatial_counts.copy(deep=True)
     result.spatial_bins.per_bin.loc[0, "n_points"] = 999
     xr.testing.assert_identical(result.spatial_counts, grid_before)
