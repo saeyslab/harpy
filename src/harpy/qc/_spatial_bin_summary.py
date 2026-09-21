@@ -1,12 +1,12 @@
 """Tabular measurements derived from a computed spatial-count grid."""
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
 import xarray as xr
 
+from harpy._feature_panels import _FeaturePanelContract
 from harpy.qc._points_summary_metadata import PointsSummaryMetadata
 
 
@@ -80,10 +80,11 @@ class FeatureSpatialBinSummary:
 
 
 def _summarize_feature_bins(
-    grid: xr.DataArray, *, metadata: PointsSummaryMetadata, class_by_feature: Mapping[str, str]
+    grid: xr.DataArray, *, metadata: PointsSummaryMetadata, panel: _FeaturePanelContract
 ) -> FeatureSpatialBinSummary:
-    """Summarize the feature grid and attach each feature's authoritative panel class once."""
-    per_bin, per_feature = _spatial_bin_frames(grid, metadata=metadata, group_axis="feature")
+    """Summarize the feature grid and attach each feature's class from the supplied panel."""
+    per_bin, per_feature = _spatial_bin_frames(grid, metadata=metadata, summary_axis="feature")
+    class_by_feature = panel.class_by_feature
     feature_classes = per_feature["feature"].astype(object).map(class_by_feature)
     per_feature.insert(1, "feature_class", pd.Categorical(feature_classes))
     return FeatureSpatialBinSummary(per_bin=per_bin, per_feature=per_feature)
@@ -106,12 +107,12 @@ def _summarize_spatial_bins(grid: xr.DataArray, *, metadata: PointsSummaryMetada
     empty, class point counts and ``n_retained_bins_without_class`` are zero,
     and distribution statistics and ``pct_retained_bins_without_class`` are NaN.
     """
-    per_bin, per_class = _spatial_bin_frames(grid, metadata=metadata, group_axis="feature_class")
+    per_bin, per_class = _spatial_bin_frames(grid, metadata=metadata, summary_axis="feature_class")
     return SpatialBinSummary(per_bin=per_bin, per_class=per_class)
 
 
 def _spatial_bin_frames(
-    grid: xr.DataArray, *, metadata: PointsSummaryMetadata, group_axis: str
+    grid: xr.DataArray, *, metadata: PointsSummaryMetadata, summary_axis: str
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Reduce a completed class/feature grid into bin rows and per-group statistics.
 
@@ -119,8 +120,8 @@ def _spatial_bin_frames(
     including zeros in the other planes. This calculation uses no source
     points. Rows follow group order, then row-major spatial order.
     """
-    groups = tuple(grid.coords[group_axis].values)
-    zero_suffix = "class" if group_axis == "feature_class" else "feature"
+    groups = tuple(grid.coords[summary_axis].values)
+    zero_suffix = "class" if summary_axis == "feature_class" else "feature"
     retained = grid.values.any(axis=0)
     y_bin, x_bin = np.nonzero(retained)
     n_retained = len(y_bin)
@@ -138,7 +139,7 @@ def _spatial_bin_frames(
         point_counts[ordinal * n_retained : (ordinal + 1) * n_retained] = plane[retained]
     per_bin = pd.DataFrame(
         {
-            group_axis: pd.Categorical.from_codes(np.repeat(np.arange(len(groups)), n_retained), categories=groups),
+            summary_axis: pd.Categorical.from_codes(np.repeat(np.arange(len(groups)), n_retained), categories=groups),
             "y_bin": np.tile(y_bin, len(groups)),
             "x_bin": np.tile(x_bin, len(groups)),
             "x": np.tile(grid.x.values[x_bin], len(groups)),
@@ -172,7 +173,7 @@ def _spatial_bin_frames(
         total = counts.sum(dtype=np.uint64)
         n_zero = int(np.count_nonzero(counts == 0))
         row = {
-            group_axis: group,
+            summary_axis: group,
             **population,
             "n_points": total,
             f"n_retained_bins_without_{zero_suffix}": n_zero,
@@ -184,6 +185,6 @@ def _spatial_bin_frames(
         }
         group_rows.append(row)
     per_group = pd.DataFrame(group_rows)
-    per_group[group_axis] = pd.Categorical(per_group[group_axis], categories=groups)
+    per_group[summary_axis] = pd.Categorical(per_group[summary_axis], categories=groups)
 
     return per_bin, per_group
