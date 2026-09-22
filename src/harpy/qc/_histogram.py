@@ -14,6 +14,7 @@ from loguru import logger as log
 from matplotlib.axes import Axes
 from spatialdata import SpatialData
 
+from harpy.qc._points_summary_schema import _FEATURE_CLASS_KEY, _FEATURE_KEY, _N_POINTS_KEY
 from harpy.qc._summarize_points import PointsSummary
 from harpy.qc._summarize_points_by_feature import FeaturePointsSummary
 from harpy.table._table import ProcessTable
@@ -141,7 +142,7 @@ def spatial_bin_histogram(
     return _plot_spatial_bin_histogram(
         spatial_bins.per_bin,
         spatial_bins.per_class,
-        summary_axis="feature_class",
+        summary_axis=_FEATURE_CLASS_KEY,
         selected=feature_class,
         compute_name="summarize_points",
         ax=ax,
@@ -187,8 +188,8 @@ def spatial_bin_histogram_by_feature(
     Parameters
     ----------
     summary
-        Result of :func:`harpy.qc.summarize_points_by_feature`, computed with
-        ``bin_size``. Uses ``spatial_bins.per_bin`` for counts and
+        Result of :func:`harpy.qc.summarize_points_by_feature`, computed from a
+        binned :class:`~harpy.qc.PointsSummary`. Uses ``spatial_bins.per_bin`` for counts and
         ``spatial_bins.per_feature`` for median/SD annotations, not the top-level
         feature totals. Source and geometry context remain available in
         ``metadata`` for caller-supplied titles or figure captions.
@@ -243,9 +244,8 @@ def spatial_bin_histogram_by_feature(
     --------
     .. code-block:: python
 
-        features = hp.qc.summarize_points_by_feature(
-            sdata, "transcripts", features=["EPCAM", "VIM"], bin_size=100
-        )
+        summary = hp.qc.summarize_points(sdata, "transcripts", bin_size=100)
+        features = hp.qc.summarize_points_by_feature(sdata, summary=summary, features=["EPCAM", "VIM"])
         ax = hp.qc.spatial_bin_histogram_by_feature(features, feature="EPCAM")
     """
     if not isinstance(summary, FeaturePointsSummary):
@@ -253,12 +253,13 @@ def spatial_bin_histogram_by_feature(
     spatial_bins = summary.spatial_bins
     if spatial_bins is None:
         raise ValueError(
-            "Spatial-bin measurements are missing; call hp.qc.summarize_points_by_feature() with bin_size."
+            "Spatial-bin measurements are missing; call hp.qc.summarize_points() with bin_size, "
+            "then pass that summary to hp.qc.summarize_points_by_feature()."
         )
     return _plot_spatial_bin_histogram(
         spatial_bins.per_bin,
         spatial_bins.per_feature,
-        summary_axis="feature",
+        summary_axis=_FEATURE_KEY,
         selected=feature,
         compute_name="summarize_points_by_feature",
         ax=ax,
@@ -309,7 +310,7 @@ def _plot_spatial_bin_histogram(
         raise ValueError(f"Spatial-bin SD is missing; recompute the summary with hp.qc.{compute_name}().")
     if histplot_kwargs.get("stat", "count") not in {"count", "percent"}:
         raise ValueError("Spatial-bin histograms support stat='count' or stat='percent'.")
-    values = per_bin.loc[per_bin[summary_axis] == selected, "n_points"]
+    values = per_bin.loc[per_bin[summary_axis] == selected, _N_POINTS_KEY]
     row = statistics.iloc[0]
     return _plot_histogram(
         values,
