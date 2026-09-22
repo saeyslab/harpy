@@ -14,12 +14,16 @@ from harpy._spatial_bounds import SpatialBounds
 from harpy.qc.points._points_reduction import _reduce_points_by_class
 from harpy.qc.points._points_summary_metadata import PointsSummaryMetadata
 from harpy.qc.points._points_summary_schema import _FEATURE_CLASS_KEY, _FEATURE_KEY, _N_FEATURES_KEY, _N_POINTS_KEY
+from harpy.qc.points._points_summary_validation import _validate_spatial_summary
 from harpy.qc.points._spatial_bin_summary import SpatialBinSummary, _summarize_spatial_bins
 
 
 @dataclass(frozen=True)
 class PointsSummary:
     """Computed summaries of one original points element and its feature panel.
+
+    Construction validates spatial structure, not numerical summaries.
+    In-place edits to the contained arrays or tables do not trigger validation.
 
     Attributes
     ----------
@@ -71,6 +75,9 @@ class PointsSummary:
     per_class: pd.DataFrame
     spatial_counts: xr.DataArray | None
     spatial_bins: SpatialBinSummary | None
+
+    def __post_init__(self) -> None:
+        _validate_spatial_summary(self.spatial_counts, metadata=self.metadata, axis=_FEATURE_CLASS_KEY)
 
     @property
     def panel_feature_counts(self) -> dict[str, int]:

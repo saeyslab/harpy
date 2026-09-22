@@ -36,6 +36,8 @@ class PointsSummaryMetadata:
     points_name: str
     sample_id: str | None
     feature_panel: str
+    # Keep one coordinate context for the grid, bin tables and crop, even without
+    # binning; duplicating it in DataArray.attrs would require synchronization.
     to_coordinate_system: str
     crd: SpatialBounds | None
     microns_per_unit: float | None
