@@ -3424,7 +3424,7 @@ Implemented by `hp.qc.summarize_points` and `hp.qc.PointsSummary` in
 `_points_binning.py`. Shared feature-panel parsing and point-content
 validation live in `src/harpy/_feature_panels.py` and are reused by aggregation
 and table validation. Focused tests live in
-`src/harpy/_tests/test_qc/test_summarize_points.py`. Plotting remains separate.
+`src/harpy/_tests/test_qc/test_points/test_summarize_points.py`. Plotting remains separate.
 
 Implement `hp.qc.summarize_points` and its `PointsSummary` result: lightweight
 per-feature and per-class summaries plus optional raw spatial-bin counts over
@@ -4486,8 +4486,8 @@ returned grid before display selection, without a source scan or panel lookup.
 selected-class points and returns the nested result. Bin inclusion is derived from the returned grid.
 The dataframe construction
 and public `SpatialBinSummary` live in `src/harpy/qc/points/_spatial_bin_summary.py`.
-Focused coverage is in `test_qc/test_summarize_points.py` and
-`test_qc/test_spatial_bin_summary.py`. Plotting and feature-specific grids
+Focused coverage is in `test_qc/test_points/test_summarize_points.py` and
+`test_qc/test_points/test_spatial_bin_summary.py`. Plotting and feature-specific grids
 remain in the later parts below.
 
 Extend `hp.qc.summarize_points`; do **not** introduce a public
@@ -5083,7 +5083,7 @@ or empty-population policy. `_histogram.py` provides
 separate class/feature entry points sharing selection and rendering logic. Public exports and API documentation
 include the new computation and result types; existing `PointsSummary`
 consumers use `per_feature` instead of `per_target`.
-Focused tests in `test_summarize_points_by_feature.py` and `test_histograms.py`
+Focused tests in `test_qc/test_points/test_summarize_points_by_feature.py` and `test_qc/test_histograms.py`
 cover inherited grids/populations, feature-selection independence, zero detections,
 feature totals with/without binning, validation, transforms, memory limits,
 source-read counts, read-only behavior and plotting integration. Existing
