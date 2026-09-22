@@ -39,7 +39,7 @@ implemented:
       `summarize_points` — implemented; **11e.ii** spatial-bin histograms — implemented;
       **11e.iii** feature-specific spatial counts and bin summaries through
       `hp.qc.summarize_points_by_feature` — implemented; **11e.iv** spatial density
-      heatmaps — implemented; and **11e.v** marimo density overview;
+      heatmaps — implemented; and **11e.v** density-only marimo overview;
     - **11f:** table-level summary computation through `hp.qc.summarize_table`
       and `TableSummary`, with plotting integration;
 
@@ -87,7 +87,8 @@ summary outputs: density plotting accepts the parent `PointsSummary` or
 `FeaturePointsSummary`, keeping counts and their single metadata
 record together. It does not accept a SpatialData object.
 It neither reads the source points nor resolves a live panel registry. Part
-11e.v then integrates this standalone plotter into a marimo density overview.
+11e.v then integrates this standalone plotter into a density-only marimo
+overview, with notebook image overlays deferred to a later follow-up.
 Slice 11f provides the symmetric read-only table-summary workflow, deriving
 per-instance metrics and class-level overviews from the class-aware table before
 plotting. Slice 12 is an independent integration follow-up that makes later
@@ -4389,8 +4390,9 @@ explicit computation path for feature-specific grids:
    `spatial_bin_histogram_by_feature` alongside the class histogram API from 11e.ii.
 4. **11e.iv: spatial density heatmaps** — render class-level or feature-level
    spatial-count arrays through `hp.pl.plot_points_density`.
-5. **11e.v: marimo density overview** — integrate the plotter into the notebook,
-   with display controls, browser pan/zoom, DAPI overviews, and explicit region views.
+5. **11e.v: marimo density overview** — add class-density maps with shared
+   sample/class selections and browser pan/zoom. Image overlays and image-region
+   views are deferred to a later follow-up.
 
 Part 11e.ii implements class histograms from the computed result of 11e.i;
 11e.iii adds a separate feature-summary plotting adapter sharing the same renderer. Neither requires
@@ -5778,23 +5780,58 @@ Focused tests should establish that:
 
 **Status: specified; not implemented. Depends on Part 11e.iv.**
 
-Integrate `hp.pl.plot_points_density` into the marimo notebook after the
-standalone plotter is implemented. Reuse the class and feature summaries from
-11e.i and 11e.iii; do not implement a separate density renderer in the notebook.
+Integrate `hp.pl.plot_points_density` into
+`notebooks/2026_08_ucb/histograms.py`. The first version adds class-density maps
+from the existing `PointsSummary` objects; preserve the existing feature-summary
+and feature-histogram workflow. Do not implement a separate density renderer.
+Scope this part to density-only views: image/channel selection, image overlays,
+and higher-resolution image-region views are deferred to a later follow-up.
 SpatialData density-image export and napari integration remain deferred.
 
-#### Notebook controls and large-image display
+#### Notebook layout and shared controls
 
-Reuse already computed class and feature summaries in the notebook overview.
-Display controls select samples, classes/features, normalization, and opacity
-without reading source points or recalculating summaries. Keep marimo-specific
-code in the notebook, not in the plotting API or Harpy's base dependencies.
+After **Calculate summaries** finishes, automatically show these sections in
+order, using the submitted sample selection and bin area:
+
+1. **Point counts by class** — the existing per-sample tables.
+2. **Point counts by feature** — the existing per-sample tables.
+3. **Display selection** — one shared sample selector and feature-class selector.
+   Show all calculated samples by default. Move the class selector out of the
+   current **Class histograms** section so its shared role is explicit.
+4. **Class histograms** — show the selected class for the displayed samples.
+   Keep KDE and percentage switches in a histogram-specific control group;
+   they continue to apply to class and feature histograms, not density maps.
+5. **Point density** — show the same selected class for the same displayed samples.
+
+Do not add another sample/class selector or a **Calculate density** button.
+Class-density views must work before any feature summaries are calculated.
+Default density maps to raw counts (`normalization=None`); without a background
+image, no opacity control is needed in this first version.
+
+Keep computation and display dependencies separate:
+
+- Submitting **Calculate summaries** computes the class summaries, then makes
+  the tables, histograms, and density maps available.
+- Changing the shared sample/class selection redraws the corresponding class
+  histograms and density maps from the existing summaries. It does not change
+  the summary tables or trigger another source-point reduction. The sample
+  selector also continues to control the existing feature-histogram display.
+- Changing KDE or percentage updates only histograms, not density maps.
+- The existing **Calculate feature summaries** form remains the explicit
+  trigger for feature-specific computation.
+
+Display selection must not redefine the retained-bin population: selecting a
+class chooses its existing count plane, retaining zero-valued bins inside the
+summary's shared mask. Neither selection nor pan/zoom changes bin geometry or
+recalculates statistics. Keep marimo-specific code in the notebook, not in the
+plotting API or Harpy's base dependencies.
+
+#### Interactive density display and canvas size
 
 Use browser-based Matplotlib interaction through `mo.mpl.interactive(ax)` for
 pan/zoom in a running notebook; do not introduce Qt integration or switch the
-plotter to a GUI backend. This adds navigation to the rendered figure, not a
-large-image streaming system. In particular, zooming into a downsampled DAPI
-overview does not automatically fetch a finer image level.
+plotter to a GUI backend. This navigates the existing density grid; zooming
+does not compute finer bins or read source points.
 
 Choose a bounded notebook canvas explicitly, for example:
 
@@ -5817,38 +5854,41 @@ pixels per bin = plotting-area width in pixels / number of visible x bins
 
 For example, a 1,000-pixel-wide plotting area provides about 2 pixels per bin
 for 500 visible bins, but only 0.2 pixels per bin for 5,000. In the latter case,
-individual bins cannot be distinguished in the overview: use zoom or a smaller
-region view for detail, rather than automatically growing the canvas or DPI.
+individual bins cannot be distinguished in the overview: use zoom for detail,
+rather than automatically growing the canvas or DPI.
 Apply the same reasoning to the vertical direction. Keep figure size and DPI
 under caller/notebook control; the grid alone does not determine optimal values.
 
-For large-image overlays:
+Check rendering and interaction on representative grid sizes before claiming
+acceptable performance; browser pan/zoom and a bounded canvas alone do not make
+a large Matplotlib mesh memory-bounded.
 
-- Render whole-sample overviews using suitable existing image-pyramid levels
-  where available, rather than requiring a full-resolution mosaic in memory.
-- Provide explicit region-of-interest views that rerender the image crop at a
-  suitable higher resolution through the existing image renderer. Reuse the
-  density grid in the same coordinate system; changing the displayed region
-  must not redefine the summary's retained-bin population or statistics.
-- Keep the density's computed bin resolution in both overview and region views.
-  Increasing figure size or DPI does not create finer bins or solve image-loading
-  costs. Do not add automatic viewport-driven image loading in this part.
+#### Deferred notebook image overlays
 
-Check rendering and interaction on representative grid and image sizes before
-claiming acceptable performance; browser pan/zoom alone does not make a large
-Matplotlib mesh or image memory-bounded.
+A later follow-up can add compatible image/channel selection (for example,
+DAPI), pyramid-based whole-sample overviews, and explicit higher-resolution
+image crops through the existing image renderer. Both layers must use the
+summary's coordinate system, without changing the density grid or retained-bin
+population. Browser zoom alone must not be presented as fetching a finer image
+level. These image controls and their performance checks are not acceptance
+requirements for this density-only version; Part 11e.iv's generic overlay
+support remains unchanged.
 
 #### Verification
 
-Check that the notebook overview reuses calculated summaries when display
-controls change, performs no source-point reductions, and writes no SpatialData
-elements or metadata. Notebook display changes must not mutate the summaries.
+Check that submitting **Calculate summaries** exposes the tables, class
+histograms, and density maps without a second calculation action or prior
+feature-summary submission. Shared sample/class selections must control both
+class plots; KDE/percentage switches must affect only histograms.
 
-Smoke-test the running marimo overview with representative grid sizes and
-existing multiscale images: browser pan/zoom, an appropriately resolved DAPI
-overview, and an explicit higher-resolution region view. Confirm alignment and
-unchanged bin geometry without relying on an automatic image-level refresh when
-zooming, Qt integration, or density-image export.
+Display changes must reuse calculated summaries, perform no source-point
+reductions or image reads, and write no SpatialData elements or metadata.
+They must not mutate the summaries, their retained-bin masks, or statistics.
+
+Smoke-test the running marimo overview with representative grid sizes:
+browser pan/zoom, bounded canvases, correct selected-class maps, and unchanged
+bin geometry. Image/channel controls, DAPI overviews, image-region rendering,
+Qt integration, and density-image export are outside this part.
 
 ## Slice 11f: table-level summary computation and plotting integration
 
