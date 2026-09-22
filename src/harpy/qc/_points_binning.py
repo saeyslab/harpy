@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 
 from harpy._spatial_bounds import SpatialBounds
+from harpy.qc._points_summary_schema import _FEATURE_CLASS_KEY, _N_POINTS_KEY
 
 
 def _select_point_coordinates(
@@ -87,15 +88,7 @@ def _point_bin_edges(
             count += 1
         counts.append(count)
 
-    grid_shape = (group_count, counts[1], counts[0])
-    grid_bytes = group_count * counts[1] * counts[0] * np.dtype(np.uint64).itemsize
-    if max_grid_bytes is not None and grid_bytes > max_grid_bytes:
-        raise ValueError(
-            f"Spatial count grid shape {grid_shape} requires {grid_bytes:,} bytes (uint64), "
-            f"exceeding max_grid_bytes={max_grid_bytes:,}. Increase bin_size, restrict crd, "
-            "select fewer features/classes, or raise max_grid_bytes "
-            "(None disables this limit)."
-        )
+    _check_grid_budget((group_count, counts[1], counts[0]), max_grid_bytes=max_grid_bytes)
 
     edges = []
     for (minimum, maximum), count in zip(axis_bounds, counts, strict=True):
@@ -108,9 +101,21 @@ def _point_bin_edges(
     return edges[0], edges[1]
 
 
+def _check_grid_budget(shape: tuple[int, int, int], *, max_grid_bytes: int | None) -> None:
+    """Check the final uint64 grid size, for either new or inherited bin edges."""
+    grid_bytes = shape[0] * shape[1] * shape[2] * np.dtype(np.uint64).itemsize
+    if max_grid_bytes is not None and grid_bytes > max_grid_bytes:
+        raise ValueError(
+            f"Spatial count grid shape {shape} requires {grid_bytes:,} bytes (uint64), "
+            f"exceeding max_grid_bytes={max_grid_bytes:,}. Increase bin_size, restrict crd, "
+            "select fewer features/classes, or raise max_grid_bytes "
+            "(None disables this limit)."
+        )
+
+
 def _empty_bin_counts(summary_axis: str) -> pd.Series:
     index = pd.MultiIndex.from_arrays([[], [], []], names=[summary_axis, "y_bin", "x_bin"])
-    return pd.Series(index=index, dtype=np.uint64, name="n_points")
+    return pd.Series(index=index, dtype=np.uint64, name=_N_POINTS_KEY)
 
 
 def _count_point_bins(
@@ -118,7 +123,7 @@ def _count_point_bins(
     groups: np.ndarray,
     *,
     edges: tuple[np.ndarray, np.ndarray],
-    summary_axis: str = "feature_class",
+    summary_axis: str = _FEATURE_CLASS_KEY,
 ) -> pd.Series:
     """Reduce selected XY points to observed (group, y-bin, x-bin) counts.
 
@@ -143,4 +148,4 @@ def _count_point_bins(
             "x_bin": x_bin,
         }
     )
-    return frame.groupby([summary_axis, "y_bin", "x_bin"], observed=True).size().astype(np.uint64).rename("n_points")
+    return frame.groupby([summary_axis, "y_bin", "x_bin"], observed=True).size().astype(np.uint64).rename(_N_POINTS_KEY)
