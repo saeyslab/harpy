@@ -11,8 +11,9 @@ from spatialdata import SpatialData
 
 from harpy._feature_panels import _FeaturePanelContract
 from harpy._spatial_bounds import SpatialBounds
-from harpy.qc._points_reduction import _reduce_points
+from harpy.qc._points_reduction import _reduce_points_by_class
 from harpy.qc._points_summary_metadata import PointsSummaryMetadata
+from harpy.qc._points_summary_schema import _FEATURE_CLASS_KEY, _FEATURE_KEY, _N_FEATURES_KEY, _N_POINTS_KEY
 from harpy.qc._spatial_bin_summary import SpatialBinSummary, _summarize_spatial_bins
 
 
@@ -76,7 +77,7 @@ class PointsSummary:
         """Return selected panel sizes from ``per_class.n_features``, including undetected features."""
         return {
             str(name): int(count)
-            for name, count in zip(self.per_class["feature_class"], self.per_class["n_features"], strict=True)
+            for name, count in zip(self.per_class[_FEATURE_CLASS_KEY], self.per_class[_N_FEATURES_KEY], strict=True)
         }
 
     @property
@@ -90,7 +91,7 @@ class PointsSummary:
         """
         if self.spatial_counts is None:
             return None
-        return self.spatial_counts.any(dim="feature_class")
+        return self.spatial_counts.any(dim=_FEATURE_CLASS_KEY)
 
 
 def summarize_points(
@@ -227,11 +228,10 @@ def summarize_points(
     """
     if isinstance(top_n, bool) or not isinstance(top_n, Integral) or top_n < 1:
         raise ValueError("top_n must be a positive integer.")
-    result = _reduce_points(
+    result = _reduce_points_by_class(
         sdata,
         points_name,
-        selected_names=feature_classes,
-        summary_axis="feature_class",
+        feature_classes=feature_classes,
         bin_size=bin_size,
         max_grid_bytes=max_grid_bytes,
         to_coordinate_system=to_coordinate_system,
@@ -267,9 +267,9 @@ def _summary_frames(
         feature_frames.append(
             pd.DataFrame(
                 {
-                    "feature": features,
-                    "feature_class": name,
-                    "n_points": values,
+                    _FEATURE_KEY: features,
+                    _FEATURE_CLASS_KEY: name,
+                    _N_POINTS_KEY: values,
                     "within_class_fraction": values / total if total else np.full(len(values), np.nan),
                 }
             )
@@ -278,11 +278,11 @@ def _summary_frames(
         n_zero = int((values == 0).sum())
         class_rows.append(
             {
-                "feature_class": name,
-                "n_features": len(features),
+                _FEATURE_CLASS_KEY: name,
+                _N_FEATURES_KEY: len(features),
                 "n_zero_features": n_zero,
                 "pct_zero_features": 100 * n_zero / len(features),
-                "n_points": total,
+                _N_POINTS_KEY: total,
                 "mean_points_per_feature": float(values.mean()),
                 "median_points_per_feature": float(np.median(values)),
                 "p95_points_per_feature": float(np.percentile(values, 95)),
