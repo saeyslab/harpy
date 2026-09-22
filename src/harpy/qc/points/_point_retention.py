@@ -15,8 +15,10 @@ from harpy.image._image import _get_boundary, _get_spatial_element
 from harpy.transformations._transformations import _identity_check_transformations_points
 from harpy.utils._keys import _GENES_KEY, _RAW_COUNTS_KEY
 
+_WARNED_DEPRECATED_ATTRIBUTES: set[str] = set()
 
-def analyse_genes_left_out(
+
+def point_retention(
     sdata: SpatialData,
     labels_name: str,
     table_name: str,
@@ -85,7 +87,7 @@ def analyse_genes_left_out(
         import harpy as hp
 
         sdata = hp.datasets.xenium_human_ovarian_cancer(subset=True)
-        hp.qc.analyse_genes_left_out(
+        hp.qc.point_retention(
             sdata,
             labels_name="cell_labels_global",
             points_name="transcripts_global",
@@ -169,3 +171,14 @@ def analyse_genes_left_out(
     )
 
     return filtered
+
+
+def __getattr__(name: str) -> object:
+    if name == "analyse_genes_left_out":
+        if name not in _WARNED_DEPRECATED_ATTRIBUTES:
+            _WARNED_DEPRECATED_ATTRIBUTES.add(name)
+            log.warning(
+                "`harpy.qc.analyse_genes_left_out` is deprecated. Import and use `harpy.qc.point_retention` instead."
+            )
+        return point_retention
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

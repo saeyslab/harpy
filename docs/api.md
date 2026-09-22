@@ -199,7 +199,7 @@ Quality control functions.
     image_histogram
     segmentation_coverage
     segmentation_histogram
-    analyse_genes_left_out
+    point_retention
     table_histogram
     table_histograms
     spatial_bin_histogram
