@@ -310,12 +310,25 @@ def test_grid_budget_counts_requested_features_not_classes(monkeypatch):
 
 
 @pytest.mark.parametrize("bin_size, crd", [(None, None), (2, None), (2, (0, 8, 0, 2))])
-def test_multiple_features_share_source_reads_and_never_collect_points(monkeypatch, bin_size, crd):
+def test_multiple_features_share_source_reads_and_return_compact_counts(monkeypatch, bin_size, crd):
     """One count pass serves all requested features, validation and bin statistics.
 
-    Inherited edges avoid an extent pass even when the parent inferred them.
-    Unbinned summaries reuse totals with no source reads. Seventeen partitions
-    exercise more than one merge level; only compact counts reach dask.compute.
+    The feature summary reuses the bin boundaries saved in the supplied
+    summary, even when no crop was specified. It must not perform another
+    coordinate scan to determine the grid extent.
+
+    When the supplied summary has ``bin_size=None``, feature totals are taken
+    directly from ``summary.per_feature``. No source points need to be read again.
+
+    With binning enabled, each of the 17 source partitions produces partial
+    counts. The merge tree combines at most eight results per task:
+    17 partition results -> 3 intermediate results -> 1 final result.
+    The test checks that each source partition is read exactly once despite
+    these multiple merge stages.
+
+    The compute guard checks that the returned reduction contains count Series,
+    not point dataframes. It does not measure peak memory or inspect intermediate
+    task results.
     """
     reads = Counter()
 
@@ -334,7 +347,10 @@ def test_multiple_features_share_source_reads_and_never_collect_points(monkeypat
 
     def compact_compute(*args, **kwargs):
         computed = original_compute(*args, **kwargs)
-        assert not any(isinstance(value, pd.DataFrame) for value in computed)
+        assert len(computed) == 1
+        feature_counts, bin_counts = computed[0]
+        assert isinstance(feature_counts, pd.Series)
+        assert isinstance(bin_counts, pd.Series)
         return computed
 
     monkeypatch.setattr(dask, "compute", compact_compute)

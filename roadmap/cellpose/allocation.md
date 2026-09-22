@@ -38,7 +38,7 @@ implemented:
       separate parts: **11e.i** construct `summary.spatial_bins` inside
       `summarize_points` — implemented; **11e.ii** spatial-bin histograms — implemented;
       **11e.iii** feature-specific spatial counts and bin summaries through
-      `hp.qc.bin_points_by_feature`; and **11e.iv** spatial density
+      `hp.qc.summarize_points_by_feature` — implemented; and **11e.iv** spatial density
       heatmaps;
     - **11f:** table-level summary computation through `hp.qc.summarize_table`
       and `TableSummary`, with plotting integration;
@@ -3419,8 +3419,9 @@ and lookup contracts.
 **Status: implemented.**
 
 Implemented by `hp.qc.summarize_points` and `hp.qc.PointsSummary` in
-`src/harpy/qc/_summarize_points.py`, with panel-independent coordinate/bin
-helpers in `_points_binning.py`. Shared feature-panel parsing and point-content
+`src/harpy/qc/_summarize_points.py`, with shared source reductions in
+`_points_reduction.py` and panel-independent coordinate/bin helpers in
+`_points_binning.py`. Shared feature-panel parsing and point-content
 validation live in `src/harpy/_feature_panels.py` and are reused by aggregation
 and table validation. Focused tests live in
 `src/harpy/_tests/test_qc/test_summarize_points.py`. Plotting remains separate.
@@ -3549,9 +3550,8 @@ assignment, AnnData construction, or writes to the SpatialData object/store.
 
 ### Return contract: `PointsSummary`
 
-The declarations and examples below use the agreed `per_feature` name. The
-current implementation still calls this field `per_target`; its naming-only
-cleanup is specified in Part 11e.iii and remains to be implemented.
+The implementation uses `per_feature`, renamed from `per_target` in Part
+11e.iii without changing the table's columns or statistical definitions.
 
 Return a small result container:
 
@@ -4371,7 +4371,7 @@ Focused tests should cover:
 
 ## Slice 11e: original-point summary visualization
 
-**Status: Parts 11e.i–ii implemented; Parts 11e.iii–iv specified, not implemented.**
+**Status: Parts 11e.i–iii implemented; Part 11e.iv specified, not implemented.**
 
 Implement annotation-free QC of transcript-positive spatial bins,
 using the existing `PointsSummary.spatial_counts` from Slice 11a, plus an
@@ -4383,14 +4383,14 @@ explicit computation path for feature-specific grids:
 2. **11e.ii: spatial-bin histograms** — visualize the
    results of 11e.i, with one shared bin population across feature classes.
 3. **11e.iii: feature-specific spatial counts and bin summaries** — return a
-   `FeaturePointsSummary` through `hp.qc.bin_points_by_feature`, with one count
-   plane per requested feature and derived bin statistics; add feature-level
-   support to the histogram API from 11e.ii.
+   `FeaturePointsSummary` through `hp.qc.summarize_points_by_feature`, with one count
+   plane per requested feature and derived bin statistics; add
+   `spatial_bin_histogram_by_feature` alongside the class histogram API from 11e.ii.
 4. **11e.iv: spatial density heatmaps** — render class-level or feature-level
    spatial-count arrays through `hp.pl.plot_transcript_density`.
 
 Part 11e.ii implements class histograms from the computed result of 11e.i;
-11e.iii extends that plotting adapter to feature summaries. Neither requires
+11e.iii adds a separate feature-summary plotting adapter sharing the same renderer. Neither requires
 density rendering to be implemented first. Part 11e.iv consumes the class-grid contract
 from 11e.i and the feature-grid contract from 11e.iii. Keep the parts within
 Slice 11e so later slice numbers remain unchanged. Replace the former per-feature distribution
@@ -4402,7 +4402,7 @@ one feature's counts across spatial bins. The existing
 these maps.
 
 The bin-summary helper consumes the counts already reduced inside
-`summarize_points` or `bin_points_by_feature`; it does not trigger another
+`summarize_points` or `summarize_points_by_feature`; it does not trigger another
 source-point scan or panel lookup. Plotters consume the parent results, which retain both measurements
 and the single shared metadata record,
 never call `summarize_points` or `aggregate_points`, and never read source
@@ -4482,8 +4482,8 @@ returned grid before display selection, without a source scan or panel lookup.
 
 **Status: implemented.**
 
-`src/harpy/qc/_summarize_points.py` reduces only selected-class points and
-returns the nested result. Bin inclusion is derived from the returned grid.
+`src/harpy/qc/_summarize_points.py` uses `_points_reduction.py` to reduce only
+selected-class points and returns the nested result. Bin inclusion is derived from the returned grid.
 The dataframe construction
 and public `SpatialBinSummary` live in `src/harpy/qc/_spatial_bin_summary.py`.
 Focused coverage is in `test_qc/test_summarize_points.py` and
@@ -4749,11 +4749,11 @@ Focused tests should establish that:
 
 ### Part 11e.ii: spatial-bin histograms
 
-**Status: implemented for class histograms; feature-summary integration remains
-specified in Part 11e.iii.**
+**Status: implemented, including feature-summary integration from Part 11e.iii.**
 
 Implemented in `src/harpy/qc/_histogram.py`, which contains
-`spatial_bin_histogram`, `table_histogram`, `table_histograms`, and their
+`spatial_bin_histogram`, `spatial_bin_histogram_by_feature`,
+`table_histogram`, `table_histograms`, and their
 shared numerical renderer `_plot_histogram`. Bin summaries now provide sample SD.
 The old table-histogram names remain deprecated aliases. Focused tests in
 `test_histograms.py` cover populations, clipping/percentage scaling, KDE,
@@ -4771,22 +4771,27 @@ Do not render `summary.per_feature` or its existing per-feature
 computation in each plot. The numerical overview is already available in
 `summary.spatial_bins.per_class` for direct inspection or export; do not
 implement a separate `hp.qc.spatial_bin_overview` table-style plotting API.
-Part 11e.iii adds `FeaturePointsSummary` input: select one feature from its
+Part 11e.iii adds `spatial_bin_histogram_by_feature` for `FeaturePointsSummary`:
+select one feature from its
 `spatial_bins.per_bin` and use annotations from `spatial_bins.per_feature`.
 Reuse the same renderer, styling, and population rules; do not recompute bin
 statistics in the plotting adapter.
 
-#### Public histogram entry point
+#### Public histogram entry points
 
-Use `hp.qc.spatial_bin_histogram` for one class's histogram, extending it to
-one feature's histogram in Part 11e.iii. The implemented input is `PointsSummary`
-with required keyword-only `feature_class`; `FeaturePointsSummary` and its
-`feature` selector remain planned. It supports caller-supplied Matplotlib axes
-and returns the axes used. Do not generate an automatic title: `title=None`
+Keep separate public functions with one input type and one required selector:
+
+- `hp.qc.spatial_bin_histogram(summary: PointsSummary, *, feature_class: str, ...)`
+  plots one feature class.
+- `hp.qc.spatial_bin_histogram_by_feature(summary: FeaturePointsSummary, *, feature: str, ...)`
+  plots one feature.
+
+Both support caller-supplied Matplotlib axes and return the axes used.
+Do not generate an automatic title: `title=None`
 leaves the axes title unchanged, including on reused axes. An explicit string
 sets the title. Callers can use `summary.metadata` for source or geometry context.
-Both `spatial_bin_histogram` and `table_histogram` supply default axis labels,
-including count/percentage Y-axis labels. Neither exposes a `ylabel` parameter;
+Both spatial-bin entry points and `table_histogram` supply default axis labels,
+including count/percentage Y-axis labels. None exposes a `ylabel` parameter;
 customize labels through the returned axes, for example
 `ax.set(xlabel="Points per bin", ylabel="Number of bins")`. Remove the old
 `ylabel` argument without a compatibility shim.
@@ -4799,14 +4804,16 @@ ax = hp.qc.spatial_bin_histogram(
     ax=ax,
 )
 
-# After computing a FeaturePointsSummary in Part 11e.iii:
-ax = hp.qc.spatial_bin_histogram(feature_summary, feature="EPCAM", ax=ax)
+# With a computed FeaturePointsSummary:
+ax = hp.qc.spatial_bin_histogram_by_feature(feature_summary, feature="EPCAM", ax=ax)
 ```
 
-The eventual combined API requires exactly one explicit selector: `feature_class` for `PointsSummary`,
-or `feature` for `FeaturePointsSummary`. Reject both selectors together, a
-selector incompatible with the result type, or a name absent from the result.
-Do not implicitly pool features/classes or look up additional source data.
+Do not accept a union of summary types or mutually exclusive optional
+selectors in either public function. Reject the wrong summary type or a name
+absent from the result. Keep both functions as thin adapters over shared
+private selection/plotting logic and `_plot_histogram`; do not duplicate
+statistical or rendering behavior. Do not implicitly pool features/classes
+or look up additional source data.
 
 Counts are the default. To display percentages instead, use
 `histplot_kwargs={"stat": "percent"}`; this changes only the Y-axis scaling.
@@ -4823,11 +4830,12 @@ additional normalization handling, rather than unconditional forwarding of
 The renderer owns data selection and weighting: reject `data`, `x`, `y`,
 `hue`, `weights`, and `ax` overrides in this mapping, and reject
 `multiple="fill"`, which replaces the population normalization. The spatial
-API accepts only `stat="count"` and `stat="percent"`; table histograms retain
+APIs accept only `stat="count"` and `stat="percent"`; table histograms retain
 other Seaborn statistics. These restrictions leave display styling configurable.
 
 When `summary.spatial_bins` is `None`, raise a clear error explaining that
-`summarize_points` must be called with `bin_size`. Do not reread points,
+the matching computation API (`summarize_points` or `summarize_points_by_feature`)
+must be called with `bin_size`. Do not reread points,
 validate panels again, or create an AnnData table to render the histogram.
 
 #### Table-histogram naming and deprecation
@@ -4840,7 +4848,8 @@ from a collection of histograms:
 | -------------------------------------- | ------------------------ | -------------------------------------------------------- |
 | `hp.qc.metric_histogram`               | `hp.qc.table_histogram`  | One metric column from a table's `.obs` or `.var`.       |
 | `hp.qc.metrics_histogram`              | `hp.qc.table_histograms` | Multiple table metrics arranged in subplots.             |
-| Proposed `hp.qc.spatial_bin_histogram` | Unchanged                | One class's or feature's spatial-bin count distribution. |
+| `hp.qc.spatial_bin_histogram` | Unchanged                | One feature class's spatial-bin count distribution. |
+| `hp.qc.spatial_bin_histogram_by_feature` | New entry point | One feature's spatial-bin count distribution. |
 
 `table_histogram`, not the multi-plot wrapper, is the direct counterpart to
 `spatial_bin_histogram`. Avoid a cell-specific name because table metrics may
@@ -4970,7 +4979,7 @@ denominator described above.
 Use the table histogram's plotting options and defaults for the spatial API,
 without table/column selectors; `feature_class` is required and keyword-only.
 As with the table API, `show_std` controls SD inside the median annotation.
-A future feature histogram describes bins for one feature, not the removed
+A feature histogram describes bins for one feature, not the removed
 distribution of total counts across panel features.
 
 #### Shared histogram renderer and precomputed annotations
@@ -5026,7 +5035,7 @@ Use sample SD (`ddof=1`), matching the existing `values.std()` convention in
 `metric_histogram` / renamed `table_histogram`. Fewer than two retained bins
 yield NaN, displayed as "N/A"; constant counts across at least two bins yield
 zero SD. This adds no source-point scan and does not change bin inclusion.
-The spatial plotting adapter uses the supplied statistics rather than
+The shared spatial plotting helper uses the supplied statistics rather than
 recomputing them or silently filling missing summary fields. Histogram
 construction and optional KDE estimation operate only on the captured per-bin values.
 
@@ -5062,11 +5071,27 @@ warning-free.
 
 ### Part 11e.iii: feature-specific spatial counts and bin summaries
 
-**Status: specified; not implemented.**
+**Status: implemented.**
 
-Add a read-only `hp.qc.bin_points_by_feature` computation API. It produces
-spatial counts and derived bin summaries for explicitly selected panel features,
-including genes, negative targets, and other controls. Keep this separate from
+Implemented in `src/harpy/qc/_summarize_points_by_feature.py`, with shared source
+reductions in `_points_reduction.py`, bin geometry in `_points_binning.py`,
+and bin statistics in `_spatial_bin_summary.py`. `_reduce_points_by_class()`
+prepares new grids and metadata; `_reduce_points_by_feature()` prepares feature
+requests against an existing reference. Both use `_compute_point_reductions()`
+for partition validation/counting and tree merging, without sharing grid-selection
+or empty-population policy. `_histogram.py` provides
+separate class/feature entry points sharing selection and rendering logic. Public exports and API documentation
+include the new computation and result types; existing `PointsSummary`
+consumers use `per_feature` instead of `per_target`.
+Focused tests in `test_summarize_points_by_feature.py` and `test_histograms.py`
+cover inherited grids/populations, feature-selection independence, zero detections,
+feature totals with/without binning, validation, transforms, memory limits,
+source-read counts, read-only behavior and plotting integration. Existing
+class-summary and bin-summary regressions retain their numerical assertions.
+
+Add a read-only `hp.qc.summarize_points_by_feature` computation API. It produces
+feature totals and optional spatial counts and bin summaries for explicitly
+selected panel features, including genes, negative targets, and other controls. Keep this separate from
 the class-level QC summaries: do not add a potentially panel-wide feature dimension to
 `PointsSummary.spatial_counts`.
 
@@ -5080,17 +5105,25 @@ parameter mutually exclusive with `feature_classes` to `summarize_points`:
   per-feature/per-class tables and spatial-bin summaries retain their existing
   class-selection semantics. In particular, `panel_feature_counts` describes
   complete selected-class panel sizes, not a requested feature subset.
-- `bin_points_by_feature(...) -> FeaturePointsSummary` computes explicitly
-  selected features' grids, always using `(feature, y, x)`, and their
-  retained-bin measurements and statistics. The result contains `metadata`,
-  `spatial_counts`, and `spatial_bins`, plus a derived `retained_bin_mask`.
+- `summarize_points_by_feature(...) -> FeaturePointsSummary` computes explicitly
+  selected features' totals using a required reference `PointsSummary`, with
+  optional `(feature, y, x)` grids and measurements over its retained bins.
+  The result always contains `metadata` and `per_feature`;
+  `spatial_counts`, `spatial_bins`, and the inherited
+  `retained_bin_mask` are None without binning.
+
+`summarize_points` defaults to `bin_size=None`; the feature API inherits whether
+binning was requested, rather than accepting a second set of spatial options. Keep
+`summarize_points` as the class-selection API and use
+`summarize_points_by_feature` as the canonical name for explicit feature selection.
 
 This separation avoids making array dimensions, summary meanings, and panel
 denominators depend on which selection parameter was supplied. Feature
 membership and class assignments still come from the authoritative panel;
 users do not supply another feature-to-class mapping. Both results support
-density rendering in 11e.iv and spatial-bin histograms through the API from
-11e.ii. Implement its feature-result adapter as part of 11e.iii.
+density rendering in 11e.iv and spatial-bin histograms through parallel APIs.
+Implement `spatial_bin_histogram_by_feature` as part of 11e.iii, sharing
+selection and rendering logic with the class-level API from 11e.ii.
 
 #### Consistent feature naming
 
@@ -5102,13 +5135,18 @@ The nesting distinguishes what is summarized:
 - `points_summary.per_feature`: one row per panel feature in the selected
   classes, with its total point count and within-class fraction over the
   selected points, independent of whether binning was requested.
+- `feature_summary.per_feature`: one row per requested feature, with its
+  panel-defined class and total point count after selection, independent of
+  binning. No within-class fraction is calculated for this requested subset.
 - `feature_summary.spatial_bins.per_feature`: one row per requested feature,
   with statistics across the shared retained spatial bins, including its
   total points, mean/median/SD, and zero-bin counts.
 
 Thus `per_feature` identifies what each row represents; `spatial_bins` makes
-the spatial-bin population explicit. Keep the proposed nested field unchanged,
-and do not add a duplicate top-level table to `FeaturePointsSummary`.
+the spatial-bin population explicit. The top-level table remains available
+without binning; the nested table adds bin-distribution statistics when requested.
+Its feature identity, class and point total agree with the top-level table,
+just as class point totals agree between the two class-summary tables.
 
 `SpatialBinSummary` summarizes a `(feature_class, y, x)` grid whose counts
 are already aggregated by class. It cannot recover individual features'
@@ -5117,7 +5155,7 @@ exposes `per_class`, not `per_feature`. `FeatureSpatialBinSummary` summarizes
 a `(feature, y, x)` grid that preserves separate feature planes and therefore
 exposes `per_feature`.
 
-This is a naming-only cleanup of the existing summary API: update construction,
+The `per_target` to `per_feature` rename is a naming-only cleanup: update construction,
 docstrings, examples, tests, and affected notebooks, along with internal names
 such as `target_counts` → `feature_counts` and `target_frames` →
 `feature_frames` where they represent these generic features. Do not change
@@ -5127,39 +5165,41 @@ definitions. Existing regression tests should retain their numerical assertions.
 #### Public computation API
 
 ```python
-def bin_points_by_feature(
+def summarize_points_by_feature(
     sdata: SpatialData,
-    points_name: str,
     *,
+    summary: PointsSummary,
     features: str | Sequence[str],
-    bin_size: float,
     max_grid_bytes: int | None = 1024**3,
-    to_coordinate_system: str = "global",
-    microns_per_unit: float | None = None,
-    crd: SpatialBounds | tuple[float, ...] | None = None,
 ) -> FeaturePointsSummary:
     ...
 ```
 
-Reuse the corresponding `summarize_points` parameter meanings, with these
-differences:
+Use the reference summary as the sole source of analysis context:
 
-- `features` replaces `feature_classes`: require an explicit feature name or
-  a nonempty sequence of distinct panel feature names. Do not default to
-  allocating a grid for every panel feature.
-- `bin_size` is required and positive/finite; there is no no-binning mode.
+- Inherit points name, sample/panel identity, coordinate system, crop (including
+  z bounds), calibration, exact bin edges and retained-bin population. Do not
+  accept duplicate spatial arguments or allow overrides.
+- `features` requires an explicit name or nonempty sequence of distinct names
+  belonging to the classes represented in `summary`. Preserve panel order.
+- An unbinned reference returns feature totals from `summary.per_feature`,
+  without reading source points. A binned reference triggers a shared source
+  count pass on its exact grid, without extent discovery.
+- Keep `max_grid_bytes` as an independent budget for the requested feature grid.
 - Omit `top_n`, which only serves statistics this function does not compute.
-- Return a `FeaturePointsSummary` with required grids and bin summaries,
-  not a conditional variant of `PointsSummary`.
+- Return a `FeaturePointsSummary` with required feature totals and optional
+  grids and bin summaries, not a conditional variant of `PointsSummary`.
 
 Require the same authoritative feature-panel metadata as `summarize_points`.
-Resolve feature and class columns from the panel, reuse source feature/class
-validation before feature filtering, and direct users with no panel to
-`hp.pt.add_feature_panel`. Unknown requested features raise an error. A valid
-panel feature with no detections, including none inside the crop, produces
-an all-zero plane when another requested feature has selected points. If no
-points remain across all requested features after cropping, raise `ValueError`,
-matching `summarize_points`; an explicit crop does not override this rule.
+Check source identity and represented feature/class assignments against the
+reference. The source and its transformations must remain unchanged since the
+reference was computed; identity checks do not prove snapshot freshness.
+During binned computation, validate source feature/class assignments before
+filtering in the same partition-wise count pass. Unbinned results reuse the
+reference totals and their prior validation without another source scan.
+Unknown or unrepresented requested features raise. Valid features with no
+detections retain zero totals and all-zero planes/rows, even when all requested
+features are undetected: the reference still defines a valid population.
 
 #### Output and geometry
 
@@ -5175,25 +5215,32 @@ class FeatureSpatialBinSummary:
 @dataclass(frozen=True)
 class FeaturePointsSummary:
     metadata: PointsSummaryMetadata
-    spatial_counts: xr.DataArray
-    spatial_bins: FeatureSpatialBinSummary
-
-    @property
-    def retained_bin_mask(self) -> xr.DataArray:
-        return self.spatial_counts.any(dim="feature")
+    per_feature: pd.DataFrame
+    spatial_counts: xr.DataArray | None
+    spatial_bins: FeatureSpatialBinSummary | None
+    retained_bin_mask: xr.DataArray | None
 ```
 
 ```text
 FeaturePointsSummary
 ├── metadata                        one source/geometry record
-├── spatial_counts                  (feature, y, x), including empty bins
-├── spatial_bins
+├── per_feature                     selected-feature totals, always present
+├── spatial_counts                  optional (feature, y, x), including empty bins
+├── spatial_bins                    optional
 │   ├── per_bin                     retained bin × selected feature
 │   └── per_feature                 statistics across retained bins
-└── retained_bin_mask               derived from the full feature grid
+└── retained_bin_mask               reference population snapshot, or None
 ```
 
-The `spatial_counts` array contains raw, unsmoothed, in-memory uint64 counts
+The top-level `per_feature` table contains `feature`, panel-defined
+`feature_class`, and uint64 `n_points`, in canonical panel order. Include
+undetected requested features with zero counts. Cropping applies to totals
+whether or not binning was requested. Without binning, no grid, bin statistics,
+or automatic extent are computed; bin size, bin edges and derived extent in
+the metadata are None. The reference has already applied any crop to those
+totals; the unbinned feature call does not repeat coordinate work.
+
+When requested, the `spatial_counts` array contains raw, unsmoothed, in-memory uint64 counts
 with dimensions `(feature, y, x)`, one plane per requested feature. Preserve the `feature`
 dimension even for a single feature. Multiple requested features are counted
 separately, not pooled during computation.
@@ -5206,26 +5253,17 @@ record. Physical calibration describes the selected coordinate
 system and does not change points, edges, or raw counts; downstream rendering
 uses this captured value for optional density normalization.
 
-All selected features share one grid. Use the explicit crop, or derive the
-transformed extent from the selected features, with the same edge convention
-as `summarize_points`: full-width bins beyond observed maxima without a crop,
-and potentially narrower terminal bins with a crop. If none of the requested
-features have detections, or cropping removes all selected points, raise
-rather than returning an entirely empty result.
+When binning, use the reference's exact edges: full-width terminal bins from
+automatic extent discovery, or potentially narrower terminal bins from a crop.
+Never infer a new extent from the requested features. Retain the reference mask
+as a snapshot, not as `spatial_counts.any(dim="feature")`: a bin can be retained
+even when all requested features are zero there. Changing the requested feature
+list must not change another feature's grid, counts or statistics.
 
-As with class filtering, feature selection defines the computation's inputs.
-Within the returned grid, bins containing only unselected features are excluded
-from summaries but remain zero-filled. Derive shared bin inclusion with
-`spatial_counts.any(dim="feature")` through the uncached `retained_bin_mask`
-property, without storing a mask or separate occupancy metadata. Features
-selected together share that population, including their individual zeros; selecting one plane for display
-later must not redefine it.
-
-For `features=["EPCAM", "VIM"]`, a bin with EPCAM=0 and VIM=5 contributes a
-zero to EPCAM's statistics and histogram. Requesting only EPCAM excludes that
-bin, so separate feature-only calls can have different grids and populations.
-Compute features together for comparisons over the same bins. This is not a
-tissue mask; an explicit crop fixes geometry, not bin inclusion.
+For an endogenous reference, a bin with EPCAM=0 and VIM=5 contributes zero
+to EPCAM's statistics whether requesting EPCAM alone or together with VIM.
+The reference population is detection-based, not a tissue annotation. Its
+grid and mask stay fixed across calls using the same unchanged reference/source.
 
 #### Bin measurements and statistics
 
@@ -5239,8 +5277,8 @@ scan. Keep the two dataframe meanings explicit:
   does **not** count distinct genes/features. Coordinates and actual bin
   areas follow the same metadata/edge contract as `SpatialBinSummary`.
 - `per_feature`: one row per requested feature, including undetected features.
-  Record `feature` and its panel-defined `feature_class` here once, without
-  repeating the class on every bin row or adding a separate mapping. Include
+  Record `feature` and its panel-defined `feature_class`, without repeating
+  the class on every bin row or adding a separate mapping. Include
   `n_total_bins`, `n_retained_bins`, `n_excluded_bins`, `pct_excluded_bins`,
   `n_points`, `n_retained_bins_without_feature`,
   `pct_retained_bins_without_feature`, `mean_points_per_bin`,
@@ -5249,14 +5287,13 @@ scan. Keep the two dataframe meanings explicit:
   zeros. Use the class-summary definitions for percentages and linear
   percentiles, and sample SD (`ddof=1`, NaN for fewer than two bins).
 
-An undetected feature has an all-zero plane and zero per-bin values when
-another requested feature has points; its zero-bin percentage is 100. If no
-requested features have points after selection, raise as specified above.
+An undetected feature has an all-zero plane and zero per-bin values over the
+reference population; its zero-bin percentage is 100. This also applies when
+every requested feature is undetected.
 Keep raw counts, without fixed-area or panel-size normalization. Source and
 geometry metadata remain only on the parent, not in dataframe `.attrs`.
 
-Do not copy every `PointsSummary` field: no top-level `per_feature` (feature
-totals already live in `spatial_bins.per_feature`), no top-level `per_class`
+Do not copy every `PointsSummary` field: no top-level `per_class`
 (a requested subset is not a complete class panel), and no
 `panel_feature_counts` property presenting selected-feature counts as panel
 sizes. Do not add within-class fractions or top-N/concentration statistics.
@@ -5264,25 +5301,39 @@ sizes. Do not add within-class fractions or top-N/concentration statistics.
 For example:
 
 ```python
-feature_summary = hp.qc.bin_points_by_feature(
+unbinned = hp.qc.summarize_points(
     sdata,
     points_name="sample_a_transcripts_mosaic_1",
-    features=["EPCAM", "VIM"],
+    feature_classes="Endogenous",
+)
+feature_totals = hp.qc.summarize_points_by_feature(
+    sdata, summary=unbinned, features=["EPCAM", "VIM"],
+)
+feature_totals.per_feature  # no spatial grid is computed
+
+points_summary = hp.qc.summarize_points(
+    sdata,
+    points_name="sample_a_transcripts_mosaic_1",
+    feature_classes="Endogenous",
     bin_size=100,
     to_coordinate_system="sample_a_global_1_micron",
     microns_per_unit=1.0,
 )
+feature_summary = hp.qc.summarize_points_by_feature(
+    sdata, summary=points_summary, features=["EPCAM", "VIM"],
+)
 
+feature_summary.per_feature                          # totals independent of binning
 feature_summary.spatial_counts.sel(feature="EPCAM")  # one feature's XY grid
 feature_summary.spatial_bins.per_bin                 # histogram measurements
 feature_summary.spatial_bins.per_feature             # statistics per feature
-hp.qc.spatial_bin_histogram(feature_summary, feature="EPCAM", ax=ax)
+hp.qc.spatial_bin_histogram_by_feature(feature_summary, feature="EPCAM", ax=ax)
 ```
 
 #### Shared implementation and memory
 
 Reuse feature-panel resolution/validation, coordinate transformations,
-`SpatialBounds` handling, bin-edge construction, and partition-wise bin
+`SpatialBounds` handling, inherited bin edges, and partition-wise bin
 counting. Generalize the private grouping/array helpers only as needed to
 support either a feature-class or feature axis; do not maintain an independent
 binning implementation or introduce a public grouping-mode framework.
@@ -5293,11 +5344,13 @@ These derived tables require neither an additional source scan nor a
 cross-partition distinct-feature reduction. They do require local work and
 memory proportional to the completed feature grid and retained-bin rows.
 
-Reduce all requested features together in one partition-wise count pass.
-A preliminary selected-feature extent reduction
-may still be needed without an explicit crop. Never scan separately for each
-requested feature, collect the full points dataframe on the driver, or call
-point-to-label assignment. A separate call to this API reads original points;
+For binned references, reduce all requested features together in one
+partition-wise count pass, with no preliminary extent reduction. Top-level
+feature totals use the same reduced counts; do not add another source pass.
+For unbinned references, select existing totals without a source scan.
+Never scan separately for each requested feature, collect the full points
+dataframe on the driver, or call
+point-to-label assignment. A binned call to this API reads original points;
 it cannot obtain feature-specific counts from a previously returned class grid.
 Calling both public APIs may therefore scan the source separately. Sharing
 private helpers means sharing implementation, not caching results or sharing
@@ -5305,9 +5358,11 @@ execution across calls.
 
 Apply `max_grid_bytes` to
 `n_requested_features * n_y_bins * n_x_bins * uint64.itemsize` before allocating
-the dense feature grid. Do not allocate or reduce unselected panel features or
-class planes to determine occupancy. As in `summarize_points`, this limits the final
-count grid, not total peak memory or intermediate reductions. In particular,
+the dense feature grid; do not enforce it for unbinned references.
+Do not allocate or reduce unselected panel features or
+class planes to determine occupancy; reuse the reference mask. As in
+`summarize_points`, this limits the final count grid, not total peak memory
+or intermediate reductions. In particular,
 `spatial_bins.per_bin` adds `n_requested_features * n_retained_bins` rows:
 20 features over 100,000 retained bins produce two million rows, with geometry
 and count columns in addition to the grid. Document this cost; do not describe
@@ -5317,14 +5372,19 @@ and count columns in addition to the grid. Document this cost; do not describe
 
 Focused tests should establish that:
 
+- feature totals are always returned in panel order, including undetected
+  features, and agree across binned/unbinned calls with the same selection;
+- an unbinned reference leaves spatial results and mask absent and reuses
+  already-cropped feature totals with no source reads or coordinate work;
 - requested features have separate count planes, with no implicit pooling;
-- valid undetected features retain all-zero planes; unknown features and
-  invalid source feature/class assignments raise;
+- valid undetected features retain all-zero planes; unknown/unrepresented
+  features raise, and binned source scans reject invalid feature/class assignments;
 - coordinate transforms, crops, edge conventions, and calibration match the
   shared summary contract;
-- only requested features determine automatic extent and bin inclusion;
-  zeros within their shared population remain explicit, and an entirely empty
-  selection raises even with an explicit crop;
+- a feature alone or alongside others has identical counts, grid, mask and
+  statistics, including with automatically inferred reference edges;
+- entirely undetected requested features retain zero planes and rows over the
+  reference population, including features removed by the reference crop;
 - `retained_bin_mask`, per-bin measurements, and per-feature statistics use
   the same population; totals match the feature planes and undetected features
   retain zero-valued rows and the specified single-bin/constant SD behavior;
@@ -5335,9 +5395,10 @@ Focused tests should establish that:
   bin summaries use the completed grid without another source scan;
 - feature histograms consume the prepared measurements and statistics through
   the shared renderer, accept only compatible selectors, and retain zeros and
-  the full-population percentage denominator after display filtering;
-- no top-level per-feature/per-class summary, AnnData construction, or plotting
-  is invoked by the computation API; and
+  the full-population percentage denominator after display filtering; unbinned
+  summaries raise with guidance to create a binned `summarize_points` reference;
+- no complete-class summary, AnnData construction, or plotting is invoked by
+  the feature computation API; and
 - source elements and metadata remain unchanged.
 
 ### Part 11e.iv: spatial density heatmaps
@@ -5352,6 +5413,10 @@ the required context. Neither parent input is an alternative computation
 path: do not accept SpatialData or compute missing results. Reuse the shared
 transcript-positive-bin definition from 11e.i and 11e.iii; the histogram
 renderer need not be implemented first.
+
+Both summary types may be unbinned. Reject a missing `spatial_counts` with
+guidance to create a `summarize_points` reference with `bin_size` and, for
+feature plots, pass that reference to `summarize_points_by_feature`.
 
 Validate only the array's dimensions/coordinates and the parent's metadata
 needed for the requested display. Read bin geometry and `to_coordinate_system`
@@ -5398,7 +5463,7 @@ without another point scan.
 Requesting a class or feature absent from the array raises a clear error
 without a source scan or panel lookup. An available all-zero plane is valid.
 The panel requirement and source feature/class validation belong to
-`summarize_points` or `bin_points_by_feature`, not the renderer. When either
+`summarize_points` or `summarize_points_by_feature`, not the renderer. When either
 computation finds a missing panel, its error directs the user to the
 `hp.pt.add_feature_panel` helper from Slice 11c.
 
@@ -5488,7 +5553,7 @@ operate on the precomputed bins.
 The current `plot_transcript_density` filters points and then calls
 `ddf.compute()` before constructing a NumPy histogram. Replace that computation
 path with direct rendering of the compact spatial-count array inside the
-parent result produced by `summarize_points` or `bin_points_by_feature`. Update affected examples,
+parent result produced by `summarize_points` or `summarize_points_by_feature`. Update affected examples,
 documentation, and tests to the explicit compute-then-plot workflow; do not
 retain the previous source-data signature
 through a compatibility branch or add an optional convenience shortcut.

@@ -76,7 +76,10 @@ def _feature_summary(counts):
         metadata=original.metadata,
         per_feature=pd.DataFrame(),
         spatial_counts=grid,
-        spatial_bins=_summarize_feature_bins(grid, metadata=original.metadata, panel=panel),
+        spatial_bins=_summarize_feature_bins(
+            grid, metadata=original.metadata, panel=panel, retained_bin_mask=original.retained_bin_mask
+        ),
+        retained_bin_mask=original.retained_bin_mask,
     )
 
 
@@ -329,7 +332,7 @@ def test_empty_population_and_invalid_spatial_histogram_requests():
     assert "No retained spatial bins" in empty.texts[0].get_text()
     with pytest.raises(ValueError, match="bin_size"):
         spatial_bin_histogram(replace(summary, spatial_bins=None), feature_class="Control")
-    with pytest.raises(ValueError, match=r"summarize_points_by_feature\(\) with bin_size"):
+    with pytest.raises(ValueError, match=r"summarize_points\(\) with bin_size"):
         spatial_bin_histogram_by_feature(replace(_feature_summary([0, 1]), spatial_bins=None), feature="EPCAM")
     with pytest.raises(ValueError, match="absent"):
         spatial_bin_histogram(summary, feature_class="Missing")

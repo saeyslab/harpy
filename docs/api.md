@@ -203,8 +203,12 @@ Quality control functions.
     table_histogram
     table_histograms
     spatial_bin_histogram
+    spatial_bin_histogram_by_feature
     obs_scatter
     summarize_points
+    summarize_points_by_feature
+    FeaturePointsSummary
+    FeatureSpatialBinSummary
     PointsSummary
     PointsSummaryMetadata
     SpatialBinSummary
