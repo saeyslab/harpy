@@ -39,7 +39,7 @@ implemented:
       `summarize_points` — implemented; **11e.ii** spatial-bin histograms — implemented;
       **11e.iii** feature-specific spatial counts and bin summaries through
       `hp.qc.summarize_points_by_feature` — implemented; **11e.iv** spatial density
-      heatmaps — implemented; and **11e.v** density-only marimo overview;
+      heatmaps — implemented; and **11e.v** density-only marimo overview — implemented;
     - **11f:** table-level summary computation through `hp.qc.summarize_table`
       and `TableSummary`, with plotting integration;
 
@@ -4373,7 +4373,7 @@ Focused tests should cover:
 
 ## Slice 11e: original-point summary visualization
 
-**Status: Parts 11e.i–iv implemented; Part 11e.v specified, not implemented.**
+**Status: Parts 11e.i–v implemented.**
 
 Implement annotation-free QC of transcript-positive spatial bins,
 using the existing `PointsSummary.spatial_counts` from Slice 11a, plus an
@@ -5778,7 +5778,7 @@ Focused tests should establish that:
 
 ### Part 11e.v: marimo density overview
 
-**Status: specified; not implemented. Depends on Part 11e.iv.**
+**Status: implemented.**
 
 Integrate `hp.pl.plot_points_density` into
 `notebooks/2026_08_ucb/histograms.py`. The first version adds class-density maps
@@ -5807,6 +5807,9 @@ Do not add another sample/class selector or a **Calculate density** button.
 Class-density views must work before any feature summaries are calculated.
 Default density maps to raw counts (`normalization=None`); without a background
 image, no opacity control is needed in this first version.
+Show one interactive figure per displayed sample, with its own labelled color
+scale. Report unavailable classes per sample rather than substituting another
+class. The existing feature-summary and feature-histogram controls remain intact.
 
 Keep computation and display dependencies separate:
 
@@ -5838,14 +5841,20 @@ Choose a bounded notebook canvas explicitly, for example:
 ```python
 import matplotlib.pyplot as plt
 
-fig, ax = plt.subplots(figsize=(10, 6), dpi=150)
+fig, ax = plt.subplots(figsize=(10, 4.3), dpi=100, layout="compressed")
 hp.pl.plot_points_density(summary, feature_class="Endogenous", ax=ax)
+ax.set_xlabel("")
+ax.set_ylabel("")
 mo.mpl.interactive(fig)
 ```
 
-This example produces a 1,500 × 900 pixel canvas, with less space available for
-the heatmap after labels, margins, the colorbar, and aspect adjustment. It is a
-display choice, not an automatically derived optimum or a change in bin size.
+The notebook uses a full-width layout and a 10-inch-wide canvas at 100 DPI.
+Height follows the physical y/x extent, allowing space for decorations, and
+is bounded to 3–8 inches. Compressed layout reduces unused space around the
+equal-aspect map and its colorbar. Keep numerical coordinate ticks but omit
+axis names: the title already identifies the coordinate system.
+Browser display scaling may adjust the canvas resolution.
+This is a display choice, not an automatically derived optimum or a change in bin size.
 For uniformly spaced bins, approximate horizontal detail as:
 
 ```text
@@ -5889,6 +5898,12 @@ Smoke-test the running marimo overview with representative grid sizes:
 browser pan/zoom, bounded canvases, correct selected-class maps, and unchanged
 bin geometry. Image/channel controls, DAPI overviews, image-region rendering,
 Qt integration, and density-image export are outside this part.
+
+Implemented checks include focused notebook-cell tests and a running-browser
+smoke test with two synthetic samples, including a 400 × 1,000-bin grid.
+Sample/class changes reuse summaries, histogram switches leave density figures
+unchanged, and pan/zoom navigates existing grids without another reduction.
+This does not establish performance on the full UCB dataset.
 
 ## Slice 11f: table-level summary computation and plotting integration
 
