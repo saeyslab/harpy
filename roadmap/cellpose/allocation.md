@@ -34,12 +34,12 @@ implemented:
       elements through `hp.pt.add_feature_panel` — implemented;
     - **11d:** validate existing points against their registered feature panel
       through the read-only `hp.pt.validate_points` API;
-    - **11e:** transcript-positive bin summaries and visualization, in four
+    - **11e:** transcript-positive bin summaries and visualization, in five
       separate parts: **11e.i** construct `summary.spatial_bins` inside
       `summarize_points` — implemented; **11e.ii** spatial-bin histograms — implemented;
       **11e.iii** feature-specific spatial counts and bin summaries through
-      `hp.qc.summarize_points_by_feature` — implemented; and **11e.iv** spatial density
-      heatmaps;
+      `hp.qc.summarize_points_by_feature` — implemented; **11e.iv** spatial density
+      heatmaps; and **11e.v** marimo density overview;
     - **11f:** table-level summary computation through `hp.qc.summarize_table`
       and `TableSummary`, with plotting integration;
 
@@ -86,8 +86,9 @@ which derives transcript-positive bin statistics and renders the precomputed
 summary outputs: density plotting accepts the parent `PointsSummary` or
 `FeaturePointsSummary`, keeping counts and their single metadata
 record together. It does not accept a SpatialData object.
-It neither reads the source points nor resolves a live panel registry. Slice
-11f provides the symmetric read-only table-summary workflow, deriving
+It neither reads the source points nor resolves a live panel registry. Part
+11e.v then integrates this standalone plotter into a marimo density overview.
+Slice 11f provides the symmetric read-only table-summary workflow, deriving
 per-instance metrics and class-level overviews from the class-aware table before
 plotting. Slice 12 is an independent integration follow-up that makes later
 SpatialData Zarr reads retain lazy AnnData matrices. It is not required for Slice 7b's
@@ -4371,7 +4372,7 @@ Focused tests should cover:
 
 ## Slice 11e: original-point summary visualization
 
-**Status: Parts 11e.i–iii implemented; Part 11e.iv specified, not implemented.**
+**Status: Parts 11e.i–iii implemented; Parts 11e.iv–v specified, not implemented.**
 
 Implement annotation-free QC of transcript-positive spatial bins,
 using the existing `PointsSummary.spatial_counts` from Slice 11a, plus an
@@ -4388,12 +4389,16 @@ explicit computation path for feature-specific grids:
    `spatial_bin_histogram_by_feature` alongside the class histogram API from 11e.ii.
 4. **11e.iv: spatial density heatmaps** — render class-level or feature-level
    spatial-count arrays through `hp.pl.plot_points_density`.
+5. **11e.v: marimo density overview** — integrate the plotter into the notebook,
+   with display controls, browser pan/zoom, DAPI overviews, and explicit region views.
 
 Part 11e.ii implements class histograms from the computed result of 11e.i;
 11e.iii adds a separate feature-summary plotting adapter sharing the same renderer. Neither requires
 density rendering to be implemented first. Part 11e.iv consumes the class-grid contract
-from 11e.i and the feature-grid contract from 11e.iii. Keep the parts within
-Slice 11e so later slice numbers remain unchanged. Replace the former per-feature distribution
+from 11e.i and the feature-grid contract from 11e.iii. Part 11e.v follows 11e.iv
+and reuses its plotter; notebook integration is not required to complete 11e.iv.
+Keep the parts within Slice 11e so later slice numbers remain unchanged.
+Replace the former per-feature distribution
 plot and per-feature class-summary display with this bin-based workflow.
 Feature-specific maps and bin histograms do not reinstate distributions over
 features' total counts, rankings, or top-N plots. Their histograms describe
@@ -5414,11 +5419,12 @@ path: do not accept SpatialData or compute missing results. Reuse the shared
 transcript-positive-bin definition from 11e.i and 11e.iii; the histogram
 renderer need not be implemented first.
 
-Scope this part to the read-only plotter and a marimo overview. Defer converting
-or writing density grids into SpatialData image elements, including export
-transformations, mask storage, and display-pyramid generation. Do not introduce
-an export API, napari integration, or a new implementation slice for that work
-yet; plotting must never modify the SpatialData object or backing store.
+Scope this part to the standalone read-only plotter, including generic image
+overlays through shared axes. Marimo integration follows separately in 11e.v.
+Defer converting or writing density grids into SpatialData image elements,
+including export transformations, mask storage, and display-pyramid generation.
+Do not introduce an export API or napari integration in either part; plotting
+must never modify the SpatialData object or backing store.
 
 This is a breaking replacement: remove the old public name and SpatialData-input
 signature, without a deprecated alias, compatibility shim, or legacy computation
@@ -5664,42 +5670,13 @@ aspect, and axis orientation; do not reset its viewport or blindly invert its
 y-axis. Draw the density above the image with the requested opacity, retaining
 transparent excluded bins and visible zero-valued bins inside the shared mask.
 
-#### Marimo overview and large-image display
-
-Reuse already computed class and feature summaries in the notebook overview.
-Display controls select samples, classes/features, normalization, and opacity
-without reading source points or recalculating summaries. Keep marimo-specific
-code in the notebook, not in the plotting API or Harpy's base dependencies.
-
-Use browser-based Matplotlib interaction through `mo.mpl.interactive(ax)` for
-pan/zoom in a running notebook; do not introduce Qt integration or switch the
-plotter to a GUI backend. This adds navigation to the rendered figure, not a
-large-image streaming system. In particular, zooming into a downsampled DAPI
-overview does not automatically fetch a finer image level.
-
-For large-image overlays:
-
-- Render whole-sample overviews using suitable existing image-pyramid levels
-  where available, rather than requiring a full-resolution mosaic in memory.
-- Provide explicit region-of-interest views that rerender the image crop at a
-  suitable higher resolution through the existing image renderer. Reuse the
-  density grid in the same coordinate system; changing the displayed region
-  must not redefine the summary's retained-bin population or statistics.
-- Keep the density's computed bin resolution in both overview and region views.
-  Increasing figure size or DPI does not create finer bins or solve image-loading
-  costs. Do not add automatic viewport-driven image loading in this part.
-
-Check rendering and interaction on representative grid and image sizes before
-claiming acceptable performance; browser pan/zoom alone does not make a large
-Matplotlib mesh or image memory-bounded.
-
 #### Reuse of precomputed grids
 
 The current `plot_transcript_density` filters points and then calls
 `ddf.compute()` before constructing a NumPy histogram. Replace that computation
 path with direct rendering of the compact spatial-count array inside the
 parent result produced by `summarize_points` or `summarize_points_by_feature`.
-Update public exports, API documentation, affected examples, notebooks, and tests
+Update public exports, API documentation, affected examples, and tests
 to `plot_points_density` and the explicit compute-then-plot workflow. Do not
 retain the previous name or source-data signature through a compatibility branch
 or add an optional convenience shortcut.
@@ -5758,15 +5735,56 @@ Focused tests should establish that:
   while retaining zero-valued bins inside the mask;
 - normalization and smoothing do not mutate raw counts, summary metadata,
   retained-bin masks, or computed statistics;
-- the notebook overview reuses calculated summaries when display controls
-  change, performs no source-point reductions, and writes no SpatialData
-  elements or metadata;
 - sample, mosaic, and panel identities remain distinguishable; and
 - density rendering never calls summary computation, source-point reads,
   point reductions, or panel-registry resolution, including when several
   classes or features are rendered from the same array.
 
-Also smoke-test the running marimo overview with representative grid sizes and
+### Part 11e.v: marimo density overview
+
+**Status: specified; not implemented. Depends on Part 11e.iv.**
+
+Integrate `hp.pl.plot_points_density` into the marimo notebook after the
+standalone plotter is implemented. Reuse the class and feature summaries from
+11e.i and 11e.iii; do not implement a separate density renderer in the notebook.
+SpatialData density-image export and napari integration remain deferred.
+
+#### Notebook controls and large-image display
+
+Reuse already computed class and feature summaries in the notebook overview.
+Display controls select samples, classes/features, normalization, and opacity
+without reading source points or recalculating summaries. Keep marimo-specific
+code in the notebook, not in the plotting API or Harpy's base dependencies.
+
+Use browser-based Matplotlib interaction through `mo.mpl.interactive(ax)` for
+pan/zoom in a running notebook; do not introduce Qt integration or switch the
+plotter to a GUI backend. This adds navigation to the rendered figure, not a
+large-image streaming system. In particular, zooming into a downsampled DAPI
+overview does not automatically fetch a finer image level.
+
+For large-image overlays:
+
+- Render whole-sample overviews using suitable existing image-pyramid levels
+  where available, rather than requiring a full-resolution mosaic in memory.
+- Provide explicit region-of-interest views that rerender the image crop at a
+  suitable higher resolution through the existing image renderer. Reuse the
+  density grid in the same coordinate system; changing the displayed region
+  must not redefine the summary's retained-bin population or statistics.
+- Keep the density's computed bin resolution in both overview and region views.
+  Increasing figure size or DPI does not create finer bins or solve image-loading
+  costs. Do not add automatic viewport-driven image loading in this part.
+
+Check rendering and interaction on representative grid and image sizes before
+claiming acceptable performance; browser pan/zoom alone does not make a large
+Matplotlib mesh or image memory-bounded.
+
+#### Verification
+
+Check that the notebook overview reuses calculated summaries when display
+controls change, performs no source-point reductions, and writes no SpatialData
+elements or metadata. Notebook display changes must not mutate the summaries.
+
+Smoke-test the running marimo overview with representative grid sizes and
 existing multiscale images: browser pan/zoom, an appropriately resolved DAPI
 overview, and an explicit higher-resolution region view. Confirm alignment and
 unchanged bin geometry without relying on an automatic image-level refresh when
