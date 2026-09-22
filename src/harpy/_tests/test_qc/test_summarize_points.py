@@ -53,6 +53,27 @@ def _frame():
 
 
 def _sdata(frame=None, *, panel=None, npartitions=3):
+    """Create unbacked ``calls`` points with an identity transform to ``global``.
+
+    By default, ``_frame()`` supplies these points; ``code_class`` is categorical::
+
+        x  y  gene   code_class
+        0  0  GeneA  Endogenous
+        1  1  NegA   Negative
+        2  0  NegA   Negative
+        3  1  NegB   Negative
+        4  0  SysA   SystemControl
+        5  1  GeneB  Endogenous
+        6  0  NegA   Negative
+        7  1  GeneA  Endogenous
+
+    The default ``PANEL`` also contains undetected features: ZeroGene
+    (Endogenous), NegC (Negative), SysB (SystemControl), and NoCalls
+    (EmptyClass). It is registered as ``panel_a`` for sample ``sample_a``.
+
+    Supplying ``frame`` replaces the default point rows, not the panel;
+    supplying ``panel`` independently replaces the panel record.
+    """
     if frame is None:
         frame = _frame()
     points = frame if isinstance(frame, dd.DataFrame) else dd.from_pandas(frame, npartitions=npartitions)
