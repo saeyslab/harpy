@@ -9,6 +9,7 @@ import dask
 import numpy as np
 import pandas as pd
 import xarray as xr
+from dask.dataframe import DataFrame as DaskDataFrame
 from spatialdata import SpatialData
 from spatialdata.models import get_axes_names
 from spatialdata.transformations import get_transformation
@@ -27,16 +28,17 @@ from harpy.qc._points_binning import (
     _transformed_point_xy,
 )
 from harpy.qc._points_summary_metadata import PointsSummaryMetadata
+from harpy.qc._points_summary_schema import _FEATURE_CLASS_KEY, _FEATURE_KEY, _N_POINTS_KEY
 from harpy.transformations._transformations import _invertible_affine_matrix
 
 
 @dataclass(frozen=True)
 class _PointSummaryReduction:
-    """Compact source reductions shared by class- and feature-level summaries.
+    """Compact source reductions used to assemble a class-level points summary.
 
-    ``selected_names`` contains the selected feature/class names in panel order,
-    including names without detections. ``feature_counts`` contains only
-    observed selected features' totals; class summaries zero-fill these against the panel.
+    ``selected_names`` contains the selected class names in panel order,
+    including names without detections. ``feature_counts`` contains totals
+    for observed features in those classes; the summary zero-fills against the panel.
     No original points are retained here.
     """
 
@@ -47,67 +49,44 @@ class _PointSummaryReduction:
     metadata: PointsSummaryMetadata
 
 
-def _reduce_points(
+def _reduce_points_by_class(
     sdata: SpatialData,
     points_name: str,
     *,
-    selected_names: str | Sequence[str] | None,
-    summary_axis: Literal["feature_class", "feature"],
+    feature_classes: str | Sequence[str] | None,
     bin_size: float | None,
     max_grid_bytes: int | None,
     to_coordinate_system: str,
     microns_per_unit: float | None,
     crd: SpatialBounds | tuple[float, ...] | None,
 ) -> _PointSummaryReduction:
-    """Validate and jointly count selected features, grouped spatially by feature or class.
+    """Prepare a new class-level analysis context and reduce its source points.
 
-    Normalize and validate ``selected_names`` as a tuple in panel order before
-    counting, without modifying the caller's input sequence.
-    Resolve source columns from the panel. All selected features/classes share
-    one grid and one partition-wise validation/count pass; automatic extent
-    discovery needs a preliminary coordinate reduction. Selection determines extent and counts,
-    but never hides invalid source feature/class assignments during counting.
-    ``summary_axis`` names the output feature/class dimension, not a source column.
+    Validate class selection and spatial parameters, construct optional bin
+    edges (discovering selected-class extent when needed), and build metadata.
+    The selected population must be nonempty. Actual partition validation and
+    counting use ``_compute_point_reductions()``, also used by feature summaries.
     """
     if points_name not in sdata.points:
         raise ValueError(f"Points element {points_name!r} does not exist.")
     panel_name, panel, points_record = _resolve_points_feature_panel(sdata, points_name)
     points = sdata.points[points_name]
-    for key in (panel.feature_key, panel.feature_class_key):
-        if key not in points.columns:
-            raise ValueError(f"Points element {points_name!r} does not contain panel column {key!r}.")
-    _validate_feature_class_dtype(points, points_name=points_name, panel=panel)
-    if summary_axis == "feature_class":
-        selection_parameter = "feature_classes"
-        allowed_names = panel.classes
-        selection_key = panel.feature_class_key
-        if selected_names is None:
-            selected_names = allowed_names
-    else:
-        selection_parameter = "features"
-        # The mapping's keys are the panel's feature names.
-        allowed_names = tuple(panel.class_by_feature)
-        selection_key = panel.feature_key
-        if selected_names is None:
-            raise ValueError("features must contain one or more exact panel names.")
-
-    # The panel returned by _resolve_points_feature_panel() guarantees sorted
-    # classes and sorted features within each class. `allowed_names` inherits
-    # that order: class names, or feature names ordered first by class, then
-    # within each class—not globally alphabetical across classes.
-    # Validate the selection below and preserve this panel order, not request order.
-    if not isinstance(selected_names, (str, Sequence)):
-        raise ValueError(f"{selection_parameter} must contain one or more exact panel names.")
-    selected_names = (selected_names,) if isinstance(selected_names, str) else tuple(selected_names)
-    if not selected_names or any(not isinstance(value, str) for value in selected_names):
-        raise ValueError(f"{selection_parameter} must contain one or more exact panel names.")
-    if len(set(selected_names)) != len(selected_names):
-        raise ValueError(f"{selection_parameter} must not contain duplicate names.")
-    unknown = set(selected_names) - set(allowed_names)
+    _validate_point_columns(points, points_name=points_name, panel=panel)
+    if feature_classes is None:
+        feature_classes = panel.classes
+    if not isinstance(feature_classes, (str, Sequence)):
+        raise ValueError("feature_classes must contain one or more exact panel names.")
+    requested = (feature_classes,) if isinstance(feature_classes, str) else tuple(feature_classes)
+    if not requested or any(not isinstance(value, str) for value in requested):
+        raise ValueError("feature_classes must contain one or more exact panel names.")
+    if len(set(requested)) != len(requested):
+        raise ValueError("feature_classes must not contain duplicate names.")
+    unknown = set(requested) - set(panel.classes)
     if unknown:
-        label = "feature classes" if summary_axis == "feature_class" else "features"
-        raise ValueError(f"Unknown {label}: {sorted(unknown)}; requested names must belong to the panel.")
-    selected_names = tuple(name for name in allowed_names if name in selected_names)
+        raise ValueError(f"Unknown feature classes: {sorted(unknown)}; requested names must belong to the panel.")
+    # _resolve_points_feature_panel() returns sorted panel classes. Preserve
+    # this canonical order rather than the order of the user's request.
+    selected_names = tuple(name for name in panel.classes if name in requested)
 
     if max_grid_bytes is not None:
         if isinstance(max_grid_bytes, bool) or not isinstance(max_grid_bytes, Integral) or max_grid_bytes < 1:
@@ -131,26 +110,17 @@ def _reduce_points(
     axes = ()
     matrix = None
     if bin_size is not None or crd is not None:
-        axes = tuple(get_axes_names(points))
-        if axes not in (("x", "y"), ("x", "y", "z")):
-            raise ValueError(f"Spatial summaries require XY or XYZ points, found axes {axes!r}.")
-        if crd is not None and crd.z is not None and "z" not in axes:
-            raise ValueError("crd z bounds require 3D points; the selected points element has no z axis.")
-        try:
-            transformation = get_transformation(points, to_coordinate_system=to_coordinate_system)
-        except ValueError as e:
-            raise ValueError(
-                f"Points element {points_name!r} does not define coordinate system {to_coordinate_system!r}."
-            ) from e
-        matrix = _invertible_affine_matrix(transformation, axes=axes, element_kind="Points")
+        axes, matrix = _resolve_point_coordinate_transform(
+            points, points_name=points_name, to_coordinate_system=to_coordinate_system, crd=crd
+        )
 
     edges = None
     if bin_size is not None:
         bounds = None if crd is None else (*crd.x, *crd.y)
         if bounds is None:
-            # Only selected features/classes determine extent. Min/max share the lazy
+            # Only selected classes determine extent. Min/max share the lazy
             # transformation into the requested coordinate system.
-            selected_points = points[points[selection_key].isin(selected_names)]
+            selected_points = points[points[panel.feature_class_key].isin(selected_names)]
             transformed_xy = selected_points[list(axes)].map_partitions(
                 _transformed_point_xy,
                 axes=axes,
@@ -161,7 +131,7 @@ def _reduce_points(
             bounds = (minimum["x"], maximum["x"], minimum["y"], maximum["y"])
             if not np.isfinite(bounds).all():
                 raise ValueError(
-                    f"No points remain for the selected {selection_parameter}; cannot infer spatial extent. "
+                    "No points remain for the selected feature_classes; cannot infer spatial extent. "
                     "Check the selection and source points."
                 )
         edges = _point_bin_edges(
@@ -172,6 +142,141 @@ def _reduce_points(
             max_grid_bytes=max_grid_bytes,
         )
 
+    feature_counts, bin_counts = _compute_point_reductions(
+        points,
+        panel=panel,
+        points_name=points_name,
+        selected_names=selected_names,
+        summary_axis=_FEATURE_CLASS_KEY,
+        axes=axes,
+        matrix=matrix,
+        crd=crd,
+        edges=edges,
+    )
+    # Counts contain only observed selected features, before panel zero-filling.
+    if feature_counts.empty:
+        raise ValueError(
+            "No points remain after applying feature_classes and crd. "
+            "Check the selection, crop bounds, and coordinate system."
+        )
+    metadata = PointsSummaryMetadata(
+        points_name=points_name,
+        sample_id=points_record.get("sample_id"),
+        feature_panel=panel_name,
+        to_coordinate_system=to_coordinate_system,
+        crd=crd,
+        microns_per_unit=microns_per_unit,
+        bin_size=None if bin_size is None else float(bin_size),
+        x_edges=None if edges is None else tuple(float(value) for value in edges[0]),
+        y_edges=None if edges is None else tuple(float(value) for value in edges[1]),
+    )
+    grid = (
+        None
+        if edges is None
+        else _spatial_count_array(
+            bin_counts, selected_names=selected_names, summary_axis=_FEATURE_CLASS_KEY, edges=edges
+        )
+    )
+    return _PointSummaryReduction(
+        panel=panel,
+        selected_names=selected_names,
+        feature_counts=feature_counts,
+        spatial_counts=grid,
+        metadata=metadata,
+    )
+
+
+def _validate_point_columns(points: DaskDataFrame, *, points_name: str, panel: _FeaturePanelContract) -> None:
+    """Check source columns and categorical class dtype without reading point rows."""
+    for key in (panel.feature_key, panel.feature_class_key):
+        if key not in points.columns:
+            raise ValueError(f"Points element {points_name!r} does not contain panel column {key!r}.")
+    _validate_feature_class_dtype(points, points_name=points_name, panel=panel)
+
+
+def _resolve_point_coordinate_transform(
+    points: DaskDataFrame, *, points_name: str, to_coordinate_system: str, crd: SpatialBounds | None
+) -> tuple[tuple[str, ...], np.ndarray]:
+    """Resolve the full XY/XYZ affine for spatial selection and binning."""
+    axes = tuple(get_axes_names(points))
+    if axes not in (("x", "y"), ("x", "y", "z")):
+        raise ValueError(f"Spatial summaries require XY or XYZ points, found axes {axes!r}.")
+    if crd is not None and crd.z is not None and "z" not in axes:
+        raise ValueError("crd z bounds require 3D points; the selected points element has no z axis.")
+    try:
+        transformation = get_transformation(points, to_coordinate_system=to_coordinate_system)
+    except ValueError as e:
+        raise ValueError(
+            f"Points element {points_name!r} does not define coordinate system {to_coordinate_system!r}."
+        ) from e
+    return axes, _invertible_affine_matrix(transformation, axes=axes, element_kind="Points")
+
+
+def _compute_point_reductions(
+    points: DaskDataFrame,
+    *,
+    panel: _FeaturePanelContract,
+    points_name: str,
+    selected_names: tuple[str, ...],
+    summary_axis: Literal["feature_class", "feature"],
+    axes: tuple[str, ...],
+    matrix: np.ndarray | None,
+    crd: SpatialBounds | None,
+    edges: tuple[np.ndarray, np.ndarray] | None,
+) -> tuple[pd.Series, pd.Series | None]:
+    """Compute compact feature totals and optional bin counts from prepared inputs.
+
+    Parameters
+    ----------
+    points
+        Lazy source points dataframe. The caller checks that the panel's
+        feature/class columns exist and the class column has a compatible dtype.
+    panel
+        Validated feature panel defining source column names and the allowed
+        feature-to-class assignments.
+    points_name
+        Source element name used in validation errors.
+    selected_names
+        Validated class or feature names to include, according to ``summary_axis``.
+    summary_axis
+        ``"feature_class"`` selects classes through ``panel.feature_class_key``;
+        ``"feature"`` selects features through ``panel.feature_key``. Also names
+        the first bin-count index level. Feature totals always count individual
+        features, regardless of this choice.
+    axes
+        Source coordinate columns in matrix order: ``("x", "y")`` or
+        ``("x", "y", "z")``. Empty when neither cropping nor binning is requested.
+    matrix
+        Homogeneous affine matrix from source coordinates to the requested
+        coordinate system, with input and output axes ordered as ``axes``.
+        None when no spatial operation is requested.
+    crd
+        Optional crop in transformed coordinates, applied to both outputs.
+        Any z bounds are applied before projecting to XY for binning.
+    edges
+        Prepared ``(x_edges, y_edges)`` arrays in transformed coordinates, or
+        None to skip binning. The caller supplies edges covering the selected
+        points; this helper does not infer extent or construct a grid.
+
+    Returns
+    -------
+    feature_counts
+        In-memory uint64 Series named ``n_points``, indexed by ``feature``.
+        Contains totals for observed features after selection and cropping;
+        callers add zero counts for undetected panel features.
+    bin_counts
+        In-memory uint64 Series named ``n_points``, indexed by
+        ``(summary_axis, y_bin, x_bin)`` with zero-based bin indices. Contains
+        only occupied bins; None when ``edges`` is None.
+
+    Notes
+    -----
+    Each partition validates all source feature/class assignments before
+    filtering, then computes both counts. A tree reduction merges compact
+    results; only the final reduced Series are materialized on the driver,
+    never original point rows. Empty results are returned unchanged, leaving
+    the empty-population policy to the caller.
+    """
     columns = list(dict.fromkeys([panel.feature_key, panel.feature_class_key, *axes]))
     # Each delayed partition has one consumer that both validates and reduces
     # it. Feature and bin counts therefore share the same source read/selection.
@@ -189,36 +294,7 @@ def _reduce_points(
         )
         for part in points[columns].to_delayed()
     ]
-    feature_counts, bin_counts = dask.compute(_tree_reduce(tasks, _merge_point_summaries))[0]
-    # Counts contain only observed selected features, before panel zero-filling.
-    if feature_counts.empty:
-        raise ValueError(
-            f"No points remain after applying {selection_parameter} and crd. "
-            "Check the selection, crop bounds, and coordinate system."
-        )
-    metadata = PointsSummaryMetadata(
-        points_name=points_name,
-        sample_id=points_record.get("sample_id"),
-        feature_panel=panel_name,
-        to_coordinate_system=to_coordinate_system,
-        crd=crd,
-        microns_per_unit=microns_per_unit,
-        bin_size=None if bin_size is None else float(bin_size),
-        x_edges=None if edges is None else tuple(float(value) for value in edges[0]),
-        y_edges=None if edges is None else tuple(float(value) for value in edges[1]),
-    )
-    grid = (
-        None
-        if edges is None
-        else _spatial_count_array(bin_counts, selected_names=selected_names, summary_axis=summary_axis, edges=edges)
-    )
-    return _PointSummaryReduction(
-        panel=panel,
-        selected_names=selected_names,
-        feature_counts=feature_counts,
-        spatial_counts=grid,
-        metadata=metadata,
-    )
+    return dask.compute(_tree_reduce(tasks, _merge_point_summaries))[0]
 
 
 def _tree_reduce(tasks, merge, *, fan_in: int = 8):
@@ -297,7 +373,8 @@ def _summarize_point_partition(
     and filter it by ``selected_names`` before spatial selection. For example,
     ``gene`` can group bins under the output axis ``feature``; ``code_class``
     can group under ``feature_class``.
-    Excluded features/classes contribute neither counts nor bin inclusion.
+    Excluded features/classes contribute no counts to this reduction. Callers
+    decide which bins enter the resulting statistical summaries.
     """
     errors = _feature_panel_partition_errors(
         partition,
@@ -307,7 +384,7 @@ def _summarize_point_partition(
     )
     if len(errors):
         raise ValueError(f"Points element {points_name!r}: {errors.iloc[0]}")
-    selection_key = panel.feature_class_key if summary_axis == "feature_class" else panel.feature_key
+    selection_key = panel.feature_class_key if summary_axis == _FEATURE_CLASS_KEY else panel.feature_key
     selected = partition.loc[partition[selection_key].isin(selected_names)]
     keep, xy = _select_point_coordinates(selected, axes=axes, matrix=matrix, crd=crd)
     selected = selected.loc[keep]
@@ -319,8 +396,8 @@ def _summarize_point_partition(
     # Count observed strings only: categorical value_counts would otherwise
     # include unused source categories independently of the authoritative panel.
     features = selected[panel.feature_key].astype(object).value_counts(sort=False).astype(np.uint64)
-    features.index.name = "feature"
-    features.name = "n_points"
+    features.index.name = _FEATURE_KEY
+    features.name = _N_POINTS_KEY
     return features, bins
 
 
@@ -345,7 +422,7 @@ def _spatial_count_array(counts: pd.Series, *, selected_names, summary_axis: str
     return xr.DataArray(
         grid,
         dims=(summary_axis, "y", "x"),
-        name="n_points",
+        name=_N_POINTS_KEY,
         coords={
             summary_axis: list(selected_names),
             "x": x_edges[:-1] + np.diff(x_edges) / 2,
