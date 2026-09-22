@@ -5434,9 +5434,23 @@ feature_class: str | None = None
 features: str | Sequence[str] | None = None
 ```
 
-Derive bin inclusion from all planes in the supplied result, before display
-selection; these are the classes/features selected at computation time, not
-necessarily the whole assay panel. For a class grid, display selection operates only on the
+Use the supplied result's `retained_bin_mask`, independently of display
+selection:
+
+- For `PointsSummary`, the property derives inclusion from all class planes
+  in its grid: any class selected during summary computation can retain a bin.
+  These classes need not cover the whole assay panel.
+- For `FeaturePointsSummary`, use the mask inherited from the original
+  `PointsSummary` supplied to `summarize_points_by_feature`. Never reconstruct
+  it from the feature planes, even from their combined nonzero counts. A bin
+  retained by the original summary remains included when every requested
+  feature has zero counts there.
+
+For example, a bin retained because it contains VIM remains visible as zero
+in an EPCAM-only heatmap if EPCAM was not detected there. Selecting or combining
+feature planes must not change that inherited population.
+
+For a class grid, display selection operates only on the
 `feature_class` coordinate of that array. `None` sums the counts across its classes for the
 display; it does not recover classes excluded during summary computation.
 A string selects an exact available class, such as `"Endogenous"`, `"Negative"`,
@@ -5504,34 +5518,73 @@ the source grid or produce a new reduction over original points.
 
 Class/feature selection, bin inclusion, and normalization are separate choices.
 Selecting `"Negative"` or a feature must not silently divide counts by panel
-size or bin area. Expose normalization explicitly and label its units; the
-exact normalization parameter names remain to be specified for this part.
+size or bin area. Use one explicit keyword:
 
-For class grids, derive display values from raw bins, optionally dividing by
-the class panel sizes exposed by the derived `summary.panel_feature_counts`
-property and, when `summary.metadata.microns_per_unit`
-is not `None`, by physical geometric bin area, using the calibration contract
-from 11e.i rather than inferring units from a coordinate-system name. These are
-summary snapshots; never resolve them again from a live panel registry or
-estimate them from observed features. Require the relevant parent metadata
-when a selected normalization needs it. Do not substitute a whole-mosaic area for
-individual bin area. Keep the array's raw counts unchanged; any smoothing
-applies to the display only. Matched class plots must use the common extent and
-bin edges in the parent's metadata, including all-zero grids for valid
-classes without detections. For the CosMx control comparison, use the same
-chosen normalization for the separate negative-probe and system-control maps.
+```python
+normalization: Literal["per_area", "per_panel_feature", "per_panel_feature_per_area"] | None = None
+```
 
-For feature grids, support raw counts or explicitly requested physical-area
-normalization using the captured calibration and bin geometry. Do not divide
-individual feature counts or a selected feature sum by a whole-class panel
-size; class-panel normalization applies only to class grids.
+`None` means no normalization: display raw points per bin without dividing by
+bin area, panel size, or the sample's total counts.
 
-Render bins excluded by the shared mask as transparent or otherwise clearly
-unreported. Keep class- and feature-specific zeros inside that mask visible
-as zero, not missing data; do not mask each plane by its own positive counts.
-A completely empty population gets an explicit empty-state message. The raw zero-filled
-array remains unchanged. Any optional smoothing is display-only, must respect
-the shared mask, and never changes the statistics or histogram inputs.
+For each bin, let `C` be the selected or combined raw count, `A` its physical
+area in µm², and `N` the complete panel feature count for the displayed classes:
+
+| `normalization` | Display value | Colorbar units | Supported input |
+| --- | --- | --- | --- |
+| `None` | `C` | Points per bin | Both summary types |
+| `"per_area"` | `C / A` | Points per µm² | Both summary types |
+| `"per_panel_feature"` | `C / N` | Points per panel feature per bin | `PointsSummary` only |
+| `"per_panel_feature_per_area"` | `C / (N * A)` | Points per panel feature per µm² | `PointsSummary` only |
+
+Read both denominators from the supplied summary, without separate overrides:
+
+- Panel sizes come from `summary.panel_feature_counts`, including panel features
+  with no detections, not just observed features. For one class, use its panel
+  size, not the entire assay panel size. For example, a panel with 5,000
+  Endogenous features and 10 Negative features uses `N=10` for a Negative map,
+  not 5,010. This is an average across panel features in the displayed class,
+  not a count for an individual feature or a division by the number of classes.
+  With `feature_class=None`, sum counts across the computed classes and
+  divide by their combined panel size; do not sum separately normalized maps.
+- Physical areas use actual `x_edges`/`y_edges` differences multiplied by
+  `summary.metadata.microns_per_unit**2`, including narrower terminal bins after
+  an explicit crop. Area-normalized modes require this calibration and raise a
+  clear error if it is missing. Do not infer units from a coordinate-system name
+  or substitute whole-mosaic area for individual bin area.
+
+These are captured summary values: never resolve a live panel registry or
+estimate panel sizes from detected features. For `FeaturePointsSummary`, allow
+only `None` and `"per_area"`, whether displaying one feature or an explicit
+sum. Reject panel-normalized modes rather than dividing feature counts by a
+whole-class panel size. Reject unknown normalization values.
+
+For example:
+
+```python
+hp.pl.plot_transcript_density(
+    summary,
+    feature_class="Negative",
+    normalization="per_panel_feature_per_area",
+)
+```
+
+Normalization changes only display values and the colorbar label, never stored
+counts, the retained-bin mask, or computed statistics. Keep it separate from
+color scaling (for example, a logarithmic color scale), which maps values to
+colors without changing their units. Matched class plots use the common extent
+and bin edges from the summary metadata, including valid all-zero class planes.
+For negative-probe and system-control comparisons, use the same chosen
+normalization for both maps.
+
+Render bins excluded by `result.retained_bin_mask` as transparent or otherwise
+clearly unreported. Keep class- and feature-specific zeros inside that mask
+visible as zero, not missing data; do not mask each plane by its own positive
+counts. If the mask retains no bins, show an explicit empty-state message.
+An all-zero feature grid with a nonempty inherited population is not an empty
+population. The raw zero-filled array remains unchanged. Any optional smoothing
+is display-only, must respect the shared mask, and never changes the statistics
+or histogram inputs.
 
 The primary spatial visualization should be matched class heatmaps, optionally
 with shared morphology context. Neither a tissue outline nor an inferred tissue
@@ -5571,8 +5624,8 @@ helpers. Other plotting APIs are not changed solely to implement this contract.
 Focused tests should establish that:
 
 - all-zero classes/features remain visible inside a nonempty shared population,
-  while completely empty bins/populations are distinguished from
-  plane-specific zeros;
+  while bins excluded by the mask and completely empty masks are distinguished
+  from plane-specific zeros;
 - density plotting accepts `PointsSummary` and `FeaturePointsSummary`, reading
   their grids and single metadata records without SpatialData or a root panel
   registry; bare arrays do not substitute for the parent results;
@@ -5585,13 +5638,22 @@ Focused tests should establish that:
 - `features` selects existing feature planes, an explicit list combines their
   counts, and incompatible selectors or ambiguous multi-feature defaults raise;
   display selection never changes bin inclusion or invokes source filtering;
+- feature heatmaps use the inherited `FeaturePointsSummary.retained_bin_mask`,
+  including bins where every requested feature is zero. Plotting a feature
+  alone or alongside others preserves the original class summary's population;
 - source-data input is not accepted as an alternative computation path;
-- normalized displays use the corresponding captured metadata: authoritative
-  panel sizes for class normalization, calibration and bin geometry for
-  physical-area normalization; class-panel normalization is not applied to
-  feature grids;
+- `normalization=None` is the default and leaves counts unchanged; all four
+  choices produce the specified values and units using captured panel sizes
+  (including undetected features) and calibrated areas from actual bin edges,
+  including narrower terminal bins;
+- panel normalization uses only the displayed class's panel size, not the whole
+  assay panel. Pooled class normalization divides summed counts by the combined
+  panel size, not by summing separately normalized class maps;
+- area normalization without calibration, panel normalization of feature grids,
+  and unknown normalization values raise clear errors;
 - labels/units, axes, and common extents remain correct for both grid kinds;
-- normalization and smoothing do not mutate raw counts or summary metadata;
+- normalization and smoothing do not mutate raw counts, summary metadata,
+  retained-bin masks, or computed statistics;
 - sample, mosaic, and panel identities remain distinguishable; and
 - density rendering never calls summary computation, source-point reads,
   point reductions, or panel-registry resolution, including when several
