@@ -10,17 +10,17 @@ import xarray as xr
 from spatialdata import SpatialData
 
 from harpy._feature_panels import _resolve_points_feature_panel
-from harpy.qc._points_binning import _check_grid_budget
-from harpy.qc._points_reduction import (
+from harpy.qc.points._points_binning import _check_grid_budget
+from harpy.qc.points._points_reduction import (
     _compute_point_reductions,
     _resolve_point_coordinate_transform,
     _spatial_count_array,
     _validate_point_columns,
 )
-from harpy.qc._points_summary_metadata import PointsSummaryMetadata
-from harpy.qc._points_summary_schema import _FEATURE_CLASS_KEY, _FEATURE_KEY, _N_POINTS_KEY
-from harpy.qc._spatial_bin_summary import FeatureSpatialBinSummary, _summarize_feature_bins
-from harpy.qc._summarize_points import PointsSummary
+from harpy.qc.points._points_summary_metadata import PointsSummaryMetadata
+from harpy.qc.points._points_summary_schema import _FEATURE_CLASS_KEY, _FEATURE_KEY, _N_POINTS_KEY
+from harpy.qc.points._spatial_bin_summary import FeatureSpatialBinSummary, _summarize_feature_bins
+from harpy.qc.points._summarize_points import PointsSummary
 
 
 @dataclass(frozen=True)

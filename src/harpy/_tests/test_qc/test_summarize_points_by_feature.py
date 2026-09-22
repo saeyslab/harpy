@@ -102,8 +102,8 @@ def test_feature_summary_returns_typed_outputs_and_shared_metadata():
 
 @pytest.mark.parametrize("crd", [None, (0, 4, 0, 2)])
 def test_unbinned_reference_reuses_totals_without_source_or_coordinate_work(monkeypatch, crd):
-    from harpy.qc import _points_reduction as reductions
-    from harpy.qc import _summarize_points_by_feature as module
+    from harpy.qc.points import _points_reduction as reductions
+    from harpy.qc.points import _summarize_points_by_feature as module
 
     sdata = _sdata()
     summary = summarize_points(sdata, "calls", crd=crd)
@@ -158,7 +158,7 @@ def test_feature_selection_changes_neither_reference_grid_nor_statistics(monkeyp
     For an inferred reference extent, GeneB alone would formerly shift the
     grid origin to (5, 1). It must instead keep the full reference grid.
     """
-    from harpy.qc import _points_reduction as module
+    from harpy.qc.points import _points_reduction as module
 
     sdata = _sdata()
     summary = summarize_points(sdata, "calls", bin_size=2, crd=crd)
@@ -293,7 +293,7 @@ def test_feature_pixel_and_micron_grids_have_equivalent_counts_and_areas():
 
 
 def test_grid_budget_counts_requested_features_not_classes(monkeypatch):
-    from harpy.qc import _points_reduction as module
+    from harpy.qc.points import _points_reduction as module
 
     sdata = _sdata()
     summary = summarize_points(sdata, "calls", feature_classes="Endogenous", bin_size=2, crd=(0, 8, 0, 2))

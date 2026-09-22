@@ -3419,7 +3419,7 @@ and lookup contracts.
 **Status: implemented.**
 
 Implemented by `hp.qc.summarize_points` and `hp.qc.PointsSummary` in
-`src/harpy/qc/_summarize_points.py`, with shared source reductions in
+`src/harpy/qc/points/_summarize_points.py`, with shared source reductions in
 `_points_reduction.py` and panel-independent coordinate/bin helpers in
 `_points_binning.py`. Shared feature-panel parsing and point-content
 validation live in `src/harpy/_feature_panels.py` and are reused by aggregation
@@ -4482,10 +4482,10 @@ returned grid before display selection, without a source scan or panel lookup.
 
 **Status: implemented.**
 
-`src/harpy/qc/_summarize_points.py` uses `_points_reduction.py` to reduce only
+`src/harpy/qc/points/_summarize_points.py` uses `_points_reduction.py` to reduce only
 selected-class points and returns the nested result. Bin inclusion is derived from the returned grid.
 The dataframe construction
-and public `SpatialBinSummary` live in `src/harpy/qc/_spatial_bin_summary.py`.
+and public `SpatialBinSummary` live in `src/harpy/qc/points/_spatial_bin_summary.py`.
 Focused coverage is in `test_qc/test_summarize_points.py` and
 `test_qc/test_spatial_bin_summary.py`. Plotting and feature-specific grids
 remain in the later parts below.
@@ -5073,7 +5073,7 @@ warning-free.
 
 **Status: implemented.**
 
-Implemented in `src/harpy/qc/_summarize_points_by_feature.py`, with shared source
+Implemented in `src/harpy/qc/points/_summarize_points_by_feature.py`, with shared source
 reductions in `_points_reduction.py`, bin geometry in `_points_binning.py`,
 and bin statistics in `_spatial_bin_summary.py`. `_reduce_points_by_class()`
 prepares new grids and metadata; `_reduce_points_by_feature()` prepares feature

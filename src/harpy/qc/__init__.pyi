@@ -6,13 +6,13 @@ from ._histogram import (
     table_histogram,
     table_histograms,
 )
-from ._points_summary_metadata import PointsSummaryMetadata
 from ._qc_image_histogram import image_histogram
 from ._qc_segmentation import segmentation_coverage, segmentation_histogram
 from ._qc_transcripts import analyse_genes_left_out, obs_scatter
-from ._spatial_bin_summary import FeatureSpatialBinSummary, SpatialBinSummary
-from ._summarize_points import PointsSummary, summarize_points
-from ._summarize_points_by_feature import FeaturePointsSummary, summarize_points_by_feature
+from .points._points_summary_metadata import PointsSummaryMetadata
+from .points._spatial_bin_summary import FeatureSpatialBinSummary, SpatialBinSummary
+from .points._summarize_points import PointsSummary, summarize_points
+from .points._summarize_points_by_feature import FeaturePointsSummary, summarize_points_by_feature
 
 __all__ = [
     "FeaturePointsSummary",

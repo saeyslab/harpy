@@ -7,8 +7,8 @@ import pandas as pd
 import xarray as xr
 
 from harpy._feature_panels import _FeaturePanelContract
-from harpy.qc._points_summary_metadata import PointsSummaryMetadata
-from harpy.qc._points_summary_schema import _FEATURE_CLASS_KEY, _FEATURE_KEY, _N_POINTS_KEY
+from harpy.qc.points._points_summary_metadata import PointsSummaryMetadata
+from harpy.qc.points._points_summary_schema import _FEATURE_CLASS_KEY, _FEATURE_KEY, _N_POINTS_KEY
 
 
 @dataclass(frozen=True)

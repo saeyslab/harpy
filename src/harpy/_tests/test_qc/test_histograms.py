@@ -23,7 +23,7 @@ from harpy.qc import (
     table_histogram,
     table_histograms,
 )
-from harpy.qc._spatial_bin_summary import _summarize_feature_bins, _summarize_spatial_bins
+from harpy.qc.points._spatial_bin_summary import _summarize_feature_bins, _summarize_spatial_bins
 
 matplotlib.use("Agg")
 

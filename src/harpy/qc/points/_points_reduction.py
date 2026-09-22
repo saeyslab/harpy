@@ -21,14 +21,14 @@ from harpy._feature_panels import (
     _validate_feature_class_dtype,
 )
 from harpy._spatial_bounds import SpatialBounds, _normalize_spatial_bounds
-from harpy.qc._points_binning import (
+from harpy.qc.points._points_binning import (
     _count_point_bins,
     _point_bin_edges,
     _select_point_coordinates,
     _transformed_point_xy,
 )
-from harpy.qc._points_summary_metadata import PointsSummaryMetadata
-from harpy.qc._points_summary_schema import _FEATURE_CLASS_KEY, _FEATURE_KEY, _N_POINTS_KEY
+from harpy.qc.points._points_summary_metadata import PointsSummaryMetadata
+from harpy.qc.points._points_summary_schema import _FEATURE_CLASS_KEY, _FEATURE_KEY, _N_POINTS_KEY
 from harpy.transformations._transformations import _invertible_affine_matrix
 
 

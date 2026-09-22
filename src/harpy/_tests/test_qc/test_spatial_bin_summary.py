@@ -5,7 +5,7 @@ import xarray as xr
 
 from harpy import SpatialBounds
 from harpy.qc import PointsSummaryMetadata, SpatialBinSummary
-from harpy.qc._spatial_bin_summary import _summarize_spatial_bins
+from harpy.qc.points._spatial_bin_summary import _summarize_spatial_bins
 
 
 def _grid_and_metadata(*, microns_per_unit=None):

@@ -11,10 +11,10 @@ from spatialdata import SpatialData
 
 from harpy._feature_panels import _FeaturePanelContract
 from harpy._spatial_bounds import SpatialBounds
-from harpy.qc._points_reduction import _reduce_points_by_class
-from harpy.qc._points_summary_metadata import PointsSummaryMetadata
-from harpy.qc._points_summary_schema import _FEATURE_CLASS_KEY, _FEATURE_KEY, _N_FEATURES_KEY, _N_POINTS_KEY
-from harpy.qc._spatial_bin_summary import SpatialBinSummary, _summarize_spatial_bins
+from harpy.qc.points._points_reduction import _reduce_points_by_class
+from harpy.qc.points._points_summary_metadata import PointsSummaryMetadata
+from harpy.qc.points._points_summary_schema import _FEATURE_CLASS_KEY, _FEATURE_KEY, _N_FEATURES_KEY, _N_POINTS_KEY
+from harpy.qc.points._spatial_bin_summary import SpatialBinSummary, _summarize_spatial_bins
 
 
 @dataclass(frozen=True)

@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 
 from harpy._spatial_bounds import SpatialBounds
-from harpy.qc._points_summary_schema import _FEATURE_CLASS_KEY, _N_POINTS_KEY
+from harpy.qc.points._points_summary_schema import _FEATURE_CLASS_KEY, _N_POINTS_KEY
 
 
 def _select_point_coordinates(

@@ -13,7 +13,7 @@ from spatialdata.models import PointsModel
 from spatialdata.transformations import Affine, Identity, Scale, set_transformation
 
 import harpy as hp
-from harpy.qc._points_binning import _count_point_bins, _point_bin_edges
+from harpy.qc.points._points_binning import _count_point_bins, _point_bin_edges
 
 PANEL = {
     "feature_key": "gene",
@@ -299,7 +299,7 @@ def test_pixel_and_micron_bins_have_equivalent_counts_and_physical_areas():
 
 @pytest.mark.parametrize("calibration", [0, -1, np.nan, np.inf, True, "1", 1j])
 def test_invalid_physical_calibration_fails_before_reduction(calibration, monkeypatch):
-    from harpy.qc import _points_reduction as module
+    from harpy.qc.points import _points_reduction as module
 
     def forbidden(*args, **kwargs):
         pytest.fail("Invalid calibration should fail before reducing points.")
@@ -534,7 +534,7 @@ def test_grid_budget_rejects_extreme_extent_without_overflow_or_edge_allocation(
 @pytest.mark.parametrize("crd", [None, (0, 8, 0, 2)])
 def test_grid_budget_fails_before_count_reduction(crd, monkeypatch):
     """Only automatic extent discovery may read points before rejecting the grid."""
-    from harpy.qc import _points_reduction as module
+    from harpy.qc.points import _points_reduction as module
 
     reads = []
 
@@ -561,7 +561,7 @@ def test_default_grid_budget_can_be_disabled_without_allocating_large_grid(monke
     Intercept only final dense-grid construction to avoid a large allocation;
     real edge construction and point reductions run with the limit disabled.
     """
-    from harpy.qc import _points_reduction as module
+    from harpy.qc.points import _points_reduction as module
 
     class GridAllocationReached(Exception):
         pass
@@ -758,7 +758,7 @@ def test_joint_reductions_share_source_reads(monkeypatch, crd):
     # PointsModel.parse may inspect source indices while preparing the fixture;
     # only source reads performed by summarize_points belong to this contract.
     reads.clear()
-    from harpy.qc import _points_reduction as module
+    from harpy.qc.points import _points_reduction as module
 
     original = module._summarize_point_partition
 
@@ -784,7 +784,7 @@ def test_joint_reductions_share_source_reads(monkeypatch, crd):
 
 def test_nonspatial_summary_does_not_project_coordinates_or_require_registration(monkeypatch):
     sdata = _sdata()
-    from harpy.qc import _points_reduction as module
+    from harpy.qc.points import _points_reduction as module
 
     original = module._summarize_point_partition
 
