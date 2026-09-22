@@ -11,7 +11,7 @@ from spatialdata import SpatialData, read_zarr
 from spatialdata.transformations import Affine, Scale, set_transformation
 
 from harpy import SpatialBounds
-from harpy._tests.test_qc.test_summarize_points import PANEL, _frame, _sdata
+from harpy._tests.test_qc.test_points.test_summarize_points import PANEL, _frame, _sdata
 from harpy.qc import (
     FeaturePointsSummary,
     FeatureSpatialBinSummary,
