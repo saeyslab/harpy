@@ -5414,6 +5414,12 @@ path: do not accept SpatialData or compute missing results. Reuse the shared
 transcript-positive-bin definition from 11e.i and 11e.iii; the histogram
 renderer need not be implemented first.
 
+Scope this part to the read-only plotter and a marimo overview. Defer converting
+or writing density grids into SpatialData image elements, including export
+transformations, mask storage, and display-pyramid generation. Do not introduce
+an export API, napari integration, or a new implementation slice for that work
+yet; plotting must never modify the SpatialData object or backing store.
+
 This is a breaking replacement: remove the old public name and SpatialData-input
 signature, without a deprecated alias, compatibility shim, or legacy computation
 path. The new name matches the point-summary APIs and covers all feature classes,
@@ -5583,8 +5589,8 @@ and bin edges from the summary metadata, including valid all-zero class planes.
 For negative-probe and system-control comparisons, use the same chosen
 normalization for both maps.
 
-Render bins excluded by `result.retained_bin_mask` as transparent or otherwise
-clearly unreported. Keep class- and feature-specific zeros inside that mask
+Render bins excluded by `result.retained_bin_mask` as transparent, so an
+underlying image remains visible. Keep class- and feature-specific zeros inside that mask
 visible as zero, not missing data; do not mask each plane by its own positive
 counts. If the mask retains no bins, show an explicit empty-state message.
 An all-zero feature grid with a nonempty inherited population is not an empty
@@ -5606,6 +5612,86 @@ Do not render every control transcript as the default visualization. An
 individual-point overlay belongs to separate diagnostic plotting for a selected
 crop; this density renderer does not fetch those points. The density maps
 operate on the precomputed bins.
+
+#### Grid resolution and image overlays
+
+Render the existing grid at its computed bin resolution. For example,
+`bin_size=10` in a micron coordinate system represents 10 µm × 10 µm bins,
+except for narrower terminal bins after an explicit crop. Figure size and DPI
+change display resolution, not the underlying spatial information; finer bins
+require recomputing the summary. Do not rebin or upsample counts to an image's
+pixel resolution.
+
+Use `metadata.x_edges` and `metadata.y_edges` as the actual rectangle boundaries,
+with one color per bin and no interpolation or smoothing by default.
+`Axes.pcolormesh(..., shading="flat")` supports these explicit boundaries,
+including unequal terminal-bin widths. Do not stretch the grid into equal-sized
+pixels using only its outer extent when its bins have unequal widths.
+
+The grid is already in `summary.metadata.to_coordinate_system`: summary
+computation transforms the source points before binning. The density renderer
+must not apply that source transformation again. For a DAPI overlay, render the
+image using its own transformation into the same coordinate system. Alignment
+depends on shared coordinates, not identical array shapes or pixel resolutions.
+The image must have a valid transformation into that system; do not align it by
+simply stretching it to the density grid's extent.
+
+Keep image rendering separate. Expose `ax: Axes | None = None` and
+`alpha: float = 1.0` on `plot_points_density`, and return the axes used. Compose
+with the existing image renderer, for example:
+
+```python
+ax = hp.pl.plot_sdata(
+    sdata,
+    image_name="my_image",
+    channel="DAPI",
+    to_coordinate_system=summary.metadata.to_coordinate_system,
+)
+hp.pl.plot_points_density(
+    summary,
+    feature_class="Endogenous",
+    ax=ax,
+    alpha=0.5,
+)
+```
+
+The caller must use the same coordinate system for both layers; an arbitrary
+Matplotlib axes does not identify its SpatialData coordinate system. The density
+renderer accepts no image or SpatialData argument and performs no image reads.
+For a standalone plot, initialize spatial limits from the grid edges and use
+equal spatial aspect. When overlaying an existing plot, retain its limits,
+aspect, and axis orientation; do not reset its viewport or blindly invert its
+y-axis. Draw the density above the image with the requested opacity, retaining
+transparent excluded bins and visible zero-valued bins inside the shared mask.
+
+#### Marimo overview and large-image display
+
+Reuse already computed class and feature summaries in the notebook overview.
+Display controls select samples, classes/features, normalization, and opacity
+without reading source points or recalculating summaries. Keep marimo-specific
+code in the notebook, not in the plotting API or Harpy's base dependencies.
+
+Use browser-based Matplotlib interaction through `mo.mpl.interactive(ax)` for
+pan/zoom in a running notebook; do not introduce Qt integration or switch the
+plotter to a GUI backend. This adds navigation to the rendered figure, not a
+large-image streaming system. In particular, zooming into a downsampled DAPI
+overview does not automatically fetch a finer image level.
+
+For large-image overlays:
+
+- Render whole-sample overviews using suitable existing image-pyramid levels
+  where available, rather than requiring a full-resolution mosaic in memory.
+- Provide explicit region-of-interest views that rerender the image crop at a
+  suitable higher resolution through the existing image renderer. Reuse the
+  density grid in the same coordinate system; changing the displayed region
+  must not redefine the summary's retained-bin population or statistics.
+- Keep the density's computed bin resolution in both overview and region views.
+  Increasing figure size or DPI does not create finer bins or solve image-loading
+  costs. Do not add automatic viewport-driven image loading in this part.
+
+Check rendering and interaction on representative grid and image sizes before
+claiming acceptable performance; browser pan/zoom alone does not make a large
+Matplotlib mesh or image memory-bounded.
 
 #### Reuse of precomputed grids
 
@@ -5661,12 +5747,30 @@ Focused tests should establish that:
 - area normalization without calibration, panel normalization of feature grids,
   and unknown normalization values raise clear errors;
 - labels/units, axes, and common extents remain correct for both grid kinds;
+- rendered rectangles follow the actual bin edges, including narrower terminal
+  bins, without rebinning or default interpolation; changing figure size or DPI
+  does not change the bin geometry or count values;
+- a synthetic image/points overlay with known translation and scaling aligns
+  in the shared coordinate system despite different image and bin resolutions;
+  the density grid is not transformed a second time;
+- overlays reuse and return the supplied axes, preserve existing limits, aspect,
+  and axis orientation, respect `alpha`, and leave excluded bins transparent
+  while retaining zero-valued bins inside the mask;
 - normalization and smoothing do not mutate raw counts, summary metadata,
   retained-bin masks, or computed statistics;
+- the notebook overview reuses calculated summaries when display controls
+  change, performs no source-point reductions, and writes no SpatialData
+  elements or metadata;
 - sample, mosaic, and panel identities remain distinguishable; and
 - density rendering never calls summary computation, source-point reads,
   point reductions, or panel-registry resolution, including when several
   classes or features are rendered from the same array.
+
+Also smoke-test the running marimo overview with representative grid sizes and
+existing multiscale images: browser pan/zoom, an appropriately resolved DAPI
+overview, and an explicit higher-resolution region view. Confirm alignment and
+unchanged bin geometry without relying on an automatic image-level refresh when
+zooming, Qt integration, or density-image export.
 
 ## Slice 11f: table-level summary computation and plotting integration
 
