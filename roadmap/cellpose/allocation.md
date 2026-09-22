@@ -39,7 +39,7 @@ implemented:
       `summarize_points` — implemented; **11e.ii** spatial-bin histograms — implemented;
       **11e.iii** feature-specific spatial counts and bin summaries through
       `hp.qc.summarize_points_by_feature` — implemented; **11e.iv** spatial density
-      heatmaps; and **11e.v** marimo density overview;
+      heatmaps — implemented; and **11e.v** marimo density overview;
     - **11f:** table-level summary computation through `hp.qc.summarize_table`
       and `TableSummary`, with plotting integration;
 
@@ -4372,7 +4372,7 @@ Focused tests should cover:
 
 ## Slice 11e: original-point summary visualization
 
-**Status: Parts 11e.i–iii implemented; Parts 11e.iv–v specified, not implemented.**
+**Status: Parts 11e.i–iv implemented; Part 11e.v specified, not implemented.**
 
 Implement annotation-free QC of transcript-positive spatial bins,
 using the existing `PointsSummary.spatial_counts` from Slice 11a, plus an
@@ -5408,7 +5408,11 @@ Focused tests should establish that:
 
 ### Part 11e.iv: spatial density heatmaps
 
-**Status: specified; not implemented.**
+**Status: implemented.**
+
+Implemented in `harpy.plot._points_density`, with focused coverage in
+`test_points_density.py`. The coordinate-based instance-density renderer remains
+unchanged. Rendering is unsmoothed; optional smoothing is outside this part.
 
 Replace `hp.pl.plot_transcript_density` with `hp.pl.plot_points_density`, a
 renderer accepting a `PointsSummary` or
@@ -5436,8 +5440,16 @@ Both summary types may be unbinned. Reject a missing `spatial_counts` with
 guidance to create a `summarize_points` reference with `bin_size` and, for
 feature plots, pass that reference to `summarize_points_by_feature`.
 
-Validate only the array's dimensions/coordinates and the parent's metadata
-needed for the requested display. Read bin geometry and `to_coordinate_system`
+Validate spatial structure once in `PointsSummary.__post_init__` and
+`FeaturePointsSummary.__post_init__`, through a shared private helper: grid
+dimensions/names, bin edges and centers, and the feature summary's stored mask
+must agree. Do not recompute counts, statistics or the derived class mask.
+Unbinned summaries remain valid. Construction-time validation does not track
+subsequent in-place edits to nested arrays or tables.
+
+The renderer trusts this structural contract and checks only its plotting
+request (including the need for binning and normalization prerequisites).
+Read bin geometry and `to_coordinate_system`
 from `result.metadata`; do not accept a second bin size, crop, or coordinate
 transformation that could disagree with the computed grid. Any source filtering belongs to
 computation, not rendering. There is no raw points fallback, source-gene-column
@@ -5600,9 +5612,9 @@ underlying image remains visible. Keep class- and feature-specific zeros inside 
 visible as zero, not missing data; do not mask each plane by its own positive
 counts. If the mask retains no bins, show an explicit empty-state message.
 An all-zero feature grid with a nonempty inherited population is not an empty
-population. The raw zero-filled array remains unchanged. Any optional smoothing
-is display-only, must respect the shared mask, and never changes the statistics
-or histogram inputs.
+population. The raw zero-filled array remains unchanged. This renderer does not
+offer smoothing; any future smoothing must be display-only, respect the shared
+mask, and leave statistics and histogram inputs unchanged.
 
 The primary spatial visualization should be matched class heatmaps, optionally
 with shared morphology context. Neither a tissue outline nor an inferred tissue
@@ -5681,10 +5693,16 @@ equal spatial aspect. When overlaying an existing plot, retain its limits,
 aspect, and axis orientation; do not reset its viewport or blindly invert its
 y-axis. Draw the density above the image with the requested opacity, retaining
 transparent excluded bins and visible zero-valued bins inside the shared mask.
+Empty axes use a downward-increasing y-axis, matching image display. Expose
+`cmap`, `colorbar`, optional `vmin`/`vmax` for matching color scales, and an optional
+`title` (None by default); colorbar labels identify the displayed selection and
+normalization units. These settings do not alter bin geometry or statistics.
+Without explicit color limits, all-zero maps use a 0–1 scale so the colorbar
+does not imply negative counts or densities.
 
 #### Reuse of precomputed grids
 
-The current `plot_transcript_density` filters points and then calls
+The previous `plot_transcript_density` filtered points and then called
 `ddf.compute()` before constructing a NumPy histogram. Replace that computation
 path with direct rendering of the compact spatial-count array inside the
 parent result produced by `summarize_points` or `summarize_points_by_feature`.
@@ -5713,8 +5731,9 @@ Focused tests should establish that:
 - density plotting accepts `PointsSummary` and `FeaturePointsSummary`, reading
   their grids and single metadata records without SpatialData or a root panel
   registry; bare arrays do not substitute for the parent results;
-- `None` spatial counts produce actionable guidance to compute with `bin_size`,
-  and malformed grid/coordinate metadata produce display-specific errors;
+- `None` spatial counts produce actionable plotting guidance to compute with
+  `bin_size`; malformed grid/coordinate metadata and inherited masks are
+  rejected by summary constructors, without count reductions or source reads;
 - class selection only selects classes already in the array; `None` selects
   and sums all available classes, missing requested classes raise without a
   scan, and display selection never changes the bin population defined by the
@@ -5748,7 +5767,7 @@ Focused tests should establish that:
 - overlays reuse and return the supplied axes, preserve existing limits, aspect,
   and axis orientation, respect `alpha`, and leave excluded bins transparent
   while retaining zero-valued bins inside the mask;
-- normalization and smoothing do not mutate raw counts, summary metadata,
+- rendering and normalization do not mutate raw counts, summary metadata,
   retained-bin masks, or computed statistics;
 - sample, mosaic, and panel identities remain distinguishable; and
 - density rendering never calls summary computation, source-point reads,

@@ -309,7 +309,7 @@ Plotting functions.
 .. autosummary::
     :toctree: generated
 
-    plot_transcript_density
+    plot_points_density
 ```
 
 ## Utils
