@@ -4387,7 +4387,7 @@ explicit computation path for feature-specific grids:
    plane per requested feature and derived bin statistics; add
    `spatial_bin_histogram_by_feature` alongside the class histogram API from 11e.ii.
 4. **11e.iv: spatial density heatmaps** — render class-level or feature-level
-   spatial-count arrays through `hp.pl.plot_transcript_density`.
+   spatial-count arrays through `hp.pl.plot_points_density`.
 
 Part 11e.ii implements class histograms from the computed result of 11e.i;
 11e.iii adds a separate feature-summary plotting adapter sharing the same renderer. Neither requires
@@ -5405,14 +5405,20 @@ Focused tests should establish that:
 
 **Status: specified; not implemented.**
 
-Retain the public `hp.pl.plot_transcript_density` name, but replace its
-SpatialData-input signature with a renderer accepting a `PointsSummary` or
+Replace `hp.pl.plot_transcript_density` with `hp.pl.plot_points_density`, a
+renderer accepting a `PointsSummary` or
 `FeaturePointsSummary` result. Read its `spatial_counts` (`feature_class, y, x`
 or `feature, y, x`) and `metadata` together; a bare DataArray no longer carries
 the required context. Neither parent input is an alternative computation
 path: do not accept SpatialData or compute missing results. Reuse the shared
 transcript-positive-bin definition from 11e.i and 11e.iii; the histogram
 renderer need not be implemented first.
+
+This is a breaking replacement: remove the old public name and SpatialData-input
+signature, without a deprecated alias, compatibility shim, or legacy computation
+path. The new name matches the point-summary APIs and covers all feature classes,
+not only biological transcripts. Its docstring should describe rendering
+precomputed spatial counts, with physical-density normalization optional.
 
 Both summary types may be unbinned. Reject a missing `spatial_counts` with
 guidance to create a `summarize_points` reference with `bin_size` and, for
@@ -5425,7 +5431,7 @@ transformation that could disagree with the computed grid. Any source filtering 
 computation, not rendering. There is no raw points fallback, source-gene-column
 argument, or in-plot subsampling path.
 
-#### Class and feature selection through `plot_transcript_density`
+#### Class and feature selection through `plot_points_density`
 
 Use selectors for already computed planes:
 
@@ -5494,7 +5500,7 @@ summary = hp.qc.summarize_points(
     microns_per_unit=1.0,
 )
 
-hp.pl.plot_transcript_density(
+hp.pl.plot_points_density(
     summary,
     feature_class="Negative",
 )
@@ -5506,9 +5512,9 @@ without recomputing the summary or accessing `sdata`.
 Likewise, reuse the feature grid from 11e.iii:
 
 ```python
-hp.pl.plot_transcript_density(feature_summary, features="EPCAM")
-hp.pl.plot_transcript_density(feature_summary, features="VIM")
-hp.pl.plot_transcript_density(feature_summary, features=["EPCAM", "VIM"])
+hp.pl.plot_points_density(feature_summary, features="EPCAM")
+hp.pl.plot_points_density(feature_summary, features="VIM")
+hp.pl.plot_points_density(feature_summary, features=["EPCAM", "VIM"])
 ```
 
 The final call explicitly combines both count planes; it does not change
@@ -5562,7 +5568,7 @@ whole-class panel size. Reject unknown normalization values.
 For example:
 
 ```python
-hp.pl.plot_transcript_density(
+hp.pl.plot_points_density(
     summary,
     feature_class="Negative",
     normalization="per_panel_feature_per_area",
@@ -5606,10 +5612,11 @@ operate on the precomputed bins.
 The current `plot_transcript_density` filters points and then calls
 `ddf.compute()` before constructing a NumPy histogram. Replace that computation
 path with direct rendering of the compact spatial-count array inside the
-parent result produced by `summarize_points` or `summarize_points_by_feature`. Update affected examples,
-documentation, and tests to the explicit compute-then-plot workflow; do not
-retain the previous source-data signature
-through a compatibility branch or add an optional convenience shortcut.
+parent result produced by `summarize_points` or `summarize_points_by_feature`.
+Update public exports, API documentation, affected examples, notebooks, and tests
+to `plot_points_density` and the explicit compute-then-plot workflow. Do not
+retain the previous name or source-data signature through a compatibility branch
+or add an optional convenience shortcut.
 
 Users call the appropriate computation API explicitly and reuse its parent result
 across plots. A multi-class or multi-feature report computes its requested
@@ -5623,6 +5630,8 @@ helpers. Other plotting APIs are not changed solely to implement this contract.
 
 Focused tests should establish that:
 
+- `hp.pl.plot_points_density` is publicly available and the removed
+  `hp.pl.plot_transcript_density` name is not retained as an alias;
 - all-zero classes/features remain visible inside a nonempty shared population,
   while bins excluded by the mask and completely empty masks are distinguished
   from plane-specific zeros;
