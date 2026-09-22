@@ -5628,6 +5628,18 @@ change display resolution, not the underlying spatial information; finer bins
 require recomputing the summary. Do not rebin or upsample counts to an image's
 pixel resolution.
 
+Keep figure sizing independent of grid size:
+
+- If `ax` is supplied, reuse its figure size and DPI unchanged; ignore `figsize`
+  rather than resizing the caller's figure.
+- Otherwise, create the figure using `figsize: tuple[float, float] = (8, 8)`
+  (in inches), inheriting Matplotlib's configured DPI. Callers needing a specific
+  DPI can create their own figure and pass its axes; no separate plotter DPI
+  parameter is needed.
+- Use the coordinate extent and equal spatial aspect to fit a standalone map
+  inside the axes. Do not automatically increase figure size or DPI based on
+  the number of bins, or attempt to guarantee several display pixels per bin.
+
 Use `metadata.x_edges` and `metadata.y_edges` as the actual rectangle boundaries,
 with one color per bin and no interpolation or smoothing by default.
 `Axes.pcolormesh(..., shading="flat")` supports these explicit boundaries,
@@ -5727,6 +5739,9 @@ Focused tests should establish that:
 - rendered rectangles follow the actual bin edges, including narrower terminal
   bins, without rebinning or default interpolation; changing figure size or DPI
   does not change the bin geometry or count values;
+- standalone figures honor `figsize` (default `(8, 8)`) and Matplotlib's
+  configured DPI; supplied axes retain their figure size and DPI even if
+  `figsize` is passed. Larger grids do not automatically enlarge the canvas;
 - a synthetic image/points overlay with known translation and scaling aligns
   in the shared coordinate system despite different image and bin resolutions;
   the density grid is not transformed a second time;
@@ -5761,6 +5776,32 @@ pan/zoom in a running notebook; do not introduce Qt integration or switch the
 plotter to a GUI backend. This adds navigation to the rendered figure, not a
 large-image streaming system. In particular, zooming into a downsampled DAPI
 overview does not automatically fetch a finer image level.
+
+Choose a bounded notebook canvas explicitly, for example:
+
+```python
+import matplotlib.pyplot as plt
+
+fig, ax = plt.subplots(figsize=(10, 6), dpi=150)
+hp.pl.plot_points_density(summary, feature_class="Endogenous", ax=ax)
+mo.mpl.interactive(fig)
+```
+
+This example produces a 1,500 × 900 pixel canvas, with less space available for
+the heatmap after labels, margins, the colorbar, and aspect adjustment. It is a
+display choice, not an automatically derived optimum or a change in bin size.
+For uniformly spaced bins, approximate horizontal detail as:
+
+```text
+pixels per bin = plotting-area width in pixels / number of visible x bins
+```
+
+For example, a 1,000-pixel-wide plotting area provides about 2 pixels per bin
+for 500 visible bins, but only 0.2 pixels per bin for 5,000. In the latter case,
+individual bins cannot be distinguished in the overview: use zoom or a smaller
+region view for detail, rather than automatically growing the canvas or DPI.
+Apply the same reasoning to the vertical direction. Keep figure size and DPI
+under caller/notebook control; the grid alone does not determine optimal values.
 
 For large-image overlays:
 
