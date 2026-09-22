@@ -1,6 +1,6 @@
 import os
 
-from harpy.qc._qc_transcripts import analyse_genes_left_out
+from harpy.qc.points._analyse_genes_left_out import analyse_genes_left_out
 
 
 def test_analyse_genes_left_out(sdata_transcripts_no_backed, tmp_path):
