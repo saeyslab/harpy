@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from spatialdata import SpatialData
 
 from harpy.qc._histogram import table_histogram
-from harpy.qc._qc_transcripts import obs_scatter
+from harpy.qc._scatter import obs_scatter
 from harpy.utils._keys import _CELLSIZE_KEY
 
 

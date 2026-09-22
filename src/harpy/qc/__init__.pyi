@@ -8,7 +8,7 @@ from ._histogram import (
 )
 from ._qc_image_histogram import image_histogram
 from ._qc_segmentation import segmentation_coverage, segmentation_histogram
-from ._qc_transcripts import obs_scatter
+from ._scatter import obs_scatter
 from .points._analyse_genes_left_out import analyse_genes_left_out
 from .points._points_summary_metadata import PointsSummaryMetadata
 from .points._spatial_bin_summary import FeatureSpatialBinSummary, SpatialBinSummary
