@@ -5984,19 +5984,119 @@ unsmoothed display with the requested normalization.
   smoothing weights over retained support so missing neighbors do not act as
   artificial zero measurements. Genuine zeros inside retained bins still
   contribute, including feature-specific zeros in the inherited population.
-- Define the interaction with existing normalization modes explicitly. Account
-  for actual bin areas where area normalization is requested, including
-  narrower terminal bins after a crop. Do not silently assume every bin has
-  the nominal full area or uniformly spaced centers at crop boundaries.
+- Use the geometry and normalization rules below, including actual areas and
+  center positions for narrower terminal bins after a crop.
 - Label smoothed output and its units unambiguously, and expose the active
   smoothing scale in the plot's labeling or documentation. For example, an
   area-normalized result is **Smoothed points per µm²**, not raw counts.
   Smoothed values are local estimates, not replacements for exact count totals.
 
-Finalize the numerical interaction with normalization before implementation.
-Keep that behavior in Harpy's API contract so notebook callers do not implement
-their own rules; the parameter name, units, and enable/disable behavior above
-are settled.
+#### Bin centers, boundaries, and normalization
+
+All geometry is already captured by the summary; no new metadata or source
+reads are needed:
+
+- Read bin centers from `summary.spatial_counts.coords["x"]` and `["y"]`.
+  Use distances between these centers, in the summary's coordinate-system
+  units, to determine Gaussian weights.
+- Read exact bin boundaries from `summary.metadata.x_edges` and `y_edges`.
+  Adjacent boundary differences give widths and heights, including cropped
+  terminal bins. Centers alone do not supply the exact bin sizes.
+- The summary constructor already checks that grid coordinates match the
+  centers implied by these boundaries. Reuse this contract rather than
+  introducing another copy of the geometry.
+
+For example:
+
+```text
+x boundaries:   0, 10, 20, 25
+x centers:      5, 15, 22.5
+bin widths:    10, 10,  5
+```
+
+The last center-to-center distance is 7.5, but the final bin's width is 5.
+Do not derive widths from center spacing or treat narrower bins as full-sized
+array pixels. A plain array filter using `sigma / bin_size` assumes regular
+spacing; handling cropped terminal bins must respect their actual geometry.
+
+Physical areas use the same calculation as the existing plotter:
+
+```python
+widths = np.diff(summary.metadata.x_edges)
+heights = np.diff(summary.metadata.y_edges)
+areas_um2 = heights[:, None] * widths[None, :] * summary.metadata.microns_per_unit**2
+```
+
+Physical calibration remains required only for area-normalized modes; it
+does not change sigma's coordinate-system units.
+
+For each displayed bin, let `S(F)` be the Gaussian-weighted sum of values `F`
+over retained neighboring bins. Let `C` be the selected or pooled raw counts,
+`A` their actual areas in µm², and `N` the selected classes' combined panel
+feature count. Use the same spatial weights in numerator and denominator:
+
+| Normalization | Smoothed display value |
+| --- | --- |
+| `None` | `S(C) / S(1)` |
+| `"per_area"` | `S(C) / S(A)` |
+| `"per_panel_feature"` | `S(C) / (N * S(1))` |
+| `"per_panel_feature_per_area"` | `S(C) / (N * S(A))` |
+
+`S(1)` sums weights over retained bins, including bins with zero counts.
+Existing restrictions on panel normalization for feature summaries remain
+unchanged. These rules apply only when smoothing is enabled.
+
+For the area-normalized case, consider a 100 µm² bin containing 100 points
+beside a cropped 50 µm² bin containing 50 points. Both densities are 1
+point/µm². With equal weights for illustration, averaging counts first gives
+75 points; dividing by each destination bin's area then incorrectly gives
+0.75 and 1.5 points/µm². Combining counts and their corresponding areas gives
+`(100 + 50) / (100 + 50) = 1` point/µm² instead. Actual Gaussian weights
+depend on distance, but the same numerator/denominator rule applies. When
+all bin areas are equal, the two approaches coincide.
+
+Keep these numerical rules in Harpy, not notebook cells.
+
+#### Retained support and grid boundaries
+
+Retained support means the bins included by `summary.retained_bin_mask`, not
+only bins with positive counts in the displayed plane. A bin with zero
+Endogenous points can still be retained because another selected class has
+detections there. Feature maps likewise use their inherited population.
+These are genuine zero measurements and must participate in smoothing.
+
+For example, when smoothing the middle bin, use these illustrative weights:
+
+```text
+Neighbor:   excluded    10 points    0 points
+Weight:        1           2           1
+Retained:     no          yes         yes
+
+Smoothed count = (2 × 10 + 1 × 0) / (2 + 1) = 6.67
+```
+
+The excluded bin contributes neither a value nor a denominator weight. The
+retained zero contributes its weight even though its numerator contribution
+is zero. Treating the excluded bin as another zero would incorrectly give
+`20 / 4 = 5`; ignoring the genuine zero would incorrectly give `20 / 2 = 10`.
+For area-normalized density, use the corresponding weighted retained areas
+in the denominator, as specified above.
+
+Apply the same no-support rule beyond the grid's outer boundaries: do not
+invent reflected, replicated, or wrapped measurements. In particular, do not
+inherit SciPy's `gaussian_filter` default `mode="reflect"`, which mirrors edge
+values. A regular-grid filter implementation can zero-pad both the masked
+count numerator and the support denominator (mask weights or masked areas),
+then divide. Zero-padding the count or density array alone would instead
+introduce artificial zero measurements and attenuate boundary values.
+This boundary rule does not remove the requirement to handle nonuniform
+terminal-bin geometry correctly.
+
+Finally, reapply the original retained-bin mask to the displayed result.
+Discard any intermediate smoothed values at excluded positions: they remain
+transparent. Smoothing must not fill excluded holes, expand the population,
+or modify the stored mask. Genuine zeros inside the mask remain part of the
+calculation even when their smoothed display values become nonzero.
 
 #### Rendering scope and verification
 
@@ -6009,9 +6109,13 @@ requirements of this part or 11e.vii.
 Focused tests should cover unchanged behavior with smoothing disabled,
 invalid sigma values, documented scale conversion, masked boundaries versus
 genuine zero counts, all-zero selected planes, narrower terminal bins,
-normalization/label consistency, and both summary types. Verify that input summaries remain
-unchanged, source points are not read, and rendering retains the original
-bin geometry. Notebook integration is not required to complete this part.
+constant-density preservation across unequal-area bins, normalization/label
+consistency, and both summary types. Include an outer-boundary case that
+distinguishes retained-support normalization from reflected padding, and
+verify that smoothing leaves excluded holes transparent. Input summaries
+must remain unchanged, source points must not be read, and rendering must
+retain the original bin geometry. Notebook integration is not required to
+complete this part.
 
 ### Part 11e.vii: marimo smoothed-density overview
 
