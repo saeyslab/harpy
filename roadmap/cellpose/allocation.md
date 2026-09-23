@@ -34,12 +34,14 @@ implemented:
       elements through `hp.pt.add_feature_panel` — implemented;
     - **11d:** validate existing points against their registered feature panel
       through the read-only `hp.pt.validate_points` API;
-    - **11e:** transcript-positive bin summaries and visualization, in five
+    - **11e:** transcript-positive bin summaries and visualization, in seven
       separate parts: **11e.i** construct `summary.spatial_bins` inside
       `summarize_points` — implemented; **11e.ii** spatial-bin histograms — implemented;
       **11e.iii** feature-specific spatial counts and bin summaries through
       `hp.qc.summarize_points_by_feature` — implemented; **11e.iv** spatial density
-      heatmaps — implemented; and **11e.v** density-only marimo overview — implemented;
+      heatmaps — implemented; **11e.v** density-only marimo overview — implemented;
+      **11e.vi** optional spatial-density smoothing in Harpy; and **11e.vii**
+      marimo smoothed-density overview;
     - **11f:** table-level summary computation through `hp.qc.summarize_table`
       and `TableSummary`, with plotting integration;
 
@@ -89,6 +91,10 @@ record together. It does not accept a SpatialData object.
 It neither reads the source points nor resolves a live panel registry. Part
 11e.v then integrates this standalone plotter into a density-only marimo
 overview, with notebook image overlays deferred to a later follow-up.
+Part 11e.vi adds optional smoothing inside Harpy's plotter, and 11e.vii
+separately adopts it as the notebook's default density view, with sigma equal
+to the nominal bin size and no smoothing controls. Both retain the existing
+flat-bin rendering; rendering interpolation remains deferred.
 Slice 11f provides the symmetric read-only table-summary workflow, deriving
 per-instance metrics and class-level overviews from the class-aware table before
 plotting. Slice 12 is an independent integration follow-up that makes later
@@ -4373,7 +4379,7 @@ Focused tests should cover:
 
 ## Slice 11e: original-point summary visualization
 
-**Status: Parts 11e.i–v implemented.**
+**Status: Parts 11e.i–v implemented; Parts 11e.vi–vii planned, not implemented.**
 
 Implement annotation-free QC of transcript-positive spatial bins,
 using the existing `PointsSummary.spatial_counts` from Slice 11a, plus an
@@ -4393,12 +4399,21 @@ explicit computation path for feature-specific grids:
 5. **11e.v: marimo density overview** — add class-density maps with shared
    sample/class selections and browser pan/zoom. Image overlays and image-region
    views are deferred to a later follow-up.
+6. **11e.vi: optional spatial-density smoothing in Harpy** — extend
+   `hp.pl.plot_points_density` with mask-aware Gaussian smoothing of display
+   values, without changing stored summaries or flat-bin rendering.
+7. **11e.vii: marimo smoothed-density overview** — show one smoothed map per
+   displayed sample, using its nominal bin size as sigma without exposing
+   smoothing controls or duplicating Harpy's smoothing logic.
 
 Part 11e.ii implements class histograms from the computed result of 11e.i;
 11e.iii adds a separate feature-summary plotting adapter sharing the same renderer. Neither requires
 density rendering to be implemented first. Part 11e.iv consumes the class-grid contract
 from 11e.i and the feature-grid contract from 11e.iii. Part 11e.v follows 11e.iv
 and reuses its plotter; notebook integration is not required to complete 11e.iv.
+Part 11e.vi also builds on 11e.iv independently of notebook changes. Part
+11e.vii depends on both 11e.v and 11e.vi. Neither follow-up implements rendering
+interpolation or a finer display grid.
 Keep the parts within Slice 11e so later slice numbers remain unchanged.
 Replace the former per-feature distribution
 plot and per-feature class-summary display with this bin-based workflow.
@@ -5414,7 +5429,8 @@ Focused tests should establish that:
 
 Implemented in `harpy.plot._points_density`, with focused coverage in
 `test_points_density.py`. The coordinate-based instance-density renderer remains
-unchanged. Rendering is unsmoothed; optional smoothing is outside this part.
+unchanged. Rendering is unsmoothed; optional smoothing follows in 11e.vi,
+outside this part's implementation contract.
 
 Replace `hp.pl.plot_transcript_density` with `hp.pl.plot_points_density`, a
 renderer accepting a `PointsSummary` or
@@ -5614,8 +5630,8 @@ underlying image remains visible. Keep class- and feature-specific zeros inside 
 visible as zero, not missing data; do not mask each plane by its own positive
 counts. If the mask retains no bins, show an explicit empty-state message.
 An all-zero feature grid with a nonempty inherited population is not an empty
-population. The raw zero-filled array remains unchanged. This renderer does not
-offer smoothing; any future smoothing must be display-only, respect the shared
+population. The raw zero-filled array remains unchanged. Part 11e.iv does not
+offer smoothing; the follow-up in 11e.vi must be display-only, respect the shared
 mask, and leave statistics and histogram inputs unchanged.
 
 The primary spatial visualization should be matched class heatmaps, optionally
@@ -5904,6 +5920,145 @@ smoke test with two synthetic samples, including a 400 × 1,000-bin grid.
 Sample/class changes reuse summaries, histogram switches leave density figures
 unchanged, and pan/zoom navigates existing grids without another reduction.
 This does not establish performance on the full UCB dataset.
+
+### Part 11e.vi: optional spatial-density smoothing in Harpy
+
+**Status: planned; not implemented. Depends on Part 11e.iv.**
+
+Extend `hp.pl.plot_points_density` with optional Gaussian smoothing of the
+precomputed spatial-count grid. This part owns the plotting API, numerical
+behavior, documentation, and focused tests. It does not modify the marimo
+notebook or introduce another summary-computation API.
+
+#### Public API
+
+Add one keyword-only parameter to `hp.pl.plot_points_density`:
+
+```python
+smoothing_sigma: float | None = None
+```
+
+- `None` disables smoothing; a positive finite value enables it. Reject zero,
+  negative or nonfinite values and booleans. Do not add a separate `smooth=True`
+  parameter.
+- Sigma is the Gaussian standard deviation in
+  `summary.metadata.to_coordinate_system` units, just like `bin_size`, not a
+  number of bins, screen pixels, or a kernel radius. Thus `10.0` means 10 µm
+  in a micron coordinate system, or 10 pixels in a pixel coordinate system.
+  Use the captured bin geometry to convert that distance into smoothing
+  weights; `microns_per_unit` does not change the units of this parameter.
+- When enabled, the function constructs temporary smoothed display values and
+  plots them directly. It still returns Matplotlib `Axes`, not a modified
+  summary or a separate smoothing result.
+
+For a summary computed in a micron coordinate system with
+`microns_per_unit=1.0`, the proposed call is:
+
+```python
+ax = hp.pl.plot_points_density(
+    points_summary,
+    feature_class="Endogenous",
+    normalization="per_area",
+    smoothing_sigma=10.0,  # Gaussian sigma = 10 µm
+)
+```
+
+On a uniform 10 × 10 µm grid, this sigma corresponds to one bin; it does not
+rebin the data. Omitting `smoothing_sigma`, or passing `None`, keeps the
+unsmoothed display with the requested normalization.
+
+#### Display-only smoothing contract
+
+- Smoothing is disabled by default. Existing calls keep their raw-bin behavior
+  and existing normalization choices.
+- Support both `PointsSummary` and `FeaturePointsSummary`, retaining their
+  existing class/feature selection and pooling contracts.
+- Work on temporary floating-point display values. Do not mutate
+  `spatial_counts`, metadata, retained-bin masks, per-bin measurements,
+  histograms, or any computed statistics. Read neither source points nor a
+  live panel registry, and perform no SpatialData writes.
+- Keep the chosen spatial smoothing scale independent of figure size, DPI,
+  and zoom level.
+- Respect the original retained-bin mask. Excluded bins provide no support
+  to the local average and remain transparent in the result. Normalize
+  smoothing weights over retained support so missing neighbors do not act as
+  artificial zero measurements. Genuine zeros inside retained bins still
+  contribute, including feature-specific zeros in the inherited population.
+- Define the interaction with existing normalization modes explicitly. Account
+  for actual bin areas where area normalization is requested, including
+  narrower terminal bins after a crop. Do not silently assume every bin has
+  the nominal full area or uniformly spaced centers at crop boundaries.
+- Label smoothed output and its units unambiguously, and expose the active
+  smoothing scale in the plot's labeling or documentation. For example, an
+  area-normalized result is **Smoothed points per µm²**, not raw counts.
+  Smoothed values are local estimates, not replacements for exact count totals.
+
+Finalize the numerical interaction with normalization before implementation.
+Keep that behavior in Harpy's API contract so notebook callers do not implement
+their own rules; the parameter name, units, and enable/disable behavior above
+are settled.
+
+#### Rendering scope and verification
+
+Keep the existing bin edges and flat-bin renderer. Smoothing changes adjacent
+bin values, not the number or geometry of displayed bins; square boundaries
+may therefore remain visible when zooming. Interpolation between bin centers,
+upsampling, and continuous-looking rendering are explicitly deferred, not
+requirements of this part or 11e.vii.
+
+Focused tests should cover unchanged behavior with smoothing disabled,
+invalid sigma values, documented scale conversion, masked boundaries versus
+genuine zero counts, all-zero selected planes, narrower terminal bins,
+normalization/label consistency, and both summary types. Verify that input summaries remain
+unchanged, source points are not read, and rendering retains the original
+bin geometry. Notebook integration is not required to complete this part.
+
+### Part 11e.vii: marimo smoothed-density overview
+
+**Status: planned; not implemented. Depends on Parts 11e.v and 11e.vi.**
+
+Extend the density section of `notebooks/2026_08_ucb/histograms.py` to consume
+Harpy's smoothing API. Do not add Gaussian filtering, mask handling, or
+normalization calculations to notebook cells. Replace the unsmoothed maps from
+11e.v with smoothed maps, rather than showing both versions.
+
+- Show one density plot per displayed sample for the selected class, always
+  smoothed. Do not expose a smoothing toggle or a sigma control, and do not
+  add an unsmoothed comparison plot.
+- Pass `smoothing_sigma=summary.metadata.bin_size` for each sample. Use the
+  nominal bin size captured by the calculated summary, not an unsubmitted
+  form value or the width of a narrower terminal bin. For 10 × 10 µm bins,
+  this gives Gaussian sigma = 10 µm in the notebook's micron coordinate system.
+- This is a notebook policy, not a change to the public plotting API:
+  `hp.pl.plot_points_density` retains `smoothing_sigma=None` by default.
+  Other callers can still request unsmoothed maps or choose another sigma.
+- Briefly identify the view as smoothed and state its scale, for example,
+  **Gaussian smoothing: σ = 10 µm**. Keep this informational, not an input.
+- Reuse the existing sample/class selectors and calculated summaries. Do not
+  require another **Calculate summaries** submission or add a separate density
+  computation button.
+- Display changes reuse those summaries without rereading source points or
+  changing stored counts, masks, tables, or histogram measurements. Shared
+  sample/class selections continue to redraw the corresponding plots;
+  KDE/percentage controls remain histogram-only.
+- Submitting a different bin area recalculates summaries through the existing
+  workflow. The new nominal bin size then also determines the smoothing
+  distance; zooming does not change either value. This is a predictable
+  default, not a claim of an optimal bandwidth for every dataset.
+- Delegate smoothing and its unit-aware labeling to `hp.pl.plot_points_density`.
+  Explain that the view shows a smoothed estimate on the existing bins, not
+  finer spatial measurements. Preserve the existing normalization choice.
+- Preserve the existing bounded canvases, equal spatial scaling, pan/zoom,
+  and unavailable-class behavior. Image overlays, density export, and rendering
+  interpolation remain outside this part.
+
+Verify the reactive dependencies with focused notebook tests and a running
+browser check: each available selected sample has one smoothed map and passes
+its captured nominal bin size as sigma, including after a newly submitted bin
+area. There are no smoothing controls or duplicate unsmoothed maps. Display
+changes and pan/zoom perform no source scans or summary mutation; histogram
+controls do not rerender density maps. Verify that the public plotter's
+unsmoothed default remains unchanged.
 
 ## Slice 11f: table-level summary computation and plotting integration
 
