@@ -1,6 +1,7 @@
 """Read-only rendering of precomputed class and feature count grids."""
 
 from collections.abc import Sequence
+from numbers import Real
 from typing import Literal
 
 import matplotlib.pyplot as plt
@@ -8,6 +9,7 @@ import numpy as np
 import xarray as xr
 from matplotlib.axes import Axes
 from matplotlib.colors import Colormap
+from scipy.sparse import csr_array
 
 from harpy.qc.points._points_summary_schema import _FEATURE_CLASS_KEY, _FEATURE_KEY
 from harpy.qc.points._summarize_points import PointsSummary
@@ -20,6 +22,7 @@ def plot_points_density(
     feature_class: str | None = None,
     features: str | Sequence[str] | None = None,
     normalization: Literal["per_area", "per_panel_feature", "per_panel_feature_per_area"] | None = None,
+    smoothing_sigma: float | None = None,
     cmap: str | Colormap = "cividis",
     colorbar: bool = True,
     vmin: float | None = None,
@@ -57,6 +60,22 @@ def plot_points_density(
         classes' complete panel size, including undetected features;
         ``"per_panel_feature_per_area"`` divides by both panel size and area.
         Pooled classes use summed counts divided by their combined panel size.
+    smoothing_sigma
+        Optional positive, finite Gaussian standard deviation in
+        ``metadata.to_coordinate_system`` units, not bins or screen pixels.
+        None leaves values unsmoothed. For example, ``smoothing_sigma=10``
+        means 10 µm in a micron coordinate system, or 10 pixels in a pixel
+        coordinate system. In the latter case, if ``microns_per_unit=0.5``
+        was supplied to :func:`harpy.qc.summarize_points`, sigma is physically
+        equivalent to 5 µm.
+        Weights use actual bin-center distances, truncated at four sigma
+        along each axis. Smoothing includes retained zero-count bins but
+        excludes masked bins and locations outside the grid. Area-normalized
+        maps divide weighted counts by weighted bin areas; other modes use
+        weighted counts per retained bin.
+        Smoothed values are local estimates, not exact counts. The summary's
+        counts and statistics remain unchanged. The plot keeps the original
+        bin resolution, so individual bins may remain visible when zooming in.
     cmap
         Matplotlib colormap. Excluded bins are transparent regardless of its
         configured bad-value color.
@@ -103,6 +122,11 @@ def plot_points_density(
         )
         hp.pl.plot_points_density(summary, feature_class="Endogenous")
 
+        hp.pl.plot_points_density(
+            summary, feature_class="Endogenous", normalization="per_area",
+            smoothing_sigma=10,  # Gaussian sigma = 10 µm; original bins remain unchanged
+        )
+
         ax = hp.pl.plot_sdata(
             sdata, image_name="DAPI", channel="DAPI",
             to_coordinate_system=summary.metadata.to_coordinate_system,
@@ -118,6 +142,15 @@ def plot_points_density(
         )
     if normalization not in (None, "per_area", "per_panel_feature", "per_panel_feature_per_area"):
         raise ValueError(f"Unknown normalization: {normalization!r}.")
+    if smoothing_sigma is not None:
+        if (
+            isinstance(smoothing_sigma, bool)
+            or not isinstance(smoothing_sigma, Real)
+            or not np.isfinite(smoothing_sigma)
+            or smoothing_sigma <= 0
+        ):
+            raise ValueError("smoothing_sigma must be a positive, finite number in coordinate-system units, or None.")
+        smoothing_sigma = float(smoothing_sigma)
     if not np.isfinite(alpha) or not 0 <= alpha <= 1:
         raise ValueError("alpha must be between 0 and 1.")
 
@@ -131,23 +164,43 @@ def plot_points_density(
     # Copy into display values: normalization must never modify stored counts.
     values = grid.sel({axis: list(names)}).sum(dim=axis).to_numpy().astype(float)
     units = "Points"
+    panel_size = 1
+    areas = None
     if normalization in ("per_panel_feature", "per_panel_feature_per_area"):
         if not isinstance(summary, PointsSummary):
             raise ValueError("Panel-feature normalization is supported only for PointsSummary, not feature grids.")
         panel_sizes = summary.panel_feature_counts
         if any(name not in panel_sizes or panel_sizes[name] <= 0 for name in names):
             raise ValueError("Panel-feature normalization requires a positive panel size for every displayed class.")
-        values /= sum(panel_sizes[name] for name in names)
+        panel_size = sum(panel_sizes[name] for name in names)
         units += " per panel feature"
     if normalization in ("per_area", "per_panel_feature_per_area"):
         calibration = summary.metadata.microns_per_unit
         if calibration is None or not np.isfinite(calibration) or calibration <= 0:
             raise ValueError("Area normalization requires a positive, finite summary.metadata.microns_per_unit.")
         # Actual widths preserve the area of narrower terminal bins after a crop.
-        values /= np.diff(y_edges)[:, None] * np.diff(x_edges)[None, :] * calibration**2
+        areas = np.diff(y_edges)[:, None] * np.diff(x_edges)[None, :] * calibration**2
         units += " per µm²"
     else:
         units += " per bin"
+
+    if smoothing_sigma is None:
+        values /= panel_size
+        if areas is not None:
+            values /= areas
+    else:
+        # Smooth counts and their support together, not already area-normalized values:
+        # a 100-point/100-µm² bin beside a 50-point/50-µm² bin must remain at 1 point/µm².
+        values = _smooth_density(
+            values,
+            retained=retained,
+            x_centers=grid.coords["x"].to_numpy(),
+            y_centers=grid.coords["y"].to_numpy(),
+            sigma=smoothing_sigma,
+            areas=areas,
+        )
+        values /= panel_size
+        units = f"Smoothed {units.lower()}\nσ = {smoothing_sigma:g} ({summary.metadata.to_coordinate_system} units)"
 
     created_ax = ax is None
     if ax is None:
@@ -195,6 +248,71 @@ def plot_points_density(
     if created_ax:
         ax.figure.tight_layout()
     return ax
+
+
+def _smooth_density(
+    counts: np.ndarray,
+    *,
+    retained: np.ndarray,
+    x_centers: np.ndarray,
+    y_centers: np.ndarray,
+    sigma: float,
+    areas: np.ndarray | None,
+) -> np.ndarray:
+    """Divide Gaussian-weighted counts by weighted retained support (bin count or area).
+
+    Retained zeros contribute support; excluded bins and outside-grid locations
+    contribute nothing. The separable operators use actual center distances,
+    including narrower cropped bins, without a full 2D bin-to-bin weight matrix.
+    The caller reapplies the original mask: estimates never fill excluded holes.
+
+    Parameters
+    ----------
+    counts
+        Raw selected or pooled point counts, shaped ``(y, x)``.
+    retained
+        Boolean mask with the same shape as ``counts``. True includes a bin
+        in the smoothing support, even when its count is zero.
+    x_centers, y_centers
+        One-dimensional bin-center coordinates in the summary's coordinate
+        system, aligned with count columns and rows, respectively.
+    sigma
+        Positive, finite Gaussian standard deviation in the same units as
+        the centers. Weights are truncated at four sigma along each axis.
+    areas
+        Per-bin areas in µm², with the same shape as ``counts``. When supplied,
+        divide weighted counts by weighted retained areas to obtain points
+        per µm². None disables area normalization, not smoothing: divide by
+        retained-bin weights instead, obtaining smoothed points per bin.
+    """
+    x_weights = _gaussian_center_weights(x_centers, sigma=sigma)
+    y_weights = _gaussian_center_weights(y_centers, sigma=sigma)
+    numerator = y_weights @ np.where(retained, counts, 0.0)
+    numerator = (x_weights @ numerator.T).T
+    denominator = y_weights @ np.where(retained, 1.0 if areas is None else areas, 0.0)
+    denominator = (x_weights @ denominator.T).T
+    return np.divide(numerator, denominator, out=np.zeros_like(numerator), where=denominator > 0)
+
+
+def _gaussian_center_weights(centers: np.ndarray, *, sigma: float) -> csr_array:
+    """Gaussian weights between axis centers, limited to neighbors within four sigma.
+
+    Row i holds weights from neighboring input centers j to output center i.
+    Store only these neighbors, including the center itself, in a sparse matrix.
+    """
+    centers = np.asarray(centers, dtype=float)
+    # Find each center's neighbors within ±4 sigma, including both boundaries.
+    # starts/stops are slice indices; stops points just past the last included center.
+    # Example: centers=[5, 15, 25, 35, 45], center=25, sigma=2.5
+    # selects centers[1:4] = [15, 25, 35].
+    starts = np.searchsorted(centers, centers - 4 * sigma, side="left")
+    stops = np.searchsorted(centers, centers + 4 * sigma, side="right")
+    neighbor_counts = stops - starts
+    indptr = np.concatenate(([0], np.cumsum(neighbor_counts)))
+    indices = np.concatenate([np.arange(start, stop) for start, stop in zip(starts, stops, strict=True)])
+    distances = (centers[indices] - np.repeat(centers, neighbor_counts)) / sigma
+    weights = np.exp(-0.5 * distances**2)
+    return csr_array((weights, indices, indptr), shape=(len(centers), len(centers)))
 
 
 def _density_selection(

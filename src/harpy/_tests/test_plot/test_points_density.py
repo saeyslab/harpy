@@ -144,20 +144,22 @@ def test_only_feature_is_inferred(feature_summary):
     assert len(ax.figure.axes) == 1
 
 
-def test_all_zero_class_and_empty_population_are_distinct(summary):
-    ax = plot_points_density(summary, feature_class="Empty", colorbar=False)
+@pytest.mark.parametrize("smoothing_sigma", [None, 2])
+def test_all_zero_class_and_empty_population_are_distinct(summary, smoothing_sigma):
+    ax = plot_points_density(summary, feature_class="Empty", colorbar=False, smoothing_sigma=smoothing_sigma)
     assert len(ax.collections) == 1
     assert not ax.collections[0].get_array().compressed().any()
     assert ax.collections[0].get_clim() == (0, 1)
     empty = replace(summary, spatial_counts=xr.zeros_like(summary.spatial_counts))
-    empty_ax = plot_points_density(empty)
+    empty_ax = plot_points_density(empty, smoothing_sigma=smoothing_sigma)
     assert not empty_ax.collections
     assert [text.get_text() for text in empty_ax.texts] == ["No retained spatial bins"]
 
 
-def test_geometry_uses_bin_edges_and_figure_sizing_does_not_change_values(summary):
+@pytest.mark.parametrize("smoothing_sigma", [None, 2])
+def test_geometry_uses_bin_edges_and_figure_sizing_does_not_change_values(summary, smoothing_sigma):
     with plt.rc_context({"figure.dpi": 83}):
-        ax = plot_points_density(summary, colorbar=False)
+        ax = plot_points_density(summary, colorbar=False, smoothing_sigma=smoothing_sigma)
     np.testing.assert_allclose(ax.figure.get_size_inches(), [8, 8])
     assert ax.figure.dpi == 83
     corners = ax.collections[0].get_coordinates()
@@ -170,16 +172,17 @@ def test_geometry_uses_bin_edges_and_figure_sizing_does_not_change_values(summar
     assert "sample_pixels" in ax.get_xlabel()
 
     fig, reused = plt.subplots(figsize=(4, 2), dpi=120)
-    assert plot_points_density(summary, ax=reused, figsize=(99, 99)) is reused
+    assert plot_points_density(summary, ax=reused, figsize=(99, 99), smoothing_sigma=smoothing_sigma) is reused
     np.testing.assert_array_equal(reused.collections[0].get_coordinates(), corners)
     np.testing.assert_array_equal(reused.collections[0].get_array(), ax.collections[0].get_array())
     np.testing.assert_allclose(fig.get_size_inches(), [4, 2])
     assert fig.dpi == 120
-    custom = plot_points_density(summary, figsize=(3, 5), colorbar=False)
+    custom = plot_points_density(summary, figsize=(3, 5), colorbar=False, smoothing_sigma=smoothing_sigma)
     np.testing.assert_allclose(custom.figure.get_size_inches(), [3, 5])
 
 
-def test_large_grid_keeps_bounded_canvas(summary):
+@pytest.mark.parametrize("smoothing_sigma", [None, 1])
+def test_large_grid_keeps_bounded_canvas(summary, smoothing_sigma):
     grid = xr.DataArray(
         np.ones((1, 400, 1000), dtype=np.uint64),
         dims=("feature_class", "y", "x"),
@@ -194,20 +197,31 @@ def test_large_grid_keeps_bounded_canvas(summary):
             y_edges=tuple(range(401)),
         ),
     )
-    ax = plot_points_density(large, figsize=(3, 2), colorbar=False)
+    ax = plot_points_density(large, figsize=(3, 2), colorbar=False, smoothing_sigma=smoothing_sigma)
     np.testing.assert_allclose(ax.figure.get_size_inches(), [3, 2])
     assert ax.collections[0].get_array().shape == (400, 1000)
+    np.testing.assert_allclose(ax.collections[0].get_array(), 1)
 
 
 @pytest.mark.parametrize("inverted_y", [False, True])
-def test_overlay_preserves_view_and_zero_bins_are_not_transparent(summary, inverted_y):
+@pytest.mark.parametrize("smoothing_sigma", [None, 2])
+def test_overlay_preserves_view_and_zero_bins_are_not_transparent(summary, inverted_y, smoothing_sigma):
     fig, ax = plt.subplots(figsize=(4, 3), dpi=90)
     image = ax.imshow(np.ones((2, 3)), extent=(5, 20, 15, 30), origin="lower", zorder=3)
     ax.set(xlim=(9, 14), ylim=(24, 19) if inverted_y else (19, 24), aspect=2, title="sample_a / calls / panel_a")
     before = (ax.get_xlim(), ax.get_ylim(), ax.get_aspect(), ax.get_title())
     cmap = ListedColormap(["blue", "yellow"])
     cmap.set_bad("red")  # The renderer must still make excluded bins transparent.
-    returned = plot_points_density(summary, feature_class="Endogenous", ax=ax, alpha=0.5, cmap=cmap, vmin=0, vmax=8)
+    returned = plot_points_density(
+        summary,
+        feature_class="Endogenous",
+        ax=ax,
+        alpha=0.5,
+        cmap=cmap,
+        vmin=0,
+        vmax=8,
+        smoothing_sigma=smoothing_sigma,
+    )
     fig.canvas.draw()
     assert returned is ax
     assert (ax.get_xlim(), ax.get_ylim(), ax.get_aspect(), ax.get_title()) == before
@@ -265,7 +279,128 @@ def test_source_data_and_bare_arrays_are_not_accepted(summary):
             plot_points_density(invalid)
 
 
-def test_repeated_rendering_never_computes_points_or_mutates_summaries(summary, feature_summary, monkeypatch):
+@pytest.mark.parametrize("sigma", [0, -1, np.nan, np.inf, True, np.bool_(True), "2", [2]])
+def test_invalid_smoothing_scale(summary, sigma):
+    with pytest.raises(ValueError, match="smoothing_sigma.*positive, finite.*coordinate-system units"):
+        plot_points_density(summary, smoothing_sigma=sigma)
+
+
+@pytest.mark.parametrize(
+    ("normalization", "panel_size", "area_normalized", "units"),
+    [
+        (None, 1, False, "points per bin"),
+        ("per_area", 1, True, "points per µm²"),
+        ("per_panel_feature", 5, False, "points per panel feature per bin"),
+        ("per_panel_feature_per_area", 5, True, "points per panel feature per µm²"),
+    ],
+)
+def test_smoothed_normalization_matches_direct_center_weights(
+    summary, normalization, panel_size, area_normalized, units
+):
+    """Compare pooled classes with a direct 2D calculation on unequal-width bins.
+
+    Retained centers are (11, 21), (13, 21), (13, 22.5), with counts 4, 2, 6
+    and areas 1, 1, 0.5 µm². Pairwise distances, not array-index distances,
+    define the Gaussian. The panel denominator includes undetected features.
+    """
+    centers = np.array([[11, 21], [13, 21], [13, 22.5]])
+    distances = centers[:, None, :] - centers[None, :, :]
+    weights = np.exp(-0.5 * (distances**2).sum(axis=2) / 2**2)
+    support = [1, 1, 0.5] if area_normalized else [1, 1, 1]
+    expected = (weights @ [4, 2, 6]) / (weights @ support) / panel_size
+    ax = plot_points_density(summary, smoothing_sigma=2, normalization=normalization)
+    values = ax.collections[0].get_array()
+    np.testing.assert_allclose(values.compressed(), expected)
+    np.testing.assert_array_equal(values.mask, ~summary.retained_bin_mask.values)
+    assert ax.figure.axes[1].get_ylabel() == (
+        f"Combined: Endogenous + Negative + Empty — Smoothed {units}\nσ = 2 (sample_pixels units)"
+    )
+
+
+@pytest.mark.parametrize("features", ["A", ["A", "B"], "Zero"])
+def test_smoothed_features_include_inherited_zero_bins(feature_summary, features):
+    """The Negative-only bin remains support for feature maps, including undetected features."""
+    counts = [4, 0, 6] if isinstance(features, list) else [4, 0, 0] if features == "A" else [0, 0, 0]
+    centers = np.array([[11, 21], [13, 21], [13, 22.5]])
+    distances = centers[:, None, :] - centers[None, :, :]
+    weights = np.exp(-0.5 * (distances**2).sum(axis=2) / 2**2)
+    expected = (weights @ counts) / (weights @ [1, 1, 0.5])
+    ax = plot_points_density(feature_summary, features=features, normalization="per_area", smoothing_sigma=2)
+    values = ax.collections[0].get_array()
+    np.testing.assert_allclose(values.compressed(), expected)
+    np.testing.assert_array_equal(values.mask, ~feature_summary.retained_bin_mask.values)
+
+
+def test_smoothing_preserves_constant_density_across_cropped_bins(summary):
+    grid = xr.zeros_like(summary.spatial_counts)
+    # Every bin has 8 points/µm², despite unequal areas in both dimensions.
+    grid.loc[{"feature_class": "Endogenous"}] = [[8, 8, 4], [4, 4, 2]]
+    result = replace(summary, spatial_counts=grid)
+    ax = plot_points_density(result, normalization="per_area", smoothing_sigma=2, colorbar=False)
+    np.testing.assert_allclose(ax.collections[0].get_array(), 8)
+
+
+@pytest.mark.parametrize("sigma", [1.0, 0.1])
+def test_smoothing_excludes_holes_and_outside_grid_but_keeps_retained_zeros(feature_summary, sigma):
+    """At the left boundary use real neighbors only, never reflected copies.
+
+    Counts:   10  0  0  2
+    Retained:  Y  Y  N  Y
+
+    With sigma=1, the leftmost result is (10 + 2*exp(-4.5)) /
+    (1 + exp(-0.5) + exp(-4.5)). The retained zero contributes weight;
+    the hole and outside-grid positions do not. With sigma=0.1, the
+    four-sigma cutoff excludes every neighbor and leaves counts unchanged.
+    """
+    grid = xr.DataArray(
+        np.array([[[10, 0, 0, 2]]], dtype=np.uint64),
+        dims=("feature", "y", "x"),
+        coords={"feature": ["A"], "y": [0.5], "x": [0.5, 1.5, 2.5, 3.5]},
+    )
+    mask = xr.DataArray([[True, True, False, True]], dims=("y", "x"), coords={"y": grid.y, "x": grid.x})
+    result = replace(
+        feature_summary,
+        spatial_counts=grid,
+        retained_bin_mask=mask,
+        metadata=replace(feature_summary.metadata, bin_size=1, x_edges=(0, 1, 2, 3, 4), y_edges=(0, 1)),
+    )
+    ax = plot_points_density(result, smoothing_sigma=sigma, colorbar=False)
+    values = ax.collections[0].get_array()
+    np.testing.assert_array_equal(values.mask, ~mask.values)
+    if sigma == 1:
+        expected_left = (10 + 2 * np.exp(-4.5)) / (1 + np.exp(-0.5) + np.exp(-4.5))
+        assert values[0, 0] == pytest.approx(expected_left)
+        assert values[0, 1] > 0  # A measured zero may have a positive local estimate.
+    else:
+        np.testing.assert_allclose(values.compressed(), [10, 0, 2])
+
+
+def test_smoothing_scale_uses_coordinate_units_not_calibration(summary):
+    original = plot_points_density(summary, smoothing_sigma=2, colorbar=False).collections[0].get_array()
+    uncalibrated = replace(summary, metadata=replace(summary.metadata, microns_per_unit=None))
+    ax = plot_points_density(uncalibrated, smoothing_sigma=2, colorbar=False)
+    np.testing.assert_allclose(ax.collections[0].get_array(), original)
+    # Express the same geometry in a coordinate system with units ten times smaller.
+    scaled = replace(
+        uncalibrated,
+        spatial_counts=summary.spatial_counts.assign_coords(
+            x=summary.spatial_counts.x * 10, y=summary.spatial_counts.y * 10
+        ),
+        metadata=replace(
+            uncalibrated.metadata,
+            bin_size=20,
+            x_edges=tuple(np.asarray(summary.metadata.x_edges) * 10),
+            y_edges=tuple(np.asarray(summary.metadata.y_edges) * 10),
+        ),
+    )
+    ax = plot_points_density(scaled, smoothing_sigma=20, colorbar=False)
+    np.testing.assert_allclose(ax.collections[0].get_array(), original)
+
+
+@pytest.mark.parametrize("smoothing_sigma", [None, 2])
+def test_repeated_rendering_never_computes_points_or_mutates_summaries(
+    summary, feature_summary, monkeypatch, smoothing_sigma
+):
     """Detached results suffice: display choices must not invoke computation or panel resolution."""
     snapshots = [deepcopy(result) for result in (summary, feature_summary)]
 
@@ -279,10 +414,12 @@ def test_repeated_rendering_never_computes_points_or_mutates_summaries(summary, 
     monkeypatch.setattr("harpy.qc.points._summarize_points_by_feature.summarize_points_by_feature", forbidden)
     monkeypatch.setattr("harpy.qc.points._summarize_points_by_feature._resolve_points_feature_panel", forbidden)
     monkeypatch.setattr("harpy.qc.points._points_reduction._resolve_points_feature_panel", forbidden)
-    plot_points_density(summary, feature_class="Negative", normalization="per_panel_feature_per_area")
-    plot_points_density(summary, feature_class="Endogenous")
-    plot_points_density(feature_summary, features="A", normalization="per_area")
-    plot_points_density(feature_summary, features=["A", "B"])
+    plot_points_density(
+        summary, feature_class="Negative", normalization="per_panel_feature_per_area", smoothing_sigma=smoothing_sigma
+    )
+    plot_points_density(summary, feature_class="Endogenous", smoothing_sigma=smoothing_sigma)
+    plot_points_density(feature_summary, features="A", normalization="per_area", smoothing_sigma=smoothing_sigma)
+    plot_points_density(feature_summary, features=["A", "B"], smoothing_sigma=smoothing_sigma)
     for result, before in zip((summary, feature_summary), snapshots, strict=True):
         assert result.metadata == before.metadata
         xr.testing.assert_identical(result.spatial_counts, before.spatial_counts)
