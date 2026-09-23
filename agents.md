@@ -9,7 +9,7 @@ their `.venv/bin/` path rather than sourcing `activate`:
 ```bash
 .venv/bin/pytest
 .venv/bin/python -m pytest
-.venv/bin/pre-commit run ruff --all-files
+.venv/bin/pre-commit run --files path/to/changed_file.py
 ```
 
 ## Test scope
@@ -29,6 +29,20 @@ Prefer focused commands such as:
 ```
 
 Run linting only on the changed or directly affected files where possible.
+
+## Pre-commit checks
+
+Before finishing changes, run pre-commit on the files you changed:
+
+```bash
+.venv/bin/pre-commit run --files <changed-file-paths>
+```
+
+Review any automatic fixes and rerun until checks pass. Report any unresolved
+failures. Do not install or update packages in `.venv`.
+
+Run across all tracked files only when changing hook versions or investigating a
+repository-wide CI failure.
 
 ## Code explanation references
 
