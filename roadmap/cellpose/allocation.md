@@ -4379,7 +4379,7 @@ Focused tests should cover:
 
 ## Slice 11e: original-point summary visualization
 
-**Status: Parts 11e.i–v implemented; Parts 11e.vi–vii planned, not implemented.**
+**Status: Parts 11e.i–vi implemented; Part 11e.vii planned, not implemented.**
 
 Implement annotation-free QC of transcript-positive spatial bins,
 using the existing `PointsSummary.spatial_counts` from Slice 11a, plus an
@@ -5923,7 +5923,14 @@ This does not establish performance on the full UCB dataset.
 
 ### Part 11e.vi: optional spatial-density smoothing in Harpy
 
-**Status: planned; not implemented. Depends on Part 11e.iv.**
+**Status: implemented. Depends on Part 11e.iv.**
+
+Implemented in `src/harpy/plot/_points_density.py`, with focused coverage in
+`src/harpy/_tests/test_plot/test_points_density.py`. Smoothing uses separable
+sparse Gaussian weights over actual bin centers, truncated at four sigma
+along each axis. It preserves the existing flat-bin geometry and retained
+mask, and labels the displayed estimate with its units and smoothing scale.
+The notebook remains unchanged; integration belongs to Part 11e.vii.
 
 Extend `hp.pl.plot_points_density` with optional Gaussian smoothing of the
 precomputed spatial-count grid. This part owns the plotting API, numerical
@@ -5932,7 +5939,7 @@ notebook or introduce another summary-computation API.
 
 #### Public API
 
-Add one keyword-only parameter to `hp.pl.plot_points_density`:
+The keyword-only parameter on `hp.pl.plot_points_density` is:
 
 ```python
 smoothing_sigma: float | None = None
@@ -5952,7 +5959,7 @@ smoothing_sigma: float | None = None
   summary or a separate smoothing result.
 
 For a summary computed in a micron coordinate system with
-`microns_per_unit=1.0`, the proposed call is:
+`microns_per_unit=1.0`, the call is:
 
 ```python
 ax = hp.pl.plot_points_density(
