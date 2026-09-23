@@ -200,7 +200,6 @@ def plot_points_density(
             areas=areas,
         )
         values /= panel_size
-        units = f"Smoothed {units.lower()}\nσ = {smoothing_sigma:g} ({summary.metadata.to_coordinate_system} units)"
 
     created_ax = ax is None
     if ax is None:

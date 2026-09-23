@@ -288,10 +288,10 @@ def test_invalid_smoothing_scale(summary, sigma):
 @pytest.mark.parametrize(
     ("normalization", "panel_size", "area_normalized", "units"),
     [
-        (None, 1, False, "points per bin"),
-        ("per_area", 1, True, "points per µm²"),
-        ("per_panel_feature", 5, False, "points per panel feature per bin"),
-        ("per_panel_feature_per_area", 5, True, "points per panel feature per µm²"),
+        (None, 1, False, "Points per bin"),
+        ("per_area", 1, True, "Points per µm²"),
+        ("per_panel_feature", 5, False, "Points per panel feature per bin"),
+        ("per_panel_feature_per_area", 5, True, "Points per panel feature per µm²"),
     ],
 )
 def test_smoothed_normalization_matches_direct_center_weights(
@@ -312,9 +312,7 @@ def test_smoothed_normalization_matches_direct_center_weights(
     values = ax.collections[0].get_array()
     np.testing.assert_allclose(values.compressed(), expected)
     np.testing.assert_array_equal(values.mask, ~summary.retained_bin_mask.values)
-    assert ax.figure.axes[1].get_ylabel() == (
-        f"Combined: Endogenous + Negative + Empty — Smoothed {units}\nσ = 2 (sample_pixels units)"
-    )
+    assert ax.figure.axes[1].get_ylabel() == f"Combined: Endogenous + Negative + Empty — {units}"
 
 
 @pytest.mark.parametrize("features", ["A", ["A", "B"], "Zero"])
