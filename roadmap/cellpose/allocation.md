@@ -42,15 +42,16 @@ implemented:
       heatmaps — implemented; **11e.v** density-only marimo overview — implemented;
       **11e.vi** optional spatial-density smoothing in Harpy; and **11e.vii**
       marimo smoothed-density overview;
-    - **11f:** modular AnnData table I/O for SpatialData Zarr stores, in six
+    - **11f:** modular AnnData table I/O for SpatialData Zarr stores, in seven
       separate parts: **11f.i** public contracts — defined and documented;
       **11f.ii** selective component and lazy complete-table reading;
       **11f.iii** scoped writing and safe
       publication; **11f.iv** region-wise `.obsm` writing; **11f.v** integration
       with existing Harpy APIs, including `hp.tb.add_feature_matrix`;
-      **11f.vi** safe deletion of optional AnnData
-      components; a separate napari-harpy persistence migration follows all
-      six parts;
+      **11f.vi** safe deletion of optional AnnData components; **11f.vii**
+      affected-chunk regional-write optimization, after the first six parts;
+      a separate napari-harpy persistence migration also follows the first six
+      parts and does not depend on this optimization;
     - **11g:** table-level summary computation through `hp.qc.summarize_table`
       and `TableSummary`, with plotting integration;
 
@@ -109,11 +110,13 @@ callers explicitly read or replace a complete AnnData table or selected
 components without materializing unrelated matrices. Its first five parts specify
 the public contracts, implement readers, writers and region-wise `.obsm` updates,
 then integrate existing Harpy entry points using the shared storage infrastructure.
-Part 11f.vi then adds safe deletion of optional components. Napari-harpy's
-existing persistence behavior informs this design without constraining the new
+Part 11f.vi then adds safe deletion of optional components. Part 11f.vii is a
+later optimization that rewrites only affected chunks of eligible regional
+`.obsm` updates; the initial regional writer still stages complete components.
+Napari-harpy's existing persistence behavior informs this design without constraining the new
 public API; a separate follow-up migrates its application-specific adapter to
-Harpy's public I/O after deletion support is available. Neither Part 11f.vi nor
-that migration is a prerequisite for Slice 11g, which
+Harpy's public I/O after deletion support is available. Neither Parts 11f.vi–vii
+nor that migration are prerequisites for Slice 11g, which
 provides the symmetric read-only table-summary workflow, deriving per-instance metrics
 and class-level overviews from the class-aware table before plotting.
 Slice 12 remains the separate integration follow-up for making
@@ -6207,7 +6210,7 @@ unsmoothed default remains unchanged.
 ## Slice 11f: modular AnnData table I/O for SpatialData Zarr stores
 
 **Status: Part 11f.i complete (contracts and documentation only); Parts
-11f.ii–vi not implemented. The public table I/O APIs are not yet available.**
+11f.ii–vii not implemented. The public table I/O APIs are not yet available.**
 
 Provide general, modular table I/O independently of QC, aggregation or Scanpy
 preprocessing. The caller explicitly chooses a complete table or selected
@@ -6216,7 +6219,7 @@ and safe publication without reading or rewriting unrelated data. Callers may
 use ordinary AnnData/Scanpy operations between reads and writes. This slice
 does not introduce another preprocessing pipeline or choose scientific metrics.
 
-Split the work into six independently reviewable parts, in this order:
+Split the work into seven independently reviewable parts, in this order:
 
 1. **11f.i: public table I/O contracts** — specify complete-table and
    component-level APIs, memory behavior, alignment and overwrite guarantees.
@@ -6230,11 +6233,15 @@ Split the work into six independently reviewable parts, in this order:
    through the shared primitives and retain lazy results when attaching them.
 6. **11f.vi: safe deletion of optional AnnData components** — support explicit
    removals and combined replacement/deletion requests with shared rollback.
+7. **11f.vii: affected-chunk regional-write optimization** — avoid complete
+   matrix rewrites for eligible regional `.obsm` updates, without changing
+   sample layout or the public regional-update semantics.
 
 Complete Parts 11f.i–v before the table-level QC work in Slice 11g. Part 11f.vi
 is required before the napari-harpy persistence migration, but does not block
-Slice 11g. The I/O contracts themselves must remain usable without any QC result,
-feature panel or aggregation-specific metadata. Slice 12 separately addresses
+Slice 11g. Part 11f.vii follows Parts 11f.i–vi and blocks neither Slice 11g nor
+the napari-harpy migration. The I/O contracts themselves must remain usable
+without any QC result, feature panel or aggregation-specific metadata. Slice 12 separately addresses
 upstream SpatialData reopening; it is not a prerequisite for these explicit Harpy APIs.
 
 ### Part 11f.i: public table I/O contracts
@@ -6246,7 +6253,7 @@ This section defines the initial public table/component contracts, including
 signatures, implementation reuse, guarantees and examples. Parts 11f.iv and
 11f.vi specify the regional-update and deletion extensions in this roadmap.
 Update `docs/development/storage.md` and user-facing API documentation during Parts
-11f.ii–vi as the functionality is implemented, describing delivered behavior
+11f.ii–vii as the functionality is implemented, describing delivered behavior
 without roadmap status language. No separate draft API page is maintained.
 
 Reuse and, where necessary, refactor Harpy's existing AnnData reading, writing
@@ -6838,7 +6845,9 @@ for a new entry), without collecting the complete old or merged matrix in
 memory. Reading and rewriting unselected rows of the affected component is
 allowed; reading or rewriting `.X`, unrelated `.obsm` entries or other tables
 is not. Memory may include row identities, requested metadata and active
-matrix chunks. Do not add direct in-place row/chunk overwrites.
+matrix chunks. Do not add direct in-place row/chunk overwrites in this part.
+Part 11f.vii separately optimizes this operation by publishing only affected
+chunks; it is not required to deliver this initial regional-write API.
 
 Finish staging while original paths remain readable, then publish the matrix
 and metadata paths together with the shared backup/rollback mechanism. Keep
@@ -6971,6 +6980,58 @@ including consolidated metadata and affected adapter state. Verify that deleting
 an optional matrix neither reads its values nor reads or rewrites `.X`.
 Document the explicit deletion contract in the public API and storage overview.
 
+### Part 11f.vii: affected-chunk regional-write optimization
+
+**Status: planned follow-up optimization; implement after Parts 11f.i–vi.
+Not a prerequisite for Slice 11g or the napari-harpy persistence migration.**
+
+Optimize Part 11f.iv's regional `.obsm` writer without changing its public
+selection, identity, overwrite or metadata contracts. The initial implementation
+remains the bounded-memory, complete-component staging path. This follow-up
+reduces disk I/O by staging and publishing only chunks affected by a regional
+update, rather than rewriting the entire matrix.
+
+Start with existing dense, unsharded Zarr matrix entries whose shape, dtype
+and chunk layout remain unchanged. Sparse and sharded storage optimization
+is outside this first scope. New entries retain the existing creation path;
+other supported layouts retain the initial whole-component path. Document
+optimization eligibility explicitly so callers know when full rewrites still
+occur. Do not introduce a second public regional-write API.
+
+The guarantee is **only affected matrix chunks are rewritten**, not that no
+bytes belonging to other samples are touched. A chunk may contain observations
+from several regions; preserve unselected values within that chunk while
+updating selected rows. Chunks without selected rows remain untouched. With
+interleaved samples, many or even all chunks may be affected, so proportional
+I/O savings are not guaranteed. Do not reorder observations, change aggregation
+output order, rechunk stores or introduce sample-aligned storage in this slice.
+
+Resolve row identities and affected chunk coordinates before preparing the
+update. Read and modify affected chunks with bounded memory, serialize them
+using the existing array's encoding, and stage caller-prepared `.uns`
+replacements alongside them. Complete staging while original data remains
+readable, including when incoming lazy values depend on the destination.
+Caller-supplied lazy computations may themselves read additional chunks; the
+optimization bounds the writer's own merge, backup and publication work.
+
+Reuse the shared publisher and rollback machinery at chunk-path granularity;
+add format-aware chunk preparation, not a competing transaction mechanism.
+Back up only affected stored chunks and requested metadata paths, not the
+complete matrix. Preserve absent/fill-valued chunk semantics, including
+restoring whether a chunk existed if publication fails. Matrix and metadata
+changes remain one logical update with the same handled-failure recovery and
+adapter-installation boundary; no crash-atomicity or concurrency guarantees
+are added. Do not replace safe publication with unprotected live-array writes.
+Scientific metadata preparation remains the caller's responsibility.
+
+Focused tests must instrument storage reads/writes to verify that the writer
+neither reads nor rewrites unaffected matrix chunks, nor copies them for backup. Cover a
+mixed-region chunk, preservation of its unselected values, interleaved rows,
+and absent/fill-valued chunks. Verify numerical agreement with the initial
+regional writer, coupled `.uns` updates, unchanged unrelated components and
+rollback after publication/finalization failures. Keep these I/O guarantees
+separate from timing benchmarks or sample-layout optimization.
+
 ### Follow-up: napari-harpy persistence integration
 
 **Status: planned; implement after Parts 11f.i–vi. Not a prerequisite for
@@ -6978,7 +7039,8 @@ Slice 11g.**
 
 Migrate napari-harpy's shared table persistence, used by object classification
 and spatial queries, onto Harpy's public table I/O APIs. This is a separate
-cross-repository integration task following the six Harpy I/O parts.
+cross-repository integration task following the first six Harpy I/O parts;
+Part 11f.vii's affected-chunk optimization is not required.
 Napari-harpy keeps a small translation layer between application requests and
 Harpy's documented public table I/O APIs. It decides what the user wants saved
 or reloaded and translates that intent into store paths, component paths and
