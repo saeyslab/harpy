@@ -6389,7 +6389,7 @@ def write_table_components(
     *,
     table_name: str,
     components: Mapping[ComponentPath, object],
-    obs_names: AxisNames | None = None,
+    obs_identity: pd.DataFrame | AxisNames | None = None,
     var_names: AxisNames | None = None,
     raw_var_names: AxisNames | None = None,
     overwrite: bool = False,
@@ -6470,38 +6470,62 @@ writer. No append or column-level disk updates are provided.
 Component writes preserve observation/feature identities, their order and the
 table's spatial annotation. **Shapes alone do not establish alignment.**
 
-| Updated component         | Required identity context          |
-| ------------------------- | ---------------------------------- |
-| `X`, a `layers` entry     | `obs_names` and `var_names`        |
-| An `obsm` or `obsp` entry | `obs_names`                        |
-| A `varm` or `varp` entry  | `var_names`                        |
-| `raw.X`                   | `obs_names` and `raw_var_names`    |
-| A `raw.varm` entry        | `raw_var_names`                    |
-| `obs`, `var`, `raw.var`   | The supplied dataframe's own index |
-| An `uns` value            | No matrix-axis arguments           |
+| Updated component         | Required identity context                            |
+| ------------------------- | ---------------------------------------------------- |
+| `X`, a `layers` entry     | `obs_identity` and `var_names`                       |
+| An `obsm` or `obsp` entry | `obs_identity`                                       |
+| A `varm` or `varp` entry  | `var_names`                                          |
+| `raw.X`                   | `obs_identity` and `raw_var_names`                   |
+| A `raw.varm` entry        | `raw_var_names`                                      |
+| `obs`                     | Its region/instance columns, or index if unannotated |
+| `var`, `raw.var`          | The supplied dataframe's own index                   |
+| An `uns` value            | No matrix-axis arguments                             |
 
-Supply each required index once per request, describing the actual order of
-the submitted values. A supplied `obs`, `var` or `raw.var` dataframe also
-provides that axis context for matrices in the same request; repeating it in
-an argument is unnecessary. If both forms are supplied, they must agree.
+Observation identity depends on the target table's stored SpatialData annotation:
 
-Affected axes require unique, non-null string labels matching the stored
-index exactly in value and order; index names and equivalent index dtypes do
-not define identity. No automatic sorting, reindexing, renaming or string
-conversion occurs. Any explicitly supplied index is checked, even if not
-needed for a value. Tables with duplicate labels can still be read and written
-whole; axis-aligned partial updates require unambiguous identities. Unrelated
-axes do not need to be loaded or validated for an `.uns`-only update.
+- **Annotated table:** `obs_identity` is a two-column dataframe, as in
+  `adata.obs[[region_key, instance_key]]`. Resolve the column names from the
+  stored annotation; do not require separate key-name arguments or hard-code
+  them. The ordered `(region, instance_id)` pairs identify the observations,
+  not `obs_names` or instance IDs alone. Pairs must be non-null, unique and
+  match the stored pairs row by row, preserving identifier values and required
+  types without converting instance IDs to strings. The dataframe's own index
+  is not used for this identity comparison. An index-only argument cannot
+  substitute for missing or invalid linkage columns.
+- **Unannotated table:** `obs_identity` is a pandas index or sequence of
+  observation-name strings, usually `adata.obs_names`. Names must be non-null,
+  unique and match the stored observation names exactly in value and order.
+
+Supply each required identity once per request, describing the actual order
+of the submitted values. A supplied `obs` dataframe provides its linkage
+columns or index according to the same rule; a supplied `var` or `raw.var`
+provides its feature index. These can supply the corresponding context for
+matrices in the same request, without repeating identity arguments. If both
+forms are supplied, they must agree.
+
+Feature identities remain `var_names` and `raw_var_names`: unique, non-null
+string labels matching the relevant stored feature index in value and order.
+Index names and equivalent index dtypes do not define identity. No automatic
+sorting, reindexing, renaming or string conversion occurs. Any explicitly
+supplied identity is checked, even if not needed for a value. Complete-table
+reads/writes may retain non-unique AnnData indices; partial updates require
+unambiguous identities for the affected axes. In annotated tables, that means
+unique observation pairs, not necessarily unique `obs_names`. Unrelated axes
+do not need to be loaded or validated for an `.uns`-only update.
 
 Matrix inputs must have known shapes satisfying AnnData's axis rules, including
-both dimensions of pairwise matrices. Dataframe-valued aligned entries must also have matching
-indices. Raw writes require an existing `raw` container and its own unchanged
+both dimensions of pairwise matrices. Dataframe-valued aligned entries must
+also have matching indices. Raw writes require an existing `raw` container and its own unchanged
 feature axis. Identity arguments are caller declarations, not proof that a
 matrix was scientifically computed in that order, and not concurrency tokens.
 
-For annotated tables, an `.obs` replacement must preserve the region/instance
-column values row by row and their required types. Component updates must not
-add, remove or change the SpatialData annotation in `.uns` or the corresponding
+An `.obs` replacement must still preserve the stored dataframe index and its
+order; using region/instance identity does not authorize index renaming.
+Dataframe-valued observation-aligned entries must likewise retain the stored
+observation index. For annotated tables, an `.obs` replacement also preserves
+the region/instance column values row by row and their required types.
+Component updates must not add, remove or change the SpatialData annotation
+in `.uns` or the corresponding
 table-group attributes. Replacing all of `.uns` must retain that annotation.
 Use a complete-table write for a deliberate change to spatial linkage.
 
@@ -6513,6 +6537,43 @@ may inspect indices, annotation columns and encoding/shape metadata, not
 unrelated matrix values. Generic I/O does not run Harpy's scientific table
 validation, scan linked points/labels, recalculate QC, or repair custom metadata;
 callers prepare consistent scientific data and metadata before persistence.
+
+#### Region-specific reading: follow-up direction
+
+Region-aware reading is useful, but remains a selection layer over the shared
+lazy readers rather than a prerequisite for the initial signatures above.
+Initially, callers can read lazily and subset the returned AnnData without
+first materializing the full expression matrix. A later region-selection
+convenience should use the same decoding and lazy-array infrastructure.
+
+The direction for that read-only selection is:
+
+- Select annotated spatial-element names from the table's region column,
+  resolved through its SpatialData annotation. These are not coordinate-system
+  names or sample IDs, and ordinary unannotated tables have no region selector.
+- Preserve stored observation order. Select the same rows from `.obs`, `.X`,
+  `.layers`, `.obsm` and `.raw`; subset both observation axes of `.obsp`.
+  Feature-only components such as `.var`, `.varm`, `.varp` and raw feature
+  annotations keep their feature axes unchanged.
+- For a returned AnnData, update its SpatialData annotation to describe the
+  selected regions. Arbitrary `.uns` records cannot be automatically interpreted
+  or filtered; some describe the original complete table. Document that scope
+  explicitly and leave scientific metadata adjustment to the caller. A
+  structurally valid subset is not a promise of valid custom scientific metadata.
+- Keep selection lazy for matrices and leave the source table/store unchanged.
+  Reading the region column or other necessary annotations is allowed. Physical
+  reads may include chunks containing other regions; do not promise row-level
+  disk I/O granularity.
+
+Do not build this behavior on `ProcessTable._get_adata()` or refactor that
+legacy helper for this work. Leave it untouched; the new shared readers are
+the foundation. Finalize the region-selection API and its missing-region and
+metadata behavior in the follow-up, rather than silently adding a `regions`
+argument to the initial read/write APIs.
+
+Writing changes back into one region of an existing multi-region table is a
+separate contract, to be discussed next. No regional merge/update behavior is
+defined here; the current writers still replace complete tables or components.
 
 #### Memory and ownership
 
@@ -6605,12 +6666,19 @@ hp.tb.write_table_components(
 )
 ```
 
-This rewrites `.obs`, not `.X`. Its index supplies the required row identity.
+This rewrites `.obs`, not `.X`. Its region/instance columns supply observation
+identity for an annotated table; its index does so for an unannotated table.
+No separate `obs_identity` argument is needed.
 
 ##### Related matrix and metadata
 
 ```python
-# embedding is computed in exactly this obs_names order.
+# For an annotated table, identify the objects in embedding's row order.
+annotation = adata.uns["spatialdata_attrs"]
+region_key = annotation["region_key"]
+instance_key = annotation["instance_key"]
+obs_identity = adata.obs[[region_key, instance_key]]
+
 hp.tb.write_table_components(
     store,
     table_name="processed",
@@ -6618,13 +6686,14 @@ hp.tb.write_table_components(
         ("obsm", "X_embedding"): embedding,
         ("uns", "embedding"): {"method": "my_method"},
     },
-    obs_names=adata.obs_names,
+    obs_identity=obs_identity,
     overwrite=True,
 )
 ```
 
 Both entries share the same rollback window. Neither unrelated matrices nor
-the expression matrix need to be read or rewritten.
+the expression matrix need to be read or rewritten. For an unannotated table,
+use `obs_identity=adata.obs_names` instead.
 
 Runtime acceptance tests belong to Parts 11f.ii–iv; this part introduces no
 placeholder functions or tests that merely assert their presence. Part 11f.v
@@ -6635,6 +6704,8 @@ and the separate napari-harpy migration remain follow-ups.
 Generalize the existing `harpy._storage._anndata` reading helpers, using public
 AnnData decoding APIs and one shared lazy-array policy. Keep AnnData component
 encoding separate from locating a named table inside a SpatialData store.
+Leave the legacy `ProcessTable._get_adata()` untouched; it is not the basis
+for these readers or the region-selection follow-up described in Part 11f.i.
 
 Implement the standalone component reader first, then assemble complete tables
 through the same decoding infrastructure. Extend beyond the current internal
@@ -6703,6 +6774,12 @@ chunked matrix writes and a replacement whose lazy input reads the old
 destination. Verify the documented recovery limits rather than claiming
 crash-atomic publication.
 
+Identity tests must distinguish annotated region/instance pairs from ordinary
+observation names. Cover repeated instance IDs in different regions, duplicate
+or reordered pairs, and an identity dataframe whose index differs while its
+pairs remain unchanged. Separately verify that actual `.obs` replacements
+preserve the stored index, and that unannotated tables use observation names.
+
 ### Part 11f.iv: integration with existing Harpy APIs
 
 Make `hp.tb.add_table` a SpatialData-facing adapter over the shared table I/O
@@ -6735,6 +6812,7 @@ Document complete-table and annotation/component-only examples. Existing
 preprocessing conveniences may use the new storage layer, but this part does
 not redesign their scientific steps or add wrappers around Scanpy operations.
 The explicit table APIs must work independently of those conveniences.
+The legacy `ProcessTable._get_adata()` remains unchanged in this slice.
 
 Run focused integration tests for the affected callers, covering successful
 lazy attachment, input isolation, unchanged unrelated elements and restoration
