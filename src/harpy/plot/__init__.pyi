@@ -5,8 +5,9 @@ from ._clustering import cluster
 from ._enrichment import nhood_enrichment
 from ._flowsom import pixel_clusters, pixel_clusters_heatmap
 from ._plot import plot, plot_image, plot_labels, plot_shapes
-from ._plot_density import plot_instance_density, plot_transcript_density
+from ._plot_density import plot_instance_density
 from ._plot_sdata import plot_sdata, plot_sdata_genes
+from ._points_density import plot_points_density
 from ._preprocess import preprocess_transcriptomics
 from ._qc_cells import plot_adata, ridgeplot_channel, ridgeplot_channel_sample
 from ._qc_image import (
@@ -42,7 +43,7 @@ __all__ = [
     "plot_instance_density",
     "plot_sdata",
     "plot_sdata_genes",
-    "plot_transcript_density",
+    "plot_points_density",
     "preprocess_transcriptomics",
     "plot_adata",
     "ridgeplot_channel",

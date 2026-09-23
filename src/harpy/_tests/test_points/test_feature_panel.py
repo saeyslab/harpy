@@ -11,7 +11,7 @@ from spatialdata.transformations import Translation, get_transformation
 
 import harpy as hp
 from harpy._feature_panels import _make_feature_panel
-from harpy.points import _feature_panel
+from harpy.points import _feature_panel, validate_points
 
 PANEL = {
     "SystemControl": ["System1"],
@@ -97,7 +97,7 @@ def test_registration_normalizes_only_classes_and_enables_panel_summaries(tmp_pa
         panel = container.attrs["harpy"]["feature_panels"][record["feature_panel"]]
         assert panel["classes"] == sorted(PANEL)
         assert panel["features_by_class"] == {key: sorted(value) for key, value in PANEL.items()}
-        targets = hp.qc.summarize_points(container, "calls").per_target.set_index("feature")
+        targets = hp.qc.summarize_points(container, "calls").per_feature.set_index("feature")
         assert targets.loc["GeneB", "n_points"] == 2
         assert targets.loc[["ZeroGene", "Negative2", "System1"], "n_points"].tolist() == [0, 0, 0]
         assert targets.n_points.sum() == len(original)
@@ -192,7 +192,7 @@ def test_registration_supports_custom_keys_and_explicit_single_class(tmp_path):
     result = hp.qc.summarize_points(sdata, "calls")
     assert result.per_class["feature_class"].tolist() == ["All"]
     assert result.per_class["n_points"].tolist() == [4]
-    assert result.per_target.set_index("feature").loc["Undetected", "n_points"] == 0
+    assert result.per_feature.set_index("feature").loc["Undetected", "n_points"] == 0
 
 
 @pytest.mark.parametrize(
@@ -396,13 +396,16 @@ def test_empty_points_can_be_registered_with_an_entirely_undetected_panel(tmp_pa
     sdata = read_zarr(sdata.path)
     _register(sdata)
     reopened = read_zarr(sdata.path)
-    result = hp.qc.summarize_points(reopened, "calls")
-    assert len(result.per_target) == sum(len(features) for features in PANEL.values())
-    assert result.per_target.n_points.sum() == 0
+    # Registration accepts empty points; summary computation rejects them.
+    validate_points(reopened, "calls")
+    panel_name = reopened.attrs["harpy"]["points"]["calls"]["feature_panel"]
+    panel = reopened.attrs["harpy"]["feature_panels"][panel_name]
+    assert panel["features_by_class"] == {name: sorted(features) for name, features in PANEL.items()}
+    assert reopened.points["calls"].compute().empty
     # Empty Parquet partitions need not preserve unused dictionary values;
     # the panel, not observed categorical values, defines the complete classes.
     assert isinstance(reopened.points["calls"].dtypes["kind"], pd.CategoricalDtype)
-    assert result.per_class["feature_class"].tolist() == sorted(PANEL)
+    assert panel["classes"] == sorted(PANEL)
 
 
 def test_panel_storage_key_preserves_the_existing_panel_identifier():

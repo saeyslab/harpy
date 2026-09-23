@@ -188,6 +188,8 @@ External integrations.
 
 Quality control functions.
 
+### Images
+
 ```{eval-rst}
 
 .. module:: harpy.qc
@@ -197,14 +199,65 @@ Quality control functions.
     :toctree: generated
 
     image_histogram
+```
+
+### Segmentation
+
+```{eval-rst}
+
+.. currentmodule:: harpy.qc
+
+.. autosummary::
+    :toctree: generated
+
     segmentation_coverage
     segmentation_histogram
-    analyse_genes_left_out
-    metric_histogram
-    metrics_histogram
+```
+
+### Tables
+
+```{eval-rst}
+
+.. currentmodule:: harpy.qc
+
+.. autosummary::
+    :toctree: generated
+
+    table_histogram
+    table_histograms
     obs_scatter
+```
+
+### Points
+
+```{eval-rst}
+
+.. currentmodule:: harpy.qc
+
+.. autosummary::
+    :toctree: generated
+
     summarize_points
+    summarize_points_by_feature
+    point_retention
+    spatial_bin_histogram
+    spatial_bin_histogram_by_feature
+```
+
+#### Summary result types
+
+```{eval-rst}
+
+.. currentmodule:: harpy.qc
+
+.. autosummary::
+    :toctree: generated
+
     PointsSummary
+    FeaturePointsSummary
+    PointsSummaryMetadata
+    SpatialBinSummary
+    FeatureSpatialBinSummary
 ```
 
 ## Plotting
@@ -256,7 +309,7 @@ Plotting functions.
 .. autosummary::
     :toctree: generated
 
-    plot_transcript_density
+    plot_points_density
 ```
 
 ## Utils

@@ -1,5 +1,5 @@
 <!-- These badges won't work while the GitHub repo is private:
-[![License BSD-3](https://img.shields.io/pypi/l/harpy.svg?color=green)](https://github.com/saeyslab/harpy/raw/main/LICENSE)
+[![License BSD-3](https://img.shields.io/pypi/l/harpy-analysis.svg?color=green)](https://github.com/saeyslab/harpy/raw/main/LICENSE)
 [![Python Version](https://img.shields.io/pypi/pyversions/harpy-analysis.svg?color=green)](https://python.org)
 [![codecov](https://codecov.io/gh/saeyslab/harpy/graph/badge.svg?token=7UXMDWVYFZ)](https://codecov.io/gh/saeyslab/harpy)
 -->
@@ -19,7 +19,7 @@
 [![documentation badge](https://readthedocs.org/projects/harpy/badge/?version=latest)](https://harpy.readthedocs.io/en/latest/)
 [![codecov](https://codecov.io/gh/saeyslab/harpy/branch/main/graph/badge.svg)](https://codecov.io/gh/saeyslab/harpy)
 [![Downloads](https://static.pepy.tech/badge/harpy-analysis)](https://pepy.tech/project/harpy-analysis)
-[![License](https://img.shields.io/badge/license-Academic%20Non--commercial-blue)](./LICENSE)
+[![License](https://img.shields.io/badge/license-BSD%203--Clause-blue)](./LICENSE)
 ![GitHub repo size](https://img.shields.io/github/repo-size/saeyslab/harpy)
 [![Zenodo](https://zenodo.org/badge/763481288.svg)](https://zenodo.org/badge/latestdoi/763481288)
 [![Paper](https://img.shields.io/badge/Paper-Bioinformatics%20btag122-blue)](https://doi.org/10.1093/bioinformatics/btag122)
@@ -197,8 +197,7 @@ If you use Harpy for spatial transcriptomics analysis, please cite:
 
 ## License
 
-Check the [license](https://github.com/saeyslab/harpy/blob/main/LICENSE). Harpy is free for academic usage.
-For commercial usage, please contact Saeyslab.
+Harpy is licensed under the [BSD 3-Clause License](./LICENSE).
 
 ## Issues
 
