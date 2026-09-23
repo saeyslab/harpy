@@ -4379,7 +4379,7 @@ Focused tests should cover:
 
 ## Slice 11e: original-point summary visualization
 
-**Status: Parts 11e.i–vi implemented; Part 11e.vii planned, not implemented.**
+**Status: Parts 11e.i–vii implemented.**
 
 Implement annotation-free QC of transcript-positive spatial bins,
 using the existing `PointsSummary.spatial_counts` from Slice 11a, plus an
@@ -6126,7 +6126,20 @@ complete this part.
 
 ### Part 11e.vii: marimo smoothed-density overview
 
-**Status: planned; not implemented. Depends on Parts 11e.v and 11e.vi.**
+**Status: implemented. Depends on Parts 11e.v and 11e.vi.**
+
+Implemented in `notebooks/2026_08_ucb/histograms.py`, with focused checks in
+`notebooks/2026_08_ucb/test_histograms.py`. Each available selected sample has
+one smoothed class-density map, using its completed summary's nominal bin size
+as sigma. Labels report the bin area in µm² and smoothing distance in µm; no
+new controls, source reductions, or changes to histogram values are introduced.
+
+Verified with focused notebook/plotting tests and a running browser using
+synthetic samples. Submitting 400 µm² bins instead of 100 µm² updates sigma
+from 10 to 20 µm; unsubmitted settings leave the displayed scale unchanged.
+Class/sample changes and pan/zoom perform no new source reads, and histogram
+switches leave density canvases unchanged. This does not establish performance
+on the full UCB dataset.
 
 Extend the density section of `notebooks/2026_08_ucb/histograms.py` to consume
 Harpy's smoothing API. Do not add Gaussian filtering, mask handling, or
