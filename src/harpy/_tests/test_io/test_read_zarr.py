@@ -160,7 +160,14 @@ def test_invalid_requests_fail_before_store_access(tmp_path, options, error, mes
 
 @pytest.mark.parametrize("class_aware", [False, True])
 def test_reopens_aggregation_tables(tmp_path, monkeypatch, class_aware):
-    """Real aggregation outputs reopen lazily, including auxiliary counts and canonical centers."""
+    """Check compatibility between Harpy's aggregation writer and reader.
+
+    ``aggregate_points`` creates real generic or feature-class-aware tables.
+    Harpy must reopen them without premature matrix reads and match AnnData's
+    read of the stored values, including auxiliary counts and canonical centers
+    in ``obsm``. This is an integration test, not an independent check of
+    aggregation correctness: expected values come from the written table.
+    """
     sdata = SpatialData(
         labels={"cells": Labels2DModel.parse(np.array([[1, 1], [2, 2]], dtype=np.uint32))},
         points={
