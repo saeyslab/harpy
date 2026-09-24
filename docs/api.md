@@ -122,6 +122,8 @@ Operations on table (`AnnData` object) elements.
     :toctree: generated
 
     tb.add_table
+    tb.read_table
+    tb.read_table_components
     tb.aggregate_points
     tb.aggregate_image
     tb.add_canonical_centers

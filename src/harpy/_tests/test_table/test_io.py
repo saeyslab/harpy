@@ -394,7 +394,13 @@ def test_invalid_mode_fails_before_opening_store(tmp_path, reader, mode, error):
 @pytest.mark.parametrize("reader", [read_table, read_table_components])
 @pytest.mark.parametrize("matrix_kind", ["dense", "csr"])
 def test_backed_handles_reject_direct_writes(make_table_io_store, reader, matrix_kind):
-    """Backed selects a representation, not write permission or AnnData file-backed mode."""
+    """Reject writes through backed matrix handles and verify stored values remain unchanged.
+
+    Replacing X on a lazy result (``result.X = result.X * 2``) changes only the
+    returned AnnData object. Here, ``matrix[0, 1] = 99`` instead attempts a
+    storage write and must fail. Harpy's backed representation grants neither
+    write permission nor AnnData's file-backed status (``isbacked``).
+    """
     path = make_table_io_store(matrix_kind=matrix_kind)
     if reader is read_table:
         table = reader(path, table_name="counts", mode="backed")

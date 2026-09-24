@@ -45,7 +45,8 @@ def read_table(
         sparse blocks preserved; ``"backed"`` returns Zarr arrays or CSR/CSC
         dataset handles; ``"eager"`` loads NumPy/SciPy matrices into memory.
         Annotations, dataframe-valued entries and ``uns`` are always in memory.
-        ``"backed"`` does not imply AnnData's ``isbacked`` flag.
+        The returned AnnData has ``isbacked=False``; this does not mean that
+        its matrices are loaded into memory.
     sparse_chunk_size
         Rows per CSR chunk or columns per CSC chunk when ``mode="lazy"``.
         Ignored for dense arrays and other modes.
@@ -80,12 +81,16 @@ def read_table(
     --------
     .. code-block:: python
 
-        adata = hp.tb.read_table("sdata.zarr", table_name="counts")
+        adata = hp.tb.read_table("sdata.zarr", table_name="counts", mode="lazy")
         selected = adata[adata.obs["region"] == "labels_a"].copy()
         # Matrices remain lazy; custom metadata may need adjustment after selection.
 
-        # Reopen with the storage handles used by aggregate_points().
+        # Replacing X changes only this AnnData object, not the stored matrix.
+        adata.X = adata.X * 2
+
+        # Changing values through a backed handle instead attempts a disk write.
         backed = hp.tb.read_table("sdata.zarr", table_name="counts", mode="backed")
+        backed.X[0, 1] = 99  # Raises ValueError: storage is read-only.
     """
     _validate_read_mode(mode)
     sparse_chunk_size = _validate_sparse_chunk_size(sparse_chunk_size)
