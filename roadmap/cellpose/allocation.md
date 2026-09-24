@@ -45,7 +45,7 @@ implemented:
     - **11f:** modular AnnData table I/O for SpatialData Zarr stores, in eight
       separate parts: **11f.i** public contracts — defined and documented;
       **11f.ii** selective component and lazy complete-table reading — implemented;
-      **11f.iii** Harpy SpatialData reader with selective table modes;
+      **11f.iii** Harpy SpatialData reader with selective table modes — implemented;
       **11f.iv** scoped writing and safe
       publication; **11f.v** region-wise `.obsm` writing; **11f.vi** integration
       with existing Harpy APIs, including `hp.tb.add_feature_matrix`;
@@ -2616,7 +2616,7 @@ existing `aggregate_points` return contract; it neither calls an experimental
 AnnData lazy reader nor establishes a general SpatialData lazy-reading
 contract.
 
-General store reopening with selective, lazy table reads is deferred to
+General store reopening with selective, lazy table reads is provided by
 `hp.io.read_zarr()` in Part 11f.iii. Ordinary `spatialdata.read_zarr()` behavior
 remains unchanged; neither implementation patches SpatialData's private reader internals.
 
@@ -6210,9 +6210,9 @@ unsmoothed default remains unchanged.
 
 ## Slice 11f: modular AnnData table I/O for SpatialData Zarr stores
 
-**Status: Part 11f.i complete (contracts and documentation); Part 11f.ii
-implemented. `hp.tb.read_table` and `hp.tb.read_table_components` are available;
-Parts 11f.iii–viii remain planned.**
+**Status: Part 11f.i complete (contracts and documentation); Parts 11f.ii–iii
+implemented. `hp.tb.read_table`, `hp.tb.read_table_components` and
+`hp.io.read_zarr` are available; Parts 11f.iv–viii remain planned.**
 
 Provide general, modular table I/O independently of QC, aggregation or Scanpy
 preprocessing. The caller explicitly chooses a complete table or selected
@@ -6228,7 +6228,7 @@ Split the work into eight independently reviewable parts, in this order:
 2. **11f.ii: selective and lazy table reading** — implement shared decoding,
    standalone component reads and complete AnnData assembly — implemented.
 3. **11f.iii: Harpy SpatialData reader with selective table modes** — compose
-   SpatialData's non-table reader with the existing table reader in `hp.io.read_zarr()`.
+   SpatialData's non-table reader with the existing table reader in `hp.io.read_zarr()` — implemented.
 4. **11f.iv: scoped table writing and safe publication** — implement complete
    table writes and selected-component updates on the existing publisher.
 5. **11f.v: region-wise `.obsm` writing** — add a public regional-update API
@@ -6765,7 +6765,22 @@ and the separate napari-harpy migration remain follow-ups.
 
 ### Part 11f.iii: Harpy SpatialData reader with selective table modes
 
-**Status: planned; follows the implemented readers from Part 11f.ii.**
+**Status: implemented.**
+
+`hp.io.read_zarr` composes SpatialData's non-table reader with `hp.tb.read_table`.
+Both Harpy readers share local-root validation through `_open_spatialdata_group`;
+table decoding and sparse chunking remain in the existing table reader.
+Focused tests cover Zarr 2/3, selection, all three modes, untouched non-table
+elements and real generic/class-aware aggregation outputs. Storage guards
+reject writes, unselected-table reads and premature matrix reads; Dask callbacks
+reject computation during opening.
+
+An open-only synthetic smoke benchmark used two stored 100,000 × 256 uint32
+matrices (97.7 MiB each), selecting one table. Lazy/backed/eager opening took
+approximately 0.037/0.031/0.088 seconds, with 3.7/3.0/100.0 MiB additional
+sampled peak driver RSS. Skipping tables took 0.008 seconds. These local,
+sequential-run measurements exclude construction and imports; they illustrate
+the memory contract, not a general performance guarantee.
 
 Add `hp.io.read_zarr()` as a convenience wrapper that returns a SpatialData
 object with only the requested tables, using Harpy's existing table-reading
@@ -6780,7 +6795,7 @@ possible follow-up, not a prerequisite or implementation strategy for this part.
 def read_zarr(
     store: str | PathLike[str],
     *,
-    tables: str | Sequence[str] | None = None,
+    table_name: str | Sequence[str] | None = None,
     table_mode: Literal["lazy", "backed", "eager"] = "lazy",
     sparse_chunk_size: int = 1000,
 ) -> SpatialData:
@@ -6790,7 +6805,7 @@ def read_zarr(
 ```python
 sdata = hp.io.read_zarr(
     "sdata.zarr",
-    tables=["raw_counts", "processed"],
+    table_name=["raw_counts", "processed"],
     table_mode="lazy",
     sparse_chunk_size=1000,
 )
@@ -6798,8 +6813,8 @@ sdata = hp.io.read_zarr(
 
 - `store` is an existing local SpatialData Zarr root, matching `hp.tb.read_table`.
   Remote stores and already-open store objects are outside the initial contract.
-- `tables=None` reads all tables; a string or sequence selects exact table names;
-  `tables=[]` skips tables. Unknown explicitly requested names raise an error.
+- `table_name=None` reads all tables; a string or sequence selects exact table names;
+  `table_name=[]` skips tables. Unknown explicitly requested names raise an error.
 - `table_mode` applies to all selected tables. Its explicit name makes clear
   that it does not control images, labels, points or shapes. Per-table mode
   mappings are outside the initial API; callers can use `hp.tb.read_table()`
