@@ -33,6 +33,7 @@ I/O.
 .. autosummary::
     :toctree: generated
 
+    io.read_zarr
     io.CosmxSample
     io.cosmx
     io.add_cosmx_samples
