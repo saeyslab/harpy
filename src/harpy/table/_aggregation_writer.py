@@ -688,7 +688,9 @@ def _publish_staged_aggregation_table(
         paths=(_StagedPath(staged=staging, destination=destination.output),),
         operation="aggregate",
     ):
-        root = zarr.open_group(store=str(destination.root), mode="r+", use_consolidated=False)
+        # Return read-only handles; the completed payload needs no further writes.
+        # Consolidated metadata is written separately through SpatialData.
+        root = zarr.open_group(store=str(destination.root), mode="r", use_consolidated=False)
         yield root["tables"][destination.output.name]
 
 

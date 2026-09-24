@@ -512,8 +512,9 @@ def test_class_aware_aggregation_uses_panel_axis_and_adds_auxiliary_summaries(tm
     assert np.allclose(obs["auxiliary_points_fraction"], [0.5, 0.5, 1.0, 2 / 3])
     assert np.array_equal(np.asarray(expression.sum(axis=1)).ravel(), obs["n_endogenous_points"])
     assert not {"negative_points_per_feature", "system_control_points_per_feature"} & set(adata.obs)
+    canonical_centers = adata.obsm[CANONICAL_OBSM_KEY][order]
     assert np.allclose(
-        adata.obsm[CANONICAL_OBSM_KEY][order],
+        canonical_centers,
         [[0.0, 0.5, 0.5], [0.0, 0.5, 3.5], [0.0, 2.0, 0.5], [0.0, 0.5, 0.5]],
     )
     assert set(adata.uns[SPATIAL_COORDINATES_KEY][CANONICAL_OBSM_KEY]["regions"]) == {
@@ -524,8 +525,9 @@ def test_class_aware_aggregation_uses_panel_axis_and_adds_auxiliary_summaries(tm
     auxiliary = adata.obsm["auxiliary_feature_counts"]
     assert isinstance(auxiliary, CSRDataset)
     assert auxiliary.dtype == np.dtype(np.uint32)
+    auxiliary_counts = auxiliary.to_memory()[order].toarray()
     assert np.array_equal(
-        auxiliary.to_memory()[order].toarray(),
+        auxiliary_counts,
         np.array(
             [
                 [1, 0, 0, 1],
@@ -563,8 +565,18 @@ def test_class_aware_aggregation_uses_panel_axis_and_adds_auxiliary_summaries(tm
         "labels_b": {"points_element": "points_b", "coordinate_system": "sample_b"},
     }
 
+    # Returned handles must reject direct storage writes. The first ordered
+    # cell has both GeneA and Negative01 counts, so sparse writes target existing
+    # entries rather than failing because of a change in sparsity structure.
+    for matrix in (adata.X, auxiliary, adata.obsm[CANONICAL_OBSM_KEY]):
+        with pytest.raises(ValueError, match="read.only"):
+            matrix[order[0], 0] = 99
+
     roundtripped_sdata = read_zarr(output)
     roundtripped = roundtripped_sdata.tables["table"]
+    np.testing.assert_array_equal(roundtripped.X[order].toarray(), expression.toarray())
+    np.testing.assert_array_equal(roundtripped.obsm["auxiliary_feature_counts"][order].toarray(), auxiliary_counts)
+    np.testing.assert_array_equal(roundtripped.obsm[CANONICAL_OBSM_KEY][order], canonical_centers)
     roundtripped_metadata = roundtripped.uns["feature_class_aggregation"]
     assert roundtripped_metadata["expression_class"] == "Endogenous"
     assert roundtripped_metadata["count_columns"] == metadata["count_columns"]
