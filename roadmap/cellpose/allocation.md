@@ -44,7 +44,7 @@ implemented:
       marimo smoothed-density overview;
     - **11f:** modular AnnData table I/O for SpatialData Zarr stores, in seven
       separate parts: **11f.i** public contracts — defined and documented;
-      **11f.ii** selective component and lazy complete-table reading;
+      **11f.ii** selective component and lazy complete-table reading — implemented;
       **11f.iii** scoped writing and safe
       publication; **11f.iv** region-wise `.obsm` writing; **11f.v** integration
       with existing Harpy APIs, including `hp.tb.add_feature_matrix`;
@@ -6209,8 +6209,9 @@ unsmoothed default remains unchanged.
 
 ## Slice 11f: modular AnnData table I/O for SpatialData Zarr stores
 
-**Status: Part 11f.i complete (contracts and documentation only); Parts
-11f.ii–vii not implemented. The public table I/O APIs are not yet available.**
+**Status: Part 11f.i complete (contracts and documentation); Part 11f.ii
+implemented. `hp.tb.read_table` and `hp.tb.read_table_components` are available;
+Parts 11f.iii–vii remain planned.**
 
 Provide general, modular table I/O independently of QC, aggregation or Scanpy
 preprocessing. The caller explicitly chooses a complete table or selected
@@ -6224,7 +6225,7 @@ Split the work into seven independently reviewable parts, in this order:
 1. **11f.i: public table I/O contracts** — specify complete-table and
    component-level APIs, memory behavior, alignment and overwrite guarantees.
 2. **11f.ii: selective and lazy table reading** — implement shared decoding,
-   standalone component reads and complete AnnData assembly.
+   standalone component reads and complete AnnData assembly — implemented.
 3. **11f.iii: scoped table writing and safe publication** — implement complete
    table writes and selected-component updates on the existing publisher.
 4. **11f.iv: region-wise `.obsm` writing** — add a public regional-update API
@@ -6314,8 +6315,9 @@ and sparse matrices, all supported AnnData slots, and explicit eager reads.
 Preserve AnnData encodings rather than inventing another format. Dataframes
 and ordinary metadata remain memory-owned; requested matrix mappings recurse
 through the same lazy policy. Annotation-only reads do not build unrelated
-matrix graphs. The current `_read_backed_table` subset and Zarr/sparse-dataset
-handles are implementation starting points, not the new public read contract.
+matrix graphs. Reuse the storage-handle policy of `_read_backed_table` for public
+`mode="backed"` reads as well; do not force existing installation callers to
+return Dask arrays. The public readers default to `mode="lazy"`.
 
 Before writing, resolve all requested paths and validate affected axes and
 spatial linkage. Reuse existing structural checks where applicable; generic
@@ -6353,8 +6355,8 @@ inside it, without opening all of SpatialData. They operate on disk, not on a
 possibly edited `sdata.tables[table_name]`. Ordinary AnnData/Scanpy operations
 remain separate from persistence.
 
-The functions below will be exposed through `hp.tb`. The aliases describe
-argument types; they are not additional public APIs.
+The readers below are exposed through `hp.tb`; the writers remain planned.
+The aliases describe argument types; they are not additional public APIs.
 
 ```python
 from collections.abc import Mapping, Sequence
@@ -6372,7 +6374,8 @@ def read_table(
     store: str | PathLike[str],
     *,
     table_name: str,
-    lazy: bool = True,
+    mode: Literal["backed", "lazy", "eager"] = "lazy",
+    sparse_chunk_size: int = 1000,
 ) -> AnnData: ...
 
 
@@ -6381,7 +6384,8 @@ def read_table_components(
     *,
     table_name: str,
     components: Sequence[ComponentPath],
-    lazy: bool = True,
+    mode: Literal["backed", "lazy", "eager"] = "lazy",
+    sparse_chunk_size: int = 1000,
     missing: Literal["raise", "omit"] = "raise",
 ) -> dict[ComponentPath, object]: ...
 
@@ -6590,20 +6594,34 @@ interpret a smaller matrix as a regional update.
 
 #### Memory and ownership
 
-- Reads use read-only storage access. `lazy=True` returns Dask arrays for dense
-  and CSR/CSC matrix encodings, with sparse blocks remaining sparse. Encoded
-  dataframes remain in-memory dataframes, including dataframe-valued aligned
+- Reads use read-only storage access. `mode="lazy"` (default) returns Dask arrays
+  for dense and CSR/CSC matrix encodings, with sparse blocks remaining sparse.
+  `mode="backed"` returns Zarr arrays and CSR/CSC dataset handles, matching the
+  matrix representations attached by `aggregate_points`. It does not grant
+  write permission or imply AnnData's `isbacked` flag. Backed indexing reads
+  the selection into memory; Dask selections remain deferred until computed.
+  Both readers use this one `mode` parameter, replacing the `lazy` boolean.
+  Encoded dataframes remain in-memory dataframes, including dataframe-valued aligned
   entries; `obs`, `var` and requested `.uns` metadata are decoded into memory.
   Array values inside `.uns` are metadata, not lazy matrix slots.
-- `lazy=False` materializes only the requested scope and preserves sparsity.
+- Both readers expose `sparse_chunk_size=1000`, a positive integer specifying
+  rows per CSR chunk or columns per CSC chunk; the other axis stays whole.
+  Harpy supplies this default explicitly rather than relying on AnnData's
+  default. Dense arrays receive no chunk override and retain on-disk chunking.
+  The option affects only lazy sparse reads, not disk storage or backed/eager reads;
+  it is not a fixed memory-byte budget.
+  CSR/CSC matrices require sparse encoding version `0.1.0`; unknown or missing
+  versions raise `ValueError` in every read mode, without an AnnData fallback.
+- `mode="eager"` materializes only the requested scope and preserves sparsity.
   Component reads do not assemble a partial AnnData. Annotation-only reads do
   not construct or compute unrelated matrix graphs. Unsupported encodings fail
   clearly instead of triggering an eager whole-table fallback.
 - Returned annotations/metadata are independently owned. Editing them, or
   assigning a new matrix/expression in the returned AnnData, does not write to
-  disk or mutate another attached AnnData. Lazy matrices still depend on their
-  source paths; they are **not immutable snapshots**. Reopen after overwrite,
-  or write another table name when the old backing data must remain available.
+  disk or mutate another attached AnnData. Lazy matrices and backed handles
+  depend on their source paths; they are **not immutable snapshots**. Reopen
+  after overwrite, or write another table name when the old backing data must
+  remain available.
 - Writers do not mutate the supplied AnnData, dataframes, mappings or arrays.
   Lazy matrices are serialized incrementally without a preliminary whole-matrix
   computation or densification. All staged data must be complete before moving
@@ -6714,30 +6732,32 @@ and the separate napari-harpy migration remain follow-ups.
 
 ### Part 11f.ii: selective and lazy table reading
 
-Generalize the existing `harpy._storage._anndata` reading helpers, using public
-AnnData decoding APIs and one shared lazy-array policy. Keep AnnData component
-encoding separate from locating a named table inside a SpatialData store.
-Leave the legacy `ProcessTable._get_adata()` untouched; it is not the basis
-for these readers or the region-selection follow-up described in Part 11f.i.
+**Status: implemented.**
 
-Implement the standalone component reader first, then assemble complete tables
-through the same decoding infrastructure. Extend beyond the current internal
-reader's `X`/`obs`/`var`/`uns`/`obsm` subset; do not silently drop layers, raw data,
-pairwise matrices or other supported slots. Preserve sparse storage rather
-than densifying it. Unsupported encodings must fail clearly, not trigger a
-hidden complete-table read or eager conversion.
-
-Reading a complete table may inspect component metadata and build lazy graphs,
-but must not collect complete matrix values. Reading selected annotations
-must not construct or compute unrelated matrix graphs. Neither reader writes,
-attaches results to SpatialData, or changes previously returned objects.
-
-Focused tests must cover dense and sparse matrices, all supported slots,
-independent annotation/metadata ownership, and numerical agreement with
-AnnData's reader after explicit materialization. Instrument reads/computation
-to establish that annotation-only requests never fetch matrix payloads and
-complete lazy reads do not materialize them. Include ordinary tables as well
-as SpatialData-annotated tables; no feature-panel contract is required.
+- `hp.tb.read_table` and `hp.tb.read_table_components` locate one local table
+  read-only, without opening SpatialData or unrelated elements. The legacy
+  `ProcessTable._get_adata()` remains untouched.
+- The shared `harpy._storage._anndata` helpers now assemble all supported
+  AnnData slots, including layers, pairwise matrices and the independent raw
+  feature axis. Public readers default to `mode="lazy"` (Dask arrays with sparse
+  blocks for CSR/CSC matrices); `mode="backed"` returns Zarr arrays or sparse
+  dataset handles, and `mode="eager"` materializes only the requested scope.
+  Existing internal installation callers retain their storage-backed handles;
+  aggregation's return behavior is unchanged.
+- Annotation and metadata values remain independently owned in memory.
+  Logical component paths, mapping-only traversal and `missing="raise"`/`"omit"`
+  implement the contract above. Unsupported encodings fail without an eager
+  whole-table fallback. Neither reader writes or attaches results to SpatialData.
+- AnnData's public experimental `read_elem_lazy` is isolated in the shared
+  decoder, with an explicit `anndata>=0.12.10` dependency. Its empty compressed-axis
+  limitation is handled by deferred decoding of the zero-sized sparse matrix.
+- Focused tests cover Zarr 2/3, dense/CSR/CSC matrices, complete and selective
+  reads in all three modes, read-only backed handles, missing/None values,
+  empty axes, annotation ownership and numerical
+  agreement with AnnData. Instrumented storage access and Dask callbacks check
+  that lazy reads fetch no matrix payloads and annotation-only reads do not
+  open unrelated matrix nodes. Existing aggregation and canonical-center
+  storage contracts are also regression-tested.
 
 ### Part 11f.iii: scoped table writing and safe publication
 
