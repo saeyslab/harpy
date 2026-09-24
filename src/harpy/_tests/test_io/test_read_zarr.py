@@ -40,12 +40,15 @@ def _guard_table_reads(monkeypatch, *, selected, allow_matrix_reads=False):
 
     async def guarded_get(self, key, *args, **kwargs):
         assert self.read_only
+        # Check before reading: reject unselected tables and, unless allowed
+        # for eager mode, matrix-value chunks. Matrix metadata remains readable.
         check_key(key)
         return await original_get(self, key, *args, **kwargs)
 
     async def guarded_partial(self, prototype, key_ranges):
         assert self.read_only
         key_ranges = list(key_ranges)
+        # Apply the same checks to every key in a batched partial read.
         for key, _ in key_ranges:
             check_key(key)
         return await original_partial(self, prototype, key_ranges)
@@ -56,14 +59,18 @@ def _guard_table_reads(monkeypatch, *, selected, allow_matrix_reads=False):
     def unexpected_compute(graph):
         pytest.fail("Reading must not compute a Dask graph.")
 
-    # Zarr guards catch payload reads even if they do not go through Dask.
+    # Guard Zarr access directly: matrix values could otherwise be loaded
+    # without executing a Dask graph.
+    # Exiting this context restores the original methods.
     with monkeypatch.context() as patch:
         patch.setattr(LocalStore, "get", guarded_get)
         patch.setattr(LocalStore, "get_partial_values", guarded_partial)
         patch.setattr(LocalStore, "set", unexpected_write)
         patch.setattr(LocalStore, "delete", unexpected_write)
-        # Graph construction is allowed; executing it during reading is not.
+        # Fail when a local Dask scheduler starts computing. Constructing lazy
+        # graphs is allowed; executing them invokes unexpected_compute().
         with Callback(start=unexpected_compute):
+            # Both guards stay active while the caller executes its with-body.
             yield
 
 
