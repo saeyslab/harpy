@@ -294,7 +294,10 @@ def aggregate_points(
     Returns
     -------
     The updated SpatialData object with one AnnData table at
-    ``sdata.tables[output_table_name]``.
+    ``sdata.tables[output_table_name]``. Count matrices use CSR dataset handles
+    and canonical centers use a Zarr array; ``.obs``, ``.var``, and ``.uns`` are
+    loaded into memory. To read matrices as Dask arrays instead, use
+    :func:`harpy.table.read_table` with ``mode="lazy"``.
 
     Example
     --------
