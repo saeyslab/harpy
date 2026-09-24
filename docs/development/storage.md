@@ -425,18 +425,21 @@ opened in staging may be used for validation but must not survive installation.
 ### Caller-owned dirty and stale state
 
 Harpy owns I/O, publication and rollback within the guarantees documented here.
-The calling application or workflow owns state tracking:
+The calling application or workflow owns state tracking for tables, images,
+labels and other storage-backed elements:
 
 - **Dirty:** local changes have not been persisted. Callers track these changes
   and mark them clean only after successful writing; newer local changes must
   remain dirty.
-- **Stale:** backing data has changed since reading. Callers must reopen the
-  affected data and replace or invalidate dependent references and computations.
+- **Stale:** backing data has changed since reading. Callers must use reopened
+  data and replace or invalidate dependent references and computations.
 
-Harpy does not automatically track edits, refresh previously returned objects,
-or invalidate existing handles and Dask graphs. Replacing a table attached to
-`sdata` does not refresh other variables or computations referencing its old
-matrices.
+Some Harpy operations both write data and update the supplied `sdata` object
+with the reopened replacement. That attached replacement is ready to use without
+reopening it again. Other variables, handles or Dask graphs referencing the
+previous element's data are not refreshed; their lifetime remains the caller's
+responsibility. Harpy does not automatically track local edits or invalidate
+those dependent references and computations.
 
 Caller-managed tracking covers changes known to the caller. It does not
 automatically detect external writes or provide concurrent-access protection.
