@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from numbers import Integral
-from os import PathLike, fspath
-from pathlib import Path
+from os import PathLike
 from typing import Literal
 
 import zarr
@@ -19,6 +18,7 @@ from harpy._storage._anndata import (
     _read_anndata_table,
     _ReadMode,
 )
+from harpy._storage._spatialdata import _open_spatialdata_group
 
 type ComponentPath = tuple[str, ...]
 
@@ -234,28 +234,14 @@ def _validate_component_paths(components: Sequence[ComponentPath]) -> tuple[Comp
 def _open_table_group(store: str | PathLike[str], *, table_name: str) -> zarr.Group:
     """Locate one table read-only, without SpatialData's whole-store reader."""
     _validate_path_segment(table_name)
-    if not isinstance(store, (str, PathLike)):
-        raise TypeError("store must be a local path to a SpatialData Zarr root.")
-    value = fspath(store)
-    if not isinstance(value, str):
-        raise TypeError("store must be a string path, not bytes.")
-    if not value or "://" in value:
-        raise ValueError("store must be a local path to a SpatialData Zarr root.")
-    path = Path(value)
-    if not path.exists():
-        raise FileNotFoundError(f"SpatialData store {str(path)!r} does not exist.")
-    if not path.is_dir():
-        raise ValueError("store must be a SpatialData Zarr root directory.")
-    root = zarr.open_group(store=str(path), mode="r", use_consolidated=False)
-    if root.attrs.get("encoding-type") in {"anndata", "dict", "raw"}:
-        raise ValueError("store must be the SpatialData root, not an AnnData group or component.")
+    root = _open_spatialdata_group(store)
     for kind in ("images", "labels", "points", "shapes"):
         if f"{kind}/{table_name}" in root:
             raise ValueError(f"Table name {table_name!r} collides with a {kind} element.")
     try:
         group = root[f"tables/{table_name}"]
     except KeyError:
-        raise FileNotFoundError(f"Table {table_name!r} does not exist in {str(path)!r}.") from None
+        raise FileNotFoundError(f"Table {table_name!r} does not exist in {str(store)!r}.") from None
     if not isinstance(group, zarr.Group):
         raise ValueError(f"Table {table_name!r} must be an AnnData Zarr group.")
     if group.attrs.get("encoding-type") != "anndata" or group.attrs.get("encoding-version") != "0.1.0":

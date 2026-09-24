@@ -13,6 +13,7 @@ import tempfile
 import warnings
 from collections.abc import Generator
 from contextlib import contextmanager
+from os import PathLike, fspath
 from pathlib import Path
 from typing import Literal
 
@@ -26,6 +27,26 @@ from spatialdata._io.format import SpatialDataContainerFormatV01, SpatialDataCon
 from xarray import DataArray, DataTree
 
 from harpy._storage._publication import _cleanup_owned_path, _publish_staged_paths, _StagedPath
+
+
+def _open_spatialdata_group(store: str | PathLike[str]) -> zarr.Group:
+    """Open an existing local SpatialData root read-only, without decoding elements."""
+    if not isinstance(store, (str, PathLike)):
+        raise TypeError("store must be a local path to a SpatialData Zarr root.")
+    value = fspath(store)
+    if not isinstance(value, str):
+        raise TypeError("store must be a string path, not bytes.")
+    if not value or "://" in value:
+        raise ValueError("store must be a local path to a SpatialData Zarr root.")
+    path = Path(value)
+    if not path.exists():
+        raise FileNotFoundError(f"SpatialData store {str(path)!r} does not exist.")
+    if not path.is_dir():
+        raise ValueError("store must be a SpatialData Zarr root directory.")
+    root = zarr.open_group(store=str(path), mode="r", use_consolidated=False)
+    if root.attrs.get("encoding-type") in {"anndata", "dict", "raw"}:
+        raise ValueError("store must be the SpatialData root, not an AnnData group or component.")
+    return root
 
 
 def _write_element_with_cleanup(sdata: SpatialData, element_name: str) -> None:
