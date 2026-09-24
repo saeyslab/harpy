@@ -172,27 +172,81 @@ not rewrite the table's components or publish the table.
 
 ### Reading AnnData components and tables
 
-The reading helpers provide two entry points with one shared decoding policy:
+`hp.tb.read_table(store, table_name=...)` reads one complete, detached AnnData.
+`hp.tb.read_table_components(store, table_name=..., components=...)` returns
+only the requested values, keyed by logical tuple paths. Both accept a local
+SpatialData Zarr root (format 2 or 3), open it read-only and leave other elements
+unopened. They do not use SpatialData's whole-store reader or attach results to
+a live SpatialData object.
 
-- `_read_anndata_element(group, path)` locates **one component** and returns
-  its decoded value. It delegates decoding to `_read_backed_element()`, so
-  callers reading a component by path do not repeat path traversal or encoding
-  checks. It does not construct a table or attach the result to an object.
-- `_read_backed_element(element)` accepts a Zarr array or group and implements
-  the **shared decoding policy**. Dense arrays remain Zarr arrays; encoded
-  CSR/CSC matrices become AnnData sparse-dataset handles. Dataframes and
-  mappings are decoded into memory through `read_elem`. This keeps matrix
-  reads storage-backed without treating every encoded value as lazy.
-- `_read_backed_table(group)` returns an **AnnData object** from a table group,
-  using `_read_backed_element()` for `X` and entries in `obsm`, and `read_elem`
-  for `obs`, `var` and `uns`. It exists to reconstruct a table without loading
-  its complete matrices into memory. It covers these five slots, not arbitrary
-  AnnData stores containing other slots such as `layers` or `raw`.
+```python
+adata = hp.tb.read_table("sdata.zarr", table_name="counts")
+backed = hp.tb.read_table("sdata.zarr", table_name="counts", mode="backed")
+values = hp.tb.read_table_components(
+    "sdata.zarr", table_name="counts", components=[("obs",), ("obsm", "embedding")]
+)
+```
 
-The component reader and table reader both use `_read_backed_element()`; the
-table reader does not call `_read_anndata_element()`. None of these readers
-writes, publishes or restores data. The caller chooses when to read and must
-use permanent backing paths for installed objects, as described below.
+| Requested value                        | `mode="lazy"` (default)                     | `mode="backed"`                      | `mode="eager"`                     |
+| -------------------------------------- | ------------------------------------------- | ------------------------------------ | ---------------------------------- |
+| Dense or CSR/CSC matrix                | Dask array; sparse blocks stay sparse       | Zarr array or CSR/CSC dataset handle | NumPy array or SciPy sparse matrix |
+| `obs`, `var`, dataframe-valued entries | In-memory pandas dataframe                  | Same                                 | Same                               |
+| `uns`, including nested arrays         | In-memory metadata                          | Same                                 | Same                               |
+| Matrix mapping, e.g. `("obsm",)`       | Dictionary using these rules for each entry | Same policy, backed matrices         | Same policy, eager matrices        |
+
+`mode` replaces the former `lazy` boolean. Backed handles are read-only, not
+write-through views. Indexing them reads the selected values into memory;
+Dask selections remain deferred until computed.
+
+Harpy returns an ordinary AnnData container whose `isbacked` property is `False`,
+even when its matrices depend on disk. AnnData's flag describes its own
+file-managed backing mode; Harpy's `mode` selects the representation of individual
+matrices. Components can have different representations after editing—for example,
+`.X` may be materialized while layers remain lazy. Consequently, no single
+table-level flag describes whether all data is in memory. Storage write permissions
+are separate from these representations.
+
+Both readers expose `sparse_chunk_size=1000`: the positive number of rows per
+CSR chunk or columns per CSC chunk, keeping the other axis whole. Harpy passes
+this choice explicitly to AnnData. Dense arrays use their on-disk chunk layout
+without a chunk override. The option only affects lazy sparse reads; it changes
+neither disk storage nor backed/eager reads and is not a memory-byte limit.
+Lazy and backed matrix reads accept dense `array`/`string-array` encoding version
+`0.2.0` and CSR/CSC encoding version `0.1.0`. Harpy rejects other matrix encodings
+or versions with `ValueError` before decoding. CSR/CSC version checks also apply
+to eager reads.
+
+Complete reads preserve all slots, including layers, pairwise matrices and
+`raw` with its independent feature axis. Component paths cannot select
+dataframe columns, array slices or encoding internals; nested `uns` paths
+traverse mappings only. Missing components raise `KeyError`, or are omitted
+with `missing="omit"`; a present encoded `None` remains in the result.
+Annotation-only reads neither fetch unrelated matrix chunks nor construct
+their graphs. Unsupported encodings fail rather than falling back to a
+whole-table read. These readers do not validate scientific metadata.
+
+Store location belongs to `table._io`; shared AnnData decoding belongs to
+`_storage._anndata`:
+
+```text
+read_table             -> _read_anndata_table (assemble all slots)
+                                     |
+read_table_components  -> _read_anndata_element (locate one logical path)
+                                     |
+                          _decode_anndata_element
+                          (AnnData encoding registry and matrix read policy)
+```
+
+The decoder isolates AnnData's public experimental `read_elem_lazy` API.
+Internal `_read_backed_table` and `_read_backed_element` callers share this
+infrastructure and retain the same matrix representations as `mode="backed"`.
+
+Returned annotations and metadata are independently owned. Editing them or
+assigning another expression matrix does not write to disk. Lazy matrices and
+backed handles depend on their source paths: they are **not immutable snapshots**. Reopen
+after overwriting backing data; downstream operations may materialize matrices.
+None of these readers writes, publishes or restores data. Use permanent backing
+paths for installed objects, as described below.
 
 ### Replacing a whole SpatialData element
 
