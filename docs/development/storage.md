@@ -225,8 +225,8 @@ Annotation-only reads neither fetch unrelated matrix chunks nor construct
 their graphs. Unsupported encodings fail rather than falling back to a
 whole-table read. These readers do not validate scientific metadata.
 
-Store location belongs to `table._io`; shared AnnData decoding belongs to
-`_storage._anndata`:
+Local root validation is shared through `_storage._spatialdata`;
+`table._io` locates the selected table, and `_storage._anndata` decodes it:
 
 ```text
 read_table             -> _read_anndata_table (assemble all slots)
@@ -247,6 +247,33 @@ backed handles depend on their source paths: they are **not immutable snapshots*
 after overwriting backing data; downstream operations may materialize matrices.
 None of these readers writes, publishes or restores data. Use permanent backing
 paths for installed objects, as described below.
+
+### Reading a SpatialData store with selected tables
+
+`hp.io.read_zarr(store, table_name=None, table_mode="lazy", sparse_chunk_size=1000)`
+returns a SpatialData object containing all non-table elements and the selected
+tables. `table_name=None` reads all tables, a name or sequence selects exact names,
+and `table_name=[]` skips tables. Duplicate names are rejected; missing names raise
+`FileNotFoundError`. Only local store paths are supported.
+
+```text
+hp.io.read_zarr
+    ├── spatialdata.read_zarr (explicitly exclude tables)
+    │       └── non-table elements, transformations, root attributes and path
+    └── hp.tb.read_table (each selected table)
+            └── attach to the returned SpatialData object
+```
+
+`table_mode` and `sparse_chunk_size` use the table-reader contracts above;
+they do not alter non-table reading. Unselected tables are not decoded, and
+selected tables are never first loaded eagerly through SpatialData. Ordinary
+`spatialdata.read_zarr()` behavior is unchanged.
+
+The returned `sdata.is_backed()` is true because it has a store path; its
+tables still have `adata.isbacked=False`, regardless of their matrix mode.
+Reading performs no writes. In-memory edits are not automatically persisted,
+backed table handles remain read-only, and lazy/backed matrices must be
+reopened after their source data is overwritten.
 
 ### Replacing a whole SpatialData element
 
@@ -394,6 +421,25 @@ best-effort; a failure is logged rather than hidden by a claim of full recovery.
 The object installed in `sdata` must use handles opened at the **permanent
 destination**, because those handles retain their backing location. Handles
 opened in staging may be used for validation but must not survive installation.
+
+### Caller-owned dirty and stale state
+
+Harpy owns I/O, publication and rollback within the guarantees documented here.
+The calling application or workflow owns state tracking:
+
+- **Dirty:** local changes have not been persisted. Callers track these changes
+  and mark them clean only after successful writing; newer local changes must
+  remain dirty.
+- **Stale:** backing data has changed since reading. Callers must reopen the
+  affected data and replace or invalidate dependent references and computations.
+
+Harpy does not automatically track edits, refresh previously returned objects,
+or invalidate existing handles and Dask graphs. Replacing a table attached to
+`sdata` does not refresh other variables or computations referencing its old
+matrices.
+
+Caller-managed tracking covers changes known to the caller. It does not
+automatically detect external writes or provide concurrent-access protection.
 
 ## Limits of the guarantee
 
