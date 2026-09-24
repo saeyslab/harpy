@@ -6881,8 +6881,38 @@ memory independently from Slice 7b's construction benchmark.
 
 ### Part 11f.iv: scoped table writing and safe publication
 
-Build both writers on the existing AnnData serialization boundary and
-`_publish_staged_paths`; do not add another format or backup/rollback mechanism.
+**Status: planned.**
+
+Implement the two public writers defined in Part 11f.i:
+
+- `hp.tb.write_table(store, table_name=..., adata=..., overwrite=False)` creates
+  or replaces a complete table. Replacement is not a merge: old layers or
+  metadata absent from the submitted AnnData are not retained. Use this operation
+  when filtering/reordering axes or changing spatial linkage.
+- `hp.tb.write_table_components(store, table_name=..., components=..., ...)`
+  updates only the requested logical paths in an existing table. For example,
+  `components={("obs",): updated_obs}` replaces the complete observation
+  dataframe without reading or rewriting `.X`; it is not a column-level write.
+  Related matrix and metadata entries can be submitted together, while omitted
+  components remain unchanged.
+
+Both APIs take the path to an existing local SpatialData Zarr root and preserve
+its Zarr format. `overwrite=False` rejects existing destinations; `True` permits
+replacement. They return `None` after publication and metadata finalization,
+without modifying the supplied AnnData or synchronizing an existing `sdata`.
+Callers explicitly reopen affected data when needed and retain responsibility
+for dirty/stale state and dependent references.
+
+Component updates preserve stored axes, their order and spatial linkage.
+Matching shapes alone are insufficient: check the required ordered observation
+identities and feature names according to [Axis alignment and validation](#axis-alignment-and-validation).
+For annotated tables, observation identity is the ordered region/instance pairs,
+not instance IDs alone. Generic I/O validates structure, not scientific results;
+callers prepare consistent scientific metadata.
+
+Build both writers on the existing `_write_anndata_element` serialization
+boundary and `_publish_staged_paths`, extending or refactoring these helpers
+where needed; do not add another format or backup/rollback mechanism.
 Full-table writes publish one table path. Component updates publish only the
 requested non-overlapping paths within one rollback context, including related
 matrix and metadata components when supplied together.
@@ -6894,9 +6924,14 @@ validate request, axes and required metadata
     -> serialize requested payload into staging (source still readable)
     -> validate staged structure without collecting complete matrices
     -> publish requested paths while retaining backups
-    -> finish required metadata/installation work
+    -> finish metadata (and installation for live-object adapters)
     -> commit and clean up, or attempt rollback on failure
 ```
+
+The internal write operation must allow Part 11f.vi's adapters to attach reopened
+data before committing. The path-based public writers do not attach anything;
+adapters must not call a completed public write and expect a later attachment
+failure to roll it back.
 
 Use AnnData's encodings for component values and preserve SpatialData's table
 group attributes as well as its `.uns` annotation. Parent-group creation,
@@ -6932,6 +6967,13 @@ observation names. Cover repeated instance IDs in different regions, duplicate
 or reordered pairs, and an identity dataframe whose index differs while its
 pairs remain unchanged. Separately verify that actual `.obs` replacements
 preserve the stored index, and that unannotated tables use observation names.
+
+This part provides the disk-writing foundation, not region-wise updates
+(Part 11f.v), migration of `add_table` and other live-SpatialData adapters
+(Part 11f.vi), or explicit component deletion (Part 11f.vii). It adds no append
+or individual dataframe-column writes. `None` is an encoded value where
+supported, not a deletion request. Recovery remains rollback for handled
+failures, not crash recovery, immutable snapshots or concurrent-access isolation.
 
 ### Part 11f.v: region-wise `.obsm` writing
 
