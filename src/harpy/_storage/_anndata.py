@@ -127,7 +127,7 @@ def _decode_anndata_element(
     ------
     ValueError
         If a CSR/CSC element has an unsupported or missing encoding version,
-        regardless of the requested mode, or backed mode does not support
+        regardless of the requested mode, or lazy/backed mode does not support
         the element's encoding or version.
     """
     encoding = element.attrs.get("encoding-type")
@@ -148,16 +148,18 @@ def _decode_anndata_element(
         return read_elem(element)
     if encoding in {"dataframe", "null"}:
         return read_elem(element)
+
+    # Harpy defines the supported matrix formats for both lazy and backed reads.
+    is_dense = isinstance(element, zarr.Array) and encoding in {"array", "string-array"} and version == "0.2.0"
+    is_sparse = isinstance(element, zarr.Group) and encoding in {"csr_matrix", "csc_matrix"}
+    if not (is_dense or is_sparse):
+        raise ValueError(f"Unsupported AnnData encoding {encoding!r} (version {version!r}) for mode={mode!r}.")
     if mode == "backed":
-        if isinstance(element, zarr.Array) and encoding in {"array", "string-array"}:
-            if version != "0.2.0":
-                raise ValueError(f"Unsupported {encoding} encoding version {version!r}; expected '0.2.0'.")
+        if is_dense:
             return element
-        if encoding in {"csr_matrix", "csc_matrix"}:
-            # Return a storage-backed handle; values are read on indexing or to_memory().
-            return sparse_dataset(element)
-        raise ValueError(f"Unsupported AnnData encoding {encoding!r} (version {version!r}) for mode='backed'.")
-    if encoding in {"csr_matrix", "csc_matrix"}:
+        # Return a storage-backed handle; values are read on indexing or to_memory().
+        return sparse_dataset(element)
+    if is_sparse:
         shape = tuple(element.attrs["shape"])
         compressed_axis = 0 if encoding == "csr_matrix" else 1
         if shape[compressed_axis] == 0:
@@ -171,8 +173,6 @@ def _decode_anndata_element(
         # Keep the other axis whole; dense arrays retain their on-disk chunks.
         chunks = (sparse_chunk_size, -1) if compressed_axis == 0 else (-1, sparse_chunk_size)
         return read_elem_lazy(element, chunks=chunks)
-    # The encoding registry rejects unsupported types/versions rather than
-    # silently loading an unfamiliar matrix representation into memory.
     return read_elem_lazy(element)
 
 
