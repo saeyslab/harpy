@@ -310,3 +310,7 @@ def _validate_complete_table(table: AnnData) -> None:
         if table.raw.X is not None and table.raw.X.shape != (table.n_obs, table.raw.n_vars):
             raise ValueError("raw.X shape must match obs and raw.var.")
     TableModel.validate(table)
+    # TableModel.validate() does not check region/instance pair uniqueness.
+    spatialdata_attrs = table.uns.get(TableModel.ATTRS_KEY)
+    if spatialdata_attrs is not None:
+        _observation_pairs(table.obs, spatialdata_attrs, label="Table observation")
