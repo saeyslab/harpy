@@ -526,6 +526,7 @@ def _publish_staged_canonical_components(
                 root["tables"][destination.table.name]["uns"],
                 (SPATIAL_COORDINATES_KEY,),
                 {},
+                create_parents=False,
             )
 
         with _publish_staged_paths(
