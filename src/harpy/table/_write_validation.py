@@ -294,6 +294,10 @@ def _validate_component_values(
         if tuple(shape) != expected_shape:
             raise ValueError(f"Component {path!r} has shape {shape}; expected {expected_shape}.")
         if isinstance(value, pd.DataFrame):
+            # Dataframe-valued matrices (e.g. obsm/varm entries) carry row labels:
+            # matching shape alone cannot detect reordered or different identities.
+            # This is separate from the obs/var/raw.var checks above; those frames
+            # are skipped in this loop.
             _match_identity(value.index, indices[axes[0]], label=f"Component {path!r} dataframe index")
 
 
