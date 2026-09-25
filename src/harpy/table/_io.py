@@ -76,6 +76,7 @@ def read_table(
     See Also
     --------
     harpy.table.read_table_components : Read only selected components.
+    harpy.table.write_table : Persist a complete table through staging and publication.
 
     Examples
     --------
@@ -152,6 +153,7 @@ def read_table_components(
     See Also
     --------
     harpy.table.read_table : Read a complete table.
+    harpy.table.write_table_components : Persist only selected components.
 
     Examples
     --------
@@ -202,8 +204,24 @@ def _validate_path_segment(name: str) -> None:
         raise ValueError(f"Invalid table name or component path segment: {name!r}.")
 
 
-def _validate_component_paths(components: Sequence[ComponentPath]) -> tuple[ComponentPath, ...]:
-    """Validate the logical AnnData address space, not physical Zarr paths."""
+def _validate_component_paths(
+    components: Sequence[ComponentPath], *, to_write: bool = False
+) -> tuple[ComponentPath, ...]:
+    """Validate the logical AnnData address space, not physical Zarr paths.
+
+    Parameters
+    ----------
+    components
+        Nonempty sequence of logical component paths, such as ``("obsm", "embedding")``.
+        Paths must be valid, unique and non-overlapping.
+    to_write
+        Apply write-specific restrictions: reject whole matrix mappings
+        (``layers``, ``obsm``, ``varm``, ``obsp``, ``varp`` and ``raw.varm``).
+        For example, ``("layers",)`` is rejected but ``("layers", "counts")``
+        is allowed. Replacing the whole ``("uns",)`` mapping remains allowed.
+        False permits mapping roots for reading. This flag only controls path
+        validation; it does not read or write data.
+    """
     if isinstance(components, (str, bytes)) or not isinstance(components, Sequence):
         raise TypeError("components must be a sequence of tuple paths.")
     if not components:
@@ -225,6 +243,12 @@ def _validate_component_paths(components: Sequence[ComponentPath]) -> tuple[Comp
         )
         if not valid:
             raise ValueError(f"Invalid logical AnnData component path: {path!r}.")
+        if to_write and ((slot in _MATRIX_MAPPINGS and len(path) == 1) or path == ("raw", "varm")):
+            raise ValueError(f"Write individual entries, not the mapping root {path!r}.")
+        # Compare with previously accepted paths in both directions: either path
+        # may be a prefix of the other. This rejects parent/child pairs such as
+        # ("uns", "analysis") and ("uns", "analysis", "method") in either request
+        # order, as well as identical paths.
         if any(path[: len(other)] == other or other[: len(path)] == path for other in paths):
             raise ValueError("Component paths must be unique and non-overlapping.")
         paths.append(path)
