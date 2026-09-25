@@ -7191,6 +7191,15 @@ aggregation/canonical workflow or duplicate the generic I/O implementation.
 Non-table SpatialData element writers continue using their format-specific I/O
 and the shared publisher.
 
+Integration must also harmonize recovery behavior. Reuse shared table-write
+recovery to restore saved root-metadata contents (or their prior absence) on
+handled failure, rather than relying on another successful consolidation
+attempt. Save that state before changing the store. Remove only parent groups
+created by the operation, including `tables` if previously absent; preserve
+pre-existing groups. Cover setup failures before publication as well as failures
+while backups are retained. Adapters remain responsible for restoring affected
+in-memory state.
+
 Document complete-table and annotation/component-only examples. Existing
 preprocessing conveniences may use the new storage layer, but this part does
 not redesign their scientific steps or add wrappers around Scanpy operations.
@@ -7199,9 +7208,12 @@ The legacy `ProcessTable._get_adata()` remains unchanged in this slice.
 
 Run focused integration tests for the affected callers, covering successful
 lazy attachment, input isolation, unchanged unrelated elements and restoration
-after installation failures. Confirm that ordinary `spatialdata.read_zarr()`
-behavior is unchanged. Part 11f.iii's `hp.io.read_zarr()` wrapper reuses
-this foundation rather than introducing competing table codecs.
+after setup, publication, installation and metadata-finalization failures.
+Verify root-metadata restoration even when consolidation continues to fail,
+cleanup of newly created parents without removing pre-existing groups, and
+restoration of affected in-memory state. Confirm that ordinary
+`spatialdata.read_zarr()` behavior is unchanged. Part 11f.iii's `hp.io.read_zarr()`
+wrapper reuses this foundation rather than introducing competing table codecs.
 
 ### Part 11f.viii: safe deletion of optional AnnData components
 
