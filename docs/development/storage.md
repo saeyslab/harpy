@@ -136,6 +136,72 @@ This helper does not create a workspace, publish paths, retain backups or
 automatically read the result. The caller supplies the target group, normally
 in staging when preparing a replacement.
 
+#### Public scoped table writers
+
+`hp.tb.write_table(store, table_name=..., adata=..., overwrite=...)` writes a
+complete table. `hp.tb.write_table_components(store, table_name=...,
+components=..., overwrite=...)` replaces only named logical components of an
+existing table. Both operate on an existing local SpatialData root, preserve
+its Zarr format, and return `None` after publication and metadata finalization.
+An existing destination requires `overwrite=True`.
+
+Whole-table replacement is not a merge: old components absent from the new
+AnnData are not retained. Component writes preserve omitted siblings; replacing
+an `.uns` mapping replaces its whole value. `None` is an encoded value where
+supported, not a deletion command. There are no dataframe-column or regional
+row updates in these APIs.
+
+Component writes preserve existing axis identities, their order, and spatial linkage.
+Matrix updates require the corresponding `obs_identity`, `var_names`, or
+`raw_var_names`, unless a supplied `obs`, `var`, or `raw.var` dataframe already
+provides them. For annotated tables, observation identity means ordered
+`(region, instance_id)` pairs; the identity dataframe's index is ignored.
+Unannotated tables use observation names. Identities must be unique; different
+ordering is rejected rather than automatically corrected. Actual dataframe
+replacements also preserve their stored index. Axis or linkage changes require
+a complete-table write. Scientific metadata consistency remains the caller's
+responsibility.
+
+Absent raw data can be created by supplying `("raw", "X")` and either
+`raw_var_names` or a `("raw", "var")` dataframe. Names alone produce a feature
+dataframe with that index and no annotation columns. Raw shares the table's
+observations but defines its own feature axis; optional `("raw", "varm", key)`
+entries must align with it. A matrix is required to initialize raw. Replacing a
+stored null entry requires `overwrite=True`, while a genuinely absent raw path
+does not. Existing raw components can still be updated independently without
+changing their feature axis.
+
+Creation stages the complete raw container and publishes it as one path,
+together with any other requested components in the same rollback operation.
+It does not rewrite the main table or unrelated matrices. Rollback restores
+the prior absence or null entry as well as coupled updates. Raw serialization
+uses AnnData's raw encoding, not a generic mapping.
+
+The internal `_write_table_operation()` coordinates validation, serialization
+through `_write_anndata_element()`, and publication through
+`_publish_staged_paths()`. Lazy data is fully serialized into staging while old
+destinations remain readable, including when a replacement depends on those
+destinations. Matrix validation inspects structure rather than numerical values.
+Annotation-only updates do not read or rewrite unrelated matrices; consolidation
+may inspect metadata across the store.
+
+Lazy and storage-backed matrices are serialized incrementally, without preliminary
+whole-matrix materialization or densification. Memory use includes requested
+annotations, active chunks, and computations needed to produce them; no fixed
+memory limit is guaranteed.
+
+The operation retains backups through its caller's with-body and final
+consolidation. Public writers use an empty body because they do not attach data.
+Adapters using this internal operation can install reopened data before commit
+and must restore their own affected in-memory state on failure. Parent groups
+created by the operation are removed on failure, and root metadata changed by
+consolidation is restored from its previous bytes. The shared publisher's
+recovery limitations still apply.
+
+Inputs are not modified, and path-based writes do not synchronize an existing
+`sdata` or external references. Reopen affected data after writing; dirty/stale
+tracking remains caller-owned as described below.
+
 #### SpatialData-specific table metadata
 
 AnnData's writer stores the table's components and their AnnData encodings.
@@ -169,6 +235,8 @@ group attributes. AnnData's writer alone does not copy the relationship from
 I/O, Harpy supplies that additional step with `_write_spatialdata_table_attrs()`.
 This helper centralizes the extra attributes required by SpatialData; it does
 not rewrite the table's components or publish the table.
+For unannotated tables the same format attributes are written, with `region`,
+`region_key` and `instance_key` set to `None` rather than fabricated linkage.
 
 ### Reading AnnData components and tables
 
