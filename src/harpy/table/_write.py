@@ -280,7 +280,7 @@ def _write_table_operation(
     # its exact prior bytes so even a failed finalization can be undone without
     # opening unrelated tables or depending on consolidation succeeding again.
     metadata_files = (".zgroup", ".zattrs", ".zmetadata") if source_root.metadata.zarr_format == 2 else ("zarr.json",)
-    metadata_before = {}
+    root_metadata_before = {}
     metadata_attempted = False
     try:
         staged_root = zarr.open_group(str(workspace), mode="w", zarr_format=source_root.metadata.zarr_format)
@@ -346,10 +346,10 @@ def _write_table_operation(
             )
 
         for filename in metadata_files:
-            path = root / filename
-            if path.is_symlink():
-                raise ValueError(f"Refusing to update symbolic-link metadata path: {path}.")
-            metadata_before[path] = path.read_bytes() if path.exists() else None
+            metadata_path = root / filename
+            if metadata_path.is_symlink():
+                raise ValueError(f"Refusing to update symbolic-link metadata path: {metadata_path}.")
+            root_metadata_before[metadata_path] = metadata_path.read_bytes() if metadata_path.exists() else None
         writable_root = zarr.open_group(str(root), mode="r+", use_consolidated=False)
         _create_destination_parents(writable_root, root, destinations, created_parents)
         with _publish_staged_paths(root=root, workspace=workspace, paths=replacements, operation="table"):
@@ -370,6 +370,9 @@ def _write_table_operation(
                 )
                 zarr.consolidate_metadata(str(root))
     except BaseException as error:
+        # _publish_staged_paths() attempts rollback of the table/component paths.
+        # Newly created parents and root metadata are outside its scope, so restore
+        # them here. This also covers setup failures before entering the publisher.
         restoration_errors = []
         for parent in reversed(created_parents):
             try:
@@ -377,14 +380,14 @@ def _write_table_operation(
             except BaseException as restore_error:  # noqa: BLE001 - finish other restoration attempts, then report
                 restoration_errors.append(f"{parent}: {restore_error}")
         if metadata_attempted:
-            for path, previous in metadata_before.items():
+            for metadata_path, previous_bytes in root_metadata_before.items():
                 try:
-                    if previous is None:
-                        path.unlink(missing_ok=True)
+                    if previous_bytes is None:
+                        metadata_path.unlink(missing_ok=True)
                     else:
-                        path.write_bytes(previous)
+                        metadata_path.write_bytes(previous_bytes)
                 except BaseException as restore_error:  # noqa: BLE001 - preserve all restoration failures
-                    restoration_errors.append(f"{path}: {restore_error}")
+                    restoration_errors.append(f"{metadata_path}: {restore_error}")
         if restoration_errors:
             raise RuntimeError(
                 f"Table write failed; restoration also failed: {'; '.join(restoration_errors)}"
