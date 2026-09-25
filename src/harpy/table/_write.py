@@ -227,6 +227,8 @@ def _write_table_operation(
         paths = _validate_component_paths(tuple(components), to_write=True)
         source_table = _open_table_group(store, table_name=table_name)
         new_raw_var = _prepare_raw_creation(source_table, components, raw_var_names=raw_var_names, overwrite=overwrite)
+        # Use the same expected raw feature index before and after staging.
+        expected_new_raw_var_index = None if new_raw_var is None else new_raw_var.index
         # This flag means creating the raw container, not merely writing raw components.
         # It is False when raw already exists, even if its components will be updated,
         # or when no raw components were requested.
@@ -260,11 +262,11 @@ def _write_table_operation(
         # Step 2 below repeats these checks on the serialized output.
         _validate_component_values(
             source_table,
-            components,
+            components_to_validate=components,
             obs_identity=obs_identity,
             var_names=var_names,
             raw_var_names=raw_var_names,
-            new_raw_var=new_raw_var,
+            expected_new_raw_var_index=expected_new_raw_var_index,
         )
     for destination in destinations:
         if destination.is_symlink() or not destination.resolve().is_relative_to(root.resolve()):
@@ -336,11 +338,11 @@ def _write_table_operation(
             # Backed matrix handles allow shape checks without scanning matrix values.
             _validate_component_values(
                 source_table,
-                staged_values,
+                components_to_validate=staged_values,
                 obs_identity=obs_identity,
                 var_names=var_names,
                 raw_var_names=raw_var_names,
-                new_raw_var=new_raw_var,
+                expected_new_raw_var_index=expected_new_raw_var_index,
             )
 
         for filename in metadata_files:
