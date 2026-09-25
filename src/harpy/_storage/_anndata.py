@@ -8,12 +8,14 @@ coordinate these operations through ``harpy._storage._publication``.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from typing import Literal
 
 import dask.array as da
 import numpy as np
 import zarr
-from anndata import AnnData
+from anndata import AnnData, Raw
+from anndata.abc import CSCDataset, CSRDataset
 from anndata.experimental import read_elem_lazy
 from anndata.io import read_elem, sparse_dataset, write_elem
 from dask import delayed
@@ -181,11 +183,12 @@ def _write_anndata_element(
     path: tuple[str, ...],
     value: object,
     *,
-    create_parents: bool = False,
+    create_parents: bool,
 ) -> None:
     """Write one logical AnnData path through AnnData's encoding registry.
 
-    Parent groups normally must already exist. ``create_parents=True`` creates
+    Callers must explicitly choose whether to create missing parent groups.
+    ``create_parents=False`` requires existing parents; ``create_parents=True`` creates
     missing parents as AnnData-encoded mappings, which is useful for building a
     partial hierarchy in an isolated staging store. Keeping path traversal here
     gives full table writers and partial component writers the same encoding
@@ -193,7 +196,61 @@ def _write_anndata_element(
     :func:`harpy._storage._publication._publish_staged_paths`.
     """
     parent, key = _resolve_anndata_parent(group, path, create_parents=create_parents)
-    write_elem(parent, key, value)
+    write_elem(parent, key, _prepare_anndata_value(value))
+
+
+def _prepare_anndata_value(value: object) -> object:
+    """Keep storage-backed matrices chunked and serialization independent of input state."""
+    if isinstance(value, Raw):
+        # Raw shares its parent's observation axis but serializes only X, var
+        # and varm. A shape-only parent avoids copying unrelated table data.
+        return Raw(
+            AnnData(shape=(value.n_obs, 0)),
+            X=_prepare_anndata_value(value.X),
+            var=value.var.copy(deep=True),
+            varm={key: _prepare_anndata_value(item) for key, item in value.varm.items()},
+        )
+    if isinstance(value, AnnData):
+        values = {
+            slot: {key: _prepare_anndata_value(item) for key, item in getattr(value, slot).items()}
+            for slot in _MATRIX_MAPPINGS
+        }
+        if value.raw is not None:
+            values["raw"] = {
+                "X": _prepare_anndata_value(value.raw.X),
+                "var": value.raw.var.copy(deep=True),
+                "varm": {key: _prepare_anndata_value(item) for key, item in value.raw.varm.items()},
+            }
+        return AnnData(
+            X=_prepare_anndata_value(value.X),
+            obs=value.obs.copy(deep=True),
+            var=value.var.copy(deep=True),
+            uns=_prepare_anndata_value(deepcopy(value.uns)),
+            **values,
+        )
+    if isinstance(value, Mapping):
+        return {key: _prepare_anndata_value(item) for key, item in value.items()}
+    # Writer contract: serialize lazy/backed matrices incrementally, without
+    # preliminary whole-matrix materialization or densification, and leave
+    # caller-owned inputs unchanged. Storage handles alone do not guarantee
+    # chunked writes, so wrap them in Dask to use AnnData's chunked writers.
+    # Building these graphs does not materialize the matrix or modify the input.
+    if isinstance(value, (CSRDataset, CSCDataset)):
+        value = _decode_anndata_element(value.group, mode="lazy")
+    elif isinstance(value, zarr.Array):
+        value = da.from_zarr(value)
+    if isinstance(value, da.Array) and sparse.issparse(value._meta):
+        # AnnData's sparse Dask writer assigns int64 indptr/indices arrays to the
+        # first computed block. That block may be shared with caller-owned
+        # in-memory or persisted data. Our contract forbids modifying those inputs,
+        # so copy each block lazily before serialization, not the whole matrix upfront.
+        return value.map_blocks(_copy_sparse_block, meta=value._meta)
+    return value
+
+
+def _copy_sparse_block(block):
+    """Isolate a sparse block from writer-side mutations of its index arrays."""
+    return block.copy()
 
 
 def _read_anndata_element(
@@ -279,25 +336,57 @@ def _resolve_anndata_parent(
     *,
     create_parents: bool,
 ) -> tuple[zarr.Group, str]:
-    """Resolve the existing parent group and leaf key of one AnnData path."""
+    """Resolve where to write a logical AnnData component, without writing its value.
+
+    Parameters
+    ----------
+    group
+        Starting Zarr group, typically a table group or staging root.
+    path
+        Nonempty tuple of logical component names, relative to group.
+    create_parents
+        Create missing parents as encoded dictionaries. Otherwise, all parents
+        must already exist. When traversing into raw, its container must already
+        exist; new raw containers are written as complete Raw values.
+
+    Returns
+    -------
+    parent : zarr.Group
+        The group that will contain the component, not the component itself.
+    key : str
+        The final name in path, to pass with parent to write_elem. This entry
+        need not exist yet.
+
+    Examples
+    --------
+    For path=("raw", "varm", "loadings"), return group["raw"]["varm"] and
+    "loadings" after validating the parents. For path=("X",), return group
+    itself and "X", without traversing any parents.
+    """
     if not path or any(not isinstance(key, str) or not key for key in path):
         raise ValueError(f"AnnData element path must contain non-empty string keys, found {path!r}.")
     parent = group
-    for key in path[:-1]:
+    for key_index, key in enumerate(path[:-1]):
         if key not in parent and create_parents:
             write_elem(parent, key, {})
         if key not in parent or not isinstance(parent[key], zarr.Group):
             raise ValueError(f"AnnData element parent path {path[:-1]!r} does not exist as a Zarr group.")
         parent = parent[key]
+        # Dataframes and sparse matrices are also Zarr groups. Traverse only
+        # logical containers (raw or dictionaries), not their encoding internals
+        # such as ("X", "data"). The version describes the on-disk encoding.
+        expected_encoding = "raw" if path[: key_index + 1] == ("raw",) else "dict"
+        if parent.attrs.get("encoding-type") != expected_encoding or parent.attrs.get("encoding-version") != "0.1.0":
+            raise ValueError(f"AnnData element parent {path[: key_index + 1]!r} is not an encoded mapping.")
     return parent, path[-1]
 
 
 def _write_spatialdata_table_attrs(
     group: zarr.Group,
     *,
-    regions: Sequence[str],
-    region_key: str,
-    instance_key: str,
+    regions: Sequence[str] | None,
+    region_key: str | None,
+    instance_key: str | None,
 ) -> None:
     """Write SpatialData's disk-level regions-table contract.
 
@@ -313,15 +402,16 @@ def _write_spatialdata_table_attrs(
     group
         AnnData Zarr group that will become a SpatialData table element.
     regions
-        Labels elements annotated by the table.
+        Spatial elements annotated by the table, or None for an unannotated table.
     region_key
-        Column in ``adata.obs`` that identifies the labels element.
+        Column in ``adata.obs`` that identifies the spatial element, or None
+        for an unannotated table.
     instance_key
-        Column in ``adata.obs`` that identifies an instance within that labels
-        element.
+        Column in ``adata.obs`` that identifies an instance within that
+        element, or None for an unannotated table.
     """
     group.attrs["spatialdata-encoding-type"] = _SPATIALDATA_TABLE_ENCODING_TYPE
-    group.attrs["region"] = list(regions)
+    group.attrs["region"] = None if regions is None else list(regions)
     group.attrs["region_key"] = region_key
     group.attrs["instance_key"] = instance_key
     group.attrs["version"] = _SPATIALDATA_TABLE_FORMAT_VERSION

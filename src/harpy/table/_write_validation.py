@@ -185,16 +185,37 @@ def _validate_component_values(
 ) -> None:
     """Validate only affected axes and linkage, before staging and after serialization.
 
-    ``obs_identity`` describes the observation identities and their order in
-    the submitted matrices. ``var_names`` and ``raw_var_names`` describe the
-    corresponding feature identities and order. These arguments are used for
-    validation, never to reorder matrix rows or columns.
+    Each affected axis requires its obs/var/raw.var dataframe in ``components``
+    or the corresponding explicit identity argument. If both are supplied,
+    both are checked. Identities must match in value and order; they never
+    request reordering of matrix rows or columns.
 
-    Supplied obs/var/raw.var frames can provide those identities instead.
-    Only required indices and spatial annotation columns are read from the
-    original table, never its numerical matrices.
-    During raw creation, new_raw_var defines the new feature axis; all other
-    axes still come from the stored table.
+    Parameters
+    ----------
+    group
+        Existing destination table's AnnData Zarr group, not the SpatialData
+        root or staging group. Supplies the stored axes and annotation. Only
+        required indices, spatial annotation columns and linkage metadata are
+        read, never its numerical matrices.
+    components
+        Mapping of logical paths, such as ``("obsm", "embedding")``, to
+        caller-supplied values or reopened staged values. Supplied obs/var/raw.var
+        dataframes must also preserve the expected axis index.
+    obs_identity
+        Observation identities in the submitted matrices' row order. For
+        annotated tables, a two-column dataframe using the stored region and
+        instance keys; its own index is ignored. For unannotated tables, the
+        ordered observation names (``adata.obs_names``, equivalent to
+        ``adata.obs.index``).
+    var_names
+        Ordered feature names for components aligned to the main table's var.
+    raw_var_names
+        Ordered feature names for raw.X and raw.varm, whose feature axis is
+        independent of the main table's var.
+    new_raw_var
+        Feature dataframe when creating a raw container. Its index defines
+        the expected new raw feature axis; None uses the stored raw axis when
+        needed. All other axes still come from ``group``.
     """
     axes_by_path = {}
     for path in components:
@@ -214,15 +235,17 @@ def _validate_component_values(
     required = {axis for axes in axes_by_path.values() for axis in axes}
     explicit = {"obs": obs_identity, "var": var_names, "raw_var": raw_var_names}
     frame_paths = {"obs": ("obs",), "var": ("var",), "raw_var": ("raw", "var")}
-    indices = {}
+    # Expected indices for alignment checks come from the stored table,
+    # except when creating raw: new_raw_var defines its new feature axis.
+    expected_axis_indices = {}
     for axis, frame_path in frame_paths.items():
         if axis not in required and explicit[axis] is None:
             continue
         if axis == "raw_var" and new_raw_var is not None:
-            indices[axis] = new_raw_var.index
+            expected_axis_indices[axis] = new_raw_var.index
         else:
             try:
-                indices[axis] = _axis_index(group, frame_path)
+                expected_axis_indices[axis] = _axis_index(group, frame_path)
             except KeyError:
                 raise ValueError(f"The stored table has no {axis!r} axis.") from None
         # Get the obs, var or raw.var dataframe included in this write request,
@@ -233,7 +256,7 @@ def _validate_component_values(
         if frame_path in components:
             if not isinstance(supplied_axis_frame, pd.DataFrame):
                 raise TypeError(f"Component {frame_path!r} must be a pandas DataFrame.")
-            _match_identity(supplied_axis_frame.index, indices[axis], label=f"{axis} dataframe index")
+            _match_identity(supplied_axis_frame.index, expected_axis_indices[axis], label=f"{axis} dataframe index")
 
         spatialdata_attrs = _read_spatialdata_attrs(group) if axis == "obs" else None
         # 2a) Annotated obs: additionally validate the ordered region/instance
@@ -242,7 +265,9 @@ def _validate_component_values(
         # used for matching.
         if axis == "obs" and spatialdata_attrs is not None:
             keys = [spatialdata_attrs[TableModel.REGION_KEY_KEY], spatialdata_attrs[TableModel.INSTANCE_KEY]]
-            stored_obs_identity = pd.DataFrame({key: read_elem(group["obs"][key]) for key in keys}, index=indices[axis])
+            stored_obs_identity = pd.DataFrame(
+                {key: read_elem(group["obs"][key]) for key in keys}, index=expected_axis_indices[axis]
+            )
             expected = _observation_pairs(stored_obs_identity, spatialdata_attrs, label="Stored observation")
             if supplied_axis_frame is not None:
                 _match_identity(
@@ -265,7 +290,7 @@ def _validate_component_values(
             # not region/instance pairs. Check supplied_axis_frame.index, when present,
             # and any separately supplied obs_identity, var_names or raw_var_names
             # against the expected axis.
-            expected = _named_identity(indices[axis], label=f"Stored {axis}")
+            expected = _named_identity(expected_axis_indices[axis], label=f"Stored {axis}")
             for value in (None if supplied_axis_frame is None else supplied_axis_frame.index, explicit[axis]):
                 if value is not None:
                     _match_identity(_named_identity(value, label=axis), expected, label=axis)
@@ -286,11 +311,11 @@ def _validate_component_values(
         if not shape or any(not isinstance(size, Integral) or size < 0 for size in shape):
             raise ValueError(f"Component {path!r} requires a matrix with a known shape.")
         if path[0] in {"obsp", "varp"}:
-            expected_shape = (len(indices[axes[0]]),) * 2
+            expected_shape = (len(expected_axis_indices[axes[0]]),) * 2
         elif len(axes) == 2:
-            expected_shape = tuple(len(indices[axis]) for axis in axes)
+            expected_shape = tuple(len(expected_axis_indices[axis]) for axis in axes)
         else:
-            expected_shape = (len(indices[axes[0]]), *shape[1:])
+            expected_shape = (len(expected_axis_indices[axes[0]]), *shape[1:])
         if tuple(shape) != expected_shape:
             raise ValueError(f"Component {path!r} has shape {shape}; expected {expected_shape}.")
         if isinstance(value, pd.DataFrame):
@@ -298,7 +323,7 @@ def _validate_component_values(
             # matching shape alone cannot detect reordered or different identities.
             # This is separate from the obs/var/raw.var checks above; those frames
             # are skipped in this loop.
-            _match_identity(value.index, indices[axes[0]], label=f"Component {path!r} dataframe index")
+            _match_identity(value.index, expected_axis_indices[axes[0]], label=f"Component {path!r} dataframe index")
 
 
 def _validate_complete_table(table: AnnData) -> None:
