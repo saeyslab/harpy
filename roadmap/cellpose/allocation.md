@@ -42,16 +42,17 @@ implemented:
       heatmaps — implemented; **11e.v** density-only marimo overview — implemented;
       **11e.vi** optional spatial-density smoothing in Harpy; and **11e.vii**
       marimo smoothed-density overview;
-    - **11f:** modular AnnData table I/O for SpatialData Zarr stores, in eight
+    - **11f:** modular AnnData table I/O for SpatialData Zarr stores, in nine
       separate parts: **11f.i** public contracts — defined and documented;
       **11f.ii** selective component and lazy complete-table reading — implemented;
       **11f.iii** Harpy SpatialData reader with selective table modes — implemented;
-      **11f.iv** scoped writing and safe
-      publication; **11f.v** region-wise `.obsm` writing; **11f.vi** integration
+      **11f.iv** scoped writing and safe publication — implemented;
+      **11f.v** creation of raw data through component writes — implemented;
+      **11f.vi** region-wise `.obsm` writing; **11f.vii** integration
       with existing Harpy APIs, including `hp.tb.add_feature_matrix`;
-      **11f.vii** safe deletion of optional AnnData components; **11f.viii**
-      affected-chunk regional-write optimization, after the first seven parts;
-      a separate napari-harpy persistence migration also follows the first seven
+      **11f.viii** safe deletion of optional AnnData components; **11f.ix**
+      affected-chunk regional-write optimization, after the first eight parts;
+      a separate napari-harpy persistence migration also follows the first eight
       parts and does not depend on this optimization;
     - **11g:** table-level summary computation through `hp.qc.summarize_table`
       and `TableSummary`, with plotting integration;
@@ -106,19 +107,19 @@ to the nominal bin size and no smoothing controls. Both retain the existing
 flat-bin rendering; rendering interpolation remains deferred.
 Slice 11f establishes general table I/O independently of QC or preprocessing:
 callers explicitly read or replace a complete AnnData table or selected
-components without materializing unrelated matrices. Its first six parts specify
-the public contracts, implement readers, writers and region-wise `.obsm` updates,
+components without materializing unrelated matrices. Its first seven parts specify
+the public contracts, implement readers, writers, raw creation and region-wise `.obsm` updates,
 then integrate existing Harpy entry points using the shared storage infrastructure.
 Part 11f.iii composes Part 11f.ii's table reader with SpatialData's public
 non-table reader in `hp.io.read_zarr()`, selecting tables and their read mode
 without changing `spatialdata.read_zarr()` or adding another decoder. This
 reader follows Part 11f.ii and does not depend on the planned writers.
-Part 11f.vii then adds safe deletion of optional components. Part 11f.viii is a
+Part 11f.viii then adds safe deletion of optional components. Part 11f.ix is a
 later optimization that rewrites only affected chunks of eligible regional
 `.obsm` updates; the initial regional writer still stages complete components.
 Napari-harpy's existing persistence behavior informs this design without constraining the new
 public API; a separate follow-up migrates its application-specific adapter to
-Harpy's public I/O after deletion support is available. Neither Parts 11f.vii–viii
+Harpy's public I/O after deletion support is available. Neither Parts 11f.viii–ix
 nor that migration are prerequisites for Slice 11g, which
 provides the symmetric read-only table-summary workflow, deriving per-instance metrics
 and class-level overviews from the class-aware table before plotting.
@@ -6210,9 +6211,11 @@ unsmoothed default remains unchanged.
 
 ## Slice 11f: modular AnnData table I/O for SpatialData Zarr stores
 
-**Status: Part 11f.i complete (contracts and documentation); Parts 11f.ii–iii
+**Status: Part 11f.i complete (contracts and documentation); Parts 11f.ii–v
 implemented. `hp.tb.read_table`, `hp.tb.read_table_components` and
-`hp.io.read_zarr` are available; Parts 11f.iv–viii remain planned.**
+`hp.io.read_zarr`, plus `hp.tb.write_table` and `hp.tb.write_table_components`,
+are available, including raw creation through component writes;
+Parts 11f.vi–ix remain planned.**
 
 Provide general, modular table I/O independently of QC, aggregation or Scanpy
 preprocessing. The caller explicitly chooses a complete table or selected
@@ -6221,7 +6224,7 @@ and safe publication without reading or rewriting unrelated data. Callers may
 use ordinary AnnData/Scanpy operations between reads and writes. This slice
 does not introduce another preprocessing pipeline or choose scientific metrics.
 
-Split the work into eight independently reviewable parts, in this order:
+Split the work into nine independently reviewable parts, in this order:
 
 1. **11f.i: public table I/O contracts** — specify complete-table and
    component-level APIs, memory behavior, alignment and overwrite guarantees.
@@ -6230,20 +6233,22 @@ Split the work into eight independently reviewable parts, in this order:
 3. **11f.iii: Harpy SpatialData reader with selective table modes** — compose
    SpatialData's non-table reader with the existing table reader in `hp.io.read_zarr()` — implemented.
 4. **11f.iv: scoped table writing and safe publication** — implement complete
-   table writes and selected-component updates on the existing publisher.
-5. **11f.v: region-wise `.obsm` writing** — add a public regional-update API
+   table writes and selected-component updates on the existing publisher — implemented.
+5. **11f.v: creation of raw data through component writes** — create a complete
+   raw container from supplied counts and feature identities without rewriting the table — implemented.
+6. **11f.vi: region-wise `.obsm` writing** — add a public regional-update API
    with bounded-memory matrix merging and coupled, caller-prepared metadata writes.
-6. **11f.vi: integration with existing Harpy APIs** — route existing table I/O
+7. **11f.vii: integration with existing Harpy APIs** — route existing table I/O
    through the shared primitives and retain lazy results when attaching them.
-7. **11f.vii: safe deletion of optional AnnData components** — support explicit
+8. **11f.viii: safe deletion of optional AnnData components** — support explicit
    removals and combined replacement/deletion requests with shared rollback.
-8. **11f.viii: affected-chunk regional-write optimization** — avoid complete
+9. **11f.ix: affected-chunk regional-write optimization** — avoid complete
    matrix rewrites for eligible regional `.obsm` updates, without changing
    sample layout or the public regional-update semantics.
 
-Complete Parts 11f.i–vi before the table-level QC work in Slice 11g. Part 11f.vii
+Complete Parts 11f.i–vii before the table-level QC work in Slice 11g. Part 11f.viii
 is required before the napari-harpy persistence migration, but does not block
-Slice 11g. Part 11f.viii follows Parts 11f.i–vii and blocks neither Slice 11g nor
+Slice 11g. Part 11f.ix follows Parts 11f.i–viii and blocks neither Slice 11g nor
 the napari-harpy migration. The I/O contracts themselves must remain usable
 without any QC result, feature panel or aggregation-specific metadata. Part
 11f.iii builds directly on the implemented Part 11f.ii; it does not require
@@ -6255,10 +6260,11 @@ the later writing parts.
 placeholder exports added.**
 
 This section defines the initial public table/component contracts, including
-signatures, implementation reuse, guarantees and examples. Parts 11f.v and
-11f.vii specify the regional-update and deletion extensions in this roadmap.
+signatures, implementation reuse, guarantees and examples. Parts 11f.v,
+11f.vi and 11f.viii specify raw creation, regional updates and deletion extensions
+in this roadmap.
 Update `docs/development/storage.md` and user-facing API documentation during Parts
-11f.ii–viii as the functionality is implemented, describing delivered behavior
+11f.ii–ix as the functionality is implemented, describing delivered behavior
 without roadmap status language. No separate draft API page is maintained.
 
 Reuse and, where necessary, refactor Harpy's existing AnnData reading, writing
@@ -6345,11 +6351,11 @@ lazy reopen must not collect whole matrices. Public writers neither mutate
 their inputs nor return attached objects. Existing recovery limitations below
 continue to apply; no additional crash or concurrency guarantees are implied.
 
-Implementation checks are split across Parts 11f.ii–vi: all-slot and selected
+Implementation checks are split across Parts 11f.ii–vii: all-slot and selected
 read round trips, sparse preservation, independent annotations, no matrix I/O
 for annotation-only operations, axis/order rejection, chunked writes that can
 read the old destination, and failure recovery through finalization/installation.
-Part 11f.vii separately adds explicit deletion to the same publication mechanism.
+Part 11f.viii separately adds explicit deletion to the same publication mechanism.
 Omitted request paths and encoded `None` values must not become implicit deletes.
 
 #### Signatures
@@ -6359,7 +6365,7 @@ inside it, without opening all of SpatialData. They operate on disk, not on a
 possibly edited `sdata.tables[table_name]`. Ordinary AnnData/Scanpy operations
 remain separate from persistence.
 
-The readers below are exposed through `hp.tb`; the writers remain planned.
+The readers and writers below are exposed through `hp.tb`.
 The aliases describe argument types; they are not additional public APIs.
 
 ```python
@@ -6438,24 +6444,28 @@ is required. Ordinary and SpatialData-annotated tables are both supported.
 `write_table` persists the supplied AnnData as the entire destination table. It
 does not merge with an old version: omitted layers, annotations or metadata are
 not retained. It can create a table, including the `tables` container if absent.
-Creating, filtering or reordering table axes, changing spatial linkage, or
-creating/removing `raw` requires this complete-table operation.
+Creating, filtering or reordering the table's main axes, changing spatial
+linkage, changing existing raw axes or removing raw requires this complete-table
+operation. Part 11f.v extends component writes to create missing raw data
+without rewriting the table.
 
 Component APIs use **logical tuple paths**, not Zarr encoding internals:
 
-| Path                                                                                 | Value                                    | Component write                           |
-| ------------------------------------------------------------------------------------ | ---------------------------------------- | ----------------------------------------- |
-| `("X",)`                                                                             | Expression matrix, or encoded `None`     | Supported                                 |
-| `("obs",)`, `("var",)`                                                               | Whole dataframe                          | Supported                                 |
-| `("layers", key)`                                                                    | One matrix                               | Supported                                 |
-| `("obsm", key)`, `("varm", key)`                                                     | One axis-aligned value                   | Supported                                 |
-| `("obsp", key)`, `("varp", key)`                                                     | One pairwise matrix                      | Supported                                 |
-| `("uns",)` or `("uns", key, ...)`                                                    | Whole metadata mapping or a nested value | Supported                                 |
-| `("raw", "X")`, `("raw", "var")`, `("raw", "varm", key)`                             | Component of existing raw data           | Supported; raw axes must remain unchanged |
-| `("layers",)`, `("obsm",)`, `("varm",)`, `("obsp",)`, `("varp",)`, `("raw", "varm")` | Mapping of entries                       | Read only; write individual entries       |
+| Path                                                                                 | Value                                    | Component write                                                                    |
+| ------------------------------------------------------------------------------------ | ---------------------------------------- | ---------------------------------------------------------------------------------- |
+| `("X",)`                                                                             | Expression matrix, or encoded `None`     | Supported                                                                          |
+| `("obs",)`, `("var",)`                                                               | Whole dataframe                          | Supported                                                                          |
+| `("layers", key)`                                                                    | One matrix                               | Supported                                                                          |
+| `("obsm", key)`, `("varm", key)`                                                     | One axis-aligned value                   | Supported                                                                          |
+| `("obsp", key)`, `("varp", key)`                                                     | One pairwise matrix                      | Supported                                                                          |
+| `("uns",)` or `("uns", key, ...)`                                                    | Whole metadata mapping or a nested value | Supported                                                                          |
+| `("raw", "X")`, `("raw", "var")`, `("raw", "varm", key)`                             | Raw data component                       | Supported; creation as specified in Part 11f.v; existing raw axes remain unchanged |
+| `("layers",)`, `("obsm",)`, `("varm",)`, `("obsp",)`, `("varp",)`, `("raw", "varm")` | Mapping of entries                       | Read only; write individual entries                                                |
 
 `("raw",)` is not a component selector; use a complete-table read/write for
 the AnnData `Raw` container itself. Its feature axis is independent of `var`.
+Part 11f.v adds creation through the existing child selectors, not a new
+`("raw",)` selector.
 There are no selectors for dataframe columns, array slices, sparse encoding
 buffers or Zarr attributes. For example, `("obs", "prediction")` and
 `("X", "data")` are invalid.
@@ -6477,17 +6487,20 @@ Component writes require an existing table. Only specified values are replaced;
 siblings remain unchanged. Values must be supported by the shared AnnData
 encodings; unsupported values fail before publication. Missing mapping parents
 may be created with AnnData encodings, but an existing non-mapping parent is
-never replaced implicitly.
+never replaced implicitly. Part 11f.v explicitly handles raw creation from
+an absent path or a stored null entry; it does not relax other traversal checks.
 Replacing an `.uns` mapping replaces its contents, not just its supplied keys.
 Omitting a component from the request leaves it unchanged. `None` is a value
 where its encoding permits it, **not a deletion command**. Explicit removal of
-optional entries follows in Part 11f.vii and is not an argument of the initial
+optional entries follows in Part 11f.viii and is not an argument of the initial
 writer. No append or column-level disk updates are provided.
 
 #### Axis alignment and validation
 
 Component writes preserve observation/feature identities, their order and the
 table's spatial annotation. **Shapes alone do not establish alignment.**
+For creation of previously absent raw data, Part 11f.v defines its new feature
+axis from the request while preserving the existing observations and main feature axis.
 
 | Updated component         | Required identity context                            |
 | ------------------------- | ---------------------------------------------------- |
@@ -6590,7 +6603,7 @@ the foundation. Finalize the region-selection API and its missing-region and
 metadata behavior in the follow-up, rather than silently adding a `regions`
 argument to the initial read/write APIs.
 
-Region-wise writing is a separate public operation specified in Part 11f.v,
+Region-wise writing is a separate public operation specified in Part 11f.vi,
 initially limited to `.obsm` updates and accompanying `.uns` replacements.
 It does not depend on a region-selection reader. The initial writers above
 continue to replace complete tables or components; they must not silently
@@ -6633,7 +6646,7 @@ interpret a smaller matrix as a regional update.
   Memory includes requested annotations and active chunks; there is no fixed
   byte budget or guarantee that downstream Scanpy operations remain lazy.
 - Path-based writes never synchronize live `sdata.tables` or external handles.
-  Harpy's SpatialData adapters will handle attachment separately in 11f.vi.
+  Harpy's SpatialData adapters will handle attachment separately in 11f.vii.
 
 #### Completion, errors and recovery
 
@@ -6730,8 +6743,8 @@ Both entries share the same rollback window. Neither unrelated matrices nor
 the expression matrix need to be read or rewritten. For an unannotated table,
 use `obs_identity=adata.obs_names` instead.
 
-Runtime acceptance tests belong to Parts 11f.ii–vi; this part introduces no
-placeholder functions or tests that merely assert their presence. Part 11f.vii
+Runtime acceptance tests belong to Parts 11f.ii–vii; this part introduces no
+placeholder functions or tests that merely assert their presence. Part 11f.viii
 and the separate napari-harpy migration remain follow-ups.
 
 ### Part 11f.ii: selective and lazy table reading
@@ -6881,7 +6894,13 @@ memory independently from Slice 7b's construction benchmark.
 
 ### Part 11f.iv: scoped table writing and safe publication
 
-**Status: planned.**
+**Status: implemented.** `hp.tb.write_table` and `hp.tb.write_table_components`
+share staging/publication orchestration, strict ordered-identity validation,
+and the existing AnnData serializer and path publisher. Writes preserve Zarr
+format 2/3, stage lazy replacements before moving their source paths, and
+restore affected paths, newly created parents and consolidation metadata on
+handled failure. Focused tests cover scoped I/O, input ownership, identity and
+shape rejection, and staging/publication/finalization/installation failures.
 
 Implement the two public writers defined in Part 11f.i:
 
@@ -6928,7 +6947,7 @@ validate request, axes and required metadata
     -> commit and clean up, or attempt rollback on failure
 ```
 
-The internal write operation must allow Part 11f.vi's adapters to attach reopened
+The internal write operation must allow Part 11f.vii's adapters to attach reopened
 data before committing. The path-based public writers do not attach anything;
 adapters must not call a completed public write and expect a later attachment
 failure to roll it back.
@@ -6968,16 +6987,96 @@ or reordered pairs, and an identity dataframe whose index differs while its
 pairs remain unchanged. Separately verify that actual `.obs` replacements
 preserve the stored index, and that unannotated tables use observation names.
 
-This part provides the disk-writing foundation, not region-wise updates
-(Part 11f.v), migration of `add_table` and other live-SpatialData adapters
-(Part 11f.vi), or explicit component deletion (Part 11f.vii). It adds no append
+This part provides the disk-writing foundation, not raw creation through component
+writes (Part 11f.v), region-wise updates (Part 11f.vi), migration of `add_table`
+and other live-SpatialData adapters (Part 11f.vii), or explicit component deletion
+(Part 11f.viii). It adds no append
 or individual dataframe-column writes. `None` is an encoded value where
 supported, not a deletion request. Recovery remains rollback for handled
 failures, not crash recovery, immutable snapshots or concurrent-access isolation.
 
-### Part 11f.v: region-wise `.obsm` writing
+### Part 11f.v: creation of raw data through component writes
 
-**Status: planned; implement after Parts 11f.i–iv and before integration with
+**Status: implemented.** `hp.tb.write_table_components` creates raw data from
+an absent path or encoded null, using supplied feature names or a feature dataframe.
+It stages one complete raw container with AnnData's encoder and publishes it
+alongside any coupled component updates through the existing rollback mechanism.
+Focused tests cover lazy/sparse inputs, unchanged unrelated data, identity and
+overwrite rejection, and restoration after staging/publication/finalization failures.
+
+Extend `hp.tb.write_table_components()` to create raw data in an existing table
+when `.raw` is absent or stored as `None`. Avoid requiring a complete-table
+rewrite for this operation. Reuse the existing signature, AnnData serialization,
+ordered-identity validation and shared publication/rollback mechanism; do not
+add another public writer or expose `("raw",)` as a component selector.
+
+The creation contract is:
+
+- Require `("raw", "X")` with a matrix and the same observation-identity
+  context used for existing raw updates. Its rows must match the stored table's
+  observations in identity and order; a supplied `("obs",)` dataframe can
+  provide this context instead of a separate `obs_identity` argument.
+- Define the new raw feature axis using either `raw_var_names` or a supplied
+  `("raw", "var")` dataframe. Names must be unique, non-null strings, and
+  the matrix column count must match. Preserve the supplied order without
+  sorting, alignment or implicit string conversion. If both forms are supplied,
+  require their ordered identities to agree.
+- With names alone, construct `.raw.var` as a dataframe with those names as
+  its index and no annotation columns. With a dataframe, preserve its supplied
+  annotations. Do not infer raw features or copy annotations from the main
+  `.var`: raw's feature axis is independent.
+- Permit accompanying `("raw", "varm", key)` entries and validate them against
+  the new raw feature axis. Reject attempts to initialize raw through `.raw.var`
+  or `.raw.varm` alone, or with a missing/`None` `.raw.X`.
+- If raw already exists as a valid container, retain the current scoped-update
+  behavior: omitted raw components remain unchanged, and its existing feature
+  identities and order cannot change. `overwrite=True` does not permit changing
+  existing raw axes; use `write_table()` for that.
+- Preserve overwrite semantics: an absent raw path can be created with
+  `overwrite=False`; replacing a stored null entry requires `overwrite=True`.
+  Reject malformed or unsupported existing raw encodings rather than silently
+  replacing them. Other requested destinations retain their own overwrite checks.
+
+For example, creating raw data on an annotated table:
+
+```python
+hp.tb.write_table_components(
+    "sdata.zarr",
+    table_name="processed",
+    components={("raw", "X"): raw_counts},
+    obs_identity=adata.obs[[region_key, instance_key]],
+    raw_var_names=gene_names,
+    overwrite=True,
+)
+```
+
+For creation, assemble and serialize a complete AnnData-encoded raw container
+in staging, including its feature dataframe and matrix mappings. Publish that
+new subtree as one raw destination, not overlapping parent/child publication
+paths or a generic dictionary pretending to be raw. Existing raw updates keep
+their component-level publication scope. Batch accompanying non-raw components,
+such as caller-prepared `.uns` metadata, in the same rollback operation.
+
+Finish all serialization before moving source paths. Support lazy and backed
+matrix inputs without preliminary whole-matrix materialization or densification.
+Apart from reads required by a caller-supplied lazy payload, do not read or
+rewrite unrelated numerical data, including the main `.X`. Preserve table
+annotations, unrelated components and input objects. On handled failure, restore
+the prior absence or encoded null, coupled component replacements and consolidated
+metadata. Keep the existing local-store, return, attachment and recovery contracts;
+no new crash recovery, snapshots or concurrent-writer guarantees are introduced.
+
+Focused tests must cover creation from an absent path and encoded null, names-only
+and dataframe-provided feature axes, optional raw feature mappings, sparse/lazy
+round trips, identity/shape and overwrite rejection, and existing-raw updates.
+Verify unchanged unrelated components and bounded matrix I/O. Inject staging,
+publication and finalization failures to check restoration of the original raw
+state and any coupled metadata updates. The writer docstring and storage overview
+document this delivered behavior.
+
+### Part 11f.vi: region-wise `.obsm` writing
+
+**Status: planned; implement after Parts 11f.i–v and before integration with
 existing Harpy APIs.**
 
 Introduce a public API through `hp.tb` for updating one or more `.obsm` matrix
@@ -7028,7 +7127,7 @@ memory. Reading and rewriting unselected rows of the affected component is
 allowed; reading or rewriting `.X`, unrelated `.obsm` entries or other tables
 is not. Memory may include row identities, requested metadata and active
 matrix chunks. Do not add direct in-place row/chunk overwrites in this part.
-Part 11f.viii separately optimizes this operation by publishing only affected
+Part 11f.ix separately optimizes this operation by publishing only affected
 chunks; it is not required to deliver this initial regional-write API.
 
 Finish staging while original paths remain readable, then publish the matrix
@@ -7050,7 +7149,7 @@ materialization or unrelated reads. Exercise coupled metadata writes and
 failures during staging, publication and finalization, checking restoration
 of the affected entries and consolidated metadata.
 
-### Part 11f.vi: integration with existing Harpy APIs
+### Part 11f.vii: integration with existing Harpy APIs
 
 Make `hp.tb.add_table` a SpatialData-facing adapter over the shared table I/O
 infrastructure. Preserve its distinction between attaching an unbacked table
@@ -7060,7 +7159,7 @@ collection or mutating the supplied AnnData. Installation and metadata
 finalization must remain inside the rollback window; adapters restore affected
 in-memory state on failure.
 
-Explicitly migrate `hp.tb.add_feature_matrix` to Part 11f.v's regional-write
+Explicitly migrate `hp.tb.add_feature_matrix` to Part 11f.vi's regional-write
 operation for backed existing-table updates. Keep feature calculation,
 alignment of calculated values to the selected observations, selection and
 scientific metadata preparation in that API. Delegate the full-matrix merge
@@ -7104,9 +7203,9 @@ after installation failures. Confirm that ordinary `spatialdata.read_zarr()`
 behavior is unchanged. Part 11f.iii's `hp.io.read_zarr()` wrapper reuses
 this foundation rather than introducing competing table codecs.
 
-### Part 11f.vii: safe deletion of optional AnnData components
+### Part 11f.viii: safe deletion of optional AnnData components
 
-**Status: planned; implement after Parts 11f.i–vi. Required before the
+**Status: planned; implement after Parts 11f.i–vii. Required before the
 napari-harpy persistence migration, but not before Slice 11g.**
 
 Extend the public component-writing contract to explicitly remove selected
@@ -7162,12 +7261,12 @@ including consolidated metadata and affected adapter state. Verify that deleting
 an optional matrix neither reads its values nor reads or rewrites `.X`.
 Document the explicit deletion contract in the public API and storage overview.
 
-### Part 11f.viii: affected-chunk regional-write optimization
+### Part 11f.ix: affected-chunk regional-write optimization
 
-**Status: planned follow-up optimization; implement after Parts 11f.i–vii.
+**Status: planned follow-up optimization; implement after Parts 11f.i–viii.
 Not a prerequisite for Slice 11g or the napari-harpy persistence migration.**
 
-Optimize Part 11f.v's regional `.obsm` writer without changing its public
+Optimize Part 11f.vi's regional `.obsm` writer without changing its public
 selection, identity, overwrite or metadata contracts. The initial implementation
 remains the bounded-memory, complete-component staging path. This follow-up
 reduces disk I/O by staging and publishing only chunks affected by a regional
@@ -7216,13 +7315,13 @@ separate from timing benchmarks or sample-layout optimization.
 
 ### Follow-up: napari-harpy persistence integration
 
-**Status: planned; implement after Parts 11f.i–vii. Not a prerequisite for
+**Status: planned; implement after Parts 11f.i–viii. Not a prerequisite for
 Slice 11g.**
 
 Migrate napari-harpy's shared table persistence, used by object classification
 and spatial queries, onto Harpy's public table I/O APIs. This is a separate
-cross-repository integration task following the first seven Harpy I/O parts;
-Part 11f.viii's affected-chunk optimization is not required.
+cross-repository integration task following the first eight Harpy I/O parts;
+Part 11f.ix's affected-chunk optimization is not required.
 Napari-harpy keeps a small translation layer between application requests and
 Harpy's documented public table I/O APIs. It decides what the user wants saved
 or reloaded and translates that intent into store paths, component paths and
@@ -7271,7 +7370,7 @@ materialize selected matrices only where a consumer actually needs them. Review
 row-identity and live-object update semantics explicitly rather than assuming
 that matching function names make the APIs interchangeable.
 
-Use Part 11f.vii's explicit deletion support for removed optional `.obsm` entries
+Use Part 11f.viii's explicit deletion support for removed optional `.obsm` entries
 and `.uns` records, batching related replacements and deletions together.
 Do not interpret an omitted component as a deletion, silently stop persisting
 removals, or bypass the shared publisher with direct Zarr deletes.
@@ -7287,7 +7386,7 @@ Harpy dependency once the required public APIs are available.
 
 **Status: specified; not implemented.**
 
-Implement after the general table I/O foundation in Parts 11f.i–vi. This slice
+Implement after the general table I/O foundation in Parts 11f.i–vii. This slice
 defines QC computation and plotting, not another reader, writer or preprocessing
 pipeline; reuse the shared I/O primitives wherever disk access is needed.
 
