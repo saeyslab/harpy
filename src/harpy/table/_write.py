@@ -255,6 +255,8 @@ def _write_table_operation(
             if create_raw and path[0] == "raw":
                 continue
             _check_component_destination(source_table, path, overwrite=overwrite)
+        # 1) Validate caller-supplied shapes, identities and linkage before staging.
+        # Step 2 below repeats these checks on the serialized output.
         _validate_component_values(
             source_table,
             components,
@@ -323,8 +325,14 @@ def _write_table_operation(
                     staged_path = (staged_name,)
                     _write_anndata_element(staged_root, staged_path, components[path], create_parents=False)
                     replacements.append(_StagedPath(workspace / staged_name, table_path.joinpath(*path)))
+                # Temporary names hide the original slot, so explicitly preserve
+                # uns's eager-reading policy. Unlike uns, obs/var/raw.var are
+                # recognized as dataframes and decoded eagerly in any mode.
                 mode = "eager" if path[0] == "uns" else "backed"
                 staged_values[path] = _read_anndata_element(staged_root, staged_path, mode=mode)
+            # 2) Repeat step 1 on the reopened staged components, before publication.
+            # This checks the serialized output rather than the caller-supplied inputs.
+            # Backed matrix handles allow shape checks without scanning matrix values.
             _validate_component_values(
                 source_table,
                 staged_values,
