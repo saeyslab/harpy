@@ -226,23 +226,33 @@ def _write_table_operation(
         paths = _validate_component_paths(tuple(components), to_write=True)
         source_table = _open_table_group(store, table_name=table_name)
         new_raw_var = _prepare_raw_creation(source_table, components, raw_var_names=raw_var_names, overwrite=overwrite)
-        if new_raw_var is not None:
+        # This flag means creating the raw container, not merely writing raw components.
+        # It is False when raw already exists, even if its components will be updated,
+        # or when no raw components were requested.
+        create_raw = new_raw_var is not None
+        if create_raw:
+            # If create_raw is True, raw components were requested, but raw is
+            # absent or stored as None.
+            # Unlike an obsm mapping, raw defines its own feature axis via var.
+            # Below we assemble X, var and optional varm into one encoded Raw
+            # container, so publication targets the whole raw path, not its
+            # children. Rollback can then restore the original absence or None.
+
             # Zarr may not recognize an existing file/directory as a child.
             # Requests target raw's components, so even overwrite=True must not
             # replace an unrecognized raw parent with the new container.
             if "raw" not in source_table and (table_path / "raw").exists():
                 raise ValueError("Cannot create raw over an existing unrecognized raw path.")
-            # Creating raw publishes the complete new container.
-            # Updating existing raw replaces only the requested components.
             components = dict(components)
             components[("raw", "var")] = new_raw_var
             paths = tuple(components)
             publication_paths = (("raw",), *(path for path in paths if path[0] != "raw"))
         else:
+            # Existing raw containers keep unrequested components untouched.
             publication_paths = paths
         destinations = tuple(table_path.joinpath(*path) for path in publication_paths)
         for path in paths:
-            if new_raw_var is not None and path[0] == "raw":
+            if create_raw and path[0] == "raw":
                 continue
             _check_component_destination(source_table, path, overwrite=overwrite)
         _validate_component_values(
@@ -271,7 +281,7 @@ def _write_table_operation(
         staged_root = zarr.open_group(str(workspace), mode="w", zarr_format=source_root.metadata.zarr_format)
         replacements: list[_StagedPath] = []
         if adata is not None:
-            _write_anndata_element(staged_root, ("table",), adata)
+            _write_anndata_element(staged_root, ("table",), adata, create_parents=False)
             staged_table = _read_anndata_table(staged_root["table"], mode="lazy")
             _validate_complete_table(staged_table)
             annotation = staged_table.uns.get(TableModel.ATTRS_KEY)
@@ -287,26 +297,31 @@ def _write_table_operation(
             replacements.append(_StagedPath(workspace / "table", table_path))
         else:
             assert components is not None
-            if new_raw_var is not None:
+            if create_raw:
                 matrix = components[("raw", "X")]
+                # This Raw is only a serialization payload: the shape-only parent
+                # supplies n_obs without loading the actual table. AnnData writes
+                # only X, var and varm, not this parent's placeholder obs names.
+                # _validate_component_values() already checked row identities
+                # against the stored table's real observations.
                 raw = Raw(
                     AnnData(shape=(matrix.shape[0], 0)),
                     X=matrix,
                     var=new_raw_var,
                     varm={path[2]: value for path, value in components.items() if path[:2] == ("raw", "varm")},
                 )
-                _write_anndata_element(staged_root, ("raw",), raw)
+                _write_anndata_element(staged_root, ("raw",), raw, create_parents=False)
                 replacements.append(_StagedPath(workspace / "raw", table_path / "raw"))
             # Read back the new raw components from their shared container;
             # other replacements are serialized and published individually.
             staged_values = {}
             for ordinal, path in enumerate(paths):
-                if new_raw_var is not None and path[0] == "raw":
+                if create_raw and path[0] == "raw":
                     staged_path = path
                 else:
                     staged_name = f"component-{ordinal}"
                     staged_path = (staged_name,)
-                    _write_anndata_element(staged_root, staged_path, components[path])
+                    _write_anndata_element(staged_root, staged_path, components[path], create_parents=False)
                     replacements.append(_StagedPath(workspace / staged_name, table_path.joinpath(*path)))
                 mode = "eager" if path[0] == "uns" else "backed"
                 staged_values[path] = _read_anndata_element(staged_root, staged_path, mode=mode)
@@ -384,5 +399,5 @@ def _create_destination_parents(
                 if parent_path == root / "tables":
                     parent.create_group(key)
                 else:
-                    _write_anndata_element(parent, (key,), {})
+                    _write_anndata_element(parent, (key,), {}, create_parents=False)
             parent = parent[key]
