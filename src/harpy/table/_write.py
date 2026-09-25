@@ -276,9 +276,11 @@ def _write_table_operation(
 
     workspace = Path(tempfile.mkdtemp(prefix=f".{root.name}.harpy-table-staging-", dir=root.parent))
     created_parents: list[Path] = []
-    # Consolidation rewrites root metadata, outside the publisher's paths. Keep
-    # its exact prior bytes so even a failed finalization can be undone without
-    # opening unrelated tables or depending on consolidation succeeding again.
+    # The zarr.consolidate_metadata(str(root)) call below rewrites the SpatialData
+    # Zarr store's root metadata, which is not included in the paths backed up by
+    # _publish_staged_paths(). Keep its exact prior bytes so even a failed finalization
+    # can be undone without opening unrelated tables or depending on consolidation
+    # succeeding again.
     metadata_files = (".zgroup", ".zattrs", ".zmetadata") if source_root.metadata.zarr_format == 2 else ("zarr.json",)
     root_metadata_before = {}
     metadata_attempted = False
@@ -353,8 +355,15 @@ def _write_table_operation(
         writable_root = zarr.open_group(str(root), mode="r+", use_consolidated=False)
         _create_destination_parents(writable_root, root, destinations, created_parents)
         with _publish_staged_paths(root=root, workspace=workspace, paths=replacements, operation="table"):
-            # Ignore the old consolidated index while the new paths are live.
+            # Read the published paths directly (use_consolidated=False), because
+            # consolidated metadata may still describe the previous table/components.
             published_root = zarr.open_group(str(root), mode="r", use_consolidated=False)
+            # Let the caller of _write_table_operation() finish its work
+            # (i.e. we yield before consolidating metadata),
+            # such as attaching the reopened table to sdata in memory, while backups
+            # remain available. Consolidate only after the caller's with-body succeeds,
+            # so failed installation can roll back without first rewriting the store's
+            # root metadata.
             yield published_root["tables"][table_name]
             metadata_attempted = True
             # SpatialData also stores non-Zarr payloads (for example Parquet).
