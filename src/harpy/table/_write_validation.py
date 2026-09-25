@@ -116,8 +116,8 @@ def _same_metadata(left: object, right: object) -> bool:
     return bool(np.array_equal(left, right))
 
 
-def _check_annotation_updates(group: zarr.Group, components: Mapping[ComponentPath, object]) -> None:
-    """Protect spatial linkage, including when replacing all of uns."""
+def _validate_spatialdata_attrs_unchanged(group: zarr.Group, components: Mapping[ComponentPath, object]) -> None:
+    """Ensure component writes preserve uns["spatialdata_attrs"], including its absence."""
     annotation_path = ("uns", TableModel.ATTRS_KEY)
     for path, value in components.items():
         if path == ("uns",):
@@ -225,17 +225,21 @@ def _validate_component_values(
                 indices[axis] = _axis_index(group, frame_path)
             except KeyError:
                 raise ValueError(f"The stored table has no {axis!r} axis.") from None
+        # Get the obs, var or raw.var dataframe included in this write request,
+        # if any (not the dataframe already stored on disk).
         supplied_axis_frame = components.get(frame_path)
+        # 1) Any supplied obs/var/raw.var dataframe must have an index matching
+        # the expected axis in value and order, regardless of SpatialData annotation.
         if frame_path in components:
             if not isinstance(supplied_axis_frame, pd.DataFrame):
                 raise TypeError(f"Component {frame_path!r} must be a pandas DataFrame.")
             _match_identity(supplied_axis_frame.index, indices[axis], label=f"{axis} dataframe index")
 
         spatialdata_attrs = _read_spatialdata_attrs(group) if axis == "obs" else None
-        # Keep the obs check explicit: this branch validates region/instance
-        # identities only for annotated observations, never var/raw.var. Any
-        # supplied_axis_frame here is therefore obs; unannotated obs uses the
-        # index-based validation below.
+        # 2a) Annotated obs: additionally validate the ordered region/instance
+        # pairs in supplied obs and/or obs_identity. The supplied obs index was
+        # already checked in step 1; obs_identity's own dataframe index is not
+        # used for matching.
         if axis == "obs" and spatialdata_attrs is not None:
             keys = [spatialdata_attrs[TableModel.REGION_KEY_KEY], spatialdata_attrs[TableModel.INSTANCE_KEY]]
             stored_obs_identity = pd.DataFrame({key: read_elem(group["obs"][key]) for key in keys}, index=indices[axis])
@@ -257,9 +261,10 @@ def _validate_component_values(
                     label="obs_identity",
                 )
         else:
-            # For var, raw.var and obs without SpatialData annotation, identities
-            # are ordered index names, not region/instance pairs. Check the
-            # supplied dataframe index and any explicit names against that axis.
+            # 2b) Unannotated obs, var and raw.var: identities are ordered index names,
+            # not region/instance pairs. Check supplied_axis_frame.index, when present,
+            # and any separately supplied obs_identity, var_names or raw_var_names
+            # against the expected axis.
             expected = _named_identity(indices[axis], label=f"Stored {axis}")
             for value in (None if supplied_axis_frame is None else supplied_axis_frame.index, explicit[axis]):
                 if value is not None:
@@ -270,7 +275,7 @@ def _validate_component_values(
                 f"Supply {parameter} or the corresponding dataframe when writing {axis}-aligned components."
             )
 
-    _check_annotation_updates(group, components)
+    _validate_spatialdata_attrs_unchanged(group, components)
     for path, axes in axes_by_path.items():
         value = components[path]
         if not axes or path in frame_paths.values():
