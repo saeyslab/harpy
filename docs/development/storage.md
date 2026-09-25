@@ -194,9 +194,14 @@ The operation retains backups through its caller's with-body and final
 consolidation. Public writers use an empty body because they do not attach data.
 Adapters using this internal operation can install reopened data before commit
 and must restore their own affected in-memory state on failure. Parent groups
-created by the operation are removed on failure, and root metadata changed by
-consolidation is restored from its previous bytes. The shared publisher's
-recovery limitations still apply.
+created by the operation are removed on failure.
+
+Consolidated metadata at the SpatialData store root contains collected metadata
+from descendant groups and arrays, including table components. Restoring a table
+or component directory does not restore this root-level index. The operation
+therefore restores saved root-metadata file contents (or their prior absence)
+separately, without depending on another successful consolidation attempt. The
+shared publisher's recovery limitations still apply.
 
 Inputs are not modified, and path-based writes do not synchronize an existing
 `sdata` or external references. Reopen affected data after writing; dirty/stale
