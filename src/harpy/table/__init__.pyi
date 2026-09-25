@@ -12,6 +12,7 @@ from ._preprocess import preprocess_proteomics, preprocess_transcriptomics
 from ._regionprops import add_regionprop_features, add_regionprops
 from ._table import add_table, correct_marker_genes, filter_on_size
 from ._validation import validate_table
+from ._write import write_table, write_table_components
 from .cell_clustering._clustering import flowsom
 from .cell_clustering._preprocess import cell_clustering_preprocess
 from .cell_clustering._weighted_channel_expression import weighted_channel_expression
@@ -28,6 +29,8 @@ __all__ = [
     "add_table",
     "read_table",
     "read_table_components",
+    "write_table",
+    "write_table_components",
     "correct_marker_genes",
     "extract_instances",
     "ZarrIterableInstances",
