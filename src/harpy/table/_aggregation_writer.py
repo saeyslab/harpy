@@ -239,7 +239,7 @@ def _write_aggregation_table(
         f"Writing AnnData '.obs', '.var', '.uns' and '.obsm[{CANONICAL_OBSM_KEY}]' to staged table at "
         f"'{staging_table_path}'."
     )
-    _write_anndata_element(staging_root, ("table",), table)
+    _write_anndata_element(staging_root, ("table",), table, create_parents=False)
     log.info(
         f"Finished writing AnnData '.obs', '.var', '.uns' and '.obsm[{CANONICAL_OBSM_KEY}]' to staged table at "
         f"'{staging_table_path}'."
@@ -254,7 +254,7 @@ def _write_aggregation_table(
     # AnnData recognizes this as a Dask array with CSR chunks. Its sparse
     # writer computes and appends one row chunk at a time: this bounds memory,
     # but the ordered CSR append serializes the chunk writes.
-    _write_anndata_element(staging_group, ("X",), expression)
+    _write_anndata_element(staging_group, ("X",), expression, create_parents=False)
     log.info(f"Finished writing AnnData '.X' to staged table at '{staging_table_path / 'X'}'.")
     if class_contract is not None:
         auxiliary = _checkpoint_sparse_array(
@@ -263,7 +263,7 @@ def _write_aggregation_table(
         )
         auxiliary_path = staging_table_path / "obsm" / _AUXILIARY_FEATURE_MATRIX_KEY
         log.info(f"Writing AnnData '.obsm[{_AUXILIARY_FEATURE_MATRIX_KEY}]' to staged table at '{auxiliary_path}'.")
-        _write_anndata_element(staging_group, ("obsm", _AUXILIARY_FEATURE_MATRIX_KEY), auxiliary)
+        _write_anndata_element(staging_group, ("obsm", _AUXILIARY_FEATURE_MATRIX_KEY), auxiliary, create_parents=False)
         log.info(
             f"Finished writing AnnData '.obsm[{_AUXILIARY_FEATURE_MATRIX_KEY}]' to staged table at '{auxiliary_path}'."
         )
