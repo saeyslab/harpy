@@ -7088,6 +7088,12 @@ public name and signature before implementation. Use the same path-based
 matrix values and `obs_identity`, optional caller-prepared `.uns` replacements,
 and the existing overwrite policy.
 
+For an `.obsm` entry, `write_table_components()` requires a complete replacement
+matrix and identities for the whole observation axis. The regional API instead
+accepts measurements and identities only for the selected regions. Harpy
+constructs the full replacement while preserving measurements for unselected
+regions.
+
 The regional-update contract is:
 
 - Regions are spatial-element names in the stored annotation, not coordinate
@@ -7111,6 +7117,21 @@ The regional-update contract is:
   meanings. The caller checks scientific schema compatibility, including
   feature-column names and order, and prepares coherent scientific metadata.
 
+For example, updating region A in a one-column `.obsm` matrix whose regions
+are interleaved:
+
+| Stored region | Instance ID | Existing measurement | After updating A |
+| ------------- | ----------- | -------------------- | ---------------- |
+| A             | 1           | 10                   | 100              |
+| B             | 1           | 20                   | 20               |
+| A             | 2           | 30                   | 300              |
+| B             | 2           | 40                   | 40               |
+
+The caller supplies a `(2, 1)` matrix containing `100` and `300`, with
+`obs_identity` pairs `(A, 1)` and `(A, 2)` in that order. Both observations in
+region A must be supplied; this is not an arbitrary subset-of-cells update.
+Harpy validates the submitted order rather than automatically reordering rows.
+
 Allow accompanying `.uns` replacements in the **same logical update** as the
 matrices. Each supplied metadata path replaces its entire value; there is no
 automatic regional filtering or merging of metadata. Preserve unrelated paths
@@ -7119,11 +7140,11 @@ The caller prepares records covering retained as well as updated data where
 needed. Separate matrix and metadata write calls do not provide this shared
 rollback guarantee.
 
-**Bounded memory does not mean region-only disk writes.** Initially, stage a
-complete replacement for each affected `.obsm` entry. Build it lazily or chunk
-by chunk from the existing matrix and selected-row payload (or explicit fills
-for a new entry), without collecting the complete old or merged matrix in
-memory. Reading and rewriting unselected rows of the affected component is
+**Selected-row input and bounded memory do not mean region-only disk writes.**
+Initially, stage a complete replacement for each affected `.obsm` entry. Build it
+lazily or chunk by chunk from the existing matrix and selected-row payload (or
+explicit fills for a new entry), without collecting the complete old or merged
+matrix in memory. Reading and rewriting unselected rows of the affected component is
 allowed; reading or rewriting `.X`, unrelated `.obsm` entries or other tables
 is not. Memory may include row identities, requested metadata and active
 matrix chunks. Do not add direct in-place row/chunk overwrites in this part.
@@ -7140,6 +7161,12 @@ shared internal operation with installation inside the rollback window.
 The initial scope excludes regional updates of `.X`, `.layers`, `.obs`, `.raw`
 and pairwise matrices, and does not add a region-specific reader or use the
 legacy `ProcessTable._get_adata()`.
+
+This part delivers the reusable regional writer, not the migration of
+`add_feature_matrix()`. That function currently constructs a full matrix in
+memory and writes its matrix and metadata sequentially. Part 11f.vii replaces
+that persistence path with this infrastructure while retaining feature
+calculation, alignment and scientific metadata preparation in the caller.
 
 Focused tests must cover interleaved regions, instance IDs shared across
 regions, exact selected-row replacement and unchanged unselected values,
