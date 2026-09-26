@@ -142,6 +142,16 @@ def test_complete_write_allows_instance_ids_shared_by_different_regions(make_tab
 @pytest.mark.parametrize("scope", ["table", "components", "raw"])
 @pytest.mark.parametrize("matrix_kind", ["dense", "csr", "csc"])
 def test_lazy_self_overwrite_finishes_staging_before_publication(make_table_io_store, scope, matrix_kind):
+    """Lazy replacements can read the same on-disk data they overwrite.
+
+    source.X contains a graph that reads the original counts/X and multiplies
+    it by three. Harpy writes all requested replacements into separate staging
+    before moving any destination paths, so the graph can still read its inputs.
+
+    Cover whole-table replacement, X-only replacement, and coupled raw creation
+    and X replacement. Reopened values must match computations on the original
+    data, not on partially overwritten data.
+    """
     path = make_table_io_store(matrix_kind=matrix_kind)
     source = read_table(path, table_name="counts", sparse_chunk_size=1)
     expected = read_zarr(path / "tables/counts").X * 3
