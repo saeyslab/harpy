@@ -253,6 +253,9 @@ def test_raw_creation_does_not_access_unrelated_matrix_payloads(make_table_io_st
             obs_identity=["c1", "c2"],
             raw_var_names=["a", "b", "c", "d"],
         )
+    root = zarr.open_group(str(path), mode="r", use_consolidated=False)
+    assert root["tables/counts/raw"].attrs["encoding-type"] == "raw"
+    assert root["tables/counts/raw/X"].shape == (2, 4)
 
 
 @pytest.mark.parametrize("state", ["absent", "null"])
