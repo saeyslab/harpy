@@ -190,6 +190,11 @@ whole-matrix materialization or densification. Memory use includes requested
 annotations, active chunks, and computations needed to produce them; no fixed
 memory limit is guaranteed.
 
+To use AnnData's chunked writers, Harpy internally wraps Zarr arrays and Zarr-backed
+CSR/CSC dataset handles in Dask arrays. Constructing these graphs does not
+materialize the matrices; they are evaluated during serialization. The caller's
+matrices retain their original representations.
+
 The operation retains backups through its caller's with-body and final
 consolidation. Public writers use an empty body because they do not attach data.
 Adapters using this internal operation can install reopened data before commit
