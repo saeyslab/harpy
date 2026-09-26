@@ -28,22 +28,32 @@ def _store_bytes(path):
 @pytest.mark.parametrize("matrix_kind", ["dense", "csr", "csc"])
 @pytest.mark.parametrize("mode", ["lazy", "backed"])
 def test_complete_write_roundtrip_preserves_slots_and_input(make_table_io_store, zarr_format, matrix_kind, mode):
-    """Reader results can be written without losing raw, sparsity or input annotations."""
+    """Round-trip a table through Harpy while preserving contents and inputs.
+
+    counts (disk) --AnnData read--> original_table
+    counts (disk) --Harpy read----> table_to_write --Harpy write--> copy (disk)
+    copy   (disk) --AnnData read--> copied_table
+
+    The Harpy read uses lazy/backed matrices; the AnnData reads are eager.
+    Compare copied_table with original_table across all populated slots,
+    including raw and sparse formats. Verify that table_to_write.obs and
+    the original table's file bytes remain unchanged.
+    """
     path = make_table_io_store(zarr_format=zarr_format, matrix_kind=matrix_kind)
-    expected = read_zarr(path / "tables" / "counts")
+    original_table = read_zarr(path / "tables" / "counts")
     original_table_bytes = _store_bytes(path / "tables" / "counts")
-    source = read_table(path, table_name="counts", mode=mode, sparse_chunk_size=1)
-    write_table(path, table_name="copy", adata=source)
-    actual = read_zarr(path / "tables" / "copy")
+    table_to_write = read_table(path, table_name="counts", mode=mode, sparse_chunk_size=1)
+    write_table(path, table_name="copy", adata=table_to_write)
+    copied_table = read_zarr(path / "tables" / "copy")
     for slot in ("X", "obs", "var", "uns", "layers", "obsm", "varm", "obsp", "varp"):
-        actual_value, expected_value = getattr(actual, slot), getattr(expected, slot)
+        copied_value, original_value = getattr(copied_table, slot), getattr(original_table, slot)
         if slot in {"layers", "obsm", "varm", "obsp", "varp"}:
-            actual_value, expected_value = dict(actual_value), dict(expected_value)
-        _assert_value(actual_value, expected_value)
-    _assert_value(actual.raw.X, expected.raw.X)
-    _assert_value(actual.raw.var, expected.raw.var)
-    _assert_value(dict(actual.raw.varm), dict(expected.raw.varm))
-    pd.testing.assert_frame_equal(source.obs, expected.obs)
+            copied_value, original_value = dict(copied_value), dict(original_value)
+        _assert_value(copied_value, original_value)
+    _assert_value(copied_table.raw.X, original_table.raw.X)
+    _assert_value(copied_table.raw.var, original_table.raw.var)
+    _assert_value(dict(copied_table.raw.varm), dict(original_table.raw.varm))
+    pd.testing.assert_frame_equal(table_to_write.obs, original_table.obs)
     assert _store_bytes(path / "tables" / "counts") == original_table_bytes
     # Check that consolidated metadata includes the new table and these properties,
     # not that every consolidated entry matches its individual metadata file.
@@ -53,25 +63,53 @@ def test_complete_write_roundtrip_preserves_slots_and_input(make_table_io_store,
 
 
 @pytest.mark.parametrize("zarr_format", [2, 3])
-def test_complete_write_creates_container_and_spatialdata_format(tmp_path, zarr_format):
+@pytest.mark.parametrize("with_expression_matrix", [False, True])
+def test_complete_write_creates_container_and_spatialdata_format(tmp_path, zarr_format, with_expression_matrix):
+    """Write the first table into an empty on-disk SpatialData store.
+
+    Start with only a Zarr root and SpatialData metadata, not an in-memory
+    SpatialData object. The writer must create the missing tables container
+    and write a table that SpatialData.read() can reopen, with or without .X.
+    """
     path = tmp_path / "sdata.zarr"
     root = zarr.open_group(str(path), mode="w", zarr_format=zarr_format)
     root.attrs["spatialdata_attrs"] = {"version": "0.2"}
     root.attrs["custom"] = {"keep": True}
     obs = pd.DataFrame({"region": pd.Categorical(["cells", "cells"]), "instance": [1, 2]}, index=["a", "b"])
-    table = TableModel.parse(AnnData(obs=obs), region="cells", region_key="region", instance_key="instance")
+    matrix = np.array([[0, 1], [2, 0]], dtype=np.float32) if with_expression_matrix else None
+    table = TableModel.parse(AnnData(X=matrix, obs=obs), region="cells", region_key="region", instance_key="instance")
     write_table(path, table_name="annotated", adata=table)
     reopened = SpatialData.read(path, selection=["tables"])
     pd.testing.assert_frame_equal(reopened.tables["annotated"].obs, table.obs)
-    assert reopened.tables["annotated"].X is None
+    if with_expression_matrix:
+        np.testing.assert_array_equal(reopened.tables["annotated"].X, matrix)
+    else:
+        assert reopened.tables["annotated"].X is None
     assert reopened.attrs["custom"] == {"keep": True}
     assert zarr.open_group(str(path), mode="r")["tables/annotated"].attrs["region"] == ["cells"]
-    # A full replacement can change axes/linkage and removes old components.
-    write_table(path, table_name="annotated", adata=AnnData(obs=pd.DataFrame(index=["new"])), overwrite=True)
-    actual = read_table(path, table_name="annotated")
+
+
+@pytest.mark.parametrize("zarr_format", [2, 3])
+def test_complete_write_replaces_axes_and_removes_linkage(make_table_io_store, zarr_format):
+    """A full replacement can change both axes and discards omitted slot contents and linkage."""
+    path = make_table_io_store(zarr_format=zarr_format)
+    _annotated_store(path)
+    replacement = AnnData(
+        X=np.array([[7]], dtype=np.float32),
+        obs=pd.DataFrame(index=["new"]),
+        var=pd.DataFrame(index=["new_gene"]),
+    )
+    write_table(path, table_name="counts", adata=replacement, overwrite=True)
+    actual = read_table(path, table_name="counts")
     assert actual.obs_names.tolist() == ["new"]
-    assert TableModel.ATTRS_KEY not in actual.uns
-    assert zarr.open_group(str(path), mode="r")["tables/annotated"].attrs["region"] is None
+    assert actual.var_names.tolist() == ["new_gene"]
+    for slot in ("layers", "obsm", "varm", "obsp", "varp"):
+        assert not getattr(actual, slot), slot
+    assert actual.raw is None
+    assert not actual.uns
+    root = zarr.open_group(str(path), mode="r", use_consolidated=True)
+    assert root["tables/counts"].metadata.zarr_format == zarr_format
+    assert root["tables/counts"].attrs["region"] is None
 
 
 @pytest.mark.parametrize("table_name", ["new", "counts"])

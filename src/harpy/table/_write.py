@@ -56,9 +56,14 @@ def write_table(
 
     Notes
     -----
-    The input is not modified. Matrices are serialized into staging before old
-    data is moved, without a preliminary whole-matrix computation or densification.
-    Validation checks structure and SpatialData annotation, not scientific metadata.
+    The input is not modified; its matrices retain their original representations.
+
+    Zarr-backed matrices are internally wrapped in lazy Dask arrays and evaluated
+    in chunks during writing, without preliminary whole-matrix computation or
+    densification. Serialization finishes in staging before existing data is moved.
+
+    Validation checks table structure and SpatialData annotation, not scientific
+    metadata.
 
     Returns None after publication and metadata finalization. This path-based
     writer does not update live SpatialData objects or existing references;
@@ -144,7 +149,13 @@ def write_table_components(
     match the existing table, while the supplied features define a new raw axis.
     Creation requires a non-None raw.X; raw.var or raw.varm alone is insufficient.
 
-    Inputs are not modified. An obs-only update does not read or rewrite X.
+    Inputs are not modified; matrices retain their original representations.
+
+    Zarr-backed matrices are internally wrapped in lazy Dask arrays and evaluated
+    in chunks during writing, without preliminary whole-matrix computation or
+    densification.
+
+    An obs-only update does not read or rewrite X.
     Related matrix and metadata updates should be submitted in the same call.
     Staging, completion, reopening and recovery follow :func:`harpy.table.write_table`.
 
