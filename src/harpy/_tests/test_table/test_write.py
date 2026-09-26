@@ -209,6 +209,11 @@ def test_chunks_are_written_without_mutating_shared_input_blocks(make_table_io_s
     computed = []
 
     def load_block(index):
+        """Track block requests so the test can check each block is loaded once.
+
+        Return the original object, not a copy, so writer-side mutations remain
+        visible to the test.
+        """
         computed.append(index)
         return blocks[index]
 
