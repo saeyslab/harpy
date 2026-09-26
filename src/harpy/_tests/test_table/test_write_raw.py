@@ -218,6 +218,15 @@ def test_existing_raw_varm_update_preserves_other_raw_components(make_table_io_s
 
 @pytest.mark.parametrize("zarr_format", [2, 3])
 def test_raw_creation_does_not_access_unrelated_matrix_payloads(make_table_io_store, monkeypatch, zarr_format):
+    """Create raw without reading or rewriting unrelated matrix payloads.
+
+    Supply a new raw.X independently of the existing table matrices.
+    Guard X, layers, obsm, varm, obsp and varp against payload reads and
+    writes; metadata reads remain allowed for validation and consolidation.
+
+    Finally, check that raw was created with the expected encoding and
+    matrix shape, so a writer that does nothing cannot pass.
+    """
     path = make_table_io_store(zarr_format=zarr_format)
     _without_raw(path, "absent")
     original_get, original_partial, original_set = LocalStore.get, LocalStore.get_partial_values, LocalStore.set
