@@ -67,9 +67,9 @@ def test_write_spatialdata_table_attrs_writes_regions_table_contract(tmp_path):
 
 def test_read_backed_element_uses_the_stored_encoding(tmp_path):
     group = zarr.open_group(store=str(tmp_path / "elements.zarr"), mode="w")
-    _write_anndata_element(group, ("dense",), np.array([[1.0, 2.0]]))
-    _write_anndata_element(group, ("sparse",), sparse.csr_matrix([[0, 3]], dtype=np.uint32))
-    _write_anndata_element(group, ("frame",), pd.DataFrame({"value": [4]}))
+    _write_anndata_element(group, ("dense",), np.array([[1.0, 2.0]]), create_parents=False)
+    _write_anndata_element(group, ("sparse",), sparse.csr_matrix([[0, 3]], dtype=np.uint32), create_parents=False)
+    _write_anndata_element(group, ("frame",), pd.DataFrame({"value": [4]}), create_parents=False)
     _write_anndata_element(
         group,
         ("uns", "registry", "record"),
@@ -103,6 +103,7 @@ def test_mapping_decoder_preserves_matrix_mode(tmp_path, mode, dense_type, spars
             "strings": np.array([["a", "b"], ["c", "d"]]),
             "nested": {"sparse": sparse.csr_matrix([[0, 3], [4, 0]])},
         },
+        create_parents=False,
     )
 
     result = anndata_storage._decode_anndata_element(group["mapping"], mode=mode, sparse_chunk_size=1)
@@ -137,7 +138,7 @@ def test_lazy_and_backed_reads_reject_eager_only_encoding(tmp_path, monkeypatch,
 def test_dense_encoding_version_is_checked_before_decoding(tmp_path, monkeypatch, mode, version):
     """Harpy rejects unknown or missing dense versions before asking AnnData to read."""
     group = zarr.open_group(str(tmp_path / "elements.zarr"), mode="w")
-    _write_anndata_element(group, ("X",), np.ones((2, 2)))
+    _write_anndata_element(group, ("X",), np.ones((2, 2)), create_parents=False)
     if version is None:
         del group["X"].attrs["encoding-version"]
     else:
@@ -159,7 +160,7 @@ def test_sparse_encoding_version_is_checked_before_decoding(tmp_path, monkeypatc
     """Unknown or missing sparse versions fail in Harpy, regardless of AnnData support."""
     group = zarr.open_group(str(tmp_path / "table.zarr"), mode="w")
     matrix = getattr(sparse, f"{matrix_kind}_matrix")([[0, 3]], dtype=np.uint32)
-    _write_anndata_element(group, ("X",), matrix)
+    _write_anndata_element(group, ("X",), matrix, create_parents=False)
     if version is None:
         del group["X"].attrs["encoding-version"]
     else:
