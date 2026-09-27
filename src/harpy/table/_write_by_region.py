@@ -83,8 +83,8 @@ def write_table_components_by_region(
             CSC:   (all rows, chunk_size columns)
 
         Used for in-memory inputs, Zarr-backed sparse reads, and creating new
-        ``.obsm`` entries for only some regions, filling the remaining
-        observations with ``fill_values``. Existing Dask input chunks and dense
+        ``.obsm`` entries for only some regions (filling the remaining
+        observations with ``fill_values``). Existing Dask input chunks and dense
         Zarr chunks are preserved; existing dense targets retain their chunk
         layout during merging.
 
