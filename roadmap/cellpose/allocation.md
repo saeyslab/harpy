@@ -7092,7 +7092,6 @@ def write_table_components_by_region(
     store: str | PathLike[str],
     *,
     table_name: str,
-    regions: str | Sequence[str],
     components: Mapping[ComponentPath, object],
     obs_identity: pd.DataFrame,
     fill_values: Mapping[ComponentPath, object] | None = None,
@@ -7114,35 +7113,45 @@ accepts measurements and identities only for the selected regions. Harpy
 constructs the full replacement while preserving measurements for unselected
 regions.
 
+`obs_identity` is the single source for both update scope and submitted row
+identities/order; do not require a separate `regions` argument. This deliberately
+removes an independent intended-scope check: if the caller intended A and B but
+supplies every observation of A and none of B, the request is a valid A-only
+update. Harpy still detects incomplete coverage within any represented region,
+but cannot infer an entirely omitted region. Callers with a separate expected
+region selection must check it before calling the writer.
+
 The regional-update contract is:
 
-- `regions` explicitly selects spatial-element names in the stored annotation,
-  not coordinate systems or sample IDs. This defines the intended scope
-  independently of the supplied matrix rows. Unannotated tables have no
-  regional-update mode.
+- Derive the selected region set from actual values in
+  `obs_identity[region_key]`, not its categorical categories. These values name
+  spatial elements in the stored annotation, not coordinate systems or sample
+  IDs. Unannotated tables have no regional-update mode.
 - Before selecting rows, require the declared region set in
   `.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY]` to match the actual values
   present in `.obs[region_key]`. Reject both observed-but-undeclared regions and
   declared regions without observations as inconsistent stored annotation.
-  Then require every requested region to belong to this validated set and
-  derive selected rows from actual observation values. "Unknown regions"
+  Then require every region derived from `obs_identity` to belong to this
+  validated set and derive selected rows from actual observation values. "Unknown regions"
   refers to names outside this set, not outside `.cat.categories`: unused
   categorical categories do not make a region selectable.
 
   For example, declared regions `["A"]`, observed values `["A", "A"]` and
-  categories `["A", "B"]` are valid, but requesting B raises an unknown-region
-  error. Declaring `["A", "B"]` with those same observations instead fails
-  stored-annotation validation before selection, even when requesting only A.
+  categories `["A", "B"]` are valid, but supplying an observation for B in
+  `obs_identity` raises an unknown-region error. An unused B category in
+  `obs_identity` itself does not select B either. Declaring `["A", "B"]` with
+  those same stored observations instead fails annotation validation before
+  selection, even when `obs_identity` contains only A.
   Do not treat a declared-but-empty region as a valid no-op update.
 
-- `obs_identity` is required and shared by all submitted matrices. It is the
-  two-column region/instance dataframe described in Part 11f.i, covering only
-  the selected regions. Harpy obtains the required column names from the stored
+- `obs_identity` is required, nonempty and shared by all submitted matrices.
+  It is the two-column region/instance dataframe described in Part 11f.i,
+  covering only the selected regions. Harpy obtains the required column names from the stored
   SpatialData annotation. Its ordered pairs must match every stored observation
   in those regions exactly once, retaining the table's order across all selected
-  regions. The order of names in `regions` controls neither observation order
-  nor matrix-row order; it selects membership only. Reject unknown regions,
-  missing or extra observations, duplicate pairs and reordered identities.
+  regions. Deriving the region set must not regroup observations by region:
+  both identities and matrix rows must follow the selected table rows. Reject
+  unknown regions, missing or extra observations, duplicate pairs and reordered identities.
   Instance IDs may repeat across regions;
   the dataframe index does not define semantic identity.
 - For an existing `.obsm` entry, replace the selected rows and preserve all
@@ -7160,7 +7169,7 @@ The regional-update contract is:
   unselected rows of new entries, because no previous values exist to preserve.
   If such rows exist and no fill was supplied, reject the entire request before
   publishing any components; do not infer zeros or missing measurements. If
-  there are no unselected observations (for example, all regions are requested),
+  there are no unselected observations (all regions are covered by `obs_identity`),
   `fill_values=None` is valid for a new entry too: the caller supplies every row.
   `fill_values=None` means no fills were supplied, not that unselected rows
   should be replaced with missing values. Different new entries may use
@@ -7243,8 +7252,8 @@ The caller supplies a `(2, 1)` matrix containing `100` and `300`, with
 region A must be supplied; this is not an arbitrary subset-of-cells update.
 Harpy validates the submitted order rather than automatically reordering rows.
 
-For that same table, selecting both A and B requires interleaved input rows,
-whether the caller passes `regions=["A", "B"]` or `regions=["B", "A"]`:
+For that same table, an `obs_identity` containing A and B selects both regions,
+but must retain their interleaved table order:
 
 ```python
 # Required obs_identity order, with each supplied matrix in the same row order:
@@ -7278,7 +7287,6 @@ obs_identity = adata.obs.loc[selected, [region_key, instance_key]]
 hp.tb.write_table_components_by_region(
     "sdata.zarr",
     table_name="cell_features",
-    regions="cells_sample_a",
     components={
         ("obsm", "morphology"): regional_features,
         ("uns", "feature_matrices", "morphology"): updated_metadata,
@@ -7327,10 +7335,12 @@ calculation, alignment and scientific metadata preparation in the caller.
 Focused tests must cover interleaved regions, instance IDs shared across
 regions, exact selected-row replacement and unchanged unselected values,
 new-entry fills, identity/shape/dtype rejection and overwrite behavior.
-For multi-region requests, verify that reversing `regions` leaves the required
-input order and results unchanged. Accept interleaved identities and matrix
-rows in selected table order, and reject region-grouped identities without
-publishing changes.
+Verify that region scope is derived from actual `obs_identity` values, not
+unused categories. Reject empty identities and partial observation coverage of
+any represented region; accept complete coverage of A alone as an A-only update,
+preserving B in existing entries. For multi-region requests, accept interleaved
+identities and matrix rows in selected table order, and reject region-grouped
+identities without publishing changes.
 Verify that unused categorical categories neither invalidate consistent
 annotation nor make those categories selectable. Test unknown-region requests,
 observed-but-undeclared regions and declared regions without observations;
