@@ -7222,6 +7222,13 @@ The regional-update contract is:
   and SciPy inputs, Dask arrays with the corresponding block types, and supported
   Zarr-backed dense arrays or CSR/CSC dataset handles. Reuse the existing
   decoders and serializers; the regional merge must remain chunked.
+- Require the supplied matrix to match an existing entry's matrix format:
+  dense-to-dense, CSR-to-CSR or CSC-to-CSC only. Reject dense/sparse mismatches
+  and CSR/CSC mismatches before publication, including when all rows are
+  selected; do not convert formats automatically. Matching refers to the
+  logical matrix format, not identical Python classes, storage backing or
+  chunk layouts. For example, a dense Dask array may update a dense Zarr entry
+  with different chunks. New entries use the supplied matrix's format.
 - Preserve sparse representations without implicit densification. When creating
   a new sparse entry with unselected rows, support only an explicit zero fill.
   Reject nonzero or `NaN` fills in that case rather than silently constructing a
@@ -7398,6 +7405,10 @@ incompatible fills; zero-filled sparse creation and rejection of nonzero/NaN
 sparse fills when unselected rows exist. Verify that creation with all rows
 supplied needs no fill, and that unsupported representations, including stored
 DataFrame-valued entries, fail without an eager whole-matrix read.
+Verify matching-format updates across in-memory, lazy and backed inputs.
+Reject dense/sparse and CSR/CSC mismatches in both directions, for partial and
+full-region selections, without publishing matrix or accompanying metadata
+changes. Confirm that successful updates preserve the stored matrix format.
 
 Verify that regional-write results are independent of chunk layout. Include
 selected regions spanning chunk boundaries, chunks mixing selected and
