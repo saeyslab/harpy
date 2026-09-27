@@ -7129,9 +7129,11 @@ The regional-update contract is:
   pairs and reordered identities. Instance IDs may repeat across regions;
   the dataframe index does not define semantic identity.
 - For an existing `.obsm` entry, replace the selected rows and preserve all
-  unselected values, including existing missing values. No `fill_values` are
-  required to preserve other regions. Keep observation identities, table order
-  and spatial linkage unchanged. Existing entries retain their column count;
+  unselected values, including existing missing values. `fill_values=None` is
+  valid even when only some regions are requested: their existing measurements
+  are updated, while all other regions' measurements are preserved. Keep
+  observation identities, table order and spatial linkage unchanged. Existing
+  entries retain their column count;
   reject incompatible shapes or dtypes rather than clearing other regions.
   This operation does not append/remove observations or resize existing feature
   matrices.
@@ -7139,18 +7141,52 @@ The regional-update contract is:
   paths to explicit, dtype-compatible scalar fills for unselected rows, for
   example `fill_values={("obsm", "morphology"): np.nan}`. Require a fill for
   unselected rows of new entries, because no previous values exist to preserve.
-  Raise if such rows exist and no fill was supplied; do not infer zeros or
-  missing measurements. `fill_values=None` means no fills were supplied, not
-  that unselected rows should be replaced with missing values. Different new
-  entries may use different fills. Fills never replace unselected values in
-  existing entries. Selected rows must be supplied explicitly, including any
-  missing-value measurements prepared by the caller.
+  If such rows exist and no fill was supplied, reject the entire request before
+  publishing any components; do not infer zeros or missing measurements. If
+  there are no unselected observations (for example, all regions are requested),
+  `fill_values=None` is valid for a new entry too: the caller supplies every row.
+  `fill_values=None` means no fills were supplied, not that unselected rows
+  should be replaced with missing values. Different new entries may use
+  different fills. Fills never replace unselected values in existing entries.
+  Selected rows must be supplied explicitly, including any missing-value
+  measurements prepared by the caller.
 - `overwrite` permits replacement of existing requested entries, following the
   component writer's policy for both matrices and accompanying metadata.
   For `.obsm`, this permits updating selected rows, not clearing other regions.
 - Generic I/O checks identities and structural compatibility, not feature
   meanings. The caller checks scientific schema compatibility, including
   feature-column names and order, and prepares coherent scientific metadata.
+
+When implementing the public function, make the creation-only role explicit
+under `fill_values` in its docstring's `Parameters` section:
+
+```text
+fill_values
+    Mapping from ("obsm", key) paths to dtype-compatible scalar fills for
+    unselected rows of newly created matrices. Required only when creating
+    a new matrix with unselected rows; unnecessary when every row is supplied.
+    Existing matrices preserve unselected values, including missing values:
+    this parameter does not fill missing values in an existing matrix.
+    None means no fill values were supplied.
+```
+
+**Implementation contract at a glance.** After validating the request's
+identities, shapes, dtypes and overwrite permission, apply this decision table
+separately to each requested `.obsm` entry:
+
+| Entry and selection               | Selected rows receive | Unselected rows receive     | Fill required?                     |
+| --------------------------------- | --------------------- | --------------------------- | ---------------------------------- |
+| Existing entry                    | Supplied measurements | Their existing measurements | No                                 |
+| New entry with unselected rows    | Supplied measurements | Explicit fill               | Yes; reject the request if missing |
+| New entry with every row selected | Supplied measurements | No such rows                | No                                 |
+
+Every output row therefore gets its values from the supplied measurements,
+existing measurements or an explicit fill. Require a fill only when it will be
+used, not merely because an entry is new: requiring an unused value when all
+rows are supplied adds no information or protection. Callers may still supply
+a compatible fill for new entries when their region selection varies between
+calls; it is unused if every row is selected. Missing required fills must be
+rejected before any matrix or accompanying metadata is published.
 
 For example, updating region A in a one-column `.obsm` matrix whose regions
 are interleaved:
