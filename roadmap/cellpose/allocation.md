@@ -7107,6 +7107,14 @@ other component types. `.obsm` values contain only selected-region rows, whereas
 `.uns` values replace the entire requested metadata record. The existing
 `write_table_components()` API remains unchanged.
 
+An `.obsm` payload must be a matrix: `("obsm", key): None` is invalid and
+rejects the entire request before publication, including accompanying metadata
+updates. It does not mean skip, clear selected rows or delete the entry. Omit
+the component to leave it unchanged; to write missing measurements, supply a
+correctly shaped numeric matrix containing `NaN` where its dtype permits.
+This is distinct from `fill_values=None`, which means no initialization fills
+were supplied for new entries.
+
 For an `.obsm` entry, `write_table_components()` requires a complete replacement
 matrix and identities for the whole observation axis. The regional API instead
 accepts measurements and identities only for the selected regions. Harpy
@@ -7278,6 +7286,11 @@ The caller prepares records covering retained as well as updated data where
 needed. Separate matrix and metadata write calls do not provide this shared
 rollback guarantee.
 
+For a nested `.uns` value, such as `("uns", "analysis", "threshold")`, `None`
+is an encoded value, not a deletion; the same overwrite and protected-annotation
+rules still apply. Replacing the entire `("uns",)` requires a mapping, so
+`("uns",): None` is invalid.
+
 For example, update an existing matrix and its caller-prepared metadata:
 
 ```python
@@ -7335,6 +7348,10 @@ calculation, alignment and scientific metadata preparation in the caller.
 Focused tests must cover interleaved regions, instance IDs shared across
 regions, exact selected-row replacement and unchanged unselected values,
 new-entry fills, identity/shape/dtype rejection and overwrite behavior.
+Reject `.obsm` payloads of `None` without publishing any matrix or accompanying
+metadata changes; verify omitted components remain unchanged. Round-trip a
+nested `.uns` value of `None` as an encoded value, and reject `None` for the
+whole `.uns` mapping.
 Verify that region scope is derived from actual `obs_identity` values, not
 unused categories. Reject empty identities and partial observation coverage of
 any represented region; accept complete coverage of A alone as an A-only update,
