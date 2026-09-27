@@ -66,11 +66,13 @@ def write_table_components_by_region(
         exactly once, in stored table order, including when regions interleave.
         The dataframe index is ignored. No automatic row reordering occurs.
     fill_values
-        Mapping from ``("obsm", key)`` paths to dtype-compatible scalar fills
-        for unselected rows of newly created matrices. Required only when a new
-        matrix has unselected rows; sparse matrices support only zero fills.
-        Unnecessary when every row is supplied and ignored for existing entries,
-        whose unselected measurements (including missing values) are preserved.
+        For example, ``fill_values={("obsm", "morphology"): np.nan}``
+        initializes unselected rows of a newly created ``obsm["morphology"]``
+        matrix with NaN. Each supplied fill must be a scalar compatible with
+        the matrix's dtype; sparse matrices support only zero fills.
+
+        Required only when a new matrix has unselected rows. Ignored for
+        existing entries, whose unselected measurements remain unchanged.
         None means no fills were supplied. Keys must refer to submitted matrices.
     overwrite
         Allow updates to existing requested matrix and metadata entries.
@@ -83,7 +85,10 @@ def write_table_components_by_region(
     New entries retain the supplied format and dtype. Sparse matrices are never
     implicitly densified.
 
-    The caller prepares coherent scientific metadata and feature-column ordering.
+    Ensure supplied matrix columns have the same meaning and order as the
+    stored columns. Any accompanying scientific metadata must describe the
+    resulting data, including measurements retained for unselected regions.
+
     Observation identities and SpatialData linkage cannot change. All requested
     matrices and metadata share the staging and rollback operation described in
     :func:`harpy.table.write_table_components`. This path-based function returns
@@ -99,9 +104,14 @@ def write_table_components_by_region(
     .. code-block:: python
 
         selected = adata.obs[region_key].eq("cells_sample_a")
+        # updated_metadata describes the complete resulting matrix, including
+        # measurements retained for other regions.
         hp.tb.write_table_components_by_region(
             "sdata.zarr", table_name="cell_features",
-            components={("obsm", "morphology"): regional_features},
+            components={
+                ("obsm", "morphology"): regional_features,
+                ("uns", "feature_matrices", "morphology"): updated_metadata,
+            },
             obs_identity=adata.obs.loc[selected, [region_key, instance_key]],
             overwrite=True,
         )
