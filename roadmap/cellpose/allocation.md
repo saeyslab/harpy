@@ -7120,6 +7120,21 @@ The regional-update contract is:
   not coordinate systems or sample IDs. This defines the intended scope
   independently of the supplied matrix rows. Unannotated tables have no
   regional-update mode.
+- Before selecting rows, require the declared region set in
+  `.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY]` to match the actual values
+  present in `.obs[region_key]`. Reject both observed-but-undeclared regions and
+  declared regions without observations as inconsistent stored annotation.
+  Then require every requested region to belong to this validated set and
+  derive selected rows from actual observation values. "Unknown regions"
+  refers to names outside this set, not outside `.cat.categories`: unused
+  categorical categories do not make a region selectable.
+
+  For example, declared regions `["A"]`, observed values `["A", "A"]` and
+  categories `["A", "B"]` are valid, but requesting B raises an unknown-region
+  error. Declaring `["A", "B"]` with those same observations instead fails
+  stored-annotation validation before selection, even when requesting only A.
+  Do not treat a declared-but-empty region as a valid no-op update.
+
 - `obs_identity` is required and shared by all submitted matrices. It is the
   two-column region/instance dataframe described in Part 11f.i, covering only
   the selected regions. Harpy obtains the required column names from the stored
@@ -7157,6 +7172,28 @@ The regional-update contract is:
   meanings. The caller checks scientific schema compatibility, including
   feature-column names and order, and prepares coherent scientific metadata.
 
+**Matrix representations and dtype compatibility:**
+
+- Support numeric, two-dimensional dense and CSR/CSC matrices, including NumPy
+  and SciPy inputs, Dask arrays with the corresponding block types, and supported
+  Zarr-backed dense arrays or CSR/CSC dataset handles. Reuse the existing
+  decoders and serializers; the regional merge must remain chunked.
+- Preserve sparse representations without implicit densification. When creating
+  a new sparse entry with unselected rows, support only an explicit zero fill.
+  Reject nonzero or `NaN` fills in that case rather than silently constructing a
+  largely populated sparse matrix. This restriction does not require a fill
+  when every row is supplied.
+- For an existing entry, retain its stored dtype. Permit only safe casts of
+  supplied measurements into that dtype; reject potentially lossy conversions
+  rather than narrowing values or promoting the complete existing matrix.
+  New entries retain the supplied matrix's dtype and require compatible scalar
+  fills. Do not silently promote an integer matrix to accommodate a `NaN` fill.
+- Defer DataFrame-valued `.obsm` entries and reject other unsupported matrix
+  representations explicitly. The current decoder loads DataFrames eagerly;
+  reject such stored entries before decoding their complete values rather than
+  falling back to whole-matrix materialization. This restriction concerns
+  `.obsm` measurements, not the required `obs_identity` dataframe.
+
 When implementing the public function, make the creation-only role explicit
 under `fill_values` in its docstring's `Parameters` section:
 
@@ -7165,6 +7202,7 @@ fill_values
     Mapping from ("obsm", key) paths to dtype-compatible scalar fills for
     unselected rows of newly created matrices. Required only when creating
     a new matrix with unselected rows; unnecessary when every row is supplied.
+    Unselected rows of new CSR/CSC matrices support only zero fills.
     Existing matrices preserve unselected values, including missing values:
     this parameter does not fill missing values in an existing matrix.
     None means no fill values were supplied.
@@ -7269,6 +7307,16 @@ calculation, alignment and scientific metadata preparation in the caller.
 Focused tests must cover interleaved regions, instance IDs shared across
 regions, exact selected-row replacement and unchanged unselected values,
 new-entry fills, identity/shape/dtype rejection and overwrite behavior.
+Verify that unused categorical categories neither invalidate consistent
+annotation nor make those categories selectable. Test unknown-region requests,
+observed-but-undeclared regions and declared regions without observations;
+reject inconsistent annotation before selection, without publishing changes.
+Cover dense/CSR/CSC inputs in memory, lazy and backed forms; preserved sparse
+representations and stored dtypes; safe casts and rejection of lossy casts or
+incompatible fills; zero-filled sparse creation and rejection of nonzero/NaN
+sparse fills when unselected rows exist. Verify that creation with all rows
+supplied needs no fill, and that unsupported representations, including stored
+DataFrame-valued entries, fail without an eager whole-matrix read.
 Instrument matrix access to verify chunked merging without whole-matrix
 materialization or unrelated reads. Exercise coupled metadata writes and
 failures during staging, publication and finalization, checking restoration
