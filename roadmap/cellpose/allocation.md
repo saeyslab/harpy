@@ -7139,9 +7139,11 @@ The regional-update contract is:
   two-column region/instance dataframe described in Part 11f.i, covering only
   the selected regions. Harpy obtains the required column names from the stored
   SpatialData annotation. Its ordered pairs must match every stored observation
-  in those regions exactly once, in stored order. Reject unknown regions,
-  missing or extra observations, duplicate
-  pairs and reordered identities. Instance IDs may repeat across regions;
+  in those regions exactly once, retaining the table's order across all selected
+  regions. The order of names in `regions` controls neither observation order
+  nor matrix-row order; it selects membership only. Reject unknown regions,
+  missing or extra observations, duplicate pairs and reordered identities.
+  Instance IDs may repeat across regions;
   the dataframe index does not define semantic identity.
 - For an existing `.obsm` entry, replace the selected rows and preserve all
   unselected values, including existing missing values. `fill_values=None` is
@@ -7241,6 +7243,24 @@ The caller supplies a `(2, 1)` matrix containing `100` and `300`, with
 region A must be supplied; this is not an arbitrary subset-of-cells update.
 Harpy validates the submitted order rather than automatically reordering rows.
 
+For that same table, selecting both A and B requires interleaved input rows,
+whether the caller passes `regions=["A", "B"]` or `regions=["B", "A"]`:
+
+```python
+# Required obs_identity order, with each supplied matrix in the same row order:
+[("A", 1), ("B", 1), ("A", 2), ("B", 2)]
+
+# Rejected: concatenating A's observations followed by B's observations:
+[("A", 1), ("A", 2), ("B", 1), ("B", 2)]
+```
+
+For example, a one-column update of `100` for A/1, `200` for B/1, `300` for
+A/2 and `400` for B/2 must supply values in the order `[100, 200, 300, 400]`,
+not `[100, 300, 200, 400]`. Callers that calculate and concatenate per-region
+blocks must align the measurements and identities together to the selected
+table rows before calling the writer. Reordering only `obs_identity` would
+mislabel the matrix rows; the writer does not perform automatic alignment.
+
 Allow accompanying `.uns` replacements in the **same logical update** as the
 matrices. Each supplied metadata path replaces its entire value; there is no
 automatic regional filtering or merging of metadata. Preserve unrelated paths
@@ -7307,6 +7327,10 @@ calculation, alignment and scientific metadata preparation in the caller.
 Focused tests must cover interleaved regions, instance IDs shared across
 regions, exact selected-row replacement and unchanged unselected values,
 new-entry fills, identity/shape/dtype rejection and overwrite behavior.
+For multi-region requests, verify that reversing `regions` leaves the required
+input order and results unchanged. Accept interleaved identities and matrix
+rows in selected table order, and reject region-grouped identities without
+publishing changes.
 Verify that unused categorical categories neither invalidate consistent
 annotation nor make those categories selectable. Test unknown-region requests,
 observed-but-undeclared regions and declared regions without observations;
