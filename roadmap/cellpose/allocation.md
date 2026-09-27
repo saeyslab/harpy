@@ -7084,6 +7084,31 @@ Introduce `hp.tb.write_table_components_by_region()` for updating one or more
 table. Reuse the shared readers, component serialization and publication
 operation; do not implement a second serializer or rollback mechanism.
 
+**Preparatory internal validation refactor.** Before implementing the regional
+merge, separate the responsibilities currently combined in
+`_observation_pairs()`:
+
+- Validate stored-table annotation explicitly: required metadata fields,
+  referenced columns, supported column types, and agreement between declared
+  regions and actual observations. Check the complete stored region set before
+  selecting rows, without reading expression data.
+- Make `_observation_pairs()` validate and extract ordered region/instance
+  pairs from a dataframe using explicit column names. Preserve checks for valid
+  identifiers, missing values and duplicate pairs, but do not require that the
+  dataframe represents every declared region. Remove the temporary AnnData
+  construction and `TableModel.validate()` call from this helper.
+- Let callers determine the expected observations: the complete axis for
+  ordinary component writes, or all observations of the selected regions for
+  regional writes. Reuse `_match_identity()` to check exact values and order.
+
+Share these focused checks between existing component writes and the regional
+writer; do not construct temporary subset annotations to satisfy whole-table
+validation. Retain `TableModel.validate(table)` for actual complete-table
+writes. Keep this refactor internal, preserving existing public writer
+contracts and safeguards, including the column-type checks previously supplied
+by SpatialData. Do not reproduce SpatialData's entire table validator or expand
+this work into an unrelated validation redesign.
+
 The agreed API direction is below; detailed specifications will be refined
 before implementation:
 
@@ -7348,6 +7373,11 @@ calculation, alignment and scientific metadata preparation in the caller.
 Focused tests must cover interleaved regions, instance IDs shared across
 regions, exact selected-row replacement and unchanged unselected values,
 new-entry fills, identity/shape/dtype rejection and overwrite behavior.
+For the preparatory refactor, add regression coverage for annotation fields,
+column types, missing/duplicate identities, declared-versus-observed regions
+and identity order in existing writes. Verify that the shared identity checks
+also accept valid regional subsets without requiring omitted regions to appear
+in the submitted dataframe.
 Reject `.obsm` payloads of `None` without publishing any matrix or accompanying
 metadata changes; verify omitted components remain unchanged. Round-trip a
 nested `.uns` value of `None` as an encoded value, and reject `None` for the
