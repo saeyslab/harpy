@@ -7368,6 +7368,19 @@ incompatible fills; zero-filled sparse creation and rejection of nonzero/NaN
 sparse fills when unselected rows exist. Verify that creation with all rows
 supplied needs no fill, and that unsupported representations, including stored
 DataFrame-valued entries, fail without an eager whole-matrix read.
+
+Verify that regional-write results are independent of chunk layout. Include
+selected regions spanning chunk boundaries, chunks mixing selected and
+unselected rows, and chunks containing no selected rows. Use uneven,
+differently aligned chunks for the stored matrix and submitted payload.
+For example, use stored row chunks `(3, 3, 2)`, selected stored rows
+`[1, 2, 3, 6]` (zero-based), and submitted row chunks `(2, 2)`: submitted rows
+`[0, 1, 2, 3]` must map to those selected stored rows, regardless of chunk
+boundaries. Compare the complete reopened matrix with an independently
+constructed expected result, covering existing-entry updates and new-entry
+fills. These correctness cases must remain reusable as regression tests for
+Part 11f.ix, without prescribing a particular chunk-merging implementation.
+
 Instrument matrix access to verify chunked merging without whole-matrix
 materialization or unrelated reads. Exercise coupled metadata writes and
 failures during staging, publication and finalization, checking restoration
@@ -7540,6 +7553,11 @@ changes remain one logical update with the same handled-failure recovery and
 adapter-installation boundary; no crash-atomicity or concurrency guarantees
 are added. Do not replace safe publication with unprotected live-array writes.
 Scientific metadata preparation remains the caller's responsibility.
+
+Reuse Part 11f.vi's chunk-boundary correctness cases as regression tests for
+the optimized writer, exercising both eligible optimized updates and fallback
+paths. Keep numerical correctness separate from instrumentation proving which
+chunks the writer accesses.
 
 Focused tests must instrument storage reads/writes to verify that the writer
 neither reads nor rewrites unaffected matrix chunks, nor copies them for backup. Cover a
