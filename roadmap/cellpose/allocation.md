@@ -7128,20 +7128,26 @@ The regional-update contract is:
   missing or extra observations, duplicate
   pairs and reordered identities. Instance IDs may repeat across regions;
   the dataframe index does not define semantic identity.
-- Replace the selected rows and preserve all unselected rows of existing
-  entries. Keep observation identities, table order and spatial linkage
-  unchanged. Existing entries retain their column count; reject incompatible
-  shapes or dtypes rather than clearing other regions. This operation does not
-  append/remove observations or resize existing feature matrices.
+- For an existing `.obsm` entry, replace the selected rows and preserve all
+  unselected values, including existing missing values. No `fill_values` are
+  required to preserve other regions. Keep observation identities, table order
+  and spatial linkage unchanged. Existing entries retain their column count;
+  reject incompatible shapes or dtypes rather than clearing other regions.
+  This operation does not append/remove observations or resize existing feature
+  matrices.
 - A new `.obsm` entry spans all table observations. `fill_values` maps component
   paths to explicit, dtype-compatible scalar fills for unselected rows, for
   example `fill_values={("obsm", "morphology"): np.nan}`. Require a fill for
-  unselected rows of new entries; do not infer zeros or missing measurements.
-  Different new entries may use different fills. Fills never replace unselected
-  values in existing entries. Selected rows must be supplied explicitly,
-  including any missing-value measurements prepared by the caller.
+  unselected rows of new entries, because no previous values exist to preserve.
+  Raise if such rows exist and no fill was supplied; do not infer zeros or
+  missing measurements. `fill_values=None` means no fills were supplied, not
+  that unselected rows should be replaced with missing values. Different new
+  entries may use different fills. Fills never replace unselected values in
+  existing entries. Selected rows must be supplied explicitly, including any
+  missing-value measurements prepared by the caller.
 - `overwrite` permits replacement of existing requested entries, following the
   component writer's policy for both matrices and accompanying metadata.
+  For `.obsm`, this permits updating selected rows, not clearing other regions.
 - Generic I/O checks identities and structural compatibility, not feature
   meanings. The caller checks scientific schema compatibility, including
   feature-column names and order, and prepares coherent scientific metadata.
@@ -7190,6 +7196,8 @@ hp.tb.write_table_components_by_region(
 
 Here, `adata.obs` retains the stored observation order, and `regional_features`
 contains only the selected rows in the order described by `obs_identity`.
+No fill is needed: the existing morphology measurements for all other regions
+remain unchanged.
 `updated_metadata` describes the resulting matrix, including retained regions
 where needed; it is not just a metadata fragment for the selected region.
 
