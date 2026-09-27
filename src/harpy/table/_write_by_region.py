@@ -314,6 +314,32 @@ def _regional_matrix(
 ) -> da.Array:
     """Build full-axis replacements from independently chunked old and selected rows.
 
+    The supplied matrix contains selected observations; the returned .obsm
+    matrix covers all table observations.
+
+    Computational chunking of the returned matrix::
+
+        All observations supplied
+            -> Keep supplied.chunks, as prepared by _lazy_matrix():
+               Dask: existing input chunks
+               dense Zarr: on-disk chunks
+               in-memory / backed sparse: chunks based on chunk_size
+               No additional output chunking is needed.
+
+        Partial selection, existing entry
+            -> Use existing.chunks, as prepared by the lazy reader:
+               dense: existing on-disk chunks
+               CSR:   (chunk_size rows, all columns)
+               CSC:   (all rows, chunk_size columns)
+
+        Partial selection, new entry
+            -> Choose chunks from chunk_size and the full output shape:
+               dense / CSR: (chunk_size rows, all columns)
+               CSC:         (all output rows, chunk_size columns)
+
+    For new entries, do not derive output chunk sizes from supplied.chunks:
+    a five-row input must not force five-row chunks across a large table.
+
     Each task reads only its destination rectangle and the corresponding slice
     of the submitted rows. The rank within selected_rows, not the source block
     number, determines that slice. Sparse output chunks span the uncompressed
