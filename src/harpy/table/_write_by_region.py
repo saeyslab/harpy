@@ -28,7 +28,7 @@ from harpy.table._write_validation import (
     _validate_observation_annotation,
 )
 
-_REGIONAL_CHUNK_SIZE = 1000
+_DEFAULT_REGIONAL_CHUNK_SIZE = 1000
 
 
 def write_table_components_by_region(
@@ -38,6 +38,7 @@ def write_table_components_by_region(
     components: Mapping[ComponentPath, object],
     obs_identity: pd.DataFrame,
     fill_values: Mapping[ComponentPath, object] | None = None,
+    chunk_size: int = _DEFAULT_REGIONAL_CHUNK_SIZE,
     overwrite: bool = False,
 ) -> None:
     """Update `.obsm` measurements for complete regions, preserving other observations.
@@ -74,6 +75,20 @@ def write_table_components_by_region(
         Required only when a new matrix has unselected rows. Ignored for
         existing entries, whose unselected measurements remain unchanged.
         None means no fills were supplied. Keys must refer to submitted matrices.
+    chunk_size
+        Positive integer controlling computational chunk shapes::
+
+            dense: (chunk_size rows, all columns)
+            CSR:   (chunk_size rows, all columns)
+            CSC:   (all rows, chunk_size columns)
+
+        Used for in-memory inputs, Zarr-backed sparse reads, and creating new
+        ``.obsm`` entries for only some regions, filling the remaining
+        observations with ``fill_values``. Existing Dask input chunks and dense
+        Zarr chunks are preserved; existing dense targets retain their chunk
+        layout during merging.
+
+        Controls computation, not on-disk chunk sizes or a fixed memory limit.
     overwrite
         Allow updates to existing requested matrix and metadata entries.
 
@@ -122,6 +137,7 @@ def write_table_components_by_region(
         components=components,
         obs_identity=obs_identity,
         fill_values=fill_values,
+        chunk_size=chunk_size,
         overwrite=overwrite,
     ):
         pass
@@ -135,6 +151,7 @@ def _write_table_components_by_region_operation(
     components: Mapping[ComponentPath, object],
     obs_identity: pd.DataFrame,
     fill_values: Mapping[ComponentPath, object] | None = None,
+    chunk_size: int = _DEFAULT_REGIONAL_CHUNK_SIZE,
     overwrite: bool = False,
 ) -> Generator[zarr.Group, None, None]:
     """Prepare regional replacements, then yield within the shared rollback window.
@@ -146,6 +163,11 @@ def _write_table_components_by_region_operation(
         raise TypeError("components must be a mapping from tuple paths to values.")
     if not isinstance(overwrite, bool):
         raise TypeError("overwrite must be a boolean.")
+    if isinstance(chunk_size, bool) or not isinstance(chunk_size, Integral):
+        raise TypeError("chunk_size must be a positive integer.")
+    if chunk_size < 1:
+        raise ValueError("chunk_size must be a positive integer.")
+    chunk_size = int(chunk_size)
     paths = _validate_component_paths(tuple(components), to_write=True)
     matrix_paths = {path for path in paths if path[0] == "obsm"}
     if not matrix_paths or any(path[0] not in {"obsm", "uns"} for path in paths):
@@ -157,14 +179,18 @@ def _write_table_components_by_region_operation(
         raise ValueError("fill_values keys must refer to submitted obsm matrices.")
 
     group = _open_table_group(store, table_name=table_name)
-    annotation = _read_spatialdata_attrs(group)
-    if annotation is None:
+    spatialdata_attrs = _read_spatialdata_attrs(group)
+    if spatialdata_attrs is None:
         raise ValueError("Regional writes require a SpatialData-annotated table.")
-    region_key, instance_key = _annotation_columns(annotation)
-    stored_identity = _read_observation_identity(group, annotation)
-    # Validate the complete stored annotation before considering a subset. A
-    # valid A-only update must not be checked as if it were the whole A+B table.
-    stored_pairs = _validate_observation_annotation(stored_identity, annotation, label="Stored observation")
+    region_key, instance_key = _annotation_columns(spatialdata_attrs)
+    stored_identity = _read_observation_identity(group, spatialdata_attrs)
+    # 1) Validate the stored annotation against all stored observations.
+    # Declared regions must match the regions actually present in the table.
+    stored_pairs = _validate_observation_annotation(stored_identity, spatialdata_attrs, label="Stored observation")
+
+    # 2) Validate the submitted identities against the selected stored observations.
+    # An A-only update must include every observation of A in stored order,
+    # but need not include observations from B.
     if not isinstance(obs_identity, pd.DataFrame):
         raise TypeError("obs_identity must be a two-column region/instance dataframe.")
     if obs_identity.empty or len(obs_identity.columns) != 2 or set(obs_identity.columns) != {region_key, instance_key}:
@@ -196,7 +222,7 @@ def _write_table_components_by_region_operation(
             # opening the value, not after loading an unrelated full frame.
             if element.attrs.get("encoding-type") == "dataframe":
                 raise TypeError("Regional writes do not support DataFrame-valued obsm entries.")
-            existing = _read_anndata_element(group, path, mode="lazy", sparse_chunk_size=_REGIONAL_CHUNK_SIZE)
+            existing = _read_anndata_element(group, path, mode="lazy", sparse_chunk_size=chunk_size)
             if _matrix_format(existing, label=f"Stored component {path!r}") != matrix_format:
                 raise ValueError(f"Component {path!r} must match the stored matrix format (dense, CSR or CSC).")
             if existing.shape != (len(stored_identity), supplied.shape[1]):
@@ -213,12 +239,13 @@ def _write_table_components_by_region_operation(
                 if matrix_format != "dense" and len(selected_rows) != len(stored_identity) and fill != 0:
                     raise ValueError("New sparse matrices with unselected rows require a zero fill.")
         replacements[path] = _regional_matrix(
-            _lazy_matrix(supplied, matrix_format),
+            _lazy_matrix(supplied, matrix_format, chunk_size=chunk_size),
             existing=existing,
             selected_rows=selected_rows,
             n_obs=len(stored_identity),
             matrix_format=matrix_format,
             fill=fill,
+            chunk_size=chunk_size,
         )
 
     # The prepared matrices now cover the full table axis. Delegate both rounds
@@ -260,17 +287,17 @@ def _scalar_fill(value: object, dtype: np.dtype) -> object:
     return np.dtype(dtype).type(value)
 
 
-def _lazy_matrix(value: object, matrix_format: str) -> da.Array:
+def _lazy_matrix(value: object, matrix_format: str, *, chunk_size: int) -> da.Array:
     if isinstance(value, da.Array):
         return value
     if isinstance(value, (CSRDataset, CSCDataset)):
-        return _decode_anndata_element(value.group, mode="lazy", sparse_chunk_size=_REGIONAL_CHUNK_SIZE)
+        return _decode_anndata_element(value.group, mode="lazy", sparse_chunk_size=chunk_size)
     if isinstance(value, zarr.Array):
         return da.from_zarr(value)
     chunks = {
-        "dense": (_REGIONAL_CHUNK_SIZE, _REGIONAL_CHUNK_SIZE),
-        "csr": (_REGIONAL_CHUNK_SIZE, -1),
-        "csc": (-1, _REGIONAL_CHUNK_SIZE),
+        "dense": (chunk_size, -1),
+        "csr": (chunk_size, -1),
+        "csc": (-1, chunk_size),
     }[matrix_format]
     return da.from_array(value, chunks=chunks, asarray=False)
 
@@ -283,6 +310,7 @@ def _regional_matrix(
     n_obs: int,
     matrix_format: str,
     fill: object,
+    chunk_size: int,
 ) -> da.Array:
     """Build full-axis replacements from independently chunked old and selected rows.
 
@@ -295,7 +323,12 @@ def _regional_matrix(
     if len(selected_rows) == n_obs:
         return supplied.astype(dtype)
     shape = (n_obs, supplied.shape[1])
-    chunks = existing.chunks if existing is not None else (_REGIONAL_CHUNK_SIZE, _REGIONAL_CHUNK_SIZE)
+    if existing is not None:
+        chunks = existing.chunks
+    elif matrix_format == "csc":
+        chunks = (-1, chunk_size)
+    else:
+        chunks = (chunk_size, -1)
     chunks = list(da.core.normalize_chunks(chunks, shape=shape, dtype=dtype))
     if matrix_format == "csr":
         chunks[1] = (shape[1],)
