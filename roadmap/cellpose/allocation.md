@@ -7079,14 +7079,34 @@ document this delivered behavior.
 **Status: planned; implement after Parts 11f.i–v and before integration with
 existing Harpy APIs.**
 
-Introduce a public API through `hp.tb` for updating one or more `.obsm` matrix
-entries for selected regions of an existing SpatialData-annotated table.
-Reuse the shared readers, component serialization and publication operation;
-do not implement a second serializer or rollback mechanism. Finalize the
-public name and signature before implementation. Use the same path-based
-`store` and `table_name` contract, with explicit region selection, selected-row
-matrix values and `obs_identity`, optional caller-prepared `.uns` replacements,
-and the existing overwrite policy.
+Introduce `hp.tb.write_table_components_by_region()` for updating one or more
+`.obsm` matrix entries for selected regions of an existing SpatialData-annotated
+table. Reuse the shared readers, component serialization and publication
+operation; do not implement a second serializer or rollback mechanism.
+
+The agreed API direction is below; detailed specifications will be refined
+before implementation:
+
+```python
+def write_table_components_by_region(
+    store: str | PathLike[str],
+    *,
+    table_name: str,
+    regions: str | Sequence[str],
+    components: Mapping[ComponentPath, object],
+    obs_identity: pd.DataFrame,
+    fill_values: Mapping[ComponentPath, object] | None = None,
+    overwrite: bool = False,
+) -> None:
+    ...
+```
+
+Keep the same path-based `store`, `table_name` and logical tuple-path conventions
+as `write_table_components()`. Initially, `components` accepts individual
+`("obsm", key)` matrices and optional accompanying `.uns` replacements; reject
+other component types. `.obsm` values contain only selected-region rows, whereas
+`.uns` values replace the entire requested metadata record. The existing
+`write_table_components()` API remains unchanged.
 
 For an `.obsm` entry, `write_table_components()` requires a complete replacement
 matrix and identities for the whole observation axis. The regional API instead
@@ -7096,12 +7116,16 @@ regions.
 
 The regional-update contract is:
 
-- Regions are spatial-element names in the stored annotation, not coordinate
-  systems or sample IDs. Unannotated tables have no regional-update mode.
-- `obs_identity` is the two-column region/instance dataframe described in
-  Part 11f.i, but covers only the selected regions. Its ordered pairs must
-  match every stored observation in those regions exactly once, in stored
-  order. Reject unknown regions, missing or extra observations, duplicate
+- `regions` explicitly selects spatial-element names in the stored annotation,
+  not coordinate systems or sample IDs. This defines the intended scope
+  independently of the supplied matrix rows. Unannotated tables have no
+  regional-update mode.
+- `obs_identity` is required and shared by all submitted matrices. It is the
+  two-column region/instance dataframe described in Part 11f.i, covering only
+  the selected regions. Harpy obtains the required column names from the stored
+  SpatialData annotation. Its ordered pairs must match every stored observation
+  in those regions exactly once, in stored order. Reject unknown regions,
+  missing or extra observations, duplicate
   pairs and reordered identities. Instance IDs may repeat across regions;
   the dataframe index does not define semantic identity.
 - Replace the selected rows and preserve all unselected rows of existing
@@ -7109,10 +7133,15 @@ The regional-update contract is:
   unchanged. Existing entries retain their column count; reject incompatible
   shapes or dtypes rather than clearing other regions. This operation does not
   append/remove observations or resize existing feature matrices.
-- A new `.obsm` entry spans all table observations. Require an explicit,
-  dtype-compatible fill value for unselected rows; do not infer zeros or
-  missing measurements. Selected rows must be supplied explicitly, including
-  any missing-value measurements prepared by the caller.
+- A new `.obsm` entry spans all table observations. `fill_values` maps component
+  paths to explicit, dtype-compatible scalar fills for unselected rows, for
+  example `fill_values={("obsm", "morphology"): np.nan}`. Require a fill for
+  unselected rows of new entries; do not infer zeros or missing measurements.
+  Different new entries may use different fills. Fills never replace unselected
+  values in existing entries. Selected rows must be supplied explicitly,
+  including any missing-value measurements prepared by the caller.
+- `overwrite` permits replacement of existing requested entries, following the
+  component writer's policy for both matrices and accompanying metadata.
 - Generic I/O checks identities and structural compatibility, not feature
   meanings. The caller checks scientific schema compatibility, including
   feature-column names and order, and prepares coherent scientific metadata.
@@ -7140,6 +7169,30 @@ The caller prepares records covering retained as well as updated data where
 needed. Separate matrix and metadata write calls do not provide this shared
 rollback guarantee.
 
+For example, update an existing matrix and its caller-prepared metadata:
+
+```python
+selected = adata.obs[region_key].eq("cells_sample_a")
+obs_identity = adata.obs.loc[selected, [region_key, instance_key]]
+
+hp.tb.write_table_components_by_region(
+    "sdata.zarr",
+    table_name="cell_features",
+    regions="cells_sample_a",
+    components={
+        ("obsm", "morphology"): regional_features,
+        ("uns", "feature_matrices", "morphology"): updated_metadata,
+    },
+    obs_identity=obs_identity,
+    overwrite=True,
+)
+```
+
+Here, `adata.obs` retains the stored observation order, and `regional_features`
+contains only the selected rows in the order described by `obs_identity`.
+`updated_metadata` describes the resulting matrix, including retained regions
+where needed; it is not just a metadata fragment for the selected region.
+
 **Selected-row input and bounded memory do not mean region-only disk writes.**
 Initially, stage a complete replacement for each affected `.obsm` entry. Build it
 lazily or chunk by chunk from the existing matrix and selected-row payload (or
@@ -7153,10 +7206,11 @@ chunks; it is not required to deliver this initial regional-write API.
 
 Finish staging while original paths remain readable, then publish the matrix
 and metadata paths together with the shared backup/rollback mechanism. Keep
-the same local-store, input-ownership, return and recovery contracts as the
-component writer: no live-object synchronization, crash recovery or concurrent
-writer isolation. SpatialData adapters must be able to use this public API's
-shared internal operation with installation inside the rollback window.
+the same local-store, input-ownership and recovery contracts as the component
+writer. Return `None` after successful completion; do not refresh an already
+loaded `sdata`. There is no crash recovery or concurrent writer isolation.
+SpatialData adapters must be able to use this public API's shared internal
+operation with installation inside the rollback window.
 
 The initial scope excludes regional updates of `.X`, `.layers`, `.obs`, `.raw`
 and pairwise matrices, and does not add a region-specific reader or use the
