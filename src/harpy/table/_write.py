@@ -29,6 +29,7 @@ from harpy.table._write_validation import (
     _prepare_raw_creation,
     _validate_complete_table,
     _validate_component_values,
+    _validate_table_identities,
 )
 
 
@@ -213,6 +214,11 @@ def _write_table_operation(
     paths. Adapters can reopen/attach there while backups remain; they own any
     in-memory rollback. Public path-based writers use an empty with-body because
     they do not attach data. Final consolidation is part of the rollback window.
+
+    When supplied, obs_identity, var_names and raw_var_names must agree with
+    adata's corresponding axes, or with the expected axes for component writes.
+    They are checked even when axis dataframes are also supplied; no reordering
+    occurs. Complete-table replacement may change the destination's old axes.
     """
     if (adata is None) == (components is None):
         raise ValueError("Supply either adata or components, not both.")
@@ -233,6 +239,7 @@ def _write_table_operation(
         if table_path.exists() and not overwrite:
             raise FileExistsError(f"Table {table_name!r} already exists; use overwrite=True.")
         _validate_complete_table(adata)
+        _validate_table_identities(adata, obs_identity=obs_identity, var_names=var_names, raw_var_names=raw_var_names)
     else:
         assert components is not None
         paths = _validate_component_paths(tuple(components), to_write=True)
@@ -302,6 +309,9 @@ def _write_table_operation(
             _write_anndata_element(staged_root, ("table",), adata, create_parents=False)
             staged_table = _read_anndata_table(staged_root["table"], mode="lazy")
             _validate_complete_table(staged_table)
+            _validate_table_identities(
+                staged_table, obs_identity=obs_identity, var_names=var_names, raw_var_names=raw_var_names
+            )
             annotation = staged_table.uns.get(TableModel.ATTRS_KEY)
             regions = None if annotation is None else annotation[TableModel.REGION_KEY]
             if isinstance(regions, str):
