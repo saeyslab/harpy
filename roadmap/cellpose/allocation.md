@@ -49,7 +49,8 @@ implemented:
       **11f.iv** scoped writing and safe publication — implemented;
       **11f.v** creation of raw data through component writes — implemented;
       **11f.vi** region-wise `.obsm` writing — implemented; **11f.vii** integration
-      with existing Harpy APIs, including `hp.tb.add_feature_matrix`;
+      with existing Harpy APIs in three implementation slices: **a)** `hp.tb.add_table`,
+      **b)** `hp.tb.add_feature_matrix`, **c)** aggregation and canonical-component writers;
       **11f.viii** safe deletion of optional AnnData components; **11f.ix**
       affected-chunk regional-write optimization, after the first eight parts;
       a separate napari-harpy persistence migration also follows the first eight
@@ -6240,15 +6241,21 @@ Split the work into nine independently reviewable parts, in this order:
 6. **11f.vi: region-wise `.obsm` writing** — add a public regional-update API
    with bounded-memory matrix merging and coupled, caller-prepared metadata writes — implemented.
 7. **11f.vii: integration with existing Harpy APIs** — route existing table I/O
-   through the shared primitives and retain lazy results when attaching them.
+   through the shared primitives in three separately reviewable implementation
+   slices, in order a → b → c, with focused integration tests and documentation in each:
+   - **a)** refactor `hp.tb.add_table`;
+   - **b)** refactor `hp.tb.add_feature_matrix`;
+   - **c)** integrate aggregation and canonical-component writers.
+
 8. **11f.viii: safe deletion of optional AnnData components** — support explicit
    removals and combined replacement/deletion requests with shared rollback.
 9. **11f.ix: affected-chunk regional-write optimization** — avoid complete
    matrix rewrites for eligible regional `.obsm` updates, without changing
    sample layout or the public regional-update semantics.
 
-Complete Parts 11f.i–vii before the table-level QC work in Slice 11g. Part 11f.viii
-is required before the napari-harpy persistence migration, but does not block
+Complete Parts 11f.i–vii, including all three slices of vii, before the table-level
+QC work in Slice 11g. Part 11f.viii is required before the napari-harpy persistence
+migration, but does not block
 Slice 11g. Part 11f.ix follows Parts 11f.i–viii and blocks neither Slice 11g nor
 the napari-harpy migration. The I/O contracts themselves must remain usable
 without any QC result, feature panel or aggregation-specific metadata. Part
@@ -7384,7 +7391,7 @@ legacy `ProcessTable._get_adata()`.
 
 This part delivers the reusable regional writer, not the migration of
 `add_feature_matrix()`. That function currently constructs a full matrix in
-memory and writes its matrix and metadata sequentially. Part 11f.vii replaces
+memory and writes its matrix and metadata sequentially. Part 11f.vii b) replaces
 that persistence path with this infrastructure while retaining feature
 calculation, alignment and scientific metadata preparation in the caller.
 
@@ -7520,13 +7527,47 @@ the public contract.
 
 ### Part 11f.vii: integration with existing Harpy APIs
 
+**Status: planned. Split implementation into Parts 11f.vii a), b) and c), in
+that order. Each part includes its own focused integration tests and documentation
+updates; Parts 11f.viii and ix retain their numbering.**
+
+All three parts reuse the shared table I/O infrastructure rather than introducing
+competing codecs or publication mechanisms. Installation and metadata finalization
+must remain inside the rollback window; adapters restore affected in-memory state
+on failure.
+
+Reuse shared table-write recovery to restore saved root-metadata contents (or
+their prior absence) on handled failure, rather than relying on another successful
+consolidation attempt. Save that state before changing the store. Remove only
+parent groups created by the operation, including `tables` if previously absent;
+preserve pre-existing groups. Cover setup failures before publication as well as
+failures while backups are retained.
+
+Existing preprocessing conveniences may use the new storage layer, but these
+parts do not redesign their scientific steps or add wrappers around Scanpy
+operations. The explicit table APIs must work independently of those conveniences.
+The legacy `ProcessTable._get_adata()` remains unchanged. Ordinary
+`spatialdata.read_zarr()` behavior is unchanged; Part 11f.iii's `hp.io.read_zarr()`
+wrapper continues to reuse the shared table reader.
+
+### Part 11f.vii a): refactor `hp.tb.add_table`
+
 Make `hp.tb.add_table` a SpatialData-facing adapter over the shared table I/O
 infrastructure. Preserve its distinction between attaching an unbacked table
 and persisting a backed one. For backed writes, attach only the affected
 reopened table with lazy matrices, without reopening the entire tables
-collection or mutating the supplied AnnData. Installation and metadata
-finalization must remain inside the rollback window; adapters restore affected
-in-memory state on failure.
+collection or mutating the supplied AnnData. Restore the previous attached table
+if persistence, installation or metadata finalization fails.
+
+**Checks and documentation.** Cover unbacked attachment and backed creation and
+replacement, successful lazy attachment, input isolation and unchanged unrelated
+elements. Test restoration after setup, publication, installation and
+metadata-finalization failures, including exact root-metadata restoration when
+consolidation continues to fail and cleanup of only newly created parents.
+Document complete-table persistence and attachment through `add_table`, and its
+distinction from the path-based writers that do not update a supplied `sdata`.
+
+### Part 11f.vii b): refactor `hp.tb.add_feature_matrix`
 
 Explicitly migrate `hp.tb.add_feature_matrix` to Part 11f.vi's regional-write
 operation for backed existing-table updates. Keep feature calculation,
@@ -7547,10 +7588,19 @@ sequential direct writes. Restore affected in-memory entries if persistence
 or installation fails.
 
 Existing-table updates must not read or rewrite `.X`; new-table creation must
-use the shared complete-table path. Tests must cover failure during either
-component write, successful regional writes, overwrite/schema rejection,
-preserved measurements and metadata for unselected regions, and preservation
-of unrelated components.
+use the shared complete-table path integrated in Part 11f.vii a). Regional writes
+still replace the complete affected `.obsm` matrix chunkwise; affected-chunk-only
+publication remains Part 11f.ix.
+
+**Checks and documentation.** Cover new-table creation, successful regional writes,
+overwrite/schema rejection, preserved measurements and metadata for unselected
+regions, and preservation of unrelated components without reading or rewriting
+`.X`. Test failures during either component write, installation and metadata
+finalization, verifying recovery of both disk and affected in-memory state.
+Document regional feature updates, new-entry fills and feature-schema requirements,
+alongside annotation/component-only examples using the explicit table I/O APIs.
+
+### Part 11f.vii c): integrate aggregation and canonical-component writers
 
 Migrate other existing table writers to shared reading/serialization/publication
 primitives where applicable, including the complete aggregation-table path
@@ -7560,29 +7610,18 @@ aggregation/canonical workflow or duplicate the generic I/O implementation.
 Non-table SpatialData element writers continue using their format-specific I/O
 and the shared publisher.
 
-Integration must also harmonize recovery behavior. Reuse shared table-write
-recovery to restore saved root-metadata contents (or their prior absence) on
-handled failure, rather than relying on another successful consolidation
-attempt. Save that state before changing the store. Remove only parent groups
-created by the operation, including `tables` if previously absent; preserve
-pre-existing groups. Cover setup failures before publication as well as failures
-while backups are retained. Adapters remain responsible for restoring affected
-in-memory state.
+Apply the shared recovery contract above to both writer paths, replacing recovery
+that depends on another consolidation attempt. Keep installation and domain
+validation within the rollback window, and restore the affected attached table
+or component entries on failure.
 
-Document complete-table and annotation/component-only examples. Existing
-preprocessing conveniences may use the new storage layer, but this part does
-not redesign their scientific steps or add wrappers around Scanpy operations.
-The explicit table APIs must work independently of those conveniences.
-The legacy `ProcessTable._get_adata()` remains unchanged in this slice.
-
-Run focused integration tests for the affected callers, covering successful
-lazy attachment, input isolation, unchanged unrelated elements and restoration
-after setup, publication, installation and metadata-finalization failures.
-Verify root-metadata restoration even when consolidation continues to fail,
-cleanup of newly created parents without removing pre-existing groups, and
-restoration of affected in-memory state. Confirm that ordinary
-`spatialdata.read_zarr()` behavior is unchanged. Part 11f.iii's `hp.io.read_zarr()`
-wrapper reuses this foundation rather than introducing competing table codecs.
+**Checks and documentation.** Retain domain-specific correctness coverage and add
+focused integration checks for shared I/O, input isolation and unchanged unrelated
+elements. Exercise setup, publication, installation, validation and
+metadata-finalization failures for both writers. Verify saved root-metadata
+restoration even when consolidation continues to fail, cleanup of only newly
+created parents and restoration of affected in-memory state. Document the shared
+persistence/recovery behavior and the responsibilities retained by each caller.
 
 ### Part 11f.viii: safe deletion of optional AnnData components
 
