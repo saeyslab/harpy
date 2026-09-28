@@ -48,7 +48,7 @@ implemented:
       **11f.iii** Harpy SpatialData reader with selective table modes — implemented;
       **11f.iv** scoped writing and safe publication — implemented;
       **11f.v** creation of raw data through component writes — implemented;
-      **11f.vi** region-wise `.obsm` writing; **11f.vii** integration
+      **11f.vi** region-wise `.obsm` writing — implemented; **11f.vii** integration
       with existing Harpy APIs, including `hp.tb.add_feature_matrix`;
       **11f.viii** safe deletion of optional AnnData components; **11f.ix**
       affected-chunk regional-write optimization, after the first eight parts;
@@ -6211,11 +6211,12 @@ unsmoothed default remains unchanged.
 
 ## Slice 11f: modular AnnData table I/O for SpatialData Zarr stores
 
-**Status: Part 11f.i complete (contracts and documentation); Parts 11f.ii–v
+**Status: Part 11f.i complete (contracts and documentation); Parts 11f.ii–vi
 implemented. `hp.tb.read_table`, `hp.tb.read_table_components` and
 `hp.io.read_zarr`, plus `hp.tb.write_table` and `hp.tb.write_table_components`,
-are available, including raw creation through component writes;
-Parts 11f.vi–ix remain planned.**
+are available, including raw creation through component writes and regional
+updates through `hp.tb.write_table_components_by_region`;
+Parts 11f.vii–ix remain planned.**
 
 Provide general, modular table I/O independently of QC, aggregation or Scanpy
 preprocessing. The caller explicitly chooses a complete table or selected
@@ -6237,7 +6238,7 @@ Split the work into nine independently reviewable parts, in this order:
 5. **11f.v: creation of raw data through component writes** — create a complete
    raw container from supplied counts and feature identities without rewriting the table — implemented.
 6. **11f.vi: region-wise `.obsm` writing** — add a public regional-update API
-   with bounded-memory matrix merging and coupled, caller-prepared metadata writes.
+   with bounded-memory matrix merging and coupled, caller-prepared metadata writes — implemented.
 7. **11f.vii: integration with existing Harpy APIs** — route existing table I/O
    through the shared primitives and retain lazy results when attaching them.
 8. **11f.viii: safe deletion of optional AnnData components** — support explicit
@@ -7076,8 +7077,8 @@ document this delivered behavior.
 
 ### Part 11f.vi: region-wise `.obsm` writing
 
-**Status: planned; implement after Parts 11f.i–v and before integration with
-existing Harpy APIs.**
+**Status: implemented. Regional writes share the existing serializer and
+publication operation; integration with existing Harpy APIs remains Part 11f.vii.**
 
 Introduce `hp.tb.write_table_components_by_region()` for updating one or more
 `.obsm` matrix entries for selected regions of an existing SpatialData-annotated
@@ -7109,8 +7110,7 @@ contracts and safeguards, including the column-type checks previously supplied
 by SpatialData. Do not reproduce SpatialData's entire table validator or expand
 this work into an unrelated validation redesign.
 
-The agreed API direction is below; detailed specifications will be refined
-before implementation:
+The public API is:
 
 ```python
 def write_table_components_by_region(
@@ -7120,6 +7120,7 @@ def write_table_components_by_region(
     components: Mapping[ComponentPath, object],
     obs_identity: pd.DataFrame,
     fill_values: Mapping[ComponentPath, object] | None = None,
+    chunk_size: int = 1000,
     overwrite: bool = False,
 ) -> None:
     ...
@@ -7131,6 +7132,13 @@ as `write_table_components()`. Initially, `components` accepts individual
 other component types. `.obsm` values contain only selected-region rows, whereas
 `.uns` values replace the entire requested metadata record. The existing
 `write_table_components()` API remains unchanged.
+
+`chunk_size` is a positive integer controlling computational chunks: rows for
+dense/CSR matrices (all columns per chunk), or columns for CSC matrices (all
+rows per chunk). Use it for in-memory inputs, backed sparse reads, and new
+matrices requiring unselected rows. Preserve existing Dask input chunks and
+dense Zarr chunks; existing dense targets retain their merge layout. This is
+not an on-disk chunk-size setting or a fixed memory limit.
 
 An `.obsm` payload must be a matrix: `("obsm", key): None` is invalid and
 rejects the entire request before publication, including accompanying metadata
