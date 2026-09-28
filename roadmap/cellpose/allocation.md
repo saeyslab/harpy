@@ -7440,12 +7440,13 @@ of the affected entries and consolidated metadata.
 
 ### Part 11f.vi a): shared regional-update blocks
 
-**Status: planned follow-up to the implemented regional writer.**
+**Status: implemented. Regional-update blocks share one prepared task graph;
+existing-matrix slicing remains unchanged until Part 11f.vi b).**
 
 Optimize how `_regional_matrix()` prepares `regional_values` for its merge
-tasks. Currently, separate Dask-array slices are passed into delayed calls;
-their independently prepared graphs can add graph-construction overhead and
-repeat input reads or computation. Do not assume that these calls retain
+tasks. Previously, separate Dask-array slices were passed into delayed calls;
+their independently prepared graphs added graph-construction overhead and
+could repeat input reads or computation. Do not assume that these calls retain
 shared source-task keys merely because the slices originate from one array.
 
 - Derive the required update row bands from the finalized output chunks and
