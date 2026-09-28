@@ -53,22 +53,35 @@ def write_table_components_by_region(
     table_name
         Name of an existing SpatialData-annotated table.
     components
-        Nonempty mapping containing individual ``("obsm", key)`` matrices and
-        optional accompanying ``uns`` replacements. Each matrix contains only
-        the selected observations, in the order of ``obs_identity``. Supports
-        numeric 2D dense, CSR and CSC matrices, in memory, lazy or Zarr-backed.
-        Existing entries require matching formats (dense/dense, CSR/CSR,
-        CSC/CSC), unchanged column counts and safe casts into the stored dtype.
-        DataFrame-valued matrices and None matrix payloads are rejected.
-        Metadata paths replace their entire value, not a regional subset;
-        nested None values encode absence, not deletion. Omitted paths are unchanged.
+        Mapping containing one or more ``("obsm", key)`` matrices, for example
+        ``{("obsm", "morphology"): regional_features}``. Each matrix contains
+        only the observations identified by ``obs_identity``, with matching
+        row counts and row order.
+
+        Matrices must be numeric and two-dimensional: dense, CSR or CSC,
+        supplied in memory, as lazy arrays, or as Zarr-backed handles.
+        DataFrame-valued matrices and ``None`` matrix values are not supported.
+
+        When updating an existing matrix, preserve its format and column count.
+        Supplied values must be safely castable to its stored dtype.
+        No conversion between dense, CSR and CSC formats occurs.
+
+        Optional ``uns`` entries may accompany the matrices. Each supplied
+        metadata path replaces its entire value, not a regional subset.
+        ``None`` metadata values are stored, not treated as deletion.
+        Omitted component paths remain unchanged.
     obs_identity
-        Nonempty two-column dataframe using the stored region and instance keys,
-        for example ``adata.obs.loc[selected, [region_key, instance_key]]``.
-        Region values must be categorical. Actual values select the regions,
-        not unused categories. Supply every observation of each selected region
-        exactly once, in stored table order, including when regions interleave.
-        The dataframe index is ignored. No automatic row reordering occurs.
+        Nonempty two-column dataframe identifying the rows of every ``.obsm``
+        matrix in ``components``, in the same order. Use the stored region and
+        instance keys, for example
+        ``adata.obs.loc[selected, [region_key, instance_key]]``.
+
+        May cover a subset of the table, but must include every observation of
+        each selected region exactly once, in stored table order, including
+        when regions interleave. No automatic row reordering occurs.
+
+        The region column must be categorical. Actual values select the regions,
+        not unused categories. The dataframe index is ignored.
     fill_values
         For example, ``fill_values={("obsm", "morphology"): np.nan}``
         initializes unselected rows of a newly created ``obsm["morphology"]``
