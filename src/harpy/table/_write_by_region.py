@@ -350,7 +350,8 @@ def _regional_matrix(
     selected rows by their destination row band. Its delayed blocks are shared
     across merge tasks; the supplied array and output chunk policy are unchanged.
     Sparse output chunks span the uncompressed axis, as required by AnnData's
-    sparse writer.
+    sparse writer. Existing matrices must have the same complete chunk layout
+    as the finalized output; their delayed blocks are shared across merge tasks.
     """
     dtype = regional_values.dtype if existing is None else existing.dtype
     if len(table_row_positions) == n_obs:
@@ -367,6 +368,17 @@ def _regional_matrix(
         chunks[1] = (shape[1],)
     elif matrix_format == "csc":
         chunks[0] = (shape[0],)
+    # The reader already returns CSR chunks spanning all columns and CSC chunks
+    # spanning all rows. Its chunks must match the finalized output, including
+    # terminal chunks and sparse-axis adjustments.
+    # A mismatch means the chunk layout returned by _read_anndata_element()
+    # differs from the output layout expected by _regional_matrix().
+    # This indicates an internal chunking error.
+    existing_blocks = None
+    if existing is not None:
+        if tuple(chunks) != existing.chunks:
+            raise RuntimeError("Existing matrix chunks do not match the finalized output layout.")
+        existing_blocks = existing.to_delayed()
     meta = (
         np.empty((0, 0), dtype=dtype)
         if matrix_format == "dense"
@@ -424,18 +436,11 @@ def _regional_matrix(
         # Empty output row bands do not consume a row of regional update blocks.
         updates_for_row = next(regional_block_rows) if regional_row_stop > regional_row_start and shape[1] else None
         column_blocks = []
-        table_column_start = 0
         for table_block_column, width in enumerate(chunks[1]):
-            table_column_stop = table_column_start + width
-            original = (
-                None
-                if existing is None
-                else existing[table_row_start:table_row_stop, table_column_start:table_column_stop]
-            )
+            original = None if existing_blocks is None else existing_blocks[table_block_row, table_block_column]
             updates = None if updates_for_row is None else updates_for_row[table_block_column]
             block = merge_block(original, updates, block_row_positions, (height, width), dtype, matrix_format, fill)
             column_blocks.append(da.from_delayed(block, shape=(height, width), dtype=dtype, meta=meta))
-            table_column_start = table_column_stop
         row_blocks.append(da.concatenate(column_blocks, axis=1))
         table_row_start = table_row_stop
     return da.concatenate(row_blocks, axis=0)
