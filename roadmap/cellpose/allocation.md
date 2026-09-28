@@ -49,7 +49,7 @@ implemented:
       **11f.iv** scoped writing and safe publication — implemented;
       **11f.v** creation of raw data through component writes — implemented;
       **11f.vi** region-wise `.obsm` writing — implemented; **11f.vii** integration
-      with existing Harpy APIs in three implementation slices: **a)** `hp.tb.add_table`,
+      with existing Harpy APIs in three implementation slices: **a)** `hp.tb.add_table` — implemented,
       **b)** `hp.tb.add_feature_matrix`, **c)** aggregation and canonical-component writers;
       **11f.viii** safe deletion of optional AnnData components; **11f.ix**
       affected-chunk regional-write optimization, after the first eight parts;
@@ -6216,8 +6216,9 @@ unsmoothed default remains unchanged.
 implemented. `hp.tb.read_table`, `hp.tb.read_table_components` and
 `hp.io.read_zarr`, plus `hp.tb.write_table` and `hp.tb.write_table_components`,
 are available, including raw creation through component writes and regional
-updates through `hp.tb.write_table_components_by_region`;
-Parts 11f.vii–ix remain planned.**
+updates through `hp.tb.write_table_components_by_region`. Part 11f.vii a)
+(`hp.tb.add_table` integration) is implemented; Parts 11f.vii b)–c) and
+11f.viii–ix remain planned.**
 
 Provide general, modular table I/O independently of QC, aggregation or Scanpy
 preprocessing. The caller explicitly chooses a complete table or selected
@@ -6243,7 +6244,7 @@ Split the work into nine independently reviewable parts, in this order:
 7. **11f.vii: integration with existing Harpy APIs** — route existing table I/O
    through the shared primitives in three separately reviewable implementation
    slices, in order a → b → c, with focused integration tests and documentation in each:
-   - **a)** refactor `hp.tb.add_table`;
+   - **a)** refactor `hp.tb.add_table` — implemented;
    - **b)** refactor `hp.tb.add_feature_matrix`;
    - **c)** integrate aggregation and canonical-component writers.
 
@@ -7527,8 +7528,8 @@ the public contract.
 
 ### Part 11f.vii: integration with existing Harpy APIs
 
-**Status: planned. Split implementation into Parts 11f.vii a), b) and c), in
-that order. Each part includes its own focused integration tests and documentation
+**Status: Part 11f.vii a) implemented; b) and c) remain planned, in that order.
+Each part includes its own focused integration tests and documentation
 updates; Parts 11f.viii and ix retain their numbering.**
 
 All three parts reuse the shared table I/O infrastructure rather than introducing
@@ -7552,12 +7553,21 @@ wrapper continues to reuse the shared table reader.
 
 ### Part 11f.vii a): refactor `hp.tb.add_table`
 
+**Status: implemented. Backed writes use the shared table operation and attach
+only the affected table with lazy matrices; unbacked attachment remains write-free.**
+
 Make `hp.tb.add_table` a SpatialData-facing adapter over the shared table I/O
 infrastructure. Preserve its distinction between attaching an unbacked table
 and persisting a backed one. For backed writes, attach only the affected
 reopened table with lazy matrices, without reopening the entire tables
 collection or mutating the supplied AnnData. Restore the previous attached table
 if persistence, installation or metadata finalization fails.
+
+Preserve the existing unbacked overwrite behavior: replacement does not require
+`overwrite=True`. Backed replacements require permission whether the existing
+table is attached or only present on disk. Annotation preparation must not
+eagerly copy matrices; unbacked results may share matrix data with the input.
+Scope any StringDType compatibility conversion to the affected table.
 
 **Checks and documentation.** Cover unbacked attachment and backed creation and
 replacement, successful lazy attachment, input isolation and unchanged unrelated
