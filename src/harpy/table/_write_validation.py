@@ -206,6 +206,26 @@ def _observation_pairs(frame: pd.DataFrame, *, region_key: str, instance_key: st
     return pd.MultiIndex.from_frame(identity.astype(object))
 
 
+def _match_observation_identity(
+    obs_identity: pd.DataFrame | AxisNames,
+    expected: pd.MultiIndex,
+    *,
+    region_key: str,
+    instance_key: str,
+) -> None:
+    """Match explicit region/instance pairs, ignoring the identity dataframe's index."""
+    keys = [region_key, instance_key]
+    if not isinstance(obs_identity, pd.DataFrame):
+        raise TypeError("obs_identity must be a two-column region/instance dataframe for annotated tables.")
+    if set(obs_identity.columns) != set(keys) or len(obs_identity.columns) != 2:
+        raise ValueError(f"obs_identity must contain exactly the columns {keys!r}.")
+    _match_identity(
+        _observation_pairs(obs_identity, region_key=region_key, instance_key=instance_key, label="obs_identity"),
+        expected,
+        label="obs_identity",
+    )
+
+
 def _validate_observation_annotation(frame: pd.DataFrame, spatialdata_attrs: Mapping, *, label: str) -> pd.MultiIndex:
     """Validate the full table's declared/observed regions and identity columns."""
     region_key, instance_key = _annotation_columns(spatialdata_attrs)
@@ -327,7 +347,6 @@ def _validate_component_values(
         # used for matching.
         if axis == "obs" and spatialdata_attrs is not None:
             region_key, instance_key = _annotation_columns(spatialdata_attrs)
-            keys = [region_key, instance_key]
             stored_obs_identity = _read_observation_identity(group, spatialdata_attrs)
             expected = _validate_observation_annotation(
                 stored_obs_identity, spatialdata_attrs, label="Stored observation"
@@ -341,16 +360,11 @@ def _validate_component_values(
                     label="obs_identity",
                 )
             if obs_identity is not None:
-                if not isinstance(obs_identity, pd.DataFrame):
-                    raise TypeError("obs_identity must be a two-column region/instance dataframe for annotated tables.")
-                if set(obs_identity.columns) != set(keys) or len(obs_identity.columns) != 2:
-                    raise ValueError(f"obs_identity must contain exactly the columns {keys!r}.")
-                _match_identity(
-                    _observation_pairs(
-                        obs_identity, region_key=region_key, instance_key=instance_key, label="obs_identity"
-                    ),
+                _match_observation_identity(
+                    obs_identity,
                     expected,
-                    label="obs_identity",
+                    region_key=region_key,
+                    instance_key=instance_key,
                 )
         else:
             # 2b) Unannotated obs, var and raw.var: identities are ordered index names,
@@ -411,3 +425,47 @@ def _validate_complete_table(table: AnnData) -> None:
     if spatialdata_attrs is not None:
         region_key, instance_key = _annotation_columns(spatialdata_attrs)
         _observation_pairs(table.obs, region_key=region_key, instance_key=instance_key, label="Table observation")
+
+
+def _validate_table_identities(
+    table: AnnData,
+    *,
+    obs_identity: pd.DataFrame | AxisNames | None = None,
+    var_names: AxisNames | None = None,
+    raw_var_names: AxisNames | None = None,
+) -> None:
+    """Check optional explicit identities against the table without reordering.
+
+    Any supplied obs_identity, var_names or raw_var_names must match this
+    table's corresponding axis in value and order, not the destination's old
+    axis: a complete replacement may change those axes. Omitted arguments
+    need no check because the table already carries its axis dataframes.
+    """
+    if obs_identity is not None:
+        spatialdata_attrs = table.uns.get(TableModel.ATTRS_KEY)
+        if spatialdata_attrs is not None:
+            region_key, instance_key = _annotation_columns(spatialdata_attrs)
+            expected = _observation_pairs(
+                table.obs, region_key=region_key, instance_key=instance_key, label="Table observation"
+            )
+            _match_observation_identity(obs_identity, expected, region_key=region_key, instance_key=instance_key)
+        else:
+            _match_identity(
+                _named_identity(obs_identity, label="obs_identity"),
+                _named_identity(table.obs.index, label="Table obs"),
+                label="obs_identity",
+            )
+    if var_names is not None:
+        _match_identity(
+            _named_identity(var_names, label="var_names"),
+            _named_identity(table.var.index, label="Table var"),
+            label="var_names",
+        )
+    if raw_var_names is not None:
+        if table.raw is None:
+            raise ValueError("raw_var_names was supplied, but the table has no raw feature axis.")
+        _match_identity(
+            _named_identity(raw_var_names, label="raw_var_names"),
+            _named_identity(table.raw.var.index, label="Table raw.var"),
+            label="raw_var_names",
+        )
