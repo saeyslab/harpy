@@ -359,8 +359,8 @@ def add_feature_matrix(
     aligned_values = aligned.loc[:, columns].to_numpy(dtype=np.float64)
 
     if existing_matrix is not None:
-        # Calculated features are dense. The regional writer requires supplied and
-        # stored matrices to have matching formats; it does not convert between them.
+        # Check feature-matrix compatibility in both storage modes.
+        # The regional writer independently validates backed updates.
         if _matrix_format(existing_matrix, label=f"Feature matrix {feature_key!r}") != "dense":
             raise ValueError(
                 "Calculated features require an existing dense feature matrix; no format conversion occurs."
@@ -429,12 +429,53 @@ def _existing_feature_matrix(
     feature_key: str,
     feature_matrices_key: str,
 ):
-    """Read only the update's identities, matrix and metadata; never the expression matrix.
+    """Read existing feature-matrix information after validating table identities.
 
-    Validate the in-memory table's observation annotation in both modes. Backed
-    updates also require its full identity/order to match storage, including
-    unselected regions, and preserve stored measurements rather than unsaved
-    local replacements.
+    Checks in both storage modes
+    ----------------------------
+    Validate the in-memory table's SpatialData annotation against ``adata.obs``:
+    identity columns must be valid, region/instance pairs non-null and unique,
+    and declared regions must match observed regions. Also require
+    ``adata.uns[feature_matrices_key]`` to be a mapping when present.
+
+    Unbacked SpatialData
+    -------------------
+    No storage comparison is needed. Return the existing in-memory feature
+    matrix and its metadata.
+
+    Backed SpatialData
+    ------------------
+    Perform these additional checks:
+
+    - Validate stored SpatialData annotation against stored observation identities.
+    - Compare in-memory and stored region/instance column names: they must match.
+    - Compare all in-memory and stored region/instance pairs: values and row order
+      must match, including observations outside the selected regions.
+    - Reject stored DataFrame-valued feature matrices before decoding their values.
+
+    Return the stored matrix as a read-only handle and read its feature metadata
+    eagerly. Stored entries, rather than unsaved local replacements, are used
+    to prepare the update. Matrix values are not loaded and no Dask graph is built.
+
+    Notes
+    -----
+    Missing matrix or metadata entries are returned as ``None`` independently.
+    The caller checks matrix compatibility and feature-metadata compatibility.
+
+    We validate observation identities here to ensure that the resulting matrix
+    is attached to the correct in-memory observations. The validation in
+    ``_write_table_components_by_region_operation``, shared with
+    ``write_table_components_by_region``, checks the stored table and submitted
+    regional rows, not the complete in-memory table.
+
+    After a backed update, the complete resulting matrix is attached to
+    ``adata.obsm[feature_key]`` by row position. All in-memory observation
+    identities must therefore match stored identities in value and order,
+    including observations outside the selected regions. Otherwise, unchanged
+    measurements could be attached to the wrong observations.
+
+    Unbacked updates never invoke ``_write_table_components_by_region_operation``,
+    so their in-memory annotation must also be validated here.
     """
     adata = sdata.tables[table_name]
     in_memory_attrs = adata.uns.get(TableModel.ATTRS_KEY)
@@ -467,12 +508,12 @@ def _existing_feature_matrix(
         stored_pairs,
         label="In-memory observation",
     )
-    # DataFrame decoding is eager even in lazy mode. Reject that representation
-    # before reading its payload; calculated features use dense numeric matrices.
+    # DataFrame decoding is eager even in backed mode. Keep this guard to avoid
+    # loading its payload merely to prepare metadata; the writer also rejects it.
     if "/".join(matrix_path) in group and group["/".join(matrix_path)].attrs.get("encoding-type") == "dataframe":
         raise TypeError("Feature updates do not support DataFrame-valued obsm entries.")
     try:
-        matrix = _read_anndata_element(group, matrix_path, mode="lazy")
+        matrix = _read_anndata_element(group, matrix_path, mode="backed")
     except _MissingAnnDataElement:
         matrix = None  # No existing feature matrix to merge with.
     try:
