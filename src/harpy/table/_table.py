@@ -329,40 +329,87 @@ def add_table(
     region_key: str = _REGION_KEY,
     overwrite: bool = False,
 ) -> SpatialData:
-    """
-    Add an :class:`~anndata.AnnData` object as a table element to a :class:`~spatialdata.SpatialData` object.
+    """Add an AnnData table to SpatialData.
 
-    This function stores the provided :class:`~anndata.AnnData` object in ``sdata.tables[output_table_name]``.
-    When ``region`` is provided, the table is parsed as a SpatialData table and linked to one or more
-    spatial elements via ``region_key`` and ``instance_key``. If ``region`` is ``None``, the AnnData
-    object is added as a regular table without region annotations.
+    If ``sdata`` is backed by a Zarr store, also write the table to that store.
+    Otherwise, attach the table to ``sdata`` only in memory.
 
-    If ``sdata`` is backed by a zarr store, the resulting table element is also written to that store.
+    The prepared table is attached at ``sdata.tables[output_table_name]``.
+    After writing to a Zarr store, only that table is reopened with lazy matrices.
 
     Parameters
     ----------
     sdata
-        The :class:`~spatialdata.SpatialData` object to which the new table element will be added.
+        The :class:`~spatialdata.SpatialData` object to update.
     adata
-        The :class:`~anndata.AnnData` object to add. If ``region`` is not ``None``, ``adata.obs``
-        must contain the columns specified by ``region_key`` and ``instance_key``.
+        Parsed or unparsed :class:`~anndata.AnnData`. When ``region`` is provided,
+        ``adata.obs`` must already contain the columns named by ``region_key``
+        and ``instance_key``; their values are not inferred or created.
+        For an already-parsed table, these key names must match its existing
+        ``adata.uns["spatialdata_attrs"]`` metadata. Custom key names must be
+        supplied explicitly. Parsing updates a separate prepared table;
+        ``adata`` remains unchanged.
     output_table_name
-        Name of the output table element in ``sdata.tables``.
+        Name of the table in ``sdata.tables`` and, when backed, in the store.
     region
-        Regions annotated by the table. Typically this is the list of unique values in
-        ``adata.obs[region_key]``. Set to ``None`` if the table should not annotate any spatial element.
+        Names of spatial elements annotated by the resulting table, corresponding
+        to the values in ``adata.obs[region_key]``. Set to ``None`` to create an
+        unannotated table, even if ``adata`` is already parsed. This removes
+        linkage metadata from the prepared result, not its observation columns.
     instance_key
-        Name of the column in ``adata.obs`` that stores instance ids.
+        Name of the ``adata.obs`` column containing instance IDs within each region.
         Ignored if ``region`` is ``None``.
     region_key
-        Name of the column in ``adata.obs`` that stores the region labels annotated by the table.
+        Name of the ``adata.obs`` column containing each observation's region.
         Ignored if ``region`` is ``None``.
     overwrite
-        If ``True``, overwrite ``output_table_name`` if it already exists in ``sdata``.
+        Allow replacement of an existing table in backed ``sdata`` or its store.
+        Ignored for unbacked ``sdata``, where existing tables are always replaced.
 
     Returns
     -------
-    The updated :class:`~spatialdata.SpatialData` object.
+    spatialdata.SpatialData
+        The same ``sdata`` object, with the prepared table attached at
+        ``sdata.tables[output_table_name]``.
+
+    Notes
+    -----
+    Annotation preparation copies metadata, not entire matrices. For unbacked
+    ``sdata``, the attached table may share matrix data with ``adata``; this is
+    not a deep-copy API.
+
+    Backed writes finish serialization before replacing old data. Installation and
+    metadata finalization remain covered by rollback; handled failures restore the
+    previous stored table and attached entry. Unrelated elements are unchanged.
+    External references to a replaced table are not refreshed; use
+    ``sdata.tables[output_table_name]`` after success.
+
+    See Also
+    --------
+    harpy.table.write_table : Write a complete table without updating ``sdata``.
+
+    Examples
+    --------
+    In this example, ``sdata`` is backed by a Zarr store. Each row in
+    ``adata.obs`` has a ``"region"`` value of ``"cells"`` and an
+    ``"instance_id"`` identifying the corresponding cell.
+
+    The call writes the table to the store as ``"processed"`` and updates
+    ``sdata.tables["processed"]`` with the saved table. Its matrices are
+    reopened lazily, without loading their values into memory.
+
+    .. code-block:: python
+
+        sdata = hp.tb.add_table(
+            sdata,
+            adata=adata,
+            output_table_name="processed",
+            region=["cells"],
+            region_key="region",
+            instance_key="instance_id",
+            overwrite=True,
+        )
+        processed = sdata.tables["processed"]
     """
     manager = TableElementManager()
     sdata = manager.add_table(
