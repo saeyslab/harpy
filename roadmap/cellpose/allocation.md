@@ -7139,6 +7139,9 @@ rows per chunk). Use it for in-memory inputs, backed sparse reads, and new
 matrices requiring unselected rows. Preserve existing Dask input chunks and
 dense Zarr chunks; existing dense targets retain their merge layout. This is
 not an on-disk chunk-size setting or a fixed memory limit.
+Part 11f.vi a) may lazily repartition an internal view of the submitted values
+for merging; it does not change caller-owned arrays, stored chunks or the
+output-chunk policy above.
 
 An `.obsm` payload must be a matrix: `("obsm", key): None` is invalid and
 rejects the entire request before publication, including accompanying metadata
@@ -7434,6 +7437,79 @@ Instrument matrix access to verify chunked merging without whole-matrix
 materialization or unrelated reads. Exercise coupled metadata writes and
 failures during staging, publication and finalization, checking restoration
 of the affected entries and consolidated metadata.
+
+### Part 11f.vi a): shared regional-update blocks
+
+**Status: planned follow-up to the implemented regional writer.**
+
+Optimize how `_regional_matrix()` prepares `regional_values` for its merge
+tasks. Currently, separate Dask-array slices are passed into delayed calls;
+their independently prepared graphs can add graph-construction overhead and
+repeat input reads or computation. Do not assume that these calls retain
+shared source-task keys merely because the slices originate from one array.
+
+- Derive the required update row bands from the finalized output chunks and
+  the selected full-table row positions. Each band contains only the selected
+  observations belonging to that output row block, in their existing order.
+- Lazily rechunk an internal view of `regional_values` to those row bands and
+  the output column boundaries. Output blocks without selected observations
+  receive `updates=None`; do not create artificial update rows for them.
+- Convert the prepared array to delayed blocks once, outside the merge loops,
+  and pass those block references to the merge tasks. Rechunking followed by
+  independently converting each array slice to a delayed call is not the
+  intended optimization: preserve shared dependencies between update blocks.
+- Hoist the delayed merge-function wrapper outside the loops. Leave the
+  existing-matrix slicing and output concatenation unchanged in this part.
+
+Both Parts 11f.vi a) and b) preserve the public API, output-chunk policy,
+matching-format restriction, input immutability and shared publication/rollback
+contract. They still stage complete replacement matrices. Neither changes
+stored chunk layouts nor introduces whole-matrix computation or persistence
+in memory. Part 11f.ix separately addresses which on-disk chunks are rewritten.
+
+**Checks.** Reuse the regional writer's numerical and failure-recovery cases.
+Cover uneven/interleaved selections, empty update bands, partial new-entry fills,
+zero-column matrices and dense/CSR/CSC representations. Check that graph
+construction performs no payload reads or computation, and that execution
+neither collects complete old/merged matrices nor modifies supplied inputs.
+Add a controlled dense-write regression case in which one input block serves
+multiple output blocks, verifying shared input loading and correct values.
+Do not promise read-once behavior for all storage layouts or sparse writes:
+AnnData's sparse writer currently computes successive output chunks separately,
+so shared graph keys alone do not guarantee reuse across those computations.
+Compare graph-build cost in a small representative benchmark; avoid hard timing
+thresholds or exact graph-key/layer counts in unit tests.
+
+### Part 11f.vi b): reuse aligned existing blocks
+
+**Status: planned after Part 11f.vi a).**
+
+Avoid repeatedly slicing `existing` when every output block already corresponds
+exactly to one existing Dask block. After normalizing the output chunks and
+applying the CSR/CSC uncompressed-axis adjustments, explicitly compare the
+complete output chunk tuples with `existing.chunks`, including terminal chunks:
+
+- If they match, call `existing.to_delayed()` once and pass the corresponding
+  existing block references directly to the merge tasks.
+- If they differ, retain the existing slice-based path. Use an explicit
+  condition with a fallback, not an assertion that makes mismatched layouts
+  unsupported. Never infer alignment from nominal chunk sizes alone.
+- If the entry is new, retain `original=None`. Preserve the existing shortcut
+  for requests supplying all observations.
+
+Do not rely solely on today's lazy reader emitting full uncompressed axes for
+sparse matrices; the explicit comparison protects block correspondence if that
+implementation changes. The contracts and scope limits of Part 11f.vi a) also
+apply here.
+
+**Checks.** Exercise both the aligned-block path and a deliberately mismatched
+layout requiring slicing, including sparse-axis adjustments and uneven terminal
+chunks. Compare complete results with the same independent expected matrix,
+including unchanged observations and input buffers. Retain the no-premature-read
+and bounded-memory checks, and instrument a representative dense case to verify
+that existing blocks are shared without redundant reads. Measure graph-build
+overhead without making wall-clock speedups or internal graph structure part of
+the public contract.
 
 ### Part 11f.vii: integration with existing Harpy APIs
 
