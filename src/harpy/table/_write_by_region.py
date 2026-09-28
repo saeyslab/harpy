@@ -87,9 +87,10 @@ def write_table_components_by_region(
 
         Used for in-memory inputs, Zarr-backed sparse reads, and creating new
         ``.obsm`` entries for only some regions (filling the remaining
-        observations with ``fill_values``). Existing Dask input chunks and dense
-        Zarr chunks are preserved; existing dense targets retain their chunk
-        layout during merging.
+        observations with ``fill_values``). Input preparation preserves existing
+        Dask and dense Zarr chunks; merging may lazily repartition a working view
+        without changing supplied arrays. Existing dense targets retain their
+        chunk layout during merging.
 
         Controls computation, not on-disk chunk sizes or a fixed memory limit.
     overwrite
@@ -345,10 +346,11 @@ def _regional_matrix(
     For new entries, do not derive output chunk sizes from regional_values.chunks:
     a five-row input must not force five-row chunks across a large table.
 
-    Each task reads only its destination rectangle and the corresponding slice
-    of the submitted rows. The rank within table_row_positions, not the source block
-    number, determines that slice. Sparse output chunks span the uncompressed
-    axis, as required by AnnData's sparse writer.
+    For partial selections, a lazy working view of regional_values groups the
+    selected rows by their destination row band. Its delayed blocks are shared
+    across merge tasks; the supplied array and output chunk policy are unchanged.
+    Sparse output chunks span the uncompressed axis, as required by AnnData's
+    sparse writer.
     """
     dtype = regional_values.dtype if existing is None else existing.dtype
     if len(table_row_positions) == n_obs:
@@ -370,33 +372,68 @@ def _regional_matrix(
         if matrix_format == "dense"
         else getattr(sparse, f"{matrix_format}_matrix")((0, 0), dtype=dtype)
     )
+    # regional_values is the supplied .obsm matrix of new measurements, containing
+    # only the observations being updated. table_row_positions maps its rows to
+    # their destinations in the complete table (zero-based).
+    # Example: a 12-observation table, with four supplied measurement rows:
+    # regional_values[0], [1], [2], [3] belong at table rows 1, 2, 3, 6.
+    #
+    # table_row_positions        = [1, 2, 3, 6]
+    # chunks[0]                  = (3, 3, 3, 3)  # three table rows per output chunk
+    #
+    # The calculations below produce:
+    # table_row_chunk_boundaries = [0, 3, 6, 9, 12]
+    # regional_row_offsets       = [0, 2, 3, 4, 4]
+    # regional_row_counts        = [2, 1, 1, 0]
+    # regional_row_chunks        = (2, 1, 1)  # skip empty update chunks
+    #
+    # Thus regional_values[0:2], [2:3] and [3:4] supply the first three output
+    # row chunks. The fourth has no updates, so it needs no regional update chunk.
+    #
+    # Supplied observations follow stored table order, so updates for each output
+    # row chunk form a consecutive slice of regional_values.
+    # For each table chunk boundary, count the selected observations strictly
+    # before it. These cumulative counts become slice boundaries in regional_values.
+    # Consecutive offsets give each chunk's start and stop; equal offsets mean
+    # that chunk has no updates. Their differences give the update row counts.
+    table_row_chunk_boundaries = np.concatenate(([0], np.cumsum(chunks[0])))
+    regional_row_offsets = np.searchsorted(table_row_positions, table_row_chunk_boundaries)
+    regional_row_counts = np.diff(regional_row_offsets)
+    regional_row_chunks = tuple(int(count) for count in regional_row_counts if count > 0)
+    if shape[1]:
+        # Rechunk the supplied measurements to match these per-output-chunk update
+        # counts. Each resulting block contains exactly the updates for one output
+        # block. The updated rows need not be consecutive in that output block;
+        # block_row_positions specifies where each update belongs.
+        # Prepare these blocks together in one shared graph, avoiding independently
+        # constructed slices for every merge task. Task-based rechunking supports
+        # both NumPy and SciPy blocks.
+        regional_blocks = regional_values.rechunk((regional_row_chunks, chunks[1]), method="tasks").to_delayed()
+        regional_block_rows = iter(regional_blocks)
+    else:
+        # No values need updating on an empty feature axis. Skipping rechunking
+        # also avoids Dask replacing empty sparse blocks with dense ones.
+        regional_block_rows = iter(())
+    merge_block = delayed(_merge_regional_block)
     row_blocks = []
     table_row_start = 0
-    for height in chunks[0]:
+    for table_block_row, height in enumerate(chunks[0]):
         table_row_stop = table_row_start + height
-        regional_row_start, regional_row_stop = np.searchsorted(table_row_positions, [table_row_start, table_row_stop])
+        regional_row_start, regional_row_stop = regional_row_offsets[table_block_row : table_block_row + 2]
         block_row_positions = table_row_positions[regional_row_start:regional_row_stop] - table_row_start
+        # Empty output row bands do not consume a row of regional update blocks.
+        updates_for_row = next(regional_block_rows) if regional_row_stop > regional_row_start and shape[1] else None
         column_blocks = []
         table_column_start = 0
-        for width in chunks[1]:
+        for table_block_column, width in enumerate(chunks[1]):
             table_column_stop = table_column_start + width
             original = (
                 None
                 if existing is None
                 else existing[table_row_start:table_row_stop, table_column_start:table_column_stop]
             )
-            # original follows the existing matrix's Dask chunk boundaries.
-            # regional_values contains only selected observations, so the corresponding
-            # slice need not align with its input chunks. One input chunk may contribute
-            # to multiple output blocks and may consequently be read more than once.
-            updates = (
-                regional_values[regional_row_start:regional_row_stop, table_column_start:table_column_stop]
-                if regional_row_stop > regional_row_start
-                else None
-            )
-            block = delayed(_merge_regional_block)(
-                original, updates, block_row_positions, (height, width), dtype, matrix_format, fill
-            )
+            updates = None if updates_for_row is None else updates_for_row[table_block_column]
+            block = merge_block(original, updates, block_row_positions, (height, width), dtype, matrix_format, fill)
             column_blocks.append(da.from_delayed(block, shape=(height, width), dtype=dtype, meta=meta))
             table_column_start = table_column_stop
         row_blocks.append(da.concatenate(column_blocks, axis=1))
