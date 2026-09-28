@@ -148,8 +148,8 @@ An existing destination requires `overwrite=True`.
 Whole-table replacement is not a merge: old components absent from the new
 AnnData are not retained. Component writes preserve omitted siblings; replacing
 an `.uns` mapping replaces its whole value. `None` is an encoded value where
-supported, not a deletion command. There are no dataframe-column or regional
-row updates in these APIs.
+supported, not a deletion command. These two APIs do not provide dataframe-column
+or regional row updates; use the regional writer below for selected regions.
 
 Component writes preserve existing axis identities, their order, and spatial linkage.
 Matrix updates require the corresponding `obs_identity`, `var_names`, or
@@ -176,6 +176,56 @@ together with any other requested components in the same rollback operation.
 It does not rewrite the main table or unrelated matrices. Rollback restores
 the prior absence or null entry as well as coupled updates. Raw serialization
 uses AnnData's raw encoding, not a generic mapping.
+
+`hp.tb.write_table_components_by_region(store, table_name=..., components=...,
+obs_identity=..., fill_values=..., chunk_size=1000, overwrite=...)` updates individual `.obsm`
+matrices for complete regions of an existing annotated table. The nonempty
+`obs_identity` dataframe must contain exactly the stored region and instance
+columns, with a categorical region column and non-null, unique region/instance
+pairs. Actual region values select the regions; unused categories do not.
+Declared regions must match those actually present in stored observations
+before selection is validated.
+
+Supply every observation of each selected region exactly once, in stored table
+order, with each submitted matrix in that same order. If regions interleave,
+do not concatenate region-by-region blocks without aligning them first.
+The identity dataframe's index is ignored. Neither axis identities nor linkage
+can change; there is no automatic reordering or arbitrary subset-of-cells update.
+
+Submitted matrices must be numeric, two-dimensional dense, CSR or CSC matrices
+with known shapes. Dask inputs must also have known chunk sizes. DataFrame-valued
+matrices and `None` matrix payloads are rejected.
+
+- Existing matrices preserve unselected measurements, including missing values.
+  Updates require matching formats (dense/dense, CSR/CSR or CSC/CSC), unchanged
+  column counts, and safe casts into the stored dtype. The submitted regional
+  matrix and the stored matrix may have different storage backing and chunk
+  layouts. No automatic format conversion occurs.
+- New matrices retain the submitted format and dtype. Unselected rows require
+  an explicit scalar in `fill_values`, keyed by the submitted component path.
+  Those unselected rows require a zero fill for sparse matrices; dense fills
+  must be dtype-compatible. No fill is needed when every row is supplied.
+  Fills for existing entries are ignored; they never replace existing measurements.
+- Omitted components remain unchanged. Optional accompanying `.uns` replacements
+  update their entire values and share rollback with the matrices; callers
+  prepare coherent scientific metadata. Protected SpatialData annotation cannot change.
+
+Regional writes construct complete replacements in chunks and rewrite each
+affected `.obsm` entry in full. They do not read or rewrite unrelated matrices.
+`chunk_size` controls rows per computational chunk for dense/CSR matrices or
+columns for CSC matrices, keeping the other axis whole. It applies to in-memory
+inputs, backed sparse reads, and new matrices requiring unselected rows.
+Input preparation preserves existing Dask and dense Zarr chunks; merging may
+lazily repartition a working view without changing supplied arrays. When only
+some regions are selected, existing dense targets retain their chunk layout
+during merging.
+When all observations are supplied, the replacement instead keeps the prepared
+input's computational chunks, even when updating an existing entry.
+`chunk_size` does not specify on-disk chunk sizes.
+
+Memory may include identity columns, requested metadata, active chunks and
+caller-supplied computations. Inputs are not modified. The function returns
+`None` without refreshing live objects; reopen affected data after writing.
 
 The internal `_write_table_operation()` coordinates validation, serialization
 through `_write_anndata_element()`, and publication through
