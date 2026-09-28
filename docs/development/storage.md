@@ -154,8 +154,9 @@ or regional row updates; use the regional writer below for selected regions.
 Component writes preserve existing axis identities, their order, and spatial linkage.
 Matrix updates require the corresponding `obs_identity`, `var_names`, or
 `raw_var_names`, unless a supplied `obs`, `var`, or `raw.var` dataframe already
-provides them. For annotated tables, observation identity means ordered
-`(region, instance_id)` pairs; the identity dataframe's index is ignored.
+provides them. When both a dataframe and explicit identities are supplied, both
+are validated and must agree in value and order. For annotated tables, observation
+identity means ordered `(region, instance_id)` pairs; the identity dataframe's index is ignored.
 Unannotated tables use observation names. Identities must be unique; different
 ordering is rejected rather than automatically corrected. Actual dataframe
 replacements also preserve their stored index. Axis or linkage changes require
@@ -235,6 +236,12 @@ destinations. Matrix validation inspects structure rather than numerical values.
 Annotation-only updates do not read or rewrite unrelated matrices; consolidation
 may inspect metadata across the store.
 
+For a complete-table write, this internal operation also validates any optional
+`obs_identity`, `var_names`, or `raw_var_names` against the submitted AnnData, not
+the old destination axes. Conflicting identities are rejected before staging.
+Public `write_table()` and `add_table()` obtain identities from the AnnData itself;
+they do not require separate identity arguments.
+
 Lazy and storage-backed matrices are serialized incrementally, without preliminary
 whole-matrix materialization or densification. Memory use includes requested
 annotations, active chunks, and computations needed to produce them; no fixed
@@ -261,6 +268,55 @@ shared publisher's recovery limitations still apply.
 Inputs are not modified, and path-based writes do not synchronize an existing
 `sdata` or external references. Reopen affected data after writing; dirty/stale
 tracking remains caller-owned as described below.
+
+#### Adding a table to SpatialData
+
+`hp.tb.add_table(sdata, adata, output_table_name=..., region=..., overwrite=...)`
+combines table preparation with attachment to the supplied `sdata`:
+
+- **Unbacked `sdata`:** attach the prepared table without writing or computing its
+  matrices. Existing entries are replaced regardless of `overwrite`, preserving
+  this API's unbacked behavior.
+- **Backed `sdata`:** use `_write_table_operation()` for a complete-table write,
+  reopen only the affected published table using `_read_anndata_table()` in lazy
+  mode, and attach it before metadata finalization and backup disposal.
+  Replacing an attached or stored table requires `overwrite=True`, including
+  tables omitted when reading a store selectively.
+
+The caller's AnnData is not modified: parsing uses copied annotations while
+retaining matrix representations without a preliminary whole-matrix copy or
+computation. Unbacked results may still share matrix data with the input.
+Any StringDType compatibility conversion applies only to the prepared or reopened
+target, not other tables.
+
+The shared writer owns disk and root-metadata recovery; the adapter restores the
+previous attached entry on failure, or removes the new entry if none existed.
+Other attached elements and detached references are not refreshed. After success,
+use `sdata.tables[output_table_name]` for the current table.
+
+For example, write a complete result and refresh its attached representation:
+
+```python
+sdata = hp.tb.add_table(
+    sdata, processed, output_table_name="processed", region=["cells"],
+    region_key="region", instance_key="instance_id", overwrite=True,
+)
+processed = sdata.tables["processed"]
+```
+
+For an annotation-only update, the explicit component writer avoids rewriting
+matrices. It does not refresh the live object, so reopen the affected table:
+
+```python
+hp.tb.write_table_components(
+    sdata.path, table_name="processed", components={("obs",): updated_obs}, overwrite=True,
+)
+sdata.tables["processed"] = hp.tb.read_table(sdata.path, table_name="processed")
+```
+
+Here `updated_obs` preserves the stored index and, for an annotated table, its
+region/instance identities and order. Complete-table writes are needed to change
+axes or linkage.
 
 #### SpatialData-specific table metadata
 
