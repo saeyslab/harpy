@@ -139,6 +139,98 @@ def test_complete_write_allows_instance_ids_shared_by_different_regions(make_tab
     assert reopened.uns[TableModel.ATTRS_KEY]["region"] == ["cells_a", "cells_b"]
 
 
+@pytest.mark.parametrize("table_name", ["new", "counts"])
+@pytest.mark.parametrize("annotated", [False, True])
+def test_complete_write_explicit_identities_match_submitted_axes(make_table_io_store, table_name, annotated):
+    """Optional identities describe the submitted table, even when replacing different stored axes."""
+    path = make_table_io_store()
+    table = AnnData(
+        X=da.ones((3, 2), chunks=(1, 2)),
+        obs=pd.DataFrame(
+            {"sample": pd.Categorical(["new_cells"] * 3), "cell_id": [7, 8, 9]},
+            index=["new1", "new2", "new3"],
+        ),
+        var=pd.DataFrame(index=["new_gene1", "new_gene2"]),
+    )
+    table.raw = AnnData(
+        X=da.zeros((3, 4), chunks=(1, 4)),
+        obs=table.obs.copy(),
+        var=pd.DataFrame(index=["raw_a", "raw_b", "raw_c", "raw_d"]),
+    )
+    if annotated:
+        TableModel.parse(table, region="new_cells", region_key="sample", instance_key="cell_id")
+        # Pair values and order identify annotated observations, not this index.
+        obs_identity = table.obs[["sample", "cell_id"]].set_axis(["ignored1", "ignored2", "ignored3"])
+    else:
+        obs_identity = table.obs_names
+
+    with table_writer._write_table_operation(
+        path,
+        table_name=table_name,
+        adata=table,
+        obs_identity=obs_identity,
+        var_names=table.var_names,
+        raw_var_names=table.raw.var_names,
+        overwrite=True,
+    ):
+        pass
+
+    reopened = read_table(path, table_name=table_name, mode="eager")
+    pd.testing.assert_frame_equal(reopened.obs, table.obs)
+    pd.testing.assert_frame_equal(reopened.var, table.var)
+    pd.testing.assert_frame_equal(reopened.raw.var, table.raw.var)
+    np.testing.assert_array_equal(reopened.X, np.ones((3, 2)))
+    np.testing.assert_array_equal(reopened.raw.X, np.zeros((3, 4)))
+
+
+@pytest.mark.parametrize("axis", ["annotated_obs", "obs", "var", "raw_var"])
+@pytest.mark.parametrize("change", ["reordered", "different"])
+def test_complete_write_rejects_conflicting_identities_before_staging(make_table_io_store, monkeypatch, axis, change):
+    """An AnnData's axis dataframes do not excuse contradictory explicit identities."""
+    path = make_table_io_store()
+    table = read_table(path, table_name="counts", mode="lazy")
+    if axis == "annotated_obs":
+        TableModel.parse(table, region="cells", region_key="region", instance_key="instance")
+        parameter = "obs_identity"
+        identity = table.obs[["region", "instance"]].copy()
+        if change == "reordered":
+            identity = identity.iloc[::-1]
+        else:
+            identity["instance"] += 10
+    else:
+        parameter, identity = {
+            "obs": ("obs_identity", table.obs_names),
+            "var": ("var_names", table.var_names),
+            "raw_var": ("raw_var_names", table.raw.var_names),
+        }[axis]
+        identity = identity[::-1] if change == "reordered" else pd.Index(["other", *identity[1:]])
+    before = _store_bytes(path)
+
+    def unexpected_staging(*args, **kwargs):
+        pytest.fail("Conflicting identities must fail before creating a staging workspace.")
+
+    monkeypatch.setattr(table_writer.tempfile, "mkdtemp", unexpected_staging)
+    with pytest.raises(ValueError, match=parameter):
+        with table_writer._write_table_operation(
+            path, table_name="counts", adata=table, overwrite=True, **{parameter: identity}
+        ):
+            pytest.fail("Conflicting identities must not be published.")
+    assert _store_bytes(path) == before
+
+
+def test_complete_write_rejects_raw_names_without_raw(make_table_io_store):
+    path = make_table_io_store()
+    table = read_table(path, table_name="counts")
+    table.raw = None
+    before = _store_bytes(path)
+    with pytest.raises(ValueError, match="raw_var_names.*no raw feature axis"):
+        with table_writer._write_table_operation(
+            path, table_name="counts", adata=table, raw_var_names=["gene"], overwrite=True
+        ):
+            pytest.fail("A missing raw axis must reject explicit raw feature names.")
+    assert _store_bytes(path) == before
+
+
 @pytest.mark.parametrize("scope", ["table", "components", "raw"])
 @pytest.mark.parametrize("matrix_kind", ["dense", "csr", "csc"])
 def test_lazy_self_overwrite_finishes_staging_before_publication(make_table_io_store, scope, matrix_kind):
@@ -397,6 +489,37 @@ def test_annotated_pairs_not_identity_frame_index_define_alignment(make_table_io
         components={("obs",): table.obs.assign(score=[1, 2])},
         overwrite=True,
     )
+
+
+@pytest.mark.parametrize("axis", ["annotated_obs", "obs", "var", "raw_var"])
+def test_component_dataframe_and_explicit_identities_must_agree(make_table_io_store, axis):
+    """Supplying an axis dataframe makes explicit identities optional, not ignored."""
+    path = make_table_io_store()
+    if axis == "annotated_obs":
+        table = _annotated_store(path)
+        frame_path, frame, parameter = ("obs",), table.obs, "obs_identity"
+        identity = table.obs[["region", "instance"]].set_axis(["ignored1", "ignored2"])
+        conflicting_identity = identity.iloc[::-1]
+    else:
+        table = read_table(path, table_name="counts")
+        frame_path, frame, parameter = {
+            "obs": (("obs",), table.obs, "obs_identity"),
+            "var": (("var",), table.var, "var_names"),
+            "raw_var": (("raw", "var"), table.raw.var, "raw_var_names"),
+        }[axis]
+        identity = frame.index
+        conflicting_identity = identity[::-1]
+    components = {frame_path: frame.assign(score=np.arange(len(frame)))}
+    write_table_components(path, table_name="counts", components=components, overwrite=True, **{parameter: identity})
+    reopened = read_table_components(path, table_name="counts", components=[frame_path])
+    pd.testing.assert_frame_equal(reopened[frame_path], components[frame_path])
+
+    before = _store_bytes(path)
+    with pytest.raises(ValueError, match="differ in order"):
+        write_table_components(
+            path, table_name="counts", components=components, overwrite=True, **{parameter: conflicting_identity}
+        )
+    assert _store_bytes(path) == before
 
 
 @pytest.mark.parametrize(
