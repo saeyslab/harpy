@@ -13,6 +13,7 @@ import pandas as pd
 import zarr
 from anndata.abc import CSCDataset, CSRDataset
 from dask import delayed
+from numpy.typing import NDArray
 from scipy import sparse
 
 from harpy._storage._anndata import _decode_anndata_element, _read_anndata_element
@@ -27,6 +28,8 @@ from harpy.table._write_validation import (
     _read_spatialdata_attrs,
     _validate_observation_annotation,
 )
+
+type _MatrixBlock = np.ndarray | sparse.csr_matrix | sparse.csc_matrix | sparse.csr_array | sparse.csc_array
 
 _DEFAULT_REGIONAL_CHUNK_SIZE = 1000
 
@@ -202,19 +205,19 @@ def _write_table_components_by_region_operation(
     unknown = regions - set(stored_identity[region_key].unique())
     if unknown:
         raise ValueError(f"Unknown regions in obs_identity: {sorted(unknown, key=str)!r}.")
-    selected = stored_identity[region_key].isin(regions).to_numpy()
-    _match_identity(supplied_pairs, stored_pairs[selected], label="obs_identity")
-    selected_rows = np.flatnonzero(selected)
+    selected_row_mask = stored_identity[region_key].isin(regions).to_numpy()
+    _match_identity(supplied_pairs, stored_pairs[selected_row_mask], label="obs_identity")
+    table_row_positions = np.flatnonzero(selected_row_mask)
 
     replacements = dict(components)
     for path in paths:
         _check_component_destination(group, path, overwrite=overwrite)
         if path[0] != "obsm":
             continue
-        supplied = components[path]
-        matrix_format = _matrix_format(supplied, label=f"Component {path!r}")
-        if supplied.shape[0] != len(selected_rows):
-            raise ValueError(f"Component {path!r} must contain {len(selected_rows)} selected rows.")
+        regional_values = components[path]
+        matrix_format = _matrix_format(regional_values, label=f"Component {path!r}")
+        if regional_values.shape[0] != len(table_row_positions):
+            raise ValueError(f"Component {path!r} must contain {len(table_row_positions)} selected rows.")
         existing = None
         if "/".join(path) in group:
             element = group["/".join(path)]
@@ -225,23 +228,23 @@ def _write_table_components_by_region_operation(
             existing = _read_anndata_element(group, path, mode="lazy", sparse_chunk_size=chunk_size)
             if _matrix_format(existing, label=f"Stored component {path!r}") != matrix_format:
                 raise ValueError(f"Component {path!r} must match the stored matrix format (dense, CSR or CSC).")
-            if existing.shape != (len(stored_identity), supplied.shape[1]):
+            if existing.shape != (len(stored_identity), regional_values.shape[1]):
                 raise ValueError(f"Component {path!r} must preserve the stored matrix shape and column count.")
-            if not np.can_cast(supplied.dtype, existing.dtype, casting="safe"):
+            if not np.can_cast(regional_values.dtype, existing.dtype, casting="safe"):
                 raise ValueError(f"Component {path!r} cannot be safely cast to stored dtype {existing.dtype}.")
 
         fill = None
         if existing is None:
-            if len(selected_rows) != len(stored_identity) and path not in fills:
+            if len(table_row_positions) != len(stored_identity) and path not in fills:
                 raise ValueError(f"New component {path!r} requires a fill for unselected rows.")
             if path in fills:
-                fill = _scalar_fill(fills[path], supplied.dtype)
-                if matrix_format != "dense" and len(selected_rows) != len(stored_identity) and fill != 0:
+                fill = _scalar_fill(fills[path], regional_values.dtype)
+                if matrix_format != "dense" and len(table_row_positions) != len(stored_identity) and fill != 0:
                     raise ValueError("New sparse matrices with unselected rows require a zero fill.")
         replacements[path] = _regional_matrix(
-            _lazy_matrix(supplied, matrix_format, chunk_size=chunk_size),
+            _lazy_matrix(regional_values, matrix_format, chunk_size=chunk_size),
             existing=existing,
-            selected_rows=selected_rows,
+            table_row_positions=table_row_positions,
             n_obs=len(stored_identity),
             matrix_format=matrix_format,
             fill=fill,
@@ -280,7 +283,7 @@ def _matrix_format(value: object, *, label: str) -> str:
     return matrix_format
 
 
-def _scalar_fill(value: object, dtype: np.dtype) -> object:
+def _scalar_fill(value: object, dtype: np.dtype) -> np.generic:
     """Validate a scalar fill without widening the new matrix's dtype."""
     if not isinstance(value, Number) or not np.can_cast(np.min_scalar_type(value), dtype, casting="safe"):
         raise ValueError(f"Fill must be a numeric scalar compatible with dtype {dtype}.")
@@ -303,24 +306,26 @@ def _lazy_matrix(value: object, matrix_format: str, *, chunk_size: int) -> da.Ar
 
 
 def _regional_matrix(
-    supplied: da.Array,
+    regional_values: da.Array,
     *,
     existing: da.Array | None,
-    selected_rows: np.ndarray,
+    table_row_positions: NDArray[np.intp],
     n_obs: int,
     matrix_format: str,
-    fill: object,
+    fill: np.generic | None,
     chunk_size: int,
 ) -> da.Array:
     """Build full-axis replacements from independently chunked old and selected rows.
 
-    The supplied matrix contains selected observations; the returned .obsm
-    matrix covers all table observations.
+    regional_values contains the measurements to write for the selected observations.
+    table_row_positions[i] gives the zero-based full-table destination of row i
+    in regional_values.
+    The returned .obsm matrix covers all table observations.
 
     Computational chunking of the returned matrix::
 
         All observations supplied
-            -> Keep supplied.chunks, as prepared by _lazy_matrix():
+            -> Keep regional_values.chunks, as prepared by _lazy_matrix():
                Dask: existing input chunks
                dense Zarr: on-disk chunks
                in-memory / backed sparse: chunks based on chunk_size
@@ -337,18 +342,18 @@ def _regional_matrix(
                dense / CSR: (chunk_size rows, all columns)
                CSC:         (all output rows, chunk_size columns)
 
-    For new entries, do not derive output chunk sizes from supplied.chunks:
+    For new entries, do not derive output chunk sizes from regional_values.chunks:
     a five-row input must not force five-row chunks across a large table.
 
     Each task reads only its destination rectangle and the corresponding slice
-    of the submitted rows. The rank within selected_rows, not the source block
+    of the submitted rows. The rank within table_row_positions, not the source block
     number, determines that slice. Sparse output chunks span the uncompressed
     axis, as required by AnnData's sparse writer.
     """
-    dtype = supplied.dtype if existing is None else existing.dtype
-    if len(selected_rows) == n_obs:
-        return supplied.astype(dtype)
-    shape = (n_obs, supplied.shape[1])
+    dtype = regional_values.dtype if existing is None else existing.dtype
+    if len(table_row_positions) == n_obs:
+        return regional_values.astype(dtype)
+    shape = (n_obs, regional_values.shape[1])
     if existing is not None:
         chunks = existing.chunks
     elif matrix_format == "csc":
@@ -365,46 +370,88 @@ def _regional_matrix(
         if matrix_format == "dense"
         else getattr(sparse, f"{matrix_format}_matrix")((0, 0), dtype=dtype)
     )
-    rows = []
-    row_start = 0
+    row_blocks = []
+    table_row_start = 0
     for height in chunks[0]:
-        row_stop = row_start + height
-        start, stop = np.searchsorted(selected_rows, [row_start, row_stop])
-        local_rows = selected_rows[start:stop] - row_start
-        columns = []
-        col_start = 0
+        table_row_stop = table_row_start + height
+        regional_row_start, regional_row_stop = np.searchsorted(table_row_positions, [table_row_start, table_row_stop])
+        block_row_positions = table_row_positions[regional_row_start:regional_row_stop] - table_row_start
+        column_blocks = []
+        table_column_start = 0
         for width in chunks[1]:
-            col_stop = col_start + width
-            original = None if existing is None else existing[row_start:row_stop, col_start:col_stop]
-            updates = supplied[start:stop, col_start:col_stop] if stop > start else None
-            block = delayed(_merge_regional_block)(
-                original, updates, local_rows, (height, width), dtype, matrix_format, fill
+            table_column_stop = table_column_start + width
+            original = (
+                None
+                if existing is None
+                else existing[table_row_start:table_row_stop, table_column_start:table_column_stop]
             )
-            columns.append(da.from_delayed(block, shape=(height, width), dtype=dtype, meta=meta))
-            col_start = col_stop
-        rows.append(da.concatenate(columns, axis=1))
-        row_start = row_stop
-    return da.concatenate(rows, axis=0)
+            # original follows the existing matrix's Dask chunk boundaries.
+            # regional_values contains only selected observations, so the corresponding
+            # slice need not align with its input chunks. One input chunk may contribute
+            # to multiple output blocks and may consequently be read more than once.
+            updates = (
+                regional_values[regional_row_start:regional_row_stop, table_column_start:table_column_stop]
+                if regional_row_stop > regional_row_start
+                else None
+            )
+            block = delayed(_merge_regional_block)(
+                original, updates, block_row_positions, (height, width), dtype, matrix_format, fill
+            )
+            column_blocks.append(da.from_delayed(block, shape=(height, width), dtype=dtype, meta=meta))
+            table_column_start = table_column_stop
+        row_blocks.append(da.concatenate(column_blocks, axis=1))
+        table_row_start = table_row_stop
+    return da.concatenate(row_blocks, axis=0)
 
 
-def _merge_regional_block(original, updates, selected_rows, shape, dtype, matrix_format, fill):
-    """Replace selected local rows without modifying input blocks or densifying sparse data."""
+def _merge_regional_block(
+    original: _MatrixBlock | None,
+    updates: _MatrixBlock | None,
+    block_row_positions: NDArray[np.intp],
+    shape: tuple[int, int],
+    dtype: np.dtype,
+    matrix_format: str,
+    fill: np.generic | None,
+) -> _MatrixBlock:
+    """Replace selected local rows without modifying input blocks or densifying sparse data.
+
+    Parameters
+    ----------
+    original
+        Computed NumPy/SciPy block of existing measurements. None when creating
+        a new entry.
+    updates
+        Computed measurements for the selected observations in this block,
+        with rows ordered to match block_row_positions. None when the block
+        contains no selected observations.
+    block_row_positions
+        Zero-based row positions within the output block, one per row of updates.
+    shape
+        Output block shape as (number of rows, number of columns).
+    dtype
+        Output dtype, already validated as compatible with the updates.
+    matrix_format
+        Output representation: "dense", "csr" or "csc".
+    fill
+        Scalar for unselected rows of a new entry. Ignored, and may be None,
+        when original is provided. New sparse blocks use implicit zeros.
+    """
     if matrix_format == "dense":
         result = np.full(shape, fill, dtype=dtype) if original is None else original.copy()
         if updates is not None:
-            result[selected_rows] = updates
+            result[block_row_positions] = updates
         return result
     # Keep only unselected old entries and remap incoming sparse row indices.
     # No assignment into shared sparse buffers (or dense temporary) is needed.
     keep_rows = np.ones(shape[0], dtype=bool)
-    keep_rows[selected_rows] = False
+    keep_rows[block_row_positions] = False
     old = sparse.coo_matrix(shape, dtype=dtype) if original is None else original.tocoo()
     keep = keep_rows[old.row]
     new = sparse.coo_matrix((0, shape[1]), dtype=dtype) if updates is None else updates.tocoo()
     result = sparse.coo_matrix(
         (
             np.concatenate((old.data[keep], new.data)).astype(dtype, copy=False),
-            (np.concatenate((old.row[keep], selected_rows[new.row])), np.concatenate((old.col[keep], new.col))),
+            (np.concatenate((old.row[keep], block_row_positions[new.row])), np.concatenate((old.col[keep], new.col))),
         ),
         shape=shape,
     )
