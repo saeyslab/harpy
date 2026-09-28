@@ -9,7 +9,7 @@ from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
 from harpy.shape._shape import filter_shapes
-from harpy.table._manager import TableElementManager
+from harpy.table._manager import _add_table
 from harpy.utils._keys import _CELLSIZE_KEY, _INSTANCE_KEY, _REGION_KEY
 
 
@@ -411,8 +411,7 @@ def add_table(
         )
         processed = sdata.tables["processed"]
     """
-    manager = TableElementManager()
-    sdata = manager.add_table(
+    return _add_table(
         sdata,
         adata=adata,
         output_table_name=output_table_name,
@@ -421,5 +420,3 @@ def add_table(
         region_key=region_key,
         overwrite=overwrite,
     )
-
-    return sdata
