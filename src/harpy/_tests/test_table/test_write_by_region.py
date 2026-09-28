@@ -141,7 +141,14 @@ def test_input_chunk_size_preserves_existing_dense_and_dask_chunks(tmp_path, mat
 def test_chunk_size_controls_merge_layout_except_for_existing_dense_targets(
     regional_store, monkeypatch, matrix_format, create
 ):
-    """Inspect computational chunks handed to the writer, not on-disk chunks."""
+    """Check the chunk_size contract for partial-region merge outputs.
+
+    With chunk_size=2, new dense and new/existing CSR entries use two-row
+    chunks spanning all columns; CSC entries use two-column chunks spanning
+    all rows. Existing dense entries retain their stored layout instead.
+    Capture the complete replacement matrix's computational chunks before
+    serialization, not its eventual on-disk chunks or the input chunk layout.
+    """
     path, _, identity, _ = regional_store(matrix_format)
     component = ("obsm", "new" if create else "features")
     values = np.ones((4, 5), dtype=np.float32)
@@ -482,7 +489,7 @@ def test_matrix_can_have_an_empty_feature_axis(regional_store, matrix_format, cr
 def test_regional_graph_construction_does_not_read_or_compute(
     regional_store, tmp_path, monkeypatch, matrix_format, create
 ):
-    """Preparing shared update blocks builds a graph without loading their values.
+    """Preparing shared merge blocks builds a graph without loading their values.
 
     Single-row dense/CSR bands exercise leading and interior bands without
     updates. Existing dense layouts and CSC's full-row blocks stay unchanged.
@@ -521,6 +528,127 @@ def test_regional_graph_construction_does_not_read_or_compute(
     expected = np.zeros_like(old) if create else old.copy()
     expected[[1, 2, 3, 6]] = values
     np.testing.assert_array_equal(computed if matrix_format == "dense" else computed.toarray(), expected)
+
+
+@pytest.mark.parametrize("matrix_format", ["dense", "csr", "csc"])
+def test_existing_block_alignment_preserves_values_and_inputs(matrix_format):
+    """Reuse aligned blocks without changing measurements or input buffers.
+
+    Uneven terminal chunks must retain the right measurements, including rows
+    without updates. Sparse layouts keep the uncompressed axis whole, matching
+    the lazy reader's contract.
+    """
+    old = np.arange(77, dtype=np.float32).reshape(11, 7)
+    old[4, 1] = np.nan
+    values = np.arange(28, dtype=np.float32).reshape(4, 7) * 10
+    table_row_positions = np.array([1, 3, 9, 10])
+    original = old.copy() if matrix_format == "dense" else getattr(sparse, f"{matrix_format}_matrix")(old)
+    updates = values.copy() if matrix_format == "dense" else getattr(sparse, f"{matrix_format}_matrix")(values)
+    chunks = ((4, 4, 3), (3, 3, 1))
+    if matrix_format == "csr":
+        expected_chunks = (chunks[0], (7,))
+    elif matrix_format == "csc":
+        expected_chunks = ((11,), chunks[1])
+    else:
+        expected_chunks = chunks
+    existing = da.from_array(original, chunks=expected_chunks, asarray=False)
+    regional_values = da.from_array(updates, chunks=(2, 3), asarray=False)
+
+    result = regional_writer._regional_matrix(
+        regional_values,
+        existing=existing,
+        table_row_positions=table_row_positions,
+        n_obs=len(old),
+        matrix_format=matrix_format,
+        fill=None,
+        chunk_size=4,
+    )
+    assert result.chunks == expected_chunks
+    computed = result.compute()
+    assert ("dense" if isinstance(computed, np.ndarray) else computed.format) == matrix_format
+    expected = old.copy()
+    expected[table_row_positions] = values
+    np.testing.assert_array_equal(computed if matrix_format == "dense" else computed.toarray(), expected)
+    np.testing.assert_array_equal(original if matrix_format == "dense" else original.toarray(), old)
+    np.testing.assert_array_equal(updates if matrix_format == "dense" else updates.toarray(), values)
+
+
+@pytest.mark.parametrize("matrix_format", ["csr", "csc"])
+def test_misaligned_existing_blocks_rejected_before_computation(matrix_format):
+    """A split uncompressed axis violates the internal reader/merge contract.
+
+    The public writer's lazy reader never supplies this layout. Construct it
+    directly to check that a future reader change fails explicitly rather
+    than silently pairing existing blocks with different output boundaries.
+    """
+    matrix_type = getattr(sparse, f"{matrix_format}_matrix")
+    existing = da.from_array(matrix_type(np.ones((11, 7))), chunks=(4, 3), asarray=False)
+    regional_values = da.from_array(matrix_type(np.ones((4, 7))), chunks=(2, 3), asarray=False)
+
+    def unexpected_compute(*args, **kwargs):
+        pytest.fail("Chunk-layout validation started Dask computation.")
+
+    with Callback(start=unexpected_compute):
+        with pytest.raises(RuntimeError, match="Existing matrix chunks do not match the finalized output layout"):
+            regional_writer._regional_matrix(
+                regional_values,
+                existing=existing,
+                table_row_positions=np.array([1, 3, 9, 10]),
+                n_obs=11,
+                matrix_format=matrix_format,
+                fill=None,
+                chunk_size=4,
+            )
+
+
+def test_aligned_existing_blocks_share_source_reads(regional_store, monkeypatch):
+    """A dense write shares existing source blocks across multiple column blocks.
+
+    Each delayed loader returns one caller-owned three-row block. Splitting
+    its columns gives the existing matrix the stored (3, 2) chunk layout.
+    All output blocks align, but independently delaying their array slices
+    can reload the shared source block. Count those loads during a full write
+    and check that neither updated nor untouched source rows were modified.
+    """
+    path, _, identity, old = regional_store()
+    blocks = [block.copy() for block in np.split(old, [3, 6, 9])]
+    requested = []
+
+    def load_block(index):
+        requested.append(index)
+        return blocks[index]
+
+    existing = da.concatenate(
+        [
+            da.from_delayed(delayed(load_block)(i), shape=block.shape, dtype=block.dtype, meta=block)
+            for i, block in enumerate(blocks)
+        ],
+        axis=0,
+    ).rechunk((3, 2), method="tasks")
+    original_read = regional_writer._read_anndata_element
+
+    # Substitute counted source blocks only for the regional writer's lazy read;
+    # validation and serialization still operate on the real table.
+    def read_existing(group, component_path, **kwargs):
+        if component_path == ("obsm", "features") and kwargs.get("mode") == "lazy":
+            return existing
+        return original_read(group, component_path, **kwargs)
+
+    monkeypatch.setattr(regional_writer, "_read_anndata_element", read_existing)
+    values = np.arange(20, dtype=np.float32).reshape(4, 5) * 10
+    write_table_components_by_region(
+        path,
+        table_name="counts",
+        components={("obsm", "features"): values},
+        obs_identity=identity,
+        chunk_size=3,
+        overwrite=True,
+    )
+    assert sorted(requested) == list(range(len(blocks)))
+    np.testing.assert_array_equal(np.concatenate(blocks), old)
+    expected = old.copy()
+    expected[[1, 2, 3, 6]] = values
+    np.testing.assert_array_equal(read_zarr(path / "tables/counts").obsm["features"], expected)
 
 
 @pytest.mark.parametrize("matrix_format", ["dense", "csr", "csc"])
