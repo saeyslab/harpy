@@ -82,19 +82,17 @@ def feature_sdata(tmp_path):
     return make
 
 
-@pytest.mark.parametrize("zarr_format", [2, 3])
 @pytest.mark.parametrize("existing", [False, True])
 @pytest.mark.parametrize("mode", ["lazy", "backed"])
-def test_backed_update_preserves_other_regions_and_unrelated_data(
-    feature_sdata, monkeypatch, zarr_format, existing, mode
-):
+def test_backed_update_preserves_other_regions_and_unrelated_data(feature_sdata, monkeypatch, existing, mode):
     """Update A in stored row order without reading/writing X or other matrices.
 
     New matrices fill B with NaN; existing matrices keep B's stored values and
     source description. Only the two updated entries are refreshed in memory,
     preserving unrelated local changes and matrix references.
+    Regional-writer tests cover the storage-format combinations separately.
     """
-    sdata = feature_sdata(zarr_format=zarr_format, existing=existing, mode=mode, metadata_key="custom_features")
+    sdata = feature_sdata(existing=existing, mode=mode, metadata_key="custom_features")
     table = sdata.tables["counts"]
     previous_x, previous_other = table.X, table.obsm["unrelated"]
     table.obs["local_note"] = "unsaved"
@@ -289,8 +287,9 @@ def test_incompatible_feature_matrix_is_rejected_without_payload_reads(
 ):
     """Feature-matrix compatibility is checked in both storage modes.
 
-    Neither path may change the existing entries on failure. Backed checks use
-    only matrix metadata, including when rejecting DataFrames and sparse formats.
+    Each invalid representation, shape or dtype must fail without changing
+    existing entries. Backed checks inspect matrix metadata without reading
+    payload values, including when rejecting DataFrames and sparse formats.
     """
     sdata = feature_sdata(backed=backed)
     table = sdata.tables["counts"]
@@ -377,11 +376,6 @@ def test_backed_update_rejects_reordered_unselected_observations(feature_sdata):
     [
         ("missing_table", "does not exist in sdata.tables"),
         ("missing_annotation", "must have SpatialData annotation"),
-        ("malformed_annotation", "must have SpatialData annotation"),
-        ("missing_identity_key", "distinct, nonempty region_key and instance_key"),
-        ("missing_identity_column", "must contain the stored region and instance columns"),
-        ("noncategorical_regions", "region column must be categorical"),
-        ("duplicate_selected_identity", "region/instance pairs must be non-null and unique"),
         ("duplicate_unselected_identity", "region/instance pairs must be non-null and unique"),
         ("missing_labels", "does not exist in sdata.labels"),
         ("unobserved_labels", "has no observations in table"),
@@ -393,7 +387,8 @@ def test_invalid_feature_table_or_selection_fails_before_calculation(feature_sda
     A valid A/B table cannot accept an A/C request merely because C exists in
     sdata.labels or in unused categories. Duplicate identities also fail when
     they occur in B, outside the selected region A. No calculation or mutation
-    should occur after any of these invalid requests.
+    should occur after any of these representative invalid requests; detailed
+    shared-validator cases are covered by the regional-writer tests.
     """
     sdata = feature_sdata(backed=backed)
     table = sdata.tables["counts"]
@@ -402,16 +397,6 @@ def test_invalid_feature_table_or_selection_fails_before_calculation(feature_sda
         del sdata.tables["counts"]
     elif case == "missing_annotation":
         del table.uns[TableModel.ATTRS_KEY]
-    elif case == "malformed_annotation":
-        table.uns[TableModel.ATTRS_KEY] = "not a mapping"
-    elif case == "missing_identity_key":
-        del table.uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY]
-    elif case == "missing_identity_column":
-        table.obs.drop(columns="object_id", inplace=True)
-    elif case == "noncategorical_regions":
-        table.obs["sample"] = table.obs["sample"].astype(object)
-    elif case == "duplicate_selected_identity":
-        table.obs.loc["cell5", "object_id"] = 2
     elif case == "duplicate_unselected_identity":
         table.obs.loc["cell4", "object_id"] = 1
     elif case == "missing_labels":
@@ -448,19 +433,17 @@ def test_invalid_feature_table_or_selection_fails_before_calculation(feature_sda
         assert _store_bytes(sdata.path) == before
 
 
-@pytest.mark.parametrize("zarr_format", [2, 3])
 @pytest.mark.parametrize("existing", [False, True])
-@pytest.mark.parametrize("failure", ["matrix", "metadata", "installation", "finalization"])
-def test_failed_feature_update_restores_disk_and_attached_entries(
-    feature_sdata, monkeypatch, zarr_format, existing, failure
-):
+@pytest.mark.parametrize("failure", ["staging", "installation", "finalization"])
+def test_failed_feature_update_restores_disk_and_attached_entries(feature_sdata, monkeypatch, existing, failure):
     """Both component writes and attachment belong to one rollback window.
 
-    Fail after a staged component write, after installing the new matrix, or
+    Fail after staging the metadata, after installing the new matrix, or
     after consolidation changes root metadata. Restore old references (or
     remove newly created entries) as well as the exact original store bytes.
+    Regional-writer tests cover the broader storage-failure combinations.
     """
-    sdata = feature_sdata(zarr_format=zarr_format, existing=existing)
+    sdata = feature_sdata(existing=existing)
     table = sdata.tables["counts"]
     previous_matrix = table.obsm.get("features")
     previous_metadata = table.uns.get("feature_matrices")
@@ -471,8 +454,8 @@ def test_failed_feature_update_restores_disk_and_attached_entries(
 
     def failed_write(group, path, *args, **kwargs):
         original_write(group, path, *args, **kwargs)
-        if path == ("component-0",) and failure == "matrix" or path == ("component-1",) and failure == "metadata":
-            raise RuntimeError(f"{failure} failure")
+        if path == ("component-1",):
+            raise RuntimeError("staging failure")
 
     def failed_install(self, key, value):
         original_install(self, key, value)
@@ -483,7 +466,7 @@ def test_failed_feature_update_restores_disk_and_attached_entries(
         original_consolidate(*args, **kwargs)
         raise RuntimeError("finalization failure")
 
-    if failure in {"matrix", "metadata"}:
+    if failure == "staging":
         monkeypatch.setattr(table_writer, "_write_anndata_element", failed_write)
     elif failure == "installation":
         monkeypatch.setattr(type(table.obsm), "__setitem__", failed_install)
