@@ -50,7 +50,7 @@ implemented:
       **11f.v** creation of raw data through component writes — implemented;
       **11f.vi** region-wise `.obsm` writing — implemented; **11f.vii** integration
       with existing Harpy APIs in three implementation slices: **a)** `hp.tb.add_table` — implemented,
-      **b)** `hp.tb.add_feature_matrix`, **c)** aggregation and canonical-component writers;
+      **b)** `hp.tb.add_feature_matrix` — implemented, **c)** aggregation and canonical-component writers;
       **11f.viii** safe deletion of optional AnnData components; **11f.ix**
       affected-chunk regional-write optimization, after the first eight parts;
       a separate napari-harpy persistence migration also follows the first eight
@@ -6216,8 +6216,8 @@ unsmoothed default remains unchanged.
 implemented. `hp.tb.read_table`, `hp.tb.read_table_components` and
 `hp.io.read_zarr`, plus `hp.tb.write_table` and `hp.tb.write_table_components`,
 are available, including raw creation through component writes and regional
-updates through `hp.tb.write_table_components_by_region`. Part 11f.vii a)
-(`hp.tb.add_table` integration) is implemented; Parts 11f.vii b)–c) and
+updates through `hp.tb.write_table_components_by_region`. Parts 11f.vii a)–b)
+(`hp.tb.add_table` and `hp.tb.add_feature_matrix` integration) are implemented; Parts 11f.vii c) and
 11f.viii–ix remain planned.**
 
 Provide general, modular table I/O independently of QC, aggregation or Scanpy
@@ -6245,7 +6245,7 @@ Split the work into nine independently reviewable parts, in this order:
    through the shared primitives in three separately reviewable implementation
    slices, in order a → b → c, with focused integration tests and documentation in each:
    - **a)** refactor `hp.tb.add_table` — implemented;
-   - **b)** refactor `hp.tb.add_feature_matrix`;
+   - **b)** refactor `hp.tb.add_feature_matrix` — implemented;
    - **c)** integrate aggregation and canonical-component writers.
 
 8. **11f.viii: safe deletion of optional AnnData components** — support explicit
@@ -7391,8 +7391,8 @@ and pairwise matrices, and does not add a region-specific reader or use the
 legacy `ProcessTable._get_adata()`.
 
 This part delivers the reusable regional writer, not the migration of
-`add_feature_matrix()`. That function currently constructs a full matrix in
-memory and writes its matrix and metadata sequentially. Part 11f.vii b) replaces
+`add_feature_matrix()`. That function previously constructed a full matrix in
+memory and wrote its matrix and metadata sequentially. Part 11f.vii b) replaces
 that persistence path with this infrastructure while retaining feature
 calculation, alignment and scientific metadata preparation in the caller.
 
@@ -7528,7 +7528,7 @@ the public contract.
 
 ### Part 11f.vii: integration with existing Harpy APIs
 
-**Status: Part 11f.vii a) implemented; b) and c) remain planned, in that order.
+**Status: Parts 11f.vii a) and b) implemented; c) remains planned.
 Each part includes its own focused integration tests and documentation
 updates; Parts 11f.viii and ix retain their numbering.**
 
@@ -7579,6 +7579,10 @@ distinction from the path-based writers that do not update a supplied `sdata`.
 
 ### Part 11f.vii b): refactor `hp.tb.add_feature_matrix`
 
+**Status: implemented. Backed existing-table updates use the shared regional
+operation, publish matrix and metadata together, and attach only those entries
+before finalization. New-table results are prepared before complete-table publication.**
+
 Explicitly migrate `hp.tb.add_feature_matrix` to Part 11f.vi's regional-write
 operation for backed existing-table updates. Keep feature calculation,
 alignment of calculated values to the selected observations, selection and
@@ -7598,7 +7602,13 @@ sequential direct writes. Restore affected in-memory entries if persistence
 or installation fails.
 
 Existing-table updates must not read or rewrite `.X`; new-table creation must
-use the shared complete-table path integrated in Part 11f.vii a). Regional writes
+use the shared complete-table path integrated in Part 11f.vii a), only after
+feature calculation and metadata preparation succeed. Backed updates check the
+complete attached observation identity/order against storage before installing
+the full replacement matrix. Stored values and source descriptions are authoritative
+for unselected regions; unrelated local annotations and component references remain
+unchanged. Existing targets must be dense numeric matrices compatible with the
+calculated feature schema and dtype. Regional writes
 still replace the complete affected `.obsm` matrix chunkwise; affected-chunk-only
 publication remains Part 11f.ix.
 

@@ -258,6 +258,18 @@ Adapters using this internal operation can install reopened data before commit
 and must restore their own affected in-memory state on failure. Parent groups
 created by the operation are removed on failure.
 
+Component-update adapters refresh only the affected in-memory entries, preserving
+unrelated local state. Before attaching an observation-aligned matrix to an
+existing AnnData, the installing caller must verify that the complete in-memory
+observation identities match storage in value and order. This applies even after
+a regional update: the regional writer validates the submitted subset, whereas
+attachment assigns every row of the resulting matrix by position. Checking only
+selected observations cannot protect unchanged measurements from being attached
+to the wrong in-memory observations.
+
+For example, `hp.tb.add_feature_matrix()` follows this contract when attaching
+the complete updated feature matrix after a regional write.
+
 Consolidated metadata at the SpatialData store root contains collected metadata
 from descendant groups and arrays, including table components. Restoring a table
 or component directory does not restore this root-level index. The operation
