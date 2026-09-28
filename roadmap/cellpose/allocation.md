@@ -7441,7 +7441,7 @@ of the affected entries and consolidated metadata.
 ### Part 11f.vi a): shared regional-update blocks
 
 **Status: implemented. Regional-update blocks share one prepared task graph;
-existing-matrix slicing remains unchanged until Part 11f.vi b).**
+aligned existing-block reuse is implemented separately in Part 11f.vi b).**
 
 Optimize how `_regional_matrix()` prepares `regional_values` for its merge
 tasks. Previously, separate Dask-array slices were passed into delayed calls;
@@ -7483,7 +7483,8 @@ thresholds or exact graph-key/layer counts in unit tests.
 
 ### Part 11f.vi b): reuse aligned existing blocks
 
-**Status: planned after Part 11f.vi a).**
+**Status: implemented. Aligned existing blocks share one prepared task graph;
+mismatched layouts raise an explicit internal-contract error.**
 
 Avoid repeatedly slicing `existing` when every output block already corresponds
 exactly to one existing Dask block. After normalizing the output chunks and
@@ -7492,23 +7493,28 @@ complete output chunk tuples with `existing.chunks`, including terminal chunks:
 
 - If they match, call `existing.to_delayed()` once and pass the corresponding
   existing block references directly to the merge tasks.
-- If they differ, retain the existing slice-based path. Use an explicit
-  condition with a fallback, not an assertion that makes mismatched layouts
-  unsupported. Never infer alignment from nominal chunk sizes alone.
+- If they differ, raise `RuntimeError` before constructing merge tasks. This
+  violates the internal reader/merge contract; there is no slicing fallback.
+  Use an explicit check, not a Python assertion, and never infer alignment
+  from nominal chunk sizes alone.
 - If the entry is new, retain `original=None`. Preserve the existing shortcut
   for requests supplying all observations.
 
-Do not rely solely on today's lazy reader emitting full uncompressed axes for
-sparse matrices; the explicit comparison protects block correspondence if that
-implementation changes. The contracts and scope limits of Part 11f.vi a) also
-apply here.
+The public writer reads `existing` itself; callers supply only the regional
+measurements. Dense output layouts retain `existing.chunks`, and Harpy's sparse
+reader already keeps the uncompressed axis whole. Alignment is therefore an
+internal invariant, not a user restriction on supplied regional chunks. The
+explicit comparison detects an incompatible reader change instead of pairing
+blocks incorrectly. The other contracts and scope limits of Part 11f.vi a)
+also apply here.
 
-**Checks.** Exercise both the aligned-block path and a deliberately mismatched
-layout requiring slicing, including sparse-axis adjustments and uneven terminal
-chunks. Compare complete results with the same independent expected matrix,
-including unchanged observations and input buffers. Retain the no-premature-read
-and bounded-memory checks, and instrument a representative dense case to verify
-that existing blocks are shared without redundant reads. Measure graph-build
+**Checks.** Exercise aligned dense/CSR/CSC layouts with uneven terminal chunks.
+Compare complete results with the same independent expected matrix, including
+unchanged observations and input buffers. Deliberately supply sparse layouts
+whose uncompressed axes are split and verify an explicit error before computation.
+Retain the no-premature-read and bounded-memory checks, and instrument a
+representative dense case to verify that existing blocks are shared without
+redundant reads. Measure graph-build
 overhead without making wall-clock speedups or internal graph structure part of
 the public contract.
 

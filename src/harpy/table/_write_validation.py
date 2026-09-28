@@ -162,16 +162,73 @@ def _match_identity(actual: pd.Index, expected: pd.Index, *, label: str) -> None
     raise ValueError(f"{label} must match the expected identities exactly in value and order.")
 
 
-def _observation_pairs(frame: pd.DataFrame, spatialdata_attrs: dict, *, label: str) -> pd.MultiIndex:
-    keys = [spatialdata_attrs[TableModel.REGION_KEY_KEY], spatialdata_attrs[TableModel.INSTANCE_KEY]]
+def _annotation_columns(spatialdata_attrs: Mapping) -> tuple[str, str]:
+    """Resolve the stored identity column names without constructing an AnnData."""
+    region_key = spatialdata_attrs.get(TableModel.REGION_KEY_KEY)
+    instance_key = spatialdata_attrs.get(TableModel.INSTANCE_KEY)
+    if (
+        not isinstance(region_key, str)
+        or not region_key
+        or not isinstance(instance_key, str)
+        or not instance_key
+        or region_key == instance_key
+    ):
+        raise ValueError("SpatialData annotation requires distinct, nonempty region_key and instance_key names.")
+    return region_key, instance_key
+
+
+def _observation_pairs(frame: pd.DataFrame, *, region_key: str, instance_key: str, label: str) -> pd.MultiIndex:
+    """Check identity columns and return ordered pairs, for a full table or a subset.
+
+    This checks column types and non-null, unique pairs, not declared regions.
+    Callers separately validate the complete stored annotation and compare these
+    pairs with the expected full or selected observation axis.
+    """
+    keys = [region_key, instance_key]
     if any(key not in frame for key in keys):
         raise ValueError(f"{label} must contain the stored region and instance columns {keys!r}.")
+    if not frame.columns.is_unique:
+        raise ValueError(f"{label} must not contain duplicate column names.")
     identity = frame[keys]
     if identity.isna().any().any() or identity.duplicated().any():
         raise ValueError(f"{label} region/instance pairs must be non-null and unique.")
-    # Check SpatialData's required column types without reading any expression data.
-    TableModel.validate(AnnData(obs=identity, uns={TableModel.ATTRS_KEY: spatialdata_attrs}))
+    if not isinstance(identity[region_key].dtype, pd.CategoricalDtype):
+        raise ValueError(f"{label} region column must be categorical.")
+    # Preserve the integer/string instance types accepted by SpatialData,
+    # without applying its whole-table region-set check to a regional subset.
+    instances = identity[instance_key]
+    dtype = instances.dtype
+    if isinstance(dtype, pd.CategoricalDtype):
+        dtype = dtype.categories.dtype
+    integer_types = (np.int16, np.int32, np.int64, np.uint16, np.uint32, np.uint64)
+    if not (dtype in integer_types or isinstance(dtype, pd.StringDtype) or pd.api.types.is_string_dtype(instances)):
+        raise TypeError(f"{label} instance column must contain supported integer or string identifiers.")
     return pd.MultiIndex.from_frame(identity.astype(object))
+
+
+def _validate_observation_annotation(frame: pd.DataFrame, spatialdata_attrs: Mapping, *, label: str) -> pd.MultiIndex:
+    """Validate the full table's declared/observed regions and identity columns."""
+    region_key, instance_key = _annotation_columns(spatialdata_attrs)
+    regions = spatialdata_attrs.get(TableModel.REGION_KEY)
+    regions = [regions] if isinstance(regions, str) else regions
+    if not isinstance(regions, (list, tuple, np.ndarray)) or any(
+        not isinstance(region, str) or not region for region in regions
+    ):
+        raise ValueError("SpatialData annotation requires region names as a string or sequence of strings.")
+    pairs = _observation_pairs(frame, region_key=region_key, instance_key=instance_key, label=label)
+    # Use observed values, not categorical categories: unused categories do
+    # not declare regions or make an otherwise absent region selectable.
+    if set(regions) != set(frame[region_key].unique()):
+        raise ValueError(f"{label} declared regions must match the regions present in its observations.")
+    return pairs
+
+
+def _read_observation_identity(group: zarr.Group, spatialdata_attrs: Mapping) -> pd.DataFrame:
+    """Read only the observation index and its two spatial identity columns."""
+    keys = _annotation_columns(spatialdata_attrs)
+    if any(key not in group["obs"] for key in keys):
+        raise ValueError("Stored observation is missing a region or instance column referenced by its annotation.")
+    return pd.DataFrame({key: read_elem(group["obs"][key]) for key in keys}, index=_axis_index(group, ("obs",)))
 
 
 def _validate_component_values(
@@ -269,14 +326,17 @@ def _validate_component_values(
         # already checked in step 1; obs_identity's own dataframe index is not
         # used for matching.
         if axis == "obs" and spatialdata_attrs is not None:
-            keys = [spatialdata_attrs[TableModel.REGION_KEY_KEY], spatialdata_attrs[TableModel.INSTANCE_KEY]]
-            stored_obs_identity = pd.DataFrame(
-                {key: read_elem(group["obs"][key]) for key in keys}, index=expected_axis_indices[axis]
+            region_key, instance_key = _annotation_columns(spatialdata_attrs)
+            keys = [region_key, instance_key]
+            stored_obs_identity = _read_observation_identity(group, spatialdata_attrs)
+            expected = _validate_observation_annotation(
+                stored_obs_identity, spatialdata_attrs, label="Stored observation"
             )
-            expected = _observation_pairs(stored_obs_identity, spatialdata_attrs, label="Stored observation")
             if axis_frame_to_validate is not None:
                 _match_identity(
-                    _observation_pairs(axis_frame_to_validate, spatialdata_attrs, label="Supplied obs"),
+                    _observation_pairs(
+                        axis_frame_to_validate, region_key=region_key, instance_key=instance_key, label="Supplied obs"
+                    ),
                     expected,
                     label="obs_identity",
                 )
@@ -286,7 +346,9 @@ def _validate_component_values(
                 if set(obs_identity.columns) != set(keys) or len(obs_identity.columns) != 2:
                     raise ValueError(f"obs_identity must contain exactly the columns {keys!r}.")
                 _match_identity(
-                    _observation_pairs(obs_identity, spatialdata_attrs, label="obs_identity"),
+                    _observation_pairs(
+                        obs_identity, region_key=region_key, instance_key=instance_key, label="obs_identity"
+                    ),
                     expected,
                     label="obs_identity",
                 )
@@ -347,4 +409,5 @@ def _validate_complete_table(table: AnnData) -> None:
     # TableModel.validate() does not check region/instance pair uniqueness.
     spatialdata_attrs = table.uns.get(TableModel.ATTRS_KEY)
     if spatialdata_attrs is not None:
-        _observation_pairs(table.obs, spatialdata_attrs, label="Table observation")
+        region_key, instance_key = _annotation_columns(spatialdata_attrs)
+        _observation_pairs(table.obs, region_key=region_key, instance_key=instance_key, label="Table observation")

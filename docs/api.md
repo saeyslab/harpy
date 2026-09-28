@@ -127,6 +127,7 @@ Operations on table (`AnnData` object) elements.
     tb.read_table_components
     tb.write_table
     tb.write_table_components
+    tb.write_table_components_by_region
     tb.aggregate_points
     tb.aggregate_image
     tb.add_canonical_centers
