@@ -245,14 +245,19 @@ def _validate_component_paths(
             raise ValueError(f"Invalid logical AnnData component path: {path!r}.")
         if to_write and ((slot in _MATRIX_MAPPINGS and len(path) == 1) or path == ("raw", "varm")):
             raise ValueError(f"Write individual entries, not the mapping root {path!r}.")
-        # Compare with previously accepted paths in both directions: either path
-        # may be a prefix of the other. This rejects parent/child pairs such as
-        # ("uns", "analysis") and ("uns", "analysis", "method") in either request
-        # order, as well as identical paths.
-        if any(path[: len(other)] == other or other[: len(path)] == path for other in paths):
-            raise ValueError("Component paths must be unique and non-overlapping.")
         paths.append(path)
+    _check_component_path_overlap(paths)
     return tuple(paths)
+
+
+def _check_component_path_overlap(paths: Sequence[ComponentPath]) -> None:
+    """Reject duplicate and parent/child paths, including across update intents."""
+    for index, path in enumerate(paths):
+        # Compare both directions: ("uns", "analysis") and
+        # ("uns", "analysis", "method") conflict in either request order.
+        # Identical paths also conflict, even for a write/delete pair.
+        if any(path[: len(other)] == other or other[: len(path)] == path for other in paths[:index]):
+            raise ValueError("Component paths must be unique and non-overlapping.")
 
 
 def _open_table_group(store: str | PathLike[str], *, table_name: str) -> zarr.Group:
