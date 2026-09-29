@@ -7661,13 +7661,67 @@ payload reads.
 **Status: planned; implement after Parts 11f.i–vii. Required before the
 napari-harpy persistence migration, but not before Slice 11g.**
 
-**Public contract.** Extend `hp.tb.write_table_components()` to explicitly remove
-optional AnnData components, not only `.obsm` entries and `.uns` records.
-Support deletion-only requests and requests combining replacements and deletions
-in one rollback operation, rather than introducing a separate general-purpose
-deletion API.
-The current writer accepts replacement values only; this slice adds an explicit
-deletion intent without changing the meaning of existing replacement requests.
+**Public contract.** Provide two public entry points sharing one internal
+operation, not two storage implementations:
+
+- `hp.tb.delete_table_components()` for deletion-only requests. Its `components`
+  argument is a nonempty sequence of logical tuple paths. It has no identity
+  arguments or `overwrite` flag: naming a deletion target explicitly authorizes
+  its removal.
+- `hp.tb.write_table_components()` for replacements, optionally accompanied by
+  `delete: Sequence[ComponentPath] = ()`. Its existing `components` argument
+  remains a nonempty mapping of paths to replacement values. `overwrite` applies
+  only to replacements, not to the explicitly requested deletions.
+
+The new deletion API is:
+
+```python
+def delete_table_components(
+    store: str | PathLike[str],
+    *,
+    table_name: str,
+    components: Sequence[ComponentPath],
+) -> None:
+    ...
+```
+
+Both APIs operate on an existing table in a local SpatialData Zarr store and
+return `None` after successful completion. This extends deletion beyond `.obsm`
+and `.uns` without changing the meaning of existing replacement requests.
+No third public update API or separate deletion engine is introduced.
+
+For example, remove a feature matrix and its associated metadata together:
+
+```python
+hp.tb.delete_table_components(
+    "sdata.zarr",
+    table_name="counts",
+    components=[
+        ("obsm", "cell_features"),
+        ("uns", "feature_matrices", "cell_features"),
+    ],
+)
+```
+
+If the same logical update also replaces observations, submit one mixed request:
+
+```python
+hp.tb.write_table_components(
+    "sdata.zarr",
+    table_name="counts",
+    components={("obs",): updated_obs},
+    delete=[
+        ("obsm", "cell_features"),
+        ("uns", "feature_matrices", "cell_features"),
+    ],
+    overwrite=True,
+)
+```
+
+A mixed call shares one rollback operation. Calling the write and deletion APIs
+separately commits two independent operations; failure of the second does not
+undo the first. Use the mixed form whenever related changes must succeed or be
+restored together.
 
 Support deletion according to the component's structural role, rather than
 automatically allowing every path accepted for replacement:
@@ -7697,17 +7751,26 @@ Keep the three component-update intents distinct:
 
 `None` remains an encoded value where supported, not a deletion instruction.
 
-For example, removing `.obsm["cell_features"]` and its corresponding
-`.uns["feature_matrices"]["cell_features"]` record must be expressible together,
-optionally alongside an `.obs` replacement. Removing entries only from an
-in-memory AnnData must not implicitly delete them in a component-write request.
+Removing entries only from an in-memory AnnData must not implicitly delete them
+in a component-write request.
 Callers identify related scientific data and metadata; generic I/O does not
 infer which records belong together.
 
-**Decisions to finalize before implementation:**
+**Missing-target policy.** A valid deletion target that is already absent is a
+no-op. Log at INFO level with the table name and component path, then continue
+processing the remaining replacements and deletions. For example:
 
-- The deletion argument's name and representation; no public signature is fixed yet.
-- Whether requesting deletion of an already-missing target raises or is a no-op.
+```text
+Table 'counts': component ('obsm', 'cell_features') is already absent; skipping deletion.
+```
+
+Use this single policy initially; do not introduce a `missing_ok` option. If all
+deletion targets are absent and there are no replacements, return after request
+validation without creating staging/backups or rewriting consolidated metadata.
+Invalid or protected paths, conflicting requests, missing stores/tables,
+malformed parents and I/O errors still raise: they are not already-absent targets.
+Validate conflicts before skipping missing targets. A present encoded `None`
+is an existing value, not an absent path.
 
 **Validation and scope.** Validate the complete request before changing storage:
 reject duplicate or overlapping paths, including a path requested for both
@@ -7726,8 +7789,9 @@ identity and structural checks for their replacement values. Callers remain
 responsible for keeping related scientific records coherent; do not infer
 cascading deletions from metadata references.
 
-**Shared publication.** Reuse `_write_table_operation()` and
-`_publish_table_paths()` for scoped table updates and root-metadata recovery.
+**Shared publication.** Both public entry points delegate to the extended
+`_write_table_operation()`, sharing validation, publication and recovery.
+Reuse `_publish_table_paths()` for scoped table updates and root-metadata recovery.
 The underlying `_publish_staged_paths()` currently expects a staged replacement
 for every destination. Extend its operation representation to support explicit
 deletion targets without staged replacement payloads. Do not use placeholder
@@ -7748,8 +7812,8 @@ payload, including dense, sparse and DataFrame-valued entries. Deleting `.X` or
 the complete `.raw` container likewise requires no numerical reads. Leave `.X`
 untouched unless it is explicitly requested for replacement or deletion. Reuse
 the existing ownership/path safeguards and metadata cleanup/restoration contract,
-including saved store-root metadata when finalization fails. The path-based public
-writer does not update an attached AnnData or SpatialData object; adapters remain
+including saved store-root metadata when finalization fails. Neither path-based
+public API updates an attached AnnData or SpatialData object; adapters remain
 responsible for affected live objects and their restoration on failure. Keep the
 same local-store, handled-failure
 guarantees and limitations: no crash recovery or concurrent reader/writer isolation.
@@ -7757,7 +7821,9 @@ guarantees and limitations: no crash recovery or concurrent reader/writer isolat
 **Checks and documentation.** Focused tests must cover deletion-only and mixed
 requests across the supported paths, related matrix and metadata removal,
 preservation of unrelated components, protected/invalid/conflicting requests and
-the agreed missing-target behavior. Check that removing `.X` preserves the table's
+both public entry points. Verify INFO logging for absent targets, continued
+processing of other requested changes, and no storage writes for a validated
+all-missing deletion-only request. Check that removing `.X` preserves the table's
 axes and shape, and that removing `.raw` removes the complete container while
 preserving the main table. Reject individual `.raw.X`/`.raw.var` removal and
 whole-mapping deletion.
@@ -7884,7 +7950,10 @@ row-identity and live-object update semantics explicitly rather than assuming
 that matching function names make the APIs interchangeable.
 
 Use Part 11f.viii's explicit deletion support for removed optional `.obsm` entries
-and `.uns` records, batching related replacements and deletions together.
+and `.uns` records. Use `hp.tb.delete_table_components()` for deletion-only saves,
+or `hp.tb.write_table_components(..., delete=...)` to batch related replacements
+and deletions in one rollback operation. Do not split a logically coupled update
+into separate write and delete calls.
 Do not interpret an omitted component as a deletion, silently stop persisting
 removals, or bypass the shared publisher with direct Zarr deletes.
 
