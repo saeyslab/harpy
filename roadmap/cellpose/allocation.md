@@ -42,7 +42,7 @@ implemented:
       heatmaps — implemented; **11e.v** density-only marimo overview — implemented;
       **11e.vi** optional spatial-density smoothing in Harpy; and **11e.vii**
       marimo smoothed-density overview;
-    - **11f:** modular AnnData table I/O for SpatialData Zarr stores, in nine
+    - **11f:** modular AnnData table I/O for SpatialData Zarr stores, in ten
       separate parts: **11f.i** public contracts — defined and documented;
       **11f.ii** selective component and lazy complete-table reading — implemented;
       **11f.iii** Harpy SpatialData reader with selective table modes — implemented;
@@ -51,8 +51,9 @@ implemented:
       **11f.vi** region-wise `.obsm` writing — implemented; **11f.vii** integration
       with existing Harpy APIs in three implementation slices: **a)** `hp.tb.add_table` — implemented,
       **b)** `hp.tb.add_feature_matrix` — implemented, **c)** aggregation and canonical-component writers — implemented;
-      **11f.viii** safe deletion of optional AnnData components — implemented; **11f.ix**
-      affected-chunk regional-write optimization, after the first eight parts;
+      **11f.viii** safe deletion of optional AnnData components — implemented;
+      **11f.ix** SpatialData-aware table-component updates; **11f.x**
+      affected-chunk regional-write optimization, after the first nine parts;
       a separate napari-harpy persistence migration also follows the first eight
       parts and does not depend on this optimization;
     - **11g:** table-level summary computation through `hp.qc.summarize_table`
@@ -115,12 +116,14 @@ Part 11f.iii composes Part 11f.ii's table reader with SpatialData's public
 non-table reader in `hp.io.read_zarr()`, selecting tables and their read mode
 without changing `spatialdata.read_zarr()` or adding another decoder. This
 reader follows Part 11f.ii and does not depend on the planned writers.
-Part 11f.viii then adds safe deletion of optional components. Part 11f.ix is a
-later optimization that rewrites only affected chunks of eligible regional
+Part 11f.viii then adds safe deletion of optional components. Part 11f.ix adds
+SpatialData-aware component APIs for coordinated in-memory and on-disk updates,
+while retaining the path-based APIs. Part 11f.x is a later optimization that
+rewrites only affected chunks of eligible regional
 `.obsm` updates; the initial regional writer still stages complete components.
 Napari-harpy's existing persistence behavior informs this design without constraining the new
 public API; a separate follow-up migrates its application-specific adapter to
-Harpy's public I/O after deletion support is available. Neither Parts 11f.viii–ix
+Harpy's public I/O after deletion support is available. Neither Parts 11f.viii–x
 nor that migration are prerequisites for Slice 11g, which
 provides the symmetric read-only table-summary workflow, deriving per-instance metrics
 and class-level overviews from the class-aware table before plotting.
@@ -6220,7 +6223,7 @@ updates through `hp.tb.write_table_components_by_region`. Parts 11f.vii a)–c)
 (integration of `hp.tb.add_table`, `hp.tb.add_feature_matrix`, aggregation and
 canonical-component writers) are implemented. Part 11f.viii is implemented via
 `hp.tb.delete_table_components()` and mixed `write_table_components(..., delete=...)`
-updates; Part 11f.ix remains planned.**
+updates; Parts 11f.ix–x remain planned.**
 
 Provide general, modular table I/O independently of QC, aggregation or Scanpy
 preprocessing. The caller explicitly chooses a complete table or selected
@@ -6229,7 +6232,7 @@ and safe publication without reading or rewriting unrelated data. Callers may
 use ordinary AnnData/Scanpy operations between reads and writes. This slice
 does not introduce another preprocessing pipeline or choose scientific metrics.
 
-Split the work into nine independently reviewable parts, in this order:
+Split the work into ten independently reviewable parts, in this order:
 
 1. **11f.i: public table I/O contracts** — specify complete-table and
    component-level APIs, memory behavior, alignment and overwrite guarantees.
@@ -6252,15 +6255,20 @@ Split the work into nine independently reviewable parts, in this order:
 
 8. **11f.viii: safe deletion of optional AnnData components** — support explicit
    removals and combined replacement/deletion requests with shared rollback — implemented.
-9. **11f.ix: affected-chunk regional-write optimization** — avoid complete
-   matrix rewrites for eligible regional `.obsm` updates, without changing
-   sample layout or the public regional-update semantics.
+9. **11f.ix: SpatialData-aware table-component updates** — add public adapters
+   that update the supplied SpatialData's components in memory and, when backed,
+   on disk, reusing the existing storage operations and rollback boundary.
+10. **11f.x: affected-chunk regional-write optimization** — avoid complete
+    matrix rewrites for eligible regional `.obsm` updates, without changing
+    sample layout or the public regional-update semantics.
 
 Complete Parts 11f.i–vii, including all three slices of vii, before the table-level
 QC work in Slice 11g. Part 11f.viii is required before the napari-harpy persistence
 migration, but does not block
-Slice 11g. Part 11f.ix follows Parts 11f.i–viii and blocks neither Slice 11g nor
-the napari-harpy migration. The I/O contracts themselves must remain usable
+Slice 11g. Part 11f.ix follows the completed path-based I/O and provides optional
+live-SpatialData adapters; the path-based napari-harpy migration remains possible
+without it. Part 11f.x follows Parts 11f.i–ix. Neither follow-up blocks Slice 11g
+or the napari-harpy migration. The I/O contracts themselves must remain usable
 without any QC result, feature panel or aggregation-specific metadata. Part
 11f.iii builds directly on the implemented Part 11f.ii; it does not require
 the later writing parts.
@@ -6272,10 +6280,10 @@ placeholder exports added.**
 
 This section defines the initial public table/component contracts, including
 signatures, implementation reuse, guarantees and examples. Parts 11f.v,
-11f.vi and 11f.viii specify raw creation, regional updates and deletion extensions
-in this roadmap.
+11f.vi and 11f.viii specify raw creation, regional updates and deletion extensions;
+Part 11f.ix adds SpatialData-aware component adapters in this roadmap.
 Update `docs/development/storage.md` and user-facing API documentation during Parts
-11f.ii–ix as the functionality is implemented, describing delivered behavior
+11f.ii–x as the functionality is implemented, describing delivered behavior
 without roadmap status language. No separate draft API page is maintained.
 
 Reuse and, where necessary, refactor Harpy's existing AnnData reading, writing
@@ -7379,7 +7387,7 @@ matrix in memory. Reading and rewriting unselected rows of the affected componen
 allowed; reading or rewriting `.X`, unrelated `.obsm` entries or other tables
 is not. Memory may include row identities, requested metadata and active
 matrix chunks. Do not add direct in-place row/chunk overwrites in this part.
-Part 11f.ix separately optimizes this operation by publishing only affected
+Part 11f.x separately optimizes this operation by publishing only affected
 chunks; it is not required to deliver this initial regional-write API.
 
 Finish staging while original paths remain readable, then publish the matrix
@@ -7443,7 +7451,7 @@ For example, use stored row chunks `(3, 3, 2)`, selected stored rows
 boundaries. Compare the complete reopened matrix with an independently
 constructed expected result, covering existing-entry updates and new-entry
 fills. These correctness cases must remain reusable as regression tests for
-Part 11f.ix, without prescribing a particular chunk-merging implementation.
+Part 11f.x, without prescribing a particular chunk-merging implementation.
 
 Instrument matrix access to verify chunked merging without whole-matrix
 materialization or unrelated reads. Exercise coupled metadata writes and
@@ -7478,7 +7486,7 @@ Both Parts 11f.vi a) and b) preserve the public API, output-chunk policy,
 matching-format restriction, input immutability and shared publication/rollback
 contract. They still stage complete replacement matrices. Neither changes
 stored chunk layouts nor introduces whole-matrix computation or persistence
-in memory. Part 11f.ix separately addresses which on-disk chunks are rewritten.
+in memory. Part 11f.x separately addresses which on-disk chunks are rewritten.
 
 **Checks.** Reuse the regional writer's numerical and failure-recovery cases.
 Cover uneven/interleaved selections, empty update bands, partial new-entry fills,
@@ -7533,8 +7541,7 @@ the public contract.
 ### Part 11f.vii: integration with existing Harpy APIs
 
 **Status: Parts 11f.vii a), b) and c) implemented.
-Each part includes its own focused integration tests and documentation
-updates; Parts 11f.viii and ix retain their numbering.**
+Each part includes its own focused integration tests and documentation updates.**
 
 All three parts reuse the shared table I/O infrastructure rather than introducing
 competing codecs or publication mechanisms. Installation and metadata finalization
@@ -7614,7 +7621,7 @@ for unselected regions; unrelated local annotations and component references rem
 unchanged. Existing targets must be dense numeric matrices compatible with the
 calculated feature schema and dtype. Regional writes
 still replace the complete affected `.obsm` matrix chunkwise; affected-chunk-only
-publication remains Part 11f.ix.
+publication remains Part 11f.x.
 
 **Checks and documentation.** Cover new-table creation, successful regional writes,
 overwrite/schema rejection, preserved measurements and metadata for unselected
@@ -7865,9 +7872,139 @@ layer are both restored. Keep reads caused by evaluating the replacement distinc
 from the deletion operation's no-payload-read guarantee.
 Document the explicit deletion contract in the public API and storage overview.
 
-### Part 11f.ix: affected-chunk regional-write optimization
+### Part 11f.ix: SpatialData-aware table-component updates
 
-**Status: planned follow-up optimization; implement after Parts 11f.i–viii.
+**Status: planned; implement after Parts 11f.i–viii. Not a prerequisite for
+Slice 11g or the path-based napari-harpy persistence migration.**
+
+Provide general public adapters for modifying components of a table attached to
+a supplied `SpatialData`. Callers should not have to coordinate disk updates,
+selective installation and rollback themselves. Generalize the existing pattern
+used by `hp.tb.add_table()` and `hp.tb.add_feature_matrix()`, rather than introduce
+another component serializer or deletion engine.
+
+**Two explicit API levels.** Keep the existing path-based APIs unchanged, and
+add SpatialData-aware counterparts:
+
+| API                                         | Input and scope                                                                                                                     |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `hp.tb.write_table_components(store, ...)`  | Existing path-based replacement/mixed-update API; updates storage only.                                                             |
+| `hp.tb.delete_table_components(store, ...)` | Existing path-based deletion API; updates storage only.                                                                             |
+| `hp.tb.add_table_components(sdata, ...)`    | New adapter for additions/replacements and optional explicit deletions; updates the supplied SpatialData and its store when backed. |
+| `hp.tb.remove_table_components(sdata, ...)` | New deletion-only adapter; removes requested components from the supplied SpatialData and its store when backed.                    |
+
+Do not overload the existing `store` argument to accept a SpatialData object or
+change the path-based APIs' ownership contract. This mirrors the distinction
+between `write_table()` and `add_table()`. The new adapters return the supplied
+`sdata` after successful completion.
+
+Use the same logical tuple paths and replacement/identity arguments as the
+path-based component writer. The addition API accepts a nonempty `components`
+mapping and optional `delete` paths for one coupled update. The removal API
+accepts a nonempty sequence of component paths, without identity arguments or
+an overwrite flag. For example:
+
+```python
+hp.tb.add_table_components(
+    sdata,
+    table_name="counts",
+    components={
+        ("obsm", "cell_features"): features,
+        ("uns", "feature_matrices", "cell_features"): feature_metadata,
+    },
+    obs_identity=adata.obs[[region_key, instance_key]],
+    overwrite=True,
+)
+
+hp.tb.remove_table_components(
+    sdata,
+    table_name="counts",
+    components=[
+        ("obsm", "cell_features"),
+        ("uns", "feature_matrices", "cell_features"),
+    ],
+)
+```
+
+**Storage modes.** Branch on `sdata.path`, not `AnnData.isbacked` or the current
+matrix representation:
+
+- **Unbacked SpatialData (`sdata.path is None`):** validate and modify only the
+  requested in-memory components. Perform no storage operations, serialization,
+  or unnecessary matrix computation. Preserve lazy matrix representations and
+  unrelated local state. Restore affected in-memory entries if installation fails.
+- **Backed SpatialData:** validate the request against storage and the live
+  table, reuse the shared internal write operation, and install only the affected
+  components into the live table before the operation commits. Reopen written
+  matrices lazily from permanent paths; do not reload the whole AnnData or discard
+  unrelated unsaved annotations and component references.
+
+Reuse the existing logical-path, protected-component and axis-identity rules in
+both modes, refactoring shared validation where needed rather than maintaining
+competing contracts. `None` remains a replacement value, not an implicit deletion.
+Scientific metadata preparation remains the caller's responsibility.
+
+**Alignment and ownership.** Before attaching a stored matrix, verify that the
+relevant complete in-memory axes agree with storage in identity and order:
+observation identities for observation-aligned matrices, feature identities for
+feature-aligned matrices, and raw's independent feature axis where applicable.
+Shape agreement alone is insufficient. The supplied matrices still need the
+existing replacement-identity context; passing `sdata` does not prove their row
+or column order and must not trigger automatic reindexing.
+
+Only requested components are changed or refreshed. Preserve unrelated local
+edits and references. External references to replaced matrices are not updated
+automatically; caller-owned dirty/stale tracking and application events remain
+outside these generic adapters.
+
+**One rollback window.** Do not call a completed public path-based writer and
+then modify memory. Use the shared internal operation so installation happens
+while disk backups remain available:
+
+```text
+validate the request and relevant live/stored identities
+    -> stage all replacement payloads while original paths remain readable
+    -> publish replacements/deletions, retaining backups
+    -> install/remove only the requested in-memory components
+    -> finalize store metadata and commit
+       failure: shared writer restores disk; adapter restores affected memory
+```
+
+This also preserves the mixed-update contract when lazy replacement values read
+a component being deleted. Reuse `_write_table_operation()` and its publisher;
+do not add direct Zarr writes/deletions or a parallel rollback implementation.
+The existing handled-failure, no-crash-recovery and no-concurrent-isolation
+limitations remain unchanged.
+
+**Missing deletion targets.** Resolve presence in memory and on disk separately.
+A requested component already absent on disk must still be removed from memory
+if present there; conversely, local absence must not skip a stored target.
+Absence in both places is a logged no-op. Invalid paths, malformed parents and
+I/O errors still raise. Do not create disk staging or rewrite consolidated
+metadata solely to remove an entry that exists only in memory.
+
+Before implementation, explicitly settle the adapter-specific edge cases:
+replacement collision/overwrite checks when memory and disk differ; a table
+present on only one side of a backed SpatialData; and handling AnnData views.
+Do not silently create a complete stored table, discard local changes or copy
+whole matrices to resolve those cases.
+
+**Checks and documentation.** Cover unbacked and backed operation, additions,
+replacements, deletions and coupled mixed updates. Verify selective in-memory
+installation, preservation of unrelated local edits, relevant axis/order
+rejection, and no unnecessary numerical reads or computation. Cover deletion
+targets present only in memory, only on disk, in both places and in neither.
+Inject staging, publication, installation and finalization failures to verify
+disk/root-metadata recovery and restoration of affected live references. Retain
+tests proving that the original path-based APIs do not modify live objects.
+Reuse storage-level tests rather than duplicating the complete encoding matrix
+in adapter tests. Document the two API levels and their ownership/return
+contracts in API documentation and `docs/development/storage.md` during
+implementation, without roadmap language in user-facing documentation.
+
+### Part 11f.x: affected-chunk regional-write optimization
+
+**Status: planned follow-up optimization; implement after Parts 11f.i–ix.
 Not a prerequisite for Slice 11g or the napari-harpy persistence migration.**
 
 Optimize Part 11f.vi's regional `.obsm` writer without changing its public
@@ -7930,7 +8067,10 @@ Slice 11g.**
 Migrate napari-harpy's shared table persistence, used by object classification
 and spatial queries, onto Harpy's public table I/O APIs. This is a separate
 cross-repository integration task following the first eight Harpy I/O parts;
-Part 11f.ix's affected-chunk optimization is not required.
+Part 11f.x's affected-chunk optimization is not required. Part 11f.ix's new
+SpatialData-aware adapters may be used where updating a supplied live object
+belongs to the operation; they do not replace the path-based APIs or the
+application's ownership of save snapshots, dirty state and widget events.
 Napari-harpy keeps a small translation layer between application requests and
 Harpy's documented public table I/O APIs. It decides what the user wants saved
 or reloaded and translates that intent into store paths, component paths and
