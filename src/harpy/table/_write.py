@@ -239,10 +239,16 @@ def delete_table_components(
         Name of the existing table.
     components
         Nonempty sequence of unique, non-overlapping logical tuple paths.
-        Supports individual layers/obsm/varm/obsp/varp and raw.varm entries,
-        individual or nested uns records, X, and the entire raw container.
-        Required axes (obs, var, raw.var), raw.X alone, whole mapping containers
-        and SpatialData annotation in uns cannot be deleted.
+        Allowed targets are:
+
+        1. Entire X or raw: ``("X",)`` or ``("raw",)``.
+        2. Individual entries in layers, obsm, varm, obsp, varp and raw.varm,
+           such as ``("obsm", "embedding")`` or ``("raw", "varm", "loadings")``.
+        3. Individual or nested uns records, such as ``("uns", "analysis", "method")``,
+           except ``uns["spatialdata_attrs"]`` and its descendants.
+
+        Required axes (obs, var, raw.var), raw.X alone and whole mapping
+        containers (such as obsm or uns) cannot be deleted.
 
     Notes
     -----
