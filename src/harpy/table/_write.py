@@ -12,6 +12,7 @@ from pathlib import Path
 import pandas as pd
 import zarr
 from anndata import AnnData, Raw
+from loguru import logger as log
 from spatialdata.models import TableModel
 
 from harpy._storage._anndata import (
@@ -20,15 +21,29 @@ from harpy._storage._anndata import (
     _write_anndata_element,
     _write_spatialdata_table_attrs,
 )
-from harpy._storage._publication import _cleanup_owned_path, _publish_staged_paths, _remove_owned_path, _StagedPath
+from harpy._storage._publication import (
+    _cleanup_owned_path,
+    _DeletedPath,
+    _publish_staged_paths,
+    _remove_owned_path,
+    _StagedPath,
+)
 from harpy._storage._spatialdata import _open_spatialdata_group
-from harpy.table._io import ComponentPath, _open_table_group, _validate_component_paths, _validate_path_segment
+from harpy.table._io import (
+    ComponentPath,
+    _check_component_path_overlap,
+    _open_table_group,
+    _validate_component_paths,
+    _validate_path_segment,
+)
 from harpy.table._write_validation import (
     AxisNames,
     _check_component_destination,
+    _check_deletion_destination,
     _prepare_raw_creation,
     _validate_complete_table,
     _validate_component_values,
+    _validate_deletion_paths,
     _validate_table_identities,
 )
 
@@ -96,6 +111,7 @@ def write_table_components(
     *,
     table_name: str,
     components: Mapping[ComponentPath, object],
+    delete: Sequence[ComponentPath] = (),
     obs_identity: pd.DataFrame | AxisNames | None = None,
     var_names: AxisNames | None = None,
     raw_var_names: AxisNames | None = None,
@@ -116,9 +132,13 @@ def write_table_components(
         To create raw, supply raw.X and either raw_var_names or a raw.var dataframe;
         raw.varm entries may accompany them. Mapping roots other than uns,
         dataframe columns, matrix slices and encoding internals cannot be written.
-        Mappings replace their contents;
-        omitted components remain unchanged. None encodes absence where supported,
-        not deletion.
+        Mappings replace their contents. Unrequested components remain unchanged.
+        None is an encoded value where supported, not deletion.
+    delete
+        Optional component paths to remove in the same operation. Supports the
+        targets of :func:`harpy.table.delete_table_components`. Replacement and
+        deletion paths must be unique and non-overlapping, even when absent.
+        Missing deletion targets are logged at INFO and skipped.
     obs_identity
         Ordered observation identities for X, layers, obsm, obsp or raw.X.
         For annotated tables, a two-column dataframe using the stored region and
@@ -137,6 +157,7 @@ def write_table_components(
     overwrite
         Allow replacement of existing requested components; otherwise only new
         entries are allowed. Creating raw over a stored None also requires True.
+        Does not apply to explicit deletions.
 
     Notes
     -----
@@ -158,12 +179,18 @@ def write_table_components(
 
     An obs-only update does not read or rewrite X.
     Related matrix and metadata updates should be submitted in the same call.
+    A lazy replacement may need to read a component scheduled for deletion in
+    the same request. We therefore finish serializing all replacements into
+    staging before moving any deletion targets from their original locations.
+    Replacements and deletions share one rollback operation. Separate API calls
+    commit independently.
     Staging, completion, reopening and recovery follow :func:`harpy.table.write_table`.
 
     See Also
     --------
     harpy.table.read_table_components : Read only selected components.
     harpy.table.write_table : Write a complete table.
+    harpy.table.delete_table_components : Remove components without replacements.
 
     Examples
     --------
@@ -184,15 +211,72 @@ def write_table_components(
     """
     if not isinstance(components, Mapping):
         raise TypeError("components must be a mapping from tuple paths to values.")
+    if not components:
+        raise ValueError("components must not be empty; use delete_table_components() for deletion only.")
     with _write_table_operation(
         store,
         table_name=table_name,
         components=components,
+        delete=delete,
         obs_identity=obs_identity,
         var_names=var_names,
         raw_var_names=raw_var_names,
         overwrite=overwrite,
     ):
+        pass
+
+
+def delete_table_components(
+    store: str | PathLike[str], *, table_name: str, components: Sequence[ComponentPath]
+) -> None:
+    """Remove optional table components as one rollback-protected update.
+
+    Parameters
+    ----------
+    store
+        Local path to an existing SpatialData Zarr root. Its Zarr format is preserved.
+    table_name
+        Name of the existing table.
+    components
+        Nonempty sequence of unique, non-overlapping logical tuple paths.
+        Supports individual layers/obsm/varm/obsp/varp and raw.varm entries,
+        individual or nested uns records, X, and the entire raw container.
+        Required axes (obs, var, raw.var), raw.X alone, whole mapping containers
+        and SpatialData annotation in uns cannot be deleted.
+
+    Notes
+    -----
+    Naming a target authorizes its removal; no overwrite or identity arguments
+    are needed. Missing targets are logged at INFO and skipped. If all are
+    absent, no staging or metadata writes occur. Invalid paths, malformed parents
+    and I/O errors still raise. A stored None is a present value, not a missing path.
+
+    Deletion does not read component payloads. Unrequested components and parent
+    mappings remain intact. Removing X preserves the table's shape, obs and var;
+    reopening returns X=None. Removing raw returns raw=None. Callers must explicitly
+    identify related scientific records to remove; no cascading deletion occurs.
+
+    Returns None after publication and metadata finalization. Live AnnData and
+    SpatialData objects are not updated; reopen affected data after deletion.
+    Handled failures attempt to restore removed data and store-root metadata.
+    Crash recovery and concurrent-access isolation are not provided.
+
+    See Also
+    --------
+    harpy.table.write_table_components : Combine replacements and deletions.
+
+    Examples
+    --------
+    .. code-block:: python
+
+        hp.tb.delete_table_components(
+            "sdata.zarr", table_name="counts",
+            components=[("obsm", "cell_features"), ("uns", "feature_matrices", "cell_features")],
+        )
+    """
+    if not components:
+        raise ValueError("components must not be empty.")
+    with _write_table_operation(store, table_name=table_name, components={}, delete=components):
         pass
 
 
@@ -203,6 +287,7 @@ def _write_table_operation(
     table_name: str,
     adata: AnnData | None = None,
     components: Mapping[ComponentPath, object] | None = None,
+    delete: Sequence[ComponentPath] = (),
     obs_identity: pd.DataFrame | AxisNames | None = None,
     var_names: AxisNames | None = None,
     raw_var_names: AxisNames | None = None,
@@ -210,8 +295,10 @@ def _write_table_operation(
 ) -> Generator[zarr.Group, None, None]:
     """Stage, validate and publish one table update; commit after the caller succeeds.
 
-    Supply either adata or components. The yielded read-only group uses permanent
-    paths. Adapters can reopen/attach there while backups remain; they own any
+    Supply either adata or components. Component updates may include deletions;
+    only deletion-only callers may supply an empty components mapping.
+    The yielded read-only group uses permanent paths. Adapters can reopen/attach
+    there while backups remain; they own any
     in-memory rollback. Public path-based writers use an empty with-body because
     they do not attach data. Final consolidation is part of the rollback window.
 
@@ -224,6 +311,11 @@ def _write_table_operation(
         raise ValueError("Supply either adata or components, not both.")
     if not isinstance(overwrite, bool):
         raise TypeError("overwrite must be a boolean.")
+    deletion_paths = _validate_deletion_paths(delete)
+    if adata is not None and deletion_paths:
+        raise ValueError("Component deletion cannot accompany complete-table replacement.")
+    if components is not None and not components and not deletion_paths:
+        raise ValueError("Supply at least one replacement or deletion.")
     _validate_path_segment(table_name)
     source_root = _open_spatialdata_group(store)
     root = Path(store)
@@ -242,8 +334,19 @@ def _write_table_operation(
         _validate_table_identities(adata, obs_identity=obs_identity, var_names=var_names, raw_var_names=raw_var_names)
     else:
         assert components is not None
-        paths = _validate_component_paths(tuple(components), to_write=True)
+        paths = _validate_component_paths(tuple(components), to_write=True) if components else ()
+        # Check the original request before filtering absent deletions: a path
+        # cannot be both written and deleted, even if it does not exist yet.
+        _check_component_path_overlap((*paths, *deletion_paths))
+        if table_path.is_symlink() or not table_path.resolve().is_relative_to(root.resolve()):
+            raise ValueError(f"Unsafe table-write destination: {table_path}.")
         source_table = _open_table_group(store, table_name=table_name)
+        present_deletions = []
+        for path in deletion_paths:
+            if _check_deletion_destination(source_table, path, table_path=table_path, root=root):
+                present_deletions.append(path)
+            else:
+                log.info(f"Table {table_name!r}: component {path!r} is already absent; skipping deletion.")
         new_raw_var = _prepare_raw_creation(source_table, components, raw_var_names=raw_var_names, overwrite=overwrite)
         # Use the same expected raw feature index before and after staging.
         expected_new_raw_var_index = None if new_raw_var is None else new_raw_var.index
@@ -286,6 +389,11 @@ def _write_table_operation(
             raw_var_names=raw_var_names,
             expected_new_raw_var_index=expected_new_raw_var_index,
         )
+        if not paths and not present_deletions:
+            # A validated all-missing deletion request must not create a
+            # workspace or rewrite the store's consolidated metadata.
+            yield source_table
+            return
     for destination in destinations:
         if destination.is_symlink() or not destination.resolve().is_relative_to(root.resolve()):
             raise ValueError(f"Unsafe table-write destination: {destination}.")
@@ -295,7 +403,7 @@ def _write_table_operation(
     workspace = Path(tempfile.mkdtemp(prefix=f".{root.name}.harpy-table-staging-", dir=root.parent))
     try:
         staged_root = zarr.open_group(str(workspace), mode="w", zarr_format=source_root.metadata.zarr_format)
-        replacements: list[_StagedPath] = []
+        replacements: list[_StagedPath | _DeletedPath] = []
         if adata is not None:
             _write_anndata_element(staged_root, ("table",), adata, create_parents=False)
             staged_table = _read_anndata_table(staged_root["table"], mode="lazy")
@@ -358,7 +466,14 @@ def _write_table_operation(
                 raw_var_names=raw_var_names,
                 expected_new_raw_var_index=expected_new_raw_var_index,
             )
+            # Register deletion targets alongside staged replacements;
+            # _publish_table_paths() processes these instructions below.
+            replacements.extend(_DeletedPath(table_path.joinpath(*path)) for path in present_deletions)
 
+        # All replacement serialization has finished, including any reads from
+        # deletion targets (e.g. X derived from a layer being deleted). Publication
+        # can now move existing targets into backups and install replacements,
+        # keeping removals and replacements within the same rollback window.
         with _publish_table_paths(
             root=root, table_name=table_name, workspace=workspace, replacements=replacements
         ) as published:
@@ -373,7 +488,7 @@ def _publish_table_paths(
     root: Path,
     table_name: str,
     workspace: Path,
-    replacements: Sequence[_StagedPath],
+    replacements: Sequence[_StagedPath | _DeletedPath],
 ) -> Generator[zarr.Group, None, None]:
     """Publish validated table payloads and finalize metadata after caller installation.
 
@@ -400,7 +515,8 @@ def _publish_table_paths(
         clean up failures during preparation, before entering this operation.
     replacements
         Pairs of fully serialized staged paths and permanent destinations for
-        this table or its components. Callers must validate the AnnData paths
+        this table or its components, optionally accompanied by explicit deletion
+        destinations without staged payloads. Callers must validate the AnnData paths
         and payloads, overwrite permission, identities and domain constraints.
         This helper checks filesystem safety; it does not determine whether
         arbitrary paths represent valid AnnData components.
@@ -442,7 +558,8 @@ def _publish_table_paths(
                 raise ValueError(f"Refusing to update symbolic-link metadata path: {metadata_path}.")
             root_metadata_before[metadata_path] = metadata_path.read_bytes() if metadata_path.exists() else None
         writable_root = zarr.open_group(str(root), mode="r+", use_consolidated=False)
-        _create_destination_parents(writable_root, root, destinations, created_parents)
+        replacement_destinations = tuple(item.destination for item in replacements if isinstance(item, _StagedPath))
+        _create_destination_parents(writable_root, root, replacement_destinations, created_parents)
         with _publish_staged_paths(root=root, workspace=workspace, paths=replacements, operation="table"):
             # Read the published paths directly (use_consolidated=False), because
             # consolidated metadata may still describe the previous table/components.
