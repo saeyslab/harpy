@@ -6,6 +6,7 @@ from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from numbers import Integral, Number
 from os import PathLike
+from pathlib import Path
 
 import dask.array as da
 import numpy as np
@@ -21,7 +22,7 @@ from harpy.table._io import ComponentPath, _open_table_group, _validate_componen
 from harpy.table._write import _write_table_operation
 from harpy.table._write_validation import (
     _annotation_columns,
-    _check_component_destination,
+    _check_component_write_destination,
     _match_identity,
     _observation_pairs,
     _read_observation_identity,
@@ -196,6 +197,8 @@ def _write_table_components_by_region_operation(
         raise ValueError("fill_values keys must refer to submitted obsm matrices.")
 
     group = _open_table_group(store, table_name=table_name)
+    root = Path(store)
+    table_path = root / "tables" / table_name
     spatialdata_attrs = _read_spatialdata_attrs(group)
     if spatialdata_attrs is None:
         raise ValueError("Regional writes require a SpatialData-annotated table.")
@@ -225,7 +228,7 @@ def _write_table_components_by_region_operation(
 
     replacements = dict(components)
     for path in paths:
-        _check_component_destination(group, path, overwrite=overwrite)
+        _check_component_write_destination(group, path, table_path=table_path, root=root, overwrite=overwrite)
         if path[0] != "obsm":
             continue
         regional_values = components[path]

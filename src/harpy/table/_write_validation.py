@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from numbers import Integral
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -12,10 +13,76 @@ from anndata import AnnData
 from anndata.io import read_elem
 from spatialdata.models import TableModel
 
-from harpy._storage._anndata import _MissingAnnDataElement, _read_anndata_element
-from harpy.table._io import ComponentPath
+from harpy._storage._anndata import _MATRIX_MAPPINGS, _MissingAnnDataElement, _read_anndata_element
+from harpy.table._io import ComponentPath, _check_component_path_overlap, _validate_path_segment
 
 type AxisNames = pd.Index | Sequence[str]
+
+
+def _validate_deletion_paths(components: Sequence[ComponentPath]) -> tuple[ComponentPath, ...]:
+    """Allow only optional entries, protecting axes, containers and SpatialData linkage.
+
+    An empty sequence is allowed for replacement-only operations. Public
+    deletion-only requests additionally require at least one target.
+    """
+    if isinstance(components, (str, bytes)) or not isinstance(components, Sequence):
+        raise TypeError("Deletion components must be a sequence of tuple paths.")
+    paths = []
+    for path in components:
+        if not isinstance(path, tuple):
+            raise TypeError("Each component path must be a tuple of strings.")
+        if not path:
+            raise ValueError("Component paths must not be empty.")
+        for segment in path:
+            _validate_path_segment(segment)
+        valid = (
+            path in {("X",), ("raw",)}
+            or (path[0] in _MATRIX_MAPPINGS and len(path) == 2)
+            or (path[:2] == ("raw", "varm") and len(path) == 3)
+            or (path[0] == "uns" and len(path) >= 2 and path[1] != TableModel.ATTRS_KEY)
+        )
+        if not valid:
+            raise ValueError(f"Cannot delete required, protected or unsupported AnnData component {path!r}.")
+        paths.append(path)
+    _check_component_path_overlap(paths)
+    return tuple(paths)
+
+
+def _check_component_deletion_destination(
+    group: zarr.Group, path: ComponentPath, *, table_path: Path, root: Path
+) -> bool:
+    """Return whether a safe logical target exists, without decoding its payload.
+
+    Only a genuinely missing path is a no-op. Malformed mapping parents,
+    unrecognized filesystem entries and unsafe destinations still raise.
+    """
+    parent = group
+    for key_index, key in enumerate(path):
+        logical_path = path[: key_index + 1]
+        destination = table_path.joinpath(*logical_path)
+        if destination.is_symlink() or not destination.resolve().is_relative_to(root.resolve()):
+            raise ValueError(f"Unsafe table-deletion destination: {destination}.")
+        try:
+            element = parent[key]
+        except KeyError:
+            # Do not mistake an unrecognized file/directory for an absent
+            # component. stat() also propagates permission and other I/O errors.
+            try:
+                destination.stat()
+            except FileNotFoundError:
+                return False
+            raise ValueError(f"Unrecognized AnnData component path: {logical_path!r}.") from None
+        if key_index == len(path) - 1:
+            return True
+        expected_encoding = "raw" if logical_path == ("raw",) else "dict"
+        if (
+            not isinstance(element, zarr.Group)
+            or element.attrs.get("encoding-type") != expected_encoding
+            or element.attrs.get("encoding-version") != "0.1.0"
+        ):
+            raise ValueError(f"AnnData component parent {logical_path!r} is not an encoded mapping.")
+        parent = element
+    return False  # Paths are nonempty after validation.
 
 
 def _prepare_raw_creation(
@@ -65,8 +132,27 @@ def _prepare_raw_creation(
     return pd.DataFrame(index=_named_identity(raw_var_names, label="raw_var_names"))
 
 
-def _check_component_destination(group: zarr.Group, path: ComponentPath, *, overwrite: bool) -> None:
-    """Check traversal and collisions without decoding the destination value."""
+def _check_write_destination(destination: Path, *, root: Path, overwrite: bool) -> None:
+    """Check filesystem safety and overwrite permission for a table or component.
+
+    Filesystem existence matters even when Zarr does not recognize the path
+    as an element. This check does not inspect AnnData encodings or payloads.
+    """
+    if destination.is_symlink() or not destination.resolve().is_relative_to(root.resolve()):
+        raise ValueError(f"Unsafe table-write destination: {destination}.")
+    if destination.exists() and not overwrite:
+        raise FileExistsError(f"Destination {destination} already exists; use overwrite=True.")
+
+
+def _check_component_write_destination(
+    group: zarr.Group, path: ComponentPath, *, table_path: Path, root: Path, overwrite: bool
+) -> None:
+    """Check filesystem safety, overwrite permission and logical parent mappings.
+
+    The destination is resolved relative to the permanent table_path, not
+    staging. No payload is decoded and no directories are created.
+    """
+    _check_write_destination(table_path.joinpath(*path), root=root, overwrite=overwrite)
     parent = group
     for key_index, key in enumerate(path):
         if key not in parent:
@@ -75,8 +161,6 @@ def _check_component_destination(group: zarr.Group, path: ComponentPath, *, over
             return
         element = parent[key]
         if key_index == len(path) - 1:
-            if not overwrite:
-                raise FileExistsError(f"Table component {path!r} already exists; use overwrite=True.")
             return
         expected_encoding = "raw" if path[: key_index + 1] == ("raw",) else "dict"
         if (

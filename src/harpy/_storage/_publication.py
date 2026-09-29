@@ -26,21 +26,30 @@ class _StagedPath:
     destination: Path
 
 
+@dataclass(frozen=True)
+class _DeletedPath:
+    """Remove a destination on success, retaining its backup until then."""
+
+    destination: Path
+
+
 @contextmanager
 def _publish_staged_paths(
     *,
     root: Path,
     workspace: Path,
-    paths: Sequence[_StagedPath],
+    paths: Sequence[_StagedPath | _DeletedPath],
     operation: str,
 ) -> Generator[None, None, None]:
-    """Move already-written files or directories from staging to permanent destinations.
+    """Publish prepared replacements and explicit deletions with shared rollback.
 
     Keep previous destination data in backups until the caller succeeds,
     restoring it if publication or the caller's work fails.
 
     For entries in ``paths``, first back up all existing destinations, then
-    publish all prepared paths::
+    publish all prepared paths. Deletions have no staged payload: their
+    destinations remain absent until either rollback restores them or success
+    discards their backups::
 
         entry.destination (inside root) --rename--> backup directory
                                                    (previous data; created here)
@@ -68,11 +77,12 @@ def _publish_staged_paths(
         Writer-owned directory containing fully written new data. Removed
         after its prepared paths move to their permanent destinations.
     paths
-        Non-overlapping file/directory pairs on the same filesystem, published
-        within one rollback context. Each entry's ``staged`` points to the new
-        data already fully written on disk inside ``workspace``; ``destination``
-        is its permanent location inside ``root``. This function moves the
-        prepared data; it does not serialize it.
+        Non-overlapping replacements or deletions on the same filesystem,
+        published within one rollback context. A replacement's ``staged``
+        points to fully written data inside ``workspace``; ``destination`` is
+        its permanent location inside ``root``. A deletion has only a
+        ``destination``. All replacement serialization must finish before this
+        call, including computations that read a deletion target.
     operation
         Path-safe operation label for backup names and logging.
 
@@ -106,7 +116,7 @@ def _publish_staged_paths(
     backups: list[tuple[Path, Path]] = []
     published: list[Path] = []
     destinations = [str(replacement.destination) for replacement in replacements]
-    log.info(f"Publishing {len(replacements)} staged path(s) for '{operation}' to {destinations!r}.")
+    log.info(f"Publishing {len(replacements)} path update(s) for '{operation}' to {destinations!r}.")
     try:
         for ordinal, replacement in enumerate(replacements):
             if replacement.destination.exists():
@@ -114,8 +124,9 @@ def _publish_staged_paths(
                 replacement.destination.rename(backup_path)
                 backups.append((replacement.destination, backup_path))
         for replacement in replacements:
-            replacement.staged.rename(replacement.destination)
-            published.append(replacement.destination)
+            if isinstance(replacement, _StagedPath):
+                replacement.staged.rename(replacement.destination)
+                published.append(replacement.destination)
         log.info(f"Removing staging workspace at '{workspace}'.")
         _remove_owned_path(workspace)
         log.info(f"Finished removing staging workspace at '{workspace}'.")
@@ -136,20 +147,23 @@ def _publish_staged_paths(
         raise
     else:
         _cleanup_owned_path(backup)
-        log.info(f"Finished publishing staged paths for '{operation}'.")
+        log.info(f"Finished publishing path updates for '{operation}'.")
 
 
-def _validate_staged_paths(*, root: Path, workspace: Path, paths: tuple[_StagedPath, ...], operation: str) -> None:
+def _validate_staged_paths(
+    *, root: Path, workspace: Path, paths: tuple[_StagedPath | _DeletedPath, ...], operation: str
+) -> None:
     """Check path ownership and same-filesystem moves before changing destinations."""
     if not operation or Path(operation).name != operation or operation in {".", ".."}:
         raise ValueError(f"Publication operation must be a non-empty path-safe name, found {operation!r}.")
     if not paths:
-        raise ValueError("At least one staged path is required for publication.")
+        raise ValueError("At least one path update is required for publication.")
+    staged = tuple(replacement.staged for replacement in paths if isinstance(replacement, _StagedPath))
     # Check the explicit paths before resolve() follows links, including broken
     # ones. Ancestor aliases (for example macOS /tmp) remain supported.
     managed_paths = (
         workspace,
-        *(replacement.staged for replacement in paths),
+        *staged,
         *(replacement.destination for replacement in paths),
     )
     symlinks = [str(path) for path in managed_paths if path.is_symlink()]
@@ -165,7 +179,7 @@ def _validate_staged_paths(*, root: Path, workspace: Path, paths: tuple[_StagedP
     root_path, workspace_path = root.resolve(), workspace.resolve()
     if root_path.is_relative_to(workspace_path):
         raise ValueError("The staging workspace cannot contain the publication root.")
-    staged_paths = tuple(replacement.staged.resolve() for replacement in paths)
+    staged_paths = tuple(path.resolve() for path in staged)
     destination_paths = tuple(replacement.destination.resolve() for replacement in paths)
     if len(set(staged_paths)) != len(staged_paths) or len(set(destination_paths)) != len(destination_paths):
         raise ValueError("Staged source and destination paths must be unique.")

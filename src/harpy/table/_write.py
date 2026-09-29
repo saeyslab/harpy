@@ -38,8 +38,9 @@ from harpy.table._io import (
 )
 from harpy.table._write_validation import (
     AxisNames,
-    _check_component_destination,
-    _check_deletion_destination,
+    _check_component_deletion_destination,
+    _check_component_write_destination,
+    _check_write_destination,
     _prepare_raw_creation,
     _validate_complete_table,
     _validate_component_values,
@@ -333,9 +334,7 @@ def _write_table_operation(
         raise ValueError("The tables container must be a Zarr group.")
 
     if adata is not None:
-        destinations = (table_path,)
-        if table_path.exists() and not overwrite:
-            raise FileExistsError(f"Table {table_name!r} already exists; use overwrite=True.")
+        _check_write_destination(table_path, root=root, overwrite=overwrite)
         _validate_complete_table(adata)
         _validate_table_identities(adata, obs_identity=obs_identity, var_names=var_names, raw_var_names=raw_var_names)
     else:
@@ -349,7 +348,7 @@ def _write_table_operation(
         source_table = _open_table_group(store, table_name=table_name)
         present_deletions = []
         for path in deletion_paths:
-            if _check_deletion_destination(source_table, path, table_path=table_path, root=root):
+            if _check_component_deletion_destination(source_table, path, table_path=table_path, root=root):
                 present_deletions.append(path)
             else:
                 log.info(f"Table {table_name!r}: component {path!r} is already absent; skipping deletion.")
@@ -373,18 +372,16 @@ def _write_table_operation(
             # replace an unrecognized raw parent with the new container.
             if "raw" not in source_table and (table_path / "raw").exists():
                 raise ValueError("Cannot create raw over an existing unrecognized raw path.")
+            _check_write_destination(table_path / "raw", root=root, overwrite=overwrite)
             components = dict(components)
             components[("raw", "var")] = new_raw_var
             paths = tuple(components)
-            publication_paths = (("raw",), *(path for path in paths if path[0] != "raw"))
-        else:
-            # Existing raw containers keep unrequested components untouched.
-            publication_paths = paths
-        destinations = tuple(table_path.joinpath(*path) for path in publication_paths)
         for path in paths:
             if create_raw and path[0] == "raw":
                 continue
-            _check_component_destination(source_table, path, overwrite=overwrite)
+            _check_component_write_destination(
+                source_table, path, table_path=table_path, root=root, overwrite=overwrite
+            )
         # 1) Validate caller-supplied shapes, identities and linkage before staging.
         # Step 2 below repeats these checks on the serialized output.
         _validate_component_values(
@@ -400,12 +397,6 @@ def _write_table_operation(
             # workspace or rewrite the store's consolidated metadata.
             yield source_table
             return
-    for destination in destinations:
-        if destination.is_symlink() or not destination.resolve().is_relative_to(root.resolve()):
-            raise ValueError(f"Unsafe table-write destination: {destination}.")
-        if destination.exists() and not overwrite:
-            raise FileExistsError(f"Destination {destination} already exists; use overwrite=True.")
-
     workspace = Path(tempfile.mkdtemp(prefix=f".{root.name}.harpy-table-staging-", dir=root.parent))
     try:
         staged_root = zarr.open_group(str(workspace), mode="w", zarr_format=source_root.metadata.zarr_format)

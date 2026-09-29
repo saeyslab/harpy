@@ -21,7 +21,7 @@ from harpy._storage._publication import (
 )
 from harpy.table._validation import _validate_table_without_canonical
 from harpy.table._write import _publish_table_paths
-from harpy.table._write_validation import _check_component_destination, _validate_component_values
+from harpy.table._write_validation import _check_component_write_destination, _validate_component_values
 from harpy.table.canonical_centers import (
     CANONICAL_ALGORITHM_VERSION,
     CANONICAL_OBSM_KEY,
@@ -364,7 +364,9 @@ def _validate_existing_canonical_components(
             "Set 'overwrite=True' to replace both coordinated components."
         )
     for path in (_CANONICAL_MATRIX_PATH, _CANONICAL_METADATA_PATH):
-        _check_component_destination(table_group, path, overwrite=overwrite)
+        _check_component_write_destination(
+            table_group, path, table_path=destination.table_path, root=destination.root, overwrite=overwrite
+        )
 
 
 def _assemble_canonical_table_payload(
