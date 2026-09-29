@@ -60,19 +60,21 @@ from harpy.utils._keys import _FEATURE_MATRICES_KEY
 class _AggregationDestination:
     """Validated paths and storage format for an aggregation-table write.
 
+    Constructed by ``_validate_aggregation_destination()`` after destination validation.
+
     Parameters
     ----------
     root
         SpatialData Zarr store, for example ``/data/sdata.zarr``.
-    output
-        Permanent AnnData table destination within the store, for example
+    table_path
+        Permanent AnnData table path within the store, for example
         ``/data/sdata.zarr/tables/counts``. This is not the staged table path.
     zarr_format
         Store's Zarr format (2 or 3), preserved when writing the table.
     """
 
     root: Path
-    output: Path
+    table_path: Path
     zarr_format: int
 
 
@@ -146,9 +148,9 @@ def _validate_aggregation_destination(
         raise ValueError("The tables container must be a Zarr group.")
 
     tables = root / "tables"
-    output = tables / output_table_name
+    table_path = tables / output_table_name
     memory_collision = output_table_name in sdata.tables
-    disk_collision = output.exists()
+    disk_collision = table_path.exists()
     existing_element = sdata.get(output_table_name)
     if existing_element is not None and not memory_collision:
         raise ValueError(f"Element name {output_table_name!r} already belongs to a non-table SpatialData element.")
@@ -160,7 +162,7 @@ def _validate_aggregation_destination(
         )
     return _AggregationDestination(
         root=root,
-        output=output,
+        table_path=table_path,
         zarr_format=zarr_format,
     )
 
@@ -636,7 +638,7 @@ def _install_aggregation_table(
             root=destination.root,
             table_name=output_table_name,
             workspace=workspace,
-            replacements=(_StagedPath(workspace / "table", destination.output),),
+            replacements=(_StagedPath(workspace / "table", destination.table_path),),
         ) as table_group:
             backed_table = _read_backed_table(table_group)
             sdata.tables[output_table_name] = backed_table
