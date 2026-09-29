@@ -37,7 +37,8 @@ private data flow::
                     +-- Dask shuffle by (aggregation-pair ordinal, instance ID)
                     +-- _merge_count_partition()
                     +-- write merged counts to temporary Parquet on disk:
-                        tables/.harpy-aggregate-<uuid>/merged_counts/
+                        .<store-name>.harpy-aggregate-<token>/merged_counts/
+                        (beside the SpatialData store)
                               |
                               v
                    _write_aggregation_table()
