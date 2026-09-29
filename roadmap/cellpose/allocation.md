@@ -7661,16 +7661,41 @@ payload reads.
 **Status: planned; implement after Parts 11f.i–vii. Required before the
 napari-harpy persistence migration, but not before Slice 11g.**
 
-Extend the public component-writing contract to explicitly remove selected
-optional `.obsm` entries and `.uns` records. Support deletion-only requests and
-requests combining replacements and deletions in one rollback operation. This
-does not require a separate general-purpose deletion API or whole-table deletion.
+**Public contract.** Extend `hp.tb.write_table_components()` to explicitly remove
+optional AnnData components, not only `.obsm` entries and `.uns` records.
+Support deletion-only requests and requests combining replacements and deletions
+in one rollback operation, rather than introducing a separate general-purpose
+deletion API.
+The current writer accepts replacement values only; this slice adds an explicit
+deletion intent without changing the meaning of existing replacement requests.
+
+Support deletion according to the component's structural role, rather than
+automatically allowing every path accepted for replacement:
+
+| Component                                                                  | Deletion contract                                                                                           |
+| -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Individual `layers`, `obsm`, `varm`, `obsp`, `varp` entries                | Supported; remove only the requested entry.                                                                 |
+| Individual `raw.varm` entries                                              | Supported; preserve the remaining raw data.                                                                 |
+| Individual or nested `.uns` records                                        | Supported, except protected SpatialData annotation metadata and its descendants.                            |
+| `.X`                                                                       | Supported; preserve `.obs`, `.var`, all other components and the table's shape. Reopening returns `X=None`. |
+| Entire `.raw`                                                              | Supported as one unit, including its `X`, `var` and `varm`. Reopening returns `raw=None`.                   |
+| `.obs`, `.var`, or `.raw.var` individually                                 | Rejected: observation and feature axes must remain intact.                                                  |
+| `.raw.X` individually                                                      | Rejected: remove the complete `.raw` container instead.                                                     |
+| Whole mapping containers such as `.layers`, `.obsm`, `.uns` or `.raw.varm` | Rejected: remove explicitly selected entries and preserve their parent containers.                          |
+
+Deletion therefore has its own allowed-path rules: `("raw",)` is a supported
+deletion target even though whole-raw replacement is not an existing component
+write operation. This does not add whole-raw replacement support. Do not leave
+a partial raw container without its matrix or feature axis; constructing raw
+without `X` can trigger AnnData's fallback to copying the main table's data.
 
 Keep the three component-update intents distinct:
 
 - **Omitted path:** leave its stored value unchanged.
 - **Replacement value:** write the supplied value at that path.
 - **Explicit deletion:** remove that path from storage on successful completion.
+
+`None` remains an encoded value where supported, not a deletion instruction.
 
 For example, removing `.obsm["cell_features"]` and its corresponding
 `.uns["feature_matrices"]["cell_features"]` record must be expressible together,
@@ -7679,16 +7704,34 @@ in-memory AnnData must not implicitly delete them in a component-write request.
 Callers identify related scientific data and metadata; generic I/O does not
 infer which records belong together.
 
-Finalize the deletion argument and missing-target policy before implementation.
-Validate the complete request before changing storage: reject duplicate or
-overlapping paths, including a path requested for both replacement and deletion
-or an ancestor/descendant conflict. Restrict deletions to the supported optional
-entries; protect required table structures and SpatialData annotation metadata.
-Deleting individual `.obs`/`.var` columns remains a whole-dataframe replacement,
-not a new column-level disk operation. Preserve unrelated entries and parents.
+**Decisions to finalize before implementation:**
 
-Extend the existing shared publisher to represent deletion explicitly rather
-than using placeholder payloads or a separate direct-Zarr deletion path:
+- The deletion argument's name and representation; no public signature is fixed yet.
+- Whether requesting deletion of an already-missing target raises or is a no-op.
+
+**Validation and scope.** Validate the complete request before changing storage:
+reject duplicate or overlapping paths, including a path requested for both
+replacement and deletion or an ancestor/descendant conflict. Restrict deletions
+to the supported optional components above; protect required table structures and
+SpatialData annotation metadata. Whole-table deletion, observation/feature-row
+deletion and matrix-slice deletion remain outside this slice. Removing individual
+`.obs`/`.var`/`.raw.var` annotation columns remains a whole-dataframe replacement
+that preserves its index, not a new column-level disk operation. Preserve
+unrelated entries and parents.
+
+Deletion-only requests do not require `obs_identity`, `var_names` or
+`raw_var_names`: deleting a complete optional component does not align replacement
+values or change the main table's axes. Mixed requests retain the existing ordered
+identity and structural checks for their replacement values. Callers remain
+responsible for keeping related scientific records coherent; do not infer
+cascading deletions from metadata references.
+
+**Shared publication.** Reuse `_write_table_operation()` and
+`_publish_table_paths()` for scoped table updates and root-metadata recovery.
+The underlying `_publish_staged_paths()` currently expects a staged replacement
+for every destination. Extend its operation representation to support explicit
+deletion targets without staged replacement payloads. Do not use placeholder
+values or a separate direct-Zarr deletion path:
 
 ```text
 validate all replacements and deletions
@@ -7700,18 +7743,30 @@ validate all replacements and deletions
        failure: remove replacements and restore all original paths
 ```
 
-Deleting a matrix must not decode or materialize its values. Reuse the existing
-ownership/path safeguards and metadata cleanup/restoration contract; adapters
-remain responsible for affected live objects. Keep the same local-store,
-handled-failure guarantees and limitations: no crash recovery or concurrent
-reader/writer isolation.
+**I/O and ownership.** Deleting a component must not decode or materialize its
+payload, including dense, sparse and DataFrame-valued entries. Deleting `.X` or
+the complete `.raw` container likewise requires no numerical reads. Leave `.X`
+untouched unless it is explicitly requested for replacement or deletion. Reuse
+the existing ownership/path safeguards and metadata cleanup/restoration contract,
+including saved store-root metadata when finalization fails. The path-based public
+writer does not update an attached AnnData or SpatialData object; adapters remain
+responsible for affected live objects and their restoration on failure. Keep the
+same local-store, handled-failure
+guarantees and limitations: no crash recovery or concurrent reader/writer isolation.
 
-Focused tests must cover deletion-only and mixed requests, related matrix and
-metadata removal, preservation of unrelated components, invalid/conflicting
-requests and the agreed missing-target behavior. Inject publication and
-finalization failures to verify restoration of both removed and replaced data,
-including consolidated metadata and affected adapter state. Verify that deleting
-an optional matrix neither reads its values nor reads or rewrites `.X`.
+**Checks and documentation.** Focused tests must cover deletion-only and mixed
+requests across the supported paths, related matrix and metadata removal,
+preservation of unrelated components, protected/invalid/conflicting requests and
+the agreed missing-target behavior. Check that removing `.X` preserves the table's
+axes and shape, and that removing `.raw` removes the complete container while
+preserving the main table. Reject individual `.raw.X`/`.raw.var` removal and
+whole-mapping deletion.
+Cover deletion-only requests without identity arguments and mixed requests that
+still enforce replacement identities. Inject publication and finalization failures
+to verify restoration of both removed and replaced data, including consolidated
+metadata and affected adapter state. Instrument dense, sparse and DataFrame-valued
+deletions to verify that payloads are not decoded and unrelated `.X` is neither
+read nor rewritten; deleting `.X` or `.raw` itself must not read their matrices.
 Document the explicit deletion contract in the public API and storage overview.
 
 ### Part 11f.ix: affected-chunk regional-write optimization
