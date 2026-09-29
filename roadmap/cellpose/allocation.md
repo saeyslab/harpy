@@ -50,7 +50,7 @@ implemented:
       **11f.v** creation of raw data through component writes — implemented;
       **11f.vi** region-wise `.obsm` writing — implemented; **11f.vii** integration
       with existing Harpy APIs in three implementation slices: **a)** `hp.tb.add_table` — implemented,
-      **b)** `hp.tb.add_feature_matrix` — implemented, **c)** aggregation and canonical-component writers;
+      **b)** `hp.tb.add_feature_matrix` — implemented, **c)** aggregation and canonical-component writers — implemented;
       **11f.viii** safe deletion of optional AnnData components; **11f.ix**
       affected-chunk regional-write optimization, after the first eight parts;
       a separate napari-harpy persistence migration also follows the first eight
@@ -6216,9 +6216,9 @@ unsmoothed default remains unchanged.
 implemented. `hp.tb.read_table`, `hp.tb.read_table_components` and
 `hp.io.read_zarr`, plus `hp.tb.write_table` and `hp.tb.write_table_components`,
 are available, including raw creation through component writes and regional
-updates through `hp.tb.write_table_components_by_region`. Parts 11f.vii a)–b)
-(`hp.tb.add_table` and `hp.tb.add_feature_matrix` integration) are implemented; Parts 11f.vii c) and
-11f.viii–ix remain planned.**
+updates through `hp.tb.write_table_components_by_region`. Parts 11f.vii a)–c)
+(integration of `hp.tb.add_table`, `hp.tb.add_feature_matrix`, aggregation and
+canonical-component writers) are implemented; Parts 11f.viii–ix remain planned.**
 
 Provide general, modular table I/O independently of QC, aggregation or Scanpy
 preprocessing. The caller explicitly chooses a complete table or selected
@@ -7528,7 +7528,7 @@ the public contract.
 
 ### Part 11f.vii: integration with existing Harpy APIs
 
-**Status: Parts 11f.vii a) and b) implemented; c) remains planned.
+**Status: Parts 11f.vii a), b) and c) implemented.
 Each part includes its own focused integration tests and documentation
 updates; Parts 11f.viii and ix retain their numbering.**
 
@@ -7622,6 +7622,12 @@ alongside annotation/component-only examples using the explicit table I/O APIs.
 
 ### Part 11f.vii c): integrate aggregation and canonical-component writers
 
+**Status: implemented. Both domain writers and `_write_table_operation` reuse
+`_publish_table_paths` for parent setup, publication and saved root-metadata
+recovery. Aggregation retains checkpoint-driven sparse serialization; canonical
+updates retain paired-component staging and domain validation. Installed matrix
+handles are read-only, and adapters restore affected in-memory references on failure.**
+
 Migrate other existing table writers to shared reading/serialization/publication
 primitives where applicable, including the complete aggregation-table path
 and canonical-component updates. Retain their scientific orchestration and
@@ -7642,6 +7648,13 @@ metadata-finalization failures for both writers. Verify saved root-metadata
 restoration even when consolidation continues to fail, cleanup of only newly
 created parents and restoration of affected in-memory state. Document the shared
 persistence/recovery behavior and the responsibilities retained by each caller.
+
+Aggregation workspaces now live beside the store, so checkpoint/staging failures
+cannot leave a newly created `tables` group. Canonical updates validate full
+in-memory observation identity/order against storage before publication. Focused
+checks cover both Zarr formats, failure after assignment, persistent consolidation
+failure, unchanged unrelated data, and canonical updates without unrelated matrix
+payload reads.
 
 ### Part 11f.viii: safe deletion of optional AnnData components
 
