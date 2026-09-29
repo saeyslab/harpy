@@ -1,3 +1,19 @@
+"""Validate recognized Harpy table contracts in their SpatialData context.
+
+Table-validation responsibilities:
+
+- ``harpy.table._write_validation`` checks AnnData structure and ordered
+  identities for complete-table and component writes, without requiring the
+  surrounding SpatialData object.
+- ``validate_table()`` and its helpers check SpatialData annotation, recognized
+  Harpy metadata and references to other elements, including canonical centers.
+
+Annotation and observation-identity checks currently overlap between these
+paths. Keep their common invariants consistent and reuse shared checks rather
+than adding independent validation blocks to each writer. Add Harpy-specific
+metadata checks to the existing table-validation helpers.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Mapping

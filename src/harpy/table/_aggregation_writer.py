@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import tempfile
 import uuid
-from collections.abc import Generator, Mapping
-from contextlib import contextmanager
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -23,7 +23,7 @@ from harpy._storage._anndata import (
     _write_anndata_element,
     _write_spatialdata_table_attrs,
 )
-from harpy._storage._publication import _cleanup_owned_path, _publish_staged_paths, _StagedPath
+from harpy._storage._publication import _cleanup_owned_path, _StagedPath
 from harpy.table._aggregation_checkpoint import (
     _CHECKPOINT_INSTANCE_COLUMN,
     _COUNT_COLUMN,
@@ -41,6 +41,8 @@ from harpy.table._metadata import (
     _FEATURE_MATRIX_SCHEMA_VERSION,
 )
 from harpy.table._validation import _validate_table_without_canonical
+from harpy.table._write import _publish_table_paths
+from harpy.table._write_validation import _validate_complete_table
 from harpy.table.canonical_centers import (
     CANONICAL_ALGORITHM_VERSION,
     CANONICAL_OBSM_KEY,
@@ -56,10 +58,20 @@ from harpy.utils._keys import _FEATURE_MATRICES_KEY
 
 @dataclass(frozen=True)
 class _AggregationDestination:
-    """Validated local backing-store destination for one table write."""
+    """Validated paths and storage format for an aggregation-table write.
+
+    Parameters
+    ----------
+    root
+        SpatialData Zarr store, for example ``/data/sdata.zarr``.
+    output
+        Permanent AnnData table destination within the store, for example
+        ``/data/sdata.zarr/tables/counts``. This is not the staged table path.
+    zarr_format
+        Store's Zarr format (2 or 3), preserved when writing the table.
+    """
 
     root: Path
-    tables: Path
     output: Path
     zarr_format: int
 
@@ -125,10 +137,13 @@ def _validate_aggregation_destination(
     root = Path(sdata.path)
     if "://" in str(sdata.path):
         raise ValueError("hp.tb.aggregate_points currently requires a local filesystem-backed SpatialData Zarr store.")
-    root_group = zarr.open_group(store=str(root), mode="r+", use_consolidated=False)
+    root_group = zarr.open_group(store=str(root), mode="r", use_consolidated=False)
     zarr_format = getattr(getattr(root_group, "metadata", None), "zarr_format", None)
     if zarr_format not in {2, 3}:
         raise ValueError(f"Could not determine the Zarr format of the backing store at {root!s}.")
+    # Reject an incompatible container without creating a missing tables group.
+    if "tables" in root_group and not isinstance(root_group["tables"], zarr.Group):
+        raise ValueError("The tables container must be a Zarr group.")
 
     tables = root / "tables"
     output = tables / output_table_name
@@ -145,25 +160,32 @@ def _validate_aggregation_destination(
         )
     return _AggregationDestination(
         root=root,
-        tables=tables,
         output=output,
         zarr_format=zarr_format,
     )
 
 
 def _create_aggregation_workspace(destination: _AggregationDestination) -> Path:
-    """Create a temporary per-call workspace inside the store's tables group.
+    """Create a temporary workspace beside the SpatialData Zarr store.
 
-    The workspace holds the merged-count Parquet checkpoint and the staged
-    AnnData Zarr group. Successful publication moves the staged table to its
-    final element path; the remaining workspace is removed after either success
-    or failure.
+    For example, when sdata.path is "/data/sdata.zarr" and the output
+    table is named "counts"::
+
+        /data/
+        ├── sdata.zarr/                       SpatialData store
+        │   └── tables/
+        │       └── counts/                  Final AnnData table destination
+        └── .sdata.zarr.harpy-aggregate-<token>/
+            ├── merged_counts/               Temporary Parquet checkpoint
+            └── table/                       Staged AnnData table
+
+    Publication moves workspace/table to sdata.zarr/tables/counts.
+    The remaining workspace is removed after success or failure.
+
+    Preparation does not create the store's tables group or change its
+    metadata; the shared publication operation manages destination parents.
     """
-    root = zarr.open_group(store=str(destination.root), mode="r+", use_consolidated=False)
-    root.require_group("tables")
-    workspace = destination.tables / f".harpy-aggregate-{uuid.uuid4().hex[:8]}"
-    workspace.mkdir()
-    return workspace
+    return Path(tempfile.mkdtemp(prefix=f".{destination.root.name}.harpy-aggregate-", dir=destination.root.parent))
 
 
 def _write_aggregation_table(
@@ -275,6 +297,7 @@ def _write_aggregation_table(
         n_auxiliary=len(auxiliary_axis) if class_contract is not None else None,
     )
     staged_table = _read_backed_table(staging_group)
+    _validate_complete_table(staged_table)
     # Validate the reopened serialized payload before publication, so the Zarr
     # representation must satisfy the same canonical contract as the in-memory
     # construction rather than relying only on construction-time checks.
@@ -572,16 +595,16 @@ def _install_aggregation_table(
 ) -> SpatialData:
     """Publish, reopen and attach one fully staged aggregation table.
 
-    Filesystem publication is isolated in
-    :func:`_publish_staged_aggregation_table`. The table is then reconstructed
-    exclusively from its published Zarr group by :func:`_read_backed_table`,
+    Publication and metadata recovery use :func:`_publish_table_paths`.
+    The table is reconstructed exclusively from its published Zarr group by
+    :func:`_read_backed_table`,
     attached to the in-memory SpatialData object, and validated against the
     non-canonical table contracts. Canonical components have already been
     validated after reopening the staged table. Any failure in
     reading, validation, attachment, or consolidated-metadata writing propagates
     through the publication context and restores the previous on-disk table::
 
-        _publish_staged_aggregation_table()
+        _publish_table_paths()
             |
             |-- preserve previous table
             |-- publish staged table
@@ -608,90 +631,31 @@ def _install_aggregation_table(
                         re-raise the original error
     """
     previous_table = sdata.tables.get(output_table_name)
-    attached = False
     try:
-        with _publish_staged_aggregation_table(destination=destination, workspace=workspace) as table_group:
+        with _publish_table_paths(
+            root=destination.root,
+            table_name=output_table_name,
+            workspace=workspace,
+            replacements=(_StagedPath(workspace / "table", destination.output),),
+        ) as table_group:
             backed_table = _read_backed_table(table_group)
             sdata.tables[output_table_name] = backed_table
-            attached = True
             # _write_aggregation_table() already validated the serialized
             # canonical components after reopening the staged table; publication
             # only moved that payload. Validate the remaining table contracts
             # here while disk and in-memory rollback are still available.
             _validate_table_without_canonical(sdata, output_table_name)
-            sdata.write_consolidated_metadata()
+            # The shared operation consolidates after this body succeeds.
     except BaseException:
-        if attached:
+        # Attachment may have assigned the table before raising. Restore the
+        # actual entry rather than relying on a flag set after assignment.
+        if sdata.tables.get(output_table_name) is not previous_table:
             if previous_table is None:
                 del sdata.tables[output_table_name]
             else:
                 sdata.tables[output_table_name] = previous_table
-        try:
-            sdata.write_consolidated_metadata()
-        except Exception as error:  # noqa: BLE001
-            log.warning(f"Could not refresh consolidated metadata after aggregation rollback: {error}")
         raise
     return sdata
-
-
-@contextmanager
-def _publish_staged_aggregation_table(
-    *,
-    destination: _AggregationDestination,
-    workspace: Path,
-) -> Generator[zarr.Group, None, None]:
-    """Publish a complete staged table through the shared element transaction.
-
-    The staged table is complete before publication starts. When replacing an
-    existing table, the shared publisher keeps it as a rollback copy until the
-    caller has read, validated and attached the replacement and rebuilt
-    consolidated metadata::
-
-        destination.output (previous table) --rename--> backup
-                                                only when replacing
-
-        workspace/table       --rename--> destination.output
-                                           |
-                                           v
-                                  remove remaining workspace
-                                           |
-                                           v
-                                  yield published Zarr group
-                                           |
-                                           v
-                                  caller reads, validates,
-                                  attaches and consolidates
-                                           |
-                                  did the body succeed?
-                                     /           \
-                                   yes            no
-                                    |              |
-                                    v              v
-                             remove backup    remove destination
-                             if present       if it was published
-                                                   |
-                                                   v
-                                            restore backup
-                                            if one existed
-                                                   |
-                                                   v
-                                            re-raise exception
-
-    The filesystem transaction itself is implemented by
-    :func:`_publish_staged_paths`; this wrapper only maps the staged
-    complete table to its SpatialData destination and returns that table group.
-    """
-    staging = workspace / "table"
-    with _publish_staged_paths(
-        root=destination.root,
-        workspace=workspace,
-        paths=(_StagedPath(staged=staging, destination=destination.output),),
-        operation="aggregate",
-    ):
-        # Return read-only handles; the completed payload needs no further writes.
-        # Consolidated metadata is written separately through SpatialData.
-        root = zarr.open_group(store=str(destination.root), mode="r", use_consolidated=False)
-        yield root["tables"][destination.output.name]
 
 
 def _remove_aggregation_workspace(workspace: Path) -> None:

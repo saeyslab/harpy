@@ -408,7 +408,18 @@ def _validate_component_values(
 
 
 def _validate_complete_table(table: AnnData) -> None:
-    """Check AnnData alignment and SpatialData linkage without computing matrices."""
+    """Validate the structural contract for a complete-table write.
+
+    "Complete" refers to the write scope, rather than exhaustive validation
+    of Harpy-specific metadata. Checks cover AnnData axis alignment,
+    SpatialData annotation and, when annotated, unique, non-null region/instance
+    identities, without reading matrix values.
+
+    This helper requires only the AnnData object. It does not validate
+    registered feature-matrix metadata, feature-panel references or canonical
+    centers. Those checks belong to ``harpy.table._validation.validate_table()``
+    and its helpers, which also have access to the surrounding SpatialData object.
+    """
     # Accessing aligned mappings invokes AnnData's shape/index checks, including
     # after callers have edited obs/var. It does not read the matrices' values.
     for slot in ("layers", "obsm", "varm", "obsp", "varp"):

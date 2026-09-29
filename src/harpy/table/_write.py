@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import tempfile
 import warnings
-from collections.abc import Generator, Mapping
+from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
 from os import PathLike
 from pathlib import Path
@@ -293,15 +293,6 @@ def _write_table_operation(
             raise FileExistsError(f"Destination {destination} already exists; use overwrite=True.")
 
     workspace = Path(tempfile.mkdtemp(prefix=f".{root.name}.harpy-table-staging-", dir=root.parent))
-    created_parents: list[Path] = []
-    # The zarr.consolidate_metadata(str(root)) call below rewrites the SpatialData
-    # Zarr store's root metadata, which is not included in the paths backed up by
-    # _publish_staged_paths(). Keep its exact prior bytes so even a failed finalization
-    # can be undone without opening unrelated tables or depending on consolidation
-    # succeeding again.
-    metadata_files = (".zgroup", ".zattrs", ".zmetadata") if source_root.metadata.zarr_format == 2 else ("zarr.json",)
-    root_metadata_before = {}
-    metadata_attempted = False
     try:
         staged_root = zarr.open_group(str(workspace), mode="w", zarr_format=source_root.metadata.zarr_format)
         replacements: list[_StagedPath] = []
@@ -368,6 +359,83 @@ def _write_table_operation(
                 expected_new_raw_var_index=expected_new_raw_var_index,
             )
 
+        with _publish_table_paths(
+            root=root, table_name=table_name, workspace=workspace, replacements=replacements
+        ) as published:
+            yield published
+    finally:
+        _cleanup_owned_path(workspace)
+
+
+@contextmanager
+def _publish_table_paths(
+    *,
+    root: Path,
+    table_name: str,
+    workspace: Path,
+    replacements: Sequence[_StagedPath],
+) -> Generator[zarr.Group, None, None]:
+    """Publish validated table payloads and finalize metadata after caller installation.
+
+    Writing and publication are separate steps: callers first write and validate
+    a table or its components in staging. This helper then moves those existing
+    paths to their final destinations without serializing the data again.
+
+    Callers may prepare staged data differently, but share this flow::
+
+        Caller:      write and validate staged data
+        This helper: publish paths and yield the reopened table
+        Caller:      finish its with-body (e.g. attach the table in memory)
+        This helper: consolidate metadata and finalize publication
+
+    Parameters
+    ----------
+    root
+        Existing local SpatialData Zarr store. No permanent paths may have been
+        changed yet: its root metadata is saved before creating missing parents.
+    table_name
+        Table to reopen read-only from permanent paths and yield to the caller.
+    workspace
+        Owned staging directory, cleaned on success or failure. Callers also
+        clean up failures during preparation, before entering this operation.
+    replacements
+        Pairs of fully serialized staged paths and permanent destinations for
+        this table or its components. Callers must validate the AnnData paths
+        and payloads, overwrite permission, identities and domain constraints.
+        This helper checks filesystem safety; it does not determine whether
+        arbitrary paths represent valid AnnData components.
+
+    Notes
+    -----
+    Installation and any final domain validation run in the caller's with-body
+    while backups remain available. Consolidation runs only after that body
+    succeeds. Failure restores payloads, newly created parents and saved root
+    metadata; the caller restores affected in-memory references. The shared
+    publisher's crash-recovery and concurrent-access limitations still apply.
+    """
+    created_parents: list[Path] = []
+    root_metadata_before = {}
+    metadata_attempted = False
+    try:
+        _validate_path_segment(table_name)
+        source_root = _open_spatialdata_group(root)
+        table_path = root / "tables" / table_name
+        destinations = tuple(replacement.destination for replacement in replacements)
+        for destination in destinations:
+            if (
+                destination.is_symlink()
+                or not destination.is_relative_to(table_path)
+                or not destination.resolve().is_relative_to(root.resolve())
+            ):
+                raise ValueError(f"Unsafe table-write destination: {destination}.")
+        # The zarr.consolidate_metadata(str(root)) call below rewrites the SpatialData
+        # Zarr store's root metadata, which is not included in the paths backed up by
+        # _publish_staged_paths(). Keep its exact prior bytes so even a failed finalization
+        # can be undone without opening unrelated tables or depending on consolidation
+        # succeeding again.
+        metadata_files = (
+            (".zgroup", ".zattrs", ".zmetadata") if source_root.metadata.zarr_format == 2 else ("zarr.json",)
+        )
         for filename in metadata_files:
             metadata_path = root / filename
             if metadata_path.is_symlink():
@@ -379,7 +447,7 @@ def _write_table_operation(
             # Read the published paths directly (use_consolidated=False), because
             # consolidated metadata may still describe the previous table/components.
             published_root = zarr.open_group(str(root), mode="r", use_consolidated=False)
-            # Let the caller of _write_table_operation() finish its work
+            # Let the caller of _publish_table_paths() finish its work
             # (i.e. we yield before consolidating metadata),
             # such as attaching the reopened table to sdata in memory, while backups
             # remain available. Consolidate only after the caller's with-body succeeds,
