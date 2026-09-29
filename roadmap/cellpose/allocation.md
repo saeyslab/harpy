@@ -7807,10 +7807,23 @@ validate all replacements and deletions
        failure: remove replacements and restore all original paths
 ```
 
-**I/O and ownership.** Deleting a component must not decode or materialize its
+Fully serialize all replacements before moving any deletion target, including
+when a lazy replacement reads that target. For example, writing
+`.X = layers["counts"] * 2` while deleting `layers["counts"]` must finish evaluating
+and staging `.X` while the original layer remains readable at its original path.
+Publication then moves the layer into a backup and installs the staged `.X`;
+the layer disappears from its original path at that point, but its backup is
+discarded only after the entire operation succeeds. No lazy-dependency analysis
+is needed: complete staging before publication for every mixed request, rather
+than committing a write and then performing a separate deletion.
+
+**I/O and ownership.** Deletion itself must not decode or materialize the target's
 payload, including dense, sparse and DataFrame-valued entries. Deleting `.X` or
-the complete `.raw` container likewise requires no numerical reads. Leave `.X`
-untouched unless it is explicitly requested for replacement or deletion. Reuse
+the complete `.raw` container likewise requires no numerical reads for the
+deletion operation. Evaluating caller-supplied lazy replacements may legitimately
+read a deletion target during staging; this does not violate the deletion
+operation's no-payload-read guarantee. An unrequested `.X` must not be rewritten;
+it may be read only when needed by caller-supplied replacement computation. Reuse
 the existing ownership/path safeguards and metadata cleanup/restoration contract,
 including saved store-root metadata when finalization fails. Neither path-based
 public API updates an attached AnnData or SpatialData object; adapters remain
@@ -7831,8 +7844,14 @@ Cover deletion-only requests without identity arguments and mixed requests that
 still enforce replacement identities. Inject publication and finalization failures
 to verify restoration of both removed and replaced data, including consolidated
 metadata and affected adapter state. Instrument dense, sparse and DataFrame-valued
-deletions to verify that payloads are not decoded and unrelated `.X` is neither
-read nor rewritten; deleting `.X` or `.raw` itself must not read their matrices.
+deletion-only requests to verify that payloads are not decoded and unrelated `.X`
+is neither read nor rewritten; deleting `.X` or `.raw` itself must not read their
+matrices. Add a mixed-request regression test that lazily derives `.X` from
+`layers["counts"]` while deleting that layer. Verify the numerical result, the
+layer's absence on success, and completion of replacement serialization before
+the layer is moved. Inject a later failure to verify that the original `.X` and
+layer are both restored. Keep reads caused by evaluating the replacement distinct
+from the deletion operation's no-payload-read guarantee.
 Document the explicit deletion contract in the public API and storage overview.
 
 ### Part 11f.ix: affected-chunk regional-write optimization
