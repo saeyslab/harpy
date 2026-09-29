@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Generator, Mapping, Sequence
-from contextlib import contextmanager
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,11 +17,11 @@ from harpy._storage._anndata import (
 )
 from harpy._storage._publication import (
     _cleanup_owned_path,
-    _publish_staged_paths,
-    _remove_owned_path,
     _StagedPath,
 )
 from harpy.table._validation import _validate_table_without_canonical
+from harpy.table._write import _publish_table_paths
+from harpy.table._write_validation import _check_component_destination, _validate_component_values
 from harpy.table.canonical_centers import (
     CANONICAL_ALGORITHM_VERSION,
     CANONICAL_OBSM_KEY,
@@ -42,23 +41,33 @@ _CANONICAL_METADATA_PATH = ("uns", SPATIAL_COORDINATES_KEY, CANONICAL_OBSM_KEY)
 
 @dataclass(frozen=True)
 class _CanonicalCentersDestination:
-    """Validated local component paths for one existing backed table."""
+    """Validated paths and storage format for a canonical-component update.
+
+    Constructed by ``_validate_canonical_centers_destination()`` after destination validation.
+
+    Parameters
+    ----------
+    root
+        SpatialData Zarr store, for example ``/data/sdata.zarr``.
+    table_path
+        Permanent AnnData table path within the store, for example
+        ``/data/sdata.zarr/tables/counts``. The table must already exist;
+        component destinations are derived from this path, not from staging.
+    zarr_format
+        Store's Zarr format (2 or 3), preserved when writing the components.
+    """
 
     root: Path
-    table: Path
+    table_path: Path
     zarr_format: int
 
     @property
     def matrix(self) -> Path:
-        return self.table.joinpath(*_CANONICAL_MATRIX_PATH)
-
-    @property
-    def registry(self) -> Path:
-        return self.table.joinpath(*_CANONICAL_METADATA_PATH[:-1])
+        return self.table_path.joinpath(*_CANONICAL_MATRIX_PATH)
 
     @property
     def metadata(self) -> Path:
-        return self.table.joinpath(*_CANONICAL_METADATA_PATH)
+        return self.table_path.joinpath(*_CANONICAL_METADATA_PATH)
 
 
 def add_canonical_centers(
@@ -86,13 +95,17 @@ def add_canonical_centers(
 
     Only the two coordinated canonical components are staged and written. The
     table's expression matrix and all unrelated AnnData components remain
-    untouched. Publication is rollback-safe across both disk components, the
-    in-memory table refresh and consolidated-metadata writing.
+    untouched. The reopened centers matrix is a read-only Zarr handle.
+    Publication is rollback-safe across both disk components, the in-memory
+    table refresh and consolidated-metadata writing. Handled failures restore
+    saved store-root metadata without requiring consolidation to succeed again;
+    crash recovery and concurrent-access isolation are not provided.
 
     Parameters
     ----------
     sdata
-        SpatialData object backed by a writable local Zarr store.
+        SpatialData object backed by a writable local Zarr store. The table's
+        in-memory observation identities must match storage in value and order.
     table_name
         Existing regions-table element to update.
     labels_name
@@ -155,6 +168,8 @@ def add_canonical_centers(
     log.info(f"Finished calculating canonical label centers for existing table {table_name!r}.")
 
     table = sdata.tables[table_name]
+    # table supplies the destination rows; table_name identifies its sdata slot.
+    # Assembly checks that each payload's binding names that same table.
     centers, metadata = _assemble_canonical_table_payload(
         table,
         table_name=table_name,
@@ -162,6 +177,19 @@ def add_canonical_centers(
         instance_key=instance_key,
         labels_names=labels_names,
         payloads=payloads,
+    )
+    stored_table = zarr.open_group(str(destination.table_path), mode="r", use_consolidated=False)
+    obs_identity = table.obs[[region_key, instance_key]]
+    # Calculation: centers align with in-memory observations.
+    # Write check: in-memory observations align with stored observations.
+    # Compare all identities in order: centers are written by position, while
+    # the stored obs remains unchanged.
+    _validate_component_values(
+        stored_table,
+        {_CANONICAL_MATRIX_PATH: centers, _CANONICAL_METADATA_PATH: metadata},
+        obs_identity=obs_identity,
+        var_names=None,
+        raw_var_names=None,
     )
     workspace = _stage_canonical_components(
         destination,
@@ -176,6 +204,9 @@ def add_canonical_centers(
         # Dense centers reopen as a storage-backed Zarr array. Canonical validation
         # intentionally materializes this small ``(n_obs, 3)`` matrix temporarily.
         staged_centers = _read_anndata_element(staging_group, _CANONICAL_MATRIX_PATH)
+        # Observation alignment with storage was checked before staging, which
+        # does not modify obs. The canonical validator below checks the reopened
+        # matrix's shape, values and metadata without repeating that comparison.
         # Combine the reopened components with copied observations to validate
         # their table-row binding without modifying the existing table.
         staged_table = AnnData(
@@ -184,6 +215,9 @@ def add_canonical_centers(
             obsm={CANONICAL_OBSM_KEY: staged_centers},
             uns={SPATIAL_COORDINATES_KEY: {CANONICAL_OBSM_KEY: staged_metadata}},
         )
+        # Validate staged_table, not the table currently attached to sdata.
+        # table_name labels the binding and error messages; it does not select
+        # the AnnData object to validate.
         validate_canonical_payload(
             sdata,
             staged_table,
@@ -200,9 +234,6 @@ def add_canonical_centers(
             table_name=table_name,
             destination=destination,
             workspace=workspace,
-            region_key=region_key,
-            instance_key=instance_key,
-            labels_names=labels_names,
         )
     finally:
         _cleanup_owned_path(workspace)
@@ -236,7 +267,7 @@ def _validate_canonical_centers_destination(
         raise ValueError("hp.tb.add_canonical_centers currently requires a local filesystem-backed Zarr store.")
 
     root = Path(sdata.path)
-    root_group = zarr.open_group(store=str(root), mode="r+", use_consolidated=False)
+    root_group = zarr.open_group(store=str(root), mode="r", use_consolidated=False)
     zarr_format = getattr(getattr(root_group, "metadata", None), "zarr_format", None)
     if zarr_format not in {2, 3}:
         raise ValueError(f"Could not determine the Zarr format of the backing store at {root!s}.")
@@ -252,7 +283,7 @@ def _validate_canonical_centers_destination(
     table_path = root / "tables" / table_name
     if not table_path.is_dir():
         raise ValueError(f"Backed table element {table_name!r} does not use a local directory Zarr layout.")
-    return _CanonicalCentersDestination(root=root, table=table_path, zarr_format=zarr_format)
+    return _CanonicalCentersDestination(root=root, table_path=table_path, zarr_format=zarr_format)
 
 
 def _normalize_labels_names(
@@ -310,7 +341,7 @@ def _validate_existing_canonical_components(
         raise ValueError(f"adata.uns[{SPATIAL_COORDINATES_KEY!r}] must be a mapping registry.")
     memory_metadata = isinstance(memory_registry, Mapping) and CANONICAL_OBSM_KEY in memory_registry
 
-    root = zarr.open_group(store=str(destination.root), mode="r+", use_consolidated=False)
+    root = zarr.open_group(store=str(destination.root), mode="r", use_consolidated=False)
     table_group = root["tables"][table_name]
     disk_matrix = CANONICAL_OBSM_KEY in table_group["obsm"]
     uns_group = table_group["uns"]
@@ -332,6 +363,8 @@ def _validate_existing_canonical_components(
             f"Table {table_name!r} contains an incomplete canonical-center payload. "
             "Set 'overwrite=True' to replace both coordinated components."
         )
+    for path in (_CANONICAL_MATRIX_PATH, _CANONICAL_METADATA_PATH):
+        _check_component_destination(table_group, path, overwrite=overwrite)
 
 
 def _assemble_canonical_table_payload(
@@ -421,26 +454,25 @@ def _install_canonical_components(
     table_name: str,
     destination: _CanonicalCentersDestination,
     workspace: Path,
-    region_key: str,
-    instance_key: str,
-    labels_names: tuple[str, ...],
 ) -> None:
     """Install staged canonical components into an existing backed table.
 
     Non-canonical table contracts must have been validated beforehand with
     :func:`harpy.table._validation._validate_table_without_canonical`, and the
-    data and metadata they cover must remain unchanged.
+    data and metadata they cover must remain unchanged. Staged canonical
+    components must also have passed ``validate_canonical_payload()``; the
+    in-memory observations must match storage in value and order.
 
     Publish the centers matrix and metadata, reopen them from their permanent
     paths, and update the existing AnnData object in place. Preserve sibling
-    metadata records, but replace the canonical record entirely. Validate the
-    installed payload and refresh consolidated metadata while backups remain
+    metadata records, but replace the canonical record entirely. Refresh
+    consolidated metadata after attachment succeeds, while backups remain
     available.
 
-    On failure, the publication context attempts disk rollback. This function
-    restores the previous in-memory entries, removing newly added entries when
-    none existed before, then attempts to refresh consolidated metadata and
-    re-raises the exception. Unrelated table contents remain unchanged.
+    On failure, ``_publish_table_paths`` restores disk paths, newly created
+    parents and saved root metadata. This function restores the previous
+    in-memory entries, removing newly added entries when none existed before,
+    and re-raises the exception. Unrelated table contents remain unchanged.
     """
     table = sdata.tables[table_name]
     previous_matrix_exists = CANONICAL_OBSM_KEY in table.obsm
@@ -449,7 +481,17 @@ def _install_canonical_components(
     previous_registry = table.uns.get(SPATIAL_COORDINATES_KEY)
 
     try:
-        with _publish_staged_canonical_components(destination=destination, workspace=workspace) as table_group:
+        with _publish_table_paths(
+            root=destination.root,
+            table_name=table_name,
+            workspace=workspace,
+            replacements=(
+                _StagedPath(workspace.joinpath(*_CANONICAL_MATRIX_PATH), destination.matrix),
+                _StagedPath(workspace.joinpath(*_CANONICAL_METADATA_PATH), destination.metadata),
+            ),
+        ) as table_group:
+            # Publication only moves the already-validated staged components.
+            # Reopen and attach them without reading center values again for validation.
             matrix = _read_anndata_element(table_group, _CANONICAL_MATRIX_PATH)
             metadata = _read_anndata_element(table_group, _CANONICAL_METADATA_PATH)
             # Preserve sibling records, but replace the entire canonical metadata record.
@@ -457,18 +499,7 @@ def _install_canonical_components(
             registry[CANONICAL_OBSM_KEY] = metadata
             table.obsm[CANONICAL_OBSM_KEY] = matrix
             table.uns[SPATIAL_COORDINATES_KEY] = registry
-            # Non-canonical table contracts have already been validated and remain
-            # unchanged. Validate only the installed canonical components while
-            # rollback remains available.
-            validate_canonical_payload(
-                sdata,
-                table,
-                table_name=table_name,
-                region_key=region_key,
-                instance_key=instance_key,
-                regions=labels_names,
-            )
-            sdata.write_consolidated_metadata()
+            # Consolidation follows on successful exit, while backups remain.
     except BaseException:
         if previous_matrix_exists:
             table.obsm[CANONICAL_OBSM_KEY] = previous_matrix
@@ -478,75 +509,4 @@ def _install_canonical_components(
             table.uns[SPATIAL_COORDINATES_KEY] = previous_registry
         else:
             table.uns.pop(SPATIAL_COORDINATES_KEY, None)
-        try:
-            sdata.write_consolidated_metadata()
-        except Exception as error:  # noqa: BLE001
-            log.warning(f"Could not refresh consolidated metadata after canonical-center rollback: {error}")
-        raise
-
-
-@contextmanager
-def _publish_staged_canonical_components(
-    *,
-    destination: _CanonicalCentersDestination,
-    workspace: Path,
-) -> Generator[zarr.Group, None, None]:
-    """Publish two canonical components through the shared element transaction.
-
-    Existing canonical components, including an asymmetric old payload, are
-    preserved as rollback copies while the caller refreshes the in-memory
-    table, validates it and writes consolidated metadata::
-
-        existing components --rename--> same-filesystem backups
-        staged components   --rename--> table component paths
-                                      |
-                                      v
-                    yield the existing table Zarr group
-                                      |
-                         +------------+------------+
-                         |                         |
-                      success                    failure
-                         |                         |
-                 remove workspace       remove replacements,
-                                        restore backups
-
-    The filesystem transaction itself is implemented by
-    :func:`_publish_staged_paths`; this wrapper additionally creates
-    and, on failure, removes the nested ``uns["spatial_coordinates"]`` mapping
-    when the table did not already contain it.
-    """
-    # Component publication does not cover the parent uns["spatial_coordinates"]
-    # mapping. Track whether this call creates it so failure cleanup removes only
-    # a newly created mapping, preserving any pre-existing metadata.
-    registry_created = not destination.registry.exists()
-    try:
-        if registry_created:
-            root = zarr.open_group(store=str(destination.root), mode="r+", use_consolidated=False)
-            _write_anndata_element(
-                root["tables"][destination.table.name]["uns"],
-                (SPATIAL_COORDINATES_KEY,),
-                {},
-                create_parents=False,
-            )
-
-        with _publish_staged_paths(
-            root=destination.root,
-            workspace=workspace,
-            paths=(
-                _StagedPath(
-                    staged=workspace.joinpath(*_CANONICAL_MATRIX_PATH),
-                    destination=destination.matrix,
-                ),
-                _StagedPath(
-                    staged=workspace.joinpath(*_CANONICAL_METADATA_PATH),
-                    destination=destination.metadata,
-                ),
-            ),
-            operation="canonical",
-        ):
-            root = zarr.open_group(store=str(destination.root), mode="r+", use_consolidated=False)
-            yield root["tables"][destination.table.name]
-    except BaseException:
-        if registry_created:
-            _remove_owned_path(destination.registry)
         raise
