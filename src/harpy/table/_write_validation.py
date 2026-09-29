@@ -117,6 +117,11 @@ def _prepare_raw_creation(
             raise ValueError("Cannot create raw over a malformed or unsupported raw encoding.")
         if not overwrite:
             raise FileExistsError("The raw entry already exists as None; use overwrite=True.")
+    return _new_raw_var(components, raw_var_names=raw_var_names)
+
+
+def _new_raw_var(components: Mapping[ComponentPath, object], *, raw_var_names: AxisNames | None) -> pd.DataFrame:
+    """Prepare a new raw feature axis identically for memory and storage updates."""
     if components.get(("raw", "X")) is None:
         raise ValueError("Creating raw requires a non-None ('raw', 'X') matrix.")
     if ("raw", "var") in components:
@@ -200,23 +205,31 @@ def _same_metadata(left: object, right: object) -> bool:
     return bool(np.array_equal(left, right))
 
 
-def _validate_spatialdata_attrs_unchanged(group: zarr.Group, components: Mapping[ComponentPath, object]) -> None:
+def _validate_spatialdata_attrs_unchanged(
+    spatialdata_attrs: Mapping | None, components: Mapping[ComponentPath, object]
+) -> None:
     """Ensure component writes preserve uns["spatialdata_attrs"], including its absence."""
     annotation_path = ("uns", TableModel.ATTRS_KEY)
     for path, value in components.items():
         if path == ("uns",):
             if not isinstance(value, Mapping):
                 raise ValueError("uns must be a mapping.")
-            stored = _read_spatialdata_attrs(group)
+            stored = spatialdata_attrs
             present = stored is not None
             if (TableModel.ATTRS_KEY in value) != present or (
                 present and not _same_metadata(stored, value[TableModel.ATTRS_KEY])
             ):
                 raise ValueError("Component writes must preserve SpatialData annotation; use write_table().")
         elif path[:2] == annotation_path:
+            stored = spatialdata_attrs
             try:
-                stored = _read_anndata_element(group, path, mode="eager")
-            except _MissingAnnDataElement:
+                if stored is None:
+                    raise KeyError(path)
+                for key in path[2:]:
+                    if not isinstance(stored, Mapping):
+                        raise ValueError(f"SpatialData annotation parent of {path!r} is not a mapping.")
+                    stored = stored[key]
+            except KeyError:
                 raise ValueError("Component writes must not add SpatialData annotation; use write_table().") from None
             if not _same_metadata(stored, value):
                 raise ValueError("Component writes must preserve SpatialData annotation; use write_table().")
@@ -378,21 +391,7 @@ def _validate_component_values(
         staging and reused when checking the reopened staged components. None
         uses the stored raw axis when needed. All other axes come from ``group``.
     """
-    axes_by_path = {}
-    for path in components_to_validate:
-        slot = path[0]
-        if slot == "uns":
-            axes = ()
-        elif slot in {"obs", "obsm", "obsp"}:
-            axes = ("obs",)
-        elif slot in {"var", "varm", "varp"}:
-            axes = ("var",)
-        elif slot == "raw":
-            axes = ("obs", "raw_var") if path[1] == "X" else ("raw_var",)
-        else:
-            axes = ("obs", "var")
-        axes_by_path[path] = axes
-
+    axes_by_path = {path: _component_axes(path) for path in components_to_validate}
     required = {axis for axes in axes_by_path.values() for axis in axes}
     explicit = {"obs": obs_identity, "var": var_names, "raw_var": raw_var_names}
     frame_paths = {"obs": ("obs",), "var": ("var",), "raw_var": ("raw", "var")}
@@ -411,61 +410,123 @@ def _validate_component_values(
             except KeyError:
                 raise ValueError(f"The stored table has no {axis!r} axis.") from None
 
-    # Compare the original inputs or reopened staged values with the expected axes.
+    expected_spatialdata_attrs = (
+        _read_spatialdata_attrs(group)
+        if "obs" in expected_axis_indices or any(path[0] == "uns" for path in components_to_validate)
+        else None
+    )
+    expected_obs_identity = (
+        _read_observation_identity(group, expected_spatialdata_attrs)
+        if "obs" in expected_axis_indices and expected_spatialdata_attrs is not None
+        else None
+    )
+    _validate_component_values_against_axes(
+        components_to_validate,
+        # Expected destination metadata:
+        expected_axis_indices=expected_axis_indices,
+        expected_obs_identity=expected_obs_identity,
+        expected_spatialdata_attrs=expected_spatialdata_attrs,
+        # Identity context supplied with the update:
+        supplied_obs_identity=obs_identity,
+        supplied_var_names=var_names,
+        supplied_raw_var_names=raw_var_names,
+    )
+
+
+def _component_axes(path: ComponentPath) -> tuple[str, ...]:
+    """Return the complete axes needed to align one replacement component."""
+    slot = path[0]
+    if slot == "uns":
+        return ()
+    if slot in {"obs", "obsm", "obsp"}:
+        return ("obs",)
+    if slot in {"var", "varm", "varp"}:
+        return ("var",)
+    if slot == "raw":
+        return ("obs", "raw_var") if path[1] == "X" else ("raw_var",)
+    return ("obs", "var")
+
+
+def _validate_component_values_against_axes(
+    components_to_validate: Mapping[ComponentPath, object],
+    *,
+    expected_axis_indices: Mapping[str, pd.Index],
+    expected_obs_identity: pd.DataFrame | None,
+    expected_spatialdata_attrs: Mapping | None,
+    supplied_obs_identity: pd.DataFrame | AxisNames | None,
+    supplied_var_names: AxisNames | None,
+    supplied_raw_var_names: AxisNames | None,
+) -> None:
+    """Validate replacement values against metadata, without storage or matrix reads.
+
+    The disk wrapper reads only required axes and annotation; in-memory adapters
+    supply that metadata from the attached table. Both use these same ordered
+    identity, shape and protected-annotation rules. For new raw data, the caller
+    supplies its prepared feature index instead of an existing raw axis.
+    The ``expected_*`` arguments describe the destination metadata; ``supplied_*``
+    arguments describe the identity context submitted with the update.
+    Observation checks distinguish annotated region/instance pairs from
+    unannotated observation names; feature axes always use ordered names.
+    """
+    if expected_spatialdata_attrs is not None and not isinstance(expected_spatialdata_attrs, Mapping):
+        raise ValueError("SpatialData annotation must be a mapping.")
+    axes_by_path = {path: _component_axes(path) for path in components_to_validate}
+    frame_paths = {"obs": ("obs",), "var": ("var",), "raw_var": ("raw", "var")}
+    # 1) Any supplied obs/var/raw.var dataframe must have an index matching
+    # the expected axis in value and order, regardless of SpatialData annotation.
+    # These may be the original inputs or reopened staged values.
     for axis in expected_axis_indices:
         frame_path = frame_paths[axis]
         # Get the obs, var or raw.var dataframe being checked in this round,
         # if any (not the dataframe already stored in the destination table).
         axis_frame_to_validate = components_to_validate.get(frame_path)
-        # 1) Any supplied obs/var/raw.var dataframe must have an index matching
-        # the expected axis in value and order, regardless of SpatialData annotation.
         if frame_path in components_to_validate:
             if not isinstance(axis_frame_to_validate, pd.DataFrame):
                 raise TypeError(f"Component {frame_path!r} must be a pandas DataFrame.")
+            # In-memory adapters install these frames without AnnData's axis
+            # setters (which also modify unrelated aligned dataframes). Retain
+            # their dataframe-metadata restrictions in the shared validator.
+            if isinstance(axis_frame_to_validate.columns, pd.MultiIndex):
+                raise ValueError(f"Component {frame_path!r} must not have MultiIndex columns.")
+            if not isinstance(axis_frame_to_validate.index.name, (str, type(None))):
+                raise ValueError(f"Component {frame_path!r} index name must be a string or None.")
             _match_identity(axis_frame_to_validate.index, expected_axis_indices[axis], label=f"{axis} dataframe index")
 
-        spatialdata_attrs = _read_spatialdata_attrs(group) if axis == "obs" else None
-        # 2a) Annotated obs: additionally validate the ordered region/instance
-        # pairs in supplied obs and/or obs_identity. The supplied obs index was
-        # already checked in step 1; obs_identity's own dataframe index is not
-        # used for matching.
-        if axis == "obs" and spatialdata_attrs is not None:
-            region_key, instance_key = _annotation_columns(spatialdata_attrs)
-            stored_obs_identity = _read_observation_identity(group, spatialdata_attrs)
-            expected = _validate_observation_annotation(
-                stored_obs_identity, spatialdata_attrs, label="Stored observation"
+    # 2) Validate observation identities using the destination's annotation policy.
+    if "obs" in expected_axis_indices:
+        supplied_obs_frame = components_to_validate.get(("obs",))
+        if expected_spatialdata_attrs is not None:
+            assert expected_obs_identity is not None
+            _validate_annotated_obs_update(
+                expected_obs_identity=expected_obs_identity,
+                expected_spatialdata_attrs=expected_spatialdata_attrs,
+                supplied_obs_frame=supplied_obs_frame,
+                supplied_obs_identity=supplied_obs_identity,
             )
-            if axis_frame_to_validate is not None:
-                _match_identity(
-                    _observation_pairs(
-                        axis_frame_to_validate, region_key=region_key, instance_key=instance_key, label="Supplied obs"
-                    ),
-                    expected,
-                    label="obs_identity",
-                )
-            if obs_identity is not None:
-                _match_observation_identity(
-                    obs_identity,
-                    expected,
-                    region_key=region_key,
-                    instance_key=instance_key,
-                )
         else:
-            # 2b) Unannotated obs, var and raw.var: identities are ordered index names,
-            # not region/instance pairs. Check axis_frame_to_validate.index, when present,
-            # and any separately supplied obs_identity, var_names or raw_var_names
-            # against the expected axis.
-            expected = _named_identity(expected_axis_indices[axis], label=f"Stored {axis}")
-            for value in (None if axis_frame_to_validate is None else axis_frame_to_validate.index, explicit[axis]):
-                if value is not None:
-                    _match_identity(_named_identity(value, label=axis), expected, label=axis)
-        if axis_frame_to_validate is None and explicit[axis] is None:
-            parameter = {"obs": "obs_identity", "var": "var_names", "raw_var": "raw_var_names"}[axis]
+            _validate_unannotated_obs_update(
+                expected_obs_index=expected_axis_indices["obs"],
+                supplied_obs_frame=supplied_obs_frame,
+                supplied_obs_identity=supplied_obs_identity,
+            )
+
+    # 3) Feature axes always use ordered names, regardless of observation annotation.
+    # Check both the supplied var/raw.var index and explicit names when both are given.
+    for axis, supplied_names in (("var", supplied_var_names), ("raw_var", supplied_raw_var_names)):
+        if axis not in expected_axis_indices:
+            continue
+        axis_frame_to_validate = components_to_validate.get(frame_paths[axis])
+        expected = _named_identity(expected_axis_indices[axis], label=f"Stored {axis}")
+        for value in (None if axis_frame_to_validate is None else axis_frame_to_validate.index, supplied_names):
+            if value is not None:
+                _match_identity(_named_identity(value, label=axis), expected, label=axis)
+        if axis_frame_to_validate is None and supplied_names is None:
+            parameter = "var_names" if axis == "var" else "raw_var_names"
             raise ValueError(
                 f"Supply {parameter} or the corresponding dataframe when writing {axis}-aligned components."
             )
 
-    _validate_spatialdata_attrs_unchanged(group, components_to_validate)
+    _validate_spatialdata_attrs_unchanged(expected_spatialdata_attrs, components_to_validate)
     for path, axes in axes_by_path.items():
         value = components_to_validate[path]
         if not axes or path in frame_paths.values():
@@ -489,6 +550,60 @@ def _validate_component_values(
             # This is separate from the obs/var/raw.var checks above; those frames
             # are skipped in this loop.
             _match_identity(value.index, expected_axis_indices[axes[0]], label=f"Component {path!r} dataframe index")
+
+
+def _validate_annotated_obs_update(
+    *,
+    expected_obs_identity: pd.DataFrame,
+    expected_spatialdata_attrs: Mapping,
+    supplied_obs_frame: pd.DataFrame | None,
+    supplied_obs_identity: pd.DataFrame | AxisNames | None,
+) -> None:
+    """Match supplied obs and/or explicit identities by ordered region/instance pairs.
+
+    The shared dataframe checks already validated the replacement obs index.
+    The explicit ``supplied_obs_identity`` dataframe's index is ignored.
+    """
+    region_key, instance_key = _annotation_columns(expected_spatialdata_attrs)
+    expected = _validate_observation_annotation(
+        expected_obs_identity, expected_spatialdata_attrs, label="Destination observation"
+    )
+    # A replacement obs frame and explicit obs_identity are independent sources
+    # of identity information: validate both when both are supplied.
+    if supplied_obs_frame is not None:
+        _match_identity(
+            _observation_pairs(
+                supplied_obs_frame, region_key=region_key, instance_key=instance_key, label="Supplied obs"
+            ),
+            expected,
+            label="obs_identity",
+        )
+    if supplied_obs_identity is not None:
+        _match_observation_identity(
+            supplied_obs_identity,
+            expected,
+            region_key=region_key,
+            instance_key=instance_key,
+        )
+    if supplied_obs_frame is None and supplied_obs_identity is None:
+        raise ValueError("Supply obs_identity or the corresponding dataframe when writing obs-aligned components.")
+
+
+def _validate_unannotated_obs_update(
+    *,
+    expected_obs_index: pd.Index,
+    supplied_obs_frame: pd.DataFrame | None,
+    supplied_obs_identity: pd.DataFrame | AxisNames | None,
+) -> None:
+    """Match supplied obs and/or explicit identities by ordered observation names."""
+    # Without SpatialData annotation, observation names identify rows rather
+    # than region/instance pairs. Validate both supplied sources when present.
+    expected = _named_identity(expected_obs_index, label="Stored obs")
+    for value in (None if supplied_obs_frame is None else supplied_obs_frame.index, supplied_obs_identity):
+        if value is not None:
+            _match_identity(_named_identity(value, label="obs"), expected, label="obs")
+    if supplied_obs_frame is None and supplied_obs_identity is None:
+        raise ValueError("Supply obs_identity or the corresponding dataframe when writing obs-aligned components.")
 
 
 def _validate_complete_table(table: AnnData) -> None:

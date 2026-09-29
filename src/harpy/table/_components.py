@@ -54,6 +54,19 @@ def add_table_components(
 ) -> SpatialData:
     """Update selected table components in SpatialData and, when backed, its store.
 
+    Keep the existing AnnData object and update only the requested components,
+    preserving unrelated local edits and matrix references.
+
+    For example, replace only an embedding in backed SpatialData while keeping
+    an annotation column that has not yet been saved::
+
+        Requested update: obsm["embedding"]
+
+        Component                   In memory after update     On disk after update
+        obsm["embedding"]           Reopened replacement       Replacement written
+        obs["manual_annotation"]    Unsaved column retained    Not written
+        X                           Same matrix reference      Unchanged
+
     Parameters
     ----------
     sdata
@@ -110,13 +123,6 @@ def add_table_components(
     matrix representations. Supplied matrix data may be shared; this is not a
     deep-copy API. Backed updates use the shared staged writer, then reopen only
     affected entries, with matrices lazy and annotations in memory.
-
-    Selective installation preserves unrelated local edits and matrix references
-    in the existing AnnData. This is deliberate: reloading and reattaching the
-    complete table from disk would discard unrelated unsaved edits from the
-    attached table and replace those references. For example, updating
-    ``obsm["embedding"]`` leaves an unsaved ``obs["manual_annotation"]`` column
-    untouched, including when SpatialData is backed.
 
     Installation finishes before disk publication commits. Handled failures
     restore affected live references as well as stored data. No crash recovery
@@ -237,12 +243,14 @@ def _update_table_components(
     indices = _memory_axis_indices(table, components, obs_identity, var_names, raw_var_names, new_raw_var=new_raw_var)
     _validate_component_values_against_axes(
         components,
+        # Expected destination metadata:
         expected_axis_indices=indices,
-        spatialdata_attrs=table.uns.get(TableModel.ATTRS_KEY),
-        observation_identity=table.obs if "obs" in indices else None,
-        obs_identity=obs_identity,
-        var_names=var_names,
-        raw_var_names=raw_var_names,
+        expected_obs_identity=table.obs if "obs" in indices else None,
+        expected_spatialdata_attrs=table.uns.get(TableModel.ATTRS_KEY),
+        # Identity context supplied with the update:
+        supplied_obs_identity=obs_identity,
+        supplied_var_names=var_names,
+        supplied_raw_var_names=raw_var_names,
     )
     if group is not None:
         stored_new_raw_var = _prepare_raw_creation(group, components, raw_var_names=raw_var_names, overwrite=overwrite)
