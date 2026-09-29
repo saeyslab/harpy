@@ -1,7 +1,7 @@
 # Storage writes and overwrite guarantees
 
 Harpy separates **serializing new data** from **replacing existing data**. This
-document defines replacement scope, staging, publication and recovery
+document defines replacement/deletion scope, staging, publication and recovery
 responsibilities for writers using the shared local-filesystem storage helpers.
 It is an internal developer contract, not a public storage API or a guarantee
 about every Harpy reader and writer. It does not cover replacing an entire
@@ -26,11 +26,14 @@ For where metadata lives and which data it describes, see
   data and, where needed, intermediate computation results.
 - **Staged path:** a file or directory containing fully written new data inside
   the workspace, ready to move to its permanent destination.
+- **Deletion target:** an explicitly requested component path with no replacement
+  payload. Its previous contents remain recoverable in a backup until success.
 - **Backup:** previous destination data retained during replacement so it can
   be restored on failure. Backups are separate from the workspace and are made
   by renaming existing paths, not by reserializing their contents.
 - **Publication:** moving staged paths to permanent destinations while retaining
-  backups until the caller finishes installing the replacement.
+  backups until the caller finishes installing the update. Explicit deletion
+  targets are moved to backups too, leaving their permanent paths absent.
 - **Installation:** reopening the published data, attaching it to the in-memory
   object, validating it as appropriate and refreshing consolidated metadata.
 
@@ -143,10 +146,10 @@ complete table. `hp.tb.write_table_components(store, table_name=...,
 components=..., overwrite=...)` replaces only named logical components of an
 existing table. Both operate on an existing local SpatialData root, preserve
 its Zarr format, and return `None` after publication and metadata finalization.
-An existing destination requires `overwrite=True`.
+An existing replacement destination requires `overwrite=True`.
 
 Whole-table replacement is not a merge: old components absent from the new
-AnnData are not retained. Component writes preserve omitted siblings; replacing
+AnnData are not retained. Component writes preserve unrequested siblings; replacing
 an `.uns` mapping replaces its whole value. `None` is an encoded value where
 supported, not a deletion command. These two APIs do not provide dataframe-column
 or regional row updates; use the regional writer below for selected regions.
@@ -177,6 +180,47 @@ together with any other requested components in the same rollback operation.
 It does not rewrite the main table or unrelated matrices. Rollback restores
 the prior absence or null entry as well as coupled updates. Raw serialization
 uses AnnData's raw encoding, not a generic mapping.
+
+`hp.tb.delete_table_components(store, table_name=..., components=[...])` removes
+explicitly named optional components. A mixed update uses
+`hp.tb.write_table_components(..., components={...}, delete=[...])` instead;
+its replacement mapping must still be nonempty. Both entry points share
+`_write_table_operation()` and one publication/rollback context. Separate calls
+commit independently.
+
+| Deletion target                                                         | Contract                                                               |
+| ----------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| Individual `layers`, `obsm`, `varm`, `obsp`, `varp`, `raw.varm` entries | Remove only the named entry; preserve its parent mapping.              |
+| Individual or nested `uns` records                                      | Supported except `uns["spatialdata_attrs"]` and its descendants.       |
+| `X`                                                                     | Preserve `obs`, `var` and table shape; reopen with `X=None`.           |
+| Entire `raw`                                                            | Remove the container as a unit; reopen with `raw=None`.                |
+| `obs`, `var`, `raw.var`, `raw.X`, whole mapping roots                   | Rejected. Required axes and containers cannot be removed individually. |
+
+Deletion-only requests need no identities or overwrite flag. Explicit deletion
+authorizes removal; `overwrite` in a mixed request controls replacements only.
+Replacement values retain their existing identity/shape checks. All paths must
+be unique and non-overlapping across both sets, including absent targets.
+Removing dataframe columns still requires a whole-frame replacement, not a
+column deletion. Callers explicitly identify related scientific records; Harpy
+does not infer cascading deletions or removals from omitted values.
+
+A valid absent target is logged at INFO and skipped. If every deletion target
+is absent and there are no replacements, the validated request returns without
+staging, backups or metadata writes. Encoded `None` is a present value. Invalid
+paths, malformed parents, missing stores/tables and I/O errors still raise.
+Deletion inspects metadata only, never the target's matrix or dataframe payload.
+
+All replacement serialization finishes before **any** deletion target moves.
+For example, a lazy replacement `.X = layers["counts"] * 2` can read the old
+layer while staging even when that layer is listed in `delete`. Publication
+then backs up both old paths, installs the new `X` and leaves the layer absent.
+Backups are discarded only after installation and consolidation succeed;
+handled failures restore both paths and the saved store-root metadata.
+
+These path-based APIs do not update live objects. An installing adapter owns
+removal or refresh of affected in-memory entries and restores them on failure.
+The shared crash-recovery and concurrent-access limitations apply equally to
+deletions and replacements.
 
 `hp.tb.write_table_components_by_region(store, table_name=..., components=...,
 obs_identity=..., fill_values=..., chunk_size=1000, overwrite=...)` updates individual `.obsm`
