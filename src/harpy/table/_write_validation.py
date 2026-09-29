@@ -415,7 +415,7 @@ def _validate_component_values(
         if "obs" in expected_axis_indices or any(path[0] == "uns" for path in components_to_validate)
         else None
     )
-    expected_obs_identity = (
+    expected_region_instance_identity = (
         _read_observation_identity(group, expected_spatialdata_attrs)
         if "obs" in expected_axis_indices and expected_spatialdata_attrs is not None
         else None
@@ -424,7 +424,7 @@ def _validate_component_values(
         components_to_validate,
         # Expected destination metadata:
         expected_axis_indices=expected_axis_indices,
-        expected_obs_identity=expected_obs_identity,
+        expected_region_instance_identity=expected_region_instance_identity,
         expected_spatialdata_attrs=expected_spatialdata_attrs,
         # Identity context supplied with the update:
         supplied_obs_identity=obs_identity,
@@ -451,7 +451,7 @@ def _validate_component_values_against_axes(
     components_to_validate: Mapping[ComponentPath, object],
     *,
     expected_axis_indices: Mapping[str, pd.Index],
-    expected_obs_identity: pd.DataFrame | None,
+    expected_region_instance_identity: pd.DataFrame | None,
     expected_spatialdata_attrs: Mapping | None,
     supplied_obs_identity: pd.DataFrame | AxisNames | None,
     supplied_var_names: AxisNames | None,
@@ -465,8 +465,9 @@ def _validate_component_values_against_axes(
     supplies its prepared feature index instead of an existing raw axis.
     The ``expected_*`` arguments describe the destination metadata; ``supplied_*``
     arguments describe the identity context submitted with the update.
-    Observation checks distinguish annotated region/instance pairs from
-    unannotated observation names; feature axes always use ordered names.
+    ``expected_region_instance_identity`` supplies the destination's region and
+    instance columns for annotated observations only. Unannotated observations
+    use ``expected_axis_indices["obs"]``; feature axes always use ordered names.
     """
     if expected_spatialdata_attrs is not None and not isinstance(expected_spatialdata_attrs, Mapping):
         raise ValueError("SpatialData annotation must be a mapping.")
@@ -496,9 +497,9 @@ def _validate_component_values_against_axes(
     if "obs" in expected_axis_indices:
         supplied_obs_frame = components_to_validate.get(("obs",))
         if expected_spatialdata_attrs is not None:
-            assert expected_obs_identity is not None
+            assert expected_region_instance_identity is not None
             _validate_annotated_obs_update(
-                expected_obs_identity=expected_obs_identity,
+                expected_region_instance_identity=expected_region_instance_identity,
                 expected_spatialdata_attrs=expected_spatialdata_attrs,
                 supplied_obs_frame=supplied_obs_frame,
                 supplied_obs_identity=supplied_obs_identity,
@@ -554,7 +555,7 @@ def _validate_component_values_against_axes(
 
 def _validate_annotated_obs_update(
     *,
-    expected_obs_identity: pd.DataFrame,
+    expected_region_instance_identity: pd.DataFrame,
     expected_spatialdata_attrs: Mapping,
     supplied_obs_frame: pd.DataFrame | None,
     supplied_obs_identity: pd.DataFrame | AxisNames | None,
@@ -566,7 +567,7 @@ def _validate_annotated_obs_update(
     """
     region_key, instance_key = _annotation_columns(expected_spatialdata_attrs)
     expected = _validate_observation_annotation(
-        expected_obs_identity, expected_spatialdata_attrs, label="Destination observation"
+        expected_region_instance_identity, expected_spatialdata_attrs, label="Destination observation"
     )
     # A replacement obs frame and explicit obs_identity are independent sources
     # of identity information: validate both when both are supplied.
