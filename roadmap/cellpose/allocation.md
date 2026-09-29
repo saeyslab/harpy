@@ -7944,6 +7944,23 @@ both modes, refactoring shared validation where needed rather than maintaining
 competing contracts. `None` remains a replacement value, not an implicit deletion.
 Scientific metadata preparation remains the caller's responsibility.
 
+**Overwrite policy.** Match `hp.tb.add_table()` for the new
+`hp.tb.add_table_components()` adapter:
+
+- **Unbacked SpatialData:** ignore `overwrite`; explicitly requested in-memory
+  components may be replaced even with `overwrite=False`.
+- **Backed SpatialData:** require `overwrite=True` if a requested replacement
+  target exists in memory or on disk, including an unsaved local entry absent
+  from storage. With `overwrite=False`, additions are allowed only when the
+  target is absent from both. Check the component being written, not merely
+  whether its containing table exists.
+
+This controls replacement permission only. Shape, identity, protected-path and
+other validation still apply in both modes; preserve unrelated local state and
+restore affected entries on installation failure. Explicit deletions do not
+require overwrite permission, and `remove_table_components()` has no overwrite
+flag. The existing path-based writers retain their current overwrite contract.
+
 **Alignment and ownership.** Before attaching a stored matrix, verify that the
 relevant complete in-memory axes agree with storage in identity and order:
 observation identities for observation-aligned matrices, feature identities for
@@ -7983,17 +8000,34 @@ Absence in both places is a logged no-op. Invalid paths, malformed parents and
 I/O errors still raise. Do not create disk staging or rewrite consolidated
 metadata solely to remove an entry that exists only in memory.
 
-Before implementation, explicitly settle the adapter-specific edge cases:
-replacement collision/overwrite checks when memory and disk differ; a table
-present on only one side of a backed SpatialData; and handling AnnData views.
-Do not silently create a complete stored table, discard local changes or copy
-whole matrices to resolve those cases.
+**Destination table requirements.** Apply these checks to both new adapters
+before staging or modifying in-memory components:
+
+- **Table presence:** require `sdata.tables[table_name]` to exist. For backed
+  SpatialData, also require the same table to exist in its store. If the table
+  exists only in memory or only on disk, raise with guidance to persist or load
+  it explicitly. Do not implicitly create or load a complete table. This is a
+  table-level requirement: individual components may still exist on only one
+  side, as covered by the overwrite and missing-deletion policies above.
+- **AnnData views:** reject the update if `sdata.tables[table_name].is_view` is
+  true, in both backed and unbacked modes. The caller must explicitly prepare
+  and attach a non-view destination table. Do not silently copy or materialize
+  the view. This restriction concerns the attached destination table, not the
+  supported representations of supplied replacement matrices.
 
 **Checks and documentation.** Cover unbacked and backed operation, additions,
 replacements, deletions and coupled mixed updates. Verify selective in-memory
 installation, preservation of unrelated local edits, relevant axis/order
 rejection, and no unnecessary numerical reads or computation. Cover deletion
 targets present only in memory, only on disk, in both places and in neither.
+Verify that unbacked replacements work with `overwrite=False`, without bypassing
+validation. For backed replacements, cover targets present only in memory, only
+on disk, in both places and in neither: existing targets require `overwrite=True`,
+while additions absent from both do not.
+Test missing destination tables, including backed tables present only in memory
+or only on disk, and AnnData-view destinations in both storage modes. Verify
+rejection before staging or mutation, without implicit whole-table loading,
+creation, matrix copying or computation; preserve existing storage and live state.
 Inject staging, publication, installation and finalization failures to verify
 disk/root-metadata recovery and restoration of affected live references. Retain
 tests proving that the original path-based APIs do not modify live objects.
