@@ -258,6 +258,18 @@ Adapters using this internal operation can install reopened data before commit
 and must restore their own affected in-memory state on failure. Parent groups
 created by the operation are removed on failure.
 
+The publication/finalization part is shared through `_publish_table_paths()`.
+Writers with domain-specific staging, such as aggregation and canonical-center
+updates, use it directly without serializing their staged data a second time.
+They retain responsibility for scientific construction, domain validation and
+in-memory restoration. Aggregation keeps its partitioned checkpoint and sparse
+row-block writes; canonical updates publish only the coordinated matrix and
+metadata entries. Both reopen read-only handles from permanent paths.
+Table-writing staging workspaces live beside the SpatialData Zarr store, not
+inside its `tables` group. This applies both to ordinary table writes and writers
+that prepare their own staged data. Missing destination parents are created only
+within shared publication setup, which tracks them for cleanup.
+
 Component-update adapters refresh only the affected in-memory entries, preserving
 unrelated local state. Before attaching an observation-aligned matrix to an
 existing AnnData, the installing caller must verify that the complete in-memory
@@ -583,8 +595,10 @@ Responsibility depends on when a failure happens:
   `BaseException`, attempts to remove published replacements and restores old
   destinations. A newly created destination has no backup and is removed.
 - **After disk rollback:** the caller or adapter restores the affected
-  in-memory objects and attempts to refresh consolidated metadata. The exception
-  is propagated to the caller.
+  in-memory objects and metadata outside the published paths. Table writers use
+  `_publish_table_paths()` to restore saved store-root metadata, without another
+  consolidation attempt. Other element adapters may attempt to refresh
+  consolidated metadata. The exception is propagated to the caller.
 
 For example, consider a matrix and its metadata published together. If moving
 the metadata fails after the new matrix has moved, the publisher attempts to
@@ -608,9 +622,11 @@ the caller's context body. Writing associated metadata after the publication
 context has successfully exited is too late to use its backups for rollback.
 
 Consolidated metadata is the store's metadata index, not another copy of the
-matrix data. It must be refreshed after paths change and after rollback so
-readers do not use stale descriptions of the store. Refresh after rollback is
-best-effort; a failure is logged rather than hidden by a claim of full recovery.
+matrix data. It must be updated after publication and restored after rollback so
+readers do not use stale descriptions of the store. Table publication restores
+its saved contents directly. Non-table adapters may instead attempt a best-effort
+refresh after rollback; a failed refresh is logged rather than hidden by a claim
+of full recovery.
 
 ## Storage-backed references after publication
 
