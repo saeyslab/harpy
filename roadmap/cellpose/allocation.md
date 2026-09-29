@@ -51,7 +51,7 @@ implemented:
       **11f.vi** region-wise `.obsm` writing — implemented; **11f.vii** integration
       with existing Harpy APIs in three implementation slices: **a)** `hp.tb.add_table` — implemented,
       **b)** `hp.tb.add_feature_matrix` — implemented, **c)** aggregation and canonical-component writers — implemented;
-      **11f.viii** safe deletion of optional AnnData components; **11f.ix**
+      **11f.viii** safe deletion of optional AnnData components — implemented; **11f.ix**
       affected-chunk regional-write optimization, after the first eight parts;
       a separate napari-harpy persistence migration also follows the first eight
       parts and does not depend on this optimization;
@@ -6218,7 +6218,9 @@ implemented. `hp.tb.read_table`, `hp.tb.read_table_components` and
 are available, including raw creation through component writes and regional
 updates through `hp.tb.write_table_components_by_region`. Parts 11f.vii a)–c)
 (integration of `hp.tb.add_table`, `hp.tb.add_feature_matrix`, aggregation and
-canonical-component writers) are implemented; Parts 11f.viii–ix remain planned.**
+canonical-component writers) are implemented. Part 11f.viii is implemented via
+`hp.tb.delete_table_components()` and mixed `write_table_components(..., delete=...)`
+updates; Part 11f.ix remains planned.**
 
 Provide general, modular table I/O independently of QC, aggregation or Scanpy
 preprocessing. The caller explicitly chooses a complete table or selected
@@ -6246,10 +6248,10 @@ Split the work into nine independently reviewable parts, in this order:
    slices, in order a → b → c, with focused integration tests and documentation in each:
    - **a)** refactor `hp.tb.add_table` — implemented;
    - **b)** refactor `hp.tb.add_feature_matrix` — implemented;
-   - **c)** integrate aggregation and canonical-component writers.
+   - **c)** integrate aggregation and canonical-component writers — implemented.
 
 8. **11f.viii: safe deletion of optional AnnData components** — support explicit
-   removals and combined replacement/deletion requests with shared rollback.
+   removals and combined replacement/deletion requests with shared rollback — implemented.
 9. **11f.ix: affected-chunk regional-write optimization** — avoid complete
    matrix rewrites for eligible regional `.obsm` updates, without changing
    sample layout or the public regional-update semantics.
@@ -6501,8 +6503,9 @@ an absent path or a stored null entry; it does not relax other traversal checks.
 Replacing an `.uns` mapping replaces its contents, not just its supplied keys.
 Omitting a component from the request leaves it unchanged. `None` is a value
 where its encoding permits it, **not a deletion command**. Explicit removal of
-optional entries follows in Part 11f.viii and is not an argument of the initial
-writer. No append or column-level disk updates are provided.
+optional entries is specified in Part 11f.viii, which extends the initial writer
+with `delete` and adds a deletion-only API. No append or column-level disk updates
+are provided.
 
 #### Axis alignment and validation
 
@@ -6752,9 +6755,10 @@ Both entries share the same rollback window. Neither unrelated matrices nor
 the expression matrix need to be read or rewritten. For an unannotated table,
 use `obs_identity=adata.obs_names` instead.
 
-Runtime acceptance tests belong to Parts 11f.ii–vii; this part introduces no
-placeholder functions or tests that merely assert their presence. Part 11f.viii
-and the separate napari-harpy migration remain follow-ups.
+Runtime acceptance tests belong to the implementation parts; this contract part
+introduces no placeholder functions or tests that merely assert their presence.
+Part 11f.viii adds deletion support; the separate napari-harpy migration remains
+a follow-up.
 
 ### Part 11f.ii: selective and lazy table reading
 
@@ -7658,8 +7662,16 @@ payload reads.
 
 ### Part 11f.viii: safe deletion of optional AnnData components
 
-**Status: planned; implement after Parts 11f.i–vii. Required before the
-napari-harpy persistence migration, but not before Slice 11g.**
+**Status: implemented. Required before the napari-harpy persistence migration,
+but not before Slice 11g.**
+
+Both public entry points share `_write_table_operation()` and
+`_publish_table_paths()`. `_DeletedPath` extends the existing filesystem publisher
+with backup-only destinations; no payload decoding or separate deletion engine
+is introduced. Focused tests cover both Zarr formats, supported/protected paths,
+missing targets, no-payload-read deletion, coupled rollback and lazy replacements
+that read a component being deleted. Public API and storage documentation describe
+the completed contract below.
 
 **Public contract.** Provide two public entry points sharing one internal
 operation, not two storage implementations:
@@ -7792,10 +7804,9 @@ cascading deletions from metadata references.
 **Shared publication.** Both public entry points delegate to the extended
 `_write_table_operation()`, sharing validation, publication and recovery.
 Reuse `_publish_table_paths()` for scoped table updates and root-metadata recovery.
-The underlying `_publish_staged_paths()` currently expects a staged replacement
-for every destination. Extend its operation representation to support explicit
-deletion targets without staged replacement payloads. Do not use placeholder
-values or a separate direct-Zarr deletion path:
+The underlying `_publish_staged_paths()` accepts `_StagedPath` replacements and
+explicit `_DeletedPath` destinations without staged payloads. It does not use
+placeholder values or a separate direct-Zarr deletion path:
 
 ```text
 validate all replacements and deletions
