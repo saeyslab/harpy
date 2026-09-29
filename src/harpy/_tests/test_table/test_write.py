@@ -765,15 +765,66 @@ def test_identity_index_name_and_equivalent_string_dtype_do_not_change_identity(
     np.testing.assert_array_equal(read_table(path, table_name="counts", mode="eager").X, np.ones((2, 3)))
 
 
-def test_unrecognized_component_destination_still_requires_overwrite(make_table_io_store):
+@pytest.mark.parametrize("scope", ["table", "component"])
+def test_unrecognized_write_destination_still_requires_overwrite(make_table_io_store, scope):
     path = make_table_io_store()
-    destination = path / "tables/counts/uns/external"
+    destination = path / ("tables/external" if scope == "table" else "tables/counts/uns/external")
     destination.mkdir()
     (destination / "notes.txt").write_text("not a Zarr value")
     before = _store_bytes(path)
     with pytest.raises(FileExistsError):
-        write_table_components(path, table_name="counts", components={("uns", "external"): 1})
+        if scope == "table":
+            write_table(path, table_name="external", adata=AnnData())
+        else:
+            write_table_components(path, table_name="counts", components={("uns", "external"): 1})
     assert _store_bytes(path) == before
+    assert not list(path.parent.glob(f".{path.name}.harpy-*"))
+
+
+@pytest.mark.parametrize("scope", ["table", "component", "new_raw"])
+@pytest.mark.parametrize("dangling", [False, True])
+def test_write_destinations_reject_symlinks_before_staging(make_table_io_store, monkeypatch, scope, dangling):
+    """Table, component and new-raw writes reject links before any staging work."""
+    path = make_table_io_store()
+    external_path = path.parent / "external.zarr"
+    external = zarr.open_group(str(external_path), mode="w")
+    if not dangling:
+        # Encoded None allows raw-creation preparation to finish, so the
+        # filesystem check must still reject replacing its symbolic link.
+        write_elem(external, "target", None)
+    if scope == "table":
+        destination = path / "tables/new"
+    elif scope == "component":
+        destination = path / "tables/counts/uns/new"
+    else:
+        group = zarr.open_group(str(path), mode="r+", use_consolidated=False)["tables/counts"]
+        del group["raw"]
+        destination = path / "tables/counts/raw"
+    destination.symlink_to(external_path / "target", target_is_directory=True)
+    before = _store_bytes(path)
+    external_before = _store_bytes(external_path)
+
+    def unexpected_staging(*args, **kwargs):
+        pytest.fail("Unsafe destinations must be rejected before staging.")
+
+    monkeypatch.setattr(table_writer.tempfile, "mkdtemp", unexpected_staging)
+    with pytest.raises(ValueError, match="Unsafe table-write destination"):
+        if scope == "table":
+            write_table(path, table_name="new", adata=AnnData(), overwrite=True)
+        elif scope == "component":
+            write_table_components(path, table_name="counts", components={("uns", "new"): 1}, overwrite=True)
+        else:
+            write_table_components(
+                path,
+                table_name="counts",
+                components={("raw", "X"): np.ones((2, 4))},
+                obs_identity=["c1", "c2"],
+                raw_var_names=["a", "b", "c", "d"],
+                overwrite=True,
+            )
+    assert destination.is_symlink()
+    assert _store_bytes(path) == before
+    assert _store_bytes(external_path) == external_before
 
 
 def test_root_metadata_symlink_is_not_written_through(make_table_io_store):
