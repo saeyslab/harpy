@@ -6,6 +6,7 @@ import pytest
 
 from harpy._storage._publication import (
     _cleanup_owned_path,
+    _DeletedPath,
     _publish_staged_paths,
     _remove_owned_path,
     _StagedPath,
@@ -43,6 +44,55 @@ def test_publish_staged_paths_publishes_one_consistency_unit(tmp_path, existing)
     assert not workspace.exists()
     assert not list(tmp_path.glob(".store.harpy-test-backup-*"))
     assert (root / "unrelated").read_text() == "keep"
+
+
+@pytest.mark.parametrize("mixed", [False, True])
+@pytest.mark.parametrize("fail", [False, True])
+def test_explicit_deletions_share_the_backup_window(tmp_path, mixed, fail):
+    """A deletion stays recoverable through the caller's body, just like a replacement."""
+    root, workspace, staged = _staged_update(tmp_path, existing=True)
+    paths = (staged[0] if mixed else _DeletedPath(staged[0].destination), _DeletedPath(staged[1].destination))
+
+    def publish():
+        with _publish_staged_paths(root=root, workspace=workspace, paths=paths, operation="test"):
+            assert not (root / "metadata").exists()
+            assert (root / "matrix").exists() == mixed
+            backup = next(tmp_path.glob(".store.harpy-test-backup-*"))
+            assert (backup / "path-1/payload").read_text() == "old metadata"
+            if fail:
+                raise RuntimeError("caller failure")
+
+    if fail:
+        with pytest.raises(RuntimeError, match="caller failure"):
+            publish()
+        assert (root / "matrix/payload").read_text() == "old matrix"
+        assert (root / "metadata/payload").read_text() == "old metadata"
+    else:
+        publish()
+        assert not (root / "metadata").exists()
+        if mixed:
+            assert (root / "matrix/payload").read_text() == "new matrix"
+    assert (root / "unrelated").read_text() == "keep"
+    assert not list(tmp_path.glob(".store.harpy-test-backup-*"))
+
+
+@pytest.mark.parametrize("unsafe", ["symlink", "outside", "overlap"])
+def test_deletions_obey_publication_path_safety(tmp_path, unsafe):
+    root, workspace, staged = _staged_update(tmp_path, existing=True)
+    if unsafe == "symlink":
+        target = root / "link"
+        target.symlink_to(root / "metadata", target_is_directory=True)
+    elif unsafe == "outside":
+        target = tmp_path / "outside"
+    else:
+        target = root / "matrix/payload"
+    with pytest.raises(ValueError):
+        with _publish_staged_paths(
+            root=root, workspace=workspace, paths=(staged[0], _DeletedPath(target)), operation="test"
+        ):
+            pytest.fail("Unsafe deletion accepted")
+    assert (root / "matrix/payload").read_text() == "old matrix"
+    assert (root / "metadata/payload").read_text() == "old metadata"
 
 
 @pytest.mark.parametrize("existing", [False, True])
