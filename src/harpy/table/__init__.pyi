@@ -12,7 +12,7 @@ from ._preprocess import preprocess_proteomics, preprocess_transcriptomics
 from ._regionprops import add_regionprop_features, add_regionprops
 from ._table import add_table, correct_marker_genes, filter_on_size
 from ._validation import validate_table
-from ._write import write_table, write_table_components
+from ._write import delete_table_components, write_table, write_table_components
 from ._write_by_region import write_table_components_by_region
 from .cell_clustering._clustering import flowsom
 from .cell_clustering._preprocess import cell_clustering_preprocess
@@ -32,6 +32,7 @@ __all__ = [
     "read_table_components",
     "write_table",
     "write_table_components",
+    "delete_table_components",
     "write_table_components_by_region",
     "correct_marker_genes",
     "extract_instances",
