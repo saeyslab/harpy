@@ -184,7 +184,9 @@ def test_add_table_attaches_only_target_lazily_and_preserves_slots(
 
     The store contains a malformed unrelated table, so reopening all tables would
     fail. The attached result must preserve every slot and use lazy matrices;
-    reopening it must not execute a graph after the write has finished.
+    reopening it must not execute a graph after the write has finished. Harpy's
+    AnnData serializer must run exactly once into staging, and attachment must
+    reopen the permanent table path.
     """
     path = make_table_io_store(zarr_format=zarr_format, matrix_kind=matrix_kind)
     original = read_table(path, table_name="counts", mode="eager")
@@ -196,7 +198,13 @@ def test_add_table_attaches_only_target_lazily_and_preserves_slots(
     sdata.path = path
     if output_name == "counts":
         sdata.tables[output_name] = source
+    written_stores = []
+    write_staged = table_writer._write_anndata_element
     read_published = table_manager._read_anndata_table
+
+    def record_write(group, component_path, value, **kwargs):
+        written_stores.append(Path(group.store.root))
+        return write_staged(group, component_path, value, **kwargs)
 
     def guarded_reopen(group, **kwargs):
         assert group.name == f"/tables/{output_name}"
@@ -207,10 +215,14 @@ def test_add_table_attaches_only_target_lazily_and_preserves_slots(
         with Callback(start=unexpected_compute):
             return read_published(group, **kwargs)
 
+    monkeypatch.setattr(table_writer, "_write_anndata_element", record_write)
     monkeypatch.setattr(table_manager, "_read_anndata_table", guarded_reopen)
     result = add_table(sdata, source, output_name, region=None, overwrite=output_name == "counts")
 
     assert result is sdata
+    assert len(written_stores) == 1
+    assert not written_stores[0].is_relative_to(path)
+    assert not list(path.parent.glob(f".{path.name}.harpy-*"))
     attached = sdata.tables[output_name]
     assert isinstance(attached.X, da.Array)
     assert isinstance(attached.raw.X, da.Array)
