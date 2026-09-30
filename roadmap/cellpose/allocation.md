@@ -54,7 +54,7 @@ implemented:
       **11f.viii** safe deletion of optional AnnData components — implemented;
       **11f.ix** SpatialData-aware table-component updates — implemented;
       **11f.x** SpatialData-aware regional table-component updates in two implementation slices:
-      **a)** implement `hp.tb.add_table_components_by_region()`,
+      **a)** implement `hp.tb.add_table_components_by_region()` — implemented,
       **b)** migrate `hp.tb.add_feature_matrix()` for existing-table regional updates;
       **11f.xi** affected-chunk regional-write optimization, after the first ten parts;
       a separate napari-harpy persistence migration also follows the first eight
@@ -6231,7 +6231,8 @@ updates through `hp.tb.write_table_components_by_region`. Parts 11f.vii a)–c)
 canonical-component writers) are implemented. Part 11f.viii is implemented via
 `hp.tb.delete_table_components()` and mixed `write_table_components(..., delete=...)`
 updates. Part 11f.ix is implemented via `hp.tb.add_table_components()` and
-`hp.tb.remove_table_components()`; Parts 11f.x a)–b) and 11f.xi remain planned.**
+`hp.tb.remove_table_components()`. Part 11f.x a) is implemented via
+`hp.tb.add_table_components_by_region()`; Parts 11f.x b) and 11f.xi remain planned.**
 
 Provide general, modular table I/O independently of QC, aggregation or Scanpy
 preprocessing. The caller explicitly chooses a complete table or selected
@@ -6269,7 +6270,7 @@ Split the work into eleven independently reviewable parts, in this order:
 10. **11f.x: SpatialData-aware regional table-component updates** — implement
     and adopt the public adapter in two separately reviewable slices, in order a → b:
     - **a)** implement `hp.tb.add_table_components_by_region()` for regional merging,
-      persistence when backed, and selective installation into the supplied SpatialData;
+      persistence when backed, and selective installation into the supplied SpatialData — implemented;
     - **b)** migrate `hp.tb.add_feature_matrix()` to that API for existing-table
       regional updates, retaining scientific preparation and separate new-table creation.
 
@@ -8062,7 +8063,7 @@ implementation, without roadmap language in user-facing documentation.
 
 ### Part 11f.x: SpatialData-aware regional table-component updates
 
-**Status: planned in two separately reviewable implementation slices, a → b.
+**Status: slice a) implemented; slice b) planned, following a).
 Not a prerequisite for Slice 11g or the path-based napari-harpy persistence migration.**
 
 First implement the general regional adapter, then migrate the existing
@@ -8070,8 +8071,10 @@ feature-matrix caller. Keep the affected-chunk optimization separate in Part 11f
 
 ### Part 11f.x a): implement `hp.tb.add_table_components_by_region()`
 
-**Status: planned; builds on Part 11f.vi's regional writer and Part 11f.ix's
-SpatialData-aware component adapters.**
+**Status: implemented. The public adapter shares regional validation and lazy
+merge preparation with the disk-only writer, and installs only affected components
+within the shared rollback window. Focused tests cover both storage modes,
+retained measurements, sparse chunk preparation and failure recovery.**
 
 Add `hp.tb.add_table_components_by_region()` as the SpatialData-aware counterpart
 of `hp.tb.write_table_components_by_region()`. Keep the path-based writer

@@ -427,9 +427,9 @@ complete in-memory axes match storage in identity and order before positional
 attachment. Raw uses its independent feature axis.
 
 - **Unbacked SpatialData:** updates stay in memory, without serialization or
-  numerical computation. Matrix representations are retained and may be shared
-  with inputs. As with `add_table`, `overwrite` is ignored; validation still
-  applies.
+  numerical computation. Complete-component replacements retain matrix
+  representations and may share data with inputs. As with `add_table`,
+  `overwrite` is ignored; validation still applies.
 - **Backed SpatialData:** `overwrite=True` is required if a replacement target
   exists in either memory or storage. Reopen only requested replacements from
   their permanent paths, using lazy matrices and eager annotations. Unrelated
@@ -451,6 +451,14 @@ backups remain available; consolidation and commit follow successful installatio
 On handled failure, the shared writer restores storage/root metadata and the
 adapter restores the original affected in-memory references. Unbacked failures
 restore those references without any storage work.
+
+Regional adapters, such as `hp.tb.add_table_components_by_region()`, follow the
+same observation-alignment, selective-installation and recovery guarantees.
+Unselected observations retain measurements from the stored target when backed,
+or from the attached target when unbacked. For backed updates, storage determines
+target existence, format, shape and dtype: a target present only in memory is new
+on disk and follows the new-entry fill rules. Preserving unrelated local components
+does not preserve unsaved values within a requested matrix.
 
 External references are not refreshed. Callers continue to own dirty/stale
 tracking, application events and coherent scientific metadata; the existing
