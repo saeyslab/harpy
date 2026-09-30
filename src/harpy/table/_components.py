@@ -117,7 +117,7 @@ def add_table_components(
     -----
     Axes and SpatialData linkage cannot change. Supply replacement identities
     even though sdata is provided; matrices are never reordered automatically.
-    Backed updates additionally require the relevant live axes to match storage.
+    Backed updates additionally require the relevant in-memory axes to match storage.
 
     Unbacked updates perform no serialization or matrix computation and retain
     matrix representations. Supplied matrix data may be shared; this is not a
@@ -251,7 +251,7 @@ def _update_table_components(
     )
     if group is not None:
         stored_new_raw_var = _prepare_raw_creation(group, components, raw_var_names=raw_var_names, overwrite=overwrite)
-        _check_live_axes(table, group, indices, stored_new_raw_var=stored_new_raw_var)
+        _check_in_memory_versus_storage_axes(table, group, indices, stored_new_raw_var=stored_new_raw_var)
 
     # Retain original slot objects. Prepared mappings/raw containers are shallow
     # copies, so neither successful installation nor rollback mutates old entries.
@@ -272,8 +272,12 @@ def _update_table_components(
                 raw_var_names=raw_var_names,
                 overwrite=overwrite,
             ) as published:
-                # All serialization is complete. Reopen only requested permanent
-                # paths and install before finalization can discard disk backups.
+                # Serialization is complete. Reopen requested components from permanent
+                # paths and attach them inside _write_table_operation()'s rollback window.
+                # Its nested _publish_staged_paths() context retains disk backups until
+                # this with-body and metadata consolidation succeed. On failure, that
+                # context restores disk components; the except block below restores
+                # the previous in-memory slot objects.
                 reopened = {path: _read_anndata_element(published, path, mode="lazy") for path in paths}
                 updates = _prepare_memory_updates(table, reopened, deletions, new_raw_var=new_raw_var)
                 _install_memory_updates(table, updates)
@@ -420,7 +424,7 @@ def _validate_component_values_against_memory(
         in :func:`harpy.table.add_table_components`.
     expected_axis_indices
         Indices prepared by ``_memory_axis_indices()``. The caller retains them
-        for the separate memory-versus-storage comparison in ``_check_live_axes()``.
+        for the separate memory-versus-storage comparison in ``_check_in_memory_versus_storage_axes()``.
     obs_identity, var_names, raw_var_names
         Corresponding identity arguments from the public component-update APIs.
     """
@@ -454,28 +458,36 @@ def _validate_component_values_against_memory(
     )
 
 
-def _check_live_axes(
+def _check_in_memory_versus_storage_axes(
     table: AnnData,
     group: zarr.Group,
     indices: Mapping[str, pd.Index],
     *,
     stored_new_raw_var: pd.DataFrame | None,
 ) -> None:
-    """Check whole live axes before positional installation; never scan matrix values."""
+    """Check whole in-memory axes against storage before positional installation.
+
+    "In-memory" refers to the supplied AnnData ``table``; "storage" refers to
+    the destination table's AnnData Zarr ``group``, not the SpatialData store root.
+    The comparison uses axis metadata, never matrix values; ``table`` may still
+    contain lazy or storage-backed matrices.
+    """
     for axis, index in indices.items():
         if axis == "obs":
             stored_attrs = _read_spatialdata_attrs(group)
-            live_attrs = table.uns.get(TableModel.ATTRS_KEY)
-            if (stored_attrs is None) != (live_attrs is None):
+            in_memory_attrs = table.uns.get(TableModel.ATTRS_KEY)
+            if (stored_attrs is None) != (in_memory_attrs is None):
                 raise ValueError("In-memory and stored SpatialData annotation must agree; reopen the table.")
             if stored_attrs is not None:
-                if _annotation_columns(live_attrs) != _annotation_columns(stored_attrs):
+                if _annotation_columns(in_memory_attrs) != _annotation_columns(stored_attrs):
                     raise ValueError("In-memory and stored region/instance keys must agree; reopen the table.")
-                live_pairs = _validate_observation_annotation(table.obs, live_attrs, label="In-memory observation")
+                in_memory_pairs = _validate_observation_annotation(
+                    table.obs, in_memory_attrs, label="In-memory observation"
+                )
                 stored_pairs = _validate_observation_annotation(
                     _read_observation_identity(group, stored_attrs), stored_attrs, label="Stored observation"
                 )
-                _match_identity(live_pairs, stored_pairs, label="In-memory observation")
+                _match_identity(in_memory_pairs, stored_pairs, label="In-memory observation")
                 continue
         if axis == "raw_var" and stored_new_raw_var is not None:
             stored_index = stored_new_raw_var.index
