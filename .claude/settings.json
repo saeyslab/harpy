@@ -1,6 +1,5 @@
 {
   "env": {
-    "UV_PROJECT_ENVIRONMENT": ".venv",
     "PYTHONUNBUFFERED": "1",
     "PYTHONPYCACHEPREFIX": ".cache/claude/pycache",
     "XDG_CACHE_HOME": ".cache/claude",

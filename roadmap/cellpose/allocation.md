@@ -8135,6 +8135,28 @@ not necessarily the original array container type. Document that distinction
 from ordinary component replacement. Retain the regional writer's `chunk_size`
 policy, adapting input preparation for in-memory targets where necessary.
 
+**Sparse chunk preparation for unbacked updates.** An attached sparse Dask
+matrix may have chunks along both dimensions, unlike Harpy's sparse reader,
+which returns CSR blocks spanning all columns and CSC blocks spanning all rows.
+For partial updates of such existing matrices, prepare a separate lazy working
+array before calling `_regional_matrix()`:
+
+- **CSR:** combine column chunks to span all columns, preserving row chunks.
+- **CSC:** combine row chunks to span all rows, preserving column chunks.
+
+For example, a six-row, four-column CSR matrix would use:
+
+```python
+original.chunks == ((3, 3), (2, 2))
+working.chunks == ((3, 3), (4,))
+```
+
+Rechunk only the working array when needed. Preparation must not trigger
+computation, modify the original array or its chunk layout, rewrite storage,
+reorder measurements, or convert between dense, CSR and CSC formats. Keep the
+merge helper's existing-block/output-layout check: adapt valid public inputs
+to that internal contract rather than weakening the check.
+
 **Attached-table and overwrite contracts.** Reuse Part 11f.ix's requirements:
 the table must already be attached and, when backed, also exist in storage.
 Reject destination AnnData views and HDF5-backed tables; do not implicitly load,
@@ -8183,7 +8205,13 @@ Cover full observation-order mismatches involving unselected regions, independen
 matrix presence in memory and storage, the overwrite policy, and the authoritative
 merge source in each mode. Exercise representative matching-format dense/CSR/CSC
 updates and new-entry fills, including lazy inputs without premature computation
-and without input mutation. Reuse lower-level regional correctness and storage
+and without input mutation. For unbacked partial updates, explicitly cover
+existing CSR matrices with split column chunks and CSC matrices with split row
+chunks. Verify that working-array preparation stays lazy, original chunks and
+values remain unchanged, and the merged result preserves the sparse format,
+updated measurements and unselected measurements. Keep the lower-level test
+that rejects incompatible layouts passed directly to the merge helper.
+Reuse lower-level regional correctness and storage
 tests rather than duplicating their full encoding/chunk-layout matrix. Document
 the new API alongside its disk-only counterpart in `docs/api.md` and the storage
 contract during implementation, without roadmap language in user-facing docs.
