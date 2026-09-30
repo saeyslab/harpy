@@ -42,6 +42,7 @@ from harpy.table._write_validation import (
     _check_component_write_destination,
     _check_write_destination,
     _prepare_raw_creation,
+    _storage_axis_indices,
     _validate_complete_table,
     _validate_component_values_against_storage,
     _validate_deletion_paths,
@@ -353,7 +354,6 @@ def _write_table_operation(
             else:
                 log.info(f"Table {table_name!r}: component {path!r} is already absent; skipping deletion.")
         new_raw_var = _prepare_raw_creation(source_table, components, raw_var_names=raw_var_names, overwrite=overwrite)
-        # Use the same expected raw feature index before and after staging.
         expected_new_raw_var_index = None if new_raw_var is None else new_raw_var.index
         # This flag means creating the raw container, not merely writing raw components.
         # It is False when raw already exists, even if its components will be updated,
@@ -382,15 +382,25 @@ def _write_table_operation(
             _check_component_write_destination(
                 source_table, path, table_path=table_path, root=root, overwrite=overwrite
             )
+        # Prepare the expected axes once, including any new raw feature index.
+        # Both validation rounds use these indices, not axes from staged values.
+        expected_axis_indices = _storage_axis_indices(
+            source_table,
+            components,
+            obs_identity=obs_identity,
+            var_names=var_names,
+            raw_var_names=raw_var_names,
+            expected_new_raw_var_index=expected_new_raw_var_index,
+        )
         # 1) Validate caller-supplied shapes, identities and linkage before staging.
         # Step 2 below repeats these checks on the serialized output.
         _validate_component_values_against_storage(
             source_table,
             components_to_validate=components,
+            expected_axis_indices=expected_axis_indices,
             obs_identity=obs_identity,
             var_names=var_names,
             raw_var_names=raw_var_names,
-            expected_new_raw_var_index=expected_new_raw_var_index,
         )
         if not paths and not present_deletions:
             # A validated all-missing deletion request must not create a
@@ -458,10 +468,10 @@ def _write_table_operation(
             _validate_component_values_against_storage(
                 source_table,
                 components_to_validate=staged_values,
+                expected_axis_indices=expected_axis_indices,
                 obs_identity=obs_identity,
                 var_names=var_names,
                 raw_var_names=raw_var_names,
-                expected_new_raw_var_index=expected_new_raw_var_index,
             )
             # Register deletion targets alongside staged replacements;
             # _publish_table_paths() processes these instructions below.

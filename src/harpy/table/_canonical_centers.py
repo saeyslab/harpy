@@ -21,7 +21,11 @@ from harpy._storage._publication import (
 )
 from harpy.table._validation import _validate_table_without_canonical
 from harpy.table._write import _publish_table_paths
-from harpy.table._write_validation import _check_component_write_destination, _validate_component_values_against_storage
+from harpy.table._write_validation import (
+    _check_component_write_destination,
+    _storage_axis_indices,
+    _validate_component_values_against_storage,
+)
 from harpy.table.canonical_centers import (
     CANONICAL_ALGORITHM_VERSION,
     CANONICAL_OBSM_KEY,
@@ -180,17 +184,29 @@ def add_canonical_centers(
     )
     stored_table = zarr.open_group(str(destination.table_path), mode="r", use_consolidated=False)
     obs_identity = table.obs[[region_key, instance_key]]
+    components = {_CANONICAL_MATRIX_PATH: centers, _CANONICAL_METADATA_PATH: metadata}
+    expected_axis_indices = _storage_axis_indices(
+        stored_table,
+        components,
+        obs_identity=obs_identity,
+        var_names=None,
+        raw_var_names=None,
+    )
     # Calculation: centers align with in-memory observations.
     # Write check: in-memory observations align with stored observations.
     # Compare all identities in order: centers are written by position, while
     # the stored obs remains unchanged.
     _validate_component_values_against_storage(
         stored_table,
-        {_CANONICAL_MATRIX_PATH: centers, _CANONICAL_METADATA_PATH: metadata},
+        components,
+        expected_axis_indices=expected_axis_indices,
         obs_identity=obs_identity,
         var_names=None,
         raw_var_names=None,
     )
+    # Keep staging explicit so canonical-specific validation can inspect the
+    # serialized components before publication. _write_table_operation() yields
+    # only after publication; see docs/development/storage.md for the rationale.
     workspace = _stage_canonical_components(
         destination,
         centers=centers,

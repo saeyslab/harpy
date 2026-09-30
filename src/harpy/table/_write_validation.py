@@ -177,7 +177,7 @@ def _check_component_write_destination(
         parent = element
 
 
-def _axis_index(group: zarr.Group, path: ComponentPath) -> pd.Index:
+def _storage_axis_index(group: zarr.Group, path: ComponentPath) -> pd.Index:
     """Read only a dataframe's index, not its other annotation columns."""
     frame = group["/".join(path)]
     if frame.attrs.get("encoding-type") != "dataframe" or frame.attrs.get("encoding-version") != "0.2.0":
@@ -345,51 +345,50 @@ def _read_observation_identity(group: zarr.Group, spatialdata_attrs: Mapping) ->
     keys = _annotation_columns(spatialdata_attrs)
     if any(key not in group["obs"] for key in keys):
         raise ValueError("Stored observation is missing a region or instance column referenced by its annotation.")
-    return pd.DataFrame({key: read_elem(group["obs"][key]) for key in keys}, index=_axis_index(group, ("obs",)))
+    return pd.DataFrame({key: read_elem(group["obs"][key]) for key in keys}, index=_storage_axis_index(group, ("obs",)))
 
 
-def _validate_component_values_against_storage(
+def _storage_axis_indices(
     group: zarr.Group,
-    components_to_validate: Mapping[ComponentPath, object],
+    components: Mapping[ComponentPath, object],
     *,
     obs_identity: pd.DataFrame | AxisNames | None,
     var_names: AxisNames | None,
     raw_var_names: AxisNames | None,
     expected_new_raw_var_index: pd.Index | None = None,
-) -> None:
-    """Read required destination metadata and validate component replacements.
+) -> dict[str, pd.Index]:
+    """Collect stored destination axis indices needed to validate a component update.
 
-    Used before staging and again on reopened serialized values. Gather the
-    expected axes and annotation from storage, then delegate validation to
-    ``_validate_component_values_against_axes()``.
+    Include axes used by the replacement components, plus any axis with an
+    explicit identity argument. Explicit identities are validated even when no
+    replacement component uses their axis; they do not supply the returned indices.
 
     Parameters
     ----------
     group
         Existing destination table's AnnData Zarr group, not the SpatialData
-        root or staging group. Supplies the stored axes and annotation. Only
-        required indices, spatial annotation columns and linkage metadata are
-        read, never its numerical matrices.
-    components_to_validate
-        Component replacements to validate: either caller-supplied values or their
-        reopened staged representations. Uses the same mapping format as
-        ``components`` in :func:`harpy.table.write_table_components`.
-    obs_identity
-        Corresponds to ``obs_identity`` in the public component-update APIs.
-    var_names
-        Corresponds to ``var_names`` in the public component-update APIs.
-    raw_var_names
-        Corresponds to ``raw_var_names`` in the public component-update APIs.
+        root or staging group. Only required indices are read, never numerical matrices.
+    components
+        Replacement components whose alignment determines the required axes.
+        For example, obsm requires obs; X requires obs and var; uns requires none.
+    obs_identity, var_names, raw_var_names
+        Caller-supplied identity arguments. A non-None value additionally requires
+        validation of obs, var or raw_var, respectively.
     expected_new_raw_var_index
-        Expected feature index when creating a raw container, prepared before
-        staging and reused when checking the reopened staged components. None
-        uses the stored raw axis when needed. Except for the feature index of a
-        newly created raw container (raw is optional and has no stored feature index
-        yet, whereas the table's obs and var indices already exist), required indices
-        are read from the stored destination table in ``group``.
+        Prepared feature index when creating a raw container. Raw is optional and
+        has no stored feature index yet in this case, whereas the table's obs and
+        var indices already exist. None uses the stored raw axis when needed.
+
+    Returns
+    -------
+    dict[str, pandas.Index]
+        Expected indices for only the axes requiring validation: ``"obs"``,
+        ``"var"`` and/or ``"raw_var"``. Values come from the corresponding stored
+        dataframes, except for a newly created raw axis supplied above. The obs
+        value contains observation names, not region/instance pairs. Prepare once
+        before staging and reuse when validating the reopened staged components.
     """
-    axes_by_path = {path: _component_axes(path) for path in components_to_validate}
-    required = {axis for axes in axes_by_path.values() for axis in axes}
+    required = {axis for path in components for axis in _component_axes(path)}
     explicit = {"obs": obs_identity, "var": var_names, "raw_var": raw_var_names}
     frame_paths = {"obs": ("obs",), "var": ("var",), "raw_var": ("raw", "var")}
     # Expected indices for alignment checks come from the stored table,
@@ -403,10 +402,44 @@ def _validate_component_values_against_storage(
             expected_axis_indices[axis] = expected_new_raw_var_index
         else:
             try:
-                expected_axis_indices[axis] = _axis_index(group, frame_path)
+                expected_axis_indices[axis] = _storage_axis_index(group, frame_path)
             except KeyError:
                 raise ValueError(f"The stored table has no {axis!r} axis.") from None
+    return expected_axis_indices
 
+
+def _validate_component_values_against_storage(
+    group: zarr.Group,
+    components_to_validate: Mapping[ComponentPath, object],
+    *,
+    expected_axis_indices: Mapping[str, pd.Index],
+    obs_identity: pd.DataFrame | AxisNames | None,
+    var_names: AxisNames | None,
+    raw_var_names: AxisNames | None,
+) -> None:
+    """Read required spatial annotation and validate replacements against stored metadata.
+
+    Used before staging and again on reopened serialized values. Combine the
+    prepared axis indices with annotation from storage, then delegate validation
+    to ``_validate_component_values_against_axes()``.
+
+    Parameters
+    ----------
+    group
+        Existing destination table's AnnData Zarr group, not the SpatialData
+        root or staging group. Supplies any required observation identities and
+        linkage metadata; numerical matrices are not read.
+    components_to_validate
+        Component replacements to validate: either caller-supplied values or their
+        reopened staged representations. Uses the same mapping format as
+        ``components`` in :func:`harpy.table.write_table_components`.
+    expected_axis_indices
+        Indices prepared by ``_storage_axis_indices()`` before staging, including
+        the intended feature index when creating raw. Reuse the same indices when
+        validating reopened staged components.
+    obs_identity, var_names, raw_var_names
+        Corresponding identity arguments from the public component-update APIs.
+    """
     expected_spatialdata_attrs = (
         _read_spatialdata_attrs(group)
         if "obs" in expected_axis_indices or any(path[0] == "uns" for path in components_to_validate)

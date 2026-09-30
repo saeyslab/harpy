@@ -309,6 +309,22 @@ They retain responsibility for scientific construction, domain validation and
 in-memory restoration. Aggregation keeps its partitioned checkpoint and sparse
 row-block writes; canonical updates publish only the coordinated matrix and
 metadata entries. Both reopen read-only handles from permanent paths.
+
+Canonical centers deliberately retain their own staging step. Generic component
+validation checks shapes, identities and SpatialData linkage; canonical validation
+additionally checks coordinate values and consistency with canonical metadata and
+source labels. `add_canonical_centers()` runs `validate_canonical_payload()` on the
+serialized, reopened components before publication, so validating the original
+in-memory inputs alone is not sufficient.
+
+`_write_table_operation()` currently offers no caller-defined validation between
+staging and publication: its caller's `with` body runs only after publication.
+Supporting canonical validation there would require a pre-publication callback.
+For now, explicit canonical staging keeps this sequence visible without adding a
+callback contract solely for this case. Publication, disk rollback and metadata
+finalization remain shared through `_publish_table_paths()`. Reconsider a callback
+if another component writer needs the same staged-validation extension point.
+
 Table-writing staging workspaces live beside the SpatialData Zarr store, not
 inside its `tables` group. This applies both to ordinary table writes and writers
 that prepare their own staged data. Missing destination parents are created only
@@ -372,19 +388,73 @@ sdata = hp.tb.add_table(
 processed = sdata.tables["processed"]
 ```
 
-For an annotation-only update, the explicit component writer avoids rewriting
-matrices. It does not refresh the live object, so reopen the affected table:
+For an annotation-only update, the SpatialData-aware component adapter avoids
+rewriting matrices and refreshes only the requested live component:
 
 ```python
-hp.tb.write_table_components(
-    sdata.path, table_name="processed", components={("obs",): updated_obs}, overwrite=True,
+hp.tb.add_table_components(
+    sdata, table_name="processed", components={("obs",): updated_obs}, overwrite=True,
 )
-sdata.tables["processed"] = hp.tb.read_table(sdata.path, table_name="processed")
 ```
 
 Here `updated_obs` preserves the stored index and, for an annotated table, its
 region/instance identities and order. Complete-table writes are needed to change
 axes or linkage.
+
+#### Updating components of an attached table
+
+There are two explicit ownership levels:
+
+| APIs                                                | Effect                                                                                   | Return               |
+| --------------------------------------------------- | ---------------------------------------------------------------------------------------- | -------------------- |
+| `write_table_components`, `delete_table_components` | Update the supplied store only; do not modify live objects.                              | `None`               |
+| `add_table_components`, `remove_table_components`   | Update selected components of an attached table, and its store when `sdata.path` is set. | The supplied `sdata` |
+
+The SpatialData-aware adapters retain the existing AnnData object. They require
+the table to be attached and, when backed, already present in storage. They do
+not load or create a missing table implicitly. Destination AnnData views are
+rejected: callers must explicitly prepare and attach a non-view table. HDF5-backed
+AnnData destinations are also rejected because their setters can write through
+to a separate file, outside Harpy's Zarr publication operation. Harpy's read-only
+Zarr handles and lazy arrays do not make AnnData HDF5-backed.
+
+The same component paths, explicit identity arguments, protected annotation,
+raw-creation and deletion rules apply at both ownership levels. In particular,
+passing `sdata` does not establish the order of replacement matrix rows or
+columns; callers still supply the corresponding identities or axis dataframes.
+Only relevant axes are checked. Backed updates additionally check that these
+complete live axes match storage in identity and order before positional
+attachment. Raw uses its independent feature axis.
+
+- **Unbacked SpatialData:** updates stay in memory, without serialization or
+  numerical computation. Matrix representations are retained and may be shared
+  with inputs. As with `add_table`, `overwrite` is ignored; validation still
+  applies.
+- **Backed SpatialData:** `overwrite=True` is required if a replacement target
+  exists in either memory or storage. Reopen only requested replacements from
+  their permanent paths, using lazy matrices and eager annotations. Unrelated
+  local edits and matrix references are not refreshed or persisted.
+
+`add_table_components(..., components={...}, delete=[...])` combines replacements
+and deletions. `remove_table_components(..., components=[...])` is deletion-only;
+explicit deletion paths authorize removal without an overwrite flag. Presence
+is resolved independently in memory and storage: a memory-only entry is removed
+without staging or consolidation, and a disk-only entry is still removed from
+storage. Targets absent in both locations are logged and skipped. Malformed
+parents remain errors, not missing targets.
+
+Both adapters prepare new mapping containers without mutating unrelated entries.
+For backed updates, `_write_table_operation()` finishes replacement serialization
+before publication, including when a lazy replacement reads a deletion target.
+The adapter installs requested entries inside the operation's context, while
+backups remain available; consolidation and commit follow successful installation.
+On handled failure, the shared writer restores storage/root metadata and the
+adapter restores the original affected in-memory references. Unbacked failures
+restore those references without any storage work.
+
+External references are not refreshed. Callers continue to own dirty/stale
+tracking, application events and coherent scientific metadata; the existing
+concurrency and crash-recovery limitations are unchanged.
 
 #### SpatialData-specific table metadata
 

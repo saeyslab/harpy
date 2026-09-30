@@ -26,13 +26,13 @@ from harpy.table._write import _write_table_operation
 from harpy.table._write_validation import (
     AxisNames,
     _annotation_columns,
-    _axis_index,
     _component_axes,
     _match_identity,
     _new_raw_var,
     _prepare_raw_creation,
     _read_observation_identity,
     _read_spatialdata_attrs,
+    _storage_axis_index,
     _validate_component_values_against_axes,
     _validate_deletion_paths,
     _validate_observation_annotation,
@@ -481,7 +481,7 @@ def _check_live_axes(
             stored_index = stored_new_raw_var.index
         else:
             frame_path = ("raw", "var") if axis == "raw_var" else (axis,)
-            stored_index = _axis_index(group, frame_path)
+            stored_index = _storage_axis_index(group, frame_path)
         _match_identity(index, stored_index, label=f"In-memory {axis}")
 
 
