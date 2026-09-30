@@ -20,7 +20,6 @@ from harpy.table import (
     delete_table_components,
     read_table,
     remove_table_components,
-    write_table_components,
 )
 
 
@@ -549,13 +548,3 @@ def test_deletion_only_installation_failure_restores_memory_and_disk(make_table_
         remove_table_components(sdata, table_name="counts", components=[("obsm", "embedding"), ("raw",)])
     assert table._obsm is previous[0] and table._raw is previous[1]
     assert _store_bytes(path) == before
-
-
-def test_path_based_operations_remain_disk_only(make_table_io_store):
-    path = make_table_io_store()
-    sdata, table = _attach(path, backed=True)
-    original_raw = table.raw
-    write_table_components(path, table_name="counts", components={("uns", "new"): 1})
-    delete_table_components(path, table_name="counts", components=[("raw",)])
-    assert table.raw is original_raw and "new" not in table.uns
-    assert sdata.tables["counts"] is table

@@ -17,7 +17,7 @@ from zarr.storage import LocalStore
 
 import harpy.table._write as table_writer
 from harpy._tests.test_table.test_io import _assert_value
-from harpy.table import read_table, read_table_components, write_table, write_table_components
+from harpy.table import delete_table_components, read_table, read_table_components, write_table, write_table_components
 
 
 def _store_bytes(path):
@@ -391,6 +391,18 @@ def test_obs_update_never_reads_or_writes_expression_data(make_table_io_store, m
     }
     pd.testing.assert_frame_equal(read_zarr(path / "tables/counts").obs, obs)
     assert "score" not in table.obs
+
+
+def test_path_based_operations_remain_disk_only(make_table_io_store):
+    path = make_table_io_store()
+    table = read_table(path, table_name="counts", mode="lazy")
+    sdata = SpatialData(tables={"counts": table})
+    sdata.path = path
+    original_raw = table.raw
+    write_table_components(path, table_name="counts", components={("uns", "new"): 1})
+    delete_table_components(path, table_name="counts", components=[("raw",)])
+    assert table.raw is original_raw and "new" not in table.uns
+    assert sdata.tables["counts"] is table
 
 
 def test_component_writes_cover_matrix_axes_raw_and_mapping_replacement(make_table_io_store):
