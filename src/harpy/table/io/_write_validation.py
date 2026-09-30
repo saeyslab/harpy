@@ -323,8 +323,22 @@ def _match_observation_identity(
     )
 
 
-def _validate_observation_annotation(frame: pd.DataFrame, spatialdata_attrs: Mapping, *, label: str) -> pd.MultiIndex:
-    """Validate the full table's declared/observed regions and identity columns."""
+def _validated_observation_pairs(frame: pd.DataFrame, spatialdata_attrs: Mapping, *, label: str) -> pd.MultiIndex:
+    """Validate the full table annotation and return ordered region/instance pairs.
+
+    Declared regions must match observed values, not unused categorical levels.
+    With annotation keys ``region`` and ``instance``, for example::
+
+        region   instance
+        A        1
+        B        1
+        A        2
+
+        -> MultiIndex([("A", 1), ("B", 1), ("A", 2)])
+
+    The pairs preserve dataframe row order; the dataframe's own index is
+    neither used as identity nor modified.
+    """
     region_key, instance_key = _annotation_columns(spatialdata_attrs)
     regions = spatialdata_attrs.get(TableModel.REGION_KEY)
     regions = [regions] if isinstance(regions, str) else regions
@@ -630,7 +644,7 @@ def _validate_annotated_obs_update(
     The explicit ``supplied_obs_identity`` dataframe's index is ignored.
     """
     region_key, instance_key = _annotation_columns(expected_spatialdata_attrs)
-    expected = _validate_observation_annotation(
+    expected = _validated_observation_pairs(
         expected_region_instance_identity, expected_spatialdata_attrs, label="Destination observation"
     )
     # A replacement obs frame and explicit obs_identity are independent sources

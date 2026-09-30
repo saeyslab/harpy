@@ -35,7 +35,7 @@ from harpy.table.io._write_validation import (
     _storage_axis_index,
     _validate_component_values_against_axes,
     _validate_deletion_paths,
-    _validate_observation_annotation,
+    _validated_observation_pairs,
 )
 
 _ABSENT = object()
@@ -202,31 +202,12 @@ def _update_table_components(
     overwrite: bool = False,
 ) -> SpatialData:
     """Validate both destinations, then install inside the writer's rollback window."""
-    if not isinstance(sdata, SpatialData):
-        raise TypeError("sdata must be a SpatialData object.")
     if not isinstance(overwrite, bool):
         raise TypeError("overwrite must be a boolean.")
-    _validate_path_segment(table_name)
     paths = _validate_component_paths(tuple(components), to_write=True) if components else ()
     deletions = _validate_deletion_paths(delete)
     _check_component_path_overlap((*paths, *deletions))
-    if table_name not in sdata.tables:
-        raise ValueError(f"Table {table_name!r} is not attached to sdata; load and attach it explicitly.")
-    table = sdata.tables[table_name]
-    if table.is_view:
-        raise ValueError("Component updates require a non-view destination table; prepare and attach it explicitly.")
-    # HDF5-backed setters can write through to another file. They cannot satisfy
-    # this adapter's memory-only / shared-Zarr-publication ownership contract.
-    if table.isbacked:
-        raise ValueError("HDF5-backed AnnData destinations are not supported; attach a detached table explicitly.")
-    group = None
-    if sdata.path is not None:
-        try:
-            group = _open_table_group(sdata.path, table_name=table_name)
-        except FileNotFoundError as error:
-            raise FileNotFoundError(
-                f"The store and table {table_name!r} must already exist; persist the table explicitly first."
-            ) from error
+    table, group = _component_update_destination(sdata, table_name=table_name)
 
     # Check live parents even for missing deletion targets. A scalar where a
     # mapping is expected is malformed, not a missing component.
@@ -288,6 +269,35 @@ def _update_table_components(
             setattr(table, f"_{slot}", value)
         raise
     return sdata
+
+
+def _component_update_destination(sdata: SpatialData, *, table_name: str) -> tuple[AnnData, zarr.Group | None]:
+    """Require an attached, non-view table and, when backed, its existing stored counterpart.
+
+    Return the attached table and a read-only Zarr group, or None for the group
+    when sdata has no path. Neither loads nor creates a complete table.
+    """
+    if not isinstance(sdata, SpatialData):
+        raise TypeError("sdata must be a SpatialData object.")
+    _validate_path_segment(table_name)
+    if table_name not in sdata.tables:
+        raise ValueError(f"Table {table_name!r} is not attached to sdata; load and attach it explicitly.")
+    table = sdata.tables[table_name]
+    if table.is_view:
+        raise ValueError("Component updates require a non-view destination table; prepare and attach it explicitly.")
+    # HDF5-backed setters can write through to another file. They cannot satisfy
+    # this adapter's memory-only / shared-Zarr-publication ownership contract.
+    if table.isbacked:
+        raise ValueError("HDF5-backed AnnData destinations are not supported; attach a detached table explicitly.")
+    group = None
+    if sdata.path is not None:
+        try:
+            group = _open_table_group(sdata.path, table_name=table_name)
+        except FileNotFoundError as error:
+            raise FileNotFoundError(
+                f"The store and table {table_name!r} must already exist; persist the table explicitly first."
+            ) from error
+    return table, group
 
 
 def _memory_component(table: AnnData, path: ComponentPath) -> object:
@@ -481,10 +491,10 @@ def _check_in_memory_versus_storage_axes(
             if stored_attrs is not None:
                 if _annotation_columns(in_memory_attrs) != _annotation_columns(stored_attrs):
                     raise ValueError("In-memory and stored region/instance keys must agree; reopen the table.")
-                in_memory_pairs = _validate_observation_annotation(
+                in_memory_pairs = _validated_observation_pairs(
                     table.obs, in_memory_attrs, label="In-memory observation"
                 )
-                stored_pairs = _validate_observation_annotation(
+                stored_pairs = _validated_observation_pairs(
                     _read_observation_identity(group, stored_attrs), stored_attrs, label="Stored observation"
                 )
                 _match_identity(in_memory_pairs, stored_pairs, label="In-memory observation")

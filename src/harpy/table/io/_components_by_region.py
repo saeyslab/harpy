@@ -16,7 +16,6 @@ from harpy.table.io._components import (
     _install_memory_updates,
     _memory_component,
     _prepare_memory_updates,
-    _validate_component_values_against_memory,
 )
 from harpy.table.io._read import ComponentPath
 from harpy.table.io._write_by_region import (
@@ -27,7 +26,7 @@ from harpy.table.io._write_by_region import (
     _validate_regional_request,
     _write_table_components_by_region_operation,
 )
-from harpy.table.io._write_validation import _annotation_columns, _validate_spatialdata_attrs_unchanged
+from harpy.table.io._write_validation import _validate_spatialdata_attrs_unchanged
 
 
 def add_table_components_by_region(
@@ -151,17 +150,28 @@ def add_table_components_by_region(
         raise ValueError("Regional updates require a SpatialData-annotated table.")
     _validate_spatialdata_attrs_unchanged(spatialdata_attrs, components)
     for path in paths:
-        # Check in-memory parents and overwrite permission independently of disk.
-        # Their values are not the merge source for a backed update.
+        # Check in-memory parents; their values are not the merge source
+        # for a backed update.
         in_memory_value = _memory_component(table, path)
+        # For backed SpatialData, replacing a component requires overwrite=True
+        # even when it exists only in memory, not on disk. Installation would
+        # otherwise replace potentially unsaved local data without permission.
         if group is not None and in_memory_value is not _ABSENT and not overwrite:
             raise FileExistsError(f"In-memory component {path!r} already exists; use overwrite=True.")
 
     if group is not None:
+        # Backed SpatialData: group is the destination table in the Zarr store.
         # Installation assigns the complete matrix by row position, so even
         # observations outside the submitted regions must match storage.
-        _check_in_memory_versus_storage_axes(table, group, {"obs": table.obs.index}, stored_new_raw_var=None)
+        _check_in_memory_versus_storage_axes(
+            table=table,
+            group=group,
+            indices={"obs": table.obs.index},
+            stored_new_raw_var=None,
+        )
     else:
+        # Unbacked SpatialData: use the attached table's observations because
+        # there is no backing store from which to read the destination identities.
         table_row_positions = _regional_row_positions(table.obs, spatialdata_attrs, obs_identity)
         replacements = dict(components)
         for path in paths:
@@ -180,17 +190,10 @@ def add_table_components_by_region(
                 fill_values=fill_values,
                 chunk_size=chunk_size,
             )
-        # The regional merge now covers every observation. Validate the prepared
-        # components against the attached destination just as full updates do.
-        identity_columns = list(_annotation_columns(spatialdata_attrs))
-        _validate_component_values_against_memory(
-            table,
-            replacements,
-            expected_axis_indices={"obs": table.obs.index},
-            obs_identity=table.obs[identity_columns],
-            var_names=None,
-            raw_var_names=None,
-        )
+        # Unlike full updates in _update_table_components(), we do not call
+        # _validate_component_values_against_memory() here: regional preparation
+        # already validates identities and matrix compatibility, and SpatialData
+        # annotation protection ran above.
 
     previous = {slot: getattr(table, f"_{slot}") for slot in {path[0] for path in paths}}
     try:
@@ -207,10 +210,13 @@ def add_table_components_by_region(
                 chunk_size=chunk_size,
                 overwrite=overwrite,
             ) as published:
-                # The regional operation yields inside _write_table_operation()'s
-                # publication context. Disk backups remain available through this
-                # installation and subsequent consolidation; its publisher restores
-                # disk on failure, while the except below restores memory.
+                # Serialization is complete (same pattern as in _update_table_components()).
+                # Reopen requested components from permanent paths and attach them inside
+                # _write_table_operation()'s rollback window, kept open by the regional operation.
+                # Its nested _publish_staged_paths() context retains disk backups until
+                # this with-body and metadata consolidation succeed. On failure, that
+                # context restores disk components; the except block below restores
+                # the previous in-memory slot objects.
                 reopened = {path: _read_anndata_element(published, path, mode="lazy") for path in paths}
                 updates = _prepare_memory_updates(table, reopened, (), new_raw_var=None)
                 _install_memory_updates(table, updates)

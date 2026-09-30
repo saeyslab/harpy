@@ -202,6 +202,7 @@ changes when it is backed by a Zarr store.
 
     tb.add_table
     tb.add_table_components
+    tb.add_table_components_by_region
     tb.remove_table_components
 ```
 
