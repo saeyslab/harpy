@@ -159,6 +159,10 @@ Operations on table (`AnnData` object) elements.
 
 ### I/O
 
+For AnnData tables in SpatialData Zarr stores, see the
+[storage contracts (developer documentation)](development/storage.md) for details on
+reading modes, update scopes, overwrite guarantees, and storage-backed references.
+
 #### Reading
 
 ```{eval-rst}
