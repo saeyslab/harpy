@@ -41,8 +41,6 @@ from harpy.table._metadata import (
     _FEATURE_MATRIX_SCHEMA_VERSION,
 )
 from harpy.table._validation import _validate_table_without_canonical
-from harpy.table._write import _publish_table_paths
-from harpy.table._write_validation import _validate_complete_table
 from harpy.table.canonical_centers import (
     CANONICAL_ALGORITHM_VERSION,
     CANONICAL_OBSM_KEY,
@@ -53,6 +51,8 @@ from harpy.table.canonical_centers import (
     canonical_metadata_to_storage,
     validate_canonical_payload,
 )
+from harpy.table.io._write import _publish_table_paths
+from harpy.table.io._write_validation import _validate_complete_table
 from harpy.utils._keys import _FEATURE_MATRICES_KEY
 
 

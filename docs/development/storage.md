@@ -548,7 +548,7 @@ their graphs. Unsupported encodings fail rather than falling back to a
 whole-table read. These readers do not validate scientific metadata.
 
 Local root validation is shared through `_storage._spatialdata`;
-`table._io` locates the selected table, and `_storage._anndata` decodes it:
+`table.io._read` locates the selected table, and `_storage._anndata` decodes it:
 
 ```text
 read_table             -> _read_anndata_table (assemble all slots)

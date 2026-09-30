@@ -12,7 +12,7 @@ from spatialdata.models import TableModel
 from spatialdata.transformations import get_transformation
 
 from harpy.image._image import add_labels, get_dataarray
-from harpy.table._table import add_table
+from harpy.table.io._add_table import add_table
 
 
 def bounding_box_query(

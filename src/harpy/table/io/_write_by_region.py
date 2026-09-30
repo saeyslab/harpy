@@ -18,9 +18,9 @@ from numpy.typing import NDArray
 from scipy import sparse
 
 from harpy._storage._anndata import _decode_anndata_element, _read_anndata_element
-from harpy.table._io import ComponentPath, _open_table_group, _validate_component_paths
-from harpy.table._write import _write_table_operation
-from harpy.table._write_validation import (
+from harpy.table.io._read import ComponentPath, _open_table_group, _validate_component_paths
+from harpy.table.io._write import _write_table_operation
+from harpy.table.io._write_validation import (
     _annotation_columns,
     _check_component_write_destination,
     _match_identity,

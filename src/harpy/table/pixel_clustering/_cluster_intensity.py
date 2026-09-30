@@ -15,7 +15,7 @@ from spatialdata import SpatialData
 from harpy.image._image import _get_spatial_element
 from harpy.table._allocation_intensity import aggregate_image
 from harpy.table._preprocess import preprocess_proteomics
-from harpy.table._table import add_table
+from harpy.table.io._add_table import add_table
 from harpy.utils._keys import _RAW_COUNTS_KEY, ClusteringKey
 
 

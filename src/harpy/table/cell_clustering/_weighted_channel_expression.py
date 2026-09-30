@@ -5,8 +5,9 @@ from pandas.testing import assert_index_equal
 from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
-from harpy.table._table import ProcessTable, add_table
+from harpy.table._table import ProcessTable
 from harpy.table.cell_clustering._utils import _get_mapping
+from harpy.table.io._add_table import add_table
 from harpy.utils._keys import _CELLSIZE_KEY, _RAW_COUNTS_KEY, ClusteringKey
 
 

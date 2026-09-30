@@ -119,18 +119,59 @@ Operations on table (`AnnData` object) elements.
 .. module:: harpy.tb
 .. currentmodule:: harpy
 
+```
+
+### I/O
+
+#### Reading
+
+```{eval-rst}
+
+.. autosummary::
+    :toctree: generated
+
+    tb.read_table
+    tb.read_table_components
+```
+
+#### Writing directly to storage
+
+These functions update the Zarr store without changing tables attached to an
+in-memory `SpatialData` object.
+
+```{eval-rst}
+
+.. autosummary::
+    :toctree: generated
+
+    tb.write_table
+    tb.write_table_components
+    tb.delete_table_components
+    tb.write_table_components_by_region
+```
+
+#### Updating SpatialData tables
+
+These functions update tables attached to `SpatialData` and also persist the
+changes when it is backed by a Zarr store.
+
+```{eval-rst}
+
 .. autosummary::
     :toctree: generated
 
     tb.add_table
     tb.add_table_components
     tb.remove_table_components
-    tb.read_table
-    tb.read_table_components
-    tb.write_table
-    tb.write_table_components
-    tb.delete_table_components
-    tb.write_table_components_by_region
+```
+
+### Processing and analysis
+
+```{eval-rst}
+
+.. autosummary::
+    :toctree: generated
+
     tb.aggregate_points
     tb.aggregate_image
     tb.add_canonical_centers

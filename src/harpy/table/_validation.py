@@ -2,7 +2,7 @@
 
 Table-validation responsibilities:
 
-- ``harpy.table._write_validation`` checks AnnData structure and ordered
+- ``harpy.table.io._write_validation`` checks AnnData structure and ordered
   identities for complete-table and component writes, without requiring the
   surrounding SpatialData object.
 - ``validate_table()`` and its helpers check SpatialData annotation, recognized

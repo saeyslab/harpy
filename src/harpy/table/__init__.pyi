@@ -6,21 +6,22 @@ from ._annotation import cluster_cleanliness, score_genes, score_genes_iter
 from ._canonical_centers import add_canonical_centers
 from ._cluster_intensity import cluster_intensity
 from ._clustering import kmeans, leiden
-from ._components import add_table_components, remove_table_components
 from ._enrichment import nhood_enrichment
-from ._io import read_table, read_table_components
 from ._preprocess import preprocess_proteomics, preprocess_transcriptomics
 from ._regionprops import add_regionprop_features, add_regionprops
-from ._table import add_table, correct_marker_genes, filter_on_size
+from ._table import correct_marker_genes, filter_on_size
 from ._validation import validate_table
-from ._write import delete_table_components, write_table, write_table_components
-from ._write_by_region import write_table_components_by_region
 from .cell_clustering._clustering import flowsom
 from .cell_clustering._preprocess import cell_clustering_preprocess
 from .cell_clustering._weighted_channel_expression import weighted_channel_expression
 from .featurization._featurize import extract_instances, featurize
 from .featurization._vit_mae import train_autoencoder
 from .featurization._zarr_iterable_instances import ZarrDataLoader, ZarrIterableInstances
+from .io._add_table import add_table
+from .io._components import add_table_components, remove_table_components
+from .io._read import read_table, read_table_components
+from .io._write import delete_table_components, write_table, write_table_components
+from .io._write_by_region import write_table_components_by_region
 from .niches._clustering import nhood_kmeans, nhood_lda
 from .pixel_clustering._cluster_intensity import cluster_intensity_SOM
 from .pixel_clustering._neighbors import spatial_pixel_neighbors

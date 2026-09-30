@@ -29,14 +29,14 @@ from harpy._storage._publication import (
     _StagedPath,
 )
 from harpy._storage._spatialdata import _open_spatialdata_group
-from harpy.table._io import (
+from harpy.table.io._read import (
     ComponentPath,
     _check_component_path_overlap,
     _open_table_group,
     _validate_component_paths,
     _validate_path_segment,
 )
-from harpy.table._write_validation import (
+from harpy.table.io._write_validation import (
     AxisNames,
     _check_component_deletion_destination,
     _check_component_write_destination,

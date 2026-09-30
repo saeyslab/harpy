@@ -19,9 +19,9 @@ from spatialdata.transformations import Affine, Identity, Scale, Sequence, Trans
 import harpy.table._aggregation_checkpoint as checkpoint_module
 import harpy.table._aggregation_writer as writer_module
 import harpy.table._allocation as aggregation_module
-import harpy.table._write as table_writer
+import harpy.table.io._write as table_writer
 import harpy.transformations._transformations as transformation_module
-from harpy._tests.test_table.test_write import _store_bytes
+from harpy._tests.test_table.test_io.test_write import _store_bytes
 from harpy.table import validate_table
 from harpy.table._aggregation_contracts import _FeatureClassAggregationContract
 from harpy.table._allocation import aggregate_points, bin_counts

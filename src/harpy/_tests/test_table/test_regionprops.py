@@ -4,7 +4,7 @@ from spatialdata.models import TableModel
 
 from harpy.image._image import add_labels
 from harpy.table._regionprops import add_regionprop_features, add_regionprops
-from harpy.table._table import add_table
+from harpy.table.io._add_table import add_table
 
 ALL_REGIONPROPS = [
     "area",

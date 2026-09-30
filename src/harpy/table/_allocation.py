@@ -112,7 +112,6 @@ from harpy.table._aggregation_writer import (
 from harpy.table._metadata import (
     _AUXILIARY_POINTS_FRACTION_COLUMN,
 )
-from harpy.table._table import add_table
 from harpy.table._utils import _sanity_check_append_region
 from harpy.table.canonical_centers import (
     CanonicalCacheReport,
@@ -121,6 +120,7 @@ from harpy.table.canonical_centers import (
     build_canonical_source_signature,
     calculate_canonical_centers,
 )
+from harpy.table.io._add_table import add_table
 from harpy.transformations._transformations import _PointToLabelsTransform, _resolve_point_to_labels_transform
 from harpy.utils._keys import _CELL_INDEX, _GENES_KEY, _INSTANCE_KEY, _REGION_KEY, _SPATIAL
 from harpy.utils.utils import _make_list

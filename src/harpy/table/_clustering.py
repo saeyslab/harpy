@@ -11,7 +11,8 @@ from loguru import logger as log
 from sklearn.cluster import KMeans
 from spatialdata import SpatialData
 
-from harpy.table._table import ProcessTable, add_table
+from harpy.table._table import ProcessTable
+from harpy.table.io._add_table import add_table
 
 
 def kmeans(

@@ -9,8 +9,8 @@ from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
 from harpy.shape._shape import filter_shapes
-from harpy.table._manager import _add_table
-from harpy.utils._keys import _CELLSIZE_KEY, _INSTANCE_KEY, _REGION_KEY
+from harpy.table.io._add_table import add_table
+from harpy.utils._keys import _CELLSIZE_KEY
 
 
 class ProcessTable:
@@ -318,105 +318,3 @@ def filter_on_size(
     log.info(f"{filtered} cells were filtered out based on size.")
 
     return sdata
-
-
-def add_table(
-    sdata: SpatialData,
-    adata: AnnData,
-    output_table_name: str,
-    region: list[str] | None,
-    instance_key: str = _INSTANCE_KEY,
-    region_key: str = _REGION_KEY,
-    overwrite: bool = False,
-) -> SpatialData:
-    """Add an AnnData table to SpatialData.
-
-    If ``sdata`` is backed by a Zarr store, also write the table to that store.
-    Otherwise, attach the table to ``sdata`` only in memory.
-
-    The prepared table is attached at ``sdata.tables[output_table_name]``.
-    After writing to a Zarr store, only that table is reopened with lazy matrices.
-
-    Parameters
-    ----------
-    sdata
-        The :class:`~spatialdata.SpatialData` object to update.
-    adata
-        Parsed or unparsed :class:`~anndata.AnnData`. When ``region`` is provided,
-        ``adata.obs`` must already contain the columns named by ``region_key``
-        and ``instance_key``; their values are not inferred or created.
-        For an already-parsed table, these key names must match its existing
-        ``adata.uns["spatialdata_attrs"]`` metadata. Custom key names must be
-        supplied explicitly. Parsing updates a separate prepared table;
-        ``adata`` remains unchanged.
-    output_table_name
-        Name of the table in ``sdata.tables`` and, when backed, in the store.
-    region
-        Names of spatial elements annotated by the resulting table, corresponding
-        to the values in ``adata.obs[region_key]``. Set to ``None`` to create an
-        unannotated table, even if ``adata`` is already parsed. This removes
-        linkage metadata from the prepared result, not its observation columns.
-    instance_key
-        Name of the ``adata.obs`` column containing instance IDs within each region.
-        Ignored if ``region`` is ``None``.
-    region_key
-        Name of the ``adata.obs`` column containing each observation's region.
-        Ignored if ``region`` is ``None``.
-    overwrite
-        Allow replacement of an existing table in backed ``sdata`` or its store.
-        Ignored for unbacked ``sdata``, where existing tables are always replaced.
-
-    Returns
-    -------
-    spatialdata.SpatialData
-        The same ``sdata`` object, with the prepared table attached at
-        ``sdata.tables[output_table_name]``.
-
-    Notes
-    -----
-    Annotation preparation copies metadata, not entire matrices. For unbacked
-    ``sdata``, the attached table may share matrix data with ``adata``; this is
-    not a deep-copy API.
-
-    Backed writes finish serialization before replacing old data. Installation and
-    metadata finalization remain covered by rollback; handled failures restore the
-    previous stored table and attached entry. Unrelated elements are unchanged.
-    External references to a replaced table are not refreshed; use
-    ``sdata.tables[output_table_name]`` after success.
-
-    See Also
-    --------
-    harpy.table.write_table : Write a complete table without updating ``sdata``.
-
-    Examples
-    --------
-    In this example, ``sdata`` is backed by a Zarr store. Each row in
-    ``adata.obs`` has a ``"region"`` value of ``"cells"`` and an
-    ``"instance_id"`` identifying the corresponding cell.
-
-    The call writes the table to the store as ``"processed"`` and updates
-    ``sdata.tables["processed"]`` with the saved table. Its matrices are
-    reopened lazily, without loading their values into memory.
-
-    .. code-block:: python
-
-        sdata = hp.tb.add_table(
-            sdata,
-            adata=adata,
-            output_table_name="processed",
-            region=["cells"],
-            region_key="region",
-            instance_key="instance_id",
-            overwrite=True,
-        )
-        processed = sdata.tables["processed"]
-    """
-    return _add_table(
-        sdata,
-        adata=adata,
-        output_table_name=output_table_name,
-        region=region,
-        instance_key=instance_key,
-        region_key=region_key,
-        overwrite=overwrite,
-    )

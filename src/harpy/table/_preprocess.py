@@ -13,7 +13,8 @@ from spatialdata import SpatialData
 
 from harpy.image._image import get_dataarray
 from harpy.shape._shape import filter_shapes
-from harpy.table._table import ProcessTable, add_table
+from harpy.table._table import ProcessTable
+from harpy.table.io._add_table import add_table
 from harpy.utils._aggregate import _get_mask_area
 from harpy.utils._keys import _CELLSIZE_KEY, _RAW_COUNTS_KEY
 

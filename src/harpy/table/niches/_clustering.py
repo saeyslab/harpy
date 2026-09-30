@@ -11,7 +11,8 @@ from sklearn.decomposition import LatentDirichletAllocation
 from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
-from harpy.table._table import ProcessTable, add_table
+from harpy.table._table import ProcessTable
+from harpy.table.io._add_table import add_table
 from harpy.table.niches._composition import _compute_nhood_composition, _compute_nhood_counts
 from harpy.utils._keys import _ANNOTATION_KEY
 

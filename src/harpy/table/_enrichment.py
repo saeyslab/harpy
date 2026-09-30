@@ -1,7 +1,8 @@
 from loguru import logger as log
 from spatialdata import SpatialData
 
-from harpy.table._table import ProcessTable, add_table
+from harpy.table._table import ProcessTable
+from harpy.table.io._add_table import add_table
 from harpy.utils._keys import _ANNOTATION_KEY
 
 try:

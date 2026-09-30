@@ -21,7 +21,8 @@ from spatialdata.models import TableModel
 
 from harpy.image._image import get_dataarray
 from harpy.io._zarr import _get_backing_zarr_format
-from harpy.table._table import ProcessTable, add_table
+from harpy.table._table import ProcessTable
+from harpy.table.io._add_table import add_table
 from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY
 
 _VALID_EXPORT_SOURCES = ("Blockwise Object Predictions", "Object Predictions")

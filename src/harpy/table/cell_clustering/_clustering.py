@@ -8,9 +8,10 @@ from anndata import AnnData
 from loguru import logger as log
 from spatialdata import SpatialData
 
-from harpy.table._table import ProcessTable, add_table
+from harpy.table._table import ProcessTable
 from harpy.table.cell_clustering._preprocess import cell_clustering_preprocess
 from harpy.table.cell_clustering._utils import _get_mapping
+from harpy.table.io._add_table import add_table
 from harpy.utils._keys import _CELL_INDEX, _CELLSIZE_KEY, _INSTANCE_KEY, _RAW_COUNTS_KEY, _REGION_KEY, ClusteringKey
 
 try:

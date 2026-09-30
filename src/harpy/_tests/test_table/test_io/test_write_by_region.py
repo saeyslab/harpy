@@ -14,9 +14,9 @@ from scipy import sparse
 from spatialdata.models import TableModel
 from zarr.storage import LocalStore
 
-import harpy.table._write as table_writer
-import harpy.table._write_by_region as regional_writer
-from harpy._tests.test_table.test_write import _store_bytes
+import harpy.table.io._write as table_writer
+import harpy.table.io._write_by_region as regional_writer
+from harpy._tests.test_table.test_io.test_write import _store_bytes
 from harpy.table import read_table_components, write_table_components, write_table_components_by_region
 
 

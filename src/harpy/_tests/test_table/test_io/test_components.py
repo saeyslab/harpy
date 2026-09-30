@@ -11,10 +11,10 @@ from spatialdata import SpatialData
 from spatialdata.models import TableModel
 from zarr.storage import LocalStore
 
-import harpy.table._components as component_adapter
-import harpy.table._write as table_writer
-from harpy._tests.test_table.test_io import _assert_value
-from harpy._tests.test_table.test_write import _annotated_store, _store_bytes
+import harpy.table.io._components as component_adapter
+import harpy.table.io._write as table_writer
+from harpy._tests.test_table.test_io.test_read import _assert_value
+from harpy._tests.test_table.test_io.test_write import _annotated_store, _store_bytes
 from harpy.table import (
     add_table_components,
     delete_table_components,

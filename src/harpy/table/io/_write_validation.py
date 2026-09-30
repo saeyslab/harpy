@@ -14,7 +14,7 @@ from anndata.io import read_elem
 from spatialdata.models import TableModel
 
 from harpy._storage._anndata import _MATRIX_MAPPINGS, _MissingAnnDataElement, _read_anndata_element
-from harpy.table._io import ComponentPath, _check_component_path_overlap, _validate_path_segment
+from harpy.table.io._read import ComponentPath, _check_component_path_overlap, _validate_path_segment
 
 type AxisNames = pd.Index | Sequence[str]
 

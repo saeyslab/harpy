@@ -13,9 +13,9 @@ from spatialdata.models import Labels2DModel, TableModel
 from zarr.storage import LocalStore
 
 import harpy.table._add_feature_matrix as feature_writer
-import harpy.table._write as table_writer
-from harpy._tests.test_table.test_io import _assert_value
-from harpy._tests.test_table.test_write import _store_bytes
+import harpy.table.io._write as table_writer
+from harpy._tests.test_table.test_io.test_read import _assert_value
+from harpy._tests.test_table.test_io.test_write import _store_bytes
 from harpy.table import read_table
 from harpy.table._add_feature_matrix import add_feature_matrix
 

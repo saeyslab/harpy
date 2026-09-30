@@ -11,7 +11,8 @@ from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
 from harpy.image._image import get_dataarray
-from harpy.table._table import ProcessTable, add_table
+from harpy.table._table import ProcessTable
+from harpy.table.io._add_table import add_table
 from harpy.utils._keys import _INSTANCE_KEY
 from harpy.utils.utils import _make_list
 

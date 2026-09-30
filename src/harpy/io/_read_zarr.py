@@ -13,7 +13,7 @@ from spatialdata import read_zarr as read_spatialdata_zarr
 from harpy._storage._anndata import _DEFAULT_SPARSE_CHUNK_SIZE, _ReadMode
 from harpy._storage._spatialdata import _open_spatialdata_group
 from harpy.table import read_table
-from harpy.table._io import _validate_path_segment, _validate_read_mode, _validate_sparse_chunk_size
+from harpy.table.io._read import _validate_path_segment, _validate_read_mode, _validate_sparse_chunk_size
 
 
 def read_zarr(

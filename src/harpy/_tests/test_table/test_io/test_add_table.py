@@ -11,13 +11,12 @@ from dask.callbacks import Callback
 from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
-import harpy.table._manager as table_manager
-import harpy.table._write as table_writer
-from harpy._tests.test_table.test_io import _assert_value
-from harpy._tests.test_table.test_write import _store_bytes
+import harpy.table.io._add_table as table_manager
+import harpy.table.io._write as table_writer
+from harpy._tests.test_table.test_io.test_read import _assert_value
+from harpy._tests.test_table.test_io.test_write import _store_bytes
 from harpy.table import read_table
-from harpy.table._manager import _cast_stringdtype_uns
-from harpy.table._table import add_table
+from harpy.table.io._add_table import _cast_stringdtype_uns, add_table
 from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY
 
 

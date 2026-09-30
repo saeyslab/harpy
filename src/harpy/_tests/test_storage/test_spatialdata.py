@@ -19,7 +19,7 @@ from harpy._storage import _spatialdata
 from harpy.image._image import add_image, add_labels, get_dataarray
 from harpy.points._points import add_points
 from harpy.shape._shape import add_shapes
-from harpy.table._table import add_table
+from harpy.table.io._add_table import add_table
 
 
 def _make_element(kind):

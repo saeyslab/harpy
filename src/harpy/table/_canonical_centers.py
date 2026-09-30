@@ -20,12 +20,6 @@ from harpy._storage._publication import (
     _StagedPath,
 )
 from harpy.table._validation import _validate_table_without_canonical
-from harpy.table._write import _publish_table_paths
-from harpy.table._write_validation import (
-    _check_component_write_destination,
-    _storage_axis_indices,
-    _validate_component_values_against_storage,
-)
 from harpy.table.canonical_centers import (
     CANONICAL_ALGORITHM_VERSION,
     CANONICAL_OBSM_KEY,
@@ -37,6 +31,12 @@ from harpy.table.canonical_centers import (
     canonical_metadata_to_storage,
     inspect_canonical_cache,
     validate_canonical_payload,
+)
+from harpy.table.io._write import _publish_table_paths
+from harpy.table.io._write_validation import (
+    _check_component_write_destination,
+    _storage_axis_indices,
+    _validate_component_values_against_storage,
 )
 
 _CANONICAL_MATRIX_PATH = ("obsm", CANONICAL_OBSM_KEY)

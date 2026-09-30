@@ -14,7 +14,7 @@ from spatialdata.transformations import get_transformation
 
 from harpy.image._image import _get_spatial_element
 from harpy.table._preprocess import preprocess_proteomics
-from harpy.table._table import add_table
+from harpy.table.io._add_table import add_table
 from harpy.utils._keys import _CELL_INDEX, _CELLSIZE_KEY, _INSTANCE_KEY, _RAW_COUNTS_KEY, _REGION_KEY
 
 

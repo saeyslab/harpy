@@ -14,12 +14,12 @@ from spatialdata.models import TableModel
 
 from harpy._storage._anndata import _MissingAnnDataElement, _read_anndata_element
 from harpy.image._image import _get_translation, _precondition, get_dataarray
-from harpy.table._io import _open_table_group
 from harpy.table._metadata import _FEATURE_MATRIX_SCHEMA_VERSION
 from harpy.table._regionprops import _calculate_regionprop_features
-from harpy.table._table import add_table
-from harpy.table._write_by_region import _matrix_format, _write_table_components_by_region_operation
-from harpy.table._write_validation import (
+from harpy.table.io._add_table import add_table
+from harpy.table.io._read import _open_table_group
+from harpy.table.io._write_by_region import _matrix_format, _write_table_components_by_region_operation
+from harpy.table.io._write_validation import (
     _annotation_columns,
     _match_identity,
     _read_observation_identity,

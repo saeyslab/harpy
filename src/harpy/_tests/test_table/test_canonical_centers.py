@@ -16,8 +16,8 @@ from spatialdata.transformations import Identity
 from zarr.storage import LocalStore
 
 import harpy.table._canonical_centers as canonical_writer
-import harpy.table._write as table_writer
-from harpy._tests.test_table.test_write import _store_bytes
+import harpy.table.io._write as table_writer
+from harpy._tests.test_table.test_io.test_write import _store_bytes
 from harpy.table import add_canonical_centers, validate_table
 from harpy.table._validation import _validate_table_annotation
 from harpy.table.canonical_centers import (
