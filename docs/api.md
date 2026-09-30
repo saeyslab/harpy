@@ -123,6 +123,8 @@ Operations on table (`AnnData` object) elements.
     :toctree: generated
 
     tb.add_table
+    tb.add_table_components
+    tb.remove_table_components
     tb.read_table
     tb.read_table_components
     tb.write_table
