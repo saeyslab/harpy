@@ -24,7 +24,7 @@ from harpy.table.io._write_validation import (
     _match_identity,
     _read_observation_identity,
     _read_spatialdata_attrs,
-    _validate_observation_annotation,
+    _validated_observation_pairs,
 )
 from harpy.utils._aggregate import RasterAggregator, _get_mask_area
 from harpy.utils._keys import _CELL_INDEX, _FEATURE_MATRICES_KEY, _INSTANCE_KEY, _REGION_KEY
@@ -482,7 +482,7 @@ def _existing_feature_matrix(
     if not isinstance(in_memory_attrs, Mapping):
         raise ValueError(f"Table {table_name!r} must have SpatialData annotation.")
     # Validate the full in-memory observation population, including unselected regions.
-    in_memory_pairs = _validate_observation_annotation(adata.obs, in_memory_attrs, label="In-memory observation")
+    in_memory_pairs = _validated_observation_pairs(adata.obs, in_memory_attrs, label="In-memory observation")
     local_metadata = adata.uns.get(feature_matrices_key, {})
     if not isinstance(local_metadata, Mapping):
         raise ValueError(f"adata.uns[{feature_matrices_key!r}] must be a metadata mapping.")
@@ -498,7 +498,7 @@ def _existing_feature_matrix(
     if _annotation_columns(in_memory_attrs) != _annotation_columns(stored_attrs):
         raise ValueError("In-memory and stored tables must use the same region and instance keys; reopen the table.")
     stored_identity = _read_observation_identity(group, stored_attrs)
-    stored_pairs = _validate_observation_annotation(
+    stored_pairs = _validated_observation_pairs(
         stored_identity,
         stored_attrs,
         label="Stored observation",

@@ -27,7 +27,7 @@ from harpy.table.io._write_validation import (
     _observation_pairs,
     _read_observation_identity,
     _read_spatialdata_attrs,
-    _validate_observation_annotation,
+    _validated_observation_pairs,
 )
 
 type _MatrixBlock = np.ndarray | sparse.csr_matrix | sparse.csc_matrix | sparse.csr_array | sparse.csc_array
@@ -131,6 +131,7 @@ def write_table_components_by_region(
     --------
     harpy.table.write_table_components : Replace complete components.
     harpy.table.read_table_components : Read selected stored components.
+    harpy.table.add_table_components_by_region : Also update the attached SpatialData table.
 
     Examples
     --------
@@ -174,67 +175,25 @@ def _write_table_components_by_region_operation(
 ) -> Generator[zarr.Group, None, None]:
     """Prepare regional replacements, then yield within the shared rollback window.
 
-    Future SpatialData adapters can install the reopened table in their with-body;
+    SpatialData adapters install requested reopened components in their with-body;
     the shared writer retains responsibility for publication and finalization.
     """
-    if not isinstance(components, Mapping):
-        raise TypeError("components must be a mapping from tuple paths to values.")
-    if not isinstance(overwrite, bool):
-        raise TypeError("overwrite must be a boolean.")
-    if isinstance(chunk_size, bool) or not isinstance(chunk_size, Integral):
-        raise TypeError("chunk_size must be a positive integer.")
-    if chunk_size < 1:
-        raise ValueError("chunk_size must be a positive integer.")
+    paths = _validate_regional_request(components, fill_values=fill_values, chunk_size=chunk_size, overwrite=overwrite)
     chunk_size = int(chunk_size)
-    paths = _validate_component_paths(tuple(components), to_write=True)
-    matrix_paths = {path for path in paths if path[0] == "obsm"}
-    if not matrix_paths or any(path[0] not in {"obsm", "uns"} for path in paths):
-        raise ValueError("Regional writes require individual obsm matrices and optional uns replacements only.")
-    if fill_values is not None and not isinstance(fill_values, Mapping):
-        raise TypeError("fill_values must be a mapping from submitted obsm paths to scalar fills.")
-    fills = {} if fill_values is None else dict(fill_values)
-    if fills.keys() - matrix_paths:
-        raise ValueError("fill_values keys must refer to submitted obsm matrices.")
-
     group = _open_table_group(store, table_name=table_name)
     root = Path(store)
     table_path = root / "tables" / table_name
     spatialdata_attrs = _read_spatialdata_attrs(group)
     if spatialdata_attrs is None:
         raise ValueError("Regional writes require a SpatialData-annotated table.")
-    region_key, instance_key = _annotation_columns(spatialdata_attrs)
     stored_identity = _read_observation_identity(group, spatialdata_attrs)
-    # 1) Validate the stored annotation against all stored observations.
-    # Declared regions must match the regions actually present in the table.
-    stored_pairs = _validate_observation_annotation(stored_identity, spatialdata_attrs, label="Stored observation")
-
-    # 2) Validate the submitted identities against the selected stored observations.
-    # An A-only update must include every observation of A in stored order,
-    # but need not include observations from B.
-    if not isinstance(obs_identity, pd.DataFrame):
-        raise TypeError("obs_identity must be a two-column region/instance dataframe.")
-    if obs_identity.empty or len(obs_identity.columns) != 2 or set(obs_identity.columns) != {region_key, instance_key}:
-        raise ValueError("obs_identity must be nonempty and contain exactly the stored region and instance columns.")
-    supplied_pairs = _observation_pairs(
-        obs_identity, region_key=region_key, instance_key=instance_key, label="obs_identity"
-    )
-    regions = set(obs_identity[region_key].unique())
-    unknown = regions - set(stored_identity[region_key].unique())
-    if unknown:
-        raise ValueError(f"Unknown regions in obs_identity: {sorted(unknown, key=str)!r}.")
-    selected_row_mask = stored_identity[region_key].isin(regions).to_numpy()
-    _match_identity(supplied_pairs, stored_pairs[selected_row_mask], label="obs_identity")
-    table_row_positions = np.flatnonzero(selected_row_mask)
+    table_row_positions = _regional_row_positions(stored_identity, spatialdata_attrs, obs_identity)
 
     replacements = dict(components)
     for path in paths:
         _check_component_write_destination(group, path, table_path=table_path, root=root, overwrite=overwrite)
         if path[0] != "obsm":
             continue
-        regional_values = components[path]
-        matrix_format = _matrix_format(regional_values, label=f"Component {path!r}")
-        if regional_values.shape[0] != len(table_row_positions):
-            raise ValueError(f"Component {path!r} must contain {len(table_row_positions)} selected rows.")
         existing = None
         if "/".join(path) in group:
             element = group["/".join(path)]
@@ -243,28 +202,15 @@ def _write_table_components_by_region_operation(
             if element.attrs.get("encoding-type") == "dataframe":
                 raise TypeError("Regional writes do not support DataFrame-valued obsm entries.")
             existing = _read_anndata_element(group, path, mode="lazy", sparse_chunk_size=chunk_size)
-            if _matrix_format(existing, label=f"Stored component {path!r}") != matrix_format:
-                raise ValueError(f"Component {path!r} must match the stored matrix format (dense, CSR or CSC).")
-            if existing.shape != (len(stored_identity), regional_values.shape[1]):
-                raise ValueError(f"Component {path!r} must preserve the stored matrix shape and column count.")
-            if not np.can_cast(regional_values.dtype, existing.dtype, casting="safe"):
-                raise ValueError(f"Component {path!r} cannot be safely cast to stored dtype {existing.dtype}.")
-
-        fill = None
-        if existing is None:
-            if len(table_row_positions) != len(stored_identity) and path not in fills:
-                raise ValueError(f"New component {path!r} requires a fill for unselected rows.")
-            if path in fills:
-                fill = _scalar_fill(fills[path], regional_values.dtype)
-                if matrix_format != "dense" and len(table_row_positions) != len(stored_identity) and fill != 0:
-                    raise ValueError("New sparse matrices with unselected rows require a zero fill.")
-        replacements[path] = _regional_matrix(
-            _lazy_matrix(regional_values, matrix_format, chunk_size=chunk_size),
+            # A stored null is an invalid matrix, not an absent entry.
+            _matrix_format(existing, label=f"Stored component {path!r}")
+        replacements[path] = _prepare_regional_matrix(
+            path,
+            components[path],
             existing=existing,
             table_row_positions=table_row_positions,
             n_obs=len(stored_identity),
-            matrix_format=matrix_format,
-            fill=fill,
+            fill_values=fill_values,
             chunk_size=chunk_size,
         )
 
@@ -275,6 +221,157 @@ def _write_table_components_by_region_operation(
         store, table_name=table_name, components=replacements, obs_identity=stored_identity, overwrite=overwrite
     ) as published:
         yield published
+
+
+def _validate_regional_request(
+    components: Mapping[ComponentPath, object],
+    *,
+    fill_values: Mapping[ComponentPath, object] | None,
+    chunk_size: int,
+    overwrite: bool,
+) -> tuple[ComponentPath, ...]:
+    """Validate regional scopes and options identically for disk and memory updates."""
+    if not isinstance(components, Mapping):
+        raise TypeError("components must be a mapping from tuple paths to values.")
+    if not isinstance(overwrite, bool):
+        raise TypeError("overwrite must be a boolean.")
+    if isinstance(chunk_size, bool) or not isinstance(chunk_size, Integral):
+        raise TypeError("chunk_size must be a positive integer.")
+    if chunk_size < 1:
+        raise ValueError("chunk_size must be a positive integer.")
+    paths = _validate_component_paths(tuple(components), to_write=True)
+    matrix_paths = {path for path in paths if path[0] == "obsm"}
+    if not matrix_paths or any(path[0] not in {"obsm", "uns"} for path in paths):
+        raise ValueError("Regional writes require individual obsm matrices and optional uns replacements only.")
+    if fill_values is not None and not isinstance(fill_values, Mapping):
+        raise TypeError("fill_values must be a mapping from submitted obsm paths to scalar fills.")
+    fills = {} if fill_values is None else dict(fill_values)
+    if fills.keys() - matrix_paths:
+        raise ValueError("fill_values keys must refer to submitted obsm matrices.")
+    return paths
+
+
+def _regional_row_positions(
+    destination_obs: pd.DataFrame, spatialdata_attrs: Mapping, obs_identity: pd.DataFrame
+) -> NDArray[np.intp]:
+    """Match complete selected regions to zero-based rows of the destination table.
+
+    destination_obs describes the full stored or attached observation axis;
+    it must contain the identity columns and may include other annotations.
+    obs_identity describes only the submitted matrix rows, in destination order.
+    Its dataframe index is ignored; selection and alignment use region/instance pairs.
+    """
+    if not isinstance(spatialdata_attrs, Mapping):
+        raise ValueError("Regional writes require a SpatialData-annotated table.")
+    region_key, instance_key = _annotation_columns(spatialdata_attrs)
+    # 1) Validate the destination annotation against all its observations.
+    # Declared regions must match the regions actually present in the table.
+    destination_pairs = _validated_observation_pairs(
+        destination_obs, spatialdata_attrs, label="Destination observation"
+    )
+
+    # 2) Validate submitted identities against the selected destination observations.
+    # An A-only update must include every observation of A in destination order,
+    # but need not include observations from B.
+    if not isinstance(obs_identity, pd.DataFrame):
+        raise TypeError("obs_identity must be a two-column region/instance dataframe.")
+    if obs_identity.empty or len(obs_identity.columns) != 2 or set(obs_identity.columns) != {region_key, instance_key}:
+        raise ValueError(
+            "obs_identity must be nonempty and contain exactly the destination region and instance columns."
+        )
+    supplied_pairs = _observation_pairs(
+        obs_identity, region_key=region_key, instance_key=instance_key, label="obs_identity"
+    )
+    regions = set(obs_identity[region_key].unique())
+    unknown = regions - set(destination_obs[region_key].unique())
+    if unknown:
+        raise ValueError(f"Unknown regions in obs_identity: {sorted(unknown, key=str)!r}.")
+    selected_row_mask = destination_obs[region_key].isin(regions).to_numpy()
+    _match_identity(supplied_pairs, destination_pairs[selected_row_mask], label="obs_identity")
+    return np.flatnonzero(selected_row_mask)
+
+
+def _prepare_regional_matrix(
+    path: ComponentPath,
+    regional_values: object,
+    *,
+    existing: object | None,
+    table_row_positions: NDArray[np.intp],
+    n_obs: int,
+    fill_values: Mapping[ComponentPath, object] | None,
+    chunk_size: int,
+) -> da.Array:
+    """Validate matrix compatibility and prepare a lazy full-observation replacement.
+
+    Parameters
+    ----------
+    path
+        Submitted obsm path, used to resolve its fill and identify validation errors.
+    regional_values
+        Measurements for selected observations only, in destination-table order.
+    existing
+        Destination matrix to retain outside selected rows, or None for a new entry.
+        Comes from storage for disk updates and from the attached table otherwise.
+    table_row_positions
+        Full-table destination of each row in regional_values, already validated.
+    n_obs
+        Number of observations in the complete destination table.
+    fill_values, chunk_size
+        Validated options from the public regional-update APIs.
+    """
+    matrix_format = _matrix_format(regional_values, label=f"Component {path!r}")
+    if regional_values.shape[0] != len(table_row_positions):
+        raise ValueError(f"Component {path!r} must contain {len(table_row_positions)} selected rows.")
+    if existing is not None:
+        if _matrix_format(existing, label=f"Existing component {path!r}") != matrix_format:
+            raise ValueError(f"Component {path!r} must match the destination matrix format (dense, CSR or CSC).")
+        if existing.shape != (n_obs, regional_values.shape[1]):
+            raise ValueError(f"Component {path!r} must preserve the destination matrix shape and column count.")
+        if not np.can_cast(regional_values.dtype, existing.dtype, casting="safe"):
+            raise ValueError(f"Component {path!r} cannot be safely cast to destination dtype {existing.dtype}.")
+        existing = _lazy_matrix(existing, matrix_format, chunk_size=chunk_size)
+        # Backed updates read existing from storage with merge-compatible sparse chunks.
+        # Unbacked updates take existing from table.obsm; if it is already a Dask
+        # array, _lazy_matrix() preserves its chunks, which may split both axes.
+        # _regional_matrix() requires CSR blocks to span all columns, or CSC blocks
+        # to span all rows. Therefore, we prepare a compatible lazy working array
+        # when needed, without changing the original matrix's chunks:
+        # CSR ((3, 3), (2, 2)) -> ((3, 3), (4,)); CSC keeps columns and joins rows.
+        if len(table_row_positions) != n_obs and matrix_format != "dense":
+            whole_axis = 1 if matrix_format == "csr" else 0
+            if len(existing.chunks[whole_axis]) > 1:
+                if existing.shape[1] == 0:
+                    # In Dask 2026.7.1, _compute_rechunk() returns a dense empty
+                    # array for zero-sized inputs, losing their sparse representation.
+                    # An empty feature axis has no measurements to retain: prepare
+                    # its full-row CSC block lazily without that format conversion.
+                    existing = da.from_delayed(
+                        delayed(sparse.csc_matrix)(existing.shape, dtype=existing.dtype),
+                        shape=existing.shape,
+                        dtype=existing.dtype,
+                        meta=existing._meta,
+                    )
+                else:
+                    existing = existing.rechunk({whole_axis: -1}, method="tasks")
+
+    fill = None
+    if existing is None:
+        fills = {} if fill_values is None else fill_values
+        if len(table_row_positions) != n_obs and path not in fills:
+            raise ValueError(f"New component {path!r} requires a fill for unselected rows.")
+        if path in fills:
+            fill = _scalar_fill(fills[path], regional_values.dtype)
+            if matrix_format != "dense" and len(table_row_positions) != n_obs and fill != 0:
+                raise ValueError("New sparse matrices with unselected rows require a zero fill.")
+    return _regional_matrix(
+        _lazy_matrix(regional_values, matrix_format, chunk_size=chunk_size),
+        existing=existing,
+        table_row_positions=table_row_positions,
+        n_obs=n_obs,
+        matrix_format=matrix_format,
+        fill=fill,
+        chunk_size=chunk_size,
+    )
 
 
 def _matrix_format(value: object, *, label: str) -> str:
@@ -349,10 +446,12 @@ def _regional_matrix(
                No additional output chunking is needed.
 
         Partial selection, existing entry
-            -> Use existing.chunks, as prepared by the lazy reader:
-               dense: existing on-disk chunks
-               CSR:   (chunk_size rows, all columns)
-               CSC:   (all rows, chunk_size columns)
+            -> Use existing.chunks, as prepared by the reader or
+               _prepare_regional_matrix():
+               dense Zarr / Dask: existing chunks
+               in-memory dense:  (chunk_size rows, all columns)
+               CSR: all columns; keep attached Dask row chunks, otherwise chunk_size
+               CSC: all rows; keep attached Dask column chunks, otherwise chunk_size
 
         Partial selection, new entry
             -> Choose chunks from chunk_size and the full output shape:
@@ -384,12 +483,11 @@ def _regional_matrix(
         chunks[1] = (shape[1],)
     elif matrix_format == "csc":
         chunks[0] = (shape[0],)
-    # The reader already returns CSR chunks spanning all columns and CSC chunks
-    # spanning all rows. Its chunks must match the finalized output, including
-    # terminal chunks and sparse-axis adjustments.
-    # A mismatch means the chunk layout returned by _read_anndata_element()
-    # differs from the output layout expected by _regional_matrix().
-    # This indicates an internal chunking error.
+    # The reader returns CSR chunks spanning all columns and CSC chunks spanning
+    # all rows; _prepare_regional_matrix() also prepares this layout for attached
+    # arrays. Their chunks must match the finalized output, including terminal
+    # chunks and sparse-axis adjustments. A mismatch here is an internal
+    # preparation/merge error, not an unsupported public input layout.
     existing_blocks = None
     if existing is not None:
         if tuple(chunks) != existing.chunks:

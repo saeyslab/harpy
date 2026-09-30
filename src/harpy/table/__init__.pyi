@@ -19,6 +19,7 @@ from .featurization._vit_mae import train_autoencoder
 from .featurization._zarr_iterable_instances import ZarrDataLoader, ZarrIterableInstances
 from .io._add_table import add_table
 from .io._components import add_table_components, remove_table_components
+from .io._components_by_region import add_table_components_by_region
 from .io._read import read_table, read_table_components
 from .io._write import delete_table_components, write_table, write_table_components
 from .io._write_by_region import write_table_components_by_region
@@ -31,6 +32,7 @@ __all__ = [
     "add_canonical_centers",
     "add_table",
     "add_table_components",
+    "add_table_components_by_region",
     "remove_table_components",
     "read_table",
     "read_table_components",
