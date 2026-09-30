@@ -348,7 +348,7 @@ def _read_observation_identity(group: zarr.Group, spatialdata_attrs: Mapping) ->
     return pd.DataFrame({key: read_elem(group["obs"][key]) for key in keys}, index=_axis_index(group, ("obs",)))
 
 
-def _validate_component_values(
+def _validate_component_values_against_storage(
     group: zarr.Group,
     components_to_validate: Mapping[ComponentPath, object],
     *,
@@ -357,12 +357,11 @@ def _validate_component_values(
     raw_var_names: AxisNames | None,
     expected_new_raw_var_index: pd.Index | None = None,
 ) -> None:
-    """Validate only affected axes and linkage, before staging and after serialization.
+    """Read required destination metadata and validate component replacements.
 
-    Each affected axis requires its obs/var/raw.var dataframe in
-    ``components_to_validate`` or the corresponding explicit identity argument.
-    If both are supplied, both are checked. Identities must match in value and
-    order; they never request reordering of matrix rows or columns.
+    Used before staging and again on reopened serialized values. Gather the
+    expected axes and annotation from storage, then delegate validation to
+    ``_validate_component_values_against_axes()``.
 
     Parameters
     ----------
@@ -372,24 +371,22 @@ def _validate_component_values(
         required indices, spatial annotation columns and linkage metadata are
         read, never its numerical matrices.
     components_to_validate
-        Mapping of logical paths, such as ``("obsm", "embedding")``, to
-        caller-supplied values or reopened staged values. Supplied obs/var/raw.var
-        dataframes must also preserve the expected axis index.
+        Component replacements to validate: either caller-supplied values or their
+        reopened staged representations. Uses the same mapping format as
+        ``components`` in :func:`harpy.table.write_table_components`.
     obs_identity
-        Observation identities in the submitted matrices' row order. For
-        annotated tables, a two-column dataframe using the stored region and
-        instance keys; its own index is ignored. For unannotated tables, the
-        ordered observation names (``adata.obs_names``, equivalent to
-        ``adata.obs.index``).
+        Corresponds to ``obs_identity`` in the public component-update APIs.
     var_names
-        Ordered feature names for components aligned to the main table's var.
+        Corresponds to ``var_names`` in the public component-update APIs.
     raw_var_names
-        Ordered feature names for raw.X and raw.varm, whose feature axis is
-        independent of the main table's var.
+        Corresponds to ``raw_var_names`` in the public component-update APIs.
     expected_new_raw_var_index
         Expected feature index when creating a raw container, prepared before
         staging and reused when checking the reopened staged components. None
-        uses the stored raw axis when needed. All other axes come from ``group``.
+        uses the stored raw axis when needed. Except for the feature index of a
+        newly created raw container (raw is optional and has no stored feature index
+        yet, whereas the table's obs and var indices already exist), required indices
+        are read from the stored destination table in ``group``.
     """
     axes_by_path = {path: _component_axes(path) for path in components_to_validate}
     required = {axis for axes in axes_by_path.values() for axis in axes}
@@ -459,15 +456,49 @@ def _validate_component_values_against_axes(
 ) -> None:
     """Validate replacement values against metadata, without storage or matrix reads.
 
-    The disk wrapper reads only required axes and annotation; in-memory adapters
-    supply that metadata from the attached table. Both use these same ordered
-    identity, shape and protected-annotation rules. For new raw data, the caller
-    supplies its prepared feature index instead of an existing raw axis.
     The ``expected_*`` arguments describe the destination metadata; ``supplied_*``
     arguments describe the identity context submitted with the update.
-    ``expected_region_instance_identity`` supplies the destination's region and
-    instance columns for annotated observations only. Unannotated observations
-    use ``expected_axis_indices["obs"]``; feature axes always use ordered names.
+    Identities must match in value and order; validation never reorders components.
+
+    Parameters
+    ----------
+    components_to_validate
+        Component replacements to validate: either caller-supplied values or their
+        reopened staged representations. Uses the same mapping format as
+        ``components`` in :func:`harpy.table.add_table_components` and
+        :func:`harpy.table.write_table_components`.
+    expected_axis_indices
+        Expected destination indices for axes requiring validation, either because
+        replacement components use them or explicit identity arguments were supplied.
+
+        Keys identify axes:
+
+        - ``"obs"``: the destination's obs.index.
+        - ``"var"``: the destination's var.index.
+        - ``"raw_var"``: the destination's raw.var.index, or the prepared feature
+          index when creating raw.
+
+        The caller reads existing axis indices from the stored table or obtains
+        them from the attached in-memory AnnData, not from replacement dataframes.
+        Used to validate dataframe indices, matrix dimensions and named identities.
+        The ``"obs"`` value always contains observation index labels; annotated
+        region/instance identities are supplied separately through
+        ``expected_region_instance_identity``.
+    expected_region_instance_identity
+        Dataframe containing only the destination's region and instance columns,
+        in observation order. Required for annotated observation validation;
+        otherwise None. Unannotated observations use ``expected_axis_indices["obs"]``.
+    expected_spatialdata_attrs
+        Destination SpatialData annotation, including declared regions and the
+        region/instance column names. Used for annotated observation checks and
+        protecting linkage metadata. None for unannotated tables; may also be None
+        when the update requires neither observation nor linkage-metadata checks.
+    supplied_obs_identity
+        Corresponds to ``obs_identity`` in the public component-update APIs.
+    supplied_var_names
+        Corresponds to ``var_names`` in the public component-update APIs.
+    supplied_raw_var_names
+        Corresponds to ``raw_var_names`` in the public component-update APIs.
     """
     if expected_spatialdata_attrs is not None and not isinstance(expected_spatialdata_attrs, Mapping):
         raise ValueError("SpatialData annotation must be a mapping.")

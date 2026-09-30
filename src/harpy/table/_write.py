@@ -43,7 +43,7 @@ from harpy.table._write_validation import (
     _check_write_destination,
     _prepare_raw_creation,
     _validate_complete_table,
-    _validate_component_values,
+    _validate_component_values_against_storage,
     _validate_deletion_paths,
     _validate_table_identities,
 )
@@ -384,7 +384,7 @@ def _write_table_operation(
             )
         # 1) Validate caller-supplied shapes, identities and linkage before staging.
         # Step 2 below repeats these checks on the serialized output.
-        _validate_component_values(
+        _validate_component_values_against_storage(
             source_table,
             components_to_validate=components,
             obs_identity=obs_identity,
@@ -426,7 +426,7 @@ def _write_table_operation(
                 # This Raw is only a serialization payload: the shape-only parent
                 # supplies n_obs without loading the actual table. AnnData writes
                 # only X, var and varm, not this parent's placeholder obs names.
-                # _validate_component_values() already checked row identities
+                # _validate_component_values_against_storage() already checked row identities
                 # against the stored table's real observations.
                 raw = Raw(
                     AnnData(shape=(matrix.shape[0], 0)),
@@ -455,7 +455,7 @@ def _write_table_operation(
             # 2) Repeat step 1 on the reopened staged components, before publication.
             # This checks the serialized output rather than the caller-supplied inputs.
             # Backed matrix handles allow shape checks without scanning matrix values.
-            _validate_component_values(
+            _validate_component_values_against_storage(
                 source_table,
                 components_to_validate=staged_values,
                 obs_identity=obs_identity,

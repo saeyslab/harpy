@@ -6,6 +6,7 @@ from ._annotation import cluster_cleanliness, score_genes, score_genes_iter
 from ._canonical_centers import add_canonical_centers
 from ._cluster_intensity import cluster_intensity
 from ._clustering import kmeans, leiden
+from ._components import add_table_components, remove_table_components
 from ._enrichment import nhood_enrichment
 from ._io import read_table, read_table_components
 from ._preprocess import preprocess_proteomics, preprocess_transcriptomics
@@ -28,6 +29,8 @@ __all__ = [
     "canonical_centers",
     "add_canonical_centers",
     "add_table",
+    "add_table_components",
+    "remove_table_components",
     "read_table",
     "read_table_components",
     "write_table",

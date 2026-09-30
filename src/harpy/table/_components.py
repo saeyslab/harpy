@@ -241,16 +241,13 @@ def _update_table_components(
     if table.raw is None and any(path[0] == "raw" for path in paths):
         new_raw_var = _new_raw_var(components, raw_var_names=raw_var_names)
     indices = _memory_axis_indices(table, components, obs_identity, var_names, raw_var_names, new_raw_var=new_raw_var)
-    _validate_component_values_against_axes(
+    _validate_component_values_against_memory(
+        table,
         components,
-        # Expected destination metadata:
         expected_axis_indices=indices,
-        expected_obs_identity=table.obs if "obs" in indices else None,
-        expected_spatialdata_attrs=table.uns.get(TableModel.ATTRS_KEY),
-        # Identity context supplied with the update:
-        supplied_obs_identity=obs_identity,
-        supplied_var_names=var_names,
-        supplied_raw_var_names=raw_var_names,
+        obs_identity=obs_identity,
+        var_names=var_names,
+        raw_var_names=raw_var_names,
     )
     if group is not None:
         stored_new_raw_var = _prepare_raw_creation(group, components, raw_var_names=raw_var_names, overwrite=overwrite)
@@ -342,7 +339,44 @@ def _memory_axis_indices(
     *,
     new_raw_var: pd.DataFrame | None,
 ) -> dict[str, pd.Index]:
-    """Gather only required axis metadata, including explicit identity arguments."""
+    """Collect destination axis indices needed to validate a component update.
+
+    Include axes used by the replacement components, plus any axis with an
+    explicit identity argument. Explicit identities are validated even when no
+    replacement component uses their axis; they do not supply the returned indices.
+
+    Parameters
+    ----------
+    table
+        Existing in-memory destination table. Supplies the expected axis indices,
+        not the replacement obs/var/raw.var dataframes in ``components``.
+    components
+        Replacement components whose alignment determines the required axes.
+        For example, obsm requires obs; X requires obs and var; uns requires none.
+    obs_identity, var_names, raw_var_names
+        Caller-supplied identity arguments. A non-None value additionally requires
+        validation of obs, var or raw_var, respectively.
+    new_raw_var
+        Prepared raw.var dataframe when creating a raw container. Its index
+        defines the new raw_var axis; otherwise use the destination's raw.var index.
+
+    Returns
+    -------
+    dict[str, pandas.Index]
+        Expected indices for only the axes requiring validation. Possible keys
+        are ``"obs"``, ``"var"`` and ``"raw_var"``, with values from table.obs.index,
+        table.var.index and table.raw.var.index (or new_raw_var.index), respectively.
+        The obs value contains observation names, not region/instance pairs.
+
+        Without explicit identity arguments::
+
+            obsm update -> {"obs": table.obs.index}
+            X update    -> {"obs": table.obs.index, "var": table.var.index}
+            uns update  -> {}
+
+        Thus, ``"obs" in indices`` means observation validation is needed, not
+        that the caller supplied an obs dataframe or that the table has an obs slot.
+    """
     required = {axis for path in components for axis in _component_axes(path)}
     for axis, identity in (("obs", obs_identity), ("var", var_names), ("raw_var", raw_var_names)):
         if identity is not None:
@@ -359,6 +393,65 @@ def _memory_axis_indices(
         else:
             indices[axis] = getattr(table, axis).index
     return indices
+
+
+def _validate_component_values_against_memory(
+    table: AnnData,
+    components_to_validate: Mapping[ComponentPath, object],
+    *,
+    expected_axis_indices: Mapping[str, pd.Index],
+    obs_identity: pd.DataFrame | AxisNames | None,
+    var_names: AxisNames | None,
+    raw_var_names: AxisNames | None,
+) -> None:
+    """Validate replacements against attached AnnData metadata, without storage reads.
+
+    Prepare the required region/instance dataframe, then delegate validation to
+    ``_validate_component_values_against_axes()``. "Memory" refers to the attached
+    table's metadata; its matrices may remain lazy or storage-backed.
+
+    Parameters
+    ----------
+    table
+        Attached destination AnnData supplying the expected SpatialData annotation
+        and region/instance columns, not a replacement table.
+    components_to_validate
+        Component replacements, using the same mapping format as ``components``
+        in :func:`harpy.table.add_table_components`.
+    expected_axis_indices
+        Indices prepared by ``_memory_axis_indices()``. The caller retains them
+        for the separate memory-versus-storage comparison in ``_check_live_axes()``.
+    obs_identity, var_names, raw_var_names
+        Corresponding identity arguments from the public component-update APIs.
+    """
+    expected_spatialdata_attrs = table.uns.get(TableModel.ATTRS_KEY)
+    expected_region_instance_identity = None
+    if "obs" in expected_axis_indices and expected_spatialdata_attrs is not None:
+        if not isinstance(expected_spatialdata_attrs, Mapping):
+            raise ValueError("SpatialData annotation must be a mapping.")
+        region_key, instance_key = _annotation_columns(expected_spatialdata_attrs)
+        identity_columns = [region_key, instance_key]
+        # Check the full frame before selecting: selection must not hide duplicate
+        # column names or replace the missing-identity error with a pandas KeyError.
+        if any(key not in table.obs for key in identity_columns):
+            raise ValueError(
+                f"Destination observation must contain the stored region and instance columns {identity_columns!r}."
+            )
+        if not table.obs.columns.is_unique:
+            raise ValueError("Destination observation must not contain duplicate column names.")
+        expected_region_instance_identity = table.obs[identity_columns]
+
+    _validate_component_values_against_axes(
+        components_to_validate,
+        # Expected destination metadata:
+        expected_axis_indices=expected_axis_indices,
+        expected_region_instance_identity=expected_region_instance_identity,
+        expected_spatialdata_attrs=expected_spatialdata_attrs,
+        # Identity context supplied with the update:
+        supplied_obs_identity=obs_identity,
+        supplied_var_names=var_names,
+        supplied_raw_var_names=raw_var_names,
+    )
 
 
 def _check_live_axes(
