@@ -21,19 +21,36 @@ Import Harpy as::
     SpatialBounds
 ```
 
-## IO
-
-I/O.
+## I/O
 
 ```{eval-rst}
 
 .. module:: harpy.io
 .. currentmodule:: harpy
 
+```
+
+### SpatialData stores
+
+Read existing SpatialData Zarr stores.
+
+```{eval-rst}
+
 .. autosummary::
     :toctree: generated
 
     io.read_zarr
+```
+
+### Platform-specific import
+
+Import platform-specific data, with related configuration and validation helpers.
+
+```{eval-rst}
+
+.. autosummary::
+    :toctree: generated
+
     io.CosmxSample
     io.cosmx
     io.add_cosmx_samples
@@ -44,12 +61,31 @@ I/O.
     io.xenium
     io.visium
     io.visium_hd
+```
+
+### Transcript readers
+
+Read transcript coordinates from generic or platform-specific files.
+
+```{eval-rst}
+
+.. autosummary::
+    :toctree: generated
+
     io.read_transcripts
     io.read_resolve_transcripts
     io.read_merscope_transcripts
     io.read_stereoseq_transcripts
-    io.convert_to_zarr_2
+```
 
+### Helpers
+
+```{eval-rst}
+
+.. autosummary::
+    :toctree: generated
+
+    io.convert_to_zarr_2
 ```
 
 ## Image
