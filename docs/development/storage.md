@@ -423,7 +423,7 @@ raw-creation and deletion rules apply at both ownership levels. In particular,
 passing `sdata` does not establish the order of replacement matrix rows or
 columns; callers still supply the corresponding identities or axis dataframes.
 Only relevant axes are checked. Backed updates additionally check that these
-complete live axes match storage in identity and order before positional
+complete in-memory axes match storage in identity and order before positional
 attachment. Raw uses its independent feature axis.
 
 - **Unbacked SpatialData:** updates stay in memory, without serialization or
