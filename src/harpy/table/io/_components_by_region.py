@@ -110,9 +110,16 @@ def add_table_components_by_region(
     measurements, not unsaved local replacements of the requested matrix. A target
     present only in memory is new on disk and follows the new-entry-fill rules.
 
-    Unbacked updates perform no persistence or forced matrix computation. The
-    installed matrix is lazy even when inputs are in memory. Inputs are not modified,
-    but may be shared: this is not an immutable-snapshot or deep-copy API.
+    For unbacked SpatialData, the attached Dask array represents the complete
+    updated matrix: selected rows use the supplied measurements; unselected rows
+    retain existing measurements, or receive the specified fill for a new entry.
+    The numerical merge remains deferred until the array is evaluated, for example
+    through `.compute()` or writing. This adapter attaches the result without
+    executing the merge or writing to disk, avoiding forced materialization of the
+    complete updated matrix merely to attach it. Subsequent processing or writing
+    can evaluate its chunks as needed. Inputs already in memory still occupy memory.
+    Inputs are not modified, but may be shared: this is not an immutable-snapshot
+    or deep-copy API.
 
     Backed updates stage complete affected matrices in chunks and reopen only
     requested components, with lazy matrices and eager metadata. Installation runs

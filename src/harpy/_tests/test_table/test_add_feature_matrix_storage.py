@@ -7,12 +7,14 @@ import pytest
 import zarr
 from anndata import AnnData
 from anndata.io import write_elem
+from dask.callbacks import Callback
 from scipy import sparse
 from spatialdata import SpatialData
 from spatialdata.models import Labels2DModel, TableModel
 from zarr.storage import LocalStore
 
 import harpy.table._add_feature_matrix as feature_writer
+import harpy.table.io._components_by_region as regional_adapter
 import harpy.table.io._write as table_writer
 from harpy._tests.test_table.test_io.test_read import _assert_value
 from harpy._tests.test_table.test_io.test_write import _store_bytes
@@ -80,6 +82,60 @@ def feature_sdata(tmp_path):
         return sdata
 
     return make
+
+
+@pytest.mark.parametrize("backed", [False, True])
+@pytest.mark.parametrize("existing", [False, True])
+def test_regional_feature_update_uses_expected_source_and_defers_unbacked_merge(
+    feature_sdata, monkeypatch, backed, existing
+):
+    """Update A's interleaved rows while retaining B from the correct source.
+
+    Local measurements and source descriptions differ from storage: retain local
+    B values when unbacked and stored B values when backed. New entries fill B
+    with NaN. Guard only the update phase so feature calculation can complete,
+    but the subsequent unbacked merge must remain deferred.
+    """
+    sdata = feature_sdata(backed=backed, existing=existing)
+    table = sdata.tables["counts"]
+    local_values = np.arange(110, 116, dtype=float).reshape(6, 1)
+    if existing:
+        table.obsm["features"] = da.from_array(local_values, chunks=(2, 1))
+        table.uns["feature_matrices"]["features"]["coordinate_system"] = ["local_A", "local_B"]
+    original_adapter = feature_writer.add_table_components_by_region
+
+    def unexpected_compute(*args, **kwargs):
+        pytest.fail("The unbacked adapter must attach the merge without computing it.")
+
+    def guarded_update(sdata, **kwargs):
+        # Feature calculation may execute Dask tasks; only the subsequent
+        # unbacked merge is guarded against computation.
+        with Callback(start=None if backed else unexpected_compute):
+            return original_adapter(sdata, **kwargs)
+
+    monkeypatch.setattr(feature_writer, "add_table_components_by_region", guarded_update)
+    add_feature_matrix(
+        sdata,
+        "A",
+        None,
+        table_name="counts",
+        feature_key="features",
+        features=["area"],
+        overwrite_feature_key=backed and existing,
+    )
+    table = sdata.tables["counts"]
+    if existing:
+        expected = np.arange(10, 16, dtype=float).reshape(6, 1) if backed else local_values.copy()
+    else:
+        expected = np.full((6, 1), np.nan)
+    expected[[1, 3, 5], 0] = [2, 3, 1]
+    assert isinstance(table.obsm["features"], da.Array)
+    np.testing.assert_array_equal(table.obsm["features"].compute(), expected)
+    metadata = table.uns["feature_matrices"]["features"]
+    assert list(metadata["coordinate_system"]) == (
+        ["old_B" if backed else "local_B", "global"] if existing else ["global"]
+    )
+    assert list(metadata["feature_columns"]) == ["area"]
 
 
 @pytest.mark.parametrize("existing", [False, True])
@@ -194,13 +250,14 @@ def test_backed_update_preserves_other_regions_and_unrelated_data(feature_sdata,
             assert after[path] == contents, path
 
 
-def test_unbacked_regional_updates_preserve_values_and_sources_without_writing(feature_sdata, monkeypatch):
+@pytest.mark.parametrize("overwrite", [False, True])
+def test_unbacked_regional_updates_preserve_values_and_sources_without_writing(feature_sdata, monkeypatch, overwrite):
     sdata = feature_sdata(backed=False, existing=False)
 
     def unexpected_write(*args, **kwargs):
         pytest.fail("An unbacked update must not write to disk.")
 
-    monkeypatch.setattr(feature_writer, "_write_table_components_by_region_operation", unexpected_write)
+    monkeypatch.setattr(regional_adapter, "_write_table_components_by_region_operation", unexpected_write)
     for region in ["B", "A"]:
         add_feature_matrix(
             sdata,
@@ -209,38 +266,37 @@ def test_unbacked_regional_updates_preserve_values_and_sources_without_writing(f
             table_name="counts",
             feature_key="features",
             features=["area"],
-            overwrite_feature_key=True,
+            overwrite_feature_key=overwrite,
         )
     table = sdata.tables["counts"]
-    assert isinstance(table.obsm["features"], np.ndarray)
-    np.testing.assert_array_equal(table.obsm["features"][:, 0], [1, 2, 3, 3, 2, 1])
+    assert isinstance(table.obsm["features"], da.Array)
+    np.testing.assert_array_equal(table.obsm["features"].compute()[:, 0], [1, 2, 3, 3, 2, 1])
     assert table.uns["feature_matrices"]["features"]["source_label"] == ["B", "A"]
     assert table.uns["feature_matrices"]["features"]["source_image"] == [None, None]
 
 
 @pytest.mark.parametrize("backed", [False, True])
-@pytest.mark.parametrize("reason", ["overwrite", "columns", "column_order", "missing_metadata"])
+@pytest.mark.parametrize("reason", ["columns", "column_order", "missing_metadata"])
 def test_rejected_feature_updates_leave_matrix_and_metadata_unchanged(feature_sdata, backed, reason):
     sdata = feature_sdata(backed=backed)
     table = sdata.tables["counts"]
     features = ["area"]
-    if reason != "overwrite":
-        if reason == "columns":
-            table.uns["feature_matrices"]["features"]["feature_columns"] = ["different_feature"]
-        elif reason == "column_order":
-            table.uns["feature_matrices"]["features"]["feature_columns"] = ["perimeter", "area"]
-            table.obsm["features"] = np.zeros((6, 2))
-            features = ["area", "perimeter"]
-        else:
-            del table.uns["feature_matrices"]["features"]
-        if backed:
-            root = zarr.open_group(str(sdata.path), mode="r+", use_consolidated=False)
-            write_elem(root["tables/counts/uns"], "feature_matrices", table.uns["feature_matrices"])
-            if reason == "column_order":
-                write_elem(root["tables/counts/obsm"], "features", table.obsm["features"])
+    if reason == "columns":
+        table.uns["feature_matrices"]["features"]["feature_columns"] = ["different_feature"]
+    elif reason == "column_order":
+        table.uns["feature_matrices"]["features"]["feature_columns"] = ["perimeter", "area"]
+        table.obsm["features"] = np.zeros((6, 2))
+        features = ["area", "perimeter"]
+    else:
+        del table.uns["feature_matrices"]["features"]
+    if backed:
+        root = zarr.open_group(str(sdata.path), mode="r+", use_consolidated=False)
+        write_elem(root["tables/counts/uns"], "feature_matrices", table.uns["feature_matrices"])
+        if reason == "column_order":
+            write_elem(root["tables/counts/obsm"], "features", table.obsm["features"])
     previous_matrix, previous_metadata = table.obsm["features"], table.uns["feature_matrices"]
     before = _store_bytes(sdata.path) if backed else None
-    with pytest.raises(ValueError, match="already exists" if reason == "overwrite" else "compatible schema"):
+    with pytest.raises(ValueError, match="compatible schema"):
         add_feature_matrix(
             sdata,
             "A",
@@ -248,7 +304,7 @@ def test_rejected_feature_updates_leave_matrix_and_metadata_unchanged(feature_sd
             table_name="counts",
             feature_key="features",
             features=features,
-            overwrite_feature_key=reason != "overwrite",
+            overwrite_feature_key=backed,
         )
     assert table.obsm["features"] is previous_matrix
     assert table.uns["feature_matrices"] is previous_metadata
@@ -256,14 +312,14 @@ def test_rejected_feature_updates_leave_matrix_and_metadata_unchanged(feature_sd
         assert _store_bytes(sdata.path) == before
 
 
-@pytest.mark.parametrize("location", ["disk_only", "memory_only"])
+@pytest.mark.parametrize("location", ["disk_only", "memory_only", "both"])
 def test_feature_overwrite_requires_permission_for_attached_or_stored_entries(feature_sdata, location):
-    sdata = feature_sdata(existing=location == "disk_only")
+    sdata = feature_sdata(existing=location != "memory_only")
     table = sdata.tables["counts"]
     if location == "disk_only":
         del table.obsm["features"]
         del table.uns["feature_matrices"]
-    else:
+    elif location == "memory_only":
         table.obsm["features"] = np.ones((6, 1))
     before = _store_bytes(sdata.path)
     with pytest.raises(ValueError, match="overwrite_feature_key=True"):
@@ -353,7 +409,7 @@ def test_feature_metadata_uses_existing_matrix_dtype(feature_sdata, backed):
     assert table.uns["feature_matrices"]["features"]["dtype"] == "complex128"
     expected = existing.copy()
     expected[[1, 3, 5], 0] = [2, 3, 1]
-    result = table.obsm["features"].compute() if backed else table.obsm["features"]
+    result = table.obsm["features"].compute()
     np.testing.assert_array_equal(result, expected)
 
 
@@ -434,22 +490,26 @@ def test_invalid_feature_table_or_selection_fails_before_calculation(feature_sda
 
 
 @pytest.mark.parametrize("existing", [False, True])
-@pytest.mark.parametrize("failure", ["staging", "installation", "finalization"])
-def test_failed_feature_update_restores_disk_and_attached_entries(feature_sdata, monkeypatch, existing, failure):
+@pytest.mark.parametrize(
+    ("backed", "failure"), [(False, "installation"), (True, "staging"), (True, "installation"), (True, "finalization")]
+)
+def test_failed_feature_update_restores_disk_and_attached_entries(
+    feature_sdata, monkeypatch, existing, backed, failure
+):
     """Both component writes and attachment belong to one rollback window.
 
-    Fail after staging the metadata, after installing the new matrix, or
-    after consolidation changes root metadata. Restore old references (or
-    remove newly created entries) as well as the exact original store bytes.
+    Fail after installing the components in either mode, or after staging or
+    consolidation when backed. Restore the exact original attached references
+    (or remove newly created entries) and, when backed, the original store bytes.
     Regional-writer tests cover the broader storage-failure combinations.
     """
-    sdata = feature_sdata(existing=existing)
+    sdata = feature_sdata(backed=backed, existing=existing)
     table = sdata.tables["counts"]
     previous_matrix = table.obsm.get("features")
     previous_metadata = table.uns.get("feature_matrices")
-    before = _store_bytes(sdata.path)
+    before = _store_bytes(sdata.path) if backed else None
     original_write = table_writer._write_anndata_element
-    original_install = type(table.obsm).__setitem__
+    original_install = regional_adapter._install_memory_updates
     original_consolidate = zarr.consolidate_metadata
 
     def failed_write(group, path, *args, **kwargs):
@@ -457,10 +517,9 @@ def test_failed_feature_update_restores_disk_and_attached_entries(feature_sdata,
         if path == ("component-1",):
             raise RuntimeError("staging failure")
 
-    def failed_install(self, key, value):
-        original_install(self, key, value)
-        if self.parent is table and key == "features" and value is not previous_matrix:
-            raise RuntimeError("installation failure")
+    def failed_install(table, updates):
+        original_install(table, updates)
+        raise RuntimeError("installation failure")
 
     def failed_consolidate(*args, **kwargs):
         original_consolidate(*args, **kwargs)
@@ -469,7 +528,7 @@ def test_failed_feature_update_restores_disk_and_attached_entries(feature_sdata,
     if failure == "staging":
         monkeypatch.setattr(table_writer, "_write_anndata_element", failed_write)
     elif failure == "installation":
-        monkeypatch.setattr(type(table.obsm), "__setitem__", failed_install)
+        monkeypatch.setattr(regional_adapter, "_install_memory_updates", failed_install)
     else:
         monkeypatch.setattr(zarr, "consolidate_metadata", failed_consolidate)
     with pytest.raises(RuntimeError, match=failure):
@@ -482,11 +541,12 @@ def test_failed_feature_update_restores_disk_and_attached_entries(feature_sdata,
             features=["area"],
             overwrite_feature_key=existing,
         )
-    assert _store_bytes(sdata.path) == before
+    if backed:
+        assert _store_bytes(sdata.path) == before
+        assert not list(sdata.path.parent.glob(f".{sdata.path.name}.harpy-*"))
     assert sdata.tables["counts"] is table
     assert table.obsm.get("features") is previous_matrix
     assert table.uns.get("feature_matrices") is previous_metadata
-    assert not list(sdata.path.parent.glob(f".{sdata.path.name}.harpy-*"))
 
 
 @pytest.mark.parametrize("zarr_format", [2, 3])
@@ -517,19 +577,63 @@ def test_new_feature_table_publishes_complete_result_and_attaches_lazily(feature
     )
 
 
+@pytest.mark.parametrize(("backed", "loaded"), [(False, True), (True, True), (True, False)])
+@pytest.mark.parametrize("overwrite", [False, True])
+def test_new_feature_table_replacement_follows_storage_mode(feature_sdata, monkeypatch, backed, loaded, overwrite):
+    """Unbacked replacement ignores the flag; backed replacement requires it, even if unloaded."""
+    sdata = feature_sdata(backed=backed)
+    previous = sdata.tables["counts"]
+    if not loaded:
+        del sdata.tables["counts"]
+    before = _store_bytes(sdata.path) if backed else None
+
+    def unexpected_regional_update(*args, **kwargs):
+        pytest.fail("New-table creation must not use the regional adapter.")
+
+    monkeypatch.setattr(feature_writer, "add_table_components_by_region", unexpected_regional_update)
+    options = {
+        "output_table_name": "counts",
+        "feature_key": "features",
+        "features": ["area"],
+        "overwrite_output_table": overwrite,
+    }
+    if backed and not overwrite:
+        with pytest.raises((ValueError, FileExistsError), match="overwrite"):
+            add_feature_matrix(sdata, "A", None, **options)
+        assert sdata.tables.get("counts") is (previous if loaded else None)
+        assert _store_bytes(sdata.path) == before
+    else:
+        result = add_feature_matrix(sdata, "A", None, **options)
+        assert result is sdata
+        replacement = sdata.tables["counts"]
+        assert replacement is not previous and replacement.X is None
+        values = replacement.obsm["features"]
+        assert isinstance(values, da.Array if backed else np.ndarray)
+        np.testing.assert_array_equal(values.compute() if backed else values, [[3], [2], [1]])
+
+
 @pytest.mark.parametrize("backed", [False, True])
 @pytest.mark.parametrize("replace", [False, True])
-def test_new_feature_table_is_not_published_before_calculation(feature_sdata, monkeypatch, backed, replace):
-    """A failed calculation must neither install an empty table nor replace an existing one."""
+@pytest.mark.parametrize("failure", ["calculation", "validation"])
+def test_new_feature_table_is_not_published_before_preparation_succeeds(
+    feature_sdata, monkeypatch, backed, replace, failure
+):
+    """Failed calculation or duplicate calculated identities must leave any previous table intact."""
     sdata = feature_sdata(backed=backed)
     previous = sdata.tables["counts"]
     before = _store_bytes(sdata.path) if backed else None
 
     def failed_calculation(*args, **kwargs):
-        raise RuntimeError("calculation failure")
+        if failure == "calculation":
+            raise RuntimeError("calculation failure")
+        # Calculation returns ambiguous identities; subsequent alignment validation rejects them.
+        return pd.DataFrame({"sample": ["A", "A"], "object_id": [1, 1], "area": [3.0, 3.0]}), ["area"], None
 
     monkeypatch.setattr(feature_writer, "_compute_pair_feature_frame", failed_calculation)
-    with pytest.raises(RuntimeError, match="calculation failure"):
+    with pytest.raises(
+        RuntimeError if failure == "calculation" else ValueError,
+        match="calculation failure" if failure == "calculation" else "duplicate",
+    ):
         add_feature_matrix(
             sdata,
             "A",
@@ -537,7 +641,7 @@ def test_new_feature_table_is_not_published_before_calculation(feature_sdata, mo
             output_table_name="counts" if replace else "new",
             feature_key="features",
             features=["area"],
-            overwrite_output_table=replace,
+            overwrite_output_table=backed and replace,
         )
     assert sdata.tables["counts"] is previous
     assert "new" not in sdata.tables

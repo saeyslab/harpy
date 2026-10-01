@@ -17,15 +17,10 @@ from harpy.image._image import _get_translation, _precondition, get_dataarray
 from harpy.table._metadata import _FEATURE_MATRIX_SCHEMA_VERSION
 from harpy.table._regionprops import _calculate_regionprop_features
 from harpy.table.io._add_table import add_table
-from harpy.table.io._read import _open_table_group
-from harpy.table.io._write_by_region import _matrix_format, _write_table_components_by_region_operation
-from harpy.table.io._write_validation import (
-    _annotation_columns,
-    _match_identity,
-    _read_observation_identity,
-    _read_spatialdata_attrs,
-    _validated_observation_pairs,
-)
+from harpy.table.io._components import _check_in_memory_versus_storage_axes, _component_update_destination
+from harpy.table.io._components_by_region import add_table_components_by_region
+from harpy.table.io._write_by_region import _matrix_format
+from harpy.table.io._write_validation import _validated_observation_pairs
 from harpy.utils._aggregate import RasterAggregator, _get_mask_area
 from harpy.utils._keys import _CELL_INDEX, _FEATURE_MATRICES_KEY, _INSTANCE_KEY, _REGION_KEY
 from harpy.utils.utils import _da_unique, _make_list
@@ -135,11 +130,13 @@ def add_feature_matrix(
         by index, by name, or as a list of indices or names. If `None`, all
         channels of the image element are used.
     overwrite_output_table
-        If `True`, overwrite `output_table_name` when creating a new table.
+        Allow replacing an existing output table in backed SpatialData or its
+        store when creating a new table. Ignored for unbacked SpatialData.
     overwrite_feature_key
-        Allow updates to an existing feature matrix and its metadata. Feature
-        columns must retain their names and order; measurements and source
-        descriptions for unselected regions are preserved.
+        Allow updates to a feature matrix or its metadata already present in
+        backed SpatialData or its store. Ignored for unbacked SpatialData.
+        In both modes, feature columns must retain their names and order;
+        measurements and source descriptions for unselected regions are preserved.
     to_coordinate_system
         Coordinate system or systems used when pairing image and labels elements.
         If a list is provided, it must either have length 1 or match
@@ -184,7 +181,12 @@ def add_feature_matrix(
     Matrix and metadata publication, attachment and finalization share rollback;
     unrelated components and local annotations are preserved. The attached
     observation identities must match the stored table in value and order.
-    Unbacked updates attach an in-memory matrix without writing to disk.
+
+    Feature calculation and alignment complete before updating an existing table.
+    When unbacked, only the subsequent merge with retained measurements (or NaN
+    fills for a new entry) remains lazy: the attached Dask array represents the
+    complete updated matrix without forcing its materialization or writing to disk.
+    New-table creation still prepares a complete table before attachment.
 
     External references to replaced components are not refreshed. Use the entries
     in ``sdata.tables[table_name]`` after a successful update. The ``chunks``
@@ -196,6 +198,8 @@ def add_feature_matrix(
         Aggregate intensity-derived features into a table.
     harpy.tb.add_regionprops
         Add morphology features to table observations.
+    harpy.table.add_table_components_by_region
+        Update regional measurements and their metadata in an attached table.
 
     Examples
     --------
@@ -247,7 +251,7 @@ def add_feature_matrix(
                 "Parameter 'overwrite_feature_key' can only be used when updating an existing table, "
                 "which requires setting 'table_name' to a table name."
             )
-        if output_table_name in sdata.tables and not overwrite_output_table:
+        if sdata.path is not None and output_table_name in sdata.tables and not overwrite_output_table:
             raise ValueError(
                 f"Table element '{output_table_name}' already exists in 'sdata.tables'. "
                 "Set 'overwrite_output_table=True' to replace it."
@@ -295,11 +299,15 @@ def add_feature_matrix(
                     f"Labels element {labels_element!r} has no observations in table {target_table_name!r}."
                 )
 
-    if not overwrite_feature_key and (
-        feature_key in adata.obsm
-        or feature_key in adata.uns.get(feature_matrices_key, {})
-        or existing_matrix is not None
-        or existing_metadata is not None
+    if (
+        sdata.path is not None
+        and not overwrite_feature_key
+        and (
+            feature_key in adata.obsm
+            or feature_key in adata.uns.get(feature_matrices_key, {})
+            or existing_matrix is not None
+            or existing_metadata is not None
+        )
     ):
         raise ValueError(
             f"Feature matrix '{feature_key}' already exists in 'sdata.tables[{target_table_name!r}].obsm'. "
@@ -360,7 +368,7 @@ def add_feature_matrix(
 
     if existing_matrix is not None:
         # Check feature-matrix compatibility in both storage modes.
-        # The regional writer independently validates backed updates.
+        # The regional adapter independently validates updates before installation.
         if _matrix_format(existing_matrix, label=f"Feature matrix {feature_key!r}") != "dense":
             raise ValueError(
                 "Calculated features require an existing dense feature matrix; no format conversion occurs."
@@ -407,19 +415,15 @@ def add_feature_matrix(
             overwrite=overwrite_output_table,
         )
 
-    _update_feature_matrix(
+    matrix_path = ("obsm", feature_key)
+    return add_table_components_by_region(
         sdata,
-        adata=adata,
         table_name=target_table_name,
-        feature_key=feature_key,
-        feature_matrices_key=feature_matrices_key,
+        components={matrix_path: aligned_values, ("uns", feature_matrices_key, feature_key): metadata},
         obs_identity=selected_keys,
-        aligned_values=aligned_values,
-        metadata=metadata,
+        fill_values={matrix_path: np.nan},
         overwrite=overwrite_feature_key,
     )
-
-    return sdata
 
 
 def _existing_feature_matrix(
@@ -462,52 +466,32 @@ def _existing_feature_matrix(
     Missing matrix or metadata entries are returned as ``None`` independently.
     The caller checks matrix compatibility and feature-metadata compatibility.
 
-    We validate observation identities here to ensure that the resulting matrix
-    is attached to the correct in-memory observations. The validation in
-    ``_write_table_components_by_region_operation``, shared with
-    ``write_table_components_by_region``, checks the stored table and submitted
-    regional rows, not the complete in-memory table.
-
-    After a backed update, the complete resulting matrix is attached to
-    ``adata.obsm[feature_key]`` by row position. All in-memory observation
-    identities must therefore match stored identities in value and order,
-    including observations outside the selected regions. Otherwise, unchanged
-    measurements could be attached to the wrong observations.
-
-    Unbacked updates never invoke ``_write_table_components_by_region_operation``,
-    so their in-memory annotation must also be validated here.
+    Run shared destination and identity checks here before expensive feature
+    calculation. ``add_table_components_by_region()`` checks them again when
+    applying the prepared update. For backed updates, both require the full
+    in-memory observation identities and order to match storage before attaching
+    the resulting matrix by position, including rows outside the updated regions.
     """
-    adata = sdata.tables[table_name]
+    adata, group = _component_update_destination(sdata, table_name=table_name)
     in_memory_attrs = adata.uns.get(TableModel.ATTRS_KEY)
     if not isinstance(in_memory_attrs, Mapping):
         raise ValueError(f"Table {table_name!r} must have SpatialData annotation.")
-    # Validate the full in-memory observation population, including unselected regions.
-    in_memory_pairs = _validated_observation_pairs(adata.obs, in_memory_attrs, label="In-memory observation")
+    # Reject invalid identities before feature calculation, using the same
+    # validators as the regional adapter rather than a separate comparison.
+    if group is None:
+        _validated_observation_pairs(adata.obs, in_memory_attrs, label="In-memory observation")
+    else:
+        _check_in_memory_versus_storage_axes(
+            table=adata, group=group, indices={"obs": adata.obs.index}, stored_new_raw_var=None
+        )
     local_metadata = adata.uns.get(feature_matrices_key, {})
     if not isinstance(local_metadata, Mapping):
         raise ValueError(f"adata.uns[{feature_matrices_key!r}] must be a metadata mapping.")
-    if sdata.path is None:
+    if group is None:
         return adata.obsm.get(feature_key), local_metadata.get(feature_key)
 
     matrix_path = ("obsm", feature_key)
     metadata_path = ("uns", feature_matrices_key, feature_key)
-    group = _open_table_group(sdata.path, table_name=table_name)
-    stored_attrs = _read_spatialdata_attrs(group)
-    if stored_attrs is None:
-        raise ValueError("The stored table must have SpatialData annotation.")
-    if _annotation_columns(in_memory_attrs) != _annotation_columns(stored_attrs):
-        raise ValueError("In-memory and stored tables must use the same region and instance keys; reopen the table.")
-    stored_identity = _read_observation_identity(group, stored_attrs)
-    stored_pairs = _validated_observation_pairs(
-        stored_identity,
-        stored_attrs,
-        label="Stored observation",
-    )
-    _match_identity(
-        in_memory_pairs,
-        stored_pairs,
-        label="In-memory observation",
-    )
     # DataFrame decoding is eager even in backed mode. Keep this guard to avoid
     # loading its payload merely to prepare metadata; the writer also rejects it.
     if "/".join(matrix_path) in group and group["/".join(matrix_path)].attrs.get("encoding-type") == "dataframe":
@@ -574,69 +558,6 @@ def _merge_feature_matrix_metadata(previous: object, current: dict, *, region_or
     merged["source_image"] = [sources[label][0] for label in merged["source_label"]]
     merged["coordinate_system"] = [sources[label][1] for label in merged["source_label"]]
     return merged
-
-
-def _update_feature_matrix(
-    sdata: SpatialData,
-    *,
-    adata: AnnData,
-    table_name: str,
-    feature_key: str,
-    feature_matrices_key: str,
-    obs_identity: pd.DataFrame,
-    aligned_values: np.ndarray,
-    metadata: dict,
-    overwrite: bool,
-) -> None:
-    """Publish and install the two affected entries, restoring live references on failure."""
-    previous_matrix = adata.obsm.get(feature_key)
-    previous_metadata = adata.uns.get(feature_matrices_key)
-    updated_metadata = dict(previous_metadata or {})
-    try:
-        if sdata.path is not None:
-            matrix_path = ("obsm", feature_key)
-            metadata_path = ("uns", feature_matrices_key, feature_key)
-            with _write_table_components_by_region_operation(
-                sdata.path,
-                table_name=table_name,
-                components={matrix_path: aligned_values, metadata_path: metadata},
-                obs_identity=obs_identity,
-                fill_values={matrix_path: np.nan},
-                overwrite=overwrite,
-            ) as published:
-                # Reopen only the updated entries. Attach them before finalization,
-                # while the shared writer can still restore both on-disk paths.
-                matrix = _read_anndata_element(published, matrix_path, mode="lazy")
-                updated_metadata[feature_key] = _read_anndata_element(published, metadata_path, mode="eager")
-                adata.obsm[feature_key] = matrix
-                adata.uns[feature_matrices_key] = updated_metadata
-        else:
-            # Unbacked updates retain their in-memory representation and perform
-            # no storage operations. Only the requested matrix is copied.
-            region_key = adata.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]
-            selected_regions = obs_identity[region_key].unique()
-            selected_mask = adata.obs[region_key].isin(selected_regions).to_numpy()
-            matrix = (
-                np.full((adata.n_obs, aligned_values.shape[1]), np.nan, dtype=aligned_values.dtype)
-                if previous_matrix is None
-                else np.asarray(previous_matrix).copy()
-            )
-            matrix[selected_mask] = aligned_values
-            updated_metadata[feature_key] = metadata
-            adata.obsm[feature_key] = matrix
-            adata.uns[feature_matrices_key] = updated_metadata
-    except BaseException:
-        # The writer restores disk state; this adapter restores only the two
-        # affected in-memory entries, leaving unrelated local edits untouched.
-        if previous_matrix is None:
-            adata.obsm.pop(feature_key, None)
-        else:
-            adata.obsm[feature_key] = previous_matrix
-        if previous_metadata is None:
-            adata.uns.pop(feature_matrices_key, None)
-        else:
-            adata.uns[feature_matrices_key] = previous_metadata
-        raise
 
 
 def _normalize_requested_features(features: tuple[str, ...] | list[str]) -> list[str]:
