@@ -8241,10 +8241,31 @@ Keep scientific responsibilities in `add_feature_matrix()`:
 
 Submit the selected measurements at `("obsm", feature_key)` together with
 the prepared `("uns", feature_matrices_key, feature_key)` record and matching
-`obs_identity`. Pass the existing overwrite policy and the NaN fill for new
-dense entries with unselected observations. Delegate generic regional validation
-and installation safety to the adapter; retain checks needed to prepare coherent
-scientific metadata, sharing existing helpers rather than adding competing rules.
+`obs_identity`. Pass `overwrite_feature_key` as the adapter's `overwrite` argument
+and the NaN fill for new dense entries with unselected observations. Delegate
+generic regional validation and installation safety to the adapter; retain checks
+needed to prepare coherent scientific metadata, sharing existing helpers rather
+than adding competing rules.
+
+**Align both overwrite flags with Harpy's storage-mode policy.** This slice
+intentionally changes the existing unbacked permission checks:
+
+- **Unbacked SpatialData:** ignore `overwrite_feature_key` for existing-table
+  regional updates, and ignore `overwrite_output_table` when creating a table
+  at an existing output name. Allow replacement of the corresponding in-memory
+  result without requiring either flag to be `True`.
+- **Backed SpatialData:** require `overwrite_feature_key=True` when the requested
+  feature matrix or its metadata already exists in memory or storage. Require
+  `overwrite_output_table=True` when the output table already exists in memory
+  or storage. Keep these permission checks consistent with the regional adapter
+  and `add_table()`, respectively.
+
+Ignoring overwrite permission does not relax validation: retain regional identity,
+matrix-compatibility and scientific-schema checks, and validation of which
+parameters apply to existing-table updates versus new-table creation. Prepare and
+validate a complete new table before replacing an existing output; calculation or
+validation failures must leave the previous table unchanged. Document both flags'
+storage-mode behavior explicitly in `add_feature_matrix()`.
 
 Preserve the authoritative merge source in each mode: stored measurements for
 backed updates and attached measurements for unbacked updates. Keep unrelated
@@ -8253,16 +8274,20 @@ lazy-result contract, including for unbacked updates; do not force computation
 solely to recover the previous NumPy container type. Document any resulting
 representation change without changing scientific values or feature semantics.
 
-Leave new-table creation on the existing complete-table/add-table path. This
-slice does not change feature calculation, add new regional update scopes, or
-implement affected-chunk publication.
+Leave new-table creation on the existing complete-table/add-table path; align
+its overwrite permission as described above without changing that mechanism.
+This slice does not change feature calculation, add new regional update scopes,
+or implement affected-chunk publication.
 
 **Checks and documentation.** Reuse focused `add_feature_matrix()` integration
 tests to verify delegation, correct selected and retained measurements, coherent
 metadata, new-entry NaN fills, preservation of unrelated local edits, and failure
-recovery in both storage modes. Keep coverage of feature-schema rejection and
-unchanged new-table creation. Rely on the adapter and regional writer tests for
-the general storage/encoding/rollback matrix rather than duplicating them here.
+recovery in both storage modes. Explicitly test that both overwrite flags are
+ignored for unbacked replacements and still required for backed replacements.
+Keep coverage of feature-schema rejection and complete new-table creation,
+including preservation of an existing output when calculation or validation fails.
+Rely on the adapter and regional writer tests for general storage, encoding and
+rollback coverage rather than duplicating it here.
 During this migration, make the distinction between attaching the updated matrix
 and computing its values explicit in the `add_table_components_by_region()`
 docstring and the regional-update paragraph in `docs/development/storage.md`:
@@ -8282,9 +8307,9 @@ memory; this contract does not eliminate their memory cost.
 Also document in `add_feature_matrix()` that feature calculation and alignment
 complete before the regional update. Only the subsequent merge with retained
 measurements, or fills for a new entry, remains deferred when unbacked.
-This does not make feature extraction lazy or change new-table creation. Do not
-introduce a persistence option; keep shared I/O contracts centralized rather than
-repeating the full contract in that docstring.
+This does not make feature extraction lazy or change the complete-table creation
+mechanism. Do not introduce a persistence option; keep shared I/O contracts
+centralized rather than repeating the full contract in that docstring.
 
 ### Part 11f.xi: affected-chunk regional-write optimization
 
