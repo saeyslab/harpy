@@ -288,6 +288,19 @@ chunks chosen when AnnData writes the NumPy array. `_decode_anndata_element`
 reads dense arrays with `read_elem_lazy(element)` and keeps those chunks
 (`src/harpy/_storage/_anndata.py`, end of `_decode_anndata_element`).
 
+**Evidence on writes.**
+
+- AnnData ignores Dask chunks when it writes dense arrays (verified). A 40,000 ×
+  600 NumPy array and the same shape as a Dask array chunked `(10000, 600)` were
+  both stored in `(5000, 75)` chunks. Only an explicit
+  `dataset_kwargs={"chunks": (10000, 600)}` gave row-only storage. Every dense
+  result Harpy writes today is therefore split by columns on disk, including
+  `X_pca` and scaled layers written back with `write_table_components`.
+- AnnData passes the same `dataset_kwargs` to every array of an element, for
+  example to each `obs` column (source, `write_dataframe` in anndata
+  `_io/specs/methods.py`). Whole-table writes therefore cannot use one chunk
+  tuple for their dense matrices.
+
 **Impact.**
 
 - scanpy's PCA rejects column-split chunks (verified).
@@ -888,19 +901,75 @@ rsc.get.anndata_to_CPU(adata)
 
 ### Phase 1: row-major layouts for dense and sparse matrices
 
-Implement all parts of gap 1, with the tests listed there:
+Implement gap 1 in three slices, in this order. Gap 1 calls row-only writes the
+primary fix, because they give the cleanest stored layout. The slices still start
+with the read side: it helps existing stores immediately, without rewriting any
+data, and it provides the sizing logic that the write side reuses.
 
-1. Row-only chunks for dense matrices: on writes first, then
-   `dense_chunks="auto"` on lazy reads for stores that are already split by
-   columns.
-2. CSR instead of CSC in the Visium and Visium HD readers.
-3. A one-time conversion path for existing CSC tables.
-4. `sparse_chunks="auto"` as the default for sparse lazy reads, and for Harpy's
-   internal uses of the fixed 1000.
+| Slice                | Content                                                                        | Main code                                                          | Depends on                                   |
+| -------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------ | -------------------------------------------- |
+| **1a: read side**    | `sparse_chunks` and `dense_chunks` on all read functions; shared sizing helper | `_storage/_anndata.py`, `table/io/_read.py`, `io/_read_zarr.py`    | nothing                                      |
+| **1b: dense writes** | row-only stored chunks for dense 2-D matrices                                  | `_storage/_anndata.py` (`_write_anndata_element`)                  | 1a's sizing helper                           |
+| **1c: CSC → CSR**    | Visium readers write CSR; one-time conversion of existing CSC tables           | `io/_visium.py`, `io/_visium_hd.py`, a conversion helper or recipe | the open CSC question; 1a for the lazy reads |
 
-Items 1 to 3 unblock scanpy's PCA and QC and rapids-singlecell for every table
-layout Harpy writes; item 4 sizes the blocks. The reader change in item 2 is the
-smallest.
+After 1a, existing stores work with scanpy and rapids-singlecell, except CSC
+tables. After 1b, new dense tables need no merge on read. After 1c, every table
+Harpy writes is stored row-major, as CSR or dense with row-only chunks.
+
+#### Slice 1a: read side
+
+- Replace `sparse_chunk_size` with `sparse_chunks="auto" | int`, and add
+  `dense_chunks="auto" | int | "storage"`, on all three public read functions:
+  `read_table`, `read_table_components` and `hp.io.read_zarr`
+  (`src/harpy/io/_read_zarr.py`), which also exposes `sparse_chunk_size` today.
+- Add the shared sizing helper: memory target from Dask's `array.chunk-size` →
+  rows per block, from the average non-zero values per row for sparse matrices
+  and from columns × dtype for dense ones, rounded to a multiple of the stored
+  row chunk size.
+- Use the same default for the internal uses of the fixed 1000:
+  `_prepare_anndata_value`, which lazily wraps storage-backed sparse inputs
+  during writes, and the `chunk_size` default of
+  `write_table_components_by_region` and `add_table_components_by_region`
+  (`_DEFAULT_REGIONAL_CHUNK_SIZE`). This changes a public default of those two
+  write functions.
+- Tests: the read-side tests listed under "Dense matrices" and "Sparse block
+  size" in gap 1.
+- `sparse_chunk_size` appears about 23 times in 6 test files, 15 of them in
+  `test_read.py`. Renaming is free for users, because the API is unreleased, but
+  those tests need updating.
+
+#### Slice 1b: dense writes
+
+- In `_write_anndata_element`, store dense 2-D matrices (`X`, layers, `obsm`
+  entries; `varm`, `varp` and `raw` per the open question on scope) with row-only
+  chunks, sized by the 1a helper.
+- Implementation: AnnData's `write_dispatched`, with a callback that sets `chunks`
+  only for dense 2-D matrices and leaves `obs`/`var` columns and sparse buffers to
+  AnnData's defaults. `write_dispatched` is available in anndata 0.12.10; this
+  approach has not been tested yet.
+- Coverage: all of Harpy's own table writers go through `_write_anndata_element`:
+  `write_table`, `write_table_components`, `add_table`, `add_table_components`,
+  the aggregation writer behind `aggregate_points`, and canonical centers.
+  `aggregate_image` writes through `add_table`. Aggregation therefore needs no
+  separate work; add a test that an `aggregate_image` table is stored with
+  row-only chunks.
+- Not covered: tables saved through SpatialData's own writer, such as
+  `sdata.write(output)` in the Visium readers. Those tables are sparse and are
+  handled by 1c.
+- Side effect: this also fixes the dense results Harpy writes back today, such as
+  `X_pca` and scaled layers, which are currently split by columns on disk.
+- Tests: the write-side tests listed under "Dense matrices" in gap 1.
+
+#### Slice 1c: CSC → CSR
+
+- Remove the `.tocsc()` conversion from the Visium and Visium HD readers
+  (`src/harpy/io/_visium.py`, `src/harpy/io/_visium_hd.py`). They save through
+  `sdata.write(output)`, so this in-memory change is all they need.
+- Provide the one-time conversion path for existing CSC tables described under
+  "CSC matrices" in gap 1.
+- Resolve the open question first: why do the readers use CSC, and does any
+  workflow depend on it?
+- Tests: those listed under "CSC matrices" in gap 1.
 
 ### Phase 2: user documentation
 
