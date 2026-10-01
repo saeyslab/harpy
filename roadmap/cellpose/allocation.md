@@ -8132,11 +8132,13 @@ matrix. Make this distinction explicit in the public docstring and tests.
 
 Unbacked updates validate against the attached table and merge with its existing
 matrix. Reuse lazy merging without collecting complete lazy matrices or
-modifying caller-owned inputs. The prepared replacement may be a Dask array
-even when supplied measurements are in memory; preserve dense/CSR/CSC format,
-not necessarily the original array container type. Document that distinction
-from ordinary component replacement. Retain the regional writer's `chunk_size`
-policy, adapting input preparation for in-memory targets where necessary.
+modifying caller-owned inputs. Attach a Dask array representing the complete
+updated matrix, even when supplied measurements are in memory. Do not call
+`persist()` or otherwise force the numerical merge to execute before returning.
+Preserve dense/CSR/CSC format, not necessarily the original array container type.
+Document that distinction from ordinary component replacement. Retain the regional
+writer's `chunk_size` policy, adapting input preparation for in-memory targets
+where necessary.
 
 **Sparse chunk preparation for unbacked updates.** An attached sparse Dask
 matrix may have chunks along both dimensions, unlike Harpy's sparse reader,
@@ -8261,8 +8263,28 @@ metadata, new-entry NaN fills, preservation of unrelated local edits, and failur
 recovery in both storage modes. Keep coverage of feature-schema rejection and
 unchanged new-table creation. Rely on the adapter and regional writer tests for
 the general storage/encoding/rollback matrix rather than duplicating them here.
-Update the function's documentation where its returned matrix representation or
-storage behavior needs clarification; keep shared I/O contracts centralized.
+During this migration, make the distinction between attaching the updated matrix
+and computing its values explicit in the `add_table_components_by_region()`
+docstring and the regional-update paragraph in `docs/development/storage.md`:
+
+> For unbacked SpatialData, `add_table_components_by_region()` attaches a Dask
+> array representing the complete updated matrix. Selected rows use the supplied
+> measurements; unselected rows retain existing measurements, or receive the
+> specified fill for a new entry. The numerical merge remains deferred until the
+> array is evaluated, for example through `.compute()` or writing. The adapter
+> attaches this result without executing the numerical merge or writing to disk.
+
+Explain the reason for deferring the merge: avoid forcing materialization of the
+complete updated matrix merely to attach it, and allow subsequent processing or
+writing to evaluate its chunks as needed. Inputs already in memory still occupy
+memory; this contract does not eliminate their memory cost.
+
+Also document in `add_feature_matrix()` that feature calculation and alignment
+complete before the regional update. Only the subsequent merge with retained
+measurements, or fills for a new entry, remains deferred when unbacked.
+This does not make feature extraction lazy or change new-table creation. Do not
+introduce a persistence option; keep shared I/O contracts centralized rather than
+repeating the full contract in that docstring.
 
 ### Part 11f.xi: affected-chunk regional-write optimization
 
