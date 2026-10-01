@@ -29,9 +29,17 @@ The answer is mostly yes:
 Three Harpy-side changes would remove most of the remaining friction, in this
 order:
 
-1. Lazy reads of dense matrices keep their on-disk chunks, and Harpy's writer
-   produces dense chunks that split the feature axis. scanpy's PCA and QC metrics
-   and rapids-singlecell's input check reject that layout.
+1. Lazy chunk layouts do not suit the downstream tools. Two stored layouts are
+   split along the feature axis, which scanpy's PCA and QC metrics and
+   rapids-singlecell's input check reject:
+   - dense matrices, because lazy reads keep their on-disk chunks and Harpy's
+     writer produces dense chunks that split the feature axis;
+   - CSC matrices, because lazy reads chunk them by genes, with all cells in
+     every block. Harpy's Visium and Visium HD readers store `X` as CSC.
+
+   In addition, sparse blocks default to a fixed 1000 rows, far fewer than most
+   spatial tables need.
+
 2. Writing several lazy results in one call recomputes their shared upstream
    graph once per result. In the test below, the source matrix was read about
    seven times for one write.
@@ -236,7 +244,43 @@ could then be altered.
 
 ## Harpy-side gaps and proposed changes
 
-### Gap 1: dense lazy reads inherit column-split on-disk chunks
+### Gap 1: lazy chunk layouts that do not suit downstream tools
+
+scanpy's lazy code paths and rapids-singlecell expect row-major layouts: Dask
+arrays chunked by rows only, with dense or CSR blocks, of a size that keeps tasks
+efficient. Three things get in the way:
+
+- dense matrices whose stored chunks split the feature axis;
+- CSC matrices, which lazy reads chunk by genes;
+- a fixed default of 1000 rows per sparse block, far fewer than most spatial
+  tables need.
+
+#### Dense matrices
+
+**Requirement.** Every lazy matrix that scanpy or rapids-singlecell processes must
+be chunked by rows only: each Dask block spans all columns, so
+`X.chunks == ((rows, rows, ...), (n_vars,))` and `X.numblocks[1] == 1`. scanpy's
+PCA and QC metrics and rapids-singlecell's `_check_gpu_X` check this. The
+requirement applies at two levels with different strictness:
+
+1. **The lazy Dask array returned by `read_table` (required).** This is what the
+   downstream tools receive. Harpy can satisfy it whatever the on-disk layout, by
+   reading whole stored chunks into row bands; see "Aligned reading, not a
+   rechunk" below.
+2. **The on-disk Zarr chunks (recommended, and the primary fix).** If dense
+   matrices are stored with row-only chunks, lazy reads use the stored chunks
+   unchanged. Compatibility does not require this, but it is the cleanest layout,
+   so the proposed change starts here.
+
+**Where dense matrices occur in Harpy.** Sparse transcriptomics tables (CSR) are
+not affected. Dense matrices come from:
+
+- image intensity tables built by `hp.tb.aggregate_image`, whose `X` is created
+  from a dense array (`src/harpy/table/_allocation_intensity.py`): the
+  proteomics and imaging case;
+- dense `obsm` entries, such as `X_pca` and feature matrices added with
+  `hp.tb.add_feature_matrix`;
+- layers that become dense, for example after `scale(zero_center=True)`.
 
 **Evidence (verified).** `hp.tb.write_table` stored a dense 4000 × 600 `X` in
 `(1000, 150)` chunks. Harpy passes no chunk arguments, so these are the default
@@ -253,25 +297,276 @@ reads dense arrays with `read_elem_lazy(element)` and keeps those chunks
 - rapids-singlecell's `_check_gpu_X` rejects any array with more than one
   feature chunk (source).
 
-**Proposed change.**
+**Proposed change.** Fix the layout where it is created, at write time, and make
+lazy reads align with whatever is already stored.
 
-1. On lazy reads, rechunk dense matrices to `(chunk_size, -1)`, i.e. whole rows.
-   With the on-disk row chunk size as `chunk_size`, this only merges the blocks
-   within each row band and does not reorder data. Each task then holds one full
-   row band, so very wide matrices may need a smaller row count.
-2. When writing dense matrices, request row-only chunks, so that the merge in
-   step 1 is not needed for stores written by Harpy.
+1. **Writes (primary fix):** store dense matrices with row-only chunks, with the
+   number of rows taken from the memory target (see "Choosing the number of rows
+   per chunk" below). Lazy reads of these stores use the stored chunks unchanged,
+   so each Dask block is exactly one stored chunk.
+2. **Lazy reads (for stores already split by columns):**
+   `read_table(..., mode="lazy")` and `read_table_components(..., mode="lazy")`
+   return dense matrices chunked as `(rows, n_columns)` by default, i.e. whole
+   rows, without callers having to rechunk. This covers tables that Harpy has
+   written so far and stores written by other tools.
+   - Build the chunks into the read: pass them to
+     `read_elem_lazy(element, chunks=(rows, n_columns))`.
+     `_decode_anndata_element` already does this for sparse matrices
+     (`src/harpy/_storage/_anndata.py`); dense arrays currently fall through to
+     `read_elem_lazy(element)`, which keeps the stored chunks.
+   - Verified with anndata 0.12.10: on storage chunked `(1000, 150)`,
+     `read_elem_lazy(element, chunks=(1000, 600))` returned `(1000, 600)` blocks
+     with the same values.
+
+**Aligned reading, not a rechunk.** Dask's guidance is to avoid `rechunk`
+operations that move data between many chunks, and to align Dask chunks with
+stored chunks: one stored chunk or a whole multiple of them, never a fraction.
+Change 2 follows both:
+
+- With `rows` a multiple of the stored row chunk size, each Dask block is a whole
+  number of complete stored chunks. For `(1000, 150)` storage, one block is a
+  1000-row band made of four stored chunks. The bytes read are the same as with
+  the stored chunks, and nothing moves between rows.
+- Built into the read, it is not a `rechunk` in the graph. `read_elem_lazy`
+  creates dense arrays with `da.from_zarr(elem, chunks=chunks)` (anndata
+  `_io/specs/lazy_methods.py`), so each task reads its stored chunks directly.
+  Verified on the 4000 × 600 store:
+
+| How                                            | Graph layers       | Tasks |
+| ---------------------------------------------- | ------------------ | ----- |
+| `read_elem_lazy(element, chunks=(1000, 600))`  | read only          | 5     |
+| `read_elem_lazy(element).rechunk((1000, 600))` | read and `rechunk` | 21    |
+
+The remaining cost is that each task holds a full row band rather than one
+stored chunk. That is why the number of rows follows a memory target.
+
+**Scope of the default.**
+
+- Dense matrices with `mode="lazy"`: row-only chunks by default.
+- CSR matrices: already row-only; unchanged.
+- CSC matrices: not converted by default, because the conversion is expensive;
+  see "CSC matrices" below.
+- `mode="backed"` and `mode="eager"`: unaffected, because they return Zarr arrays
+  or in-memory matrices rather than Dask chunks.
+
+**API decisions.**
+
+1. **Rows per block.** `sparse_chunk_size` applies only to sparse matrices, and a
+   sparse block's size depends on its non-zero values rather than its columns, so
+   one shared row count fits poorly. Dense matrices need their own setting, with a
+   default derived from a memory target (see below) rather than a fixed number.
+2. **Opting out.** Workflows that read one column at a time need a way to keep the
+   stored chunks (see "Trade-off" below).
+3. **No general `chunks=` parameter.** `read_table` returns many matrices with
+   different shapes, formats and axes: `X`, layers, `obsm` entries with different
+   column counts, sparse and dense. One chunk tuple cannot fit them all. Both
+   settings below therefore specify only the number of rows; the other axis is
+   always whole. Callers who need a different layout can rechunk the result.
+
+Proposed settings:
+
+- `sparse_chunk_size` (exists): rows per CSR block.
+- `dense_chunks` (new), one of:
+  - `"auto"` (default): keep the stored chunks when they are already row-only;
+    otherwise read whole stored chunks into row bands, using the multiple of the
+    stored row chunk size closest to the memory target;
+  - an integer: that number of rows per block, rounded to a multiple of the
+    stored row chunk size;
+  - `"storage"`: keep the stored chunks as they are.
+
+**Choosing the number of rows per chunk.** Each block holds
+rows × columns × bytes per value, so the row count should follow from a memory
+target rather than a fixed number. For example, with Dask's default target chunk
+size of 128 MiB (`array.chunk-size`):
+
+| Matrix                | Bytes per row | 1000 rows | Rows for about 128 MiB |
+| --------------------- | ------------- | --------- | ---------------------- |
+| 40 channels, float32  | 160 B         | 160 KB    | about 840,000          |
+| 20,000 genes, float32 | 80 KB         | 80 MB     | about 1,700            |
+
+A fixed 1000 rows is far too small for intensity tables with tens of channels,
+and roughly right for wide gene matrices. Writes use the result directly as the
+stored row chunk size. Lazy reads round it to a multiple of the stored row chunk
+size, so that they never split a stored chunk.
 
 Decide whether this applies to every dense matrix or only to observation-aligned
 ones (`X`, `layers`, `obsm`). Row-only chunking is also valid for `varm`, `varp`
 and `raw`.
 
+**Trade-off.** With row-only chunks, reading a single column, such as one
+channel for plotting, touches every stored chunk. Whole-matrix analyses such as
+scanpy's need row-only chunks, so they should be the default. If fast
+per-channel access matters for a workflow, that argues for an additional
+column-oriented copy for that workflow, not for a different default.
+
 **Tests.**
 
-- A dense table written and lazily read by Harpy has `numblocks[1] == 1`.
+- A dense table written and lazily read by Harpy has `numblocks[1] == 1`, and
+  its stored chunks are row-only.
 - A store written with column-split chunks by another tool reads with whole
   rows and the same values.
+- The number of rows per lazy block follows the memory target and is a multiple
+  of the on-disk row chunk size.
+- With `dense_chunks="auto"`, row-only stored chunks are kept unchanged, and
+  column-split stored chunks are read into row bands without a `rechunk` layer in
+  the graph.
+- An explicit row count is respected, and the storage opt-out keeps the stored
+  chunks.
+- `backed` and `eager` reads return the same types as before.
 - `sc.pp.pca(adata, svd_solver="covariance_eigh")` works on the result.
+
+#### CSC matrices
+
+**Which formats occur.** Spatial transcriptomics tables are normally CSR, with
+cells or bins as rows:
+
+- scanpy's `read_10x_h5`, used for Xenium and Visium, returns `csr_matrix`;
+- the spatialdata-io CosMx and Stereo-seq readers build CSR;
+- Harpy's MERSCOPE reader and `hp.tb.aggregate_points` produce CSR.
+
+The exception is Harpy's own Visium and Visium HD readers. They call
+`adata.X = adata.X.tocsc()` (`src/harpy/io/_visium.py` and
+`src/harpy/io/_visium_hd.py`). No comment explains the conversion, and no test
+relies on it. A likely reason is faster access to individual genes, for example
+for plotting, because CSC stores each gene's values contiguously.
+
+**Evidence (verified).** A lazy read splits a CSC matrix along its compressed
+axis, the genes, into `sparse_chunk_size` columns (default 1000), and keeps all
+cells in every block. Tested with 4000 cells, before and after a lazy conversion
+to row-chunked CSR:
+
+| Genes | Lazy layout as read                                   | As read                                                                                                          | After conversion              |
+| ----- | ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ----------------------------- |
+| 600   | one `(4000, 600)` block: the whole matrix in one task | QC, `normalize_total`, `log1p` and HVG ran; PCA refused                                                          | all steps, including PCA, ran |
+| 2500  | three `(4000, 1000)` blocks                           | `calculate_qc_metrics` failed with `Length of values (12000) does not match length of index (4000)`; PCA refused | all steps, including PCA, ran |
+
+PCA refused with `Only sparse dask arrays with CSR-meta format are supported. Got
+csc as meta`. rapids-singlecell's input check requires CSR blocks and one chunk
+along the genes, so it would reject both layouts (source). With 2500 genes,
+`normalize_total`, `log1p` and HVG ran without errors, but their results were not
+checked.
+
+**Impact.**
+
+- Visium and Visium HD tables written by Harpy cannot use the lazy scanpy or
+  rapids-singlecell paths as they are.
+- Every block holds all cells, so memory per task grows with the number of cells
+  and bins. For Visium HD, with millions of bins, this undoes the purpose of
+  chunking.
+
+**Lazy conversion is possible but expensive.**
+`X.rechunk((rows, -1)).map_blocks(sparse.csr_matrix, meta=...)` produces
+row-chunked CSR, and the pipeline then works (verified). However:
+
+- every row block of the result depends on every gene block of the input, so
+  computing any part of the result reads the whole matrix;
+- each input task holds all cells for `sparse_chunk_size` genes;
+- a lazy pipeline repeats this for every compute, unless the converted matrix is
+  stored or persisted.
+
+**Proposed change.**
+
+1. Store Visium and Visium HD tables as CSR: remove the `.tocsc()` conversion
+   from both readers. First check whether any workflow depends on fast per-gene
+   access; if so, convert only for that access instead of for storage.
+2. Convert existing CSC tables once, rather than on every read. Provide a helper
+   or a documented recipe: read `X` lazily, convert it as above, and replace it
+   through `write_table_components`, passing `{("X",): converted}` with
+   `obs_identity`, `var_names` and `overwrite=True`. The same applies to CSC
+   layers.
+3. Do not convert silently in `read_table`, because of the cost. If reads should
+   support it, add an explicit opt-in argument whose docstring states the cost.
+
+**Tests.**
+
+- Tables written by the Visium and Visium HD readers have CSR `X`.
+- A converted table passes rapids-singlecell's layout check (`numblocks[1] == 1`
+  and CSR blocks), runs `sc.pp.pca`, and has the same values as before
+  conversion.
+
+#### Sparse block size
+
+**Current behavior.** `sparse_chunk_size` (default 1000) sets the rows per CSR
+block, or the columns per CSC block. However, the memory a sparse block needs
+depends on its non-zero values, not on its rows: about 8 bytes per non-zero value
+in memory (a float32 value and an int32 column index), plus the row pointers.
+
+**Evidence (verified).** A 200,000 × 2000 CSR matrix with 8 million non-zero
+values (40 per row), written by AnnData:
+
+- `data` and `indices` are stored as 1-D arrays in chunks of 250,000 non-zero
+  values, and `indptr` in chunks of 50,001 row pointers. Stored chunks therefore
+  follow non-zero values, not rows.
+- The total number of non-zero values is the length of `data`, which is
+  available from metadata alone.
+- Reading the matrix lazily, through a store that counts fetches of the 32
+  stored `data` chunks:
+
+| Rows per block | Blocks | Non-zero values per block | Stored chunk fetches | Fetches per stored chunk |
+| -------------- | ------ | ------------------------- | -------------------- | ------------------------ |
+| 1000           | 200    | about 40,000              | 231                  | 7.2                      |
+| 50,000         | 4      | about 2,000,000           | 35                   | 1.1                      |
+
+Each fetch reads and decompresses a whole stored chunk, so small blocks repeat
+that work.
+
+**Impact.**
+
+- Many small tasks. An 11-million-bin Visium HD table gets 11,000 blocks, each of
+  about 40 KB if bins hold about 5 non-zero values (an assumption, not measured).
+  The rapids-singlecell tutorials use 20,000 to 50,000 rows per block.
+- Repeated decompression whenever a block holds fewer non-zero values than a
+  stored chunk, as measured above.
+
+**Proposed change.** Replace `sparse_chunk_size` with `sparse_chunks`, either
+`"auto"` (the default) or an integer.
+
+- `"auto"`: rows per block = memory target ÷ (average non-zero values per row ×
+  bytes per non-zero value). The average comes from metadata
+  (`len(data) / n_rows`), and the bytes per non-zero value from the stored dtypes
+  of `data` and `indices`. Use the same 128 MiB target as for dense matrices.
+  With 8 bytes per non-zero value:
+
+  | Average non-zero values per row | Rows for about 128 MiB | Rough example        |
+  | ------------------------------- | ---------------------- | -------------------- |
+  | 5                               | about 3.4 million      | Visium HD 2 µm bins  |
+  | 40                              | about 420,000          | small targeted panel |
+  | 500                             | about 34,000           | large panel          |
+  | 3000                            | about 5,600            | single-cell RNA      |
+
+  The examples are rough illustrations, not measurements.
+
+- An integer keeps today's meaning: rows per CSR block, or columns per CSC block.
+- **No `"storage"` mode.** Sparse matrices have no 2-D chunk grid: the stored
+  `data` and `indices` chunks are counted in non-zero values, independent of
+  row boundaries, so there is no stored layout to keep. The alignment rule
+  instead is to make blocks much larger than one stored chunk, so that each
+  stored chunk is fetched by at most two tasks. The `"auto"` sizes do this: in
+  the measurement above, blocks of about 2 million non-zero values fetched each
+  250,000-value chunk 1.1 times on average.
+- **Cap for densified blocks.** Blocks sized by non-zero values only stay the
+  right size while the data is sparse. Steps that make blocks dense, such as
+  `scale(zero_center=True)`, turn a 420,000-row block with 2000 genes into
+  3.4 GB. `"auto"` therefore also caps the rows so that a dense copy of a block
+  stays within a limit. Callers who densify can also pass an integer.
+- **Upper bound.** rapids-singlecell limits GPU blocks to 2³¹ − 1 non-zero
+  values. A 128 MiB target, about 16.8 million non-zero values, is far below
+  that.
+- **Renaming is free.** `read_table` and `read_table_components` are not yet
+  released: they are not on `main` or in the latest tag, v0.4.4.
+- **Same default internally.** Harpy uses a fixed 1000 elsewhere too:
+  `_DEFAULT_SPARSE_CHUNK_SIZE` when storage-backed sparse matrices are wrapped
+  lazily for writing (`_prepare_anndata_value` in
+  `src/harpy/_storage/_anndata.py`), and the `chunk_size` default of
+  `write_table_components_by_region`. Both should use the same `"auto"` logic.
+
+**Tests.**
+
+- `"auto"` derives the rows from metadata, without reading `data` or `indices`.
+- The rows follow the memory target for different densities, and respect the
+  dense-copy cap.
+- An integer keeps today's meaning for CSR and CSC.
+- Lazy values equal the stored matrix for both settings.
 
 ### Gap 2: writing several lazy results recomputes their shared graph
 
@@ -462,10 +757,14 @@ The supplied `obs` and `var` dataframes provide the observation and feature
 identities that the matrix components are checked against. If cells or genes
 were filtered, use `hp.tb.write_table(..., overwrite=True)` instead.
 
-For dense tables, until gap 1 is fixed, call
-`adata.X = adata.X.rechunk((chunk_rows, -1))` after reading and use
-`svd_solver="covariance_eigh"`. On machines without TBB, run dense scaling with
-`dask.config.set(scheduler="synchronous")`.
+Until gap 1 is fixed:
+
+- for dense tables, call `adata.X = adata.X.rechunk((chunk_rows, -1))` after
+  reading and use `svd_solver="covariance_eigh"`;
+- for CSC tables, such as those written by Harpy's Visium readers, convert `X` to
+  row-chunked CSR (see gap 1), preferably once, storing the result;
+- on machines without TBB, run dense scaling with
+  `dask.config.set(scheduler="synchronous")`.
 
 rapids-singlecell (untested, from its documentation):
 
@@ -490,11 +789,21 @@ rsc.get.anndata_to_CPU(adata)
 
 ## Implementation sequence
 
-### Phase 1: row-only dense chunks
+### Phase 1: row-major layouts for dense and sparse matrices
 
-Implement gap 1 for lazy reads and dense writes, with the tests listed there.
-This is a small change that unblocks dense tables for scanpy's PCA and QC and
-for rapids-singlecell.
+Implement all parts of gap 1, with the tests listed there:
+
+1. Row-only chunks for dense matrices: on writes first, then
+   `dense_chunks="auto"` on lazy reads for stores that are already split by
+   columns.
+2. CSR instead of CSC in the Visium and Visium HD readers.
+3. A one-time conversion path for existing CSC tables.
+4. `sparse_chunks="auto"` as the default for sparse lazy reads, and for Harpy's
+   internal uses of the fixed 1000.
+
+Items 1 to 3 unblock scanpy's PCA and QC and rapids-singlecell for every table
+layout Harpy writes; item 4 sizes the blocks. The reader change in item 2 is the
+smallest.
 
 ### Phase 2: user documentation
 
@@ -538,13 +847,15 @@ this document is currently based on source review.
 
 ## Open questions
 
-- **Chunk size default.** `sparse_chunk_size` defaults to 1000 rows. That means
-  1000 tasks per million cells, whereas the rapids-singlecell tutorials use
-  20,000 to 50,000 rows per chunk. Should the default be larger, or derived from
-  a target number of non-zero values per block? The 2³¹ non-zero limit per GPU
-  block bounds it from above.
+- **Dense-copy cap for sparse blocks.** What limit should `sparse_chunks="auto"`
+  use for the dense size of a block (see "Sparse block size" in Gap 1)? Should
+  the 128 MiB target and this cap be configurable, for example through Dask's
+  `array.chunk-size` setting?
 - **Scope of rechunking.** Should Gap 1 cover all dense matrices, or only
   observation-aligned ones?
+- **CSC in the Visium readers.** Why do the Visium and Visium HD readers store
+  CSC, and does any workflow depend on it? Should existing CSC tables be
+  converted automatically, for example by a migration step, or only on request?
 - **Version floors.** Only scanpy 1.11.1 was tested. Whether the lazy paths work
   with the declared floor `scanpy>=1.9.1` is untested. Harpy's I/O should also
   be tested with `anndata>=0.12.14`, which rapids-singlecell requires.

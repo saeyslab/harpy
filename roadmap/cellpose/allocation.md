@@ -55,7 +55,7 @@ implemented:
       **11f.ix** SpatialData-aware table-component updates — implemented;
       **11f.x** SpatialData-aware regional table-component updates in two implementation slices:
       **a)** implement `hp.tb.add_table_components_by_region()` — implemented,
-      **b)** migrate `hp.tb.add_feature_matrix()` for existing-table regional updates;
+      **b)** migrate `hp.tb.add_feature_matrix()` for existing-table regional updates — implemented;
       **11f.xi** affected-chunk regional-write optimization, after the first ten parts;
       a separate napari-harpy persistence migration also follows the first eight
       parts and does not depend on this optimization;
@@ -6231,8 +6231,9 @@ updates through `hp.tb.write_table_components_by_region`. Parts 11f.vii a)–c)
 canonical-component writers) are implemented. Part 11f.viii is implemented via
 `hp.tb.delete_table_components()` and mixed `write_table_components(..., delete=...)`
 updates. Part 11f.ix is implemented via `hp.tb.add_table_components()` and
-`hp.tb.remove_table_components()`. Part 11f.x a) is implemented via
-`hp.tb.add_table_components_by_region()`; Parts 11f.x b) and 11f.xi remain planned.**
+`hp.tb.remove_table_components()`. Parts 11f.x a)–b) are implemented via
+`hp.tb.add_table_components_by_region()` and migration of `hp.tb.add_feature_matrix()`
+to that adapter for existing-table regional updates. Part 11f.xi remains planned.**
 
 Provide general, modular table I/O independently of QC, aggregation or Scanpy
 preprocessing. The caller explicitly chooses a complete table or selected
@@ -8063,7 +8064,7 @@ implementation, without roadmap language in user-facing documentation.
 
 ### Part 11f.x: SpatialData-aware regional table-component updates
 
-**Status: slice a) implemented; slice b) planned, following a).
+**Status: slices a) and b) implemented.
 Not a prerequisite for Slice 11g or the path-based napari-harpy persistence migration.**
 
 First implement the general regional adapter, then migrate the existing
@@ -8223,7 +8224,11 @@ contract during implementation, without roadmap language in user-facing docs.
 
 ### Part 11f.x b): migrate `hp.tb.add_feature_matrix()` for existing-table regional updates
 
-**Status: planned; implement after Part 11f.x a).**
+**Status: implemented. Existing-table updates delegate to the public regional
+adapter in both storage modes, retaining scientific preparation and separate
+complete-table creation. Both overwrite flags follow Harpy's storage-mode policy;
+unbacked regional results remain lazy. Focused tests cover delegation, retained
+measurements and metadata, overwrite permission, validation and failure recovery.**
 
 Route existing-table regional updates in `hp.tb.add_feature_matrix()` through
 the public `hp.tb.add_table_components_by_region()` API in both backed and
