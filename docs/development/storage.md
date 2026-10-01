@@ -460,6 +460,11 @@ target existence, format, shape and dtype: a target present only in memory is ne
 on disk and follows the new-entry fill rules. Preserving unrelated local components
 does not preserve unsaved values within a requested matrix.
 
+For unbacked SpatialData, `hp.tb.add_table_components_by_region()` attaches the
+complete updated matrix lazily, without executing the numerical merge or writing
+to disk. This guarantee concerns the regional update itself, not calculations
+callers perform to prepare the submitted measurements.
+
 External references are not refreshed. Callers continue to own dirty/stale
 tracking, application events and coherent scientific metadata; the existing
 concurrency and crash-recovery limitations are unchanged.
