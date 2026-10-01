@@ -426,7 +426,14 @@ chunk size, at least one, so that they never split a stored chunk.
 `obsm`, `varm`, `varp` and `raw`. Row-only chunking is valid for all of them.
 
 - Arrays that are not 2-D are chunked along the first axis only, with all other
-  axes whole.
+  axes whole. Their bytes per row = itemsize × the product of all axes after the
+  first; for 2-D arrays this is columns × itemsize, and for 1-D arrays the
+  itemsize alone.
+- An array with zero bytes per row, i.e. without columns, is read as one block,
+  like a sparse matrix without non-zero values.
+- The stored row chunk size is `element.chunks[0]`. For sharded Zarr arrays this
+  is the inner chunk, which can be read on its own; Harpy does not write
+  sharded arrays, so this only matters for stores written by other tools.
 - String arrays (`string-array` encoding, which the lazy reader also handles)
   keep their stored chunks, because their size per element cannot be derived
   from the dtype.
@@ -450,8 +457,11 @@ column-oriented copy for that workflow, not for a different default.
   unchanged, smaller stored chunks are combined, a stored chunk larger than the
   target becomes one block, and column-split stored chunks are read into row
   bands without a `rechunk` layer in the graph.
-- Arrays that are not 2-D are chunked along the first axis only, and string
-  arrays keep their stored chunks.
+- Arrays that are not 2-D are chunked along the first axis only, sized from the
+  product of their other axes; arrays without columns are read as one block; and
+  string arrays keep their stored chunks.
+- For sharded arrays, rows are aligned with the inner chunks reported by
+  `element.chunks`.
 - An explicit row count is respected, and the storage opt-out keeps the stored
   chunks.
 - `backed` and `eager` reads return the same types as before.
@@ -1022,14 +1032,16 @@ as those of `hp.tb.add_feature_matrix`, use the same chunk policy.
 - Add the shared sizing helper: memory target from Dask's `array.chunk-size` →
   rows per block, from the bytes per row: the average non-zero values per row
   plus the row pointer for sparse matrices (see "Sparse block size" in gap 1),
-  and columns × dtype for dense ones. For dense matrices, use the largest
-  multiple of the stored row chunk size that does not exceed the target, and at
-  least one stored chunk.
+  and itemsize × the product of all axes after the first for dense ones. For
+  dense matrices, use the largest multiple of the stored row chunk size
+  (`element.chunks[0]`, the inner chunk for sharded arrays) that does not exceed
+  the target, and at least one stored chunk.
 - Implement the decisions recorded in gap 1:
   - the dense rule, including stored chunks larger than the target ("Dense
     matrices");
   - the scope: all lazily read dense arrays, first axis only for arrays that are
-    not 2-D, stored chunks for string arrays;
+    not 2-D, one block for arrays without columns, stored chunks for string
+    arrays;
   - the sparse edge cases: CSC, no non-zero values, clamping ("Sparse block
     size");
   - the validation of both settings.
@@ -1037,6 +1049,22 @@ as those of `hp.tb.add_feature_matrix`, use the same chunk policy.
   `_decode_anndata_element`. The `chunk_size` default of the by-region functions
   stays at 1000; slice 1d changes it (see "Internal uses of the fixed 1000" in
   gap 1).
+- **Tables reopened after writes use the new defaults, intentionally.** Besides
+  the three public readers, these internal reads use the lazy defaults:
+  - `add_table` reopens the published table lazily and attaches it to `sdata`
+    (`src/harpy/table/io/_add_table.py`), and so do `add_table_components`
+    (`src/harpy/table/io/_components.py`) and the by-region adapter
+    (`src/harpy/table/io/_components_by_region.py`) for their components.
+    After 1a, every table attached by `aggregate_points`, `aggregate_image` and
+    the other `add_table`-based functions therefore uses `"auto"` chunks, so that
+    an attached table looks the same as one returned by `read_table`. Add a test
+    for this.
+  - `write_table` reads the staged table lazily for validation
+    (`src/harpy/table/io/_write.py`, in `_write_table_operation`). That only
+    checks structure: it builds the Dask graph without computing values, and the
+    new sizing reads only metadata. No change is needed.
+  - The other internal reads use `backed` or `eager` mode (component staging in
+    `_write.py`, canonical centers, `add_feature_matrix`) and are unaffected.
 - **Guard for regional writes.** `_write_table_components_by_region_operation`
   (`src/harpy/table/io/_write_by_region.py`) reads the existing matrix with
   `_read_anndata_element(..., sparse_chunk_size=chunk_size)` and passes nothing
