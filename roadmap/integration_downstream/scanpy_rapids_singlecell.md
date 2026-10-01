@@ -376,8 +376,9 @@ Proposed settings:
 
 **Choosing the number of rows per chunk.** Each block holds
 rows × columns × bytes per value, so the row count should follow from a memory
-target rather than a fixed number. For example, with Dask's default target chunk
-size of 128 MiB (`array.chunk-size`):
+target rather than a fixed number. The target is Dask's `array.chunk-size`
+setting, 128 MiB by default; see "Memory target" under "Sparse block size"
+below. With the default:
 
 | Matrix                | Bytes per row | 1000 rows | Rows for about 128 MiB |
 | --------------------- | ------------- | --------- | ---------------------- |
@@ -524,8 +525,9 @@ that work.
 - `"auto"`: rows per block = memory target ÷ (average non-zero values per row ×
   bytes per non-zero value). The average comes from metadata
   (`len(data) / n_rows`), and the bytes per non-zero value from the stored dtypes
-  of `data` and `indices`. Use the same 128 MiB target as for dense matrices.
-  With 8 bytes per non-zero value:
+  of `data` and `indices`. The memory target is Dask's `array.chunk-size`
+  setting, the same as for dense matrices (see "Memory target" below). With the
+  default of 128 MiB and 8 bytes per non-zero value:
 
   | Average non-zero values per row | Rows for about 128 MiB | Rough example        |
   | ------------------------------- | ---------------------- | -------------------- |
@@ -544,11 +546,9 @@ that work.
   stored chunk is fetched by at most two tasks. The `"auto"` sizes do this: in
   the measurement above, blocks of about 2 million non-zero values fetched each
   250,000-value chunk 1.1 times on average.
-- **Cap for densified blocks.** Blocks sized by non-zero values only stay the
-  right size while the data is sparse. Steps that make blocks dense, such as
-  `scale(zero_center=True)`, turn a 420,000-row block with 2000 genes into
-  3.4 GB. `"auto"` therefore also caps the rows so that a dense copy of a block
-  stays within a limit. Callers who densify can also pass an integer.
+- **No cap for densification.** `"auto"` sizes blocks for the data as stored and
+  does not anticipate what happens downstream. Steps that make blocks dense split
+  the rows first; see "Densifying steps" below.
 - **Upper bound.** rapids-singlecell limits GPU blocks to 2³¹ − 1 non-zero
   values. A 128 MiB target, about 16.8 million non-zero values, is far below
   that.
@@ -560,11 +560,94 @@ that work.
   `src/harpy/_storage/_anndata.py`), and the `chunk_size` default of
   `write_table_components_by_region`. Both should use the same `"auto"` logic.
 
+**What others do.** No library in the ecosystem builds a densification limit into
+its reader:
+
+| Who                                                                                                | Sparse block size                                                                                                       | Densification                                                                                                                |
+| -------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| AnnData `read_elem_lazy`                                                                           | fixed 1000 rows for CSR (`_DEFAULT_STRIDE`); dense keeps the stored chunks                                              | not handled                                                                                                                  |
+| [scanpy's Dask tutorial](https://scanpy.readthedocs.io/en/stable/tutorials/experimental/dask.html) | 100,000 rows, for 1.46 million cells × 27,714 genes                                                                     | never densifies; advises that users "will likely have to work with smaller chunks … via a rechunking operation" when they do |
+| [rapids-singlecell](https://github.com/scverse/rapids_singlecell/blob/ed56fe5/docs/out_of_core.md) | 20,000-row example; chunks "large enough to amortize scheduling but small enough to fit per-worker VRAM"                | tutorials use `scale(zero_center=False)` to avoid it; on out-of-memory errors, "reduce chunk size"                           |
+| [Dask](https://docs.dask.org/en/stable/array-chunks.html)                                          | `"auto"` targets `array.chunk-size` from shape × dtype; recommends chunks of 10 MB to 1 GB and tasks longer than 100 ms | does not know about sparsity, so `"auto"` sizes sparse arrays as if they were dense                                          |
+
+The common pattern is to read in large blocks, and to let the step that densifies
+split the rows first.
+
+**Memory target: Dask's `array.chunk-size`.** Dask has a global setting,
+`array.chunk-size` (default 128 MiB), which it uses whenever chunk sizes are left
+to `"auto"`, for example in `X.rechunk({0: "auto"})`. Harpy's
+`sparse_chunks="auto"` and `dense_chunks="auto"` take their memory target from
+the same setting, instead of a value hard-coded in Harpy. Verified for a
+2000-gene float32 matrix:
+
+| How the setting is changed                             | `array.chunk-size` | Rows chosen by Dask's `"auto"` |
+| ------------------------------------------------------ | ------------------ | ------------------------------ |
+| default                                                | 128 MiB            | 16,777                         |
+| `with dask.config.set({"array.chunk-size": "32MiB"}):` | 32 MiB             | 4,194                          |
+| environment variable `DASK_ARRAY__CHUNK_SIZE=64MiB`    | 64 MiB             | 8,388                          |
+
+- **One setting for everything.** Changing the value once, for example on a small
+  machine or GPU, changes Harpy's lazy reads (sparse and dense) and the split
+  before densifying together. The read blocks and the densified blocks cannot
+  drift apart because two libraries use different targets.
+- **No new Harpy parameter.** A `target_bytes=` argument is not needed: Dask's
+  context manager, environment variable and config files already cover this. An
+  integer `sparse_chunks=` or `dense_chunks=` still sets an exact number of rows.
+- **Read when the lazy array is built.** `read_table` reads the setting when it
+  builds the lazy array, not when it computes. Change the setting before the
+  call, or wrap the call in `dask.config.set`.
+- **One byte budget for sparse and dense.** `"auto"` converts the same target
+  into rows differently: from non-zero values for sparse blocks, and from
+  columns × dtype for dense blocks.
+
+**Densifying steps.** Blocks sized by non-zero values only stay the right size
+while the data is sparse. Steps such as `scale(zero_center=True)`, the default
+of `sc.pp.scale`, make blocks dense. The reader should not cap blocks for this.
+Instead, the densifying step splits the rows first:
+
+```python
+adata.X = adata.X.rechunk({0: "auto"})  # before sc.pp.scale(adata), for example
+```
+
+Evidence (verified, 100,000 × 2000 CSR matrix with 4 million non-zero values,
+763 MiB when dense):
+
+- Dask's `"auto"` sizes the sparse-backed array as if it were dense: 16,777 rows,
+  exactly 128 MiB ÷ (2000 genes × 4 bytes). The split therefore gives dense-safe
+  blocks without any Harpy code.
+- The split is cheap: splitting 50,000-row blocks into 10,000-row blocks gives
+  blocks that each depend on exactly one original block, with no shuffle.
+- It is needed. `scale(zero_center=True)` followed by a reduction used about 4×
+  the dense block size in temporary memory:
+
+| Rows per block      | Peak traced memory |
+| ------------------- | ------------------ |
+| 100,000 (one block) | 3,083 MiB          |
+| 10,000              | 336 MiB            |
+
+Two consequences:
+
+- **The new default moves risk onto densifying pipelines.** With today's fixed
+  1000 rows, `sc.pp.scale()` densifies each block to about 8 MB. With blocks sized
+  by non-zero values, a 420,000-row block over 2000 highly variable genes becomes
+  3.4 GB dense, plus about 4× that in temporary memory per thread. Harpy's own
+  `Preprocess.preprocess` calls `scale(zero_center=True)`. Dropping the cap is
+  right only if the split happens somewhere Harpy controls: in Harpy's own
+  wrappers (gap 5) and in the user guide (Phase 2).
+- **More blocks after densifying are correct, not a problem.** Once data is dense,
+  its correct block size is in dense bytes. 1 million cells × 2000 genes in
+  float32 is 7.5 GiB, about 60 blocks of 128 MiB, which is Dask's recommended
+  size. The problem with today's default is the opposite: thousands of tiny
+  sparse blocks, such as 11,000 blocks of about 40 KB for Visium HD.
+
+For rapids-singlecell, GPU memory is the binding limit: pass an integer, or lower
+`array.chunk-size`.
+
 **Tests.**
 
 - `"auto"` derives the rows from metadata, without reading `data` or `indices`.
-- The rows follow the memory target for different densities, and respect the
-  dense-copy cap.
+- The rows follow the memory target for different densities, and change with
+  `array.chunk-size` when it is set before the read.
 - An integer keeps today's meaning for CSR and CSC.
 - Lazy values equal the stored matrix for both settings.
 
@@ -657,6 +740,11 @@ Store-path variants (`store`, `table_name`) that read with
 `write_table` would let these functions scale. They depend on gap 1 and benefit
 from gaps 2 and 3.
 
+These variants must split rows before densifying steps. `Preprocess.preprocess`
+calls `sc.pp.scale(..., zero_center=True)`, which makes blocks dense; with blocks
+sized by non-zero values, the variant should first call
+`adata.X = adata.X.rechunk({0: "auto"})` (see "Densifying steps" in gap 1).
+
 ## Upstream limitations to document
 
 These are not Harpy changes, but users of the lazy path will hit them.
@@ -668,9 +756,13 @@ These are not Harpy changes, but users of the lazy path will hit them.
   the gene flags on test data with outliers. On sparse Dask arrays it raises
   `TypeError` (`np.putmask`, `preprocessing/_highly_variable_genes.py`). Use
   `seurat` or `cell_ranger`.
-- Sparse `scale(zero_center=True)` turns blocks into dense `np.matrix`, after
-  which PCA fails. Use `zero_center=False`, or convert the blocks with
-  `X.map_blocks(np.asarray, meta=np.array([], dtype=X.dtype))`; PCA then works.
+- Sparse `scale(zero_center=True)` turns blocks into dense `np.matrix` in scanpy
+  1.11.1, after which PCA fails. This is fixed in scanpy 1.11.2
+  ([PR #3597](https://github.com/scverse/scanpy/pull/3597), source; 1.11.2 was
+  not tested here). On 1.11.1 and earlier, use `zero_center=False`, or convert the
+  blocks with `X.map_blocks(np.asarray, meta=np.array([], dtype=X.dtype))`; PCA
+  then works. On any version, zero-centering makes the blocks dense, so split the
+  rows first (see "Densifying steps" in gap 1).
 - Dense PCA needs dask-ml unless `svd_solver="covariance_eigh"`. Sparse PCA
   always uses `covariance_eigh` and builds an n_vars × n_vars matrix, so select
   highly variable genes first.
@@ -766,6 +858,11 @@ Until gap 1 is fixed:
 - on machines without TBB, run dense scaling with
   `dask.config.set(scheduler="synchronous")`.
 
+Independently of gap 1, split the rows before any step that makes the matrix
+dense, such as `sc.pp.scale(adata)` with its default `zero_center=True`:
+`adata.X = adata.X.rechunk({0: "auto"})`. To use smaller blocks everywhere, lower
+Dask's `array.chunk-size` setting.
+
 rapids-singlecell (untested, from its documentation):
 
 ```python
@@ -813,6 +910,8 @@ containing:
 - the recommended usage pattern above;
 - when to use `write_table_components` and when to use `write_table`;
 - the reopen rule;
+- splitting rows before densifying steps, and Dask's `array.chunk-size` setting
+  as the single memory target;
 - the upstream limitations, including the scheduler/Numba note.
 
 Link it from the table I/O section of `docs/api.md`.
@@ -847,18 +946,16 @@ this document is currently based on source review.
 
 ## Open questions
 
-- **Dense-copy cap for sparse blocks.** What limit should `sparse_chunks="auto"`
-  use for the dense size of a block (see "Sparse block size" in Gap 1)? Should
-  the 128 MiB target and this cap be configurable, for example through Dask's
-  `array.chunk-size` setting?
 - **Scope of rechunking.** Should Gap 1 cover all dense matrices, or only
   observation-aligned ones?
 - **CSC in the Visium readers.** Why do the Visium and Visium HD readers store
   CSC, and does any workflow depend on it? Should existing CSC tables be
   converted automatically, for example by a migration step, or only on request?
 - **Version floors.** Only scanpy 1.11.1 was tested. Whether the lazy paths work
-  with the declared floor `scanpy>=1.9.1` is untested. Harpy's I/O should also
-  be tested with `anndata>=0.12.14`, which rapids-singlecell requires.
+  with the declared floor `scanpy>=1.9.1` is untested. scanpy 1.11.2 fixes the
+  `scale` → PCA failure on sparse Dask input, which argues for `scanpy>=1.11.2`
+  on the lazy path. Harpy's I/O should also be tested with `anndata>=0.12.14`,
+  which rapids-singlecell requires.
 - **Scheduler guidance.** Should Harpy recommend a Dask scheduler configuration
   for downstream analysis, or only document the Numba issue?
 
