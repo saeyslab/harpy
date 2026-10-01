@@ -116,8 +116,10 @@ Compared with AnnData's own `read_elem_lazy` and `write_elem`, Harpy adds:
 
 **SpatialData's reader is eager for tables (verified).** After
 `sd.read_zarr(path)`, `sdata.tables[name].X` was a `scipy.sparse.csr_matrix`,
-whereas the labels in the same store were lazy Dask arrays. Harpy's functions
-that start from `sdata.tables` therefore receive fully loaded tables.
+whereas the labels in the same store were lazy Dask arrays. Harpy's own reader
+differs: `hp.io.read_zarr` reads tables lazily by default (`table_mode="lazy"`).
+Harpy's functions that start from `sdata.tables` therefore receive fully loaded
+tables after `sd.read_zarr`, but lazy tables after `hp.io.read_zarr`; see gap 5.
 
 ## Verified: scanpy on a lazily read Harpy table
 
@@ -378,14 +380,31 @@ stored chunk. That is why the number of rows follows a memory target.
 
 Proposed settings:
 
-- `sparse_chunk_size` (exists): rows per CSR block.
+- `sparse_chunks` (replaces `sparse_chunk_size`): rows per CSR block; see
+  "Sparse block size" below.
 - `dense_chunks` (new), one of:
-  - `"auto"` (default): keep the stored chunks when they are already row-only;
-    otherwise read whole stored chunks into row bands, using the multiple of the
-    stored row chunk size closest to the memory target;
-  - an integer: that number of rows per block, rounded to a multiple of the
-    stored row chunk size;
+  - `"auto"` (default): rows per block = the largest multiple of the stored row
+    chunk size that does not exceed the memory target, and at least one stored
+    chunk. Stored row-only chunks at or just below the target are kept unchanged;
+    smaller stored chunks are combined into row bands up to the target;
+  - an integer: that number of rows per block, rounded down to a multiple of the
+    stored row chunk size, and at least one stored chunk;
   - `"storage"`: keep the stored chunks as they are.
+
+**Stored chunks larger than the target.** When a single stored row chunk is
+already larger than the target, for example a 100,000-row stored chunk across
+20,000 genes (8 GB), a block is that one stored chunk. Splitting it would not
+save memory: Zarr decompresses a stored chunk as a whole, even to read part of
+it, so every task reading a part would still decompress all of it, and the
+decompression would be repeated in each task. Downstream steps that need smaller
+blocks can split after reading, which is cheap (each new block depends on one
+block). Once slice 1b makes Harpy write chunks at or below the target, this case
+only occurs for stores written by other tools.
+
+**Validation.** `sparse_chunks` accepts `"auto"` or a positive integer; NumPy
+integers are accepted and booleans rejected, as for `sparse_chunk_size` today.
+`dense_chunks` also accepts `"storage"`. The memory target is parsed from
+`array.chunk-size` with `dask.utils.parse_bytes`.
 
 **Choosing the number of rows per chunk.** Each block holds
 rows × columns × bytes per value, so the row count should follow from a memory
@@ -400,12 +419,17 @@ below. With the default:
 
 A fixed 1000 rows is far too small for intensity tables with tens of channels,
 and roughly right for wide gene matrices. Writes use the result directly as the
-stored row chunk size. Lazy reads round it to a multiple of the stored row chunk
-size, so that they never split a stored chunk.
+stored row chunk size. Lazy reads round it down to a multiple of the stored row
+chunk size, at least one, so that they never split a stored chunk.
 
-Decide whether this applies to every dense matrix or only to observation-aligned
-ones (`X`, `layers`, `obsm`). Row-only chunking is also valid for `varm`, `varp`
-and `raw`.
+**Scope.** The rule applies to every lazily read dense array: `X`, layers,
+`obsm`, `varm`, `varp` and `raw`. Row-only chunking is valid for all of them.
+
+- Arrays that are not 2-D are chunked along the first axis only, with all other
+  axes whole.
+- String arrays (`string-array` encoding, which the lazy reader also handles)
+  keep their stored chunks, because their size per element cannot be derived
+  from the dtype.
 
 **Trade-off.** With row-only chunks, reading a single column, such as one
 channel for plotting, touches every stored chunk. Whole-matrix analyses such as
@@ -419,11 +443,15 @@ column-oriented copy for that workflow, not for a different default.
   its stored chunks are row-only.
 - A store written with column-split chunks by another tool reads with whole
   rows and the same values.
-- The number of rows per lazy block follows the memory target and is a multiple
-  of the on-disk row chunk size.
-- With `dense_chunks="auto"`, row-only stored chunks are kept unchanged, and
-  column-split stored chunks are read into row bands without a `rechunk` layer in
-  the graph.
+- The number of rows per lazy block is the largest multiple of the on-disk row
+  chunk size that does not exceed the memory target, and at least one stored
+  chunk.
+- With `dense_chunks="auto"`, row-only stored chunks at the target are kept
+  unchanged, smaller stored chunks are combined, a stored chunk larger than the
+  target becomes one block, and column-split stored chunks are read into row
+  bands without a `rechunk` layer in the graph.
+- Arrays that are not 2-D are chunked along the first axis only, and string
+  arrays keep their stored chunks.
 - An explicit row count is respected, and the storage opt-out keeps the stored
   chunks.
 - `backed` and `eager` reads return the same types as before.
@@ -535,21 +563,35 @@ that work.
 **Proposed change.** Replace `sparse_chunk_size` with `sparse_chunks`, either
 `"auto"` (the default) or an integer.
 
-- `"auto"`: rows per block = memory target ÷ (average non-zero values per row ×
-  bytes per non-zero value). The average comes from metadata
-  (`len(data) / n_rows`), and the bytes per non-zero value from the stored dtypes
-  of `data` and `indices`. The memory target is Dask's `array.chunk-size`
+- `"auto"`: rows per block = memory target ÷ bytes per row, where
+
+  bytes per row = average non-zero values per row × (itemsize of `data` +
+  itemsize of `indices`) + itemsize of `indptr`.
+
+  Each row costs its non-zero values plus one row pointer. The average comes from
+  metadata (`len(data) / n_rows`), and the itemsizes from the stored dtypes of
+  `data`, `indices` and `indptr`. The memory target is Dask's `array.chunk-size`
   setting, the same as for dense matrices (see "Memory target" below). With the
-  default of 128 MiB and 8 bytes per non-zero value:
+  default of 128 MiB, 8 bytes per non-zero value (float32 values and int32
+  indices) and a 4-byte `indptr` entry (int32, as in the stores AnnData wrote in
+  these experiments):
 
-  | Average non-zero values per row | Rows for about 128 MiB | Rough example        |
-  | ------------------------------- | ---------------------- | -------------------- |
-  | 5                               | about 3.4 million      | Visium HD 2 µm bins  |
-  | 40                              | about 420,000          | small targeted panel |
-  | 500                             | about 34,000           | large panel          |
-  | 3000                            | about 5,600            | single-cell RNA      |
+  | Average non-zero values per row | Bytes per row | Rows for about 128 MiB | Rough example        |
+  | ------------------------------- | ------------- | ---------------------- | -------------------- |
+  | 5                               | 44            | about 3.1 million      | Visium HD 2 µm bins  |
+  | 40                              | 324           | about 410,000          | small targeted panel |
+  | 500                             | 4,004         | about 34,000           | large panel          |
+  | 3000                            | 24,004        | about 5,600            | single-cell RNA      |
 
-  The examples are rough illustrations, not measurements.
+  The examples are rough illustrations, not measurements. The row pointer only
+  matters for very sparse tables: without it, the first row would give about
+  3.4 million rows, and with an int64 `indptr` about 2.8 million.
+
+  Edge cases:
+  - for CSC matrices, the same rule sizes the columns per block, from the
+    average non-zero values per column, with one `indptr` entry per column;
+  - a matrix without non-zero values is read as one block;
+  - the result is clamped to between 1 and the length of the compressed axis.
 
 - An integer keeps today's meaning: rows per CSR block, or columns per CSC block.
 - **No `"storage"` mode.** Sparse matrices have no 2-D chunk grid: the stored
@@ -567,11 +609,16 @@ that work.
   that.
 - **Renaming is free.** `read_table` and `read_table_components` are not yet
   released: they are not on `main` or in the latest tag, v0.4.4.
-- **Same default internally.** Harpy uses a fixed 1000 elsewhere too:
-  `_DEFAULT_SPARSE_CHUNK_SIZE` when storage-backed sparse matrices are wrapped
-  lazily for writing (`_prepare_anndata_value` in
-  `src/harpy/_storage/_anndata.py`), and the `chunk_size` default of
-  `write_table_components_by_region`. Both should use the same `"auto"` logic.
+- **Internal uses of the fixed 1000.**
+  - `_prepare_anndata_value` (`src/harpy/_storage/_anndata.py`) wraps
+    storage-backed sparse matrices lazily for writing through
+    `_decode_anndata_element`. It inherits the new `"auto"` default without
+    changes of its own.
+  - The `chunk_size` default of `write_table_components_by_region` and
+    `add_table_components_by_region` (`_DEFAULT_REGIONAL_CHUNK_SIZE`) stays at
+    1000 for now. It controls computation inside the regional merge (in-memory
+    inputs, merge blocks), not what downstream tools read, so changing it is a
+    separate follow-up: slice 1d in Phase 1.
 
 **What others do.** No library in the ecosystem builds a densification limit into
 its reader:
@@ -642,8 +689,8 @@ Two consequences:
 
 - **The new default moves risk onto densifying pipelines.** With today's fixed
   1000 rows, `sc.pp.scale()` densifies each block to about 8 MB. With blocks sized
-  by non-zero values, a 420,000-row block over 2000 highly variable genes becomes
-  3.4 GB dense, plus about 4× that in temporary memory per thread. Harpy's own
+  by non-zero values, a 410,000-row block over 2000 highly variable genes becomes
+  3.3 GB dense, plus about 4× that in temporary memory per thread. Harpy's own
   `Preprocess.preprocess` calls `scale(zero_center=True)`. Dropping the cap is
   right only if the split happens somewhere Harpy controls: in Harpy's own
   wrappers (gap 5) and in the user guide (Phase 2).
@@ -659,8 +706,14 @@ For rapids-singlecell, GPU memory is the binding limit: pass an integer, or lowe
 **Tests.**
 
 - `"auto"` derives the rows from metadata, without reading `data` or `indices`.
+- Bytes per row include the `indptr` entry, using the stored itemsizes of
+  `data`, `indices` and `indptr`.
 - The rows follow the memory target for different densities, and change with
   `array.chunk-size` when it is set before the read.
+- For CSC matrices, `"auto"` sizes the columns per block from the average
+  non-zero values per column.
+- A matrix without non-zero values is read as one block, and results are
+  clamped to the length of the compressed axis.
 - An integer keeps today's meaning for CSR and CSC.
 - Lazy values equal the stored matrix for both settings.
 
@@ -736,17 +789,50 @@ table could have read the wrong data without an error.
   have lazy reads check it before reading blocks, raising a clear error when the
   table has been replaced.
 
-### Gap 5: Harpy's own scanpy wrappers load tables into memory
+### Gap 5: Harpy's own scanpy wrappers are not built for lazy tables
 
 Harpy's table processing functions do not benefit from the lazy I/O yet:
 
 - `Preprocess.preprocess` (`src/harpy/table/_preprocess.py`) and the
-  `leiden` and `score_genes` wrappers start from `sdata.tables`, which
-  `sd.read_zarr` has fully loaded.
+  `leiden` and `score_genes` wrappers start from `sdata.tables`. After
+  `sd.read_zarr` these tables are in memory, but `hp.io.read_zarr` reads them
+  lazily by default (`table_mode="lazy"`). These functions therefore already
+  receive lazy tables when users open stores with Harpy's reader.
 - `ProcessTable._get_adata` (`src/harpy/table/_table.py`) copies the table.
 - The preprocessing code uses operations that only work on in-memory matrices,
   such as `issparse`, `.toarray()`, `np.where` and `np.nanquantile`.
 - Results are written through `add_table`.
+
+**Evidence (verified).** On a table read with `hp.io.read_zarr`, so lazily,
+`hp.tb.preprocess_transcriptomics` fails today at `sc.pp.scale`
+(`src/harpy/table/_preprocess.py`, in `Preprocess.preprocess`) with
+`TypeError: _spbase.sum() got an unexpected keyword argument 'keepdims'`. A
+likely cause (inferred) is Harpy's size normalization just before it, which
+produces sparse blocks that scanpy cannot sum.
+
+**Accepted during Phases 1–5.** The move from in-memory to lazy and backed
+AnnData is ongoing, and some legacy table functions, such as
+`preprocess_transcriptomics` and other scanpy wrappers, will fail on lazy tables
+until Phase 6 ports them. This is accepted, for ease of development:
+
+- **Scope: this branch only.** `hp.io.read_zarr` and its lazy default are new on
+  this branch; they are not on `main` or in the latest release, v0.4.4. Released
+  users open stores with `sd.read_zarr`, which loads tables into memory, so the
+  legacy functions keep working for them.
+- **No changes to legacy code during Phases 1–5.** The legacy table functions
+  are not ported, patched or guarded until Phase 6.
+- **No default switches.** `hp.io.read_zarr` keeps `table_mode="lazy"`.
+- **Workaround.** `hp.io.read_zarr(..., table_mode="eager")` or `sd.read_zarr`
+  gives in-memory tables, which the legacy functions handle as before. State
+  this wherever the lazy default is described.
+- **Known risk.** Besides failing loudly, as `preprocess_transcriptomics` does,
+  a legacy function may run on a lazy table but do the wrong thing silently: for
+  example, NumPy operations such as `np.where` or `np.nanquantile` can load the
+  whole matrix into memory, and some scanpy paths give wrong results without an
+  error (`seurat_v3` on dense Dask; see "Upstream limitations to document").
+- **Before release.** Decide how released users of `hp.io.read_zarr` meet the
+  legacy functions: ported (Phase 6), guarded with a clear error that recommends
+  `table_mode="eager"`, or documented. See "Open questions".
 
 Store-path variants (`store`, `table_name`) that read with
 `read_table(mode="lazy")` and write with `write_table_components` or
@@ -899,22 +985,33 @@ rsc.get.anndata_to_CPU(adata)
 
 ## Implementation sequence
 
+**Policy for Phases 1–5.** These phases change the storage layer, the table I/O
+functions and the readers named in their slices. They do not touch Harpy's
+legacy table functions, such as `preprocess_transcriptomics` and the other
+scanpy wrappers, and they do not switch defaults such as `hp.io.read_zarr`'s
+`table_mode="lazy"`. Failures of legacy functions on lazy tables are accepted
+until Phase 6; see "Accepted during Phases 1–5" in gap 5.
+
 ### Phase 1: row-major layouts for dense and sparse matrices
 
-Implement gap 1 in three slices, in this order. Gap 1 calls row-only writes the
-primary fix, because they give the cleanest stored layout. The slices still start
-with the read side: it helps existing stores immediately, without rewriting any
-data, and it provides the sizing logic that the write side reuses.
+Implement gap 1 in three slices, in this order, followed by a fourth slice for
+regional writes. Gap 1 calls row-only writes the primary fix, because they give
+the cleanest stored layout. The slices still start with the read side: it helps
+existing stores immediately, without rewriting any data, and it provides the
+sizing logic that the write side reuses.
 
-| Slice                | Content                                                                        | Main code                                                          | Depends on                                   |
-| -------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------ | -------------------------------------------- |
-| **1a: read side**    | `sparse_chunks` and `dense_chunks` on all read functions; shared sizing helper | `_storage/_anndata.py`, `table/io/_read.py`, `io/_read_zarr.py`    | nothing                                      |
-| **1b: dense writes** | row-only stored chunks for dense 2-D matrices                                  | `_storage/_anndata.py` (`_write_anndata_element`)                  | 1a's sizing helper                           |
-| **1c: CSC → CSR**    | Visium readers write CSR; one-time conversion of existing CSC tables           | `io/_visium.py`, `io/_visium_hd.py`, a conversion helper or recipe | the open CSC question; 1a for the lazy reads |
+| Slice                         | Content                                                                        | Main code                                                           | Depends on                                   |
+| ----------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------- | -------------------------------------------- |
+| **1a: read side**             | `sparse_chunks` and `dense_chunks` on all read functions; shared sizing helper | `_storage/_anndata.py`, `table/io/_read.py`, `io/_read_zarr.py`     | nothing                                      |
+| **1b: dense writes**          | row-only stored chunks for dense 2-D matrices                                  | `_storage/_anndata.py` (`_write_anndata_element`)                   | 1a's sizing helper                           |
+| **1c: CSC → CSR**             | Visium readers write CSR; one-time conversion of existing CSC tables           | `io/_visium.py`, `io/_visium_hd.py`, a conversion helper or recipe  | the open CSC question; 1a for the lazy reads |
+| **1d: regional-write chunks** | chunk policy of the regional merge; removes 1a's guard                         | `table/io/_write_by_region.py`, `table/io/_components_by_region.py` | 1a's read policy and sizing helper           |
 
 After 1a, existing stores work with scanpy and rapids-singlecell, except CSC
 tables. After 1b, new dense tables need no merge on read. After 1c, every table
-Harpy writes is stored row-major, as CSR or dense with row-only chunks.
+Harpy writes is stored row-major, as CSR or dense with row-only chunks. Slice 1d
+does not change what downstream tools receive; it makes regional updates, such
+as those of `hp.tb.add_feature_matrix`, use the same chunk policy.
 
 #### Slice 1a: read side
 
@@ -923,26 +1020,56 @@ Harpy writes is stored row-major, as CSR or dense with row-only chunks.
   `read_table`, `read_table_components` and `hp.io.read_zarr`
   (`src/harpy/io/_read_zarr.py`), which also exposes `sparse_chunk_size` today.
 - Add the shared sizing helper: memory target from Dask's `array.chunk-size` →
-  rows per block, from the average non-zero values per row for sparse matrices
-  and from columns × dtype for dense ones, rounded to a multiple of the stored
-  row chunk size.
-- Use the same default for the internal uses of the fixed 1000:
-  `_prepare_anndata_value`, which lazily wraps storage-backed sparse inputs
-  during writes, and the `chunk_size` default of
-  `write_table_components_by_region` and `add_table_components_by_region`
-  (`_DEFAULT_REGIONAL_CHUNK_SIZE`). This changes a public default of those two
-  write functions.
+  rows per block, from the bytes per row: the average non-zero values per row
+  plus the row pointer for sparse matrices (see "Sparse block size" in gap 1),
+  and columns × dtype for dense ones. For dense matrices, use the largest
+  multiple of the stored row chunk size that does not exceed the target, and at
+  least one stored chunk.
+- Implement the decisions recorded in gap 1:
+  - the dense rule, including stored chunks larger than the target ("Dense
+    matrices");
+  - the scope: all lazily read dense arrays, first axis only for arrays that are
+    not 2-D, stored chunks for string arrays;
+  - the sparse edge cases: CSC, no non-zero values, clamping ("Sparse block
+    size");
+  - the validation of both settings.
+- `_prepare_anndata_value` inherits the new default through
+  `_decode_anndata_element`. The `chunk_size` default of the by-region functions
+  stays at 1000; slice 1d changes it (see "Internal uses of the fixed 1000" in
+  gap 1).
+- **Guard for regional writes.** `_write_table_components_by_region_operation`
+  (`src/harpy/table/io/_write_by_region.py`) reads the existing matrix with
+  `_read_anndata_element(..., sparse_chunk_size=chunk_size)` and passes nothing
+  for dense matrices. With the new default, existing dense matrices would
+  silently be read in row bands. That would still be correct, but it contradicts
+  the documented behavior that "existing dense targets retain their chunk layout
+  during merging". In 1a, that read therefore passes `dense_chunks="storage"`
+  explicitly, so regional writes behave exactly as before. Slice 1d removes the
+  guard.
+- Docs: update the docstrings of the three readers, and the reading contracts in
+  `docs/development/storage.md`, which state `sparse_chunk_size=1000` and that
+  "Dense arrays use their on-disk chunk layout without a chunk override" (in the
+  section "Reading AnnData components and tables" and in the `hp.io.read_zarr`
+  section).
 - Tests: the read-side tests listed under "Dense matrices" and "Sparse block
-  size" in gap 1.
-- `sparse_chunk_size` appears about 23 times in 6 test files, 15 of them in
-  `test_read.py`. Renaming is free for users, because the API is unreleased, but
-  those tests need updating.
+  size" in gap 1. Existing tests to change:
+  - `test_sparse_chunk_size_leaves_dense_disk_chunks_unchanged`
+    (`src/harpy/_tests/test_table/test_io/test_read.py`) asserts the old dense
+    behavior and becomes a test of `dense_chunks="storage"`;
+  - `test_sparse_chunk_size_controls_the_compressed_axis` expects 1000 rows by
+    default;
+  - `sparse_chunk_size` appears about 23 times in 6 test files, 15 of them in
+    `test_read.py`. Renaming is free for users, because the API is unreleased,
+    but those tests need updating.
+- Users of this branch's `hp.io.read_zarr` get the new chunking immediately,
+  because it reads tables lazily by default. Harpy's legacy table functions are
+  not adapted during Phases 1–5 (see "Accepted during Phases 1–5" in gap 5).
 
 #### Slice 1b: dense writes
 
-- In `_write_anndata_element`, store dense 2-D matrices (`X`, layers, `obsm`
-  entries; `varm`, `varp` and `raw` per the open question on scope) with row-only
-  chunks, sized by the 1a helper.
+- In `_write_anndata_element`, store dense matrices (`X`, layers, `obsm`, `varm`,
+  `varp` and `raw`, the same scope as the reads) with row-only chunks, sized by
+  the 1a helper.
 - Implementation: AnnData's `write_dispatched`, with a callback that sets `chunks`
   only for dense 2-D matrices and leaves `obs`/`var` columns and sparse buffers to
   AnnData's defaults. `write_dispatched` is available in anndata 0.12.10; this
@@ -970,6 +1097,82 @@ Harpy writes is stored row-major, as CSR or dense with row-only chunks.
 - Resolve the open question first: why do the readers use CSC, and does any
   workflow depend on it?
 - Tests: those listed under "CSC matrices" in gap 1.
+
+#### Slice 1d: chunk policy for regional writes
+
+`write_table_components_by_region` and `add_table_components_by_region` update
+`obsm` matrices for complete regions. `hp.tb.add_feature_matrix` writes through
+`add_table_components_by_region` (`src/harpy/table/_add_feature_matrix.py`), so
+this is a user-facing path.
+
+**How chunks drive the merge today (source).** For a partial update of an
+existing entry, `_regional_matrix` uses the chunks of the lazily read existing
+matrix as the output layout. Each block of the existing matrix becomes one merge
+task, which combines that block with the new rows that fall inside it. One
+`chunk_size` setting (default 1000) does three different jobs:
+
+1. how the existing matrix is read;
+2. how in-memory inputs are split into blocks;
+3. the output layout for new entries.
+
+Only the first has a stored layout to align with, and it is handled
+inconsistently:
+
+| Existing matrix | Read with                                                   | Merge tasks                                                                                                                 |
+| --------------- | ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| CSR / CSC       | `sparse_chunk_size=chunk_size` (1000 rows, or 1000 columns) | 1000-row blocks: many small tasks, and stored chunks fetched several times (7.2× in "Sparse block size" in gap 1, verified) |
+| dense           | the stored chunks, since `chunk_size` does not apply        | AnnData's default stored chunks, often split by columns, such as `(5000, 75)`: many small tasks per row band                |
+
+**Proposed policy.**
+
+1. **Read the existing matrix the way slice 1a reads:** `sparse_chunks="auto"`
+   and `dense_chunks="auto"`, i.e. aligned with the stored chunks and sized to
+   the memory target. Merge tasks then have a sensible size automatically, and
+   stored chunks are no longer fetched repeatedly. This fits the merge's
+   requirements: CSR blocks already span all columns and CSC blocks all rows,
+   and dense row bands work as they are.
+2. **Turn `chunk_size` into `"auto" | int`, defaulting to `"auto"`,** for the
+   parts without a stored layout:
+   - in-memory inputs and new entries are sized with 1a's helper from the
+     supplied matrix: dense from columns × dtype, sparse from its number of
+     non-zero values when it is known (in memory);
+   - lazy sparse inputs, whose number of non-zero values is not known without
+     computing, fall back to Dask's dense-equivalent `"auto"`, which is the
+     cautious choice;
+   - an integer keeps today's meaning, as an explicit override.
+3. **Memory.** A merge task holds the original block, the updates and the
+   result, so about 3× the block size. That is in line with what Dask's 128 MiB
+   target assumes. If it is too much, lowering `array.chunk-size` shrinks
+   everything consistently.
+
+**Removing the guard and updating the docs.** Remove 1a's
+`dense_chunks="storage"` guard from the read of the existing matrix. Update the
+documented chunking behavior:
+
+- the `chunk_size` description in the docstrings of
+  `write_table_components_by_region` and `add_table_components_by_region`,
+  including "existing dense targets retain their chunk layout during merging";
+- the chunking notes in the docstring of `_regional_matrix`;
+- the regional-write section of `docs/development/storage.md`, which describes
+  `chunk_size` as rows per computational chunk and states that input preparation
+  preserves existing Dask and dense Zarr chunks.
+
+**Tests.**
+
+- Existing sparse and dense matrices are read with the 1a policy, and the merge
+  output keeps that layout.
+- In-memory inputs and new entries are sized from the memory target; an integer
+  `chunk_size` keeps today's behavior.
+- Lazy sparse inputs fall back to Dask's dense-equivalent `"auto"`.
+- The existing regional-write tests that assert chunk layouts are updated
+  (`src/harpy/_tests/test_table/test_io/test_write_components_by_region.py` and
+  `test_components_by_region.py`).
+
+**When.** After 1a, which provides the read policy and the sizing helper. Slice
+1d does not depend on 1b or 1c. Because it does not affect what downstream tools
+receive, it comes after 1b and 1c in priority, unless `hp.tb.add_feature_matrix`
+or other regional updates of large tables are slow in practice; then implement
+it directly after 1a.
 
 ### Phase 2: user documentation
 
@@ -1005,7 +1208,9 @@ Choose between returning reopened tables and generation tokens (gap 4).
 
 Add lazy, store-path variants of `preprocess_transcriptomics`,
 `preprocess_proteomics`, `leiden` and related wrappers (gap 5). Remove or
-replace their in-memory-only operations.
+replace their in-memory-only operations. This is the first phase that touches
+the legacy table functions, and it resolves the breakage accepted during Phases
+1–5.
 
 ### Phase 7: rapids-singlecell validation on a GPU machine
 
@@ -1015,8 +1220,11 @@ this document is currently based on source review.
 
 ## Open questions
 
-- **Scope of rechunking.** Should Gap 1 cover all dense matrices, or only
-  observation-aligned ones?
+- **Legacy table functions at release.** If Phase 6 is not complete when this
+  branch is released, how should released users of `hp.io.read_zarr` meet the
+  legacy table functions on lazy tables: guarded with a clear error that
+  recommends `table_mode="eager"`, or only documented? See "Accepted during
+  Phases 1–5" in gap 5.
 - **CSC in the Visium readers.** Why do the Visium and Visium HD readers store
   CSC, and does any workflow depend on it? Should existing CSC tables be
   converted automatically, for example by a migration step, or only on request?
