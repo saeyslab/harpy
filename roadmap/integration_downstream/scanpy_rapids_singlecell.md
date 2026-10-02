@@ -1552,20 +1552,32 @@ only bounds the non-zero values per row, not the density.
 `chunks=(_STORED_CHUNK_BYTES // itemsize of data,)`: for float32 data,
 1,048,576 values, 4 MiB of `data`. This is the same fixed constant as for dense
 matrices, independent of the matrix's size and of how it reaches the writer.
+The length depends only on the dtype of `data`, with no cap, for in-memory and
+Dask matrices alike.
 
 - AnnData passes the same `dataset_kwargs` to `data`, `indices` and `indptr`
   (`write_sparse_compressed`), so all three get this chunk length. `indices`
   then has the same chunk boundaries as `data`, so a range of rows touches the
   same chunk numbers in both. Different lengths per array are not possible
   through AnnData's writer.
-- In-memory matrices: cap the length at the longest of the three arrays (the
-  number of non-zero values, or the length of the compressed axis plus one for
-  `indptr`), at least 1, so that no array gets a chunk larger than needed
-  across all three. Capping at the number of non-zero values alone would give
-  `indptr` of a matrix with few non-zero values one chunk per few rows.
-- Dask matrices: the number of non-zero values is unknown, so the length is not
-  capped. The last chunk of each array is padded, which is cheap with
-  compression (see "Small arrays" in 1b).
+- Why no cap: AnnData calls the write callback twice for a Dask sparse matrix.
+  The first call gets the Dask array. `write_dask_sparse` then writes the first
+  computed block through the same dispatcher, so the second call gets that
+  block as an in-memory SciPy matrix, with the first call's `dataset_kwargs`
+  (`write_dask_sparse` in `anndata/_io/specs/methods.py`). Verified with a
+  probe: an in-memory CSR matrix gives one call, a Dask CSR matrix two, the
+  second with the `chunks` chosen in the first. A cap for in-memory matrices,
+  such as the number of non-zero values, would apply to that first block and
+  let it decide the stored chunks of the whole matrix again. Because the length
+  depends only on the dtype, which the Dask array and its blocks share, both
+  calls give the same chunks, without a guard and without relying on how AnnData
+  passes `dataset_kwargs` along. Dense Dask arrays are written once, through
+  `da.store`, so the cap of 1b is not affected.
+- Cost: a small sparse matrix gets one padded chunk per array instead of a
+  chunk of its own size. With compression this is cheap. Measured on a
+  100 × 50 CSR matrix with 500 non-zero values: chunk files of 3,064 B in total
+  instead of 2,696 B with Zarr's default, and a read of 2.94 ms instead of
+  2.72 ms (see also "Small arrays" in 1b).
 - Writes stay as they are: AnnData's Dask sparse writer appends one block at a
   time, so no stored chunk is written by two blocks at once, and only the last
   partly filled chunk of each append is rewritten by the next. Block boundaries
@@ -1583,7 +1595,13 @@ matrices, independent of the matrix's size and of how it reaches the writer.
   matrices to the layout sentence (stored chunks of 4 MiB of non-zero values),
   so that "everything else" no longer includes them.
 - The docstrings of `_write_anndata_element` and of the write callback, which
-  give the rules: add the sparse rule and its cap.
+  give the rules: add the sparse rule, and why it has no cap (the second
+  callback call for Dask sparse matrices).
+- Code comments on both sides of the difference, so that a reader of either
+  rule is not surprised by the other: at the dense cap in
+  `_choose_dense_stored_chunks`, that sparse matrices have no such cap and why;
+  at the sparse rule in the write callback, that dense arrays are capped but a
+  sparse cap would be computed from a Dask matrix's first block.
 - The Notes of `write_table`, `write_table_components`, `add_table` and
   `add_table_components`: sparse matrices are stored in chunks of 4 MiB of
   non-zero values.
@@ -1595,9 +1613,11 @@ matrices, independent of the matrix's size and of how it reaches the writer.
 - With a lowered constant, CSR and CSC matrices written from memory and from
   Dask get `data`, `indices` and `indptr` chunks of the constant ÷ the itemsize
   of `data`, whatever the size of the first Dask block, and keep their values.
-- The cap for in-memory matrices: a matrix with fewer non-zero values than one
-  chunk, and a matrix without non-zero values, get chunks of the longest
-  array's length, so `indptr` is not split into many small chunks.
+- Dask CSR matrices with a tiny first block, and with a first block without
+  non-zero values, get the constant's chunk length for all three arrays, so
+  the second callback call does not let the first block decide.
+- A small in-memory matrix, and one without non-zero values, get the same
+  uncapped length.
 - Sparse matrices at other paths, such as in `uns`, keep AnnData's defaults;
   dense matrices keep 1b's layout.
 - The aggregation writer's `X` and auxiliary counts follow the rule.
