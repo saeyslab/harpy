@@ -232,17 +232,14 @@ def test_rechunk_to_write_blocks_leaves_arrays_without_values_unchanged():
         assert anndata_storage._rechunk_to_write_blocks(values, chosen_chunk_rows=1) is values
 
 
-@pytest.mark.parametrize("zarr_format", [2, 3])
-def test_writer_stores_only_dense_matrices_in_row_only_chunks(tmp_path, monkeypatch, zarr_format):
-    """Matrix paths get row-only stored chunks; other encoded arrays keep AnnData's defaults.
+def _write_layout_test_tables(tmp_path, monkeypatch, zarr_format, *, stored_chunk_bytes):
+    """Write one table through Harpy's writer and once through a plain write_elem.
 
-    The lowered constant holds two 48-byte matrix rows, or twelve values of a 1-D
-    float64 array, so that the Harpy layout and AnnData's defaults differ for
-    every array checked. Columns of a dataframe-valued obsm entry, obs and var
-    columns, categorical codes, uns arrays, string arrays and sparse buffers must
-    be stored as a plain write_elem stores them.
+    ``stored_chunk_bytes`` replaces ``_STORED_CHUNK_BYTES`` for the test, so that
+    each layout test can choose a constant that makes its checks meaningful.
+    Returns Harpy's table group, the reference group and the dense matrix values.
     """
-    monkeypatch.setattr(anndata_storage, "_STORED_CHUNK_BYTES", 100)
+    monkeypatch.setattr(anndata_storage, "_STORED_CHUNK_BYTES", stored_chunk_bytes)
     n_obs = 30
     values = np.arange(n_obs * 6, dtype=np.float64).reshape(n_obs, 6)
     obs = pd.DataFrame(
@@ -263,28 +260,63 @@ def test_writer_stores_only_dense_matrices_in_row_only_chunks(tmp_path, monkeypa
         varm={"loadings": np.ones((6, 6))},
         obsp={"distances": np.ones((n_obs, n_obs))},
         varp={"correlations": np.ones((6, 6))},
-        uns={"values": np.arange(n_obs * 6, dtype=float), "nested": {"matrix": values.copy()}},
+        uns={
+            "values": np.arange(n_obs * 6, dtype=float),
+            "nested": {"matrix": values.copy()},
+            # Lists are encoded as array too, but have no shape or dtype, so the
+            # write callback must not treat them as matrices.
+            "regions": ["cells_a", "cells_b"],
+        },
     )
     table.raw = AnnData(X=values.copy(), obs=obs, var=var, varm={"loadings": np.ones((6, 6))})
     root = zarr.open_group(str(tmp_path / "elements.zarr"), mode="w", zarr_format=zarr_format)
-
     _write_anndata_element(root, ("table",), table, logical_path=(), create_parents=False)
     write_elem(root, "reference", table)
+    return root["table"], root["reference"], values
 
-    group, reference = root["table"], root["reference"]
+
+@pytest.mark.parametrize("zarr_format", [2, 3])
+def test_writer_stores_dense_matrices_in_row_only_chunks(tmp_path, monkeypatch, zarr_format):
+    """Every dense matrix path gets row-only stored chunks from the lowered constant, and keeps its values.
+
+    A constant of 100 bytes holds two 48-byte rows of the 6-column matrices.
+    """
+    group, _, values = _write_layout_test_tables(tmp_path, monkeypatch, zarr_format, stored_chunk_bytes=100)
+
     row_only = {
         "X": (2, 6),
         "layers/lazy": (2, 6),
         "obsm/embedding": (2, 6),
         "varm/loadings": (2, 6),
         # A 240-byte row exceeds the constant, so each stored chunk is one row.
-        "obsp/distances": (1, n_obs),
+        "obsp/distances": (1, values.shape[0]),
         "varp/correlations": (2, 6),
         "raw/X": (2, 6),
         "raw/varm/loadings": (2, 6),
     }
     for name, chunks in row_only.items():
         assert group[name].chunks == chunks, name
+    written = read_elem(group)
+    np.testing.assert_array_equal(written.X, values)
+    np.testing.assert_array_equal(written.layers["lazy"], values)
+    np.testing.assert_array_equal(written.raw.X, values)
+
+
+@pytest.mark.parametrize("zarr_format", [2, 3])
+def test_writer_keeps_anndata_defaults_for_other_arrays(tmp_path, monkeypatch, zarr_format):
+    """Arrays that are not dense matrices are stored as a plain write_elem stores them.
+
+    The encoding alone does not identify matrices: numeric obs and var columns,
+    categorical codes, and arrays and lists in uns are also encoded as array.
+    Columns of a dataframe-valued obsm entry sit one level deeper than matrix
+    entries, and string arrays and sparse buffers have encodings of their own.
+
+    A constant of 8 bytes is smaller than every array checked, so Harpy's
+    layout, if wrongly applied, would split each of them and differ from
+    AnnData's defaults; the test checks that this holds for every array.
+    """
+    group, reference, _ = _write_layout_test_tables(tmp_path, monkeypatch, zarr_format, stored_chunk_bytes=8)
+
     for name in (
         "obs/score",
         "obs/label/codes",
@@ -293,15 +325,16 @@ def test_writer_stores_only_dense_matrices_in_row_only_chunks(tmp_path, monkeypa
         "obsm/strings",
         "uns/values",
         "uns/nested/matrix",
+        "uns/regions",
         "layers/sparse/data",
         "layers/sparse/indices",
         "raw/var/mean",
     ):
-        assert group[name].chunks == reference[name].chunks, name
-    written = read_elem(group)
-    np.testing.assert_array_equal(written.X, values)
-    np.testing.assert_array_equal(written.layers["lazy"], values)
-    np.testing.assert_array_equal(written.raw.X, values)
+        array = reference[name]
+        # The comparison only catches a misapplied layout if that layout would differ.
+        assert anndata_storage._choose_dense_stored_chunks(array.shape, array.dtype.itemsize) != array.chunks, name
+        assert group[name].chunks == array.chunks, name
+    assert read_elem(group["uns/regions"]).tolist() == ["cells_a", "cells_b"]
 
 
 def test_writer_uses_the_logical_path_rather_than_the_staged_name(tmp_path, monkeypatch):
