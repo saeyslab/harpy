@@ -40,6 +40,10 @@ For where metadata lives and which data it describes, see
   calls these chunks, as in `X.chunks`.
 - **Stored chunk:** a separately compressed piece of a Zarr array on disk, which
   Zarr decompresses whole whenever any part of it is read.
+- **Input block:** a block of a Dask array passed to a writer. Its layout comes
+  from the caller and may split columns or stored chunks.
+- **Write block:** a block as it is written to Zarr, in one step. A write block
+  that covers only part of a stored chunk makes Zarr read and rewrite that chunk.
 
 ## Replacement scope
 

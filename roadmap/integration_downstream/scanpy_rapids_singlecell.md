@@ -492,12 +492,15 @@ Zarr v2 stores cannot be sharded. And a shard is written as a whole, so a Dask
 block that covers only part of a shard reads and rewrites that shard.
 
 Writes stay correct when a user enables automatic sharding, because AnnData's
-`da.store` call holds a lock by default. The extra cost is at most one shard
-rewrite at each block boundary, which is small because the shards (about 8 MiB)
-are much smaller than the Dask blocks (about 128 MiB). Shards therefore need no
-write alignment of their own. Explicit sharding by Harpy, which would reduce the
-file count substantially, is deferred; see "Deferred: explicit sharding" under
-"Implementation sequence".
+`da.store` call holds a lock by default. A shard then holds two stored chunks, so
+each write block boundary inside a shard makes Zarr rewrite that shard once more.
+With write blocks of many stored chunks that is rare. With write blocks of one
+stored chunk, which inputs with small blocks get (see "Block alignment before
+writing" in slice 1b), every shard is written twice and read once. Harpy accepts
+this for the opt-in setting rather than aligning write blocks to shards it does
+not choose. Explicit sharding by Harpy, which would reduce the file count
+substantially and align write blocks to whole shards, is deferred; see
+"Deferred: explicit sharding" under "Implementation sequence".
 
 **Scope.** The rule applies to every lazily read dense array: `X`, layers,
 `obsm`, `varm`, `varp` and `raw`. Row-only chunking is valid for all of them.
@@ -1089,12 +1092,12 @@ the cleanest stored layout. The slices still start with the read side: it helps
 existing stores immediately, without rewriting any data, and it provides the
 sizing logic that the write side reuses.
 
-| Slice                         | Content                                                                        | Main code                                                           | Depends on                                   |
-| ----------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------- | -------------------------------------------- |
-| **1a: read side**             | `sparse_chunks` and `dense_chunks` on all read functions; shared sizing helper | `_storage/_anndata.py`, `table/io/_read.py`, `io/_read_zarr.py`     | nothing                                      |
-| **1b: dense writes**          | row-only stored chunks of a fixed size (a few MiB) for dense matrices          | `_storage/_anndata.py` (`_write_anndata_element`)                   | 1a's sizing helper                           |
-| **1c: CSC → CSR**             | Visium readers write CSR; one-time conversion of existing CSC tables           | `io/_visium.py`, `io/_visium_hd.py`, a conversion helper or recipe  | the open CSC question; 1a for the lazy reads |
-| **1d: regional-write chunks** | chunk policy of the regional merge; removes 1a's guard                         | `table/io/_write_by_region.py`, `table/io/_components_by_region.py` | 1a's read policy and sizing helper           |
+| Slice                         | Content                                                                                                  | Main code                                                           | Depends on                                   |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | -------------------------------------------- |
+| **1a: read side**             | `sparse_chunks` and `dense_chunks` on all read functions; shared sizing helper                           | `_storage/_anndata.py`, `table/io/_read.py`, `io/_read_zarr.py`     | nothing                                      |
+| **1b: dense writes**          | row-only stored chunks of a fixed size (a few MiB) for dense matrices, with write blocks aligned to them | `_storage/_anndata.py` (`_write_anndata_element`)                   | 1a's sizing helper                           |
+| **1c: CSC → CSR**             | Visium readers write CSR; one-time conversion of existing CSC tables                                     | `io/_visium.py`, `io/_visium_hd.py`, a conversion helper or recipe  | the open CSC question; 1a for the lazy reads |
+| **1d: regional-write chunks** | chunk policy of the regional merge; removes 1a's guard                                                   | `table/io/_write_by_region.py`, `table/io/_components_by_region.py` | 1a's read policy and sizing helper           |
 
 After 1a, existing stores work with scanpy and rapids-singlecell, except CSC
 tables. After 1b, new dense tables are stored in whole rows, so lazy reads only
@@ -1185,6 +1188,157 @@ as those of `hp.tb.add_feature_matrix`, use the same chunk policy.
   only for dense 2-D matrices and leaves `obs`/`var` columns and sparse buffers to
   AnnData's defaults. `write_dispatched` is available in anndata 0.12.10; this
   approach has not been tested yet.
+- Block alignment before writing. Terms, as in the Terminology section of
+  `docs/development/storage.md`: a _stored chunk_ is a piece of the Zarr array on
+  disk, here S rows and all columns, with S set by the write constant; _input
+  blocks_ are the blocks of the Dask array passed to the writer, which Harpy does
+  not control; _write blocks_ are the blocks after Harpy's rechunk, each written
+  in one step.
+  - Why: AnnData writes dense Dask arrays with
+    `da.store(..., scheduler="threads")` (`write_basic_dask_dask_dense` in
+    `anndata/_io/specs/methods.py`), into an array created with Harpy's stored
+    chunks. Zarr only writes whole stored chunks. When a write block covers part
+    of a stored chunk, Zarr reads the chunk if it exists, decompresses it,
+    inserts the block's rows, and compresses and writes the whole chunk again, so
+    a stored chunk shared by n write blocks is written n times. Neither Dask nor
+    Zarr avoids this by itself: `da.store` writes the blocks it is given. Dask's
+    own `to_zarr` does rechunk when writing into an existing Zarr array, but
+    AnnData does not use it. By default, `da.store` uses a single lock for the
+    whole array, held while each write block is written (`load_store_chunk` in
+    `dask/array/core.py`): write blocks are written one at a time, aligned or
+    not, while input blocks are still computed in parallel. The lock keeps the
+    rewrites correct: without it, two concurrent rewrites of a stored chunk could
+    lose one block's rows. The lock itself costs little, because Zarr compresses
+    the stored chunks of one write block in parallel threads.
+  - Rule: in the callback, rechunk each dense Dask input to write blocks of whole
+    rows, each k stored chunks: `x.rechunk({0: k * S, 1: -1})`, with `-1` (the
+    whole axis) for every axis after the first. k = the bytes of the largest
+    input block ÷ the bytes of a stored chunk, rounded down, at least 1. Every
+    write block boundary then falls on a stored chunk boundary, so each stored
+    chunk lies inside exactly one write block and is written once, without being
+    read back. Only the boundaries matter, not the size: for k > 1 the rechunk
+    does not cut input blocks into stored chunks, it only moves each boundary
+    down to the nearest stored chunk boundary, so write blocks keep about the
+    size of the input blocks. This is the rounding of 1a's `_dense_lazy_chunks`, with the
+    largest input block as the byte target instead of `array.chunk-size`, and
+    with S from the write constant instead of `element.chunks[0]`, so the helper
+    can be shared. In-memory NumPy arrays need nothing: AnnData assigns the whole
+    array, and Zarr splits it into stored chunks.
+  - Example: a 12 × 4 matrix with S = 3 has stored chunks of rows 0–2, 3–5, 6–8
+    and 9–11.
+    - Input blocks of 2 rows × 2 columns hold 4 values, against 12 per stored
+      chunk, so k = max(1, ⌊4/12⌋) = 1 and the rechunk is
+      `x.rechunk({0: 3, 1: -1})`. Without it, the stored chunk of rows 3–5 is
+      written four times, by the input blocks of rows 2–3 and 4–5 in both column
+      halves.
+    - Input blocks of 7 rows × 4 columns (28 values) give k = 2: write blocks of
+      rows 0–5 and 6–11.
+    - Large input blocks: with S = 1,000 rows (4 MiB) and input blocks of 32,500
+      rows (about 130 MiB), the input boundary at row 32,500 cuts the stored
+      chunk of rows 32,000–32,999, which would be written twice: partly filled
+      by the first input block, then read back, merged and written again for the
+      second. k = ⌊32,500 / 1,000⌋ = 32 gives write blocks of 32,000 rows, so
+      that boundary moves down to row 32,000:
+
+      ```text
+      stored chunks: | 0–999 | … | 31,000–31,999 | 32,000–32,999 | 33,000–33,999 | …
+      input blocks:  | rows 0–32,499 ...............................|... rows 32,500–64,999
+      write blocks:  | rows 0–31,999 ...............|... rows 32,000–63,999 ...........
+      ```
+
+      Input blocks that are already aligned, such as 128 MiB read blocks from a
+      Harpy store of the same width, give back their own layout and are not
+      rechunked.
+
+    - Small input blocks, such as `X_pca` for 4,000,000 cells × 50 components,
+      float32 (763 MiB): a row is 200 B, so S = 4 MiB ÷ 200 B = 20,971 rows.
+      `X_pca` keeps the row blocks of the `X` it was computed from, here 1,600
+      rows (320 KB), so k = max(1, ⌊320 KB ÷ 4 MiB⌋) = 1 and the rechunk is
+      `x.rechunk({0: 20_971, 1: -1})`. Each write block combines about 13 input
+      blocks into one stored chunk, which is written once. Measured: 1.4–1.5 s
+      and about 150 MiB extra peak memory, against 35.7 s without the rechunk,
+      and 0.6–1.0 s but about 1.4–1.6 GiB with write blocks filled to
+      `array.chunk-size`. The stored chunks are the same either way, so a later
+      lazy read with `dense_chunks="auto"` still combines 32 of them into
+      128 MiB read blocks. Column-split grids from older stores behave the same:
+      their input blocks are usually no larger than one new stored chunk, so
+      k = 1, and each write block combines the column pieces of its rows.
+  - Why k follows the input blocks:
+    - memory: a write block's task holds its input pieces and the joined write
+      block, about twice its size, and each thread can have one in flight, so
+      peak memory is roughly 2 × threads × the write block size. Following the
+      input keeps it at about what the input already used;
+    - speed: k = 1 for every input would split large input blocks, and under the
+      lock Zarr then compresses one stored chunk at a time, about 2× slower than
+      with write blocks of several stored chunks. Smaller write blocks do not
+      avoid the lock; they only make more, shorter turns, and each turn
+      compresses fewer stored chunks in parallel;
+    - inputs that are already aligned are written as they are: their own size
+      gives back their own layout, and Dask's `rechunk` returns the array
+      unchanged when its chunks already match.
+  - Not chosen: write blocks filled up to `array.chunk-size`, the rule of Dask's
+    own `to_zarr`. It is about as fast, but it raises the memory of inputs with
+    small blocks to roughly 2 × threads × `array.chunk-size`, about 3 GiB with 12
+    threads and 128 MiB (see the second table below).
+  - Misaligned inputs this handles:
+    - lazy results: a row-wise result, such as a projection `X @ W` as in PCA,
+      keeps its input's row blocks, which are sized for the input's width.
+      Narrower outputs, such as embeddings in `obsm` or a matrix subset to highly
+      variable genes, get stored chunks with many more rows;
+    - the regional merge: a partial update of an existing entry keeps the
+      existing stored chunks (read with `dense_chunks="storage"`), which for
+      stores written before 1b are Zarr's default grid, split by columns. After
+      1b, a matrix with the same width and dtype is already aligned, with one
+      stored chunk per input block, and is written as it is. New entries use
+      `chunk_size` rows, unrelated to the stored rows;
+    - Zarr-backed inputs, which `_prepare_anndata_value` wraps with
+      `da.from_zarr`, so that the source's stored chunks become the input blocks.
+  - Measured with AnnData's `write_elem` on a Zarr v3 store on local disk, with
+    4 MiB stored chunks of whole rows. Cost of misalignment, best of three runs:
+
+    | Matrix                                                          | Blocks written                                                            | Time   |
+    | --------------------------------------------------------------- | ------------------------------------------------------------------------- | ------ |
+    | 200,000 × 600 float32, stored chunk 1,747 rows                  | aligned, 4 blocks of 32 chunks                                            | 0.84 s |
+    |                                                                 | 50,000-row blocks, not on chunk boundaries                                | 0.82 s |
+    |                                                                 | 10,000 × 100 grid, split by columns                                       | 6.71 s |
+    | 2,000,000 × 50 float32 (like `X_pca`), stored chunk 20,971 rows | aligned, 3 blocks of 32 chunks                                            | 0.26 s |
+    |                                                                 | aligned, 96 blocks of one chunk                                           | 0.72 s |
+    |                                                                 | 100 blocks of 20,000 rows (each chunk shared by 2 blocks)                 | 1.37 s |
+    |                                                                 | 1,250 blocks of 1,600 rows (each chunk shared by about 13 blocks)         | 18.0 s |
+    |                                                                 | control: 1,250 blocks of 1,600 rows with matching 1,600-row stored chunks | 2.23 s |
+    |                                                                 | the 1,600-row blocks rechunked to write blocks of 32 stored chunks        | 0.30 s |
+
+    Large blocks of whole rows that only miss chunk boundaries cost almost
+    nothing, because each shares at most two stored chunks. Blocks split by
+    columns, or smaller than a stored chunk, are 8× to 70× slower; the control
+    shows that most of this is misalignment, and the rest the overhead of many
+    small blocks. Rechunking first adds no I/O, only copying in memory.
+
+    Write block size: a 4,000,000 × 50 float32 matrix (763 MiB), generated
+    lazily in input blocks of 1,600 rows, with stored chunks of 20,971 rows, on
+    12 CPUs. Each case ran in its own process, once or twice; times vary between
+    runs. Peak memory is measured above the memory in use before writing.
+
+    | Write blocks                                                   | Number | Time      | Extra peak memory |
+    | -------------------------------------------------------------- | ------ | --------- | ----------------- |
+    | none: the input blocks as they are                             | 2,500  | 35.7 s    | about 100 MiB     |
+    | 1 stored chunk (4 MiB), the rule's result for this input       | 191    | 1.4–1.5 s | about 150 MiB     |
+    | 2 stored chunks (8 MiB)                                        | 96     | 1.0 s     | about 270 MiB     |
+    | 8 stored chunks (32 MiB)                                       | 24     | 0.6–1.0 s | about 780 MiB     |
+    | 32 stored chunks (about 128 MiB), filled to `array.chunk-size` | 6      | 0.6–1.0 s | about 1.4–1.6 GiB |
+
+    Counted with a wrapped Zarr store, for a 2,000,000 × 50 matrix with input
+    blocks of 1,600 rows and 96 stored chunks: without the rechunk, 1,345 stored
+    chunk writes and 1,249 reads; with write blocks of one or of 32 stored
+    chunks, 96 writes and no reads. The rechunk adds one task per write block,
+    plus slicing tasks where an input block crosses a write block boundary. The
+    store step then needs one task per write block instead of one per input
+    block, so the graph shrinks: 2,500 tasks without the rechunk, 1,632 with one
+    stored chunk per write block and 1,260 with 32. Each input block is computed
+    once.
+
+  - Keep AnnData's writer and its lock: with aligned blocks, `da.store` with
+    `lock=False` was only 0.03–0.07 s faster.
 - Coverage: all of Harpy's own table writers go through `_write_anndata_element`:
   `write_table`, `write_table_components`, `add_table`, `add_table_components`,
   the aggregation writer behind `aggregate_points`, and canonical centers.
@@ -1216,6 +1370,15 @@ as those of `hp.tb.add_feature_matrix`, use the same chunk policy.
   Dask's `array.chunk-size`; and that sharding follows AnnData's setting.
 - Tests:
   - the write-side tests listed under "Dense matrices" in gap 1;
+  - the write block helper returns k × S rows, with k = the bytes of the largest
+    input block ÷ the bytes of a stored chunk, rounded down, at least 1, and all
+    other axes whole;
+  - dense Dask inputs split by columns, with blocks smaller than a stored chunk,
+    or with row blocks off the chunk boundaries reach AnnData's writer as write
+    blocks of whole stored chunks and keep their values; an input with blocks
+    smaller than a stored chunk gets write blocks of one stored chunk, not of
+    `array.chunk-size`; an input already in write blocks of whole stored chunks
+    gets no `rechunk` layer;
   - with `ad.settings.auto_shard_zarr_v3` enabled on a Zarr v3 store, Harpy's
     row-only chunks are kept as the inner chunks (AnnData only accepts the
     setting after `ad.settings.zarr_write_format = 3`);
@@ -1363,8 +1526,8 @@ Zarr v3 stores:
 
 - row-only shards of a fixed size, for example 32 stored chunks (about 128 MiB);
   for a 40 GiB dense matrix this reduces about 10,000 files to about 320;
-- Dask write blocks aligned to whole shards, because a shard is written as a
-  whole;
+- write blocks of whole shards, with k counted in shards instead of stored
+  chunks, because a shard is written as a whole;
 - the same for the 1-D arrays of sparse matrices (`data`, `indices` and
   `indptr`);
 - Zarr v2 stores stay unsharded.
