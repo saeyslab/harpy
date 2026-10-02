@@ -36,6 +36,10 @@ For where metadata lives and which data it describes, see
   targets are moved to backups too, leaving their permanent paths absent.
 - **Installation:** reopening the published data, attaching it to the in-memory
   object, validating it as appropriate and refreshing consolidated metadata.
+- **Block:** one piece of a lazy Dask array, computed by one task. Dask itself
+  calls these chunks, as in `X.chunks`.
+- **Stored chunk:** a separately compressed piece of a Zarr array on disk, which
+  Zarr decompresses whole whenever any part of it is read.
 
 ## Replacement scope
 
@@ -529,9 +533,8 @@ values = hp.tb.read_table_components(
 | `uns`, including nested arrays         | In-memory metadata                          | Same                                 | Same                               |
 | Matrix mapping, e.g. `("obsm",)`       | Dictionary using these rules for each entry | Same policy, backed matrices         | Same policy, eager matrices        |
 
-`mode` replaces the former `lazy` boolean. Backed handles are read-only, not
-write-through views. Indexing them reads the selected values into memory;
-Dask selections remain deferred until computed.
+Backed handles are read-only, not write-through views. Indexing them reads the
+selected values into memory; Dask selections remain deferred until computed.
 
 Harpy returns an ordinary AnnData container whose `isbacked` property is `False`,
 even when its matrices depend on disk. AnnData's flag describes its own
@@ -541,11 +544,24 @@ matrices. Components can have different representations after editing—for exam
 table-level flag describes whether all data is in memory. Storage write permissions
 are separate from these representations.
 
-Both readers expose `sparse_chunk_size=1000`: the positive number of rows per
-CSR chunk or columns per CSC chunk, keeping the other axis whole. Harpy passes
-this choice explicitly to AnnData. Dense arrays use their on-disk chunk layout
-without a chunk override. The option only affects lazy sparse reads; it changes
-neither disk storage nor backed/eager reads and is not a memory-byte limit.
+Lazy reads choose a block layout through `sparse_chunks` and `dense_chunks`,
+both `"auto"` by default. Neither changes disk storage or backed/eager reads.
+
+- Sparse blocks keep the uncompressed axis whole: rows per CSR block, columns
+  per CSC block. `"auto"` sizes them to about Dask's `array.chunk-size`, reading
+  only metadata. Sparse matrices have no stored chunk grid along rows to align
+  with; `_sparse_block_length` explains why that stays cheap.
+- Dense blocks are whole rows, the layout {doc}`scanpy <scanpy:index>` and
+  {doc}`rapids-singlecell <rapids_singlecell:index>` require, built from whole
+  stored chunks so that no stored chunk is split. `"storage"` keeps the stored
+  chunks instead. `_dense_lazy_chunks` documents the sizing rule.
+
+`array.chunk-size` is read when the lazy arrays are built. Tables reopened by
+`add_table`, `add_table_components` and the regional adapter use the same
+defaults. The regional writer reads existing matrices with
+`dense_chunks="storage"`, so existing dense targets keep their stored layout
+during merging.
+
 Lazy and backed matrix reads accept dense `array`/`string-array` encoding version
 `0.2.0` and CSR/CSC encoding version `0.1.0`. Harpy rejects other matrix encodings
 or versions with `ValueError` before decoding. CSR/CSC version checks also apply
@@ -585,7 +601,7 @@ paths for installed objects, as described below.
 
 ### Reading a SpatialData store with selected tables
 
-`hp.io.read_zarr(store, table_name=None, table_mode="lazy", sparse_chunk_size=1000)`
+`hp.io.read_zarr(store, table_name=None, table_mode="lazy", sparse_chunks="auto", dense_chunks="auto")`
 returns a SpatialData object containing all non-table elements and the selected
 tables. `table_name=None` reads all tables, a name or sequence selects exact names,
 and `table_name=[]` skips tables. Duplicate names are rejected; missing names raise
@@ -599,7 +615,7 @@ hp.io.read_zarr
             └── attach to the returned SpatialData object
 ```
 
-`table_mode` and `sparse_chunk_size` use the table-reader contracts above;
+`table_mode`, `sparse_chunks` and `dense_chunks` use the table-reader contracts above;
 they do not alter non-table reading. Unselected tables are not decoded, and
 selected tables are never first loaded eagerly through SpatialData. Ordinary
 `spatialdata.read_zarr()` behavior is unchanged.

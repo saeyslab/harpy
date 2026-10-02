@@ -219,8 +219,10 @@ graph and embedding steps require in-memory GPU data. `tl.leiden` and
 builds its AnnData from
 `anndata.experimental.read_elem_lazy(f["X"], (50_000, n_vars))` and eagerly read
 `obs`/`var`, then calls `rsc.get.anndata_to_GPU`. For a SpatialData store,
-`hp.tb.read_table(store, table_name=..., mode="lazy", sparse_chunk_size=50_000)`
+`hp.tb.read_table(store, table_name=..., mode="lazy", sparse_chunks=50_000)`
 replaces that construction. The tutorials use 20,000 to 50,000 rows per chunk.
+With slice 1a, the default `sparse_chunks="auto"` sizes blocks from Dask's
+`array.chunk-size` instead; pass an integer to match the tutorials.
 Neither tutorial writes results back to storage.
 
 **Cluster (source).** Multi-GPU runs use `dask_cuda.LocalCUDACluster` with a
@@ -977,7 +979,7 @@ rapids-singlecell (untested, from its documentation):
 ```python
 import rapids_singlecell as rsc
 
-adata = hp.tb.read_table(store, table_name=table_name, mode="lazy", sparse_chunk_size=50_000)
+adata = hp.tb.read_table(store, table_name=table_name, mode="lazy", sparse_chunks=50_000)
 rsc.get.anndata_to_GPU(adata)
 rsc.pp.normalize_total(adata, target_sum=1e4)
 rsc.pp.log1p(adata)
@@ -1111,9 +1113,24 @@ as those of `hp.tb.add_feature_matrix`, use the same chunk policy.
 - Not covered: tables saved through SpatialData's own writer, such as
   `sdata.write(output)` in the Visium readers. Those tables are sparse and are
   handled by 1c.
+- Out of scope: stored chunk sizes of sparse matrices. Harpy passes no chunk
+  settings, so AnnData leaves them to Zarr's default (`_guess_chunks` in
+  `zarr/core/chunk_grids.py`). For in-memory matrices it is sized from the whole
+  array; for Dask matrices, AnnData's `write_dask_sparse` writes the first block
+  that way and appends the others, so the first block's size counts. The default
+  aims for 256 KiB × 2^(log10 of the size in MiB), clamped to 128 KiB–64 MiB:
+  about 0.5 MiB for 10 MiB and about 4 MiB for 10 GiB. That keeps stored chunks
+  far below the 128 MiB `"auto"` blocks, which is the assumption behind
+  `sparse_chunks="auto"` (see "Sparse block size" in gap 1). Measured with
+  Harpy's writer on a 500,000 × 2000 CSR matrix: stored `data` chunks of
+  0.5–1.2 MiB, whether written from memory or from Dask.
 - Side effect: this also fixes the dense results Harpy writes back today, such as
   `X_pca` and scaled layers, which are currently split by columns on disk.
-- Tests: the write-side tests listed under "Dense matrices" in gap 1.
+- Tests:
+  - the write-side tests listed under "Dense matrices" in gap 1;
+  - Harpy-written sparse matrices, from memory and from Dask, have stored `data`
+    and `indices` chunks well below the `"auto"` block size. This guards the
+    assumption above if AnnData or Zarr change their defaults.
 
 #### Slice 1c: CSC → CSR
 
