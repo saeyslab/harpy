@@ -366,7 +366,7 @@ def test_lazy_replacement_finishes_before_its_source_is_deleted(
     """
     path = make_table_io_store(zarr_format=zarr_format, matrix_kind=matrix_kind)
     zarr.consolidate_metadata(str(path))
-    source = read_table(path, table_name="counts", sparse_chunk_size=1)
+    source = read_table(path, table_name="counts", sparse_chunks=1)
     expected = read_zarr(path / "tables/counts").layers["counts"] * 2
     before = _store_bytes(path)
     original_rename, original_consolidate = Path.rename, zarr.consolidate_metadata

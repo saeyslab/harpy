@@ -8,6 +8,7 @@ import pytest
 import zarr
 from anndata import AnnData
 from dask.callbacks import Callback
+from scipy import sparse
 from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
@@ -242,6 +243,32 @@ def test_add_table_attaches_only_target_lazily_and_preserves_slots(
     assert _store_bytes(path / "tables" / "unrelated") == unrelated_bytes
     root = zarr.open_group(str(path), mode="r", use_consolidated=True)
     assert root[f"tables/{output_name}"].metadata.zarr_format == zarr_format
+
+
+def test_reopened_table_uses_the_readers_default_chunks(make_table_io_store):
+    """add_table attaches its reopened table with the same lazy layout as read_table.
+
+    With 2500 rows, the former fixed 1000-row sparse blocks would split X; the
+    "auto" default reads it as one block. The dense obsm entry is read in whole rows.
+    """
+    path = make_table_io_store()
+    sdata = SpatialData()
+    sdata.path = path
+    n_obs = 2500
+    adata = AnnData(
+        X=sparse.random(n_obs, 20, density=0.05, format="csr", dtype=np.float32, random_state=0),
+        obsm={"features": np.arange(n_obs * 40, dtype=np.float32).reshape(n_obs, 40)},
+    )
+
+    add_table(sdata, adata, "large", region=None)
+
+    attached = sdata.tables["large"]
+    expected = read_table(path, table_name="large")
+    assert attached.X.chunks == expected.X.chunks == ((n_obs,), (20,))
+    assert attached.obsm["features"].chunks == expected.obsm["features"].chunks
+    assert attached.obsm["features"].numblocks[1] == 1
+    _assert_value(attached.X, adata.X)
+    _assert_value(attached.obsm["features"], adata.obsm["features"])
 
 
 @pytest.mark.parametrize("backed", [False, True])
