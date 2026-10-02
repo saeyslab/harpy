@@ -139,28 +139,17 @@ each other; both routes use the same publisher.
 ### Writing AnnData components
 
 `_write_anndata_element(group, path, value, logical_path=..., ...)` writes a
-value at `path`, such as `("obsm", "my_matrix")`, and returns `None`. It
-centralizes path handling and AnnData encoding through AnnData's
-`write_dispatched`. The optional `create_parents=True` creates missing parents
-as AnnData-encoded mappings.
+value at `path`, such as `("obsm", "my_matrix")`, through AnnData's
+`write_dispatched`, and returns `None`. The optional `create_parents=True`
+creates missing parents as AnnData-encoded mappings.
 
-The required `logical_path` is the value's position in the AnnData table: `()`
-for a whole table, `("raw",)` for raw, or a component path. It can differ from
-`path`, because staged values do not always sit at their logical path:
-`write_table_components` stages each component as `component-N`. The writer
-uses it to choose the stored layout:
-
-- Dense arrays at matrix paths (`X`, entries of `layers`, `obsm`, `varm`,
-  `obsp` and `varp`, and raw's `X` and `varm` entries) are stored in row-only
-  chunks of 4 MiB (`_STORED_CHUNK_BYTES`), spanning all axes after the first.
-  The size is fixed in bytes, unlike Zarr's size-dependent default, and does
-  not depend on Dask's `array.chunk-size`, which sizes lazy blocks only.
-- Dask inputs are rechunked into write blocks of whole stored chunks, about the
-  size of their input blocks, so that each stored chunk is written once;
-  `_rechunk_to_write_blocks` documents the rule.
-- Everything else keeps AnnData's defaults: `obs`/`var` columns, `uns`, sparse
-  matrices and string arrays. Sharding follows AnnData's `auto_shard_zarr_v3`
-  setting; Harpy's chunks then become the inner chunks of its shards.
+Callers pass the value's position in the AnnData table as `logical_path`,
+because staged paths need not be logical ones: `write_table_components` stages
+components as `component-N`. The writer uses it to choose the stored layout.
+Dense matrices are stored in row-only chunks of 4 MiB, fixed in bytes and
+independent of `array.chunk-size`. Everything else keeps AnnData's defaults,
+and sharding follows AnnData's `auto_shard_zarr_v3` setting. The docstring of
+`_write_anndata_element` gives the rules and the helpers that apply them.
 
 This helper does not create a workspace, publish paths, retain backups or
 automatically read the result. The caller supplies the target group, normally
