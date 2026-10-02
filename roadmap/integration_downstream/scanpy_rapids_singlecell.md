@@ -319,7 +319,7 @@ reads dense arrays with `read_elem_lazy(element)` and keeps those chunks
 lazy reads align with whatever is already stored.
 
 1. **Writes (primary fix):** store dense matrices with row-only chunks of a fixed
-   size, a Harpy constant of a few MiB (see "Stored chunk size for writes"
+   size, a Harpy constant of 4 MiB (see "Stored chunk size for writes"
    below). Lazy reads of these stores combine whole stored chunks into row bands
    of about the memory target, so no column chunks need merging and no stored
    chunk is split.
@@ -429,8 +429,8 @@ stored chunk size.
 
 **Stored chunk size for writes (decided).** Writes do not use the memory target
 as the stored chunk size. They store dense matrices in row-only chunks of a fixed
-size: a Harpy constant of a few MiB, for example 4 MiB, independent of Dask's
-`array.chunk-size`. The exact value is set in slice 1b.
+size: a Harpy constant of 4 MiB, `_STORED_CHUNK_BYTES = 4 * 1024 * 1024` in
+`_storage/_anndata.py`, independent of Dask's `array.chunk-size`.
 
 - A stored chunk is decompressed whole, so small stored chunks keep partial reads
   cheap: subsets of rows, viewers, and the regional merge reading an existing
@@ -1093,12 +1093,12 @@ the cleanest stored layout. The slices still start with the read side: it helps
 existing stores immediately, without rewriting any data, and it provides the
 sizing logic that the write side reuses.
 
-| Slice                         | Content                                                                                                  | Main code                                                           | Depends on                                   |
-| ----------------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | -------------------------------------------- |
-| **1a: read side**             | `sparse_chunks` and `dense_chunks` on all read functions; shared sizing helper                           | `_storage/_anndata.py`, `table/io/_read.py`, `io/_read_zarr.py`     | nothing                                      |
-| **1b: dense writes**          | row-only stored chunks of a fixed size (a few MiB) for dense matrices, with write blocks aligned to them | `_storage/_anndata.py` (`_write_anndata_element`)                   | 1a's sizing helper                           |
-| **1c: CSC → CSR**             | Visium readers write CSR; one-time conversion of existing CSC tables                                     | `io/_visium.py`, `io/_visium_hd.py`, a conversion helper or recipe  | the open CSC question; 1a for the lazy reads |
-| **1d: regional-write chunks** | chunk policy of the regional merge; removes 1a's guard                                                   | `table/io/_write_by_region.py`, `table/io/_components_by_region.py` | 1a's read policy and sizing helper           |
+| Slice                         | Content                                                                                              | Main code                                                           | Depends on                                   |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | -------------------------------------------- |
+| **1a: read side**             | `sparse_chunks` and `dense_chunks` on all read functions; shared sizing helper                       | `_storage/_anndata.py`, `table/io/_read.py`, `io/_read_zarr.py`     | nothing                                      |
+| **1b: dense writes**          | row-only stored chunks of a fixed size (4 MiB) for dense matrices, with write blocks aligned to them | `_storage/_anndata.py` (`_write_anndata_element`)                   | 1a's sizing helper                           |
+| **1c: CSC → CSR**             | Visium readers write CSR; one-time conversion of existing CSC tables                                 | `io/_visium.py`, `io/_visium_hd.py`, a conversion helper or recipe  | the open CSC question; 1a for the lazy reads |
+| **1d: regional-write chunks** | chunk policy of the regional merge; removes 1a's guard                                               | `table/io/_write_by_region.py`, `table/io/_components_by_region.py` | 1a's read policy and sizing helper           |
 
 After 1a, existing stores work with scanpy and rapids-singlecell, except CSC
 tables. After 1b, new dense tables are stored in whole rows, so lazy reads only
@@ -1181,8 +1181,9 @@ as those of `hp.tb.add_feature_matrix`, use the same chunk policy.
 
 - In `_write_anndata_element`, store dense matrices (`X`, layers, `obsm`, `varm`,
   `obsp`, `varp` and `raw`, the same scope as the reads) with row-only chunks of
-  a fixed size: a Harpy constant of a few MiB, independent of Dask's
-  `array.chunk-size` (see "Stored chunk size for writes" in gap 1). Rows per
+  a fixed size: 4 MiB, the Harpy constant `_STORED_CHUNK_BYTES` in
+  `_storage/_anndata.py`, independent of Dask's `array.chunk-size` (see "Stored
+  chunk size for writes" in gap 1). Rows per
   stored chunk = the constant ÷ bytes per row, computed with the same
   bytes-per-row logic as the 1a helper.
 - Stored chunk shape and edge cases: one helper, mirroring the read helper
@@ -1222,10 +1223,23 @@ as those of `hp.tb.add_feature_matrix`, use the same chunk policy.
     to align.
 
 - Implementation: AnnData's `write_dispatched`, with a callback.
-  `write_dispatched` is available in anndata 0.12.10; this approach has not been
-  tested yet. AnnData calls the callback for every element it writes, including
-  nested ones such as each `obs` column, with the element, its parent group, its
-  key in that group and its encoding (`WriteCallback` in `anndata/_types.py`).
+  `write_dispatched` is available in anndata 0.12.10, Harpy's floor. AnnData
+  calls the callback for every element it writes, including nested ones such as
+  each `obs` column, with the element, its parent group, its key in that group
+  and its encoding (`WriteCallback` in `anndata/_types.py`).
+  - Checked with a prototype on Zarr v3 and v2 stores, with anndata 0.12.10,
+    using Harpy's staging patterns: a whole table at `table`, a component at
+    `component-0`, a `Raw` at `raw` and an empty mapping.
+    - The parent group's name plus the key gives each element's full Zarr path,
+      the same on both formats, so the callback can strip the written value's
+      prefix (its parent group and key) and add `logical_path`.
+    - The encodings match the rule below: numeric `obs`/`var` columns,
+      categorical codes and `uns` arrays are `array`; a dataframe-valued `obsm`
+      entry is `dataframe`, with its columns one level deeper; sparse matrices
+      are `csr_matrix`, and their `data`, `indices` and `indptr` arrays do not
+      reach the callback; Dask dense arrays are `array`.
+    - Setting `chunks` and rechunking a Dask input in the callback works: the
+      stored chunks are the ones set, and the values are unchanged.
   - Rule: the callback sets `chunks`, and rechunks Dask inputs (see "Block
     alignment before writing" below), only for elements whose encoding is
     `array` and whose logical path, meaning their position in the AnnData rather
@@ -1459,9 +1473,20 @@ as those of `hp.tb.add_feature_matrix`, use the same chunk policy.
     its stored layout changes; say so.
   - In the Notes of `write_table`, `write_table_components`, `add_table` and
     `add_table_components`, one or two sentences: dense matrices are stored in
-    row-only chunks of about 4 MiB (the constant's value); sparse matrices and
+    row-only chunks of 4 MiB; sparse matrices and
     annotations use AnnData's defaults; sharding follows AnnData's
     `auto_shard_zarr_v3` setting.
+- Expected changes to existing code and tests:
+  - the required `logical_path` argument changes every call site of
+    `_write_anndata_element`: 8 in `src`, and the direct calls in
+    `_tests/test_storage/test_anndata.py`;
+  - existing tests that write through Harpy's writers and then assert chunks,
+    such as the one in `test_add_table.py` and the regional-merge tests in
+    `test_components_by_region.py` and `test_write_components_by_region.py`,
+    may need new expected values once dense matrices are stored in row-only
+    chunks. Check each one rather than only updating the numbers. Most chunk
+    assertions in the read tests use stores written directly with AnnData's
+    `write_elem` and are unaffected.
 - Tests:
   - the write-side tests listed under "Dense matrices" in gap 1;
   - a table written with `write_table` stores dense `X`, layers, `obsm`, `varm`,
