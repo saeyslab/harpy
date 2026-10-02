@@ -92,6 +92,7 @@ source_suffix = {
 intersphinx_mapping = {
     "anndata": ("https://anndata.readthedocs.io/en/stable/", None),
     "scanpy": ("https://scanpy.readthedocs.io/en/stable/", None),
+    "rapids_singlecell": ("https://rapids-singlecell.scverse.org/en/stable/", None),
     "numpy": ("https://numpy.org/doc/stable/", None),
     "geopandas": ("https://geopandas.org/en/stable/", None),
     "xarray": ("https://docs.xarray.dev/en/stable/", None),
