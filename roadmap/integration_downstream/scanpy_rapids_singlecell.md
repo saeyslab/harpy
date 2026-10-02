@@ -503,7 +503,8 @@ substantially and align write blocks to whole shards, is deferred; see
 "Deferred: explicit sharding" under "Implementation sequence".
 
 **Scope.** The rule applies to every lazily read dense array: `X`, layers,
-`obsm`, `varm`, `varp` and `raw`. Row-only chunking is valid for all of them.
+`obsm`, `varm`, `obsp`, `varp` and `raw`. Row-only chunking is valid for all of
+them.
 
 - Arrays that are not 2-D are chunked along the first axis only, with all other
   axes whole. Their bytes per row = itemsize × the product of all axes after the
@@ -1179,15 +1180,85 @@ as those of `hp.tb.add_feature_matrix`, use the same chunk policy.
 #### Slice 1b: dense writes
 
 - In `_write_anndata_element`, store dense matrices (`X`, layers, `obsm`, `varm`,
-  `varp` and `raw`, the same scope as the reads) with row-only chunks of a fixed
-  size: a Harpy constant of a few MiB, independent of Dask's `array.chunk-size`
-  (see "Stored chunk size for writes" in gap 1). Rows per stored chunk = the
-  constant ÷ bytes per row, computed with the same bytes-per-row logic as the 1a
-  helper.
-- Implementation: AnnData's `write_dispatched`, with a callback that sets `chunks`
-  only for dense 2-D matrices and leaves `obs`/`var` columns and sparse buffers to
-  AnnData's defaults. `write_dispatched` is available in anndata 0.12.10; this
-  approach has not been tested yet.
+  `obsp`, `varp` and `raw`, the same scope as the reads) with row-only chunks of
+  a fixed size: a Harpy constant of a few MiB, independent of Dask's
+  `array.chunk-size` (see "Stored chunk size for writes" in gap 1). Rows per
+  stored chunk = the constant ÷ bytes per row, computed with the same
+  bytes-per-row logic as the 1a helper.
+- Stored chunk shape and edge cases: one helper, mirroring the read helper
+  `_dense_lazy_chunks`:
+
+  ```python
+  def _dense_stored_chunks(shape, itemsize):
+      n_rows = shape[0]
+      bytes_per_row = itemsize * prod(shape[1:])
+      if bytes_per_row == 0:
+          rows = max(n_rows, 1)  # no values: one stored chunk, as reads use one block
+      else:
+          rows = max(_STORED_CHUNK_BYTES // bytes_per_row, 1)
+      return (min(rows, max(n_rows, 1)), *(max(size, 1) for size in shape[1:]))
+  ```
+
+  - Arrays that are not 2-D are chunked along the first axis. 0-D arrays cannot
+    occur at matrix paths; if one did, it would be left to AnnData, as the read
+    helper does. String arrays are excluded by the callback's encoding rule.
+  - Zero columns: Zarr rejects a chunk edge of 0, even on an axis of length 0
+    ("integer chunk edge length must be >= 1"). Its own default replaces 0 with
+    1: `(10, 0)` gets chunks `(10, 1)`, `(0, 5)` gets `(1, 5)` and `(0, 0)` gets
+    `(1, 1)`. The helper does the same, with one stored chunk of all rows when a
+    row holds no values.
+  - Zero rows: a stored chunk of 1 row.
+  - Small arrays: rows are capped at the number of rows, so that a stored chunk
+    is no larger than the array. Zarr stores every chunk at the full chunk
+    shape and fills the part outside the array with the fill value. A 10 × 50
+    float32 array (2,000 B) with chunks of 20,971 rows wrote a 4,194,200-byte
+    chunk file without compression. With Zarr's default compression (Zstd) the
+    padding costs almost nothing: the chunk file was 2,032 B instead of 1,891 B
+    with the cap, and a read took 0.54 ms instead of 0.51 ms. The cap therefore
+    mainly matters for uncompressed stores; it costs nothing and matches the
+    read helper. The last stored chunk of every array is padded the same way,
+    which a regular chunk grid cannot avoid.
+  - Write blocks: no rechunk for arrays without values, since there is nothing
+    to align.
+
+- Implementation: AnnData's `write_dispatched`, with a callback.
+  `write_dispatched` is available in anndata 0.12.10; this approach has not been
+  tested yet. AnnData calls the callback for every element it writes, including
+  nested ones such as each `obs` column, with the element, its parent group, its
+  key in that group and its encoding (`WriteCallback` in `anndata/_types.py`).
+  - Rule: the callback sets `chunks`, and rechunks Dask inputs (see "Block
+    alignment before writing" below), only for elements whose encoding is
+    `array` and whose logical path, meaning their position in the AnnData rather
+    than in the Zarr store, is `("X",)`, `("raw", "X")`, `(slot, key)` for a slot
+    in `_MATRIX_MAPPINGS` (`layers`, `obsm`, `varm`, `obsp`, `varp`), or
+    `("raw", "varm", key)`. It passes every other element to AnnData unchanged.
+    The encoding alone is not enough, because numeric `obs`/`var` columns and
+    arrays in `uns` are also encoded as `array`. The encoding excludes sparse
+    matrices, `string-array` and dataframes; a dataframe-valued `obsm` entry
+    also has its columns one level deeper, at `("obsm", key, column)`. Arrays
+    that are not 2-D are chunked along the first axis, as on the read side.
+  - Logical path argument: `_write_anndata_element` gets a required keyword
+    argument, for example `logical_path`, with the logical path of the value it
+    writes: `()` for a whole table, `("raw",)` for raw, and the component path
+    for a component. The callback appends the element's position below the
+    written value, from its parent group and key, and applies the rule to the
+    result. The Zarr path cannot be used instead, because callers stage values
+    at different places, and `write_table_components` stages each component as
+    `component-N` at the staging root, which hides the slot entirely:
+
+    | Caller                                     | Staged at                            | Logical path of the value       |
+    | ------------------------------------------ | ------------------------------------ | ------------------------------- |
+    | `write_table`                              | `table`                              | `()`, the whole table           |
+    | `write_table_components`, raw              | `raw`                                | `("raw",)`                      |
+    | `write_table_components`, other components | `component-N`                        | e.g. `("obsm", "X_pca")`        |
+    | aggregation writer                         | `table`, `table/X`, `table/obsm/key` | `()`, `("X",)`, `("obsm", key)` |
+    | canonical centers                          | `obsm/key` at the staging root       | `("obsm", key)`                 |
+
+    Calls that write only metadata, such as the canonical-centers metadata in
+    `uns` and the empty mappings that `write_table_components` creates, pass
+    their path too; nothing in them is chunked. The argument is required so that
+    each call site states the path: a wrong default would silently chunk the
+    wrong arrays.
 - Block alignment before writing. Terms, as in the Terminology section of
   `docs/development/storage.md`: a _stored chunk_ is a piece of the Zarr array on
   disk, here S rows and all columns, with S set by the write constant; _input
@@ -1370,6 +1441,16 @@ as those of `hp.tb.add_feature_matrix`, use the same chunk policy.
   Dask's `array.chunk-size`; and that sharding follows AnnData's setting.
 - Tests:
   - the write-side tests listed under "Dense matrices" in gap 1;
+  - a table written with `write_table` stores dense `X`, layers, `obsm`, `varm`,
+    `obsp`, `varp` and raw entries in row-only chunks, while numeric `obs`/`var`
+    columns, arrays in `uns`, dataframe-valued `obsm` entries, string arrays and
+    sparse matrices keep AnnData's defaults;
+  - the same through `write_table_components`, whose components are staged as
+    `component-N`, and through the aggregation and canonical-centers writers;
+  - edge cases: shapes `(10, 0)`, `(0, 5)` and `(0, 0)`, written from NumPy and
+    from Dask; an array smaller than one stored chunk gets chunks of its own
+    number of rows; 1-D and 3-D arrays are chunked along the first axis; a string
+    array at a matrix path keeps AnnData's defaults;
   - the write block helper returns k × S rows, with k = the bytes of the largest
     input block ÷ the bytes of a stored chunk, rounded down, at least 1, and all
     other axes whole;
