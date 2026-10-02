@@ -1,16 +1,7 @@
-## Python environment
+Shared agent instructions (Python environment, test scope, pre-commit checks and code
+explanation references) live in `agents.md`, imported here:
 
-Canonical environment: `.venv`. Use it as-is — do NOT sync, update, or install
-into it (e.g. no `uv sync`/`uv run`); the maintainer manages env updates manually.
-
-Run Python, tests, lint, and tooling by calling the environment's binaries directly via
-their `.venv/bin/` path.
-
-```bash
-.venv/bin/pytest
-.venv/bin/python -m pytest
-.venv/bin/pre-commit run ruff --all-files
-```
+@agents.md
 
 ## Claude config
 
