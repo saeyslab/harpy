@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import dask
 import dask.array as da
 import numpy as np
 import pandas as pd
@@ -7,6 +8,7 @@ import pytest
 import zarr
 from anndata import AnnData
 from anndata.abc import CSRDataset
+from anndata.io import write_elem
 from scipy import sparse
 from spatialdata import SpatialData
 from spatialdata.models import Labels2DModel, TableModel
@@ -93,7 +95,7 @@ def test_read_backed_element_uses_the_stored_encoding(tmp_path):
     [("lazy", da.Array, da.Array), ("backed", zarr.Array, CSRDataset), ("eager", np.ndarray, sparse.csr_matrix)],
 )
 def test_mapping_decoder_preserves_matrix_mode(tmp_path, mode, dense_type, sparse_type):
-    """Dictionary nesting must preserve the requested matrix mode and sparse chunks."""
+    """Dictionary nesting must preserve the requested matrix mode and chunk settings."""
     group = zarr.open_group(str(tmp_path / "elements.zarr"), mode="w")
     _write_anndata_element(
         group,
@@ -101,18 +103,76 @@ def test_mapping_decoder_preserves_matrix_mode(tmp_path, mode, dense_type, spars
         {
             "dense": np.ones((2, 2)),
             "strings": np.array([["a", "b"], ["c", "d"]]),
-            "nested": {"sparse": sparse.csr_matrix([[0, 3], [4, 0]])},
+            "nested": {"sparse": sparse.csr_matrix([[0, 3], [4, 0]]), "dense": np.ones((4, 2))},
         },
         create_parents=False,
     )
 
-    result = anndata_storage._decode_anndata_element(group["mapping"], mode=mode, sparse_chunk_size=1)
+    result = anndata_storage._decode_anndata_element(group["mapping"], mode=mode, sparse_chunks=1, dense_chunks=1)
 
     assert isinstance(result["dense"], dense_type)
     assert isinstance(result["strings"], dense_type)
     assert isinstance(result["nested"]["sparse"], sparse_type)
     if mode == "lazy":
         assert result["nested"]["sparse"].chunks == ((1, 1), (2,))
+        stored_rows = group["mapping/nested/dense"].chunks[0]
+        assert result["nested"]["dense"].chunks[0][0] == stored_rows
+
+
+@pytest.mark.parametrize("mode", ["lazy", "backed", "eager"])
+@pytest.mark.parametrize(
+    "options, error, message",
+    [
+        ({"dense_chunks": "stored"}, ValueError, "dense_chunks must be 'auto' or 'storage'"),
+        ({"dense_chunks": 1.5}, TypeError, "dense_chunks must be"),
+        ({"dense_chunks": 0}, ValueError, "dense_chunks must be"),
+        ({"sparse_chunks": "storage"}, ValueError, "sparse_chunks must be 'auto' or a positive integer"),
+        ({"sparse_chunks": True}, TypeError, "sparse_chunks must be"),
+        ({"sparse_chunks": -1}, ValueError, "sparse_chunks must be"),
+    ],
+)
+def test_decoder_rejects_unknown_chunk_settings(tmp_path, mode, options, error, message):
+    """Internal callers cannot fall back to "auto" by passing an unknown setting."""
+    group = zarr.open_group(str(tmp_path / "elements.zarr"), mode="w")
+    write_elem(group, "dense", np.ones((4, 2)))
+    write_elem(group, "sparse", sparse.csr_matrix(np.eye(4)))
+    for name in ("dense", "sparse"):
+        with pytest.raises(error, match=message):
+            anndata_storage._decode_anndata_element(group[name], mode=mode, **options)
+        with pytest.raises(error, match=message):
+            _read_anndata_element(group, (name,), mode=mode, **options)
+
+
+def test_dense_lazy_chunks_cover_other_dimensions_empty_columns_strings_and_shards(tmp_path):
+    """Row-only "auto" chunks for arrays that are not 2-D, without columns, of strings, or sharded.
+
+    The target fits five rows of the 3-D array: two stored chunks of two rows. The
+    sharded array aligns with its inner chunks of three rows, not its shards.
+    """
+    group = zarr.open_group(str(tmp_path / "elements.zarr"), mode="w", zarr_format=3)
+    arrays = {
+        "cube": (np.arange(60, dtype=np.float64).reshape(10, 3, 2), {"chunks": (2, 1, 1)}),
+        "vector": (np.arange(10, dtype=np.float64), {"chunks": (3,)}),
+        "empty": (np.zeros((10, 0)), {}),
+        "strings": (np.array([["a", "bb"]] * 10), {"chunks": (2, 1)}),
+        "sharded": (np.arange(48, dtype=np.float64).reshape(12, 4), {"chunks": (3, 4), "shards": (6, 4)}),
+    }
+    for name, (values, dataset_kwargs) in arrays.items():
+        write_elem(group, name, values, dataset_kwargs=dataset_kwargs)
+    assert group["sharded"].chunks == (3, 4) and group["sharded"].shards == (6, 4)
+
+    with dask.config.set({"array.chunk-size": 5 * 3 * 2 * 8}):
+        lazy = {name: anndata_storage._decode_anndata_element(group[name], mode="lazy") for name in arrays}
+
+    assert lazy["cube"].chunks == ((4, 4, 2), (3,), (2,))
+    # 240 bytes fit 30 rows of the vector; the result is clamped to its ten rows.
+    assert lazy["vector"].chunks == ((10,),)
+    assert lazy["empty"].chunks == ((10,), (0,))
+    assert lazy["strings"].chunks == ((2,) * 5, (1, 1))
+    # 240 bytes fit seven 32-byte rows: two inner chunks of three rows.
+    assert lazy["sharded"].chunks == ((6, 6), (4,))
+    for name, (values, _) in arrays.items():
+        np.testing.assert_array_equal(lazy[name].compute(), values)
 
 
 @pytest.mark.parametrize("mode", ["lazy", "backed"])

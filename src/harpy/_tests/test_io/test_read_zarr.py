@@ -9,6 +9,7 @@ import zarr
 from anndata import AnnData
 from anndata import read_zarr as read_anndata_zarr
 from anndata.abc import CSRDataset
+from anndata.io import write_elem
 from dask.callbacks import Callback
 from geopandas.testing import assert_geodataframe_equal
 from scipy import sparse
@@ -101,9 +102,9 @@ def test_selection_preserves_non_table_elements(spatial_store, monkeypatch, tabl
 
 @pytest.mark.parametrize("mode", ["lazy", "backed", "eager"])
 def test_table_modes_survive_attachment(spatial_store, monkeypatch, mode):
-    """The requested mode, sparse chunk size and table annotation survive attachment."""
+    """The requested mode, sparse chunk setting and table annotation survive attachment."""
     with _guard_table_reads(monkeypatch, selected={"csr"}, allow_matrix_reads=mode == "eager"):
-        result = read_zarr(spatial_store, table_name="csr", table_mode=mode, sparse_chunk_size=1)
+        result = read_zarr(spatial_store, table_name="csr", table_mode=mode, sparse_chunks=1)
     table = result.tables["csr"]
     assert table.uns["spatialdata_attrs"] == {"region": "cells", "region_key": "region", "instance_key": "instance"}
     if mode == "lazy":
@@ -122,6 +123,22 @@ def test_table_modes_survive_attachment(spatial_store, monkeypatch, mode):
     ordinary = read_spatialdata_zarr(spatial_store)
     assert isinstance(ordinary.tables["dense"].X, np.ndarray)
     assert sparse.isspmatrix_csr(ordinary.tables["csr"].X)
+
+
+@pytest.mark.parametrize(
+    "dense_chunks, expected", [("auto", ((2,), (2,))), (1, ((1, 1), (2,))), ("storage", ((1, 1), (1, 1)))]
+)
+def test_dense_chunk_setting_survives_attachment(spatial_store, monkeypatch, dense_chunks, expected):
+    """Lazy dense tables use whole rows by default, an integer row count, or the stored chunks."""
+    values = np.array([[1, 0], [2, 3]], dtype=np.float32)
+    # SpatialData consolidates its metadata; edit without it, then consolidate again.
+    table_group = zarr.open_group(str(spatial_store), mode="r+", use_consolidated=False)["tables/dense"]
+    write_elem(table_group, "X", values, dataset_kwargs={"chunks": (1, 1)})
+    zarr.consolidate_metadata(str(spatial_store))
+    with _guard_table_reads(monkeypatch, selected={"dense"}):
+        result = read_zarr(spatial_store, table_name="dense", dense_chunks=dense_chunks)
+    assert result.tables["dense"].X.chunks == expected
+    np.testing.assert_array_equal(result.tables["dense"].X.compute(), values)
 
 
 def test_table_only_store_skips_broken_unselected_table(tmp_path, monkeypatch):
@@ -157,7 +174,10 @@ def test_store_without_tables(tmp_path):
         ({"table_name": [1]}, TypeError, "strings"),
         ({"table_name": {"counts"}}, TypeError, "table_name"),
         ({"table_mode": "invalid", "table_name": []}, ValueError, "mode"),
-        ({"sparse_chunk_size": 0, "table_name": []}, ValueError, "positive"),
+        ({"sparse_chunks": 0, "table_name": []}, ValueError, "positive"),
+        ({"sparse_chunks": "storage", "table_name": []}, ValueError, "sparse_chunks must be 'auto'"),
+        ({"dense_chunks": 0, "table_name": []}, ValueError, "positive"),
+        ({"dense_chunks": "rows", "table_name": []}, ValueError, "dense_chunks must be 'auto' or 'storage'"),
     ],
 )
 def test_invalid_requests_fail_before_store_access(tmp_path, options, error, message):
