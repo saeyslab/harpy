@@ -1,9 +1,11 @@
 from pathlib import Path
 
+import dask
 import dask.array as da
 import numpy as np
 import pandas as pd
 import pytest
+import scanpy as sc
 import zarr
 from anndata import AnnData, read_zarr
 from anndata._io.specs.registry import IORegistryError
@@ -15,6 +17,7 @@ from spatialdata import SpatialData
 from spatialdata.models import TableModel
 from zarr.storage import LocalStore
 
+import harpy._storage._anndata as anndata_storage
 import harpy.table.io._write as table_writer
 from harpy._tests.test_table.test_io.test_read import _assert_value
 from harpy.table import delete_table_components, read_table, read_table_components, write_table, write_table_components
@@ -440,6 +443,57 @@ def test_component_writes_cover_matrix_axes_raw_and_mapping_replacement(make_tab
         overwrite=True,
     )
     assert read_table(path, table_name="counts").X is None
+
+
+def test_end_to_end_dense_write_lazy_read_and_scanpy_pca(make_table_io_store, monkeypatch):
+    """End to end for dense matrices: Harpy's writers, lazy reads and scanpy.
+
+    This is the behaviour the row-only layout exists for. A dense table and a
+    dense component written with Harpy's writers are stored in whole rows of the
+    stored-chunk constant, even when the component arrives in blocks that split
+    its columns. A lazy read combines whole stored chunks into blocks that span
+    all columns, and scanpy's PCA accepts them, keeps its projection lazy and
+    matches an in-memory PCA. Arrays in uns keep AnnData's defaults.
+    """
+    # Writes store dense matrices in chunks of as many whole rows as fit in
+    # _STORED_CHUNK_BYTES (_choose_dense_stored_chunks): 1,200 bytes hold five
+    # 240-byte rows of the 30-column float64 matrix.
+    monkeypatch.setattr(anndata_storage, "_STORED_CHUNK_BYTES", 5 * 30 * 8)
+    path = make_table_io_store()
+    values = np.random.default_rng(0).normal(size=(40, 30))
+    obs = pd.DataFrame(index=[f"c{i}" for i in range(40)])
+    var = pd.DataFrame(index=[f"g{i}" for i in range(30)])
+    write_table(path, table_name="dense", adata=AnnData(X=values, obs=obs, var=var))
+    # The embedding's input blocks of 7 rows x 10 columns split the columns and do
+    # not line up with the 5-row stored chunks; the writer rechunks them into
+    # write blocks of whole stored chunks (_rechunk_to_write_blocks).
+    write_table_components(
+        path,
+        table_name="dense",
+        components={("obsm", "embedding"): da.from_array(values, chunks=(7, 10)), ("uns", "values"): values},
+        obs_identity=obs.index,
+    )
+
+    group = zarr.open_group(str(path / "tables" / "dense"), mode="r")
+    assert group["X"].chunks == group["obsm/embedding"].chunks == (5, 30)
+    assert group["uns/values"].chunks == (40, 30)
+    # Lazy reads use blocks of the largest multiple of the stored rows that fits
+    # Dask's array.chunk-size, spanning all columns (_dense_lazy_chunks): a target
+    # of twelve 240-byte rows and stored chunks of 5 rows give read blocks of 10 rows.
+    with dask.config.set({"array.chunk-size": 12 * 30 * 8}):
+        table = read_table(path, table_name="dense")
+    for matrix in (table.X, table.obsm["embedding"]):
+        assert matrix.chunks == ((10, 10, 10, 10), (30,))
+        np.testing.assert_array_equal(matrix.compute(), values)
+    sc.pp.pca(table, n_comps=2, svd_solver="covariance_eigh")
+    # The projection stays lazy, so it can be written back without loading it.
+    assert isinstance(table.obsm["X_pca"], da.Array)
+    # It matches an in-memory PCA of the same values, up to the sign of each component.
+    expected = AnnData(X=values)
+    sc.pp.pca(expected, n_comps=2, svd_solver="covariance_eigh")
+    lazy_pca = table.obsm["X_pca"].compute()
+    signs = np.sign(np.sum(lazy_pca * expected.obsm["X_pca"], axis=0))
+    np.testing.assert_allclose(lazy_pca * signs, expected.obsm["X_pca"], atol=1e-10)
 
 
 def _annotated_store(path):
