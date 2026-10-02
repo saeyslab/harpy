@@ -9,8 +9,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
+from functools import partial
 from math import prod
 from numbers import Integral
+from pathlib import PurePosixPath
 from typing import Literal
 
 import dask
@@ -19,7 +21,7 @@ import numpy as np
 import zarr
 from anndata import AnnData, Raw
 from anndata.abc import CSCDataset, CSRDataset
-from anndata.experimental import read_elem_lazy
+from anndata.experimental import read_elem_lazy, write_dispatched
 from anndata.io import read_elem, sparse_dataset, write_elem
 from dask import delayed
 from dask.utils import parse_bytes
@@ -37,6 +39,10 @@ _MATRIX_MAPPINGS = ("layers", "obsm", "varm", "obsp", "varp")
 # an integer sets them directly, and dense "storage" keeps the stored chunks.
 _SparseChunks = Literal["auto"] | int
 _DenseChunks = Literal["auto", "storage"] | int
+# Stored chunk size of the dense matrices Harpy writes. It is fixed in bytes,
+# unlike Zarr's default, which grows with the array, and does not depend on
+# Dask's array.chunk-size, which sizes in-memory blocks only.
+_STORED_CHUNK_BYTES = 4 * 1024 * 1024
 
 
 def _validate_sparse_chunks(value: _SparseChunks) -> _SparseChunks:
@@ -340,11 +346,208 @@ def _dense_lazy_chunks(element: zarr.Array, *, dense_chunks: _DenseChunks) -> tu
     return (min(rows, max(n_rows, 1)), *(-1,) * (element.ndim - 1))
 
 
+def _is_matrix_path(path: tuple[str, ...]) -> bool:
+    """Return whether a logical AnnData path holds a matrix.
+
+    These are the paths that lazy reads return as matrices: ``X``, the entries
+    of ``layers``, ``obsm``, ``varm``, ``obsp`` and ``varp``, and raw's ``X``
+    and ``varm`` entries. The matrix can be dense or sparse; the caller checks
+    the encoding. Columns of a dataframe-valued ``obsm`` entry are one level
+    deeper and are excluded.
+    """
+    return (
+        path in {("X",), ("raw", "X")}
+        or (len(path) == 2 and path[0] in _MATRIX_MAPPINGS)
+        or (len(path) == 3 and path[:2] == ("raw", "varm"))
+    )
+
+
+def _choose_dense_stored_chunks(shape: tuple[int, ...], itemsize: int) -> tuple[int, ...]:
+    """Choose the stored chunk shape for a dense array about to be written.
+
+    The result is passed to Zarr as ``chunks`` when the array is created. Each
+    stored chunk spans all axes after the first and holds as many whole rows as
+    fit in ``_STORED_CHUNK_BYTES``: at least one row, and at most the array's
+    rows.
+    """
+    n_rows, other_axes = shape[0], shape[1:]
+    bytes_per_row = itemsize * prod(other_axes)
+    if bytes_per_row == 0:
+        # Rows without values: one stored chunk for the whole array, as lazy
+        # reads use one block for it.
+        rows_per_chunk = n_rows
+    else:
+        # At least one row, even when a single row exceeds the constant.
+        rows_per_chunk = max(_STORED_CHUNK_BYTES // bytes_per_row, 1)
+    # At most the array's rows: Zarr stores every chunk at the full chunk
+    # shape and fills the part outside the array, so a small array would
+    # otherwise get a padded 4 MiB chunk.
+    rows_per_chunk = min(rows_per_chunk, n_rows)
+    # Zarr requires chunk edges of at least 1, also along empty axes, as in
+    # its own default.
+    return (max(rows_per_chunk, 1), *(max(size, 1) for size in other_axes))
+
+
+def _rechunk_to_write_blocks(value: da.Array, *, chosen_chunk_rows: int) -> da.Array:
+    """Rechunk a dense Dask array into write blocks, so that each stored chunk is written once.
+
+    Terms used below, as in ``docs/development/storage.md``:
+
+    - *stored chunks*: the chunks of the Zarr array about to be written, of
+      ``chosen_chunk_rows`` rows each;
+    - *input blocks*: the blocks of ``value``, whose layout comes from the caller;
+    - *write blocks*: the blocks returned here, each written to Zarr in one step.
+
+    AnnData writes Dask arrays with ``dask.array.store``, which holds one lock
+    for the whole array and writes one write block at a time. Zarr writes
+    whole stored chunks: a write block that covers only part of a stored chunk
+    makes Zarr read, merge and rewrite that chunk, once for every write block
+    that shares it. Each write block returned here spans all axes after the
+    first and a whole number of stored chunks, so each stored chunk lies in
+    exactly one write block and is written once, without being read back.
+
+    The number of stored chunks per write block is the largest input block's
+    bytes divided by a stored chunk's bytes, rounded down and at least one.
+    Only the boundaries move: write blocks keep about the memory of the input
+    blocks, and Zarr compresses the stored chunks of a write block in
+    parallel.
+
+    Parameters
+    ----------
+    value
+        The dense Dask array about to be written; its blocks are the input
+        blocks.
+    chosen_chunk_rows
+        Rows per stored chunk, along the first axis, of the Zarr array about
+        to be created. ``_choose_dense_stored_chunks`` computes it from
+        ``_STORED_CHUNK_BYTES``: as many whole rows as fit in that many bytes;
+        its docstring gives the exact rule. It is not read from disk: the
+        array does not exist yet.
+
+    Returns
+    -------
+    dask.array.Array
+        ``value`` rechunked into write blocks, or ``value`` itself when it
+        holds no values or its blocks already are write blocks.
+    """
+    if value.size == 0:
+        # No values are written, so there is nothing to align.
+        return value
+    bytes_per_row = value.dtype.itemsize * prod(value.shape[1:])
+    stored_chunk_bytes = chosen_chunk_rows * bytes_per_row
+    largest_input_block_bytes = value.dtype.itemsize * prod(max(sizes) for sizes in value.chunks)
+    # Stored chunks per write block: as many as fit in the largest input block, at least one.
+    stored_chunks_per_write_block = max(largest_input_block_bytes // stored_chunk_bytes, 1)
+    # Never more rows than the array has.
+    rows_per_write_block = min(stored_chunks_per_write_block * chosen_chunk_rows, value.shape[0])
+    # Dask's rechunk returns the array itself when its chunks already match,
+    # so an input already in these write blocks is not rechunked.
+    return value.rechunk({0: rows_per_write_block, **dict.fromkeys(range(1, value.ndim), -1)})
+
+
+def _write_element_with_layout(
+    write_func,
+    parent: zarr.Group,
+    key: str,
+    value: object,
+    *,
+    iospec,
+    dataset_kwargs: Mapping[str, object],
+    root: str,
+    logical_path: tuple[str, ...],
+) -> None:
+    """``write_dispatched`` callback: store dense matrices in row-only chunks, other elements unchanged.
+
+    AnnData calls it just before writing each element, nested ones included,
+    and passes the first four arguments positionally. The encoding alone does
+    not identify matrices, because numeric ``obs`` columns and arrays in
+    ``uns`` are also encoded as ``array``, and so are lists in ``uns``.
+
+    For a dense matrix, it takes three steps:
+
+    1. ``_choose_dense_stored_chunks`` chooses the stored chunk shape from
+       ``_STORED_CHUNK_BYTES``: whole rows along the first axis, all other axes
+       whole;
+    2. for a Dask value, ``_rechunk_to_write_blocks`` rechunks it into write
+       blocks of whole stored chunks, using the chosen rows per stored chunk;
+    3. the chosen shape goes to Zarr as ``chunks`` in ``dataset_kwargs``, and
+       ``write_func`` writes the value.
+
+    Parameters
+    ----------
+    write_func
+        AnnData's write function for this element, which does the writing.
+    parent
+        The Zarr group that will contain the element.
+    key
+        The element's key in ``parent``.
+    value
+        The in-memory value about to be written, such as a NumPy or Dask
+        array, a dataframe or a mapping. It is not on disk yet.
+    iospec
+        The encoding AnnData will use, such as ``array`` or ``csr_matrix``.
+    dataset_kwargs
+        Zarr options for creating the array; dense matrices get ``chunks``.
+    root, logical_path
+        The Zarr path where ``_write_anndata_element`` writes its value, and
+        that value's logical path. The element's logical path is
+        ``logical_path`` followed by the element's position below ``root``.
+
+    Examples
+    --------
+    With ``_STORED_CHUNK_BYTES`` lowered to 96 bytes for readability, a 12 × 4
+    float64 matrix (32-byte rows) gets stored chunks of 96 // 32 = 3 rows with
+    all 4 columns, ``chunks=(3, 4)``. Zarr writes whole stored chunks, so the
+    write blocks must not split them.
+
+    Input blocks smaller than a stored chunk, 2 rows × 2 columns (32 bytes),
+    become write blocks of one stored chunk, ``value.rechunk({0: 3, 1: -1})``::
+
+        row             0  1  2  3  4  5  6  7  8  9 10 11
+        stored chunks  [---0---][---1---][---2---][---3---]   all 4 columns
+        input blocks   [----][----][----][----][----][----]   each in 2 column halves
+        write blocks   [---0---][---1---][---2---][---3---]   all 4 columns
+
+    Without the rechunk, stored chunk 1 (rows 3–5) would be written four
+    times, by the input blocks of rows 2–3 and 4–5 in both column halves, each
+    time read back and merged first.
+
+    Input blocks larger than a stored chunk, 7 rows × 4 columns (224 bytes),
+    hold two whole stored chunks (224 // 96 = 2), so they become write blocks
+    of 6 rows, ``value.rechunk({0: 6, 1: -1})``::
+
+        row             0  1  2  3  4  5  6  7  8  9 10 11
+        stored chunks  [---0---][---1---][---2---][---3---]   all 4 columns
+        input blocks   [---------0---------][------1------]   all 4 columns
+        write blocks   [-------0--------][-------1--------]   all 4 columns
+
+    Without the rechunk, the boundary at row 7 would split stored chunk 2
+    (rows 6–8) between both input blocks, row 6 in the first and rows 7–8 in
+    the second, so it would be written twice: once with row 6, then read
+    back, merged with rows 7–8 and written again. The rechunk moves the
+    boundary down to row 6; the write blocks keep about the size of the input
+    blocks.
+    Input blocks of 6 rows already are write blocks and are written as they
+    are. ``_rechunk_to_write_blocks`` documents the rule.
+    """
+    relative = PurePosixPath(f"{parent.name.rstrip('/')}/{key}").relative_to(root).parts
+    is_dense_matrix = _is_matrix_path(logical_path + relative) and iospec.encoding_type == "array"
+    if is_dense_matrix and getattr(value, "ndim", 0) > 0:
+        chunks = _choose_dense_stored_chunks(value.shape, value.dtype.itemsize)
+        if isinstance(value, da.Array):
+            value = _rechunk_to_write_blocks(value, chosen_chunk_rows=chunks[0])
+        # No shards are passed, so AnnData's opt-in automatic sharding still
+        # applies and keeps these chunks as the inner chunks of its shards.
+        dataset_kwargs = {**dataset_kwargs, "chunks": chunks}
+    write_func(parent, key, value, dataset_kwargs=dataset_kwargs)
+
+
 def _write_anndata_element(
     group: zarr.Group,
     path: tuple[str, ...],
     value: object,
     *,
+    logical_path: tuple[str, ...],
     create_parents: bool,
 ) -> None:
     """Write one logical AnnData path through AnnData's encoding registry.
@@ -356,9 +559,25 @@ def _write_anndata_element(
     gives full table writers and partial component writers the same encoding
     boundary; safe replacement is provided separately by
     :func:`harpy._storage._publication._publish_staged_paths`.
+
+    ``logical_path`` is the position of ``value`` in the AnnData table, which
+    can differ from its staged ``path``: ``()`` for a whole table, ``("raw",)``
+    for raw, or a component path such as ``("obsm", "X_pca")`` staged under a
+    temporary name. It is required, so that no caller silently gets a layout
+    meant for other arrays.
+
+    Dense arrays at matrix paths below it (``_is_matrix_path``) are stored
+    in row-only chunks of about ``_STORED_CHUNK_BYTES`` (``_choose_dense_stored_chunks``),
+    and Dask inputs are rechunked so that each stored chunk is written once
+    (``_rechunk_to_write_blocks``). Other elements, such as ``obs``/``var`` columns,
+    ``uns``, sparse matrices and string arrays, keep AnnData's defaults.
+    Sharding follows AnnData's ``auto_shard_zarr_v3`` setting.
     """
     parent, key = _resolve_anndata_parent(group, path, create_parents=create_parents)
-    write_elem(parent, key, _prepare_anndata_value(value))
+    callback = partial(
+        _write_element_with_layout, root=f"{parent.name.rstrip('/')}/{key}", logical_path=tuple(logical_path)
+    )
+    write_dispatched(parent, key, _prepare_anndata_value(value), callback=callback)
 
 
 def _prepare_anndata_value(value: object) -> object:
