@@ -16,6 +16,7 @@ from spatialdata._io.format import SpatialDataContainerFormatV01
 from spatialdata.models import Labels2DModel, Labels3DModel, PointsModel, TableModel
 from spatialdata.transformations import Affine, Identity, Scale, Sequence, Translation, set_transformation
 
+import harpy._storage._anndata as anndata_storage
 import harpy.table._aggregation_checkpoint as checkpoint_module
 import harpy.table._aggregation_writer as writer_module
 import harpy.table._allocation as aggregation_module
@@ -696,6 +697,30 @@ def test_aggregate_points_writes_once_and_preserves_unrelated_elements(monkeypat
         if "/" in key and not key.startswith("tables/table/"):
             assert (sdata.path / key).read_bytes() == value
     assert not list(tmp_path.glob(".input.zarr.harpy-*"))
+
+
+def test_aggregate_points_stores_dense_centers_in_row_only_chunks(monkeypatch, tmp_path):
+    """The dense canonical centers get row-only stored chunks; the sparse counts keep AnnData's layout."""
+    # A constant below one row gives stored chunks of one row with all coordinates.
+    monkeypatch.setattr(anndata_storage, "_STORED_CHUNK_BYTES", 1)
+    sdata = _backed(_class_aware_sdata(), tmp_path)
+
+    aggregate_points(
+        sdata,
+        labels_name="labels_a",
+        points_name="points_a",
+        to_coordinate_system="sample_a",
+        output_table_name="table",
+        expression_class="Endogenous",
+    )
+
+    group = zarr.open_group(str(sdata.path / "tables" / "table"), mode="r", use_consolidated=False)
+    centers = group[f"obsm/{CANONICAL_OBSM_KEY}"]
+    assert centers.shape[0] > 1
+    assert centers.chunks == (1, centers.shape[1])
+    for name in ("X", "obsm/auxiliary_feature_counts"):
+        assert group[name].attrs["encoding-type"] == "csr_matrix"
+        assert group[f"{name}/data"].chunks[0] > 1
 
 
 @pytest.mark.parametrize("zarr_format", [2, 3])

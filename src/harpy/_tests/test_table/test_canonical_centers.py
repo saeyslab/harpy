@@ -15,6 +15,7 @@ from spatialdata.models import Labels2DModel, Labels3DModel, TableModel
 from spatialdata.transformations import Identity
 from zarr.storage import LocalStore
 
+import harpy._storage._anndata as anndata_storage
 import harpy.table._canonical_centers as canonical_writer
 import harpy.table.io._write as table_writer
 from harpy._tests.test_table.test_io.test_write import _store_bytes
@@ -332,6 +333,19 @@ def test_add_canonical_centers_updates_only_the_canonical_components(tmp_path, m
     np.testing.assert_array_equal(reopened_table.obsp["connectivities"].toarray(), np.eye(2))
     np.testing.assert_array_equal(reopened_table.varm["loadings"], [[1.0], [2.0]])
     np.testing.assert_array_equal(reopened_table.varp["correlations"], [[1.0, 0.5], [0.5, 1.0]])
+
+
+def test_add_canonical_centers_stores_centers_in_row_only_chunks(tmp_path, monkeypatch) -> None:
+    """The canonical centers are a dense obsm matrix, stored in whole rows of the stored-chunk constant."""
+    # A constant below one row gives stored chunks of one row with all coordinates.
+    monkeypatch.setattr(anndata_storage, "_STORED_CHUNK_BYTES", 1)
+    sdata = _backed_external_sdata(tmp_path)
+
+    add_canonical_centers(sdata, table_name="table")
+
+    centers = zarr.open_array(str(sdata.path / "tables" / "table" / "obsm" / CANONICAL_OBSM_KEY), mode="r")
+    assert centers.shape[0] > 1
+    assert centers.chunks == (1, centers.shape[1])
 
 
 def test_add_canonical_centers_aligns_overlapping_instance_ids_across_regions(tmp_path) -> None:
