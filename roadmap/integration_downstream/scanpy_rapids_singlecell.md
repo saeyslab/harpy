@@ -1093,13 +1093,13 @@ the cleanest stored layout. The slices still start with the read side: it helps
 existing stores immediately, without rewriting any data, and it provides the
 sizing logic that the write side reuses.
 
-| Slice                         | Content                                                                                                            | Main code                                                           | Depends on                                   |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------- | -------------------------------------------- |
-| **1a: read side**             | `sparse_chunks` and `dense_chunks` on all read functions; shared sizing helper                                     | `_storage/_anndata.py`, `table/io/_read.py`, `io/_read_zarr.py`     | nothing                                      |
-| **1b: dense writes**          | row-only stored chunks of a fixed size (4 MiB) for dense matrices, with write blocks aligned to them               | `_storage/_anndata.py` (`_write_anndata_element`)                   | 1a's sizing helper                           |
-| **1c: sparse writes**         | stored chunks of a fixed size (4 MiB of non-zero values) for CSR/CSC matrices, independent of the first Dask block | `_storage/_anndata.py` (the write callback)                         | 1b's callback and constant                   |
-| **1d: CSC → CSR**             | Visium readers write CSR; one-time conversion of existing CSC tables                                               | `io/_visium.py`, `io/_visium_hd.py`, a conversion helper or recipe  | the open CSC question; 1a for the lazy reads |
-| **1e: regional-write chunks** | chunk policy of the regional merge; removes 1a's guard                                                             | `table/io/_write_by_region.py`, `table/io/_components_by_region.py` | 1a's read policy and sizing helper           |
+| Slice                         | Content                                                                                                                              | Main code                                                           | Depends on                                   |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------- | -------------------------------------------- |
+| **1a: read side**             | `sparse_chunks` and `dense_chunks` on all read functions; shared sizing helper                                                       | `_storage/_anndata.py`, `table/io/_read.py`, `io/_read_zarr.py`     | nothing                                      |
+| **1b: dense writes**          | row-only stored chunks of a fixed size (4 MiB) for dense matrices, with write blocks aligned to them                                 | `_storage/_anndata.py` (`_write_anndata_element`)                   | 1a's sizing helper                           |
+| **1c: sparse writes**         | stored chunks of a fixed length (524,288 entries, at most 4 MiB per array) for CSR/CSC matrices, independent of the first Dask block | `_storage/_anndata.py` (the write callback)                         | 1b's callback and constant                   |
+| **1d: CSC → CSR**             | Visium readers write CSR; one-time conversion of existing CSC tables                                                                 | `io/_visium.py`, `io/_visium_hd.py`, a conversion helper or recipe  | the open CSC question; 1a for the lazy reads |
+| **1e: regional-write chunks** | chunk policy of the regional merge; removes 1a's guard                                                                               | `table/io/_write_by_region.py`, `table/io/_components_by_region.py` | 1a's read policy and sizing helper           |
 
 After 1a, existing stores work with scanpy and rapids-singlecell, except CSC
 tables. After 1b, new dense tables are stored in whole rows, so lazy reads only
@@ -1549,17 +1549,38 @@ only bounds the non-zero values per row, not the density.
 
 **Rule.** In 1b's write callback, for elements encoded as `csr_matrix` or
 `csc_matrix` at matrix paths (`_is_matrix_path`), pass
-`chunks=(_STORED_CHUNK_BYTES // itemsize of data,)`: for float32 data,
-1,048,576 values, 4 MiB of `data`. This is the same fixed constant as for dense
-matrices, independent of the matrix's size and of how it reaches the writer.
-The length depends only on the dtype of `data`, with no cap, for in-memory and
-Dask matrices alike.
+`chunks=(max(_STORED_CHUNK_BYTES // 8, 1),)`: 524,288 entries per chunk, for
+`data`, `indices` and `indptr` alike. 8 bytes is the width of int64, the widest
+index dtype, so no array's chunks exceed `_STORED_CHUNK_BYTES` (4 MiB) for data
+types up to 8 bytes: float32 `data` gets 2 MiB chunks, float64 `data` and int64
+`indices` and `indptr` 4 MiB. "At least 1" keeps the length valid when tests
+lower the constant below 8 bytes. The length is the same for every sparse
+matrix, with no cap, for in-memory and Dask matrices alike; it depends on
+nothing about the matrix, not even its dtype.
 
 - AnnData passes the same `dataset_kwargs` to `data`, `indices` and `indptr`
   (`write_sparse_compressed`), so all three get this chunk length. `indices`
   then has the same chunk boundaries as `data`, so a range of rows touches the
   same chunk numbers in both. Different lengths per array are not possible
   through AnnData's writer.
+- Why 8 bytes rather than the itemsize of `data`: AnnData's lazy reader opens
+  the matrix in every read block without caching `indptr` (`make_dask_chunk` in
+  `anndata/_io/specs/lazy_methods.py`, `should_cache_indptr=False`) and slices
+  its rows, so each read block decompresses at least one `indptr` chunk. For
+  Dask writes, AnnData also casts `indices` and `indptr` to int64
+  (`as_int64_indices` in `write_dask_sparse`). With float32 data, estimated from
+  the chunk sizes, not measured:
+
+  | Length                                         | `data` | `indices` (Dask writes) | `indptr` | Extra per ~128 MiB read block  |
+  | ---------------------------------------------- | ------ | ----------------------- | -------- | ------------------------------ |
+  | 4 MiB ÷ itemsize of `data` = 1,048,576 entries | 4 MiB  | 8 MiB                   | 8 MiB    | ≥ 8 MiB of `indptr` (about 6%) |
+  | 4 MiB ÷ 8 bytes = 524,288 entries (chosen)     | 2 MiB  | 4 MiB                   | 4 MiB    | ≥ 4 MiB (about 3%)             |
+
+  The chosen length keeps "at most 4 MiB" true for every array and halves the
+  `indptr` overhead per read block. The cost is twice as many `data` chunk
+  files, for example 20 instead of 10 for the 38 MiB matrix above, still far
+  fewer than Zarr's default after a small first block.
+
 - Why no cap: AnnData calls the write callback twice for a Dask sparse matrix.
   The first call gets the Dask array. `write_dask_sparse` then writes the first
   computed block through the same dispatcher, so the second call gets that
@@ -1569,31 +1590,36 @@ Dask matrices alike.
   second with the `chunks` chosen in the first. A cap for in-memory matrices,
   such as the number of non-zero values, would apply to that first block and
   let it decide the stored chunks of the whole matrix again. Because the length
-  depends only on the dtype, which the Dask array and its blocks share, both
-  calls give the same chunks, without a guard and without relying on how AnnData
-  passes `dataset_kwargs` along. Dense Dask arrays are written once, through
+  depends on nothing about the matrix, both calls give the same chunks, without
+  a guard and without relying on how AnnData passes `dataset_kwargs` along. Dense Dask arrays are written once, through
   `da.store`, so the cap of 1b is not affected.
 - Cost: a small sparse matrix gets one padded chunk per array instead of a
   chunk of its own size. With compression this is cheap. Measured on a
-  100 × 50 CSR matrix with 500 non-zero values: chunk files of 3,064 B in total
-  instead of 2,696 B with Zarr's default, and a read of 2.94 ms instead of
-  2.72 ms (see also "Small arrays" in 1b).
+  100 × 50 CSR matrix with 500 non-zero values, with chunks of 1,048,576
+  entries: chunk files of 3,064 B in total instead of 2,696 B with Zarr's
+  default, and a read of 2.94 ms instead of 2.72 ms (see also "Small arrays" in
+  1b). The chosen 524,288 entries pad half as much.
 - Writes stay as they are: AnnData's Dask sparse writer appends one block at a
   time, so no stored chunk is written by two blocks at once, and only the last
   partly filled chunk of each append is rewritten by the next. Block boundaries
   fall at arbitrary non-zero positions, so there is nothing to align; this is
   the same reason the read side has no aligned mode for sparse matrices.
-- Reads: 4 MiB stored chunks stay far below the 128 MiB `"auto"` read blocks,
+- Reads: stored chunks of at most 4 MiB stay far below the 128 MiB `"auto"` read blocks,
   so the assumption behind `sparse_chunks="auto"` holds by construction rather
   than by AnnData's and Zarr's defaults.
-- Sharding: no `shards` are passed, as in 1b. With AnnData's opt-in automatic
-  sharding, arrays of more than eight chunks get shards of two chunks.
+- Sharding: no `shards` are passed, as in 1b, so sharding follows AnnData's
+  opt-in setting. For Dask writes, AnnData creates the arrays from the first
+  block, and Zarr sizes automatic shards from that block: with a 100-row first
+  block of the 200,000-row example, the shards equal the chunks; with a
+  150,000-row first block, they hold two chunks (verified). The chunk length no
+  longer depends on the first block, but automatic shard sizes still can.
+  Explicit sharding (see "Deferred: explicit sharding") would remove this.
 
 **Docs.**
 
 - "Writing AnnData components" in `docs/development/storage.md`: add sparse
-  matrices to the layout sentence (stored chunks of 4 MiB of non-zero values),
-  so that "everything else" no longer includes them.
+  matrices to the layout sentence (stored chunks of 524,288 entries, at most
+  4 MiB per array), so that "everything else" no longer includes them.
 - The docstrings of `_write_anndata_element` and of the write callback, which
   give the rules: add the sparse rule, and why it has no cap (the second
   callback call for Dask sparse matrices).
@@ -1603,25 +1629,40 @@ Dask matrices alike.
   at the sparse rule in the write callback, that dense arrays are capped but a
   sparse cap would be computed from a Dask matrix's first block.
 - The Notes of `write_table`, `write_table_components`, `add_table` and
-  `add_table_components`: sparse matrices are stored in chunks of 4 MiB of
-  non-zero values.
+  `add_table_components`: sparse matrices are stored in chunks of at most
+  4 MiB per array.
 - The docstring of `_sparse_block_length`, which says that Harpy sets no sparse
   chunk sizes and that Zarr's default applies.
+
+**Expected changes to existing tests.**
+
+- `test_writer_keeps_anndata_defaults_for_other_arrays` in `test_anndata.py`
+  lists `layers/sparse/data` and `layers/sparse/indices`, which now get
+  Harpy's chunks: move them out, and add a sparse matrix in `uns`, so that the
+  test still checks that sparse matrices at other paths keep AnnData's
+  defaults.
+- `test_aggregate_points_stores_dense_centers_in_row_only_chunks` in
+  `test_allocation.py` asserts that the sparse `X` and auxiliary counts keep
+  `data` chunks above 1 under a 1-byte constant; under the new rule they get
+  chunks of 1 entry, so the assertion becomes a check of the sparse rule.
+- `test_sparse_stored_chunks_stay_far_below_auto_blocks` becomes the exact
+  check listed below.
 
 **Tests.**
 
 - With a lowered constant, CSR and CSC matrices written from memory and from
-  Dask get `data`, `indices` and `indptr` chunks of the constant ÷ the itemsize
-  of `data`, whatever the size of the first Dask block, and keep their values.
+  Dask get `data`, `indices` and `indptr` chunks of `max(constant // 8, 1)`
+  entries, whatever the size of the first Dask block, and keep their values.
 - Dask CSR matrices with a tiny first block, and with a first block without
-  non-zero values, get the constant's chunk length for all three arrays, so
-  the second callback call does not let the first block decide.
+  non-zero values, get that chunk length for all three arrays, so the second
+  callback call does not let the first block decide.
 - A small in-memory matrix, and one without non-zero values, get the same
   uncapped length.
 - Sparse matrices at other paths, such as in `uns`, keep AnnData's defaults;
   dense matrices keep 1b's layout.
 - The aggregation writer's `X` and auxiliary counts follow the rule.
-- 1b's guard test becomes an exact check of the chunk length.
+- 1b's guard test, `test_sparse_stored_chunks_stay_far_below_auto_blocks`,
+  becomes an exact check of the chunk length.
 - End to end, `test_end_to_end_csr_write_lazy_read_and_scanpy_pca`, the CSR
   counterpart of 1b's `test_end_to_end_dense_write_lazy_read_and_scanpy_pca` in
   `test_write.py`:
