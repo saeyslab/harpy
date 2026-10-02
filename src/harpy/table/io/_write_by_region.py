@@ -201,7 +201,9 @@ def _write_table_components_by_region_operation(
             # opening the value, not after loading an unrelated full frame.
             if element.attrs.get("encoding-type") == "dataframe":
                 raise TypeError("Regional writes do not support DataFrame-valued obsm entries.")
-            existing = _read_anndata_element(group, path, mode="lazy", sparse_chunk_size=chunk_size)
+            # Keep the stored dense chunk layout during merging, as documented,
+            # rather than the readers' row-only default (until slice 1d revisits it).
+            existing = _read_anndata_element(group, path, mode="lazy", sparse_chunks=chunk_size, dense_chunks="storage")
             # A stored null is an invalid matrix, not an absent entry.
             _matrix_format(existing, label=f"Stored component {path!r}")
         replacements[path] = _prepare_regional_matrix(
@@ -408,7 +410,7 @@ def _lazy_matrix(value: object, matrix_format: str, *, chunk_size: int) -> da.Ar
     if isinstance(value, da.Array):
         return value
     if isinstance(value, (CSRDataset, CSCDataset)):
-        return _decode_anndata_element(value.group, mode="lazy", sparse_chunk_size=chunk_size)
+        return _decode_anndata_element(value.group, mode="lazy", sparse_chunks=chunk_size)
     if isinstance(value, zarr.Array):
         return da.from_zarr(value)
     chunks = {

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from numbers import Integral
 from os import PathLike
 from typing import Literal
 
@@ -11,12 +10,15 @@ import zarr
 from anndata import AnnData
 
 from harpy._storage._anndata import (
-    _DEFAULT_SPARSE_CHUNK_SIZE,
     _MATRIX_MAPPINGS,
+    _DenseChunks,
     _MissingAnnDataElement,
     _read_anndata_element,
     _read_anndata_table,
     _ReadMode,
+    _SparseChunks,
+    _validate_dense_chunks,
+    _validate_sparse_chunks,
 )
 from harpy._storage._spatialdata import _open_spatialdata_group
 
@@ -30,7 +32,8 @@ def read_table(
     *,
     table_name: str,
     mode: _ReadMode = "lazy",
-    sparse_chunk_size: int = _DEFAULT_SPARSE_CHUNK_SIZE,
+    sparse_chunks: _SparseChunks = "auto",
+    dense_chunks: _DenseChunks = "auto",
 ) -> AnnData:
     """Read one complete table without opening other SpatialData elements.
 
@@ -47,9 +50,25 @@ def read_table(
         Annotations, dataframe-valued entries and ``uns`` are always in memory.
         The returned AnnData has ``isbacked=False``; this does not mean that
         its matrices are loaded into memory.
-    sparse_chunk_size
-        Rows per CSR chunk or columns per CSC chunk when ``mode="lazy"``.
-        Ignored for dense arrays and other modes.
+    sparse_chunks
+        Block size of lazy sparse matrices along their compressed axis: rows
+        per CSR block or columns per CSC block, keeping the other axis whole.
+        ``"auto"`` (default) chooses the rows (CSR) or columns (CSC) per block
+        so that a block holds about Dask's ``array.chunk-size`` bytes (128 MiB
+        by default). The bytes per row or column follow from the average number
+        of non-zero values and the stored dtypes, reading only metadata. A
+        positive integer sets the size directly. Ignored for dense arrays and
+        other modes.
+    dense_chunks
+        Block layout of lazy dense arrays. ``"auto"`` (default) and a positive
+        integer give blocks of whole rows, spanning all other axes. Their number
+        of rows is the largest multiple of the stored row chunk size that does
+        not exceed the rows fitting ``array.chunk-size`` (``"auto"``) or the
+        requested rows (integer), and at least one stored chunk. A block therefore
+        never splits a stored chunk; when one stored chunk exceeds the target,
+        a block is that chunk. ``"storage"`` keeps the stored chunks. String
+        arrays always keep their stored chunks. Ignored for sparse matrices and
+        other modes.
 
     Returns
     -------
@@ -73,6 +92,10 @@ def read_table(
 
     No scientific metadata validation is performed.
 
+    ``"auto"`` block sizes read ``array.chunk-size`` when the lazy arrays are
+    built, so set it before calling, for example with
+    ``dask.config.set({"array.chunk-size": "64MiB"})``.
+
     See Also
     --------
     harpy.table.read_table_components : Read only selected components.
@@ -94,9 +117,10 @@ def read_table(
         backed.X[0, 1] = 99  # Raises ValueError: storage is read-only.
     """
     _validate_read_mode(mode)
-    sparse_chunk_size = _validate_sparse_chunk_size(sparse_chunk_size)
+    sparse_chunks = _validate_sparse_chunks(sparse_chunks)
+    dense_chunks = _validate_dense_chunks(dense_chunks)
     group = _open_table_group(store, table_name=table_name)
-    return _read_anndata_table(group, mode=mode, sparse_chunk_size=sparse_chunk_size)
+    return _read_anndata_table(group, mode=mode, sparse_chunks=sparse_chunks, dense_chunks=dense_chunks)
 
 
 def read_table_components(
@@ -105,7 +129,8 @@ def read_table_components(
     table_name: str,
     components: Sequence[ComponentPath],
     mode: _ReadMode = "lazy",
-    sparse_chunk_size: int = _DEFAULT_SPARSE_CHUNK_SIZE,
+    sparse_chunks: _SparseChunks = "auto",
+    dense_chunks: _DenseChunks = "auto",
     missing: Literal["raise", "omit"] = "raise",
 ) -> dict[ComponentPath, object]:
     """Read selected logical components without constructing an AnnData.
@@ -130,9 +155,9 @@ def read_table_components(
         CSR/CSC dataset handles; ``"eager"`` materializes only the requested
         scope as NumPy/SciPy matrices. Dataframes and all values below ``uns``
         are always decoded into memory.
-    sparse_chunk_size
-        Rows per CSR chunk or columns per CSC chunk when ``mode="lazy"``.
-        Ignored for dense arrays and other modes.
+    sparse_chunks, dense_chunks
+        Lazy block layout of sparse and dense matrices, as described for
+        :func:`harpy.table.read_table`. Ignored in other modes.
     missing
         Raise KeyError for an absent component, or omit its dictionary entry.
         A present encoded None is retained. Invalid paths, invalid traversal
@@ -165,7 +190,8 @@ def read_table_components(
         obs = values[("obs",)]
     """
     _validate_read_mode(mode)
-    sparse_chunk_size = _validate_sparse_chunk_size(sparse_chunk_size)
+    sparse_chunks = _validate_sparse_chunks(sparse_chunks)
+    dense_chunks = _validate_dense_chunks(dense_chunks)
     if not isinstance(missing, str):
         raise TypeError("missing must be 'raise' or 'omit'.")
     if missing not in {"raise", "omit"}:
@@ -175,7 +201,9 @@ def read_table_components(
     result = {}
     for path in paths:
         try:
-            result[path] = _read_anndata_element(group, path, mode=mode, sparse_chunk_size=sparse_chunk_size)
+            result[path] = _read_anndata_element(
+                group, path, mode=mode, sparse_chunks=sparse_chunks, dense_chunks=dense_chunks
+            )
         except _MissingAnnDataElement:
             if missing != "omit":
                 raise
@@ -187,14 +215,6 @@ def _validate_read_mode(mode: _ReadMode) -> None:
         raise TypeError("mode must be 'backed', 'lazy' or 'eager'.")
     if mode not in {"backed", "lazy", "eager"}:
         raise ValueError("mode must be 'backed', 'lazy' or 'eager'.")
-
-
-def _validate_sparse_chunk_size(value: int) -> int:
-    if isinstance(value, bool) or not isinstance(value, Integral):
-        raise TypeError("sparse_chunk_size must be a positive integer.")
-    if value < 1:
-        raise ValueError("sparse_chunk_size must be a positive integer.")
-    return int(value)
 
 
 def _validate_path_segment(name: str) -> None:

@@ -10,10 +10,16 @@ import zarr
 from spatialdata import SpatialData
 from spatialdata import read_zarr as read_spatialdata_zarr
 
-from harpy._storage._anndata import _DEFAULT_SPARSE_CHUNK_SIZE, _ReadMode
+from harpy._storage._anndata import (
+    _DenseChunks,
+    _ReadMode,
+    _SparseChunks,
+    _validate_dense_chunks,
+    _validate_sparse_chunks,
+)
 from harpy._storage._spatialdata import _open_spatialdata_group
 from harpy.table import read_table
-from harpy.table.io._read import _validate_path_segment, _validate_read_mode, _validate_sparse_chunk_size
+from harpy.table.io._read import _validate_path_segment, _validate_read_mode
 
 
 def read_zarr(
@@ -21,7 +27,8 @@ def read_zarr(
     *,
     table_name: str | Sequence[str] | None = None,
     table_mode: _ReadMode = "lazy",
-    sparse_chunk_size: int = _DEFAULT_SPARSE_CHUNK_SIZE,
+    sparse_chunks: _SparseChunks = "auto",
+    dense_chunks: _DenseChunks = "auto",
 ) -> SpatialData:
     """Read a SpatialData store with selected tables in the requested matrix mode.
 
@@ -39,9 +46,9 @@ def read_zarr(
         and ``"eager"`` returns in-memory NumPy/SciPy matrices. Annotations,
         dataframe-valued entries and ``uns`` are always in memory.
         Does not control how images, labels, points or shapes are read.
-    sparse_chunk_size
-        Rows per CSR chunk or columns per CSC chunk for lazy table reads.
-        Ignored for dense matrices and other modes.
+    sparse_chunks, dense_chunks
+        Lazy block layout of sparse and dense table matrices, as described for
+        :func:`harpy.table.read_table`. Ignored for other table modes.
 
     Returns
     -------
@@ -77,7 +84,8 @@ def read_zarr(
         spatial_only = hp.io.read_zarr("sdata.zarr", table_name=[])
     """
     _validate_read_mode(table_mode)
-    sparse_chunk_size = _validate_sparse_chunk_size(sparse_chunk_size)
+    sparse_chunks = _validate_sparse_chunks(sparse_chunks)
+    dense_chunks = _validate_dense_chunks(dense_chunks)
     if table_name is not None:
         if isinstance(table_name, str):
             table_name = (table_name,)
@@ -108,5 +116,7 @@ def read_zarr(
     # below using the requested table_mode.
     sdata = read_spatialdata_zarr(Path(store), selection=("images", "labels", "points", "shapes"))
     for name in table_name:
-        sdata.tables[name] = read_table(store, table_name=name, mode=table_mode, sparse_chunk_size=sparse_chunk_size)
+        sdata.tables[name] = read_table(
+            store, table_name=name, mode=table_mode, sparse_chunks=sparse_chunks, dense_chunks=dense_chunks
+        )
     return sdata

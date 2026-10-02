@@ -9,8 +9,11 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
+from math import prod
+from numbers import Integral
 from typing import Literal
 
+import dask
 import dask.array as da
 import numpy as np
 import zarr
@@ -19,6 +22,7 @@ from anndata.abc import CSCDataset, CSRDataset
 from anndata.experimental import read_elem_lazy
 from anndata.io import read_elem, sparse_dataset, write_elem
 from dask import delayed
+from dask.utils import parse_bytes
 from scipy import sparse
 from spatialdata.models import TableModel
 
@@ -29,7 +33,32 @@ _SPATIALDATA_TABLE_ENCODING_TYPE = "ngff:regions_table"
 _SPATIALDATA_TABLE_FORMAT_VERSION = "0.2"
 _ReadMode = Literal["backed", "lazy", "eager"]
 _MATRIX_MAPPINGS = ("layers", "obsm", "varm", "obsp", "varp")
-_DEFAULT_SPARSE_CHUNK_SIZE = 1000
+# Lazy block sizes: "auto" derives them from Dask's array.chunk-size setting,
+# an integer sets them directly, and dense "storage" keeps the stored chunks.
+_SparseChunks = Literal["auto"] | int
+_DenseChunks = Literal["auto", "storage"] | int
+
+
+def _validate_sparse_chunks(value: _SparseChunks) -> _SparseChunks:
+    return _validate_chunks(value, name="sparse_chunks", modes=("auto",))
+
+
+def _validate_dense_chunks(value: _DenseChunks) -> _DenseChunks:
+    return _validate_chunks(value, name="dense_chunks", modes=("auto", "storage"))
+
+
+def _validate_chunks(value: object, *, name: str, modes: tuple[str, ...]) -> str | int:
+    """Accept one of the named modes or a positive integer, including NumPy integers."""
+    allowed = " or ".join([*(repr(mode) for mode in modes), "a positive integer"])
+    if isinstance(value, str):
+        if value not in modes:
+            raise ValueError(f"{name} must be {allowed}.")
+        return value
+    if isinstance(value, bool) or not isinstance(value, Integral):
+        raise TypeError(f"{name} must be {allowed}.")
+    if value < 1:
+        raise ValueError(f"{name} must be {allowed}.")
+    return int(value)
 
 
 class _MissingAnnDataElement(KeyError):
@@ -46,7 +75,11 @@ def _read_backed_table(group: zarr.Group) -> AnnData:
 
 
 def _read_anndata_table(
-    group: zarr.Group, *, mode: _ReadMode, sparse_chunk_size: int = _DEFAULT_SPARSE_CHUNK_SIZE
+    group: zarr.Group,
+    *,
+    mode: _ReadMode,
+    sparse_chunks: _SparseChunks = "auto",
+    dense_chunks: _DenseChunks = "auto",
 ) -> AnnData:
     """Read a complete AnnData table using the component reader ``_read_anndata_element``.
 
@@ -58,17 +91,19 @@ def _read_anndata_table(
     matrix values, ``backed`` retains Zarr arrays or sparse-dataset handles,
     and ``eager`` loads them into memory. DataFrame-valued entries are always
     eager. Unsupported lazy matrix encodings raise rather than falling back
-    to an eager read.
+    to an eager read. ``sparse_chunks`` and ``dense_chunks`` set the lazy block
+    layout, as described for ``_decode_anndata_element``.
 
     When present, ``raw`` follows the same policy: its ``var`` is eager,
     while its ``X`` and ``varm`` follow the requested matrix-reading mode.
     """
     if group.attrs.get("encoding-type") != "anndata" or group.attrs.get("encoding-version") != "0.1.0":
         raise ValueError(f"Unsupported AnnData table encoding at {group.name!r}.")
+    chunk_options = {"sparse_chunks": sparse_chunks, "dense_chunks": dense_chunks}
     values = {slot: _read_anndata_element(group, (slot,), mode="eager") for slot in ("obs", "var")}
     values.update(
         {
-            slot: _read_anndata_element(group, (slot,), mode=mode, sparse_chunk_size=sparse_chunk_size)
+            slot: _read_anndata_element(group, (slot,), mode=mode, **chunk_options)
             for slot in ("X", "uns", *_MATRIX_MAPPINGS)
             if slot in group
         }
@@ -96,7 +131,7 @@ def _read_anndata_table(
             # raw.X can retain genes removed from the main table, so read its
             # own var and varm rather than reuse the main table's feature annotations.
             values["raw"] = {
-                slot: _read_anndata_element(group, ("raw", slot), mode=mode, sparse_chunk_size=sparse_chunk_size)
+                slot: _read_anndata_element(group, ("raw", slot), mode=mode, **chunk_options)
                 for slot in ("X", "var", "varm")
                 if slot in raw
             }
@@ -119,19 +154,51 @@ def _read_backed_element(element: zarr.Array | zarr.Group) -> object:
 
 
 def _decode_anndata_element(
-    element: zarr.Array | zarr.Group, *, mode: _ReadMode, sparse_chunk_size: int = _DEFAULT_SPARSE_CHUNK_SIZE
+    element: zarr.Array | zarr.Group,
+    *,
+    mode: _ReadMode,
+    sparse_chunks: _SparseChunks = "auto",
+    dense_chunks: _DenseChunks = "auto",
 ) -> object:
     """Decode an AnnData element eagerly, lazily, or as a storage-backed handle.
 
-    Mappings are decoded entry by entry using the same mode and sparse chunk size.
+    Mappings are decoded entry by entry using the same mode and chunk settings.
+
+    Parameters
+    ----------
+    element
+        Encoded Zarr array or group.
+    mode
+        ``"lazy"`` builds Dask arrays, ``"backed"`` returns Zarr arrays or
+        sparse-dataset handles, and ``"eager"`` loads values into memory.
+    sparse_chunks
+        Lazy CSR/CSC blocks keep the uncompressed axis whole. ``"auto"`` chooses
+        the rows (CSR) or columns (CSC) per block so that a block holds about
+        Dask's ``array.chunk-size`` bytes, using only array metadata (see
+        ``_sparse_block_length``); an integer gives rows per CSR block or columns
+        per CSC block directly.
+    dense_chunks
+        Lazy dense blocks span all axes after the first. ``"auto"`` sizes rows
+        from ``array.chunk-size`` and an integer requests a number of rows; both
+        are aligned with the stored row chunks (see ``_dense_lazy_chunks``).
+        ``"storage"`` keeps the stored chunks, as do string arrays in any case.
+
+    Both settings are validated in every mode, but only used in lazy mode.
 
     Raises
     ------
+    TypeError
+        If ``sparse_chunks`` or ``dense_chunks`` is neither a supported mode
+        name nor an integer.
     ValueError
-        If a CSR/CSC element has an unsupported or missing encoding version,
-        regardless of the requested mode, or lazy/backed mode does not support
-        the element's encoding or version.
+        If ``sparse_chunks`` or ``dense_chunks`` is an unsupported mode name or
+        an integer below 1. Also if a CSR/CSC element has an unsupported or
+        missing encoding version, regardless of the requested mode, or
+        lazy/backed mode does not support the element's encoding or version.
     """
+    # Reject unknown settings here rather than silently treating them as "auto".
+    sparse_chunks = _validate_sparse_chunks(sparse_chunks)
+    dense_chunks = _validate_dense_chunks(dense_chunks)
     encoding = element.attrs.get("encoding-type")
     version = element.attrs.get("encoding-version")
     if encoding in {"csr_matrix", "csc_matrix"}:
@@ -139,11 +206,13 @@ def _decode_anndata_element(
         # Unknown formats must not bypass Harpy's sparse chunking policy.
         if version != "0.1.0":
             raise ValueError(f"Unsupported {encoding} encoding version {version!r}; expected '0.1.0'.")
-    # Preserve the requested reading mode and sparse chunk size for matrices
+    # Preserve the requested reading mode and chunk settings for matrices
     # inside mappings, including nested mappings.
     if encoding == "dict" and version == "0.1.0":
         return {
-            key: _decode_anndata_element(element[key], mode=mode, sparse_chunk_size=sparse_chunk_size)
+            key: _decode_anndata_element(
+                element[key], mode=mode, sparse_chunks=sparse_chunks, dense_chunks=dense_chunks
+            )
             for key in element.keys()
         }
     if mode == "eager":
@@ -171,11 +240,98 @@ def _decode_anndata_element(
             matrix_type = sparse.csr_matrix if compressed_axis == 0 else sparse.csc_matrix
             meta = matrix_type((0, 0), dtype=element["data"].dtype)
             return da.from_delayed(delayed(read_elem)(element), shape=shape, dtype=meta.dtype, meta=meta)
-        # Harpy owns the sparse default, independently of AnnData's defaults.
-        # Keep the other axis whole; dense arrays retain their on-disk chunks.
-        chunks = (sparse_chunk_size, -1) if compressed_axis == 0 else (-1, sparse_chunk_size)
+        # Harpy owns the sparse block size, independently of AnnData's defaults.
+        # Keep the other axis whole.
+        length = _sparse_block_length(element, compressed_axis=compressed_axis, sparse_chunks=sparse_chunks)
+        chunks = (length, -1) if compressed_axis == 0 else (-1, length)
         return read_elem_lazy(element, chunks=chunks)
-    return read_elem_lazy(element)
+    # String sizes cannot be derived from the dtype, so string arrays keep their
+    # stored chunks.
+    chunks = None if encoding == "string-array" else _dense_lazy_chunks(element, dense_chunks=dense_chunks)
+    # chunks=None makes AnnData keep the stored chunks.
+    return read_elem_lazy(element, chunks=chunks)
+
+
+def _chunk_size_target() -> int:
+    """Return Dask's ``array.chunk-size`` setting in bytes, the target of ``"auto"`` blocks."""
+    return parse_bytes(dask.config.get("array.chunk-size"))
+
+
+def _sparse_block_length(element: zarr.Group, *, compressed_axis: int, sparse_chunks: _SparseChunks) -> int:
+    """Return rows per lazy CSR block, or columns per lazy CSC block.
+
+    ``"auto"`` divides the memory target by the bytes per row (CSR) or column
+    (CSC)::
+
+        average non-zero values × (itemsize of data + itemsize of indices)
+        + itemsize of indptr
+
+    The average is the length of ``data`` divided by the length of the
+    compressed axis, so only array metadata is read.
+
+    Terms used below:
+
+    - *block*: one piece of the returned Dask array, computed by one task
+      (Dask calls these chunks);
+    - *stored chunk*: a separately compressed piece of a Zarr array on disk,
+      which Zarr decompresses whole.
+
+    Unlike dense arrays, sparse matrices have no stored chunk grid along rows
+    to align with: ``data`` and ``indices`` are chunked by non-zero values, and
+    rows hold different numbers of them, so block boundaries fall at arbitrary
+    positions inside stored chunks. Only the edge chunks of a block are shared
+    with its neighbours and decompressed twice. That stays cheap while blocks
+    are much larger than stored chunks (as for Harpy's own writes: Harpy sets
+    no sparse chunk sizes, so Zarr's default applies, sized from the array or,
+    for Dask writes, from the first block written; it grows from about 0.5 MiB
+    for 10 MiB to about 4 MiB for 10 GiB, far below ``"auto"`` blocks of about
+    ``array.chunk-size``). Stores written with much larger chunks make each
+    block decompress more than it uses, which slows reads but does not change
+    results.
+    """
+    # The caller has validated sparse_chunks: "auto" or a positive int.
+    if sparse_chunks != "auto":
+        return sparse_chunks
+    # The caller handles an empty compressed axis before sizing blocks.
+    length = int(element.attrs["shape"][compressed_axis])
+    data = element["data"]
+    nnz = int(data.shape[0])
+    if nnz == 0:
+        # Only the row pointers remain, so one block is small.
+        return length
+    bytes_per_line = nnz / length * (data.dtype.itemsize + element["indices"].dtype.itemsize)
+    bytes_per_line += element["indptr"].dtype.itemsize
+    return min(max(int(_chunk_size_target() // bytes_per_line), 1), length)
+
+
+def _dense_lazy_chunks(element: zarr.Array, *, dense_chunks: _DenseChunks) -> tuple[int, ...] | None:
+    """Return a row-only block layout (Dask chunks) for a dense array, or None to keep its stored chunks.
+
+    Blocks span all axes after the first. Their number of rows is the largest
+    multiple of the stored row chunk size that does not exceed the requested
+    rows, and at least one stored chunk, so a lazy block never splits a stored
+    chunk. Zarr decompresses stored chunks whole, so splitting one would not
+    save memory and would repeat the decompression. ``element.chunks`` reports
+    the inner chunks of sharded arrays, which can be read individually.
+
+    ``"auto"`` requests the rows that fit the memory target; an integer
+    requests that number of rows directly.
+    """
+    # The caller has validated dense_chunks: "auto", "storage" or a positive int.
+    if dense_chunks == "storage" or element.ndim == 0:
+        return None
+    n_rows = int(element.shape[0])
+    stored_rows = int(element.chunks[0])
+    if dense_chunks == "auto":
+        bytes_per_row = element.dtype.itemsize * prod(element.shape[1:])
+        if bytes_per_row == 0:
+            # Without columns, the whole array is metadata-sized: read one block.
+            return (max(n_rows, 1), *(-1,) * (element.ndim - 1))
+        requested_rows = _chunk_size_target() // bytes_per_row
+    else:
+        requested_rows = dense_chunks
+    rows = max(requested_rows // stored_rows, 1) * stored_rows
+    return (min(rows, max(n_rows, 1)), *(-1,) * (element.ndim - 1))
 
 
 def _write_anndata_element(
@@ -258,7 +414,8 @@ def _read_anndata_element(
     component_path: tuple[str, ...],
     *,
     mode: _ReadMode = "backed",
-    sparse_chunk_size: int = _DEFAULT_SPARSE_CHUNK_SIZE,
+    sparse_chunks: _SparseChunks = "auto",
+    dense_chunks: _DenseChunks = "auto",
 ) -> object:
     """Read an AnnData component by its logical keys, not its storage internals.
 
@@ -276,9 +433,9 @@ def _read_anndata_element(
         returns Zarr arrays or sparse-dataset handles, and ``"eager"`` loads
         values into memory. DataFrames and all values below ``uns`` are
         always eager.
-    sparse_chunk_size
-        Rows per CSR chunk or columns per CSC chunk for lazy sparse reads.
-        Ignored for dense arrays and other modes.
+    sparse_chunks, dense_chunks
+        Lazy block layout of sparse and dense matrices, as described for
+        ``_decode_anndata_element``. Ignored in other modes.
 
     Raises
     ------
@@ -327,7 +484,7 @@ def _read_anndata_element(
     if (len(component_path) == 1 and component_path[0] in _MATRIX_MAPPINGS) or component_path == ("raw", "varm"):
         if element.attrs.get("encoding-type") != "dict" or element.attrs.get("encoding-version") != "0.1.0":
             raise ValueError(f"AnnData component {component_path!r} must be an encoded mapping.")
-    return _decode_anndata_element(element, mode=mode, sparse_chunk_size=sparse_chunk_size)
+    return _decode_anndata_element(element, mode=mode, sparse_chunks=sparse_chunks, dense_chunks=dense_chunks)
 
 
 def _resolve_anndata_parent(
