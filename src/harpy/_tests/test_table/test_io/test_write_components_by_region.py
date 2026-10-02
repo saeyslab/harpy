@@ -400,7 +400,7 @@ def test_dense_creation_nan_fill_safe_casts_and_nested_null_metadata(regional_st
 @pytest.mark.parametrize("matrix_format", ["dense", "csr", "csc"])
 def test_lazy_regional_self_overwrite(regional_store, matrix_format):
     path, _, identity, old = regional_store(matrix_format)
-    source = read_table_components(path, table_name="counts", components=[("obsm", "features")], sparse_chunk_size=2)[
+    source = read_table_components(path, table_name="counts", components=[("obsm", "features")], sparse_chunks=2)[
         ("obsm", "features")
     ]
     payload = source[[1, 2, 3, 6], :] * 2
@@ -457,8 +457,9 @@ def test_regional_graph_construction_does_not_read_or_compute(
     path, _, _, old = regional_store(matrix_format)
     existing = None
     if not create:
+        # Keep the stored dense layout, as the regional writer's own read does.
         existing = read_table_components(
-            path, table_name="counts", components=[("obsm", "features")], sparse_chunk_size=1
+            path, table_name="counts", components=[("obsm", "features")], sparse_chunks=1, dense_chunks="storage"
         )[("obsm", "features")]
     values = np.arange(20, dtype=np.float32).reshape(4, 5)
     payload = _input_matrix(tmp_path, values, matrix_format, "lazy")

@@ -1,5 +1,6 @@
 from contextlib import contextmanager
 
+import dask
 import dask.array as da
 import numpy as np
 import pandas as pd
@@ -95,9 +96,9 @@ def test_complete_read_preserves_all_slots_without_lazy_matrix_reads(
     expected = read_zarr(path / "tables" / "counts")
     if mode != "eager":
         with _guard_reads(monkeypatch):
-            actual = read_table(path, table_name="counts", mode=mode, sparse_chunk_size=1)
+            actual = read_table(path, table_name="counts", mode=mode, sparse_chunks=1)
     else:
-        actual = read_table(path, table_name="counts", mode=mode, sparse_chunk_size=1)
+        actual = read_table(path, table_name="counts", mode=mode, sparse_chunks=1)
 
     matrix_types = {
         "lazy": (da.Array,),
@@ -123,32 +124,96 @@ def test_complete_read_preserves_all_slots_without_lazy_matrix_reads(
     _assert_value(subset.X, expected[[1], [0, 2]].X)
 
 
+def _blocks(length, size):
+    """Expected Dask chunks along one axis: full blocks of `size`, then the remainder."""
+    return (size,) * (length // size) + ((length % size,) if length % size else ())
+
+
+def _read_both(path, **options):
+    """Read X with both public readers, inside the metadata-only read guard."""
+    table = read_table(path, table_name="counts", **options)
+    component = read_table_components(path, table_name="counts", components=[("X",)], **options)[("X",)]
+    return table.X, component
+
+
+def _dense_store(tmp_path, values, chunks):
+    """Store a table whose dense X uses the given on-disk chunks."""
+    path = tmp_path / "sdata.zarr"
+    root = zarr.open_group(str(path), mode="w")
+    write_elem(root.require_group("tables"), "counts", AnnData(X=values))
+    write_elem(root["tables/counts"], "X", values, dataset_kwargs={"chunks": chunks})
+    return path
+
+
 @pytest.mark.parametrize("matrix_kind", ["csr", "csc"])
-@pytest.mark.parametrize("options, size", [({}, 1000), ({"sparse_chunk_size": 128}, 128)])
-def test_sparse_chunk_size_controls_the_compressed_axis(tmp_path, monkeypatch, matrix_kind, options, size):
-    """Both readers use Harpy's default or override, retaining the other axis whole."""
+@pytest.mark.parametrize(
+    "options, size", [({}, None), ({"sparse_chunks": "auto"}, None), ({"sparse_chunks": 128}, 128)]
+)
+def test_sparse_chunks_control_the_compressed_axis(tmp_path, monkeypatch, matrix_kind, options, size):
+    """Both readers use the "auto" default or an integer override, retaining the other axis whole.
+
+    With only three non-zero values, "auto" fits the whole compressed axis into one block.
+    """
     path = tmp_path / "sdata.zarr"
     root = zarr.open_group(str(path), mode="w")
     matrix = getattr(sparse, f"{matrix_kind}_matrix")(([1, 2, 3], ([0, 128, 1002], [0, 129, 1004])), shape=(1003, 1005))
     write_elem(root.require_group("tables"), "counts", AnnData(X=matrix))
     with _guard_reads(monkeypatch):
-        table = read_table(path, table_name="counts", **options)
-        components = read_table_components(path, table_name="counts", components=[("X",)], **options)
+        values = _read_both(path, **options)
     if matrix_kind == "csr":
-        expected_chunks = ((size,) * (1003 // size) + (1003 % size,), (1005,))
+        expected_chunks = (_blocks(1003, size or 1003), (1005,))
     else:
-        expected_chunks = ((1003,), (size,) * (1005 // size) + (1005 % size,))
-    for value in (table.X, components[("X",)]):
+        expected_chunks = ((1003,), _blocks(1005, size or 1005))
+    for value in values:
         assert value.chunks == expected_chunks
         _assert_value(value, matrix)
 
 
-def test_sparse_chunk_size_reaches_mapping_entries_and_raw(make_table_io_store, monkeypatch):
+@pytest.mark.parametrize("matrix_kind", ["csr", "csc"])
+def test_auto_sparse_chunks_divide_the_target_by_bytes_per_row_including_indptr(tmp_path, monkeypatch, matrix_kind):
+    """Every row (CSR) or column (CSC) holds two non-zero values plus one row pointer.
+
+    The target fits seven of these lines. Without the indptr entry it would fit eight.
+    """
+    n = 100
+    dense = np.zeros((n, n), dtype=np.float32)
+    dense[np.arange(n), np.arange(n)] = 1
+    dense[np.arange(n), (np.arange(n) + 1) % n] = 2
+    matrix = getattr(sparse, f"{matrix_kind}_matrix")(dense)
+    path = tmp_path / "sdata.zarr"
+    root = zarr.open_group(str(path), mode="w")
+    write_elem(root.require_group("tables"), "counts", AnnData(X=matrix))
+    stored = root["tables/counts/X"]
+    bytes_per_value = stored["data"].dtype.itemsize + stored["indices"].dtype.itemsize
+    bytes_per_line = 2 * bytes_per_value + stored["indptr"].dtype.itemsize
+    target = 7 * bytes_per_line + 1
+    assert target // (2 * bytes_per_value) != 7
+    with dask.config.set({"array.chunk-size": target}), _guard_reads(monkeypatch):
+        values = _read_both(path)
+    expected_chunks = (_blocks(n, 7), (n,)) if matrix_kind == "csr" else ((n,), _blocks(n, 7))
+    for value in values:
+        assert value.chunks == expected_chunks
+        _assert_value(value, matrix)
+
+
+def test_auto_sparse_chunks_read_a_matrix_without_non_zero_values_as_one_block(tmp_path, monkeypatch):
+    path = tmp_path / "sdata.zarr"
+    root = zarr.open_group(str(path), mode="w")
+    matrix = sparse.csr_matrix((50, 4), dtype=np.float32)
+    write_elem(root.require_group("tables"), "counts", AnnData(X=matrix))
+    with dask.config.set({"array.chunk-size": 1}), _guard_reads(monkeypatch):
+        values = _read_both(path)
+    for value in values:
+        assert value.chunks == ((50,), (4,))
+        _assert_value(value, matrix)
+
+
+def test_sparse_chunks_reach_mapping_entries_and_raw(make_table_io_store, monkeypatch):
     path = make_table_io_store()
     with _guard_reads(monkeypatch):
-        table = read_table(path, table_name="counts", sparse_chunk_size=np.int64(1))
+        table = read_table(path, table_name="counts", sparse_chunks=np.int64(1))
         components = read_table_components(
-            path, table_name="counts", components=[("layers",), ("varm", "loadings"), ("raw", "X")], sparse_chunk_size=1
+            path, table_name="counts", components=[("layers",), ("varm", "loadings"), ("raw", "X")], sparse_chunks=1
         )
     assert table.layers["counts"].chunks == components[("layers",)]["counts"].chunks == ((1, 1), (3,))
     assert table.varm["loadings"].chunks == components[("varm", "loadings")].chunks == ((3,), (1, 1))
@@ -156,15 +221,57 @@ def test_sparse_chunk_size_reaches_mapping_entries_and_raw(make_table_io_store, 
     assert table.obsp["neighbors"].chunks == ((1, 1), (2,))
 
 
-def test_sparse_chunk_size_leaves_dense_disk_chunks_unchanged(make_table_io_store, monkeypatch):
+@pytest.mark.parametrize(
+    "stored_chunks, target_rows, expected_rows",
+    [
+        # Column-split stored chunks are combined into row bands: the largest
+        # multiple of the stored seven rows that does not exceed 30 rows.
+        ((7, 3), 30, 28),
+        # Row-only stored chunks at the target are kept as they are.
+        ((30, 10), 30, 30),
+        # A stored chunk larger than the target becomes one block, not split.
+        ((50, 10), 10, 50),
+    ],
+)
+def test_auto_dense_chunks_read_row_bands_aligned_with_stored_chunks(
+    tmp_path, monkeypatch, stored_chunks, target_rows, expected_rows
+):
+    values = np.arange(1000, dtype=np.float64).reshape(100, 10)
+    path = _dense_store(tmp_path, values, stored_chunks)
+    bytes_per_row = values.dtype.itemsize * values.shape[1]
+    with dask.config.set({"array.chunk-size": target_rows * bytes_per_row}), _guard_reads(monkeypatch):
+        lazy_values = _read_both(path)
+    for value in lazy_values:
+        assert value.chunks == (_blocks(100, expected_rows), (10,))
+        # The row bands are built into the read, not added as a rechunk afterwards.
+        assert not any(name.startswith("rechunk") for name in value.dask.layers)
+        _assert_value(value, values)
+
+
+@pytest.mark.parametrize("dense_chunks, expected_rows", [(20, 14), (np.int64(14), 14), (3, 7), (1000, 100)])
+def test_integer_dense_chunks_round_down_to_stored_row_chunks(tmp_path, monkeypatch, dense_chunks, expected_rows):
+    """An integer is rounded down to whole stored chunks, at least one, and clamped to the array."""
+    values = np.arange(1000, dtype=np.float64).reshape(100, 10)
+    path = _dense_store(tmp_path, values, (7, 3))
+    with _guard_reads(monkeypatch):
+        lazy_values = _read_both(path, dense_chunks=dense_chunks)
+    for value in lazy_values:
+        assert value.chunks == (_blocks(100, expected_rows), (10,))
+        _assert_value(value, values)
+
+
+def test_dense_chunks_default_to_whole_rows_and_storage_keeps_disk_chunks(make_table_io_store, monkeypatch):
     path = make_table_io_store(matrix_kind="dense")
     matrix = np.arange(6).reshape(2, 3)
     group = zarr.open_group(str(path), mode="r+")["tables/counts"]
     write_elem(group, "X", matrix, dataset_kwargs={"chunks": (1, 2)})
     with _guard_reads(monkeypatch):
-        table = read_table(path, table_name="counts", sparse_chunk_size=1)
-        components = read_table_components(path, table_name="counts", components=[("X",)], sparse_chunk_size=1)
-    for value in (table.X, components[("X",)]):
+        default_values = _read_both(path, sparse_chunks=1)
+        stored_values = _read_both(path, dense_chunks="storage")
+    for value in default_values:
+        assert value.chunks == ((2,), (3,))
+        _assert_value(value, matrix)
+    for value in stored_values:
         assert value.chunks == ((1, 1), (2, 1))
         _assert_value(value, matrix)
     assert group["X"].chunks == (1, 2)
@@ -172,12 +279,27 @@ def test_sparse_chunk_size_leaves_dense_disk_chunks_unchanged(make_table_io_stor
 
 @pytest.mark.parametrize("reader", [read_table, read_table_components])
 @pytest.mark.parametrize(
-    "size, error", [(True, TypeError), (1.5, TypeError), (None, TypeError), (0, ValueError), (-1, ValueError)]
+    "option, value, error",
+    [
+        ("sparse_chunks", True, TypeError),
+        ("sparse_chunks", 1.5, TypeError),
+        ("sparse_chunks", None, TypeError),
+        ("sparse_chunks", 0, ValueError),
+        ("sparse_chunks", -1, ValueError),
+        ("sparse_chunks", "storage", ValueError),
+        ("sparse_chunks", "Auto", ValueError),
+        ("dense_chunks", True, TypeError),
+        ("dense_chunks", 1.5, TypeError),
+        ("dense_chunks", None, TypeError),
+        ("dense_chunks", 0, ValueError),
+        ("dense_chunks", "stored", ValueError),
+    ],
 )
-def test_invalid_sparse_chunk_size_fails_before_opening_store(tmp_path, reader, size, error):
+def test_invalid_chunk_settings_fail_before_opening_store(tmp_path, reader, option, value, error):
     options = {"components": [("X",)]} if reader is read_table_components else {}
-    with pytest.raises(error, match="sparse_chunk_size must be a positive integer"):
-        reader(tmp_path / "absent.zarr", table_name="counts", sparse_chunk_size=size, **options)
+    allowed = "'auto' or 'storage'" if option == "dense_chunks" else "'auto'"
+    with pytest.raises(error, match=f"{option} must be {allowed} or a positive integer"):
+        reader(tmp_path / "absent.zarr", table_name="counts", **{option: value}, **options)
 
 
 @pytest.mark.parametrize("mode", ["lazy", "backed", "eager"])
@@ -217,9 +339,9 @@ def test_components_cover_matrix_mappings_and_raw(make_table_io_store, monkeypat
     ]
     if mode != "eager":
         with _guard_reads(monkeypatch):
-            values = read_table_components(path, table_name="counts", components=paths, mode=mode, sparse_chunk_size=1)
+            values = read_table_components(path, table_name="counts", components=paths, mode=mode, sparse_chunks=1)
     else:
-        values = read_table_components(path, table_name="counts", components=paths, mode=mode, sparse_chunk_size=1)
+        values = read_table_components(path, table_name="counts", components=paths, mode=mode, sparse_chunks=1)
     expected = read_table(path, table_name="counts", mode="eager")
     for key in paths:
         target = expected.raw if key[0] == "raw" else expected

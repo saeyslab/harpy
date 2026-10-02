@@ -42,7 +42,7 @@ def test_complete_write_roundtrip_preserves_slots_and_input(make_table_io_store,
     path = make_table_io_store(zarr_format=zarr_format, matrix_kind=matrix_kind)
     original_table = read_zarr(path / "tables" / "counts")
     original_table_bytes = _store_bytes(path / "tables" / "counts")
-    table_to_write = read_table(path, table_name="counts", mode=mode, sparse_chunk_size=1)
+    table_to_write = read_table(path, table_name="counts", mode=mode, sparse_chunks=1)
     write_table(path, table_name="copy", adata=table_to_write)
     copied_table = read_zarr(path / "tables" / "copy")
     for slot in ("X", "obs", "var", "uns", "layers", "obsm", "varm", "obsp", "varp"):
@@ -245,7 +245,7 @@ def test_lazy_self_overwrite_finishes_staging_before_publication(make_table_io_s
     data, not on partially overwritten data.
     """
     path = make_table_io_store(matrix_kind=matrix_kind)
-    source = read_table(path, table_name="counts", sparse_chunk_size=1)
+    source = read_table(path, table_name="counts", sparse_chunks=1)
     expected = read_zarr(path / "tables/counts").X * 3
     source.X = source.X * 3
     if scope == "table":
