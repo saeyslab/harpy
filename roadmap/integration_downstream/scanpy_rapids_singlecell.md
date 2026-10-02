@@ -1435,10 +1435,33 @@ as those of `hp.tb.add_feature_matrix`, use the same chunk policy.
 - Sharding: pass no `shards`, so that AnnData's opt-in automatic sharding is
   respected and Harpy's chunks become its inner chunks (see "Sharding" in
   gap 1).
-- Docs: document the constant clearly in the writer docstrings and in the
-  writing section of `docs/development/storage.md`: its value; that it is fixed
-  in bytes, unlike Zarr's size-dependent default; that it does not depend on
-  Dask's `array.chunk-size`; and that sharding follows AnnData's setting.
+- Docs: state the new layout at contract level, as for reading; the
+  measurements and examples stay in this document.
+  - In "Writing AnnData components" in `docs/development/storage.md`:
+    - the constant: its value; that it is fixed in bytes, unlike Zarr's
+      size-dependent default; that it does not depend on Dask's
+      `array.chunk-size`; and that sharding follows AnnData's setting;
+    - the scope: dense arrays at matrix paths (`X`, layers, `obsm`, `varm`,
+      `obsp`, `varp` and raw) get row-only stored chunks; `obs`/`var` columns,
+      `uns`, sparse matrices and string arrays keep AnnData's defaults;
+    - write alignment, in one sentence: Dask inputs are rechunked so that each
+      stored chunk is written once, with write blocks about the size of the
+      input blocks. The write block helper's docstring documents the rule, as
+      `_dense_lazy_chunks` does for reads;
+    - the new `logical_path` argument of `_write_anndata_element`: what it is,
+      and why it is needed (staged paths such as `component-N` are not logical
+      paths).
+  - In "Reading AnnData components and tables" in the same document: the
+    sentence that the regional writer reads existing dense matrices with
+    `dense_chunks="storage"`, "so existing dense targets keep their stored
+    layout during merging", then only holds for the input blocks during the
+    merge. The merged result is written with Harpy's row-only stored chunks, so
+    its stored layout changes; say so.
+  - In the Notes of `write_table`, `write_table_components`, `add_table` and
+    `add_table_components`, one or two sentences: dense matrices are stored in
+    row-only chunks of about 4 MiB (the constant's value); sparse matrices and
+    annotations use AnnData's defaults; sharding follows AnnData's
+    `auto_shard_zarr_v3` setting.
 - Tests:
   - the write-side tests listed under "Dense matrices" in gap 1;
   - a table written with `write_table` stores dense `X`, layers, `obsm`, `varm`,
