@@ -54,21 +54,25 @@ def read_table(
         Block size of lazy sparse matrices along their compressed axis: rows
         per CSR block or columns per CSC block, keeping the other axis whole.
         ``"auto"`` (default) chooses the rows (CSR) or columns (CSC) per block
-        so that a block holds about Dask's ``array.chunk-size`` bytes (128 MiB
-        by default). The bytes per row or column follow from the average number
+        so that a block holds about ``array.chunk-size`` bytes, a
+        :doc:`Dask configuration setting <dask:configuration>` (128 MiB by
+        default). The bytes per row or column follow from the average number
         of non-zero values and the stored dtypes, reading only metadata. A
         positive integer sets the size directly. Ignored for dense arrays and
         other modes.
     dense_chunks
         Block layout of lazy dense arrays. ``"auto"`` (default) and a positive
-        integer give blocks of whole rows, spanning all other axes. Their number
-        of rows is the largest multiple of the stored row chunk size that does
-        not exceed the rows fitting ``array.chunk-size`` (``"auto"``) or the
-        requested rows (integer), and at least one stored chunk. A block therefore
-        never splits a stored chunk; when one stored chunk exceeds the target,
-        a block is that chunk. ``"storage"`` keeps the stored chunks. String
-        arrays always keep their stored chunks. Ignored for sparse matrices and
-        other modes.
+        integer give blocks of whole rows, spanning all other axes, the layout
+        :doc:`scanpy <scanpy:index>` and
+        :doc:`rapids-singlecell <rapids_singlecell:index>` expect for lazy
+        matrices. Their number of rows is the largest multiple of the stored
+        row chunk size that does not exceed the requested rows, and at least
+        one stored chunk. ``"auto"`` requests the rows that fit in Dask's
+        ``array.chunk-size`` setting, as for ``sparse_chunks``; an integer
+        requests that number of rows. A block therefore never splits a stored
+        chunk; when one stored chunk exceeds the target, a block is that chunk.
+        ``"storage"`` keeps the stored chunks. String arrays always keep their
+        stored chunks. Ignored for sparse matrices and other modes.
 
     Returns
     -------

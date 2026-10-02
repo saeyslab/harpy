@@ -307,12 +307,18 @@ def _sparse_block_length(element: zarr.Group, *, compressed_axis: int, sparse_ch
 def _dense_lazy_chunks(element: zarr.Array, *, dense_chunks: _DenseChunks) -> tuple[int, ...] | None:
     """Return a row-only block layout (Dask chunks) for a dense array, or None to keep its stored chunks.
 
-    Blocks span all axes after the first. Their number of rows is the largest
-    multiple of the stored row chunk size that does not exceed the requested
-    rows, and at least one stored chunk, so a lazy block never splits a stored
-    chunk. Zarr decompresses stored chunks whole, so splitting one would not
-    save memory and would repeat the decompression. ``element.chunks`` reports
-    the inner chunks of sharded arrays, which can be read individually.
+    Blocks span all axes after the first, because the lazy code paths of
+    :mod:`scanpy` (e.g. PCA and QC metrics) and the input check of
+    :mod:`rapids_singlecell` require a single block along the columns
+    (``X.numblocks[1] == 1``), while stored chunks, such as AnnData's defaults,
+    often split the columns.
+
+    Their number of rows is the largest multiple of the stored row chunk size
+    that does not exceed the requested rows, and at least one stored chunk, so
+    a lazy block never splits a stored chunk. Zarr decompresses stored chunks
+    whole, so splitting one would not save memory and would repeat the
+    decompression. ``element.chunks`` reports the inner chunks of sharded
+    arrays, which can be read individually.
 
     ``"auto"`` requests the rows that fit the memory target; an integer
     requests that number of rows directly.
