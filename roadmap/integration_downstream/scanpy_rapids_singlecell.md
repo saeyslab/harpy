@@ -272,9 +272,10 @@ requirement applies at two levels with different strictness:
    reading whole stored chunks into row bands; see "Aligned reading, not a
    rechunk" below.
 2. **The on-disk Zarr chunks (recommended, and the primary fix).** If dense
-   matrices are stored with row-only chunks, lazy reads use the stored chunks
-   unchanged. Compatibility does not require this, but it is the cleanest layout,
-   so the proposed change starts here.
+   matrices are stored with row-only chunks, lazy reads only combine whole stored
+   chunks into row bands and never need to merge column chunks. Compatibility does
+   not require this, but it is the cleanest layout, so the proposed change starts
+   here.
 
 **Where dense matrices occur in Harpy.** Sparse transcriptomics tables (CSR) are
 not affected. Dense matrices come from:
@@ -317,10 +318,11 @@ reads dense arrays with `read_elem_lazy(element)` and keeps those chunks
 **Proposed change.** Fix the layout where it is created, at write time, and make
 lazy reads align with whatever is already stored.
 
-1. **Writes (primary fix):** store dense matrices with row-only chunks, with the
-   number of rows taken from the memory target (see "Choosing the number of rows
-   per chunk" below). Lazy reads of these stores use the stored chunks unchanged,
-   so each Dask block is exactly one stored chunk.
+1. **Writes (primary fix):** store dense matrices with row-only chunks of a fixed
+   size, a Harpy constant of a few MiB (see "Stored chunk size for writes"
+   below). Lazy reads of these stores combine whole stored chunks into row bands
+   of about the memory target, so no column chunks need merging and no stored
+   chunk is split.
 2. **Lazy reads (for stores already split by columns):**
    `read_table(..., mode="lazy")` and `read_table_components(..., mode="lazy")`
    return dense matrices chunked as `(rows, n_columns)` by default, i.e. whole
@@ -420,9 +422,82 @@ below. With the default:
 | 20,000 genes, float32 | 80 KB         | 80 MB     | about 1,700            |
 
 A fixed 1000 rows is far too small for intensity tables with tens of channels,
-and roughly right for wide gene matrices. Writes use the result directly as the
-stored row chunk size. Lazy reads round it down to a multiple of the stored row
-chunk size, at least one, so that they never split a stored chunk.
+and roughly right for wide gene matrices. Lazy reads round the result down to a
+multiple of the stored row chunk size, at least one, so that they never split a
+stored chunk. This target sizes lazy blocks only; writes use a smaller, fixed
+stored chunk size.
+
+**Stored chunk size for writes (decided).** Writes do not use the memory target
+as the stored chunk size. They store dense matrices in row-only chunks of a fixed
+size: a Harpy constant of a few MiB, for example 4 MiB, independent of Dask's
+`array.chunk-size`. The exact value is set in slice 1b.
+
+- A stored chunk is decompressed whole, so small stored chunks keep partial reads
+  cheap: subsets of rows, viewers, and the regional merge reading an existing
+  matrix. With stored chunks of 128 MiB, reading a few rows would decompress
+  128 MiB.
+- Lazy reads lose nothing: `dense_chunks="auto"` combines whole stored chunks
+  into blocks of about the memory target.
+- The on-disk layout should not depend on the Dask settings of whoever wrote the
+  store. A fixed constant keeps the stores Harpy writes consistent.
+- The size is comparable to Zarr's own defaults (about 0.5–4 MiB), but with whole
+  rows.
+- The constant is fixed in bytes; only the number of rows adapts to the row
+  width. Zarr's default instead grows with the array, 256 KiB × 2^(log10 of the
+  size in MiB), clamped to 128 KiB–64 MiB, mainly to limit the number of chunk
+  files for very large arrays. A fixed size keeps the cost of a partial read the
+  same whatever the table size. For dense matrices up to tens of GiB both give
+  similar file counts (for 40 GiB, about 10,000 files at 4 MiB against about
+  6,800 at Zarr's about 6 MiB). They differ substantially only for very large
+  arrays (for 1 TiB, about 262,000 against about 65,000), where sharding is the
+  better way to reduce the file count (see "Sharding" below).
+- Nothing overrides it. Harpy passes the chunks explicitly, and explicit chunks
+  win over Dask's `array.chunk-size`, which sizes only in-memory blocks, and over
+  Zarr's configuration, which has no setting that changes explicit chunks.
+  Verified with AnnData's writer on a Zarr v3 store, from NumPy and from Dask
+  with `array.chunk-size` set to 8 MiB.
+
+Rows per stored chunk = the constant ÷ bytes per row (itemsize × the product of
+all axes after the first), at least one row and at most the number of rows. With
+4 MiB:
+
+| Matrix                | Bytes per row | Rows per stored chunk | Stored chunks per 128 MiB lazy block |
+| --------------------- | ------------- | --------------------- | ------------------------------------ |
+| 40 channels, float32  | 160 B         | about 26,000          | 32                                   |
+| 20,000 genes, float32 | 80 KB         | about 52              | 32                                   |
+
+When a single row is larger than the constant, a stored chunk is one row.
+
+**Sharding (decided for slice 1b).** Harpy passes no `shards`, only `chunks`.
+Sharding stays AnnData's opt-in setting `ad.settings.auto_shard_zarr_v3` (off by
+default, Zarr v3 only), which adds `shards="auto"` only when no `shards` are given
+(`zarr_v3_sharding` in `anndata/_io/specs/methods.py`). Harpy's chunks then become
+the inner chunks of the shards, which lazy reads align to. Verified: chunks of
+(1000, 600) were kept as inner chunks, in shards of (2000, 600).
+
+Harpy does not enable it, because Zarr's automatic shard heuristic
+(`_auto_partition` in `zarr/core/chunk_grids.py`, which warns that it is
+experimental) does little for this layout. Computed for a 10M × 1000 float32
+matrix with 4 MiB row-only chunks, and for the `data` array of a sparse matrix
+with 2 billion float32 values:
+
+| Case                                              | Shards                       | Effect                                                                                |
+| ------------------------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------- |
+| Default                                           | 2 chunks per shard           | halves the file count                                                                 |
+| `array.target_shard_size_bytes` set, e.g. 256 MiB | 1 chunk per shard            | none: the heuristic grows shards along every axis, and the chunks span all columns    |
+| Sparse `data` and `indices`                       | 1 MiB chunks in 2 MiB shards | about twice as many files as unsharded, where Zarr's default gives about 4 MiB chunks |
+
+Sharding is also limited to Zarr v3. Harpy writes in the source store's format, so
+Zarr v2 stores cannot be sharded. And a shard is written as a whole, so a Dask
+block that covers only part of a shard reads and rewrites that shard.
+
+Writes stay correct when a user enables automatic sharding, because AnnData's
+`da.store` call holds a lock by default. The extra cost is at most one shard
+rewrite at each block boundary, which is small because the shards (about 8 MiB)
+are much smaller than the Dask blocks (about 128 MiB). Shards therefore need no
+write alignment of their own. Explicit sharding by Harpy, which would reduce the
+file count substantially, is deferred; see "Deferred: explicit sharding" under
+"Implementation sequence".
 
 **Scope.** The rule applies to every lazily read dense array: `X`, layers,
 `obsm`, `varm`, `varp` and `raw`. Row-only chunking is valid for all of them.
@@ -434,8 +509,9 @@ chunk size, at least one, so that they never split a stored chunk.
 - An array with zero bytes per row, i.e. without columns, is read as one block,
   like a sparse matrix without non-zero values.
 - The stored row chunk size is `element.chunks[0]`. For sharded Zarr arrays this
-  is the inner chunk, which can be read on its own; Harpy does not write
-  sharded arrays, so this only matters for stores written by other tools.
+  is the inner chunk, which can be read on its own. Harpy does not set shards
+  itself, so sharded arrays come from AnnData's opt-in automatic sharding or
+  from other tools (see "Sharding" above).
 - String arrays (`string-array` encoding, which the lazy reader also handles)
   keep their stored chunks, because their size per element cannot be derived
   from the dtype.
@@ -449,7 +525,8 @@ column-oriented copy for that workflow, not for a different default.
 **Tests.**
 
 - A dense table written and lazily read by Harpy has `numblocks[1] == 1`, and
-  its stored chunks are row-only.
+  its stored chunks are row-only, with their rows set by the fixed stored-chunk
+  constant.
 - A store written with column-split chunks by another tool reads with whole
   rows and the same values.
 - The number of rows per lazy block is the largest multiple of the on-disk row
@@ -1015,12 +1092,13 @@ sizing logic that the write side reuses.
 | Slice                         | Content                                                                        | Main code                                                           | Depends on                                   |
 | ----------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------- | -------------------------------------------- |
 | **1a: read side**             | `sparse_chunks` and `dense_chunks` on all read functions; shared sizing helper | `_storage/_anndata.py`, `table/io/_read.py`, `io/_read_zarr.py`     | nothing                                      |
-| **1b: dense writes**          | row-only stored chunks for dense 2-D matrices                                  | `_storage/_anndata.py` (`_write_anndata_element`)                   | 1a's sizing helper                           |
+| **1b: dense writes**          | row-only stored chunks of a fixed size (a few MiB) for dense matrices          | `_storage/_anndata.py` (`_write_anndata_element`)                   | 1a's sizing helper                           |
 | **1c: CSC → CSR**             | Visium readers write CSR; one-time conversion of existing CSC tables           | `io/_visium.py`, `io/_visium_hd.py`, a conversion helper or recipe  | the open CSC question; 1a for the lazy reads |
 | **1d: regional-write chunks** | chunk policy of the regional merge; removes 1a's guard                         | `table/io/_write_by_region.py`, `table/io/_components_by_region.py` | 1a's read policy and sizing helper           |
 
 After 1a, existing stores work with scanpy and rapids-singlecell, except CSC
-tables. After 1b, new dense tables need no merge on read. After 1c, every table
+tables. After 1b, new dense tables are stored in whole rows, so lazy reads only
+combine whole stored chunks. After 1c, every table
 Harpy writes is stored row-major, as CSR or dense with row-only chunks. Slice 1d
 does not change what downstream tools receive; it makes regional updates, such
 as those of `hp.tb.add_feature_matrix`, use the same chunk policy.
@@ -1098,8 +1176,11 @@ as those of `hp.tb.add_feature_matrix`, use the same chunk policy.
 #### Slice 1b: dense writes
 
 - In `_write_anndata_element`, store dense matrices (`X`, layers, `obsm`, `varm`,
-  `varp` and `raw`, the same scope as the reads) with row-only chunks, sized by
-  the 1a helper.
+  `varp` and `raw`, the same scope as the reads) with row-only chunks of a fixed
+  size: a Harpy constant of a few MiB, independent of Dask's `array.chunk-size`
+  (see "Stored chunk size for writes" in gap 1). Rows per stored chunk = the
+  constant ÷ bytes per row, computed with the same bytes-per-row logic as the 1a
+  helper.
 - Implementation: AnnData's `write_dispatched`, with a callback that sets `chunks`
   only for dense 2-D matrices and leaves `obs`/`var` columns and sparse buffers to
   AnnData's defaults. `write_dispatched` is available in anndata 0.12.10; this
@@ -1126,8 +1207,18 @@ as those of `hp.tb.add_feature_matrix`, use the same chunk policy.
   0.5–1.2 MiB, whether written from memory or from Dask.
 - Side effect: this also fixes the dense results Harpy writes back today, such as
   `X_pca` and scaled layers, which are currently split by columns on disk.
+- Sharding: pass no `shards`, so that AnnData's opt-in automatic sharding is
+  respected and Harpy's chunks become its inner chunks (see "Sharding" in
+  gap 1).
+- Docs: document the constant clearly in the writer docstrings and in the
+  writing section of `docs/development/storage.md`: its value; that it is fixed
+  in bytes, unlike Zarr's size-dependent default; that it does not depend on
+  Dask's `array.chunk-size`; and that sharding follows AnnData's setting.
 - Tests:
   - the write-side tests listed under "Dense matrices" in gap 1;
+  - with `ad.settings.auto_shard_zarr_v3` enabled on a Zarr v3 store, Harpy's
+    row-only chunks are kept as the inner chunks (AnnData only accepts the
+    setting after `ad.settings.zarr_write_format = 3`);
   - Harpy-written sparse matrices, from memory and from Dask, have stored `data`
     and `indices` chunks well below the `"auto"` block size. This guards the
     assumption above if AnnData or Zarr change their defaults.
@@ -1262,6 +1353,24 @@ the legacy table functions, and it resolves the breakage accepted during Phases
 Run the rapids-singlecell pattern on a CUDA machine with `anndata>=0.12.14`,
 including writing results back with Harpy. Every rapids-singlecell statement in
 this document is currently based on source review.
+
+### Deferred: explicit sharding
+
+Start this only if file counts become a problem, for example with file quotas on
+HPC file systems or with object stores. AnnData's automatic sharding does not
+help here (see "Sharding" in gap 1), so Harpy would pass explicit `shards` for
+Zarr v3 stores:
+
+- row-only shards of a fixed size, for example 32 stored chunks (about 128 MiB);
+  for a 40 GiB dense matrix this reduces about 10,000 files to about 320;
+- Dask write blocks aligned to whole shards, because a shard is written as a
+  whole;
+- the same for the 1-D arrays of sparse matrices (`data`, `indices` and
+  `indptr`);
+- Zarr v2 stores stay unsharded.
+
+To decide then: whether Harpy's explicit shards apply always or only on request,
+given that AnnData adds its own automatic shards only when none are given.
 
 ## Open questions
 
