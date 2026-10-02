@@ -457,8 +457,17 @@ def _stage_canonical_components(
     try:
         staging = zarr.open_group(store=str(workspace), mode="w", zarr_format=destination.zarr_format)
         log.info(f"Writing staged canonical-center components to '{workspace}'.")
-        _write_anndata_element(staging, _CANONICAL_MATRIX_PATH, centers, create_parents=True)
-        _write_anndata_element(staging, _CANONICAL_METADATA_PATH, dict(metadata), create_parents=True)
+        # The staging root mirrors the table, so the staged paths are logical paths.
+        _write_anndata_element(
+            staging, _CANONICAL_MATRIX_PATH, centers, logical_path=_CANONICAL_MATRIX_PATH, create_parents=True
+        )
+        _write_anndata_element(
+            staging,
+            _CANONICAL_METADATA_PATH,
+            dict(metadata),
+            logical_path=_CANONICAL_METADATA_PATH,
+            create_parents=True,
+        )
         log.info(f"Finished writing staged canonical-center components to '{workspace}'.")
     except BaseException:
         _cleanup_owned_path(workspace)

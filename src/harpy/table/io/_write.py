@@ -80,6 +80,11 @@ def write_table(
     in chunks during writing, without preliminary whole-matrix computation or
     densification. Serialization finishes in staging before existing data is moved.
 
+    Dense matrices (X, layers, obsm, varm, obsp, varp and raw) are stored in
+    chunks of whole rows of 4 MiB each, regardless of their input chunks or
+    Dask's ``array.chunk-size``. Sparse matrices and annotations use AnnData's
+    defaults. Sharding follows AnnData's ``auto_shard_zarr_v3`` setting.
+
     Validation checks table structure and SpatialData annotation, not scientific
     metadata.
 
@@ -177,7 +182,9 @@ def write_table_components(
 
     Zarr-backed matrices are internally wrapped in lazy Dask arrays and evaluated
     in chunks during writing, without preliminary whole-matrix computation or
-    densification.
+    densification. Stored layouts follow :func:`harpy.table.write_table`: dense
+    matrices in chunks of whole rows of 4 MiB each, sparse matrices and
+    annotations in AnnData's defaults.
 
     An obs-only update does not read or rewrite X.
     Related matrix and metadata updates should be submitted in the same call.
@@ -412,7 +419,7 @@ def _write_table_operation(
         staged_root = zarr.open_group(str(workspace), mode="w", zarr_format=source_root.metadata.zarr_format)
         replacements: list[_StagedPath | _DeletedPath] = []
         if adata is not None:
-            _write_anndata_element(staged_root, ("table",), adata, create_parents=False)
+            _write_anndata_element(staged_root, ("table",), adata, logical_path=(), create_parents=False)
             staged_table = _read_anndata_table(staged_root["table"], mode="lazy")
             _validate_complete_table(staged_table)
             _validate_table_identities(
@@ -444,7 +451,7 @@ def _write_table_operation(
                     var=new_raw_var,
                     varm={path[2]: value for path, value in components.items() if path[:2] == ("raw", "varm")},
                 )
-                _write_anndata_element(staged_root, ("raw",), raw, create_parents=False)
+                _write_anndata_element(staged_root, ("raw",), raw, logical_path=("raw",), create_parents=False)
                 replacements.append(_StagedPath(workspace / "raw", table_path / "raw"))
             # Read back the new raw components from their shared container;
             # other replacements are serialized and published individually.
@@ -455,7 +462,10 @@ def _write_table_operation(
                 else:
                     staged_name = f"component-{ordinal}"
                     staged_path = (staged_name,)
-                    _write_anndata_element(staged_root, staged_path, components[path], create_parents=False)
+                    # The temporary name hides the slot, so pass the logical path.
+                    _write_anndata_element(
+                        staged_root, staged_path, components[path], logical_path=path, create_parents=False
+                    )
                     replacements.append(_StagedPath(workspace / staged_name, table_path.joinpath(*path)))
                 # Temporary names hide the original slot, so explicitly preserve
                 # uns's eager-reading policy. Unlike uns, obs/var/raw.var are
@@ -626,7 +636,8 @@ def _create_destination_parents(
     for destination in destinations:
         parent = group
         parent_path = root
-        for key in destination.relative_to(root).parts[:-1]:
+        parts = destination.relative_to(root).parts
+        for index, key in enumerate(parts[:-1]):
             parent_path = parent_path / key
             if key not in parent:
                 if parent_path.exists() or parent_path.is_symlink():
@@ -635,5 +646,6 @@ def _create_destination_parents(
                 if parent_path == root / "tables":
                     parent.create_group(key)
                 else:
-                    _write_anndata_element(parent, (key,), {}, create_parents=False)
+                    # Destinations are tables/<table name>/<logical path>.
+                    _write_anndata_element(parent, (key,), {}, logical_path=parts[2 : index + 1], create_parents=False)
             parent = parent[key]

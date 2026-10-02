@@ -77,6 +77,10 @@ def add_table(
     External references to a replaced table are not refreshed; use
     ``sdata.tables[output_table_name]`` after success.
 
+    Backed writes store dense matrices in chunks of whole rows of 4 MiB each,
+    and sparse matrices and annotations in AnnData's defaults, as
+    :func:`harpy.table.write_table` does.
+
     See Also
     --------
     harpy.table.write_table : Write a complete table without updating ``sdata``.

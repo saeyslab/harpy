@@ -202,7 +202,7 @@ def _write_table_components_by_region_operation(
             if element.attrs.get("encoding-type") == "dataframe":
                 raise TypeError("Regional writes do not support DataFrame-valued obsm entries.")
             # Keep the stored dense chunk layout during merging, as documented,
-            # rather than the readers' row-only default (until slice 1d revisits it).
+            # rather than the readers' row-only default (until slice 1e revisits it).
             existing = _read_anndata_element(group, path, mode="lazy", sparse_chunks=chunk_size, dense_chunks="storage")
             # A stored null is an invalid matrix, not an absent entry.
             _matrix_format(existing, label=f"Stored component {path!r}")
