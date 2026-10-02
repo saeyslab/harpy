@@ -138,10 +138,29 @@ each other; both routes use the same publisher.
 
 ### Writing AnnData components
 
-`_write_anndata_element(group, path, value, ...)` writes a value at a logical
-AnnData path, such as `("obsm", "my_matrix")`, and returns `None`. It centralizes
-path handling and AnnData encoding through `write_elem`. The optional
-`create_parents=True` creates missing parents as AnnData-encoded mappings.
+`_write_anndata_element(group, path, value, logical_path=..., ...)` writes a
+value at `path`, such as `("obsm", "my_matrix")`, and returns `None`. It
+centralizes path handling and AnnData encoding through AnnData's
+`write_dispatched`. The optional `create_parents=True` creates missing parents
+as AnnData-encoded mappings.
+
+The required `logical_path` is the value's position in the AnnData table: `()`
+for a whole table, `("raw",)` for raw, or a component path. It can differ from
+`path`, because staged values do not always sit at their logical path:
+`write_table_components` stages each component as `component-N`. The writer
+uses it to choose the stored layout:
+
+- Dense arrays at matrix paths (`X`, entries of `layers`, `obsm`, `varm`,
+  `obsp` and `varp`, and raw's `X` and `varm` entries) are stored in row-only
+  chunks of 4 MiB (`_STORED_CHUNK_BYTES`), spanning all axes after the first.
+  The size is fixed in bytes, unlike Zarr's size-dependent default, and does
+  not depend on Dask's `array.chunk-size`, which sizes lazy blocks only.
+- Dask inputs are rechunked into write blocks of whole stored chunks, about the
+  size of their input blocks, so that each stored chunk is written once;
+  `_rechunk_to_write_blocks` documents the rule.
+- Everything else keeps AnnData's defaults: `obs`/`var` columns, `uns`, sparse
+  matrices and string arrays. Sharding follows AnnData's `auto_shard_zarr_v3`
+  setting; Harpy's chunks then become the inner chunks of its shards.
 
 This helper does not create a workspace, publish paths, retain backups or
 automatically read the result. The caller supplies the target group, normally
@@ -563,8 +582,9 @@ both `"auto"` by default. Neither changes disk storage or backed/eager reads.
 `array.chunk-size` is read when the lazy arrays are built. Tables reopened by
 `add_table`, `add_table_components` and the regional adapter use the same
 defaults. The regional writer reads existing matrices with
-`dense_chunks="storage"`, so existing dense targets keep their stored layout
-during merging.
+`dense_chunks="storage"`, so the merge works on blocks of the existing stored
+chunks. The merged result is written like any other dense matrix, in Harpy's
+row-only stored chunks, so the stored layout of an older target changes.
 
 Lazy and backed matrix reads accept dense `array`/`string-array` encoding version
 `0.2.0` and CSR/CSC encoding version `0.1.0`. Harpy rejects other matrix encodings
