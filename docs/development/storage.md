@@ -146,9 +146,12 @@ creates missing parents as AnnData-encoded mappings.
 Callers pass the value's position in the AnnData table as `logical_path`,
 because staged paths need not be logical ones: `write_table_components` stages
 components as `component-N`. The writer uses it to choose the stored layout.
-Dense matrices are stored in row-only chunks of 4 MiB, fixed in bytes and
+Dense matrices are stored in row-only chunks of 4 MiB, and sparse matrices in
+chunks of 524,288 entries per array, at most 4 MiB each; both are fixed and
 independent of `array.chunk-size`. Everything else keeps AnnData's defaults,
-and sharding follows AnnData's `auto_shard_zarr_v3` setting. The docstring of
+and sharding follows AnnData's `auto_shard_zarr_v3` setting. The comment at
+`_STORED_CHUNK_BYTES` explains the difference from Dask's `array.chunk-size`
+and from Zarr's default. The docstring of
 `_write_anndata_element` gives the rules and the helpers that apply them.
 
 This helper does not create a workspace, publish paths, retain backups or
