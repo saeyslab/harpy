@@ -486,10 +486,74 @@ def test_end_to_end_dense_write_lazy_read_and_scanpy_pca(make_table_io_store, mo
         assert matrix.chunks == ((10, 10, 10, 10), (30,))
         np.testing.assert_array_equal(matrix.compute(), values)
     sc.pp.pca(table, n_comps=2, svd_solver="covariance_eigh")
-    # The projection stays lazy, so it can be written back without loading it.
+    # PCA computes its components when called, in one pass over X; only the
+    # projection obsm["X_pca"] stays a lazy Dask array, computed block by
+    # block when used, so it can be written back without loading it whole.
     assert isinstance(table.obsm["X_pca"], da.Array)
     # It matches an in-memory PCA of the same values, up to the sign of each component.
     expected = AnnData(X=values)
+    sc.pp.pca(expected, n_comps=2, svd_solver="covariance_eigh")
+    lazy_pca = table.obsm["X_pca"].compute()
+    signs = np.sign(np.sum(lazy_pca * expected.obsm["X_pca"], axis=0))
+    np.testing.assert_allclose(lazy_pca * signs, expected.obsm["X_pca"], atol=1e-10)
+
+
+def test_end_to_end_csr_write_lazy_read_and_scanpy_pca(make_table_io_store, monkeypatch):
+    """End to end for CSR matrices: Harpy's writers, lazy reads and scanpy.
+
+    A CSR table and a lazy CSR component written with Harpy's writers get one
+    fixed chunk length for their data, indices and indptr arrays, even when the
+    component's first block holds a single row. A lazy read gives CSR blocks of
+    whole rows that span all columns, and scanpy's PCA accepts them, keeps its
+    projection lazy and matches an in-memory PCA.
+    """
+    # Writes store each array of a sparse matrix in chunks of _STORED_CHUNK_BYTES
+    # // 8 entries (_choose_sparse_stored_chunks): 256 bytes give 32 entries.
+    monkeypatch.setattr(anndata_storage, "_STORED_CHUNK_BYTES", 256)
+    path = make_table_io_store()
+    rng = np.random.default_rng(0)
+    values = rng.normal(size=(40, 30)) * (rng.random((40, 30)) < 0.3)
+    in_memory_counts = sparse.csr_matrix(values)
+    obs = pd.DataFrame(index=[f"c{i}" for i in range(40)])
+    var = pd.DataFrame(index=[f"g{i}" for i in range(30)])
+    write_table(path, table_name="sparse", adata=AnnData(X=in_memory_counts, obs=obs, var=var))
+    # The lazy component's first block holds a single row. AnnData writes that
+    # block first, and its size must not decide the chunks of the whole matrix.
+    meta = sparse.csr_matrix((0, 0), dtype=in_memory_counts.dtype)
+    lazy_counts = da.concatenate(
+        [
+            da.from_array(in_memory_counts[:1], chunks=(1, -1), asarray=False, meta=meta),
+            da.from_array(in_memory_counts[1:], chunks=(13, -1), asarray=False, meta=meta),
+        ]
+    )
+    write_table_components(
+        path,
+        table_name="sparse",
+        components={("layers", "lazy_counts"): lazy_counts},
+        obs_identity=obs.index,
+        var_names=var.index,
+    )
+
+    group = zarr.open_group(str(path / "tables" / "sparse"), mode="r")
+    for name in ("X", "layers/lazy_counts"):
+        for array in ("data", "indices", "indptr"):
+            assert group[f"{name}/{array}"].chunks == (32,), f"{name}/{array}"
+    # Lazy reads size CSR blocks from Dask's array.chunk-size and the average
+    # bytes per row, spanning all columns (_sparse_block_length): 1 KiB gives
+    # several blocks of about 8 rows.
+    with dask.config.set({"array.chunk-size": "1KiB"}):
+        table = read_table(path, table_name="sparse")
+    for lazy_matrix in (table.X, table.layers["lazy_counts"]):
+        assert lazy_matrix.numblocks[0] > 1 and lazy_matrix.numblocks[1] == 1
+        assert isinstance(lazy_matrix._meta, sparse.csr_matrix)
+        np.testing.assert_array_equal(lazy_matrix.compute().toarray(), values)
+    sc.pp.pca(table, n_comps=2, svd_solver="covariance_eigh")
+    # PCA computes its components when called, in one pass over X; only the
+    # projection obsm["X_pca"] stays a lazy Dask array, computed block by
+    # block when used, so it can be written back without loading it whole.
+    assert isinstance(table.obsm["X_pca"], da.Array)
+    # It matches an in-memory PCA of the same matrix, up to the sign of each component.
+    expected = AnnData(X=in_memory_counts.copy())
     sc.pp.pca(expected, n_comps=2, svd_solver="covariance_eigh")
     lazy_pca = table.obsm["X_pca"].compute()
     signs = np.sign(np.sum(lazy_pca * expected.obsm["X_pca"], axis=0))
