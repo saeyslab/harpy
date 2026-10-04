@@ -39,9 +39,37 @@ _MATRIX_MAPPINGS = ("layers", "obsm", "varm", "obsp", "varp")
 # an integer sets them directly, and dense "storage" keeps the stored chunks.
 _SparseChunks = Literal["auto"] | int
 _DenseChunks = Literal["auto", "storage"] | int
-# Stored chunk size of the dense matrices Harpy writes. It is fixed in bytes,
-# unlike Zarr's default, which grows with the array, and does not depend on
-# Dask's array.chunk-size, which sizes in-memory blocks only.
+# Two sizes are easy to confuse here:
+#
+# - Stored chunk: a separately compressed piece of a Zarr array on disk. Zarr
+#   always decompresses a stored chunk whole, so its size is the minimum cost
+#   of reading any part of it. It is fixed when the array is written.
+# - Block: a piece of a lazy Dask array in memory, computed by one task. Its
+#   target size is Dask's array.chunk-size setting (128 MiB by default), and it
+#   is chosen at read time; lazy reads combine whole stored chunks into blocks.
+#
+# _STORED_CHUNK_BYTES sets the stored chunks of the matrices Harpy writes: the
+# target size of a dense matrix's row-only chunks, and the upper limit of the chunks
+# of each array of a sparse matrix. It is deliberately much smaller than
+# array.chunk-size. A stored chunk is the smallest unit of both reading and
+# writing, while lazy reads combine whole stored chunks into blocks of about
+# array.chunk-size (32 chunks of 4 MiB per 128 MiB block), so computations
+# still get large blocks. Larger stored chunks would make reading a few rows
+# decompress the whole chunk, and would force write blocks of at least that
+# size, raising the memory of writes from inputs with small blocks. The
+# layout on disk must also not depend on the Dask settings of whoever wrote
+# the store.
+#
+# It is also fixed rather than growing with the array, as Zarr's default does
+# (about 0.5 MiB for 10 MiB, 4 MiB for 10 GiB, 16 MiB for 1 TiB). A fixed size
+# keeps the cost of a partial read the same whatever the table size. Zarr grows
+# its chunks mainly to limit the number of files for very large arrays; for
+# tables up to tens of GiB both give similar file counts, and sharding is the
+# better answer beyond that.
+#
+# The docstrings of the public table writers (write_table and the functions
+# that refer to it) and docs/development/storage.md state this value as 4 MiB;
+# update them if it changes.
 _STORED_CHUNK_BYTES = 4 * 1024 * 1024
 
 
@@ -287,11 +315,10 @@ def _sparse_block_length(element: zarr.Group, *, compressed_axis: int, sparse_ch
     rows hold different numbers of them, so block boundaries fall at arbitrary
     positions inside stored chunks. Only the edge chunks of a block are shared
     with its neighbours and decompressed twice. That stays cheap while blocks
-    are much larger than stored chunks (as for Harpy's own writes: Harpy sets
-    no sparse chunk sizes, so Zarr's default applies, sized from the array or,
-    for Dask writes, from the first block written; it grows from about 0.5 MiB
-    for 10 MiB to about 4 MiB for 10 GiB, far below ``"auto"`` blocks of about
-    ``array.chunk-size``). Stores written with much larger chunks make each
+    are much larger than stored chunks. Harpy's own writes store at most
+    ``_STORED_CHUNK_BYTES`` per chunk of each array
+    (``_choose_sparse_stored_chunks``), far below ``"auto"`` blocks of about
+    ``array.chunk-size``. Stores written with much larger chunks make each
     block decompress more than it uses, which slows reads but does not change
     results.
     """
@@ -381,11 +408,36 @@ def _choose_dense_stored_chunks(shape: tuple[int, ...], itemsize: int) -> tuple[
         rows_per_chunk = max(_STORED_CHUNK_BYTES // bytes_per_row, 1)
     # At most the array's rows: Zarr stores every chunk at the full chunk
     # shape and fills the part outside the array, so a small array would
-    # otherwise get a padded 4 MiB chunk.
+    # otherwise get a padded 4 MiB chunk. Sparse matrices have no such cap
+    # (_choose_sparse_stored_chunks): for a Dask matrix, AnnData calls the write
+    # callback again with its first block, and a cap computed from that block
+    # would decide the whole layout.
     rows_per_chunk = min(rows_per_chunk, n_rows)
     # Zarr requires chunk edges of at least 1, also along empty axes, as in
     # its own default.
     return (max(rows_per_chunk, 1), *(max(size, 1) for size in other_axes))
+
+
+def _choose_sparse_stored_chunks() -> tuple[int]:
+    """Choose the stored chunk shape for the arrays of a sparse matrix about to be written.
+
+    AnnData passes one ``chunks`` setting to the ``data``, ``indices`` and
+    ``indptr`` arrays of a CSR or CSC matrix, so they share one length:
+    ``_STORED_CHUNK_BYTES`` divided by 8 bytes, the width of int64, the widest
+    index dtype, and at least one. No array's chunks then exceed
+    ``_STORED_CHUNK_BYTES`` for data types up to 8 bytes. Dividing by a
+    smaller itemsize, such as that of float32 data, would double the int64
+    ``indptr`` chunks, which every lazy read block decompresses again.
+
+    The length depends on nothing about the matrix and is not capped at its
+    size, unlike the dense rule. For a Dask matrix, AnnData calls the write
+    callback twice: first with the Dask array, then with its first computed
+    block as a SciPy matrix. A cap computed in the second call would let the
+    first block decide the chunks of the whole matrix; a fixed length makes
+    both calls agree. A small matrix therefore gets one padded chunk per
+    array, which compression makes cheap.
+    """
+    return (max(_STORED_CHUNK_BYTES // 8, 1),)
 
 
 def _rechunk_to_write_blocks(value: da.Array, *, chosen_chunk_rows: int) -> da.Array:
@@ -456,7 +508,7 @@ def _write_element_with_layout(
     root: str,
     logical_path: tuple[str, ...],
 ) -> None:
-    """``write_dispatched`` callback: store dense matrices in row-only chunks, other elements unchanged.
+    """``write_dispatched`` callback: store matrices in Harpy's stored layout, other elements unchanged.
 
     AnnData calls it just before writing each element, nested ones included,
     and passes the first four arguments positionally. The encoding alone does
@@ -473,6 +525,13 @@ def _write_element_with_layout(
     3. the chosen shape goes to Zarr as ``chunks`` in ``dataset_kwargs``, and
        ``write_func`` writes the value.
 
+    For a sparse matrix, ``_choose_sparse_stored_chunks`` chooses one chunk
+    length for its ``data``, ``indices`` and ``indptr`` arrays, which goes to
+    Zarr as ``chunks`` in the same way. There is nothing to rechunk: AnnData
+    writes a Dask sparse matrix by appending one block at a time. For such a
+    matrix, AnnData calls this callback a second time with its first computed
+    block, which gets the same chunk length.
+
     Parameters
     ----------
     write_func
@@ -487,7 +546,8 @@ def _write_element_with_layout(
     iospec
         The encoding AnnData will use, such as ``array`` or ``csr_matrix``.
     dataset_kwargs
-        Zarr options for creating the array; dense matrices get ``chunks``.
+        Zarr options for creating the arrays; dense and sparse matrices get
+        ``chunks``.
     root, logical_path
         The Zarr path where ``_write_anndata_element`` writes its value, and
         that value's logical path. The element's logical path is
@@ -531,14 +591,22 @@ def _write_element_with_layout(
     are. ``_rechunk_to_write_blocks`` documents the rule.
     """
     relative = PurePosixPath(f"{parent.name.rstrip('/')}/{key}").relative_to(root).parts
-    is_dense_matrix = _is_matrix_path(logical_path + relative) and iospec.encoding_type == "array"
+    is_matrix = _is_matrix_path(logical_path + relative)
+    is_dense_matrix = is_matrix and iospec.encoding_type == "array"
+    is_sparse_matrix = is_matrix and iospec.encoding_type in {"csr_matrix", "csc_matrix"}
     if is_dense_matrix and getattr(value, "ndim", 0) > 0:
         chunks = _choose_dense_stored_chunks(value.shape, value.dtype.itemsize)
         if isinstance(value, da.Array):
             value = _rechunk_to_write_blocks(value, chosen_chunk_rows=chunks[0])
-        # No shards are passed, so AnnData's opt-in automatic sharding still
-        # applies and keeps these chunks as the inner chunks of its shards.
         dataset_kwargs = {**dataset_kwargs, "chunks": chunks}
+    elif is_sparse_matrix:
+        # No cap at the matrix size, unlike dense arrays: for a Dask matrix,
+        # AnnData calls this callback again with its first block as a SciPy
+        # matrix, and a cap computed from that block would decide the chunks of
+        # the whole matrix. The fixed length makes both calls agree.
+        dataset_kwargs = {**dataset_kwargs, "chunks": _choose_sparse_stored_chunks()}
+    # No shards are passed, so AnnData's opt-in automatic sharding still
+    # applies and keeps these chunks as the inner chunks of its shards.
     write_func(parent, key, value, dataset_kwargs=dataset_kwargs)
 
 
@@ -569,9 +637,12 @@ def _write_anndata_element(
     Dense arrays at matrix paths below it (``_is_matrix_path``) are stored
     in row-only chunks of about ``_STORED_CHUNK_BYTES`` (``_choose_dense_stored_chunks``),
     and Dask inputs are rechunked so that each stored chunk is written once
-    (``_rechunk_to_write_blocks``). Other elements, such as ``obs``/``var`` columns,
-    ``uns``, sparse matrices and string arrays, keep AnnData's defaults.
-    Sharding follows AnnData's ``auto_shard_zarr_v3`` setting.
+    (``_rechunk_to_write_blocks``). Sparse matrices at matrix paths get one
+    fixed chunk length for their ``data``, ``indices`` and ``indptr`` arrays,
+    at most ``_STORED_CHUNK_BYTES`` per chunk and not capped at the matrix size
+    (``_choose_sparse_stored_chunks``). Other elements, such as ``obs``/``var``
+    columns, ``uns`` and string arrays, keep AnnData's defaults. Sharding
+    follows AnnData's ``auto_shard_zarr_v3`` setting.
     """
     parent, key = _resolve_anndata_parent(group, path, create_parents=create_parents)
     callback = partial(

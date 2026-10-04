@@ -1179,7 +1179,7 @@ those of `hp.tb.add_feature_matrix`, use the same chunk policy.
   because it reads tables lazily by default. Harpy's legacy table functions are
   not adapted during Phases 1–5 (see "Accepted during Phases 1–5" in gap 5).
 
-#### Slice 1b: dense writes
+#### Slice 1b: dense writes (implemented)
 
 - In `_write_anndata_element`, store dense matrices (`X`, layers, `obsm`, `varm`,
   `obsp`, `varp` and `raw`, the same scope as the reads) with row-only chunks of
@@ -1512,7 +1512,7 @@ those of `hp.tb.add_feature_matrix`, use the same chunk policy.
     and `indices` chunks well below the `"auto"` block size. This guards the
     assumption above if AnnData or Zarr change their defaults.
 
-#### Slice 1c: sparse writes
+#### Slice 1c: sparse writes (implemented)
 
 **Why.** Harpy passes no chunk settings for sparse matrices, so AnnData leaves
 their `data`, `indices` and `indptr` arrays to Zarr's default (`_guess_chunks`

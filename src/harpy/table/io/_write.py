@@ -80,10 +80,17 @@ def write_table(
     in chunks during writing, without preliminary whole-matrix computation or
     densification. Serialization finishes in staging before existing data is moved.
 
-    Dense matrices (X, layers, obsm, varm, obsp, varp and raw) are stored in
-    chunks of whole rows of 4 MiB each, regardless of their input chunks or
-    Dask's ``array.chunk-size``. Sparse matrices and annotations use AnnData's
-    defaults. Sharding follows AnnData's ``auto_shard_zarr_v3`` setting.
+    Matrices are stored in a layout suited to lazy reading. Matrices are the
+    values of ``X``, of each entry in ``layers``, ``obsm``, ``varm``, ``obsp`` and
+    ``varp``, and of ``raw.X`` and each entry in ``raw.varm``. They can be dense
+    (NumPy arrays, or Dask arrays with NumPy blocks) or sparse (SciPy CSR or CSC
+    matrices, or Dask arrays with such blocks). Dense matrices are stored in
+    chunks of whole rows of about 4 MiB, and sparse matrices in chunks of at most
+    4 MiB, whatever chunks or blocks they arrive in and whatever Dask's
+    ``array.chunk-size``. Everything else is stored as AnnData stores it by
+    default: ``obs`` and ``var``, dataframes in ``obsm``, everything in ``uns``,
+    and arrays of strings. Sharding follows AnnData's ``auto_shard_zarr_v3``
+    setting.
 
     Validation checks table structure and SpatialData annotation, not scientific
     metadata.
@@ -182,9 +189,8 @@ def write_table_components(
 
     Zarr-backed matrices are internally wrapped in lazy Dask arrays and evaluated
     in chunks during writing, without preliminary whole-matrix computation or
-    densification. Stored layouts follow :func:`harpy.table.write_table`: dense
-    matrices in chunks of whole rows of 4 MiB each, sparse matrices and
-    annotations in AnnData's defaults.
+    densification. Stored layouts follow :func:`harpy.table.write_table`, whose
+    Notes list which elements are stored as matrices.
 
     An obs-only update does not read or rewrite X.
     Related matrix and metadata updates should be submitted in the same call.

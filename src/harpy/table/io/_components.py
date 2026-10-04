@@ -122,10 +122,9 @@ def add_table_components(
     Unbacked updates perform no serialization or matrix computation and retain
     matrix representations. Supplied matrix data may be shared; this is not a
     deep-copy API. Backed updates use the shared staged writer, then reopen only
-    affected entries, with matrices lazy and annotations in memory. The writer
-    stores dense matrices in chunks of whole rows of 4 MiB each, and sparse
-    matrices and annotations in AnnData's defaults, as
-    :func:`harpy.table.write_table` does.
+    affected entries, with matrices lazy and annotations in memory. Backed
+    writes store matrices as :func:`harpy.table.write_table` does; its Notes
+    list which elements are stored as matrices.
 
     Installation finishes before disk publication commits. Handled failures
     restore affected live references as well as stored data. No crash recovery
