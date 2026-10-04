@@ -481,7 +481,7 @@ def test_end_to_end_dense_write_lazy_read_and_scanpy_pca(make_table_io_store, mo
     # Dask's array.chunk-size, spanning all columns (_dense_lazy_chunks): a target
     # of twelve 240-byte rows and stored chunks of 5 rows give read blocks of 10 rows.
     with dask.config.set({"array.chunk-size": 12 * 30 * 8}):
-        table = read_table(path, table_name="dense")
+        table = read_table(path, table_name="dense", mode="lazy", dense_chunks="auto")
     for matrix in (table.X, table.obsm["embedding"]):
         assert matrix.chunks == ((10, 10, 10, 10), (30,))
         np.testing.assert_array_equal(matrix.compute(), values)
@@ -542,7 +542,7 @@ def test_end_to_end_csr_write_lazy_read_and_scanpy_pca(make_table_io_store, monk
     # bytes per row, spanning all columns (_sparse_block_length): 1 KiB gives
     # several blocks of about 8 rows.
     with dask.config.set({"array.chunk-size": "1KiB"}):
-        table = read_table(path, table_name="sparse")
+        table = read_table(path, table_name="sparse", mode="lazy", sparse_chunks="auto")
     for lazy_matrix in (table.X, table.layers["lazy_counts"]):
         assert lazy_matrix.numblocks[0] > 1 and lazy_matrix.numblocks[1] == 1
         assert isinstance(lazy_matrix._meta, sparse.csr_matrix)
