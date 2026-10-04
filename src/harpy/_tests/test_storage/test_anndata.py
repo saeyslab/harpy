@@ -266,6 +266,8 @@ def _write_layout_test_tables(tmp_path, monkeypatch, zarr_format, *, stored_chun
             # Lists are encoded as array too, but have no shape or dtype, so the
             # write callback must not treat them as matrices.
             "regions": ["cells_a", "cells_b"],
+            # A sparse matrix outside the matrix paths keeps AnnData's defaults.
+            "sparse": sparse.csr_matrix(values),
         },
     )
     table.raw = AnnData(X=values.copy(), obs=obs, var=var, varm={"loadings": np.ones((6, 6))})
@@ -303,20 +305,41 @@ def test_writer_stores_dense_matrices_in_row_only_chunks(tmp_path, monkeypatch, 
 
 
 @pytest.mark.parametrize("zarr_format", [2, 3])
+def test_writer_stores_in_memory_sparse_layer_in_fixed_length_chunks(tmp_path, monkeypatch, zarr_format):
+    """An in-memory CSR layer, written as part of a whole table, gets one fixed chunk length.
+
+    The layer's data, indices and indptr all get chunks of 100 // 8 = 12
+    entries, fewer than its 179 non-zero values and 31 row pointers, so all
+    three arrays are split, unlike AnnData's single default chunk for arrays
+    this small. Dask input, one-line first blocks and CSC matrices are tested
+    in test_sparse_matrices_get_the_fixed_chunk_length_whatever_their_first_block.
+    """
+    group, _, values = _write_layout_test_tables(tmp_path, monkeypatch, zarr_format, stored_chunk_bytes=100)
+
+    for name in ("data", "indices", "indptr"):
+        assert group[f"layers/sparse/{name}"].chunks == (12,), name
+    np.testing.assert_array_equal(read_elem(group["layers/sparse"]).toarray(), values)
+
+
+@pytest.mark.parametrize("zarr_format", [2, 3])
 def test_writer_keeps_anndata_defaults_for_other_arrays(tmp_path, monkeypatch, zarr_format):
-    """Arrays that are not dense matrices are stored as a plain write_elem stores them.
+    """Arrays that are not matrices at matrix paths are stored as a plain write_elem stores them.
 
     The encoding alone does not identify matrices: numeric obs and var columns,
     categorical codes, and arrays and lists in uns are also encoded as array.
     Columns of a dataframe-valued obsm entry sit one level deeper than matrix
-    entries, and string arrays and sparse buffers have encodings of their own.
+    entries, string arrays have an encoding of their own, and a sparse matrix
+    in uns is not at a matrix path.
 
     A constant of 8 bytes is smaller than every array checked, so Harpy's
     layout, if wrongly applied, would split each of them and differ from
-    AnnData's defaults; the test checks that this holds for every array.
+    AnnData's defaults; the test checks that this holds for every array, with
+    the sparse rule for the sparse matrix's arrays and the dense rule for the
+    others.
     """
     group, reference, _ = _write_layout_test_tables(tmp_path, monkeypatch, zarr_format, stored_chunk_bytes=8)
 
+    sparse_arrays = ("uns/sparse/data", "uns/sparse/indices", "uns/sparse/indptr")
     for name in (
         "obs/score",
         "obs/label/codes",
@@ -326,13 +349,17 @@ def test_writer_keeps_anndata_defaults_for_other_arrays(tmp_path, monkeypatch, z
         "uns/values",
         "uns/nested/matrix",
         "uns/regions",
-        "layers/sparse/data",
-        "layers/sparse/indices",
+        *sparse_arrays,
         "raw/var/mean",
     ):
         array = reference[name]
+        misapplied = (
+            anndata_storage._choose_sparse_stored_chunks()
+            if name in sparse_arrays
+            else anndata_storage._choose_dense_stored_chunks(array.shape, array.dtype.itemsize)
+        )
         # The comparison only catches a misapplied layout if that layout would differ.
-        assert anndata_storage._choose_dense_stored_chunks(array.shape, array.dtype.itemsize) != array.chunks, name
+        assert misapplied != array.chunks, name
         assert group[name].chunks == array.chunks, name
     assert read_elem(group["uns/regions"]).tolist() == ["cells_a", "cells_b"]
 
@@ -348,6 +375,9 @@ def test_writer_uses_the_logical_path_rather_than_the_staged_name(tmp_path, monk
         # Arrays that are not 2-D are chunked along the first axis, from 48-byte rows.
         "component-2": (("obsm", "cube"), np.ones((30, 3, 2))),
         "component-3": (("obsm", "vector"), np.ones(30)),
+        # Sparse matrices get chunks of 100 // 8 = 12 entries per array.
+        "component-4": (("obsm", "sparse"), sparse.csr_matrix(values)),
+        "component-5": (("uns", "sparse"), sparse.csr_matrix(values)),
     }
     for name, (logical_path, value) in components.items():
         _write_anndata_element(group, (name,), value, logical_path=logical_path, create_parents=False)
@@ -359,6 +389,8 @@ def test_writer_uses_the_logical_path_rather_than_the_staged_name(tmp_path, monk
     assert group["component-1"].chunks == group["reference"].chunks
     assert group["component-2"].chunks == (2, 3, 2)
     assert group["component-3"].chunks == (12,)
+    assert group["component-4/data"].chunks == (12,)
+    assert group["component-5/data"].chunks == (values.size,)
     assert group["raw/X"].chunks == group["raw/varm/loadings"].chunks == (2, 6)
 
 
@@ -438,12 +470,12 @@ def test_automatic_sharding_keeps_row_only_chunks_as_inner_chunks(tmp_path, monk
 
 
 @pytest.mark.parametrize("lazy", [False, True])
-def test_sparse_stored_chunks_stay_far_below_auto_blocks(tmp_path, lazy):
-    """Guard the assumption behind sparse_chunks="auto" against changes in AnnData or Zarr.
+def test_sparse_stored_chunks_have_the_fixed_length_of_the_real_constant(tmp_path, lazy):
+    """With the real constant, every array of a sparse matrix is written in chunks of 524,288 entries.
 
-    Harpy sets no sparse chunk sizes. Zarr's default, sized from the array or,
-    for Dask writes, from the first block, must stay far below the about
-    array.chunk-size bytes of an "auto" block.
+    The other sparse layout tests lower the constant; this one checks the real
+    value, 4 MiB divided by 8 bytes, so that each chunk holds at most 4 MiB. It
+    writes the same CSR matrix from memory and from Dask.
     """
     matrix = sparse.random(20_000, 1_000, density=0.1, format="csr", dtype=np.float32, random_state=0)
     value = matrix
@@ -455,11 +487,88 @@ def test_sparse_stored_chunks_stay_far_below_auto_blocks(tmp_path, lazy):
 
     _write_anndata_element(group, ("X",), value, logical_path=("X",), create_parents=False)
 
-    limit = anndata_storage._chunk_size_target() // 8
-    for name in ("data", "indices"):
+    for name in ("data", "indices", "indptr"):
         array = group[f"X/{name}"]
-        assert array.chunks[0] * array.dtype.itemsize <= limit, name
+        assert array.chunks == (524_288,), name
+        assert array.chunks[0] * array.dtype.itemsize <= 4 * 1024 * 1024, name
+    # Zarr's chunks give the shape of one stored chunk: the 2,000,000 non-zero
+    # values take four chunks of 524,288 entries, the last one partly filled.
+    assert group["X/data"].nchunks == 4
     assert (read_elem(group["X"]) != matrix).nnz == 0
+
+
+def _sparse_matrix_input(matrix, kind):
+    """Wrap a CSR or CSC matrix as in-memory or Dask input with a given first block along its compressed axis."""
+    if kind == "memory":
+        return matrix
+    axis = 0 if matrix.format == "csr" else 1
+    meta = getattr(sparse, f"{matrix.format}_matrix")((0, 0), dtype=matrix.dtype)
+
+    def blocks(start, stop, size):
+        part = matrix[start:stop] if axis == 0 else matrix[:, start:stop]
+        chunks = (size, -1) if axis == 0 else (-1, size)
+        return da.from_array(part, chunks=chunks, asarray=False, meta=meta)
+
+    length = matrix.shape[axis]
+    if kind == "dask":
+        return blocks(0, length, 10)
+    # A first block of one line, either with or without non-zero values.
+    first = blocks(0, 1, 1)
+    return da.concatenate([first, blocks(1, length, 10)], axis=axis)
+
+
+@pytest.mark.parametrize("matrix_format", ["csr", "csc"])
+@pytest.mark.parametrize("kind", ["memory", "dask", "dask_tiny_first_block", "dask_empty_first_block"])
+def test_sparse_matrices_get_the_fixed_chunk_length_whatever_their_first_block(
+    tmp_path, monkeypatch, matrix_format, kind
+):
+    """CSR and CSC matrices get chunks of constant // 8 entries per array, from memory and from Dask.
+
+    For Dask input, AnnData's write_dask_sparse writes the first computed block
+    through the same dispatcher, so Harpy's write callback
+    (harpy._storage._anndata._write_element_with_layout) is called a second
+    time, with that block as a SciPy matrix. Harpy has no guard for this: the
+    chunk length from _choose_sparse_stored_chunks depends on nothing about the
+    matrix, so both calls choose the same chunks. This test fails if the length
+    ever comes to depend on the matrix, for example through a cap at its size,
+    because a first block of one line, with or without non-zero values, would
+    then decide the chunks of the whole matrix.
+
+    A constant of 512 bytes gives 64 entries per chunk: more than the arrays of
+    a one-line first block hold, so a length computed from that block would
+    differ, and fewer than the whole matrix's non-zero values, so its arrays are
+    split.
+    """
+    monkeypatch.setattr(anndata_storage, "_STORED_CHUNK_BYTES", 512)
+    rng = np.random.default_rng(0)
+    values = rng.random((40, 30)) * (rng.random((40, 30)) < 0.3)
+    if kind == "dask_empty_first_block":
+        values[0, :] = 0
+        values[:, 0] = 0
+    else:
+        values[0, 0] = 1.0
+    matrix = getattr(sparse, f"{matrix_format}_matrix")(values)
+    group = zarr.open_group(str(tmp_path / "elements.zarr"), mode="w", zarr_format=3)
+
+    _write_anndata_element(group, ("X",), _sparse_matrix_input(matrix, kind), logical_path=("X",), create_parents=False)
+
+    assert matrix.nnz > 64
+    for name in ("data", "indices", "indptr"):
+        assert group[f"X/{name}"].chunks == (512 // 8,), name
+    np.testing.assert_array_equal(read_elem(group["X"]).toarray(), values)
+
+
+@pytest.mark.parametrize("values", [np.eye(3), np.zeros((3, 4))], ids=["small", "without_values"])
+def test_small_sparse_matrices_get_the_same_uncapped_chunk_length(tmp_path, monkeypatch, values):
+    """A sparse matrix shorter than one chunk is not capped at its size: one padded chunk per array."""
+    monkeypatch.setattr(anndata_storage, "_STORED_CHUNK_BYTES", 64)
+    group = zarr.open_group(str(tmp_path / "elements.zarr"), mode="w", zarr_format=3)
+
+    _write_anndata_element(group, ("X",), sparse.csr_matrix(values), logical_path=("X",), create_parents=False)
+
+    for name in ("data", "indices", "indptr"):
+        assert group[f"X/{name}"].chunks == (64 // 8,), name
+    np.testing.assert_array_equal(read_elem(group["X"]).toarray(), values)
 
 
 @pytest.mark.parametrize("mode", ["lazy", "backed"])
