@@ -1885,10 +1885,107 @@ Link it from the table I/O section of `docs/api.md`.
 
 ### Phase 3: write cost
 
-Measure the number of source reads and the write time for multi-component writes
-on a realistic table (for example 1M cells). Document the checkpoint pattern.
-Then decide whether single-pass evaluation (gap 2, option 1) is worth owning in
-Harpy.
+**The problem, restated.** Dask computes shared work once only within one
+compute, and keeps nothing between computes. Harpy's writers split one write
+into many computes:
+
+- the component writer writes each component in its own `_write_anndata_element`
+  call (`_write_table_operation` in `src/harpy/table/io/_write.py`);
+- AnnData's dense writer computes each component at once, with
+  `da.store(elem, g, scheduler="threads")` (`write_basic_dask_dask_dense` in
+  `anndata/_io/specs/methods.py`);
+- AnnData's sparse writer (`write_dask_sparse`, same file) computes the first
+  block, then every further block in its own `compute()`, and appends it.
+
+Shared upstream work, such as read → `normalize_total` → `log1p`, is therefore
+redone for every compute. The goal is not to optimize the graph itself, but to
+evaluate a write call in as few computes as possible, ideally one.
+
+**Preliminary measurements (current code).** Taken while writing this spec,
+with variants of `scripts/harpy_write_passes.py` that step 1 adds to the
+script. Synthetic counts of 8,000 × 600 at 5% density, read with
+`sparse_chunks=2000` (4 row blocks) or `1000` (8), then `normalize_total` and
+`log1p`; source block reads during the write:
+
+| Write                                                               | 4 blocks | 8 blocks                            |
+| ------------------------------------------------------------------- | -------- | ----------------------------------- |
+| `log1p` alone, `normalize_total(target_sum=None)` (median)          | 20       | 80                                  |
+| `log1p` alone, `normalize_total(target_sum=1e4)`                    | 4        | 8                                   |
+| `log1p` and `X_pca` in one `dask.compute`, with PCA, as a reference | –        | 24 (16 with Dask's task fusion off) |
+
+- Gap 2's script no longer shows the problem: with Phase 1's `"auto"`, its
+  4,000 × 600 table is one block (2 computes, 4 reads, against the 5 computes and
+  28 reads in gap 2's evidence, measured with 1000-row blocks).
+- The largest cost is a single lazy sparse component whose graph contains a
+  global reduction, such as `normalize_total`'s default median of all cells'
+  totals. Every per-block compute of the sparse writer reads all blocks again,
+  so the reads grow with the square of the number of blocks: for 1 M cells in
+  about 30 blocks, around 1,000 block reads instead of 30. Gap 2 describes only
+  the case of several components per call.
+- One compute turns about N² reads into 2–3 × N. Not exactly N: Dask's graph
+  optimization sometimes repeats a cheap read rather than holding the block in
+  memory. That is Dask's own trade-off between memory and recomputation, and
+  acceptable.
+
+**Step 1: measure.** Extend `scripts/harpy_write_passes.py`: pin the block size;
+compare one component with several, with and without a global reduction
+upstream; add one `dask.compute` as the reference. Run it on a realistic table,
+for example 1 M cells, measuring write time, source reads and peak memory.
+Refresh gap 2's evidence and the expected output in `scripts/README.md`.
+
+**Step 2: document the workarounds.** With Phase 2 deferred, in the docstring
+of `write_table_components` and in gap 2 for now:
+
+- the checkpoint pattern: write the intermediate layer, reopen the table, and
+  continue from the stored layer;
+- `persist()` for shared intermediates that fit in memory;
+- a fixed `target_sum`, or the median computed once beforehand, so that the
+  graph has no global reduction.
+
+**Step 3: decide whether Harpy owns the writing of Dask matrices.** The
+proposed design, if the measurements justify it:
+
+- **Scope:** only Dask matrices. AnnData stays responsible for encodings,
+  metadata and in-memory values.
+- **Deferred writes:** the write callback `_write_element_with_layout`
+  (`src/harpy/_storage/_anndata.py`) already intercepts every matrix. For Dask
+  values it returns a deferred write instead of computing.
+- **One compute per call:** the component writer collects the deferred writes
+  of all components and runs one `dask.compute`. Validation of the staged
+  result, publication and rollback stay as they are. `write_table`, which
+  writes a whole AnnData in one `_write_anndata_element` call, collects the
+  deferred writes of its elements the same way.
+- **Dense:** Harpy creates the Zarr array itself, with AnnData's encoding
+  attributes and 1b's stored chunks and write blocks, and returns
+  `da.store(..., compute=False)`.
+- **Sparse:** `da.store` cannot express it. A CSR matrix on disk is three 1-D
+  arrays, and where a block goes in `data` and `indices` depends on the
+  non-zero counts of every block before it, known only after computing them.
+  That is why AnnData appends block by block. Two options:
+  1. per-block staging, then concatenation: one compute writes each block's
+     arrays to a temporary location in parallel; a cheap second step copies
+     them into the final `data`, `indices` and `indptr`, with 1c's fixed stored
+     chunks. The output is written an extra time, but the upstream graph is
+     never recomputed;
+  2. batched computes: compute k blocks at a time. Simpler, but only a partial
+     fix, since the global work is still redone N/k times.
+
+  So `da.store(..., compute=False)` alone fixes only the dense half, not the
+  sparse half, which holds the quadratic case.
+
+- **Benefits:** the writer follows the user's Dask scheduler, where AnnData
+  hard-codes `"threads"` for dense writes; explicit sharding (see "Deferred:
+  explicit sharding") is easier to add once Harpy owns the write.
+- **Costs:** Harpy maintains the on-disk CSR writing, AnnData's format version
+  `0.1.0`, which Harpy already validates when reading; more code to test; and
+  a higher peak memory, because one compute keeps more intermediate results
+  alive at the same time.
+
+Step 1 should show how much of the cost is the sparse quadratic case and how
+much the extra memory of one compute matters. Then decide between full
+single-pass writing (option 1 for sparse) and the simpler batched sparse loop
+(option 2). Phase 3 ends with that decision, recorded here; if Harpy is to own
+the writing, the implementation gets its own slices, as Phase 1 did.
 
 ### Phase 4: write-back helper
 
