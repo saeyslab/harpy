@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Generator, Mapping
 from contextlib import contextmanager
+from math import prod
 from numbers import Integral, Number
 from os import PathLike
 from pathlib import Path
@@ -17,7 +18,16 @@ from dask import delayed
 from numpy.typing import NDArray
 from scipy import sparse
 
-from harpy._storage._anndata import _decode_anndata_element, _read_anndata_element
+from harpy._storage._anndata import (
+    _auto_sparse_block_length,
+    _chunk_size_target,
+    _decode_anndata_element,
+    _DenseChunks,
+    _read_anndata_element,
+    _SparseChunks,
+    _validate_dense_chunks,
+    _validate_sparse_chunks,
+)
 from harpy.table.io._read import ComponentPath, _open_table_group, _validate_component_paths
 from harpy.table.io._write import _write_table_operation
 from harpy.table.io._write_validation import (
@@ -32,8 +42,6 @@ from harpy.table.io._write_validation import (
 
 type _MatrixBlock = np.ndarray | sparse.csr_matrix | sparse.csc_matrix | sparse.csr_array | sparse.csc_array
 
-_DEFAULT_REGIONAL_CHUNK_SIZE = 1000
-
 
 def write_table_components_by_region(
     store: str | PathLike[str],
@@ -42,7 +50,8 @@ def write_table_components_by_region(
     components: Mapping[ComponentPath, object],
     obs_identity: pd.DataFrame,
     fill_values: Mapping[ComponentPath, object] | None = None,
-    chunk_size: int = _DEFAULT_REGIONAL_CHUNK_SIZE,
+    sparse_chunks: _SparseChunks = "auto",
+    dense_chunks: _DenseChunks = "auto",
     overwrite: bool = False,
 ) -> None:
     """Update `.obsm` measurements for complete regions, preserving other observations.
@@ -60,8 +69,12 @@ def write_table_components_by_region(
         row counts and row order.
 
         Matrices must be numeric and two-dimensional: dense, CSR or CSC,
-        supplied in memory, as lazy arrays, or as Zarr-backed handles.
+        supplied in memory, as lazy arrays, or backed by Zarr.
         DataFrame-valued matrices and ``None`` matrix values are not supported.
+        Matrices backed by Zarr must be AnnData-encoded, such as those of a
+        table read with ``mode="backed"``. A plain ``zarr.Array`` is rejected;
+        wrap it with ``dask.array.from_zarr`` to supply it as a lazy array,
+        which keeps its blocks.
 
         When updating an existing matrix, preserve its format and column count.
         Supplied values must be safely castable to its stored dtype.
@@ -92,21 +105,19 @@ def write_table_components_by_region(
         Required only when a new matrix has unselected rows. Ignored for
         existing entries, whose unselected measurements remain unchanged.
         None means no fills were supplied. Keys must refer to submitted matrices.
-    chunk_size
-        Positive integer controlling computational chunk shapes::
+    sparse_chunks, dense_chunks
+        Block layout of the lazy merge, with the same values and meaning as in
+        :func:`harpy.table.read_table`, both ``"auto"`` by default. They apply
+        to the stored matrix, read as ``read_table`` reads it, and to the values
+        Harpy splits into blocks itself: supplied matrices in memory or backed
+        by Zarr, and new ``.obsm`` entries for only some regions. ``"auto"``
+        sizes blocks from Dask's ``array.chunk-size``. An integer sets rows per
+        dense or CSR block, or columns per CSC block; for a stored dense matrix
+        it is rounded down to whole stored chunks. ``"storage"`` keeps the
+        stored chunks of a stored dense matrix and behaves like ``"auto"``
+        otherwise. Dask inputs keep their own blocks.
 
-            dense: (chunk_size rows, all columns)
-            CSR:   (chunk_size rows, all columns)
-            CSC:   (all rows, chunk_size columns)
-
-        Used for in-memory inputs, Zarr-backed sparse reads, and creating new
-        ``.obsm`` entries for only some regions (filling the remaining
-        observations with ``fill_values``). Input preparation preserves existing
-        Dask and dense Zarr chunks; merging may lazily repartition a working view
-        without changing supplied arrays. Existing dense targets retain their
-        chunk layout during merging.
-
-        Controls computation, not on-disk chunk sizes or a fixed memory limit.
+        These control computation, not on-disk chunk sizes.
     overwrite
         Allow updates to existing requested matrix and metadata entries.
 
@@ -156,7 +167,8 @@ def write_table_components_by_region(
         components=components,
         obs_identity=obs_identity,
         fill_values=fill_values,
-        chunk_size=chunk_size,
+        sparse_chunks=sparse_chunks,
+        dense_chunks=dense_chunks,
         overwrite=overwrite,
     ):
         pass
@@ -170,7 +182,8 @@ def _write_table_components_by_region_operation(
     components: Mapping[ComponentPath, object],
     obs_identity: pd.DataFrame,
     fill_values: Mapping[ComponentPath, object] | None = None,
-    chunk_size: int = _DEFAULT_REGIONAL_CHUNK_SIZE,
+    sparse_chunks: _SparseChunks = "auto",
+    dense_chunks: _DenseChunks = "auto",
     overwrite: bool = False,
 ) -> Generator[zarr.Group, None, None]:
     """Prepare regional replacements, then yield within the shared rollback window.
@@ -178,8 +191,9 @@ def _write_table_components_by_region_operation(
     SpatialData adapters install requested reopened components in their with-body;
     the shared writer retains responsibility for publication and finalization.
     """
-    paths = _validate_regional_request(components, fill_values=fill_values, chunk_size=chunk_size, overwrite=overwrite)
-    chunk_size = int(chunk_size)
+    paths = _validate_regional_request(components, fill_values=fill_values, overwrite=overwrite)
+    sparse_chunks = _validate_sparse_chunks(sparse_chunks)
+    dense_chunks = _validate_dense_chunks(dense_chunks)
     group = _open_table_group(store, table_name=table_name)
     root = Path(store)
     table_path = root / "tables" / table_name
@@ -201,9 +215,10 @@ def _write_table_components_by_region_operation(
             # opening the value, not after loading an unrelated full frame.
             if element.attrs.get("encoding-type") == "dataframe":
                 raise TypeError("Regional writes do not support DataFrame-valued obsm entries.")
-            # Keep the stored dense chunk layout during merging, as documented,
-            # rather than the readers' row-only default (until slice 1e revisits it).
-            existing = _read_anndata_element(group, path, mode="lazy", sparse_chunks=chunk_size, dense_chunks="storage")
+            # Open the stored matrix without reading its values: a zarr.Array or a
+            # sparse dataset handle. _prepare_regional_matrix() splits it into
+            # blocks with the settings, like any other value (see _lazy_matrix()).
+            existing = _read_anndata_element(group, path, mode="backed")
             # A stored null is an invalid matrix, not an absent entry.
             _matrix_format(existing, label=f"Stored component {path!r}")
         replacements[path] = _prepare_regional_matrix(
@@ -213,7 +228,8 @@ def _write_table_components_by_region_operation(
             table_row_positions=table_row_positions,
             n_obs=len(stored_identity),
             fill_values=fill_values,
-            chunk_size=chunk_size,
+            sparse_chunks=sparse_chunks,
+            dense_chunks=dense_chunks,
         )
 
     # The prepared matrices now cover the full table axis. Delegate both rounds
@@ -229,18 +245,16 @@ def _validate_regional_request(
     components: Mapping[ComponentPath, object],
     *,
     fill_values: Mapping[ComponentPath, object] | None,
-    chunk_size: int,
     overwrite: bool,
 ) -> tuple[ComponentPath, ...]:
-    """Validate regional scopes and options identically for disk and memory updates."""
+    """Validate regional scopes and options identically for disk and memory updates.
+
+    The block layout settings are validated separately, with the readers' validators.
+    """
     if not isinstance(components, Mapping):
         raise TypeError("components must be a mapping from tuple paths to values.")
     if not isinstance(overwrite, bool):
         raise TypeError("overwrite must be a boolean.")
-    if isinstance(chunk_size, bool) or not isinstance(chunk_size, Integral):
-        raise TypeError("chunk_size must be a positive integer.")
-    if chunk_size < 1:
-        raise ValueError("chunk_size must be a positive integer.")
     paths = _validate_component_paths(tuple(components), to_write=True)
     matrix_paths = {path for path in paths if path[0] == "obsm"}
     if not matrix_paths or any(path[0] not in {"obsm", "uns"} for path in paths):
@@ -301,7 +315,8 @@ def _prepare_regional_matrix(
     table_row_positions: NDArray[np.intp],
     n_obs: int,
     fill_values: Mapping[ComponentPath, object] | None,
-    chunk_size: int,
+    sparse_chunks: _SparseChunks,
+    dense_chunks: _DenseChunks,
 ) -> da.Array:
     """Validate matrix compatibility and prepare a lazy full-observation replacement.
 
@@ -318,9 +333,10 @@ def _prepare_regional_matrix(
         Full-table destination of each row in regional_values, already validated.
     n_obs
         Number of observations in the complete destination table.
-    fill_values, chunk_size
+    fill_values, sparse_chunks, dense_chunks
         Validated options from the public regional-update APIs.
     """
+    chunk_settings = {"sparse_chunks": sparse_chunks, "dense_chunks": dense_chunks}
     matrix_format = _matrix_format(regional_values, label=f"Component {path!r}")
     if regional_values.shape[0] != len(table_row_positions):
         raise ValueError(f"Component {path!r} must contain {len(table_row_positions)} selected rows.")
@@ -331,10 +347,11 @@ def _prepare_regional_matrix(
             raise ValueError(f"Component {path!r} must preserve the destination matrix shape and column count.")
         if not np.can_cast(regional_values.dtype, existing.dtype, casting="safe"):
             raise ValueError(f"Component {path!r} cannot be safely cast to destination dtype {existing.dtype}.")
-        existing = _lazy_matrix(existing, matrix_format, chunk_size=chunk_size)
-        # Backed updates read existing from storage with merge-compatible sparse chunks.
-        # Unbacked updates take existing from table.obsm; if it is already a Dask
-        # array, _lazy_matrix() preserves its chunks, which may split both axes.
+        existing = _lazy_matrix(existing, matrix_format, **chunk_settings)
+        # A storage-backed existing matrix, opened from the store (backed updates)
+        # or attached in backed mode (unbacked updates), is now split as the
+        # readers split it. An attached Dask array keeps its blocks, which may
+        # split both axes.
         # _regional_matrix() requires CSR blocks to span all columns, or CSC blocks
         # to span all rows. Therefore, we prepare a compatible lazy working array
         # when needed, without changing the original matrix's chunks:
@@ -357,6 +374,7 @@ def _prepare_regional_matrix(
                     existing = existing.rechunk({whole_axis: -1}, method="tasks")
 
     fill = None
+    new_entry_block_length = None
     if existing is None:
         fills = {} if fill_values is None else fill_values
         if len(table_row_positions) != n_obs and path not in fills:
@@ -365,20 +383,33 @@ def _prepare_regional_matrix(
             fill = _scalar_fill(fills[path], regional_values.dtype)
             if matrix_format != "dense" and len(table_row_positions) != n_obs and fill != 0:
                 raise ValueError("New sparse matrices with unselected rows require a zero fill.")
+        # Size the blocks of the full new entry, not of the regional input: its
+        # rows, or for CSC its columns, and the input's non-zero values.
+        new_entry_length = regional_values.shape[1] if matrix_format == "csc" else n_obs
+        new_entry_block_length = _block_length(
+            regional_values, matrix_format, length=new_entry_length, **chunk_settings
+        )
     return _regional_matrix(
-        _lazy_matrix(regional_values, matrix_format, chunk_size=chunk_size),
+        _lazy_matrix(regional_values, matrix_format, **chunk_settings),
         existing=existing,
         table_row_positions=table_row_positions,
         n_obs=n_obs,
         matrix_format=matrix_format,
         fill=fill,
-        chunk_size=chunk_size,
+        new_entry_block_length=new_entry_block_length,
     )
 
 
 def _matrix_format(value: object, *, label: str) -> str:
     """Inspect supported numeric matrix metadata without computing or decoding values."""
     meta = value._meta if isinstance(value, da.Array) else value
+    if isinstance(meta, zarr.Array) and meta.attrs.get("encoding-type") is None:
+        # _lazy_matrix() splits storage-backed values with the readers' decoder,
+        # which needs AnnData encoding; see the trade-off explained there.
+        raise TypeError(
+            f"{label} is a zarr.Array without AnnData encoding; wrap it with "
+            "dask.array.from_zarr to supply it as a lazy array."
+        )
     if isinstance(meta, (np.ndarray, zarr.Array)):
         matrix_format = "dense"
     elif sparse.issparse(meta) and meta.format in {"csr", "csc"}:
@@ -406,19 +437,109 @@ def _scalar_fill(value: object, dtype: np.dtype) -> np.generic:
     return np.dtype(dtype).type(value)
 
 
-def _lazy_matrix(value: object, matrix_format: str, *, chunk_size: int) -> da.Array:
+def _lazy_matrix(
+    value: object, matrix_format: str, *, sparse_chunks: _SparseChunks, dense_chunks: _DenseChunks
+) -> da.Array:
+    """Return a matrix as a Dask array, split into blocks by the settings unless it is one already.
+
+    The only place where the regional writer turns values into Dask arrays,
+    for the existing matrix (opened from the store or attached) and the
+    regional input alike.
+
+    - Dask arrays keep their blocks, which whoever built them chose.
+    - Storage-backed values, an AnnData-encoded ``zarr.Array`` or a CSR/CSC
+      dataset handle, go through the readers' decoder, so they are split as
+      ``read_table`` splits them.
+    - In-memory values have no stored chunks; ``_block_length`` sizes their
+      blocks. Dense and CSR blocks span all columns, CSC blocks all rows.
+    """
     if isinstance(value, da.Array):
         return value
-    if isinstance(value, (CSRDataset, CSCDataset)):
-        return _decode_anndata_element(value.group, mode="lazy", sparse_chunks=chunk_size)
-    if isinstance(value, zarr.Array):
-        return da.from_zarr(value)
-    chunks = {
-        "dense": (chunk_size, -1),
-        "csr": (chunk_size, -1),
-        "csc": (-1, chunk_size),
-    }[matrix_format]
+    if isinstance(value, (zarr.Array, CSRDataset, CSCDataset)):
+        # Trade-off: the decoder requires AnnData encoding, so _matrix_format()
+        # rejects a plain zarr.Array and asks the caller to wrap it in
+        # da.from_zarr, which then keeps the caller's blocks. Accepting plain
+        # arrays here would need a second copy of the readers' dense chunk rules.
+        element = value if isinstance(value, zarr.Array) else value.group
+        return _decode_anndata_element(element, mode="lazy", sparse_chunks=sparse_chunks, dense_chunks=dense_chunks)
+    blocked_axis = 1 if matrix_format == "csc" else 0
+    length = _block_length(
+        value,
+        matrix_format,
+        length=value.shape[blocked_axis],
+        sparse_chunks=sparse_chunks,
+        dense_chunks=dense_chunks,
+    )
+    chunks = (-1, length) if matrix_format == "csc" else (length, -1)
     return da.from_array(value, chunks=chunks, asarray=False)
+
+
+def _block_length(
+    value: object,
+    matrix_format: str,
+    *,
+    length: int,
+    sparse_chunks: _SparseChunks,
+    dense_chunks: _DenseChunks,
+) -> int | str:
+    """Return rows (dense, CSR) or columns (CSC) per block of a matrix without stored chunks.
+
+    Used for in-memory values, and for new entries, which are sized from the
+    input that fills them. The readers' helpers (``_dense_lazy_chunks``,
+    ``_sparse_block_length``) take a stored array instead.
+
+    Parameters
+    ----------
+    value
+        The matrix to split, or for a new entry its input. Gives the columns,
+        dtype and number of non-zero values.
+    matrix_format
+        ``"dense"``, ``"csr"`` or ``"csc"``.
+    length
+        Length of the axis the blocks split, of the matrix being split: rows for
+        dense and CSR, columns for CSC. For a new entry, its full number of rows.
+    sparse_chunks, dense_chunks
+        Validated settings, as for the readers. An integer is used directly.
+        ``"auto"`` aims at blocks of about Dask's ``array.chunk-size``: dense
+        from the bytes per row, sparse from the number of non-zero values, as
+        ``_auto_sparse_block_length`` does for stored matrices. ``"storage"``
+        has no stored chunks to keep, so it behaves like ``"auto"``.
+
+    Returns
+    -------
+    A positive number of rows or columns, or ``"auto"`` for a lazy sparse
+    value: its number of non-zero values is unknown without computing it, so
+    Dask's own ``"auto"`` sizing applies, which counts every entry as stored
+    and so gives smaller blocks.
+    """
+    if matrix_format == "dense":
+        if dense_chunks not in {"auto", "storage"}:
+            return dense_chunks
+        bytes_per_row = np.dtype(value.dtype).itemsize * prod(value.shape[1:])
+        if bytes_per_row == 0:
+            # Without columns, the whole matrix is metadata-sized: one block.
+            return max(length, 1)
+        return min(max(_chunk_size_target() // bytes_per_row, 1), max(length, 1))
+    if sparse_chunks != "auto":
+        return sparse_chunks
+    if isinstance(value, da.Array):
+        return "auto"
+    if isinstance(value, (CSRDataset, CSCDataset)):
+        # Only reached for a new entry: _lazy_matrix() decodes handles itself. Not
+        # _sparse_block_length(): that takes the length from the stored shape, while
+        # a new CSR entry's blocks split all n_obs rows of the table.
+        data, indices, indptr = (value.group[name] for name in ("data", "indices", "indptr"))
+        nnz = data.shape[0]
+    else:
+        # An in-memory SciPy matrix.
+        data, indices, indptr = value.data, value.indices, value.indptr
+        nnz = value.nnz
+    return _auto_sparse_block_length(
+        length,
+        int(nnz),
+        entry_bytes=data.dtype.itemsize + indices.dtype.itemsize,
+        indptr_itemsize=indptr.dtype.itemsize,
+    )
 
 
 def _regional_matrix(
@@ -429,7 +550,7 @@ def _regional_matrix(
     n_obs: int,
     matrix_format: str,
     fill: np.generic | None,
-    chunk_size: int,
+    new_entry_block_length: int | str | None,
 ) -> da.Array:
     """Build full-axis replacements from independently chunked old and selected rows.
 
@@ -438,27 +559,28 @@ def _regional_matrix(
     in regional_values.
     The returned .obsm matrix covers all table observations.
 
-    Computational chunking of the returned matrix::
+    Computational chunking of the returned matrix, following the validated
+    sparse_chunks and dense_chunks settings::
 
         All observations supplied
             -> Keep regional_values.chunks, as prepared by _lazy_matrix():
-               Dask: existing input chunks
-               dense Zarr: on-disk chunks
-               in-memory / backed sparse: chunks based on chunk_size
+               Dask: the input's own blocks
+               storage-backed: as the readers split it
+               in-memory: blocks sized by _block_length()
                No additional output chunking is needed.
 
         Partial selection, existing entry
-            -> Use existing.chunks, as prepared by the reader or
-               _prepare_regional_matrix():
-               dense Zarr / Dask: existing chunks
-               in-memory dense:  (chunk_size rows, all columns)
-               CSR: all columns; keep attached Dask row chunks, otherwise chunk_size
-               CSC: all rows; keep attached Dask column chunks, otherwise chunk_size
+            -> Use existing.chunks, as prepared by _prepare_regional_matrix():
+               storage-backed (stored or attached): as the readers split it
+               in-memory: blocks sized by _block_length()
+               attached Dask: its own blocks; CSR joined to all columns,
+                              CSC joined to all rows
 
         Partial selection, new entry
-            -> Choose chunks from chunk_size and the full output shape:
-               dense / CSR: (chunk_size rows, all columns)
-               CSC:         (all output rows, chunk_size columns)
+            -> new_entry_block_length, from _block_length() for the full output:
+               dense / CSR: (new_entry_block_length rows, all columns)
+               CSC:         (all output rows, new_entry_block_length columns)
+               "auto" (lazy sparse input) leaves the length to Dask.
 
     For new entries, do not derive output chunk sizes from regional_values.chunks:
     a five-row input must not force five-row chunks across a large table.
@@ -477,17 +599,17 @@ def _regional_matrix(
     if existing is not None:
         chunks = existing.chunks
     elif matrix_format == "csc":
-        chunks = (-1, chunk_size)
+        chunks = (-1, new_entry_block_length)
     else:
-        chunks = (chunk_size, -1)
+        chunks = (new_entry_block_length, -1)
     chunks = list(da.core.normalize_chunks(chunks, shape=shape, dtype=dtype))
     if matrix_format == "csr":
         chunks[1] = (shape[1],)
     elif matrix_format == "csc":
         chunks[0] = (shape[0],)
-    # The reader returns CSR chunks spanning all columns and CSC chunks spanning
-    # all rows; _prepare_regional_matrix() also prepares this layout for attached
-    # arrays. Their chunks must match the finalized output, including terminal
+    # The readers' decoder returns CSR chunks spanning all columns and CSC chunks
+    # spanning all rows; _prepare_regional_matrix() also prepares this layout for
+    # attached Dask arrays. Their chunks must match the finalized output, including terminal
     # chunks and sparse-axis adjustments. A mismatch here is an internal
     # preparation/merge error, not an unsupported public input layout.
     existing_blocks = None

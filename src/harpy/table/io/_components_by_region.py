@@ -8,7 +8,13 @@ import pandas as pd
 from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
-from harpy._storage._anndata import _read_anndata_element
+from harpy._storage._anndata import (
+    _DenseChunks,
+    _read_anndata_element,
+    _SparseChunks,
+    _validate_dense_chunks,
+    _validate_sparse_chunks,
+)
 from harpy.table.io._components import (
     _ABSENT,
     _check_in_memory_versus_storage_axes,
@@ -19,7 +25,6 @@ from harpy.table.io._components import (
 )
 from harpy.table.io._read import ComponentPath
 from harpy.table.io._write_by_region import (
-    _DEFAULT_REGIONAL_CHUNK_SIZE,
     _matrix_format,
     _prepare_regional_matrix,
     _regional_row_positions,
@@ -36,7 +41,8 @@ def add_table_components_by_region(
     components: Mapping[ComponentPath, object],
     obs_identity: pd.DataFrame,
     fill_values: Mapping[ComponentPath, object] | None = None,
-    chunk_size: int = _DEFAULT_REGIONAL_CHUNK_SIZE,
+    sparse_chunks: _SparseChunks = "auto",
+    dense_chunks: _DenseChunks = "auto",
     overwrite: bool = False,
 ) -> SpatialData:
     """Update regional `.obsm` measurements in SpatialData and, when backed, its store.
@@ -65,6 +71,10 @@ def add_table_components_by_region(
 
         Supports numeric two-dimensional dense, CSR and CSC matrices, in memory,
         lazy or Zarr-backed. DataFrame matrices and None matrix values are rejected.
+        Zarr-backed matrices, supplied or attached, must be AnnData-encoded, such
+        as those of a table read with ``mode="backed"``. A plain ``zarr.Array`` is
+        rejected; wrap it with ``dask.array.from_zarr`` to supply it as a lazy
+        array, which keeps its blocks.
         Existing destinations require matching formats, unchanged column counts
         and safe casts into their dtype. No dense/CSR/CSC conversion occurs.
         Prepare accompanying scientific metadata for the complete resulting
@@ -82,17 +92,22 @@ def add_table_components_by_region(
         of a new dense matrix. Required only for new matrices with unselected rows;
         fills are ignored for existing entries. Scalars must be dtype-compatible,
         and sparse matrices allow only zero fills. Keys must name submitted matrices.
-    chunk_size
-        Positive integer controlling computational chunk shapes::
+    sparse_chunks, dense_chunks
+        Block layout of the lazy merge, with the same values and meaning as in
+        :func:`harpy.table.read_table`, both ``"auto"`` by default. They apply
+        to the destination matrix (the stored matrix when backed, read as
+        ``read_table`` reads it, or an attached matrix in memory or backed by
+        Zarr), to supplied matrices in memory or backed by Zarr, and to new
+        matrices for only some regions. ``"auto"`` sizes blocks from Dask's
+        ``array.chunk-size``. An integer sets rows per dense or CSR block, or
+        columns per CSC block; for a dense matrix in storage it is rounded down
+        to whole stored chunks. ``"storage"`` keeps the stored chunks of a dense
+        matrix in storage and behaves like ``"auto"`` otherwise.
 
-            dense / CSR: (chunk_size rows, all columns)
-            CSC:         (all rows, chunk_size columns)
-
-        Used for in-memory inputs, backed sparse reads and new partial-region
-        matrices. Existing Dask and dense Zarr chunks are retained where compatible
-        with merging. Attached CSR matrices with split column chunks, or CSC
-        matrices with split row chunks, use a lazily rechunked working array;
-        their original chunks are unchanged. Not an on-disk chunk size or byte limit.
+        Dask arrays keep their blocks, both supplied and attached. Attached CSR
+        matrices with split column blocks, or CSC matrices with split row blocks,
+        use a lazily rechunked working array; their original blocks are
+        unchanged. These control computation, not on-disk chunk sizes.
     overwrite
         Ignored for unbacked SpatialData; validation still applies. When backed,
         allow replacement of targets present in memory or storage. Without it,
@@ -149,8 +164,9 @@ def add_table_components_by_region(
             overwrite=True,
         )
     """
-    paths = _validate_regional_request(components, fill_values=fill_values, chunk_size=chunk_size, overwrite=overwrite)
-    chunk_size = int(chunk_size)
+    paths = _validate_regional_request(components, fill_values=fill_values, overwrite=overwrite)
+    sparse_chunks = _validate_sparse_chunks(sparse_chunks)
+    dense_chunks = _validate_dense_chunks(dense_chunks)
     table, group = _component_update_destination(sdata, table_name=table_name)
     spatialdata_attrs = table.uns.get(TableModel.ATTRS_KEY)
     if not isinstance(spatialdata_attrs, Mapping):
@@ -195,7 +211,8 @@ def add_table_components_by_region(
                 table_row_positions=table_row_positions,
                 n_obs=table.n_obs,
                 fill_values=fill_values,
-                chunk_size=chunk_size,
+                sparse_chunks=sparse_chunks,
+                dense_chunks=dense_chunks,
             )
         # Unlike full updates in _update_table_components(), we do not call
         # _validate_component_values_against_memory() here: regional preparation
@@ -214,7 +231,8 @@ def add_table_components_by_region(
                 components=components,
                 obs_identity=obs_identity,
                 fill_values=fill_values,
-                chunk_size=chunk_size,
+                sparse_chunks=sparse_chunks,
+                dense_chunks=dense_chunks,
                 overwrite=overwrite,
             ) as published:
                 # Serialization is complete (same pattern as in _update_table_components()).
