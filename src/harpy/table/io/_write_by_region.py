@@ -383,11 +383,13 @@ def _prepare_regional_matrix(
             fill = _scalar_fill(fills[path], regional_values.dtype)
             if matrix_format != "dense" and len(table_row_positions) != n_obs and fill != 0:
                 raise ValueError("New sparse matrices with unselected rows require a zero fill.")
-        # Size the blocks of the full new entry, not of the regional input: its
-        # rows, or for CSC its columns, and the input's non-zero values.
+        # Rows (dense, CSR) or columns (CSC) per Dask block of the new entry that
+        # _regional_matrix() builds. Its blocks cut the whole entry: all table rows,
+        # or for CSC all columns, not just the input's. _block_length() estimates
+        # their bytes from the input, whose rows hold all of the entry's values.
         new_entry_length = regional_values.shape[1] if matrix_format == "csc" else n_obs
         new_entry_block_length = _block_length(
-            regional_values, matrix_format, length=new_entry_length, **chunk_settings
+            regional_values, matrix_format, blocked_axis_length=new_entry_length, **chunk_settings
         )
     return _regional_matrix(
         _lazy_matrix(regional_values, matrix_format, **chunk_settings),
@@ -463,14 +465,14 @@ def _lazy_matrix(
         element = value if isinstance(value, zarr.Array) else value.group
         return _decode_anndata_element(element, mode="lazy", sparse_chunks=sparse_chunks, dense_chunks=dense_chunks)
     blocked_axis = 1 if matrix_format == "csc" else 0
-    length = _block_length(
+    block_length = _block_length(
         value,
         matrix_format,
-        length=value.shape[blocked_axis],
+        blocked_axis_length=value.shape[blocked_axis],
         sparse_chunks=sparse_chunks,
         dense_chunks=dense_chunks,
     )
-    chunks = (-1, length) if matrix_format == "csc" else (length, -1)
+    chunks = (-1, block_length) if matrix_format == "csc" else (block_length, -1)
     return da.from_array(value, chunks=chunks, asarray=False)
 
 
@@ -478,7 +480,7 @@ def _block_length(
     value: object,
     matrix_format: str,
     *,
-    length: int,
+    blocked_axis_length: int,
     sparse_chunks: _SparseChunks,
     dense_chunks: _DenseChunks,
 ) -> int | str:
@@ -488,16 +490,54 @@ def _block_length(
     input that fills them. The readers' helpers (``_dense_lazy_chunks``,
     ``_sparse_block_length``) take a stored array instead.
 
+    For a new CSR entry, the result is min(array.chunk-size ÷ bytes per row,
+    blocked_axis_length): the bytes per row come from the input's rows only,
+    the limit from the whole entry (see blocked_axis_length). Why the bytes
+    per row come from the input's rows only:
+
+    A block is a range of consecutive rows (dense, CSR) or columns (CSC),
+    computed by one Dask task and held in memory whole. The aim is blocks of
+    about Dask's ``array.chunk-size``, so the bytes per row must be estimated.
+
+    A new CSR entry holds the input's non-zero values in the selected rows and
+    nothing in the others. Its bytes per row are therefore estimated from the
+    input's rows only, not averaged over the table: the selected rows are the
+    densest the entry has, and they are often consecutive, for example one
+    sample. Its blocks still split all rows of the table. Example: a new entry
+    for sample A in a table of 10 samples of 1 M cells, with 50 values per row
+    of 8 bytes (float32 data and int32 index), 4 bytes of ``indptr`` per row,
+    and an ``array.chunk-size`` of 128 MiB::
+
+        table rows   0 ──────── 1M ───────────────────────────────── 10M
+                     [ sample A: 50 values/row ][ other samples: 0 values/row ]
+
+        averaged over the table: 5 values × 8 + 4 = 44 bytes per row
+            -> 3,050,402 rows per block. The first block holds all of A's
+               rows (404 bytes each) and 2 M empty rows: about 393 MiB,
+               three times the target.
+        from A's rows only:     50 values × 8 + 4 = 404 bytes per row
+            -> 332,222 rows per block. Blocks over A hold about 128 MiB,
+               blocks over the other samples only their row pointers.
+
+    Dense rows all have the same size, filled or not, and CSC blocks split
+    columns, which hold the same values in the input and the new entry, so
+    neither needs this distinction.
+
     Parameters
     ----------
     value
         The matrix to split, or for a new entry its input. Gives the columns,
-        dtype and number of non-zero values.
+        dtype and number of non-zero values, and for sparse matrices the rows
+        (CSR) or columns (CSC) those values are spread over.
     matrix_format
         ``"dense"``, ``"csr"`` or ``"csc"``.
-    length
-        Length of the axis the blocks split, of the matrix being split: rows for
-        dense and CSR, columns for CSC. For a new entry, its full number of rows.
+    blocked_axis_length
+        Length of the axis the blocks split, which limits the result: rows for
+        dense and CSR, columns for CSC. For a new entry, this is the entry's
+        length, not the input's. For dense and CSR that is the table's n_obs
+        rows, while the input has only the selected rows. For CSC it is the
+        number of columns, the same for both. If it were limited to the input's
+        rows, a 5-row input would cut a 10 M-row entry into 2 M blocks of 5 rows.
     sparse_chunks, dense_chunks
         Validated settings, as for the readers. An integer is used directly.
         ``"auto"`` aims at blocks of about Dask's ``array.chunk-size``: dense
@@ -518,27 +558,31 @@ def _block_length(
         bytes_per_row = np.dtype(value.dtype).itemsize * prod(value.shape[1:])
         if bytes_per_row == 0:
             # Without columns, the whole matrix is metadata-sized: one block.
-            return max(length, 1)
-        return min(max(_chunk_size_target() // bytes_per_row, 1), max(length, 1))
+            return max(blocked_axis_length, 1)
+        return min(max(_chunk_size_target() // bytes_per_row, 1), max(blocked_axis_length, 1))
     if sparse_chunks != "auto":
         return sparse_chunks
     if isinstance(value, da.Array):
         return "auto"
     if isinstance(value, (CSRDataset, CSCDataset)):
         # Only reached for a new entry: _lazy_matrix() decodes handles itself. Not
-        # _sparse_block_length(): that takes the length from the stored shape, while
-        # a new CSR entry's blocks split all n_obs rows of the table.
+        # _sparse_block_length(): it limits the result to the input's own rows,
+        # while a new CSR entry's blocks split all rows of the table.
         data, indices, indptr = (value.group[name] for name in ("data", "indices", "indptr"))
         nnz = data.shape[0]
     else:
         # An in-memory SciPy matrix.
         data, indices, indptr = value.data, value.indices, value.indptr
         nnz = value.nnz
+    compressed_axis = 1 if matrix_format == "csc" else 0
+    # Bytes per row (CSR) or column (CSC) from the value's own rows or columns,
+    # the limit from the axis the blocks split (see the example above).
     return _auto_sparse_block_length(
-        length,
+        value.shape[compressed_axis],
         int(nnz),
         entry_bytes=data.dtype.itemsize + indices.dtype.itemsize,
         indptr_itemsize=indptr.dtype.itemsize,
+        max_length=blocked_axis_length,
     )
 
 

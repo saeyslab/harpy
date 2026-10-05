@@ -4,6 +4,7 @@ import pandas as pd
 import pytest
 import zarr
 from anndata import read_h5ad
+from anndata.io import write_elem
 from dask import delayed
 from dask.callbacks import Callback
 from scipy import sparse
@@ -13,8 +14,20 @@ from zarr.storage import LocalStore
 
 import harpy.table.io._components_by_region as regional_adapter
 import harpy.table.io._write as table_writer
+import harpy.table.io._write_by_region as regional_writer
+from harpy._storage._anndata import _read_backed_element
 from harpy._tests.test_table.test_io.test_write import _store_bytes
 from harpy.table import add_table_components_by_region, delete_table_components, read_table
+
+# Settings for a 12 × 5 matrix, with the blocks they give it. Dense matrices in
+# storage have stored chunks of (3, 2): an integer rounds down to whole stored
+# chunks of 3 rows, and "storage" keeps them.
+_STORAGE_BACKED_SETTINGS = [
+    ("dense", {"dense_chunks": 4}, ((3, 3, 3, 3), (5,))),
+    ("dense", {"dense_chunks": "storage"}, ((3, 3, 3, 3), (2, 2, 1))),
+    ("csr", {"sparse_chunks": 5}, ((5, 5, 2), (5,))),
+    ("csc", {"sparse_chunks": 2}, ((12,), (2, 2, 1))),
+]
 
 
 def _unexpected(*args, **kwargs):
@@ -78,7 +91,8 @@ def test_regional_update_preserves_local_state_and_uses_destination_measurements
                 components={component: payload, ("uns", "analysis", "method"): "updated"},
                 obs_identity=identity,
                 fill_values={component: fill} if create else None,
-                chunk_size=3,
+                sparse_chunks=3,
+                dense_chunks=3,
                 overwrite=backed,
             )
     assert result is sdata and sdata.tables["counts"] is table
@@ -147,6 +161,88 @@ def test_unbacked_preparation_wraps_memory_and_storage_handles_without_computati
     expected[[1, 2, 3, 6]] = 1
     np.testing.assert_array_equal(_dense(table.obsm["features"]), expected)
     assert table.obsm["features"] is not original and _store_bytes(path) == before
+
+
+@pytest.mark.parametrize("matrix_format, settings, expected_chunks", _STORAGE_BACKED_SETTINGS)
+def test_unbacked_update_reads_storage_backed_existing_matrices_with_the_settings(
+    regional_store, matrix_format, settings, expected_chunks
+):
+    """An attached table read in backed mode holds a zarr.Array or a sparse dataset handle.
+
+    The merge splits it as the readers would, and the output keeps those blocks.
+    """
+    path, _, identity, old = regional_store(matrix_format)
+    table = read_table(path, table_name="counts", mode="backed")
+    sdata = SpatialData(tables={"counts": table})
+    add_table_components_by_region(
+        sdata,
+        table_name="counts",
+        components={("obsm", "features"): _matrix(np.ones((4, 5), dtype=np.float32), matrix_format)},
+        obs_identity=identity,
+        **settings,
+    )
+    merged = table.obsm["features"]
+    assert merged.chunks == expected_chunks
+    expected = old.copy()
+    expected[[1, 2, 3, 6]] = 1
+    np.testing.assert_array_equal(_dense(merged), expected)
+
+
+@pytest.mark.parametrize("backed", [False, True])
+@pytest.mark.parametrize("matrix_format, settings, expected_chunks", _STORAGE_BACKED_SETTINGS)
+def test_full_update_reads_storage_backed_inputs_with_the_settings(
+    regional_store, tmp_path, monkeypatch, backed, matrix_format, settings, expected_chunks
+):
+    """A full update keeps the input's blocks, so a storage-backed input must be split by the settings.
+
+    Holds for backed and unbacked SpatialData alike. The input is stored in its
+    own Zarr group, dense in chunks of (3, 2).
+    """
+    path, table, _, _ = regional_store(matrix_format)
+    sdata = SpatialData(tables={"counts": table})
+    if backed:
+        sdata.path = path
+    values = np.arange(60, dtype=np.float32).reshape(12, 5) * 10
+    group = zarr.open_group(str(tmp_path / "input.zarr"), mode="w")
+    dataset_kwargs = {"chunks": (3, 2)} if matrix_format == "dense" else {}
+    write_elem(group, "matrix", _matrix(values, matrix_format), dataset_kwargs=dataset_kwargs)
+    payload = _read_backed_element(group["matrix"])
+    original_regional_matrix = regional_writer._regional_matrix
+    prepared_chunks = []
+
+    def capture_chunks(*args, **kwargs):
+        result = original_regional_matrix(*args, **kwargs)
+        prepared_chunks.append(result.chunks)
+        return result
+
+    monkeypatch.setattr(regional_writer, "_regional_matrix", capture_chunks)
+    add_table_components_by_region(
+        sdata,
+        table_name="counts",
+        components={("obsm", "features"): payload},
+        obs_identity=table.obs[["region", "instance"]],
+        overwrite=True,
+        **settings,
+    )
+    assert prepared_chunks == [expected_chunks]
+    np.testing.assert_array_equal(_dense(table.obsm["features"]), values)
+
+
+@pytest.mark.parametrize("setting, value", [("sparse_chunks", "storage"), ("dense_chunks", 0)])
+def test_invalid_chunk_settings_preserve_memory(regional_store, setting, value):
+    """The adapter rejects invalid settings with the readers' messages, before any change."""
+    _, table, identity, _ = regional_store()
+    sdata = SpatialData(tables={"counts": table})
+    original = table._obsm
+    with pytest.raises((TypeError, ValueError), match=f"{setting} must be"):
+        add_table_components_by_region(
+            sdata,
+            table_name="counts",
+            components={("obsm", "features"): np.ones((4, 5), dtype=np.float32)},
+            obs_identity=identity,
+            **{setting: value},
+        )
+    assert table._obsm is original
 
 
 @pytest.mark.parametrize("presence", ["both", "memory", "disk", "neither"])

@@ -335,20 +335,37 @@ def _sparse_block_length(element: zarr.Group, *, compressed_axis: int, sparse_ch
     )
 
 
-def _auto_sparse_block_length(length: int, nnz: int, *, entry_bytes: int, indptr_itemsize: int) -> int:
+def _auto_sparse_block_length(
+    length: int, nnz: int, *, entry_bytes: int, indptr_itemsize: int, max_length: int | None = None
+) -> int:
     """Return rows (CSR) or columns (CSC) per block of about ``array.chunk-size`` bytes.
 
     Shared by lazy reads (``_sparse_block_length``, from stored metadata) and
     the regional writer (``_block_length``, from an in-memory matrix or a
-    dataset handle's metadata). ``length`` is the length of
-    the compressed axis, ``nnz`` the number of non-zero values and
-    ``entry_bytes`` the itemsize of ``data`` plus that of ``indices``.
+    dataset handle's metadata).
+
+    Parameters
+    ----------
+    length
+        Length of the compressed axis over which the ``nnz`` non-zero values
+        are spread; gives the average bytes per row (CSR) or column (CSC).
+    nnz
+        Number of non-zero values.
+    entry_bytes
+        Itemsize of ``data`` plus that of ``indices``.
+    indptr_itemsize
+        Itemsize of ``indptr``, one entry per row (CSR) or column (CSC).
+    max_length
+        Upper limit of the result, by default ``length``. The regional writer
+        passes the full table's rows for a new CSR entry, which it sizes from
+        the rows of its input only (see ``_block_length``).
     """
+    max_length = length if max_length is None else max_length
     if nnz == 0 or length == 0:
         # Only the row pointers remain, so one block is small.
-        return max(length, 1)
+        return max(max_length, 1)
     bytes_per_line = nnz / length * entry_bytes + indptr_itemsize
-    return min(max(int(_chunk_size_target() // bytes_per_line), 1), length)
+    return min(max(int(_chunk_size_target() // bytes_per_line), 1), max_length)
 
 
 def _dense_lazy_chunks(element: zarr.Array, *, dense_chunks: _DenseChunks) -> tuple[int, ...] | None:

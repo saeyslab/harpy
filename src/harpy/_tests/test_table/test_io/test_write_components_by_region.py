@@ -1,6 +1,7 @@
 from contextlib import contextmanager
 from pathlib import Path
 
+import dask
 import dask.array as da
 import numpy as np
 import pandas as pd
@@ -28,8 +29,35 @@ def _input_matrix(tmp_path, values, matrix_format, mode):
         # Neither rows nor columns align with the stored three-unit chunks.
         return da.from_array(matrix, chunks=(2, 2), asarray=False)
     group = zarr.open_group(str(tmp_path / "input.zarr"), mode="w")
-    write_elem(group, "matrix", matrix)
+    # Dense stored chunks of (2, 2) split rows and columns, so the readers' row
+    # blocks of whole stored chunks differ from the stored layout.
+    write_elem(group, "matrix", matrix, dataset_kwargs={"chunks": (2, 2)} if matrix_format == "dense" else {})
     return regional_writer._decode_anndata_element(group["matrix"], mode="backed")
+
+
+def _prepared_chunks(monkeypatch, path, *, component, payload, identity, create, **settings):
+    """Return the blocks of the complete replacement matrix, captured before serialization."""
+    original_operation = regional_writer._write_table_operation
+    prepared_chunks = []
+
+    @contextmanager
+    def capture_chunks(*args, **kwargs):
+        prepared_chunks.append(kwargs["components"][component].chunks)
+        with original_operation(*args, **kwargs) as published:
+            yield published
+
+    monkeypatch.setattr(regional_writer, "_write_table_operation", capture_chunks)
+    write_table_components_by_region(
+        path,
+        table_name="counts",
+        components={component: payload},
+        obs_identity=identity,
+        fill_values={component: 0} if create else None,
+        overwrite=not create,
+        **settings,
+    )
+    (chunks,) = prepared_chunks
+    return chunks
 
 
 @pytest.mark.parametrize("zarr_format", [2, 3])
@@ -61,7 +89,8 @@ def test_regional_merge_is_independent_of_chunk_boundaries(
         components={component: payload, ("uns", "analysis", "method"): "updated"},
         obs_identity=identity,
         fill_values={component: 0} if create else None,
-        chunk_size=3,
+        sparse_chunks=3,
+        dense_chunks=3,
         overwrite=True,
     )
     reopened = read_zarr(path / "tables/counts")
@@ -83,76 +112,241 @@ def test_regional_merge_is_independent_of_chunk_boundaries(
 
 @pytest.mark.parametrize("matrix_format", ["dense", "csr", "csc"])
 @pytest.mark.parametrize("mode", ["memory", "lazy", "backed"])
-def test_input_chunk_size_preserves_existing_dense_and_dask_chunks(tmp_path, matrix_format, mode):
-    """Only in-memory arrays and backed sparse inputs receive new chunk sizes."""
+def test_lazy_matrix_applies_integer_settings_to_all_but_dask_inputs(tmp_path, matrix_format, mode):
+    """An integer sets rows per dense or CSR block and columns per CSC block.
+
+    Dask inputs keep their blocks. A storage-backed dense input is split as the
+    readers split it: 3 rows round down to one whole stored chunk of 2 rows.
+    """
     values = np.ones((4, 5), dtype=np.float32)
     payload = _input_matrix(tmp_path, values, matrix_format, mode)
-    lazy = regional_writer._lazy_matrix(payload, matrix_format, chunk_size=3)
+    lazy = regional_writer._lazy_matrix(payload, matrix_format, sparse_chunks=3, dense_chunks=3)
     if mode == "lazy":
         assert lazy is payload
     elif mode == "backed" and matrix_format == "dense":
-        assert lazy.chunksize == payload.chunks
+        assert lazy.chunks == ((2, 2), (5,))
     else:
-        assert lazy.chunksize == ((4, 3) if matrix_format == "csc" else (3, 5))
+        assert lazy.chunks == (((4,), (3, 2)) if matrix_format == "csc" else ((3, 1), (5,)))
+
+
+def test_lazy_matrix_storage_setting_keeps_stored_chunks_of_storage_backed_dense_inputs_only(tmp_path):
+    """``"storage"`` keeps the stored chunks of a dense zarr.Array.
+
+    An in-memory matrix has no stored chunks to keep, so it is split as with ``"auto"``.
+    """
+    values = np.ones((4, 5), dtype=np.float32)
+    backed = _input_matrix(tmp_path, values, "dense", "backed")
+    storage = {"sparse_chunks": "auto", "dense_chunks": "storage"}
+    assert regional_writer._lazy_matrix(backed, "dense", **storage).chunks == ((2, 2), (2, 2, 1))
+    # The readers' row blocks of whole stored chunks, for comparison.
+    assert regional_writer._lazy_matrix(backed, "dense", sparse_chunks="auto", dense_chunks=3).chunks == (
+        (2, 2),
+        (5,),
+    )
+    auto = {"sparse_chunks": "auto", "dense_chunks": "auto"}
+    assert (
+        regional_writer._lazy_matrix(values, "dense", **storage).chunks
+        == regional_writer._lazy_matrix(values, "dense", **auto).chunks
+    )
+
+
+def test_plain_zarr_arrays_are_rejected_and_work_when_wrapped_in_dask(regional_store, tmp_path):
+    """A zarr.Array without AnnData encoding is rejected before anything is written.
+
+    Storage-backed values are split by the readers' decoder, which needs the
+    encoding. Wrapped in da.from_zarr, the array is a lazy input instead.
+    """
+    path, _, identity, old = regional_store()
+    values = np.arange(20, dtype=np.float32).reshape(4, 5)
+    plain = zarr.open_group(str(tmp_path / "plain.zarr"), mode="w").create_array(
+        "matrix", shape=values.shape, chunks=(2, 2), dtype=values.dtype
+    )
+    plain[:] = values
+    options = {"table_name": "counts", "obs_identity": identity, "overwrite": True}
+    before = _store_bytes(path)
+    with pytest.raises(TypeError, match="without AnnData encoding; wrap it with dask.array.from_zarr"):
+        write_table_components_by_region(path, components={("obsm", "features"): plain}, **options)
+    assert _store_bytes(path) == before
+    write_table_components_by_region(path, components={("obsm", "features"): da.from_zarr(plain)}, **options)
+    expected = old.copy()
+    expected[[1, 2, 3, 6]] = values
+    np.testing.assert_array_equal(read_zarr(path / "tables/counts").obsm["features"], expected)
+
+
+@pytest.mark.parametrize(
+    "matrix_format, expected", [("dense", ((4,), (5,))), ("csr", ((2, 2), (5,))), ("csc", ((4,), (2, 2, 1)))]
+)
+def test_lazy_matrix_auto_sizes_in_memory_values_from_array_chunk_size(tmp_path, matrix_format, expected):
+    """``"auto"`` sizes in-memory blocks from Dask's ``array.chunk-size``, here 100 bytes.
+
+    For a 4 × 5 float32 matrix of ones:
+
+    - dense: 20 bytes per row, so 5 rows, capped at the 4 rows there are;
+    - CSR: 5 values per row of 8 bytes (float32 data and int32 index) plus
+      4 bytes of indptr, 44 bytes, so 2 rows;
+    - CSC: 4 values per column, 36 bytes, so 2 columns.
+    """
+    values = _input_matrix(tmp_path, np.ones((4, 5), dtype=np.float32), matrix_format, "memory")
+    with dask.config.set({"array.chunk-size": "100B"}):
+        lazy = regional_writer._lazy_matrix(values, matrix_format, sparse_chunks="auto", dense_chunks="auto")
+    assert lazy.chunks == expected
 
 
 @pytest.mark.parametrize("matrix_format", ["dense", "csr", "csc"])
 @pytest.mark.parametrize("create", [False, True])
-def test_chunk_size_controls_merge_layout_except_for_existing_dense_targets(
+def test_integer_settings_control_merge_layout_of_existing_and_new_entries(
     regional_store, monkeypatch, matrix_format, create
 ):
-    """Check the chunk_size contract for partial-region merge outputs.
+    """An integer applies to the existing matrix and new entries alike.
 
-    With chunk_size=2, new dense and new/existing CSR entries use two-row
-    chunks spanning all columns; CSC entries use two-column chunks spanning
-    all rows. Existing dense entries retain their stored layout instead.
-    Capture the complete replacement matrix's computational chunks before
-    serialization, not its eventual on-disk chunks or the input chunk layout.
+    With 2, CSR entries use two-row blocks spanning all columns, CSC entries
+    two-column blocks spanning all rows, and a new dense entry two-row blocks.
+    An existing dense matrix, stored in chunks of (3, 2), is read as
+    ``read_table`` reads it: 2 rows round to one whole stored chunk of 3 rows,
+    spanning all columns. Capture the complete replacement matrix's blocks
+    before serialization, not its eventual on-disk chunks or the input's blocks.
     """
     path, _, identity, _ = regional_store(matrix_format)
     component = ("obsm", "new" if create else "features")
     values = np.ones((4, 5), dtype=np.float32)
     payload = values if matrix_format == "dense" else getattr(sparse, f"{matrix_format}_matrix")(values)
-    original_operation = regional_writer._write_table_operation
-    prepared_chunks = []
-
-    @contextmanager
-    def capture_chunks(*args, **kwargs):
-        prepared_chunks.append(kwargs["components"][component].chunks)
-        with original_operation(*args, **kwargs) as published:
-            yield published
-
-    monkeypatch.setattr(regional_writer, "_write_table_operation", capture_chunks)
-    write_table_components_by_region(
+    chunks = _prepared_chunks(
+        monkeypatch,
         path,
-        table_name="counts",
-        components={component: payload},
-        obs_identity=identity,
-        fill_values={component: 0} if create else None,
-        chunk_size=np.int64(2),
-        overwrite=not create,
+        component=component,
+        payload=payload,
+        identity=identity,
+        create=create,
+        sparse_chunks=np.int64(2),
+        dense_chunks=np.int64(2),
     )
     if matrix_format == "dense" and not create:
-        expected = ((3, 3, 3, 3), (2, 2, 1))
+        expected = ((3, 3, 3, 3), (5,))
     elif matrix_format == "csc":
         expected = ((12,), (2, 2, 1))
     else:
         expected = ((2, 2, 2, 2, 2, 2), (5,))
-    assert prepared_chunks == [expected]
+    assert chunks == expected
 
 
-@pytest.mark.parametrize("chunk_size", [0, -1, True, 1.5, "3", None])
-def test_invalid_chunk_size_leaves_store_unchanged(regional_store, chunk_size):
+@pytest.mark.parametrize("matrix_format", ["dense", "csr", "csc"])
+@pytest.mark.parametrize("create", [False, True])
+def test_auto_settings_read_existing_matrices_as_read_table_and_size_new_entries(
+    regional_store, monkeypatch, matrix_format, create
+):
+    """With the default ``"auto"``, an existing matrix keeps the blocks ``read_table`` gives it.
+
+    New entries are sized from ``array.chunk-size``, here 64 bytes, for the
+    full 12-row output of the 4 × 5 float32 input of ones:
+
+    - dense: 20 bytes per row, so 3 rows;
+    - CSR: 5 values per selected row, 8 bytes each (float32 data and int32
+      index), plus 4 bytes of indptr, 44 bytes per row, so 1 row;
+    - CSC: 4 values per column, 36 bytes, so 1 column.
+    """
+    path, _, identity, _ = regional_store(matrix_format)
+    component = ("obsm", "new" if create else "features")
+    values = np.ones((4, 5), dtype=np.float32)
+    payload = values if matrix_format == "dense" else getattr(sparse, f"{matrix_format}_matrix")(values)
+    with dask.config.set({"array.chunk-size": "64B"}):
+        if create:
+            expected = {
+                "dense": ((3, 3, 3, 3), (5,)),
+                "csr": ((1,) * 12, (5,)),
+                "csc": ((12,), (1,) * 5),
+            }[matrix_format]
+        else:
+            expected = read_table_components(path, table_name="counts", components=[component])[component].chunks
+        chunks = _prepared_chunks(
+            monkeypatch, path, component=component, payload=payload, identity=identity, create=create
+        )
+    assert chunks == expected
+
+
+@pytest.mark.parametrize("mode", ["memory", "backed"])
+def test_new_csr_entries_are_sized_from_the_input_rows_and_limited_by_the_table_rows(tmp_path, mode):
+    """A new CSR entry's values sit in the selected rows only, so its bytes per row come from them.
+
+    The 4 × 5 float32 input of ones has 5 values per row of 8 bytes (float32
+    data and int32 index) plus 4 bytes of indptr: 44 bytes per row. Averaged
+    over a 12-row table it would be 20 / 12 × 8 + 4, about 17 bytes per row.
+    The blocks split all 12 table rows, so they may be longer than the input.
+    """
+    values = _input_matrix(tmp_path, np.ones((4, 5), dtype=np.float32), "csr", mode)
+    options = {"blocked_axis_length": 12, "sparse_chunks": "auto", "dense_chunks": "auto"}
+    with dask.config.set({"array.chunk-size": "88B"}):
+        # 88 // 44 = 2 rows, not the 5 rows the table average would give.
+        assert regional_writer._block_length(values, "csr", **options) == 2
+    with dask.config.set({"array.chunk-size": "1MiB"}):
+        # Limited by the 12 table rows, not by the 4 input rows.
+        assert regional_writer._block_length(values, "csr", **options) == 12
+
+
+@pytest.mark.parametrize("create", [False, True])
+def test_storage_setting_keeps_stored_chunks_of_existing_dense_matrices_only(regional_store, monkeypatch, create):
+    """``"storage"`` keeps the stored (3, 2) chunks of an existing dense matrix.
+
+    A new entry has no stored chunks to keep, so it is sized as with
+    ``"auto"``: 3 rows of 20 bytes for an ``array.chunk-size`` of 64 bytes.
+    """
+    path, _, identity, _ = regional_store()
+    component = ("obsm", "new" if create else "features")
+    with dask.config.set({"array.chunk-size": "64B"}):
+        chunks = _prepared_chunks(
+            monkeypatch,
+            path,
+            component=component,
+            payload=np.ones((4, 5), dtype=np.float32),
+            identity=identity,
+            create=create,
+            dense_chunks="storage",
+        )
+    assert chunks == (((3, 3, 3, 3), (5,)) if create else ((3, 3, 3, 3), (2, 2, 1)))
+
+
+@pytest.mark.parametrize("matrix_format", ["csr", "csc"])
+def test_new_entries_from_lazy_sparse_inputs_fall_back_to_dask_auto(regional_store, monkeypatch, matrix_format):
+    """A lazy sparse input does not know its number of non-zero values without computing it.
+
+    Its new entry is then sized by Dask's own ``"auto"``, which counts every
+    entry as stored, along the rows (CSR) or columns (CSC).
+    """
+    path, _, identity, _ = regional_store(matrix_format)
+    values = getattr(sparse, f"{matrix_format}_matrix")(np.ones((4, 5), dtype=np.float32))
+    payload = da.from_array(values, chunks=(2, 2), asarray=False)
+    auto = ((12,), "auto") if matrix_format == "csc" else ("auto", (5,))
+    with dask.config.set({"array.chunk-size": "40B"}):
+        expected = da.core.normalize_chunks(auto, shape=(12, 5), dtype=np.float32)
+        chunks = _prepared_chunks(
+            monkeypatch, path, component=("obsm", "new"), payload=payload, identity=identity, create=True
+        )
+    assert chunks == expected
+
+
+@pytest.mark.parametrize(
+    "setting, value",
+    [
+        ("sparse_chunks", 0),
+        ("sparse_chunks", "storage"),
+        ("sparse_chunks", None),
+        ("dense_chunks", -1),
+        ("dense_chunks", True),
+        ("dense_chunks", 1.5),
+        ("dense_chunks", "3"),
+    ],
+)
+def test_invalid_chunk_settings_leave_store_unchanged(regional_store, setting, value):
+    """Invalid settings are rejected with the readers' messages, before anything is written."""
     path, _, identity, _ = regional_store()
     before = _store_bytes(path)
-    with pytest.raises((TypeError, ValueError), match="chunk_size must be a positive integer"):
+    with pytest.raises((TypeError, ValueError), match=f"{setting} must be"):
         write_table_components_by_region(
             path,
             table_name="counts",
             components={("obsm", "features"): np.ones((4, 5), dtype=np.float32)},
             obs_identity=identity,
-            chunk_size=chunk_size,
             overwrite=True,
+            **{setting: value},
         )
     assert _store_bytes(path) == before
 
@@ -411,7 +605,8 @@ def test_lazy_regional_self_overwrite(regional_store, matrix_format):
         table_name="counts",
         components={("obsm", "features"): payload},
         obs_identity=identity,
-        chunk_size=3,
+        sparse_chunks=3,
+        dense_chunks=3,
         overwrite=True,
     )
     result = read_zarr(path / "tables/counts").obsm["features"]
@@ -435,7 +630,8 @@ def test_matrix_can_have_an_empty_feature_axis(regional_store, matrix_format, cr
         components={("obsm", "empty"): payload},
         obs_identity=identity,
         fill_values={("obsm", "empty"): 0},
-        chunk_size=3,
+        sparse_chunks=3,
+        dense_chunks=3,
         overwrite=not create,
     )
     result = read_zarr(path / "tables/counts").obsm["empty"]
@@ -457,7 +653,7 @@ def test_regional_graph_construction_does_not_read_or_compute(
     path, _, _, old = regional_store(matrix_format)
     existing = None
     if not create:
-        # Keep the stored dense layout, as the regional writer's own read does.
+        # The stored dense layout splits columns too, which the merge must keep.
         existing = read_table_components(
             path, table_name="counts", components=[("obsm", "features")], sparse_chunks=1, dense_chunks="storage"
         )[("obsm", "features")]
@@ -483,7 +679,7 @@ def test_regional_graph_construction_does_not_read_or_compute(
                 n_obs=len(old),
                 matrix_format=matrix_format,
                 fill=0 if create else None,
-                chunk_size=1,
+                new_entry_block_length=1,
             )
     computed = result.compute()
     expected = np.zeros_like(old) if create else old.copy()
@@ -522,7 +718,7 @@ def test_existing_block_alignment_preserves_values_and_inputs(matrix_format):
         n_obs=len(old),
         matrix_format=matrix_format,
         fill=None,
-        chunk_size=4,
+        new_entry_block_length=None,
     )
     assert result.chunks == expected_chunks
     computed = result.compute()
@@ -558,7 +754,7 @@ def test_misaligned_existing_blocks_rejected_before_computation(matrix_format):
                 n_obs=11,
                 matrix_format=matrix_format,
                 fill=None,
-                chunk_size=4,
+                new_entry_block_length=None,
             )
 
 
@@ -588,10 +784,11 @@ def test_aligned_existing_blocks_share_source_reads(regional_store, monkeypatch)
     ).rechunk((3, 2), method="tasks")
     original_read = regional_writer._read_anndata_element
 
-    # Substitute counted source blocks only for the regional writer's lazy read;
-    # validation and serialization still operate on the real table.
+    # Substitute counted source blocks only for the regional writer's opening of
+    # the stored matrix; as a Dask array, it keeps its blocks in _lazy_matrix().
+    # Validation and serialization still operate on the real table.
     def read_existing(group, component_path, **kwargs):
-        if component_path == ("obsm", "features") and kwargs.get("mode") == "lazy":
+        if component_path == ("obsm", "features") and kwargs.get("mode") == "backed":
             return existing
         return original_read(group, component_path, **kwargs)
 
@@ -602,7 +799,7 @@ def test_aligned_existing_blocks_share_source_reads(regional_store, monkeypatch)
         table_name="counts",
         components={("obsm", "features"): values},
         obs_identity=identity,
-        chunk_size=3,
+        dense_chunks=3,
         overwrite=True,
     )
     assert sorted(requested) == list(range(len(blocks)))
@@ -687,7 +884,8 @@ def test_merge_reads_only_affected_matrices_and_keeps_shared_blocks_unchanged(
                 components={component: payload},
                 obs_identity=identity,
                 fill_values={component: 0} if create else None,
-                chunk_size=3,
+                sparse_chunks=3,
+                dense_chunks=3,
                 overwrite=True,
             )
     if matrix_format == "dense":
