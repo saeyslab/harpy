@@ -549,8 +549,11 @@ def _block_length(
     -------
     A positive number of rows or columns, or ``"auto"`` for a lazy sparse
     value: its number of non-zero values is unknown without computing it, so
-    Dask's own ``"auto"`` sizing applies, which counts every entry as stored
-    and so gives smaller blocks.
+    Dask's own ``"auto"`` sizing applies: it picks the rows (or columns) per
+    block as if the matrix were dense, from the number of columns × itemsize.
+    A computed block stores only its non-zero values, 8 bytes each with
+    float32 data and int32 indices, so for a typical sparse matrix, less than
+    about half filled, it uses less memory than ``array.chunk-size``.
     """
     if matrix_format == "dense":
         if dense_chunks not in {"auto", "storage"}:
