@@ -880,8 +880,10 @@ memory, but it does not include the writing itself.
    and continue from the stored layer. Alternatively, `persist()` shared
    intermediates when they fit in memory.
 
-Option 2 is documentation only and should come first. Phase 3 measured the
-effect on a realistic table and records the decision on option 1.
+Phase 3 measured the effect on a realistic table and decided: Harpy computes
+sparse Dask matrices in batches of blocks, one compute per batch (slice 3a),
+which divides the repeated global work by the batch size without documenting
+option 2; one compute across all components of a call (slice 3b) is deferred.
 
 ### Gap 3: no helper to persist scanpy's outputs
 
@@ -1909,8 +1911,7 @@ practice, or for consistency before a release.
 
 **Deferred until Phases 3–7 are implemented.** Most of the guide depends on
 them: which writer to use (Phase 4's write-back helper), the reopen rule
-(Phase 5), the checkpoint pattern (Phase 3) and Harpy's own wrappers (Phase
-6). Written now, it would need rewriting. The contracts are already documented
+(Phase 5) and Harpy's own wrappers (Phase 6). Written now, it would need rewriting. The contracts are already documented
 in `docs/development/storage.md` and the docstrings. If a release is cut before
 Phase 6, add at least a short note or a guard for the legacy table functions
 on lazy tables (see "Legacy table functions at release" in the open
@@ -1951,7 +1952,7 @@ each in its own process: one component and two, with and without a global
 reduction upstream, and a one-compute reference that writes nothing. It runs
 on a small table for exact counts, and on 1 M cells × 2,000 genes (100 M
 non-zero values) for time and memory. The results are in gap 2's evidence. For
-the decision in step 3:
+the decision below:
 
 - The cost that matters is the sparse writer's one compute per block combined
   with a global reduction upstream, such as `normalize_total`'s default median:
@@ -1967,47 +1968,178 @@ the decision in step 3:
   gave no sign of needing more memory. That reference does not include the
   writing itself.
 
-**Step 2: document the workarounds.** With Phase 2 deferred, in the docstring
-of `write_table_components` and in gap 2 for now:
-
-- the checkpoint pattern: write the intermediate layer, reopen the table, and
-  continue from the stored layer;
-- `persist()` for shared intermediates that fit in memory;
-- a fixed `target_sum`, or the median computed once beforehand, so that the
-  graph has no global reduction.
-
-**Step 3: decide whether Harpy owns the writing of Dask matrices.** Phase 3 is
+**Decision: implement slice 3a, defer slice 3b, then Phase 4.** Phase 3 is
 about how often a write evaluates the upstream graph. It is not about which
 components to write (Phase 4's `write_table_updates`), nor about publishing
 them together with rollback, which `write_table_components` already does for
-all components of one call. Two independent fixes, 3a and 3b, with a shared
-scope: only Dask matrices, while AnnData stays responsible for encodings,
+all components of one call. Two independent fixes:
+
+- **3a**, Harpy owns the computes of Dask matrix writes. Sparse ones in
+  batches of blocks, one compute per batch, which divides the quadratic cost
+  that step 1 measured by the batch size and computes the blocks of a batch in
+  parallel. Dense ones on the user's Dask scheduler, which AnnData's dense
+  writer overrides. With it, a global reduction upstream is rarely worth a
+  workaround, so none is documented (a fixed `target_sum`, the checkpoint
+  pattern or `persist()`).
+- **3b**, all components of one call in one compute, gains little in practice.
+  scanpy computes the PCA fit, the highly-variable-gene statistics and the
+  neighbor graphs eagerly, and the recommended pattern computes `X_pca` before
+  `neighbors`, so a write typically holds one lazy matrix, the `log1p` layer.
+
+Both concern Dask matrices only; AnnData stays responsible for encodings,
 metadata and in-memory values.
 
-**3a. One compute per sparse component.** This removes the quadratic cost
-that step 1 measured, even for a single component, and needs no grouping
-across components.
+#### Slice 3a: Harpy owns the computes of Dask matrix writes
 
-- `da.store` cannot express it. A CSR matrix on disk is three 1-D arrays, and
-  where a block goes in `data` and `indices` depends on the non-zero counts of
-  every block before it, known only after computing them. That is why AnnData
-  appends block by block, one compute each.
-- Harpy's write callback `_write_element_with_layout`
-  (`src/harpy/_storage/_anndata.py`), which already intercepts every matrix,
-  writes sparse Dask matrices itself. Two options:
-  1. per-block staging, then concatenation: one compute writes each block's
-     arrays to a temporary location in parallel; a cheap second step copies
-     them into the final `data`, `indices` and `indptr`, with 1c's fixed stored
-     chunks. The output is written an extra time, but the upstream graph is
-     never recomputed;
-  2. batched computes: compute k blocks at a time. Simpler, but only a partial
-     fix, since the global work is still redone N/k times.
-- Dense components need no such fix: AnnData already writes each one in one
-  compute (`da.store`).
+**Goal.** Harpy decides how every Dask matrix is computed when it is written,
+in one place and with one behavior:
 
-**3b. One compute per call, across components.** The smaller gain: in step 1,
-each additional component cost about one more pass over the source, reading
-each block 2–3 times.
+- sparse: a Dask CSR or CSC matrix is computed in batches of k blocks, one
+  compute per batch, instead of one compute per block. A global reduction
+  upstream then runs once per batch instead of once per block, and the blocks
+  of a batch are computed in parallel;
+- dense: a Dask array is written on the user's Dask scheduler. AnnData's dense
+  writer calls `da.store(elem, g, scheduler="threads")`, and an explicit
+  scheduler overrides an active `distributed` client, so today a dense write is
+  computed with threads in the client process, not on the workers. AnnData's
+  sparse writer uses plain `.compute()` and already follows the client.
+
+**What Harpy owns.** The computes, for both: the scheduler, the batching, and
+the layout of 1b and 1c. The write to disk only where it has to:
+
+- dense: AnnData's dense writer computes and writes in one call, with its
+  hard-coded scheduler, so Harpy writes dense Dask arrays itself;
+- sparse: once a block is computed, appending it to disk involves no Dask
+  scheduler, so AnnData keeps writing the bytes, through its public
+  `sparse_dataset(group).append(block)`. Explicit sharding (see "Deferred:
+  explicit sharding") does not need more: shards are set when the arrays are
+  created, through the same `dataset_kwargs` that already carry 1c's chunks.
+  Owning the sparse disk write as well would add parallel writing and a choice
+  of index dtypes, at the cost of maintaining AnnData's CSR format in Harpy.
+  Revisit it if explicit sharding or a measurement shows a need.
+
+**Scope.** Dask values at matrix paths (`_is_matrix_path`, the paths of 1b and
+1c) that reach the write callback `_write_element_with_layout`
+(`src/harpy/_storage/_anndata.py`). That includes storage-backed sparse
+matrices, which `_prepare_anndata_value` wraps lazily. The callback already
+intercepts every matrix and sets its layout (1b, 1c); for these values it no
+longer calls AnnData's Dask writers. In-memory matrices, and everything else,
+stay with AnnData.
+
+**Sparse part: batched computes.** AnnData's `write_dask_sparse` computes the
+first block, writes it through AnnData's writer for in-memory matrices (which
+re-enters the callback, so 1c's chunks apply), then computes every further
+block separately and appends it. Harpy does the same, with k blocks per
+compute:
+
+1. compute the first k blocks in one `dask.compute`, on the active scheduler;
+2. write the first block as AnnData does today: indices and `indptr` as int64
+   (`as_int64_indices`), through AnnData's writer for in-memory matrices,
+   re-entering the callback. AnnData creates the encoded group, with its
+   compressor and sharding handling and 1c's fixed chunk length;
+3. append the other blocks of the batch, in order, with
+   `sparse_dataset(group).append(block)`;
+4. repeat for the next k blocks until all are written.
+
+The stored result is the same as today, including the automatic shards, which
+the first block decides (see 1c). Each block is computed once, so per-block
+work runs once in total, as today.
+
+**Batch size k: the number of threads of the active scheduler.** For Dask's
+threaded scheduler, its `num_workers` setting, by default the number of CPUs
+(`dask.system.CPU_COUNT`); for `distributed`, the total number of worker
+threads; for the synchronous scheduler, 1. A batch then keeps every thread
+busy. Memory: the k computed blocks of a batch are held until they are
+appended, in the client process with `distributed`: about k blocks of the
+input's block size, for example about 1.5 GB for 12 threads and blocks of
+about 128 MiB, against one block today. A parallel compute of k blocks holds
+about as much anyway. To use less, lower Dask's `array.chunk-size`, which
+shrinks every block, the same memory target as everywhere else. A separate
+setting for k is not part of 3a.
+
+What batching does not remove: a global reduction still runs once per batch,
+⌈N/k⌉ times. With 20 blocks and 12 threads that is twice instead of 20 times;
+for hundreds of blocks the cost is divided by k, not removed.
+
+**Options considered and rejected for the sparse part.** Both remove the
+repeated global reduction completely, but both cost more than batching in
+common cases:
+
+- per-block staging, then concatenation: one compute writes each block's
+  arrays to a temporary location, and a second step copies them into the final
+  arrays. Everything is computed once, but the output is written twice; at
+  1 M cells the write dominates (3.8 s, against about 0.27 s per pass over the
+  source), so this is costlier than recomputing for cheap graphs;
+- count first, then write in place: one compute counts the values per block,
+  which gives each block's offset, and a second writes every block straight
+  into the final arrays, in parallel. The output is written once, but the whole
+  upstream graph runs twice, including per-block work that AnnData runs once:
+  a regression for expensive per-block graphs without a global reduction.
+
+**Dense part: creating the target.** Writing a dense Dask array without
+AnnData's `write_func` also bypasses what AnnData does around the write, so
+Harpy does it:
+
+- the encoding attributes, which AnnData sets in `write_func`'s wrapper
+  (`write_spec` in `anndata/_io/specs/registry.py`): `encoding-type` and
+  `encoding-version`, from the `iospec` the callback receives;
+- the array settings AnnData derives from `dataset_kwargs`: for Zarr v3, the
+  compressor conversion and `shards="auto"` when
+  `anndata.settings.auto_shard_zarr_v3` is on and no shards are given
+  (`zarr_v3_compressor_compat` and `zarr_v3_sharding`, same module);
+- 1b's stored chunks, already in `dataset_kwargs`.
+
+Harpy creates the array at its full size, as AnnData does, not empty and then
+resized: with automatic sharding, Zarr chooses the shard shape when the array
+is created.
+
+**Dense part: the write.** The callback already rechunks a dense Dask value
+into write blocks of whole stored chunks (`_rechunk_to_write_blocks`, 1b).
+Harpy runs `da.store(value, array)` without a `scheduler` argument, so the
+active scheduler applies, and with Dask's default lock, as AnnData does today.
+No new on-disk format: the stored array is the same as AnnData's.
+
+**Edge cases.** Uneven, empty and all-zero sparse blocks; a matrix without
+non-zero values; an empty compressed axis; CSC; fewer blocks than k; k = 1
+under the synchronous scheduler.
+
+**Tests.**
+
+- A round trip for CSR and CSC Dask values with uneven, empty and all-zero
+  blocks: read back with AnnData's `read_elem` and `read_elem_lazy` and with
+  Harpy's readers; the same values, encoding attributes, int64 index dtypes,
+  1c's chunk length and, with automatic sharding on, the same shards as today.
+- A dense Dask write stores the same array as AnnData's writer does today:
+  values, encoding attributes, 1b's stored chunks and, with automatic sharding
+  on, the same shards; the 1b tests still pass.
+- Dense and sparse writes run on the active scheduler: with a scheduler set
+  through `dask.config`, its computes are the ones that run.
+- Writing one sparse Dask matrix of N blocks runs ⌈N/k⌉ computes
+  (`ComputeCounter`), with k set through the threaded scheduler's
+  `num_workers`, for example N = 20 and k = 4, 1 and 20.
+- With a global reduction upstream, the source reads drop accordingly: about
+  ⌈N/k⌉ full passes instead of N.
+- An expensive per-block function without a global reduction runs exactly once
+  per block, as today.
+- Zarr v2 and v3.
+- The 1c tests still pass; in-memory matrices still go through AnnData.
+
+**Acceptance.** With `scripts/harpy_write_passes.py` at 1 M cells, on this
+machine's 12 threads: writing `log1p` after the median is close to the 3.8 s
+without a global reduction at 6 blocks (one batch), and at 20 blocks (two
+batches) the source reads drop from 440 to about 60. Writing `X_pca` is no
+slower than today. Record the peak memory with k = 12 next to today's.
+
+**Docs.** The docstring of `_write_element_with_layout`, the section "Writing
+AnnData components" in `docs/development/storage.md` (batched sparse computes,
+k, and its memory), and gap 2's evidence once measured.
+
+#### Slice 3b (deferred): one compute per call
+
+Deferred, see the decision above. Revisit if writes with several lazy matrices
+per call turn out to be common, for example through Phase 4's helper. The
+measured gain: each additional component cost about one more pass over the
+source, reading each block 2–3 times. The design:
 
 - **Deferred writes:** `_write_anndata_element` passes the write callback
   `_write_element_with_layout` to AnnData's `write_dispatched`, which calls it
@@ -2016,44 +2148,39 @@ each block 2–3 times.
   For Dask values it would instead create the target and record a deferred
   write in a collector list, passed in through `partial` like `root` and
   `logical_path`:
-  - dense: a Zarr array that Harpy creates, with AnnData's encoding attributes
-    and 1b's stored chunks and write blocks, and
-    `da.store(value, array, compute=False)`, a Dask `Delayed`;
-  - sparse: one delayed task per block that writes the block's `data`,
-    `indices` and row lengths to a staging location, as in 3a, option 1.
+  - dense: 3a's dense write with `da.store(value, array, compute=False)`, a
+    Dask `Delayed`, instead of computing;
+  - sparse: 3a appends computed blocks in order, batch by batch, so its writes
+    cannot be deferred as a whole. How 3a's batches combine with one compute
+    per call, for example by computing the dense stores together with the
+    first batch, is to be designed when 3b is revisited.
 - **One compute:** after its loop over the components, the component writer
   runs `dask.compute(*recorded_writes)`. Dask merges the graphs, so shared
   upstream tasks with the same keys, such as the `log1p` blocks behind both a
-  layer and `X_pca`, run once. Then the staged sparse blocks are concatenated
-  into the final arrays, which reads only the staged output, never the upstream
-  graph. `write_table`, which writes a whole AnnData in one
-  `_write_anndata_element` call, collects the deferred writes of its elements
-  the same way.
+  layer and `X_pca`, run once. `write_table`, which writes a whole AnnData in
+  one `_write_anndata_element` call, collects the deferred writes of its
+  elements the same way.
 - **Validation moves after the compute:** today each component is read back
   for validation right after it is written (`_write_table_operation`). With
-  deferred writes there is nothing to read back until the compute and the
-  concatenation have run, so the read-back moves after them. Publication and
-  rollback stay as they are.
+  deferred writes there is nothing to read back until the computes have run, so
+  the read-back moves after them. Publication and rollback stay as they are.
 - Writes in separate calls can never share a compute. Phase 4 makes one call
   with everything that changed the natural pattern.
 
-**Benefits and costs of owning the writes.**
+**Benefits and costs of owning the computes**, for 3a and, if implemented, 3b.
 
-- **Benefits:** the writer follows the user's Dask scheduler, where AnnData
-  hard-codes `"threads"` for dense writes; explicit sharding (see "Deferred:
-  explicit sharding") is easier to add once Harpy owns the write.
-- **Costs:** Harpy maintains the on-disk CSR writing, AnnData's format version
-  `0.1.0`, which Harpy already validates when reading; more code to test; and
-  possibly a higher peak memory, because one compute keeps more intermediate
-  results alive at the same time. Step 1 found no sign of that, but measured
-  one compute without the writing.
+- **Benefits:** every Dask matrix write follows the user's Dask scheduler,
+  where AnnData hard-codes `"threads"` for dense writes; sparse blocks are
+  computed in parallel and global reductions far less often; the computes of
+  all matrix writes are decided in one place, ready for 3b and for explicit
+  sharding.
+- **Costs:** Harpy writes dense Dask arrays itself, so it sets AnnData's
+  encoding attributes and Zarr v3 array settings for them; more code to test;
+  and a higher peak memory for sparse writes, about k blocks instead of one,
+  controlled through `array.chunk-size`. AnnData's CSR format stays with
+  AnnData, which still writes the sparse bytes.
 
-Step 1 showed that the cost that matters is the sparse case with a global
-reduction, which grows with the table and the number of blocks: that is 3a.
-Still to decide: whether to implement 3a, with which option, and then whether
-3b is worth it on top. Phase 3 ends with these decisions, recorded here; if
-Harpy is to own the writing, the implementation gets its own slices, as Phase 1
-did.
+Phase 3 is complete once slice 3a is implemented; slice 3b stays deferred.
 
 ### Phase 4: write-back helper
 
