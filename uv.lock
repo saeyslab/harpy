@@ -1819,7 +1819,7 @@ requires-dist = [
     { name = "seaborn", specifier = ">=0.12.2" },
     { name = "session-info2" },
     { name = "spatialdata", specifier = ">=0.7.3" },
-    { name = "spatialdata-io" },
+    { name = "spatialdata-io", specifier = ">=0.7.0" },
     { name = "spatialdata-plot" },
     { name = "sphinx", marker = "extra == 'docs'", specifier = ">=4.5" },
     { name = "sphinx-autodoc-typehints", marker = "extra == 'docs'" },

@@ -60,7 +60,7 @@ dependencies = [
     "universal_pathlib",
     "crick",
     "lazy-loader>=0.4",
-    "spatialdata_io",
+    "spatialdata_io>=0.7.0",
     "spatialdata-plot",
     "flowsom",
     # for debug logging
