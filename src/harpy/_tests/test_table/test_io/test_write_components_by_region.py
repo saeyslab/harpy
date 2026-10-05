@@ -304,19 +304,27 @@ def test_storage_setting_keeps_stored_chunks_of_existing_dense_matrices_only(reg
     assert chunks == (((3, 3, 3, 3), (5,)) if create else ((3, 3, 3, 3), (2, 2, 1)))
 
 
-@pytest.mark.parametrize("matrix_format", ["csr", "csc"])
-def test_new_entries_from_lazy_sparse_inputs_fall_back_to_dask_auto(regional_store, monkeypatch, matrix_format):
+@pytest.mark.parametrize("matrix_format, expected", [("csr", ((2,) * 6, (5,))), ("csc", ((12,), (1,) * 5))])
+def test_new_entries_from_lazy_sparse_inputs_fall_back_to_dask_auto(
+    regional_store, monkeypatch, matrix_format, expected
+):
     """A lazy sparse input does not know its number of non-zero values without computing it.
 
-    Its new entry is then sized by Dask's own ``"auto"``, which counts every
-    entry as stored, along the rows (CSR) or columns (CSC).
+    Its new entry is then sized by Dask's own ``"auto"``, as if it were dense,
+    along the rows (CSR) or columns (CSC) of the full 12 × 5 entry. With an
+    ``array.chunk-size`` of 48 bytes and 4 bytes per float32 entry:
+
+    - CSR: 5 × 4 = 20 bytes per row, so 2 rows;
+    - CSC: 12 × 4 = 48 bytes per column, so 1 column.
+
+    The input holds one value per row, so counting its non-zero values would
+    give 4 rows (12 bytes per row) or 4 columns (about 10 bytes per column):
+    the result shows which sizing was used.
     """
     path, _, identity, _ = regional_store(matrix_format)
-    values = getattr(sparse, f"{matrix_format}_matrix")(np.ones((4, 5), dtype=np.float32))
+    values = getattr(sparse, f"{matrix_format}_matrix")(np.eye(4, 5, dtype=np.float32))
     payload = da.from_array(values, chunks=(2, 2), asarray=False)
-    auto = ((12,), "auto") if matrix_format == "csc" else ("auto", (5,))
-    with dask.config.set({"array.chunk-size": "40B"}):
-        expected = da.core.normalize_chunks(auto, shape=(12, 5), dtype=np.float32)
+    with dask.config.set({"array.chunk-size": "48B"}):
         chunks = _prepared_chunks(
             monkeypatch, path, component=("obsm", "new"), payload=payload, identity=identity, create=True
         )
