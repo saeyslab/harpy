@@ -243,7 +243,8 @@ The shared crash-recovery and concurrent-access limitations apply equally to
 deletions and replacements.
 
 `hp.tb.write_table_components_by_region(store, table_name=..., components=...,
-obs_identity=..., fill_values=..., chunk_size=1000, overwrite=...)` updates individual `.obsm`
+obs_identity=..., fill_values=..., sparse_chunks="auto", dense_chunks="auto",
+overwrite=...)` updates individual `.obsm`
 matrices for complete regions of an existing annotated table. The nonempty
 `obs_identity` dataframe must contain exactly the stored region and instance
 columns, with a categorical region column and non-null, unique region/instance
@@ -259,7 +260,8 @@ can change; there is no automatic reordering or arbitrary subset-of-cells update
 
 Submitted matrices must be numeric, two-dimensional dense, CSR or CSC matrices
 with known shapes. Dask inputs must also have known chunk sizes. DataFrame-valued
-matrices and `None` matrix payloads are rejected.
+matrices and `None` matrix payloads are rejected. Matrices backed by Zarr must be
+AnnData-encoded; wrap a plain `zarr.Array` with `dask.array.from_zarr`.
 
 - Existing matrices preserve unselected measurements, including missing values.
   Updates require matching formats (dense/dense, CSR/CSR or CSC/CSC), unchanged
@@ -277,16 +279,17 @@ matrices and `None` matrix payloads are rejected.
 
 Regional writes construct complete replacements in chunks and rewrite each
 affected `.obsm` entry in full. They do not read or rewrite unrelated matrices.
-`chunk_size` controls rows per computational chunk for dense/CSR matrices or
-columns for CSC matrices, keeping the other axis whole. It applies to in-memory
-inputs, backed sparse reads, and new matrices requiring unselected rows.
-Input preparation preserves existing Dask and dense Zarr chunks; merging may
-lazily repartition a working view without changing supplied arrays. When only
-some regions are selected, existing dense targets retain their chunk layout
-during merging.
-When all observations are supplied, the replacement instead keeps the prepared
-input's computational chunks, even when updating an existing entry.
-`chunk_size` does not specify on-disk chunk sizes.
+`sparse_chunks` and `dense_chunks` set the block layout of the lazy merge, with
+the values and meaning of the lazy readers (see the table-reader contract
+below). The existing matrix is read as `read_table` reads it, and the same
+settings size the values Harpy splits into blocks itself: matrices in memory or
+backed by Zarr, and new matrices requiring unselected rows. `"storage"` only
+applies to dense matrices in storage and behaves like `"auto"` otherwise. Dask
+inputs keep their blocks; merging may lazily repartition a working view without
+changing supplied arrays. When only some regions are selected, the output keeps
+the existing matrix's blocks. When all observations are supplied, it instead
+keeps the prepared input's blocks, even when updating an existing entry.
+Neither setting specifies on-disk chunk sizes.
 
 Memory may include identity columns, requested metadata, active chunks and
 caller-supplied computations. Inputs are not modified. The function returns
@@ -574,10 +577,10 @@ both `"auto"` by default. Neither changes disk storage or backed/eager reads.
 
 `array.chunk-size` is read when the lazy arrays are built. Tables reopened by
 `add_table`, `add_table_components` and the regional adapter use the same
-defaults. The regional writer reads existing matrices with
-`dense_chunks="storage"`, so the merge works on blocks of the existing stored
-chunks. The merged result is written like any other dense matrix, in Harpy's
-row-only stored chunks, so the stored layout of an older target changes.
+defaults. The regional writer reads existing matrices with its own
+`sparse_chunks` and `dense_chunks`, by default the same as these readers. The
+merged result is written like any other matrix, in Harpy's stored chunks, so the
+stored layout of an older target changes.
 
 Lazy and backed matrix reads accept dense `array`/`string-array` encoding version
 `0.2.0` and CSR/CSC encoding version `0.1.0`. Harpy rejects other matrix encodings
