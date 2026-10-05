@@ -4866,12 +4866,12 @@ As part of 11e.ii, align the table-input names with `spatial_bin_histogram`.
 The prefix identifies the source; singular/plural distinguishes one histogram
 from a collection of histograms:
 
-| Current name                           | Canonical name           | Purpose                                                  |
-| -------------------------------------- | ------------------------ | -------------------------------------------------------- |
-| `hp.qc.metric_histogram`               | `hp.qc.table_histogram`  | One metric column from a table's `.obs` or `.var`.       |
-| `hp.qc.metrics_histogram`              | `hp.qc.table_histograms` | Multiple table metrics arranged in subplots.             |
-| `hp.qc.spatial_bin_histogram` | Unchanged                | One feature class's spatial-bin count distribution. |
-| `hp.qc.spatial_bin_histogram_by_feature` | New entry point | One feature's spatial-bin count distribution. |
+| Current name                             | Canonical name           | Purpose                                             |
+| ---------------------------------------- | ------------------------ | --------------------------------------------------- |
+| `hp.qc.metric_histogram`                 | `hp.qc.table_histogram`  | One metric column from a table's `.obs` or `.var`.  |
+| `hp.qc.metrics_histogram`                | `hp.qc.table_histograms` | Multiple table metrics arranged in subplots.        |
+| `hp.qc.spatial_bin_histogram`            | Unchanged                | One feature class's spatial-bin count distribution. |
+| `hp.qc.spatial_bin_histogram_by_feature` | New entry point          | One feature's spatial-bin count distribution.       |
 
 `table_histogram`, not the multi-plot wrapper, is the direct counterpart to
 `spatial_bin_histogram`. Avoid a cell-specific name because table metrics may
@@ -5578,11 +5578,11 @@ bin area, panel size, or the sample's total counts.
 For each bin, let `C` be the selected or combined raw count, `A` its physical
 area in µm², and `N` the complete panel feature count for the displayed classes:
 
-| `normalization` | Display value | Colorbar units | Supported input |
-| --- | --- | --- | --- |
-| `None` | `C` | Points per bin | Both summary types |
-| `"per_area"` | `C / A` | Points per µm² | Both summary types |
-| `"per_panel_feature"` | `C / N` | Points per panel feature per bin | `PointsSummary` only |
+| `normalization`                | Display value | Colorbar units                   | Supported input      |
+| ------------------------------ | ------------- | -------------------------------- | -------------------- |
+| `None`                         | `C`           | Points per bin                   | Both summary types   |
+| `"per_area"`                   | `C / A`       | Points per µm²                   | Both summary types   |
+| `"per_panel_feature"`          | `C / N`       | Points per panel feature per bin | `PointsSummary` only |
 | `"per_panel_feature_per_area"` | `C / (N * A)` | Points per panel feature per µm² | `PointsSummary` only |
 
 Read both denominators from the supplied summary, without separate overrides:
@@ -6042,12 +6042,12 @@ over retained neighboring bins. Let `C` be the selected or pooled raw counts,
 `A` their actual areas in µm², and `N` the selected classes' combined panel
 feature count. Use the same spatial weights in numerator and denominator:
 
-| Normalization | Smoothed display value |
-| --- | --- |
-| `None` | `S(C) / S(1)` |
-| `"per_area"` | `S(C) / S(A)` |
-| `"per_panel_feature"` | `S(C) / (N * S(1))` |
-| `"per_panel_feature_per_area"` | `S(C) / (N * S(A))` |
+| Normalization                  | Smoothed display value |
+| ------------------------------ | ---------------------- |
+| `None`                         | `S(C) / S(1)`          |
+| `"per_area"`                   | `S(C) / S(A)`          |
+| `"per_panel_feature"`          | `S(C) / (N * S(1))`    |
+| `"per_panel_feature_per_area"` | `S(C) / (N * S(A))`    |
 
 `S(1)` sums weights over retained bins, including bins with zero counts.
 Existing restrictions on panel normalization for feature summaries remain
