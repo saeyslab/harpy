@@ -1718,12 +1718,26 @@ task, which combines that block with the new rows that fall inside it. One
 3. the output layout for new entries.
 
 Only the first has a stored layout to align with, and it is handled
-inconsistently:
+inconsistently. The state after 1b and 1c:
 
-| Existing matrix | Read with                                                   | Merge tasks                                                                                                                 |
-| --------------- | ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| CSR / CSC       | `sparse_chunk_size=chunk_size` (1000 rows, or 1000 columns) | 1000-row blocks: many small tasks, and stored chunks fetched several times (7.2× in "Sparse block size" in gap 1, verified) |
-| dense           | the stored chunks, since `chunk_size` does not apply        | AnnData's default stored chunks, often split by columns, such as `(5000, 75)`: many small tasks per row band                |
+| Existing matrix | Read with                                                      | Merge tasks                                                                                                                                                                                     |
+| --------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CSR / CSC       | `sparse_chunks=chunk_size` (1000 rows, or 1000 columns)        | 1000-row blocks: many small tasks                                                                                                                                                               |
+| dense           | the stored chunks, through 1a's `dense_chunks="storage"` guard | stores written before 1b: AnnData's default chunks, often split by columns, such as `(5000, 75)`, so many small tasks per row band; since 1b: row-only 4 MiB stored chunks, one small task each |
+
+What the small sparse blocks cost changed with 1c. With Zarr's default stored
+chunks, 1000-row blocks fetched stored chunks several times (7.2× in "Sparse
+block size" in gap 1). With 1c's stored chunks of 524,288 entries they do not:
+measured on a 500,000 × 200 CSR matrix with 25 M non-zero values, one run each,
+reading all of it took 0.77 s in 1000-row blocks (500 blocks) against 0.89 s
+with Zarr's default chunks. The cost that remains is the number of tasks: the
+same matrix read in 2 blocks of 300,000 rows took 0.06 s, about 13× less. So
+1e is now mainly about fewer, larger merge tasks and the same defaults as the
+readers, not about repeated I/O.
+
+Writing the merged result is not affected: since 1b it goes through the write
+callback, so dense output is rechunked into whole stored chunks whatever the
+merge blocks are, and sparse output gets 1c's fixed chunk length.
 
 **Proposed policy.**
 
@@ -1735,9 +1749,12 @@ inconsistently:
    and dense row bands work as they are.
 2. **Turn `chunk_size` into `"auto" | int`, defaulting to `"auto"`,** for the
    parts without a stored layout:
-   - in-memory inputs and new entries are sized with 1a's helper from the
-     supplied matrix: dense from columns × dtype, sparse from its number of
-     non-zero values when it is known (in memory);
+   - in-memory inputs and new entries are sized from the supplied matrix, with
+     the same rules as 1a's readers: dense from columns × dtype, sparse from
+     its number of non-zero values when it is known (in memory). 1a's helpers,
+     `_dense_lazy_chunks` and `_sparse_block_length`, take Zarr arrays, so this
+     needs a small variant that takes a shape, dtype and number of non-zero
+     values instead;
    - lazy sparse inputs, whose number of non-zero values is not known without
      computing, fall back to Dask's dense-equivalent `"auto"`, which is the
      cautious choice;
@@ -1770,11 +1787,13 @@ documented chunking behavior:
   (`src/harpy/_tests/test_table/test_io/test_write_components_by_region.py` and
   `test_components_by_region.py`).
 
-**When.** After 1a, which provides the read policy and the sizing helper. Slice
-1e does not depend on 1b, 1c or 1d. Because it does not affect what downstream
-tools receive, it comes after 1b, 1c and 1d in priority, unless `hp.tb.add_feature_matrix`
-or other regional updates of large tables are slow in practice; then implement
-it directly after 1a.
+**When.** After 1a, which provides the read policy. Slice 1e does not depend on
+1b, 1c or 1d, and it does not affect what downstream tools receive or what is
+stored. With 1b to 1d implemented, it is the remaining slice of Phase 1. Since
+1c removed the repeated-I/O argument for sparse matrices, its value is fewer,
+larger merge tasks and consistent defaults; implement it when regional updates
+of large tables, such as those of `hp.tb.add_feature_matrix`, are slow in
+practice, or for consistency before a release.
 
 ### Phase 2: user documentation
 
