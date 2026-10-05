@@ -1757,6 +1757,14 @@ removed.
 
 - Lazy (Dask) inputs keep their own blocks, as today: the merge rechunks the
   update to the output layout anyway.
+- Storage-backed values, for example the existing matrix of a table attached
+  in backed mode or a backed regional input, follow the readers' chunk rules:
+  a CSR/CSC dataset handle is decoded with the readers' decoder and
+  `sparse_chunks`; a dense `zarr.Array` gets its blocks from
+  `_dense_lazy_chunks` and `dense_chunks`, then `da.from_zarr`, which also
+  works for plain Zarr arrays without AnnData encoding, which the decoder
+  rejects. Today `_lazy_matrix` wraps a `zarr.Array` with its stored chunks,
+  ignoring `dense_chunks`.
 - Sizing in-memory inputs and new entries needs a small variant of 1a's
   helpers, which take Zarr arrays (`_dense_lazy_chunks`, `_sparse_block_length`):
   one that takes a shape, dtype and number of non-zero values instead.
@@ -1798,6 +1806,15 @@ documented chunking behavior:
   rounded down to whole stored chunks.
 - `"storage"`: a dense existing matrix keeps its stored chunks, and a new dense
   entry is sized as with `"auto"`.
+- Storage-backed values follow the settings: with an unbacked SpatialData whose
+  attached table was read in backed mode, the existing dense matrix (a
+  `zarr.Array`) is read with `dense_chunks`, and a CSR/CSC dataset handle with
+  `sparse_chunks`.
+- A full update (all observations supplied) with a storage-backed input follows
+  the settings, for backed and unbacked SpatialData alike: a dense `zarr.Array`
+  follows `dense_chunks`, and a sparse dataset handle `sparse_chunks`. The
+  output keeps the input's blocks in a full update, so the input must be read
+  with the setting.
 - Invalid values are rejected with the readers' messages.
 - The existing regional-write tests pass `chunk_size=...`
   (`src/harpy/_tests/test_table/test_io/test_write_components_by_region.py` and
