@@ -326,14 +326,28 @@ def _sparse_block_length(element: zarr.Group, *, compressed_axis: int, sparse_ch
     if sparse_chunks != "auto":
         return sparse_chunks
     # The caller handles an empty compressed axis before sizing blocks.
-    length = int(element.attrs["shape"][compressed_axis])
     data = element["data"]
-    nnz = int(data.shape[0])
-    if nnz == 0:
+    return _auto_sparse_block_length(
+        int(element.attrs["shape"][compressed_axis]),
+        int(data.shape[0]),
+        entry_bytes=data.dtype.itemsize + element["indices"].dtype.itemsize,
+        indptr_itemsize=element["indptr"].dtype.itemsize,
+    )
+
+
+def _auto_sparse_block_length(length: int, nnz: int, *, entry_bytes: int, indptr_itemsize: int) -> int:
+    """Return rows (CSR) or columns (CSC) per block of about ``array.chunk-size`` bytes.
+
+    Shared by lazy reads (``_sparse_block_length``, from stored metadata) and
+    the regional writer (``_block_length``, from an in-memory matrix or a
+    dataset handle's metadata). ``length`` is the length of
+    the compressed axis, ``nnz`` the number of non-zero values and
+    ``entry_bytes`` the itemsize of ``data`` plus that of ``indices``.
+    """
+    if nnz == 0 or length == 0:
         # Only the row pointers remain, so one block is small.
-        return length
-    bytes_per_line = nnz / length * (data.dtype.itemsize + element["indices"].dtype.itemsize)
-    bytes_per_line += element["indptr"].dtype.itemsize
+        return max(length, 1)
+    bytes_per_line = nnz / length * entry_bytes + indptr_itemsize
     return min(max(int(_chunk_size_target() // bytes_per_line), 1), length)
 
 
