@@ -1700,7 +1700,7 @@ is independent of 1d and 1e.
   Harpy readers return have CSR `X` with unchanged values. A CSR table then
   follows the chain of 1c's end-to-end test.
 
-#### Slice 1e: chunk policy for regional writes
+#### Slice 1e: chunk policy for regional writes (implemented)
 
 `write_table_components_by_region` and `add_table_components_by_region` update
 `obsm` matrices for complete regions. `hp.tb.add_feature_matrix` writes through
@@ -1780,7 +1780,18 @@ compatibility: `chunk_size` is removed.
   1e, `_lazy_matrix` accepted them, with their stored chunks.
 - Sizing in-memory inputs and new entries needs a small variant of 1a's
   helpers, which take Zarr arrays (`_dense_lazy_chunks`, `_sparse_block_length`):
-  one that takes a shape, dtype and number of non-zero values instead.
+  one that takes a shape, dtype and number of non-zero values instead
+  (`_block_length`, sharing the sparse formula with the readers through
+  `_auto_sparse_block_length`).
+- New CSR entries: the bytes per row come from the input's rows only, and the
+  limit on rows per block from the whole entry, the table's rows. The entry
+  holds the input's values in the selected rows and nothing in the others,
+  and the selected rows are often consecutive, for example one sample.
+  Averaging over the table would make the blocks over them several times the
+  target: about 3× for one sample of 1 M cells in a 10 M-row table, with 50
+  values per row. Limiting the blocks to the input's rows would instead cut a
+  large entry into tiny blocks for a small region. The docstring of
+  `_block_length` has the worked example.
 - Validation reuses the readers' `_validate_sparse_chunks` and
   `_validate_dense_chunks`, so the same values are accepted and rejected.
 - The merge's layout rules still hold: CSR blocks span all columns, CSC blocks
@@ -1792,6 +1803,10 @@ compatibility: `chunk_size` is removed.
   consistently.
 - `hp.tb.add_feature_matrix` does not expose `chunk_size`, so its users are not
   affected.
+- The settings describe the merge only. After a backed update, the adapter
+  reopens the requested components with `read_table`'s defaults, not with the
+  call's `sparse_chunks` and `dense_chunks`, as 1a decided for every adapter
+  ("Tables reopened after writes use the new defaults, intentionally").
 
 **Removing the guard and updating the docs.** Remove 1a's
 `dense_chunks="storage"` guard from the read of the existing matrix, which now
