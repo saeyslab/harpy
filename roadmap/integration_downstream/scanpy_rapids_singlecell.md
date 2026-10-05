@@ -1096,13 +1096,13 @@ the cleanest stored layout. The slices still start with the read side: it helps
 existing stores immediately, without rewriting any data, and it provides the
 sizing logic that the write side reuses.
 
-| Slice                         | Content                                                                                                                              | Main code                                                           | Depends on                         |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------- | ---------------------------------- |
-| **1a: read side**             | `sparse_chunks` and `dense_chunks` on all read functions; shared sizing helper                                                       | `_storage/_anndata.py`, `table/io/_read.py`, `io/_read_zarr.py`     | nothing                            |
-| **1b: dense writes**          | row-only stored chunks of a fixed size (4 MiB) for dense matrices, with write blocks aligned to them                                 | `_storage/_anndata.py` (`_write_anndata_element`)                   | 1a's sizing helper                 |
-| **1c: sparse writes**         | stored chunks of a fixed length (524,288 entries, at most 4 MiB per array) for CSR/CSC matrices, independent of the first Dask block | `_storage/_anndata.py` (the write callback)                         | 1b's callback and constant         |
-| **1d: CSC → CSR**             | Visium readers keep CSR; existing CSC tables are not converted                                                                       | `io/_visium.py`, `io/_visium_hd.py`                                 | nothing                            |
-| **1e: regional-write chunks** | chunk policy of the regional merge; removes 1a's guard                                                                               | `table/io/_write_by_region.py`, `table/io/_components_by_region.py` | 1a's read policy and sizing helper |
+| Slice                         | Content                                                                                                                              | Main code                                                           | Depends on                 |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------- | -------------------------- |
+| **1a: read side**             | `sparse_chunks` and `dense_chunks` on all read functions; shared sizing helper                                                       | `_storage/_anndata.py`, `table/io/_read.py`, `io/_read_zarr.py`     | nothing                    |
+| **1b: dense writes**          | row-only stored chunks of a fixed size (4 MiB) for dense matrices, with write blocks aligned to them                                 | `_storage/_anndata.py` (`_write_anndata_element`)                   | 1a's sizing helper         |
+| **1c: sparse writes**         | stored chunks of a fixed length (524,288 entries, at most 4 MiB per array) for CSR/CSC matrices, independent of the first Dask block | `_storage/_anndata.py` (the write callback)                         | 1b's callback and constant |
+| **1d: CSC → CSR**             | Visium readers keep CSR; existing CSC tables are not converted                                                                       | `io/_visium.py`, `io/_visium_hd.py`                                 | nothing                    |
+| **1e: regional-write chunks** | the readers' `sparse_chunks` and `dense_chunks` replace `chunk_size` in the regional merge; removes 1a's guard                       | `table/io/_write_by_region.py`, `table/io/_components_by_region.py` | 1a's read policy           |
 
 After 1a, existing stores work with scanpy and rapids-singlecell, except CSC
 tables. After 1b, new dense tables are stored in whole rows, so lazy reads only
@@ -1739,38 +1739,49 @@ Writing the merged result is not affected: since 1b it goes through the write
 callback, so dense output is rechunked into whole stored chunks whatever the
 merge blocks are, and sparse output gets 1c's fixed chunk length.
 
-**Proposed policy.**
+**Decided policy: the readers' parameters.** Replace `chunk_size` in
+`write_table_components_by_region` and `add_table_components_by_region` with the
+readers' `sparse_chunks` and `dense_chunks`: the same names, values and meaning
+as in `read_table`, both defaulting to `"auto"`. The regional writer is a lazy
+read of the existing matrix merged with the update, so it uses the readers'
+vocabulary, and each format gets its own rule, also when one call updates both
+dense and sparse `obsm` entries. One setting applies to the existing matrix,
+the update and new entries alike. No backward compatibility: `chunk_size` is
+removed.
 
-1. **Read the existing matrix the way slice 1a reads:** `sparse_chunks="auto"`
-   and `dense_chunks="auto"`, i.e. aligned with the stored chunks and sized to
-   the memory target. Merge tasks then have a sensible size automatically, and
-   stored chunks are no longer fetched repeatedly. This fits the merge's
-   requirements: CSR blocks already span all columns and CSC blocks all rows,
-   and dense row bands work as they are.
-2. **Turn `chunk_size` into `"auto" | int`, defaulting to `"auto"`,** for the
-   parts without a stored layout:
-   - in-memory inputs and new entries are sized from the supplied matrix, with
-     the same rules as 1a's readers: dense from columns × dtype, sparse from
-     its number of non-zero values when it is known (in memory). 1a's helpers,
-     `_dense_lazy_chunks` and `_sparse_block_length`, take Zarr arrays, so this
-     needs a small variant that takes a shape, dtype and number of non-zero
-     values instead;
-   - lazy sparse inputs, whose number of non-zero values is not known without
-     computing, fall back to Dask's dense-equivalent `"auto"`, which is the
-     cautious choice;
-   - an integer keeps today's meaning, as an explicit override.
-3. **Memory.** A merge task holds the original block, the updates and the
-   result, so about 3× the block size. That is in line with what Dask's 128 MiB
-   target assumes. If it is too much, lowering `array.chunk-size` shrinks
-   everything consistently.
+| Setting                  | Existing matrix                                                                                                                                                                     | Update (in-memory input) and new entries                                                                                                                                                                                              |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `"auto"` (default)       | read as `read_table` reads it: sparse blocks of about `array.chunk-size`, from the average number of non-zero values; dense blocks of whole stored chunks, about `array.chunk-size` | sized from `array.chunk-size` by the same rules: dense from columns × dtype, sparse from the number of non-zero values; a lazy sparse input, whose number of non-zero values is unknown, falls back to Dask's `"auto"` along the rows |
+| an integer               | rows per block for CSR, columns for CSC; for dense, rows rounded down to whole stored chunks, at least one, as `read_table` does                                                    | that many rows (dense and CSR) or columns (CSC) per block                                                                                                                                                                             |
+| `"storage"` (dense only) | keeps the stored chunks, as in `read_table`                                                                                                                                         | there are no stored chunks to keep, so as `"auto"`                                                                                                                                                                                    |
+
+- Lazy (Dask) inputs keep their own blocks, as today: the merge rechunks the
+  update to the output layout anyway.
+- Sizing in-memory inputs and new entries needs a small variant of 1a's
+  helpers, which take Zarr arrays (`_dense_lazy_chunks`, `_sparse_block_length`):
+  one that takes a shape, dtype and number of non-zero values instead.
+- Validation reuses the readers' `_validate_sparse_chunks` and
+  `_validate_dense_chunks`, so the same values are accepted and rejected.
+- The merge's layout rules still hold: CSR blocks span all columns, CSC blocks
+  all rows, and dense blocks are whole rows. The output keeps the existing
+  matrix's blocks, as `_regional_matrix` requires.
+- Memory: a merge task holds the original block, the updates and the result,
+  so about 3× the block size. That is in line with what Dask's 128 MiB target
+  assumes. If it is too much, lowering `array.chunk-size` shrinks everything
+  consistently.
+- `hp.tb.add_feature_matrix` does not expose `chunk_size`, so its users are not
+  affected.
 
 **Removing the guard and updating the docs.** Remove 1a's
 `dense_chunks="storage"` guard from the read of the existing matrix. Update the
 documented chunking behavior:
 
-- the `chunk_size` description in the docstrings of
-  `write_table_components_by_region` and `add_table_components_by_region`,
-  including "existing dense targets retain their chunk layout during merging";
+- the parameter descriptions in the docstrings of
+  `write_table_components_by_region` and `add_table_components_by_region`:
+  replace `chunk_size`, including "existing dense targets retain their chunk
+  layout during merging", with `sparse_chunks` and `dense_chunks`, described as
+  in `read_table`, plus how they apply to the update and new entries and what
+  `"storage"` means for a new entry;
 - the chunking notes in the docstring of `_regional_matrix`;
 - the regional-write section of `docs/development/storage.md`, which describes
   `chunk_size` as rows per computational chunk and states that input preparation
@@ -1778,14 +1789,21 @@ documented chunking behavior:
 
 **Tests.**
 
-- Existing sparse and dense matrices are read with the 1a policy, and the merge
-  output keeps that layout.
-- In-memory inputs and new entries are sized from the memory target; an integer
-  `chunk_size` keeps today's behavior.
-- Lazy sparse inputs fall back to Dask's dense-equivalent `"auto"`.
-- The existing regional-write tests that assert chunk layouts are updated
+- `"auto"`: existing sparse and dense matrices are read as `read_table` reads
+  them, and the merge output keeps that layout; in-memory inputs and new
+  entries are sized from `array.chunk-size`; lazy sparse inputs fall back to
+  Dask's `"auto"`.
+- An integer applies to the existing matrix and the update alike: rows per
+  block for dense and CSR, columns for CSC, and for a dense existing matrix
+  rounded down to whole stored chunks.
+- `"storage"`: a dense existing matrix keeps its stored chunks, and a new dense
+  entry is sized as with `"auto"`.
+- Invalid values are rejected with the readers' messages.
+- The existing regional-write tests pass `chunk_size=...`
   (`src/harpy/_tests/test_table/test_io/test_write_components_by_region.py` and
-  `test_components_by_region.py`).
+  `test_components_by_region.py`). They switch to `sparse_chunks` or
+  `dense_chunks`; expected layouts for dense existing matrices may change,
+  because the integer now applies to them too, rounded to whole stored chunks.
 
 **When.** After 1a, which provides the read policy. Slice 1e does not depend on
 1b, 1c or 1d, and it does not affect what downstream tools receive or what is
