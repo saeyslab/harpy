@@ -559,11 +559,11 @@ cells or bins as rows:
 - the spatialdata-io CosMx and Stereo-seq readers build CSR;
 - Harpy's MERSCOPE reader and `hp.tb.aggregate_points` produce CSR.
 
-The exception is Harpy's own Visium and Visium HD readers. They call
+The exception was Harpy's own Visium and Visium HD readers. They called
 `adata.X = adata.X.tocsc()` (`src/harpy/io/_visium.py` and
-`src/harpy/io/_visium_hd.py`). No comment explains the conversion, and no test
-relies on it. A likely reason is faster access to individual genes, for example
-for plotting, because CSC stores each gene's values contiguously.
+`src/harpy/io/_visium_hd.py`). The conversion served only visualization: CSC
+stores each gene's values contiguously, so reading a single gene, for example
+to plot it, is cheap. Slice 1d removed it.
 
 **Evidence (verified).** A lazy read splits a CSC matrix along its compressed
 axis, the genes, into `sparse_chunk_size` columns (default 1000), and keeps all
@@ -599,25 +599,27 @@ row-chunked CSR, and the pipeline then works (verified). However:
 - a lazy pipeline repeats this for every compute, unless the converted matrix is
   stored or persisted.
 
-**Proposed change.**
+**Decided change.**
 
 1. Store Visium and Visium HD tables as CSR: remove the `.tocsc()` conversion
-   from both readers. First check whether any workflow depends on fast per-gene
-   access; if so, convert only for that access instead of for storage.
-2. Convert existing CSC tables once, rather than on every read. Provide a helper
-   or a documented recipe: read `X` lazily, convert it as above, and replace it
-   through `write_table_components`, passing `{("X",): converted}` with
-   `obs_identity`, `var_names` and `overwrite=True`. The same applies to CSC
-   layers.
-3. Do not convert silently in `read_table`, because of the cost. If reads should
-   support it, add an explicit opt-in argument whose docstring states the cost.
+   from both readers. It served only visualization, so no workflow depends on
+   it.
+2. No backward compatibility: existing CSC tables are not converted, and Harpy
+   provides no conversion helper. Harpy still reads and writes CSC matrices,
+   for stores from other tools, but lazily read CSC tables cannot use scanpy's
+   or rapids-singlecell's lazy paths. Users re-run the reader to get CSR.
+3. Do not convert silently in `read_table`, because of the cost.
+
+**Trade-off.** Showing a single gene across all bins touches every row of a CSR
+matrix, so per-gene views of large Visium HD tables read from disk get slower.
+As for row-only dense chunks, whole-matrix analyses decide the default; a
+column-oriented copy for per-gene access can be added later if a workflow
+needs it.
 
 **Tests.**
 
-- Tables written by the Visium and Visium HD readers have CSR `X`.
-- A converted table passes rapids-singlecell's layout check (`numblocks[1] == 1`
-  and CSR blocks), runs `sc.pp.pca`, and has the same values as before
-  conversion.
+- Tables returned by the Visium and Visium HD readers have CSR `X`, with the
+  values spatialdata-io read.
 
 #### Sparse block size
 
@@ -1045,8 +1047,9 @@ Until gap 1 is fixed:
 
 - for dense tables, call `adata.X = adata.X.rechunk((chunk_rows, -1))` after
   reading and use `svd_solver="covariance_eigh"`;
-- for CSC tables, such as those written by Harpy's Visium readers, convert `X` to
-  row-chunked CSR (see gap 1), preferably once, storing the result;
+- for CSC tables, such as those written by Harpy's Visium readers before
+  slice 1d, re-run the reader, or convert `X` to row-chunked CSR yourself (see
+  "CSC matrices" in gap 1), preferably once, storing the result;
 - on machines without TBB, run dense scaling with
   `dask.config.set(scheduler="synchronous")`.
 
@@ -1093,13 +1096,13 @@ the cleanest stored layout. The slices still start with the read side: it helps
 existing stores immediately, without rewriting any data, and it provides the
 sizing logic that the write side reuses.
 
-| Slice                         | Content                                                                                                                              | Main code                                                           | Depends on                                   |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------- | -------------------------------------------- |
-| **1a: read side**             | `sparse_chunks` and `dense_chunks` on all read functions; shared sizing helper                                                       | `_storage/_anndata.py`, `table/io/_read.py`, `io/_read_zarr.py`     | nothing                                      |
-| **1b: dense writes**          | row-only stored chunks of a fixed size (4 MiB) for dense matrices, with write blocks aligned to them                                 | `_storage/_anndata.py` (`_write_anndata_element`)                   | 1a's sizing helper                           |
-| **1c: sparse writes**         | stored chunks of a fixed length (524,288 entries, at most 4 MiB per array) for CSR/CSC matrices, independent of the first Dask block | `_storage/_anndata.py` (the write callback)                         | 1b's callback and constant                   |
-| **1d: CSC → CSR**             | Visium readers write CSR; one-time conversion of existing CSC tables                                                                 | `io/_visium.py`, `io/_visium_hd.py`, a conversion helper or recipe  | the open CSC question; 1a for the lazy reads |
-| **1e: regional-write chunks** | chunk policy of the regional merge; removes 1a's guard                                                                               | `table/io/_write_by_region.py`, `table/io/_components_by_region.py` | 1a's read policy and sizing helper           |
+| Slice                         | Content                                                                                                                              | Main code                                                           | Depends on                         |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------- | ---------------------------------- |
+| **1a: read side**             | `sparse_chunks` and `dense_chunks` on all read functions; shared sizing helper                                                       | `_storage/_anndata.py`, `table/io/_read.py`, `io/_read_zarr.py`     | nothing                            |
+| **1b: dense writes**          | row-only stored chunks of a fixed size (4 MiB) for dense matrices, with write blocks aligned to them                                 | `_storage/_anndata.py` (`_write_anndata_element`)                   | 1a's sizing helper                 |
+| **1c: sparse writes**         | stored chunks of a fixed length (524,288 entries, at most 4 MiB per array) for CSR/CSC matrices, independent of the first Dask block | `_storage/_anndata.py` (the write callback)                         | 1b's callback and constant         |
+| **1d: CSC → CSR**             | Visium readers keep CSR; existing CSC tables are not converted                                                                       | `io/_visium.py`, `io/_visium_hd.py`                                 | nothing                            |
+| **1e: regional-write chunks** | chunk policy of the regional merge; removes 1a's guard                                                                               | `table/io/_write_by_region.py`, `table/io/_components_by_region.py` | 1a's read policy and sizing helper |
 
 After 1a, existing stores work with scanpy and rapids-singlecell, except CSC
 tables. After 1b, new dense tables are stored in whole rows, so lazy reads only
@@ -1682,18 +1685,20 @@ is independent of 1d and 1e.
 #### Slice 1d: CSC → CSR
 
 - Remove the `.tocsc()` conversion from the Visium and Visium HD readers
-  (`src/harpy/io/_visium.py`, `src/harpy/io/_visium_hd.py`). They save through
-  `sdata.write(output)`, so this in-memory change is all they need.
-- Provide the one-time conversion path for existing CSC tables described under
-  "CSC matrices" in gap 1.
-- Resolve the open question first: why do the readers use CSC, and does any
-  workflow depend on it?
-- Tests: those listed under "CSC matrices" in gap 1, and the CSC counterpart of
-  the end-to-end tests of 1b and 1c. scanpy refuses lazy CSC input ("Only
-  sparse dask arrays with CSR-meta format are supported", see "CSC matrices" in
-  gap 1), so after converting an existing CSC table, the same chain must work:
-  stored as CSR, read lazily in row blocks, and `sc.pp.pca` matching an
-  in-memory PCA up to sign.
+  (`src/harpy/io/_visium.py`, `src/harpy/io/_visium_hd.py`). spatialdata-io
+  reads the counts with scanpy's `read_10x_h5`, which returns CSR, so the
+  readers then keep CSR. They save through `sdata.write(output)`, so this
+  in-memory change is all they need.
+- Decided: the conversion served only visualization, so nothing depends on it.
+  No backward compatibility: existing CSC tables are not converted and Harpy
+  provides no helper; users re-run the reader. Harpy still reads and writes CSC
+  matrices for stores from other tools. Mention this in the release notes. See
+  "CSC matrices" in gap 1, including the trade-off for per-gene views.
+- Tests: the readers had no running unit tests (the Visium HD example test is
+  skipped because it downloads data). Add tests that replace spatialdata-io's
+  reader with a small synthetic SpatialData and check that the tables the
+  Harpy readers return have CSR `X` with unchanged values. A CSR table then
+  follows the chain of 1c's end-to-end test.
 
 #### Slice 1e: chunk policy for regional writes
 
@@ -1840,9 +1845,6 @@ given that AnnData adds its own automatic shards only when none are given.
   legacy table functions on lazy tables: guarded with a clear error that
   recommends `table_mode="eager"`, or only documented? See "Accepted during
   Phases 1–5" in gap 5.
-- **CSC in the Visium readers.** Why do the Visium and Visium HD readers store
-  CSC, and does any workflow depend on it? Should existing CSC tables be
-  converted automatically, for example by a migration step, or only on request?
 - **Version floors.** Only scanpy 1.11.1 was tested. Whether the lazy paths work
   with the declared floor `scanpy>=1.9.1` is untested. scanpy 1.11.2 fixes the
   `scale` → PCA failure on sparse Dask input, which argues for `scanpy>=1.11.2`
