@@ -1112,7 +1112,7 @@ writes is stored row-major, as CSR or dense with row-only chunks. Slice 1e does
 not change what downstream tools receive; it makes regional updates, such as
 those of `hp.tb.add_feature_matrix`, use the same chunk policy.
 
-#### Slice 1a: read side
+#### Slice 1a: read side (implemented)
 
 - Replace `sparse_chunk_size` with `sparse_chunks="auto" | int`, and add
   `dense_chunks="auto" | int | "storage"`, on all three public read functions:
@@ -1682,7 +1682,7 @@ nothing about the matrix, not even its dtype.
 **When.** Directly after 1b. It reuses 1b's callback, constant and path rule, and
 is independent of 1d and 1e.
 
-#### Slice 1d: CSC → CSR
+#### Slice 1d: CSC → CSR (implemented)
 
 - Remove the `.tocsc()` conversion from the Visium and Visium HD readers
   (`src/harpy/io/_visium.py`, `src/harpy/io/_visium_hd.py`). spatialdata-io
