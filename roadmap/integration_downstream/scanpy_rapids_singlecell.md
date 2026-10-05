@@ -1862,6 +1862,15 @@ practice, or for consistency before a release.
 
 ### Phase 2: user documentation
 
+**Deferred until Phases 3–7 are implemented.** Most of the guide depends on
+them: which writer to use (Phase 4's write-back helper), the reopen rule
+(Phase 5), the checkpoint pattern (Phase 3) and Harpy's own wrappers (Phase
+6). Written now, it would need rewriting. The contracts are already documented
+in `docs/development/storage.md` and the docstrings. If a release is cut before
+Phase 6, add at least a short note or a guard for the legacy table functions
+on lazy tables (see "Legacy table functions at release" in the open
+questions).
+
 Add a user guide page, "Using Harpy tables with scanpy and rapids-singlecell",
 containing:
 
