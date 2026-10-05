@@ -1745,9 +1745,10 @@ readers' `sparse_chunks` and `dense_chunks`: the same names, values and meaning
 as in `read_table`, both defaulting to `"auto"`. The regional writer is a lazy
 read of the existing matrix merged with the update, so it uses the readers'
 vocabulary, and each format gets its own rule, also when one call updates both
-dense and sparse `obsm` entries. One setting applies to the existing matrix,
-the update and new entries alike. No backward compatibility: `chunk_size` is
-removed.
+dense and sparse `obsm` entries. One setting applies to every value Harpy
+chunks itself, the existing matrix, the update and new entries alike; Dask
+values keep their blocks (see the first note below the table). No backward
+compatibility: `chunk_size` is removed.
 
 | Setting                  | Existing matrix                                                                                                                                                                     | Update (in-memory input) and new entries                                                                                                                                                                                              |
 | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1755,16 +1756,28 @@ removed.
 | an integer               | rows per block for CSR, columns for CSC; for dense, rows rounded down to whole stored chunks, at least one, as `read_table` does                                                    | that many rows (dense and CSR) or columns (CSC) per block                                                                                                                                                                             |
 | `"storage"` (dense only) | keeps the stored chunks, as in `read_table`                                                                                                                                         | there are no stored chunks to keep, so as `"auto"`                                                                                                                                                                                    |
 
-- Lazy (Dask) inputs keep their own blocks, as today: the merge rechunks the
-  update to the output layout anyway.
+- Which values the settings apply to: the values Harpy has to chunk itself,
+  that is stored values (the existing matrix read from the store, and
+  storage-backed inputs) and in-memory values (inputs, and in the unbacked path
+  an in-memory existing matrix from the attached table). Dask values keep their
+  blocks, which whoever built them chose, for example `read_table` with its own
+  settings: a lazy input, as today, since the merge rechunks the update to the
+  output layout anyway, and in the unbacked path a lazily read existing matrix,
+  whose blocks become the output layout. For an in-memory existing matrix, an
+  integer means that many rows or columns, with no stored chunks to round to.
+  `"storage"` only means something for stored matrices; for any other value it
+  behaves like `"auto"`.
 - Storage-backed values, for example the existing matrix of a table attached
-  in backed mode or a backed regional input, follow the readers' chunk rules:
-  a CSR/CSC dataset handle is decoded with the readers' decoder and
-  `sparse_chunks`; a dense `zarr.Array` gets its blocks from
-  `_dense_lazy_chunks` and `dense_chunks`, then `da.from_zarr`, which also
-  works for plain Zarr arrays without AnnData encoding, which the decoder
-  rejects. Today `_lazy_matrix` wraps a `zarr.Array` with its stored chunks,
-  ignoring `dense_chunks`.
+  in backed mode or a backed regional input, go through the readers' decoder
+  with the settings: an AnnData-encoded `zarr.Array` itself, or the group of a
+  CSR/CSC dataset handle. The backed path opens the stored matrix in backed
+  mode rather than reading it lazily, so `_lazy_matrix` is the one place where
+  any value becomes a Dask array.
+- Trade-off: the decoder requires AnnData encoding, so a plain `zarr.Array` is
+  rejected, with a message to wrap it in `da.from_zarr`; as a Dask input it
+  then keeps the caller's blocks. Accepting plain arrays would need a second
+  copy of the readers' dense chunk rules. No backward compatibility: before
+  1e, `_lazy_matrix` accepted them, with their stored chunks.
 - Sizing in-memory inputs and new entries needs a small variant of 1a's
   helpers, which take Zarr arrays (`_dense_lazy_chunks`, `_sparse_block_length`):
   one that takes a shape, dtype and number of non-zero values instead.
@@ -1781,8 +1794,8 @@ removed.
   affected.
 
 **Removing the guard and updating the docs.** Remove 1a's
-`dense_chunks="storage"` guard from the read of the existing matrix. Update the
-documented chunking behavior:
+`dense_chunks="storage"` guard from the read of the existing matrix, which now
+opens it in backed mode (see above). Update the documented chunking behavior:
 
 - the parameter descriptions in the docstrings of
   `write_table_components_by_region` and `add_table_components_by_region`:
@@ -1816,6 +1829,8 @@ documented chunking behavior:
   output keeps the input's blocks in a full update, so the input must be read
   with the setting.
 - Invalid values are rejected with the readers' messages.
+- A plain `zarr.Array` input is rejected with the hint to wrap it in
+  `da.from_zarr`, before anything is written, and works once wrapped.
 - The existing regional-write tests pass `chunk_size=...`
   (`src/harpy/_tests/test_table/test_io/test_write_components_by_region.py` and
   `test_components_by_region.py`). They switch to `sparse_chunks` or
