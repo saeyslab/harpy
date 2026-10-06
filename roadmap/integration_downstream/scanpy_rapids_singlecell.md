@@ -2346,7 +2346,15 @@ key, by contrast, is a missing component and stays in storage.
   require `overwrite=True` for every component, since all of them come from
   the attached table. One small addition: a parameter such as
   `reopen_also=(("X",),)`, so that `X` is reopened and reinstalled after `x_to`
-  inside the same rollback window, although `X` itself was not written;
+  inside the same rollback window, although `X` itself was not written. The
+  paths in `reopen_also` count as touched slots: they extend the rollback
+  snapshot as well as the installation, for example
+  `slots = {path[0] for path in (*paths, *deletions, *reopen_also)}`. Today the
+  snapshot covers only the written and deleted paths
+  (`src/harpy/table/io/_components.py`). Without this, a failure after the
+  installation, for example in metadata consolidation, would restore the store
+  and the written slots, but leave the live `X` as the reopened counts: the
+  processed values would then be gone from both the store and the live table;
 - unbacked SpatialData, without `sdata.path`: it raises. There is no store to
   compare with, and the attached table already holds the changes; silently
   doing nothing could suggest that the results were saved. The error names the
@@ -2499,7 +2507,12 @@ adapter:
   ways out. For a table read lazily from a store and attached to unbacked
   SpatialData, `write_table_updates` with that store writes only its changes.
 - A failure in the adapter restores the live table, as for
-  `add_table_components`.
+  `add_table_components`. Also after an `x_to` write: with a failure injected
+  after the installation, as in
+  `test_failure_restores_exact_live_references_and_storage`
+  (`src/harpy/_tests/test_table/test_io/test_components_by_region.py`),
+  `table.X` is the original processed `X` object, `table.layers` the original
+  object without the destination key, and the store is unchanged.
 
 **Docs.**
 
