@@ -2005,15 +2005,58 @@ SpatialData (see "The SpatialData adapter" below).
   a fresh read is not enough: the name depends on the chunk settings (checked:
   a default read and one with `sparse_chunks=1000` give different names for
   the same stored `X`, and so do a default read and one with
-  `dense_chunks="storage"` for a dense `obsm` entry). Proposed implementation:
-  Harpy's lazy reader records the arrays it creates, Dask name → store, table
-  and component path, for example in a process-wide registry; an array is
-  unchanged when its name maps to the same stored element. Any operation,
-  including a rechunk, gives a new name and so counts as changed. That is
-  conservative: a rechunked but otherwise unmodified matrix is rewritten, and
-  a rechunked `X` goes to `x_to` as a copy.
+  `dense_chunks="storage"` for a dense `obsm` entry).
 - A backed handle that points to the same stored element is unchanged: a
   `zarr.Array`, or a CSR/CSC dataset whose group, at the same store and path.
+
+**How a pure read is recognised: a registry of Dask names.** Every Dask
+operation, a rechunk, slicing or arithmetic alike, returns a new array with a
+new name, a deterministic token of the operation and its inputs. An array that
+is still nothing but a read keeps the name the reader gave it. So Harpy's lazy
+reader records the arrays it creates, and "a graph on top of the read" becomes
+"a name that is not registered for this element":
+
+```
+lazy reader creates array      ──> registry[array.name] = (store, element path)
+scanpy: X → normalize → log1p  ──> new array, new name, not in the registry  ──> changed
+untouched layer                ──> same name, registered for that element   ──> unchanged
+```
+
+- **No graph inspection.** The structure of a read's graph is an AnnData and
+  Dask internal: a sparse read is one layer, `make_dask_chunk-…`, a dense read
+  two, `original-from-zarr-…` and `from-zarr-…`. Matching on those would tie
+  Harpy to internals that can change. The registry relies only on Dask's
+  contract that an operation gives a new name.
+- **Where it is filled:** in the lazy branch of `_decode_anndata_element`
+  (`src/harpy/_storage/_anndata.py`), which every lazy read goes through:
+  `read_table`, `read_table_components`, `hp.io.read_zarr` and the reopen after
+  the adapters' writes, including the zero-sized sparse case built with
+  `from_delayed`.
+- **Key and value:** the key is the Dask array's name. The value identifies the
+  stored element: the resolved store root and the element's path in the store.
+  The logical component path alone is not enough, because tables live under
+  `tables/<name>`.
+- **Names identify the store too** (checked): two stores with the same layout
+  give different names, `make_dask_chunk-51e8…` and `make_dask_chunk-ce47…`
+  for `X`, and `from-zarr-f13b…` and `from-zarr-6ab1…` for a dense `obsm`
+  entry. Two reads with the same settings give the same name, and different
+  chunk settings different names, so each read registers its own name.
+- **Lifetime:** a process-wide dict. Its entries are small, and repeated reads
+  reuse the same keys, so its size is bounded by the number of distinct
+  element and chunk-setting combinations read in the process.
+- **Copies and pickling keep the name** (checked): `da.Array.copy()`,
+  `adata.copy()`, for sparse `X` and a dense `obsm` entry, and pickling, as
+  when an array is sent to `distributed` workers. A copied pure read is still
+  recognised.
+- **Arrays read lazily outside Harpy are not registered,** for example with
+  AnnData's own lazy reader or `da.from_zarr`, and so count as changed. That is
+  conservative.
+- **A stored element overwritten after the read:** the old array still maps to
+  the same element and counts as unchanged. That is correct: there is nothing
+  to write, and it would read the current stored data anyway.
+- **Conservative for operations without effect:** a rechunked but otherwise
+  unmodified matrix counts as changed and is rewritten, and a rechunked `X`
+  goes to `x_to` as a copy.
 
 **Comparing in-memory matrices with storage.**
 
@@ -2145,6 +2188,10 @@ unchanged, `obs` is simply rewritten each time.
 - An unchanged table writes nothing.
 - A table read with non-default `sparse_chunks` or `dense_chunks` is
   recognised as unchanged; a rechunked matrix counts as changed.
+- The registry: an unchanged read is recognised; reads from two stores with
+  the same layout are not mixed up; a copied read (`da.Array.copy()`,
+  `adata.copy()`) is recognised; an array from `da.from_zarr` on the stored
+  element counts as changed.
 - Backed handles to the stored elements are unchanged.
 - Components missing from `adata` are not deleted.
 - A failure during the write rolls back, as for `write_table_components`.
