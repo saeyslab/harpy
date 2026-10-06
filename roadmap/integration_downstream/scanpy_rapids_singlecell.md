@@ -2011,9 +2011,11 @@ flowchart TD
     xto -- no --> xnew{"X new, storage<br/>has no X?"}
     xnew -- yes --> dest
     xnew -- no --> x_error[/"Raise, explaining x_to"/]
-    xto -- yes --> collide{"x_to a layer that adata<br/>also holds, new or changed?"}
-    collide -- yes --> collide_error[/"Raise: two values<br/>for one path"/]
-    collide -- no --> xdest["Destination: x_to"]
+    xto -- yes --> is_layer{"x_to is a layer, and<br/>adata.layers holds that key?"}
+    is_layer -- no --> xdest["Destination: x_to"]
+    is_layer -- yes --> layer_written{"Is that layer itself<br/>new or changed?"}
+    layer_written -- no --> xdest
+    layer_written -- yes --> collide_error[/"Raise: two values<br/>for one path"/]
     dest --> exists{"Destination exists<br/>in storage?"}
     xdest --> exists
     exists -- no --> write["Write"]
