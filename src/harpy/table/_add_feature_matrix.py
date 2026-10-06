@@ -4,6 +4,7 @@ import uuid
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -130,11 +131,15 @@ def add_feature_matrix(
         by index, by name, or as a list of indices or names. If `None`, all
         channels of the image element are used.
     overwrite_output_table
-        Allow replacing an existing output table in backed SpatialData or its
-        store when creating a new table. Ignored for unbacked SpatialData.
+        Allow replacing an output table that exists in the store of backed
+        SpatialData, when creating a new table. It only concerns the store: a
+        table attached but never saved is replaced without it. Ignored for
+        unbacked SpatialData.
     overwrite_feature_key
-        Allow updates to a feature matrix or its metadata already present in
-        backed SpatialData or its store. Ignored for unbacked SpatialData.
+        Allow updates to a feature matrix or its metadata that exist in the
+        store of backed SpatialData. It only concerns the store: an entry
+        present only in memory, never saved, is replaced without it. Ignored
+        for unbacked SpatialData.
         In both modes, feature columns must retain their names and order;
         measurements and source descriptions for unselected regions are preserved.
     to_coordinate_system
@@ -251,7 +256,13 @@ def add_feature_matrix(
                 "Parameter 'overwrite_feature_key' can only be used when updating an existing table, "
                 "which requires setting 'table_name' to a table name."
             )
-        if sdata.path is not None and output_table_name in sdata.tables and not overwrite_output_table:
+        # overwrite_output_table only concerns the store: a table attached but
+        # never saved is replaced without it, as for unbacked SpatialData.
+        if (
+            sdata.path is not None
+            and not overwrite_output_table
+            and (Path(sdata.path) / "tables" / output_table_name).exists()
+        ):
             raise ValueError(
                 f"Table element '{output_table_name}' already exists in 'sdata.tables'. "
                 "Set 'overwrite_output_table=True' to replace it."
@@ -299,15 +310,13 @@ def add_feature_matrix(
                     f"Labels element {labels_element!r} has no observations in table {target_table_name!r}."
                 )
 
+    # overwrite_feature_key only concerns the store. When backed, existing_matrix
+    # and existing_metadata come from the store; an entry present only in memory
+    # is replaced without permission, as for unbacked SpatialData.
     if (
         sdata.path is not None
         and not overwrite_feature_key
-        and (
-            feature_key in adata.obsm
-            or feature_key in adata.uns.get(feature_matrices_key, {})
-            or existing_matrix is not None
-            or existing_metadata is not None
-        )
+        and (existing_matrix is not None or existing_metadata is not None)
     ):
         raise ValueError(
             f"Feature matrix '{feature_key}' already exists in 'sdata.tables[{target_table_name!r}].obsm'. "
