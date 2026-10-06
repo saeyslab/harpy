@@ -1938,7 +1938,9 @@ Link it from the table I/O section of `docs/api.md`.
 compares a table, typically read lazily and then processed by scanpy, with the
 stored table, and writes only what is new or changed. Today the caller lists
 every output and its identities (gap 3): the recommended scanpy pattern passes
-12 components to `write_table_components`.
+12 components to `write_table_components`. A SpatialData adapter,
+`hp.tb.add_table_updates`, does the same for a table attached to backed
+SpatialData (see "The SpatialData adapter" below).
 
 **The contract.**
 
@@ -1973,8 +1975,21 @@ every output and its identities (gap 3): the recommended scanpy pattern passes
 1. Read the stored state cheaply: `obs`, `var` and `uns`, which are small and
    read eagerly, and which components exist in each slot. No matrix values.
 2. Check the axes. If the observation identities or `var_names` differ from
-   storage, for example after filtering cells or genes, raise and point to
-   `write_table`, rather than silently rewriting the whole table.
+   storage, for example after filtering cells or genes, raise rather than
+   silently rewriting the whole table. The same holds for `raw`'s own gene
+   axis, `raw.var_names`, when `raw` exists in both (see "`raw`" below). The
+   error names the three ways out:
+   - `write_table(..., overwrite=True)` to replace the stored table with the
+     subset;
+   - `write_table` under a new `table_name`, to keep the original table;
+   - `write_table_components_by_region` or `add_table_components_by_region`,
+     for an update of `obsm` matrices that covers whole regions, with
+     `fill_values` for the other observations.
+
+   Subsetting changes which cells and genes the table describes, so its
+   graphs, statistics and SpatialData linkage no longer match. That is a
+   whole-table operation, which the helper does not decide on.
+
 3. Classify every component by the contract. `obs` and `var` are written as
    whole dataframes, since the component writer works per dataframe; `uns`
    entries at their own path, such as `("uns", "pca")`.
@@ -2011,8 +2026,24 @@ every output and its identities (gap 3): the recommended scanpy pattern passes
   plus about one block. The cost is one read of each stored element that has
   an in-memory value in `adata`: for an eager table, about one read of its
   stored matrices, cheaper than rewriting them.
-- `raw.X` follows the matrix rule, and `raw.var` the dataframe rule. `x_to`
-  does not apply to `raw`.
+
+**`raw`.** `raw` is a snapshot with its own gene axis, `raw.var`, typically
+taken before genes were removed (`adata.raw = adata`); `layers` share `X`'s
+cells and genes. Hence:
+
+- `x_to` targets a layer: a processed `X` has `X`'s axes. `x_to` does not
+  apply to `raw`.
+- `raw` in `adata` but not in storage: new, and written whole (`raw.X`,
+  `raw.var`, `raw.varm`), which `write_table_components` already supports,
+  with `raw`'s own identities.
+- `raw` in both, with the same `raw.var_names`: `raw.X` and each `raw.varm`
+  entry follow the matrix rule, `raw.var` the dataframe rule.
+- `raw.var_names` that differ from storage: `raw`'s axis changed; raise and
+  point to `write_table`, as for the main axes. The component writer keeps the
+  required axes, including `raw.var`, fixed.
+- `raw` in storage but not in `adata`: not deleted.
+- Subsetting genes of the main table changes `var_names`, so the helper
+  raises (step 2), while `raw` would still hold every gene.
 
 **`overwrite`: about existence, not values.** Whether a component changed and
 whether its write replaces something are two separate checks. The comparison
@@ -2033,22 +2064,69 @@ definition, and the `x_to` destination, and it is the rule of
   computing it just for that. Re-running the same pipeline therefore needs
   `overwrite=True`, because the layer then exists.
 - After the write, the store holds the counts in `X` and the processed values
-  in the layer, while `adata.X` in memory still holds the processed values.
-  Returning the reopened table (see below, and Phase 5) would make that
-  difference visible.
+  in the layer. What the table in memory holds then differs between the
+  store-path function and the adapter: see "Return values" below.
 
-**Still to settle in this spec.**
+**Comparing `obs` and `var`: strict equality.** The stored dataframe is read
+eagerly and compared exactly, for example with
+`pd.testing.assert_frame_equal(..., check_exact=True)`: the same index, the
+same columns in the same order, the same dtypes, including categorical
+categories and their order, and the same values, with NaN equal to NaN.
+Anything else counts as changed, and the whole dataframe is written. Strict is
+the safe side: a false "changed" only rewrites a small dataframe, while a false
+"unchanged" would lose data. If a dtype does not survive a write and read
+unchanged, `obs` is simply rewritten each time.
 
-- What counts as a change in `obs` and `var`: dtype changes such as categories,
-  column order, NaN equality.
-- How `uns` is compared: nested mappings, arrays, `None`, and values without a
-  meaningful equality, which count as changed. Protected SpatialData metadata
-  must not change, as the writers already enforce.
-- Scope: a store-path function only, or also a SpatialData adapter, as
-  `add_table_components` and `add_table_components_by_region` have.
-- The return value, tied to Phase 5: returning the reopened lazy table
-  (`adata = hp.tb.write_table_updates(...)`) would make the reopen rule
-  natural, and is one of Phase 5's two options.
+**Comparing `uns`.**
+
+- Per top-level key: a new or changed `uns["pca"]` is written whole, at
+  `("uns", "pca")`, not at its nested paths. Simpler, and the entries are
+  small.
+- The comparison reuses `_same_metadata` (`src/harpy/table/io/_write_validation.py`),
+  which recurses into mappings and compares leaves with `np.array_equal`,
+  extended so that NaN equals NaN, a dataframe in `uns` follows the dataframe
+  rule, and a value whose comparison raises or is ambiguous counts as changed.
+- `uns["spatialdata_attrs"]` is protected: unchanged, it is skipped; changed,
+  the helper raises and points to `write_table`, as
+  `_validate_spatialdata_attrs_unchanged` does for component writes.
+- Keys missing from `adata` are not deleted, as for every other component.
+
+**The SpatialData adapter.** Following the existing pairs
+(`write_table_components` and `add_table_components`,
+`write_table_components_by_region` and `add_table_components_by_region`):
+
+- signature:
+  `hp.tb.add_table_updates(sdata, table_name=..., x_to=None, overwrite=False) -> SpatialData`;
+- it compares the attached table with the store, so there is no separate
+  `adata` argument. The typical flow: read with
+  `hp.io.read_zarr(..., table_mode="lazy")`, run scanpy on
+  `sdata.tables["counts"]` in place, then call `add_table_updates`;
+- backed SpatialData: it writes with the same staging and rollback, then
+  installs the reopened changed components, lazily, as `add_table_components`
+  does. When `x_to` moved `X`, it also reinstalls `X` from storage, so that the
+  live table matches the store; otherwise the next call would see `X` as
+  changed again and copy it once more;
+- unbacked SpatialData: it raises. There is no store to compare with, and the
+  attached table already holds the changes; silently doing nothing could
+  suggest that the results were saved. The message points to writing the
+  SpatialData, or to `write_table`.
+
+**Return values.**
+
+- `write_table_updates` returns `None`, like `write_table_components` and the
+  other store-path writers, whose docstrings tell the caller to reopen. It
+  never changes the `adata` it is given: nothing is installed or replaced, not
+  even the `x_to` destination. After `x_to=("layers", "log1p")` the store holds
+  the counts in `X` and the processed values in the layer, while `adata.X`
+  still holds the processed values and `adata.layers` has no `"log1p"`. Reopen
+  the table to get one that matches the store. Calling the helper again with
+  the same `adata` without reopening finds `X` changed again and writes it to
+  the layer once more, which needs `overwrite=True`. Returning the reopened
+  table is Phase 5's decision, for every store-path writer at once, not for
+  this one first.
+- `add_table_updates` returns the `sdata` it was given, as the other adapters
+  do, with the reopened components installed. On the SpatialData path that
+  already avoids stale tables.
 
 **Tests, at least.**
 
@@ -2062,13 +2140,28 @@ definition, and the `x_to` destination, and it is the rule of
 - An in-memory matrix equal to storage is not rewritten; one that differs, in
   values, dtype or format, is.
 - A destination key that `adata.layers` also holds raises.
-- A filtered table raises and points to `write_table`.
+- A table filtered by cells, and one filtered by genes, raise, and the error
+  names the three ways out; nothing is written.
 - An unchanged table writes nothing.
 - A table read with non-default `sparse_chunks` or `dense_chunks` is
   recognised as unchanged; a rechunked matrix counts as changed.
 - Backed handles to the stored elements are unchanged.
 - Components missing from `adata` are not deleted.
 - A failure during the write rolls back, as for `write_table_components`.
+- After `write_table_updates`, every slot of `adata` holds the same objects as
+  before, also after `x_to`.
+- `obs` and `var`: a new column, a changed dtype or category order, and a
+  changed value each count as changed; an identical dataframe is not written.
+- `uns`: a changed nested value rewrites its top-level key only; NaN equals
+  NaN; a changed `uns["spatialdata_attrs"]` raises.
+- `raw`: a `raw` created by `adata.raw = adata` is written whole; a changed
+  `raw.var_names` raises; an unchanged `raw` is not written.
+- The adapter, on backed SpatialData: the same components are written as by
+  the store-path function, the reopened components are installed lazily, and
+  after `x_to` the live `X` is the stored one, so a second call writes nothing.
+- The adapter on unbacked SpatialData raises with the explanation.
+- A failure in the adapter restores the live table, as for
+  `add_table_components`.
 
 **Relation to Phase 4.** The helper decides which components to write, and
 passes them to `write_table_components` in one call. It does not change how
