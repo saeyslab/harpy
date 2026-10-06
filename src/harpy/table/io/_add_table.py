@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from pathlib import Path
 
 import numpy as np
 from anndata import AnnData
@@ -56,8 +57,10 @@ def add_table(
         Name of the ``adata.obs`` column containing each observation's region.
         Ignored if ``region`` is ``None``.
     overwrite
-        Allow replacement of an existing table in backed ``sdata`` or its store.
-        Ignored for unbacked ``sdata``, where existing tables are always replaced.
+        Allow replacement of a table that exists in the store of backed
+        ``sdata``. It only concerns the store: a table attached to backed
+        ``sdata`` but never saved is replaced without it. Ignored for unbacked
+        ``sdata``, where existing tables are always replaced.
 
     Returns
     -------
@@ -194,7 +197,9 @@ def _add_table(
 
     store = sdata.path
     previous_table = sdata.tables.get(output_table_name)
-    if store is not None and previous_table is not None and not overwrite:
+    # overwrite only concerns the store: a table attached but never saved is
+    # replaced without it, as for unbacked sdata.
+    if store is not None and not overwrite and (Path(store) / "tables" / output_table_name).exists():
         raise ValueError(
             f"Attempting to overwrite 'sdata.tables[\"{output_table_name}\"]', but overwrite is set to False. "
             "Set overwrite to True to overwrite the .zarr store."
