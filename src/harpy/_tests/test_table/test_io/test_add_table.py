@@ -337,6 +337,20 @@ def test_backed_add_table_rejects_overwrite_even_if_table_not_loaded(make_table_
     assert _store_bytes(path) == before
 
 
+def test_backed_add_table_replaces_a_table_attached_but_never_saved(make_table_io_store):
+    """overwrite concerns the store: a table present only in memory is replaced without it."""
+    path = make_table_io_store()
+    sdata = SpatialData()
+    sdata.path = path
+    unsaved = read_table(path, table_name="counts", mode="eager")
+    sdata.tables["unsaved"] = unsaved
+    source = read_table(path, table_name="counts", mode="eager")
+    add_table(sdata, source, "unsaved", region=None)
+    assert sdata.tables["unsaved"] is not unsaved
+    stored = read_table(path, table_name="unsaved", mode="eager")
+    assert stored.shape == source.shape
+
+
 @pytest.mark.parametrize("matrix_kind", ["dense", "csr", "csc"])
 def test_add_table_lazy_self_overwrite_uses_old_values_and_attaches_new_result(make_table_io_store, matrix_kind):
     """Safely overwrite the table that supplies a lazy computation.
