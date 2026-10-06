@@ -1945,12 +1945,27 @@ SpatialData (see "The SpatialData adapter" below).
 **Slices.** Phase 3 is implemented in four slices, each with its own tests, as
 Phase 1 was:
 
-| Slice            | Content                                                                                                                                        | Depends on |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
-| 3a (implemented) | `overwrite` means "in the store" for every backed adapter, `add_feature_matrix` included, with docstrings and tests (see "Prerequisite" below) | nothing    |
-| 3b (implemented) | the registry of Dask names in the lazy decoder (see "How a read is recognised" below)                                                          | nothing    |
-| 3c               | the comparison rules (`obs`/`var`, `uns`, matrices with the two cost rules) and `write_table_updates`, with `x_to` and the axis errors         | 3b         |
-| 3d               | `add_table_updates` on `_update_table_components`, with `reopen_also`                                                                          | 3a, 3c     |
+| Slice            | Content                                                                                                                                                                                                 | Depends on |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| 3a (implemented) | `overwrite` means "in the store" for every backed adapter, `add_feature_matrix` included, with docstrings and tests (see "Prerequisite" below)                                                          | nothing    |
+| 3b (implemented) | the registry of Dask names in the lazy decoder (see "How a read is recognised" below)                                                                                                                   | nothing    |
+| 3c               | in two steps: (i) the comparison helpers (`obs`/`var`, `uns`, matrices with the two cost rules, the identity checks for reads and handles); (ii) `write_table_updates`, with `x_to` and the axis errors | 3b         |
+| 3d               | `add_table_updates` on `_update_table_components`, with `reopen_also`                                                                                                                                   | 3a, 3c     |
+
+Slice 3c is one slice in two reviewable steps:
+
+1. **3c (i), the comparison helpers:** functions that decide whether one value
+   in `adata` changed against its stored element, each with its own unit
+   tests: the strict dataframe rule for `obs`, `var` and DataFrame-valued
+   `obsm`/`varm` entries; the separate `uns` comparator, per top-level key;
+   matrices, with the metadata check first and the block-by-block value
+   comparison second; the identity checks for registered reads (through
+   `_lazy_read_source`) and for backed handles.
+2. **3c (ii), `write_table_updates`:** it uses the helpers. It adds the axis
+   check with the three ways out, `x_to` with its allowed values and collision
+   rule, the routing of new and changed components into one
+   `write_table_components` call, and the early return when nothing changed,
+   with the end-to-end tests, including the scanpy pipeline.
 
 **The contract.**
 
@@ -2214,7 +2229,14 @@ table. Two rules keep it cheap:
    in-memory array, stopping at the first block that differs. Memory stays at
    the in-memory array plus about one block. NaN equals NaN; sparse blocks are
    compared by value. The blocks follow the readers' `"auto"` layout, so each
-   step reads about `array.chunk-size`.
+   step reads about `array.chunk-size`. In practice: read the stored element
+   with the readers (`_read_anndata_element(..., mode="lazy")`), then compute
+   `stored.blocks[i]` one at a time against the matching slice of the
+   in-memory value. That reuses the readers' layout and decoding, rather than
+   slicing Zarr arrays and sparse datasets by hand. Sparse blocks are compared
+   in canonical form (sorted indices, summed duplicates), with NaN equal to
+   NaN; a block whose structure differs only by explicit zeros counts as
+   changed, conservatively, as in rule 1.
 
 The cost per in-memory matrix at an existing path is then:
 
@@ -2227,6 +2249,11 @@ The cost per in-memory matrix at an existing path is then:
 The check costs at most about a write, which is the more expensive part, with
 its compression, except for the rare matrix that differs only in its last
 block. For an eager table that is about one read of its stored matrices.
+
+Values the comparison does not handle, such as awkward arrays or other objects
+in a matrix slot, count as changed: `write_table_components` then accepts or
+rejects them with its own validation, rather than the helper adding a second
+set of type checks.
 
 Deferred, if a measurement shows the need: content hashes. Harpy's writer
 could store a hash of each matrix as an attribute when writing; the check would
@@ -2305,7 +2332,8 @@ categories and their order, and the same values, with NaN equal to NaN.
 Anything else counts as changed, and the whole dataframe is written. Strict is
 the safe side: a false "changed" only rewrites a small dataframe, while a false
 "unchanged" would lose data. If a dtype does not survive a write and read
-unchanged, `obs` is simply rewritten each time.
+unchanged, `obs` is simply rewritten each time. DataFrame-valued `obsm` or
+`varm` entries, which AnnData allows, follow the same strict rule.
 
 **Written whole: removed columns and nested keys disappear.** `obs` and `var`
 are written as whole dataframes, and `uns` per top-level key. So a column
