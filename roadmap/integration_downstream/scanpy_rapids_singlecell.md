@@ -905,10 +905,10 @@ hp.tb.write_table_updates(store, table_name="counts", adata=adata, overwrite=Tru
 
 Design notes:
 
-- Lazy matrices that are still nothing but a read of their stored element can
-  be recognised as unchanged. Their Dask name alone is not enough to compare
-  with a fresh read: it depends on the chunk settings of the read (see Phase 3).
-  Other matrices are treated as new or changed.
+- Lazy matrices that are recognised as a read of their stored element, not
+  changed by the user since, count as unchanged. Their Dask name alone is not
+  enough to compare with a fresh read: it depends on the chunk settings of the
+  read (see Phase 3). Other matrices are treated as new or changed.
 - `obs` and `var` are small enough to compare directly with the stored
   dataframes. `uns` entries can be compared by key and value.
 - If `obs_names` or `var_names` differ from storage, raise and point to
@@ -1946,13 +1946,14 @@ SpatialData (see "The SpatialData adapter" below).
 
 1. **Is a component changed?** One rule for every component, `X` included:
 
-   | Value in `adata`                                                    | Changed?                                                                |
-   | ------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-   | its path is not in storage                                          | new, so written                                                         |
-   | still nothing but a read, or a backed handle, of its stored element | no, decided by identity, without reading values                         |
-   | in memory: NumPy, SciPy, dataframes, `uns` values                   | compared by value with the stored element; changed only if different    |
-   | any other Dask array, derived from something                        | yes; it is not computed just to compare it                              |
-   | missing from `adata`                                                | not deleted: deletion stays explicit, through `delete_table_components` |
+   | Value in `adata`                                                          | Changed?                                                                |
+   | ------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+   | its path is not in storage                                                | new, so written                                                         |
+   | a read of its stored element, not changed since, or a backed handle to it | no, decided by identity, without reading values                         |
+   | in memory: NumPy, SciPy, dataframes, `uns` values                         | compared by value with the stored element; changed only if different    |
+   | any other Dask array, derived from something                              | yes; it is not computed just to compare it                              |
+   | a backed handle to another element, in another table or store             | yes, and copied; its values are not compared                            |
+   | missing from `adata`                                                      | not deleted: deletion stays explicit, through `delete_table_components` |
 
    `obs`, `var` and `uns` are always in memory, so they are compared by value;
    in-memory matrices follow the same rule. Matrices that scanpy creates in
@@ -1969,6 +1970,54 @@ SpatialData (see "The SpatialData adapter" below).
 
    For the scanpy pipeline the call becomes
    `hp.tb.write_table_updates(store, table_name=..., adata=adata, x_to=("layers", "log1p"))`.
+
+**Overview: the decision for each component.** The sections below detail each
+step. Components in storage but missing from `adata` are never deleted, so the
+diagram has no branch for them.
+
+```mermaid
+flowchart TD
+    start(["write_table_updates / add_table_updates"]) --> axes{"Axes match storage?<br/>obs identities, var_names,<br/>raw.var_names"}
+    axes -- no --> axis_error[/"Raise, naming the ways out:<br/>write_table, a new table_name,<br/>or the regional writers"/]
+    axes -- yes --> each["Each component of adata"]
+    each --> stored{"Path in storage?"}
+    stored -- no --> new["New"]
+    stored -- yes --> held{"How is it held?"}
+    held -- "lazy read with a registered name<br/>(also persisted or copied)" --> unchanged["Unchanged: skip"]
+    held -- "backed handle to the same element" --> unchanged
+    held -- "in memory: obs, var, uns,<br/>NumPy, SciPy" --> equal{"Equal to the<br/>stored value?"}
+    equal -- yes --> unchanged
+    equal -- no --> changed["Changed"]
+    held -- "derived Dask array, or backed<br/>handle to another element" --> changed
+    changed --> isx{"Is it X?"}
+    isx -- no --> dest["Destination: its own path"]
+    isx -- yes --> xto{"x_to given?"}
+    xto -- no --> x_error[/"Raise, explaining x_to"/]
+    xto -- yes --> xdest["Destination: x_to"]
+    new --> write
+    dest --> exists{"Destination exists<br/>in storage?"}
+    xdest --> exists
+    exists -- no --> write["Write"]
+    exists -- yes --> overwrite{"overwrite=True?"}
+    overwrite -- no --> ow_error[/"Raise"/]
+    overwrite -- yes --> write
+    write --> call["One write_table_components call:<br/>staging, validation, rollback.<br/>Nothing changed: nothing written"]
+```
+
+**Overview: what the contract protects against, and what not.**
+
+| Situation                                                                    | Protected?                             |
+| ---------------------------------------------------------------------------- | -------------------------------------- |
+| The stored `X`, usually counts, overwritten by processed values              | yes: raises without `x_to`             |
+| A filtered table written as an update                                        | yes: axis error, with the ways out     |
+| `uns["spatialdata_attrs"]` changed                                           | yes: raises                            |
+| Components missing from `adata` deleted                                      | yes: never deleted                     |
+| Unchanged lazy reads, backed handles or equal in-memory values rewritten     | yes: skipped                           |
+| A partial failure leaving a half-written table                               | yes: rollback                          |
+| Another writer's change to an element held as an unchanged read              | yes: left alone                        |
+| Another writer's change to an element held in memory, or changed by the user | **no**: last writer wins, not detected |
+| A persisted read that is stale after another writer's change                 | **no**: not detected (Phase 5)         |
+| A matrix that was only rechunked                                             | rewritten: conservative, never wrong   |
 
 **What it does.**
 
@@ -2000,21 +2049,37 @@ SpatialData (see "The SpatialData adapter" below).
 
 **Recognising reads and backed handles.**
 
-- A lazy matrix is unchanged if it is nothing but a read of its stored
-  element, whatever the chunk settings of that read. Comparing Dask names with
-  a fresh read is not enough: the name depends on the chunk settings (checked:
+- A lazy matrix is unchanged if it is recognised as a read of its stored
+  element that the user has not changed since (see the registry below),
+  whatever the chunk settings of that read. Comparing Dask names with a fresh
+  read is not enough: the name depends on the chunk settings (checked:
   a default read and one with `sparse_chunks=1000` give different names for
   the same stored `X`, and so do a default read and one with
   `dense_chunks="storage"` for a dense `obsm` entry).
 - A backed handle that points to the same stored element is unchanged: a
-  `zarr.Array`, or a CSR/CSC dataset whose group, at the same store and path.
+  `zarr.Array`, or a CSR/CSC dataset whose group, at the same store and path
+  (the resolved store root and the element's path in the store). Identity is
+  enough, and its values are not compared: a backed handle has no values of
+  its own, since every read goes to the stored element, so it cannot differ
+  from storage. Even a write into it in place, `array[...] = ...`, is already
+  in the store, with nothing left to write.
+- A backed handle that points to another element, for example a matrix opened
+  in backed mode from another table or store and assigned to
+  `adata.layers["external"]`, counts as changed and is copied, like a derived
+  Dask array. The write path already handles it: `_prepare_anndata_value`
+  wraps storage-backed values lazily for the writer. Its values are not
+  compared with storage, which would read both matrices for what is almost
+  always a different matrix.
+- In practice: `read_table(mode="backed")`, then adding something computed in
+  memory, such as `obs` columns or an `obsm` embedding. The backed `X` and
+  layers are recognised as unchanged, and only the new parts are written.
 
-**How a pure read is recognised: a registry of Dask names.** Every Dask
-operation, a rechunk, slicing or arithmetic alike, returns a new array with a
-new name, a deterministic token of the operation and its inputs. An array that
-is still nothing but a read keeps the name the reader gave it. So Harpy's lazy
-reader records the arrays it creates, and "a graph on top of the read" becomes
-"a name that is not registered for this element":
+**How a read is recognised: a registry of Dask names.** A Dask operation that
+changes the graph, a real rechunk, slicing or arithmetic alike, returns a new
+array with a new name, a deterministic token of the operation and its inputs.
+An array that is still the read keeps the name the reader gave it. So Harpy's
+lazy reader records the arrays it creates, and "changed by the user since it
+was read" becomes "a name that is not registered for this element":
 
 ```
 lazy reader creates array      ──> registry[array.name] = (store, element path)
@@ -2022,11 +2087,18 @@ scanpy: X → normalize → log1p  ──> new array, new name, not in the regis
 untouched layer                ──> same name, registered for that element   ──> unchanged
 ```
 
+**What the rule means.** A recognised array is a read of its stored element
+that the user has not changed since it was read. The rule does not claim that
+it equals what is stored now: a Dask name identifies a computation, not the
+state of the store (see persisted and stale reads below). For a write-back,
+"not changed by the user" is the question that matters: the helper writes what
+the user changed.
+
 - **No graph inspection.** The structure of a read's graph is an AnnData and
   Dask internal: a sparse read is one layer, `make_dask_chunk-…`, a dense read
   two, `original-from-zarr-…` and `from-zarr-…`. Matching on those would tie
   Harpy to internals that can change. The registry relies only on Dask's
-  contract that an operation gives a new name.
+  contract that an operation that changes the graph gives a new name.
 - **Where it is filled:** in the lazy branch of `_decode_anndata_element`
   (`src/harpy/_storage/_anndata.py`), which every lazy read goes through:
   `read_table`, `read_table_components`, `hp.io.read_zarr` and the reopen after
@@ -2048,27 +2120,83 @@ untouched layer                ──> same name, registered for that element   
   `adata.copy()`, for sparse `X` and a dense `obsm` entry, and pickling, as
   when an array is sent to `distributed` workers. A copied pure read is still
   recognised.
-- **Arrays read lazily outside Harpy are not registered,** for example with
-  AnnData's own lazy reader or `da.from_zarr`, and so count as changed. That is
-  conservative.
-- **A stored element overwritten after the read:** the old array still maps to
-  the same element and counts as unchanged. That is correct: there is nothing
-  to write, and it would read the current stored data anyway.
-- **Conservative for operations without effect:** a rechunked but otherwise
-  unmodified matrix counts as changed and is rewritten, and a rechunked `X`
-  goes to `x_to` as a copy.
+- **Arrays read lazily outside Harpy** (checked): AnnData's own
+  `read_elem_lazy` with the same chunks gives exactly the name of Harpy's read,
+  since Harpy uses it, and is recognised; correctly, as it is a read of that
+  element. Plain `da.from_zarr` gave other names in every form tried (a
+  `zarr.Array` or a URL with a component, with or without `inline_array`), and
+  so counts as changed. The spec does not promise either: an array whose name
+  happens to match a registered read is a read of that element.
+- **Operations that keep the name** (checked): a rechunk to the same chunks
+  returns the same array, and `persist()` keeps the name while the graph then
+  holds the computed values (one `MaterializedLayer`). Both count as unchanged:
+  the user changed nothing. A real rechunk gets a new name and counts as
+  changed: the matrix is rewritten, and a rechunked `X` goes to `x_to` as a
+  copy. That is conservative.
+- **Persisted and stale reads** (checked): after the stored element is
+  overwritten with other values of the same shape, a new read gets the same
+  name. An old lazy read then computes the new values, so it stays consistent
+  with storage; an old persisted read still holds the old values. Both count
+  as unchanged, and the helper does not write the old values back: that would
+  undo someone else's write. The table in memory is then stale, which is gap 4
+  and Phase 5's concern, not the write-back's. If Phase 5 chooses generation
+  tokens, the registry can record the token at read time, and the helper can
+  then raise on a stale read instead.
+
+  This protection only holds for recognised reads. For values in memory
+  (`obs`, `var`, `uns`, in-memory matrices) and changed components, the helper
+  compares with or writes to the current store, so a change made by another
+  writer since the read looks like the user's change and is overwritten: last
+  writer wins. Like Harpy's other writers, the helper provides no
+  concurrent-access isolation. Detecting such conflicts needs Phase 5's
+  generation tokens. A new element that another writer adds, such as
+  `obsm["test"]`, is missing from `adata` and is therefore left alone.
+
+- **`persist()` is not detected from the graph** (the `MaterializedLayer`): that
+  relies on Dask internals, and with this rule it is not needed.
 
 **Comparing in-memory matrices with storage.**
 
-- A different dtype, shape or format (dense, CSR, CSC) counts as changed;
-  writing would change the stored dtype or format.
-- NaN equals NaN. Sparse matrices are compared by value, so a difference in
-  explicit zeros alone is not a change.
-- The stored element is read lazily, block by block, and compared with the
-  matching slice of the in-memory array, so memory stays at the in-memory array
-  plus about one block. The cost is one read of each stored element that has
-  an in-memory value in `adata`: for an eager table, about one read of its
-  stored matrices, cheaper than rewriting them.
+A comparison only happens for an in-memory value whose path already exists in
+storage. Lazy reads and backed handles cost nothing (a registry lookup or an
+identity check), new paths need no comparison, and `obs`, `var` and `uns` are
+small. The expensive case is an in-memory matrix at an existing path, for
+example a second run that recomputes `obsp["connectivities"]`, or an eager
+table. Two rules keep it cheap:
+
+1. **Metadata first, without reading values.** A different shape, dtype or
+   format (dense, CSR, CSC) counts as changed, as writing would change the
+   stored dtype or format; so does, for a sparse matrix, a different number of
+   stored values (the length of `data`). No values are read then. A recomputed
+   neighbor graph usually differs here already. This check is conservative: a
+   sparse matrix that differs only in explicit zeros has another number of
+   stored values and is rewritten.
+2. **Stop at the first differing block.** Otherwise the stored element is read
+   lazily, block by block, and compared with the matching slice of the
+   in-memory array, stopping at the first block that differs. Memory stays at
+   the in-memory array plus about one block. NaN equals NaN; sparse blocks are
+   compared by value.
+
+The cost per in-memory matrix at an existing path is then:
+
+| The matrix                                          | Cost of the check                                  |
+| --------------------------------------------------- | -------------------------------------------------- |
+| changed in shape, dtype, format or number of values | none: metadata only                                |
+| changed in values                                   | typically one block, where the first difference is |
+| unchanged                                           | one full read, which then saves the write          |
+
+The check costs at most about a write, which is the more expensive part, with
+its compression, except for the rare matrix that differs only in its last
+block. For an eager table that is about one read of its stored matrices.
+
+Deferred, if a measurement shows the need: content hashes. Harpy's writer
+could store a hash of each matrix as an attribute when writing; the check would
+then hash the in-memory value, fast and without I/O, and compare it with the
+stored hash, falling back to the value comparison for stores written by
+AnnData or spatialdata, which have none. That adds hashing at write time and
+an attribute to maintain. An opt-out parameter that treats every in-memory
+value as changed is the simpler alternative, but more API, and with the two
+rules it should not be needed.
 
 **`raw`.** `raw` is a snapshot with its own gene axis, `raw.var`, typically
 taken before genes were removed (`adata.raw = adata`); `layers` share `X`'s
@@ -2149,10 +2277,18 @@ unchanged, `obs` is simply rewritten each time.
   does. When `x_to` moved `X`, it also reinstalls `X` from storage, so that the
   live table matches the store; otherwise the next call would see `X` as
   changed again and copy it once more;
-- unbacked SpatialData: it raises. There is no store to compare with, and the
-  attached table already holds the changes; silently doing nothing could
-  suggest that the results were saved. The message points to writing the
-  SpatialData, or to `write_table`.
+- unbacked SpatialData, without `sdata.path`: it raises. There is no store to
+  compare with, and the attached table already holds the changes; silently
+  doing nothing could suggest that the results were saved. The error names the
+  ways out:
+  - write the SpatialData itself, `sdata.write(path)`;
+  - write the table into an existing store, `hp.tb.write_table`;
+  - if the table was read from a store, for example with `hp.tb.read_table`
+    and then attached to SpatialData without a path, call the store-path
+    function directly,
+    `hp.tb.write_table_updates(store, table_name=..., adata=sdata.tables[name])`.
+    It compares against that store and recognises the unchanged lazy matrices
+    through the registry.
 
 **Return values.**
 
@@ -2182,17 +2318,31 @@ unchanged, `obs` is simply rewritten each time.
   an eager table with a changed `X` behaves like a lazy one.
 - An in-memory matrix equal to storage is not rewritten; one that differs, in
   values, dtype or format, is.
+- The cost rules, counting reads of the stored values: a changed sparse matrix
+  with another number of stored values reads no values; one with the same
+  number stops after the first differing block; an equal one reads every block
+  and writes nothing.
 - A destination key that `adata.layers` also holds raises.
 - A table filtered by cells, and one filtered by genes, raise, and the error
   names the three ways out; nothing is written.
 - An unchanged table writes nothing.
 - A table read with non-default `sparse_chunks` or `dense_chunks` is
-  recognised as unchanged; a rechunked matrix counts as changed.
+  recognised as unchanged; a real rechunk counts as changed, and a rechunk to
+  the same chunks as unchanged.
 - The registry: an unchanged read is recognised; reads from two stores with
   the same layout are not mixed up; a copied read (`da.Array.copy()`,
-  `adata.copy()`) is recognised; an array from `da.from_zarr` on the stored
-  element counts as changed.
-- Backed handles to the stored elements are unchanged.
+  `adata.copy()`) is recognised; AnnData's `read_elem_lazy` with the same
+  chunks is recognised; an array with an unregistered name, such as a real
+  rechunk, counts as changed.
+- A persisted read counts as unchanged. With an overwrite of the stored element
+  between the read and the helper, the old persisted values are not written
+  back, and the store keeps the newer data.
+- Backed handles to the stored elements are unchanged: a table read with
+  `mode="backed"`, plus new `obs` columns and an `obsm` embedding in memory,
+  writes only those.
+- A backed handle to another element, dense and sparse, from another table
+  and from another store, counts as changed and is copied; the stored values
+  then equal the source.
 - Components missing from `adata` are not deleted.
 - A failure during the write rolls back, as for `write_table_components`.
 - After `write_table_updates`, every slot of `adata` holds the same objects as
@@ -2206,7 +2356,9 @@ unchanged, `obs` is simply rewritten each time.
 - The adapter, on backed SpatialData: the same components are written as by
   the store-path function, the reopened components are installed lazily, and
   after `x_to` the live `X` is the stored one, so a second call writes nothing.
-- The adapter on unbacked SpatialData raises with the explanation.
+- The adapter on unbacked SpatialData raises, and the error names the three
+  ways out. For a table read lazily from a store and attached to unbacked
+  SpatialData, `write_table_updates` with that store writes only its changes.
 - A failure in the adapter restores the live table, as for
   `add_table_components`.
 
