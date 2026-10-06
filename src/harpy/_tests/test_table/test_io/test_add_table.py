@@ -9,8 +9,8 @@ import zarr
 from anndata import AnnData
 from dask.callbacks import Callback
 from scipy import sparse
-from spatialdata import SpatialData
-from spatialdata.models import TableModel
+from spatialdata import SpatialData, read_zarr
+from spatialdata.models import Labels2DModel, TableModel
 
 import harpy.table.io._add_table as table_manager
 import harpy.table.io._write as table_writer
@@ -21,17 +21,40 @@ from harpy.table.io._add_table import _cast_stringdtype_uns, add_table
 from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY
 
 
+@pytest.fixture
+def annotated_sdata(tmp_path):
+    """A small backed SpatialData: one labels element and a table annotating it.
+
+    These tests only exercise one table, so they do not need the full
+    transcriptomics example, whose images make it slow to build and write.
+    """
+    labels = Labels2DModel.parse(np.array([[0, 1, 1], [2, 2, 3]], dtype=np.uint32), dims=("y", "x"))
+    obs = pd.DataFrame(
+        {_REGION_KEY: pd.Categorical(["segmentation_mask"] * 3), _INSTANCE_KEY: [1, 2, 3]},
+        index=["1", "2", "3"],
+    )
+    table = TableModel.parse(
+        AnnData(X=np.arange(6, dtype=np.float32).reshape(3, 2), obs=obs),
+        region="segmentation_mask",
+        region_key=_REGION_KEY,
+        instance_key=_INSTANCE_KEY,
+    )
+    path = tmp_path / "sdata.zarr"
+    SpatialData(labels={"segmentation_mask": labels}, tables={"table_transcriptomics": table}).write(path)
+    return read_zarr(path)
+
+
 @pytest.mark.parametrize("is_backed", [True, False])
-def test_add_table(sdata_transcripts: SpatialData, recwarn, is_backed):
-    assert sdata_transcripts.is_backed()
+def test_add_table(annotated_sdata: SpatialData, recwarn, is_backed):
+    assert annotated_sdata.is_backed()
 
     if not is_backed:
-        sdata_transcripts.path = None
+        annotated_sdata.path = None
 
-    adata = sdata_transcripts["table_transcriptomics"]
+    adata = annotated_sdata["table_transcriptomics"]
 
-    sdata_transcripts = add_table(
-        sdata_transcripts,
+    annotated_sdata = add_table(
+        annotated_sdata,
         adata=adata,
         output_table_name="table_transcriptomics",
         instance_key=_INSTANCE_KEY,
@@ -40,30 +63,26 @@ def test_add_table(sdata_transcripts: SpatialData, recwarn, is_backed):
         overwrite=True,
     )
 
-    assert (
-        _INSTANCE_KEY == sdata_transcripts["table_transcriptomics"].uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY]
-    )
-    assert (
-        _REGION_KEY == sdata_transcripts["table_transcriptomics"].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]
-    )
+    assert _INSTANCE_KEY == annotated_sdata["table_transcriptomics"].uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY]
+    assert _REGION_KEY == annotated_sdata["table_transcriptomics"].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]
 
-    assert ["segmentation_mask"] == sdata_transcripts["table_transcriptomics"].uns[TableModel.ATTRS_KEY][
+    assert ["segmentation_mask"] == annotated_sdata["table_transcriptomics"].uns[TableModel.ATTRS_KEY][
         TableModel.REGION_KEY
     ]
 
-    userwarning_msg = f"The table is annotating {sdata_transcripts['table_transcriptomics'].obs[_REGION_KEY].cat.categories.to_list()[0]}, which is not present in the SpatialData object."
+    userwarning_msg = f"The table is annotating {annotated_sdata['table_transcriptomics'].obs[_REGION_KEY].cat.categories.to_list()[0]}, which is not present in the SpatialData object."
 
     assert not any(isinstance(w.message, UserWarning) and str(w.message) == userwarning_msg for w in recwarn.list)
 
 
 @pytest.mark.parametrize("is_backed", [True, False])
-def test_add_table_change_region_instance_keys(sdata_transcripts: SpatialData, recwarn, is_backed):
-    assert sdata_transcripts.is_backed()
+def test_add_table_change_region_instance_keys(annotated_sdata: SpatialData, recwarn, is_backed):
+    assert annotated_sdata.is_backed()
 
     if not is_backed:
-        sdata_transcripts.path = None
+        annotated_sdata.path = None
 
-    adata = sdata_transcripts["table_transcriptomics"]
+    adata = annotated_sdata["table_transcriptomics"]
 
     # test if we can update the name of the instance and region keys.
     new_instance_key = "instance_key_test"
@@ -75,8 +94,8 @@ def test_add_table_change_region_instance_keys(sdata_transcripts: SpatialData, r
     # need to pop the spatialdata_attrs, otherwise harpy will complain that new region key does not match the old region key
     adata.uns.pop(TableModel.ATTRS_KEY, None)
 
-    sdata_transcripts = add_table(
-        sdata_transcripts,
+    annotated_sdata = add_table(
+        annotated_sdata,
         adata=adata,
         output_table_name="table_transcriptomics",
         instance_key=new_instance_key,
@@ -86,48 +105,46 @@ def test_add_table_change_region_instance_keys(sdata_transcripts: SpatialData, r
     )
 
     assert (
-        new_instance_key
-        == sdata_transcripts["table_transcriptomics"].uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY]
+        new_instance_key == annotated_sdata["table_transcriptomics"].uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY]
     )
     assert (
-        new_region_key
-        == sdata_transcripts["table_transcriptomics"].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]
+        new_region_key == annotated_sdata["table_transcriptomics"].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]
     )
 
-    assert ["segmentation_mask"] == sdata_transcripts["table_transcriptomics"].uns[TableModel.ATTRS_KEY][
+    assert ["segmentation_mask"] == annotated_sdata["table_transcriptomics"].uns[TableModel.ATTRS_KEY][
         TableModel.REGION_KEY
     ]
 
-    userwarning_msg = f"The table is annotating {sdata_transcripts['table_transcriptomics'].obs[new_region_key].cat.categories.to_list()[0]}, which is not present in the SpatialData object."
+    userwarning_msg = f"The table is annotating {annotated_sdata['table_transcriptomics'].obs[new_region_key].cat.categories.to_list()[0]}, which is not present in the SpatialData object."
 
     assert not any(isinstance(w.message, UserWarning) and str(w.message) == userwarning_msg for w in recwarn.list)
 
 
 @pytest.mark.parametrize("is_backed", [True, False])
-def test_add_table_not_annotating(sdata_transcripts: SpatialData, is_backed):
-    assert sdata_transcripts.is_backed()
+def test_add_table_not_annotating(annotated_sdata: SpatialData, is_backed):
+    assert annotated_sdata.is_backed()
 
     if not is_backed:
-        sdata_transcripts.path = None
+        annotated_sdata.path = None
 
-    adata = sdata_transcripts["table_transcriptomics"]
+    adata = annotated_sdata["table_transcriptomics"]
 
-    sdata_transcripts = add_table(
-        sdata_transcripts,
+    annotated_sdata = add_table(
+        annotated_sdata,
         adata=adata,
         output_table_name="table_transcriptomics",
         region=None,  # table is not annotating a region
         overwrite=True,
     )
 
-    assert TableModel.ATTRS_KEY not in sdata_transcripts["table_transcriptomics"].uns
+    assert TableModel.ATTRS_KEY not in annotated_sdata["table_transcriptomics"].uns
 
 
-def test_add_new_backed_table_does_not_warn_about_missing_regions(sdata_transcripts: SpatialData, recwarn):
-    adata = sdata_transcripts["table_transcriptomics"].copy()
+def test_add_new_backed_table_does_not_warn_about_missing_regions(annotated_sdata: SpatialData, recwarn):
+    adata = annotated_sdata["table_transcriptomics"].copy()
 
-    sdata_transcripts = add_table(
-        sdata_transcripts,
+    annotated_sdata = add_table(
+        annotated_sdata,
         adata=adata,
         output_table_name="table_transcriptomics_copy",
         instance_key=_INSTANCE_KEY,
@@ -136,7 +153,7 @@ def test_add_new_backed_table_does_not_warn_about_missing_regions(sdata_transcri
         overwrite=False,
     )
 
-    assert "table_transcriptomics_copy" in sdata_transcripts.tables
+    assert "table_transcriptomics_copy" in annotated_sdata.tables
 
     userwarning_msg = (
         f"The table is annotating {adata.obs[_REGION_KEY].cat.categories.to_list()[0]!r}, "
