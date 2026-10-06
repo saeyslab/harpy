@@ -95,9 +95,8 @@ opencv = [
 ]
 # additional UI or CLI interfaces
 napari = [
-    "napari[all]>=0.4.18",
-    "napari-spatialdata>=0.2.6",
-    "napari-harpy>=0.0.11",
+    "napari[all]>=0.7.1",
+    "spatiato>=0.2.0",
 ]
 vitessce = [
     "harpy-vitessce ; python_version >= '3.12'"
@@ -129,6 +128,7 @@ test = [
     "opencv-python-headless",
     "pytest",
     "pytest-cov",
+    "pytest-xdist",
     "tox",
 ]
 docs = [
