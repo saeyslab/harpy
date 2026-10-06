@@ -313,7 +313,8 @@ def test_rejected_feature_updates_leave_matrix_and_metadata_unchanged(feature_sd
 
 
 @pytest.mark.parametrize("location", ["disk_only", "memory_only", "both"])
-def test_feature_overwrite_requires_permission_for_attached_or_stored_entries(feature_sdata, location):
+def test_feature_overwrite_requires_permission_for_stored_entries_only(feature_sdata, location):
+    """overwrite_feature_key concerns the store: an entry present only in memory is replaced without it."""
     sdata = feature_sdata(existing=location != "memory_only")
     table = sdata.tables["counts"]
     if location == "disk_only":
@@ -322,9 +323,30 @@ def test_feature_overwrite_requires_permission_for_attached_or_stored_entries(fe
     elif location == "memory_only":
         table.obsm["features"] = np.ones((6, 1))
     before = _store_bytes(sdata.path)
-    with pytest.raises(ValueError, match="overwrite_feature_key=True"):
-        add_feature_matrix(sdata, "A", None, table_name="counts", feature_key="features", features=["area"])
-    assert _store_bytes(sdata.path) == before
+    options = {"table_name": "counts", "feature_key": "features", "features": ["area"]}
+    if location != "memory_only":
+        with pytest.raises(ValueError, match="overwrite_feature_key=True"):
+            add_feature_matrix(sdata, "A", None, **options)
+        assert _store_bytes(sdata.path) == before
+        return
+    add_feature_matrix(sdata, "A", None, **options)
+    # A's areas 2, 3 and 1 go to table rows 1, 3 and 5. The entry is new in the
+    # store, so the other rows get the NaN fill.
+    expected = np.full((6, 1), np.nan)
+    expected[[1, 3, 5], 0] = [2, 3, 1]
+    np.testing.assert_array_equal(read_table(sdata.path, table_name="counts", mode="eager").obsm["features"], expected)
+    np.testing.assert_array_equal(table.obsm["features"].compute(), expected)
+
+
+def test_new_feature_table_replaces_a_table_attached_but_never_saved(feature_sdata):
+    """overwrite_output_table concerns the store: a table present only in memory is replaced without it."""
+    sdata = feature_sdata()
+    unsaved = read_table(sdata.path, table_name="counts", mode="eager")
+    sdata.tables["unsaved"] = unsaved
+    add_feature_matrix(sdata, "A", None, output_table_name="unsaved", feature_key="features", features=["area"])
+    assert sdata.tables["unsaved"] is not unsaved
+    stored = read_table(sdata.path, table_name="unsaved", mode="eager")
+    np.testing.assert_array_equal(stored.obsm["features"], [[3], [2], [1]])
 
 
 @pytest.mark.parametrize("backed", [False, True])
