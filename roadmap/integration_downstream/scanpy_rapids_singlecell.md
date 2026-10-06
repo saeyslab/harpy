@@ -905,9 +905,10 @@ hp.tb.write_table_updates(store, table_name="counts", adata=adata, overwrite=Tru
 
 Design notes:
 
-- Lazy matrices that are still the arrays created by `read_table` can be
-  recognised as unchanged by their Dask array name. Other matrices are treated
-  as new or changed.
+- Lazy matrices that are still nothing but a read of their stored element can
+  be recognised as unchanged. Their Dask name alone is not enough to compare
+  with a fresh read: it depends on the chunk settings of the read (see Phase 3).
+  Other matrices are treated as new or changed.
 - `obs` and `var` are small enough to compare directly with the stored
   dataframes. `uns` entries can be compared by key and value.
 - If `obs_names` or `var_names` differ from storage, raise and point to
@@ -1932,13 +1933,102 @@ Link it from the table I/O section of `docs/api.md`.
 
 ### Phase 3: write-back helper
 
-Implement the comparison-based helper from gap 3. Test it against the pipeline
-above, including filtered tables, which must raise and point to `write_table`.
+**Goal.** `hp.tb.write_table_updates(store, table_name=..., adata=..., overwrite=...)`
+compares a table that was read lazily and then processed, typically by scanpy,
+with the stored table, and writes only what is new or changed. Today the caller
+lists every output and its identities (gap 3): the recommended scanpy pattern
+passes 12 components to `write_table_components`.
 
-The helper decides which components to write, and passes them to
-`write_table_components` in one call. It does not change how they are
-computed: it inherits whatever Phase 4 does, and with Phase 4's slice 4c, if
-implemented, that one call is evaluated in one compute.
+**What it does.**
+
+1. Read the stored state cheaply: `obs`, `var` and `uns`, which are small and
+   read eagerly, and which components exist in each slot. No matrix values.
+2. Check the axes. If the observation identities or `var_names` differ from
+   storage, for example after filtering cells or genes, raise and point to
+   `write_table`, rather than silently rewriting the whole table.
+3. Classify each component of `adata`:
+   - `obs` and `var` are compared with the stored dataframes. If anything
+     differs, for example a new `leiden` or `highly_variable` column, the
+     whole dataframe is written, since the component writer works per
+     dataframe;
+   - `uns` is compared key by key, nested; new or changed entries are written
+     at their own path, such as `("uns", "pca")`;
+   - a matrix (`layers`, `obsm`, `varm`, `obsp`, `varp`, `raw`) is unchanged if
+     it is still nothing but a read of its stored element, or a backed handle
+     to it (see below); otherwise it is new or changed;
+   - `X` is handled separately (see below);
+   - components missing from `adata` are not deleted. Deletion stays explicit,
+     through `delete_table_components`.
+4. Write all new and changed components in one `write_table_components` call,
+   with `adata`'s identities: the staging, validation, publication and rollback
+   that exist today. If nothing changed, nothing is written.
+
+For the recommended scanpy pattern this writes the same components that
+pattern lists by hand, found automatically, except `X`.
+
+**Decisions.**
+
+- **A changed `X` raises.** After `normalize_total` and `log1p`, `adata.X` is a
+  new array, and `X` usually holds the stored counts, so the helper never
+  overwrites it. The error explains what to do: move the processed values to a
+  layer (`adata.layers["log1p"] = adata.X`), put back the `X` that was read,
+  and call the helper again; or, to replace the stored `X` deliberately, use
+  `write_table_components(components={("X",): adata.X}, ...)`.
+- **Eager tables are not supported, for now.** Only lazy reads and backed
+  handles can be recognised as unchanged without reading values, so a matrix
+  in memory at a path that exists in storage counts as changed. In practice an
+  eager table fails at `X` first: an in-memory `X` raises with a message to
+  read the table with `mode="lazy"` or `mode="backed"`. Matrices that scanpy
+  creates in memory on a lazy table, such as `X_pca` or the neighbor graphs,
+  are simply new or changed, and are written.
+- **A lazy matrix is unchanged if it is nothing but a read of its stored
+  element**, whatever the chunk settings of that read. Comparing Dask names
+  with a fresh read is not enough: the name depends on the chunk settings
+  (checked: a default read and one with `sparse_chunks=1000` give different
+  names for the same stored `X`, and so do a default read and one with
+  `dense_chunks="storage"` for a dense `obsm` entry). Proposed implementation:
+  Harpy's lazy reader records the arrays it creates, Dask name → store, table
+  and component path, for example in a process-wide registry; an array is
+  unchanged when its name maps to the same stored element. Any operation,
+  including a rechunk, gives a new name and so counts as changed. That is
+  conservative: a rechunked but otherwise unmodified matrix is rewritten.
+- **A backed handle that points to the same stored element is unchanged:** a
+  `zarr.Array`, or a CSR/CSC dataset whose group, at the same store and path.
+
+**Still to settle in this spec.**
+
+- What counts as a change in `obs` and `var`: dtype changes such as categories,
+  column order, NaN equality.
+- How `uns` is compared: nested mappings, arrays, `None`, and values without a
+  meaningful equality, which count as changed. Protected SpatialData metadata
+  must not change, as the writers already enforce.
+- `overwrite`: needed only for changed existing entries, or also for new ones.
+- Scope: a store-path function only, or also a SpatialData adapter, as
+  `add_table_components` and `add_table_components_by_region` have.
+- The return value, tied to Phase 5: returning the reopened lazy table
+  (`adata = hp.tb.write_table_updates(...)`) would make the reopen rule
+  natural, and is one of Phase 5's two options.
+- `raw`: `raw.X` and `raw.var`, if present.
+
+**Tests, at least.**
+
+- The recommended scanpy pipeline, with the processed values moved to
+  `layers["log1p"]` and `X` put back: exactly the expected components are
+  written, and the reopened table matches.
+- A changed `X` raises with the explanation, and nothing is written.
+- A filtered table raises and points to `write_table`.
+- An unchanged table writes nothing.
+- A table read with non-default `sparse_chunks` or `dense_chunks` is
+  recognised as unchanged; a rechunked matrix counts as changed.
+- Backed handles to the stored elements are unchanged.
+- An eager table raises at `X`.
+- Components missing from `adata` are not deleted.
+- A failure during the write rolls back, as for `write_table_components`.
+
+**Relation to Phase 4.** The helper decides which components to write, and
+passes them to `write_table_components` in one call. It does not change how
+they are computed: it inherits whatever Phase 4 does, and with Phase 4's slice
+4c, if implemented, that one call is evaluated in one compute.
 
 ### Phase 4: write cost
 
