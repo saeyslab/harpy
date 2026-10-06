@@ -12,7 +12,7 @@ from copy import deepcopy
 from functools import partial
 from math import prod
 from numbers import Integral
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Literal
 
 import dask
@@ -27,6 +27,7 @@ from dask import delayed
 from dask.utils import parse_bytes
 from scipy import sparse
 from spatialdata.models import TableModel
+from zarr.storage import LocalStore
 
 # Harpy owns these literals as the compatibility boundary for tables assembled
 # with the low-level AnnData writers, without depending on private SpatialData
@@ -273,17 +274,56 @@ def _decode_anndata_element(
             # matrix instead; even its sparse buffers remain unread here.
             matrix_type = sparse.csr_matrix if compressed_axis == 0 else sparse.csc_matrix
             meta = matrix_type((0, 0), dtype=element["data"].dtype)
-            return da.from_delayed(delayed(read_elem)(element), shape=shape, dtype=meta.dtype, meta=meta)
+            array = da.from_delayed(delayed(read_elem)(element), shape=shape, dtype=meta.dtype, meta=meta)
+            return _register_lazy_read(array, element)
         # Harpy owns the sparse block size, independently of AnnData's defaults.
         # Keep the other axis whole.
         length = _sparse_block_length(element, compressed_axis=compressed_axis, sparse_chunks=sparse_chunks)
         chunks = (length, -1) if compressed_axis == 0 else (-1, length)
-        return read_elem_lazy(element, chunks=chunks)
+        return _register_lazy_read(read_elem_lazy(element, chunks=chunks), element)
     # String sizes cannot be derived from the dtype, so string arrays keep their
     # stored chunks.
     chunks = None if encoding == "string-array" else _dense_lazy_chunks(element, dense_chunks=dense_chunks)
     # chunks=None makes AnnData keep the stored chunks.
-    return read_elem_lazy(element, chunks=chunks)
+    return _register_lazy_read(read_elem_lazy(element, chunks=chunks), element)
+
+
+# The stored element that each lazily read matrix reads, keyed by the Dask
+# array's name: the resolved root of its LocalStore and its path in the store.
+# A Dask operation that changes the graph gives a new name, while copies,
+# pickling, persist() and a rechunk to the same chunks keep it; so an array
+# whose name is registered is a read that has not been changed since. The
+# name identifies a computation, not the state of the store: it does not
+# promise that the values equal what is stored now.
+_LAZY_READS: dict[str, tuple[Path, str]] = {}
+
+
+def _register_lazy_read(array: da.Array, element: zarr.Array | zarr.Group) -> da.Array:
+    """Record the stored element that a lazily read array reads, then return the array.
+
+    Only reads from a ``LocalStore`` are registered: its resolved root and the
+    element's path identify the element. Reads from other stores, in memory or
+    remote, are not, so they count as changed. Every lazy read is registered,
+    also the writers' reads of staged components, whose paths never match a
+    user's arrays. Entries are small, and repeated reads reuse the same names.
+    """
+    if isinstance(element.store, LocalStore):
+        _LAZY_READS[array.name] = (Path(element.store.root).resolve(), element.path)
+    return array
+
+
+def _lazy_read_source(value: object) -> tuple[Path, str] | None:
+    """Return the stored element a lazily read matrix still reads, or ``None``.
+
+    The element is identified by the resolved store root and its path in the
+    store. ``None`` means the value is not a Dask array, or not one that a
+    lazy read created and nothing has changed since: a derived array, a read
+    from a store other than a ``LocalStore``, or an array built outside Harpy's
+    readers under another name.
+    """
+    if not isinstance(value, da.Array):
+        return None
+    return _LAZY_READS.get(value.name)
 
 
 def _chunk_size_target() -> int:
