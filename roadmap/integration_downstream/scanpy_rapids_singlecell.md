@@ -2066,7 +2066,10 @@ flowchart TD
 4. Send a changed `X` to `x_to`, or raise.
 5. Write all new and changed components in one `write_table_components` call,
    with `adata`'s identities: the staging, validation, publication and rollback
-   that exist today. If nothing changed, nothing is written.
+   that exist today. If nothing changed, nothing is written: both helpers
+   return early, without calling the writer. `add_table_components` refuses an
+   empty set of components, and an empty write would only stage, validate and
+   publish nothing.
 
 **Recognising reads and backed handles.**
 
@@ -2142,6 +2145,14 @@ the user changed.
 - **Lifetime:** a process-wide dict. Its entries are small, and repeated reads
   reuse the same keys, so its size is bounded by the number of distinct
   element and chunk-setting combinations read in the process.
+- **Internal reads are registered too, deliberately.** The writers read staged
+  components lazily to validate them (`_write_table_operation`), so arrays
+  read from temporary staging paths are registered as well. That is harmless:
+  their store paths differ, so their names never match a user's arrays. The
+  entries are small, but they accumulate over a session with many writes.
+  Fine for now; registering only the reads that reach the user, with a flag
+  on the decoder that the public readers set, is the refinement if that ever
+  matters.
 - **Copies and pickling keep the name** (checked): `da.Array.copy()`,
   `adata.copy()`, for sparse `X` and a dense `obsm` entry, and pickling, as
   when an array is sent to `distributed` workers. A copied pure read is still
@@ -2201,7 +2212,8 @@ table. Two rules keep it cheap:
    lazily, block by block, and compared with the matching slice of the
    in-memory array, stopping at the first block that differs. Memory stays at
    the in-memory array plus about one block. NaN equals NaN; sparse blocks are
-   compared by value.
+   compared by value. The blocks follow the readers' `"auto"` layout, so each
+   step reads about `array.chunk-size`.
 
 The cost per in-memory matrix at an existing path is then:
 
