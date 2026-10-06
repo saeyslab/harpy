@@ -1945,12 +1945,12 @@ SpatialData (see "The SpatialData adapter" below).
 **Slices.** Phase 3 is implemented in four slices, each with its own tests, as
 Phase 1 was:
 
-| Slice | Content                                                                                                                                        | Depends on |
-| ----- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
-| 3a    | `overwrite` means "in the store" for every backed adapter, `add_feature_matrix` included, with docstrings and tests (see "Prerequisite" below) | nothing    |
-| 3b    | the registry of Dask names in the lazy decoder (see "How a read is recognised" below)                                                          | nothing    |
-| 3c    | the comparison rules (`obs`/`var`, `uns`, matrices with the two cost rules) and `write_table_updates`, with `x_to` and the axis errors         | 3b         |
-| 3d    | `add_table_updates` on `_update_table_components`, with `reopen_also`                                                                          | 3a, 3c     |
+| Slice            | Content                                                                                                                                        | Depends on |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| 3a (implemented) | `overwrite` means "in the store" for every backed adapter, `add_feature_matrix` included, with docstrings and tests (see "Prerequisite" below) | nothing    |
+| 3b               | the registry of Dask names in the lazy decoder (see "How a read is recognised" below)                                                          | nothing    |
+| 3c               | the comparison rules (`obs`/`var`, `uns`, matrices with the two cost rules) and `write_table_updates`, with `x_to` and the axis errors         | 3b         |
+| 3d               | `add_table_updates` on `_update_table_components`, with `reopen_also`                                                                          | 3a, 3c     |
 
 **The contract.**
 
@@ -2395,7 +2395,8 @@ key, by contrast, is a missing component and stays in storage.
     It compares against that store and recognises the unchanged lazy matrices
     through the registry.
 
-**Prerequisite: `overwrite` means "in the store" for every backed adapter.**
+**Prerequisite: `overwrite` means "in the store" for every backed adapter
+(slice 3a, implemented).**
 Today four functions also check in-memory presence for backed SpatialData:
 `add_table_components` (through `_update_table_components`),
 `add_table_components_by_region`, `add_table` for a whole table, and

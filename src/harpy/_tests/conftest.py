@@ -1,5 +1,6 @@
 import os
 
+import dask
 import pyrootutils
 import pytest
 from hydra import compose, initialize
@@ -19,6 +20,18 @@ from harpy.datasets.transcriptomics import (
     visium_hd_example_custom_binning,
 )
 from harpy.table._allocation_intensity import aggregate_image
+
+
+def pytest_configure(config):
+    """Limit Dask's threads in each pytest-xdist worker (``pytest -n auto``).
+
+    Every worker process runs Dask's threaded scheduler, which by default starts
+    one thread per CPU core; with one worker per core that oversubscribes the
+    machine. Tests that set a scheduler or ``num_workers`` themselves override
+    this locally. Without pytest-xdist nothing changes.
+    """
+    if os.environ.get("PYTEST_XDIST_WORKER") is not None:
+        dask.config.set(num_workers=2)
 
 
 @pytest.fixture(scope="function")
