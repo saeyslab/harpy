@@ -2354,7 +2354,22 @@ key, by contrast, is a missing component and stays in storage.
   (`src/harpy/table/io/_components.py`). Without this, a failure after the
   installation, for example in metadata consolidation, would restore the store
   and the written slots, but leave the live `X` as the reopened counts: the
-  processed values would then be gone from both the store and the live table;
+  processed values would then be gone from both the store and the live table.
+  The order of events for an `x_to` write that fails at the end:
+
+  | Step        | Store                                   | Live table                                         |
+  | ----------- | --------------------------------------- | -------------------------------------------------- |
+  | before      | `X` = counts, no `layers/log1p`         | `X` = processed                                    |
+  | 1. snapshot | —                                       | `previous` saves the current `X`, `layers`, `obs`  |
+  | 2. write    | `layers/log1p` = processed              | unchanged                                          |
+  | 3. install  | —                                       | `X` = counts, reopened; `layers["log1p"]` reopened |
+  | 4. failure  | the writer removes `layers/log1p` again | —                                                  |
+  | 5. rollback | —                                       | every slot in `previous` is put back               |
+
+  With `reopen_also` in `slots`, step 5 restores the processed `X`. Without
+  it, `X` stays the counts from step 3 while the store no longer has the
+  layer, and the processed values are referenced nowhere;
+
 - unbacked SpatialData, without `sdata.path`: it raises. There is no store to
   compare with, and the attached table already holds the changes; silently
   doing nothing could suggest that the results were saved. The error names the
