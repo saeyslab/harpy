@@ -247,7 +247,11 @@ def test_invalid_chunk_settings_preserve_memory(regional_store, setting, value):
 
 @pytest.mark.parametrize("presence", ["both", "memory", "disk", "neither"])
 def test_backed_component_presence_controls_overwrite_and_new_entry_fills(regional_store, presence):
-    """Memory presence requires overwrite, but only disk presence supplies retained rows."""
+    """Only disk presence requires overwrite, and only disk presence supplies retained rows.
+
+    overwrite concerns the store: a target present only in memory is new on disk,
+    so it needs no permission, and it follows the new-entry fill rules.
+    """
     path, table, identity, old = regional_store()
     sdata = SpatialData(tables={"counts": table})
     sdata.path = path
@@ -259,17 +263,16 @@ def test_backed_component_presence_controls_overwrite_and_new_entry_fills(region
     options = {"table_name": "counts", "components": {("obsm", "features"): values}, "obs_identity": identity}
     before = _store_bytes(path)
     original = table._obsm
-    if presence != "neither":
+    stored = presence in {"both", "disk"}
+    if stored:
         with pytest.raises(FileExistsError):
             add_table_components_by_region(sdata, **options)
         assert table._obsm is original and _store_bytes(path) == before
-    if presence in {"memory", "neither"}:
+    else:
         with pytest.raises(ValueError, match="requires a fill"):
-            add_table_components_by_region(sdata, **options, overwrite=True)
+            add_table_components_by_region(sdata, **options)
         assert table._obsm is original and _store_bytes(path) == before
-    add_table_components_by_region(
-        sdata, **options, fill_values={("obsm", "features"): 0}, overwrite=presence != "neither"
-    )
+    add_table_components_by_region(sdata, **options, fill_values={("obsm", "features"): 0}, overwrite=stored)
     expected = old.copy() if presence in {"both", "disk"} else np.zeros_like(old)
     expected[[1, 2, 3, 6]] = 1
     np.testing.assert_array_equal(_dense(table.obsm["features"]), expected)

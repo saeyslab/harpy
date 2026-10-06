@@ -16,7 +16,6 @@ from harpy._storage._anndata import (
     _validate_sparse_chunks,
 )
 from harpy.table.io._components import (
-    _ABSENT,
     _check_in_memory_versus_storage_axes,
     _component_update_destination,
     _install_memory_updates,
@@ -109,9 +108,10 @@ def add_table_components_by_region(
         use a lazily rechunked working array; their original blocks are
         unchanged. These control computation, not on-disk chunk sizes.
     overwrite
-        Ignored for unbacked SpatialData; validation still applies. When backed,
-        allow replacement of targets present in memory or storage. Without it,
-        additions must be absent from both.
+        Allow replacing targets that exist in the store. Ignored for unbacked
+        SpatialData; validation still applies. It only concerns the store: a
+        target present only in memory, never saved, is replaced without it, as
+        for unbacked SpatialData.
 
     Returns
     -------
@@ -165,6 +165,8 @@ def add_table_components_by_region(
         )
     """
     paths = _validate_regional_request(components, fill_values=fill_values, overwrite=overwrite)
+    # overwrite only concerns the store, where the writer checks it: a component
+    # present only in memory is replaced without it, as for unbacked SpatialData.
     sparse_chunks = _validate_sparse_chunks(sparse_chunks)
     dense_chunks = _validate_dense_chunks(dense_chunks)
     table, group = _component_update_destination(sdata, table_name=table_name)
@@ -173,14 +175,9 @@ def add_table_components_by_region(
         raise ValueError("Regional updates require a SpatialData-annotated table.")
     _validate_spatialdata_attrs_unchanged(spatialdata_attrs, components)
     for path in paths:
-        # Check in-memory parents; their values are not the merge source
-        # for a backed update.
-        in_memory_value = _memory_component(table, path)
-        # For backed SpatialData, replacing a component requires overwrite=True
-        # even when it exists only in memory, not on disk. Installation would
-        # otherwise replace potentially unsaved local data without permission.
-        if group is not None and in_memory_value is not _ABSENT and not overwrite:
-            raise FileExistsError(f"In-memory component {path!r} already exists; use overwrite=True.")
+        # Check in-memory parents; their values are not the merge source for a
+        # backed update.
+        _memory_component(table, path)
 
     if group is not None:
         # Backed SpatialData: group is the destination table in the Zarr store.
