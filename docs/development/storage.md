@@ -387,8 +387,10 @@ combines table preparation with attachment to the supplied `sdata`:
 - **Backed `sdata`:** use `_write_table_operation()` for a complete-table write,
   reopen only the affected published table using `_read_anndata_table()` in lazy
   mode, and attach it before metadata finalization and backup disposal.
-  Replacing an attached or stored table requires `overwrite=True`, including
-  tables omitted when reading a store selectively.
+  Replacing a stored table requires `overwrite=True`, including tables omitted
+  when reading a store selectively. A table attached but never saved is
+  replaced without it, as for unbacked `sdata`: `overwrite` only concerns the
+  store.
 
 The caller's AnnData is not modified: parsing uses copied annotations while
 retaining matrix representations without a preliminary whole-matrix copy or
@@ -454,7 +456,9 @@ attachment. Raw uses its independent feature axis.
   representations and may share data with inputs. As with `add_table`,
   `overwrite` is ignored; validation still applies.
 - **Backed SpatialData:** `overwrite=True` is required if a replacement target
-  exists in either memory or storage. Reopen only requested replacements from
+  exists in storage. A target present only in memory, never saved, is replaced
+  without it, as for unbacked SpatialData: `overwrite` only concerns the store.
+  Reopen only requested replacements from
   their permanent paths, using lazy matrices and eager annotations. Unrelated
   local edits and matrix references are not refreshed or persisted.
 
