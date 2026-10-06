@@ -1948,7 +1948,7 @@ Phase 1 was:
 | Slice            | Content                                                                                                                                        | Depends on |
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
 | 3a (implemented) | `overwrite` means "in the store" for every backed adapter, `add_feature_matrix` included, with docstrings and tests (see "Prerequisite" below) | nothing    |
-| 3b               | the registry of Dask names in the lazy decoder (see "How a read is recognised" below)                                                          | nothing    |
+| 3b (implemented) | the registry of Dask names in the lazy decoder (see "How a read is recognised" below)                                                          | nothing    |
 | 3c               | the comparison rules (`obs`/`var`, `uns`, matrices with the two cost rules) and `write_table_updates`, with `x_to` and the axis errors         | 3b         |
 | 3d               | `add_table_updates` on `_update_table_components`, with `reopen_also`                                                                          | 3a, 3c     |
 
@@ -2098,7 +2098,8 @@ flowchart TD
   memory, such as `obs` columns or an `obsm` embedding. The backed `X` and
   layers are recognised as unchanged, and only the new parts are written.
 
-**How a read is recognised: a registry of Dask names.** A Dask operation that
+**How a read is recognised: a registry of Dask names (slice 3b, implemented).**
+A Dask operation that
 changes the graph, a real rechunk, slicing or arithmetic alike, returns a new
 array with a new name, a deterministic token of the operation and its inputs.
 An array that is still the read keeps the name the reader gave it. So Harpy's
