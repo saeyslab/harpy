@@ -181,7 +181,8 @@ def test_none_replacements_and_whole_uns_preserve_annotation(make_table_io_store
 
 
 @pytest.mark.parametrize("presence", ["both", "memory", "disk", "neither"])
-def test_backed_overwrite_checks_memory_and_disk_independently(make_table_io_store, presence):
+def test_backed_overwrite_concerns_the_store_only(make_table_io_store, presence):
+    """overwrite guards stored targets; a target present only in memory is replaced without it."""
     path = make_table_io_store()
     if presence in {"memory", "neither"}:
         delete_table_components(path, table_name="counts", components=[("obsm", "embedding")])
@@ -196,12 +197,13 @@ def test_backed_overwrite_checks_memory_and_disk_independently(make_table_io_sto
         "components": {("obsm", "embedding"): np.full((2, 2), 7)},
         "obs_identity": table.obs_names,
     }
-    if presence != "neither":
+    stored = presence in {"both", "disk"}
+    if stored:
         old = table.obsm.get("embedding")
         with pytest.raises(FileExistsError, match="overwrite"):
             add_table_components(sdata, **options)
         assert table.obsm.get("embedding") is old and _store_bytes(path) == before
-    add_table_components(sdata, **options, overwrite=presence != "neither")
+    add_table_components(sdata, **options, overwrite=stored)
     np.testing.assert_array_equal(table.obsm["embedding"].compute(), np.full((2, 2), 7))
 
 
