@@ -2055,6 +2055,23 @@ compute:
    `sparse_dataset(group).append(block)`;
 4. repeat for the next k blocks until all are written.
 
+```
+batch 1:  dask.compute(block 0, …, block k−1)     <- parallel: worker threads, or distributed workers
+          ↓ returns k SciPy matrices to the client process
+          for block in computed_blocks:            <- sequential: a plain for-loop, no Dask
+              sparse_dataset(group).append(block)
+batch 2:  dask.compute(block k, …, block 2k−1)     <- parallel again
+          ↓
+          for block in computed_blocks: append(block)
+…
+```
+
+Only the computing is parallel. The appends run one after another in the
+client process, as AnnData's do today: each append writes directly after the
+previous block in `data` and `indices`, so they are ordered anyway. No two
+writes overlap, which is why 3a needs no write blocks of whole shards (see
+3b).
+
 The stored result is the same as today, including the automatic shards, which
 the first block decides (see 1c). Each block is computed once, so per-block
 work runs once in total, as today.
@@ -2170,8 +2187,48 @@ set through `dask.config`, then an active `distributed` client, then Dask's
 default threaded scheduler), and with Dask's default lock, as AnnData does
 today. No new on-disk format: the stored array is the same as AnnData's.
 
+**Write blocks of whole shards.** On a `distributed` cluster the write runs in
+several worker processes, and Dask's default `da.store` lock is per process,
+so it does not stop two workers from writing to the same place. Without
+sharding that is fine: 1b's write blocks are whole stored chunks, so no two
+tasks write the same chunk. With AnnData's automatic sharding on (off by
+default), a shard can span several write blocks, and two workers could write
+the same shard at once and corrupt it. Today this cannot happen, because
+AnnData's `scheduler="threads"` keeps every write in one process.
+
+So write blocks consist of whole shards when the array is sharded:
+
+- Harpy creates the array first, then reads its shard shape (`array.shards`:
+  `None` when unsharded, always for Zarr v2), then rechunks and stores. Reading
+  the shard shape back is robust even though Zarr calls its automatic shard
+  choice experimental and liable to change.
+- `_rechunk_to_write_blocks` uses the shard's rows instead of the stored
+  chunk's as its unit. Its parameter `chosen_chunk_rows` becomes, for example,
+  `write_unit_rows`: the rows of a stored chunk, or of a shard when sharded.
+- Shards of Harpy's row-only chunks span all columns, so write blocks stay row
+  bands. Zarr's automatic shards hold 2 stored chunks along an axis only when
+  the array has more than 8 chunks along it, otherwise 1: at most about 8 MiB,
+  so write blocks barely change. A guard raises if a shard does not span all
+  columns, which cannot happen with Harpy's chunks.
+- No two tasks touch the same shard, so no lock across worker processes is
+  needed. Serializing the writes instead, with a `distributed.Lock` or by
+  writing from the client, would give up most of what 3b is for.
+- Explicit shards later (see "Deferred: explicit sharding", for example 32
+  stored chunks, about 128 MiB) work through the same mechanism, with write
+  blocks of at least one shard.
+
+Optional, measured but not required: with write blocks of whole chunks or
+shards, Dask's default `lock=True` is no longer needed. It serializes the
+writes within each process; `lock=False` would let a process compress and
+write in parallel, a possible speed-up that changes behavior.
+
+3a needs none of this: it appends sparse blocks one after another in the
+client process (see 3a's batched computes), so its writes never run
+concurrently.
+
 **Edge cases.** Arrays that are not 2-D, which 1b already chunks along the
-first axis; arrays without rows or columns.
+first axis; arrays without rows or columns; arrays with fewer rows than one
+shard.
 
 **Tests.**
 
@@ -2187,15 +2244,20 @@ first axis; arrays without rows or columns.
     motivation: with AnnData's `scheduler="threads"`, none is today;
   - under `dask.config.set(scheduler="synchronous")` inside the client, none
     is.
+- With AnnData's automatic sharding on, a sharded dense array written through
+  the local client: the values are correct, and every write block covers whole
+  shards. Also with input blocks that would split shards without the rechunk.
 - Zarr v2 and v3.
 - The 1b tests still pass; in-memory dense arrays still go through AnnData.
 
 **Acceptance.** With `scripts/harpy_write_passes.py` at 1 M cells, writing
-`X_pca` is no slower than today.
+`X_pca` is no slower than today. If measured, record the effect of
+`lock=False`.
 
-**Docs.** The docstring of `_write_element_with_layout` and the section
-"Writing AnnData components" in `docs/development/storage.md` (dense Dask
-writes follow the active scheduler).
+**Docs.** The docstrings of `_write_element_with_layout` and
+`_rechunk_to_write_blocks`, and the section "Writing AnnData components" in
+`docs/development/storage.md` (dense Dask writes follow the active scheduler,
+with write blocks of whole shards when sharded).
 
 #### Slice 3c (deferred): one compute per call
 
