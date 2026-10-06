@@ -102,10 +102,11 @@ def add_table_components(
         ``("raw", "var")`` provides these instead. Creating missing raw requires
         a non-None raw.X and either these names or a raw.var dataframe.
     overwrite
-        Ignored for unbacked SpatialData, matching :func:`harpy.table.add_table`.
-        When backed, allow replacement of targets present in memory or storage;
-        otherwise only additions absent from both are allowed. Explicit deletions
-        do not require overwrite permission. Validation still applies in both modes.
+        Allow replacing targets that exist in the store. Ignored for unbacked
+        SpatialData, matching :func:`harpy.table.add_table`. It only concerns
+        the store: a target present only in memory, never saved, is replaced
+        without it, as for unbacked SpatialData. Explicit deletions do not
+        require overwrite permission. Validation still applies in both modes.
 
     Returns
     -------
@@ -206,6 +207,8 @@ def _update_table_components(
     """Validate both destinations, then install inside the writer's rollback window."""
     if not isinstance(overwrite, bool):
         raise TypeError("overwrite must be a boolean.")
+    # overwrite only concerns the store, where the writer checks it: a component
+    # present only in memory is replaced without it, as for unbacked SpatialData.
     paths = _validate_component_paths(tuple(components), to_write=True) if components else ()
     deletions = _validate_deletion_paths(delete)
     _check_component_path_overlap((*paths, *deletions))
@@ -215,8 +218,6 @@ def _update_table_components(
     # mapping is expected is malformed, not a missing component.
     for path in (*paths, *deletions):
         value = _memory_component(table, path)
-        if group is not None and path in components and value is not _ABSENT and not overwrite:
-            raise FileExistsError(f"In-memory component {path!r} already exists; use overwrite=True.")
         if group is None and path in deletions and value is _ABSENT:
             log.info(f"Table {table_name!r}: component {path!r} is already absent; skipping deletion.")
 
