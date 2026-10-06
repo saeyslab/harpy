@@ -2055,6 +2055,24 @@ compute:
    `sparse_dataset(group).append(block)`;
 4. repeat for the next k blocks until all are written.
 
+**What a block is here.** As in AnnData, a block is a slice along the
+compressed axis, one per entry of `value.chunks[axis]` (rows for CSR, columns
+for CSC), spanning the whole other axis, even when the Dask array splits it;
+Dask joins those blocks when it computes the slice. A batch is k consecutive
+slices. Column-split sparse arrays keep working as they do today.
+
+**How the first block re-enters the callback.** The `write_func` that AnnData
+hands to the callback is its writer for Dask sparse arrays
+(`partial(..., _writer=writer)` in `anndata/_io/specs/registry.py`), which
+cannot write a SciPy matrix. Harpy writes the first block with a nested
+`write_dispatched(parent, key, first_block, callback=partial(_write_element_with_layout, root=root, logical_path=logical_path))`.
+That is public API, and the callback sees the same logical path, so 1c's
+chunks apply. The callback's comment that AnnData calls it a second time with
+the first block, and the docstring of the 1c test
+`test_sparse_matrices_get_the_fixed_chunk_length_whatever_their_first_block`,
+which names `write_dask_sparse`, then describe Harpy's own nested call
+instead.
+
 ```
 batch 1:  dask.compute(block 0, …, block k−1)     <- parallel: worker threads, or distributed workers
           ↓ returns k SciPy matrices to the client process
@@ -2080,17 +2098,29 @@ work runs once in total, as today.
 scheduler is the one `dask.base.get_scheduler()` resolves, which applies
 Dask's own precedence: a scheduler set through `dask.config` overrides an
 active `distributed` client, and without either it returns `None`, Dask's
-default for arrays, the threaded scheduler. k is then: for a `distributed`
-client, the total number of worker threads; for the threaded scheduler, its
-`num_workers` setting, by default the number of CPUs
-(`dask.system.CPU_COUNT`); for the synchronous scheduler, 1. A batch then
-keeps every thread busy. Memory: the k computed blocks of a batch are held until they are
-appended, in the client process with `distributed`: about k blocks of the
-input's block size, for example about 1.5 GB for 12 threads and blocks of
-about 128 MiB, against one block today. A parallel compute of k blocks holds
-about as much anyway. To use less, lower Dask's `array.chunk-size`, which
-shrinks every block, the same memory target as everywhere else. A separate
-setting for k is not part of 3a.
+default for arrays, the threaded scheduler. k is then:
+
+- for a `distributed` client, the total number of worker threads;
+- for the threaded scheduler, its `num_workers` setting, by default the number
+  of CPUs (`dask.system.CPU_COUNT`);
+- for Dask's processes scheduler, also `num_workers` or the number of CPUs;
+- for the synchronous scheduler, 1;
+- for any other scheduler function, 1, to be safe.
+
+A batch then keeps every thread busy.
+
+**Memory: k sets the concurrency, not a memory limit.** The k computed blocks
+of a batch are held until they are appended, in the client process with
+`distributed`, where the whole batch is gathered. Memory is therefore about k
+times the block size of the value being written, for example about 1.5 GB for
+12 threads and blocks of about 128 MiB, against one block today. A parallel
+compute of k blocks holds about as much anyway. Harpy does not choose that
+block size: whoever built the Dask array did. Dask's `array.chunk-size` only
+affects blocks chosen after it is set, such as the `"auto"` blocks of
+`read_table` and Dask's own `"auto"` chunking; an existing Dask array keeps
+its blocks. To use less memory, set `array.chunk-size` before reading the
+table, or rechunk the value before writing it. A separate setting for k is not
+part of 3a.
 
 What batching does not remove: a global reduction still runs once per batch,
 ⌈N/k⌉ times. With 20 blocks and 12 threads that is twice instead of 20 times;
@@ -2172,8 +2202,21 @@ it:
 - the array settings AnnData derives from `dataset_kwargs`: for Zarr v3, the
   compressor conversion and `shards="auto"` when
   `anndata.settings.auto_shard_zarr_v3` is on and no shards are given
-  (`zarr_v3_compressor_compat` and `zarr_v3_sharding`, same module);
+  (`zarr_v3_compressor_compat` and `zarr_v3_sharding` in
+  `anndata/_io/specs/methods.py`);
 - 1b's stored chunks, already in `dataset_kwargs`.
+
+Harpy copies these two rules rather than importing AnnData's private helpers:
+`compressor` is renamed to `compressors`, which only matters when a compressor
+is passed, and Harpy passes none; and `shards="auto"` is added when
+`anndata.settings.auto_shard_zarr_v3` is on and no shards are given. The test
+that compares a dense write with AnnData's own catches any drift.
+
+For a Zarr v2 store with automatic sharding on, Harpy does what AnnData does:
+`zarr_v3_sharding` adds `shards="auto"` whatever the store's format, and
+AnnData refuses that combination as its own write format
+(`zarr_write_format=2`). Harpy deliberately keeps that behavior rather than
+improving on it.
 
 Harpy creates the array at its full size, as AnnData does, not empty and then
 resized: with automatic sharding, Zarr chooses the shard shape when the array
@@ -2187,40 +2230,55 @@ set through `dask.config`, then an active `distributed` client, then Dask's
 default threaded scheduler), and with Dask's default lock, as AnnData does
 today. No new on-disk format: the stored array is the same as AnnData's.
 
-**Write blocks of whole shards.** On a `distributed` cluster the write runs in
-several worker processes, and Dask's default `da.store` lock is per process,
-so it does not stop two workers from writing to the same place. Without
-sharding that is fine: 1b's write blocks are whole stored chunks, so no two
-tasks write the same chunk. With AnnData's automatic sharding on (off by
-default), a shard can span several write blocks, and two workers could write
-the same shard at once and corrupt it. Today this cannot happen, because
-AnnData's `scheduler="threads"` keeps every write in one process.
+**The lock.** `da.store` with its default `lock=True` asks Dask for a lock that
+suits the active scheduler (`get_scheduler_lock` in `dask/utils.py`): a
+`distributed.lock.Lock` for a `distributed` client, a multiprocessing lock for
+the processes scheduler, and a `SerializableLock` otherwise. So on a cluster
+the writes are coordinated across all workers, not only within one process,
+and 3b is correct with the default lock, whatever the write blocks. The lock
+surrounds only the write to the target: the computations still run on the
+workers, and only the writes take turns, across the whole cluster. 3b keeps
+the default lock.
 
-So write blocks consist of whole shards when the array is sharded:
+**Write blocks of whole shards.** When the array is sharded (AnnData's
+automatic sharding, off by default), write blocks consist of whole shards, for
+two reasons:
+
+- efficiency: a write block that covers part of a shard makes Zarr read,
+  modify and rewrite that shard, so a shard spanning several write blocks
+  would be written several times. This is the reason 1b aligns write blocks
+  with stored chunks;
+- it is what makes the optional `lock=False` below safe: no two tasks then
+  touch the same shard.
+
+How:
 
 - Harpy creates the array first, then reads its shard shape (`array.shards`:
-  `None` when unsharded, always for Zarr v2), then rechunks and stores. Reading
-  the shard shape back is robust even though Zarr calls its automatic shard
-  choice experimental and liable to change.
+  `None` when unsharded, always for Zarr v2), then rechunks and stores.
 - `_rechunk_to_write_blocks` uses the shard's rows instead of the stored
   chunk's as its unit. Its parameter `chosen_chunk_rows` becomes, for example,
   `write_unit_rows`: the rows of a stored chunk, or of a shard when sharded.
 - Shards of Harpy's row-only chunks span all columns, so write blocks stay row
-  bands. Zarr's automatic shards hold 2 stored chunks along an axis only when
-  the array has more than 8 chunks along it, otherwise 1: at most about 8 MiB,
-  so write blocks barely change. A guard raises if a shard does not span all
-  columns, which cannot happen with Harpy's chunks.
-- No two tasks touch the same shard, so no lock across worker processes is
-  needed. Serializing the writes instead, with a `distributed.Lock` or by
-  writing from the client, would give up most of what 3b is for.
+  bands. A guard raises if a shard does not span all columns, which cannot
+  happen with Harpy's chunks.
+- Shard sizes are read, not assumed. With the installed Zarr, Harpy's 4 MiB
+  row-only chunks get shards of 2 stored chunks by default, and of 1 stored
+  chunk with `array.target_shard_size_bytes` set: Zarr only grows a shard
+  while every axis still fits, and the column axis is already whole. So write
+  blocks barely change. That is current behavior, not a guarantee: Zarr calls
+  its automatic shard choice experimental and liable to change, which is why
+  Harpy reads `array.shards`.
 - Explicit shards later (see "Deferred: explicit sharding", for example 32
   stored chunks, about 128 MiB) work through the same mechanism, with write
   blocks of at least one shard.
 
-Optional, measured but not required: with write blocks of whole chunks or
-shards, Dask's default `lock=True` is no longer needed. It serializes the
-writes within each process; `lock=False` would let a process compress and
-write in parallel, a possible speed-up that changes behavior.
+**Optional, measured but not required: `lock=False`.** With write blocks of
+whole chunks or shards, no two tasks write the same chunk or shard, so the lock
+is not needed for correctness. With the default lock, writes are serialized
+across the whole cluster, and within a process under the threaded scheduler;
+`lock=False` would let the workers compress and write in parallel. A possible
+speed-up, especially on a cluster, that changes behavior, so it is measured
+before it is adopted.
 
 3a needs none of this: it appends sparse blocks one after another in the
 client process (see 3a's batched computes), so its writes never run
