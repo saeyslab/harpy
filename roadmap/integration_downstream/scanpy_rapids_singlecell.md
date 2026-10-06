@@ -1969,7 +1969,12 @@ SpatialData (see "The SpatialData adapter" below).
      helper never replaces the stored `X` implicitly.
 
    For the scanpy pipeline the call becomes
-   `hp.tb.write_table_updates(store, table_name=..., adata=adata, x_to=("layers", "log1p"))`.
+   `hp.tb.write_table_updates(store, table_name=..., adata=adata, x_to=("layers", "log1p"), overwrite=True)`.
+   A scanpy run changes `obs` (for example a new `leiden` column), `var` and
+   `uns` entries, which all exist in storage, so a typical scanpy write-back
+   needs `overwrite=True` (see "`overwrite`" below), just as the recommended
+   `write_table_components` pattern does today. Without it, the call raises
+   before anything is written.
 
 **Overview: the decision for each component.** The sections below detail each
 step. Components in storage but missing from `adata` are never deleted, so the
@@ -2108,6 +2113,11 @@ the user changed.
   stored element: the resolved store root and the element's path in the store.
   The logical component path alone is not enough, because tables live under
   `tables/<name>`.
+- **Only local stores are registered.** The registry identifies an element by
+  its resolved store root, which is clear for a `LocalStore`. Arrays read from
+  other stores, in memory or remote, are not registered, so they count as
+  changed and are rewritten. That is conservative: never wrong, only extra
+  work.
 - **Names identify the store too** (checked): two stores with the same layout
   give different names, `make_dask_chunk-51e8…` and `make_dask_chunk-ce47…`
   for `X`, and `from-zarr-f13b…` and `from-zarr-6ab1…` for a dense `obsm`
@@ -2248,6 +2258,16 @@ the safe side: a false "changed" only rewrites a small dataframe, while a false
 "unchanged" would lose data. If a dtype does not survive a write and read
 unchanged, `obs` is simply rewritten each time.
 
+**Written whole: removed columns and nested keys disappear.** `obs` and `var`
+are written as whole dataframes, and `uns` per top-level key. So a column
+removed from `adata.obs` or `adata.var` is removed from storage as well, and a
+nested key removed under, for example, `uns["pca"]` disappears when
+`uns["pca"]` is rewritten. "Missing components are never deleted" applies to
+components, that is `obs`, `var`, top-level `uns` keys and matrices, not to
+columns or nested keys inside a component that is written. That is correct:
+the written component is exactly the one in `adata`. A removed top-level `uns`
+key, by contrast, is a missing component and stays in storage.
+
 **Comparing `uns`.**
 
 - Per top-level key: a new or changed `uns["pca"]` is written whole, at
@@ -2271,12 +2291,23 @@ unchanged, `obs` is simply rewritten each time.
 - it compares the attached table with the store, so there is no separate
   `adata` argument. The typical flow: read with
   `hp.io.read_zarr(..., table_mode="lazy")`, run scanpy on
-  `sdata.tables["counts"]` in place, then call `add_table_updates`;
+  `sdata.tables["counts"]` in place, then call
+  `add_table_updates(sdata, table_name="counts", x_to=("layers", "log1p"), overwrite=True)`,
+  with `overwrite=True` for the same reason as the store-path function;
 - backed SpatialData: it writes with the same staging and rollback, then
   installs the reopened changed components, lazily, as `add_table_components`
   does. When `x_to` moved `X`, it also reinstalls `X` from storage, so that the
   live table matches the store; otherwise the next call would see `X` as
   changed again and copy it once more;
+- it reuses `_update_table_components` (`src/harpy/table/io/_components.py`),
+  the machinery of `add_table_components`: validation, the write through
+  `_write_table_operation`, installing the reopened components inside the
+  writer's rollback window, and restoring the live slots on failure. That
+  relies on the prerequisite below: today its in-memory overwrite check would
+  require `overwrite=True` for every component, since all of them come from
+  the attached table. One small addition: a parameter such as
+  `reopen_also=(("X",),)`, so that `X` is reopened and reinstalled after `x_to`
+  inside the same rollback window, although `X` itself was not written;
 - unbacked SpatialData, without `sdata.path`: it raises. There is no store to
   compare with, and the attached table already holds the changes; silently
   doing nothing could suggest that the results were saved. The error names the
@@ -2289,6 +2320,47 @@ unchanged, `obs` is simply rewritten each time.
     `hp.tb.write_table_updates(store, table_name=..., adata=sdata.tables[name])`.
     It compares against that store and recognises the unchanged lazy matrices
     through the registry.
+
+**Prerequisite: `overwrite` means "in the store" for every backed adapter.**
+Today three adapters also check in-memory presence for backed SpatialData:
+`add_table_components` (through `_update_table_components`),
+`add_table_components_by_region`, and `add_table` for a whole table. A path,
+or table, that exists only in memory needs `overwrite=True` there, to protect
+unsaved local data. For unbacked SpatialData, `overwrite` is already ignored,
+and in-memory values are always replaced. The protection is weak: the adapters
+replace exactly the paths the caller names, so it only catches a name
+collision with something unsaved; and for `add_table_updates` it protects
+nothing, since the values it writes are the in-memory values themselves.
+
+So, before the helper, `overwrite` becomes "in the store" for every backed
+adapter:
+
+| Backed SpatialData         | Today                  | After                                                |
+| -------------------------- | ---------------------- | ---------------------------------------------------- |
+| path exists in storage     | needs `overwrite=True` | needs `overwrite=True` (unchanged)                   |
+| path exists only in memory | needs `overwrite=True` | replaced without asking, as for unbacked SpatialData |
+| path exists in neither     | allowed                | allowed                                              |
+
+- **Where:** the in-memory check is removed in `_update_table_components`
+  (`src/harpy/table/io/_components.py`), in `add_table_components_by_region`
+  (`src/harpy/table/io/_components_by_region.py`) and in `add_table`
+  (`src/harpy/table/io/_add_table.py`); their docstrings say that `overwrite`
+  is about the store only.
+- **Compatibility:** the two component adapters are not on `main`, so changing
+  them is free. `add_table` is released with this check (v0.4.4,
+  `src/harpy/table/_manager.py`): after the change, a table attached to backed
+  SpatialData but never saved can be replaced without `overwrite=True`; a
+  stored table still needs it. One rule for all adapters is clearer than an
+  exception for whole tables, so `add_table` is aligned too, without backward
+  compatibility.
+- **Tests:** `test_backed_component_presence_controls_overwrite_and_new_entry_fills`
+  ("Memory presence requires overwrite") and its counterparts for
+  `add_table_components` and `add_table` change: a path present only in memory
+  is replaced without `overwrite=True`; one present in storage still needs it.
+- **Considered and rejected:** keeping the check, but skipping it when the
+  supplied value is the in-memory object itself (`value is in_memory_value`).
+  That would also let the helper reuse `_update_table_components`, but it adds
+  a subtle exception and leaves `overwrite` with two meanings.
 
 **Return values.**
 
@@ -2309,9 +2381,11 @@ unchanged, `obs` is simply rewritten each time.
 
 **Tests, at least.**
 
-- The recommended scanpy pipeline with `x_to=("layers", "log1p")`: exactly the
-  expected components are written, the processed values land in the layer, the
-  stored `X` is untouched, and the reopened table matches.
+- The recommended scanpy pipeline with `x_to=("layers", "log1p")` and
+  `overwrite=True`: exactly the expected components are written, the processed
+  values land in the layer, the stored `X` is untouched, and the reopened table
+  matches. Without `overwrite=True` the same call raises, because `obs`, `var`
+  and `uns` entries exist in storage, and nothing is written.
 - A changed `X` without `x_to` raises with the explanation, and nothing is
   written; with `x_to=("X",)` the stored `X` is replaced.
 - An eager table with an untouched `X` writes only its new and changed parts;
@@ -2333,7 +2407,8 @@ unchanged, `obs` is simply rewritten each time.
   the same layout are not mixed up; a copied read (`da.Array.copy()`,
   `adata.copy()`) is recognised; AnnData's `read_elem_lazy` with the same
   chunks is recognised; an array with an unregistered name, such as a real
-  rechunk, counts as changed.
+  rechunk, counts as changed; a lazy read from an in-memory Zarr store is not
+  registered and counts as changed.
 - A persisted read counts as unchanged. With an overwrite of the stored element
   between the read and the helper, the old persisted values are not written
   back, and the store keeps the newer data.
@@ -2351,11 +2426,17 @@ unchanged, `obs` is simply rewritten each time.
   changed value each count as changed; an identical dataframe is not written.
 - `uns`: a changed nested value rewrites its top-level key only; NaN equals
   NaN; a changed `uns["spatialdata_attrs"]` raises.
+- Written whole: a column removed from `adata.obs` is removed from storage; a
+  nested key removed under `uns["pca"]` disappears with the rewrite of
+  `uns["pca"]`; a removed top-level `uns` key stays in storage.
 - `raw`: a `raw` created by `adata.raw = adata` is written whole; a changed
   `raw.var_names` raises; an unchanged `raw` is not written.
 - The adapter, on backed SpatialData: the same components are written as by
   the store-path function, the reopened components are installed lazily, and
   after `x_to` the live `X` is the stored one, so a second call writes nothing.
+- The adapter writes a component that is new in storage without
+  `overwrite=True`, although it is in the attached table; a changed component
+  that exists in storage still needs `overwrite=True`.
 - The adapter on unbacked SpatialData raises, and the error names the three
   ways out. For a table read lazily from a store and attached to unbacked
   SpatialData, `write_table_updates` with that store writes only its changes.
