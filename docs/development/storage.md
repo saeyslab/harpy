@@ -586,6 +586,10 @@ defaults. The regional writer reads existing matrices with its own
 merged result is written like any other matrix, in Harpy's stored chunks, so the
 stored layout of an older target changes.
 
+Lazy reads of matrices from a local store are registered by their Dask name, so
+that a table write-back can recognise matrices not changed since they were read;
+`_lazy_read_source` explains how the registry is filled and consulted.
+
 Lazy and backed matrix reads accept dense `array`/`string-array` encoding version
 `0.2.0` and CSR/CSC encoding version `0.1.0`. Harpy rejects other matrix encodings
 or versions with `ValueError` before decoding. CSR/CSC version checks also apply

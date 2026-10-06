@@ -293,8 +293,14 @@ def _decode_anndata_element(
 # A Dask operation that changes the graph gives a new name, while copies,
 # pickling, persist() and a rechunk to the same chunks keep it; so an array
 # whose name is registered is a read that has not been changed since. The
-# name identifies a computation, not the state of the store: it does not
-# promise that the values equal what is stored now.
+# name is derived from what will be computed (read this element, with these
+# chunks), not from the values: after the stored element is overwritten, a new
+# read gets the same name. So a registered name means the array is still an
+# untouched read of that element, with no operation applied since: not that its
+# values equal what is stored now. The registry is a catalogue of read
+# fingerprints, not a snapshot of a table: reads only add entries, and it never
+# records which AnnData an array belongs to. See _lazy_read_source for how the
+# registry is filled, left alone and consulted.
 _LAZY_READS: dict[str, tuple[Path, str]] = {}
 
 
@@ -320,6 +326,29 @@ def _lazy_read_source(value: object) -> tuple[Path, str] | None:
     lazy read created and nothing has changed since: a derived array, a read
     from a store other than a ``LocalStore``, or an array built outside Harpy's
     readers under another name.
+
+    Examples
+    --------
+    The registry is filled when a matrix is read lazily, left alone while it
+    is processed, and consulted only when the table is written back::
+
+        adata = read_table(store, table_name="counts", mode="lazy")
+            # registry: "make_dask_chunk-51e8…" -> (sdata.zarr, "tables/counts/X")
+            #           "make_dask_chunk-77aa…" -> (sdata.zarr, "tables/counts/layers/counts")
+
+        sc.pp.normalize_total(adata)
+        sc.pp.log1p(adata)
+            # adata.X is a new Dask array with a new name, such as "log1p-9c3d…";
+            # the registry is not touched
+
+        _lazy_read_source(adata.X)                 # None: derived, so changed
+        _lazy_read_source(adata.layers["counts"])  # (sdata.zarr, "tables/counts/layers/counts")
+
+    The caller compares the result with the component's own path in the
+    target store: only a read of exactly that element counts as unchanged. A
+    registered read assigned elsewhere, for example
+    ``adata.layers["copy"] = adata.layers["counts"]``, is a read of another
+    element, so it is written.
     """
     if not isinstance(value, da.Array):
         return None
