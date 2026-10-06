@@ -1942,6 +1942,16 @@ every output and its identities (gap 3): the recommended scanpy pattern passes
 `hp.tb.add_table_updates`, does the same for a table attached to backed
 SpatialData (see "The SpatialData adapter" below).
 
+**Slices.** Phase 3 is implemented in four slices, each with its own tests, as
+Phase 1 was:
+
+| Slice | Content                                                                                                                                        | Depends on |
+| ----- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| 3a    | `overwrite` means "in the store" for every backed adapter, `add_feature_matrix` included, with docstrings and tests (see "Prerequisite" below) | nothing    |
+| 3b    | the registry of Dask names in the lazy decoder (see "How a read is recognised" below)                                                          | nothing    |
+| 3c    | the comparison rules (`obs`/`var`, `uns`, matrices with the two cost rules) and `write_table_updates`, with `x_to` and the axis errors         | 3b         |
+| 3d    | `add_table_updates` on `_update_table_components`, with `reopen_also`                                                                          | 3a, 3c     |
+
 **The contract.**
 
 1. **Is a component changed?** One rule for every component, `X` included:
@@ -1994,12 +2004,16 @@ flowchart TD
     equal -- yes --> unchanged
     equal -- no --> changed["Changed"]
     held -- "derived Dask array, or backed<br/>handle to another element" --> changed
+    new --> isx
     changed --> isx{"Is it X?"}
     isx -- no --> dest["Destination: its own path"]
     isx -- yes --> xto{"x_to given?"}
-    xto -- no --> x_error[/"Raise, explaining x_to"/]
-    xto -- yes --> xdest["Destination: x_to"]
-    new --> write
+    xto -- no --> xnew{"X new, storage<br/>has no X?"}
+    xnew -- yes --> dest
+    xnew -- no --> x_error[/"Raise, explaining x_to"/]
+    xto -- yes --> collide{"x_to a layer that adata<br/>also holds, new or changed?"}
+    collide -- yes --> collide_error[/"Raise: two values<br/>for one path"/]
+    collide -- no --> xdest["Destination: x_to"]
     dest --> exists{"Destination exists<br/>in storage?"}
     xdest --> exists
     exists -- no --> write["Write"]
@@ -2237,8 +2251,28 @@ definition, and the `x_to` destination, and it is the rule of
 
 **`x_to` details.**
 
-- If `adata.layers` also holds the destination key, raise: two values would
-  compete for one path.
+- Allowed values: `("layers", key)` and `("X",)`; anything else raises. An
+  `obsm` entry would fit the shape, but it means something else.
+- `x_to` applies whenever `X` would be written, new or changed. When storage
+  has no `X`, which is rare, a new `X` goes to `x_to` if it is given, and to
+  `X` otherwise: there are no stored counts to protect.
+- A collision raises only when both hold: `X` is actually redirected, because
+  it is new or changed, and `adata.layers[key]` would itself be written,
+  because it is new or changed. Then two values compete for one path, and the
+  helper does not know which one is meant. The check is about conflicting
+  values, not permission, so `overwrite=True` does not lift it. Otherwise
+  there is no conflict:
+
+  | Situation                                                                        | Result                                                                  |
+  | -------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+  | a second call with `X` unchanged, the layer present from the first call          | no redirect, no check; nothing is written for `X`                       |
+  | a re-run of scanpy after reopening: `X` changed, `layers[key]` an unchanged read | `X` goes to the layer, which needs `overwrite=True` as the layer exists |
+  | `X` changed, and `layers[key]` changed too, for example assigned another value   | raise: two values for one path                                          |
+
+  Checking only whether `adata.layers` holds the key would raise in the first
+  two cases: a second adapter call would fail although it writes nothing for
+  `X`, and so would every re-run after reopening.
+
 - If the destination already exists in storage, `overwrite=True` is needed,
   whatever its values. The destination is never compared with `X`: `X` has
   already been found changed, and comparing a derived Dask `X` would mean
@@ -2273,10 +2307,13 @@ key, by contrast, is a missing component and stays in storage.
 - Per top-level key: a new or changed `uns["pca"]` is written whole, at
   `("uns", "pca")`, not at its nested paths. Simpler, and the entries are
   small.
-- The comparison reuses `_same_metadata` (`src/harpy/table/io/_write_validation.py`),
+- The comparison follows `_same_metadata` (`src/harpy/table/io/_write_validation.py`),
   which recurses into mappings and compares leaves with `np.array_equal`,
   extended so that NaN equals NaN, a dataframe in `uns` follows the dataframe
   rule, and a value whose comparison raises or is ambiguous counts as changed.
+  It is a separate comparator: `_same_metadata` also guards
+  `uns["spatialdata_attrs"]` in `_validate_spatialdata_attrs_unchanged`, and
+  changing it for NaN would change that validation too.
 - `uns["spatialdata_attrs"]` is protected: unchanged, it is skipped; changed,
   the helper raises and points to `write_table`, as
   `_validate_spatialdata_attrs_unchanged` does for component writes.
@@ -2322,10 +2359,11 @@ key, by contrast, is a missing component and stays in storage.
     through the registry.
 
 **Prerequisite: `overwrite` means "in the store" for every backed adapter.**
-Today three adapters also check in-memory presence for backed SpatialData:
+Today four functions also check in-memory presence for backed SpatialData:
 `add_table_components` (through `_update_table_components`),
-`add_table_components_by_region`, and `add_table` for a whole table. A path,
-or table, that exists only in memory needs `overwrite=True` there, to protect
+`add_table_components_by_region`, `add_table` for a whole table, and
+`add_feature_matrix`, for its output table and its feature key. A path, or
+table, that exists only in memory needs `overwrite=True` there, to protect
 unsaved local data. For unbacked SpatialData, `overwrite` is already ignored,
 and in-memory values are always replaced. The protection is weak: the adapters
 replace exactly the paths the caller names, so it only catches a name
@@ -2343,20 +2381,31 @@ adapter:
 
 - **Where:** the in-memory check is removed in `_update_table_components`
   (`src/harpy/table/io/_components.py`), in `add_table_components_by_region`
-  (`src/harpy/table/io/_components_by_region.py`) and in `add_table`
-  (`src/harpy/table/io/_add_table.py`); their docstrings say that `overwrite`
-  is about the store only.
+  (`src/harpy/table/io/_components_by_region.py`), in `add_table`
+  (`src/harpy/table/io/_add_table.py`) and in `add_feature_matrix`
+  (`src/harpy/table/_add_feature_matrix.py`); their docstrings say that
+  `overwrite` is about the store only. `add_feature_matrix` has two such
+  checks: `overwrite_output_table`, when `output_table_name in sdata.tables`,
+  and `overwrite_feature_key`, when the feature key is in `adata.obsm` or in
+  its `uns` metadata. Both keep only the check against storage.
 - **Compatibility:** the two component adapters are not on `main`, so changing
-  them is free. `add_table` is released with this check (v0.4.4,
-  `src/harpy/table/_manager.py`): after the change, a table attached to backed
-  SpatialData but never saved can be replaced without `overwrite=True`; a
-  stored table still needs it. One rule for all adapters is clearer than an
-  exception for whole tables, so `add_table` is aligned too, without backward
-  compatibility.
+  them is free. `add_table` and `add_feature_matrix` are released with such a
+  check (v0.4.4: `src/harpy/table/_manager.py` for `add_table`; for
+  `add_feature_matrix`, a raise for `feature_key in adata.obsm` without
+  `overwrite_feature_key`, in both modes, which this branch already limited to
+  backed SpatialData). After the change, a table or feature matrix attached to
+  backed SpatialData but never saved can be replaced without permission; a
+  stored one still needs it. One rule for all is clearer than exceptions, so
+  both are aligned too, without backward compatibility.
 - **Tests:** `test_backed_component_presence_controls_overwrite_and_new_entry_fills`
   ("Memory presence requires overwrite") and its counterparts for
   `add_table_components` and `add_table` change: a path present only in memory
   is replaced without `overwrite=True`; one present in storage still needs it.
+  For `add_feature_matrix`,
+  `test_feature_overwrite_requires_permission_for_attached_or_stored_entries`
+  (`src/harpy/_tests/test_table/test_add_feature_matrix_storage.py`) changes:
+  its `memory_only` case no longer raises, while `disk_only` and `both` still
+  do; the same holds for `overwrite_output_table`.
 - **Considered and rejected:** keeping the check, but skipping it when the
   supplied value is the in-memory object itself (`value is in_memory_value`).
   That would also let the helper reuse `_update_table_components`, but it adds
@@ -2396,7 +2445,14 @@ adapter:
   with another number of stored values reads no values; one with the same
   number stops after the first differing block; an equal one reads every block
   and writes nothing.
-- A destination key that `adata.layers` also holds raises.
+- The `x_to` collision rule, in its three cases: a second adapter call with `X`
+  unchanged, the layer present from the first call, writes nothing; a re-run
+  after reopening, with `X` changed and the layer an unchanged read, writes `X`
+  to the layer with `overwrite=True`; `X` changed and the layer changed too
+  raises, also with `overwrite=True`, and nothing is written.
+- `x_to` other than `("layers", key)` or `("X",)`, for example an `obsm`
+  entry, raises. Without a stored `X`, a new `X` goes to `x_to` when given,
+  and to `X` otherwise.
 - A table filtered by cells, and one filtered by genes, raise, and the error
   names the three ways out; nothing is written.
 - An unchanged table writes nothing.
@@ -2442,6 +2498,18 @@ adapter:
   SpatialData, `write_table_updates` with that store writes only its changes.
 - A failure in the adapter restores the live table, as for
   `add_table_components`.
+
+**Docs.**
+
+- The docstrings of `write_table_updates` and `add_table_updates`: the
+  contract, `x_to`, `overwrite`, what is written whole, and what the helper
+  does and does not protect against.
+- A short contract in `docs/development/storage.md`, pointing to the
+  docstrings, as for the other writers.
+- The exports in `harpy.table` and the table I/O section of `docs/api.md`.
+- For slice 3a, the docstrings of the four functions whose `overwrite` changes:
+  `add_table_components`, `add_table_components_by_region`, `add_table` and
+  `add_feature_matrix`.
 
 **Relation to Phase 4.** The helper decides which components to write, and
 passes them to `write_table_components` in one call. It does not change how
