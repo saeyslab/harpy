@@ -141,8 +141,14 @@ def write_table_updates(
 
     Returns None. ``adata`` is not modified: after ``x_to``, ``adata.X`` still
     holds the written values and ``adata.layers`` lacks the destination. Reopen
-    the table to get one that matches the store; called again with the same
-    ``adata``, the function writes ``X`` again.
+    the table to get one that matches the store, rather than reusing ``adata``:
+    its lazy matrices read the store when they are computed. After
+    ``x_to=("X",)``, for example, ``adata.X`` would apply its processing again,
+    to the replaced and already processed ``X``; depending on the stored layout,
+    that fails or silently gives wrong values. After ``x_to`` to a layer, calling
+    again with the same ``adata`` writes ``X`` again.
+    :func:`harpy.table.add_table_updates` reinstalls what it writes in a table
+    attached to SpatialData, so that table needs no reopening.
 
     See Also
     --------
