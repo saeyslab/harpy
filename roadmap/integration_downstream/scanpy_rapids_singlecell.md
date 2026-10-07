@@ -916,6 +916,10 @@ Design notes:
 - Components missing from `adata` should not be deleted implicitly. Deletion
   stays explicit through `delete_table_components`.
 
+Phase 3 implements the helper as `hp.tb.write_table_updates`, with `x_to` for a
+processed `X`, and `hp.tb.add_table_updates` for a table attached to backed
+SpatialData; see "Phase 3: write-back helper" for the contract.
+
 ### Gap 4: stale lazy tables after an overwrite
 
 **Evidence (verified).** After `write_table(..., overwrite=True)` replaced a
@@ -1065,40 +1069,40 @@ adata.obsm["X_pca"] = adata.obsm["X_pca"].compute()
 sc.pp.neighbors(adata)
 sc.tl.leiden(adata, flavor="igraph", n_iterations=2)
 
-hp.tb.write_table_components(
-    store,
-    table_name=table_name,
-    components={
-        ("obs",): adata.obs,
-        ("var",): adata.var,
-        ("layers", "log1p"): adata.X,
-        ("obsm", "X_pca"): adata.obsm["X_pca"],
-        ("varm", "PCs"): adata.varm["PCs"],
-        ("obsp", "connectivities"): adata.obsp["connectivities"],
-        ("obsp", "distances"): adata.obsp["distances"],
-        ("uns", "log1p"): adata.uns["log1p"],
-        ("uns", "hvg"): adata.uns["hvg"],
-        ("uns", "pca"): adata.uns["pca"],
-        ("uns", "neighbors"): adata.uns["neighbors"],
-        ("uns", "leiden"): adata.uns["leiden"],
-    },
-    overwrite=True,
-)
+# Write only what is new or changed. The processed X goes to a layer, and the
+# stored X, the counts, stays as it is. overwrite=True because obs and var
+# exist in storage, as do the results of an earlier run.
+hp.tb.write_table_updates(store, table_name=table_name, adata=adata, x_to=("layers", "log1p"), overwrite=True)
 # Reopen instead of reusing lazy data from before the write.
 adata = hp.tb.read_table(store, table_name=table_name, mode="lazy")
 ```
 
-The supplied `obs` and `var` dataframes provide the observation and feature
-identities that the matrix components are checked against. If cells or genes
-were filtered, use `hp.tb.write_table(..., overwrite=True)` instead.
+`write_table_updates` compares the table with the store and writes the twelve
+components that this pipeline creates or changes, in one
+`write_table_components` call: `obs`, `var`, the `log1p` layer,
+`obsm["X_pca"]`, `varm["PCs"]`, the two neighbor graphs in `obsp` and five
+`uns` entries. If cells or genes were filtered, it raises and names the ways
+out, such as `hp.tb.write_table(..., overwrite=True)`. For SpatialData read
+with `hp.io.read_zarr(..., table_mode="lazy")`,
+`hp.tb.add_table_updates(sdata, table_name=table_name, x_to=("layers", "log1p"), overwrite=True)`
+does the same and reinstalls the written components in the attached table,
+so that reopening is not needed.
 
-Until gap 1 is fixed:
+To choose the components yourself, `hp.tb.write_table_components` remains
+available: list each path, such as `("obsm", "X_pca")`, and supply the `obs`
+and `var` dataframes, or `obs_identity` and `var_names`, as the identities
+that the matrix components are checked against.
 
-- for dense tables, call `adata.X = adata.X.rechunk((chunk_rows, -1))` after
-  reading and use `svd_solver="covariance_eigh"`;
-- for CSC tables, such as those written by Harpy's Visium readers before
-  slice 1d, re-run the reader, or convert `X` to row-chunked CSR yourself (see
-  "CSC matrices" in gap 1), preferably once, storing the result;
+Since Phase 1, lazy reads give dense and CSR matrices in blocks of whole rows,
+whatever their stored chunks, so no rechunk is needed after reading. What
+remains:
+
+- dense PCA needs `svd_solver="covariance_eigh"`, or dask-ml (see "Upstream
+  limitations to document");
+- CSC tables, such as those written by Harpy's Visium readers before slice 1d
+  or by other tools, are still read in blocks of genes: re-run the reader, or
+  convert `X` to row-chunked CSR yourself (see "CSC matrices" in gap 1),
+  preferably once, storing the result;
 - on machines without TBB, run dense scaling with
   `dask.config.set(scheduler="synchronous")`.
 
@@ -1137,7 +1141,7 @@ scanpy wrappers, and they do not switch defaults such as `hp.io.read_zarr`'s
 `table_mode="lazy"`. Failures of legacy functions on lazy tables are accepted
 until Phase 6; see "Accepted during Phases 1–5" in gap 5.
 
-### Phase 1: row-major layouts for dense and sparse matrices
+### Phase 1: row-major layouts for dense and sparse matrices (implemented)
 
 Implement gap 1 in four slices, in this order, followed by a fifth slice for
 regional writes. Gap 1 calls row-only writes the primary fix, because they give
@@ -1931,7 +1935,7 @@ containing:
 
 Link it from the table I/O section of `docs/api.md`.
 
-### Phase 3: write-back helper
+### Phase 3: write-back helper (implemented)
 
 **Goal.**
 `hp.tb.write_table_updates(store, table_name=..., adata=..., x_to=None, overwrite=...)`
@@ -1950,7 +1954,7 @@ Phase 1 was:
 | 3a (implemented) | `overwrite` means "in the store" for every backed adapter, `add_feature_matrix` included, with docstrings and tests (see "Prerequisite" below)                                                          | nothing    |
 | 3b (implemented) | the registry of Dask names in the lazy decoder (see "How a read is recognised" below)                                                                                                                   | nothing    |
 | 3c (implemented) | in two steps: (i) the comparison helpers (`obs`/`var`, `uns`, matrices with the two cost rules, the identity checks for reads and handles); (ii) `write_table_updates`, with `x_to` and the axis errors | 3b         |
-| 3d               | `add_table_updates` on `_update_table_components`, with `reopen_also`                                                                                                                                   | 3a, 3c     |
+| 3d (implemented) | `add_table_updates` on `_update_table_components`, with `reopen_also`                                                                                                                                   | 3a, 3c     |
 
 Slice 3c is one slice in two reviewable steps:
 
