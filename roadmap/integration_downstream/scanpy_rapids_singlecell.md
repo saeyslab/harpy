@@ -992,6 +992,12 @@ calls `sc.pp.scale(..., zero_center=True)`, which makes blocks dense; with block
 sized by non-zero values, the variant should first call
 `adata.X = adata.X.rechunk({0: "auto"})` (see "Densifying steps" in gap 1).
 
+Phase 6 decided against these variants: the thin scanpy wrappers are deprecated
+and guarded on lazy tables, users call scanpy directly and write back with
+Phase 3's helpers, and only the spatial steps that scanpy lacks, size and
+quantile normalisation, get lazy-safe functions; see "Phase 6: Harpy's table
+functions on lazy tables".
+
 ## Upstream limitations to document
 
 These are not Harpy changes, but users of the lazy path will hit them.
@@ -3093,13 +3099,108 @@ silent stale read is reported.**
   read graphs), need tokens per element so that a write of `obs` does not mark
   unchanged matrices stale, and a fallback for stores written by other tools.
 
-### Phase 6: store-path variants of Harpy's table functions
+### Phase 6: Harpy's table functions on lazy tables
 
-Add lazy, store-path variants of `preprocess_transcriptomics`,
-`preprocess_proteomics`, `leiden` and related wrappers (gap 5). Remove or
-replace their in-memory-only operations. This is the first phase that touches
-the legacy table functions, and it resolves the breakage accepted during Phases
-1–5.
+This is the first phase that touches the legacy table functions, and it
+resolves the breakage accepted during Phases 1–5 (gap 5).
+
+**Decided: retire the thin scanpy wrappers instead of porting them.** The
+original plan, lazy store-path variants of `preprocess_transcriptomics`,
+`preprocess_proteomics`, `leiden` and related wrappers, is replaced. Phase 3's
+write-back helpers make most of these wrappers unnecessary:
+
+- results that keep the cells and genes (QC columns, `log1p`, PCA, neighbors,
+  leiden, UMAP): run scanpy on `sdata.tables[name]`, then
+  `hp.tb.add_table_updates`, which writes only what changed. The wrappers
+  always write a whole new table through `add_table`, `X` included;
+- results that remove cells or genes (`filter_cells`, `filter_genes`, a subset
+  to highly variable genes): the axes change, so the result is a new table,
+  written with `hp.tb.add_table` or `hp.tb.write_table`. The write-back helpers
+  refuse this, and their error names these ways out.
+
+Porting the wrappers would mean rewriting scanpy orchestration for Dask, with
+no gain over calling scanpy directly: the current code uses `toarray`,
+`np.where` and `np.nanquantile`, would have to split rows before
+`scale(zero_center=True)`, and runs steps that scanpy does not support on Dask,
+such as `rank_genes_groups(method="wilcoxon")`.
+
+**What the legacy functions add beyond scanpy.** From
+`src/harpy/table/_preprocess.py`, `src/harpy/table/_clustering.py` and their
+base class `ProcessTable` (`src/harpy/table/_table.py`):
+
+| Function                            | Plain scanpy or scikit-learn                                                                              | Harpy-specific                                                                                                         |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `preprocess_transcriptomics`        | QC metrics, filtering of cells and genes, `normalize_total`, `log1p`, HVG, `scale`, PCA, in a fixed order | cell size from the labels (area per instance); size normalisation (`X / area * 100`); filtering of shapes (deprecated) |
+| `preprocess_proteomics`             | `log1p`, `scale`, PCA                                                                                     | the same size normalisation; quantile normalisation per channel (non-zero quantile `q`, clipped at `max_value_q`)      |
+| `leiden`, `kmeans`                  | neighbors, UMAP, leiden or `KMeans`, `rank_genes_groups` (wilcoxon)                                       | none: the cluster labels are cast to an integer category                                                               |
+| all of them, through `ProcessTable` |                                                                                                           | selecting the cells of one or more labels elements by `region_key`, then writing a whole new table with `add_table`    |
+
+Other functions in `hp.tb` carry their own logic and are not thin wrappers:
+`score_genes`, `score_genes_iter` and `cluster_cleanliness` (marker-gene files,
+annotation by maximum score, iterative refinement), and `flowsom`,
+`cell_clustering_preprocess`, `weighted_channel_expression` and the niche
+functions. `nhood_enrichment` is a thin wrapper around two squidpy calls.
+
+**Slices.**
+
+| Slice | Content                                                                                                                                                                                                                                                                 |
+| ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 6a    | deprecate the thin wrappers (`preprocess_transcriptomics`, `preprocess_proteomics`, `leiden`, `kmeans`, `nhood_enrichment`, `filter_on_size`): unchanged behaviour on in-memory tables, with a `FutureWarning`, and a clear error on lazy tables (see "Slice 6a" below) |
+| 6b    | lazy-safe functions for the spatial steps that scanpy lacks: size normalisation, such as `hp.tb.normalize_by_size(adata, size_key=...)`, computed per block, and quantile normalisation per channel for proteomics; cheap per channel, as tables have few channels      |
+| 6c    | the user guide (Phase 2) documents the pattern: scanpy, then `add_table_updates`, or `add_table` when cells or genes are removed, with a spatial transcriptomics example that normalises by area                                                                        |
+| 6d    | remove the unused pipeline (see "Slice 6d" below); migrate the tutorials that use the wrappers (8 notebooks), and check the plotting functions that read their keys, such as `hp.pl.preprocess_transcriptomics`                                                         |
+| 6e    | decide separately on the functions with their own logic (`score_genes*`, `cluster_cleanliness`, `flowsom`, the niche functions): port them, or keep them for in-memory tables behind the guard of 6a, depending on their use                                            |
+
+- **Cell size needs no new function:** `hp.tb.add_regionprops` already
+  computes `area` from the labels.
+- **Region selection needs no function:** selecting the cells of some labels
+  elements is a two-line subset of the table, documented as a recipe in 6c.
+- **Removal:** the deprecated wrappers stay for at least one release, so that
+  existing scripts keep working on in-memory tables.
+- **Release:** 6a is the answer to the open question "Legacy table functions at
+  release"; it can ship before the other slices.
+
+**Slice 6a: deprecated wrappers, guarded on lazy tables.**
+
+- Each thin wrapper keeps its current code and behaviour on in-memory tables.
+- At its start, after selecting the table, it warns with a `FutureWarning`,
+  which users see by default, unlike `DeprecationWarning`. The warning names
+  the replacement: scanpy directly, then `hp.tb.add_table_updates`, or
+  `hp.tb.add_table` when cells or genes are removed.
+- A guard raises a clear error if the table is not in memory: a Dask array or a
+  backed handle in `X`, the layers, `obsm` or `obsp`. Checking every slot also
+  catches a mixed table, such as an in-memory `X` with a lazy layer. The
+  message names the function, the component and the ways out, for example:
+  "`hp.tb.preprocess_transcriptomics` needs an in-memory table, but
+  `sdata.tables['counts'].X` is a lazy Dask array. Read the store with
+  `hp.io.read_zarr(..., table_mode="eager")` or `sd.read_zarr`, or call scanpy
+  directly and write back with `hp.tb.add_table_updates`."
+- The guard is called in each thin wrapper, not in `ProcessTable`, which the
+  functions of 6e also use.
+- Each wrapper is first tried on a lazy table, and only those that fail, or
+  would load the whole table into memory, get the guard. `filter_on_size`,
+  which only filters rows and writes with `add_table`, and `nhood_enrichment`,
+  which only uses `obs` and `obsm`, may already work on lazy tables. All of
+  them get the warning.
+
+**Slice 6d: removing the pipeline.** Nobody uses it, so it is removed rather
+than migrated. No command-line entry point in `pyproject.toml` and no page of
+the API documentation refers to it. It consists of:
+
+- `src/harpy/pipeline.py`; `src/harpy/single.py`, the Hydra entry point that
+  only `src/harpy/_tests/test_pipeline.py` imports; and the Hydra configs in
+  `src/harpy/configs/`;
+- `src/harpy/_tests/test_pipeline.py`, and the `cfg_pipeline*` fixtures in
+  `src/harpy/_tests/conftest.py`;
+- the `cli` extra in `pyproject.toml` (`hydra-core`, `hydra-colorlog`,
+  `submitit`, `hydra-submitit-launcher`), and the coverage `omit` entry for
+  `src/harpy/pipeline.py`;
+- probably `_export_config` in `src/harpy/utils/utils.py`, with its `omegaconf`
+  import, if nothing else uses it.
+
+To check during 6d: `test_notebook_harpy_pipeline` in
+`src/harpy/_tests/test_notebooks.py` runs `Harpy_how_to_start.ipynb`; whether
+that notebook uses the pipeline, or only the test's name mentions it.
 
 ### Phase 7: rapids-singlecell validation on a GPU machine
 
@@ -3131,7 +3232,8 @@ given that AnnData adds its own automatic shards only when none are given.
   branch is released, how should released users of `hp.io.read_zarr` meet the
   legacy table functions on lazy tables: guarded with a clear error that
   recommends `table_mode="eager"`, or only documented? See "Accepted during
-  Phases 1–5" in gap 5.
+  Phases 1–5" in gap 5. Answered by Phase 6, slice 6a: deprecated and guarded,
+  and 6a can ship before the other slices.
 - **Version floors.** Only scanpy 1.11.1 was tested. Whether the lazy paths work
   with the declared floor `scanpy>=1.9.1` is untested. scanpy 1.11.2 fixes the
   `scale` → PCA failure on sparse Dask input, which argues for `scanpy>=1.11.2`
