@@ -90,13 +90,13 @@ def _prepare_raw_creation(
     components: Mapping[ComponentPath, object],
     *,
     raw_var_names: AxisNames | None,
-    overwrite: bool,
 ) -> pd.DataFrame | None:
     """Prepare feature annotations when the request needs a new raw container.
 
     Existing raw containers retain their stored axis. Creation from an absent
-    or encoded-null entry requires raw.X and explicit feature identities;
-    replacing a stored null still requires overwrite permission.
+    or encoded-null entry requires raw.X and explicit feature identities. An
+    encoded null counts as absent, also for overwrite: AnnData writes it for
+    every table without raw, and it holds no data to protect.
 
     Returns
     -------
@@ -115,8 +115,6 @@ def _prepare_raw_creation(
             return None
         if not (isinstance(raw, zarr.Array) and encoding == ("null", "0.1.0") and raw.shape == ()):
             raise ValueError("Cannot create raw over a malformed or unsupported raw encoding.")
-        if not overwrite:
-            raise FileExistsError("The raw entry already exists as None; use overwrite=True.")
     return _new_raw_var(components, raw_var_names=raw_var_names)
 
 

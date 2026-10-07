@@ -172,8 +172,9 @@ def write_table_components(
         creating raw from names alone, raw.var has this index and no annotation columns.
     overwrite
         Allow replacement of existing requested components; otherwise only new
-        entries are allowed. Creating raw over a stored None also requires True.
-        Does not apply to explicit deletions.
+        entries are allowed. A raw stored as None, which AnnData writes for every
+        table without raw, counts as absent. Paths in ``delete`` are removed
+        whatever ``overwrite``: naming them is the permission.
 
     Notes
     -----
@@ -368,7 +369,7 @@ def _write_table_operation(
                 present_deletions.append(path)
             else:
                 log.info(f"Table {table_name!r}: component {path!r} is already absent; skipping deletion.")
-        new_raw_var = _prepare_raw_creation(source_table, components, raw_var_names=raw_var_names, overwrite=overwrite)
+        new_raw_var = _prepare_raw_creation(source_table, components, raw_var_names=raw_var_names)
         expected_new_raw_var_index = None if new_raw_var is None else new_raw_var.index
         # This flag means creating the raw container, not merely writing raw components.
         # It is False when raw already exists, even if its components will be updated,
@@ -387,7 +388,9 @@ def _write_table_operation(
             # replace an unrecognized raw parent with the new container.
             if "raw" not in source_table and (table_path / "raw").exists():
                 raise ValueError("Cannot create raw over an existing unrecognized raw path.")
-            _check_write_destination(table_path / "raw", root=root, overwrite=overwrite)
+            # Check path safety only: raw is absent here, or an encoded None that
+            # _prepare_raw_creation() validated and that counts as absent.
+            _check_write_destination(table_path / "raw", root=root, overwrite=True)
             components = dict(components)
             components[("raw", "var")] = new_raw_var
             paths = tuple(components)
