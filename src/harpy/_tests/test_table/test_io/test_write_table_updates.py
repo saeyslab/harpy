@@ -440,6 +440,11 @@ def test_a_failing_write_writes_nothing(store, written):
 
 
 def test_adata_is_not_modified(store):
+    """write_table_updates leaves the caller's table as it is, also after x_to.
+
+    Every slot holds the same objects as before: X is not replaced by the stored
+    counts, and the x_to layer is not added. Reopen the table to match the store.
+    """
     adata = read_table(store, table_name="counts", mode="lazy")
     adata.X = adata.X * 2
     adata.obs["leiden"] = pd.Categorical(["0", "1"] * (adata.n_obs // 2))
