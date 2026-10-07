@@ -1945,22 +1945,24 @@ SpatialData (see "The SpatialData adapter" below).
 **Slices.** Phase 3 is implemented in four slices, each with its own tests, as
 Phase 1 was:
 
-| Slice            | Content                                                                                                                                                                                                 | Depends on |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
-| 3a (implemented) | `overwrite` means "in the store" for every backed adapter, `add_feature_matrix` included, with docstrings and tests (see "Prerequisite" below)                                                          | nothing    |
-| 3b (implemented) | the registry of Dask names in the lazy decoder (see "How a read is recognised" below)                                                                                                                   | nothing    |
-| 3c               | in two steps: (i) the comparison helpers (`obs`/`var`, `uns`, matrices with the two cost rules, the identity checks for reads and handles); (ii) `write_table_updates`, with `x_to` and the axis errors | 3b         |
-| 3d               | `add_table_updates` on `_update_table_components`, with `reopen_also`                                                                                                                                   | 3a, 3c     |
+| Slice            | Content                                                                                                                                                                                                              | Depends on |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| 3a (implemented) | `overwrite` means "in the store" for every backed adapter, `add_feature_matrix` included, with docstrings and tests (see "Prerequisite" below)                                                                       | nothing    |
+| 3b (implemented) | the registry of Dask names in the lazy decoder (see "How a read is recognised" below)                                                                                                                                | nothing    |
+| 3c               | in two steps: (i, implemented) the comparison helpers (`obs`/`var`, `uns`, matrices with the two cost rules, the identity checks for reads and handles); (ii) `write_table_updates`, with `x_to` and the axis errors | 3b         |
+| 3d               | `add_table_updates` on `_update_table_components`, with `reopen_also`                                                                                                                                                | 3a, 3c     |
 
 Slice 3c is one slice in two reviewable steps:
 
-1. **3c (i), the comparison helpers:** functions that decide whether one value
-   in `adata` changed against its stored element, each with its own unit
-   tests: the strict dataframe rule for `obs`, `var` and DataFrame-valued
-   `obsm`/`varm` entries; the separate `uns` comparator, per top-level key;
-   matrices, with the metadata check first and the block-by-block value
-   comparison second; the identity checks for registered reads (through
-   `_lazy_read_source`) and for backed handles.
+1. **3c (i), the comparison helpers (implemented):** functions that decide
+   whether one value in `adata` changed against its stored element, each with
+   its own unit tests: the strict dataframe rule for `obs`, `var` and
+   DataFrame-valued `obsm`/`varm` entries; the separate `uns` comparator, per
+   top-level key; matrices, with the metadata check first and the
+   block-by-block value comparison second; the identity checks for registered
+   reads (through `_lazy_read_source`) and for backed handles. They are in
+   `src/harpy/table/io/_updates.py`, with `_component_changed` as the entry
+   point, and tested in `src/harpy/_tests/test_table/test_io/test_updates.py`.
 2. **3c (ii), `write_table_updates`:** it uses the helpers. It adds the axis
    check with the three ways out, `x_to` with its allowed values and collision
    rule, the routing of new and changed components into one
