@@ -3181,7 +3181,25 @@ functions. `nhood_enrichment` is a thin wrapper around two squidpy calls.
   would load the whole table into memory, get the guard. `filter_on_size`,
   which only filters rows and writes with `add_table`, and `nhood_enrichment`,
   which only uses `obs` and `obsm`, may already work on lazy tables. All of
-  them get the warning.
+  them get the warning. This try-out is a scratch script, not part of the test
+  suite.
+- **Tests, kept light:** the wrappers are about to be removed, so the tests only
+  protect the two promises of 6a.
+  - The existing tests stay as they are, without extensions: they check that
+    the wrappers behave as before on in-memory tables. They are in
+    `src/harpy/_tests/test_table/`: `test_preprocess.py` (4),
+    `test_clustering.py` (4) and `test_filter_on_size.py` (1). pytest does not
+    turn warnings into errors here, so the new `FutureWarning` does not break
+    them.
+  - One new parametrised test, with a case per guarded wrapper: the wrapper on
+    a lazily read table, inside `pytest.warns(FutureWarning)` around
+    `pytest.raises(ValueError, match="needs an in-memory table")`. The warning
+    comes before the guard raises, so each case fails fast, without computing
+    anything, and covers both promises.
+  - Wrappers that work on lazy tables get no lazy tests. Their warning is
+    checked with one `pytest.warns` around the existing call, for
+    `filter_on_size`; `nhood_enrichment`, which has no test, gets none.
+  - The new test is removed together with the wrappers.
 
 **Slice 6d: removing the pipeline.** Nobody uses it, so it is removed rather
 than migrated. No command-line entry point in `pyproject.toml` and no page of
