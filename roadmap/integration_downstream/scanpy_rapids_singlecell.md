@@ -2020,9 +2020,9 @@ diagram has no branch for them.
 
 ```mermaid
 flowchart TD
-    start(["write_table_updates / add_table_updates"]) --> annotation{"uns['spatialdata_attrs']<br/>changed or added?"}
-    annotation -- yes --> annotation_error[/"Raise, pointing to write_table"/]
-    annotation -- "no: equal or missing" --> axes{"Axes match storage?<br/>obs_names, region/instance pairs,<br/>var_names, raw.var_names"}
+    start(["write_table_updates / add_table_updates"]) --> annotation{"uns['spatialdata_attrs'] changed<br/>or added? For the adapter,<br/>also: missing?"}
+    annotation -- yes --> annotation_error[/"Raise: only write_table changes<br/>the linkage; the adapter needs<br/>both annotations to agree"/]
+    annotation -- "no: equal, or missing<br/>(write_table_updates)" --> axes{"Axes match storage?<br/>obs_names, region/instance pairs,<br/>var_names, raw.var_names"}
     axes -- no --> axis_error[/"Raise, naming the ways out:<br/>write_table, a new table_name,<br/>or the regional writers"/]
     axes -- yes --> each["Each component of adata,<br/>X first"]
     each --> stored{"Path in storage?"}
@@ -2400,7 +2400,13 @@ key, by contrast, is a missing component and stays in storage.
   `write_table`, as `_validate_spatialdata_attrs_unchanged` does for
   component writes. Adding the annotation to an unannotated stored table
   changes its SpatialData linkage, just as changing it does. Stored but
-  missing from `adata`, it is left alone, like every missing component.
+  missing from `adata`, it is left alone by `write_table_updates`, like every
+  missing component. The adapter raises instead: it puts the written
+  components back into the attached table, so that table and the store must
+  describe the same linkage, as for `add_table_components`.
+  `_update_table_components` checks this before
+  validating the components against the attached table, which would otherwise
+  reject the region/instance identities of the annotated store less clearly.
 - Keys missing from `adata` are not deleted, as for every other component.
 
 **The SpatialData adapter.** Following the existing pairs
