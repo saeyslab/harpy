@@ -7,6 +7,7 @@ exists in the store, whether it differs from the stored element.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from pathlib import Path
 
 import dask.array as da
 import numpy as np
@@ -38,13 +39,15 @@ def _component_changed(group: zarr.Group, path: ComponentPath, value: object) ->
       this element (``_lazy_read_source``); any other Dask array, derived or a
       read of another element, is changed, without computing it;
     - a backed handle (a ``zarr.Array`` or a CSR/CSC dataset) is unchanged only
-      if it points to exactly this element;
+      if it points to exactly this element, wherever its store was opened;
     - an in-memory NumPy or SciPy matrix is compared with the stored values,
       metadata first, then block by block (``_matrix_equals_stored``);
     - any other value counts as changed, and the writer validates it.
 
-    Only a ``LocalStore`` gives elements an identity, so registered reads and
-    backed handles of elements in other stores count as changed.
+    Elements are identified by their resolved path on disk
+    (``_element_identity``). Only a ``LocalStore`` gives elements one, so
+    registered reads and backed handles of elements in other stores count as
+    changed.
     """
     if path[0] == "uns":
         return not _same_uns_value(value, _read_anndata_element(group, path, mode="eager"))
@@ -63,7 +66,7 @@ def _component_changed(group: zarr.Group, path: ComponentPath, value: object) ->
     return not _matrix_equals_stored(value, element)
 
 
-def _backed_identity(value: zarr.Array | CSRDataset | CSCDataset) -> tuple | None:
+def _backed_identity(value: zarr.Array | CSRDataset | CSCDataset) -> Path | None:
     """Return the identity of the stored element a backed handle points to."""
     return _element_identity(value.group if isinstance(value, (CSRDataset, CSCDataset)) else value)
 
