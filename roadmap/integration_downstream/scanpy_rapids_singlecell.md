@@ -3163,10 +3163,25 @@ functions. `nhood_enrichment` is a thin wrapper around two squidpy calls.
 **Slice 6a: deprecated wrappers, guarded on lazy tables.**
 
 - Each thin wrapper keeps its current code and behaviour on in-memory tables.
+  Its docstring gets `.. deprecated:: 0.5.0`, rendered as "Deprecated since
+  version 0.5.0", in the convention of the earlier deprecations.
 - At its start, after selecting the table, it warns with a `FutureWarning`,
-  which users see by default, unlike `DeprecationWarning`. The warning names
+  which Python shows by default, unlike `DeprecationWarning`. The warning names
   the replacement: scanpy directly, then `hp.tb.add_table_updates`, or
   `hp.tb.add_table` when cells or genes are removed.
+- **Decided: Harpy stops silencing warnings.** `src/harpy/__init__.py` calls
+  `warnings.filterwarnings("ignore", ...)` for `FutureWarning` and
+  `DeprecationWarning` on import, unless `LOGLEVEL=DEBUG`. That filter also
+  matches subclasses, so it would hide this deprecation from every user, as it
+  already hides the `FutureWarning` for `celltype_column` in
+  `src/harpy/table/_annotation.py`. 6a removes the filter, with its `LOGLEVEL`
+  branch. Consequence: users also see the `FutureWarning`s of other libraries
+  again, which the filter hid in their whole session; `DeprecationWarning`s
+  follow Python's default and appear only for code run directly in `__main__`.
+  Considered and rejected: a Harpy warning class derived from `UserWarning`,
+  which the filter does not match, and an exemption for Harpy's own modules
+  from the filter. Both would keep hiding other libraries' warnings for no
+  clear reason.
 - A guard raises a clear error if the table is not in memory: a Dask array or a
   backed handle in `X`, the layers, `obsm` or `obsp`. Checking every slot also
   catches a mixed table, such as an in-memory `X` with a lazy layer. The
