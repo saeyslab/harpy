@@ -32,7 +32,9 @@
       "Bash(cat:*)",
       "Bash(grep:*)",
       "Bash(rg:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(.venv/bin/coverage report *)",
+      "Bash(.venv/bin/coverage debug *)"
     ],
     "deny": ["Read(./.env)", "Read(./.env.*)"]
   },
