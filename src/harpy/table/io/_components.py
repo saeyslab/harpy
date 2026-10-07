@@ -92,8 +92,10 @@ def add_table_components(
     obs_identity
         Ordered identities for observation-aligned replacements. For annotated
         tables, use ``adata.obs[[region_key, instance_key]]``; its index is
-        ignored. For unannotated tables, use observation names. Supplying
-        ``("obs",)`` provides this context instead. Both are checked if supplied.
+        ignored, so observation names are not checked through it. For
+        unannotated tables, use observation names. Supplying ``("obs",)``
+        provides this context instead, and its index must also equal the stored
+        obs index. Both are checked if supplied.
     var_names
         Ordered feature names for main-feature-aligned replacements. A supplied
         ``("var",)`` dataframe provides this context instead.

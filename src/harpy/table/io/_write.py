@@ -157,10 +157,12 @@ def write_table_components(
         Ordered observation identities for X, layers, obsm, obsp or raw.X.
         For annotated tables, a two-column dataframe using the stored region and
         instance keys, for example ``adata.obs[[region_key, instance_key]]``;
-        its index is ignored. For unannotated tables, the ordered observation names
+        its index is ignored, so observation names are not checked through it.
+        For unannotated tables, the ordered observation names
         (``adata.obs_names``, equivalent to ``adata.obs.index``).
-        A supplied obs dataframe provides this context instead. Identities must
-        be unique and match the stored observations in value and order.
+        A supplied obs dataframe provides this context instead; as a replacement,
+        its index must also equal the stored obs index (see Notes).
+        Identities must be unique and match the stored observations in value and order.
     var_names
         Ordered feature names for X, layers, varm or varp. A supplied var dataframe
         provides these instead. Names must be unique and match the stored axis.
