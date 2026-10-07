@@ -139,16 +139,15 @@ def write_table_updates(
     ``adata``, is overwritten (last writer wins); and a persisted read that
     another writer made stale. Concurrent-access isolation is not provided.
 
-    Returns None. ``adata`` is not modified: after ``x_to``, ``adata.X`` still
-    holds the written values and ``adata.layers`` lacks the destination. Reopen
-    the table to get one that matches the store, rather than reusing ``adata``:
-    its lazy matrices read the store when they are computed. After
-    ``x_to=("X",)``, for example, ``adata.X`` would apply its processing again,
-    to the replaced and already processed ``X``; depending on the stored layout,
-    that fails or silently gives wrong values. After ``x_to`` to a layer, calling
-    again with the same ``adata`` writes ``X`` again.
-    :func:`harpy.table.add_table_updates` reinstalls what it writes in a table
-    attached to SpatialData, so that table needs no reopening.
+    Returns None, and ``adata`` is not modified: its ``X`` and layers are neither
+    replaced nor refreshed, also after ``x_to``. Reopen the table to get one that
+    matches the store, rather than reusing ``adata``: its lazy matrices read the
+    store when they are computed. After ``x_to=("X",)``, for example, ``adata.X``
+    would apply its processing again, to the replaced and already processed
+    ``X``; depending on the stored layout, that fails or silently gives wrong
+    values. After ``x_to`` to a layer, calling again with the same ``adata``
+    writes ``X`` again. :func:`harpy.table.add_table_updates` reinstalls what it
+    writes in a table attached to SpatialData, so that table needs no reopening.
 
     See Also
     --------
@@ -231,8 +230,12 @@ def add_table_updates(
     Raises
     ------
     ValueError
-        If ``sdata`` has no store: there is nothing to compare with. Also for
-        the reasons that :func:`harpy.table.write_table_updates` raises.
+        If ``sdata`` has no store: there is nothing to compare with. If the
+        attached table lacks the store's SpatialData annotation, or has another
+        one: the written components are put back into the attached table, so
+        that table and the store must describe the same linkage, as for
+        :func:`harpy.table.add_table_components`. Also for the reasons that
+        :func:`harpy.table.write_table_updates` raises.
     FileNotFoundError
         If the store, or the table in it, does not exist.
     FileExistsError

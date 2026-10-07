@@ -257,16 +257,21 @@ comparison. `hp.tb.add_table_updates(sdata, table_name=..., x_to=None,
 overwrite=...)` does the same for a table attached to backed SpatialData, and
 reinstalls the written components lazily through `_update_table_components`,
 like `add_table_components`; after `x_to` it also reinstalls `X` from the store.
-Unbacked SpatialData raises, since there is no store to compare with.
+Unbacked SpatialData raises, since there is no store to compare with. So does
+an attached table that lacks the store's SpatialData annotation, or has
+another one: the written components are put back into the attached table, so
+that table and the store must describe the same linkage, as for
+`add_table_components`. `write_table_updates`, by contrast, only writes to the
+store, and leaves a stored annotation that `adata` lacks as it is.
 
 The decision for each component, in order. Components in storage but missing
 from `adata` are never deleted, so the diagram has no branch for them.
 
 ```mermaid
 flowchart TD
-    start(["write_table_updates / add_table_updates"]) --> annotation{"uns['spatialdata_attrs']<br/>changed or added?"}
-    annotation -- yes --> annotation_error[/"Raise, pointing to write_table"/]
-    annotation -- "no: equal or missing" --> axes{"Axes match storage?<br/>obs_names, region/instance pairs,<br/>var_names, raw.var_names"}
+    start(["write_table_updates / add_table_updates"]) --> annotation{"uns['spatialdata_attrs'] changed<br/>or added? For the adapter,<br/>also: missing?"}
+    annotation -- yes --> annotation_error[/"Raise: only write_table changes<br/>the linkage; the adapter needs<br/>both annotations to agree"/]
+    annotation -- "no: equal, or missing<br/>(write_table_updates)" --> axes{"Axes match storage?<br/>obs_names, region/instance pairs,<br/>var_names, raw.var_names"}
     axes -- no --> axis_error[/"Raise, naming the ways out:<br/>write_table, a new table_name,<br/>or the regional writers"/]
     axes -- yes --> each["Each component of adata,<br/>X first"]
     each --> stored{"Path in storage?"}

@@ -550,3 +550,22 @@ def test_deletion_only_installation_failure_restores_memory_and_disk(make_table_
         remove_table_components(sdata, table_name="counts", components=[("obsm", "embedding"), ("raw",)])
     assert table._obsm is previous[0] and table._raw is previous[1]
     assert _store_bytes(path) == before
+
+
+def test_backed_updates_require_the_attached_and_stored_annotation_to_agree(make_table_io_store):
+    """Checked before the in-memory validation, which would reject region/instance identities less clearly.
+
+    The annotated store requires region/instance pairs as obs_identity; without
+    an attached annotation, the in-memory validation alone would treat the table
+    as unannotated and reject the pairs as invalid observation names.
+    """
+    path = make_table_io_store()
+    sdata, table = _attach(path, backed=True, annotated=True)
+    identity = table.obs[["region", "instance"]]
+    del table.uns[TableModel.ATTRS_KEY]
+    before = _store_bytes(path)
+    with pytest.raises(ValueError, match="attached table has no SpatialData annotation"):
+        add_table_components(
+            sdata, table_name="counts", components={("obsm", "embedding"): np.ones((2, 2))}, obs_identity=identity
+        )
+    assert _store_bytes(path) == before

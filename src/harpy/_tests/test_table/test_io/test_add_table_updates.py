@@ -6,6 +6,7 @@ import pytest
 import zarr
 from scipy import sparse
 from spatialdata import SpatialData
+from spatialdata.models import TableModel
 
 import harpy.table.io._components as components_module
 import harpy.table.io._updates as updates_module
@@ -130,6 +131,24 @@ def test_unbacked_spatialdata_raises_naming_the_ways_out(store):
     write_table_updates(store, table_name="counts", adata=sdata.tables["counts"])
     stored = _stored(store)
     np.testing.assert_array_equal(stored.obsm["embedding"], np.ones((table.n_obs, 2)))
+
+
+def test_a_missing_attached_annotation_raises_before_writing(store):
+    """add_table_updates raises, before writing, when the attached table lacks the store's annotation.
+
+    After writing, the adapter puts the written components back into the
+    attached table, so that table and the store must describe the same
+    SpatialData linkage; add_table_components raises the same way.
+    write_table_updates only writes to the store, and leaves the stored
+    annotation as it is.
+    """
+    sdata, table = _attach(store)
+    del table.uns[TableModel.ATTRS_KEY]
+    table.obsm["embedding"] = np.ones((table.n_obs, 2))
+    before = _store_bytes(store)
+    with pytest.raises(ValueError, match="attached table has no SpatialData annotation"):
+        add_table_updates(sdata, table_name="counts")
+    assert _store_bytes(store) == before
 
 
 def test_a_table_without_a_stored_counterpart_raises(store):

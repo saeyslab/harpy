@@ -248,6 +248,13 @@ def _update_table_components(
     if table.raw is None and any(path[0] == "raw" for path in paths):
         new_raw_var = _new_raw_var(components, raw_var_names=raw_var_names)
     indices = _memory_axis_indices(table, components, obs_identity, var_names, raw_var_names, new_raw_var=new_raw_var)
+    if group is not None:
+        # Compare the attached table with the store first: the in-memory
+        # validation below reads the annotation of the attached table, and would
+        # reject the region/instance identities of an annotated store less clearly
+        # if the attached annotation were missing.
+        stored_new_raw_var = _prepare_raw_creation(group, components, raw_var_names=raw_var_names)
+        _check_in_memory_versus_storage_axes(table, group, indices, stored_new_raw_var=stored_new_raw_var)
     _validate_component_values_against_memory(
         table,
         components,
@@ -256,9 +263,6 @@ def _update_table_components(
         var_names=var_names,
         raw_var_names=raw_var_names,
     )
-    if group is not None:
-        stored_new_raw_var = _prepare_raw_creation(group, components, raw_var_names=raw_var_names)
-        _check_in_memory_versus_storage_axes(table, group, indices, stored_new_raw_var=stored_new_raw_var)
 
     # Retain original slot objects. Prepared mappings/raw containers are shallow
     # copies, so neither successful installation nor rollback mutates old entries.
@@ -517,8 +521,18 @@ def _check_in_memory_versus_storage_axes(
         if axis == "obs":
             stored_attrs = _read_spatialdata_attrs(group)
             in_memory_attrs = table.uns.get(TableModel.ATTRS_KEY)
-            if (stored_attrs is None) != (in_memory_attrs is None):
-                raise ValueError("In-memory and stored SpatialData annotation must agree; reopen the table.")
+            if in_memory_attrs is None and stored_attrs is not None:
+                raise ValueError(
+                    "The attached table has no SpatialData annotation (uns['spatialdata_attrs']), while the stored "
+                    "table has one; they must agree. Reopen the table, or restore its annotation."
+                )
+            if in_memory_attrs is not None and stored_attrs is None:
+                raise ValueError(
+                    "The attached table has a SpatialData annotation (uns['spatialdata_attrs']), while the stored "
+                    "table has none; they must agree. Reopen the table, or write it whole to store the annotation."
+                )
+            if in_memory_attrs is not None and not isinstance(in_memory_attrs, Mapping):
+                raise ValueError("SpatialData annotation must be a mapping.")
             if stored_attrs is not None:
                 if _annotation_columns(in_memory_attrs) != _annotation_columns(stored_attrs):
                     raise ValueError("In-memory and stored region/instance keys must agree; reopen the table.")
