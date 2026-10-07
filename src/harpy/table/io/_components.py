@@ -236,7 +236,7 @@ def _update_table_components(
         raw_var_names=raw_var_names,
     )
     if group is not None:
-        stored_new_raw_var = _prepare_raw_creation(group, components, raw_var_names=raw_var_names, overwrite=overwrite)
+        stored_new_raw_var = _prepare_raw_creation(group, components, raw_var_names=raw_var_names)
         _check_in_memory_versus_storage_axes(table, group, indices, stored_new_raw_var=stored_new_raw_var)
 
     # Retain original slot objects. Prepared mappings/raw containers are shallow
