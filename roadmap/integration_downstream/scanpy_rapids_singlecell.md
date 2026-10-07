@@ -2288,7 +2288,9 @@ cells and genes. Hence:
   apply to `raw`.
 - `raw` in `adata` but not in storage: new, and written whole (`raw.X`,
   `raw.var`, `raw.varm`), which `write_table_components` already supports,
-  with `raw`'s own identities.
+  with `raw`'s own identities. A `raw` stored as `None`, which AnnData writes
+  for every table without `raw`, counts as not in storage, so creating `raw`
+  needs no `overwrite=True`; the component writer follows the same rule.
 - `raw` in both, with the same `raw.var_names`: `raw.X` and each `raw.varm`
   entry follow the matrix rule, `raw.var` the dataframe rule.
 - `raw.var_names` that differ from storage: `raw`'s axis changed; raise and
