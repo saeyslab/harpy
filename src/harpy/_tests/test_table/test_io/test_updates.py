@@ -86,6 +86,14 @@ def test_dataframes_with_equal_values_and_nan_are_the_same():
     assert _same_dataframe(_frame(), _frame())
 
 
+def test_dataframes_without_columns_are_the_same_whatever_the_class_of_their_columns_index():
+    """AnnData turns the empty RangeIndex of such a dataframe into an empty object index."""
+    stored = pd.DataFrame(index=["a", "b"])
+    value = AnnData(var=stored.copy()).var
+    assert type(value.columns) is not type(stored.columns)
+    assert _same_dataframe(value, stored)
+
+
 @pytest.mark.parametrize(
     "change",
     [
