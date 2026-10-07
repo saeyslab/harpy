@@ -190,10 +190,10 @@ Absent raw data can be created by supplying `("raw", "X")` and either
 `raw_var_names` or a `("raw", "var")` dataframe. Names alone produce a feature
 dataframe with that index and no annotation columns. Raw shares the table's
 observations but defines its own feature axis; optional `("raw", "varm", key)`
-entries must align with it. A matrix is required to initialize raw. Replacing a
-stored null entry requires `overwrite=True`, while a genuinely absent raw path
-does not. Existing raw components can still be updated independently without
-changing their feature axis.
+entries must align with it. A matrix is required to initialize raw. A stored
+null entry, which AnnData writes for every table without raw, counts as absent:
+creating raw over it needs no `overwrite=True`. Existing raw components can
+still be updated independently without changing their feature axis.
 
 Creation stages the complete raw container and publishes it as one path,
 together with any other requested components in the same rollback operation.
@@ -241,6 +241,19 @@ These path-based APIs do not update live objects. An installing adapter owns
 removal or refresh of affected in-memory entries and restores them on failure.
 The shared crash-recovery and concurrent-access limitations apply equally to
 deletions and replacements.
+
+`hp.tb.write_table_updates(store, table_name=..., adata=..., x_to=None,
+overwrite=...)` writes back the components of a processed table that are new or
+changed against the stored table, in one `write_table_components` call, and
+writes nothing when nothing changed. A path absent from storage is new. A lazy
+read of its own stored element, recognised through the registry of lazy reads,
+and a backed handle to it are unchanged, without reading values; values in
+memory are compared with storage; any other value is changed. A changed `X`
+goes to `x_to`, such as `("layers", "log1p")`, and raises without it. The axes
+and `uns["spatialdata_attrs"]` must match storage, missing components are never
+deleted, and `overwrite` concerns existence in storage only. The docstring
+gives the full contract; `src/harpy/table/io/_updates.py` implements the
+comparison.
 
 `hp.tb.write_table_components_by_region(store, table_name=..., components=...,
 obs_identity=..., fill_values=..., sparse_chunks="auto", dense_chunks="auto",

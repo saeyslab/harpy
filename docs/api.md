@@ -186,6 +186,7 @@ in-memory `SpatialData` object.
 
     tb.write_table
     tb.write_table_components
+    tb.write_table_updates
     tb.delete_table_components
     tb.write_table_components_by_region
 ```
