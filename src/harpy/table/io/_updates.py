@@ -2,14 +2,16 @@
 
 ``write_table_updates`` classifies each component of an AnnData table as new,
 changed or unchanged against the stored table, and writes the new and changed
-ones in one ``write_table_components`` call. ``_component_changed`` decides,
-for one value whose path exists in the store, whether it differs from the
-stored element.
+ones in one ``write_table_components`` call. ``add_table_updates`` does the
+same for a table attached to backed SpatialData, and reinstalls what it wrote.
+``_component_changed`` decides, for one value whose path exists in the store,
+whether it differs from the stored element.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from os import PathLike
 from pathlib import Path
 
@@ -21,6 +23,7 @@ from anndata import AnnData
 from anndata.abc import CSCDataset, CSRDataset
 from loguru import logger as log
 from scipy import sparse
+from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
 from harpy._storage._anndata import (
@@ -30,6 +33,7 @@ from harpy._storage._anndata import (
     _lazy_read_source,
     _read_anndata_element,
 )
+from harpy.table.io._components import _component_update_destination, _update_table_components
 from harpy.table.io._read import ComponentPath, _open_table_group, _validate_path_segment
 from harpy.table.io._write import write_table_components
 from harpy.table.io._write_validation import (
@@ -143,6 +147,7 @@ def write_table_updates(
     See Also
     --------
     harpy.table.read_table : Read the table, lazily, before processing it.
+    harpy.table.add_table_updates : The same for a table attached to backed SpatialData.
     harpy.table.write_table_components : Write selected components explicitly.
     harpy.table.write_table : Write a complete table, also with other axes.
 
@@ -154,6 +159,7 @@ def write_table_updates(
         sc.pp.normalize_total(adata)
         sc.pp.log1p(adata)
         sc.pp.pca(adata)
+        # overwrite=True for re-runs: their layer and X_pca replace those of an earlier run.
         hp.tb.write_table_updates(
             "sdata.zarr", table_name="counts", adata=adata, x_to=("layers", "log1p"), overwrite=True
         )
@@ -161,6 +167,151 @@ def write_table_updates(
     """
     if not isinstance(adata, AnnData):
         raise TypeError("adata must be an AnnData.")
+    plan = _plan_table_updates(store, table_name=table_name, adata=adata, x_to=x_to, overwrite=overwrite)
+    if plan is None:
+        return
+    write_table_components(
+        store,
+        table_name=table_name,
+        components=plan.components,
+        obs_identity=plan.obs_identity,
+        var_names=plan.var_names,
+        raw_var_names=plan.raw_var_names,
+        overwrite=overwrite,
+    )
+
+
+def add_table_updates(
+    sdata: SpatialData,
+    *,
+    table_name: str,
+    x_to: ComponentPath | None = None,
+    overwrite: bool = False,
+) -> SpatialData:
+    """Write the components of an attached table that are new or changed against its store, and reinstall them.
+
+    The SpatialData counterpart of :func:`harpy.table.write_table_updates`: it
+    compares ``sdata.tables[table_name]``, typically read lazily and processed
+    in place, for example by scanpy, with the same table in the store of
+    ``sdata``, and writes only its new and changed components, with the same
+    rules for what changed, ``x_to`` and ``overwrite``. It then reinstalls the
+    written components in the attached table, reopened lazily from the store,
+    as :func:`harpy.table.add_table_components` does, so that the attached
+    table matches the store and a second call writes nothing.
+
+    Parameters
+    ----------
+    sdata
+        SpatialData backed by a store, with ``table_name`` attached and in
+        that store.
+    table_name
+        Name of the attached table to update.
+    x_to
+        Destination of a new or changed ``X``, as for
+        :func:`harpy.table.write_table_updates`. When ``X`` is written to a
+        layer, the attached ``X`` is reinstalled from the store too, usually
+        the counts, or set to ``None`` if the store has no ``X``.
+    overwrite
+        Allow replacing components that exist in storage, as for
+        :func:`harpy.table.write_table_updates`. A component that is attached
+        but not stored is new, and needs no permission.
+
+    Returns
+    -------
+    spatialdata.SpatialData
+        The supplied ``sdata``. Its attached table object is kept; only the
+        slots of written components, and ``X`` after ``x_to``, are replaced.
+
+    Raises
+    ------
+    ValueError
+        If ``sdata`` has no store: there is nothing to compare with. Also for
+        the reasons that :func:`harpy.table.write_table_updates` raises.
+    FileNotFoundError
+        If the store, or the table in it, does not exist.
+    FileExistsError
+        Without ``overwrite=True``, if a component to write exists in storage.
+
+    Notes
+    -----
+    The write uses the same staging and rollback as
+    :func:`harpy.table.add_table_components`. If it fails, also after the
+    attached table was updated, the store and the attached slots are
+    restored. External references to replaced values are not refreshed.
+
+    See Also
+    --------
+    harpy.table.write_table_updates : Write the updates of a table to a store, without SpatialData.
+    harpy.table.add_table_components : Update selected components of an attached table explicitly.
+
+    Examples
+    --------
+    .. code-block:: python
+
+        sdata = hp.io.read_zarr("sdata.zarr", table_mode="lazy")
+        adata = sdata.tables["counts"]
+        sc.pp.normalize_total(adata)
+        sc.pp.log1p(adata)
+        sc.pp.pca(adata)
+        # overwrite=True for re-runs: their layer and X_pca replace those of an earlier run.
+        hp.tb.add_table_updates(sdata, table_name="counts", x_to=("layers", "log1p"), overwrite=True)
+    """
+    if not isinstance(sdata, SpatialData):
+        raise TypeError("sdata must be a SpatialData object.")
+    if sdata.path is None:
+        raise ValueError(
+            f"add_table_updates compares the attached table {table_name!r} with its store, but sdata has none "
+            "(sdata.path is None). Write the SpatialData itself with sdata.write(path); write the table into an "
+            "existing store with hp.tb.write_table; or, if the table was read from a store, call "
+            f"hp.tb.write_table_updates(store, table_name=..., adata=sdata.tables[{table_name!r}]) with that store."
+        )
+    try:
+        table, _ = _component_update_destination(sdata, table_name=table_name)
+    except FileNotFoundError as error:
+        raise FileNotFoundError(
+            f"Table {table_name!r} has no stored counterpart to compare with. Write the SpatialData with "
+            "sdata.write(path), or the table with hp.tb.add_table, which writes and attaches it whole."
+        ) from error
+    plan = _plan_table_updates(sdata.path, table_name=table_name, adata=table, x_to=x_to, overwrite=overwrite)
+    if plan is None:
+        return sdata
+    return _update_table_components(
+        sdata,
+        table_name=table_name,
+        components=plan.components,
+        delete=(),
+        obs_identity=plan.obs_identity,
+        var_names=plan.var_names,
+        raw_var_names=plan.raw_var_names,
+        overwrite=overwrite,
+        # X written to a layer leaves the stored X as it is: reinstall it, so the
+        # attached X matches the store and the next call does not write it again.
+        reopen_also=(("X",),) if plan.x_destination not in (None, ("X",)) else (),
+    )
+
+
+@dataclass(frozen=True)
+class _TableUpdates:
+    """The components to write back, and the identities that ``write_table_components`` checks them with."""
+
+    components: dict[ComponentPath, object]
+    obs_identity: pd.DataFrame | pd.Index
+    var_names: pd.Index
+    raw_var_names: pd.Index | None
+    # Where X is written, or None if X is not written.
+    x_destination: ComponentPath | None
+
+
+def _plan_table_updates(
+    store: str | PathLike[str], *, table_name: str, adata: AnnData, x_to: ComponentPath | None, overwrite: bool
+) -> _TableUpdates | None:
+    """Check ``adata`` against the stored table and return what to write, or None if nothing changed.
+
+    Shared by ``write_table_updates`` and ``add_table_updates``: the structural
+    checks, the classification of every component, the routing of ``X`` and the
+    ``overwrite`` check, which lists every existing destination. Nothing is
+    written here.
+    """
     if not isinstance(overwrite, bool):
         raise TypeError("overwrite must be a boolean.")
     _validate_x_to(x_to)
@@ -170,10 +321,10 @@ def write_table_updates(
     # any stored values are read for a comparison.
     _check_annotation_unchanged(adata, spatialdata_attrs, table_name=table_name)
     _check_axes_unchanged(group, adata, spatialdata_attrs, table_name=table_name)
-    updates = _updates_to_write(group, adata, x_to=x_to)
+    updates, x_destination = _updates_to_write(group, adata, x_to=x_to)
     if not updates:
         log.info(f"Table {table_name!r}: no new or changed components; nothing written.")
-        return
+        return None
     existing = [path for path in updates if _exists_on_disk(group, path)]
     if existing and not overwrite:
         raise FileExistsError(
@@ -186,9 +337,7 @@ def write_table_updates(
     else:
         obs_identity = adata.obs[list(_annotation_columns(spatialdata_attrs))]
     log.info(f"Table {table_name!r}: writing new and changed components {list(updates)!r}.")
-    write_table_components(
-        store,
-        table_name=table_name,
+    return _TableUpdates(
         components=updates,
         obs_identity=obs_identity,
         var_names=adata.var_names,
@@ -196,7 +345,7 @@ def write_table_updates(
         # otherwise the writer would read and check the stored raw axis for
         # nothing, and adata.raw may be None.
         raw_var_names=adata.raw.var_names if any(path[0] == "raw" for path in updates) else None,
-        overwrite=overwrite,
+        x_destination=x_destination,
     )
 
 
@@ -276,7 +425,9 @@ def _has_stored_raw(group: zarr.Group) -> bool:
     return "raw" in group and group["raw"].attrs.get("encoding-type") == "raw"
 
 
-def _updates_to_write(group: zarr.Group, adata: AnnData, *, x_to: ComponentPath | None) -> dict[ComponentPath, object]:
+def _updates_to_write(
+    group: zarr.Group, adata: AnnData, *, x_to: ComponentPath | None
+) -> tuple[dict[ComponentPath, object], ComponentPath | None]:
     """Return the new and changed components of ``adata``, keyed by the path they are written to.
 
     A new or changed ``X`` goes to ``x_to`` when given. Without ``x_to``, a
@@ -298,9 +449,11 @@ def _updates_to_write(group: zarr.Group, adata: AnnData, *, x_to: ComponentPath 
 
     Returns
     -------
-    dict
+    updates
         The components to write, keyed by destination: ``X`` under ``x_to`` when
         redirected, every other component under its own path.
+    x_destination
+        The path that ``X`` is written to, or None if ``X`` is not written.
 
     Raises
     ------
@@ -317,6 +470,7 @@ def _updates_to_write(group: zarr.Group, adata: AnnData, *, x_to: ComponentPath 
         return to_write[path]
 
     updates = {}
+    x_destination = None
     if ("X",) in components and will_be_written(("X",)):
         if x_to is None and _exists_on_disk(group, ("X",)):
             raise ValueError(
@@ -324,17 +478,17 @@ def _updates_to_write(group: zarr.Group, adata: AnnData, *, x_to: ComponentPath 
                 "x_to=('layers', key) to write it to a layer and keep the stored X, for example "
                 "x_to=('layers', 'log1p') after normalisation, or x_to=('X',) to replace the stored X."
             )
-        destination = ("X",) if x_to is None else x_to
-        if destination != ("X",) and destination in components and will_be_written(destination):
+        x_destination = ("X",) if x_to is None else x_to
+        if x_destination != ("X",) and x_destination in components and will_be_written(x_destination):
             raise ValueError(
-                f"x_to={destination!r} would receive the changed X, but adata.layers[{destination[1]!r}] is new or "
-                "changed too: two values for one path. Remove that layer from adata, or choose another key."
+                f"x_to={x_destination!r} would receive the changed X, but adata.layers[{x_destination[1]!r}] is new "
+                "or changed too: two values for one path. Remove that layer from adata, or choose another key."
             )
-        updates[destination] = components[("X",)]
+        updates[x_destination] = components[("X",)]
     for path, value in components.items():
         if path != ("X",) and path not in updates and will_be_written(path):
             updates[path] = value
-    return updates
+    return updates, x_destination
 
 
 def _table_components(adata: AnnData) -> dict[ComponentPath, object]:

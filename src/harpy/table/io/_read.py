@@ -22,6 +22,11 @@ from harpy._storage._anndata import (
 )
 from harpy._storage._spatialdata import _open_spatialdata_group
 
+# A logical component path into a table, as Harpy addresses AnnData components:
+# ("X",), ("obs",), ("var",), (mapping, key) for layers/obsm/varm/obsp/varp,
+# ("uns", key, ...) at any depth, and ("raw", "X"), ("raw", "var") or
+# ("raw", "varm", key). Which paths an operation accepts is decided at runtime
+# by _validate_component_paths and _validate_deletion_paths.
 type ComponentPath = tuple[str, ...]
 
 _RESERVED_NAMES = {".", "..", ".zarray", ".zattrs", ".zgroup", ".zmetadata", "zarr.json"}
