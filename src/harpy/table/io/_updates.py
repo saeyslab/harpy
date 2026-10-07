@@ -38,6 +38,7 @@ from harpy.table.io._read import ComponentPath, _open_table_group, _validate_pat
 from harpy.table.io._write import write_table_components
 from harpy.table.io._write_validation import (
     _annotation_columns,
+    _comparable_spatialdata_attrs,
     _read_observation_identity,
     _read_spatialdata_attrs,
     _storage_axis_index,
@@ -374,7 +375,11 @@ def _check_annotation_unchanged(adata: AnnData, spatialdata_attrs: Mapping | Non
         return
     if spatialdata_attrs is None:
         change = "would add SpatialData annotation to the unannotated stored table"
-    elif not _same_uns_value(adata.uns[TableModel.ATTRS_KEY], spatialdata_attrs):
+    # Regions are compared as lists: one region can be a string or a one-element list.
+    elif not _same_uns_value(
+        _comparable_spatialdata_attrs(adata.uns[TableModel.ATTRS_KEY]),
+        _comparable_spatialdata_attrs(spatialdata_attrs),
+    ):
         change = "differs from the stored SpatialData annotation of table"
     else:
         return

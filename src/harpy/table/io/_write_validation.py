@@ -203,19 +203,51 @@ def _same_metadata(left: object, right: object) -> bool:
     return bool(np.array_equal(left, right))
 
 
+def _comparable_spatialdata_attrs(value: object) -> object:
+    """Return a SpatialData annotation with its regions as a list, to compare it.
+
+    SpatialData declares one region as a string or as a one-element list, and
+    either form can be stored: ``{"region": "cells", ...}`` and
+    ``{"region": ["cells"], ...}`` declare the same region. Values other than an
+    annotation with regions are returned as they are.
+    """
+    if isinstance(value, Mapping) and TableModel.REGION_KEY in value:
+        regions = value[TableModel.REGION_KEY]
+        if isinstance(regions, str):
+            regions = [regions]
+        elif isinstance(regions, np.ndarray):
+            regions = regions.tolist()
+        return {**value, TableModel.REGION_KEY: regions}
+    return value
+
+
+def _with_value(mapping: Mapping, keys: ComponentPath, value: object) -> object:
+    """Return a copy of ``mapping`` with ``value`` at the nested ``keys``, or ``value`` itself for no keys."""
+    if not keys:
+        return value
+    return {**mapping, keys[0]: _with_value(mapping[keys[0]], keys[1:], value)}
+
+
 def _validate_spatialdata_attrs_unchanged(
     spatialdata_attrs: Mapping | None, components: Mapping[ComponentPath, object]
 ) -> None:
-    """Ensure component writes preserve uns["spatialdata_attrs"], including its absence."""
+    """Ensure component writes preserve uns["spatialdata_attrs"], including its absence.
+
+    A write at or under the annotation must leave it as it was: the annotation
+    with the written value in place is compared with the stored one, as whole
+    annotations, whatever the depth of the path. Regions are compared as lists
+    (``_comparable_spatialdata_attrs``), so a region given as a string or as a
+    one-element list is the same annotation.
+    """
     annotation_path = ("uns", TableModel.ATTRS_KEY)
+    stored_attrs = _comparable_spatialdata_attrs(spatialdata_attrs)
     for path, value in components.items():
         if path == ("uns",):
             if not isinstance(value, Mapping):
                 raise ValueError("uns must be a mapping.")
-            stored = spatialdata_attrs
-            present = stored is not None
+            present = stored_attrs is not None
             if (TableModel.ATTRS_KEY in value) != present or (
-                present and not _same_metadata(stored, value[TableModel.ATTRS_KEY])
+                present and not _same_metadata(stored_attrs, _comparable_spatialdata_attrs(value[TableModel.ATTRS_KEY]))
             ):
                 raise ValueError("Component writes must preserve SpatialData annotation; use write_table().")
         elif path[:2] == annotation_path:
@@ -229,7 +261,8 @@ def _validate_spatialdata_attrs_unchanged(
                     stored = stored[key]
             except KeyError:
                 raise ValueError("Component writes must not add SpatialData annotation; use write_table().") from None
-            if not _same_metadata(stored, value):
+            attrs_if_written = _comparable_spatialdata_attrs(_with_value(spatialdata_attrs, path[2:], value))
+            if not _same_metadata(stored_attrs, attrs_if_written):
                 raise ValueError("Component writes must preserve SpatialData annotation; use write_table().")
 
 

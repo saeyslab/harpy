@@ -35,5 +35,9 @@
       "Bash(find:*)"
     ],
     "deny": ["Read(./.env)", "Read(./.env.*)"]
+  },
+  "spinnerVerbs": {
+    "mode": "replace",
+    "verbs": ["Reasoning"]
   }
 }

@@ -238,6 +238,20 @@ def test_changed_region_instance_pairs_raise(store, written):
     assert written == []
 
 
+@pytest.mark.parametrize("region", [["cells"], np.array(["cells"])])
+def test_one_region_as_a_one_element_list_is_the_stored_annotation(store, written, region):
+    """A region given as ["cells"] instead of "cells" is the same annotation.
+
+    The stored annotation has the region "cells". Changing only its form in
+    adata, to a one-element list or array, leaves the annotation unchanged:
+    write_table_updates neither raises nor writes anything.
+    """
+    adata = read_table(store, table_name="counts", mode="lazy")
+    adata.uns[TableModel.ATTRS_KEY] = {**adata.uns[TableModel.ATTRS_KEY], TableModel.REGION_KEY: region}
+    write_table_updates(store, table_name="counts", adata=adata)
+    assert written == []
+
+
 def test_a_changed_or_added_annotation_raises_and_a_missing_one_is_left_alone(store, tmp_path, written):
     adata = read_table(store, table_name="counts", mode="lazy")
     annotation = adata.uns[TableModel.ATTRS_KEY]

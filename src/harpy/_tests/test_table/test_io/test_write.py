@@ -739,6 +739,26 @@ def test_spatial_annotation_cannot_be_added_removed_or_changed_by_components(mak
     write_table_components(path, table_name="counts", components={("uns",): {**table.uns, "new": 1}}, overwrite=True)
 
 
+@pytest.mark.parametrize("region", ["cells", ["cells"], np.array(["cells"])])
+def test_one_region_as_a_string_or_a_one_element_list_is_the_same_annotation(make_table_io_store, region):
+    """SpatialData declares one region either way, so component writes accept either form as unchanged."""
+    path = make_table_io_store()
+    table = read_table(path, table_name="counts", mode="eager")
+    table.obs["region"] = pd.Categorical(["cells", "cells"])
+    table.obs["instance"] = [1, 2]
+    table = TableModel.parse(table, region="cells", region_key="region", instance_key="instance")
+    write_table(path, table_name="counts", adata=table, overwrite=True)
+    annotation = {**table.uns[TableModel.ATTRS_KEY], TableModel.REGION_KEY: region}
+    for components in (
+        {("uns",): {**table.uns, TableModel.ATTRS_KEY: annotation}},
+        {("uns", TableModel.ATTRS_KEY): annotation},
+        {("uns", TableModel.ATTRS_KEY, TableModel.REGION_KEY): region},
+    ):
+        write_table_components(path, table_name="counts", components=components, overwrite=True)
+    regions = read_table(path, table_name="counts", mode="eager").uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY]
+    assert list(np.atleast_1d(regions)) == ["cells"]
+
+
 @pytest.mark.parametrize("zarr_format", [2, 3])
 @pytest.mark.parametrize("scope", ["table", "components"])
 @pytest.mark.parametrize("failure", ["staging", "parents", "publication", "finalization", "installation"])
