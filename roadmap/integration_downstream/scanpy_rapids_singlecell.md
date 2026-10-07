@@ -2096,9 +2096,9 @@ flowchart TD
   the same stored `X`, and so do a default read and one with
   `dense_chunks="storage"` for a dense `obsm` entry).
 - A backed handle that points to the same stored element is unchanged: a
-  `zarr.Array`, or a CSR/CSC dataset whose group, at the same store and path
-  (the resolved store root and the element's path in the store). Identity is
-  enough, and its values are not compared: a backed handle has no values of
+  `zarr.Array`, or a CSR/CSC dataset whose group, at the same resolved path on
+  disk, wherever its store was opened (at the SpatialData root, the table or
+  the element itself). Identity is enough, and its values are not compared: a backed handle has no values of
   its own, since every read goes to the stored element, so it cannot differ
   from storage. Even a write into it in place, `array[...] = ...`, is already
   in the store, with nothing left to write.
@@ -2122,7 +2122,7 @@ lazy reader records the arrays it creates, and "changed by the user since it
 was read" becomes "a name that is not registered for this element":
 
 ```
-lazy reader creates array      ──> registry[array.name] = (store, element path)
+lazy reader creates array      ──> registry[array.name] = element path on disk
 scanpy: X → normalize → log1p  ──> new array, new name, not in the registry  ──> changed
 untouched layer                ──> same name, registered for that element   ──> unchanged
 ```
@@ -2145,11 +2145,15 @@ the user changed.
   the adapters' writes, including the zero-sized sparse case built with
   `from_delayed`.
 - **Key and value:** the key is the Dask array's name. The value identifies the
-  stored element: the resolved store root and the element's path in the store.
-  The logical component path alone is not enough, because tables live under
-  `tables/<name>`.
+  stored element: its resolved path on disk, such as
+  `/data/sdata.zarr/tables/counts/X`. The logical component path alone is not
+  enough, because tables live under `tables/<name>`. A store root plus the
+  element's path in that store is not enough either: it depends on the folder
+  the store was opened at, so a handle opened at the table folder would not
+  match a read from the SpatialData root, although both point to the same
+  files.
 - **Only local stores are registered.** The registry identifies an element by
-  its resolved store root, which is clear for a `LocalStore`. Arrays read from
+  its resolved path on disk, which only a `LocalStore` has. Arrays read from
   other stores, in memory or remote, are not registered, so they count as
   changed and are rewritten. That is conservative: never wrong, only extra
   work.
