@@ -1,30 +1,385 @@
-"""Decide which components of a table changed against its store, for writing back only those.
+"""Write back the components of a table that are new or changed against its store.
 
-``_component_changed`` decides, for one value of an AnnData table whose path
-exists in the store, whether it differs from the stored element.
+``write_table_updates`` classifies each component of an AnnData table as new,
+changed or unchanged against the stored table, and writes the new and changed
+ones in one ``write_table_components`` call. ``_component_changed`` decides,
+for one value whose path exists in the store, whether it differs from the
+stored element.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
+from os import PathLike
 from pathlib import Path
 
 import dask.array as da
 import numpy as np
 import pandas as pd
 import zarr
+from anndata import AnnData
 from anndata.abc import CSCDataset, CSRDataset
+from loguru import logger as log
 from scipy import sparse
+from spatialdata.models import TableModel
 
 from harpy._storage._anndata import (
+    _MATRIX_MAPPINGS,
     _decode_anndata_element,
     _element_identity,
     _lazy_read_source,
     _read_anndata_element,
 )
-from harpy.table.io._read import ComponentPath
+from harpy.table.io._read import ComponentPath, _open_table_group, _validate_path_segment
+from harpy.table.io._write import write_table_components
+from harpy.table.io._write_validation import (
+    _annotation_columns,
+    _read_observation_identity,
+    _read_spatialdata_attrs,
+    _storage_axis_index,
+)
 
 type _InMemoryMatrix = np.ndarray | sparse.csr_matrix | sparse.csc_matrix | sparse.csr_array | sparse.csc_array
+
+_AXIS_WAYS_OUT = (
+    "To store a table with other cells or genes, use write_table(..., overwrite=True) to replace the stored "
+    "table, or write_table under a new table_name to keep it. To update obsm matrices that cover whole regions, "
+    "use write_table_components_by_region or add_table_components_by_region, with fill_values for the other "
+    "observations."
+)
+
+
+def write_table_updates(
+    store: str | PathLike[str],
+    *,
+    table_name: str,
+    adata: AnnData,
+    x_to: ComponentPath | None = None,
+    overwrite: bool = False,
+) -> None:
+    """Write the components of a table that are new or changed against its store.
+
+    Compares ``adata``, typically read with :func:`harpy.table.read_table` and
+    then processed, for example by scanpy, with the stored table, and writes
+    only its new and changed components, in one rollback-protected
+    :func:`harpy.table.write_table_components` call. Components missing from
+    ``adata`` are never deleted.
+
+    Parameters
+    ----------
+    store
+        Local path to an existing SpatialData Zarr root.
+    table_name
+        Name of the existing table to update.
+    adata
+        The table with its updates. Its axes must match the stored table:
+        the same observations and features, in the same order. It is not
+        modified.
+    x_to
+        Destination of a new or changed ``X``. ``("layers", key)`` writes it to
+        that layer and keeps the stored ``X``, usually the counts;
+        ``("X",)`` replaces the stored ``X``. Without ``x_to``, a changed ``X``
+        raises: the stored ``X`` is never replaced implicitly. A new ``X``, for
+        a stored table without one, is then written to ``X``.
+    overwrite
+        Allow replacing components that exist in storage, the ``x_to``
+        destination included. A scanpy run typically changes ``obs``, ``var``
+        and ``uns`` entries, which exist, so its write-back needs ``True``. New
+        components need no permission. Whether a component is written at all is
+        decided by comparison, not by ``overwrite``.
+
+    Raises
+    ------
+    ValueError
+        If the axes of ``adata`` differ from storage: its ``obs_names``, the
+        region/instance pairs of an annotated table, its ``var_names``, or,
+        when both have ``raw``, its ``raw.var_names``. If
+        ``uns["spatialdata_attrs"]`` differs from the stored annotation, or
+        would add one. If ``X`` changed without ``x_to``, ``x_to`` is neither
+        ``("layers", key)`` nor ``("X",)``, or ``X`` and ``adata.layers[key]``
+        would both be written to ``x_to``.
+    FileExistsError
+        Without ``overwrite=True``, if a component to write exists in storage.
+        The message lists every such component.
+
+    Notes
+    -----
+    A component is new if its path does not exist in storage, and written.
+    Otherwise it is written only if it changed:
+
+    - a lazy read of its own stored element (:func:`harpy.table.read_table`
+      with ``mode="lazy"``) is unchanged, without reading values, as long as no
+      operation was applied to it: copies and ``persist()`` keep it
+      recognised, while any operation, a real rechunk included, makes it
+      changed. A backed handle to its own stored element is unchanged too;
+    - values in memory are compared with the stored values: ``obs``, ``var``
+      and DataFrame-valued entries strictly, in index, columns, dtypes,
+      categories and values; ``uns`` per top-level key; NumPy and SciPy
+      CSR/CSC matrices by shape, dtype, format and number of stored values
+      first, then block by block, stopping at the first difference;
+    - any other value is changed: a derived Dask array, without computing it
+      for a comparison, a backed handle to another element, or a value of
+      another type, which the writer then accepts or rejects.
+
+    The SpatialData annotation, ``uns["spatialdata_attrs"]``, is never
+    written: an unchanged annotation is skipped, a missing one stays in
+    storage, and a changed or added one raises.
+
+    ``obs`` and ``var`` are written whole, and ``uns`` per top-level key, so
+    columns and nested keys removed from them are removed from storage too.
+    Missing components, top-level ``uns`` keys included, stay in storage;
+    remove them with :func:`harpy.table.delete_table_components`.
+
+    Not detected: a change that another writer made in storage since the
+    read, to a component that ``adata`` holds in memory or that changed in
+    ``adata``, is overwritten (last writer wins); and a persisted read that
+    another writer made stale. Concurrent-access isolation is not provided.
+
+    Returns None. ``adata`` is not modified: after ``x_to``, ``adata.X`` still
+    holds the written values and ``adata.layers`` lacks the destination. Reopen
+    the table to get one that matches the store; called again with the same
+    ``adata``, the function writes ``X`` again.
+
+    See Also
+    --------
+    harpy.table.read_table : Read the table, lazily, before processing it.
+    harpy.table.write_table_components : Write selected components explicitly.
+    harpy.table.write_table : Write a complete table, also with other axes.
+
+    Examples
+    --------
+    .. code-block:: python
+
+        adata = hp.tb.read_table("sdata.zarr", table_name="counts", mode="lazy")
+        sc.pp.normalize_total(adata)
+        sc.pp.log1p(adata)
+        sc.pp.pca(adata)
+        hp.tb.write_table_updates(
+            "sdata.zarr", table_name="counts", adata=adata, x_to=("layers", "log1p"), overwrite=True
+        )
+        adata = hp.tb.read_table("sdata.zarr", table_name="counts", mode="lazy")
+    """
+    if not isinstance(adata, AnnData):
+        raise TypeError("adata must be an AnnData.")
+    if not isinstance(overwrite, bool):
+        raise TypeError("overwrite must be a boolean.")
+    _validate_x_to(x_to)
+    group = _open_table_group(store, table_name=table_name)
+    spatialdata_attrs = _read_spatialdata_attrs(group)
+    # The structural checks come first: they are cheap, and must fail before
+    # any stored values are read for a comparison.
+    _check_annotation_unchanged(adata, spatialdata_attrs, table_name=table_name)
+    _check_axes_unchanged(group, adata, spatialdata_attrs, table_name=table_name)
+    updates = _updates_to_write(group, adata, x_to=x_to)
+    if not updates:
+        log.info(f"Table {table_name!r}: no new or changed components; nothing written.")
+        return
+    existing = [path for path in updates if _exists_on_disk(group, path)]
+    if existing and not overwrite:
+        raise FileExistsError(
+            f"Table {table_name!r}: writing the new and changed components would replace "
+            f"{', '.join(map(repr, existing))}, which exist in storage; use overwrite=True. "
+            "Unchanged components are not written, whatever overwrite."
+        )
+    if spatialdata_attrs is None:
+        obs_identity = adata.obs_names
+    else:
+        obs_identity = adata.obs[list(_annotation_columns(spatialdata_attrs))]
+    log.info(f"Table {table_name!r}: writing new and changed components {list(updates)!r}.")
+    write_table_components(
+        store,
+        table_name=table_name,
+        components=updates,
+        obs_identity=obs_identity,
+        var_names=adata.var_names,
+        # Raw identities are only needed when raw components are written:
+        # otherwise the writer would read and check the stored raw axis for
+        # nothing, and adata.raw may be None.
+        raw_var_names=adata.raw.var_names if any(path[0] == "raw" for path in updates) else None,
+        overwrite=overwrite,
+    )
+
+
+def _validate_x_to(x_to: object) -> None:
+    """Accept ``None``, ``("X",)`` or ``("layers", key)`` as the destination of ``X``."""
+    if x_to is None or (isinstance(x_to, tuple) and x_to == ("X",)):
+        return
+    if isinstance(x_to, tuple) and len(x_to) == 2 and x_to[0] == "layers":
+        _validate_path_segment(x_to[1])
+        return
+    raise ValueError(f"x_to must be ('layers', key) or ('X',), not {x_to!r}.")
+
+
+def _check_annotation_unchanged(adata: AnnData, spatialdata_attrs: Mapping | None, *, table_name: str) -> None:
+    """Raise if ``adata`` changes or adds the stored SpatialData annotation; a missing one is left alone."""
+    if TableModel.ATTRS_KEY not in adata.uns:
+        return
+    if spatialdata_attrs is None:
+        change = "would add SpatialData annotation to the unannotated stored table"
+    elif not _same_uns_value(adata.uns[TableModel.ATTRS_KEY], spatialdata_attrs):
+        change = "differs from the stored SpatialData annotation of table"
+    else:
+        return
+    raise ValueError(
+        f"adata.uns[{TableModel.ATTRS_KEY!r}] {change} {table_name!r}. write_table_updates does not change a "
+        "table's SpatialData linkage; use write_table(..., overwrite=True)."
+    )
+
+
+def _check_axes_unchanged(
+    group: zarr.Group, adata: AnnData, spatialdata_attrs: Mapping | None, *, table_name: str
+) -> None:
+    """Raise if the axes of ``adata`` differ from the stored table, naming the ways out.
+
+    Observations are checked by their names and, in an annotated table, also by
+    their region/instance pairs, which identify them for the component writer.
+    The writer ignores the index of the pairs it is given, but a written ``obs``
+    must keep its stored index; checking both here raises once, with the ways
+    out, before any value is compared or written.
+    """
+    # The stored region and instance columns, indexed by the stored obs_names.
+    stored_identity = None if spatialdata_attrs is None else _read_observation_identity(group, spatialdata_attrs)
+    stored_obs_names = _storage_axis_index(group, ("obs",)) if stored_identity is None else stored_identity.index
+    differences = []
+    if not _same_values(adata.obs_names, stored_obs_names):
+        differences.append("obs_names")
+    if stored_identity is not None:
+        keys = list(stored_identity.columns)
+        if any(key not in adata.obs for key in keys) or not _same_values(adata.obs[keys], stored_identity):
+            differences.append(f"region/instance pairs in obs{keys!r}")
+    if not _same_values(adata.var_names, _storage_axis_index(group, ("var",))):
+        differences.append("var_names")
+    if differences:
+        raise ValueError(
+            f"The {' and '.join(differences)} of adata differ from table {table_name!r} in storage, for example "
+            f"after filtering cells or genes; write_table_updates keeps the stored axes. {_AXIS_WAYS_OUT}"
+        )
+    if (
+        adata.raw is not None
+        and _has_stored_raw(group)
+        and not _same_values(adata.raw.var_names, _storage_axis_index(group, ("raw", "var")))
+    ):
+        raise ValueError(
+            f"The raw.var_names of adata differ from the stored raw of table {table_name!r}; write_table_updates "
+            "keeps raw's own gene axis. Use write_table(..., overwrite=True) to replace the stored table, or "
+            "write_table under a new table_name to keep it."
+        )
+
+
+def _same_values(left: pd.Index | pd.DataFrame, right: pd.Index | pd.DataFrame) -> bool:
+    """Compare ordered identities by value, whatever their dtypes, such as object or string, categorical or not."""
+    return bool(np.array_equal(left.to_numpy(dtype=object), right.to_numpy(dtype=object)))
+
+
+def _has_stored_raw(group: zarr.Group) -> bool:
+    """Return whether the stored table holds raw data, rather than no raw or a raw stored as None."""
+    return "raw" in group and group["raw"].attrs.get("encoding-type") == "raw"
+
+
+def _updates_to_write(group: zarr.Group, adata: AnnData, *, x_to: ComponentPath | None) -> dict[ComponentPath, object]:
+    """Return the new and changed components of ``adata``, keyed by the path they are written to.
+
+    A new or changed ``X`` goes to ``x_to`` when given. Without ``x_to``, a
+    changed ``X`` raises, and a new ``X``, for a stored table without one, goes
+    to ``X``. ``X`` is classified first, so that these errors come before the
+    other components are compared.
+
+    Parameters
+    ----------
+    group
+        The stored table, opened read-only by ``_open_table_group``. Used for
+        what is stored: the values and element identities that decide whether a
+        component that exists changed. Whether a component exists is decided on
+        disk, at the table's path (``_exists_on_disk``).
+    adata
+        The table to write back. It is read, never modified.
+    x_to
+        The destination of ``X``, already validated by the caller.
+
+    Returns
+    -------
+    dict
+        The components to write, keyed by destination: ``X`` under ``x_to`` when
+        redirected, every other component under its own path.
+
+    Raises
+    ------
+    ValueError
+        If ``X`` changed and storage has an ``X``, without ``x_to``; or if ``X``
+        and ``adata.layers[key]`` would both be written to ``x_to``.
+    """
+    components = _table_components(adata)
+    to_write: dict[ComponentPath, bool] = {}
+
+    def will_be_written(path: ComponentPath) -> bool:
+        if path not in to_write:
+            to_write[path] = _new_or_changed(group, path, components[path])
+        return to_write[path]
+
+    updates = {}
+    if ("X",) in components and will_be_written(("X",)):
+        if x_to is None and _exists_on_disk(group, ("X",)):
+            raise ValueError(
+                "adata.X differs from the stored X, which write_table_updates never replaces implicitly. Pass "
+                "x_to=('layers', key) to write it to a layer and keep the stored X, for example "
+                "x_to=('layers', 'log1p') after normalisation, or x_to=('X',) to replace the stored X."
+            )
+        destination = ("X",) if x_to is None else x_to
+        if destination != ("X",) and destination in components and will_be_written(destination):
+            raise ValueError(
+                f"x_to={destination!r} would receive the changed X, but adata.layers[{destination[1]!r}] is new or "
+                "changed too: two values for one path. Remove that layer from adata, or choose another key."
+            )
+        updates[destination] = components[("X",)]
+    for path, value in components.items():
+        if path != ("X",) and path not in updates and will_be_written(path):
+            updates[path] = value
+    return updates
+
+
+def _table_components(adata: AnnData) -> dict[ComponentPath, object]:
+    """Return every component of ``adata`` at the path that ``write_table_components`` writes it to.
+
+    ``X``, when present; ``obs`` and ``var`` whole; each entry of ``layers``,
+    ``obsm``, ``varm``, ``obsp`` and ``varp``; each top-level ``uns`` key except
+    the SpatialData annotation, which is checked separately and never written;
+    and ``raw``'s ``X``, ``var`` and ``varm`` entries.
+    """
+    components: dict[ComponentPath, object] = {} if adata.X is None else {("X",): adata.X}
+    components[("obs",)] = adata.obs
+    components[("var",)] = adata.var
+    for slot in _MATRIX_MAPPINGS:
+        components.update({(slot, key): value for key, value in getattr(adata, slot).items()})
+    components.update({("uns", key): value for key, value in adata.uns.items() if key != TableModel.ATTRS_KEY})
+    if adata.raw is not None:
+        components[("raw", "X")] = adata.raw.X
+        components[("raw", "var")] = adata.raw.var
+        components.update({("raw", "varm", key): value for key, value in adata.raw.varm.items()})
+    return components
+
+
+def _new_or_changed(group: zarr.Group, path: ComponentPath, value: object) -> bool:
+    """Return whether a component will be written: new if its path does not exist in storage, else if it changed.
+
+    Existence is checked on disk (``_exists_on_disk``). A path on disk that Zarr
+    does not recognise as an element is written too; the writer then decides
+    whether it can be replaced.
+    """
+    if not _exists_on_disk(group, path) or "/".join(path) not in group:
+        return True
+    return _component_changed(group, path, value)
+
+
+def _exists_on_disk(group: zarr.Group, path: ComponentPath) -> bool:
+    """Return whether a component's path exists on disk, where the writer decides existence for ``overwrite``.
+
+    A path can exist on disk without Zarr recognising it as an element, so
+    existence is checked the way the writer checks it. ``group`` is opened from
+    the SpatialData root by ``_open_table_group``, so its path, such as
+    ``tables/counts``, is relative to that root: the table's path on disk is the
+    one the writer builds from the store.
+    """
+    return (Path(group.store.root) / group.path).joinpath(*path).exists()
 
 
 def _component_changed(group: zarr.Group, path: ComponentPath, value: object) -> bool:
@@ -86,7 +441,15 @@ def _same_dataframe(value: pd.DataFrame, stored: pd.DataFrame) -> bool:
     """
     try:
         pd.testing.assert_frame_equal(
-            value, stored, check_exact=True, check_index_type=True, check_column_type=True, check_like=False
+            value,
+            stored,
+            check_exact=True,
+            check_index_type=True,
+            # Compare the column labels, not the class of the columns index: AnnData
+            # stores only the names, and its constructor turns the empty RangeIndex of
+            # a dataframe without columns into an empty object index.
+            check_column_type=False,
+            check_like=False,
         )
     except (AssertionError, TypeError, ValueError):
         return False

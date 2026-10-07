@@ -21,6 +21,7 @@ from .io._add_table import add_table
 from .io._components import add_table_components, remove_table_components
 from .io._components_by_region import add_table_components_by_region
 from .io._read import read_table, read_table_components
+from .io._updates import write_table_updates
 from .io._write import delete_table_components, write_table, write_table_components
 from .io._write_by_region import write_table_components_by_region
 from .niches._clustering import nhood_kmeans, nhood_lda
@@ -38,6 +39,7 @@ __all__ = [
     "read_table_components",
     "write_table",
     "write_table_components",
+    "write_table_updates",
     "delete_table_components",
     "write_table_components_by_region",
     "correct_marker_genes",
