@@ -2009,18 +2009,20 @@ diagram has no branch for them.
 
 ```mermaid
 flowchart TD
-    start(["write_table_updates / add_table_updates"]) --> axes{"Axes match storage?<br/>obs identities, var_names,<br/>raw.var_names"}
+    start(["write_table_updates / add_table_updates"]) --> annotation{"uns['spatialdata_attrs']<br/>changed or added?"}
+    annotation -- yes --> annotation_error[/"Raise, pointing to write_table"/]
+    annotation -- "no: equal or missing" --> axes{"Axes match storage?<br/>obs_names, region/instance pairs,<br/>var_names, raw.var_names"}
     axes -- no --> axis_error[/"Raise, naming the ways out:<br/>write_table, a new table_name,<br/>or the regional writers"/]
-    axes -- yes --> each["Each component of adata"]
+    axes -- yes --> each["Each component of adata,<br/>X first"]
     each --> stored{"Path in storage?"}
     stored -- no --> new["New"]
     stored -- yes --> held{"How is it held?"}
-    held -- "lazy read with a registered name<br/>(also persisted or copied)" --> unchanged["Unchanged: skip"]
-    held -- "backed handle to the same element" --> unchanged
-    held -- "in memory: obs, var, uns,<br/>NumPy, SciPy" --> equal{"Equal to the<br/>stored value?"}
+    held -- "lazy read of its own element<br/>(registered name; also persisted or copied)" --> unchanged["Unchanged: skip"]
+    held -- "backed handle to its own element" --> unchanged
+    held -- "in memory: obs, var, uns,<br/>NumPy, SciPy CSR/CSC" --> equal{"Equal to the<br/>stored value?"}
     equal -- yes --> unchanged
     equal -- no --> changed["Changed"]
-    held -- "derived Dask array, or backed<br/>handle to another element" --> changed
+    held -- "derived Dask array, read or backed<br/>handle of another element, any other value" --> changed
     new --> isx
     changed --> isx{"Is it X?"}
     isx -- no --> dest["Destination: its own path"]
