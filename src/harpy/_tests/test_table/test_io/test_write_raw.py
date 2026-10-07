@@ -62,9 +62,8 @@ def test_raw_creation_roundtrip(make_table_io_store, zarr_format, matrix_kind, m
     else:
         identities = {"obs_identity": parent.obs_names, "raw_var_names": names}
     before = _store_bytes(path)
-    write_table_components(
-        path, table_name="counts", components=components, overwrite=state == "null" or with_frame, **identities
-    )
+    # Only the supplied obs exists in storage; a raw stored as None counts as absent.
+    write_table_components(path, table_name="counts", components=components, overwrite=with_frame, **identities)
     actual = read_zarr(path / "tables/counts")
     _assert_value(actual.raw.X, matrix)
     if with_frame:
@@ -169,15 +168,27 @@ def test_raw_creation_rejects_staged_feature_index_mismatch(make_table_io_store,
     pd.testing.assert_frame_equal(frame, original_frame)
 
 
+def test_raw_creation_over_a_raw_stored_as_none_needs_no_overwrite(make_table_io_store):
+    """AnnData stores raw as None for every table without raw; that entry holds no data to protect."""
+    path = make_table_io_store()
+    _without_raw(path, "null")
+    write_table_components(
+        path,
+        table_name="counts",
+        components={("raw", "X"): np.ones((2, 4))},
+        obs_identity=["c1", "c2"],
+        raw_var_names=["a", "b", "c", "d"],
+    )
+    _assert_value(read_zarr(path / "tables/counts").raw.X, np.ones((2, 4)))
+
+
 @pytest.mark.parametrize(
-    "state", ["null", "wrong_type", "wrong_version", "malformed_null", "unrecognized_path", "existing_axis"]
+    "state", ["wrong_type", "wrong_version", "malformed_null", "unrecognized_path", "existing_axis"]
 )
 def test_raw_creation_respects_existing_destination(make_table_io_store, state):
     path = make_table_io_store()
     group = zarr.open_group(str(path), mode="r+")["tables/counts"]
-    if state == "null":
-        write_elem(group, "raw", None)
-    elif state == "wrong_type":
+    if state == "wrong_type":
         write_elem(group, "raw", {})
     elif state == "wrong_version":
         group["raw"].attrs["encoding-version"] = "unsupported"
@@ -189,14 +200,14 @@ def test_raw_creation_respects_existing_destination(make_table_io_store, state):
         raw_path.mkdir()
         (raw_path / "user-file").write_text("keep")
     before = _store_bytes(path)
-    with pytest.raises(FileExistsError if state == "null" else ValueError):
+    with pytest.raises(ValueError):
         write_table_components(
             path,
             table_name="counts",
             components={("raw", "X"): np.ones((2, 4))},
             obs_identity=["c1", "c2"],
             raw_var_names=["a", "b", "c", "d"],
-            overwrite=state != "null",
+            overwrite=True,
         )
     assert _store_bytes(path) == before
 
