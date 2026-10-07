@@ -1915,10 +1915,13 @@ practice, or for consistency before a release.
 
 ### Phase 2: user documentation
 
-**Deferred until Phases 3–7 are implemented.** Most of the guide depends on
-them: which writer to use (Phase 3's write-back helper), the reopen rule
-(Phase 5) and Harpy's own wrappers (Phase 6). Written now, it would need rewriting. The contracts are already documented
-in `docs/development/storage.md` and the docstrings. If a release is cut before
+**Deferred until Phases 6 and 7 are implemented.** Much of the guide depends
+on them: Harpy's own wrappers (Phase 6) and the rapids-singlecell pattern
+(Phase 7). Which writer to use is settled by Phase 3's write-back helpers, and
+the reopen rule without Phase 5: reopen after the store-path writers, while
+the SpatialData adapters reinstall what they write. Written now, the guide
+would need rewriting. The contracts are already documented in
+`docs/development/storage.md` and the docstrings. If a release is cut before
 Phase 6, add at least a short note or a guard for the legacy table functions
 on lazy tables (see "Legacy table functions at release" in the open
 questions).
@@ -1927,7 +1930,8 @@ Add a user guide page, "Using Harpy tables with scanpy and rapids-singlecell",
 containing:
 
 - the recommended usage pattern above;
-- when to use `write_table_components` and when to use `write_table`;
+- when to use `write_table_updates`, `write_table_components` and
+  `write_table`, and their SpatialData counterparts;
 - the reopen rule;
 - splitting rows before densifying steps, and Dask's `array.chunk-size` setting
   as the single memory target;
@@ -3056,9 +3060,32 @@ source, reading each block 2–3 times. The design:
 Phase 4 is complete once slices 4a and 4b are implemented; slice 4c stays
 deferred.
 
-### Phase 5: stale-table protection
+### Phase 5: stale-table protection (deferred)
 
 Choose between returning reopened tables and generation tokens (gap 4).
+
+**Deferred until multi-process or shared-store use becomes a requirement, or a
+silent stale read is reported.**
+
+- The SpatialData adapters already keep the attached table fresh:
+  `add_table_components` and `add_table_updates` reinstall what they write, and
+  `X` after `x_to`, inside the write's rollback window. Checked: after
+  `add_table_updates(..., x_to=("X",))`, the attached `X` is the stored one,
+  and a second call writes nothing.
+- The store-path writers return `None`, and their docstrings tell the caller to
+  reopen. A table reused anyway reads what the write replaced. Checked: after
+  `write_table_updates(..., x_to=("X",))`, computing the caller's lazy `X`
+  again, and a second call with the same table, failed with a Zarr error
+  (`cannot reshape array of size 1048576 into shape (524288,)`); the store was
+  unchanged by the failed second call. With a compatible stored layout, the
+  read could succeed with wrong values.
+- Returning reopened tables would mostly repeat what the adapters do, for one
+  more calling pattern, and change the return type of four store-path writers.
+- What neither covers needs generation tokens: references kept outside the
+  attached table, other processes, stale persisted reads and concurrent
+  writers. Tokens touch the lazy read path (a check injected into AnnData's
+  read graphs), need tokens per element so that a write of `obs` does not mark
+  unchanged matrices stale, and a fallback for stores written by other tools.
 
 ### Phase 6: store-path variants of Harpy's table functions
 
