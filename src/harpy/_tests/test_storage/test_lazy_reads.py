@@ -56,14 +56,14 @@ def _table_store(tmp_path, name="sdata.zarr"):
 def test_lazy_reads_register_their_stored_element(tmp_path, kind):
     element = _stored_element(tmp_path, _MATRICES[kind])
     array = _decode_anndata_element(element, mode="lazy")
-    assert _lazy_read_source(array) == ((tmp_path / "store.zarr").resolve(), "matrix")
+    assert _lazy_read_source(array) == (tmp_path / "store.zarr" / "matrix").resolve()
 
 
 def test_read_table_registers_each_matrix_with_its_path_in_the_store(tmp_path):
     path = _table_store(tmp_path)
     adata = read_table(path, table_name="counts", mode="lazy")
-    assert _lazy_read_source(adata.X) == (path.resolve(), "tables/counts/X")
-    assert _lazy_read_source(adata.obsm["dense"]) == (path.resolve(), "tables/counts/obsm/dense")
+    assert _lazy_read_source(adata.X) == (path / "tables" / "counts" / "X").resolve()
+    assert _lazy_read_source(adata.obsm["dense"]) == (path / "tables" / "counts" / "obsm" / "dense").resolve()
 
 
 def test_reads_from_two_stores_with_the_same_layout_are_not_mixed_up(tmp_path):
@@ -71,8 +71,8 @@ def test_reads_from_two_stores_with_the_same_layout_are_not_mixed_up(tmp_path):
     first_x = read_table(first, table_name="counts", mode="lazy").X
     second_x = read_table(second, table_name="counts", mode="lazy").X
     assert first_x.name != second_x.name
-    assert _lazy_read_source(first_x) == (first.resolve(), "tables/counts/X")
-    assert _lazy_read_source(second_x) == (second.resolve(), "tables/counts/X")
+    assert _lazy_read_source(first_x) == (first / "tables" / "counts" / "X").resolve()
+    assert _lazy_read_source(second_x) == (second / "tables" / "counts" / "X").resolve()
 
 
 @pytest.mark.parametrize("kind", ["csr", "dense"])
@@ -130,5 +130,9 @@ def test_lazy_reads_of_staged_components_are_registered_too(tmp_path, monkeypatc
     registered = {}
     monkeypatch.setattr(anndata_storage, "_LAZY_READS", registered)
     path = _table_store(tmp_path)
-    staged_roots = {root for root, _ in registered.values() if root.name.startswith(f".{path.name}.harpy-")}
-    assert staged_roots, "write_table's lazy validation reads of the staged table were not registered."
+    staged_reads = [
+        source
+        for source in registered.values()
+        if any(part.startswith(f".{path.name}.harpy-") for part in source.parts)
+    ]
+    assert staged_reads, "write_table's lazy validation reads of the staged table were not registered."

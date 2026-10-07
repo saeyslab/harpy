@@ -152,6 +152,11 @@ def _matrix_equals_stored(value: _InMemoryMatrix, element: zarr.Array | zarr.Gro
             return False
         axis = 0 if value.format == "csr" else 1
     stored = _decode_anndata_element(element, mode="lazy")
+    # One compute per block, deliberately: it stops at the first differing block
+    # and holds about one block in memory. It is not slower than batching blocks
+    # or computing the whole matrix at once: the blocks are plain reads that share
+    # no upstream work, and Zarr already decodes the stored chunks of one block in
+    # parallel.
     start = 0
     for block_index, length in enumerate(stored.chunks[axis]):
         if axis == 0:
