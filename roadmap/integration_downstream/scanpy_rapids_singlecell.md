@@ -2037,7 +2037,7 @@ flowchart TD
     xdest --> exists
     exists -- no --> write["Write"]
     exists -- yes --> overwrite{"overwrite=True?"}
-    overwrite -- no --> ow_error[/"Raise"/]
+    overwrite -- no --> ow_error[/"Raise, listing every<br/>existing destination"/]
     overwrite -- yes --> write
     write --> call["One write_table_components call:<br/>staging, validation, rollback.<br/>Nothing changed: nothing written"]
 ```
@@ -2048,7 +2048,7 @@ flowchart TD
 | ---------------------------------------------------------------------------- | -------------------------------------- |
 | The stored `X`, usually counts, overwritten by processed values              | yes: raises without `x_to`             |
 | A filtered table written as an update                                        | yes: axis error, with the ways out     |
-| `uns["spatialdata_attrs"]` changed                                           | yes: raises                            |
+| `uns["spatialdata_attrs"]` changed or added                                  | yes: raises                            |
 | Components missing from `adata` deleted                                      | yes: never deleted                     |
 | Unchanged lazy reads, backed handles or equal in-memory values rewritten     | yes: skipped                           |
 | A partial failure leaving a half-written table                               | yes: rollback                          |
@@ -2063,9 +2063,17 @@ flowchart TD
    read eagerly, and which components exist in each slot. No matrix values.
 2. Check the axes. If the observation identities or `var_names` differ from
    storage, for example after filtering cells or genes, raise rather than
-   silently rewriting the whole table. The same holds for `raw`'s own gene
-   axis, `raw.var_names`, when `raw` exists in both (see "`raw`" below). The
-   error names the three ways out:
+   silently rewriting the whole table. The observation identities are those
+   the component writer checks: for an annotated table, the ordered
+   region/instance pairs in its stored `region_key` and `instance_key`
+   columns; for an unannotated table, the ordered `obs_names`. An annotated
+   table is checked on its `obs_names` as well: a written `obs` must keep its
+   stored index, so renamed observations would otherwise pass this check and
+   fail only in the writer, with a message that does not name the ways out.
+   The helper passes the pair columns as `obs_identity`, whose index the
+   writer ignores; `obs_names` reach the writer only as the index of a written
+   `obs`, which must equal the stored index. The same holds for `raw`'s own gene axis, `raw.var_names`, when `raw`
+   exists in both (see "`raw`" below). The error names the three ways out:
    - `write_table(..., overwrite=True)` to replace the stored table with the
      subset;
    - `write_table` under a new `table_name`, to keep the original table;
@@ -2081,7 +2089,9 @@ flowchart TD
    whole dataframes, since the component writer works per dataframe; `uns`
    entries at their own path, such as `("uns", "pca")`.
 4. Send a changed `X` to `x_to`, or raise.
-5. Write all new and changed components in one `write_table_components` call,
+5. Without `overwrite=True`, raise if any destination exists in storage, with
+   one error that lists them all (see "`overwrite`" below).
+6. Write all new and changed components in one `write_table_components` call,
    with `adata`'s identities: the staging, validation, publication and rollback
    that exist today. If nothing changed, nothing is written: both helpers
    return early, without calling the writer. `add_table_components` refuses an
@@ -2297,6 +2307,13 @@ needs none. That covers changed existing components, which exist by
 definition, and the `x_to` destination, and it is the rule of
 `write_table_components`.
 
+The helper checks this itself, once every component is classified and before
+it calls the writer: without `overwrite=True`, it raises one error that lists
+every existing path it would replace, such as `("obs",)`, `("var",)` and
+`("uns", "pca")`, and explains `overwrite`. The writer's own check stops at
+the first existing path, so a scanpy write-back would otherwise report one
+path per attempt.
+
 **`x_to` details.**
 
 - Allowed values: `("layers", key)` and `("X",)`; anything else raises. An
@@ -2364,8 +2381,11 @@ key, by contrast, is a missing component and stays in storage.
   `uns["spatialdata_attrs"]` in `_validate_spatialdata_attrs_unchanged`, and
   changing it for NaN would change that validation too.
 - `uns["spatialdata_attrs"]` is protected: unchanged, it is skipped; changed,
-  the helper raises and points to `write_table`, as
-  `_validate_spatialdata_attrs_unchanged` does for component writes.
+  or present in `adata` but not in storage, the helper raises and points to
+  `write_table`, as `_validate_spatialdata_attrs_unchanged` does for
+  component writes. Adding the annotation to an unannotated stored table
+  changes its SpatialData linkage, just as changing it does. Stored but
+  missing from `adata`, it is left alone, like every missing component.
 - Keys missing from `adata` are not deleted, as for every other component.
 
 **The SpatialData adapter.** Following the existing pairs
@@ -2507,7 +2527,8 @@ adapter:
   `overwrite=True`: exactly the expected components are written, the processed
   values land in the layer, the stored `X` is untouched, and the reopened table
   matches. Without `overwrite=True` the same call raises, because `obs`, `var`
-  and `uns` entries exist in storage, and nothing is written.
+  and `uns` entries exist in storage, and nothing is written; the error lists
+  every existing path the call would replace.
 - A changed `X` without `x_to` raises with the explanation, and nothing is
   written; with `x_to=("X",)` the stored `X` is replaced.
 - An eager table with an untouched `X` writes only its new and changed parts;
@@ -2526,8 +2547,9 @@ adapter:
 - `x_to` other than `("layers", key)` or `("X",)`, for example an `obsm`
   entry, raises. Without a stored `X`, a new `X` goes to `x_to` when given,
   and to `X` otherwise.
-- A table filtered by cells, and one filtered by genes, raise, and the error
-  names the three ways out; nothing is written.
+- A table filtered by cells, one filtered by genes, and an annotated table
+  with renamed `obs_names` raise, and the error names the three ways out;
+  nothing is written.
 - An unchanged table writes nothing.
 - A table read with non-default `sparse_chunks` or `dense_chunks` is
   recognised as unchanged; a real rechunk counts as changed, and a rechunk to
@@ -2554,7 +2576,8 @@ adapter:
 - `obs` and `var`: a new column, a changed dtype or category order, and a
   changed value each count as changed; an identical dataframe is not written.
 - `uns`: a changed nested value rewrites its top-level key only; NaN equals
-  NaN; a changed `uns["spatialdata_attrs"]` raises.
+  NaN; a changed `uns["spatialdata_attrs"]` raises, and so does one added to
+  an unannotated stored table.
 - Written whole: a column removed from `adata.obs` is removed from storage; a
   nested key removed under `uns["pca"]` disappears with the rewrite of
   `uns["pca"]`; a removed top-level `uns` key stays in storage.
