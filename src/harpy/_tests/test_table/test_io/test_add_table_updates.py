@@ -44,11 +44,11 @@ def store(tmp_path):
 def written(monkeypatch):
     """The components passed to _update_table_components, one mapping per call."""
     calls = []
-    update = updates_module._update_table_components
+    original_update = updates_module._update_table_components
 
     def record(*args, **kwargs):
         calls.append(dict(kwargs["components"]))
-        return update(*args, **kwargs)
+        return original_update(*args, **kwargs)
 
     monkeypatch.setattr(updates_module, "_update_table_components", record)
     return calls
@@ -57,6 +57,14 @@ def written(monkeypatch):
 def test_the_adapter_writes_what_the_store_path_function_writes_and_reinstalls_it(
     store, tmp_path, monkeypatch, written
 ):
+    """add_table_updates writes what write_table_updates writes, then makes the attached table match the store.
+
+    The same changes go to two identical stores: one through the adapter, one
+    through the store-path function, which must write the same components. The
+    adapter then reinstalls them as lazy reads of the store, and reinstalls X too,
+    which x_to left as the stored counts (reopen_also). The attached table then
+    matches the store, so a second call finds nothing changed and writes nothing.
+    """
     counts = _stored(store).X.toarray()
     sdata, table = _attach(store)
     _process(table)
@@ -67,11 +75,11 @@ def test_the_adapter_writes_what_the_store_path_function_writes_and_reinstalls_i
     reference = read_table(reference_path, table_name="counts", mode="lazy")
     _process(reference)
     reference_writes = []
-    write = updates_module.write_table_components
+    original_write = updates_module.write_table_components
 
     def record(*args, **kwargs):
         reference_writes.append(set(kwargs["components"]))
-        return write(*args, **kwargs)
+        return original_write(*args, **kwargs)
 
     monkeypatch.setattr(updates_module, "write_table_components", record)
     write_table_updates(

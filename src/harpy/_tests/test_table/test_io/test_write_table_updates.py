@@ -66,11 +66,11 @@ def store(tmp_path):
 def written(monkeypatch):
     """The component mappings passed to write_table_components, one per call."""
     calls = []
-    write = updates_module.write_table_components
+    original_write = updates_module.write_table_components
 
     def record(*args, **kwargs):
         calls.append(dict(kwargs["components"]))
-        return write(*args, **kwargs)
+        return original_write(*args, **kwargs)
 
     monkeypatch.setattr(updates_module, "write_table_components", record)
     return calls
