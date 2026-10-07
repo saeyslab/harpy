@@ -2411,7 +2411,10 @@ key, by contrast, is a missing component and stays in storage.
   installs the reopened changed components, lazily, as `add_table_components`
   does. When `x_to` moved `X`, it also reinstalls `X` from storage, so that the
   live table matches the store; otherwise the next call would see `X` as
-  changed again and copy it once more;
+  changed again and copy it once more. A table stored without `X` has none to
+  reinstall: a new `X` then goes to the layer, and the live `X` becomes `None`,
+  as in the store, rather than keeping the processed values, which the layer
+  now holds;
 - it reuses `_update_table_components` (`src/harpy/table/io/_components.py`),
   the machinery of `add_table_components`: validation, the write through
   `_write_table_operation`, installing the reopened components inside the
@@ -2420,7 +2423,8 @@ key, by contrast, is a missing component and stays in storage.
   require `overwrite=True` for every component, since all of them come from
   the attached table. One small addition: a parameter such as
   `reopen_also=(("X",),)`, so that `X` is reopened and reinstalled after `x_to`
-  inside the same rollback window, although `X` itself was not written. The
+  inside the same rollback window, although `X` itself was not written; a path
+  in `reopen_also` that the store lacks is installed as absent. The
   paths in `reopen_also` count as touched slots: they extend the rollback
   snapshot as well as the installation, for example
   `slots = {path[0] for path in (*paths, *deletions, *reopen_also)}`. Today the
@@ -2593,6 +2597,7 @@ adapter:
 - The adapter, on backed SpatialData: the same components are written as by
   the store-path function, the reopened components are installed lazily, and
   after `x_to` the live `X` is the stored one, so a second call writes nothing.
+  For a table stored without `X`, the live `X` is `None` after `x_to`.
 - The adapter writes a component that is new in storage without
   `overwrite=True`, although it is in the attached table; a changed component
   that exists in storage still needs `overwrite=True`.
