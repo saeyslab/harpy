@@ -140,6 +140,7 @@ docs = [
     "sphinx-autodoc-typehints",
     "sphinx-design",
     "sphinx-copybutton",
+    "sphinxcontrib-mermaid",
 ]
 benchmark =[
     "asv",

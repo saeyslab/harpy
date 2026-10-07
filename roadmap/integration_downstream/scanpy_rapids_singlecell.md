@@ -2052,7 +2052,7 @@ flowchart TD
     exists -- yes --> overwrite{"overwrite=True?"}
     overwrite -- no --> ow_error[/"Raise, listing every<br/>existing destination"/]
     overwrite -- yes --> write
-    write --> call["One write_table_components call:<br/>staging, validation, rollback.<br/>Nothing changed: nothing written"]
+    write --> call["One rollback-protected write: write_table_components,<br/>or _update_table_components for the adapter,<br/>which also reinstalls. Nothing changed: nothing written"]
 ```
 
 **Overview: what the contract protects against, and what not.**

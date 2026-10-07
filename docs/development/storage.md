@@ -259,6 +259,62 @@ reinstalls the written components lazily through `_update_table_components`,
 like `add_table_components`; after `x_to` it also reinstalls `X` from the store.
 Unbacked SpatialData raises, since there is no store to compare with.
 
+The decision for each component, in order. Components in storage but missing
+from `adata` are never deleted, so the diagram has no branch for them.
+
+```mermaid
+flowchart TD
+    start(["write_table_updates / add_table_updates"]) --> annotation{"uns['spatialdata_attrs']<br/>changed or added?"}
+    annotation -- yes --> annotation_error[/"Raise, pointing to write_table"/]
+    annotation -- "no: equal or missing" --> axes{"Axes match storage?<br/>obs_names, region/instance pairs,<br/>var_names, raw.var_names"}
+    axes -- no --> axis_error[/"Raise, naming the ways out:<br/>write_table, a new table_name,<br/>or the regional writers"/]
+    axes -- yes --> each["Each component of adata,<br/>X first"]
+    each --> stored{"Path in storage?"}
+    stored -- no --> new["New"]
+    stored -- yes --> held{"How is it held?"}
+    held -- "lazy read of its own element<br/>(registered name; also persisted or copied)" --> unchanged["Unchanged: skip"]
+    held -- "backed handle to its own element" --> unchanged
+    held -- "in memory: obs, var, uns,<br/>NumPy, SciPy CSR/CSC" --> equal{"Equal to the<br/>stored value?"}
+    equal -- yes --> unchanged
+    equal -- no --> changed["Changed"]
+    held -- "derived Dask array, read or backed<br/>handle of another element, any other value" --> changed
+    new --> isx
+    changed --> isx{"Is it X?"}
+    isx -- no --> dest["Destination: its own path"]
+    isx -- yes --> xto{"x_to given?"}
+    xto -- no --> xnew{"X new, storage<br/>has no X?"}
+    xnew -- yes --> dest
+    xnew -- no --> x_error[/"Raise, explaining x_to"/]
+    xto -- yes --> is_layer{"x_to is a layer, and<br/>adata.layers holds that key?"}
+    is_layer -- no --> xdest["Destination: x_to"]
+    is_layer -- yes --> layer_written{"Is that layer itself<br/>new or changed?"}
+    layer_written -- no --> xdest
+    layer_written -- yes --> collide_error[/"Raise: two values<br/>for one path"/]
+    dest --> exists{"Destination exists<br/>in storage?"}
+    xdest --> exists
+    exists -- no --> write["Write"]
+    exists -- yes --> overwrite{"overwrite=True?"}
+    overwrite -- no --> ow_error[/"Raise, listing every<br/>existing destination"/]
+    overwrite -- yes --> write
+    write --> call["One rollback-protected write: write_table_components,<br/>or _update_table_components for the adapter,<br/>which also reinstalls. Nothing changed: nothing written"]
+```
+
+What the write-back protects against, and what not:
+
+| Situation                                                                    | Protected?                                                       |
+| ---------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| The stored `X`, usually counts, overwritten by processed values              | yes: raises without `x_to`                                       |
+| A filtered table written as an update                                        | yes: axis error, with the ways out                               |
+| `uns["spatialdata_attrs"]` changed or added                                  | yes: raises                                                      |
+| Components missing from `adata` deleted                                      | yes: never deleted                                               |
+| Unchanged lazy reads, backed handles or equal in-memory values rewritten     | yes: skipped                                                     |
+| A partial failure leaving a half-written table                               | yes: rollback                                                    |
+| Another writer's change to an element held as an unchanged read              | yes: left alone                                                  |
+| Another writer's change to an element held in memory, or changed by the user | **no**: last writer wins, not detected                           |
+| A persisted read that is stale after another writer's change                 | **no**: not detected                                             |
+| A table reused after `write_table_updates` replaced what it reads            | **no**: reopen it; `add_table_updates` reinstalls what it writes |
+| A matrix that was only rechunked                                             | rewritten: conservative, never wrong                             |
+
 `hp.tb.write_table_components_by_region(store, table_name=..., components=...,
 obs_identity=..., fill_values=..., sparse_chunks="auto", dense_chunks="auto",
 overwrite=...)` updates individual `.obsm`
