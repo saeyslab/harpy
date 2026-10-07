@@ -185,10 +185,10 @@ in-memory `SpatialData` object.
     :toctree: generated
 
     tb.write_table
-    tb.write_table_components
     tb.write_table_updates
-    tb.delete_table_components
+    tb.write_table_components
     tb.write_table_components_by_region
+    tb.delete_table_components
 ```
 
 #### Updating SpatialData tables
@@ -202,8 +202,8 @@ changes when it is backed by a Zarr store.
     :toctree: generated
 
     tb.add_table
-    tb.add_table_components
     tb.add_table_updates
+    tb.add_table_components
     tb.add_table_components_by_region
     tb.remove_table_components
 ```

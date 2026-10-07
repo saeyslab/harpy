@@ -253,7 +253,11 @@ goes to `x_to`, such as `("layers", "log1p")`, and raises without it. The axes
 and `uns["spatialdata_attrs"]` must match storage, missing components are never
 deleted, and `overwrite` concerns existence in storage only. The docstring
 gives the full contract; `src/harpy/table/io/_updates.py` implements the
-comparison.
+comparison. `hp.tb.add_table_updates(sdata, table_name=..., x_to=None,
+overwrite=...)` does the same for a table attached to backed SpatialData, and
+reinstalls the written components lazily through `_update_table_components`,
+like `add_table_components`; after `x_to` it also reinstalls `X` from the store.
+Unbacked SpatialData raises, since there is no store to compare with.
 
 `hp.tb.write_table_components_by_region(store, table_name=..., components=...,
 obs_identity=..., fill_values=..., sparse_chunks="auto", dense_chunks="auto",
