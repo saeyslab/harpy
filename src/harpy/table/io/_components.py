@@ -14,7 +14,7 @@ from loguru import logger as log
 from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
-from harpy._storage._anndata import _read_anndata_element
+from harpy._storage._anndata import _MissingAnnDataElement, _read_anndata_element
 from harpy.table.io._read import (
     ComponentPath,
     _check_component_path_overlap,
@@ -205,16 +205,37 @@ def _update_table_components(
     var_names: AxisNames | None = None,
     raw_var_names: AxisNames | None = None,
     overwrite: bool = False,
+    reopen_also: Sequence[ComponentPath] = (),
 ) -> SpatialData:
-    """Validate both destinations, then install inside the writer's rollback window."""
+    """Validate both destinations, then install inside the writer's rollback window.
+
+    For backed SpatialData, the written components are reopened lazily from the
+    store and installed in the attached table, so that their slots refer to what
+    is stored. ``reopen_also`` names components that are not written, but must be
+    reinstalled as well, because the attached value differs from the stored one.
+    ``add_table_updates`` uses it after ``x_to``: the processed ``X`` is written
+    to a layer, while the stored ``X`` remains the counts::
+
+        Component         Store after the write   Attached, without reopen_also   Attached, with reopen_also=(("X",),)
+        X                 counts                  processed values                counts, reopened
+        layers["log1p"]   processed values        reopened                        reopened
+
+    Without ``reopen_also``, the attached ``X`` would not match the store, and the
+    next call would find it changed and write it to the layer again. A path that
+    the store lacks, such as ``X`` of a table stored without one, is installed as
+    absent. These paths also join the rollback snapshot, so a failure after
+    installation restores their previous objects as well.
+    """
     if not isinstance(overwrite, bool):
         raise TypeError("overwrite must be a boolean.")
     # overwrite only concerns the store, where the writer checks it: a component
     # present only in memory is replaced without it, as for unbacked SpatialData.
     paths = _validate_component_paths(tuple(components), to_write=True) if components else ()
     deletions = _validate_deletion_paths(delete)
-    _check_component_path_overlap((*paths, *deletions))
+    _check_component_path_overlap((*paths, *deletions, *reopen_also))
     table, group = _component_update_destination(sdata, table_name=table_name)
+    if reopen_also and group is None:
+        raise ValueError("Reopening components requires backed SpatialData.")
 
     # Check live parents even for missing deletion targets. A scalar where a
     # mapping is expected is malformed, not a missing component.
@@ -241,7 +262,7 @@ def _update_table_components(
 
     # Retain original slot objects. Prepared mappings/raw containers are shallow
     # copies, so neither successful installation nor rollback mutates old entries.
-    slots = {path[0] for path in (*paths, *deletions)}
+    slots = {path[0] for path in (*paths, *deletions, *reopen_also)}
     previous = {slot: getattr(table, f"_{slot}") for slot in slots}
     try:
         if group is None:
@@ -265,6 +286,11 @@ def _update_table_components(
                 # context restores disk components; the except block below restores
                 # the previous in-memory slot objects.
                 reopened = {path: _read_anndata_element(published, path, mode="lazy") for path in paths}
+                for path in reopen_also:
+                    try:
+                        reopened[path] = _read_anndata_element(published, path, mode="lazy")
+                    except _MissingAnnDataElement:
+                        reopened[path] = _ABSENT
                 updates = _prepare_memory_updates(table, reopened, deletions, new_raw_var=new_raw_var)
                 _install_memory_updates(table, updates)
     except BaseException:
