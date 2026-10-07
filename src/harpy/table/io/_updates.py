@@ -24,6 +24,8 @@ from harpy._storage._anndata import (
 )
 from harpy.table.io._read import ComponentPath
 
+type _InMemoryMatrix = np.ndarray | sparse.csr_matrix | sparse.csc_matrix | sparse.csr_array | sparse.csc_array
+
 
 def _component_changed(group: zarr.Group, path: ComponentPath, value: object) -> bool:
     """Return whether a value of an AnnData table differs from its stored element.
@@ -63,6 +65,9 @@ def _component_changed(group: zarr.Group, path: ComponentPath, value: object) ->
         return identity is None or _lazy_read_source(value) != identity
     if isinstance(value, (zarr.Array, CSRDataset, CSCDataset)):
         return identity is None or _backed_identity(value) != identity
+    if not (isinstance(value, np.ndarray) or (sparse.issparse(value) and value.format in {"csr", "csc"})):
+        # Not compared: the writer accepts or rejects it with its own validation.
+        return True
     return not _matrix_equals_stored(value, element)
 
 
@@ -115,7 +120,7 @@ def _same_uns_value(value: object, stored: object) -> bool:
         return False
 
 
-def _matrix_equals_stored(value: object, element: zarr.Array | zarr.Group) -> bool:
+def _matrix_equals_stored(value: _InMemoryMatrix, element: zarr.Array | zarr.Group) -> bool:
     """Compare an in-memory matrix with its stored element: metadata first, then block by block.
 
     1. Metadata, without reading values: a different encoding (dense, CSR,
@@ -129,15 +134,15 @@ def _matrix_equals_stored(value: object, element: zarr.Array | zarr.Group) -> bo
        compared with the matching slice of ``value`` in turn, stopping at the
        first difference. Memory stays at ``value`` plus about one block.
 
-    Values other than a numeric NumPy array or a CSR/CSC matrix, string arrays
-    for example, are not compared and count as different.
+    A string array always differs at step 1: AnnData stores strings with the
+    ``string-array`` encoding, so a stored ``array`` has another dtype.
     """
     encoding = element.attrs.get("encoding-type")
     if isinstance(value, np.ndarray):
         if encoding != "array" or tuple(element.shape) != value.shape or element.dtype != value.dtype:
             return False
         axis = 0
-    elif sparse.issparse(value) and value.format in {"csr", "csc"}:
+    else:
         if (
             encoding != f"{value.format}_matrix"
             or tuple(element.attrs["shape"]) != value.shape
@@ -146,8 +151,6 @@ def _matrix_equals_stored(value: object, element: zarr.Array | zarr.Group) -> bo
         ):
             return False
         axis = 0 if value.format == "csr" else 1
-    else:
-        return False
     stored = _decode_anndata_element(element, mode="lazy")
     start = 0
     for block_index, length in enumerate(stored.chunks[axis]):

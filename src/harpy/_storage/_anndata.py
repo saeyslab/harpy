@@ -289,7 +289,7 @@ def _decode_anndata_element(
 
 
 # The stored element that each lazily read matrix reads, keyed by the Dask
-# array's name: the resolved root of its LocalStore and its path in the store.
+# array's name: the resolved path of the element on disk (_element_identity).
 # A Dask operation that changes the graph gives a new name, while copies,
 # pickling, persist() and a rechunk to the same chunks keep it; so an array
 # whose name is registered is a read that has not been changed since. The
@@ -301,31 +301,48 @@ def _decode_anndata_element(
 # fingerprints, not a snapshot of a table: reads only add entries, and it never
 # records which AnnData an array belongs to. See _lazy_read_source for how the
 # registry is filled, left alone and consulted.
-_LAZY_READS: dict[str, tuple[Path, str]] = {}
+_LAZY_READS: dict[str, Path] = {}
 
 
 def _register_lazy_read(array: da.Array, element: zarr.Array | zarr.Group) -> da.Array:
     """Record the stored element that a lazily read array reads, then return the array.
 
-    Only reads from a ``LocalStore`` are registered: its resolved root and the
-    element's path identify the element. Reads from other stores, in memory or
-    remote, are not, so they count as changed. Every lazy read is registered,
-    also the writers' reads of staged components, whose paths never match a
-    user's arrays. Entries are small, and repeated reads reuse the same names.
+    Only reads from a ``LocalStore`` are registered: the element's path on disk
+    identifies it. Reads from other stores, in memory or remote, are not, so
+    they count as changed. Every lazy read is registered, also the writers'
+    reads of staged components, whose paths never match a user's arrays.
+    Entries are small, and repeated reads reuse the same names.
     """
-    if isinstance(element.store, LocalStore):
-        _LAZY_READS[array.name] = (Path(element.store.root).resolve(), element.path)
+    identity = _element_identity(element)
+    if identity is not None:
+        _LAZY_READS[array.name] = identity
     return array
 
 
-def _lazy_read_source(value: object) -> tuple[Path, str] | None:
+def _element_identity(node: zarr.Array | zarr.Group) -> Path | None:
+    """Return the identity of a stored element: its resolved path on disk.
+
+    The same element gets the same identity wherever its store was opened: at
+    the SpatialData root, the table, or the element itself, through a relative
+    path or a symlink. A store root and the element's path in that store would
+    not; they depend on the folder the store was opened at.
+
+    ``None`` for elements in stores other than a ``LocalStore``, which have no
+    path on disk.
+    """
+    if not isinstance(node.store, LocalStore):
+        return None
+    return (Path(node.store.root) / node.path).resolve()
+
+
+def _lazy_read_source(value: object) -> Path | None:
     """Return the stored element a lazily read matrix still reads, or ``None``.
 
-    The element is identified by the resolved store root and its path in the
-    store. ``None`` means the value is not a Dask array, or not one that a
-    lazy read created and nothing has changed since: a derived array, a read
-    from a store other than a ``LocalStore``, or an array built outside Harpy's
-    readers under another name.
+    The element is identified by its resolved path on disk
+    (``_element_identity``). ``None`` means the value is not a Dask array, or
+    not one that a lazy read created and nothing has changed since: a derived
+    array, a read from a store other than a ``LocalStore``, or an array built
+    outside Harpy's readers under another name.
 
     Examples
     --------
@@ -333,8 +350,8 @@ def _lazy_read_source(value: object) -> tuple[Path, str] | None:
     is processed, and consulted only when the table is written back::
 
         adata = read_table(store, table_name="counts", mode="lazy")
-            # registry: "make_dask_chunk-51e8…" -> (sdata.zarr, "tables/counts/X")
-            #           "make_dask_chunk-77aa…" -> (sdata.zarr, "tables/counts/layers/counts")
+            # registry: "make_dask_chunk-51e8…" -> sdata.zarr/tables/counts/X
+            #           "make_dask_chunk-77aa…" -> sdata.zarr/tables/counts/layers/counts
 
         sc.pp.normalize_total(adata)
         sc.pp.log1p(adata)
@@ -342,11 +359,11 @@ def _lazy_read_source(value: object) -> tuple[Path, str] | None:
             # the registry is not touched
 
         _lazy_read_source(adata.X)                 # None: derived, so changed
-        _lazy_read_source(adata.layers["counts"])  # (sdata.zarr, "tables/counts/layers/counts")
+        _lazy_read_source(adata.layers["counts"])  # sdata.zarr/tables/counts/layers/counts
 
-    The caller compares the result with the component's own path in the
-    target store: only a read of exactly that element counts as unchanged. A
-    registered read assigned elsewhere, for example
+    The caller compares the result with the identity of the component's own
+    element in the target store: only a read of exactly that element counts as
+    unchanged. A registered read assigned elsewhere, for example
     ``adata.layers["copy"] = adata.layers["counts"]``, is a read of another
     element, so it is written.
     """
