@@ -4,25 +4,25 @@ Date: 2026-09-30
 
 ## Summary
 
-This document evaluates whether Harpy's new table I/O (`hp.tb.read_table`,
-`hp.tb.read_table_components`, `hp.tb.write_table`,
-`hp.tb.write_table_components`, `hp.tb.delete_table_components`) makes it easier
+This document evaluates whether Harpy's new table I/O (`hp.tb.io.read_table`,
+`hp.tb.io.read_table_components`, `hp.tb.io.write_table`,
+`hp.tb.io.write_table_components`, `hp.tb.io.delete_table_components`) makes it easier
 to run scanpy and rapids-singlecell on large tables stored in SpatialData Zarr
 stores, using lazy (Dask) matrices instead of loading tables into memory.
 
 The answer is mostly yes:
 
 - `sd.read_zarr` loads table matrices into memory. For a SpatialData store,
-  `hp.tb.read_table(..., mode="lazy")` is therefore the practical way to obtain a
+  `hp.tb.io.read_table(..., mode="lazy")` is therefore the practical way to obtain a
   lazy table without assembling one from AnnData's low-level readers.
 - For CSR-stored matrices, the lazy layout that Harpy produces is exactly what
   scanpy and rapids-singlecell require: Dask arrays chunked along rows only, with
   every chunk spanning all features, and `scipy.sparse.csr_matrix` blocks.
 - A standard scanpy pipeline ran unchanged on a lazily read Harpy table, and its
-  results were persisted with `hp.tb.write_table_components` without rewriting
+  results were persisted with `hp.tb.io.write_table_components` without rewriting
   the stored counts matrix.
 - The identity checks in `write_table_components` correctly refuse to write
-  results after cells or genes have been filtered. `hp.tb.write_table` handles
+  results after cells or genes have been filtered. `hp.tb.io.write_table` handles
   that case, including when the lazy input still reads from the table being
   replaced.
 
@@ -83,7 +83,7 @@ dask-ml, TBB and OpenMP were not available.
 
 ## What Harpy's table I/O contributes
 
-**Reading.** `hp.tb.read_table(store, table_name=..., mode="lazy")` opens one
+**Reading.** `hp.tb.io.read_table(store, table_name=..., mode="lazy")` opens one
 table without opening other SpatialData elements.
 
 - Sparse matrices become Dask arrays with `csr_matrix` or `csc_matrix` blocks,
@@ -93,10 +93,10 @@ table without opening other SpatialData elements.
 - Dense matrices become Dask arrays that keep the on-disk Zarr chunks.
 - `obs`, `var` and `uns` are always loaded into memory.
 
-`hp.tb.read_table_components` reads selected components, for example only
+`hp.tb.io.read_table_components` reads selected components, for example only
 `("obs",)`, without constructing matrix graphs.
 
-**Writing.** `hp.tb.write_table_components` replaces selected components of an
+**Writing.** `hp.tb.io.write_table_components` replaces selected components of an
 existing table:
 
 - `obs`, `var`, individual `layers`/`obsm`/`varm`/`obsp`/`varp` entries, and
@@ -106,7 +106,7 @@ existing table:
 - staged, then published with rollback on handled failures.
 
 Unrequested components, including `X`, are not read or rewritten.
-`hp.tb.write_table` replaces a complete table. It is the path for results whose
+`hp.tb.io.write_table` replaces a complete table. It is the path for results whose
 axes changed, such as filtered cells or genes.
 
 Compared with AnnData's own `read_elem_lazy` and `write_elem`, Harpy adds:
@@ -128,7 +128,7 @@ tables after `sd.read_zarr`, but lazy tables after `hp.io.read_zarr`; see gap 5.
 
 Test data: a synthetic SpatialData store with one labels element and an annotated
 table of 4000 cells × 600 genes (Poisson counts, 5% non-zero), written with
-`SpatialData.write` and read back with `hp.tb.read_table(..., mode="lazy")`.
+`SpatialData.write` and read back with `hp.tb.io.read_table(..., mode="lazy")`.
 Lazy `X` had chunks `(1000, 600)` and `csr_matrix` blocks. "Computes" counts
 Dask graph evaluations during each step.
 
@@ -168,7 +168,7 @@ though its lazy `X` still read from the table being replaced (5 computes). The
 reopened `X` matched the expected values computed before the write.
 
 **Dense tables (verified).** A dense 4000 × 600 table written with
-`hp.tb.write_table` from a NumPy `X` was stored in `(1000, 150)` chunks. Lazy
+`hp.tb.io.write_table` from a NumPy `X` was stored in `(1000, 150)` chunks. Lazy
 reads kept that layout, 4 × 4 blocks. `normalize_total`, `log1p`,
 `highly_variable_genes` and `scale` worked. `pp.pca` did not:
 
@@ -222,7 +222,7 @@ graph and embedding steps require in-memory GPU data. `tl.leiden` and
 builds its AnnData from
 `anndata.experimental.read_elem_lazy(f["X"], (50_000, n_vars))` and eagerly read
 `obs`/`var`, then calls `rsc.get.anndata_to_GPU`. For a SpatialData store,
-`hp.tb.read_table(store, table_name=..., mode="lazy", sparse_chunks=50_000)`
+`hp.tb.io.read_table(store, table_name=..., mode="lazy", sparse_chunks=50_000)`
 replaces that construction. The tutorials use 20,000 to 50,000 rows per chunk.
 With slice 1a, the default `sparse_chunks="auto"` sizes blocks from Dask's
 `array.chunk-size` instead; pass an integer to match the tutorials.
@@ -290,7 +290,7 @@ not affected. Dense matrices come from:
   `hp.tb.add_feature_matrix`;
 - layers that become dense, for example after `scale(zero_center=True)`.
 
-**Evidence (verified).** `hp.tb.write_table` stored a dense 4000 × 600 `X` in
+**Evidence (verified).** `hp.tb.io.write_table` stored a dense 4000 × 600 `X` in
 `(1000, 150)` chunks. Harpy passes no chunk arguments, so these are the default
 chunks chosen when AnnData writes the NumPy array. `_decode_anndata_element`
 reads dense arrays with `read_elem_lazy(element)` and keeps those chunks
@@ -900,7 +900,7 @@ compute across all components of a call (slice 4c) is deferred.
 version and writes only new or changed components. A possible signature:
 
 ```python
-hp.tb.write_table_updates(store, table_name="counts", adata=adata, overwrite=True)
+hp.tb.io.write_table_updates(store, table_name="counts", adata=adata, overwrite=True)
 ```
 
 Design notes:
@@ -916,8 +916,8 @@ Design notes:
 - Components missing from `adata` should not be deleted implicitly. Deletion
   stays explicit through `delete_table_components`.
 
-Phase 3 implements the helper as `hp.tb.write_table_updates`, with `x_to` for a
-processed `X`, and `hp.tb.add_table_updates` for a table attached to backed
+Phase 3 implements the helper as `hp.tb.io.write_table_updates`, with `x_to` for a
+processed `X`, and `hp.tb.io.add_table_updates` for a table attached to backed
 SpatialData; see "Phase 3: write-back helper" for the contract.
 
 ### Gap 4: stale lazy tables after an overwrite
@@ -932,7 +932,7 @@ table could have read the wrong data without an error.
 **Options.**
 
 - Have the write functions return the reopened lazy table, so the natural
-  pattern is `adata = hp.tb.write_table(...)`.
+  pattern is `adata = hp.tb.io.write_table(...)`.
 - Record a generation token in the table's attributes on every publication, and
   have lazy reads check it before reading blocks, raising a clear error when the
   table has been replaced.
@@ -1065,7 +1065,7 @@ import harpy as hp
 import scanpy as sc
 
 store, table_name = "sdata.zarr", "counts"
-adata = hp.tb.read_table(store, table_name=table_name, mode="lazy")
+adata = hp.tb.io.read_table(store, table_name=table_name, mode="lazy")
 
 sc.pp.normalize_total(adata)
 sc.pp.log1p(adata)
@@ -1078,9 +1078,9 @@ sc.tl.leiden(adata, flavor="igraph", n_iterations=2)
 # Write only what is new or changed. The processed X goes to a layer, and the
 # stored X, the counts, stays as it is. overwrite=True because obs and var
 # exist in storage, as do the results of an earlier run.
-hp.tb.write_table_updates(store, table_name=table_name, adata=adata, x_to=("layers", "log1p"), overwrite=True)
+hp.tb.io.write_table_updates(store, table_name=table_name, adata=adata, x_to=("layers", "log1p"), overwrite=True)
 # Reopen instead of reusing lazy data from before the write.
-adata = hp.tb.read_table(store, table_name=table_name, mode="lazy")
+adata = hp.tb.io.read_table(store, table_name=table_name, mode="lazy")
 ```
 
 `write_table_updates` compares the table with the store and writes the twelve
@@ -1088,13 +1088,13 @@ components that this pipeline creates or changes, in one
 `write_table_components` call: `obs`, `var`, the `log1p` layer,
 `obsm["X_pca"]`, `varm["PCs"]`, the two neighbor graphs in `obsp` and five
 `uns` entries. If cells or genes were filtered, it raises and names the ways
-out, such as `hp.tb.write_table(..., overwrite=True)`. For SpatialData read
+out, such as `hp.tb.io.write_table(..., overwrite=True)`. For SpatialData read
 with `hp.io.read_zarr(..., table_mode="lazy")`,
-`hp.tb.add_table_updates(sdata, table_name=table_name, x_to=("layers", "log1p"), overwrite=True)`
+`hp.tb.io.add_table_updates(sdata, table_name=table_name, x_to=("layers", "log1p"), overwrite=True)`
 does the same and reinstalls the written components in the attached table,
 so that reopening is not needed.
 
-To choose the components yourself, `hp.tb.write_table_components` remains
+To choose the components yourself, `hp.tb.io.write_table_components` remains
 available: list each path, such as `("obsm", "X_pca")`, and supply the `obs`
 and `var` dataframes, or `obs_identity` and `var_names`, as the identities
 that the matrix components are checked against.
@@ -1122,7 +1122,7 @@ rapids-singlecell (untested, from its documentation):
 ```python
 import rapids_singlecell as rsc
 
-adata = hp.tb.read_table(store, table_name=table_name, mode="lazy", sparse_chunks=50_000)
+adata = hp.tb.io.read_table(store, table_name=table_name, mode="lazy", sparse_chunks=50_000)
 rsc.get.anndata_to_GPU(adata)
 rsc.pp.normalize_total(adata, target_sum=1e4)
 rsc.pp.log1p(adata)
@@ -1948,12 +1948,12 @@ Link it from the table I/O section of `docs/api.md`.
 ### Phase 3: write-back helper (implemented)
 
 **Goal.**
-`hp.tb.write_table_updates(store, table_name=..., adata=..., x_to=None, overwrite=...)`
+`hp.tb.io.write_table_updates(store, table_name=..., adata=..., x_to=None, overwrite=...)`
 compares a table, typically read lazily and then processed by scanpy, with the
 stored table, and writes only what is new or changed. Today the caller lists
 every output and its identities (gap 3): the recommended scanpy pattern passes
 12 components to `write_table_components`. A SpatialData adapter,
-`hp.tb.add_table_updates`, does the same for a table attached to backed
+`hp.tb.io.add_table_updates`, does the same for a table attached to backed
 SpatialData (see "The SpatialData adapter" below).
 
 **Slices.** Phase 3 is implemented in four slices, each with its own tests, as
@@ -1982,7 +1982,7 @@ Slice 3c is one slice in two reviewable steps:
    and collision rule, the routing of new and changed components into one
    `write_table_components` call, and the early return when nothing changed,
    with the end-to-end tests, including the scanpy pipeline. It is in
-   `src/harpy/table/io/_updates.py`, exported as `hp.tb.write_table_updates`,
+   `src/harpy/table/io/_updates.py`, exported as `hp.tb.io.write_table_updates`,
    and tested in
    `src/harpy/_tests/test_table/test_io/test_write_table_updates.py`.
 
@@ -2013,7 +2013,7 @@ Slice 3c is one slice in two reviewable steps:
      helper never replaces the stored `X` implicitly.
 
    For the scanpy pipeline the call becomes
-   `hp.tb.write_table_updates(store, table_name=..., adata=adata, x_to=("layers", "log1p"), overwrite=True)`.
+   `hp.tb.io.write_table_updates(store, table_name=..., adata=adata, x_to=("layers", "log1p"), overwrite=True)`.
    A scanpy run changes `obs` (for example a new `leiden` column), `var` and
    `uns` entries, which all exist in storage, so a typical scanpy write-back
    needs `overwrite=True` (see "`overwrite`" below), just as the recommended
@@ -2420,7 +2420,7 @@ key, by contrast, is a missing component and stays in storage.
 `write_table_components_by_region` and `add_table_components_by_region`):
 
 - signature:
-  `hp.tb.add_table_updates(sdata, table_name=..., x_to=None, overwrite=False) -> SpatialData`;
+  `hp.tb.io.add_table_updates(sdata, table_name=..., x_to=None, overwrite=False) -> SpatialData`;
 - it compares the attached table with the store, so there is no separate
   `adata` argument. The typical flow: read with
   `hp.io.read_zarr(..., table_mode="lazy")`, run scanpy on
@@ -2473,11 +2473,11 @@ key, by contrast, is a missing component and stays in storage.
   doing nothing could suggest that the results were saved. The error names the
   ways out:
   - write the SpatialData itself, `sdata.write(path)`;
-  - write the table into an existing store, `hp.tb.write_table`;
-  - if the table was read from a store, for example with `hp.tb.read_table`
+  - write the table into an existing store, `hp.tb.io.write_table`;
+  - if the table was read from a store, for example with `hp.tb.io.read_table`
     and then attached to SpatialData without a path, call the store-path
     function directly,
-    `hp.tb.write_table_updates(store, table_name=..., adata=sdata.tables[name])`.
+    `hp.tb.io.write_table_updates(store, table_name=..., adata=sdata.tables[name])`.
     It compares against that store and recognises the unchanged lazy matrices
     through the registry.
 
@@ -3111,11 +3111,11 @@ write-back helpers make most of these wrappers unnecessary:
 
 - results that keep the cells and genes (QC columns, `log1p`, PCA, neighbors,
   leiden, UMAP): run scanpy on `sdata.tables[name]`, then
-  `hp.tb.add_table_updates`, which writes only what changed. The wrappers
+  `hp.tb.io.add_table_updates`, which writes only what changed. The wrappers
   always write a whole new table through `add_table`, `X` included;
 - results that remove cells or genes (`filter_cells`, `filter_genes`, a subset
   to highly variable genes): the axes change, so the result is a new table,
-  written with `hp.tb.add_table` or `hp.tb.write_table`. The write-back helpers
+  written with `hp.tb.io.add_table` or `hp.tb.io.write_table`. The write-back helpers
   refuse this, and their error names these ways out.
 
 Porting the wrappers would mean rewriting scanpy orchestration for Dask, with
@@ -3171,8 +3171,8 @@ helpers `_warn_deprecated_wrapper` and `_require_in_memory_table` are in
   version 0.5.0", in the convention of the earlier deprecations.
 - At its start, after selecting the table, it warns with a `FutureWarning`,
   which Python shows by default, unlike `DeprecationWarning`. The warning names
-  the replacement: scanpy directly, then `hp.tb.add_table_updates`, or
-  `hp.tb.add_table` when cells or genes are removed.
+  the replacement: scanpy directly, then `hp.tb.io.add_table_updates`, or
+  `hp.tb.io.add_table` when cells or genes are removed.
 - **Decided: Harpy stops silencing warnings.** `src/harpy/__init__.py` calls
   `warnings.filterwarnings("ignore", ...)` for `FutureWarning` and
   `DeprecationWarning` on import, unless `LOGLEVEL=DEBUG`. That filter also
@@ -3195,7 +3195,7 @@ helpers `_warn_deprecated_wrapper` and `_require_in_memory_table` are in
   "`hp.tb.preprocess_transcriptomics` needs an in-memory table, but
   `sdata.tables['counts'].X` is a lazy Dask array. Read the store with
   `hp.io.read_zarr(..., table_mode="eager")` or `sd.read_zarr`, or call scanpy
-  directly and write back with `hp.tb.add_table_updates`."
+  directly and write back with `hp.tb.io.add_table_updates`."
 - The guard is called in each thin wrapper, not in `ProcessTable`, which the
   functions of 6f also use.
 - Each wrapper is first tried on a lazy table, and only those that fail, or
