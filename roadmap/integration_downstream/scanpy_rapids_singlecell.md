@@ -3309,6 +3309,131 @@ featurisation. This slice groups the first kind in `hp.tb.io`; 6c adds
   points and tables), so moving its table functions into `hp.tb` would split
   a coherent group, of which the points part is the largest.
 
+**Slice 6c: `hp.tb.pp`, normalisation by cell size and by quantile.** Two
+functions for the spatial steps that scanpy lacks, which the deprecated
+preprocessing wrappers performed. Both follow scanpy's `sc.pp` convention:
+they take an `AnnData`, change it in place and return `None`, so that they fit
+between scanpy calls, before `hp.tb.io.add_table_updates`. Both work on
+in-memory and on lazy tables. On in-memory tables, `normalize_by_size` gives
+the results of the deprecated wrappers, and `normalize_by_quantile` those of
+`preprocess_proteomics(q=...)` divided by 100 (see below).
+
+- **`hp.tb.pp.normalize_by_size(adata, size_key="area", scale_factor=100, layer=None)`:**
+  divides each row by the size of its cell, `X / size * scale_factor`.
+  - `size_key` names the `obs` column with the sizes. `"area"` is the column
+    that `hp.tb.add_regionprops` adds from the labels; the column `shapeSize`
+    of the deprecated wrappers works as well.
+  - `scale_factor=100` is the factor of the wrappers, which multiplied by 100
+    for numerical stability in later steps such as highly variable genes.
+  - A missing column, or a size that is missing, zero or negative, raises a
+    `ValueError`. The wrappers silently produced `inf`.
+  - Integer counts become `float32`; floating-point values keep their dtype.
+  - `layer=None` normalises `X`; a layer name normalises that layer instead.
+  - In memory: NumPy arrays and SciPy CSR or CSC matrices, which stay in their
+    format. Lazy: the scaling is applied per block, without computing
+    anything; the chunks stay as they are, and sparse blocks stay
+    `csr_matrix`, which scanpy requires.
+  - **On a lazy table, the call only extends the Dask graph,** with the sizes
+    from `obs`, which is always in memory. The scaling runs when `X` is
+    computed: by the write-back, by a later scanpy step, or explicitly. `X`
+    is then a derived array, so the write-back counts it as changed and needs
+    `x_to`, as after `normalize_total`. Every compute reads the stored values
+    and scales them again, which is cheap: the scaling works per block, with
+    no global reduction.
+  - **Records its parameters** in
+    `adata.uns["normalize_by_size"] = {"size_key": ..., "scale_factor": ...}`,
+    as scanpy does in `uns["log1p"]`. The sizes themselves are already in
+    `obs`. If the entry exists, the function warns that the matrix may
+    already be normalised, a common mistake when a notebook cell is run
+    twice, and replaces the entry.
+- **`hp.tb.pp.normalize_by_quantile(adata, q=0.999, max_value=1, quantiles=None, layer=None)`:**
+  per channel, the `q` quantile of the non-zero values, then `X / quantile`,
+  clipped at `max_value`. The `q` quantile maps to 1, so a normalised channel
+  lies in `[0, max_value]`, by default `[0, 1]`. `max_value=None` does not
+  clip; the name follows `max_value` of `sc.pp.scale`, which also clips.
+  - **The clipping belongs here,** not to a separate step: it caps the few
+    values above the quantile, such as bright spots or artefacts, so that each
+    channel ends up in a comparable range; that is the usual percentile
+    normalisation for multiplex imaging, as in pixie. Without it, the function
+    would only divide by a robust denominator. scanpy has no equivalent:
+    `sc.pp.scale(max_value=...)` clips after a z-score, a different
+    transform, and clipping by hand needs `np.minimum` in memory and
+    `da.clip` on lazy tables, with their dtype and sparse cases.
+  - **No factor of 100.** `preprocess_proteomics(q=...)` multiplies by 100 and
+    clips at `max_value * 100`. That rescaling is arbitrary and is dropped,
+    without backward compatibility: results are those of the wrapper divided
+    by 100. `normalize_by_size` keeps its `scale_factor`, which serves highly
+    variable genes in transcriptomics.
+  - **The quantiles are computed once, when the function is called.** They
+    depend on all cells: left lazy, they would be recomputed for every block,
+    or batch of blocks, when the result is written (gap 2). The quantile
+    vector is small, one value per channel. Only the scaling and the clipping
+    stay lazy.
+  - **So the call is not lazy:** it reads the data once to compute the
+    quantiles, which takes noticeable time on a large table, unlike
+    `normalize_by_size`; the docstring says so. The vector then enters the
+    Dask graph as a constant NumPy array, so later computes of `X`, including
+    every block or batch that the write-back computes, only read the stored
+    values and scale them: the quantiles are not computed again.
+  - **Records the quantiles and the parameters,** following scanpy's
+    conventions: a value per channel in `var` (as `var["means"]` or
+    `var["highly_variable"]`), parameters in `uns` (as `uns["pca"]`):
+    `adata.var["quantile"]` holds the quantile applied to each channel, and
+    `adata.uns["normalize_by_quantile"] = {"q": ..., "max_value": ...}` the
+    parameters. They give provenance, so that a
+    reopened table shows what its normalised layer was divided by, and they
+    allow applying the same normalisation to other data. `obs`, `var` and
+    `uns` are always in memory, also for lazy tables, and
+    `hp.tb.io.add_table_updates` writes them back with the normalised matrix:
+    `var` as changed, the `uns` entry as new. No separate storage, such as a
+    file or a cache, that could drift away from the table. As for
+    `normalize_by_size`, an existing entry gives a warning and is replaced.
+  - **`quantiles=`** applies quantiles computed before instead of computing
+    them, for example those of another sample with the same channels:
+    `quantiles=other.var["quantile"]`. It takes a pandas Series indexed by
+    channel name, aligned with `var_names` by name, where a missing channel
+    raises, or a sequence of one value per channel, in the order of `var`.
+    Then nothing is computed, and the call is lazy too; `q` is ignored and
+    recorded as `None`.
+  - A channel without non-zero values keeps its values, all zero, instead of
+    the wrapper's NaN or `inf`.
+  - **Dense input,** in memory or lazy, is supported. For a lazy dense matrix,
+    Dask computes the per-channel quantiles itself (it implements
+    `np.nanquantile`).
+  - **In-memory sparse input** is converted to dense first, as the wrapper
+    does, and the result is dense. Intensity tables are usually dense, and a
+    densified table of few channels is small.
+  - **Lazy sparse input raises** a `ValueError`: gathering the non-zero values
+    of each channel from all row blocks is more work than this slice needs.
+    The message names the ways out: densify the matrix first, or read the
+    table with `table_mode="eager"`. Support can be added later if needed.
+- **Tests:**
+  - on the example datasets, in memory, the results equal those of the
+    deprecated wrappers: `preprocess_transcriptomics` and
+    `preprocess_proteomics` with size normalisation, and
+    `preprocess_proteomics(q=...)` divided by 100;
+  - quantile normalisation maps the `q` quantile to 1 and clips at
+    `max_value`, and `max_value=None` does not clip;
+  - lazy results equal in-memory results;
+  - `normalize_by_size` on a lazy table computes nothing, keeps the chunks and
+    keeps `csr_matrix` blocks;
+  - a missing, zero or negative size raises;
+  - a channel without non-zero values stays zero;
+  - in-memory sparse input to `normalize_by_quantile` gives the dense result,
+    and lazy sparse input raises;
+  - the `uns` entries, and `var["quantile"]`, are recorded, and running a
+    function a second time warns;
+  - `quantiles=` gives the same result as the computed quantiles, computes
+    nothing on a lazy table, aligns a Series by channel name, and raises for
+    a missing channel.
+- **Docs:** the docstrings; a `tb.pp` section in `docs/api.md`; and the
+  deprecation notes of `preprocess_transcriptomics` and
+  `preprocess_proteomics`, which name these functions for the steps that
+  scanpy does not provide.
+- **Creating the namespace:** `src/harpy/table/pp/`, with public exports in
+  its `__init__.py` and `from . import pp` in `src/harpy/table/__init__.pyi`,
+  as for `io` in 6b.
+
 **Slice 6e: removing the pipeline.** Nobody uses it, so it is removed rather
 than migrated. No command-line entry point in `pyproject.toml` and no page of
 the API documentation refers to it. It consists of:
