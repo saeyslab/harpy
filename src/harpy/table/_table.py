@@ -1,9 +1,13 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+import warnings
+from collections.abc import Iterable, Iterator
 
+import dask.array as da
 import numpy as np
+import zarr
 from anndata import AnnData
+from anndata.abc import CSCDataset, CSRDataset
 from loguru import logger as log
 from spatialdata import SpatialData
 from spatialdata.models import TableModel
@@ -11,6 +15,47 @@ from spatialdata.models import TableModel
 from harpy.shape._shape import filter_shapes
 from harpy.table.io._add_table import add_table
 from harpy.utils._keys import _CELLSIZE_KEY
+
+
+def _warn_deprecated_wrapper(function_name: str) -> None:
+    """Warn that a thin scanpy wrapper is deprecated, and name what replaces it."""
+    warnings.warn(
+        f"harpy.tb.{function_name} is deprecated since version 0.5.0 and will be removed in a future release. "
+        "Process the table directly, for example with scanpy or squidpy, then write the results back with "
+        "harpy.tb.add_table_updates, or with harpy.tb.add_table when cells or genes are removed.",
+        FutureWarning,
+        # Point at the caller of the deprecated wrapper, not at the wrapper itself.
+        stacklevel=3,
+    )
+
+
+def _require_in_memory_table(sdata: SpatialData, table_name: str, function_name: str) -> None:
+    """Raise if a matrix of the table is lazy or storage-backed, for a wrapper that needs it in memory.
+
+    Every matrix slot is checked, so that a table that mixes in-memory and lazy
+    matrices is caught as well.
+    """
+    table = sdata.tables[table_name]
+    for path, value in _table_matrices(table):
+        if isinstance(value, (da.Array, zarr.Array, CSRDataset, CSCDataset)):
+            kind = "a lazy Dask array" if isinstance(value, da.Array) else "storage-backed"
+            raise ValueError(
+                f"harpy.tb.{function_name} needs an in-memory table, but sdata.tables[{table_name!r}].{path} is "
+                f"{kind}. Read the store with harpy.io.read_zarr(..., table_mode='eager') or spatialdata.read_zarr, "
+                "or call scanpy directly and write the results back with harpy.tb.add_table_updates."
+            )
+
+
+def _table_matrices(table: AnnData) -> Iterator[tuple[str, object]]:
+    """Yield each matrix of the table with its attribute path, such as ``X``, ``layers['counts']`` or ``raw.X``."""
+    yield "X", table.X
+    for slot in ("layers", "obsm", "varm", "obsp", "varp"):
+        for key, value in getattr(table, slot).items():
+            yield f"{slot}[{key!r}]", value
+    if table.raw is not None:
+        yield "raw.X", table.raw.X
+        for key, value in table.raw.varm.items():
+            yield f"raw.varm[{key!r}]", value
 
 
 class ProcessTable:
@@ -255,6 +300,12 @@ def filter_on_size(
 
     All cells with a size outside of the min and max size range are removed using the `instance_size_key` in `.obs`. Run e.g. :func:`~harpy.tb.preprocess_transcriptomics` or :func:`~harpy.tb.preprocess_proteomics` to obtain cell sizes.
 
+    .. deprecated:: 0.5.0
+       `harpy.tb.filter_on_size` is deprecated and will be removed in a future release. Select the cells
+       directly, for example
+       ``adata[adata.obs[instance_size_key].between(min_size, max_size, inclusive="neither")]``, and write
+       the result with :func:`~harpy.tb.add_table`.
+
     Parameters
     ----------
     sdata
@@ -286,6 +337,7 @@ def filter_on_size(
     -------
     The updated SpatialData object.
     """
+    _warn_deprecated_wrapper("filter_on_size")
     process_table_instance = ProcessTable(sdata, labels_name=labels_name, table_name=table_name)
     adata = process_table_instance._get_adata()
     start = adata.shape[0]

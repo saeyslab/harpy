@@ -27,14 +27,6 @@ else:
         "False"  # avoid newer dataframe backends, see  https://github.com/dask/dask/issues/11146
     )
 
-loglevel = os.environ.get("LOGLEVEL")
-if loglevel is None or loglevel.upper() != "DEBUG":
-    # silence developer warnings if not in debug mode
-    import warnings
-
-    warnings.filterwarnings("ignore", category=FutureWarning)
-    warnings.filterwarnings("ignore", category=DeprecationWarning)
-
 
 # import submodules in specific order to avoid circular imports
 # use aliases from more convenient names
