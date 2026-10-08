@@ -25,7 +25,7 @@ def nhood_enrichment(
 
     .. deprecated:: 0.5.0
        `harpy.tb.nhood_enrichment` is deprecated and will be removed in a future release. Call squidpy directly
-       on the table, then write the results back with :func:`~harpy.tb.add_table_updates`.
+       on the table, then write the results back with :func:`~harpy.tb.io.add_table_updates`.
 
     Parameters
     ----------

@@ -21,7 +21,7 @@ for n_vars in (600, 2500):
     path = new_store({"counts": annotated_table(counts)})
 
     for converted in (False, True):
-        adata = hp.tb.read_table(path, table_name="counts", mode="lazy")
+        adata = hp.tb.io.read_table(path, table_name="counts", mode="lazy")
         label = f"{n_vars} genes, {'converted to row-chunked CSR' if converted else 'as read'}"
         if converted:
             # Every row block of the result needs data from every gene block of the input.

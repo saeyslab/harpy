@@ -48,8 +48,8 @@ def preprocess_transcriptomics(
 
     .. deprecated:: 0.5.0
        `harpy.tb.preprocess_transcriptomics` is deprecated and will be removed in a future release. Call scanpy
-       directly on the table, then write the results back with :func:`~harpy.tb.add_table_updates`, or with
-       :func:`~harpy.tb.add_table` when cells or genes are removed.
+       directly on the table, then write the results back with :func:`~harpy.tb.io.add_table_updates`, or with
+       :func:`~harpy.tb.io.add_table` when cells or genes are removed.
 
        Until its removal, `harpy.tb.preprocess_transcriptomics` only accepts an in-memory table, and raises a
        ``ValueError`` for a lazy or storage-backed one: read the store with
@@ -183,8 +183,8 @@ def preprocess_proteomics(
 
     .. deprecated:: 0.5.0
        `harpy.tb.preprocess_proteomics` is deprecated and will be removed in a future release. Call scanpy
-       directly on the table, then write the results back with :func:`~harpy.tb.add_table_updates`, or with
-       :func:`~harpy.tb.add_table` when cells or genes are removed.
+       directly on the table, then write the results back with :func:`~harpy.tb.io.add_table_updates`, or with
+       :func:`~harpy.tb.io.add_table` when cells or genes are removed.
 
     Parameters
     ----------

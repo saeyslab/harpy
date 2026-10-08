@@ -18,7 +18,7 @@ from zarr.storage import LocalStore
 import harpy.table.io._write as table_writer
 import harpy.table.io._write_by_region as regional_writer
 from harpy._tests.test_table.test_io.test_write import _store_bytes
-from harpy.table import read_table_components, write_table_components, write_table_components_by_region
+from harpy.table.io import read_table_components, write_table_components, write_table_components_by_region
 
 
 def _input_matrix(tmp_path, values, matrix_format, mode):

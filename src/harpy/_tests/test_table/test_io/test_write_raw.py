@@ -15,7 +15,7 @@ import harpy.table.io._write as table_writer
 from harpy._storage._anndata import _read_anndata_element
 from harpy._tests.test_table.test_io.test_read import _assert_value
 from harpy._tests.test_table.test_io.test_write import _annotated_store, _store_bytes
-from harpy.table import read_table, write_table_components
+from harpy.table.io import read_table, write_table_components
 
 
 def _without_raw(path, state):

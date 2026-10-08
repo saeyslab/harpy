@@ -11,7 +11,7 @@ from spatialdata.models import TableModel
 
 import harpy.table.io._updates as updates_module
 from harpy._storage._anndata import _lazy_read_source
-from harpy.table import read_table, write_table, write_table_components, write_table_updates
+from harpy.table.io import read_table, write_table, write_table_components, write_table_updates
 
 _IDENTITY = ["region", "instance"]
 

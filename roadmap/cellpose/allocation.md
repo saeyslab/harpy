@@ -49,12 +49,12 @@ implemented:
       **11f.iv** scoped writing and safe publication — implemented;
       **11f.v** creation of raw data through component writes — implemented;
       **11f.vi** region-wise `.obsm` writing — implemented; **11f.vii** integration
-      with existing Harpy APIs in three implementation slices: **a)** `hp.tb.add_table` — implemented,
+      with existing Harpy APIs in three implementation slices: **a)** `hp.tb.io.add_table` — implemented,
       **b)** `hp.tb.add_feature_matrix` — implemented, **c)** aggregation and canonical-component writers — implemented;
       **11f.viii** safe deletion of optional AnnData components — implemented;
       **11f.ix** SpatialData-aware table-component updates — implemented;
       **11f.x** SpatialData-aware regional table-component updates in two implementation slices:
-      **a)** implement `hp.tb.add_table_components_by_region()` — implemented,
+      **a)** implement `hp.tb.io.add_table_components_by_region()` — implemented,
       **b)** migrate `hp.tb.add_feature_matrix()` for existing-table regional updates — implemented;
       **11f.xi** affected-chunk regional-write optimization, after the first ten parts;
       a separate napari-harpy persistence migration also follows the first eight
@@ -6223,16 +6223,16 @@ unsmoothed default remains unchanged.
 ## Slice 11f: modular AnnData table I/O for SpatialData Zarr stores
 
 **Status: Part 11f.i complete (contracts and documentation); Parts 11f.ii–vi
-implemented. `hp.tb.read_table`, `hp.tb.read_table_components` and
-`hp.io.read_zarr`, plus `hp.tb.write_table` and `hp.tb.write_table_components`,
+implemented. `hp.tb.io.read_table`, `hp.tb.io.read_table_components` and
+`hp.io.read_zarr`, plus `hp.tb.io.write_table` and `hp.tb.io.write_table_components`,
 are available, including raw creation through component writes and regional
-updates through `hp.tb.write_table_components_by_region`. Parts 11f.vii a)–c)
-(integration of `hp.tb.add_table`, `hp.tb.add_feature_matrix`, aggregation and
+updates through `hp.tb.io.write_table_components_by_region`. Parts 11f.vii a)–c)
+(integration of `hp.tb.io.add_table`, `hp.tb.add_feature_matrix`, aggregation and
 canonical-component writers) are implemented. Part 11f.viii is implemented via
-`hp.tb.delete_table_components()` and mixed `write_table_components(..., delete=...)`
-updates. Part 11f.ix is implemented via `hp.tb.add_table_components()` and
-`hp.tb.remove_table_components()`. Parts 11f.x a)–b) are implemented via
-`hp.tb.add_table_components_by_region()` and migration of `hp.tb.add_feature_matrix()`
+`hp.tb.io.delete_table_components()` and mixed `write_table_components(..., delete=...)`
+updates. Part 11f.ix is implemented via `hp.tb.io.add_table_components()` and
+`hp.tb.io.remove_table_components()`. Parts 11f.x a)–b) are implemented via
+`hp.tb.io.add_table_components_by_region()` and migration of `hp.tb.add_feature_matrix()`
 to that adapter for existing-table regional updates. Part 11f.xi remains planned.**
 
 Provide general, modular table I/O independently of QC, aggregation or Scanpy
@@ -6259,7 +6259,7 @@ Split the work into eleven independently reviewable parts, in this order:
 7. **11f.vii: integration with existing Harpy APIs** — route existing table I/O
    through the shared primitives in three separately reviewable implementation
    slices, in order a → b → c, with focused integration tests and documentation in each:
-   - **a)** refactor `hp.tb.add_table` — implemented;
+   - **a)** refactor `hp.tb.io.add_table` — implemented;
    - **b)** refactor `hp.tb.add_feature_matrix` — implemented;
    - **c)** integrate aggregation and canonical-component writers — implemented.
 
@@ -6270,7 +6270,7 @@ Split the work into eleven independently reviewable parts, in this order:
    on disk, reusing the existing storage operations and rollback boundary — implemented.
 10. **11f.x: SpatialData-aware regional table-component updates** — implement
     and adopt the public adapter in two separately reviewable slices, in order a → b:
-    - **a)** implement `hp.tb.add_table_components_by_region()` for regional merging,
+    - **a)** implement `hp.tb.io.add_table_components_by_region()` for regional merging,
       persistence when backed, and selective installation into the supplied SpatialData — implemented;
     - **b)** migrate `hp.tb.add_feature_matrix()` to that API for existing-table
       regional updates, retaining scientific preparation and separate new-table creation.
@@ -6725,13 +6725,13 @@ import harpy as hp
 import scanpy as sc
 
 store = "sdata.zarr"
-adata = hp.tb.read_table(store, table_name="raw_counts")
+adata = hp.tb.io.read_table(store, table_name="raw_counts")
 adata.layers["counts"] = adata.X.copy()
 sc.pp.normalize_total(adata, target_sum=1e4)
 sc.pp.log1p(adata)
 
 # A new destination leaves the raw table and its backing arrays untouched.
-hp.tb.write_table(store, table_name="processed", adata=adata)
+hp.tb.io.write_table(store, table_name="processed", adata=adata)
 ```
 
 Callers that filter rows/columns also update any custom metadata that depends
@@ -6740,12 +6740,12 @@ on those axes. Generic I/O does not interpret or repair those records.
 ##### Annotation-only update
 
 ```python
-components = hp.tb.read_table_components(
+components = hp.tb.io.read_table_components(
     store, table_name="raw_counts", components=[("obs",)]
 )
 obs = components[("obs",)]
 obs["reviewed"] = False
-hp.tb.write_table_components(
+hp.tb.io.write_table_components(
     store,
     table_name="raw_counts",
     components={("obs",): obs},
@@ -6766,7 +6766,7 @@ region_key = annotation["region_key"]
 instance_key = annotation["instance_key"]
 obs_identity = adata.obs[[region_key, instance_key]]
 
-hp.tb.write_table_components(
+hp.tb.io.write_table_components(
     store,
     table_name="processed",
     components={
@@ -6791,7 +6791,7 @@ a follow-up.
 
 **Status: implemented.**
 
-- `hp.tb.read_table` and `hp.tb.read_table_components` locate one local table
+- `hp.tb.io.read_table` and `hp.tb.io.read_table_components` locate one local table
   read-only, without opening SpatialData or unrelated elements. The legacy
   `ProcessTable._get_adata()` remains untouched.
 - The shared `harpy._storage._anndata` helpers now assemble all supported
@@ -6820,7 +6820,7 @@ a follow-up.
 
 **Status: implemented.**
 
-`hp.io.read_zarr` composes SpatialData's non-table reader with `hp.tb.read_table`.
+`hp.io.read_zarr` composes SpatialData's non-table reader with `hp.tb.io.read_table`.
 Both Harpy readers share local-root validation through `_open_spatialdata_group`;
 table decoding and sparse chunking remain in the existing table reader.
 Focused tests cover Zarr 2/3, selection, all three modes, untouched non-table
@@ -6837,7 +6837,7 @@ the memory contract, not a general performance guarantee.
 
 Add `hp.io.read_zarr()` as a convenience wrapper that returns a SpatialData
 object with only the requested tables, using Harpy's existing table-reading
-modes. Compose SpatialData's public reader with `hp.tb.read_table()`; do not
+modes. Compose SpatialData's public reader with `hp.tb.io.read_table()`; do not
 implement another table decoder or change ordinary `spatialdata.read_zarr()`
 behavior. Upstream integration with SpatialData's own reader remains a separate
 possible follow-up, not a prerequisite or implementation strategy for this part.
@@ -6864,13 +6864,13 @@ sdata = hp.io.read_zarr(
 )
 ```
 
-- `store` is an existing local SpatialData Zarr root, matching `hp.tb.read_table`.
+- `store` is an existing local SpatialData Zarr root, matching `hp.tb.io.read_table`.
   Remote stores and already-open store objects are outside the initial contract.
 - `table_name=None` reads all tables; a string or sequence selects exact table names;
   `table_name=[]` skips tables. Unknown explicitly requested names raise an error.
 - `table_mode` applies to all selected tables. Its explicit name makes clear
   that it does not control images, labels, points or shapes. Per-table mode
-  mappings are outside the initial API; callers can use `hp.tb.read_table()`
+  mappings are outside the initial API; callers can use `hp.tb.io.read_table()`
   separately when they need another mode for a particular table.
 - `"lazy"` returns Dask matrices, `"backed"` returns read-only Zarr arrays or
   CSR/CSC dataset handles, and `"eager"` returns in-memory NumPy/SciPy matrices.
@@ -6887,7 +6887,7 @@ sdata = hp.io.read_zarr(
 
 1. Read non-table elements and root metadata through `spatialdata.read_zarr()`,
    explicitly excluding tables from its selection.
-2. Resolve the requested table names and read each through `hp.tb.read_table()`
+2. Resolve the requested table names and read each through `hp.tb.io.read_table()`
    with `table_mode` and `sparse_chunk_size`.
 3. Attach those tables to the returned object's `sdata.tables` collection.
 
@@ -6934,7 +6934,7 @@ memory independently from Slice 7b's construction benchmark.
 
 ### Part 11f.iv: scoped table writing and safe publication
 
-**Status: implemented.** `hp.tb.write_table` and `hp.tb.write_table_components`
+**Status: implemented.** `hp.tb.io.write_table` and `hp.tb.io.write_table_components`
 share staging/publication orchestration, strict ordered-identity validation,
 and the existing AnnData serializer and path publisher. Writes preserve Zarr
 format 2/3, stage lazy replacements before moving their source paths, and
@@ -6944,11 +6944,11 @@ shape rejection, and staging/publication/finalization/installation failures.
 
 Implement the two public writers defined in Part 11f.i:
 
-- `hp.tb.write_table(store, table_name=..., adata=..., overwrite=False)` creates
+- `hp.tb.io.write_table(store, table_name=..., adata=..., overwrite=False)` creates
   or replaces a complete table. Replacement is not a merge: old layers or
   metadata absent from the submitted AnnData are not retained. Use this operation
   when filtering/reordering axes or changing spatial linkage.
-- `hp.tb.write_table_components(store, table_name=..., components=..., ...)`
+- `hp.tb.io.write_table_components(store, table_name=..., components=..., ...)`
   updates only the requested logical paths in an existing table. For example,
   `components={("obs",): updated_obs}` replaces the complete observation
   dataframe without reading or rewriting `.X`; it is not a column-level write.
@@ -7037,14 +7037,14 @@ failures, not crash recovery, immutable snapshots or concurrent-access isolation
 
 ### Part 11f.v: creation of raw data through component writes
 
-**Status: implemented.** `hp.tb.write_table_components` creates raw data from
+**Status: implemented.** `hp.tb.io.write_table_components` creates raw data from
 an absent path or encoded null, using supplied feature names or a feature dataframe.
 It stages one complete raw container with AnnData's encoder and publishes it
 alongside any coupled component updates through the existing rollback mechanism.
 Focused tests cover lazy/sparse inputs, unchanged unrelated data, identity and
 overwrite rejection, and restoration after staging/publication/finalization failures.
 
-Extend `hp.tb.write_table_components()` to create raw data in an existing table
+Extend `hp.tb.io.write_table_components()` to create raw data in an existing table
 when `.raw` is absent or stored as `None`. Avoid requiring a complete-table
 rewrite for this operation. Reuse the existing signature, AnnData serialization,
 ordered-identity validation and shared publication/rollback mechanism; do not
@@ -7080,7 +7080,7 @@ The creation contract is:
 For example, creating raw data on an annotated table:
 
 ```python
-hp.tb.write_table_components(
+hp.tb.io.write_table_components(
     "sdata.zarr",
     table_name="processed",
     components={("raw", "X"): raw_counts},
@@ -7119,7 +7119,7 @@ document this delivered behavior.
 **Status: implemented. Regional writes share the existing serializer and
 publication operation; integration with existing Harpy APIs remains Part 11f.vii.**
 
-Introduce `hp.tb.write_table_components_by_region()` for updating one or more
+Introduce `hp.tb.io.write_table_components_by_region()` for updating one or more
 `.obsm` matrix entries for selected regions of an existing SpatialData-annotated
 table. Reuse the shared readers, component serialization and publication
 operation; do not implement a second serializer or rollback mechanism.
@@ -7379,7 +7379,7 @@ For example, update an existing matrix and its caller-prepared metadata:
 selected = adata.obs[region_key].eq("cells_sample_a")
 obs_identity = adata.obs.loc[selected, [region_key, instance_key]]
 
-hp.tb.write_table_components_by_region(
+hp.tb.io.write_table_components_by_region(
     "sdata.zarr",
     table_name="cell_features",
     components={
@@ -7581,12 +7581,12 @@ The legacy `ProcessTable._get_adata()` remains unchanged. Ordinary
 `spatialdata.read_zarr()` behavior is unchanged; Part 11f.iii's `hp.io.read_zarr()`
 wrapper continues to reuse the shared table reader.
 
-### Part 11f.vii a): refactor `hp.tb.add_table`
+### Part 11f.vii a): refactor `hp.tb.io.add_table`
 
 **Status: implemented. Backed writes use the shared table operation and attach
 only the affected table with lazy matrices; unbacked attachment remains write-free.**
 
-Make `hp.tb.add_table` a SpatialData-facing adapter over the shared table I/O
+Make `hp.tb.io.add_table` a SpatialData-facing adapter over the shared table I/O
 infrastructure. Preserve its distinction between attaching an unbacked table
 and persisting a backed one. For backed writes, attach only the affected
 reopened table with lazy matrices, without reopening the entire tables
@@ -7702,11 +7702,11 @@ the completed contract below.
 **Public contract.** Provide two public entry points sharing one internal
 operation, not two storage implementations:
 
-- `hp.tb.delete_table_components()` for deletion-only requests. Its `components`
+- `hp.tb.io.delete_table_components()` for deletion-only requests. Its `components`
   argument is a nonempty sequence of logical tuple paths. It has no identity
   arguments or `overwrite` flag: naming a deletion target explicitly authorizes
   its removal.
-- `hp.tb.write_table_components()` for replacements, optionally accompanied by
+- `hp.tb.io.write_table_components()` for replacements, optionally accompanied by
   `delete: Sequence[ComponentPath] = ()`. Its existing `components` argument
   remains a nonempty mapping of paths to replacement values. `overwrite` applies
   only to replacements, not to the explicitly requested deletions.
@@ -7731,7 +7731,7 @@ No third public update API or separate deletion engine is introduced.
 For example, remove a feature matrix and its associated metadata together:
 
 ```python
-hp.tb.delete_table_components(
+hp.tb.io.delete_table_components(
     "sdata.zarr",
     table_name="counts",
     components=[
@@ -7744,7 +7744,7 @@ hp.tb.delete_table_components(
 If the same logical update also replaces observations, submit one mixed request:
 
 ```python
-hp.tb.write_table_components(
+hp.tb.io.write_table_components(
     "sdata.zarr",
     table_name="counts",
     components={("obs",): updated_obs},
@@ -7902,18 +7902,18 @@ presence, lazy dependencies and failure recovery. Not a prerequisite for Slice
 Provide general public adapters for modifying components of a table attached to
 a supplied `SpatialData`. Callers should not have to coordinate disk updates,
 selective installation and rollback themselves. Generalize the existing pattern
-used by `hp.tb.add_table()` and `hp.tb.add_feature_matrix()`, rather than introduce
+used by `hp.tb.io.add_table()` and `hp.tb.add_feature_matrix()`, rather than introduce
 another component serializer or deletion engine.
 
 **Two explicit API levels.** Keep the existing path-based APIs unchanged, and
 add SpatialData-aware counterparts:
 
-| API                                         | Input and scope                                                                                                                     |
-| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `hp.tb.write_table_components(store, ...)`  | Existing path-based replacement/mixed-update API; updates storage only.                                                             |
-| `hp.tb.delete_table_components(store, ...)` | Existing path-based deletion API; updates storage only.                                                                             |
-| `hp.tb.add_table_components(sdata, ...)`    | New adapter for additions/replacements and optional explicit deletions; updates the supplied SpatialData and its store when backed. |
-| `hp.tb.remove_table_components(sdata, ...)` | New deletion-only adapter; removes requested components from the supplied SpatialData and its store when backed.                    |
+| API                                            | Input and scope                                                                                                                     |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `hp.tb.io.write_table_components(store, ...)`  | Existing path-based replacement/mixed-update API; updates storage only.                                                             |
+| `hp.tb.io.delete_table_components(store, ...)` | Existing path-based deletion API; updates storage only.                                                                             |
+| `hp.tb.io.add_table_components(sdata, ...)`    | New adapter for additions/replacements and optional explicit deletions; updates the supplied SpatialData and its store when backed. |
+| `hp.tb.io.remove_table_components(sdata, ...)` | New deletion-only adapter; removes requested components from the supplied SpatialData and its store when backed.                    |
 
 Do not overload the existing `store` argument to accept a SpatialData object or
 change the path-based APIs' ownership contract. This mirrors the distinction
@@ -7927,7 +7927,7 @@ accepts a nonempty sequence of component paths, without identity arguments or
 an overwrite flag. For example:
 
 ```python
-hp.tb.add_table_components(
+hp.tb.io.add_table_components(
     sdata,
     table_name="counts",
     components={
@@ -7938,7 +7938,7 @@ hp.tb.add_table_components(
     overwrite=True,
 )
 
-hp.tb.remove_table_components(
+hp.tb.io.remove_table_components(
     sdata,
     table_name="counts",
     components=[
@@ -7966,8 +7966,8 @@ both modes, refactoring shared validation where needed rather than maintaining
 competing contracts. `None` remains a replacement value, not an implicit deletion.
 Scientific metadata preparation remains the caller's responsibility.
 
-**Overwrite policy.** Match `hp.tb.add_table()` for the new
-`hp.tb.add_table_components()` adapter:
+**Overwrite policy.** Match `hp.tb.io.add_table()` for the new
+`hp.tb.io.add_table_components()` adapter:
 
 - **Unbacked SpatialData:** ignore `overwrite`; explicitly requested in-memory
   components may be replaced even with `overwrite=False`.
@@ -8070,15 +8070,15 @@ Not a prerequisite for Slice 11g or the path-based napari-harpy persistence migr
 First implement the general regional adapter, then migrate the existing
 feature-matrix caller. Keep the affected-chunk optimization separate in Part 11f.xi.
 
-### Part 11f.x a): implement `hp.tb.add_table_components_by_region()`
+### Part 11f.x a): implement `hp.tb.io.add_table_components_by_region()`
 
 **Status: implemented. The public adapter shares regional validation and lazy
 merge preparation with the disk-only writer, and installs only affected components
 within the shared rollback window. Focused tests cover both storage modes,
 retained measurements, sparse chunk preparation and failure recovery.**
 
-Add `hp.tb.add_table_components_by_region()` as the SpatialData-aware counterpart
-of `hp.tb.write_table_components_by_region()`. Keep the path-based writer
+Add `hp.tb.io.add_table_components_by_region()` as the SpatialData-aware counterpart
+of `hp.tb.io.write_table_components_by_region()`. Keep the path-based writer
 disk-only. The new adapter updates the existing attached AnnData and, when
 `sdata.path` is set, persists the same update to its SpatialData Zarr store.
 Return the supplied `sdata` after successful completion.
@@ -8231,7 +8231,7 @@ unbacked regional results remain lazy. Focused tests cover delegation, retained
 measurements and metadata, overwrite permission, validation and failure recovery.**
 
 Route existing-table regional updates in `hp.tb.add_feature_matrix()` through
-the public `hp.tb.add_table_components_by_region()` API in both backed and
+the public `hp.tb.io.add_table_components_by_region()` API in both backed and
 unbacked SpatialData. Replace its local coordination of merging, persistence,
 selective installation and rollback with the adapter, rather than retaining a
 second implementation or calling the private regional write operation directly.
@@ -8410,13 +8410,13 @@ For example, after a user changes cell classifications or their colors:
 
 - **Save:** napari-harpy captures the selected table's unsaved edits. Its adapter
   submits the affected `.obs` dataframe and `.uns["user_class_colors"]` record
-  together to `hp.tb.write_table_components()`. Harpy performs the
+  together to `hp.tb.io.write_table_components()`. Harpy performs the
   staged storage operation; only after it succeeds does napari-harpy acknowledge
   those edits and show success. On failure, the edits remain unsaved and the
   application displays the error. Harpy does not need to know that the values
   came from an object-classifier widget.
 - **Reload:** the adapter requests the selected values through
-  `hp.tb.read_table_components()`. Napari-harpy handles installing them into its
+  `hp.tb.io.read_table_components()`. Napari-harpy handles installing them into its
   live table, restoring affected in-memory state if installation fails, and
   notifying widgets so classifications, colors and controls refresh. Harpy's
   reader itself does not modify the live application state.
@@ -8436,8 +8436,8 @@ row-identity and live-object update semantics explicitly rather than assuming
 that matching function names make the APIs interchangeable.
 
 Use Part 11f.viii's explicit deletion support for removed optional `.obsm` entries
-and `.uns` records. Use `hp.tb.delete_table_components()` for deletion-only saves,
-or `hp.tb.write_table_components(..., delete=...)` to batch related replacements
+and `.uns` records. Use `hp.tb.io.delete_table_components()` for deletion-only saves,
+or `hp.tb.io.write_table_components(..., delete=...)` to batch related replacements
 and deletions in one rollback operation. Do not split a logically coupled update
 into separate write and delete calls.
 Do not interpret an omitted component as a deletion, silently stop persisting

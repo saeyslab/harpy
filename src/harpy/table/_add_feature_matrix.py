@@ -203,7 +203,7 @@ def add_feature_matrix(
         Aggregate intensity-derived features into a table.
     harpy.tb.add_regionprops
         Add morphology features to table observations.
-    harpy.table.add_table_components_by_region
+    harpy.table.io.add_table_components_by_region
         Update regional measurements and their metadata in an attached table.
 
     Examples

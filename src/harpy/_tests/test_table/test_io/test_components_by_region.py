@@ -17,7 +17,7 @@ import harpy.table.io._write as table_writer
 import harpy.table.io._write_by_region as regional_writer
 from harpy._storage._anndata import _read_backed_element
 from harpy._tests.test_table.test_io.test_write import _store_bytes
-from harpy.table import add_table_components_by_region, delete_table_components, read_table
+from harpy.table.io import add_table_components_by_region, delete_table_components, read_table
 
 # Settings for a 12 × 5 matrix, with the blocks they give it. Dense matrices in
 # storage have stored chunks of (3, 2): an integer rounds down to whole stored

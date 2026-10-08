@@ -1,4 +1,4 @@
-from . import canonical_centers
+from . import canonical_centers, io
 from ._add_feature_matrix import add_feature_matrix
 from ._allocation import aggregate_points, allocate, bin_counts
 from ._allocation_intensity import aggregate_image, allocate_intensity
@@ -6,6 +6,7 @@ from ._annotation import cluster_cleanliness, score_genes, score_genes_iter
 from ._canonical_centers import add_canonical_centers
 from ._cluster_intensity import cluster_intensity
 from ._clustering import kmeans, leiden
+from ._deprecated_add_table import add_table
 from ._enrichment import nhood_enrichment
 from ._preprocess import preprocess_proteomics, preprocess_transcriptomics
 from ._regionprops import add_regionprop_features, add_regionprops
@@ -17,32 +18,15 @@ from .cell_clustering._weighted_channel_expression import weighted_channel_expre
 from .featurization._featurize import extract_instances, featurize
 from .featurization._vit_mae import train_autoencoder
 from .featurization._zarr_iterable_instances import ZarrDataLoader, ZarrIterableInstances
-from .io._add_table import add_table
-from .io._components import add_table_components, remove_table_components
-from .io._components_by_region import add_table_components_by_region
-from .io._read import read_table, read_table_components
-from .io._updates import add_table_updates, write_table_updates
-from .io._write import delete_table_components, write_table, write_table_components
-from .io._write_by_region import write_table_components_by_region
 from .niches._clustering import nhood_kmeans, nhood_lda
 from .pixel_clustering._cluster_intensity import cluster_intensity_SOM
 from .pixel_clustering._neighbors import spatial_pixel_neighbors
 
 __all__ = [
     "canonical_centers",
+    "io",
     "add_canonical_centers",
     "add_table",
-    "add_table_components",
-    "add_table_components_by_region",
-    "add_table_updates",
-    "remove_table_components",
-    "read_table",
-    "read_table_components",
-    "write_table",
-    "write_table_components",
-    "write_table_updates",
-    "delete_table_components",
-    "write_table_components_by_region",
     "correct_marker_genes",
     "extract_instances",
     "ZarrIterableInstances",

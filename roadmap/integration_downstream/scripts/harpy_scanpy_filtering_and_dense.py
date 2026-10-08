@@ -17,10 +17,10 @@ import harpy as hp
 quiet()
 counts = make_counts(4000, 600, density=0.05)
 path = new_store({"counts": annotated_table(counts)})
-hp.tb.write_table(path, table_name="dense", adata=annotated_table(counts.toarray()))
+hp.tb.io.write_table(path, table_name="dense", adata=annotated_table(counts.toarray()))
 
 # Sparse steps on a lazily read table.
-adata = hp.tb.read_table(path, table_name="counts", mode="lazy")
+adata = hp.tb.io.read_table(path, table_name="counts", mode="lazy")
 print("lazy X:", describe(adata.X))
 run_step("calculate_qc_metrics(percent_top=None)", sc.pp.calculate_qc_metrics, adata, percent_top=None, inplace=True)
 run_step("filter_cells(min_genes=25)", sc.pp.filter_cells, adata, min_genes=25)
@@ -35,7 +35,7 @@ run_step("pca (sparse Dask)", sc.pp.pca, adata, n_comps=20)
 # The filtered table no longer matches the stored observations.
 run_step(
     "write_table_components after filtering (expected to be refused)",
-    hp.tb.write_table_components,
+    hp.tb.io.write_table_components,
     path,
     table_name="counts",
     components={("obsm", "X_pca"): adata.obsm["X_pca"]},
@@ -47,13 +47,13 @@ run_step(
 expected = adata.X.compute().toarray()
 run_step(
     "write_table(overwrite=True) of the filtered lazy table",
-    hp.tb.write_table,
+    hp.tb.io.write_table,
     path,
     table_name="counts",
     adata=adata,
     overwrite=True,
 )
-back = hp.tb.read_table(path, table_name="counts", mode="lazy")
+back = hp.tb.io.read_table(path, table_name="counts", mode="lazy")
 print("reopened shape:", back.shape, "| X:", describe(back.X), "| obsm:", list(back.obsm))
 print("reopened X matches expected:", np.allclose(back.X.compute().toarray(), expected, atol=1e-5))
 
@@ -62,7 +62,7 @@ run_step("compute lazy X read before the overwrite (stale)", lambda: str(adata.X
 
 # Dense table written by Harpy from a NumPy X: lazy reads keep the on-disk chunks.
 # The synchronous scheduler avoids a Numba crash on this machine; see numba_scale_threads.py.
-dense = hp.tb.read_table(path, table_name="dense", mode="lazy")
+dense = hp.tb.io.read_table(path, table_name="dense", mode="lazy")
 print("dense lazy X:", describe(dense.X))
 with dask.config.set(scheduler="synchronous"):
     run_step("dense normalize_total", sc.pp.normalize_total, dense)

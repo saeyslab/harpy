@@ -170,8 +170,8 @@ reading modes, update scopes, overwrite guarantees, and storage-backed reference
 .. autosummary::
     :toctree: generated
 
-    tb.read_table
-    tb.read_table_components
+    tb.io.read_table
+    tb.io.read_table_components
 ```
 
 #### Writing directly to storage
@@ -184,11 +184,11 @@ in-memory `SpatialData` object.
 .. autosummary::
     :toctree: generated
 
-    tb.write_table
-    tb.write_table_updates
-    tb.write_table_components
-    tb.write_table_components_by_region
-    tb.delete_table_components
+    tb.io.write_table
+    tb.io.write_table_updates
+    tb.io.write_table_components
+    tb.io.write_table_components_by_region
+    tb.io.delete_table_components
 ```
 
 #### Updating SpatialData tables
@@ -201,11 +201,11 @@ changes when it is backed by a Zarr store.
 .. autosummary::
     :toctree: generated
 
-    tb.add_table
-    tb.add_table_updates
-    tb.add_table_components
-    tb.add_table_components_by_region
-    tb.remove_table_components
+    tb.io.add_table
+    tb.io.add_table_updates
+    tb.io.add_table_components
+    tb.io.add_table_components_by_region
+    tb.io.remove_table_components
 ```
 
 ### Processing and analysis

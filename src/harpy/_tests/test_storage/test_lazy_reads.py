@@ -16,7 +16,7 @@ from zarr.storage import MemoryStore
 
 import harpy._storage._anndata as anndata_storage
 from harpy._storage._anndata import _decode_anndata_element, _lazy_read_source
-from harpy.table import read_table, write_table
+from harpy.table.io import read_table, write_table
 
 _VALUES = np.arange(24, dtype=np.float32).reshape(6, 4)
 _MATRICES = {

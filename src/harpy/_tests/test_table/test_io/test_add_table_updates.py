@@ -13,7 +13,7 @@ import harpy.table.io._updates as updates_module
 from harpy._storage._anndata import _lazy_read_source
 from harpy._tests.test_table.test_io.test_write import _store_bytes
 from harpy._tests.test_table.test_io.test_write_table_updates import _dense, _store, _stored, _table
-from harpy.table import add_table_updates, read_table, write_table_updates
+from harpy.table.io import add_table_updates, read_table, write_table_updates
 
 
 def _attach(path, *, backed=True):
@@ -124,7 +124,7 @@ def test_unbacked_spatialdata_raises_naming_the_ways_out(store):
     table.obsm["embedding"] = np.ones((table.n_obs, 2))
     with pytest.raises(ValueError, match="sdata.path is None") as error:
         add_table_updates(sdata, table_name="counts")
-    for way_out in ("sdata.write(path)", "hp.tb.write_table", "hp.tb.write_table_updates(store"):
+    for way_out in ("sdata.write(path)", "hp.tb.io.write_table", "hp.tb.io.write_table_updates(store"):
         assert way_out in str(error.value)
 
     # The store-path function, with the store the table was read from, writes only its changes.
@@ -154,7 +154,7 @@ def test_a_missing_attached_annotation_raises_before_writing(store):
 def test_a_table_without_a_stored_counterpart_raises(store):
     sdata, _ = _attach(store)
     sdata.tables["unsaved"] = _table()
-    with pytest.raises(FileNotFoundError, match="hp.tb.add_table"):
+    with pytest.raises(FileNotFoundError, match="hp.tb.io.add_table"):
         add_table_updates(sdata, table_name="unsaved")
 
 

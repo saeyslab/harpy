@@ -20,7 +20,13 @@ from zarr.storage import LocalStore
 import harpy._storage._anndata as anndata_storage
 import harpy.table.io._write as table_writer
 from harpy._tests.test_table.test_io.test_read import _assert_value
-from harpy.table import delete_table_components, read_table, read_table_components, write_table, write_table_components
+from harpy.table.io import (
+    delete_table_components,
+    read_table,
+    read_table_components,
+    write_table,
+    write_table_components,
+)
 
 
 def _store_bytes(path):

@@ -161,8 +161,8 @@ in staging when preparing a replacement.
 
 #### Public scoped table writers
 
-`hp.tb.write_table(store, table_name=..., adata=..., overwrite=...)` writes a
-complete table. `hp.tb.write_table_components(store, table_name=...,
+`hp.tb.io.write_table(store, table_name=..., adata=..., overwrite=...)` writes a
+complete table. `hp.tb.io.write_table_components(store, table_name=...,
 components=..., overwrite=...)` replaces only named logical components of an
 existing table. Both operate on an existing local SpatialData root, preserve
 its Zarr format, and return `None` after publication and metadata finalization.
@@ -201,9 +201,9 @@ It does not rewrite the main table or unrelated matrices. Rollback restores
 the prior absence or null entry as well as coupled updates. Raw serialization
 uses AnnData's raw encoding, not a generic mapping.
 
-`hp.tb.delete_table_components(store, table_name=..., components=[...])` removes
+`hp.tb.io.delete_table_components(store, table_name=..., components=[...])` removes
 explicitly named optional components. A mixed update uses
-`hp.tb.write_table_components(..., components={...}, delete=[...])` instead;
+`hp.tb.io.write_table_components(..., components={...}, delete=[...])` instead;
 its replacement mapping must still be nonempty. Both entry points share
 `_write_table_operation()` and one publication/rollback context. Separate calls
 commit independently.
@@ -242,7 +242,7 @@ removal or refresh of affected in-memory entries and restores them on failure.
 The shared crash-recovery and concurrent-access limitations apply equally to
 deletions and replacements.
 
-`hp.tb.write_table_updates(store, table_name=..., adata=..., x_to=None,
+`hp.tb.io.write_table_updates(store, table_name=..., adata=..., x_to=None,
 overwrite=...)` writes back the components of a processed table that are new or
 changed against the stored table, in one `write_table_components` call, and
 writes nothing when nothing changed. A path absent from storage is new. A lazy
@@ -253,7 +253,7 @@ goes to `x_to`, such as `("layers", "log1p")`, and raises without it. The axes
 and `uns["spatialdata_attrs"]` must match storage, missing components are never
 deleted, and `overwrite` concerns existence in storage only. The docstring
 gives the full contract; `src/harpy/table/io/_updates.py` implements the
-comparison. `hp.tb.add_table_updates(sdata, table_name=..., x_to=None,
+comparison. `hp.tb.io.add_table_updates(sdata, table_name=..., x_to=None,
 overwrite=...)` does the same for a table attached to backed SpatialData, and
 reinstalls the written components lazily through `_update_table_components`,
 like `add_table_components`; after `x_to` it also reinstalls `X` from the store.
@@ -320,7 +320,7 @@ What the write-back protects against, and what not:
 | A table reused after `write_table_updates` replaced what it reads            | **no**: reopen it; `add_table_updates` reinstalls what it writes |
 | A matrix that was only rechunked                                             | rewritten: conservative, never wrong                             |
 
-`hp.tb.write_table_components_by_region(store, table_name=..., components=...,
+`hp.tb.io.write_table_components_by_region(store, table_name=..., components=...,
 obs_identity=..., fill_values=..., sparse_chunks="auto", dense_chunks="auto",
 overwrite=...)` updates individual `.obsm`
 matrices for complete regions of an existing annotated table. The nonempty
@@ -456,7 +456,7 @@ tracking remains caller-owned as described below.
 
 #### Adding a table to SpatialData
 
-`hp.tb.add_table(sdata, adata, output_table_name=..., region=..., overwrite=...)`
+`hp.tb.io.add_table(sdata, adata, output_table_name=..., region=..., overwrite=...)`
 combines table preparation with attachment to the supplied `sdata`:
 
 - **Unbacked `sdata`:** attach the prepared table without writing or computing its
@@ -484,7 +484,7 @@ use `sdata.tables[output_table_name]` for the current table.
 For example, write a complete result and refresh its attached representation:
 
 ```python
-sdata = hp.tb.add_table(
+sdata = hp.tb.io.add_table(
     sdata, processed, output_table_name="processed", region=["cells"],
     region_key="region", instance_key="instance_id", overwrite=True,
 )
@@ -495,7 +495,7 @@ For an annotation-only update, the SpatialData-aware component adapter avoids
 rewriting matrices and refreshes only the requested live component:
 
 ```python
-hp.tb.add_table_components(
+hp.tb.io.add_table_components(
     sdata, table_name="processed", components={("obs",): updated_obs}, overwrite=True,
 )
 ```
@@ -557,7 +557,7 @@ On handled failure, the shared writer restores storage/root metadata and the
 adapter restores the original affected in-memory references. Unbacked failures
 restore those references without any storage work.
 
-Regional adapters, such as `hp.tb.add_table_components_by_region()`, follow the
+Regional adapters, such as `hp.tb.io.add_table_components_by_region()`, follow the
 same observation-alignment, selective-installation and recovery guarantees.
 Unselected observations retain measurements from the stored target when backed,
 or from the attached target when unbacked. For backed updates, storage determines
@@ -565,7 +565,7 @@ target existence, format, shape and dtype: a target present only in memory is ne
 on disk and follows the new-entry fill rules. Preserving unrelated local components
 does not preserve unsaved values within a requested matrix.
 
-For unbacked SpatialData, `hp.tb.add_table_components_by_region()` attaches the
+For unbacked SpatialData, `hp.tb.io.add_table_components_by_region()` attaches the
 complete updated matrix lazily, without executing the numerical merge or writing
 to disk. This guarantee concerns the regional update itself, not calculations
 callers perform to prepare the submitted measurements.
@@ -612,17 +612,17 @@ For unannotated tables the same format attributes are written, with `region`,
 
 ### Reading AnnData components and tables
 
-`hp.tb.read_table(store, table_name=...)` reads one complete, detached AnnData.
-`hp.tb.read_table_components(store, table_name=..., components=...)` returns
+`hp.tb.io.read_table(store, table_name=...)` reads one complete, detached AnnData.
+`hp.tb.io.read_table_components(store, table_name=..., components=...)` returns
 only the requested values, keyed by logical tuple paths. Both accept a local
 SpatialData Zarr root (format 2 or 3), open it read-only and leave other elements
 unopened. They do not use SpatialData's whole-store reader or attach results to
 a live SpatialData object.
 
 ```python
-adata = hp.tb.read_table("sdata.zarr", table_name="counts")
-backed = hp.tb.read_table("sdata.zarr", table_name="counts", mode="backed")
-values = hp.tb.read_table_components(
+adata = hp.tb.io.read_table("sdata.zarr", table_name="counts")
+backed = hp.tb.io.read_table("sdata.zarr", table_name="counts", mode="backed")
+values = hp.tb.io.read_table_components(
     "sdata.zarr", table_name="counts", components=[("obs",), ("obsm", "embedding")]
 )
 ```
@@ -717,7 +717,7 @@ and `table_name=[]` skips tables. Duplicate names are rejected; missing names ra
 hp.io.read_zarr
     ├── spatialdata.read_zarr (explicitly exclude tables)
     │       └── non-table elements, transformations, root attributes and path
-    └── hp.tb.read_table (each selected table)
+    └── hp.tb.io.read_table (each selected table)
             └── attach to the returned SpatialData object
 ```
 

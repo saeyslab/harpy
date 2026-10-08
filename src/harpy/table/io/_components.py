@@ -78,7 +78,7 @@ def add_table_components(
         The attached AnnData must not be a view or an HDF5-backed object.
     components
         Nonempty mapping from logical tuple paths to replacement values, using
-        the same scopes as :func:`harpy.table.write_table_components`: X,
+        the same scopes as :func:`harpy.table.io.write_table_components`: X,
         obs/var dataframes, individual matrix-mapping entries, whole or nested
         uns, and raw.X/raw.var/raw.varm entries. For example,
         ``{("obsm", "embedding"): embedding, ("uns", "embedding"): metadata}``.
@@ -86,7 +86,7 @@ def add_table_components(
         None is a replacement value where supported, not a deletion instruction.
     delete
         Optional explicit deletion paths, using the scopes of
-        :func:`harpy.table.delete_table_components`. All replacement and deletion
+        :func:`harpy.table.io.delete_table_components`. All replacement and deletion
         paths must be unique and non-overlapping. Missing targets in both
         memory and storage are logged and skipped.
     obs_identity
@@ -105,7 +105,7 @@ def add_table_components(
         a non-None raw.X and either these names or a raw.var dataframe.
     overwrite
         Allow replacing targets that exist in the store. Ignored for unbacked
-        SpatialData, matching :func:`harpy.table.add_table`. It only concerns
+        SpatialData, matching :func:`harpy.table.io.add_table`. It only concerns
         the store: a target present only in memory, never saved, is replaced
         without it, as for unbacked SpatialData. Explicit deletions do not
         require overwrite permission. Validation still applies in both modes.
@@ -126,7 +126,7 @@ def add_table_components(
     matrix representations. Supplied matrix data may be shared; this is not a
     deep-copy API. Backed updates use the shared staged writer, then reopen only
     affected entries, with matrices lazy and annotations in memory. Backed
-    writes store matrices as :func:`harpy.table.write_table` does; its Notes
+    writes store matrices as :func:`harpy.table.io.write_table` does; its Notes
     list which elements are stored as matrices.
 
     Installation finishes before disk publication commits. Handled failures
@@ -136,8 +136,8 @@ def add_table_components(
 
     See Also
     --------
-    harpy.table.write_table_components : Update storage without modifying live objects.
-    harpy.table.remove_table_components : Remove selected live and stored components.
+    harpy.table.io.write_table_components : Update storage without modifying live objects.
+    harpy.table.io.remove_table_components : Remove selected live and stored components.
     """
     if not isinstance(components, Mapping):
         raise TypeError("components must be a mapping from tuple paths to values.")
@@ -187,7 +187,7 @@ def remove_table_components(sdata: SpatialData, *, table_name: str, components: 
 
     Related measurements and scientific metadata must be listed explicitly;
     deletions do not cascade. To combine replacements and removals in one
-    rollback operation, use :func:`harpy.table.add_table_components` with delete.
+    rollback operation, use :func:`harpy.table.io.add_table_components` with delete.
     Its installation, recovery and external-reference rules also apply here.
     """
     if not components:
@@ -466,7 +466,7 @@ def _validate_component_values_against_memory(
         and region/instance columns, not a replacement table.
     components_to_validate
         Component replacements, using the same mapping format as ``components``
-        in :func:`harpy.table.add_table_components`.
+        in :func:`harpy.table.io.add_table_components`.
     expected_axis_indices
         Indices prepared by ``_memory_axis_indices()``. The caller retains them
         for the separate memory-versus-storage comparison in ``_check_in_memory_versus_storage_axes()``.

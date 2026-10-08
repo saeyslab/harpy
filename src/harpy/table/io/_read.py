@@ -107,14 +107,14 @@ def read_table(
 
     See Also
     --------
-    harpy.table.read_table_components : Read only selected components.
-    harpy.table.write_table : Persist a complete table through staging and publication.
+    harpy.table.io.read_table_components : Read only selected components.
+    harpy.table.io.write_table : Persist a complete table through staging and publication.
 
     Examples
     --------
     .. code-block:: python
 
-        adata = hp.tb.read_table("sdata.zarr", table_name="counts", mode="lazy")
+        adata = hp.tb.io.read_table("sdata.zarr", table_name="counts", mode="lazy")
         selected = adata[adata.obs["region"] == "labels_a"].copy()
         # Matrices remain lazy; custom metadata may need adjustment after selection.
 
@@ -122,7 +122,7 @@ def read_table(
         adata.X = adata.X * 2
 
         # Changing values through a backed handle instead attempts a disk write.
-        backed = hp.tb.read_table("sdata.zarr", table_name="counts", mode="backed")
+        backed = hp.tb.io.read_table("sdata.zarr", table_name="counts", mode="backed")
         backed.X[0, 1] = 99  # Raises ValueError: storage is read-only.
     """
     _validate_read_mode(mode)
@@ -166,7 +166,7 @@ def read_table_components(
         are always decoded into memory.
     sparse_chunks, dense_chunks
         Lazy block layout of sparse and dense matrices, as described for
-        :func:`harpy.table.read_table`. Ignored in other modes.
+        :func:`harpy.table.io.read_table`. Ignored in other modes.
     missing
         Raise KeyError for an absent component, or omit its dictionary entry.
         A present encoded None is retained. Invalid paths, invalid traversal
@@ -182,18 +182,18 @@ def read_table_components(
     Notes
     -----
     Results follow the same ownership and backing-path rules as
-    :func:`harpy.table.read_table`. Neither reader writes to disk.
+    :func:`harpy.table.io.read_table`. Neither reader writes to disk.
 
     See Also
     --------
-    harpy.table.read_table : Read a complete table.
-    harpy.table.write_table_components : Persist only selected components.
+    harpy.table.io.read_table : Read a complete table.
+    harpy.table.io.write_table_components : Persist only selected components.
 
     Examples
     --------
     .. code-block:: python
 
-        values = hp.tb.read_table_components(
+        values = hp.tb.io.read_table_components(
             "sdata.zarr", table_name="counts", components=[("obs",), ("uns", "analysis")]
         )
         obs = values[("obs",)]

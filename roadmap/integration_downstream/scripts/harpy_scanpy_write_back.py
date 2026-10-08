@@ -14,7 +14,7 @@ import harpy as hp
 quiet()
 counts = make_counts(4000, 600, density=0.05)
 path = new_store({"counts": annotated_table(counts)})
-adata = hp.tb.read_table(path, table_name="counts", mode="lazy")
+adata = hp.tb.io.read_table(path, table_name="counts", mode="lazy")
 print("lazy X:", describe(adata.X))
 
 run_step("normalize_total", sc.pp.normalize_total, adata)
@@ -30,7 +30,7 @@ expected_pca = adata.obsm["X_pca"].compute()
 
 run_step(
     "write_table_components: obs, var, lazy layer, lazy X_pca, PCs, uns",
-    hp.tb.write_table_components,
+    hp.tb.io.write_table_components,
     path,
     table_name="counts",
     components={
@@ -46,7 +46,7 @@ run_step(
     overwrite=True,
 )
 
-back = hp.tb.read_table(path, table_name="counts", mode="lazy")
+back = hp.tb.io.read_table(path, table_name="counts", mode="lazy")
 print("reopened X:", describe(back.X))
 print("reopened layers['log1p']:", describe(back.layers["log1p"]))
 print("reopened obsm['X_pca']:", describe(back.obsm["X_pca"]))
@@ -60,7 +60,7 @@ run_step("neighbors on reopened lazy X_pca", sc.pp.neighbors, back, n_neighbors=
 run_step("leiden", sc.tl.leiden, back, flavor="igraph", n_iterations=2)
 run_step(
     "write_table_components: obs, obsp graphs, uns",
-    hp.tb.write_table_components,
+    hp.tb.io.write_table_components,
     path,
     table_name="counts",
     components={
@@ -73,7 +73,7 @@ run_step(
     overwrite=True,
 )
 
-final = hp.tb.read_table(path, table_name="counts", mode="lazy")
+final = hp.tb.io.read_table(path, table_name="counts", mode="lazy")
 print("final obsp keys:", sorted(final.obsp), "| obs has leiden:", "leiden" in final.obs.columns)
 print(
     "connectivities match:",

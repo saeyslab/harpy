@@ -124,7 +124,7 @@ def run_case(store: str, case: str, sparse_chunks: str | int) -> dict:
     # Patch before reading, so the lazy graph is built with the counting reader.
     lazy_methods.make_dask_chunk = counting_read_block
 
-    adata = hp.tb.read_table(store, table_name="counts", mode="lazy", sparse_chunks=sparse_chunks)
+    adata = hp.tb.io.read_table(store, table_name="counts", mode="lazy", sparse_chunks=sparse_chunks)
     sc.pp.normalize_total(adata, target_sum=1e4 if case == "log1p_fixed_target" else None)
     sc.pp.log1p(adata)
     if case in {"x_pca", "both", "one_compute"}:
@@ -140,7 +140,7 @@ def run_case(store: str, case: str, sparse_chunks: str | int) -> dict:
         if case == "one_compute":
             dask.compute(*(_block_totals(value) for _, value in results.values()))
         else:
-            hp.tb.write_table_components(
+            hp.tb.io.write_table_components(
                 store,
                 table_name="counts",
                 components=dict(results[name] for name in WRITTEN[case]),
@@ -165,7 +165,7 @@ def make_store(n_obs: int | None) -> str:
     quiet()
     counts = make_counts(8000, 600, density=0.05) if n_obs is None else make_large_counts(n_obs, 2000, 100)
     store = new_store({})
-    hp.tb.write_table(store, table_name="counts", adata=annotated_table(counts))
+    hp.tb.io.write_table(store, table_name="counts", adata=annotated_table(counts))
     print(f"table: {counts.shape[0]:,} × {counts.shape[1]:,}, {counts.nnz:,} non-zero values", flush=True)
     return store
 

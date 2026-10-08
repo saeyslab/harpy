@@ -93,7 +93,7 @@ def add_table_components_by_region(
         and sparse matrices allow only zero fills. Keys must name submitted matrices.
     sparse_chunks, dense_chunks
         Block layout of the lazy merge, with the same values and meaning as in
-        :func:`harpy.table.read_table`, both ``"auto"`` by default. They apply
+        :func:`harpy.table.io.read_table`, both ``"auto"`` by default. They apply
         to the destination matrix (the stored matrix when backed, read as
         ``read_table`` reads it, or an attached matrix in memory or backed by
         Zarr), to supplied matrices in memory or backed by Zarr, and to new
@@ -144,8 +144,8 @@ def add_table_components_by_region(
 
     See Also
     --------
-    harpy.table.write_table_components_by_region : Update regional measurements on disk only.
-    harpy.table.add_table_components : Replace complete components in an attached table.
+    harpy.table.io.write_table_components_by_region : Update regional measurements on disk only.
+    harpy.table.io.add_table_components : Replace complete components in an attached table.
 
     Examples
     --------
@@ -153,7 +153,7 @@ def add_table_components_by_region(
 
         adata = sdata.tables["cell_features"]
         selected = adata.obs["region"].eq("cells_sample_a")
-        hp.tb.add_table_components_by_region(
+        hp.tb.io.add_table_components_by_region(
             sdata, table_name="cell_features",
             components={
                 ("obsm", "morphology"): regional_features,

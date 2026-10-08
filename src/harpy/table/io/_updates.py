@@ -64,10 +64,10 @@ def write_table_updates(
 ) -> None:
     """Write the components of a table that are new or changed against its store.
 
-    Compares ``adata``, typically read with :func:`harpy.table.read_table` and
+    Compares ``adata``, typically read with :func:`harpy.table.io.read_table` and
     then processed, for example by scanpy, with the stored table, and writes
     only its new and changed components, in one rollback-protected
-    :func:`harpy.table.write_table_components` call. Components missing from
+    :func:`harpy.table.io.write_table_components` call. Components missing from
     ``adata`` are never deleted.
 
     Parameters
@@ -112,7 +112,7 @@ def write_table_updates(
     A component is new if its path does not exist in storage, and written.
     Otherwise it is written only if it changed:
 
-    - a lazy read of its own stored element (:func:`harpy.table.read_table`
+    - a lazy read of its own stored element (:func:`harpy.table.io.read_table`
       with ``mode="lazy"``) is unchanged, without reading values, as long as no
       operation was applied to it: copies and ``persist()`` keep it
       recognised, while any operation, a real rechunk included, makes it
@@ -133,7 +133,7 @@ def write_table_updates(
     ``obs`` and ``var`` are written whole, and ``uns`` per top-level key, so
     columns and nested keys removed from them are removed from storage too.
     Missing components, top-level ``uns`` keys included, stay in storage;
-    remove them with :func:`harpy.table.delete_table_components`.
+    remove them with :func:`harpy.table.io.delete_table_components`.
 
     Not detected: a change that another writer made in storage since the
     read, to a component that ``adata`` holds in memory or that changed in
@@ -147,29 +147,29 @@ def write_table_updates(
     would apply its processing again, to the replaced and already processed
     ``X``; depending on the stored layout, that fails or silently gives wrong
     values. After ``x_to`` to a layer, calling again with the same ``adata``
-    writes ``X`` again. :func:`harpy.table.add_table_updates` reinstalls what it
+    writes ``X`` again. :func:`harpy.table.io.add_table_updates` reinstalls what it
     writes in a table attached to SpatialData, so that table needs no reopening.
 
     See Also
     --------
-    harpy.table.read_table : Read the table, lazily, before processing it.
-    harpy.table.add_table_updates : The same for a table attached to backed SpatialData.
-    harpy.table.write_table_components : Write selected components explicitly.
-    harpy.table.write_table : Write a complete table, also with other axes.
+    harpy.table.io.read_table : Read the table, lazily, before processing it.
+    harpy.table.io.add_table_updates : The same for a table attached to backed SpatialData.
+    harpy.table.io.write_table_components : Write selected components explicitly.
+    harpy.table.io.write_table : Write a complete table, also with other axes.
 
     Examples
     --------
     .. code-block:: python
 
-        adata = hp.tb.read_table("sdata.zarr", table_name="counts", mode="lazy")
+        adata = hp.tb.io.read_table("sdata.zarr", table_name="counts", mode="lazy")
         sc.pp.normalize_total(adata)
         sc.pp.log1p(adata)
         sc.pp.pca(adata)
         # overwrite=True for re-runs: their layer and X_pca replace those of an earlier run.
-        hp.tb.write_table_updates(
+        hp.tb.io.write_table_updates(
             "sdata.zarr", table_name="counts", adata=adata, x_to=("layers", "log1p"), overwrite=True
         )
-        adata = hp.tb.read_table("sdata.zarr", table_name="counts", mode="lazy")
+        adata = hp.tb.io.read_table("sdata.zarr", table_name="counts", mode="lazy")
     """
     if not isinstance(adata, AnnData):
         raise TypeError("adata must be an AnnData.")
@@ -196,13 +196,13 @@ def add_table_updates(
 ) -> SpatialData:
     """Write the components of an attached table that are new or changed against its store, and reinstall them.
 
-    The SpatialData counterpart of :func:`harpy.table.write_table_updates`: it
+    The SpatialData counterpart of :func:`harpy.table.io.write_table_updates`: it
     compares ``sdata.tables[table_name]``, typically read lazily and processed
     in place, for example by scanpy, with the same table in the store of
     ``sdata``, and writes only its new and changed components, with the same
     rules for what changed, ``x_to`` and ``overwrite``. It then reinstalls the
     written components in the attached table, reopened lazily from the store,
-    as :func:`harpy.table.add_table_components` does, so that the attached
+    as :func:`harpy.table.io.add_table_components` does, so that the attached
     table matches the store and a second call writes nothing.
 
     Parameters
@@ -214,12 +214,12 @@ def add_table_updates(
         Name of the attached table to update.
     x_to
         Destination of a new or changed ``X``, as for
-        :func:`harpy.table.write_table_updates`. When ``X`` is written to a
+        :func:`harpy.table.io.write_table_updates`. When ``X`` is written to a
         layer, the attached ``X`` is reinstalled from the store too, usually
         the counts, or set to ``None`` if the store has no ``X``.
     overwrite
         Allow replacing components that exist in storage, as for
-        :func:`harpy.table.write_table_updates`. A component that is attached
+        :func:`harpy.table.io.write_table_updates`. A component that is attached
         but not stored is new, and needs no permission.
 
     Returns
@@ -235,8 +235,8 @@ def add_table_updates(
         attached table lacks the store's SpatialData annotation, or has another
         one: the written components are put back into the attached table, so
         that table and the store must describe the same linkage, as for
-        :func:`harpy.table.add_table_components`. Also for the reasons that
-        :func:`harpy.table.write_table_updates` raises.
+        :func:`harpy.table.io.add_table_components`. Also for the reasons that
+        :func:`harpy.table.io.write_table_updates` raises.
     FileNotFoundError
         If the store, or the table in it, does not exist.
     FileExistsError
@@ -245,14 +245,14 @@ def add_table_updates(
     Notes
     -----
     The write uses the same staging and rollback as
-    :func:`harpy.table.add_table_components`. If it fails, also after the
+    :func:`harpy.table.io.add_table_components`. If it fails, also after the
     attached table was updated, the store and the attached slots are
     restored. External references to replaced values are not refreshed.
 
     See Also
     --------
-    harpy.table.write_table_updates : Write the updates of a table to a store, without SpatialData.
-    harpy.table.add_table_components : Update selected components of an attached table explicitly.
+    harpy.table.io.write_table_updates : Write the updates of a table to a store, without SpatialData.
+    harpy.table.io.add_table_components : Update selected components of an attached table explicitly.
 
     Examples
     --------
@@ -264,7 +264,7 @@ def add_table_updates(
         sc.pp.log1p(adata)
         sc.pp.pca(adata)
         # overwrite=True for re-runs: their layer and X_pca replace those of an earlier run.
-        hp.tb.add_table_updates(sdata, table_name="counts", x_to=("layers", "log1p"), overwrite=True)
+        hp.tb.io.add_table_updates(sdata, table_name="counts", x_to=("layers", "log1p"), overwrite=True)
     """
     if not isinstance(sdata, SpatialData):
         raise TypeError("sdata must be a SpatialData object.")
@@ -272,15 +272,15 @@ def add_table_updates(
         raise ValueError(
             f"add_table_updates compares the attached table {table_name!r} with its store, but sdata has none "
             "(sdata.path is None). Write the SpatialData itself with sdata.write(path); write the table into an "
-            "existing store with hp.tb.write_table; or, if the table was read from a store, call "
-            f"hp.tb.write_table_updates(store, table_name=..., adata=sdata.tables[{table_name!r}]) with that store."
+            "existing store with hp.tb.io.write_table; or, if the table was read from a store, call "
+            f"hp.tb.io.write_table_updates(store, table_name=..., adata=sdata.tables[{table_name!r}]) with that store."
         )
     try:
         table, _ = _component_update_destination(sdata, table_name=table_name)
     except FileNotFoundError as error:
         raise FileNotFoundError(
             f"Table {table_name!r} has no stored counterpart to compare with. Write the SpatialData with "
-            "sdata.write(path), or the table with hp.tb.add_table, which writes and attaches it whole."
+            "sdata.write(path), or the table with hp.tb.io.add_table, which writes and attaches it whole."
         ) from error
     plan = _plan_table_updates(sdata.path, table_name=table_name, adata=table, x_to=x_to, overwrite=overwrite)
     if plan is None:

@@ -102,17 +102,17 @@ def write_table(
 
     See Also
     --------
-    harpy.table.read_table : Reopen the written table.
-    harpy.table.write_table_components : Replace only selected components.
+    harpy.table.io.read_table : Reopen the written table.
+    harpy.table.io.write_table_components : Replace only selected components.
 
     Examples
     --------
     .. code-block:: python
 
-        adata = hp.tb.read_table("sdata.zarr", table_name="counts")
+        adata = hp.tb.io.read_table("sdata.zarr", table_name="counts")
         adata.X = adata.X * 2
-        hp.tb.write_table("sdata.zarr", table_name="counts", adata=adata, overwrite=True)
-        adata = hp.tb.read_table("sdata.zarr", table_name="counts")
+        hp.tb.io.write_table("sdata.zarr", table_name="counts", adata=adata, overwrite=True)
+        adata = hp.tb.io.read_table("sdata.zarr", table_name="counts")
     """
     if not isinstance(adata, AnnData):
         raise TypeError("adata must be an AnnData.")
@@ -150,7 +150,7 @@ def write_table_components(
         None is an encoded value where supported, not deletion.
     delete
         Optional component paths to remove in the same operation. Supports the
-        targets of :func:`harpy.table.delete_table_components`. Replacement and
+        targets of :func:`harpy.table.io.delete_table_components`. Replacement and
         deletion paths must be unique and non-overlapping, even when absent.
         Missing deletion targets are logged at INFO and skipped.
     obs_identity
@@ -179,7 +179,7 @@ def write_table_components(
     Notes
     -----
     Existing axes, their order and SpatialData linkage cannot change; use
-    :func:`harpy.table.write_table` for those changes. No automatic reordering
+    :func:`harpy.table.io.write_table` for those changes. No automatic reordering
     occurs. If both a dataframe and explicit identities are supplied, both are
     checked. Dataframe replacements must also preserve their stored index.
     Callers prepare consistent scientific data and metadata.
@@ -192,7 +192,7 @@ def write_table_components(
 
     Zarr-backed matrices are internally wrapped in lazy Dask arrays and evaluated
     in chunks during writing, without preliminary whole-matrix computation or
-    densification. Stored layouts follow :func:`harpy.table.write_table`, whose
+    densification. Stored layouts follow :func:`harpy.table.io.write_table`, whose
     Notes list which elements are stored as matrices.
 
     An obs-only update does not read or rewrite X.
@@ -202,25 +202,25 @@ def write_table_components(
     staging before moving any deletion targets from their original locations.
     Replacements and deletions share one rollback operation. Separate API calls
     commit independently.
-    Staging, completion, reopening and recovery follow :func:`harpy.table.write_table`.
+    Staging, completion, reopening and recovery follow :func:`harpy.table.io.write_table`.
 
     See Also
     --------
-    harpy.table.read_table_components : Read only selected components.
-    harpy.table.write_table : Write a complete table.
-    harpy.table.delete_table_components : Remove components without replacements.
+    harpy.table.io.read_table_components : Read only selected components.
+    harpy.table.io.write_table : Write a complete table.
+    harpy.table.io.delete_table_components : Remove components without replacements.
 
     Examples
     --------
     .. code-block:: python
 
-        hp.tb.write_table_components(
+        hp.tb.io.write_table_components(
             "sdata.zarr", table_name="counts",
             components={("obsm", "embedding"): embedding, ("uns", "embedding"): metadata},
             obs_identity=adata.obs[[region_key, instance_key]], overwrite=True,
         )
 
-        hp.tb.write_table_components(
+        hp.tb.io.write_table_components(
             "sdata.zarr", table_name="counts",
             components={("raw", "X"): raw_counts},
             obs_identity=adata.obs[[region_key, instance_key]],
@@ -287,13 +287,13 @@ def delete_table_components(
 
     See Also
     --------
-    harpy.table.write_table_components : Combine replacements and deletions.
+    harpy.table.io.write_table_components : Combine replacements and deletions.
 
     Examples
     --------
     .. code-block:: python
 
-        hp.tb.delete_table_components(
+        hp.tb.io.delete_table_components(
             "sdata.zarr", table_name="counts",
             components=[("obsm", "cell_features"), ("uns", "feature_matrices", "cell_features")],
         )

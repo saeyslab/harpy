@@ -477,7 +477,7 @@ def _validate_component_values_against_storage(
     components_to_validate
         Component replacements to validate: either caller-supplied values or their
         reopened staged representations. Uses the same mapping format as
-        ``components`` in :func:`harpy.table.write_table_components`.
+        ``components`` in :func:`harpy.table.io.write_table_components`.
     expected_axis_indices
         Indices prepared by ``_storage_axis_indices()`` before staging, including
         the intended feature index when creating raw. Reuse the same indices when
@@ -543,8 +543,8 @@ def _validate_component_values_against_axes(
     components_to_validate
         Component replacements to validate: either caller-supplied values or their
         reopened staged representations. Uses the same mapping format as
-        ``components`` in :func:`harpy.table.add_table_components` and
-        :func:`harpy.table.write_table_components`.
+        ``components`` in :func:`harpy.table.io.add_table_components` and
+        :func:`harpy.table.io.write_table_components`.
     expected_axis_indices
         Expected destination indices for axes requiring validation, either because
         replacement components use them or explicit identity arguments were supplied.

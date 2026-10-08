@@ -16,7 +16,7 @@ import harpy.table.io._add_table as table_manager
 import harpy.table.io._write as table_writer
 from harpy._tests.test_table.test_io.test_read import _assert_value
 from harpy._tests.test_table.test_io.test_write import _store_bytes
-from harpy.table import read_table
+from harpy.table.io import read_table
 from harpy.table.io._add_table import _cast_stringdtype_uns, add_table
 from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY
 

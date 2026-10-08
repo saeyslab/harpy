@@ -80,12 +80,12 @@ def add_table(
     External references to a replaced table are not refreshed; use
     ``sdata.tables[output_table_name]`` after success.
 
-    Backed writes store matrices as :func:`harpy.table.write_table` does; its
+    Backed writes store matrices as :func:`harpy.table.io.write_table` does; its
     Notes list which elements are stored as matrices.
 
     See Also
     --------
-    harpy.table.write_table : Write a complete table without updating ``sdata``.
+    harpy.table.io.write_table : Write a complete table without updating ``sdata``.
 
     Examples
     --------
@@ -99,7 +99,7 @@ def add_table(
 
     .. code-block:: python
 
-        sdata = hp.tb.add_table(
+        sdata = hp.tb.io.add_table(
             sdata,
             adata=adata,
             output_table_name="processed",

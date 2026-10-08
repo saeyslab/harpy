@@ -298,7 +298,7 @@ def aggregate_points(
     ``sdata.tables[output_table_name]``. Count matrices use read-only CSR dataset
     handles and canonical centers use a read-only Zarr array; ``.obs``, ``.var``,
     and ``.uns`` are loaded into memory. To read matrices as Dask arrays instead,
-    use :func:`harpy.table.read_table` with ``mode="lazy"``.
+    use :func:`harpy.table.io.read_table` with ``mode="lazy"``.
 
     Example
     --------

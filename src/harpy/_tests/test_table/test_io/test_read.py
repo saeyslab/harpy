@@ -15,7 +15,7 @@ from spatialdata import SpatialData
 from spatialdata.models import TableModel
 from zarr.storage import LocalStore
 
-from harpy.table import read_table, read_table_components
+from harpy.table.io import read_table, read_table_components
 
 
 @contextmanager

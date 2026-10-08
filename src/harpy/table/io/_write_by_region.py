@@ -107,7 +107,7 @@ def write_table_components_by_region(
         None means no fills were supplied. Keys must refer to submitted matrices.
     sparse_chunks, dense_chunks
         Block layout of the lazy merge, with the same values and meaning as in
-        :func:`harpy.table.read_table`, both ``"auto"`` by default. They apply
+        :func:`harpy.table.io.read_table`, both ``"auto"`` by default. They apply
         to the stored matrix, read as ``read_table`` reads it, and to the values
         Harpy splits into blocks itself: supplied matrices in memory or backed
         by Zarr, and new ``.obsm`` entries for only some regions. ``"auto"``
@@ -135,14 +135,14 @@ def write_table_components_by_region(
 
     Observation identities and SpatialData linkage cannot change. All requested
     matrices and metadata share the staging and rollback operation described in
-    :func:`harpy.table.write_table_components`. This path-based function returns
+    :func:`harpy.table.io.write_table_components`. This path-based function returns
     None and does not refresh live SpatialData objects; reopen affected data.
 
     See Also
     --------
-    harpy.table.write_table_components : Replace complete components.
-    harpy.table.read_table_components : Read selected stored components.
-    harpy.table.add_table_components_by_region : Also update the attached SpatialData table.
+    harpy.table.io.write_table_components : Replace complete components.
+    harpy.table.io.read_table_components : Read selected stored components.
+    harpy.table.io.add_table_components_by_region : Also update the attached SpatialData table.
 
     Examples
     --------
@@ -151,7 +151,7 @@ def write_table_components_by_region(
         selected = adata.obs[region_key].eq("cells_sample_a")
         # updated_metadata describes the complete resulting matrix, including
         # measurements retained for other regions.
-        hp.tb.write_table_components_by_region(
+        hp.tb.io.write_table_components_by_region(
             "sdata.zarr", table_name="cell_features",
             components={
                 ("obsm", "morphology"): regional_features,

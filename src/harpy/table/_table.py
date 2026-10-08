@@ -22,7 +22,7 @@ def _warn_deprecated_wrapper(function_name: str) -> None:
     warnings.warn(
         f"harpy.tb.{function_name} is deprecated since version 0.5.0 and will be removed in a future release. "
         "Process the table directly, for example with scanpy or squidpy, then write the results back with "
-        "harpy.tb.add_table_updates, or with harpy.tb.add_table when cells or genes are removed.",
+        "harpy.tb.io.add_table_updates, or with harpy.tb.io.add_table when cells or genes are removed.",
         FutureWarning,
         # Point at the caller of the deprecated wrapper, not at the wrapper itself.
         stacklevel=3,
@@ -42,7 +42,7 @@ def _require_in_memory_table(sdata: SpatialData, table_name: str, function_name:
             raise ValueError(
                 f"harpy.tb.{function_name} needs an in-memory table, but sdata.tables[{table_name!r}].{path} is "
                 f"{kind}. Read the store with harpy.io.read_zarr(..., table_mode='eager') or spatialdata.read_zarr, "
-                "or call scanpy directly and write the results back with harpy.tb.add_table_updates."
+                "or call scanpy directly and write the results back with harpy.tb.io.add_table_updates."
             )
 
 
@@ -304,7 +304,7 @@ def filter_on_size(
        `harpy.tb.filter_on_size` is deprecated and will be removed in a future release. Select the cells
        directly, for example
        ``adata[adata.obs[instance_size_key].between(min_size, max_size, inclusive="neither")]``, and write
-       the result with :func:`~harpy.tb.add_table`.
+       the result with :func:`~harpy.tb.io.add_table`.
 
     Parameters
     ----------

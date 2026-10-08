@@ -14,7 +14,7 @@ from spatialdata.models import TableModel
 from zarr.storage import MemoryStore
 
 from harpy._storage._anndata import _decode_anndata_element, _read_anndata_element
-from harpy.table import read_table, write_table
+from harpy.table.io import read_table, write_table
 from harpy.table.io._read import _open_table_group
 from harpy.table.io._updates import _component_changed, _matrix_equals_stored, _same_dataframe, _same_uns_value
 

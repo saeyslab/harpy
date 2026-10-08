@@ -18,8 +18,8 @@ import harpy.table.io._components_by_region as regional_adapter
 import harpy.table.io._write as table_writer
 from harpy._tests.test_table.test_io.test_read import _assert_value
 from harpy._tests.test_table.test_io.test_write import _store_bytes
-from harpy.table import read_table
 from harpy.table._add_feature_matrix import add_feature_matrix
+from harpy.table.io import read_table
 
 
 @pytest.fixture

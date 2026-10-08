@@ -338,7 +338,7 @@ def xenium_human_ovarian_cancer(
     region = adata.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY]
     adata.uns.pop(TableModel.ATTRS_KEY)
     # back to zarr
-    sdata = hp.tb.add_table(
+    sdata = hp.tb.io.add_table(
         sdata,
         adata=adata,
         output_table_name=table_name,

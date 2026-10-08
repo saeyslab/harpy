@@ -18,7 +18,7 @@ from harpy._storage._anndata import (
     _validate_sparse_chunks,
 )
 from harpy._storage._spatialdata import _open_spatialdata_group
-from harpy.table import read_table
+from harpy.table.io import read_table
 from harpy.table.io._read import _validate_path_segment, _validate_read_mode
 
 
@@ -48,7 +48,7 @@ def read_zarr(
         Does not control how images, labels, points or shapes are read.
     sparse_chunks, dense_chunks
         Lazy block layout of sparse and dense table matrices, as described for
-        :func:`harpy.table.read_table`. Ignored for other table modes.
+        :func:`harpy.table.io.read_table`. Ignored for other table modes.
 
     Returns
     -------
@@ -71,8 +71,8 @@ def read_zarr(
 
     See Also
     --------
-    harpy.table.read_table : Read one table without opening other elements.
-    harpy.table.read_table_components : Read selected AnnData components.
+    harpy.table.io.read_table : Read one table without opening other elements.
+    harpy.table.io.read_table_components : Read selected AnnData components.
     spatialdata.read_zarr : SpatialData's reader with element-type selection.
 
     Examples
