@@ -3148,12 +3148,21 @@ functions. `nhood_enrichment` is a thin wrapper around two squidpy calls.
 | 6a (implemented) | deprecate the thin wrappers (`preprocess_transcriptomics`, `preprocess_proteomics`, `leiden`, `kmeans`, `nhood_enrichment`, `filter_on_size`): unchanged behaviour on in-memory tables, with a `FutureWarning`, and a clear error on lazy tables (see "Slice 6a" below)                      |
 | 6b               | group the table I/O functions in `hp.tb.io`, with `hp.tb.add_table` deprecated in favour of `hp.tb.io.add_table` (see "Slice 6b" below)                                                                                                                                                      |
 | 6c               | create `hp.tb.pp` with lazy-safe functions for the spatial steps that scanpy lacks: size normalisation, such as `hp.tb.pp.normalize_by_size(adata, size_key=...)`, computed per block, and quantile normalisation per channel for proteomics; cheap per channel, as tables have few channels |
-| 6d               | the user guide (Phase 2) documents the pattern: scanpy, then `add_table_updates`, or `add_table` when cells or genes are removed, with a spatial transcriptomics example that normalises by area                                                                                             |
+| 6d               | the user guide (Phase 2) documents the pattern: scanpy, then `add_table_updates`, or `add_table` when cells or genes are removed, with a spatial transcriptomics example that normalises by area; where the area comes from is shown once a source is decided (see "Cell size" below)        |
 | 6e               | remove the unused pipeline (see "Slice 6e" below); migrate the tutorials that use the wrappers (8 notebooks), and check the plotting functions that read their keys, such as `hp.pl.preprocess_transcriptomics`                                                                              |
 | 6f               | decide separately on the functions with their own logic (`score_genes*`, `cluster_cleanliness`, `flowsom`, the niche functions): port them, or keep them for in-memory tables behind the guard of 6a, depending on their use                                                                 |
 
-- **Cell size needs no new function:** `hp.tb.add_regionprops` already
-  computes `area` from the labels.
+- **Cell size: no source prescribed for now.** `normalize_by_size` reads the
+  sizes from an `obs` column, `"area"` by default, and the documentation does
+  not prescribe where that column comes from. The legacy `_CELLSIZE_KEY`
+  (`"shapeSize"`) is deprecated and not recommended. A possible follow-up,
+  not a slice of this phase: a convenience function such as
+  `hp.tb.pp.calculate_instance_size(adata, labels, key_added="area")`, which
+  adds the pixel count of each instance to `adata.obs`, in the convention of
+  `hp.tb.pp`. It needs the labels as well as the table, since a table does
+  not contain the segmentation: it matches instances through the table's
+  `instance_key`, and a table that annotates several labels elements needs
+  one labels array per region, through the `region_key`.
 - **Region selection needs no function:** selecting the cells of some labels
   elements is a two-line subset of the table, documented as a recipe in 6d.
 - **Removal:** the deprecated wrappers stay for at least one release, so that
@@ -3320,9 +3329,9 @@ the results of the deprecated wrappers, and `normalize_by_quantile` those of
 
 - **`hp.tb.pp.normalize_by_size(adata, size_key="area", scale_factor=100, layer=None)`:**
   divides each row by the size of its cell, `X / size * scale_factor`.
-  - `size_key` names the `obs` column with the sizes. `"area"` is the column
-    that `hp.tb.add_regionprops` adds from the labels; the column `shapeSize`
-    of the deprecated wrappers works as well.
+  - `size_key` names the `obs` column with the instance sizes, `"area"` by
+    default. Where that column comes from is not prescribed (see "Cell size"
+    above).
   - `scale_factor=100` is the factor of the wrappers, which multiplied by 100
     for numerical stability in later steps such as highly variable genes.
   - A missing column, or a size that is missing, zero or negative, raises a
@@ -3423,7 +3432,9 @@ the results of the deprecated wrappers, and `normalize_by_quantile` those of
   - on the example datasets, in memory, the results equal those of the
     deprecated wrappers: `preprocess_transcriptomics` and
     `preprocess_proteomics` with size normalisation, and
-    `preprocess_proteomics(q=...)` divided by 100;
+    `preprocess_proteomics(q=...)` divided by 100. The size comparisons pass
+    `size_key="shapeSize"`, the column in which the wrappers store sizes;
+    that is a detail of the test, not a recommendation;
   - quantile normalisation maps the `q` quantile to 1 and clips at
     `max_value`, and `max_value=None` does not clip;
   - lazy results equal in-memory results;
