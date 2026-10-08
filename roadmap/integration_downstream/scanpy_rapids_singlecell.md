@@ -3398,8 +3398,20 @@ the results of the deprecated wrappers, and `normalize_by_quantile` those of
   - A channel without non-zero values keeps its values, all zero, instead of
     the wrapper's NaN or `inf`.
   - **Dense input,** in memory or lazy, is supported. For a lazy dense matrix,
-    Dask computes the per-channel quantiles itself (it implements
-    `np.nanquantile`).
+    `np.nanquantile` dispatches to `da.nanquantile` (checked in Dask
+    2026.7.1). It rechunks so that each block holds all rows of its channels,
+    with `"auto"` sizing on the channel axis, so that a task stays around
+    Dask's `array.chunk-size`: for 10 million cells and 60 float64 channels,
+    the blocks hold all rows and one channel each, about 80 MB. Then it runs
+    NumPy's `nanquantile` on each block. The function therefore needs no
+    rechunk of its own, and the normalised matrix keeps the chunks of `X`.
+  - **The quantiles equal NumPy's:** the same algorithm, on complete columns.
+    Checked on 13 row blocks with 30 % zeros: identical for float64, and
+    within float32 rounding for float32 (largest difference 8.7e-7, on values
+    up to about 40); the tests compare with a tolerance. This is not
+    `da.percentile`, whose `"dask"` and `"tdigest"` internal methods
+    approximate, by merging per-block percentiles or digests, and which only
+    handles 1-D arrays.
   - **In-memory sparse input** is converted to dense first, as the wrapper
     does, and the result is dense. Intensity tables are usually dense, and a
     densified table of few channels is small.
