@@ -3143,13 +3143,13 @@ functions. `nhood_enrichment` is a thin wrapper around two squidpy calls.
 
 **Slices.**
 
-| Slice | Content                                                                                                                                                                                                                                                                 |
-| ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 6a    | deprecate the thin wrappers (`preprocess_transcriptomics`, `preprocess_proteomics`, `leiden`, `kmeans`, `nhood_enrichment`, `filter_on_size`): unchanged behaviour on in-memory tables, with a `FutureWarning`, and a clear error on lazy tables (see "Slice 6a" below) |
-| 6b    | lazy-safe functions for the spatial steps that scanpy lacks: size normalisation, such as `hp.tb.normalize_by_size(adata, size_key=...)`, computed per block, and quantile normalisation per channel for proteomics; cheap per channel, as tables have few channels      |
-| 6c    | the user guide (Phase 2) documents the pattern: scanpy, then `add_table_updates`, or `add_table` when cells or genes are removed, with a spatial transcriptomics example that normalises by area                                                                        |
-| 6d    | remove the unused pipeline (see "Slice 6d" below); migrate the tutorials that use the wrappers (8 notebooks), and check the plotting functions that read their keys, such as `hp.pl.preprocess_transcriptomics`                                                         |
-| 6e    | decide separately on the functions with their own logic (`score_genes*`, `cluster_cleanliness`, `flowsom`, the niche functions): port them, or keep them for in-memory tables behind the guard of 6a, depending on their use                                            |
+| Slice            | Content                                                                                                                                                                                                                                                                 |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 6a (implemented) | deprecate the thin wrappers (`preprocess_transcriptomics`, `preprocess_proteomics`, `leiden`, `kmeans`, `nhood_enrichment`, `filter_on_size`): unchanged behaviour on in-memory tables, with a `FutureWarning`, and a clear error on lazy tables (see "Slice 6a" below) |
+| 6b               | lazy-safe functions for the spatial steps that scanpy lacks: size normalisation, such as `hp.tb.normalize_by_size(adata, size_key=...)`, computed per block, and quantile normalisation per channel for proteomics; cheap per channel, as tables have few channels      |
+| 6c               | the user guide (Phase 2) documents the pattern: scanpy, then `add_table_updates`, or `add_table` when cells or genes are removed, with a spatial transcriptomics example that normalises by area                                                                        |
+| 6d               | remove the unused pipeline (see "Slice 6d" below); migrate the tutorials that use the wrappers (8 notebooks), and check the plotting functions that read their keys, such as `hp.pl.preprocess_transcriptomics`                                                         |
+| 6e               | decide separately on the functions with their own logic (`score_genes*`, `cluster_cleanliness`, `flowsom`, the niche functions): port them, or keep them for in-memory tables behind the guard of 6a, depending on their use                                            |
 
 - **Cell size needs no new function:** `hp.tb.add_regionprops` already
   computes `area` from the labels.
@@ -3160,7 +3160,10 @@ functions. `nhood_enrichment` is a thin wrapper around two squidpy calls.
 - **Release:** 6a is the answer to the open question "Legacy table functions at
   release"; it can ship before the other slices.
 
-**Slice 6a: deprecated wrappers, guarded on lazy tables.**
+**Slice 6a: deprecated wrappers, guarded on lazy tables (implemented).** The
+helpers `_warn_deprecated_wrapper` and `_require_in_memory_table` are in
+`src/harpy/table/_table.py`; the new test is
+`src/harpy/_tests/test_table/test_deprecated_wrappers.py`.
 
 - Each thin wrapper keeps its current code and behaviour on in-memory tables.
   Its docstring gets `.. deprecated:: 0.5.0`, rendered as "Deprecated since
@@ -3183,8 +3186,10 @@ functions. `nhood_enrichment` is a thin wrapper around two squidpy calls.
   from the filter. Both would keep hiding other libraries' warnings for no
   clear reason.
 - A guard raises a clear error if the table is not in memory: a Dask array or a
-  backed handle in `X`, the layers, `obsm` or `obsp`. Checking every slot also
-  catches a mixed table, such as an in-memory `X` with a lazy layer. The
+  backed handle in `X`, the layers, `obsm`, `varm`, `obsp`, `varp`, `raw.X`
+  or `raw.varm`. Checking every slot also catches a mixed table, such as an
+  in-memory `X` with a lazy layer, or a lazy `raw`, which `rank_genes_groups`
+  in `leiden` and `kmeans` would use. The
   message names the function, the component and the ways out, for example:
   "`hp.tb.preprocess_transcriptomics` needs an in-memory table, but
   `sdata.tables['counts'].X` is a lazy Dask array. Read the store with
@@ -3193,11 +3198,19 @@ functions. `nhood_enrichment` is a thin wrapper around two squidpy calls.
 - The guard is called in each thin wrapper, not in `ProcessTable`, which the
   functions of 6e also use.
 - Each wrapper is first tried on a lazy table, and only those that fail, or
-  would load the whole table into memory, get the guard. `filter_on_size`,
-  which only filters rows and writes with `add_table`, and `nhood_enrichment`,
-  which only uses `obs` and `obsm`, may already work on lazy tables. All of
-  them get the warning. This try-out is a scratch script, not part of the test
-  suite.
+  would load the whole table into memory, get the guard. All of them get the
+  warning. This try-out is a scratch script, not part of the test suite. The
+  outcome, on the example datasets read with
+  `hp.io.read_zarr(..., table_mode="lazy")`:
+
+  | Wrapper                      | On a lazy table                                                                                                                                                     | Guard |
+  | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- |
+  | `preprocess_transcriptomics` | fails at `scale` (`TypeError: _spbase.sum() got an unexpected keyword argument 'keepdims'`)                                                                         | yes   |
+  | `leiden`, `kmeans`           | fail with their defaults (a numba `TypingError`)                                                                                                                    | yes   |
+  | `preprocess_proteomics`      | runs with its defaults, with `q` (Dask implements `np.nanquantile`) and with `scale`; only `calculate_pca=True` fails, as scanpy needs `dask_ml` for dense Dask PCA | no    |
+  | `filter_on_size`             | runs: it only filters rows and writes with `add_table`                                                                                                              | no    |
+  | `nhood_enrichment`           | not tried: squidpy is not installed in the development environment; it only uses `obs`, `obsm` and `add_table`                                                      | no    |
+
 - **Tests, kept light:** the wrappers are about to be removed, so the tests only
   protect the two promises of 6a.
   - The existing tests stay as they are, without extensions: they check that
@@ -3212,8 +3225,9 @@ functions. `nhood_enrichment` is a thin wrapper around two squidpy calls.
     comes before the guard raises, so each case fails fast, without computing
     anything, and covers both promises.
   - Wrappers that work on lazy tables get no lazy tests. Their warning is
-    checked with one `pytest.warns` around the existing call, for
-    `filter_on_size`; `nhood_enrichment`, which has no test, gets none.
+    checked with one `pytest.warns` around an existing call, for
+    `filter_on_size` and `preprocess_proteomics`; `nhood_enrichment`, which has
+    no test, gets none.
   - The new test is removed together with the wrappers.
 
 **Slice 6d: removing the pipeline.** Nobody uses it, so it is removed rather
