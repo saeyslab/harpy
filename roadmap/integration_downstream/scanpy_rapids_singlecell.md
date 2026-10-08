@@ -3143,14 +3143,14 @@ functions. `nhood_enrichment` is a thin wrapper around two squidpy calls.
 
 **Slices.**
 
-| Slice            | Content                                                                                                                                                                                                                                                                             |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 6a (implemented) | deprecate the thin wrappers (`preprocess_transcriptomics`, `preprocess_proteomics`, `leiden`, `kmeans`, `nhood_enrichment`, `filter_on_size`): unchanged behaviour on in-memory tables, with a `FutureWarning`, and a clear error on lazy tables (see "Slice 6a" below)             |
-| 6b               | group the table I/O functions in `hp.tb.io`, with `hp.tb.add_table` deprecated in favour of `hp.tb.io.add_table`, and create `hp.tb.pp` for the normalisations of 6c (see "Slice 6b" below)                                                                                         |
-| 6c               | lazy-safe functions in `hp.tb.pp` for the spatial steps that scanpy lacks: size normalisation, such as `hp.tb.pp.normalize_by_size(adata, size_key=...)`, computed per block, and quantile normalisation per channel for proteomics; cheap per channel, as tables have few channels |
-| 6d               | the user guide (Phase 2) documents the pattern: scanpy, then `add_table_updates`, or `add_table` when cells or genes are removed, with a spatial transcriptomics example that normalises by area                                                                                    |
-| 6e               | remove the unused pipeline (see "Slice 6e" below); migrate the tutorials that use the wrappers (8 notebooks), and check the plotting functions that read their keys, such as `hp.pl.preprocess_transcriptomics`                                                                     |
-| 6f               | decide separately on the functions with their own logic (`score_genes*`, `cluster_cleanliness`, `flowsom`, the niche functions): port them, or keep them for in-memory tables behind the guard of 6a, depending on their use                                                        |
+| Slice            | Content                                                                                                                                                                                                                                                                                      |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 6a (implemented) | deprecate the thin wrappers (`preprocess_transcriptomics`, `preprocess_proteomics`, `leiden`, `kmeans`, `nhood_enrichment`, `filter_on_size`): unchanged behaviour on in-memory tables, with a `FutureWarning`, and a clear error on lazy tables (see "Slice 6a" below)                      |
+| 6b               | group the table I/O functions in `hp.tb.io`, with `hp.tb.add_table` deprecated in favour of `hp.tb.io.add_table` (see "Slice 6b" below)                                                                                                                                                      |
+| 6c               | create `hp.tb.pp` with lazy-safe functions for the spatial steps that scanpy lacks: size normalisation, such as `hp.tb.pp.normalize_by_size(adata, size_key=...)`, computed per block, and quantile normalisation per channel for proteomics; cheap per channel, as tables have few channels |
+| 6d               | the user guide (Phase 2) documents the pattern: scanpy, then `add_table_updates`, or `add_table` when cells or genes are removed, with a spatial transcriptomics example that normalises by area                                                                                             |
+| 6e               | remove the unused pipeline (see "Slice 6e" below); migrate the tutorials that use the wrappers (8 notebooks), and check the plotting functions that read their keys, such as `hp.pl.preprocess_transcriptomics`                                                                              |
+| 6f               | decide separately on the functions with their own logic (`score_genes*`, `cluster_cleanliness`, `flowsom`, the niche functions): port them, or keep them for in-memory tables behind the guard of 6a, depending on their use                                                                 |
 
 - **Cell size needs no new function:** `hp.tb.add_regionprops` already
   computes `area` from the labels.
@@ -3231,12 +3231,12 @@ helpers `_warn_deprecated_wrapper` and `_require_in_memory_table` are in
     no test, gets none.
   - The new test is removed together with the wrappers.
 
-**Slice 6b: `hp.tb.io` and `hp.tb.pp`.** `hp.tb` mixes about 35 functions of
-different kinds: reading and writing tables, creating tables from images and
-points (`aggregate_*`, `allocate*`, `bin_counts`, `add_feature_matrix`),
+**Slice 6b: `hp.tb.io`.** `hp.tb` mixes about 35 functions of different
+kinds: reading and writing tables, creating tables from images and points
+(`aggregate_*`, `allocate*`, `bin_counts`, `add_feature_matrix`),
 preprocessing, clustering and annotation, region properties, niches and
-featurisation. Two sub-namespaces group the first kind and the new
-normalisations, before 6c adds functions.
+featurisation. This slice groups the first kind in `hp.tb.io`; 6c adds
+`hp.tb.pp` for the new normalisations.
 
 - **`hp.tb.io`:** the table I/O functions move there: `read_table`,
   `read_table_components`, `write_table`, `write_table_updates`,
@@ -3257,22 +3257,50 @@ normalisations, before 6c adds functions.
   SpatialData objects (`read_zarr`, the platform readers), while these
   functions work on one table. With `hp.tb.io`, `hp.io.read_zarr(...)` and
   `hp.tb.io.read_table(...)` each name their scope.
-- **`hp.tb.pp`:** the home of the normalisations of 6c, which take an `AnnData`
-  and change it in place, in the style of scanpy's `sc.pp`. Created in this
-  slice, filled in 6c. Why not a top-level `hp.pp`: Harpy's namespaces are
-  organised by element type (`hp.im`, `hp.sh`, `hp.pt`, `hp.tb`), and a
-  top-level `pp` would add a second organising principle, by kind of step, and
-  raise the question of where image preprocessing belongs, which lives in
-  `hp.im`.
-- **Implementation:** `hp.tb` is built with `lazy_loader` from
-  `src/harpy/table/__init__.pyi`, which already exposes a submodule
-  (`from . import canonical_centers`). `io` and `pp` follow that pattern, each
-  with its own public exports.
-- **Text to update in the same slice,** so that 6c starts in the new layout:
-  docstrings (examples, See Also and cross-references), the table I/O sections
-  of `docs/api.md` (`tb.io.*`), `docs/development/storage.md`, the references
-  in this roadmap, and the tests that import these functions from
-  `harpy.table`.
+- **`hp.tb.pp` comes in 6c,** together with its first functions, so that it is
+  never an empty public namespace with nothing to document or test. It is the
+  home of the normalisations, which take an `AnnData` and change it in place,
+  in the style of scanpy's `sc.pp`. Why not a top-level `hp.pp`: most of
+  Harpy's namespaces are organised by element type (`hp.im`, `hp.sh`, `hp.pt`,
+  `hp.tb`). `hp.qc` is organised by purpose, but quality control is the same
+  activity whatever the element, while a top-level `pp` would have no clear
+  boundary with image preprocessing, which lives in `hp.im`.
+- **Implementation:**
+  - `src/harpy/table/io/__init__.py` gets explicit public imports of the 12
+    functions, like `src/harpy/table/canonical_centers/__init__.py`. The stub
+    `src/harpy/table/__init__.pyi` replaces its imports of these functions
+    with `from . import io`, as it already does for `canonical_centers`.
+    Harpy's own modules import from `harpy.table.io._add_table` and the other
+    private modules directly; `_add_table` depends only on `_write` and
+    `harpy._storage`, so no import cycle is expected, but it is checked.
+  - `hp.tb.add_table` becomes a thin deprecated function, with
+    `.. deprecated:: 0.5.0` in its docstring and the `FutureWarning`, that
+    calls `hp.tb.io.add_table`.
+  - The warning text and the deprecation notes of 6a name
+    `harpy.tb.add_table_updates` and `harpy.tb.add_table`; they move to
+    `harpy.tb.io`.
+- **Text to update in the same slice,** so that 6c starts in the new layout,
+  about 34 files:
+  - docstrings (examples, See Also and cross-references), mostly in
+    `src/harpy/table/io/`, plus `src/harpy/io/_read_zarr.py` and a few other
+    modules;
+  - the table I/O sections of `docs/api.md` (`tb.io.*`) and
+    `docs/development/storage.md`;
+  - this roadmap, `roadmap/cellpose/allocation.md`, and the scripts in
+    `roadmap/integration_downstream/scripts/`, which call the API and must
+    keep running;
+  - the imports in the tests (12 modules import these functions from
+    `harpy.table`).
+
+  Left as they are: `roadmap/integration_downstream/integration.md`, a working
+  note, and the generated `docs/_build/`. The tutorials only call
+  `hp.tb.add_table` (6 times, in 3 notebooks), which keeps working, with the
+  warning, until 6e migrates them.
+
+- **Tests:** one small test that `hp.tb.io` exposes the 12 functions, that
+  `hp.tb.read_table` and the other moved names no longer exist on `hp.tb`, and
+  that `hp.tb.add_table` warns and calls `hp.tb.io.add_table`. The existing
+  tests only change their imports.
 - **Not now:** reorganising the rest of `hp.tb`, for example a `hp.tb.tl` for
   clustering and annotation in scanpy's style. The deprecated wrappers are
   leaving anyway, and 6f still has to decide on the functions with their own
