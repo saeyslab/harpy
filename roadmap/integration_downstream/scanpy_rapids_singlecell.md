@@ -3611,12 +3611,16 @@ function, when its use asks for it.
   elements.
 - **Docs:** each docstring says that the function loads the matrices of the
   table into memory, so that a lazy or backed table is read once in full.
-- **Tests:** on a backed `sdata` whose tables are lazy, each function runs, and
-  the table attached as input stays lazy; for one function the result equals
-  that of the in-memory run. The existing tests cover the in-memory behaviour,
-  which does not change. `flowsom` and `weighted_channel_expression` are tested
-  in one workflow, as `weighted_channel_expression` reads the table that
-  `flowsom` writes.
+- **Tests, kept light:** the helper loads lazy and backed tables, equal to an
+  eager read, and returns an in-memory table as it is; and one function,
+  `nhood_kmeans` on synthetic blobs, runs on a backed `sdata` whose tables are
+  lazy, while the table attached as input stays lazy. Each function loads its
+  table with the same one-line call, so one stands for all. The existing tests
+  cover the in-memory behaviour, which does not change. Checked once, outside
+  the test suite: without the load, runs on a backed `sdata` of `score_genes`
+  followed by `cluster_cleanliness`, of `score_genes_iter`, of `nhood_kmeans`
+  and `nhood_lda`, and of the `flowsom` workflow up to
+  `weighted_channel_expression` all failed.
 
 ### Phase 7: rapids-singlecell validation on a GPU machine
 
