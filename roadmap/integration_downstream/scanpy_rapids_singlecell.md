@@ -3145,14 +3145,14 @@ functions. `nhood_enrichment` is a thin wrapper around two squidpy calls.
 
 **Slices.**
 
-| Slice            | Content                                                                                                                                                                                                                                                                                      |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 6a (implemented) | deprecate the thin wrappers (`preprocess_transcriptomics`, `preprocess_proteomics`, `leiden`, `kmeans`, `nhood_enrichment`, `filter_on_size`): unchanged behaviour on in-memory tables, with a `FutureWarning`, and a clear error on lazy tables (see "Slice 6a" below)                      |
-| 6b (implemented) | group the table I/O functions in `hp.tb.io`, with `hp.tb.add_table` deprecated in favour of `hp.tb.io.add_table` (see "Slice 6b" below)                                                                                                                                                      |
-| 6c (implemented) | create `hp.tb.pp` with lazy-safe functions for the spatial steps that scanpy lacks: size normalisation, such as `hp.tb.pp.normalize_by_size(adata, size_key=...)`, computed per block, and quantile normalisation per channel for proteomics; cheap per channel, as tables have few channels |
-| 6d (implemented) | the quickstart shows the pattern on the table it creates: read with lazy tables, scanpy as usual, then `add_table_updates` with `x_to` to a new layer (see "Slice 6d" below); the full user guide (Phase 2) waits for Phase 7                                                                |
-| 6e               | remove the unused pipeline (see "Slice 6e" below); migrate the tutorials that use the wrappers (8 notebooks), and check the plotting functions that read their keys, such as `hp.pl.preprocess_transcriptomics`                                                                              |
-| 6f               | decide separately on the functions with their own logic (`score_genes*`, `cluster_cleanliness`, `flowsom`, the niche functions): port them, or keep them for in-memory tables behind the guard of 6a, depending on their use                                                                 |
+| Slice            | Content                                                                                                                                                                                                                                                                                           |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 6a (implemented) | deprecate the thin wrappers (`preprocess_transcriptomics`, `preprocess_proteomics`, `leiden`, `kmeans`, `nhood_enrichment`, `filter_on_size`): unchanged behaviour on in-memory tables, with a `FutureWarning`, and a clear error on lazy tables (see "Slice 6a" below)                           |
+| 6b (implemented) | group the table I/O functions in `hp.tb.io`, with `hp.tb.add_table` deprecated in favour of `hp.tb.io.add_table` (see "Slice 6b" below)                                                                                                                                                           |
+| 6c (implemented) | create `hp.tb.pp` with lazy-safe functions for the spatial steps that scanpy lacks: size normalisation, such as `hp.tb.pp.normalize_by_size(adata, size_key=...)`, computed per block, and quantile normalisation per channel for proteomics; cheap per channel, as tables have few channels      |
+| 6d (implemented) | the quickstart shows the pattern on the table it creates: read with lazy tables, scanpy as usual, then `add_table_updates` with `x_to` to a new layer (see "Slice 6d" below); the full user guide (Phase 2) waits for Phase 7                                                                     |
+| 6e               | remove the unused pipeline (implemented, see "Slice 6e" below); migrate the tutorials that use the wrappers (8 notebooks), and check the plotting functions that read their keys, such as `hp.pl.preprocess_transcriptomics` (deferred)                                                           |
+| 6f               | keep the functions with their own logic (`score_genes*`, `cluster_cleanliness`, `flowsom`, `weighted_channel_expression`, the niche functions), not deprecated: for now they load the tables they read into memory, so that they work on in-memory, lazy and backed tables (see "Slice 6f" below) |
 
 - **Cell size: no source prescribed for now.** `normalize_by_size` reads the
   sizes from an `obs` column, `"area"` by default, and the documentation does
@@ -3526,7 +3526,8 @@ the quickstart.
   splitting rows before densifying steps, the upstream limitations, and the
   rapids-singlecell pattern, after Phase 7.
 
-**Slice 6e: removing the pipeline.** Nobody uses it, so it is removed rather
+**Slice 6e: removing the pipeline (implemented), and migrating the tutorials
+(deferred).** Nobody uses the pipeline, so it is removed rather
 than migrated. No command-line entry point in `pyproject.toml` and no page of
 the API documentation refers to it. It consists of:
 
@@ -3546,9 +3547,6 @@ the API documentation refers to it. It consists of:
   pipeline's multirun mode;
 - `omegaconf` in the main dependencies of `pyproject.toml`, which nothing else
   uses; `pyrootutils` stays, as the notebook tests use it;
-- `docs/tutorials/hpc/intro.md`, the tutorial for running the Hydra pipeline
-  on a cluster, and its entry in `docs/tutorials/hpc/index.md`;
-  `vib_compute.md`, on the cluster setup, stays;
 - the "CLI workflows" line on the `cli` extra in `README.md` and
   `docs/installation.md`.
 
@@ -3556,6 +3554,69 @@ the API documentation refers to it. It consists of:
 `src/harpy/_tests/test_notebooks.py` runs, does not use the pipeline: only its
 prose mentions "the Harpy pipeline". The notebook and its test stay. After the
 removal, `uv.lock` needs `uv lock` to drop the `cli` extra and `omegaconf`.
+
+**The tutorials are not part of this repository.** `docs/tutorials` is a git
+submodule, the repository `vibspatial/harpy_notebooks`, so their changes are
+made there:
+
+- **Migrating the tutorials is deferred:** the 8 notebooks that use the
+  deprecated wrappers, and the plotting functions that read the wrappers'
+  keys, such as `hp.pl.preprocess_transcriptomics`, which live in this
+  repository and are checked together with the notebooks.
+- **`hpc/intro.md`,** the tutorial for running the Hydra pipeline on a
+  cluster, documents the removed pipeline: the `harpy +experiment=...`
+  command line, the `cli` extra and the `configs/` folder. It is updated or
+  removed in the tutorials repository.
+
+**Slice 6f: functions with their own logic, on tables loaded into memory.**
+These functions do more than call scanpy, so they are kept, and not
+deprecated: no `FutureWarning` and no `.. deprecated::` note. For now they
+work on in-memory tables, and load a lazy or storage-backed table into memory
+themselves. Porting a function to lazy tables is decided later, function by
+function, when its use asks for it.
+
+- **The functions, and the tables they read:**
+  - `score_genes`, `score_genes_iter` and `cluster_cleanliness`
+    (`src/harpy/table/_annotation.py`): `table_name`;
+  - `nhood_kmeans` and `nhood_lda` (`src/harpy/table/niches/_clustering.py`):
+    `table_name`;
+  - `flowsom` (`src/harpy/table/cell_clustering/_clustering.py`): the table
+    that it creates with `cell_clustering_preprocess`, under
+    `output_table_name`, and then clusters;
+  - `weighted_channel_expression`
+    (`src/harpy/table/cell_clustering/_weighted_channel_expression.py`):
+    `cell_clustering_table_name` and `table_name_pixel_cluster_intensity`.
+- **Why load, rather than raise as the guard of 6a does.** On a backed
+  `sdata`, `add_table` attaches the table it writes with lazy matrices, so the
+  tables that Harpy's own steps create (`aggregate_*`, `allocate`,
+  `cluster_intensity`, `flowsom`) are lazy when the next step reads them. A
+  guard would stop these functions in ordinary workflows, not only after a
+  lazy read the user chose, and the user would have to reopen the store with
+  `table_mode="eager"` between steps. `flowsom` could not run on a backed
+  `sdata` at all: it creates its table and clusters it in the same call. The
+  guard of 6a stays for the deprecated wrappers, where it points to scanpy and
+  `add_table_updates`.
+- **How:** each function loads the matrices of the table it reads into memory,
+  on the copy that it processes, before its own logic runs, for example with
+  `AnnData.to_memory`; a lazy matrix is computed, a storage-backed one is read.
+  The memory use is that of the eager read that a guard would ask for. The
+  table attached to `sdata` stays as it is. The functions write their output
+  with `add_table`, as now. A log message at INFO level names the table that is
+  loaded, so that the cost stays visible.
+- **Where:** in these functions, not in `ProcessTable`, which other functions
+  also use: the deprecated wrappers keep their guard, and `add_regionprops`,
+  `cluster_intensity` and `featurize` keep their current behaviour.
+- **Not part of 6f:** `correct_marker_genes` changes only `obs`, and
+  `cell_clustering_preprocess` reads no table: it creates one from labels
+  elements.
+- **Docs:** each docstring says that the function loads the matrices of the
+  table into memory, so that a lazy or backed table is read once in full.
+- **Tests:** on a backed `sdata` whose tables are lazy, each function runs, and
+  the table attached as input stays lazy; for one function the result equals
+  that of the in-memory run. The existing tests cover the in-memory behaviour,
+  which does not change. `flowsom` and `weighted_channel_expression` are tested
+  in one workflow, as `weighted_channel_expression` reads the table that
+  `flowsom` writes.
 
 ### Phase 7: rapids-singlecell validation on a GPU machine
 
