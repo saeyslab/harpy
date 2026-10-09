@@ -3146,8 +3146,8 @@ functions. `nhood_enrichment` is a thin wrapper around two squidpy calls.
 | Slice            | Content                                                                                                                                                                                                                                                                                      |
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 6a (implemented) | deprecate the thin wrappers (`preprocess_transcriptomics`, `preprocess_proteomics`, `leiden`, `kmeans`, `nhood_enrichment`, `filter_on_size`): unchanged behaviour on in-memory tables, with a `FutureWarning`, and a clear error on lazy tables (see "Slice 6a" below)                      |
-| 6b               | group the table I/O functions in `hp.tb.io`, with `hp.tb.add_table` deprecated in favour of `hp.tb.io.add_table` (see "Slice 6b" below)                                                                                                                                                      |
-| 6c               | create `hp.tb.pp` with lazy-safe functions for the spatial steps that scanpy lacks: size normalisation, such as `hp.tb.pp.normalize_by_size(adata, size_key=...)`, computed per block, and quantile normalisation per channel for proteomics; cheap per channel, as tables have few channels |
+| 6b (implemented) | group the table I/O functions in `hp.tb.io`, with `hp.tb.add_table` deprecated in favour of `hp.tb.io.add_table` (see "Slice 6b" below)                                                                                                                                                      |
+| 6c (implemented) | create `hp.tb.pp` with lazy-safe functions for the spatial steps that scanpy lacks: size normalisation, such as `hp.tb.pp.normalize_by_size(adata, size_key=...)`, computed per block, and quantile normalisation per channel for proteomics; cheap per channel, as tables have few channels |
 | 6d               | the user guide (Phase 2) documents the pattern: scanpy, then `add_table_updates`, or `add_table` when cells or genes are removed, with a spatial transcriptomics example that normalises by area; where the area comes from is shown once a source is decided (see "Cell size" below)        |
 | 6e               | remove the unused pipeline (see "Slice 6e" below); migrate the tutorials that use the wrappers (8 notebooks), and check the plotting functions that read their keys, such as `hp.pl.preprocess_transcriptomics`                                                                              |
 | 6f               | decide separately on the functions with their own logic (`score_genes*`, `cluster_cleanliness`, `flowsom`, the niche functions): port them, or keep them for in-memory tables behind the guard of 6a, depending on their use                                                                 |
@@ -3240,7 +3240,7 @@ helpers `_warn_deprecated_wrapper` and `_require_in_memory_table` are in
     no test, gets none.
   - The new test is removed together with the wrappers.
 
-**Slice 6b: `hp.tb.io`.** `hp.tb` mixes about 35 functions of different
+**Slice 6b: `hp.tb.io` (implemented).** `hp.tb` mixes about 35 functions of different
 kinds: reading and writing tables, creating tables from images and points
 (`aggregate_*`, `allocate*`, `bin_counts`, `add_feature_matrix`),
 preprocessing, clustering and annotation, region properties, niches and
@@ -3318,7 +3318,7 @@ featurisation. This slice groups the first kind in `hp.tb.io`; 6c adds
   points and tables), so moving its table functions into `hp.tb` would split
   a coherent group, of which the points part is the largest.
 
-**Slice 6c: `hp.tb.pp`, normalisation by cell size and by quantile.** Two
+**Slice 6c: `hp.tb.pp`, normalisation by cell size and by quantile (implemented).** Two
 functions for the spatial steps that scanpy lacks, which the deprecated
 preprocessing wrappers performed. Both follow scanpy's `sc.pp` convention:
 they take an `AnnData`, change it in place and return `None`, so that they fit
@@ -3327,7 +3327,7 @@ in-memory and on lazy tables. On in-memory tables, `normalize_by_size` gives
 the results of the deprecated wrappers, and `normalize_by_quantile` those of
 `preprocess_proteomics(q=...)` divided by 100 (see below).
 
-- **`hp.tb.pp.normalize_by_size(adata, size_key="area", scale_factor=100, layer=None)`:**
+- **`hp.tb.pp.normalize_by_size(adata, size_key="area", scale_factor=100, layer=None, key_added="normalize_by_size")`:**
   divides each row by the size of its cell, `X / size * scale_factor`.
   - `size_key` names the `obs` column with the instance sizes, `"area"` by
     default. Where that column comes from is not prescribed (see "Cell size"
@@ -3350,12 +3350,37 @@ the results of the deprecated wrappers, and `normalize_by_quantile` those of
     and scales them again, which is cheap: the scaling works per block, with
     no global reduction.
   - **Records its parameters** in
-    `adata.uns["normalize_by_size"] = {"size_key": ..., "scale_factor": ...}`,
+    `adata.uns[key_added] = {"size_key": ..., "scale_factor": ..., "layer": ...}`,
     as scanpy does in `uns["log1p"]`. The sizes themselves are already in
-    `obs`. If the entry exists, the function warns that the matrix may
+    `obs`. If the entry exists, the function warns that a matrix may
     already be normalised, a common mistake when a notebook cell is run
     twice, and replaces the entry.
-- **`hp.tb.pp.normalize_by_quantile(adata, q=0.999, max_value=1, quantiles=None, layer=None)`:**
+- **One entry per key, by default one per table,** for both functions.
+  With the default `key_added`, a table holds one entry per function, as
+  scanpy keeps a single `uns["log1p"]` and warns whenever it exists. The `uns`
+  entries record `layer`, so that they say which matrix was normalised. The
+  warning fires whenever the entry of the key exists, and the new entry, like
+  the quantiles in `var`, replaces the old one, so that it describes the last
+  call.
+  - **`key_added` names every record of one normalisation,** with the name of
+    the function as explicit default: `uns[key_added]` for
+    `normalize_by_size`; `var[key_added]`, the quantiles, and
+    `uns[key_added]`, the parameters, for `normalize_by_quantile`. One name in
+    two containers, as `sc.tl.leiden` writes `obs["leiden"]` and
+    `uns["leiden"]`. A single rule, with the default visible in the
+    signature, rather than scanpy's `None` default for outputs whose default
+    names differ, as in `sc.pp.pca`; so the quantiles are in
+    `var["normalize_by_quantile"]` by default, not in `var["quantile"]`.
+  - **It serves tables with several normalised matrices,** for example a layer
+    normalised by cell area and another by nucleus area, or the quantiles of
+    `X` and of a layer. With the default keys, the second call would warn
+    without reason, and replace the record of the first; for quantiles, those
+    of the first matrix would be lost for `quantiles=`. Entries per layer would
+    do the same without a parameter, but add structure to every table for a
+    rare case.
+  - **A second run of the same call still warns,** as it reuses the key. The
+    warning message names `key_added` for the case of several normalisations.
+- **`hp.tb.pp.normalize_by_quantile(adata, q=0.999, max_value=1, quantiles=None, layer=None, key_added="normalize_by_quantile")`:**
   per channel, the `q` quantile of the non-zero values, then `X / quantile`,
   clipped at `max_value`. The `q` quantile maps to 1, so a normalised channel
   lies in `[0, max_value]`, by default `[0, 1]`. `max_value=None` does not
@@ -3387,9 +3412,10 @@ the results of the deprecated wrappers, and `normalize_by_quantile` those of
   - **Records the quantiles and the parameters,** following scanpy's
     conventions: a value per channel in `var` (as `var["means"]` or
     `var["highly_variable"]`), parameters in `uns` (as `uns["pca"]`):
-    `adata.var["quantile"]` holds the quantile applied to each channel, and
-    `adata.uns["normalize_by_quantile"] = {"q": ..., "max_value": ...}` the
-    parameters. They give provenance, so that a
+    `adata.var[key_added]` holds the quantile applied to each channel, and
+    `adata.uns[key_added] = {"q": ..., "max_value": ..., "layer": ...}` the
+    parameters, both by default under `"normalize_by_quantile"`. They give
+    provenance, so that a
     reopened table shows what its normalised layer was divided by, and they
     allow applying the same normalisation to other data. `obs`, `var` and
     `uns` are always in memory, also for lazy tables, and
@@ -3399,7 +3425,7 @@ the results of the deprecated wrappers, and `normalize_by_quantile` those of
     `normalize_by_size`, an existing entry gives a warning and is replaced.
   - **`quantiles=`** applies quantiles computed before instead of computing
     them, for example those of another sample with the same channels:
-    `quantiles=other.var["quantile"]`. It takes a pandas Series indexed by
+    `quantiles=other.var["normalize_by_quantile"]`. It takes a pandas Series indexed by
     channel name, aligned with `var_names` by name, where a missing channel
     raises, or a sequence of one value per channel, in the order of `var`.
     Then nothing is computed, and the call is lazy too; `q` is ignored and
@@ -3427,14 +3453,14 @@ the results of the deprecated wrappers, and `normalize_by_quantile` those of
   - **Lazy sparse input raises** a `ValueError`: gathering the non-zero values
     of each channel from all row blocks is more work than this slice needs.
     The message names the ways out: densify the matrix first, or read the
-    table with `table_mode="eager"`. Support can be added later if needed.
+    table in memory, with `mode="eager"` in `hp.tb.io.read_table` or
+    `table_mode="eager"` in `hp.io.read_zarr`. Support can be added later if
+    needed.
 - **Tests:**
-  - on the example datasets, in memory, the results equal those of the
-    deprecated wrappers: `preprocess_transcriptomics` and
-    `preprocess_proteomics` with size normalisation, and
-    `preprocess_proteomics(q=...)` divided by 100. The size comparisons pass
-    `size_key="shapeSize"`, the column in which the wrappers store sizes;
-    that is a detail of the test, not a recommendation;
+  - on small synthetic tables, the results follow the formulas of the
+    deprecated wrappers (for quantiles, divided by 100), also with the
+    default parameters; no test depends on the wrappers or on the example
+    datasets;
   - quantile normalisation maps the `q` quantile to 1 and clips at
     `max_value`, and `max_value=None` does not clip;
   - lazy results equal in-memory results;
@@ -3444,8 +3470,10 @@ the results of the deprecated wrappers, and `normalize_by_quantile` those of
   - a channel without non-zero values stays zero;
   - in-memory sparse input to `normalize_by_quantile` gives the dense result,
     and lazy sparse input raises;
-  - the `uns` entries, and `var["quantile"]`, are recorded, and running a
-    function a second time warns;
+  - the `uns` entries, and the quantiles in `var`, are recorded, and running a
+    function a second time warns, also with `key_added`;
+  - `key_added` keeps the records of two normalised matrices of one table
+    apart, without a warning;
   - `quantiles=` gives the same result as the computed quantiles, computes
     nothing on a lazy table, aligns a Series by channel name, and raises for
     a missing channel.
