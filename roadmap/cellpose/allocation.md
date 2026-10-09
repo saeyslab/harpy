@@ -3,8 +3,9 @@
 ## Status
 
 Thirteen numbered implementation slices are planned, with Slice 7 split into
-parts a and b and Slice 11 into parts a through g; Slices 1 through 9 are
-implemented:
+parts a and b and Slice 11 into parts a through g; Slices 1 through 10 are
+implemented, as are Parts 11a–11f except the optimization 11f.xi. Slice 11g
+and the optional Slice 12 remain:
 
 1. patch the CosMx reader and establish the generic Harpy feature-panel
    metadata contract — implemented;
@@ -23,25 +24,26 @@ implemented:
 9. add canonical centers to compatible existing SpatialData tables —
    implemented;
 10. support point-to-label assignment through general invertible SpatialData
-    transformations into a shared coordinate system;
+    transformations into a shared coordinate system — implemented;
 11. add QC, shared element and table I/O, generic panel preparation and
     validation in seven independently scoped steps:
     - **11a:** original-point summary computation through
-      `hp.qc.summarize_points` and `PointsSummary`, without plotting changes;
+      `hp.qc.summarize_points` and `PointsSummary`, without plotting changes —
+      implemented;
     - **11b:** share element publication and rollback across existing I/O
       workflows through `_replace_element_on_disk` — implemented;
     - **11c:** register authoritative feature panels for existing points
       elements through `hp.pt.add_feature_panel` — implemented;
     - **11d:** validate existing points against their registered feature panel
-      through the read-only `hp.pt.validate_points` API;
+      through the read-only `hp.pt.validate_points` API — implemented;
     - **11e:** transcript-positive bin summaries and visualization, in seven
       separate parts: **11e.i** construct `summary.spatial_bins` inside
       `summarize_points` — implemented; **11e.ii** spatial-bin histograms — implemented;
       **11e.iii** feature-specific spatial counts and bin summaries through
       `hp.qc.summarize_points_by_feature` — implemented; **11e.iv** spatial density
       heatmaps — implemented; **11e.v** density-only marimo overview — implemented;
-      **11e.vi** optional spatial-density smoothing in Harpy; and **11e.vii**
-      marimo smoothed-density overview;
+      **11e.vi** optional spatial-density smoothing in Harpy — implemented; and
+      **11e.vii** marimo smoothed-density overview — implemented;
     - **11f:** modular AnnData table I/O for SpatialData Zarr stores, in eleven
       separate parts: **11f.i** public contracts — defined and documented;
       **11f.ii** selective component and lazy complete-table reading — implemented;
@@ -56,14 +58,15 @@ implemented:
       **11f.x** SpatialData-aware regional table-component updates in two implementation slices:
       **a)** implement `hp.tb.io.add_table_components_by_region()` — implemented,
       **b)** migrate `hp.tb.add_feature_matrix()` for existing-table regional updates — implemented;
-      **11f.xi** affected-chunk regional-write optimization, after the first ten parts;
-      a separate napari-harpy persistence migration also follows the first eight
-      parts and does not depend on this optimization;
+      **11f.xi** affected-chunk regional-write optimization, after the first ten parts —
+      planned; a separate napari-harpy persistence migration also follows the first eight
+      parts and does not depend on this optimization — planned;
     - **11g:** table-level summary computation through `hp.qc.summarize_table`
-      and `TableSummary`, with plotting integration;
+      and `TableSummary`, with plotting integration — specified, not
+      implemented;
 
 12. optionally optimize Slice 7b's latency after phase-level benchmarks identify
-    material checkpoint or writer overhead.
+    material checkpoint or writer overhead — optional, not implemented.
 
 Slice 2 replaces the current single-run reader surface with one coherent,
 sample-aware creation contract. Slice 3 validates that an existing store still
