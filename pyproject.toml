@@ -55,7 +55,6 @@ dependencies = [
     "seaborn>=0.12.2",
     "leidenalg>=0.9.1",
     "ome_zarr>=0.14.0",
-    "omegaconf",
     "pyrootutils",
     "universal_pathlib",
     "crick",
@@ -103,12 +102,6 @@ napari = [
 vitessce = [
     "harpy-vitessce ; python_version >= '3.12'"
 ]
-cli = [
-    "hydra-core>=1.2.0",
-    "hydra-colorlog>=1.2.0",
-    "submitit>=1.4.5",
-    "hydra-submitit-launcher>=1.2.0"
-]
 notebook = [
     "marimo>=0.24.2",
     "ipywidgets",
@@ -123,7 +116,7 @@ notebook = [
 # best default for end-users
 extra = [
     # do not support basic tiling correction, and squidpy installation in default PyPI install
-    "harpy-analysis[cellpose,instanseg,opencv,vitessce,cli,notebook]",
+    "harpy-analysis[cellpose,instanseg,opencv,vitessce,notebook]",
 ]
 # dev dependencies
 test = [
@@ -190,7 +183,6 @@ omit = [
     "experiments/*",
     "src/harpy/externals/*",
     "src/harpy/io/*",
-    "src/harpy/pipeline.py",
     "docs/*",
 ]
 

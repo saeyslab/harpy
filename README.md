@@ -70,7 +70,6 @@ pip install "harpy-analysis[extra]"
 - FlowSOM Clustering: `flowsom`
 - Vitessce: `harpy-vitessce`
 - Notebook workflows: `ipywidgets`, `tqdm`, `bokeh`, `textalloc`, `joypy`, `supervenn`, `nbconvert`, `ipython`
-- CLI workflows: `hydra-core`
 
 **With extras and napari**
 

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import os
 from collections.abc import Iterable
-from pathlib import Path
 from typing import Any
 
 import dask
@@ -12,8 +10,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 from geopandas import GeoDataFrame
 from numpy.typing import NDArray
-from omegaconf import OmegaConf
-from omegaconf.dictconfig import DictConfig
 from shapely.affinity import translate
 from shapely.geometry import LineString, MultiLineString
 from spatialdata import SpatialData
@@ -125,14 +121,6 @@ def border_color(r: bool) -> matplotlib.colors.Colormap:
 def linewidth(r: bool) -> float:
     """Select linewidth 1 if true else 0.5."""
     return 1 if r else 0.5
-
-
-def _export_config(cfg: DictConfig, output_yaml: str | Path):
-    yaml_config = OmegaConf.to_yaml(cfg)
-    output_dir = os.path.dirname(output_yaml)
-    os.makedirs(output_dir, exist_ok=True)
-    with open(output_yaml, "w") as f:
-        f.write(yaml_config)
 
 
 def _get_uint_dtype(value: int) -> str:

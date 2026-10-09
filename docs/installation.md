@@ -17,7 +17,6 @@ pip install "harpy-analysis[extra]"
 - FlowSOM Clustering: `flowsom`, `scikit-learn`
 - Vitessce: `harpy-vitessce`
 - Notebook workflows: `ipywidgets`, `tqdm`, `bokeh`, `textalloc`, `joypy`, `supervenn`, `nbconvert`, `ipython`
-- CLI workflows: `hydra-core`, `hydra-colorlog`, `submitit`, `hydra-submitit-launcher`
 
 **With extras and napari**
 

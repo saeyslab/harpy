@@ -1,9 +1,0 @@
-data_dir: null
-image: null
-coords: null
-markers: null
-transform_matrix: null
-crop_param: null
-scale_factors: null #[ 2,2,2,2  ]
-chunks: 1024
-z_projection: True
