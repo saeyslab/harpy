@@ -3538,12 +3538,24 @@ the API documentation refers to it. It consists of:
 - the `cli` extra in `pyproject.toml` (`hydra-core`, `hydra-colorlog`,
   `submitit`, `hydra-submitit-launcher`), and the coverage `omit` entry for
   `src/harpy/pipeline.py`;
-- probably `_export_config` in `src/harpy/utils/utils.py`, with its `omegaconf`
-  import, if nothing else uses it.
+- `_export_config` in `src/harpy/utils/utils.py`, with its `omegaconf`
+  imports: the pipeline is its only user;
+- the root-level `configs/` directory, the user-facing Hydra configs
+  (`experiment/`, `local/default.example.yaml` and the step configs), and
+  `scripts/create_dataset.py`, which generated dataset configs for the
+  pipeline's multirun mode;
+- `omegaconf` in the main dependencies of `pyproject.toml`, which nothing else
+  uses; `pyrootutils` stays, as the notebook tests use it;
+- `docs/tutorials/hpc/intro.md`, the tutorial for running the Hydra pipeline
+  on a cluster, and its entry in `docs/tutorials/hpc/index.md`;
+  `vib_compute.md`, on the cluster setup, stays;
+- the "CLI workflows" line on the `cli` extra in `README.md` and
+  `docs/installation.md`.
 
-To check during 6e: `test_notebook_harpy_pipeline` in
-`src/harpy/_tests/test_notebooks.py` runs `Harpy_how_to_start.ipynb`; whether
-that notebook uses the pipeline, or only the test's name mentions it.
+`Harpy_how_to_start.ipynb`, which `test_notebook_harpy_pipeline` in
+`src/harpy/_tests/test_notebooks.py` runs, does not use the pipeline: only its
+prose mentions "the Harpy pipeline". The notebook and its test stay. After the
+removal, `uv.lock` needs `uv lock` to drop the `cli` extra and `omegaconf`.
 
 ### Phase 7: rapids-singlecell validation on a GPU machine
 
