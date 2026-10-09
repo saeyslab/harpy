@@ -52,6 +52,15 @@ jobs:
             **/uv.lock
             **/pyproject.toml
 
+      # Example datasets fetched by the tests (pooch.os_cache("sparrow")); shared by all matrix jobs.
+      # The key changes with the registry; restore-keys reuses the previous cache, and pooch re-checks hashes.
+      - name: Cache example datasets
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/sparrow
+          key: harpy-datasets-${{ hashFiles('src/harpy/datasets/registry.py') }}
+          restore-keys: harpy-datasets-
+
       - name: Sync env (locked, --lock makes it fail immediatelly if uv.lock out of date with pyproject.toml)
         run: uv sync --locked --extra dev --extra cellpose3 --python ${{ matrix.python }}
 
@@ -60,7 +69,8 @@ jobs:
           MPLBACKEND: agg
           PLATFORM: ${{ matrix.os }}
           DISPLAY: :42
-        run: uv run --no-sync pytest --cov harpy --cov-branch --cov-report=xml src/harpy/_tests
+        # -n auto: one pytest-xdist worker per CPU; worksteal rebalances uneven test durations
+        run: uv run --no-sync pytest -n auto --dist worksteal --cov harpy --cov-branch --cov-report=xml src/harpy/_tests
 
       - name: Upload coverage
         uses: codecov/codecov-action@v4
