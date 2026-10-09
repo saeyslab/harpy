@@ -65,7 +65,8 @@ and 11h and the optional Slice 12 remain:
       and `TableSummary`, with plotting integration — specified, not
       implemented;
     - **11h:** select regions with `region` instead of `labels_name` in the
-      existing table-QC plots, as `summarize_table` does — planned, after 11g;
+      existing table-QC plots, as `summarize_table` does, and rename
+      `obs_scatter` to `table_scatter` — planned, after 11g;
 
 12. optionally optimize Slice 7b's latency after phase-level benchmarks identify
     material checkpoint or writer overhead — optional, not implemented.
@@ -1532,10 +1533,10 @@ suitable for cell-level histograms and violin plots of the raw class counts and
 following per-instance plotting metrics on demand:
 
 ```text
-negative_points_per_feature =
+n_negative_points_per_feature =
     n_negative_points / auxiliary_class_feature_counts["Negative"]
 
-system_control_points_per_feature =
+n_system_control_points_per_feature =
     n_system_control_points / auxiliary_class_feature_counts["SystemControl"]
 ```
 
@@ -8557,7 +8558,7 @@ must retain the population of the computed result. Current Harpy aggregation tab
 instances with zero total assigned points; if a supplied table contains such
 rows, exclude them from the QC result without modifying the table.
 
-Report selected, included, and excluded row counts. These describe only the
+Report total, retained, and excluded row counts. These describe only the
 supplied table population, not all segmented cells: do not invent rows for
 labels absent from the table, claim to recover previously omitted empty cells,
 or imply that these statistics include unassigned points. Label outputs as
@@ -8566,34 +8567,132 @@ necrosis selection.
 
 ### Return contract: `TableSummary`
 
-Return a result container with two dataframes:
+Return a result container with one metadata record and three dataframes:
 
 ```python
 @dataclass(frozen=True)
+class TableSummaryMetadata:
+    table_name: str
+    region: tuple[str, ...]  # selected regions, resolved from None
+    feature_classes: tuple[str, ...]  # selected classes, resolved from None
+    expression_class: str  # the class in X, from the aggregation record
+    points_name_by_region: Mapping[str, str]  # region -> name of the points element aggregated into it
+    auxiliary_class_feature_counts: Mapping[str, int]  # denominators, for the selected auxiliary classes
+
+
+@dataclass(frozen=True)
 class TableSummary:
+    metadata: TableSummaryMetadata
     per_instance: pd.DataFrame
     per_class: pd.DataFrame
+    per_region: pd.DataFrame
 ```
 
-`per_instance` contains the selected observation index and instance/region
-identity, selected existing class-count metrics, `auxiliary_points_fraction`,
-and the derived per-feature rates below. Preserve observation alignment and
-retain these derived values only in the result, not in the source `.obs`.
+**One metadata owner,** as `PointsSummary` has `PointsSummaryMetadata`: the
+record identifies the selected table and regions and retains the class/panel
+association, from `uns["feature_class_aggregation"]` and the table's
+`spatialdata_attrs`. It describes the inputs of the computation, not a live
+metadata lookup. The mappings are stored immutably, as `PointsSummaryMetadata`
+stores tuples.
 
-`per_class` provides an overview across the included transcript-positive
-instances, grouped by region and feature class so distinct sources remain
-identifiable. Include selected/included/excluded instance counts, total
-assigned points for the class within the included population, and
-explicitly named statistics such as `mean_points_per_instance` and
-`median_points_per_instance`. Include instances with zero points in that class
-when calculating these statistics. Class selection does not silently filter
-out those instances.
+- **`table_name` and `points_name_by_region`** identify the sources: the table,
+  and for each selected region the name of the points element aggregated into
+  it. That pairing comes from the aggregation record's `regions` mapping, which
+  `aggregate_points` writes because SpatialData's table annotation knows only
+  the regions. Each points element references exactly one feature panel,
+  through `sdata.attrs["harpy"]["points"][points_name]["feature_panel"]`, so the
+  class definitions remain traceable to their panel. The regions may lead to
+  one shared panel key or to several equivalent ones, so there is no single
+  `feature_panel` field as in `PointsSummaryMetadata`. The name follows
+  `points_name` and the panel's `features_by_class`.
+- **`region` and `feature_classes`** record the selection, resolved from `None`
+  to the regions and classes that were summarized.
+- **`expression_class`** is the class whose features form `X`, copied from the
+  aggregation record. It is stored, not derived: a selection without the
+  expression class, such as `feature_classes=["Negative", "SystemControl"]`,
+  does not contain it, yet it remains true of the table, and it tells signal
+  from controls. `PointsSummaryMetadata` has no such field by design: neither
+  the panel nor the points designate an expression class, which is chosen
+  only when a class-aware table is aggregated, so before aggregation all
+  classes are equals.
+- **`auxiliary_class_feature_counts`** are the denominators of the per-feature
+  rates, for the selected auxiliary classes, as `bin_size` belongs to the bin
+  statistics on the points side.
+- **Not in the record:** `feature_key` and `feature_class_key`, provenance that
+  `PointsSummaryMetadata` does not carry either; `region_key` and
+  `instance_key`, which the identity columns of `per_instance` show; and a
+  coordinate system or `microns_per_unit`. `PointsSummaryMetadata` records
+  those because `summarize_points` crops and bins in that frame, while
+  `summarize_table` computes no spatial quantity. The coordinate system of each
+  region in the aggregation record is provenance of the aggregation, and stays
+  there. Results, such as the total, retained and excluded row counts, stay in
+  `per_class` and `per_region`.
+
+The dataframes follow `PointsSummary` and its `SpatialBinSummary`, whose
+retained bins are the population closest to the retained instances here.
+
+**`per_instance`: one row per retained instance,** an instance of a selected
+region with at least one point across the selected classes. Its index is the
+table's `.obs` index, so that the rows stay aligned with the table and can be
+joined back to it. Columns:
+
+- the region and instance identity, under the table's own `region_key` and
+  `instance_key` names;
+- the count column of each selected class, copied from `.obs` through
+  `count_columns`, for example `n_endogenous_points`, `n_negative_points` and
+  `n_system_control_points`;
+- `auxiliary_points_fraction`, copied from `.obs` as stored at aggregation;
+- for each selected auxiliary class, the per-feature rate described below,
+  named after its count column with `_per_feature` appended: for example
+  `n_negative_points_per_feature`.
+
+`per_instance` is wide, one column per class, unlike the long `per_bin` of
+`SpatialBinSummary` (one row per bin and class). That keeps the observation
+alignment, and lets `instance_scatter` compare two classes' rates without a
+pivot. Only the rates are derived; they exist only in the result, not in the
+source `.obs`.
+
+**`per_class`: one row per selected class,** pooled over the selected regions,
+as `PointsSummary.per_class` and `SpatialBinSummary.per_class` have one row per
+selected class. **`per_region`: one row per selected region and selected
+class,** with a `region` column: the statistics of `per_class`, computed
+within each region, which is typically a sample. The points side has no
+counterpart, because a `PointsSummary` covers one points element; per-sample
+statistics there come from separate `summarize_points` calls, while one table
+can combine several samples. With one selected region, `per_class` and
+`per_region` have the same values. Pooled and per-region statistics live in separate
+dataframes, so that summing a column never counts instances twice and no
+sentinel region name is needed. Their columns follow `SpatialBinSummary.per_class`,
+with instances in place of bins:
+
+| Columns                                                                                                                                                                      | Meaning                                                                                                                                                       |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `feature_class`, and `region` in `per_region`                                                                                                                                | the group                                                                                                                                                     |
+| `n_total_instances`, `n_retained_instances`, `n_excluded_instances`, `pct_excluded_instances`                                                                                | the shared population: the table's rows of the selected regions, those with points across the selected classes, the others, and 100 × excluded / total        |
+| `n_retained_instances_without_class`, `pct_retained_instances_without_class`                                                                                                 | retained instances with zero points of this row's class, and 100 × that count / retained                                                                      |
+| `n_points`, `mean_points_per_instance`, `median_points_per_instance`, `std_points_per_instance`, `p95_points_per_instance`                                                   | the class's points over the retained instances, zeros included                                                                                                |
+| `n_features`, `mean_points_per_feature_per_instance`, `median_points_per_feature_per_instance`, `std_points_per_feature_per_instance`, `p95_points_per_feature_per_instance` | the panel's feature count of the class, the denominator, and the statistics of the per-feature rate over the retained instances; NaN for the expression class |
+
+- **Shared population:** the population counts are the same for every class of
+  a group, as the population is chosen jointly across the selected classes.
+  Instances with zero points in a class count in that class's statistics;
+  class selection does not silently filter them out.
+- **Conventions of the bin statistics:** `std_` uses `ddof=1` and is NaN for
+  fewer than two retained instances; `p95_` uses linear interpolation; an
+  all-zero class in a nonempty population has zero-valued statistics and
+  `pct_retained_instances_without_class=100`.
+- **Rate statistics:** only auxiliary classes have a denominator in
+  `auxiliary_class_feature_counts`, so the expression class has NaN rate
+  columns and `n_features`. As a rate is a count divided by a constant, its
+  statistics equal the count statistics divided by `n_features`.
+- **Names:** not `mean_points_per_feature`, which `PointsSummary.per_class`
+  already uses for the mean over a panel's features, a different population.
 
 Do not use ambiguous metric names or imply that `per_class` has the same
 statistical population in both summary types. Labels and result columns must
 distinguish points **per target**, **per spatial bin**, and **per instance**.
-A histogram in 11e gives each included spatial bin equal weight; a cell-level
-histogram gives each included transcript-positive instance equal weight.
+A histogram in 11e gives each retained spatial bin equal weight; a cell-level
+histogram gives each retained transcript-positive instance equal weight.
 
 ### Existing measurements and derived instance metrics
 
@@ -8616,10 +8715,10 @@ corresponding positive values in that record's `auxiliary_class_feature_counts`.
 For the CosMx example:
 
 ```text
-negative_points_per_feature =
+n_negative_points_per_feature =
     n_negative_points / auxiliary_class_feature_counts["Negative"]
 
-system_control_points_per_feature =
+n_system_control_points_per_feature =
     n_system_control_points / auxiliary_class_feature_counts["SystemControl"]
 ```
 
@@ -8642,8 +8741,9 @@ instances or features.
 
 ### Plotting integration
 
-`hp.qc.obs_scatter` and `hp.qc.table_histogram` (renamed from
-`hp.qc.metric_histogram` in Part 11e.ii) remain useful for
+`hp.qc.obs_scatter` (renamed to `hp.qc.table_scatter` in Slice 11h) and
+`hp.qc.table_histogram` (renamed from `hp.qc.metric_histogram` in Part 11e.ii)
+remain useful for
 metrics already stored in `.obs` (and, for the histogram, `.var`). They select
 and plot existing columns; they do not calculate the underlying class counts
 or panel-normalized rates. Preserve those direct table-input use cases.
@@ -8656,13 +8756,13 @@ the computed `TableSummary`, as the points side passes its result to
 hp.qc.instance_histogram(table_summary, column="auxiliary_points_fraction")
 hp.qc.instance_scatter(
     table_summary,
-    column_x="negative_points_per_feature",
-    column_y="system_control_points_per_feature",
+    column_x="n_negative_points_per_feature",
+    column_y="n_system_control_points_per_feature",
 )
 ```
 
 - **Named after their unit of analysis.** `spatial_bin_histogram` gives each
-  included spatial bin equal weight; `instance_histogram` gives each included
+  retained spatial bin equal weight; `instance_histogram` gives each retained
   transcript-positive instance equal weight. The names and axis labels keep
   the two apart.
 - **They select columns of `summary.per_instance`** with `column`, or
@@ -8698,8 +8798,18 @@ Focused tests should establish that:
   only selected table rows with a positive total across selected classes, retaining
   zeros for a selected feature class and reporting excluded rows without
   reconstructing cells absent from the table;
-- per-class totals, means, and medians agree with the selected per-instance
-  metrics, with names clearly indicating an instance-level denominator;
+- the statistics of `per_class` and `per_region` (totals, means, medians,
+  standard deviations and 95th percentiles of counts and per-feature rates)
+  agree with the retained per-instance metrics, with names clearly indicating
+  an instance-level denominator; `per_class` pools the selected regions and
+  equals `per_region` for a single region; rate statistics equal the count
+  statistics divided by `n_features`, and are NaN for the expression class;
+- rate columns are named after their count column with `_per_feature`
+  appended, derived from the metadata bindings;
+- `TableSummary.metadata` records the table, the regions and classes resolved
+  from `None`, the table's expression class also when it is not selected, the
+  source points element of each region, and the denominators of the selected
+  auxiliary classes;
 - derived metrics use the table's recorded count-column bindings and
   authoritative auxiliary-class feature-count snapshot;
 - normalized rates use full panel feature counts, including features with no
@@ -8715,7 +8825,7 @@ Focused tests should establish that:
   unchanged, do not repeat summary computation, and do not require writing
   temporary metrics to `.obs`.
 
-## Slice 11h: `region` in the table-QC plots
+## Slice 11h: consistent names in the table-QC plots
 
 **Status: planned; implement after Slice 11g.**
 
@@ -8724,8 +8834,32 @@ select the regions of a table with `labels_name`, as the deprecated scanpy
 wrappers do. Slice 11g's `summarize_table` selects them with `region`, the
 term of SpatialData's table annotation and of `hp.tb.io.add_table`. This slice
 aligns the three plots with it, so that the table-QC functions use one name for
-one concept.
+one concept, and renames `obs_scatter` to `table_scatter`.
 
+**The naming rule of the QC API:**
+
+| What is passed                           | Function                                               | Named after      |
+| ---------------------------------------- | ------------------------------------------------------ | ---------------- |
+| `sdata` and `points_name`                | `summarize_points`, returning `PointsSummary`          | the source       |
+| `sdata` and `table_name`                 | `summarize_table`, returning `TableSummary`            | the source       |
+| a `PointsSummary`                        | `spatial_bin_histogram`, `hp.pl.plot_points_density`   | the unit plotted |
+| a `TableSummary`                         | `instance_histogram`, `instance_scatter`               | the unit plotted |
+| `sdata` and `table_name`, stored columns | `table_histogram`, `table_histograms`, `table_scatter` | the source       |
+
+Computations and their results are named after their source; the dataframes
+inside after the unit of a row (`per_instance`, `per_class`,
+`spatial_bins.per_bin`); plots of a computed summary after the unit they plot;
+and plots of stored table columns after the table they read. `obs_scatter` is
+the exception today: it is named after `.obs`, while its histogram siblings are
+named after the table. Neither `obs_histogram` nor `InstanceSummary` fits the
+rule: `table_histogram` also plots `.var` columns, so its unit depends on its
+`dataframe` argument, and a result named after its unit would not pair with
+`summarize_table`, nor with `PointsSummary`.
+
+- **Rename `hp.qc.obs_scatter` to `hp.qc.table_scatter`,** with its behaviour
+  unchanged. `obs_scatter` stays for at least one release, as a deprecated alias
+  that warns with a `FutureWarning` and calls `table_scatter`, as `labels_name`
+  below.
 - **Rename the parameter** to `region`, with the meaning it has in
   `summarize_table`: names from the table's `uns["spatialdata_attrs"]["region"]`,
   whose rows are selected through `obs[region_key]`, whatever the type of the
