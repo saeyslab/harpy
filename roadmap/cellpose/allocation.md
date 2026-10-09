@@ -3,9 +3,9 @@
 ## Status
 
 Thirteen numbered implementation slices are planned, with Slice 7 split into
-parts a and b and Slice 11 into parts a through g; Slices 1 through 10 are
-implemented, as are Parts 11a–11f except the optimization 11f.xi. Slice 11g
-and the optional Slice 12 remain:
+parts a and b and Slice 11 into parts a through h; Slices 1 through 10 are
+implemented, as are Parts 11a–11f except the optimization 11f.xi. Slices 11g
+and 11h and the optional Slice 12 remain:
 
 1. patch the CosMx reader and establish the generic Harpy feature-panel
    metadata contract — implemented;
@@ -26,7 +26,7 @@ and the optional Slice 12 remain:
 10. support point-to-label assignment through general invertible SpatialData
     transformations into a shared coordinate system — implemented;
 11. add QC, shared element and table I/O, generic panel preparation and
-    validation in seven independently scoped steps:
+    validation in eight independently scoped steps:
     - **11a:** original-point summary computation through
       `hp.qc.summarize_points` and `PointsSummary`, without plotting changes —
       implemented;
@@ -64,6 +64,8 @@ and the optional Slice 12 remain:
     - **11g:** table-level summary computation through `hp.qc.summarize_table`
       and `TableSummary`, with plotting integration — specified, not
       implemented;
+    - **11h:** select regions with `region` instead of `labels_name` in the
+      existing table-QC plots, as `summarize_table` does — planned, after 11g;
 
 12. optionally optimize Slice 7b's latency after phase-level benchmarks identify
     material checkpoint or writer overhead — optional, not implemented.
@@ -8507,10 +8509,42 @@ parameters or result shapes:
 For the class-aware table path, `feature_classes` selects exact classes from
 `adata.uns["feature_class_aggregation"]["classes"]`; `None` includes all
 recorded classes. Resolve class-count columns through that metadata rather
-than guessing names. The final complete signature and any observation/region
-selection parameters should follow the existing table-QC conventions and be
-specified before implementation; the calls above establish the entry points
-and shared class-selection meaning, not an additional raw-point fallback.
+than guessing names. The calls above establish the entry points and shared
+class-selection meaning, not an additional raw-point fallback.
+
+**Signature.** It mirrors `summarize_points`: the `sdata` and the element name
+are positional, everything else keyword-only.
+
+```python
+def summarize_table(
+    sdata: SpatialData,
+    table_name: str,
+    *,
+    region: str | Sequence[str] | None = None,
+    feature_classes: str | Sequence[str] | None = None,
+) -> TableSummary:
+```
+
+- **`region`** selects the annotated elements to summarize, in SpatialData's
+  sense: the names in `uns["spatialdata_attrs"]["region"]`, whose rows the
+  table identifies through `obs[region_key]`. `None` selects every region the
+  table annotates. The values are validated against the table's annotation,
+  not against `sdata`'s elements: a name the table does not annotate raises a
+  `ValueError` that lists the annotated regions, and the annotated elements
+  need not be present. The name follows SpatialData and `hp.tb.io.add_table`,
+  whose `region` parameter writes the same annotation. It is not
+  `labels_name`: the summary reads only `.obs` and `.uns`, so it does not
+  depend on the element type, and a table annotating shapes with the same
+  metadata is summarized the same way. Aligning the existing table-QC plots
+  follows in Slice 11h.
+- **`feature_classes`** has the type and meaning of the same parameter of
+  `summarize_points`. A table without `uns["feature_class_aggregation"]`, which
+  is not class-aware, raises a `ValueError`.
+- **Not parameters:** `bin_size`, as above; the spatial options of
+  `summarize_points` (`crd`, `to_coordinate_system`, `microns_per_unit`), as
+  this is an instance-level summary whose selection unit is the region; and an
+  observation selection: to summarize a subset of rows, subset the table
+  first.
 
 The summary must identify the selected table and regions and retain the
 relevant class/panel association from the aggregation metadata. Within the
@@ -8614,18 +8648,43 @@ metrics already stored in `.obs` (and, for the histogram, `.var`). They select
 and plot existing columns; they do not calculate the underlying class counts
 or panel-normalized rates. Preserve those direct table-input use cases.
 
-To plot temporary derived metrics without modifying the table, extend the
-consumption interface or share dataframe-based rendering helpers so plots can
-consume `TableSummary.per_instance`. The exact public precomputed-result
-interface is to be finalized for this slice. Keep one computation/rendering
-boundary: plotting an available summary must not call `summarize_table` again,
-read the original points, or write derived metrics to `.obs`.
+To plot the derived metrics without modifying the table, two new plots take
+the computed `TableSummary`, as the points side passes its result to
+`spatial_bin_histogram(summary, *, feature_class, …)`:
 
-Support cell-level views such as histograms or violin plots of class counts
-and `auxiliary_points_fraction`, and comparisons of per-feature rates in a
-scatter or hexbin plot. These describe assigned points only; they complement
-Slices 11a and 11e and cannot replace their original-point spatial background
-maps, which retain unassigned and outside-mask controls.
+```python
+hp.qc.instance_histogram(table_summary, column="auxiliary_points_fraction")
+hp.qc.instance_scatter(
+    table_summary,
+    column_x="negative_points_per_feature",
+    column_y="system_control_points_per_feature",
+)
+```
+
+- **Named after their unit of analysis.** `spatial_bin_histogram` gives each
+  included spatial bin equal weight; `instance_histogram` gives each included
+  transcript-positive instance equal weight. The names and axis labels keep
+  the two apart.
+- **They select columns of `summary.per_instance`** with `column`, or
+  `column_x` and `column_y`: class counts, `auxiliary_points_fraction` and the
+  per-feature rates, for example `instance_histogram` for class counts and
+  `auxiliary_points_fraction`, and `instance_scatter` to compare per-feature
+  rates. They plot the population that the summary computed, without
+  filtering it again.
+- **One computation/rendering boundary:** plotting an available summary does
+  not call `summarize_table` again, read the original points, or write derived
+  metrics to `.obs`.
+- **Shared rendering:** `instance_histogram` renders through the shared
+  `_plot_histogram` of `table_histogram`, so the two look the same, with the
+  same median line and `quantile_range`. `obs_scatter`'s rendering moves into
+  a private dataframe-based helper that `obs_scatter` and `instance_scatter`
+  share.
+- **Not now:** violin plots and hexbin plots; the histogram and the scatter
+  cover the views this slice needs.
+
+These views describe assigned points only; they complement Slices 11a and 11e
+and cannot replace their original-point spatial background maps, which retain
+unassigned and outside-mask controls.
 
 ### Verification
 
@@ -8651,9 +8710,32 @@ Focused tests should establish that:
   points, label rasters, `.X`, or the auxiliary count matrix, even when `.X`
   has subsequently been normalized;
 - existing table-input plotting remains usable for ordinary stored metrics; and
-- plotting precomputed table summaries leaves both the summary and source
-  table unchanged, does not repeat summary computation, and does not require
-  writing temporary metrics to `.obs`.
+- `instance_histogram` and `instance_scatter` plot columns of
+  `TableSummary.per_instance`, leave both the summary and source table
+  unchanged, do not repeat summary computation, and do not require writing
+  temporary metrics to `.obs`.
+
+## Slice 11h: `region` in the table-QC plots
+
+**Status: planned; implement after Slice 11g.**
+
+`hp.qc.obs_scatter`, `hp.qc.table_histogram` and `hp.qc.table_histograms`
+select the regions of a table with `labels_name`, as the deprecated scanpy
+wrappers do. Slice 11g's `summarize_table` selects them with `region`, the
+term of SpatialData's table annotation and of `hp.tb.io.add_table`. This slice
+aligns the three plots with it, so that the table-QC functions use one name for
+one concept.
+
+- **Rename the parameter** to `region`, with the meaning it has in
+  `summarize_table`: names from the table's `uns["spatialdata_attrs"]["region"]`,
+  whose rows are selected through `obs[region_key]`, whatever the type of the
+  annotated elements.
+- **Keep `labels_name` for at least one release,** as a deprecated alias that
+  warns with a `FutureWarning` and selects the same rows; passing both raises a
+  `ValueError`.
+- **Not in scope:** `hp.qc.segmentation_coverage` and
+  `hp.qc.segmentation_histogram`, whose `labels_name` names the labels element
+  that they measure, not a region of a table.
 
 ## Slice 12: optional Slice 7b latency optimization
 
