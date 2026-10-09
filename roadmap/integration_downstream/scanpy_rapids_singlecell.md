@@ -3150,7 +3150,7 @@ functions. `nhood_enrichment` is a thin wrapper around two squidpy calls.
 | 6a (implemented) | deprecate the thin wrappers (`preprocess_transcriptomics`, `preprocess_proteomics`, `leiden`, `kmeans`, `nhood_enrichment`, `filter_on_size`): unchanged behaviour on in-memory tables, with a `FutureWarning`, and a clear error on lazy tables (see "Slice 6a" below)                      |
 | 6b (implemented) | group the table I/O functions in `hp.tb.io`, with `hp.tb.add_table` deprecated in favour of `hp.tb.io.add_table` (see "Slice 6b" below)                                                                                                                                                      |
 | 6c (implemented) | create `hp.tb.pp` with lazy-safe functions for the spatial steps that scanpy lacks: size normalisation, such as `hp.tb.pp.normalize_by_size(adata, size_key=...)`, computed per block, and quantile normalisation per channel for proteomics; cheap per channel, as tables have few channels |
-| 6d               | the quickstart shows the pattern on the table it creates: read with lazy tables, scanpy as usual, then `add_table_updates` with `x_to` to a new layer (see "Slice 6d" below); the full user guide (Phase 2) waits for Phase 7                                                                |
+| 6d (implemented) | the quickstart shows the pattern on the table it creates: read with lazy tables, scanpy as usual, then `add_table_updates` with `x_to` to a new layer (see "Slice 6d" below); the full user guide (Phase 2) waits for Phase 7                                                                |
 | 6e               | remove the unused pipeline (see "Slice 6e" below); migrate the tutorials that use the wrappers (8 notebooks), and check the plotting functions that read their keys, such as `hp.pl.preprocess_transcriptomics`                                                                              |
 | 6f               | decide separately on the functions with their own logic (`score_genes*`, `cluster_cleanliness`, `flowsom`, the niche functions): port them, or keep them for in-memory tables behind the guard of 6a, depending on their use                                                                 |
 
@@ -3487,7 +3487,7 @@ the results of the deprecated wrappers, and `normalize_by_quantile` those of
   its `__init__.py` and `from . import pp` in `src/harpy/table/__init__.pyi`,
   as for `io` in 6b.
 
-**Slice 6d: scanpy on lazy tables, in the quickstart.** A short section in
+**Slice 6d: scanpy on lazy tables, in the quickstart (implemented).** A short section in
 `docs/quickstart.md` that continues its example, which ends by creating
 `table_intensities`. No separate guide page: one complete example says more
 than a long page, and the README and the documentation index already link to
