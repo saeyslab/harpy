@@ -3152,7 +3152,7 @@ functions. `nhood_enrichment` is a thin wrapper around two squidpy calls.
 | 6c (implemented) | create `hp.tb.pp` with lazy-safe functions for the spatial steps that scanpy lacks: size normalisation, such as `hp.tb.pp.normalize_by_size(adata, size_key=...)`, computed per block, and quantile normalisation per channel for proteomics; cheap per channel, as tables have few channels      |
 | 6d (implemented) | the quickstart shows the pattern on the table it creates: read with lazy tables, scanpy as usual, then `add_table_updates` with `x_to` to a new layer (see "Slice 6d" below); the full user guide (Phase 2) waits for Phase 7                                                                     |
 | 6e               | remove the unused pipeline (implemented, see "Slice 6e" below); migrate the tutorials that use the wrappers (8 notebooks), and check the plotting functions that read their keys, such as `hp.pl.preprocess_transcriptomics` (deferred)                                                           |
-| 6f               | keep the functions with their own logic (`score_genes*`, `cluster_cleanliness`, `flowsom`, `weighted_channel_expression`, the niche functions), not deprecated: for now they load the tables they read into memory, so that they work on in-memory, lazy and backed tables (see "Slice 6f" below) |
+| 6f (implemented) | keep the functions with their own logic (`score_genes*`, `cluster_cleanliness`, `flowsom`, `weighted_channel_expression`, the niche functions), not deprecated: for now they load the tables they read into memory, so that they work on in-memory, lazy and backed tables (see "Slice 6f" below) |
 
 - **Cell size: no source prescribed for now.** `normalize_by_size` reads the
   sizes from an `obs` column, `"area"` by default, and the documentation does
@@ -3314,8 +3314,29 @@ featurisation. This slice groups the first kind in `hp.tb.io`; 6c adds
   tests only change their imports.
 - **Not now:** reorganising the rest of `hp.tb`, for example a `hp.tb.tl` for
   clustering and annotation in scanpy's style. The deprecated wrappers are
-  leaving anyway, and 6f still has to decide on the functions with their own
-  logic; decide after 6f. The same review covers `hp.qc`, which stays as it
+  leaving anyway. **Deferred until after the 0.5.0 release,** which ships
+  Phase 6 as it is; the follow-up moves the tooling that only needs tables to
+  `hp.tb.tl`:
+  - **Candidates:** the functions of 6f, which derive annotations, as
+    `sc.tl.leiden` and `sc.tl.score_genes` do: `score_genes`,
+    `score_genes_iter`, `cluster_cleanliness`, `flowsom`,
+    `weighted_channel_expression`, `nhood_kmeans` and `nhood_lda`. Not `pp`:
+    none of them transforms the matrix.
+  - **Not candidates:** `add_feature_matrix`, `cell_clustering_preprocess`,
+    `aggregate_image`, `add_regionprops` and `featurize`, which build or
+    extend a table from spatial elements.
+  - **To decide with the move, not before:** the calling convention.
+    `hp.tb.pp` follows scanpy (an `AnnData` changed in place), while these
+    functions take `sdata` and element names and write a new table with
+    `add_table`. The functions that only need the table (`score_genes*`,
+    `cluster_cleanliness`, `nhood_*`) could follow scanpy; `flowsom` and
+    `weighted_channel_expression` need labels or several tables. Deciding both
+    at once migrates users once.
+  - **Deprecation:** these are released functions, which the tutorials use, so
+    the old names stay on `hp.tb`, deprecated, for at least one release, as
+    `hp.tb.add_table` in this slice.
+
+  The same review covers `hp.qc`, which stays as it
   is: it is organised by purpose across element types (images, segmentation,
   points and tables), so moving its table functions into `hp.tb` would split
   a coherent group, of which the points part is the largest.
@@ -3568,7 +3589,8 @@ made there:
   command line, the `cli` extra and the `configs/` folder. It is updated or
   removed in the tutorials repository.
 
-**Slice 6f: functions with their own logic, on tables loaded into memory.**
+**Slice 6f: functions with their own logic, on tables loaded into memory
+(implemented).**
 These functions do more than call scanpy, so they are kept, and not
 deprecated: no `FutureWarning` and no `.. deprecated::` note. For now they
 work on in-memory tables, and load a lazy or storage-backed table into memory
