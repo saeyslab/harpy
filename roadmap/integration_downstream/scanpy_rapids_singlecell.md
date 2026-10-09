@@ -1921,7 +1921,9 @@ practice, or for consistency before a release.
 
 ### Phase 2: user documentation
 
-**Deferred until Phases 6 and 7 are implemented.** Much of the guide depends
+**Deferred until Phases 6 and 7 are implemented.** Slice 6d adds a short
+example of the pattern to the quickstart (see "Slice 6d"); the guide below
+waits for Phase 7. Much of the guide depends
 on them: Harpy's own wrappers (Phase 6) and the rapids-singlecell pattern
 (Phase 7). Which writer to use is settled by Phase 3's write-back helpers, and
 the reopen rule without Phase 5: reopen after the store-path writers, while
@@ -3148,7 +3150,7 @@ functions. `nhood_enrichment` is a thin wrapper around two squidpy calls.
 | 6a (implemented) | deprecate the thin wrappers (`preprocess_transcriptomics`, `preprocess_proteomics`, `leiden`, `kmeans`, `nhood_enrichment`, `filter_on_size`): unchanged behaviour on in-memory tables, with a `FutureWarning`, and a clear error on lazy tables (see "Slice 6a" below)                      |
 | 6b (implemented) | group the table I/O functions in `hp.tb.io`, with `hp.tb.add_table` deprecated in favour of `hp.tb.io.add_table` (see "Slice 6b" below)                                                                                                                                                      |
 | 6c (implemented) | create `hp.tb.pp` with lazy-safe functions for the spatial steps that scanpy lacks: size normalisation, such as `hp.tb.pp.normalize_by_size(adata, size_key=...)`, computed per block, and quantile normalisation per channel for proteomics; cheap per channel, as tables have few channels |
-| 6d               | the user guide (Phase 2) documents the pattern: scanpy, then `add_table_updates`, or `add_table` when cells or genes are removed, with a spatial transcriptomics example that normalises by area; where the area comes from is shown once a source is decided (see "Cell size" below)        |
+| 6d               | the quickstart shows the pattern on the table it creates: read with lazy tables, scanpy as usual, then `add_table_updates` with `x_to` to a new layer (see "Slice 6d" below); the full user guide (Phase 2) waits for Phase 7                                                                |
 | 6e               | remove the unused pipeline (see "Slice 6e" below); migrate the tutorials that use the wrappers (8 notebooks), and check the plotting functions that read their keys, such as `hp.pl.preprocess_transcriptomics`                                                                              |
 | 6f               | decide separately on the functions with their own logic (`score_genes*`, `cluster_cleanliness`, `flowsom`, the niche functions): port them, or keep them for in-memory tables behind the guard of 6a, depending on their use                                                                 |
 
@@ -3164,7 +3166,7 @@ functions. `nhood_enrichment` is a thin wrapper around two squidpy calls.
   `instance_key`, and a table that annotates several labels elements needs
   one labels array per region, through the `region_key`.
 - **Region selection needs no function:** selecting the cells of some labels
-  elements is a two-line subset of the table, documented as a recipe in 6d.
+  elements is a two-line subset of the table.
 - **Removal:** the deprecated wrappers stay for at least one release, so that
   existing scripts keep working on in-memory tables.
 - **Release:** 6a is the answer to the open question "Legacy table functions at
@@ -3484,6 +3486,45 @@ the results of the deprecated wrappers, and `normalize_by_quantile` those of
 - **Creating the namespace:** `src/harpy/table/pp/`, with public exports in
   its `__init__.py` and `from . import pp` in `src/harpy/table/__init__.pyi`,
   as for `io` in 6b.
+
+**Slice 6d: scanpy on lazy tables, in the quickstart.** A short section in
+`docs/quickstart.md` that continues its example, which ends by creating
+`table_intensities`. No separate guide page: one complete example says more
+than a long page, and the README and the documentation index already link to
+the quickstart.
+
+- **The example:** the quickstart writes the downloaded dataset to a local
+  store and reopens it with `hp.io.read_zarr` before its first step, so that
+  each step writes its result to that store. `aggregate_image` then writes the
+  table and attaches it with lazy matrices, through `add_table`; the scanpy
+  section uses it as attached, without a second write or read. It runs scanpy
+  as usual on `X` (`normalize_total`, `log1p`, `pca`, `neighbors`, `leiden`),
+  then one call to
+  `hp.tb.io.add_table_updates(..., x_to=("layers", "log1p"), overwrite=True)`.
+  It mirrors the end-to-end unit test of the write-back helpers.
+- **The normalised matrix goes to a new layer through `x_to`.** The scanpy
+  calls stay those of scanpy's own tutorials, without `layer=` arguments, and
+  the stored `X` keeps the raw values. Attaching a copy of `X` as a layer
+  first, with `add_table_components`, would write the raw matrix a second
+  time, and the normalised layer once more.
+- **Scanpy settings that lazy tables need:** `svd_solver="covariance_eigh"`,
+  because scanpy's default PCA of a dense Dask matrix needs `dask_ml`, which
+  Harpy does not depend on; the projection computed once (gap 2);
+  `use_rep="X_pca"`, because scanpy's neighbors uses `X` for tables of fewer
+  than 50 variables; and `flavor="igraph"` for leiden, as scanpy recommends.
+- **`overwrite=True`,** because leiden adds a column to `obs`, which exists in
+  the store.
+- **One sentence each** for `add_table_components`, to write chosen components
+  by name, and `add_table`, when cells or genes are removed. `hp.tb.pp` is not
+  mentioned: the example uses scanpy's own normalisation.
+- **Checked by running it** on the MIBI example, with the steps of the
+  quickstart except the segmentation: write, `read_zarr`, `aggregate_image` on
+  its existing masks, which attaches a lazy dense table, then the scanpy
+  section. `add_table_updates` writes the layer, `obs`, `X_pca`, `PCs`, the
+  neighbour graphs and the `uns` entries, and leaves `X` as it is.
+- **Out of scope, still Phase 2:** the reopen rule, `array.chunk-size`,
+  splitting rows before densifying steps, the upstream limitations, and the
+  rapids-singlecell pattern, after Phase 7.
 
 **Slice 6e: removing the pipeline.** Nobody uses it, so it is removed rather
 than migrated. No command-line entry point in `pyproject.toml` and no page of
