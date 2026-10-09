@@ -37,13 +37,31 @@ def _require_in_memory_table(sdata: SpatialData, table_name: str, function_name:
     """
     table = sdata.tables[table_name]
     for path, value in _table_matrices(table):
-        if isinstance(value, (da.Array, zarr.Array, CSRDataset, CSCDataset)):
+        if _is_lazy_or_backed(value):
             kind = "a lazy Dask array" if isinstance(value, da.Array) else "storage-backed"
             raise ValueError(
                 f"harpy.tb.{function_name} needs an in-memory table, but sdata.tables[{table_name!r}].{path} is "
                 f"{kind}. Read the store with harpy.io.read_zarr(..., table_mode='eager') or spatialdata.read_zarr, "
                 "or call scanpy directly and write the results back with harpy.tb.io.add_table_updates."
             )
+
+
+def _load_into_memory(adata: AnnData, table_name: str) -> AnnData:
+    """Return the table with its lazy or storage-backed matrices loaded into memory.
+
+    For the table functions that work on in-memory tables only, on the copy that they
+    process: a lazy matrix is computed and a storage-backed one is read, so that lazy and
+    backed tables, such as those that Harpy attaches after writing to a backed
+    ``SpatialData``, work as well. An in-memory table is returned as it is.
+    """
+    if not any(_is_lazy_or_backed(value) for _, value in _table_matrices(adata)):
+        return adata
+    log.info(f"Loading the matrices of table '{table_name}' into memory.")
+    return adata.to_memory()
+
+
+def _is_lazy_or_backed(value: object) -> bool:
+    return isinstance(value, (da.Array, zarr.Array, CSRDataset, CSCDataset))
 
 
 def _table_matrices(table: AnnData) -> Iterator[tuple[str, object]]:
