@@ -1,5 +1,0 @@
-defaults:
-  - resolve_liver
-
-image: ${dataset.data_dir}/20272_slide1_A1-2_DAPI.tiff
-coords: ${dataset.data_dir}/20272_slide1_A1-2_results.txt

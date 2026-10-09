@@ -4,12 +4,42 @@ import hashlib
 from pathlib import Path
 
 import pooch
+from filelock import FileLock
 from pooch import Pooch
 
 # from harpy import __version__
 __version__ = "0.0.1"  # Do not automatically update dataset Cache for each release, because it downloads a lot of data.
 
 BASE_URL = "https://objectstor.vib.be/spatial-hackathon-public/sparrow/public_datasets"
+
+
+class _LockedPooch(Pooch):
+    """Pooch registry that downloads and unpacks each file under a per-file lock.
+
+    Without the lock, processes that share the cache (e.g. pytest-xdist workers
+    or parallel jobs) can unpack the same archive at the same time, and one of
+    them may read files another is still rewriting. The lock spans the whole
+    ``fetch``, so a process that waited finds the file downloaded and unpacked,
+    and skips both steps.
+    """
+
+    def fetch(self, fname, processor=None, downloader=None, progressbar=False):
+        lock_path = Path(self.abspath) / f"{fname}.lock"
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with FileLock(lock_path):
+            return super().fetch(fname, processor=processor, downloader=downloader, progressbar=progressbar)
+
+
+def _locked(registry: Pooch) -> _LockedPooch:
+    """Copy a registry made by :func:`pooch.create` into a :class:`_LockedPooch`."""
+    return _LockedPooch(
+        path=registry.path,
+        base_url=registry.base_url,
+        registry=registry.registry,
+        urls=registry.urls,
+        retry_if_failed=registry.retry_if_failed,
+        allow_updates=registry.allow_updates,
+    )
 
 
 def get_registry(path: str | Path | None = None) -> Pooch:
@@ -92,7 +122,7 @@ def get_registry(path: str | Path | None = None) -> Pooch:
             "proteomics/macsima/sdata_tonsil.zarr.zip": "9a22f90480c28ce07c51c489f279ade0d545103354e153124a9cd2d9ab7f7a43",  # data used for benchmarking
         },
     )
-    return registry
+    return _locked(registry)
 
 
 def get_spatialdata_registry(path: str | Path | None = None) -> Pooch:
@@ -117,7 +147,7 @@ def get_spatialdata_registry(path: str | Path | None = None) -> Pooch:
             "spatialdata-sandbox/steinbock_io.zip": None,
         },
     )
-    return registry
+    return _locked(registry)
 
 
 def get_ome_registry(path: str | Path | None = None) -> Pooch:
@@ -142,7 +172,7 @@ def get_ome_registry(path: str | Path | None = None) -> Pooch:
             "Vectra-QPTIFF/perkinelmer/PKI_fields/LuCa-7color_%5b13860,52919%5d_1x1component_data.tif": "50c3cc12b4e644467cb752d3e5cc778bb7c43209b99f3cac0ba5f44bbbb28fcc",
         },
     )
-    return registry
+    return _locked(registry)
 
 
 def _calculate_sha256(file_path: str | Path):

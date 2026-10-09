@@ -64,9 +64,31 @@ mypy --ignore-missing-imports src/
 
 ## Automated commit checks
 
-Install a pre-commit hook to run all configured checks in `.pre-commit-config.yaml`:
+After setting up each clone, install the Git hooks using the project's environment:
 
+```bash
+.venv/bin/pre-commit install
 ```
-pre-commit install
-pre-commit run -a
+
+This installs both the commit and push hooks configured in `.pre-commit-config.yaml`.
+Installing the Python package alone does not activate Git hooks. The hooks use the
+pinned tool versions in the configuration, matching pre-commit.ci.
+
+Run checks on the files you changed before committing:
+
+```bash
+.venv/bin/pre-commit run --files path/to/changed_file.py
 ```
+
+If a hook modifies files, review the changes, stage them again, and retry the
+commit. A failed check after automatic fixes is expected: the fixes need to be
+included in the commit. Resolve any remaining reported lint errors manually.
+
+To reproduce pre-commit.ci's checks across all tracked files, run:
+
+```bash
+.venv/bin/pre-commit run --all-files --show-diff-on-failure
+```
+
+Run this broader check when changing hook versions or investigating a CI failure,
+since CI can report problems in files outside your commit.

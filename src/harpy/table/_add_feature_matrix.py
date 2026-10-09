@@ -1,22 +1,27 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import zarr
 from anndata import AnnData
-from anndata.io import write_elem
 from loguru import logger as log
 from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
+from harpy._storage._anndata import _MissingAnnDataElement, _read_anndata_element
 from harpy.image._image import _get_translation, _precondition, get_dataarray
 from harpy.table._metadata import _FEATURE_MATRIX_SCHEMA_VERSION
 from harpy.table._regionprops import _calculate_regionprop_features
-from harpy.table._table import ProcessTable, add_table
+from harpy.table.io._add_table import add_table
+from harpy.table.io._components import _check_in_memory_versus_storage_axes, _component_update_destination
+from harpy.table.io._components_by_region import add_table_components_by_region
+from harpy.table.io._write_by_region import _matrix_format
+from harpy.table.io._write_validation import _validated_observation_pairs
 from harpy.utils._aggregate import RasterAggregator, _get_mask_area
 from harpy.utils._keys import _CELL_INDEX, _FEATURE_MATRICES_KEY, _INSTANCE_KEY, _REGION_KEY
 from harpy.utils.utils import _da_unique, _make_list
@@ -82,8 +87,8 @@ def add_feature_matrix(
 
     The function supports two modes:
 
-    - If `table_name is None`, a new annotated table is created first and
-      `output_table_name` is required.
+    - If `table_name is None`, a new annotated table is prepared and published
+      after feature calculation succeeds. `output_table_name` is required.
     - If `table_name` is provided, the existing table is updated in place by
       writing or replacing `obsm[feature_key]` for the selected labels element or
       elements.
@@ -126,10 +131,17 @@ def add_feature_matrix(
         by index, by name, or as a list of indices or names. If `None`, all
         channels of the image element are used.
     overwrite_output_table
-        If `True`, overwrite `output_table_name` when creating a new table.
+        Allow replacing an output table that exists in the store of backed
+        SpatialData, when creating a new table. It only concerns the store: a
+        table attached but never saved is replaced without it. Ignored for
+        unbacked SpatialData.
     overwrite_feature_key
-        If `True`, replace an existing `adata.obsm[feature_key]` when updating
-        an existing table.
+        Allow updates to a feature matrix or its metadata that exist in the
+        store of backed SpatialData. It only concerns the store: an entry
+        present only in memory, never saved, is replaced without it. Ignored
+        for unbacked SpatialData.
+        In both modes, feature columns must retain their names and order;
+        measurements and source descriptions for unselected regions are preserved.
     to_coordinate_system
         Coordinate system or systems used when pairing image and labels elements.
         If a list is provided, it must either have length 1 or match
@@ -157,12 +169,42 @@ def add_feature_matrix(
     -------
     The updated SpatialData object.
 
+    Notes
+    -----
+    New feature matrices use NaN for observations outside the selected regions.
+    Existing matrices require a compatible feature schema and dense numeric
+    storage; incompatible schemas are rejected rather than clearing other regions.
+
+    In both storage modes, existing tables require valid SpatialData annotation
+    with unique region/instance pairs. Selected labels elements must exist in
+    ``sdata.labels`` and have observations in the target table.
+
+    If ``sdata`` is backed by a Zarr store, existing-table updates publish only
+    the feature matrix and its metadata, without reading or rewriting ``.X``.
+    Unselected rows retain their stored values, not unsaved local replacements.
+    The affected matrix is merged and rewritten in chunks, then attached lazily.
+    Matrix and metadata publication, attachment and finalization share rollback;
+    unrelated components and local annotations are preserved. The attached
+    observation identities must match the stored table in value and order.
+
+    Feature calculation and alignment complete before updating an existing table.
+    When unbacked, only the subsequent merge with retained measurements (or NaN
+    fills for a new entry) remains lazy: the attached Dask array represents the
+    complete updated matrix without forcing its materialization or writing to disk.
+    New-table creation still prepares a complete table before attachment.
+
+    External references to replaced components are not refreshed. Use the entries
+    in ``sdata.tables[table_name]`` after a successful update. The ``chunks``
+    parameter controls raster feature extraction, not table-writing chunks.
+
     See Also
     --------
     harpy.tb.aggregate_image
         Aggregate intensity-derived features into a table.
     harpy.tb.add_regionprops
         Add morphology features to table observations.
+    harpy.table.io.add_table_components_by_region
+        Update regional measurements and their metadata in an attached table.
 
     Examples
     --------
@@ -214,20 +256,26 @@ def add_feature_matrix(
                 "Parameter 'overwrite_feature_key' can only be used when updating an existing table, "
                 "which requires setting 'table_name' to a table name."
             )
-        if output_table_name in sdata.tables and not overwrite_output_table:
+        # overwrite_output_table only concerns the store: a table attached but
+        # never saved is replaced without it, as for unbacked SpatialData.
+        if (
+            sdata.path is not None
+            and not overwrite_output_table
+            and (Path(sdata.path) / "tables" / output_table_name).exists()
+        ):
             raise ValueError(
                 f"Table element '{output_table_name}' already exists in 'sdata.tables'. "
                 "Set 'overwrite_output_table=True' to replace it."
             )
-        sdata = _create_empty_feature_table(
+        adata = _prepare_feature_table(
             sdata,
             labels_name=labels_names,
-            output_table_name=output_table_name,
             region_key=region_key,
             instance_key=instance_key,
-            overwrite=overwrite_output_table,
         )
         target_table_name = output_table_name
+        existing_matrix = None
+        existing_metadata = None
     else:
         if output_table_name is not None:
             raise ValueError(
@@ -240,16 +288,36 @@ def add_feature_matrix(
                 "which requires setting 'table_name=None'."
             )
         target_table_name = table_name
-        # Validate that the target table exists, annotates the requested labels elements,
-        # and uses unique instance ids within each selected region.
-        ProcessTable(sdata, table_name=target_table_name, labels_name=labels_names)
+        if target_table_name not in sdata.tables:
+            raise ValueError(f"Table element {target_table_name!r} does not exist in sdata.tables.")
         adata = sdata.tables[target_table_name]
+        existing_matrix, existing_metadata = _existing_feature_matrix(
+            sdata,
+            table_name=table_name,
+            feature_key=feature_key,
+            feature_matrices_key=feature_matrices_key,
+        )
         region_key = adata.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]
         instance_key = adata.uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY]
+        # Identity validation above checks the table, not the requested sources.
+        # Unused region categories do not make a labels element selectable.
+        observed_regions = set(adata.obs[region_key].unique())
+        for labels_element in labels_names:
+            if labels_element not in sdata.labels:
+                raise ValueError(f"Labels element {labels_element!r} does not exist in sdata.labels.")
+            if labels_element not in observed_regions:
+                raise ValueError(
+                    f"Labels element {labels_element!r} has no observations in table {target_table_name!r}."
+                )
 
-    adata = sdata.tables[target_table_name]
-
-    if feature_key in adata.obsm and not overwrite_feature_key:
+    # overwrite_feature_key only concerns the store. When backed, existing_matrix
+    # and existing_metadata come from the store; an entry present only in memory
+    # is replaced without permission, as for unbacked SpatialData.
+    if (
+        sdata.path is not None
+        and not overwrite_feature_key
+        and (existing_matrix is not None or existing_metadata is not None)
+    ):
         raise ValueError(
             f"Feature matrix '{feature_key}' already exists in 'sdata.tables[{target_table_name!r}].obsm'. "
             "Set 'overwrite_feature_key=True' to replace it."
@@ -307,34 +375,17 @@ def add_feature_matrix(
     aligned = computed_features.set_index([region_key, instance_key]).reindex(pd.MultiIndex.from_frame(selected_keys))
     aligned_values = aligned.loc[:, columns].to_numpy(dtype=np.float64)
 
-    shape = (adata.n_obs, len(columns))
-    matrix = np.full(shape, np.nan, dtype=np.float64)
-    non_selected_count = int((~selected_mask).sum())
-    if feature_key in adata.obsm and overwrite_feature_key:
-        schema_matches = False
-        existing = np.asarray(adata.obsm[feature_key])
-        if existing.ndim == 2 and existing.shape[0] == adata.n_obs and existing.shape[1] == len(columns):
-            feature_matrices = adata.uns.get(feature_matrices_key, {})
-            if isinstance(feature_matrices, dict) and feature_key in feature_matrices:
-                existing_metadata = feature_matrices[feature_key]
-                existing_columns = (
-                    existing_metadata.get("feature_columns") if isinstance(existing_metadata, dict) else None
-                )
-                if existing_columns is not None:
-                    schema_matches = [str(column) for column in list(existing_columns)] == [
-                        str(column) for column in columns
-                    ]
-
-        if schema_matches:
-            existing = np.asarray(adata.obsm[feature_key], dtype=np.float64)
-            if existing.shape == shape:
-                matrix = existing.copy()
-        elif non_selected_count > 0:
-            log.warning(
-                "The schema of the existing feature matrix does not match the requested features. "
-                "Values for non-selected rows will be replaced with NaN."
+    if existing_matrix is not None:
+        # Check feature-matrix compatibility in both storage modes.
+        # The regional adapter independently validates updates before installation.
+        if _matrix_format(existing_matrix, label=f"Feature matrix {feature_key!r}") != "dense":
+            raise ValueError(
+                "Calculated features require an existing dense feature matrix; no format conversion occurs."
             )
-    matrix[selected_mask] = aligned_values
+        if existing_matrix.shape != (adata.n_obs, len(columns)):
+            raise ValueError(f"Feature matrix {feature_key!r} must preserve its shape and feature columns.")
+        if not np.can_cast(aligned_values.dtype, existing_matrix.dtype, casting="safe"):
+            raise ValueError(f"Calculated features cannot be safely cast to stored dtype {existing_matrix.dtype}.")
 
     # Per-pair fields are always stored as lists (one entry per labels/image pair) so
     # the metadata schema does not depend on how many pairs were requested.
@@ -343,7 +394,7 @@ def add_feature_matrix(
         "schema_version": _FEATURE_MATRIX_SCHEMA_VERSION,
         "backend": "numpy",
         "source_kind": _SOURCE_KIND,
-        "dtype": str(matrix.dtype),
+        "dtype": str(aligned_values.dtype if existing_matrix is None else existing_matrix.dtype),
         "source_label": [pair.labels_name for pair in pair_specs],
         "source_image": [pair.image_name for pair in pair_specs],
         "source_channels": source_channels,
@@ -351,25 +402,171 @@ def add_feature_matrix(
         "features": list(requested_features),
     }
 
-    adata.obsm[feature_key] = matrix
-    existing_metadata = adata.uns.get(feature_matrices_key, {})
-    if not isinstance(existing_metadata, dict):
-        existing_metadata = dict(existing_metadata)
-    existing_metadata[feature_key] = metadata
-    adata.uns[feature_matrices_key] = existing_metadata
+    if existing_matrix is not None:
+        metadata = _merge_feature_matrix_metadata(
+            existing_metadata,
+            metadata,
+            region_order=adata.obs[region_key].unique().tolist(),
+        )
 
-    if sdata.is_backed() and sdata.path is not None:
-        root = zarr.open_group(sdata.path, mode="r+", use_consolidated=False)
-        table_group = root["tables"][target_table_name]
-        write_elem(table_group["obsm"], feature_key, matrix)
+    if table_name is None:
+        # Build the complete result before publishing anything: calculation or
+        # validation failures must not create an empty table or replace an old one.
+        adata.obsm[feature_key] = aligned_values
+        adata.uns[feature_matrices_key] = {feature_key: metadata}
+        return add_table(
+            sdata,
+            adata=adata,
+            output_table_name=target_table_name,
+            region=labels_names,
+            region_key=region_key,
+            instance_key=instance_key,
+            overwrite=overwrite_output_table,
+        )
 
-        uns_group = table_group["uns"]
-        if feature_matrices_key not in uns_group:
-            write_elem(uns_group, feature_matrices_key, {})
-        write_elem(uns_group[feature_matrices_key], feature_key, metadata)
-        zarr.consolidate_metadata(sdata.path)
+    matrix_path = ("obsm", feature_key)
+    return add_table_components_by_region(
+        sdata,
+        table_name=target_table_name,
+        components={matrix_path: aligned_values, ("uns", feature_matrices_key, feature_key): metadata},
+        obs_identity=selected_keys,
+        fill_values={matrix_path: np.nan},
+        overwrite=overwrite_feature_key,
+    )
 
-    return sdata
+
+def _existing_feature_matrix(
+    sdata: SpatialData,
+    *,
+    table_name: str,
+    feature_key: str,
+    feature_matrices_key: str,
+):
+    """Read existing feature-matrix information after validating table identities.
+
+    Checks in both storage modes
+    ----------------------------
+    Validate the in-memory table's SpatialData annotation against ``adata.obs``:
+    identity columns must be valid, region/instance pairs non-null and unique,
+    and declared regions must match observed regions. Also require
+    ``adata.uns[feature_matrices_key]`` to be a mapping when present.
+
+    Unbacked SpatialData
+    -------------------
+    No storage comparison is needed. Return the existing in-memory feature
+    matrix and its metadata.
+
+    Backed SpatialData
+    ------------------
+    Perform these additional checks:
+
+    - Validate stored SpatialData annotation against stored observation identities.
+    - Compare in-memory and stored region/instance column names: they must match.
+    - Compare all in-memory and stored region/instance pairs: values and row order
+      must match, including observations outside the selected regions.
+    - Reject stored DataFrame-valued feature matrices before decoding their values.
+
+    Return the stored matrix as a read-only handle and read its feature metadata
+    eagerly. Stored entries, rather than unsaved local replacements, are used
+    to prepare the update. Matrix values are not loaded and no Dask graph is built.
+
+    Notes
+    -----
+    Missing matrix or metadata entries are returned as ``None`` independently.
+    The caller checks matrix compatibility and feature-metadata compatibility.
+
+    Run shared destination and identity checks here before expensive feature
+    calculation. ``add_table_components_by_region()`` checks them again when
+    applying the prepared update. For backed updates, both require the full
+    in-memory observation identities and order to match storage before attaching
+    the resulting matrix by position, including rows outside the updated regions.
+    """
+    adata, group = _component_update_destination(sdata, table_name=table_name)
+    in_memory_attrs = adata.uns.get(TableModel.ATTRS_KEY)
+    if not isinstance(in_memory_attrs, Mapping):
+        raise ValueError(f"Table {table_name!r} must have SpatialData annotation.")
+    # Reject invalid identities before feature calculation, using the same
+    # validators as the regional adapter rather than a separate comparison.
+    if group is None:
+        _validated_observation_pairs(adata.obs, in_memory_attrs, label="In-memory observation")
+    else:
+        _check_in_memory_versus_storage_axes(
+            table=adata, group=group, indices={"obs": adata.obs.index}, stored_new_raw_var=None
+        )
+    local_metadata = adata.uns.get(feature_matrices_key, {})
+    if not isinstance(local_metadata, Mapping):
+        raise ValueError(f"adata.uns[{feature_matrices_key!r}] must be a metadata mapping.")
+    if group is None:
+        return adata.obsm.get(feature_key), local_metadata.get(feature_key)
+
+    matrix_path = ("obsm", feature_key)
+    metadata_path = ("uns", feature_matrices_key, feature_key)
+    # DataFrame decoding is eager even in backed mode. Keep this guard to avoid
+    # loading its payload merely to prepare metadata; the writer also rejects it.
+    if "/".join(matrix_path) in group and group["/".join(matrix_path)].attrs.get("encoding-type") == "dataframe":
+        raise TypeError("Feature updates do not support DataFrame-valued obsm entries.")
+    try:
+        matrix = _read_anndata_element(group, matrix_path, mode="backed")
+    except _MissingAnnDataElement:
+        matrix = None  # No existing feature matrix to merge with.
+    try:
+        metadata = _read_anndata_element(group, metadata_path, mode="eager")
+    except _MissingAnnDataElement:
+        metadata = None
+    return matrix, metadata
+
+
+def _merge_feature_matrix_metadata(previous: object, current: dict, *, region_order: list[str]) -> dict:
+    """Keep source descriptions for retained regions without relabeling existing feature columns."""
+    if (
+        not isinstance(previous, Mapping)
+        or previous.get("schema_version") != _FEATURE_MATRIX_SCHEMA_VERSION
+        or previous.get("source_kind") != _SOURCE_KIND
+        or not np.array_equal(previous.get("feature_columns"), current["feature_columns"])
+    ):
+        raise ValueError(
+            "Existing feature metadata must have a compatible schema and identical feature columns in order."
+        )
+    if not np.array_equal(previous.get("source_channels"), current["source_channels"]):
+        raise ValueError("Existing and calculated feature matrices must use the same source channels in order.")
+
+    fields = ("source_label", "source_image", "coordinate_system")
+    previous_sources = []
+    for field in fields:
+        values = previous.get(field)
+        if not isinstance(values, (list, tuple, np.ndarray)) or np.ndim(values) != 1:
+            raise ValueError(f"Existing feature metadata requires a one-dimensional {field!r} sequence.")
+        previous_sources.append(list(values))
+    labels, images, coordinate_systems = previous_sources
+    if (
+        len(labels) != len(images)
+        or len(labels) != len(coordinate_systems)
+        or any(not isinstance(label, str) for label in labels)
+        or len(set(labels)) != len(labels)
+        or any(image is not None and not isinstance(image, str) for image in images)
+        or any(not isinstance(system, str) for system in coordinate_systems)
+    ):
+        raise ValueError(
+            "Existing feature metadata must contain one source image and coordinate system per unique label."
+        )
+
+    # Index the existing source descriptions by region.
+    sources = {}
+    for label, image, coordinate_system in zip(labels, images, coordinate_systems, strict=True):
+        sources[label] = (image, coordinate_system)
+
+    # Replace sources for the requested regions, retaining the others.
+    for label, image, coordinate_system in zip(
+        current["source_label"], current["source_image"], current["coordinate_system"], strict=True
+    ):
+        sources[label] = (image, coordinate_system)
+
+    # Store parallel lists in the table's region order.
+    merged = {**deepcopy(previous), **current}
+    merged["source_label"] = [label for label in region_order if label in sources]
+    merged["source_image"] = [sources[label][0] for label in merged["source_label"]]
+    merged["coordinate_system"] = [sources[label][1] for label in merged["source_label"]]
+    return merged
 
 
 def _normalize_requested_features(features: tuple[str, ...] | list[str]) -> list[str]:
@@ -446,14 +643,13 @@ def _broadcast_parameter(
     )
 
 
-def _create_empty_feature_table(
+def _prepare_feature_table(
     sdata: SpatialData,
     labels_name: Sequence[str],
-    output_table_name: str,
     region_key: str,
     instance_key: str,
-    overwrite: bool,
-) -> SpatialData:
+) -> AnnData:
+    """Prepare observation identities without attaching or publishing a table."""
     obs_frames: list[pd.DataFrame] = []
     uuid_value = str(uuid.uuid4())[:8]
     labels_names = list(labels_name)
@@ -486,14 +682,11 @@ def _create_empty_feature_table(
     table_obs[region_key] = pd.Categorical(table_obs[region_key], categories=list(labels_names))
     adata = AnnData(obs=table_obs)
 
-    return add_table(
-        sdata,
-        adata=adata,
-        output_table_name=output_table_name,
+    return TableModel.parse(
+        adata,
         region=list(labels_names),
         instance_key=instance_key,
         region_key=region_key,
-        overwrite=overwrite,
     )
 
 

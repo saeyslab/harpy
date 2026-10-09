@@ -5,8 +5,9 @@ from pandas.testing import assert_index_equal
 from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
-from harpy.table._table import ProcessTable, add_table
+from harpy.table._table import ProcessTable, _load_into_memory
 from harpy.table.cell_clustering._utils import _get_mapping
+from harpy.table.io._add_table import add_table
 from harpy.utils._keys import _CELLSIZE_KEY, _RAW_COUNTS_KEY, ClusteringKey
 
 
@@ -57,6 +58,11 @@ def weighted_channel_expression(
     -------
     The updated `sdata` object with the results of the weighted channel expression added to the specified `output_table_name`.
 
+    Notes
+    -----
+    The function loads both tables into memory: the matrices of a lazy or storage-backed table, such as one
+    that Harpy attaches after writing to a backed `SpatialData`, are read in full.
+
     See Also
     --------
     harpy.tb.cell_clustering_preprocess : prepares data for cell clustering.
@@ -70,7 +76,7 @@ def weighted_channel_expression(
     process_table_clustering = ProcessTable(
         sdata, labels_name=_labels_name, table_name=cell_clustering_table_name
     )  # get all of the labels elements, to keep API not too complex, do not allow subsetting labels elements
-    adata_cell_clustering = process_table_clustering._get_adata()
+    adata_cell_clustering = _load_into_memory(process_table_clustering._get_adata(), cell_clustering_table_name)
     missing_keys = [
         key
         for key in [ClusteringKey._CLUSTERING_KEY.value, ClusteringKey._METACLUSTERING_KEY.value]
@@ -86,7 +92,9 @@ def weighted_channel_expression(
     cell_counts_matrix = adata_cell_clustering.layers[raw_counts_key]
 
     process_table_intensity = ProcessTable(sdata, labels_name=None, table_name=table_name_pixel_cluster_intensity)
-    adata_cluster_intensity = process_table_intensity._get_adata()
+    adata_cluster_intensity = _load_into_memory(
+        process_table_intensity._get_adata(), table_name_pixel_cluster_intensity
+    )
 
     if clustering_key.value == ClusteringKey._METACLUSTERING_KEY.value:
         df_intensity = adata_cluster_intensity.uns[clustering_key.value].copy()

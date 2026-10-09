@@ -4,7 +4,6 @@ from pathlib import Path
 
 from spatialdata import SpatialData, read_zarr
 from spatialdata.models import TableModel
-from spatialdata.transformations import get_transformation, remove_transformation, set_transformation
 from spatialdata_io._constants._constants import VisiumHDKeys
 from spatialdata_io.readers.visium_hd import visium_hd as sdata_visium_hd
 
@@ -69,24 +68,11 @@ def visium_hd(
         bins_as_squares=bins_as_squares,
     )
 
-    if fullres_image_file is not None:  # Move full image from global to dataset_id coordinate system
-        transformations = get_transformation(sdata.images[f"{dataset_id}_full_image"], get_all=True)
-        set_transformation(
-            sdata.images[f"{dataset_id}_full_image"], transformations["global"], to_coordinate_system=dataset_id
-        )
-        remove_transformation(sdata.images[f"{dataset_id}_full_image"], to_coordinate_system="global")
-
-    if load_all_images:  # Move cytassist image from global to dataset_id coordinate system
-        transformations = get_transformation(sdata.images[f"{dataset_id}_cytassist_image"], get_all=True)
-        set_transformation(
-            sdata.images[f"{dataset_id}_cytassist_image"], transformations["global"], to_coordinate_system=dataset_id
-        )
-        remove_transformation(sdata.images[f"{dataset_id}_cytassist_image"], to_coordinate_system="global")
-
+    # spatialdata-io registers the full-resolution and CytAssist images in the
+    # dataset_id coordinate system already, so they need no transformation here.
     for table_name in [*sdata.tables]:
         adata = sdata[table_name]
         adata.var_names_make_unique()
-        adata.X = adata.X.tocsc()
 
         _old_instance_key = sdata[table_name].uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY]
         adata.obs.rename(columns={VisiumHDKeys.REGION_KEY: region_key, _old_instance_key: instance_key}, inplace=True)

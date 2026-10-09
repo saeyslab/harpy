@@ -59,7 +59,6 @@ def visium(
     for table_name in [*sdata.tables]:
         adata = sdata[table_name]
         adata.var_names_make_unique()
-        adata.X = adata.X.tocsc()
 
         _old_instance_key = sdata[table_name].uns[TableModel.ATTRS_KEY][TableModel.INSTANCE_KEY]
         _old_region_key = sdata[table_name].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]

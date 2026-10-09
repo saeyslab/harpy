@@ -9,7 +9,7 @@ their `.venv/bin/` path rather than sourcing `activate`:
 ```bash
 .venv/bin/pytest
 .venv/bin/python -m pytest
-.venv/bin/pre-commit run ruff --all-files
+.venv/bin/pre-commit run --files path/to/changed_file.py
 ```
 
 ## Test scope
@@ -28,7 +28,33 @@ Prefer focused commands such as:
 .venv/bin/pytest -q path/to/test_module.py::test_specific_behavior
 ```
 
+For broader runs, such as several test modules, a test directory, or the full
+suite when it is warranted, run the tests in parallel with pytest-xdist (part of
+the `test` extra):
+
+```bash
+.venv/bin/pytest -q -n auto path/to/test_directory
+```
+
+Run a single module or test sequentially: starting the workers costs more than
+it saves. Under xdist, `src/harpy/_tests/conftest.py` limits each worker's Dask
+threads.
+
 Run linting only on the changed or directly affected files where possible.
+
+## Pre-commit checks
+
+Before finishing changes, run pre-commit on the files you changed:
+
+```bash
+.venv/bin/pre-commit run --files <changed-file-paths>
+```
+
+Review any automatic fixes and rerun until checks pass. Report any unresolved
+failures. Do not install or update packages in `.venv`.
+
+Run across all tracked files only when changing hook versions or investigating a
+repository-wide CI failure.
 
 ## Code explanation references
 

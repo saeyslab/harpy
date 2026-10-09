@@ -17,7 +17,8 @@ from anndata import AnnData
 from loguru import logger as log
 from spatialdata import SpatialData
 
-from harpy.table._table import ProcessTable, add_table
+from harpy.table._table import ProcessTable, _load_into_memory
+from harpy.table.io._add_table import add_table
 from harpy.utils._keys import _ANNOTATION_KEY, _CLEANLINESS_KEY, _UNKNOWN_CELLTYPE_KEY
 
 
@@ -103,6 +104,9 @@ def score_genes(
     The deprecated keyword argument `celltype_column` is still accepted for backward compatibility;
     use `key_added` instead.
 
+    The function loads the table into memory: the matrices of a lazy or storage-backed table, such as one
+    that Harpy attaches after writing to a backed `SpatialData`, are read in full.
+
     See Also
     --------
     harpy.tb.score_genes_iter : iterative scoring algorithm.
@@ -114,7 +118,7 @@ def score_genes(
     )
 
     process_table_instance = ProcessTable(sdata, labels_name=labels_name, table_name=table_name)
-    adata = process_table_instance._get_adata()
+    adata = _load_into_memory(process_table_instance._get_adata(), table_name)
     # Load marker genes from csv
     if input_dict:
         log.warning(
@@ -315,6 +319,9 @@ def score_genes_iter(
     The deprecated keyword argument `celltype_column` is still accepted for backward compatibility;
     use `key_added` instead.
 
+    The function loads the table into memory: the matrices of a lazy or storage-backed table, such as one
+    that Harpy attaches after writing to a backed `SpatialData`, are read in full.
+
     See Also
     --------
     harpy.tb.score_genes : score genes using :func:`~scanpy.tl.score_genes`.
@@ -335,7 +342,7 @@ def score_genes_iter(
     kwargs["scale_score_p"] = scale_score_p
 
     process_table_instance = ProcessTable(sdata, labels_name=labels_name, table_name=table_name)
-    adata = process_table_instance._get_adata()
+    adata = _load_into_memory(process_table_instance._get_adata(), table_name)
 
     adata, celltypes_scored, celltypes_all = _annotate_celltype_iter(
         adata=adata,
@@ -756,12 +763,17 @@ def cluster_cleanliness(
 
         - Dictionary with cell types as keys and their corresponding colors as values.
 
+    Notes
+    -----
+    The function loads the table into memory: the matrices of a lazy or storage-backed table, such as one
+    that Harpy attaches after writing to a backed `SpatialData`, are read in full.
+
     See Also
     --------
     harpy.tb.score_genes : score genes using :func:`~scanpy.tl.score_genes`.
     """
     process_table_instance = ProcessTable(sdata, labels_name=labels_name, table_name=table_name)
-    adata = process_table_instance._get_adata()
+    adata = _load_into_memory(process_table_instance._get_adata(), table_name)
     celltypes = np.array(sorted(celltypes), dtype=str)
     color_dict = None
 

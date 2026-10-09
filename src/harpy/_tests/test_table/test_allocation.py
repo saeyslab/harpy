@@ -1,4 +1,5 @@
 from copy import deepcopy
+from pathlib import Path
 from types import SimpleNamespace
 
 import dask
@@ -15,10 +16,13 @@ from spatialdata._io.format import SpatialDataContainerFormatV01
 from spatialdata.models import Labels2DModel, Labels3DModel, PointsModel, TableModel
 from spatialdata.transformations import Affine, Identity, Scale, Sequence, Translation, set_transformation
 
+import harpy._storage._anndata as anndata_storage
 import harpy.table._aggregation_checkpoint as checkpoint_module
 import harpy.table._aggregation_writer as writer_module
 import harpy.table._allocation as aggregation_module
+import harpy.table.io._write as table_writer
 import harpy.transformations._transformations as transformation_module
+from harpy._tests.test_table.test_io.test_write import _store_bytes
 from harpy.table import validate_table
 from harpy.table._aggregation_contracts import _FeatureClassAggregationContract
 from harpy.table._allocation import aggregate_points, bin_counts
@@ -349,6 +353,27 @@ def test_aggregate_points_rejects_unbacked_input_before_pair_validation(sdata_tr
     assert 'sdata.write("sdata.zarr")' in str(error.value)
 
 
+@pytest.mark.parametrize("zarr_format", [2, 3])
+def test_aggregation_rejects_non_group_tables_before_preparation(tmp_path, monkeypatch, zarr_format):
+    """Reject an array at tables before aggregation setup, without modifying the store."""
+    path = tmp_path / "input.zarr"
+    root = zarr.open_group(str(path), mode="w", zarr_format=zarr_format)
+    root.create_array("tables", data=np.array([1], dtype=np.uint32))
+    sdata = SpatialData()
+    sdata.path = path
+    before = _store_bytes(path)
+
+    def unexpected_setup(*args, **kwargs):
+        raise AssertionError("Aggregation setup started despite an invalid tables container.")
+
+    monkeypatch.setattr(aggregation_module, "_normalize_aggregation_pairs", unexpected_setup)
+    with pytest.raises(ValueError, match="The tables container must be a Zarr group"):
+        aggregate_points(sdata, labels_name="labels", points_name="points", output_table_name="counts")
+
+    assert _store_bytes(path) == before
+    assert not list(tmp_path.glob(".input.zarr.harpy-*"))
+
+
 def test_aggregate_points_overwrite(sdata_transcripts: SpatialData):
     with pytest.raises(
         ValueError,
@@ -390,7 +415,7 @@ def test_aggregation_write_failure_preserves_existing_table_and_cleans_workspace
 
     reopened = read_zarr(sdata.path)
     assert (reopened.tables["table"].X != expected).nnz == 0
-    assert not list((tmp_path / "input.zarr" / "tables").glob(".harpy-aggregate-*"))
+    assert not list(tmp_path.glob(".input.zarr.harpy-*"))
 
 
 def test_aggregation_reopen_failure_rolls_back_published_table(monkeypatch, tmp_path):
@@ -403,9 +428,14 @@ def test_aggregation_reopen_failure_rolls_back_published_table(monkeypatch, tmp_
         output_table_name="table",
     )
     expected = sdata.tables["table"].X.to_memory()
+    original_read = writer_module._read_backed_table
 
-    def fail(*args, **kwargs):
-        raise RuntimeError("injected table reopen failure")
+    def fail(group):
+        # Staged validation must succeed; fail only after publication, when
+        # reopening the permanent path for attachment to sdata.
+        if group.name == "/tables/table":
+            raise RuntimeError("injected table reopen failure")
+        return original_read(group)
 
     monkeypatch.setattr(writer_module, "_read_backed_table", fail)
     with pytest.raises(RuntimeError, match="injected table reopen failure"):
@@ -421,8 +451,7 @@ def test_aggregation_reopen_failure_rolls_back_published_table(monkeypatch, tmp_
     assert (sdata.tables["table"].X.to_memory() != expected).nnz == 0
     reopened = read_zarr(sdata.path)
     assert (reopened.tables["table"].X != expected).nnz == 0
-    assert not list((tmp_path / "input.zarr" / "tables").glob(".harpy-aggregate-*"))
-    assert not list(tmp_path.glob(".input.zarr.harpy-aggregate-backup-*"))
+    assert not list(tmp_path.glob(".input.zarr.harpy-*"))
 
 
 @pytest.mark.parametrize("replace_existing", [False, True])
@@ -469,8 +498,7 @@ def test_aggregation_metadata_validation_failure_rolls_back_published_table(monk
         assert (reopened.tables["table"].X != expected).nnz == 0
         assert "feature_class_aggregation" not in reopened.tables["table"].uns
         validate_table(reopened, "table")
-    assert not list((sdata.path / "tables").glob(".harpy-aggregate-*"))
-    assert not list(tmp_path.glob(".input.zarr.harpy-aggregate-backup-*"))
+    assert not list(tmp_path.glob(".input.zarr.harpy-*"))
 
 
 def test_class_aware_aggregation_uses_panel_axis_and_adds_auxiliary_summaries(tmp_path):
@@ -512,8 +540,9 @@ def test_class_aware_aggregation_uses_panel_axis_and_adds_auxiliary_summaries(tm
     assert np.allclose(obs["auxiliary_points_fraction"], [0.5, 0.5, 1.0, 2 / 3])
     assert np.array_equal(np.asarray(expression.sum(axis=1)).ravel(), obs["n_endogenous_points"])
     assert not {"negative_points_per_feature", "system_control_points_per_feature"} & set(adata.obs)
+    canonical_centers = adata.obsm[CANONICAL_OBSM_KEY][order]
     assert np.allclose(
-        adata.obsm[CANONICAL_OBSM_KEY][order],
+        canonical_centers,
         [[0.0, 0.5, 0.5], [0.0, 0.5, 3.5], [0.0, 2.0, 0.5], [0.0, 0.5, 0.5]],
     )
     assert set(adata.uns[SPATIAL_COORDINATES_KEY][CANONICAL_OBSM_KEY]["regions"]) == {
@@ -524,8 +553,9 @@ def test_class_aware_aggregation_uses_panel_axis_and_adds_auxiliary_summaries(tm
     auxiliary = adata.obsm["auxiliary_feature_counts"]
     assert isinstance(auxiliary, CSRDataset)
     assert auxiliary.dtype == np.dtype(np.uint32)
+    auxiliary_counts = auxiliary.to_memory()[order].toarray()
     assert np.array_equal(
-        auxiliary.to_memory()[order].toarray(),
+        auxiliary_counts,
         np.array(
             [
                 [1, 0, 0, 1],
@@ -563,8 +593,18 @@ def test_class_aware_aggregation_uses_panel_axis_and_adds_auxiliary_summaries(tm
         "labels_b": {"points_element": "points_b", "coordinate_system": "sample_b"},
     }
 
+    # Returned handles must reject direct storage writes. The first ordered
+    # cell has both GeneA and Negative01 counts, so sparse writes target existing
+    # entries rather than failing because of a change in sparsity structure.
+    for matrix in (adata.X, auxiliary, adata.obsm[CANONICAL_OBSM_KEY]):
+        with pytest.raises(ValueError, match="read.only"):
+            matrix[order[0], 0] = 99
+
     roundtripped_sdata = read_zarr(output)
     roundtripped = roundtripped_sdata.tables["table"]
+    np.testing.assert_array_equal(roundtripped.X[order].toarray(), expression.toarray())
+    np.testing.assert_array_equal(roundtripped.obsm["auxiliary_feature_counts"][order].toarray(), auxiliary_counts)
+    np.testing.assert_array_equal(roundtripped.obsm[CANONICAL_OBSM_KEY][order], canonical_centers)
     roundtripped_metadata = roundtripped.uns["feature_class_aggregation"]
     assert roundtripped_metadata["expression_class"] == "Endogenous"
     assert roundtripped_metadata["count_columns"] == metadata["count_columns"]
@@ -615,22 +655,176 @@ def test_aggregate_points_writes_a_reopenable_zarr_v2_table(tmp_path):
     }
 
 
-def test_aggregate_points_publishes_without_spatialdata_write_element(monkeypatch, tmp_path):
+@pytest.mark.parametrize("expression_class", [None, "Endogenous"])
+def test_aggregate_points_writes_once_and_preserves_unrelated_elements(monkeypatch, tmp_path, expression_class):
+    """Stage each count matrix once, reuse shared publication, and leave other elements alone."""
     sdata = _backed(_class_aware_sdata(), tmp_path)
+    source_points = sdata.points["points_a"]
+    source_labels = sdata.labels["labels_a"]
+    root = zarr.open_group(str(sdata.path), mode="r+", use_consolidated=False)
+    # Metadata consolidation may inspect this group; no table decoder may open it.
+    root.require_group("tables").create_group("unrelated").attrs["encoding-type"] = "unsupported"
+    before = _store_bytes(sdata.path)
+    original_write = writer_module._write_anndata_element
+    written = []
+
+    def tracked_write(group, path, value, **kwargs):
+        written.append(path)
+        return original_write(group, path, value, **kwargs)
 
     def fail(*args, **kwargs):
         raise AssertionError("SpatialData.write_element() must not write the assembled table.")
 
     monkeypatch.setattr(sdata, "write_element", fail)
+    monkeypatch.setattr(writer_module, "_write_anndata_element", tracked_write)
     result = aggregate_points(
         sdata,
         labels_name="labels_a",
         points_name="points_a",
         to_coordinate_system="sample_a",
         output_table_name="table",
+        expression_class=expression_class,
     )
 
     assert isinstance(result.tables["table"].X, CSRDataset)
+    assert result.tables["table"].X.group.read_only
+    assert written.count(("X",)) == 1
+    assert written.count(("obsm", "auxiliary_feature_counts")) == (expression_class is not None)
+    assert sdata.points["points_a"] is source_points
+    assert sdata.labels["labels_a"] is source_labels
+    for key, value in before.items():
+        # Only the destination table and store-root metadata may change.
+        if "/" in key and not key.startswith("tables/table/"):
+            assert (sdata.path / key).read_bytes() == value
+    assert not list(tmp_path.glob(".input.zarr.harpy-*"))
+
+
+def test_aggregate_points_stores_dense_and_sparse_matrices_in_harpys_layout(monkeypatch, tmp_path):
+    """The aggregated point counts get the sparse layout, the canonical centers the dense layout.
+
+    The constant is lowered to 8 bytes because this small table would otherwise
+    fit in single chunks, the same as AnnData's default. With 8 bytes:
+
+    - sparse, the aggregated point counts in X and obsm["auxiliary_feature_counts"]:
+      their data, indices and indptr are stored in chunks of 8 // 8 = 1 entry,
+      which differs from the default for every array of more than one entry;
+    - dense, the canonical centers in obsm: stored one row per chunk with all
+      coordinates, since a row of coordinates is larger than 8 bytes.
+    """
+    monkeypatch.setattr(anndata_storage, "_STORED_CHUNK_BYTES", 8)
+    sdata = _backed(_class_aware_sdata(), tmp_path)
+
+    aggregate_points(
+        sdata,
+        labels_name="labels_a",
+        points_name="points_a",
+        to_coordinate_system="sample_a",
+        output_table_name="table",
+        expression_class="Endogenous",
+    )
+
+    group = zarr.open_group(str(sdata.path / "tables" / "table"), mode="r", use_consolidated=False)
+    for name in ("X", "obsm/auxiliary_feature_counts"):
+        assert group[name].attrs["encoding-type"] == "csr_matrix"
+        assert group[f"{name}/data"].shape[0] > 1
+        for array in ("data", "indices", "indptr"):
+            assert group[f"{name}/{array}"].chunks == (1,), f"{name}/{array}"
+    centers = group[f"obsm/{CANONICAL_OBSM_KEY}"]
+    assert centers.shape[0] > 1
+    assert centers.chunks == (1, centers.shape[1])
+
+
+@pytest.mark.parametrize("zarr_format", [2, 3])
+@pytest.mark.parametrize("replace_existing", [False, True])
+@pytest.mark.parametrize(
+    "failure", ["checkpoint", "staging", "parents", "publication", "installation", "validation", "finalization"]
+)
+def test_aggregation_shared_publication_restores_store_and_attachment(
+    tmp_path, monkeypatch, zarr_format, replace_existing, failure
+):
+    """Failure restores disk bytes and the original attached table, or its absence.
+
+    A first aggregation must not leave a new tables container after failure.
+    Replacement must preserve the old table. Installation fails *after*
+    assignment; finalization fails *after* rewriting root metadata, and keeps
+    failing if retried. Recovery must therefore restore saved metadata bytes.
+    """
+    sdata = _class_aware_sdata()
+    path = tmp_path / "input.zarr"
+    sdata.write(path, sdata_formats=SpatialDataContainerFormatV01() if zarr_format == 2 else None)
+    sdata = read_zarr(path)
+    options = {
+        "labels_name": "labels_a",
+        "points_name": "points_a",
+        "to_coordinate_system": "sample_a",
+        "output_table_name": "table",
+    }
+    if replace_existing:
+        aggregate_points(sdata, **options)
+    previous = sdata.tables.get("table")
+    zarr.consolidate_metadata(str(path))
+    before = _store_bytes(path)
+    original_write = writer_module._write_anndata_element
+    original_parents = table_writer._create_destination_parents
+    original_rename = Path.rename
+    original_install = type(sdata.tables).__setitem__
+    original_validate = writer_module._validate_table_without_canonical
+    original_consolidate = zarr.consolidate_metadata
+    consolidation_calls = []
+
+    def failed_checkpoint(*args, **kwargs):
+        raise RuntimeError("checkpoint failure")
+
+    def failed_write(*args, **kwargs):
+        original_write(*args, **kwargs)
+        raise RuntimeError("staging failure")
+
+    def failed_parents(*args, **kwargs):
+        original_parents(*args, **kwargs)
+        raise RuntimeError("parents failure")
+
+    def failed_rename(self, target):
+        if ".harpy-aggregate-" in str(self) and self.name == "table":
+            raise RuntimeError("publication failure")
+        return original_rename(self, target)
+
+    def failed_install(self, key, value):
+        original_install(self, key, value)
+        if self is sdata.tables and key == "table" and value is not previous:
+            raise RuntimeError("installation failure")
+
+    def failed_validate(*args, **kwargs):
+        original_validate(*args, **kwargs)
+        raise RuntimeError("validation failure")
+
+    def failed_consolidate(*args, **kwargs):
+        consolidation_calls.append(True)
+        original_consolidate(*args, **kwargs)
+        raise RuntimeError("finalization failure")
+
+    if failure == "checkpoint":
+        monkeypatch.setattr(aggregation_module, "_stage_aggregation_checkpoint", failed_checkpoint)
+    elif failure == "staging":
+        monkeypatch.setattr(writer_module, "_write_anndata_element", failed_write)
+    elif failure == "parents":
+        monkeypatch.setattr(table_writer, "_create_destination_parents", failed_parents)
+    elif failure == "publication":
+        monkeypatch.setattr(Path, "rename", failed_rename)
+    elif failure == "installation":
+        monkeypatch.setattr(type(sdata.tables), "__setitem__", failed_install)
+    elif failure == "validation":
+        monkeypatch.setattr(writer_module, "_validate_table_without_canonical", failed_validate)
+    else:
+        monkeypatch.setattr(zarr, "consolidate_metadata", failed_consolidate)
+
+    with pytest.raises(RuntimeError, match=failure):
+        aggregate_points(sdata, **options, overwrite=replace_existing)
+
+    assert _store_bytes(path) == before
+    assert sdata.tables.get("table") is previous
+    assert not list(tmp_path.glob(".input.zarr.harpy-*"))
+    if failure == "finalization":
+        assert len(consolidation_calls) == 1
 
 
 def test_ordinary_aggregation_uses_label_centers_without_class_metadata(tmp_path):
@@ -1431,7 +1625,7 @@ def test_nonfinite_source_coordinates_fail_without_publishing_table_and_clean_wo
         )
 
     assert "table" not in sdata.tables
-    assert not list((tmp_path / "input.zarr" / "tables").glob(".harpy-aggregate-*"))
+    assert not list(tmp_path.glob(".input.zarr.harpy-*"))
 
 
 def test_assign_points_to_labels_graph_construction_does_not_read_sources():

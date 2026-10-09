@@ -11,7 +11,8 @@ from loguru import logger as log
 from sklearn.cluster import KMeans
 from spatialdata import SpatialData
 
-from harpy.table._table import ProcessTable, add_table
+from harpy.table._table import ProcessTable, _require_in_memory_table, _warn_deprecated_wrapper
+from harpy.table.io._add_table import add_table
 
 
 def kmeans(
@@ -38,6 +39,14 @@ def kmeans(
     It optionally computes a UMAP (Uniform Manifold Approximation and Projection) for dimensionality reduction
     and ranks genes based on their contributions to the clustering. The clustering results, along with optional
     UMAP and gene ranking, are added to the `sdata.tables[output_table_name]` for downstream analysis.
+
+    .. deprecated:: 0.5.0
+       `harpy.tb.kmeans` is deprecated and will be removed in a future release. Cluster the table directly, for
+       example with :class:`~sklearn.cluster.KMeans` and scanpy, then write the results back with
+       :func:`~harpy.tb.io.add_table_updates`.
+
+       Until its removal, `harpy.tb.kmeans` only accepts an in-memory table, and raises a ``ValueError`` for a
+       lazy or storage-backed one: read the store with ``harpy.io.read_zarr(..., table_mode="eager")``.
 
     Parameters
     ----------
@@ -97,7 +106,9 @@ def kmeans(
     harpy.tb.preprocess_transcriptomics : preprocess transcriptomics data.
     harpy.tb.preprocess_proteomics : preprocess proteomics data.
     """
+    _warn_deprecated_wrapper("kmeans")
     cluster = Cluster(sdata, labels_name=labels_name, table_name=table_name)
+    _require_in_memory_table(sdata, table_name, "kmeans")
     cluster.cluster(
         output_table_name=output_table_name,
         cluster_callable=_kmeans,
@@ -143,6 +154,14 @@ def leiden(
     It optionally computes a UMAP (Uniform Manifold Approximation and Projection) for dimensionality reduction
     and ranks genes based on their contributions to the clustering. The clustering results, along with optional
     UMAP and gene ranking, are added to the `sdata.tables[output_table_name]` for downstream analysis.
+
+    .. deprecated:: 0.5.0
+       `harpy.tb.leiden` is deprecated and will be removed in a future release. Call scanpy directly on the
+       table, for example :func:`~scanpy.pp.neighbors` and :func:`~scanpy.tl.leiden`, then write the results
+       back with :func:`~harpy.tb.io.add_table_updates`.
+
+       Until its removal, `harpy.tb.leiden` only accepts an in-memory table, and raises a ``ValueError`` for a
+       lazy or storage-backed one: read the store with ``harpy.io.read_zarr(..., table_mode="eager")``.
 
     Parameters
     ----------
@@ -204,7 +223,9 @@ def leiden(
     harpy.tb.preprocess_transcriptomics : preprocess transcriptomics data.
     harpy.tb.preprocess_proteomics : preprocess proteomics data.
     """
+    _warn_deprecated_wrapper("leiden")
     cluster = Cluster(sdata, labels_name=labels_name, table_name=table_name)
+    _require_in_memory_table(sdata, table_name, "leiden")
     sdata = cluster.cluster(
         output_table_name=output_table_name,
         cluster_callable=_leiden,

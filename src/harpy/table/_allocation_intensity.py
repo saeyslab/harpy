@@ -15,8 +15,8 @@ from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
 from harpy.image._image import _get_translation, get_dataarray
-from harpy.table._table import add_table
 from harpy.table._utils import _sanity_check_append_region
+from harpy.table.io._add_table import add_table
 from harpy.utils._aggregate import RasterAggregator
 from harpy.utils._keys import _CELL_INDEX, _CELLSIZE_KEY, _INSTANCE_KEY, _REGION_KEY, _SPATIAL
 

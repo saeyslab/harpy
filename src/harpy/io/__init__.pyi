@@ -2,6 +2,7 @@ from ._cosmx import CosmxSample, add_cosmx_samples, cosmx, validate_cosmx_store
 from ._macsima import macsima
 from ._merscope import merscope
 from ._phenocycler import phenocycler
+from ._read_zarr import read_zarr
 from ._spatial_data import create_sdata
 from ._transcripts import (
     read_merscope_transcripts,
@@ -24,6 +25,7 @@ __all__ = [
     "phenocycler",
     "convert_to_zarr_2",
     "create_sdata",
+    "read_zarr",
     "read_merscope_transcripts",
     "read_resolve_transcripts",
     "read_stereoseq_transcripts",

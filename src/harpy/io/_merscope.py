@@ -28,7 +28,7 @@ from harpy.image._image import _get_spatial_element
 from harpy.image._rasterize import rasterize
 from harpy.io._transcripts import read_transcripts
 from harpy.shape import add_shapes
-from harpy.table._table import add_table
+from harpy.table.io._add_table import add_table
 from harpy.utils._keys import _CELL_INDEX, _INSTANCE_KEY, _REGION_KEY, _SPATIAL
 from harpy.utils.utils import _affine_transform
 

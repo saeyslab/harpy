@@ -1,7 +1,8 @@
 from loguru import logger as log
 from spatialdata import SpatialData
 
-from harpy.table._table import ProcessTable, add_table
+from harpy.table._table import ProcessTable, _warn_deprecated_wrapper
+from harpy.table.io._add_table import add_table
 from harpy.utils._keys import _ANNOTATION_KEY
 
 try:
@@ -21,6 +22,10 @@ def nhood_enrichment(
 ) -> SpatialData:
     """
     Calculate the nhood enrichment using squidpy via :func:`squidpy.gr.spatial_neighbors` and :func:`squidpy.gr.nhood_enrichment`.
+
+    .. deprecated:: 0.5.0
+       `harpy.tb.nhood_enrichment` is deprecated and will be removed in a future release. Call squidpy directly
+       on the table, then write the results back with :func:`~harpy.tb.io.add_table_updates`.
 
     Parameters
     ----------
@@ -46,6 +51,7 @@ def nhood_enrichment(
     -------
     The updated :class:`spatialdata.SpatialData` object.
     """
+    _warn_deprecated_wrapper("nhood_enrichment")
     process_table_instance = ProcessTable(sdata, labels_name=labels_name, table_name=table_name)
     adata = process_table_instance._get_adata()
 

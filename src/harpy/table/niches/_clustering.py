@@ -11,7 +11,8 @@ from sklearn.decomposition import LatentDirichletAllocation
 from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
-from harpy.table._table import ProcessTable, add_table
+from harpy.table._table import ProcessTable, _load_into_memory
+from harpy.table.io._add_table import add_table
 from harpy.table.niches._composition import _compute_nhood_composition, _compute_nhood_counts
 from harpy.utils._keys import _ANNOTATION_KEY
 
@@ -101,9 +102,14 @@ def nhood_kmeans(
     Returns
     -------
     The updated SpatialData object.
+
+    Notes
+    -----
+    The function loads the table into memory: the matrices of a lazy or storage-backed table, such as one
+    that Harpy attaches after writing to a backed `SpatialData`, are read in full.
     """
     process_table_instance = ProcessTable(sdata, labels_name=labels_name, table_name=table_name)
-    adata = process_table_instance._get_adata()
+    adata = _load_into_memory(process_table_instance._get_adata(), table_name)
 
     if key_added in adata.obs.columns:
         log.warning(f"The column '{key_added}' already exists in the AnnData object. Proceeding to overwrite it.")
@@ -259,9 +265,14 @@ def nhood_lda(
     Returns
     -------
     The updated SpatialData object.
+
+    Notes
+    -----
+    The function loads the table into memory: the matrices of a lazy or storage-backed table, such as one
+    that Harpy attaches after writing to a backed `SpatialData`, are read in full.
     """
     process_table_instance = ProcessTable(sdata, labels_name=labels_name, table_name=table_name)
-    adata = process_table_instance._get_adata()
+    adata = _load_into_memory(process_table_instance._get_adata(), table_name)
 
     if key_added in adata.obs.columns:
         log.warning(f"The column '{key_added}' already exists in the AnnData object. Proceeding to overwrite it.")

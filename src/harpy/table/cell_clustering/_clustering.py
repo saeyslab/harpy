@@ -8,9 +8,10 @@ from anndata import AnnData
 from loguru import logger as log
 from spatialdata import SpatialData
 
-from harpy.table._table import ProcessTable, add_table
+from harpy.table._table import ProcessTable, _load_into_memory
 from harpy.table.cell_clustering._preprocess import cell_clustering_preprocess
 from harpy.table.cell_clustering._utils import _get_mapping
+from harpy.table.io._add_table import add_table
 from harpy.utils._keys import _CELL_INDEX, _CELLSIZE_KEY, _INSTANCE_KEY, _RAW_COUNTS_KEY, _REGION_KEY, ClusteringKey
 
 try:
@@ -112,6 +113,11 @@ def flowsom(
 
         - An instance of :class:`flowsom.FlowSOM` containing the trained FlowSOM model.
 
+    Notes
+    -----
+    The function loads the table that it creates into memory before clustering it: on a backed `SpatialData`,
+    Harpy attaches that table with lazy matrices, which are then read in full.
+
     See Also
     --------
     :func:`~harpy.im.flowsom` : FlowSOM pixel clustering.
@@ -134,7 +140,10 @@ def flowsom(
     )
 
     process_table_instance = ProcessTable(sdata, labels_name=cells_labels_name, table_name=output_table_name)
-    adata = process_table_instance._get_adata(index_names_var=index_names_var, index_positions_var=index_positions_var)
+    adata = _load_into_memory(
+        process_table_instance._get_adata(index_names_var=index_names_var, index_positions_var=index_positions_var),
+        output_table_name,
+    )
 
     adata, fsom = _flowsom(
         adata,

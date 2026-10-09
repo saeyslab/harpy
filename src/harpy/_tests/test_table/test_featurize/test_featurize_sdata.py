@@ -8,8 +8,8 @@ from spatialdata import SpatialData, read_zarr
 from spatialdata.models import TableModel
 
 from harpy.image import add_image, add_labels
-from harpy.table._table import add_table
 from harpy.table.featurization._featurize import extract_instances, featurize
+from harpy.table.io._add_table import add_table
 from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY
 from harpy.utils.utils import _dummy_embedding, _to_numpy
 

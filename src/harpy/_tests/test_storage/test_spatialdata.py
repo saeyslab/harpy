@@ -19,7 +19,7 @@ from harpy._storage import _spatialdata
 from harpy.image._image import add_image, add_labels, get_dataarray
 from harpy.points._points import add_points
 from harpy.shape._shape import add_shapes
-from harpy.table._table import add_table
+from harpy.table.io._add_table import add_table
 
 
 def _make_element(kind):
@@ -80,9 +80,13 @@ def test_replacement_rejects_other_elements_depending_on_destination(tmp_path, m
 
 
 @pytest.mark.parametrize("zarr_format", [2, 3])
-@pytest.mark.parametrize("kind", ["images", "labels", "points", "shapes", "tables"])
+@pytest.mark.parametrize("kind", ["images", "labels", "points", "shapes"])
 def test_existing_overwrite_callers_serialize_once_and_reopen_final_paths(tmp_path, monkeypatch, kind, zarr_format):
-    """Exercise each public caller, including a lazy replacement reading its original.
+    """Exercise public callers that serialize through SpatialData, including lazy self-overwrites.
+
+    Tables are excluded: add_table() uses Harpy's AnnData serializer, not
+    SpatialData._write_element(). Its serialize-once and permanent-path reopening
+    checks live in test_table/test_io/test_add_table.py.
 
     Single-scale rasters become multiscale, so reopening against stale
     consolidated metadata would also fail the round-trip assertions.
@@ -91,7 +95,7 @@ def test_existing_overwrite_callers_serialize_once_and_reopen_final_paths(tmp_pa
     unrelated = sdata["unrelated"]
     root_attrs = deepcopy(sdata.attrs)
     original = sdata["element"]
-    transformations = None if kind == "tables" else get_transformation(original, get_all=True)
+    transformations = get_transformation(original, get_all=True)
     writes = []
     writer = SpatialData._write_element
 
@@ -133,13 +137,9 @@ def test_existing_overwrite_callers_serialize_once_and_reopen_final_paths(tmp_pa
             transformations=transformations,
             overwrite=True,
         )
-    elif kind == "shapes":
+    else:
         expected = original.assign(quality=original.quality + 1)
         result = add_shapes(sdata, input=expected, output_shapes_name="element", overwrite=True)
-    else:
-        expected = original.copy()
-        expected.X += 1
-        result = add_table(sdata, adata=expected, output_table_name="element", region=None, overwrite=True)
 
     assert result is sdata
     assert len(writes) == 1
@@ -151,8 +151,7 @@ def test_existing_overwrite_callers_serialize_once_and_reopen_final_paths(tmp_pa
     reopened = read_zarr(sdata.path)
     for container in (sdata, reopened):
         actual = container["element"]
-        if transformations is not None:
-            assert get_transformation(actual, get_all=True) == transformations
+        assert get_transformation(actual, get_all=True) == transformations
         if kind in {"images", "labels"}:
             np.testing.assert_array_equal(get_dataarray(container, "element").values, expected)
             assert set(actual.children) == {"scale0", "scale1"}
@@ -160,13 +159,8 @@ def test_existing_overwrite_callers_serialize_once_and_reopen_final_paths(tmp_pa
                 assert get_dataarray(container, "element").c.values.tolist() == ["DAPI"]
         elif kind == "points":
             pd.testing.assert_frame_equal(actual.compute(), expected)
-        elif kind == "shapes":
-            assert_geodataframe_equal(actual, expected)
         else:
-            np.testing.assert_array_equal(actual.X, expected.X)
-            pd.testing.assert_frame_equal(actual.obs, expected.obs)
-            pd.testing.assert_frame_equal(actual.var, expected.var)
-            assert actual.uns == expected.uns
+            assert_geodataframe_equal(actual, expected)
     group = zarr.open_group(str(sdata.path), mode="r")
     assert group.metadata.zarr_format == zarr_format
     assert group[kind]["element"].metadata.zarr_format == zarr_format

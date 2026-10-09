@@ -17,7 +17,8 @@ from scipy.sparse import csr_matrix
 from spatialdata import SpatialData
 
 from harpy.image._image import _precondition
-from harpy.table._table import ProcessTable, add_table
+from harpy.table._table import ProcessTable
+from harpy.table.io._add_table import add_table
 from harpy.utils._featurize import Featurizer
 from harpy.utils._keys import _CELL_INDEX, _INSTANCE_KEY, _REGION_KEY
 from harpy.utils.utils import _dummy_embedding, _make_list

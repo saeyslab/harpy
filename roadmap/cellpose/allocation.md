@@ -3,7 +3,7 @@
 ## Status
 
 Thirteen numbered implementation slices are planned, with Slice 7 split into
-parts a and b and Slice 11 into parts a through f; Slices 1 through 9 are
+parts a and b and Slice 11 into parts a through g; Slices 1 through 9 are
 implemented:
 
 1. patch the CosMx reader and establish the generic Harpy feature-panel
@@ -24,8 +24,8 @@ implemented:
    implemented;
 10. support point-to-label assignment through general invertible SpatialData
     transformations into a shared coordinate system;
-11. add QC, shared element I/O, generic panel preparation and validation in six
-    independently scoped steps:
+11. add QC, shared element and table I/O, generic panel preparation and
+    validation in seven independently scoped steps:
     - **11a:** original-point summary computation through
       `hp.qc.summarize_points` and `PointsSummary`, without plotting changes;
     - **11b:** share element publication and rollback across existing I/O
@@ -42,12 +42,27 @@ implemented:
       heatmaps — implemented; **11e.v** density-only marimo overview — implemented;
       **11e.vi** optional spatial-density smoothing in Harpy; and **11e.vii**
       marimo smoothed-density overview;
-    - **11f:** table-level summary computation through `hp.qc.summarize_table`
+    - **11f:** modular AnnData table I/O for SpatialData Zarr stores, in eleven
+      separate parts: **11f.i** public contracts — defined and documented;
+      **11f.ii** selective component and lazy complete-table reading — implemented;
+      **11f.iii** Harpy SpatialData reader with selective table modes — implemented;
+      **11f.iv** scoped writing and safe publication — implemented;
+      **11f.v** creation of raw data through component writes — implemented;
+      **11f.vi** region-wise `.obsm` writing — implemented; **11f.vii** integration
+      with existing Harpy APIs in three implementation slices: **a)** `hp.tb.io.add_table` — implemented,
+      **b)** `hp.tb.add_feature_matrix` — implemented, **c)** aggregation and canonical-component writers — implemented;
+      **11f.viii** safe deletion of optional AnnData components — implemented;
+      **11f.ix** SpatialData-aware table-component updates — implemented;
+      **11f.x** SpatialData-aware regional table-component updates in two implementation slices:
+      **a)** implement `hp.tb.io.add_table_components_by_region()` — implemented,
+      **b)** migrate `hp.tb.add_feature_matrix()` for existing-table regional updates — implemented;
+      **11f.xi** affected-chunk regional-write optimization, after the first ten parts;
+      a separate napari-harpy persistence migration also follows the first eight
+      parts and does not depend on this optimization;
+    - **11g:** table-level summary computation through `hp.qc.summarize_table`
       and `TableSummary`, with plotting integration;
 
-12. support general lazy reopening of persisted AnnData tables through
-    SpatialData; and
-13. optionally optimize Slice 7b's latency after phase-level benchmarks identify
+12. optionally optimize Slice 7b's latency after phase-level benchmarks identify
     material checkpoint or writer overhead.
 
 Slice 2 replaces the current single-run reader surface with one coherent,
@@ -95,12 +110,33 @@ Part 11e.vi adds optional smoothing inside Harpy's plotter, and 11e.vii
 separately adopts it as the notebook's default density view, with sigma equal
 to the nominal bin size and no smoothing controls. Both retain the existing
 flat-bin rendering; rendering interpolation remains deferred.
-Slice 11f provides the symmetric read-only table-summary workflow, deriving
-per-instance metrics and class-level overviews from the class-aware table before
-plotting. Slice 12 is an independent integration follow-up that makes later
-SpatialData Zarr reads retain lazy AnnData matrices. It is not required for Slice 7b's
-out-of-core writing or same-process result. Slice 13 is an optional,
-benchmark-driven follow-up: it may reduce repeated checkpoint reads and
+Slice 11f establishes general table I/O independently of QC or preprocessing:
+callers explicitly read or replace a complete AnnData table or selected
+components without materializing unrelated matrices. Its first seven parts specify
+the public contracts, implement readers, writers, raw creation and region-wise `.obsm` updates,
+then integrate existing Harpy entry points using the shared storage infrastructure.
+Part 11f.iii composes Part 11f.ii's table reader with SpatialData's public
+non-table reader in `hp.io.read_zarr()`, selecting tables and their read mode
+without changing `spatialdata.read_zarr()` or adding another decoder. This
+reader follows Part 11f.ii and does not depend on the planned writers.
+Part 11f.viii then adds safe deletion of optional components. Part 11f.ix adds
+SpatialData-aware component APIs for coordinated in-memory and on-disk updates,
+while retaining the path-based APIs. Part 11f.x a) adds the corresponding regional
+adapter, coordinating regional `.obsm` persistence and selective in-memory
+installation. Part 11f.x b) then migrates `hp.tb.add_feature_matrix()` to that
+adapter for existing-table regional updates, retaining its separate new-table
+creation path. Part 11f.xi is a later optimization that
+rewrites only affected chunks of eligible regional
+`.obsm` updates; the initial regional writer still stages complete components.
+Napari-harpy's existing persistence behavior informs this design without constraining the new
+public API; a separate follow-up migrates its application-specific adapter to
+Harpy's public I/O after deletion support is available. Neither Parts 11f.viii–xi
+nor that migration are prerequisites for Slice 11g, which
+provides the symmetric read-only table-summary workflow, deriving per-instance metrics
+and class-level overviews from the class-aware table before plotting.
+The new reader is not required for Slice 7b's out-of-core writing or
+same-process result. Slice 12 is an
+optional, benchmark-driven follow-up: it may reduce repeated checkpoint reads and
 small-partition overhead, but must preserve Slice 7b's bounded-memory and
 publication contracts.
 
@@ -274,7 +310,7 @@ ordering is deterministic rather than a claim of biological precedence.
 
 Slice 5 uses the complete relation to resolve its shared expression axis and
 feature classes, and retains each non-expression feature-list length as a
-table-local auxiliary-class feature-count snapshot for Slice 11f QC. Slice 11a
+table-local auxiliary-class feature-count snapshot for Slice 11g QC. Slice 11a
 additionally uses the actual control-feature names. A categorical transcript column
 contains only categories represented by the ingested points and cannot, by
 itself, preserve the feature-to-class relationship for a panel feature with no
@@ -1358,7 +1394,7 @@ auxiliary_points_fraction =
 Do not persist `negative_points_per_feature` or
 `system_control_points_per_feature` in `.obs`. They are deterministic rescalings
 of the raw class counts by the panel feature counts and add no independent table
-information. Slice 11f table summarization derives them on demand from the raw
+information. Slice 11g table summarization derives them on demand from the raw
 count columns and the table-local auxiliary-class feature-count snapshot for
 downstream plotting.
 
@@ -1482,12 +1518,12 @@ column. No auxiliary class produces a persisted per-feature rate. Validate the
 complete multi-region request and shared
 `feature_class_aggregation` configuration before writing the output table.
 
-### Boundary with Slices 11a, 11e, and 11f
+### Boundary with Slices 11a, 11e, and 11g
 
 The `.obs` summaries describe only auxiliary points that land inside an instance
 mask. For CosMx these auxiliary classes are controls, making the summaries
 suitable for cell-level histograms and violin plots of the raw class counts and
-`auxiliary_points_fraction`. Slice 11f may additionally derive the
+`auxiliary_points_fraction`. Slice 11g may additionally derive the
 following per-instance plotting metrics on demand:
 
 ```text
@@ -2592,9 +2628,9 @@ existing `aggregate_points` return contract; it neither calls an experimental
 AnnData lazy reader nor establishes a general SpatialData lazy-reading
 contract.
 
-Making a later `spatialdata.read_zarr()` call reopen tables lazily is explicitly
-deferred to a separate follow-up slice and must not require changes to
-SpatialData internals in Slice 7b.
+General store reopening with selective, lazy table reads is provided by
+`hp.io.read_zarr()` in Part 11f.iii. Ordinary `spatialdata.read_zarr()` behavior
+remains unchanged; neither implementation patches SpatialData's private reader internals.
 
 ### Implementation structure
 
@@ -3449,7 +3485,7 @@ is not required. Slice 11c adds explicit panel registration for existing points
 created outside Harpy without changing this summary contract. The original-point
 summaries may run before or after segmentation or aggregation and do not depend
 on an instance-label raster or an AnnData table. Table-level summary computation
-and plotting belong to Slice 11f and are not required to implement either
+and plotting belong to Slice 11g and are not required to implement either
 Slice 11a or Slice 11e.
 
 This operation complements the instance-level `.obs` metrics. It must use the
@@ -4866,12 +4902,12 @@ As part of 11e.ii, align the table-input names with `spatial_bin_histogram`.
 The prefix identifies the source; singular/plural distinguishes one histogram
 from a collection of histograms:
 
-| Current name                           | Canonical name           | Purpose                                                  |
-| -------------------------------------- | ------------------------ | -------------------------------------------------------- |
-| `hp.qc.metric_histogram`               | `hp.qc.table_histogram`  | One metric column from a table's `.obs` or `.var`.       |
-| `hp.qc.metrics_histogram`              | `hp.qc.table_histograms` | Multiple table metrics arranged in subplots.             |
-| `hp.qc.spatial_bin_histogram` | Unchanged                | One feature class's spatial-bin count distribution. |
-| `hp.qc.spatial_bin_histogram_by_feature` | New entry point | One feature's spatial-bin count distribution. |
+| Current name                             | Canonical name           | Purpose                                             |
+| ---------------------------------------- | ------------------------ | --------------------------------------------------- |
+| `hp.qc.metric_histogram`                 | `hp.qc.table_histogram`  | One metric column from a table's `.obs` or `.var`.  |
+| `hp.qc.metrics_histogram`                | `hp.qc.table_histograms` | Multiple table metrics arranged in subplots.        |
+| `hp.qc.spatial_bin_histogram`            | Unchanged                | One feature class's spatial-bin count distribution. |
+| `hp.qc.spatial_bin_histogram_by_feature` | New entry point          | One feature's spatial-bin count distribution.       |
 
 `table_histogram`, not the multi-plot wrapper, is the direct counterpart to
 `spatial_bin_histogram`. Avoid a cell-specific name because table metrics may
@@ -5578,11 +5614,11 @@ bin area, panel size, or the sample's total counts.
 For each bin, let `C` be the selected or combined raw count, `A` its physical
 area in µm², and `N` the complete panel feature count for the displayed classes:
 
-| `normalization` | Display value | Colorbar units | Supported input |
-| --- | --- | --- | --- |
-| `None` | `C` | Points per bin | Both summary types |
-| `"per_area"` | `C / A` | Points per µm² | Both summary types |
-| `"per_panel_feature"` | `C / N` | Points per panel feature per bin | `PointsSummary` only |
+| `normalization`                | Display value | Colorbar units                   | Supported input      |
+| ------------------------------ | ------------- | -------------------------------- | -------------------- |
+| `None`                         | `C`           | Points per bin                   | Both summary types   |
+| `"per_area"`                   | `C / A`       | Points per µm²                   | Both summary types   |
+| `"per_panel_feature"`          | `C / N`       | Points per panel feature per bin | `PointsSummary` only |
 | `"per_panel_feature_per_area"` | `C / (N * A)` | Points per panel feature per µm² | `PointsSummary` only |
 
 Read both denominators from the supplied summary, without separate overrides:
@@ -6042,12 +6078,12 @@ over retained neighboring bins. Let `C` be the selected or pooled raw counts,
 `A` their actual areas in µm², and `N` the selected classes' combined panel
 feature count. Use the same spatial weights in numerator and denominator:
 
-| Normalization | Smoothed display value |
-| --- | --- |
-| `None` | `S(C) / S(1)` |
-| `"per_area"` | `S(C) / S(A)` |
-| `"per_panel_feature"` | `S(C) / (N * S(1))` |
-| `"per_panel_feature_per_area"` | `S(C) / (N * S(A))` |
+| Normalization                  | Smoothed display value |
+| ------------------------------ | ---------------------- |
+| `None`                         | `S(C) / S(1)`          |
+| `"per_area"`                   | `S(C) / S(A)`          |
+| `"per_panel_feature"`          | `S(C) / (N * S(1))`    |
+| `"per_panel_feature_per_area"` | `S(C) / (N * S(A))`    |
 
 `S(1)` sums weights over retained bins, including bins with zero counts.
 Existing restrictions on panel normalization for feature summaries remain
@@ -6184,9 +6220,2243 @@ changes and pan/zoom perform no source scans or summary mutation; histogram
 controls do not rerender density maps. Verify that the public plotter's
 unsmoothed default remains unchanged.
 
-## Slice 11f: table-level summary computation and plotting integration
+## Slice 11f: modular AnnData table I/O for SpatialData Zarr stores
+
+**Status: Part 11f.i complete (contracts and documentation); Parts 11f.ii–vi
+implemented. `hp.tb.io.read_table`, `hp.tb.io.read_table_components` and
+`hp.io.read_zarr`, plus `hp.tb.io.write_table` and `hp.tb.io.write_table_components`,
+are available, including raw creation through component writes and regional
+updates through `hp.tb.io.write_table_components_by_region`. Parts 11f.vii a)–c)
+(integration of `hp.tb.io.add_table`, `hp.tb.add_feature_matrix`, aggregation and
+canonical-component writers) are implemented. Part 11f.viii is implemented via
+`hp.tb.io.delete_table_components()` and mixed `write_table_components(..., delete=...)`
+updates. Part 11f.ix is implemented via `hp.tb.io.add_table_components()` and
+`hp.tb.io.remove_table_components()`. Parts 11f.x a)–b) are implemented via
+`hp.tb.io.add_table_components_by_region()` and migration of `hp.tb.add_feature_matrix()`
+to that adapter for existing-table regional updates. Part 11f.xi remains planned.**
+
+Provide general, modular table I/O independently of QC, aggregation or Scanpy
+preprocessing. The caller explicitly chooses a complete table or selected
+AnnData components; Harpy handles encoding, lazy matrices, structural alignment
+and safe publication without reading or rewriting unrelated data. Callers may
+use ordinary AnnData/Scanpy operations between reads and writes. This slice
+does not introduce another preprocessing pipeline or choose scientific metrics.
+
+Split the work into eleven independently reviewable parts, in this order:
+
+1. **11f.i: public table I/O contracts** — specify complete-table and
+   component-level APIs, memory behavior, alignment and overwrite guarantees.
+2. **11f.ii: selective and lazy table reading** — implement shared decoding,
+   standalone component reads and complete AnnData assembly — implemented.
+3. **11f.iii: Harpy SpatialData reader with selective table modes** — compose
+   SpatialData's non-table reader with the existing table reader in `hp.io.read_zarr()` — implemented.
+4. **11f.iv: scoped table writing and safe publication** — implement complete
+   table writes and selected-component updates on the existing publisher — implemented.
+5. **11f.v: creation of raw data through component writes** — create a complete
+   raw container from supplied counts and feature identities without rewriting the table — implemented.
+6. **11f.vi: region-wise `.obsm` writing** — add a public regional-update API
+   with bounded-memory matrix merging and coupled, caller-prepared metadata writes — implemented.
+7. **11f.vii: integration with existing Harpy APIs** — route existing table I/O
+   through the shared primitives in three separately reviewable implementation
+   slices, in order a → b → c, with focused integration tests and documentation in each:
+   - **a)** refactor `hp.tb.io.add_table` — implemented;
+   - **b)** refactor `hp.tb.add_feature_matrix` — implemented;
+   - **c)** integrate aggregation and canonical-component writers — implemented.
+
+8. **11f.viii: safe deletion of optional AnnData components** — support explicit
+   removals and combined replacement/deletion requests with shared rollback — implemented.
+9. **11f.ix: SpatialData-aware table-component updates** — add public adapters
+   that update the supplied SpatialData's components in memory and, when backed,
+   on disk, reusing the existing storage operations and rollback boundary — implemented.
+10. **11f.x: SpatialData-aware regional table-component updates** — implement
+    and adopt the public adapter in two separately reviewable slices, in order a → b:
+    - **a)** implement `hp.tb.io.add_table_components_by_region()` for regional merging,
+      persistence when backed, and selective installation into the supplied SpatialData — implemented;
+    - **b)** migrate `hp.tb.add_feature_matrix()` to that API for existing-table
+      regional updates, retaining scientific preparation and separate new-table creation.
+
+11. **11f.xi: affected-chunk regional-write optimization** — avoid complete
+    matrix rewrites for eligible regional `.obsm` updates, without changing
+    sample layout or the public regional-update semantics.
+
+Complete Parts 11f.i–vii, including all three slices of vii, before the table-level
+QC work in Slice 11g. Part 11f.viii is required before the napari-harpy persistence
+migration, but does not block
+Slice 11g. Part 11f.ix follows the completed path-based I/O and provides optional
+live-SpatialData adapters; the path-based napari-harpy migration remains possible
+without it. Part 11f.x a) builds on the regional writer and Part 11f.ix's adapters;
+Part 11f.x b) follows a). Part 11f.xi follows Parts 11f.i–x, including both slices
+of x. Neither the regional adapter/migration nor the optimization blocks Slice 11g
+or the napari-harpy migration. The I/O contracts themselves must remain usable
+without any QC result, feature panel or aggregation-specific metadata. Part
+11f.iii builds directly on the implemented Part 11f.ii; it does not require
+the later writing parts.
+
+### Part 11f.i: public table I/O contracts
+
+**Status: complete — contracts defined and documented; no runtime APIs or
+placeholder exports added.**
+
+This section defines the initial public table/component contracts, including
+signatures, implementation reuse, guarantees and examples. Parts 11f.v,
+11f.vi and 11f.viii specify raw creation, regional updates and deletion extensions;
+Parts 11f.ix–x add SpatialData-aware component and regional-update adapters in this roadmap.
+Update `docs/development/storage.md` and user-facing API documentation during Parts
+11f.ii–xi as the functionality is implemented, describing delivered behavior
+without roadmap status language. No separate draft API page is maintained.
+
+Reuse and, where necessary, refactor Harpy's existing AnnData reading, writing
+and publication helpers. Build on `_read_anndata_element`,
+`_write_anndata_element`, `_read_backed_table` and `_publish_staged_paths`;
+the public APIs and existing internal callers must share these primitives,
+rather than introduce a parallel I/O implementation. Component encoding alone
+is not a safe-write operation: the public writers coordinate it with validation,
+staging, publication and metadata finalization. Extend the shared readers for
+complete-table slot coverage and Dask-backed matrices where needed; reuse does
+not require preserving private helper signatures or their current limitations.
+
+Use existing behavior in napari-harpy's `core/persistence.py` and its focused
+persistence tests as design input: selective saves/reloads, whole-`.obs`
+persistence despite column-level edit tracking, related matrix/metadata paths,
+and row-binding checks. Also inspect Harpy's `hp.tb.add_feature_matrix`, which
+already writes one `.obsm` entry and its `.uns` record directly. These are
+concrete use cases, not implementations to promote unchanged: the public APIs
+combine shared safe publication with a consistent lazy-reading policy.
+
+Do not treat napari-harpy's current function signatures, component-path/result
+classes, or coupling to a live SpatialData object as compatibility requirements.
+Propose a different public Harpy API where it gives a clearer, more reusable
+contract, and adapt napari-harpy internally afterward. Reuse suitable logic and
+behavioral tests, but do not transfer widget state management into Harpy or add
+a reverse dependency on napari-harpy. Distinguish intended user-visible behavior
+from existing persistence limitations; partial disk writes on failure are not
+behavior to preserve.
+
+#### Shared implementation and publication
+
+```text
+Public table/component readers
+    `-- shared AnnData decoding --> detached values / complete AnnData
+
+Public table/component writers          Live-SpatialData adapters
+    |                                  |
+    +---------------+------------------+
+                    |
+            shared write operation
+                    |
+                    +-- validate scope, identities and table structure
+                    +-- _anndata: encode requested payloads into staging
+                    +-- _publication: publish paths, retain backups
+                    +-- finalize metadata / adapter installation
+                    `-- commit, or restore affected state on failure
+```
+
+The shared write operation is internal orchestration, not an additional public API.
+Public writers finish disk publication and consolidation before returning
+`None`. Adapters use the same operation while keeping their installation work
+inside its rollback window. They must not call a completed public write and
+then expect an attachment failure to roll it back. Path-based callers receive
+no automatic synchronization of existing in-memory objects.
+
+Extend the existing component decoder and table assembly for Dask-backed dense
+and sparse matrices, all supported AnnData slots, and explicit eager reads.
+Preserve AnnData encodings rather than inventing another format. Dataframes
+and ordinary metadata remain memory-owned; requested matrix mappings recurse
+through the same lazy policy. Annotation-only reads do not build unrelated
+matrix graphs. Reuse the storage-handle policy of `_read_backed_table` for public
+`mode="backed"` reads as well; do not force existing installation callers to
+return Dask arrays. The public readers default to `mode="lazy"`.
+
+Before writing, resolve all requested paths and validate affected axes and
+spatial linkage. Reuse existing structural checks where applicable; generic
+storage must not acquire scientific validation or data-repair responsibilities.
+Read only the required indices, annotation columns and encoding metadata for
+these checks. Validation of staged matrices uses structure/shape metadata,
+not full numerical scans. Unsupported encodings fail explicitly.
+
+Complete-table writes publish one table directory. Component writes publish
+only requested, non-overlapping values. The format-specific writer owns
+SpatialData table-group attributes, newly created parent groups and refreshing
+consolidated metadata, including restoration/cleanup on failure. Unannotated
+tables need valid format attributes without fabricated region linkage. Preserve
+the backing store's Zarr format and unrelated user root attributes. Consolidation
+may traverse metadata outside the update; it must not load other tables' data.
+
+Keep original destinations readable until all lazy replacement payloads have
+been serialized. After publication, reopening must use permanent paths. A
+successful component update need not reopen the whole table, and a complete
+lazy reopen must not collect whole matrices. Public writers neither mutate
+their inputs nor return attached objects. Existing recovery limitations below
+continue to apply; no additional crash or concurrency guarantees are implied.
+
+Implementation checks are split across Parts 11f.ii–vii: all-slot and selected
+read round trips, sparse preservation, independent annotations, no matrix I/O
+for annotation-only operations, axis/order rejection, chunked writes that can
+read the old destination, and failure recovery through finalization/installation.
+Part 11f.viii separately adds explicit deletion to the same publication mechanism.
+Omitted request paths and encoded `None` values must not become implicit deletes.
+
+#### Signatures
+
+Use these APIs to read or write a complete AnnData table, or selected components
+inside it, without opening all of SpatialData. They operate on disk, not on a
+possibly edited `sdata.tables[table_name]`. Ordinary AnnData/Scanpy operations
+remain separate from persistence.
+
+The readers and writers below are exposed through `hp.tb`.
+The aliases describe argument types; they are not additional public APIs.
+
+```python
+from collections.abc import Mapping, Sequence
+from os import PathLike
+from typing import Literal
+
+import pandas as pd
+from anndata import AnnData
+
+ComponentPath = tuple[str, ...]
+AxisNames = pd.Index | Sequence[str]
+
+
+def read_table(
+    store: str | PathLike[str],
+    *,
+    table_name: str,
+    mode: Literal["backed", "lazy", "eager"] = "lazy",
+    sparse_chunk_size: int = 1000,
+) -> AnnData: ...
+
+
+def read_table_components(
+    store: str | PathLike[str],
+    *,
+    table_name: str,
+    components: Sequence[ComponentPath],
+    mode: Literal["backed", "lazy", "eager"] = "lazy",
+    sparse_chunk_size: int = 1000,
+    missing: Literal["raise", "omit"] = "raise",
+) -> dict[ComponentPath, object]: ...
+
+
+def write_table(
+    store: str | PathLike[str],
+    *,
+    table_name: str,
+    adata: AnnData,
+    overwrite: bool = False,
+) -> None: ...
+
+
+def write_table_components(
+    store: str | PathLike[str],
+    *,
+    table_name: str,
+    components: Mapping[ComponentPath, object],
+    obs_identity: pd.DataFrame | AxisNames | None = None,
+    var_names: AxisNames | None = None,
+    raw_var_names: AxisNames | None = None,
+    overwrite: bool = False,
+) -> None: ...
+```
+
+`store` is the local path to an **existing SpatialData Zarr root**, not its
+`tables` directory or an AnnData group. Remote URLs, store objects and live
+SpatialData objects are not accepted. Writes retain the backing store's Zarr
+format (2 or 3), without a format conversion. `table_name` identifies one table;
+it cannot be a nested path or collide with another SpatialData element type.
+These APIs do not create or replace the SpatialData root.
+
+Both writers are synchronous and return `None` after successful publication and
+metadata finalization. They do not return or attach a reopened table. Call a
+reader explicitly when needed. `overwrite=False` permits creation but rejects
+any existing destination in the request; `True` permits creation and replacement.
+
+#### Complete tables and selected components
+
+`read_table` returns a complete, detached AnnData, preserving `X`, `obs`, `var`,
+`uns`, `layers`, `obsm`, `varm`, `obsp`, `varp` and `raw` when present. A table
+without `X` or `raw` remains valid; missing optional slots follow AnnData's
+normal empty/`None` representation. No feature panel or Harpy-specific metadata
+is required. Ordinary and SpatialData-annotated tables are both supported.
+
+`write_table` persists the supplied AnnData as the entire destination table. It
+does not merge with an old version: omitted layers, annotations or metadata are
+not retained. It can create a table, including the `tables` container if absent.
+Creating, filtering or reordering the table's main axes, changing spatial
+linkage, changing existing raw axes or removing raw requires this complete-table
+operation. Part 11f.v extends component writes to create missing raw data
+without rewriting the table.
+
+Component APIs use **logical tuple paths**, not Zarr encoding internals:
+
+| Path                                                                                 | Value                                    | Component write                                                                    |
+| ------------------------------------------------------------------------------------ | ---------------------------------------- | ---------------------------------------------------------------------------------- |
+| `("X",)`                                                                             | Expression matrix, or encoded `None`     | Supported                                                                          |
+| `("obs",)`, `("var",)`                                                               | Whole dataframe                          | Supported                                                                          |
+| `("layers", key)`                                                                    | One matrix                               | Supported                                                                          |
+| `("obsm", key)`, `("varm", key)`                                                     | One axis-aligned value                   | Supported                                                                          |
+| `("obsp", key)`, `("varp", key)`                                                     | One pairwise matrix                      | Supported                                                                          |
+| `("uns",)` or `("uns", key, ...)`                                                    | Whole metadata mapping or a nested value | Supported                                                                          |
+| `("raw", "X")`, `("raw", "var")`, `("raw", "varm", key)`                             | Raw data component                       | Supported; creation as specified in Part 11f.v; existing raw axes remain unchanged |
+| `("layers",)`, `("obsm",)`, `("varm",)`, `("obsp",)`, `("varp",)`, `("raw", "varm")` | Mapping of entries                       | Read only; write individual entries                                                |
+
+`("raw",)` is not a component selector; use a complete-table read/write for
+the AnnData `Raw` container itself. Its feature axis is independent of `var`.
+Part 11f.v adds creation through the existing child selectors, not a new
+`("raw",)` selector.
+There are no selectors for dataframe columns, array slices, sparse encoding
+buffers or Zarr attributes. For example, `("obs", "prediction")` and
+`("X", "data")` are invalid.
+
+Requests must be nonempty and contain unique, non-overlapping paths. Reject
+both `("uns", "pca")` and `("uns", "pca", "params")` in one request rather
+than silently choosing one. Each path segment is a nonempty string: no path
+separators, `.`/`..` or Zarr-reserved metadata filenames. Nested `.uns` traversal
+is through mappings only, not through a dataframe or array encoding.
+
+Component reads return an ordinary dictionary keyed by the requested tuples,
+in request order. Missing paths raise `KeyError` by default. With
+`missing="omit"`, absent paths are left out, allowing reload callers to
+distinguish a removed entry from a present entry whose decoded value is `None`.
+An invalid path or a non-mapping parent still raises; `missing` only controls
+absence, not malformed requests. A missing store or table always raises.
+
+Component writes require an existing table. Only specified values are replaced;
+siblings remain unchanged. Values must be supported by the shared AnnData
+encodings; unsupported values fail before publication. Missing mapping parents
+may be created with AnnData encodings, but an existing non-mapping parent is
+never replaced implicitly. Part 11f.v explicitly handles raw creation from
+an absent path or a stored null entry; it does not relax other traversal checks.
+Replacing an `.uns` mapping replaces its contents, not just its supplied keys.
+Omitting a component from the request leaves it unchanged. `None` is a value
+where its encoding permits it, **not a deletion command**. Explicit removal of
+optional entries is specified in Part 11f.viii, which extends the initial writer
+with `delete` and adds a deletion-only API. No append or column-level disk updates
+are provided.
+
+#### Axis alignment and validation
+
+Component writes preserve observation/feature identities, their order and the
+table's spatial annotation. **Shapes alone do not establish alignment.**
+For creation of previously absent raw data, Part 11f.v defines its new feature
+axis from the request while preserving the existing observations and main feature axis.
+
+| Updated component         | Required identity context                            |
+| ------------------------- | ---------------------------------------------------- |
+| `X`, a `layers` entry     | `obs_identity` and `var_names`                       |
+| An `obsm` or `obsp` entry | `obs_identity`                                       |
+| A `varm` or `varp` entry  | `var_names`                                          |
+| `raw.X`                   | `obs_identity` and `raw_var_names`                   |
+| A `raw.varm` entry        | `raw_var_names`                                      |
+| `obs`                     | Its region/instance columns, or index if unannotated |
+| `var`, `raw.var`          | The supplied dataframe's own index                   |
+| An `uns` value            | No matrix-axis arguments                             |
+
+Observation identity depends on the target table's stored SpatialData annotation:
+
+- **Annotated table:** `obs_identity` is a two-column dataframe, as in
+  `adata.obs[[region_key, instance_key]]`. Resolve the column names from the
+  stored annotation; do not require separate key-name arguments or hard-code
+  them. The ordered `(region, instance_id)` pairs identify the observations,
+  not `obs_names` or instance IDs alone. Pairs must be non-null, unique and
+  match the stored pairs row by row, preserving identifier values and required
+  types without converting instance IDs to strings. The dataframe's own index
+  is not used for this identity comparison. An index-only argument cannot
+  substitute for missing or invalid linkage columns.
+- **Unannotated table:** `obs_identity` is a pandas index or sequence of
+  observation-name strings, usually `adata.obs_names`. Names must be non-null,
+  unique and match the stored observation names exactly in value and order.
+
+Supply each required identity once per request, describing the actual order
+of the submitted values. A supplied `obs` dataframe provides its linkage
+columns or index according to the same rule; a supplied `var` or `raw.var`
+provides its feature index. These can supply the corresponding context for
+matrices in the same request, without repeating identity arguments. If both
+forms are supplied, they must agree.
+
+Feature identities remain `var_names` and `raw_var_names`: unique, non-null
+string labels matching the relevant stored feature index in value and order.
+Index names and equivalent index dtypes do not define identity. No automatic
+sorting, reindexing, renaming or string conversion occurs. Any explicitly
+supplied identity is checked, even if not needed for a value. Complete-table
+reads/writes may retain non-unique AnnData indices; partial updates require
+unambiguous identities for the affected axes. In annotated tables, that means
+unique observation pairs, not necessarily unique `obs_names`. Unrelated axes
+do not need to be loaded or validated for an `.uns`-only update.
+
+Matrix inputs must have known shapes satisfying AnnData's axis rules, including
+both dimensions of pairwise matrices. Dataframe-valued aligned entries must
+also have matching indices. Raw writes require an existing `raw` container and its own unchanged
+feature axis. Identity arguments are caller declarations, not proof that a
+matrix was scientifically computed in that order, and not concurrency tokens.
+
+An `.obs` replacement must still preserve the stored dataframe index and its
+order; using region/instance identity does not authorize index renaming.
+Dataframe-valued observation-aligned entries must likewise retain the stored
+observation index. For annotated tables, an `.obs` replacement also preserves
+the region/instance column values row by row and their required types.
+Component updates must not add, remove or change the SpatialData annotation
+in `.uns` or the corresponding
+table-group attributes. Replacing all of `.uns` must retain that annotation.
+Use a complete-table write for a deliberate change to spatial linkage.
+
+Whole-table writers validate AnnData structure and SpatialData's table model,
+and write the appropriate disk-level table attributes for annotated or ordinary
+tables. Component writers validate the affected structure and unchanged axes
+and linkage without constructing an eager copy of the whole table. Validation
+may inspect indices, annotation columns and encoding/shape metadata, not
+unrelated matrix values. Generic I/O does not run Harpy's scientific table
+validation, scan linked points/labels, recalculate QC, or repair custom metadata;
+callers prepare consistent scientific data and metadata before persistence.
+
+#### Region-specific reading: follow-up direction
+
+Region-aware reading is useful, but remains a selection layer over the shared
+lazy readers rather than a prerequisite for the initial signatures above.
+Initially, callers can read lazily and subset the returned AnnData without
+first materializing the full expression matrix. A later region-selection
+convenience should use the same decoding and lazy-array infrastructure.
+
+The direction for that read-only selection is:
+
+- Select annotated spatial-element names from the table's region column,
+  resolved through its SpatialData annotation. These are not coordinate-system
+  names or sample IDs, and ordinary unannotated tables have no region selector.
+- Preserve stored observation order. Select the same rows from `.obs`, `.X`,
+  `.layers`, `.obsm` and `.raw`; subset both observation axes of `.obsp`.
+  Feature-only components such as `.var`, `.varm`, `.varp` and raw feature
+  annotations keep their feature axes unchanged.
+- For a returned AnnData, update its SpatialData annotation to describe the
+  selected regions. Arbitrary `.uns` records cannot be automatically interpreted
+  or filtered; some describe the original complete table. Document that scope
+  explicitly and leave scientific metadata adjustment to the caller. A
+  structurally valid subset is not a promise of valid custom scientific metadata.
+- Keep selection lazy for matrices and leave the source table/store unchanged.
+  Reading the region column or other necessary annotations is allowed. Physical
+  reads may include chunks containing other regions; do not promise row-level
+  disk I/O granularity.
+
+Do not build this behavior on `ProcessTable._get_adata()` or refactor that
+legacy helper for this work. Leave it untouched; the new shared readers are
+the foundation. Finalize the region-selection API and its missing-region and
+metadata behavior in the follow-up, rather than silently adding a `regions`
+argument to the initial read/write APIs.
+
+Region-wise writing is a separate public operation specified in Part 11f.vi,
+initially limited to `.obsm` updates and accompanying `.uns` replacements.
+It does not depend on a region-selection reader. The initial writers above
+continue to replace complete tables or components; they must not silently
+interpret a smaller matrix as a regional update.
+
+#### Memory and ownership
+
+- Reads use read-only storage access. `mode="lazy"` (default) returns Dask arrays
+  for dense and CSR/CSC matrix encodings, with sparse blocks remaining sparse.
+  `mode="backed"` returns Zarr arrays and CSR/CSC dataset handles, matching the
+  matrix representations attached by `aggregate_points`. It does not grant
+  write permission or imply AnnData's `isbacked` flag. Backed indexing reads
+  the selection into memory; Dask selections remain deferred until computed.
+  Both readers use this one `mode` parameter, replacing the `lazy` boolean.
+  Encoded dataframes remain in-memory dataframes, including dataframe-valued aligned
+  entries; `obs`, `var` and requested `.uns` metadata are decoded into memory.
+  Array values inside `.uns` are metadata, not lazy matrix slots.
+- Both readers expose `sparse_chunk_size=1000`, a positive integer specifying
+  rows per CSR chunk or columns per CSC chunk; the other axis stays whole.
+  Harpy supplies this default explicitly rather than relying on AnnData's
+  default. Dense arrays receive no chunk override and retain on-disk chunking.
+  The option affects only lazy sparse reads, not disk storage or backed/eager reads;
+  it is not a fixed memory-byte budget.
+  CSR/CSC matrices require sparse encoding version `0.1.0`; unknown or missing
+  versions raise `ValueError` in every read mode, without an AnnData fallback.
+- `mode="eager"` materializes only the requested scope and preserves sparsity.
+  Component reads do not assemble a partial AnnData. Annotation-only reads do
+  not construct or compute unrelated matrix graphs. Unsupported encodings fail
+  clearly instead of triggering an eager whole-table fallback.
+- Returned annotations/metadata are independently owned. Editing them, or
+  assigning a new matrix/expression in the returned AnnData, does not write to
+  disk or mutate another attached AnnData. Lazy matrices and backed handles
+  depend on their source paths; they are **not immutable snapshots**. Reopen
+  after overwrite, or write another table name when the old backing data must
+  remain available.
+- Writers do not mutate the supplied AnnData, dataframes, mappings or arrays.
+  Lazy matrices are serialized incrementally without a preliminary whole-matrix
+  computation or densification. All staged data must be complete before moving
+  old destinations, including when a replacement graph reads those destinations.
+  Memory includes requested annotations and active chunks; there is no fixed
+  byte budget or guarantee that downstream Scanpy operations remain lazy.
+- Path-based writes never synchronize live `sdata.tables` or external handles.
+  Harpy's SpatialData adapters will handle attachment separately in 11f.vii.
+
+#### Completion, errors and recovery
+
+One write call is one logical update. Related matrix/metadata paths should be
+submitted together. Existing contents stay available during preparation;
+backups remain until publication and required metadata finalization finish.
+Other elements and user root attributes are preserved. Updating consolidated
+metadata may inspect the store's metadata, but must not read unrelated matrices.
+
+Invalid argument types raise `TypeError`; malformed selections, invalid values,
+axis/shape mismatches and prohibited linkage changes raise `ValueError`.
+A missing store/table raises `FileNotFoundError`; an existing destination with
+`overwrite=False` raises `FileExistsError`. Missing component reads follow the
+`missing` policy above. Unsupported encodings and I/O failures propagate clear
+errors; no silent fallback, partial-success result or automatic retry occurs.
+
+Detected request errors are rejected before publication. Preparation failures
+clean up staging and newly created containers. Handled publication/finalization
+failures attempt to restore affected paths and metadata, then re-raise. Rollback
+can itself fail; retained backups and restoration errors must be reported.
+Successful return is the completion boundary: later user code cannot roll back
+that write. Cleanup warnings may report leftover temporary files after success.
+
+This is local same-filesystem rollback, **not crash recovery or concurrent
+reader/writer isolation**. Process termination, power loss or failures during
+restoration can leave incomplete state. There is no snapshot/version check or
+automatic recovery on reopen.
+
+#### Examples
+
+These examples become executable after the APIs are implemented.
+
+##### Complete-table workflow
+
+```python
+import harpy as hp
+import scanpy as sc
+
+store = "sdata.zarr"
+adata = hp.tb.io.read_table(store, table_name="raw_counts")
+adata.layers["counts"] = adata.X.copy()
+sc.pp.normalize_total(adata, target_sum=1e4)
+sc.pp.log1p(adata)
+
+# A new destination leaves the raw table and its backing arrays untouched.
+hp.tb.io.write_table(store, table_name="processed", adata=adata)
+```
+
+Callers that filter rows/columns also update any custom metadata that depends
+on those axes. Generic I/O does not interpret or repair those records.
+
+##### Annotation-only update
+
+```python
+components = hp.tb.io.read_table_components(
+    store, table_name="raw_counts", components=[("obs",)]
+)
+obs = components[("obs",)]
+obs["reviewed"] = False
+hp.tb.io.write_table_components(
+    store,
+    table_name="raw_counts",
+    components={("obs",): obs},
+    overwrite=True,
+)
+```
+
+This rewrites `.obs`, not `.X`. Its region/instance columns supply observation
+identity for an annotated table; its index does so for an unannotated table.
+No separate `obs_identity` argument is needed.
+
+##### Related matrix and metadata
+
+```python
+# For an annotated table, identify the objects in embedding's row order.
+annotation = adata.uns["spatialdata_attrs"]
+region_key = annotation["region_key"]
+instance_key = annotation["instance_key"]
+obs_identity = adata.obs[[region_key, instance_key]]
+
+hp.tb.io.write_table_components(
+    store,
+    table_name="processed",
+    components={
+        ("obsm", "X_embedding"): embedding,
+        ("uns", "embedding"): {"method": "my_method"},
+    },
+    obs_identity=obs_identity,
+    overwrite=True,
+)
+```
+
+Both entries share the same rollback window. Neither unrelated matrices nor
+the expression matrix need to be read or rewritten. For an unannotated table,
+use `obs_identity=adata.obs_names` instead.
+
+Runtime acceptance tests belong to the implementation parts; this contract part
+introduces no placeholder functions or tests that merely assert their presence.
+Part 11f.viii adds deletion support; the separate napari-harpy migration remains
+a follow-up.
+
+### Part 11f.ii: selective and lazy table reading
+
+**Status: implemented.**
+
+- `hp.tb.io.read_table` and `hp.tb.io.read_table_components` locate one local table
+  read-only, without opening SpatialData or unrelated elements. The legacy
+  `ProcessTable._get_adata()` remains untouched.
+- The shared `harpy._storage._anndata` helpers now assemble all supported
+  AnnData slots, including layers, pairwise matrices and the independent raw
+  feature axis. Public readers default to `mode="lazy"` (Dask arrays with sparse
+  blocks for CSR/CSC matrices); `mode="backed"` returns Zarr arrays or sparse
+  dataset handles, and `mode="eager"` materializes only the requested scope.
+  Existing internal installation callers retain their storage-backed handles;
+  aggregation's return behavior is unchanged.
+- Annotation and metadata values remain independently owned in memory.
+  Logical component paths, mapping-only traversal and `missing="raise"`/`"omit"`
+  implement the contract above. Unsupported encodings fail without an eager
+  whole-table fallback. Neither reader writes or attaches results to SpatialData.
+- AnnData's public experimental `read_elem_lazy` is isolated in the shared
+  decoder, with an explicit `anndata>=0.12.10` dependency. Its empty compressed-axis
+  limitation is handled by deferred decoding of the zero-sized sparse matrix.
+- Focused tests cover Zarr 2/3, dense/CSR/CSC matrices, complete and selective
+  reads in all three modes, read-only backed handles, missing/None values,
+  empty axes, annotation ownership and numerical
+  agreement with AnnData. Instrumented storage access and Dask callbacks check
+  that lazy reads fetch no matrix payloads and annotation-only reads do not
+  open unrelated matrix nodes. Existing aggregation and canonical-center
+  storage contracts are also regression-tested.
+
+### Part 11f.iii: Harpy SpatialData reader with selective table modes
+
+**Status: implemented.**
+
+`hp.io.read_zarr` composes SpatialData's non-table reader with `hp.tb.io.read_table`.
+Both Harpy readers share local-root validation through `_open_spatialdata_group`;
+table decoding and sparse chunking remain in the existing table reader.
+Focused tests cover Zarr 2/3, selection, all three modes, untouched non-table
+elements and real generic/class-aware aggregation outputs. Storage guards
+reject writes, unselected-table reads and premature matrix reads; Dask callbacks
+reject computation during opening.
+
+An open-only synthetic smoke benchmark used two stored 100,000 × 256 uint32
+matrices (97.7 MiB each), selecting one table. Lazy/backed/eager opening took
+approximately 0.037/0.031/0.088 seconds, with 3.7/3.0/100.0 MiB additional
+sampled peak driver RSS. Skipping tables took 0.008 seconds. These local,
+sequential-run measurements exclude construction and imports; they illustrate
+the memory contract, not a general performance guarantee.
+
+Add `hp.io.read_zarr()` as a convenience wrapper that returns a SpatialData
+object with only the requested tables, using Harpy's existing table-reading
+modes. Compose SpatialData's public reader with `hp.tb.io.read_table()`; do not
+implement another table decoder or change ordinary `spatialdata.read_zarr()`
+behavior. Upstream integration with SpatialData's own reader remains a separate
+possible follow-up, not a prerequisite or implementation strategy for this part.
+
+#### Public API and defaults
+
+```python
+def read_zarr(
+    store: str | PathLike[str],
+    *,
+    table_name: str | Sequence[str] | None = None,
+    table_mode: Literal["lazy", "backed", "eager"] = "lazy",
+    sparse_chunk_size: int = 1000,
+) -> SpatialData:
+    ...
+```
+
+```python
+sdata = hp.io.read_zarr(
+    "sdata.zarr",
+    table_name=["raw_counts", "processed"],
+    table_mode="lazy",
+    sparse_chunk_size=1000,
+)
+```
+
+- `store` is an existing local SpatialData Zarr root, matching `hp.tb.io.read_table`.
+  Remote stores and already-open store objects are outside the initial contract.
+- `table_name=None` reads all tables; a string or sequence selects exact table names;
+  `table_name=[]` skips tables. Unknown explicitly requested names raise an error.
+- `table_mode` applies to all selected tables. Its explicit name makes clear
+  that it does not control images, labels, points or shapes. Per-table mode
+  mappings are outside the initial API; callers can use `hp.tb.io.read_table()`
+  separately when they need another mode for a particular table.
+- `"lazy"` returns Dask matrices, `"backed"` returns read-only Zarr arrays or
+  CSR/CSC dataset handles, and `"eager"` returns in-memory NumPy/SciPy matrices.
+  The existing eager annotation policy remains unchanged: `.obs`, `.var`,
+  dataframe-valued entries and `.uns` are in memory even in lazy/backed mode.
+- Forward `sparse_chunk_size` to the existing table reader with the same
+  validation and meaning: CSR rows or CSC columns per lazy chunk; ignored for
+  dense matrices and other modes. Do not duplicate decoding or chunking policy.
+- Read all non-table elements using SpatialData's existing behavior. Preserve
+  transformations, root attributes and the store path; this wrapper introduces
+  no new persistence metadata, scientific metadata requirements or writes.
+
+#### Composition and ownership contract
+
+1. Read non-table elements and root metadata through `spatialdata.read_zarr()`,
+   explicitly excluding tables from its selection.
+2. Resolve the requested table names and read each through `hp.tb.io.read_table()`
+   with `table_mode` and `sparse_chunk_size`.
+3. Attach those tables to the returned object's `sdata.tables` collection.
+
+Never read tables eagerly through SpatialData and then replace them with lazy
+versions: that would already incur the memory cost this API is intended to
+avoid. Discover table names from storage metadata; unselected tables must not
+be decoded or have their matrix chunks read. Do not patch private SpatialData
+reader internals or change global reader behavior.
+
+Reuse the full-table contract from Parts 11f.i–ii, including all AnnData slots,
+table annotations, sparse matrices, root read-only access and backing-path
+lifetime rules. The wrapper does not create immutable snapshots or make the
+returned objects uneditable: annotations can be edited and matrices replaced
+without writing to disk. Lazy matrices and storage handles still depend on
+their source paths; reopen after those paths are overwritten.
+
+Do not add a Harpy `isbacked` flag or override AnnData's property:
+
+- `sdata.is_backed()` indicates that the SpatialData object has a backing-store
+  path, not that every table matrix remains on disk.
+- Returned tables have `adata.isbacked=False`: AnnData's flag describes its own
+  file-managed backing mode, not the representation of individual components.
+- Storage-backed handles and lazy Dask arrays can therefore occur inside an
+  AnnData with `isbacked=False`. Subsequent edits can mix in-memory, lazy and
+  storage-backed components; do not store a table-wide mode flag that can become
+  stale. Dask arrays in general need not originate from disk.
+- Read-only storage access is separate from representation and laziness.
+  It prevents direct writes through returned handles, not in-memory edits.
+
+#### Focused validation
+
+Tests should cover all/name/list/no-table selection and unknown requested names;
+all three table modes and sparse chunk-size forwarding; and unchanged non-table
+elements, transformations, root attributes and store path. Guard against eager
+matrix reads in lazy/backed mode, any decoding of unselected tables, and writes
+during reading. Exercise ordinary and class-aware aggregation tables without
+requiring a feature panel or reader-specific metadata for generic tables.
+
+Verify the returned table representations and `isbacked` behavior, read-only
+handles, preserved `TableModel` annotations, normal row/feature access, and
+materialized values matching `anndata.read_zarr`. Confirm that ordinary
+`spatialdata.read_zarr()` remains unchanged. Benchmark store-open time and driver
+memory independently from Slice 7b's construction benchmark.
+
+### Part 11f.iv: scoped table writing and safe publication
+
+**Status: implemented.** `hp.tb.io.write_table` and `hp.tb.io.write_table_components`
+share staging/publication orchestration, strict ordered-identity validation,
+and the existing AnnData serializer and path publisher. Writes preserve Zarr
+format 2/3, stage lazy replacements before moving their source paths, and
+restore affected paths, newly created parents and consolidation metadata on
+handled failure. Focused tests cover scoped I/O, input ownership, identity and
+shape rejection, and staging/publication/finalization/installation failures.
+
+Implement the two public writers defined in Part 11f.i:
+
+- `hp.tb.io.write_table(store, table_name=..., adata=..., overwrite=False)` creates
+  or replaces a complete table. Replacement is not a merge: old layers or
+  metadata absent from the submitted AnnData are not retained. Use this operation
+  when filtering/reordering axes or changing spatial linkage.
+- `hp.tb.io.write_table_components(store, table_name=..., components=..., ...)`
+  updates only the requested logical paths in an existing table. For example,
+  `components={("obs",): updated_obs}` replaces the complete observation
+  dataframe without reading or rewriting `.X`; it is not a column-level write.
+  Related matrix and metadata entries can be submitted together, while omitted
+  components remain unchanged.
+
+Both APIs take the path to an existing local SpatialData Zarr root and preserve
+its Zarr format. `overwrite=False` rejects existing destinations; `True` permits
+replacement. They return `None` after publication and metadata finalization,
+without modifying the supplied AnnData or synchronizing an existing `sdata`.
+Callers explicitly reopen affected data when needed and retain responsibility
+for dirty/stale state and dependent references.
+
+Component updates preserve stored axes, their order and spatial linkage.
+Matching shapes alone are insufficient: check the required ordered observation
+identities and feature names according to [Axis alignment and validation](#axis-alignment-and-validation).
+For annotated tables, observation identity is the ordered region/instance pairs,
+not instance IDs alone. Generic I/O validates structure, not scientific results;
+callers prepare consistent scientific metadata.
+
+Build both writers on the existing `_write_anndata_element` serialization
+boundary and `_publish_staged_paths`, extending or refactoring these helpers
+where needed; do not add another format or backup/rollback mechanism.
+Full-table writes publish one table path. Component updates publish only the
+requested non-overlapping paths within one rollback context, including related
+matrix and metadata components when supplied together.
+
+The write flow is:
+
+```text
+validate request, axes and required metadata
+    -> serialize requested payload into staging (source still readable)
+    -> validate staged structure without collecting complete matrices
+    -> publish requested paths while retaining backups
+    -> finish metadata (and installation for live-object adapters)
+    -> commit and clean up, or attempt rollback on failure
+```
+
+The internal write operation must allow Part 11f.vii's adapters to attach reopened
+data before committing. The path-based public writers do not attach anything;
+adapters must not call a completed public write and expect a later attachment
+failure to roll it back.
+
+Use AnnData's encodings for component values and preserve SpatialData's table
+group attributes as well as its `.uns` annotation. Parent-group creation,
+consolidated metadata and any changes outside published paths must have explicit
+failure cleanup/restoration. Preserve unrelated table components, other tables
+and store-root metadata.
+
+Serialize lazy matrices incrementally without a preliminary whole-matrix
+`.compute()`, `.to_memory()` or dense conversion. Memory use may include the
+requested annotations and active chunks; it must not require the entire
+expression matrix. Materialize all staged replacement data before moving
+source paths, including when a new lazy payload depends on the destination
+being replaced. Apply the existing safeguards for other attached dependents
+where the caller has a SpatialData object; do not promise detection of arbitrary
+external handles.
+
+Do not reopen every table after writing. A component update must not reread
+unmodified components; complete-table reopening, when needed for validation
+or installation, uses the lazy reader from Part 11f.ii. Keep direct component
+serialization private: the public write operation includes staging and
+publication, not an unprotected `write_elem` call.
+
+Focused tests must verify full-table and selected-component round trips,
+unchanged siblings, axis/order and overwrite rejection, coupled-component
+rollback, and restoration after publication/finalization failures. Instrument
+an `.obs` update to prove that it neither reads nor rewrites `.X`; exercise
+chunked matrix writes and a replacement whose lazy input reads the old
+destination. Verify the documented recovery limits rather than claiming
+crash-atomic publication.
+
+Identity tests must distinguish annotated region/instance pairs from ordinary
+observation names. Cover repeated instance IDs in different regions, duplicate
+or reordered pairs, and an identity dataframe whose index differs while its
+pairs remain unchanged. Separately verify that actual `.obs` replacements
+preserve the stored index, and that unannotated tables use observation names.
+
+This part provides the disk-writing foundation, not raw creation through component
+writes (Part 11f.v), region-wise updates (Part 11f.vi), migration of `add_table`
+and other live-SpatialData adapters (Part 11f.vii), or explicit component deletion
+(Part 11f.viii). It adds no append
+or individual dataframe-column writes. `None` is an encoded value where
+supported, not a deletion request. Recovery remains rollback for handled
+failures, not crash recovery, immutable snapshots or concurrent-access isolation.
+
+### Part 11f.v: creation of raw data through component writes
+
+**Status: implemented.** `hp.tb.io.write_table_components` creates raw data from
+an absent path or encoded null, using supplied feature names or a feature dataframe.
+It stages one complete raw container with AnnData's encoder and publishes it
+alongside any coupled component updates through the existing rollback mechanism.
+Focused tests cover lazy/sparse inputs, unchanged unrelated data, identity and
+overwrite rejection, and restoration after staging/publication/finalization failures.
+
+Extend `hp.tb.io.write_table_components()` to create raw data in an existing table
+when `.raw` is absent or stored as `None`. Avoid requiring a complete-table
+rewrite for this operation. Reuse the existing signature, AnnData serialization,
+ordered-identity validation and shared publication/rollback mechanism; do not
+add another public writer or expose `("raw",)` as a component selector.
+
+The creation contract is:
+
+- Require `("raw", "X")` with a matrix and the same observation-identity
+  context used for existing raw updates. Its rows must match the stored table's
+  observations in identity and order; a supplied `("obs",)` dataframe can
+  provide this context instead of a separate `obs_identity` argument.
+- Define the new raw feature axis using either `raw_var_names` or a supplied
+  `("raw", "var")` dataframe. Names must be unique, non-null strings, and
+  the matrix column count must match. Preserve the supplied order without
+  sorting, alignment or implicit string conversion. If both forms are supplied,
+  require their ordered identities to agree.
+- With names alone, construct `.raw.var` as a dataframe with those names as
+  its index and no annotation columns. With a dataframe, preserve its supplied
+  annotations. Do not infer raw features or copy annotations from the main
+  `.var`: raw's feature axis is independent.
+- Permit accompanying `("raw", "varm", key)` entries and validate them against
+  the new raw feature axis. Reject attempts to initialize raw through `.raw.var`
+  or `.raw.varm` alone, or with a missing/`None` `.raw.X`.
+- If raw already exists as a valid container, retain the current scoped-update
+  behavior: omitted raw components remain unchanged, and its existing feature
+  identities and order cannot change. `overwrite=True` does not permit changing
+  existing raw axes; use `write_table()` for that.
+- Preserve overwrite semantics: an absent raw path can be created with
+  `overwrite=False`; replacing a stored null entry requires `overwrite=True`.
+  Reject malformed or unsupported existing raw encodings rather than silently
+  replacing them. Other requested destinations retain their own overwrite checks.
+
+For example, creating raw data on an annotated table:
+
+```python
+hp.tb.io.write_table_components(
+    "sdata.zarr",
+    table_name="processed",
+    components={("raw", "X"): raw_counts},
+    obs_identity=adata.obs[[region_key, instance_key]],
+    raw_var_names=gene_names,
+    overwrite=True,
+)
+```
+
+For creation, assemble and serialize a complete AnnData-encoded raw container
+in staging, including its feature dataframe and matrix mappings. Publish that
+new subtree as one raw destination, not overlapping parent/child publication
+paths or a generic dictionary pretending to be raw. Existing raw updates keep
+their component-level publication scope. Batch accompanying non-raw components,
+such as caller-prepared `.uns` metadata, in the same rollback operation.
+
+Finish all serialization before moving source paths. Support lazy and backed
+matrix inputs without preliminary whole-matrix materialization or densification.
+Apart from reads required by a caller-supplied lazy payload, do not read or
+rewrite unrelated numerical data, including the main `.X`. Preserve table
+annotations, unrelated components and input objects. On handled failure, restore
+the prior absence or encoded null, coupled component replacements and consolidated
+metadata. Keep the existing local-store, return, attachment and recovery contracts;
+no new crash recovery, snapshots or concurrent-writer guarantees are introduced.
+
+Focused tests must cover creation from an absent path and encoded null, names-only
+and dataframe-provided feature axes, optional raw feature mappings, sparse/lazy
+round trips, identity/shape and overwrite rejection, and existing-raw updates.
+Verify unchanged unrelated components and bounded matrix I/O. Inject staging,
+publication and finalization failures to check restoration of the original raw
+state and any coupled metadata updates. The writer docstring and storage overview
+document this delivered behavior.
+
+### Part 11f.vi: region-wise `.obsm` writing
+
+**Status: implemented. Regional writes share the existing serializer and
+publication operation; integration with existing Harpy APIs remains Part 11f.vii.**
+
+Introduce `hp.tb.io.write_table_components_by_region()` for updating one or more
+`.obsm` matrix entries for selected regions of an existing SpatialData-annotated
+table. Reuse the shared readers, component serialization and publication
+operation; do not implement a second serializer or rollback mechanism.
+
+**Preparatory internal validation refactor.** Before implementing the regional
+merge, separate the responsibilities currently combined in
+`_observation_pairs()`:
+
+- Validate stored-table annotation explicitly: required metadata fields,
+  referenced columns, supported column types, and agreement between declared
+  regions and actual observations. Check the complete stored region set before
+  selecting rows, without reading expression data.
+- Make `_observation_pairs()` validate and extract ordered region/instance
+  pairs from a dataframe using explicit column names. Preserve checks for valid
+  identifiers, missing values and duplicate pairs, but do not require that the
+  dataframe represents every declared region. Remove the temporary AnnData
+  construction and `TableModel.validate()` call from this helper.
+- Let callers determine the expected observations: the complete axis for
+  ordinary component writes, or all observations of the selected regions for
+  regional writes. Reuse `_match_identity()` to check exact values and order.
+
+Share these focused checks between existing component writes and the regional
+writer; do not construct temporary subset annotations to satisfy whole-table
+validation. Retain `TableModel.validate(table)` for actual complete-table
+writes. Keep this refactor internal, preserving existing public writer
+contracts and safeguards, including the column-type checks previously supplied
+by SpatialData. Do not reproduce SpatialData's entire table validator or expand
+this work into an unrelated validation redesign.
+
+The public API is:
+
+```python
+def write_table_components_by_region(
+    store: str | PathLike[str],
+    *,
+    table_name: str,
+    components: Mapping[ComponentPath, object],
+    obs_identity: pd.DataFrame,
+    fill_values: Mapping[ComponentPath, object] | None = None,
+    chunk_size: int = 1000,
+    overwrite: bool = False,
+) -> None:
+    ...
+```
+
+Keep the same path-based `store`, `table_name` and logical tuple-path conventions
+as `write_table_components()`. Initially, `components` accepts individual
+`("obsm", key)` matrices and optional accompanying `.uns` replacements; reject
+other component types. `.obsm` values contain only selected-region rows, whereas
+`.uns` values replace the entire requested metadata record. The existing
+`write_table_components()` API remains unchanged.
+
+`chunk_size` is a positive integer controlling computational chunks: rows for
+dense/CSR matrices (all columns per chunk), or columns for CSC matrices (all
+rows per chunk). Use it for in-memory inputs, backed sparse reads, and new
+matrices requiring unselected rows. Preserve existing Dask input chunks and
+dense Zarr chunks; existing dense targets retain their merge layout. This is
+not an on-disk chunk-size setting or a fixed memory limit.
+Part 11f.vi a) may lazily repartition an internal view of the submitted values
+for merging; it does not change caller-owned arrays, stored chunks or the
+output-chunk policy above.
+
+An `.obsm` payload must be a matrix: `("obsm", key): None` is invalid and
+rejects the entire request before publication, including accompanying metadata
+updates. It does not mean skip, clear selected rows or delete the entry. Omit
+the component to leave it unchanged; to write missing measurements, supply a
+correctly shaped numeric matrix containing `NaN` where its dtype permits.
+This is distinct from `fill_values=None`, which means no initialization fills
+were supplied for new entries.
+
+For an `.obsm` entry, `write_table_components()` requires a complete replacement
+matrix and identities for the whole observation axis. The regional API instead
+accepts measurements and identities only for the selected regions. Harpy
+constructs the full replacement while preserving measurements for unselected
+regions.
+
+`obs_identity` is the single source for both update scope and submitted row
+identities/order; do not require a separate `regions` argument. This deliberately
+removes an independent intended-scope check: if the caller intended A and B but
+supplies every observation of A and none of B, the request is a valid A-only
+update. Harpy still detects incomplete coverage within any represented region,
+but cannot infer an entirely omitted region. Callers with a separate expected
+region selection must check it before calling the writer.
+
+The regional-update contract is:
+
+- Derive the selected region set from actual values in
+  `obs_identity[region_key]`, not its categorical categories. These values name
+  spatial elements in the stored annotation, not coordinate systems or sample
+  IDs. Unannotated tables have no regional-update mode.
+- Before selecting rows, require the declared region set in
+  `.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY]` to match the actual values
+  present in `.obs[region_key]`. Reject both observed-but-undeclared regions and
+  declared regions without observations as inconsistent stored annotation.
+  Then require every region derived from `obs_identity` to belong to this
+  validated set and derive selected rows from actual observation values. "Unknown regions"
+  refers to names outside this set, not outside `.cat.categories`: unused
+  categorical categories do not make a region selectable.
+
+  For example, declared regions `["A"]`, observed values `["A", "A"]` and
+  categories `["A", "B"]` are valid, but supplying an observation for B in
+  `obs_identity` raises an unknown-region error. An unused B category in
+  `obs_identity` itself does not select B either. Declaring `["A", "B"]` with
+  those same stored observations instead fails annotation validation before
+  selection, even when `obs_identity` contains only A.
+  Do not treat a declared-but-empty region as a valid no-op update.
+
+- `obs_identity` is required, nonempty and shared by all submitted matrices.
+  It is the two-column region/instance dataframe described in Part 11f.i,
+  covering only the selected regions. Harpy obtains the required column names from the stored
+  SpatialData annotation. Its ordered pairs must match every stored observation
+  in those regions exactly once, retaining the table's order across all selected
+  regions. Deriving the region set must not regroup observations by region:
+  both identities and matrix rows must follow the selected table rows. Reject
+  unknown regions, missing or extra observations, duplicate pairs and reordered identities.
+  Instance IDs may repeat across regions;
+  the dataframe index does not define semantic identity.
+- For an existing `.obsm` entry, replace the selected rows and preserve all
+  unselected values, including existing missing values. `fill_values=None` is
+  valid even when only some regions are requested: their existing measurements
+  are updated, while all other regions' measurements are preserved. Keep
+  observation identities, table order and spatial linkage unchanged. Existing
+  entries retain their column count;
+  reject incompatible shapes or dtypes rather than clearing other regions.
+  This operation does not append/remove observations or resize existing feature
+  matrices.
+- A new `.obsm` entry spans all table observations. `fill_values` maps component
+  paths to explicit, dtype-compatible scalar fills for unselected rows, for
+  example `fill_values={("obsm", "morphology"): np.nan}`. Require a fill for
+  unselected rows of new entries, because no previous values exist to preserve.
+  If such rows exist and no fill was supplied, reject the entire request before
+  publishing any components; do not infer zeros or missing measurements. If
+  there are no unselected observations (all regions are covered by `obs_identity`),
+  `fill_values=None` is valid for a new entry too: the caller supplies every row.
+  `fill_values=None` means no fills were supplied, not that unselected rows
+  should be replaced with missing values. Different new entries may use
+  different fills. Fills never replace unselected values in existing entries.
+  Selected rows must be supplied explicitly, including any missing-value
+  measurements prepared by the caller.
+- `overwrite` permits replacement of existing requested entries, following the
+  component writer's policy for both matrices and accompanying metadata.
+  For `.obsm`, this permits updating selected rows, not clearing other regions.
+- Generic I/O checks identities and structural compatibility, not feature
+  meanings. The caller checks scientific schema compatibility, including
+  feature-column names and order, and prepares coherent scientific metadata.
+
+**Matrix representations and dtype compatibility:**
+
+- Support numeric, two-dimensional dense and CSR/CSC matrices, including NumPy
+  and SciPy inputs, Dask arrays with the corresponding block types, and supported
+  Zarr-backed dense arrays or CSR/CSC dataset handles. Reuse the existing
+  decoders and serializers; the regional merge must remain chunked.
+- Require the supplied matrix to match an existing entry's matrix format:
+  dense-to-dense, CSR-to-CSR or CSC-to-CSC only. Reject dense/sparse mismatches
+  and CSR/CSC mismatches before publication, including when all rows are
+  selected; do not convert formats automatically. Matching refers to the
+  logical matrix format, not identical Python classes, storage backing or
+  chunk layouts. For example, a dense Dask array may update a dense Zarr entry
+  with different chunks. New entries use the supplied matrix's format.
+- Preserve sparse representations without implicit densification. When creating
+  a new sparse entry with unselected rows, support only an explicit zero fill.
+  Reject nonzero or `NaN` fills in that case rather than silently constructing a
+  largely populated sparse matrix. This restriction does not require a fill
+  when every row is supplied.
+- For an existing entry, retain its stored dtype. Permit only safe casts of
+  supplied measurements into that dtype; reject potentially lossy conversions
+  rather than narrowing values or promoting the complete existing matrix.
+  New entries retain the supplied matrix's dtype and require compatible scalar
+  fills. Do not silently promote an integer matrix to accommodate a `NaN` fill.
+- Defer DataFrame-valued `.obsm` entries and reject other unsupported matrix
+  representations explicitly. The current decoder loads DataFrames eagerly;
+  reject such stored entries before decoding their complete values rather than
+  falling back to whole-matrix materialization. This restriction concerns
+  `.obsm` measurements, not the required `obs_identity` dataframe.
+
+When implementing the public function, make the creation-only role explicit
+under `fill_values` in its docstring's `Parameters` section:
+
+```text
+fill_values
+    Mapping from ("obsm", key) paths to dtype-compatible scalar fills for
+    unselected rows of newly created matrices. Required only when creating
+    a new matrix with unselected rows; unnecessary when every row is supplied.
+    Unselected rows of new CSR/CSC matrices support only zero fills.
+    Existing matrices preserve unselected values, including missing values:
+    this parameter does not fill missing values in an existing matrix.
+    None means no fill values were supplied.
+```
+
+**Implementation contract at a glance.** After validating the request's
+identities, shapes, dtypes and overwrite permission, apply this decision table
+separately to each requested `.obsm` entry:
+
+| Entry and selection               | Selected rows receive | Unselected rows receive     | Fill required?                     |
+| --------------------------------- | --------------------- | --------------------------- | ---------------------------------- |
+| Existing entry                    | Supplied measurements | Their existing measurements | No                                 |
+| New entry with unselected rows    | Supplied measurements | Explicit fill               | Yes; reject the request if missing |
+| New entry with every row selected | Supplied measurements | No such rows                | No                                 |
+
+Every output row therefore gets its values from the supplied measurements,
+existing measurements or an explicit fill. Require a fill only when it will be
+used, not merely because an entry is new: requiring an unused value when all
+rows are supplied adds no information or protection. Callers may still supply
+a compatible fill for new entries when their region selection varies between
+calls; it is unused if every row is selected. Missing required fills must be
+rejected before any matrix or accompanying metadata is published.
+
+For example, updating region A in a one-column `.obsm` matrix whose regions
+are interleaved:
+
+| Stored region | Instance ID | Existing measurement | After updating A |
+| ------------- | ----------- | -------------------- | ---------------- |
+| A             | 1           | 10                   | 100              |
+| B             | 1           | 20                   | 20               |
+| A             | 2           | 30                   | 300              |
+| B             | 2           | 40                   | 40               |
+
+The caller supplies a `(2, 1)` matrix containing `100` and `300`, with
+`obs_identity` pairs `(A, 1)` and `(A, 2)` in that order. Both observations in
+region A must be supplied; this is not an arbitrary subset-of-cells update.
+Harpy validates the submitted order rather than automatically reordering rows.
+
+For that same table, an `obs_identity` containing A and B selects both regions,
+but must retain their interleaved table order:
+
+```python
+# Required obs_identity order, with each supplied matrix in the same row order:
+[("A", 1), ("B", 1), ("A", 2), ("B", 2)]
+
+# Rejected: concatenating A's observations followed by B's observations:
+[("A", 1), ("A", 2), ("B", 1), ("B", 2)]
+```
+
+For example, a one-column update of `100` for A/1, `200` for B/1, `300` for
+A/2 and `400` for B/2 must supply values in the order `[100, 200, 300, 400]`,
+not `[100, 300, 200, 400]`. Callers that calculate and concatenate per-region
+blocks must align the measurements and identities together to the selected
+table rows before calling the writer. Reordering only `obs_identity` would
+mislabel the matrix rows; the writer does not perform automatic alignment.
+
+Allow accompanying `.uns` replacements in the **same logical update** as the
+matrices. Each supplied metadata path replaces its entire value; there is no
+automatic regional filtering or merging of metadata. Preserve unrelated paths
+and protect SpatialData annotation metadata using the component-write rules.
+The caller prepares records covering retained as well as updated data where
+needed. Separate matrix and metadata write calls do not provide this shared
+rollback guarantee.
+
+For a nested `.uns` value, such as `("uns", "analysis", "threshold")`, `None`
+is an encoded value, not a deletion; the same overwrite and protected-annotation
+rules still apply. Replacing the entire `("uns",)` requires a mapping, so
+`("uns",): None` is invalid.
+
+For example, update an existing matrix and its caller-prepared metadata:
+
+```python
+selected = adata.obs[region_key].eq("cells_sample_a")
+obs_identity = adata.obs.loc[selected, [region_key, instance_key]]
+
+hp.tb.io.write_table_components_by_region(
+    "sdata.zarr",
+    table_name="cell_features",
+    components={
+        ("obsm", "morphology"): regional_features,
+        ("uns", "feature_matrices", "morphology"): updated_metadata,
+    },
+    obs_identity=obs_identity,
+    overwrite=True,
+)
+```
+
+Here, `adata.obs` retains the stored observation order, and `regional_features`
+contains only the selected rows in the order described by `obs_identity`.
+No fill is needed: the existing morphology measurements for all other regions
+remain unchanged.
+`updated_metadata` describes the resulting matrix, including retained regions
+where needed; it is not just a metadata fragment for the selected region.
+
+**Selected-row input and bounded memory do not mean region-only disk writes.**
+Initially, stage a complete replacement for each affected `.obsm` entry. Build it
+lazily or chunk by chunk from the existing matrix and selected-row payload (or
+explicit fills for a new entry), without collecting the complete old or merged
+matrix in memory. Reading and rewriting unselected rows of the affected component is
+allowed; reading or rewriting `.X`, unrelated `.obsm` entries or other tables
+is not. Memory may include row identities, requested metadata and active
+matrix chunks. Do not add direct in-place row/chunk overwrites in this part.
+Part 11f.xi separately optimizes this operation by publishing only affected
+chunks; it is not required to deliver this initial regional-write API.
+
+Finish staging while original paths remain readable, then publish the matrix
+and metadata paths together with the shared backup/rollback mechanism. Keep
+the same local-store, input-ownership and recovery contracts as the component
+writer. Return `None` after successful completion; do not refresh an already
+loaded `sdata`. There is no crash recovery or concurrent writer isolation.
+SpatialData adapters must be able to use this public API's shared internal
+operation with installation inside the rollback window.
+
+The initial scope excludes regional updates of `.X`, `.layers`, `.obs`, `.raw`
+and pairwise matrices, and does not add a region-specific reader or use the
+legacy `ProcessTable._get_adata()`.
+
+This part delivers the reusable regional writer, not the migration of
+`add_feature_matrix()`. That function previously constructed a full matrix in
+memory and wrote its matrix and metadata sequentially. Part 11f.vii b) replaces
+that persistence path with this infrastructure while retaining feature
+calculation, alignment and scientific metadata preparation in the caller.
+
+Focused tests must cover interleaved regions, instance IDs shared across
+regions, exact selected-row replacement and unchanged unselected values,
+new-entry fills, identity/shape/dtype rejection and overwrite behavior.
+For the preparatory refactor, add regression coverage for annotation fields,
+column types, missing/duplicate identities, declared-versus-observed regions
+and identity order in existing writes. Verify that the shared identity checks
+also accept valid regional subsets without requiring omitted regions to appear
+in the submitted dataframe.
+Reject `.obsm` payloads of `None` without publishing any matrix or accompanying
+metadata changes; verify omitted components remain unchanged. Round-trip a
+nested `.uns` value of `None` as an encoded value, and reject `None` for the
+whole `.uns` mapping.
+Verify that region scope is derived from actual `obs_identity` values, not
+unused categories. Reject empty identities and partial observation coverage of
+any represented region; accept complete coverage of A alone as an A-only update,
+preserving B in existing entries. For multi-region requests, accept interleaved
+identities and matrix rows in selected table order, and reject region-grouped
+identities without publishing changes.
+Verify that unused categorical categories neither invalidate consistent
+annotation nor make those categories selectable. Test unknown-region requests,
+observed-but-undeclared regions and declared regions without observations;
+reject inconsistent annotation before selection, without publishing changes.
+Cover dense/CSR/CSC inputs in memory, lazy and backed forms; preserved sparse
+representations and stored dtypes; safe casts and rejection of lossy casts or
+incompatible fills; zero-filled sparse creation and rejection of nonzero/NaN
+sparse fills when unselected rows exist. Verify that creation with all rows
+supplied needs no fill, and that unsupported representations, including stored
+DataFrame-valued entries, fail without an eager whole-matrix read.
+Verify matching-format updates across in-memory, lazy and backed inputs.
+Reject dense/sparse and CSR/CSC mismatches in both directions, for partial and
+full-region selections, without publishing matrix or accompanying metadata
+changes. Confirm that successful updates preserve the stored matrix format.
+
+Verify that regional-write results are independent of chunk layout. Include
+selected regions spanning chunk boundaries, chunks mixing selected and
+unselected rows, and chunks containing no selected rows. Use uneven,
+differently aligned chunks for the stored matrix and submitted payload.
+For example, use stored row chunks `(3, 3, 2)`, selected stored rows
+`[1, 2, 3, 6]` (zero-based), and submitted row chunks `(2, 2)`: submitted rows
+`[0, 1, 2, 3]` must map to those selected stored rows, regardless of chunk
+boundaries. Compare the complete reopened matrix with an independently
+constructed expected result, covering existing-entry updates and new-entry
+fills. These correctness cases must remain reusable as regression tests for
+Part 11f.xi, without prescribing a particular chunk-merging implementation.
+
+Instrument matrix access to verify chunked merging without whole-matrix
+materialization or unrelated reads. Exercise coupled metadata writes and
+failures during staging, publication and finalization, checking restoration
+of the affected entries and consolidated metadata.
+
+### Part 11f.vi a): shared regional-update blocks
+
+**Status: implemented. Regional-update blocks share one prepared task graph;
+aligned existing-block reuse is implemented separately in Part 11f.vi b).**
+
+Optimize how `_regional_matrix()` prepares `regional_values` for its merge
+tasks. Previously, separate Dask-array slices were passed into delayed calls;
+their independently prepared graphs added graph-construction overhead and
+could repeat input reads or computation. Do not assume that these calls retain
+shared source-task keys merely because the slices originate from one array.
+
+- Derive the required update row bands from the finalized output chunks and
+  the selected full-table row positions. Each band contains only the selected
+  observations belonging to that output row block, in their existing order.
+- Lazily rechunk an internal view of `regional_values` to those row bands and
+  the output column boundaries. Output blocks without selected observations
+  receive `updates=None`; do not create artificial update rows for them.
+- Convert the prepared array to delayed blocks once, outside the merge loops,
+  and pass those block references to the merge tasks. Rechunking followed by
+  independently converting each array slice to a delayed call is not the
+  intended optimization: preserve shared dependencies between update blocks.
+- Hoist the delayed merge-function wrapper outside the loops. Leave the
+  existing-matrix slicing and output concatenation unchanged in this part.
+
+Both Parts 11f.vi a) and b) preserve the public API, output-chunk policy,
+matching-format restriction, input immutability and shared publication/rollback
+contract. They still stage complete replacement matrices. Neither changes
+stored chunk layouts nor introduces whole-matrix computation or persistence
+in memory. Part 11f.xi separately addresses which on-disk chunks are rewritten.
+
+**Checks.** Reuse the regional writer's numerical and failure-recovery cases.
+Cover uneven/interleaved selections, empty update bands, partial new-entry fills,
+zero-column matrices and dense/CSR/CSC representations. Check that graph
+construction performs no payload reads or computation, and that execution
+neither collects complete old/merged matrices nor modifies supplied inputs.
+Add a controlled dense-write regression case in which one input block serves
+multiple output blocks, verifying shared input loading and correct values.
+Do not promise read-once behavior for all storage layouts or sparse writes:
+AnnData's sparse writer currently computes successive output chunks separately,
+so shared graph keys alone do not guarantee reuse across those computations.
+Compare graph-build cost in a small representative benchmark; avoid hard timing
+thresholds or exact graph-key/layer counts in unit tests.
+
+### Part 11f.vi b): reuse aligned existing blocks
+
+**Status: implemented. Aligned existing blocks share one prepared task graph;
+mismatched layouts raise an explicit internal-contract error.**
+
+Avoid repeatedly slicing `existing` when every output block already corresponds
+exactly to one existing Dask block. After normalizing the output chunks and
+applying the CSR/CSC uncompressed-axis adjustments, explicitly compare the
+complete output chunk tuples with `existing.chunks`, including terminal chunks:
+
+- If they match, call `existing.to_delayed()` once and pass the corresponding
+  existing block references directly to the merge tasks.
+- If they differ, raise `RuntimeError` before constructing merge tasks. This
+  violates the internal reader/merge contract; there is no slicing fallback.
+  Use an explicit check, not a Python assertion, and never infer alignment
+  from nominal chunk sizes alone.
+- If the entry is new, retain `original=None`. Preserve the existing shortcut
+  for requests supplying all observations.
+
+The public writer reads `existing` itself; callers supply only the regional
+measurements. Dense output layouts retain `existing.chunks`, and Harpy's sparse
+reader already keeps the uncompressed axis whole. Alignment is therefore an
+internal invariant, not a user restriction on supplied regional chunks. The
+explicit comparison detects an incompatible reader change instead of pairing
+blocks incorrectly. The other contracts and scope limits of Part 11f.vi a)
+also apply here.
+
+**Checks.** Exercise aligned dense/CSR/CSC layouts with uneven terminal chunks.
+Compare complete results with the same independent expected matrix, including
+unchanged observations and input buffers. Deliberately supply sparse layouts
+whose uncompressed axes are split and verify an explicit error before computation.
+Retain the no-premature-read and bounded-memory checks, and instrument a
+representative dense case to verify that existing blocks are shared without
+redundant reads. Measure graph-build
+overhead without making wall-clock speedups or internal graph structure part of
+the public contract.
+
+### Part 11f.vii: integration with existing Harpy APIs
+
+**Status: Parts 11f.vii a), b) and c) implemented.
+Each part includes its own focused integration tests and documentation updates.**
+
+All three parts reuse the shared table I/O infrastructure rather than introducing
+competing codecs or publication mechanisms. Installation and metadata finalization
+must remain inside the rollback window; adapters restore affected in-memory state
+on failure.
+
+Reuse shared table-write recovery to restore saved root-metadata contents (or
+their prior absence) on handled failure, rather than relying on another successful
+consolidation attempt. Save that state before changing the store. Remove only
+parent groups created by the operation, including `tables` if previously absent;
+preserve pre-existing groups. Cover setup failures before publication as well as
+failures while backups are retained.
+
+Existing preprocessing conveniences may use the new storage layer, but these
+parts do not redesign their scientific steps or add wrappers around Scanpy
+operations. The explicit table APIs must work independently of those conveniences.
+The legacy `ProcessTable._get_adata()` remains unchanged. Ordinary
+`spatialdata.read_zarr()` behavior is unchanged; Part 11f.iii's `hp.io.read_zarr()`
+wrapper continues to reuse the shared table reader.
+
+### Part 11f.vii a): refactor `hp.tb.io.add_table`
+
+**Status: implemented. Backed writes use the shared table operation and attach
+only the affected table with lazy matrices; unbacked attachment remains write-free.**
+
+Make `hp.tb.io.add_table` a SpatialData-facing adapter over the shared table I/O
+infrastructure. Preserve its distinction between attaching an unbacked table
+and persisting a backed one. For backed writes, attach only the affected
+reopened table with lazy matrices, without reopening the entire tables
+collection or mutating the supplied AnnData. Restore the previous attached table
+if persistence, installation or metadata finalization fails.
+
+Preserve the existing unbacked overwrite behavior: replacement does not require
+`overwrite=True`. Backed replacements require permission whether the existing
+table is attached or only present on disk. Annotation preparation must not
+eagerly copy matrices; unbacked results may share matrix data with the input.
+Scope any StringDType compatibility conversion to the affected table.
+
+**Checks and documentation.** Cover unbacked attachment and backed creation and
+replacement, successful lazy attachment, input isolation and unchanged unrelated
+elements. Test restoration after setup, publication, installation and
+metadata-finalization failures, including exact root-metadata restoration when
+consolidation continues to fail and cleanup of only newly created parents.
+Document complete-table persistence and attachment through `add_table`, and its
+distinction from the path-based writers that do not update a supplied `sdata`.
+
+### Part 11f.vii b): refactor `hp.tb.add_feature_matrix`
+
+**Status: implemented. Backed existing-table updates use the shared regional
+operation, publish matrix and metadata together, and attach only those entries
+before finalization. New-table results are prepared before complete-table publication.**
+
+Explicitly migrate `hp.tb.add_feature_matrix` to Part 11f.vi's regional-write
+operation for backed existing-table updates. Keep feature calculation,
+alignment of calculated values to the selected observations, selection and
+scientific metadata preparation in that API. Delegate the full-matrix merge
+and persistence to the regional-write infrastructure instead of allocating or
+copying the complete existing matrix eagerly. Use its shared internal operation
+so adapter installation finishes before backups are discarded.
+
+Check feature-column names and order in `add_feature_matrix`; reject
+incompatible existing schemas rather than replacing other regions with `NaN`.
+For a new entry, explicitly request `NaN` for unselected rows. Prepare a
+complete metadata record that preserves source descriptions for retained
+regions and updates those for the selected regions; generic I/O must not infer
+that merge. Publish `.obsm[feature_key]` and
+`.uns[feature_matrices_key][feature_key]` together, replacing the current
+sequential direct writes. Restore affected in-memory entries if persistence
+or installation fails.
+
+Existing-table updates must not read or rewrite `.X`; new-table creation must
+use the shared complete-table path integrated in Part 11f.vii a), only after
+feature calculation and metadata preparation succeed. Backed updates check the
+complete attached observation identity/order against storage before installing
+the full replacement matrix. Stored values and source descriptions are authoritative
+for unselected regions; unrelated local annotations and component references remain
+unchanged. Existing targets must be dense numeric matrices compatible with the
+calculated feature schema and dtype. Regional writes
+still replace the complete affected `.obsm` matrix chunkwise; affected-chunk-only
+publication remains Part 11f.xi.
+
+**Checks and documentation.** Cover new-table creation, successful regional writes,
+overwrite/schema rejection, preserved measurements and metadata for unselected
+regions, and preservation of unrelated components without reading or rewriting
+`.X`. Test failures during either component write, installation and metadata
+finalization, verifying recovery of both disk and affected in-memory state.
+Document regional feature updates, new-entry fills and feature-schema requirements,
+alongside annotation/component-only examples using the explicit table I/O APIs.
+
+### Part 11f.vii c): integrate aggregation and canonical-component writers
+
+**Status: implemented. Both domain writers and `_write_table_operation` reuse
+`_publish_table_paths` for parent setup, publication and saved root-metadata
+recovery. Aggregation retains checkpoint-driven sparse serialization; canonical
+updates retain paired-component staging and domain validation. Installed matrix
+handles are read-only, and adapters restore affected in-memory references on failure.**
+
+Migrate other existing table writers to shared reading/serialization/publication
+primitives where applicable, including the complete aggregation-table path
+and canonical-component updates. Retain their scientific orchestration and
+domain validation in the table modules; do not merge them into one generic
+aggregation/canonical workflow or duplicate the generic I/O implementation.
+Non-table SpatialData element writers continue using their format-specific I/O
+and the shared publisher.
+
+Apply the shared recovery contract above to both writer paths, replacing recovery
+that depends on another consolidation attempt. Keep installation and domain
+validation within the rollback window, and restore the affected attached table
+or component entries on failure.
+
+**Checks and documentation.** Retain domain-specific correctness coverage and add
+focused integration checks for shared I/O, input isolation and unchanged unrelated
+elements. Exercise setup, publication, installation, validation and
+metadata-finalization failures for both writers. Verify saved root-metadata
+restoration even when consolidation continues to fail, cleanup of only newly
+created parents and restoration of affected in-memory state. Document the shared
+persistence/recovery behavior and the responsibilities retained by each caller.
+
+Aggregation workspaces now live beside the store, so checkpoint/staging failures
+cannot leave a newly created `tables` group. Canonical updates validate full
+in-memory observation identity/order against storage before publication. Focused
+checks cover both Zarr formats, failure after assignment, persistent consolidation
+failure, unchanged unrelated data, and canonical updates without unrelated matrix
+payload reads.
+
+### Part 11f.viii: safe deletion of optional AnnData components
+
+**Status: implemented. Required before the napari-harpy persistence migration,
+but not before Slice 11g.**
+
+Both public entry points share `_write_table_operation()` and
+`_publish_table_paths()`. `_DeletedPath` extends the existing filesystem publisher
+with backup-only destinations; no payload decoding or separate deletion engine
+is introduced. Focused tests cover both Zarr formats, supported/protected paths,
+missing targets, no-payload-read deletion, coupled rollback and lazy replacements
+that read a component being deleted. Public API and storage documentation describe
+the completed contract below.
+
+**Public contract.** Provide two public entry points sharing one internal
+operation, not two storage implementations:
+
+- `hp.tb.io.delete_table_components()` for deletion-only requests. Its `components`
+  argument is a nonempty sequence of logical tuple paths. It has no identity
+  arguments or `overwrite` flag: naming a deletion target explicitly authorizes
+  its removal.
+- `hp.tb.io.write_table_components()` for replacements, optionally accompanied by
+  `delete: Sequence[ComponentPath] = ()`. Its existing `components` argument
+  remains a nonempty mapping of paths to replacement values. `overwrite` applies
+  only to replacements, not to the explicitly requested deletions.
+
+The new deletion API is:
+
+```python
+def delete_table_components(
+    store: str | PathLike[str],
+    *,
+    table_name: str,
+    components: Sequence[ComponentPath],
+) -> None:
+    ...
+```
+
+Both APIs operate on an existing table in a local SpatialData Zarr store and
+return `None` after successful completion. This extends deletion beyond `.obsm`
+and `.uns` without changing the meaning of existing replacement requests.
+No third public update API or separate deletion engine is introduced.
+
+For example, remove a feature matrix and its associated metadata together:
+
+```python
+hp.tb.io.delete_table_components(
+    "sdata.zarr",
+    table_name="counts",
+    components=[
+        ("obsm", "cell_features"),
+        ("uns", "feature_matrices", "cell_features"),
+    ],
+)
+```
+
+If the same logical update also replaces observations, submit one mixed request:
+
+```python
+hp.tb.io.write_table_components(
+    "sdata.zarr",
+    table_name="counts",
+    components={("obs",): updated_obs},
+    delete=[
+        ("obsm", "cell_features"),
+        ("uns", "feature_matrices", "cell_features"),
+    ],
+    overwrite=True,
+)
+```
+
+A mixed call shares one rollback operation. Calling the write and deletion APIs
+separately commits two independent operations; failure of the second does not
+undo the first. Use the mixed form whenever related changes must succeed or be
+restored together.
+
+Support deletion according to the component's structural role, rather than
+automatically allowing every path accepted for replacement:
+
+| Component                                                                  | Deletion contract                                                                                           |
+| -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Individual `layers`, `obsm`, `varm`, `obsp`, `varp` entries                | Supported; remove only the requested entry.                                                                 |
+| Individual `raw.varm` entries                                              | Supported; preserve the remaining raw data.                                                                 |
+| Individual or nested `.uns` records                                        | Supported, except protected SpatialData annotation metadata and its descendants.                            |
+| `.X`                                                                       | Supported; preserve `.obs`, `.var`, all other components and the table's shape. Reopening returns `X=None`. |
+| Entire `.raw`                                                              | Supported as one unit, including its `X`, `var` and `varm`. Reopening returns `raw=None`.                   |
+| `.obs`, `.var`, or `.raw.var` individually                                 | Rejected: observation and feature axes must remain intact.                                                  |
+| `.raw.X` individually                                                      | Rejected: remove the complete `.raw` container instead.                                                     |
+| Whole mapping containers such as `.layers`, `.obsm`, `.uns` or `.raw.varm` | Rejected: remove explicitly selected entries and preserve their parent containers.                          |
+
+Deletion therefore has its own allowed-path rules: `("raw",)` is a supported
+deletion target even though whole-raw replacement is not an existing component
+write operation. This does not add whole-raw replacement support. Do not leave
+a partial raw container without its matrix or feature axis; constructing raw
+without `X` can trigger AnnData's fallback to copying the main table's data.
+
+Keep the three component-update intents distinct:
+
+- **Omitted path:** leave its stored value unchanged.
+- **Replacement value:** write the supplied value at that path.
+- **Explicit deletion:** remove that path from storage on successful completion.
+
+`None` remains an encoded value where supported, not a deletion instruction.
+
+Removing entries only from an in-memory AnnData must not implicitly delete them
+in a component-write request.
+Callers identify related scientific data and metadata; generic I/O does not
+infer which records belong together.
+
+**Missing-target policy.** A valid deletion target that is already absent is a
+no-op. Log at INFO level with the table name and component path, then continue
+processing the remaining replacements and deletions. For example:
+
+```text
+Table 'counts': component ('obsm', 'cell_features') is already absent; skipping deletion.
+```
+
+Use this single policy initially; do not introduce a `missing_ok` option. If all
+deletion targets are absent and there are no replacements, return after request
+validation without creating staging/backups or rewriting consolidated metadata.
+Invalid or protected paths, conflicting requests, missing stores/tables,
+malformed parents and I/O errors still raise: they are not already-absent targets.
+Validate conflicts before skipping missing targets. A present encoded `None`
+is an existing value, not an absent path.
+
+**Validation and scope.** Validate the complete request before changing storage:
+reject duplicate or overlapping paths, including a path requested for both
+replacement and deletion or an ancestor/descendant conflict. Restrict deletions
+to the supported optional components above; protect required table structures and
+SpatialData annotation metadata. Whole-table deletion, observation/feature-row
+deletion and matrix-slice deletion remain outside this slice. Removing individual
+`.obs`/`.var`/`.raw.var` annotation columns remains a whole-dataframe replacement
+that preserves its index, not a new column-level disk operation. Preserve
+unrelated entries and parents.
+
+Deletion-only requests do not require `obs_identity`, `var_names` or
+`raw_var_names`: deleting a complete optional component does not align replacement
+values or change the main table's axes. Mixed requests retain the existing ordered
+identity and structural checks for their replacement values. Callers remain
+responsible for keeping related scientific records coherent; do not infer
+cascading deletions from metadata references.
+
+**Shared publication.** Both public entry points delegate to the extended
+`_write_table_operation()`, sharing validation, publication and recovery.
+Reuse `_publish_table_paths()` for scoped table updates and root-metadata recovery.
+The underlying `_publish_staged_paths()` accepts `_StagedPath` replacements and
+explicit `_DeletedPath` destinations without staged payloads. It does not use
+placeholder values or a separate direct-Zarr deletion path:
+
+```text
+validate all replacements and deletions
+    -> stage replacement payloads while original data remains readable
+    -> move affected existing paths to backups (including deletion targets)
+    -> install replacements; leave deletion targets absent
+    -> finish metadata/installation work while backups are retained
+    -> success: discard backups, completing the deletions
+       failure: remove replacements and restore all original paths
+```
+
+Fully serialize all replacements before moving any deletion target, including
+when a lazy replacement reads that target. For example, writing
+`.X = layers["counts"] * 2` while deleting `layers["counts"]` must finish evaluating
+and staging `.X` while the original layer remains readable at its original path.
+Publication then moves the layer into a backup and installs the staged `.X`;
+the layer disappears from its original path at that point, but its backup is
+discarded only after the entire operation succeeds. No lazy-dependency analysis
+is needed: complete staging before publication for every mixed request, rather
+than committing a write and then performing a separate deletion.
+
+**I/O and ownership.** Deletion itself must not decode or materialize the target's
+payload, including dense, sparse and DataFrame-valued entries. Deleting `.X` or
+the complete `.raw` container likewise requires no numerical reads for the
+deletion operation. Evaluating caller-supplied lazy replacements may legitimately
+read a deletion target during staging; this does not violate the deletion
+operation's no-payload-read guarantee. An unrequested `.X` must not be rewritten;
+it may be read only when needed by caller-supplied replacement computation. Reuse
+the existing ownership/path safeguards and metadata cleanup/restoration contract,
+including saved store-root metadata when finalization fails. Neither path-based
+public API updates an attached AnnData or SpatialData object; adapters remain
+responsible for affected live objects and their restoration on failure. Keep the
+same local-store, handled-failure
+guarantees and limitations: no crash recovery or concurrent reader/writer isolation.
+
+**Checks and documentation.** Focused tests must cover deletion-only and mixed
+requests across the supported paths, related matrix and metadata removal,
+preservation of unrelated components, protected/invalid/conflicting requests and
+both public entry points. Verify INFO logging for absent targets, continued
+processing of other requested changes, and no storage writes for a validated
+all-missing deletion-only request. Check that removing `.X` preserves the table's
+axes and shape, and that removing `.raw` removes the complete container while
+preserving the main table. Reject individual `.raw.X`/`.raw.var` removal and
+whole-mapping deletion.
+Cover deletion-only requests without identity arguments and mixed requests that
+still enforce replacement identities. Inject publication and finalization failures
+to verify restoration of both removed and replaced data, including consolidated
+metadata and affected adapter state. Instrument dense, sparse and DataFrame-valued
+deletion-only requests to verify that payloads are not decoded and unrelated `.X`
+is neither read nor rewritten; deleting `.X` or `.raw` itself must not read their
+matrices. Add a mixed-request regression test that lazily derives `.X` from
+`layers["counts"]` while deleting that layer. Verify the numerical result, the
+layer's absence on success, and completion of replacement serialization before
+the layer is moved. Inject a later failure to verify that the original `.X` and
+layer are both restored. Keep reads caused by evaluating the replacement distinct
+from the deletion operation's no-payload-read guarantee.
+Document the explicit deletion contract in the public API and storage overview.
+
+### Part 11f.ix: SpatialData-aware table-component updates
+
+**Status: implemented. The public adapters share component validation with the
+path-based writer and install selective in-memory updates within its rollback
+window. Focused tests cover storage modes, axis alignment, independent component
+presence, lazy dependencies and failure recovery. Not a prerequisite for Slice
+11g or the path-based napari-harpy persistence migration.**
+
+Provide general public adapters for modifying components of a table attached to
+a supplied `SpatialData`. Callers should not have to coordinate disk updates,
+selective installation and rollback themselves. Generalize the existing pattern
+used by `hp.tb.io.add_table()` and `hp.tb.add_feature_matrix()`, rather than introduce
+another component serializer or deletion engine.
+
+**Two explicit API levels.** Keep the existing path-based APIs unchanged, and
+add SpatialData-aware counterparts:
+
+| API                                            | Input and scope                                                                                                                     |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `hp.tb.io.write_table_components(store, ...)`  | Existing path-based replacement/mixed-update API; updates storage only.                                                             |
+| `hp.tb.io.delete_table_components(store, ...)` | Existing path-based deletion API; updates storage only.                                                                             |
+| `hp.tb.io.add_table_components(sdata, ...)`    | New adapter for additions/replacements and optional explicit deletions; updates the supplied SpatialData and its store when backed. |
+| `hp.tb.io.remove_table_components(sdata, ...)` | New deletion-only adapter; removes requested components from the supplied SpatialData and its store when backed.                    |
+
+Do not overload the existing `store` argument to accept a SpatialData object or
+change the path-based APIs' ownership contract. This mirrors the distinction
+between `write_table()` and `add_table()`. The new adapters return the supplied
+`sdata` after successful completion.
+
+Use the same logical tuple paths and replacement/identity arguments as the
+path-based component writer. The addition API accepts a nonempty `components`
+mapping and optional `delete` paths for one coupled update. The removal API
+accepts a nonempty sequence of component paths, without identity arguments or
+an overwrite flag. For example:
+
+```python
+hp.tb.io.add_table_components(
+    sdata,
+    table_name="counts",
+    components={
+        ("obsm", "cell_features"): features,
+        ("uns", "feature_matrices", "cell_features"): feature_metadata,
+    },
+    obs_identity=adata.obs[[region_key, instance_key]],
+    overwrite=True,
+)
+
+hp.tb.io.remove_table_components(
+    sdata,
+    table_name="counts",
+    components=[
+        ("obsm", "cell_features"),
+        ("uns", "feature_matrices", "cell_features"),
+    ],
+)
+```
+
+**Storage modes.** Branch on `sdata.path`, not `AnnData.isbacked` or the current
+matrix representation:
+
+- **Unbacked SpatialData (`sdata.path is None`):** validate and modify only the
+  requested in-memory components. Perform no storage operations, serialization,
+  or unnecessary matrix computation. Preserve lazy matrix representations and
+  unrelated local state. Restore affected in-memory entries if installation fails.
+- **Backed SpatialData:** validate the request against storage and the live
+  table, reuse the shared internal write operation, and install only the affected
+  components into the live table before the operation commits. Reopen written
+  matrices lazily from permanent paths; do not reload the whole AnnData or discard
+  unrelated unsaved annotations and component references.
+
+Reuse the existing logical-path, protected-component and axis-identity rules in
+both modes, refactoring shared validation where needed rather than maintaining
+competing contracts. `None` remains a replacement value, not an implicit deletion.
+Scientific metadata preparation remains the caller's responsibility.
+
+**Overwrite policy.** Match `hp.tb.io.add_table()` for the new
+`hp.tb.io.add_table_components()` adapter:
+
+- **Unbacked SpatialData:** ignore `overwrite`; explicitly requested in-memory
+  components may be replaced even with `overwrite=False`.
+- **Backed SpatialData:** require `overwrite=True` if a requested replacement
+  target exists in memory or on disk, including an unsaved local entry absent
+  from storage. With `overwrite=False`, additions are allowed only when the
+  target is absent from both. Check the component being written, not merely
+  whether its containing table exists.
+
+This controls replacement permission only. Shape, identity, protected-path and
+other validation still apply in both modes; preserve unrelated local state and
+restore affected entries on installation failure. Explicit deletions do not
+require overwrite permission, and `remove_table_components()` has no overwrite
+flag. The existing path-based writers retain their current overwrite contract.
+
+**Alignment and ownership.** Before attaching a stored matrix, verify that the
+relevant complete in-memory axes agree with storage in identity and order:
+observation identities for observation-aligned matrices, feature identities for
+feature-aligned matrices, and raw's independent feature axis where applicable.
+Shape agreement alone is insufficient. The supplied matrices still need the
+existing replacement-identity context; passing `sdata` does not prove their row
+or column order and must not trigger automatic reindexing.
+
+Only requested components are changed or refreshed. Preserve unrelated local
+edits and references. External references to replaced matrices are not updated
+automatically; caller-owned dirty/stale tracking and application events remain
+outside these generic adapters.
+
+**One rollback window.** Do not call a completed public path-based writer and
+then modify memory. Use the shared internal operation so installation happens
+while disk backups remain available:
+
+```text
+validate the request and relevant live/stored identities
+    -> stage all replacement payloads while original paths remain readable
+    -> publish replacements/deletions, retaining backups
+    -> install/remove only the requested in-memory components
+    -> finalize store metadata and commit
+       failure: shared writer restores disk; adapter restores affected memory
+```
+
+This also preserves the mixed-update contract when lazy replacement values read
+a component being deleted. Reuse `_write_table_operation()` and its publisher;
+do not add direct Zarr writes/deletions or a parallel rollback implementation.
+The existing handled-failure, no-crash-recovery and no-concurrent-isolation
+limitations remain unchanged.
+
+**Missing deletion targets.** Resolve presence in memory and on disk separately.
+A requested component already absent on disk must still be removed from memory
+if present there; conversely, local absence must not skip a stored target.
+Absence in both places is a logged no-op. Invalid paths, malformed parents and
+I/O errors still raise. Do not create disk staging or rewrite consolidated
+metadata solely to remove an entry that exists only in memory.
+
+**Destination table requirements.** Apply these checks to both new adapters
+before staging or modifying in-memory components:
+
+- **Table presence:** require `sdata.tables[table_name]` to exist. For backed
+  SpatialData, also require the same table to exist in its store. If the table
+  exists only in memory or only on disk, raise with guidance to persist or load
+  it explicitly. Do not implicitly create or load a complete table. This is a
+  table-level requirement: individual components may still exist on only one
+  side, as covered by the overwrite and missing-deletion policies above.
+- **AnnData views:** reject the update if `sdata.tables[table_name].is_view` is
+  true, in both backed and unbacked modes. The caller must explicitly prepare
+  and attach a non-view destination table. Do not silently copy or materialize
+  the view. This restriction concerns the attached destination table, not the
+  supported representations of supplied replacement matrices.
+- **HDF5-backed destinations:** reject actual HDF5-backed AnnData objects,
+  whose setters can write through to a separate file outside the shared Zarr
+  operation. This does not exclude Harpy's lazy arrays or read-only Zarr handles,
+  which do not set `AnnData.isbacked`.
+
+**Checks and documentation.** Cover unbacked and backed operation, additions,
+replacements, deletions and coupled mixed updates. Verify selective in-memory
+installation, preservation of unrelated local edits, relevant axis/order
+rejection, and no unnecessary numerical reads or computation. Cover deletion
+targets present only in memory, only on disk, in both places and in neither.
+Verify that unbacked replacements work with `overwrite=False`, without bypassing
+validation. For backed replacements, cover targets present only in memory, only
+on disk, in both places and in neither: existing targets require `overwrite=True`,
+while additions absent from both do not.
+Test missing destination tables, including backed tables present only in memory
+or only on disk, and AnnData-view destinations in both storage modes. Verify
+rejection before staging or mutation, without implicit whole-table loading,
+creation, matrix copying or computation; preserve existing storage and live state.
+Inject staging, publication, installation and finalization failures to verify
+disk/root-metadata recovery and restoration of affected live references. Retain
+tests proving that the original path-based APIs do not modify live objects.
+Reuse storage-level tests rather than duplicating the complete encoding matrix
+in adapter tests. Document the two API levels and their ownership/return
+contracts in API documentation and `docs/development/storage.md` during
+implementation, without roadmap language in user-facing documentation.
+
+### Part 11f.x: SpatialData-aware regional table-component updates
+
+**Status: slices a) and b) implemented.
+Not a prerequisite for Slice 11g or the path-based napari-harpy persistence migration.**
+
+First implement the general regional adapter, then migrate the existing
+feature-matrix caller. Keep the affected-chunk optimization separate in Part 11f.xi.
+
+### Part 11f.x a): implement `hp.tb.io.add_table_components_by_region()`
+
+**Status: implemented. The public adapter shares regional validation and lazy
+merge preparation with the disk-only writer, and installs only affected components
+within the shared rollback window. Focused tests cover both storage modes,
+retained measurements, sparse chunk preparation and failure recovery.**
+
+Add `hp.tb.io.add_table_components_by_region()` as the SpatialData-aware counterpart
+of `hp.tb.io.write_table_components_by_region()`. Keep the path-based writer
+disk-only. The new adapter updates the existing attached AnnData and, when
+`sdata.path` is set, persists the same update to its SpatialData Zarr store.
+Return the supplied `sdata` after successful completion.
+
+Mirror the regional writer's arguments, replacing `store` with `sdata`:
+
+```python
+def add_table_components_by_region(
+    sdata: SpatialData,
+    *,
+    table_name: str,
+    components: Mapping[ComponentPath, object],
+    obs_identity: pd.DataFrame,
+    fill_values: Mapping[ComponentPath, object] | None = None,
+    chunk_size: int = 1000,
+    overwrite: bool = False,
+) -> SpatialData: ...
+```
+
+**Regional scope.** Retain Part 11f.vi's supported payloads and validation:
+one or more numeric dense/CSR/CSC `.obsm` matrices, with optional whole-value
+`.uns` replacements. Each matrix contains only the observations identified by
+`obs_identity`, in matching row order. For example, supply
+`adata.obs.loc[selected, [region_key, instance_key]]` alongside the selected
+measurement rows. Actual region values select complete regions; unused
+categories do not. Require every observation of each selected region exactly
+once, in destination-table order, including when regions interleave. Do not
+add a separate `regions` argument or automatic row reordering.
+
+Keep the matching-format, column-count, safe-casting and new-entry-fill rules.
+`fill_values` applies only when a new destination matrix has unselected rows;
+existing matrices retain their unselected measurements. Continue rejecting
+DataFrame-valued `.obsm` entries and `None` matrix payloads. Scientific metadata
+preparation and feature-column meaning/order remain the caller's responsibility.
+Do not extend regional updates to other matrix slots or add deletion arguments
+in this part.
+
+**Storage mode and merge source.** Branch on `sdata.path`, not `AnnData.isbacked`
+or the supplied matrix representation:
+
+| SpatialData mode | Source of unselected measurements in an existing target | Installed result                                                |
+| ---------------- | ------------------------------------------------------- | --------------------------------------------------------------- |
+| Backed           | Stored `.obsm` matrix                                   | Replacement reopened lazily from permanent paths                |
+| Unbacked         | Attached `.obsm` matrix                                 | Prepared replacement, without persistence or forced computation |
+
+For backed updates, storage determines whether the matrix exists and supplies
+its format, shape, dtype and retained measurements. An unsaved local replacement
+of that same matrix is not a merge source; a matrix present only in memory is
+a new entry on disk and follows the new-entry-fill rules. Preserving unrelated
+local components does not mean preserving unsaved values within a requested
+matrix. Make this distinction explicit in the public docstring and tests.
+
+Unbacked updates validate against the attached table and merge with its existing
+matrix. Reuse lazy merging without collecting complete lazy matrices or
+modifying caller-owned inputs. Attach a Dask array representing the complete
+updated matrix, even when supplied measurements are in memory. Do not call
+`persist()` or otherwise force the numerical merge to execute before returning.
+Preserve dense/CSR/CSC format, not necessarily the original array container type.
+Document that distinction from ordinary component replacement. Retain the regional
+writer's `chunk_size` policy, adapting input preparation for in-memory targets
+where necessary.
+
+**Sparse chunk preparation for unbacked updates.** An attached sparse Dask
+matrix may have chunks along both dimensions, unlike Harpy's sparse reader,
+which returns CSR blocks spanning all columns and CSC blocks spanning all rows.
+For partial updates of such existing matrices, prepare a separate lazy working
+array before calling `_regional_matrix()`:
+
+- **CSR:** combine column chunks to span all columns, preserving row chunks.
+- **CSC:** combine row chunks to span all rows, preserving column chunks.
+
+For example, a six-row, four-column CSR matrix would use:
+
+```python
+original.chunks == ((3, 3), (2, 2))
+working.chunks == ((3, 3), (4,))
+```
+
+Rechunk only the working array when needed. Preparation must not trigger
+computation, modify the original array or its chunk layout, rewrite storage,
+reorder measurements, or convert between dense, CSR and CSC formats. Keep the
+merge helper's existing-block/output-layout check: adapt valid public inputs
+to that internal contract rather than weakening the check.
+
+**Attached-table and overwrite contracts.** Reuse Part 11f.ix's requirements:
+the table must already be attached and, when backed, also exist in storage.
+Reject destination AnnData views and HDF5-backed tables; do not implicitly load,
+create or copy an entire destination table. For backed updates, verify that
+the complete attached observation identities, their order and region/instance
+keys agree with storage before attaching a full resulting matrix. Checking only
+the selected observations cannot protect unchanged rows from misattachment.
+
+Ignore `overwrite` for unbacked SpatialData, while retaining all validation.
+For backed SpatialData, require `overwrite=True` when a requested component
+exists either in memory or on disk, including a local-only entry. Only targets
+absent from both are additions without overwrite permission.
+
+**Selective installation and shared rollback.** Keep the same AnnData object
+and preserve unrelated local annotations, components and references. Reopen
+only requested backed components, with lazy matrices and eager `.uns` values;
+do not reload the complete table. Use the existing internal regional operation
+so installation happens before finalization:
+
+```text
+validate regional payloads and complete in-memory/stored observation alignment
+    -> prepare and stage complete regional matrix replacements plus metadata
+    -> publish, retaining backups
+    -> install only the requested components in the attached table
+    -> finalize store metadata and commit
+       failure: shared writer restores disk; adapter restores affected memory
+```
+
+Reuse `_write_table_components_by_region_operation()` and the component adapter's
+installation/rollback helpers. Separate storage-independent regional validation
+and merge preparation from disk access where needed for unbacked operation;
+do not introduce another serializer, publisher or competing regional contract.
+Unbacked installation failures must also restore affected in-memory references.
+External aliases and caller-owned dirty/stale tracking remain outside the API.
+The existing handled-failure, no-crash-recovery and no-concurrent-isolation
+limitations remain unchanged.
+
+Deliver the public adapter independently of the `add_feature_matrix()` migration
+in Part 11f.x b). This slice still stages complete affected matrices. Part 11f.xi
+separately optimizes which stored chunks are rewritten.
+
+**Checks and documentation.** Focus adapter tests on backed/unbacked behavior,
+selective installation into the same AnnData, preservation of unrelated local
+edits and references, and restoration after installation/finalization failures.
+Cover full observation-order mismatches involving unselected regions, independent
+matrix presence in memory and storage, the overwrite policy, and the authoritative
+merge source in each mode. Exercise representative matching-format dense/CSR/CSC
+updates and new-entry fills, including lazy inputs without premature computation
+and without input mutation. For unbacked partial updates, explicitly cover
+existing CSR matrices with split column chunks and CSC matrices with split row
+chunks. Verify that working-array preparation stays lazy, original chunks and
+values remain unchanged, and the merged result preserves the sparse format,
+updated measurements and unselected measurements. Keep the lower-level test
+that rejects incompatible layouts passed directly to the merge helper.
+Reuse lower-level regional correctness and storage
+tests rather than duplicating their full encoding/chunk-layout matrix. Document
+the new API alongside its disk-only counterpart in `docs/api.md` and the storage
+contract during implementation, without roadmap language in user-facing docs.
+
+### Part 11f.x b): migrate `hp.tb.add_feature_matrix()` for existing-table regional updates
+
+**Status: implemented. Existing-table updates delegate to the public regional
+adapter in both storage modes, retaining scientific preparation and separate
+complete-table creation. Both overwrite flags follow Harpy's storage-mode policy;
+unbacked regional results remain lazy. Focused tests cover delegation, retained
+measurements and metadata, overwrite permission, validation and failure recovery.**
+
+Route existing-table regional updates in `hp.tb.add_feature_matrix()` through
+the public `hp.tb.io.add_table_components_by_region()` API in both backed and
+unbacked SpatialData. Replace its local coordination of merging, persistence,
+selective installation and rollback with the adapter, rather than retaining a
+second implementation or calling the private regional write operation directly.
+
+Keep scientific responsibilities in `add_feature_matrix()`:
+
+- Calculate the requested features and align the resulting measurement rows
+  with the selected observations.
+- Check feature-column meaning/order and compatible scientific metadata.
+- Prepare the complete feature-matrix metadata record, retaining source
+  descriptions for unselected regions and updating requested sources.
+
+Submit the selected measurements at `("obsm", feature_key)` together with
+the prepared `("uns", feature_matrices_key, feature_key)` record and matching
+`obs_identity`. Pass `overwrite_feature_key` as the adapter's `overwrite` argument
+and the NaN fill for new dense entries with unselected observations. Delegate
+generic regional validation and installation safety to the adapter; retain checks
+needed to prepare coherent scientific metadata, sharing existing helpers rather
+than adding competing rules.
+
+**Align both overwrite flags with Harpy's storage-mode policy.** This slice
+intentionally changes the existing unbacked permission checks:
+
+- **Unbacked SpatialData:** ignore `overwrite_feature_key` for existing-table
+  regional updates, and ignore `overwrite_output_table` when creating a table
+  at an existing output name. Allow replacement of the corresponding in-memory
+  result without requiring either flag to be `True`.
+- **Backed SpatialData:** require `overwrite_feature_key=True` when the requested
+  feature matrix or its metadata already exists in memory or storage. Require
+  `overwrite_output_table=True` when the output table already exists in memory
+  or storage. Keep these permission checks consistent with the regional adapter
+  and `add_table()`, respectively.
+
+Ignoring overwrite permission does not relax validation: retain regional identity,
+matrix-compatibility and scientific-schema checks, and validation of which
+parameters apply to existing-table updates versus new-table creation. Prepare and
+validate a complete new table before replacing an existing output; calculation or
+validation failures must leave the previous table unchanged. Document both flags'
+storage-mode behavior explicitly in `add_feature_matrix()`.
+
+Preserve the authoritative merge source in each mode: stored measurements for
+backed updates and attached measurements for unbacked updates. Keep unrelated
+local components and the same attached AnnData object. Follow the new adapter's
+lazy-result contract, including for unbacked updates; do not force computation
+solely to recover the previous NumPy container type. Document any resulting
+representation change without changing scientific values or feature semantics.
+
+Leave new-table creation on the existing complete-table/add-table path; align
+its overwrite permission as described above without changing that mechanism.
+This slice does not change feature calculation, add new regional update scopes,
+or implement affected-chunk publication.
+
+**Checks and documentation.** Reuse focused `add_feature_matrix()` integration
+tests to verify delegation, correct selected and retained measurements, coherent
+metadata, new-entry NaN fills, preservation of unrelated local edits, and failure
+recovery in both storage modes. Explicitly test that both overwrite flags are
+ignored for unbacked replacements and still required for backed replacements.
+Keep coverage of feature-schema rejection and complete new-table creation,
+including preservation of an existing output when calculation or validation fails.
+Rely on the adapter and regional writer tests for general storage, encoding and
+rollback coverage rather than duplicating it here.
+During this migration, make the distinction between attaching the updated matrix
+and computing its values explicit in the `add_table_components_by_region()`
+docstring and the regional-update paragraph in `docs/development/storage.md`:
+
+> For unbacked SpatialData, `add_table_components_by_region()` attaches a Dask
+> array representing the complete updated matrix. Selected rows use the supplied
+> measurements; unselected rows retain existing measurements, or receive the
+> specified fill for a new entry. The numerical merge remains deferred until the
+> array is evaluated, for example through `.compute()` or writing. The adapter
+> attaches this result without executing the numerical merge or writing to disk.
+
+Explain the reason for deferring the merge: avoid forcing materialization of the
+complete updated matrix merely to attach it, and allow subsequent processing or
+writing to evaluate its chunks as needed. Inputs already in memory still occupy
+memory; this contract does not eliminate their memory cost.
+
+Also document in `add_feature_matrix()` that feature calculation and alignment
+complete before the regional update. Only the subsequent merge with retained
+measurements, or fills for a new entry, remains deferred when unbacked.
+This does not make feature extraction lazy or change the complete-table creation
+mechanism. Do not introduce a persistence option; keep shared I/O contracts
+centralized rather than repeating the full contract in that docstring.
+
+### Part 11f.xi: affected-chunk regional-write optimization
+
+**Status: planned follow-up optimization; implement after Parts 11f.i–x,
+including both implementation slices of x.
+Not a prerequisite for Slice 11g or the napari-harpy persistence migration.**
+
+Optimize Part 11f.vi's regional `.obsm` writer without changing its public
+selection, identity, overwrite or metadata contracts. The initial implementation
+remains the bounded-memory, complete-component staging path. This follow-up
+reduces disk I/O by staging and publishing only chunks affected by a regional
+update, rather than rewriting the entire matrix.
+
+Start with existing dense, unsharded Zarr matrix entries whose shape, dtype
+and chunk layout remain unchanged. Sparse and sharded storage optimization
+is outside this first scope. New entries retain the existing creation path;
+other supported layouts retain the initial whole-component path. Document
+optimization eligibility explicitly so callers know when full rewrites still
+occur. Do not introduce an optimization-specific public API: both the path-based
+writer and Part 11f.x's SpatialData-aware adapter use the shared regional operation.
+
+The guarantee is **only affected matrix chunks are rewritten**, not that no
+bytes belonging to other samples are touched. A chunk may contain observations
+from several regions; preserve unselected values within that chunk while
+updating selected rows. Chunks without selected rows remain untouched. With
+interleaved samples, many or even all chunks may be affected, so proportional
+I/O savings are not guaranteed. Do not reorder observations, change aggregation
+output order, rechunk stores or introduce sample-aligned storage in this slice.
+
+Resolve row identities and affected chunk coordinates before preparing the
+update. Read and modify affected chunks with bounded memory, serialize them
+using the existing array's encoding, and stage caller-prepared `.uns`
+replacements alongside them. Complete staging while original data remains
+readable, including when incoming lazy values depend on the destination.
+Caller-supplied lazy computations may themselves read additional chunks; the
+optimization bounds the writer's own merge, backup and publication work.
+
+Reuse the shared publisher and rollback machinery at chunk-path granularity;
+add format-aware chunk preparation, not a competing transaction mechanism.
+Back up only affected stored chunks and requested metadata paths, not the
+complete matrix. Preserve absent/fill-valued chunk semantics, including
+restoring whether a chunk existed if publication fails. Matrix and metadata
+changes remain one logical update with the same handled-failure recovery and
+adapter-installation boundary; no crash-atomicity or concurrency guarantees
+are added. Do not replace safe publication with unprotected live-array writes.
+Scientific metadata preparation remains the caller's responsibility.
+
+Reuse Part 11f.vi's chunk-boundary correctness cases as regression tests for
+the optimized writer, exercising both eligible optimized updates and fallback
+paths. Keep numerical correctness separate from instrumentation proving which
+chunks the writer accesses.
+
+Focused tests must instrument storage reads/writes to verify that the writer
+neither reads nor rewrites unaffected matrix chunks, nor copies them for backup. Cover a
+mixed-region chunk, preservation of its unselected values, interleaved rows,
+and absent/fill-valued chunks. Verify numerical agreement with the initial
+regional writer, coupled `.uns` updates, unchanged unrelated components and
+rollback after publication/finalization failures. Keep these I/O guarantees
+separate from timing benchmarks or sample-layout optimization.
+
+### Follow-up: napari-harpy persistence integration
+
+**Status: planned; implement after Parts 11f.i–viii. Not a prerequisite for
+Slice 11g.**
+
+Migrate napari-harpy's shared table persistence, used by object classification
+and spatial queries, onto Harpy's public table I/O APIs. This is a separate
+cross-repository integration task following the first eight Harpy I/O parts;
+Part 11f.xi's affected-chunk optimization is not required. The SpatialData-aware
+adapters from Parts 11f.ix–x may be used where updating a supplied live object
+belongs to the operation; they do not replace the path-based APIs or the
+application's ownership of save snapshots, dirty state and widget events.
+Napari-harpy keeps a small translation layer between application requests and
+Harpy's documented public table I/O APIs. It decides what the user wants saved
+or reloaded and translates that intent into store paths, component paths and
+values. It must not retain a competing table serializer, publisher or disk
+rollback implementation, or import Harpy's private `_storage` helpers. This
+boundary lets Harpy change its storage internals without requiring matching
+changes throughout napari-harpy.
+
+Keep ownership explicit:
+
+- **Harpy:** component encoding, selective/lazy reads, structural alignment,
+  staging, publication, consolidation and disk rollback.
+- **Napari-harpy:** tracking unsaved edits, capturing save/reload requests,
+  translating those requests to Harpy calls, updating live table objects,
+  coordinating widget lifecycle/events and showing feedback. Acknowledge only
+  successfully persisted edits, and preserve newer edits made after a save
+  snapshot. Failed installation during reload must restore affected in-memory
+  state. Preserve unrelated unsaved components during selective reloads.
+
+For example, after a user changes cell classifications or their colors:
+
+- **Save:** napari-harpy captures the selected table's unsaved edits. Its adapter
+  submits the affected `.obs` dataframe and `.uns["user_class_colors"]` record
+  together to `hp.tb.io.write_table_components()`. Harpy performs the
+  staged storage operation; only after it succeeds does napari-harpy acknowledge
+  those edits and show success. On failure, the edits remain unsaved and the
+  application displays the error. Harpy does not need to know that the values
+  came from an object-classifier widget.
+- **Reload:** the adapter requests the selected values through
+  `hp.tb.io.read_table_components()`. Napari-harpy handles installing them into its
+  live table, restoring affected in-memory state if installation fails, and
+  notifying widgets so classifications, colors and controls refresh. Harpy's
+  reader itself does not modify the live application state.
+
+Preserving UI behavior means retaining the Save/Reload actions, unsaved-change
+indicators, feedback and corresponding viewer updates. It does not require
+preserving napari-harpy's existing persistence signatures, path/result classes
+or internal call structure. The adapter may change to fit the agreed Harpy API;
+the storage implementation must not acquire widget-specific concepts to match
+the old interface.
+
+Translate logical `.obs` column edits into a whole-dataframe persistence
+request. Keep GUI edit granularity separate from physical storage granularity.
+Use Harpy's selected-component readers without reopening complete tables;
+materialize selected matrices only where a consumer actually needs them. Review
+row-identity and live-object update semantics explicitly rather than assuming
+that matching function names make the APIs interchangeable.
+
+Use Part 11f.viii's explicit deletion support for removed optional `.obsm` entries
+and `.uns` records. Use `hp.tb.io.delete_table_components()` for deletion-only saves,
+or `hp.tb.io.write_table_components(..., delete=...)` to batch related replacements
+and deletions in one rollback operation. Do not split a logically coupled update
+into separate write and delete calls.
+Do not interpret an omitted component as a deletion, silently stop persisting
+removals, or bypass the shared publisher with direct Zarr deletes.
+
+Adapt the existing napari-harpy persistence tests to the agreed contracts.
+Cover save/reload behavior, related matrix/metadata writes and removals,
+unchanged unrelated data, failure rollback, unsaved-edit acknowledgements and
+widget notifications. Strengthen write-failure tests to verify restored disk
+state, not merely that edits remain marked unsaved. Pin an appropriate minimum
+Harpy dependency once the required public APIs are available.
+
+## Slice 11g: table-level summary computation and plotting integration
 
 **Status: specified; not implemented.**
+
+Implement after the general table I/O foundation in Parts 11f.i–vii. This slice
+defines QC computation and plotting, not another reader, writer or preprocessing
+pipeline; reuse the shared I/O primitives wherever disk access is needed.
 
 Implement a read-only `hp.qc.summarize_table` computation API and a
 `TableSummary` result, followed by integration with table-level QC plotting.
@@ -6382,32 +8652,7 @@ Focused tests should establish that:
   table unchanged, does not repeat summary computation, and does not require
   writing temporary metrics to `.obs`.
 
-## Slice 12: lazy SpatialData table reopening
-
-**Status: follow-up; not implemented.**
-
-Make persisted AnnData tables reopen lazily when a user later calls
-`spatialdata.read_zarr()`. This is separate from Slice 7b's out-of-core writer:
-Slice 7b must construct and publish a table without materializing its sparse
-matrices and attach that table to the same-process result with backed AnnData
-`sparse_dataset` handles, but it does not change SpatialData's general Zarr
-reader.
-
-Investigate the current SpatialData table I/O boundary and prefer an upstream
-public integration over patching private reader internals in Harpy. A reopened
-table should retain lazy or backed `X`, sparse auxiliary feature matrices and
-dense coordinate matrices while preserving pandas-compatible `.obs` and
-`.var`, `TableModel` validation, table annotations and the existing
-`SpatialData` mapping interface. The implementation must work for ordinary and
-class-aware aggregation tables without depending on CosMx metadata.
-
-Focused tests should establish that a table written by Slice 7b can be reopened
-without loading its complete matrices, passes the SpatialData table contract,
-supports normal row and feature access, and produces the same materialized
-values as `anndata.read_zarr`. Benchmark store-open time and driver memory
-independently from Slice 7b's construction benchmark.
-
-## Slice 13: optional Slice 7b latency optimization
+## Slice 12: optional Slice 7b latency optimization
 
 **Status: optional follow-up; not implemented.**
 

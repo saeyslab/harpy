@@ -217,12 +217,6 @@ wheels = [
 ]
 
 [[package]]
-name = "antlr4-python3-runtime"
-version = "4.9.3"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/3e/38/7859ff46355f76f8d19459005ca000b6e7012f2f1ca597746cbcd1fbfe5e/antlr4-python3-runtime-4.9.3.tar.gz", hash = "sha256:f224469b4168294902bb1efa80a8bf7855f24c99aef99cbefc1bcd3cce77881b", size = 117034, upload-time = "2021-11-06T17:52:23.524Z" }
-
-[[package]]
 name = "anyio"
 version = "4.13.0"
 source = { registry = "https://pypi.org/simple" }
@@ -840,18 +834,6 @@ wheels = [
 ]
 
 [[package]]
-name = "colorlog"
-version = "6.9.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'extra-14-harpy-analysis-cellpose3' and extra == 'extra-14-harpy-analysis-cellpose4')" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/d3/7a/359f4d5df2353f26172b3cc39ea32daa39af8de522205f512f458923e677/colorlog-6.9.0.tar.gz", hash = "sha256:bfba54a1b93b94f54e1f4fe48395725a3d92fd2a4af702f6bd70946bdc0c6ac2", size = 16624, upload-time = "2024-10-29T18:34:51.011Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/e3/51/9b208e85196941db2f0654ad0357ca6388ab3ed67efdbfc799f35d1f83aa/colorlog-6.9.0-py3-none-any.whl", hash = "sha256:5906e71acd67cb07a71e779c47c4bcb45fb8c2993eebe9e5adcd6a6f1b283eff", size = 11424, upload-time = "2024-10-29T18:34:49.815Z" },
-]
-
-[[package]]
 name = "comm"
 version = "0.2.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1268,6 +1250,15 @@ wheels = [
 ]
 
 [[package]]
+name = "execnet"
+version = "2.1.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/bf/89/780e11f9588d9e7128a3f87788354c7946a9cbb1401ad38a48c4db9a4f07/execnet-2.1.2.tar.gz", hash = "sha256:63d83bfdd9a23e35b9c6a3261412324f964c2ec8dcd8d3c6916ee9373e0befcd", size = 166622, upload-time = "2025-11-12T09:56:37.75Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ab/84/02fc1827e8cdded4aa65baef11296a9bbe595c474f0d6d758af082d849fd/execnet-2.1.2-py3-none-any.whl", hash = "sha256:67fba928dd5a544b783f6056f449e5e3931a5c378b128bc18501f7ea79e296ec", size = 40708, upload-time = "2025-11-12T09:56:36.333Z" },
+]
+
+[[package]]
 name = "executing"
 version = "2.2.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1311,11 +1302,11 @@ wheels = [
 
 [[package]]
 name = "filelock"
-version = "3.18.0"
+version = "3.32.7"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/0a/10/c23352565a6544bdc5353e0b15fc1c563352101f30e24bf500207a54df9a/filelock-3.18.0.tar.gz", hash = "sha256:adbc88eabb99d2fec8c9c1b229b171f18afa655400173ddc653d5d01501fb9f2", size = 18075, upload-time = "2025-03-14T07:11:40.47Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/0f/59/e19834834cb01a32febfbb0f8a23a9088088f5d45991824ff2bc3b5e8acb/filelock-3.32.7.tar.gz", hash = "sha256:37b8a3d9811b0f9aef7e5ec5c71bb320de52df51e6ca9bcd6f5ad81187660da7", size = 225154, upload-time = "2026-09-16T00:24:20.907Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/4d/36/2a115987e2d8c300a974597416d9de88f2444426de9571f4b59b2cca3acc/filelock-3.18.0-py3-none-any.whl", hash = "sha256:c401f4f8377c4464e6db25fff06205fd89bdd83b65eb0488ed1b160f780e21de", size = 16215, upload-time = "2025-03-14T07:11:39.145Z" },
+    { url = "https://files.pythonhosted.org/packages/15/df/31098c5aeb4d966b553641472bd55fcf5fdfac953549894b8a765ba44e91/filelock-3.32.7-py3-none-any.whl", hash = "sha256:65ff0d0190ea42038b32bda4b77834fb05be2cad4c5b9b01aa4dfb3614536e52", size = 100157, upload-time = "2026-09-16T00:24:19.543Z" },
 ]
 
 [[package]]
@@ -1637,13 +1628,14 @@ name = "harpy-analysis"
 version = "0.4.4"
 source = { editable = "." }
 dependencies = [
+    { name = "anndata" },
     { name = "crick" },
     { name = "distributed" },
+    { name = "filelock" },
     { name = "flowsom" },
     { name = "lazy-loader" },
     { name = "leidenalg" },
     { name = "ome-zarr" },
-    { name = "omegaconf" },
     { name = "pyrootutils" },
     { name = "rasterio" },
     { name = "scanpy" },
@@ -1673,21 +1665,12 @@ cellpose3 = [
 cellpose4 = [
     { name = "cellpose", version = "4.2.1.1", source = { registry = "https://pypi.org/simple" } },
 ]
-cli = [
-    { name = "hydra-colorlog" },
-    { name = "hydra-core" },
-    { name = "hydra-submitit-launcher" },
-    { name = "submitit" },
-]
 dev = [
     { name = "asv" },
     { name = "bokeh" },
     { name = "cellpose", version = "3.1.1.3", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-14-harpy-analysis-cellpose3'" },
     { name = "cellpose", version = "4.2.1.1", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-14-harpy-analysis-cellpose4' or extra != 'extra-14-harpy-analysis-cellpose3'" },
     { name = "harpy-vitessce" },
-    { name = "hydra-colorlog" },
-    { name = "hydra-core" },
-    { name = "hydra-submitit-launcher" },
     { name = "instanseg-torch" },
     { name = "ipython" },
     { name = "ipywidgets" },
@@ -1699,6 +1682,7 @@ dev = [
     { name = "pre-commit" },
     { name = "pytest" },
     { name = "pytest-cov" },
+    { name = "pytest-xdist" },
     { name = "sphinx" },
     { name = "sphinx-autodoc-typehints" },
     { name = "sphinx-book-theme" },
@@ -1706,7 +1690,7 @@ dev = [
     { name = "sphinx-design" },
     { name = "sphinx-rtd-theme" },
     { name = "sphinxcontrib-bibtex" },
-    { name = "submitit" },
+    { name = "sphinxcontrib-mermaid" },
     { name = "supervenn" },
     { name = "textalloc" },
     { name = "tox" },
@@ -1722,15 +1706,13 @@ docs = [
     { name = "sphinx-design" },
     { name = "sphinx-rtd-theme" },
     { name = "sphinxcontrib-bibtex" },
+    { name = "sphinxcontrib-mermaid" },
 ]
 extra = [
     { name = "bokeh" },
     { name = "cellpose", version = "3.1.1.3", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-14-harpy-analysis-cellpose3'" },
     { name = "cellpose", version = "4.2.1.1", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-14-harpy-analysis-cellpose4' or extra != 'extra-14-harpy-analysis-cellpose3'" },
     { name = "harpy-vitessce" },
-    { name = "hydra-colorlog" },
-    { name = "hydra-core" },
-    { name = "hydra-submitit-launcher" },
     { name = "instanseg-torch" },
     { name = "ipython" },
     { name = "ipywidgets" },
@@ -1738,7 +1720,6 @@ extra = [
     { name = "marimo" },
     { name = "nbconvert" },
     { name = "opencv-python-headless" },
-    { name = "submitit" },
     { name = "supervenn" },
     { name = "textalloc" },
     { name = "tqdm" },
@@ -1748,8 +1729,7 @@ instanseg = [
 ]
 napari = [
     { name = "napari", extra = ["all"] },
-    { name = "napari-harpy" },
-    { name = "napari-spatialdata" },
+    { name = "spatiato" },
 ]
 notebook = [
     { name = "bokeh" },
@@ -1769,6 +1749,7 @@ test = [
     { name = "opencv-python-headless" },
     { name = "pytest" },
     { name = "pytest-cov" },
+    { name = "pytest-xdist" },
     { name = "tox" },
 ]
 vitessce = [
@@ -1777,6 +1758,7 @@ vitessce = [
 
 [package.metadata]
 requires-dist = [
+    { name = "anndata", specifier = ">=0.12.10" },
     { name = "asv", marker = "extra == 'benchmark'" },
     { name = "bokeh", marker = "extra == 'notebook'" },
     { name = "cellpose", marker = "extra == 'cellpose'", specifier = ">=3.1.1.3,<5" },
@@ -1784,13 +1766,11 @@ requires-dist = [
     { name = "cellpose", marker = "extra == 'cellpose4'", specifier = ">=4,<5" },
     { name = "crick" },
     { name = "distributed" },
+    { name = "filelock" },
     { name = "flowsom" },
-    { name = "harpy-analysis", extras = ["cellpose", "instanseg", "opencv", "vitessce", "cli", "notebook"], marker = "extra == 'extra'" },
+    { name = "harpy-analysis", extras = ["cellpose", "instanseg", "opencv", "vitessce", "notebook"], marker = "extra == 'extra'" },
     { name = "harpy-analysis", extras = ["extra", "test", "docs", "benchmark"], marker = "extra == 'dev'" },
     { name = "harpy-vitessce", marker = "python_full_version >= '3.12' and extra == 'vitessce'" },
-    { name = "hydra-colorlog", marker = "extra == 'cli'", specifier = ">=1.2.0" },
-    { name = "hydra-core", marker = "extra == 'cli'", specifier = ">=1.2.0" },
-    { name = "hydra-submitit-launcher", marker = "extra == 'cli'", specifier = ">=1.2.0" },
     { name = "instanseg-torch", marker = "extra == 'instanseg'", specifier = ">=0.1.1" },
     { name = "ipython", marker = "extra == 'notebook'" },
     { name = "ipywidgets", marker = "extra == 'notebook'" },
@@ -1799,26 +1779,25 @@ requires-dist = [
     { name = "leidenalg", specifier = ">=0.9.1" },
     { name = "marimo", marker = "extra == 'notebook'", specifier = ">=0.24.2" },
     { name = "myst-nb", marker = "extra == 'docs'" },
-    { name = "napari", extras = ["all"], marker = "extra == 'napari'", specifier = ">=0.4.18" },
-    { name = "napari-harpy", marker = "extra == 'napari'", specifier = ">=0.0.11" },
-    { name = "napari-spatialdata", marker = "extra == 'napari'", specifier = ">=0.2.6" },
+    { name = "napari", extras = ["all"], marker = "extra == 'napari'", specifier = ">=0.7.1" },
     { name = "nbconvert", marker = "extra == 'notebook'" },
     { name = "ome-zarr", specifier = ">=0.14.0" },
-    { name = "omegaconf" },
     { name = "opencv-python-headless", marker = "extra == 'opencv'" },
     { name = "opencv-python-headless", marker = "extra == 'test'" },
     { name = "pre-commit", marker = "extra == 'dev'" },
     { name = "pyrootutils" },
     { name = "pytest", marker = "extra == 'test'" },
     { name = "pytest-cov", marker = "extra == 'test'" },
+    { name = "pytest-xdist", marker = "extra == 'test'" },
     { name = "rasterio", specifier = ">=1.3.2" },
-    { name = "scanpy", specifier = ">=1.9.1" },
+    { name = "scanpy", specifier = ">=1.11.1" },
     { name = "scikit-learn", specifier = ">=1.3.1" },
     { name = "seaborn", specifier = ">=0.12.2" },
     { name = "session-info2" },
     { name = "spatialdata", specifier = ">=0.7.3" },
-    { name = "spatialdata-io" },
+    { name = "spatialdata-io", specifier = ">=0.7.0" },
     { name = "spatialdata-plot" },
+    { name = "spatiato", marker = "extra == 'napari'", specifier = ">=0.2.0" },
     { name = "sphinx", marker = "extra == 'docs'", specifier = ">=4.5" },
     { name = "sphinx-autodoc-typehints", marker = "extra == 'docs'" },
     { name = "sphinx-book-theme", marker = "extra == 'docs'", specifier = ">=1.0.0" },
@@ -1826,7 +1805,7 @@ requires-dist = [
     { name = "sphinx-design", marker = "extra == 'docs'" },
     { name = "sphinx-rtd-theme", marker = "extra == 'docs'" },
     { name = "sphinxcontrib-bibtex", marker = "extra == 'docs'", specifier = ">=1.0.0" },
-    { name = "submitit", marker = "extra == 'cli'", specifier = ">=1.4.5" },
+    { name = "sphinxcontrib-mermaid", marker = "extra == 'docs'" },
     { name = "supervenn", marker = "extra == 'notebook'", specifier = ">=0.5.0" },
     { name = "textalloc", marker = "extra == 'notebook'" },
     { name = "tifffile", specifier = ">=2026.5.2" },
@@ -1837,7 +1816,7 @@ requires-dist = [
     { name = "voronoi-diagram-for-polygons", specifier = ">=0.1.6" },
     { name = "zarr", specifier = ">=3.2.1" },
 ]
-provides-extras = ["cellpose", "cellpose3", "cellpose4", "instanseg", "opencv", "napari", "vitessce", "cli", "notebook", "extra", "test", "docs", "benchmark", "dev"]
+provides-extras = ["cellpose", "cellpose3", "cellpose4", "instanseg", "opencv", "napari", "vitessce", "notebook", "extra", "test", "docs", "benchmark", "dev"]
 
 [[package]]
 name = "harpy-vitessce"
@@ -1871,46 +1850,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/ac/81/af16607fa045724e515579d312577261b436f36f419e7c677e7e88fcc943/hsluv-5.0.4.tar.gz", hash = "sha256:2281f946427a882010042844a38c7bbe9e0d0aaf9d46babe46366ed6f169b72e", size = 543090, upload-time = "2023-09-11T21:46:52.022Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/96/36/5bddefea3d7adf22a64f9aa9701492f8a9fe6948223f5cf2602c22ec9be7/hsluv-5.0.4-py2.py3-none-any.whl", hash = "sha256:0138bd10038e2ee1b13eecae9a7d49d4ec8c320b1d7eb4f860832c792e3e4567", size = 5252, upload-time = "2023-09-11T21:46:50.407Z" },
-]
-
-[[package]]
-name = "hydra-colorlog"
-version = "1.2.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "colorlog" },
-    { name = "hydra-core" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/2b/fc/ab5ca078d5184ae3280d5654734860198c643cd2caaaaaece63283d9f76d/hydra-colorlog-1.2.0.tar.gz", hash = "sha256:d44f85008fabd2448c7e3b496c31b44d7610560f6fff74f3673afaa949870899", size = 3060, upload-time = "2022-05-17T22:16:25.407Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/40/50/a08b0453c18088da369991d015ef3902a9ab532b515a41f1bfbe1394854d/hydra_colorlog-1.2.0-py3-none-any.whl", hash = "sha256:33d05fc11ca9bc7a5d69cfb3c8fb395a1bc52fa1dfe7aca6a6f5ffb57f6e7c4b", size = 3638, upload-time = "2022-05-17T22:16:23.598Z" },
-]
-
-[[package]]
-name = "hydra-core"
-version = "1.3.2"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "antlr4-python3-runtime" },
-    { name = "omegaconf" },
-    { name = "packaging" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/6d/8e/07e42bc434a847154083b315779b0a81d567154504624e181caf2c71cd98/hydra-core-1.3.2.tar.gz", hash = "sha256:8a878ed67216997c3e9d88a8e72e7b4767e81af37afb4ea3334b269a4390a824", size = 3263494, upload-time = "2023-02-23T18:33:43.03Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/c6/50/e0edd38dcd63fb26a8547f13d28f7a008bc4a3fd4eb4ff030673f22ad41a/hydra_core-1.3.2-py3-none-any.whl", hash = "sha256:fa0238a9e31df3373b35b0bfb672c34cc92718d21f81311d8996a16de1141d8b", size = 154547, upload-time = "2023-02-23T18:33:40.801Z" },
-]
-
-[[package]]
-name = "hydra-submitit-launcher"
-version = "1.2.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "hydra-core" },
-    { name = "submitit" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/4f/93/8f19eba16318fe79f17ae5a86ed4efc9641c33151f67a0f172fbd15ddd41/hydra-submitit-launcher-1.2.0.tar.gz", hash = "sha256:e14c8eb46d020fac60ba25f82bcc368dc55851d2683dc95c88631ffcf15e4a34", size = 4875, upload-time = "2022-05-17T22:19:47.548Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/d1/9b/0ea17f1780004c52f83566b5ca78a0844c93f5abdbbf625e40962af1ffcc/hydra_submitit_launcher-1.2.0-py3-none-any.whl", hash = "sha256:51ce468fbc91211c3a46677eefde94bbb9f721c9545af0be6dd0a95658515613", size = 5207, upload-time = "2022-05-17T22:19:45.664Z" },
 ]
 
 [[package]]
@@ -3236,42 +3175,6 @@ wheels = [
 ]
 
 [[package]]
-name = "napari-harpy"
-version = "0.1.3"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "dask", extra = ["dataframe"] },
-    { name = "harpy-analysis" },
-    { name = "joblib" },
-    { name = "lazy-loader" },
-    { name = "loguru" },
-    { name = "napari", extra = ["all"] },
-    { name = "pandas" },
-    { name = "pyarrow" },
-    { name = "pyqtgraph" },
-    { name = "spatialdata" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/08/91/23aa9baf0bec2aa6f15cc323a9faefc12ba92951b78301dfeaf95ec7386f/napari_harpy-0.1.3.tar.gz", hash = "sha256:cccfb01b064460684e53eac09fe4083d676535fa081799daf4e7fcc34fef4024", size = 19901196, upload-time = "2026-07-31T12:39:21.994Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/e3/ca/72996310ef87ea5b21f53855ab0790a08f1d8afdb0d2ee8625c9f37c9986/napari_harpy-0.1.3-py3-none-any.whl", hash = "sha256:636f433be7a8507f26b27aaf115c217502bda346b4c7d5de523f1a31a1326125", size = 703035, upload-time = "2026-07-31T12:39:20.177Z" },
-]
-
-[[package]]
-name = "napari-matplotlib"
-version = "3.0.2"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "matplotlib" },
-    { name = "napari" },
-    { name = "numpy" },
-    { name = "tinycss2" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/c8/91/a588e7a7bb02529d4219f5f0bcaf2336305d3da545787690c1544139d284/napari_matplotlib-3.0.2.tar.gz", hash = "sha256:d894ce9c004e3e4faadf6085904e18d5c4b7ccb69f932492037cc22979b04379", size = 1468037, upload-time = "2025-10-30T10:22:02.101Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/48/a4/b07ec74f0df9555bd54110f033497956715753c419236f40bc3f42984d27/napari_matplotlib-3.0.2-py3-none-any.whl", hash = "sha256:185bb4a967d157bf2b0efd14d7847023430a5ebe28aa81de34871df5477706f8", size = 365742, upload-time = "2025-10-30T10:22:00.196Z" },
-]
-
-[[package]]
 name = "napari-metadata"
 version = "0.3.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3310,43 +3213,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/29/ff/0a8a2985d252aa229a5032ca2f595a0dcb41209218107adb0960f2cf5fff/napari_plugin_manager-0.1.11.tar.gz", hash = "sha256:aab4c7564b9a56400ab452712cb0efdb956e6b1cbcdd1396707fe93e59c75c84", size = 1785222, upload-time = "2026-03-19T13:37:17.623Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/64/26/8252279412e915d0161c7f826e0378cfd77b50ed634bf04288d822146850/napari_plugin_manager-0.1.11-py3-none-any.whl", hash = "sha256:8d74909792726229144ecd4fa7226c2c5df495364fb71332850b5b2768b5fe92", size = 48220, upload-time = "2026-03-19T13:37:15.946Z" },
-]
-
-[[package]]
-name = "napari-spatialdata"
-version = "0.7.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "anndata" },
-    { name = "click" },
-    { name = "cycler" },
-    { name = "dask" },
-    { name = "geopandas" },
-    { name = "loguru" },
-    { name = "matplotlib" },
-    { name = "napari" },
-    { name = "napari-matplotlib" },
-    { name = "numba" },
-    { name = "numpy" },
-    { name = "packaging" },
-    { name = "pandas" },
-    { name = "pillow" },
-    { name = "pyqtgraph" },
-    { name = "qtpy" },
-    { name = "scanpy" },
-    { name = "scikit-learn" },
-    { name = "scipy" },
-    { name = "shapely" },
-    { name = "spatialdata" },
-    { name = "superqt" },
-    { name = "typing-extensions" },
-    { name = "vispy" },
-    { name = "xarray" },
-    { name = "xarray-datatree" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/c0/9c/526d2bc13311b759149a5084226bf48c78dacd78c985efe662c381fbbada/napari_spatialdata-0.7.1.tar.gz", hash = "sha256:d1074300a436d5248d94f5a78b0868aed7ab4a04e813c72a833c74c54d41735d", size = 6975307, upload-time = "2026-05-06T16:09:36.47Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/fc/37/832df549749d0b66bfdc5a6fc457c1175b78495d7ffa162b07130e5c96eb/napari_spatialdata-0.7.1-py3-none-any.whl", hash = "sha256:d3398144f33724e712f7e82494a13cf9c15e0f7f12cd7d92962195230c50378a", size = 103685, upload-time = "2026-05-06T16:09:35.27Z" },
 ]
 
 [[package]]
@@ -3903,19 +3769,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/03/17/f4aa0b46a59ba4e7875dc031f5401f709c9fe987bed9932b067c64bac0e2/ome_zarr_models-1.7.tar.gz", hash = "sha256:3979d304f7669e7a22be0bd8a6dd5dcc93fe85af3d842e56930d2ef2e6929090", size = 107192, upload-time = "2026-04-16T12:23:19.147Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/80/dd/3e3beee6716a4da1b60dc7dfc5d06d697bd015b11ed70c6c0bc0368aabc6/ome_zarr_models-1.7-py3-none-any.whl", hash = "sha256:4e786af38936e62be50cee000c53bf41091ee7d24b0d304570b43147ef34b6bb", size = 64185, upload-time = "2026-04-16T12:23:17.769Z" },
-]
-
-[[package]]
-name = "omegaconf"
-version = "2.3.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "antlr4-python3-runtime" },
-    { name = "pyyaml" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/09/48/6388f1bb9da707110532cb70ec4d2822858ddfb44f1cdf1233c20a80ea4b/omegaconf-2.3.0.tar.gz", hash = "sha256:d5d4b6d29955cc50ad50c46dc269bcd92c6e00f5f90d23ab5fee7bfca4ba4cc7", size = 3298120, upload-time = "2022-12-08T20:59:22.753Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/e3/94/1843518e420fa3ed6919835845df698c7e27e183cb997394e4a670973a65/omegaconf-2.3.0-py3-none-any.whl", hash = "sha256:7b4df175cdb08ba400f45cae3bdcae7ba8365db4d165fc65fd04b050ab63b46b", size = 79500, upload-time = "2022-12-08T20:59:19.686Z" },
 ]
 
 [[package]]
@@ -4837,6 +4690,19 @@ wheels = [
 ]
 
 [[package]]
+name = "pytest-xdist"
+version = "3.8.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "execnet" },
+    { name = "pytest" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/78/b4/439b179d1ff526791eb921115fca8e44e596a13efeda518b9d845a619450/pytest_xdist-3.8.0.tar.gz", hash = "sha256:7e578125ec9bc6050861aa93f2d59f1d8d085595d6551c2c90b6f4fad8d3a9f1", size = 88069, upload-time = "2025-07-01T13:30:59.346Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ca/31/d4e37e9e550c2b92a9cbc2e4d0b7420a27224968580b5a447f420847c975/pytest_xdist-3.8.0-py3-none-any.whl", hash = "sha256:202ca578cfeb7370784a8c33d6d05bc6e13b4f25b5053c30a152269fd10f0b88", size = 46396, upload-time = "2025-07-01T13:30:56.632Z" },
+]
+
+[[package]]
 name = "python-dateutil"
 version = "2.9.0.post0"
 source = { registry = "https://pypi.org/simple" }
@@ -5709,6 +5575,28 @@ wheels = [
 ]
 
 [[package]]
+name = "spatiato"
+version = "0.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "dask", extra = ["dataframe"] },
+    { name = "filelock" },
+    { name = "harpy-analysis" },
+    { name = "joblib" },
+    { name = "lazy-loader" },
+    { name = "loguru" },
+    { name = "napari", extra = ["all"] },
+    { name = "pandas" },
+    { name = "pyarrow" },
+    { name = "pyqtgraph" },
+    { name = "spatialdata" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/74/8d/0dd6852a4248c3fa090b5121a56fc4d7e79a198f670a492212a8610c62cd/spatiato-0.2.0.tar.gz", hash = "sha256:a417f42ed50f995c5be52ba19e2ac3a3f78c1c93ad72b5308a1b18de82f5e37a", size = 19935735, upload-time = "2026-10-01T13:26:02.385Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a1/26/6eb3232092f84e9a348095ca49980c1f71179dd0fd4c92e6e03604a07779/spatiato-0.2.0-py3-none-any.whl", hash = "sha256:c7cb3b973c7a2e40f437e54e4b30fe2c51943bf403ba2ebe618530a1208730ea", size = 632698, upload-time = "2026-10-01T13:26:00.38Z" },
+]
+
+[[package]]
 name = "sphinx"
 version = "8.2.3"
 source = { registry = "https://pypi.org/simple" }
@@ -5864,6 +5752,20 @@ wheels = [
 ]
 
 [[package]]
+name = "sphinxcontrib-mermaid"
+version = "2.1.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "jinja2" },
+    { name = "pyyaml" },
+    { name = "sphinx" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/8c/87/06537dff20aa57df2d0f2afa87edff4afa85dec6f57f03f7acc24f83ff88/sphinxcontrib_mermaid-2.1.1.tar.gz", hash = "sha256:f8d7f1b2f0ad69b7ebdd5cbf532fb4ee107893b5373bc2d0e9634089c0b2cfee", size = 22353, upload-time = "2026-09-01T16:10:23.671Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/50/6a/5bf2222b8084c7a7bc3ec23d470c91e3e03e82e4ce0bbacaa61f456ce7c1/sphinxcontrib_mermaid-2.1.1-py3-none-any.whl", hash = "sha256:3b9ac1a8e0b5154dec3c0acf9b5c54dd9ba58540e416f20858c300814c25648f", size = 16368, upload-time = "2026-09-01T16:10:22.377Z" },
+]
+
+[[package]]
 name = "sphinxcontrib-qthelp"
 version = "2.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -5971,19 +5873,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/5d/09/8d5c564931ae23bef17420a6c72618463a59222ca4291a7dd88de8a0d490/stdlib_list-0.11.1.tar.gz", hash = "sha256:95ebd1d73da9333bba03ccc097f5bac05e3aa03e6822a0c0290f87e1047f1857", size = 60442, upload-time = "2025-02-18T15:39:38.769Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/88/c7/4102536de33c19d090ed2b04e90e7452e2e3dc653cf3323208034eaaca27/stdlib_list-0.11.1-py3-none-any.whl", hash = "sha256:9029ea5e3dfde8cd4294cfd4d1797be56a67fc4693c606181730148c3fd1da29", size = 83620, upload-time = "2025-02-18T15:39:37.02Z" },
-]
-
-[[package]]
-name = "submitit"
-version = "1.5.2"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "cloudpickle" },
-    { name = "typing-extensions" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/1c/0a/854409283d533279b1b7523ebb65e1926ff611ee81bdf9c298bbed7b75ac/submitit-1.5.2.tar.gz", hash = "sha256:36a8a54ad4e10171111e7618eefe28fe819f931a89c9cd1f6d2770900c013f12", size = 80390, upload-time = "2024-09-18T16:05:11.33Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/dc/a4/90123871996bfb8a7148cd11d61e7a0ddc0118114c071730b3dc3a05c7bc/submitit-1.5.2-py3-none-any.whl", hash = "sha256:c6d5867fbcc78588d0ded3338436903f8db9fdb759f80e9639e6025a9ea32ade", size = 74917, upload-time = "2024-09-18T16:05:09.664Z" },
 ]
 
 [[package]]
@@ -6787,19 +6676,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/60/99/04705ee6ff4d6d4db986058ceb19f2561014dde41e2f2ab73cc5ed35c958/xarray_dataclass-3.0.0.tar.gz", hash = "sha256:0fa438efda992b859dee07dc2f99c2660886402c366706c074c4c92795b354f1", size = 8376, upload-time = "2025-07-30T20:26:31.937Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/bc/ea/bc1de04d06b7c59fc3ff647a11fa248bf80af5a6227647a31c6250c32ce6/xarray_dataclass-3.0.0-py3-none-any.whl", hash = "sha256:7956f29005671b2acaa0da700d8f359105dce84ef84f76ce2dd05b76dba3e826", size = 16862, upload-time = "2025-07-30T20:26:30.696Z" },
-]
-
-[[package]]
-name = "xarray-datatree"
-version = "0.0.14"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "packaging" },
-    { name = "xarray" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/11/d9/09f5bb481593a7d5c987c049a21c1a2c3f54de628f0e3f14fa02900e6eee/xarray-datatree-0.0.14.tar.gz", hash = "sha256:26169af35b0df0d17652e229cef210decf0711dd88e33419142edc6674113af4", size = 90104, upload-time = "2024-02-07T09:48:20.38Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/6e/a3/5e92dc7e35c08574472bbd9201aabdad03e38d54cc47c421922d219502c6/xarray_datatree-0.0.14-py3-none-any.whl", hash = "sha256:07f5d0d9a03a3220d732e1c764ee60f2c5110f884a290b2af371f92952379166", size = 63729, upload-time = "2024-02-07T09:48:19.025Z" },
 ]
 
 [[package]]

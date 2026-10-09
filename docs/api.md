@@ -21,14 +21,32 @@ Import Harpy as::
     SpatialBounds
 ```
 
-## IO
-
-I/O.
+## I/O
 
 ```{eval-rst}
 
 .. module:: harpy.io
 .. currentmodule:: harpy
+
+```
+
+### SpatialData stores
+
+Read existing SpatialData Zarr stores.
+
+```{eval-rst}
+
+.. autosummary::
+    :toctree: generated
+
+    io.read_zarr
+```
+
+### Platform-specific import
+
+Import platform-specific data, with related configuration and validation helpers.
+
+```{eval-rst}
 
 .. autosummary::
     :toctree: generated
@@ -43,12 +61,31 @@ I/O.
     io.xenium
     io.visium
     io.visium_hd
+```
+
+### Transcript readers
+
+Read transcript coordinates from generic or platform-specific files.
+
+```{eval-rst}
+
+.. autosummary::
+    :toctree: generated
+
     io.read_transcripts
     io.read_resolve_transcripts
     io.read_merscope_transcripts
     io.read_stereoseq_transcripts
-    io.convert_to_zarr_2
+```
 
+### Helpers
+
+```{eval-rst}
+
+.. autosummary::
+    :toctree: generated
+
+    io.convert_to_zarr_2
 ```
 
 ## Image
@@ -118,10 +155,81 @@ Operations on table (`AnnData` object) elements.
 .. module:: harpy.tb
 .. currentmodule:: harpy
 
+```
+
+### I/O
+
+For AnnData tables in SpatialData Zarr stores, see the
+[storage contracts (developer documentation)](development/storage.md) for details on
+reading modes, update scopes, overwrite guarantees, and storage-backed references.
+
+#### Reading
+
+```{eval-rst}
+
 .. autosummary::
     :toctree: generated
 
-    tb.add_table
+    tb.io.read_table
+    tb.io.read_table_components
+```
+
+#### Writing directly to storage
+
+These functions update the Zarr store without changing tables attached to an
+in-memory `SpatialData` object.
+
+```{eval-rst}
+
+.. autosummary::
+    :toctree: generated
+
+    tb.io.write_table
+    tb.io.write_table_updates
+    tb.io.write_table_components
+    tb.io.write_table_components_by_region
+    tb.io.delete_table_components
+```
+
+#### Updating SpatialData tables
+
+These functions update tables attached to `SpatialData` and also persist the
+changes when it is backed by a Zarr store.
+
+```{eval-rst}
+
+.. autosummary::
+    :toctree: generated
+
+    tb.io.add_table
+    tb.io.add_table_updates
+    tb.io.add_table_components
+    tb.io.add_table_components_by_region
+    tb.io.remove_table_components
+```
+
+### Preprocessing
+
+Normalisations that scanpy does not provide. Like `scanpy.pp`, they change an
+`AnnData` table in place, in memory or lazy; write the results back with
+`tb.io.add_table_updates` or `tb.io.write_table_updates`.
+
+```{eval-rst}
+
+.. autosummary::
+    :toctree: generated
+
+    tb.pp.normalize_by_size
+    tb.pp.normalize_by_quantile
+```
+
+### Processing and analysis
+
+```{eval-rst}
+
+.. autosummary::
+    :toctree: generated
+
     tb.aggregate_points
     tb.aggregate_image
     tb.add_canonical_centers

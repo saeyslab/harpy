@@ -1,8 +1,0 @@
-defaults:
-  - default
-
-repl_columns:
-  Tot_Score_: ""
-  uppfer: upffer
-
-del_celltypes: ["Hepatocytes", "LSEC45"]

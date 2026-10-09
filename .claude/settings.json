@@ -1,6 +1,5 @@
 {
   "env": {
-    "UV_PROJECT_ENVIRONMENT": ".venv",
     "PYTHONUNBUFFERED": "1",
     "PYTHONPYCACHEPREFIX": ".cache/claude/pycache",
     "XDG_CACHE_HOME": ".cache/claude",
@@ -25,13 +24,22 @@
       "Bash(git diff:*)",
       "Bash(git log:*)",
       "Bash(git show:*)",
-      "Bash(git branch:*)",
+      "Bash(git branch)",
+      "Bash(git branch -a)",
+      "Bash(git branch -r)",
+      "Bash(git branch --show-current)",
       "Bash(ls:*)",
       "Bash(cat:*)",
       "Bash(grep:*)",
       "Bash(rg:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(.venv/bin/coverage report *)",
+      "Bash(.venv/bin/coverage debug *)"
     ],
     "deny": ["Read(./.env)", "Read(./.env.*)"]
+  },
+  "spinnerVerbs": {
+    "mode": "replace",
+    "verbs": ["Reasoning"]
   }
 }

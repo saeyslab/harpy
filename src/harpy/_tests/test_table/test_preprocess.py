@@ -55,14 +55,15 @@ def test_preprocess_proteomics_multiple_samples(sdata_multi_c_no_backed):
 
 
 def test_preprocess_proteomics_overwrite(sdata_multi_c_no_backed):
-    sdata_multi_c_no_backed = preprocess_proteomics(
-        sdata_multi_c_no_backed,
-        labels_name="masks_whole",
-        table_name="table_intensities",
-        output_table_name="table_intensities",
-        instance_size_key=_CELLSIZE_KEY,
-        overwrite=True,
-    )
+    with pytest.warns(FutureWarning, match="preprocess_proteomics is deprecated since version 0.5.0"):
+        sdata_multi_c_no_backed = preprocess_proteomics(
+            sdata_multi_c_no_backed,
+            labels_name="masks_whole",
+            table_name="table_intensities",
+            output_table_name="table_intensities",
+            instance_size_key=_CELLSIZE_KEY,
+            overwrite=True,
+        )
     # running preprocess takes cells corresponding to certain labels_name from sdata.tables[table_name].
     adata = sdata_multi_c_no_backed.tables["table_intensities"]
     region_key = adata.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY_KEY]

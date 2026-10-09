@@ -10,7 +10,7 @@ from spatialdata.transformations import Identity
 
 from harpy.image._image import add_labels
 from harpy.plot._plot_density import plot_instance_density
-from harpy.table._table import add_table
+from harpy.table.io._add_table import add_table
 from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY, _SPATIAL
 
 

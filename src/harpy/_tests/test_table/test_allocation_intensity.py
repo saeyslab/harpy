@@ -2,11 +2,13 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+import zarr
 from anndata import AnnData
 from spatialdata import SpatialData
 from spatialdata.models import TableModel
 from xrspatial import zonal_stats
 
+import harpy._storage._anndata as anndata_storage
 import harpy.table._allocation_intensity as image_aggregation_module
 from harpy.image.segmentation._align_masks import align_labels
 from harpy.table._allocation_intensity import aggregate_image
@@ -176,6 +178,25 @@ def test_aggregate_image_overwrite(sdata_multi_c: SpatialData):
             append=True,
             overwrite=False,
         )
+
+
+def test_aggregate_image_stores_intensities_in_row_only_chunks(sdata_multi_c: SpatialData, monkeypatch):
+    """aggregate_image writes through add_table, so its dense table gets row-only stored chunks."""
+    monkeypatch.setattr(anndata_storage, "_STORED_CHUNK_BYTES", 1024)
+
+    sdata_multi_c = aggregate_image(
+        sdata_multi_c,
+        image_name="raw_image",
+        labels_name="masks_whole",
+        output_table_name="table_intensities",
+        append=False,
+        overwrite=True,
+    )
+
+    matrix = zarr.open_group(str(sdata_multi_c.path / "tables" / "table_intensities"), mode="r")["X"]
+    bytes_per_row = matrix.shape[1] * matrix.dtype.itemsize
+    assert matrix.shape[0] > 1024 // bytes_per_row
+    assert matrix.chunks == (max(1024 // bytes_per_row, 1), matrix.shape[1])
 
 
 def test_aggregate_image_raises_instance_key(sdata_pixie: SpatialData):

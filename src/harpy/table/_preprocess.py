@@ -13,7 +13,8 @@ from spatialdata import SpatialData
 
 from harpy.image._image import get_dataarray
 from harpy.shape._shape import filter_shapes
-from harpy.table._table import ProcessTable, add_table
+from harpy.table._table import ProcessTable, _require_in_memory_table, _warn_deprecated_wrapper
+from harpy.table.io._add_table import add_table
 from harpy.utils._aggregate import _get_mask_area
 from harpy.utils._keys import _CELLSIZE_KEY, _RAW_COUNTS_KEY
 
@@ -44,6 +45,16 @@ def preprocess_transcriptomics(
     log transformation (:func:`~scanpy.pp.log1p`), highly variable genes selection (:func:`~scanpy.pp.highly_variable_genes`),
     scaling (:func:`~scanpy.pp.scale`), and PCA calculation (:func:`~scanpy.pp.pca`) for transcriptomics data
     contained in the `sdata.tables[table_name]`. QC metrics are added to `sdata.tables[output_table_name].obs` using :func:`~scanpy.pp.calculate_qc_metrics`.
+
+    .. deprecated:: 0.5.0
+       `harpy.tb.preprocess_transcriptomics` is deprecated and will be removed in a future release. Call scanpy
+       directly on the table, then write the results back with :func:`~harpy.tb.io.add_table_updates`, or with
+       :func:`~harpy.tb.io.add_table` when cells or genes are removed. For the size normalisation, which scanpy
+       does not provide, use :func:`~harpy.tb.pp.normalize_by_size`.
+
+       Until its removal, `harpy.tb.preprocess_transcriptomics` only accepts an in-memory table, and raises a
+       ``ValueError`` for a lazy or storage-backed one: read the store with
+       ``harpy.io.read_zarr(..., table_mode="eager")``.
 
     Parameters
     ----------
@@ -116,7 +127,9 @@ def preprocess_transcriptomics(
     --------
     harpy.tb.aggregate_points : create an AnnData table in `sdata` using a `points_name` and a `labels_name`.
     """
+    _warn_deprecated_wrapper("preprocess_transcriptomics")
     preprocess_instance = Preprocess(sdata, labels_name=labels_name, table_name=table_name)
+    _require_in_memory_table(sdata, table_name, "preprocess_transcriptomics")
     sdata = preprocess_instance.preprocess(
         output_table_name=output_table_name,
         calculate_qc_metrics=True,
@@ -168,6 +181,13 @@ def preprocess_proteomics(
     Performs optional normalization (on size or via :func:`~scanpy.pp.normalize_total`), log transformation
     (:func:`~scanpy.pp.log1p`), scaling (:func:`~scanpy.pp.scale`)/ quantile normalization and PCA calculation (:func:`~scanpy.pp.pca`)
     for proteomics data contained in `sdata`.
+
+    .. deprecated:: 0.5.0
+       `harpy.tb.preprocess_proteomics` is deprecated and will be removed in a future release. Call scanpy
+       directly on the table, then write the results back with :func:`~harpy.tb.io.add_table_updates`, or with
+       :func:`~harpy.tb.io.add_table` when cells or genes are removed. For the normalisations that scanpy does
+       not provide, use :func:`~harpy.tb.pp.normalize_by_size` and :func:`~harpy.tb.pp.normalize_by_quantile`;
+       the latter does not multiply by 100, so its results are those of `q` divided by 100.
 
     Parameters
     ----------
@@ -239,6 +259,7 @@ def preprocess_proteomics(
     --------
     harpy.tb.aggregate_image : create an AnnData table in `sdata` using an `image_name` and a `labels_name`.
     """
+    _warn_deprecated_wrapper("preprocess_proteomics")
     preprocess_instance = Preprocess(sdata, labels_name=labels_name, table_name=table_name)
     sdata = preprocess_instance.preprocess(
         output_table_name=output_table_name,

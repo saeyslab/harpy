@@ -1,11 +1,7 @@
 import os
 
-import pyrootutils
+import dask
 import pytest
-from hydra import compose, initialize
-from hydra.core.global_hydra import GlobalHydra
-from hydra.core.hydra_config import HydraConfig
-from omegaconf import DictConfig
 from spatialdata import read_zarr
 from spatialdata.datasets import blobs
 
@@ -21,64 +17,16 @@ from harpy.datasets.transcriptomics import (
 from harpy.table._allocation_intensity import aggregate_image
 
 
-@pytest.fixture(scope="function")
-def cfg_pipeline_global(path_dataset_markers) -> DictConfig:
-    # Expecting pytest to be run from the root dir. config_path should be relative to this file
-    # The data_dir needs to be overwritten to point to the test data
+def pytest_configure(config):
+    """Limit Dask's threads in each pytest-xdist worker (``pytest -n auto``).
 
-    root = str(pyrootutils.setup_root(os.getcwd(), dotenv=True, pythonpath=True))
-
-    registry = get_registry()
-    dataset_image = registry.fetch("transcriptomics/resolve/mouse/20272_slide1_A1-1_DAPI_4288_2144.tiff")
-    dataset_coords = registry.fetch("transcriptomics/resolve/mouse/20272_slide1_A1-1_results_4288_2144.txt")
-
-    import torch
-
-    if torch.backends.mps.is_available():
-        device = "mps"
-    elif torch.cuda.is_available():
-        device = "cuda"
-    else:
-        device = "cpu"
-
-    n_workers = 1  # only one chunk to segment
-
-    with initialize(version_base="1.2", config_path="../configs"):
-        cfg = compose(
-            config_name="pipeline",
-            overrides=[
-                f"device={device}",
-                f"n_workers={n_workers}",
-                f"paths.data_dir={root}",
-                f"dataset.data_dir={root}",
-                f"dataset.image={dataset_image}",
-                f"dataset.coords={dataset_coords}",
-                f"dataset.markers={path_dataset_markers}",
-                "allocate.delimiter='\t'",
-                "allocate.column_x=0",
-                "allocate.column_y=1",
-                "allocate.column_gene=3",
-                "segmentation=cellpose",
-                "clean.tilingCorrection=False",  # don't include tiling correction in unit test, because of dependencies (jax, basicpy).
-            ],
-            return_hydra_config=True,
-        )
-        HydraConfig().set_config(cfg)
-
-    return cfg
-
-
-# this is called by each test which uses `cfg_pipeline` arg
-# each test generates its own temporary logging path
-@pytest.fixture(scope="function")
-def cfg_pipeline(cfg_pipeline_global, tmp_path):
-    cfg = cfg_pipeline_global.copy()
-
-    cfg.paths.output_dir = str(tmp_path)
-
-    yield cfg
-
-    GlobalHydra.instance().clear()
+    Every worker process runs Dask's threaded scheduler, which by default starts
+    one thread per CPU core; with one worker per core that oversubscribes the
+    machine. Tests that set a scheduler or ``num_workers`` themselves override
+    this locally. Without pytest-xdist nothing changes.
+    """
+    if os.environ.get("PYTEST_XDIST_WORKER") is not None:
+        dask.config.set(num_workers=2)
 
 
 @pytest.fixture

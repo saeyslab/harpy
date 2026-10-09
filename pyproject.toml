@@ -43,9 +43,10 @@ classifiers = [
 ]
 
 dependencies = [
+    "anndata>=0.12.10",
     "spatialdata>=0.7.3",
     "distributed",
-    "scanpy>=1.9.1",
+    "scanpy>=1.11.1",
     "scikit-learn>=1.3.1",
     "voronoi-diagram-for-polygons>=0.1.6",
     "zarr>=3.2.1",
@@ -54,14 +55,15 @@ dependencies = [
     "seaborn>=0.12.2",
     "leidenalg>=0.9.1",
     "ome_zarr>=0.14.0",
-    "omegaconf",
     "pyrootutils",
     "universal_pathlib",
     "crick",
     "lazy-loader>=0.4",
-    "spatialdata_io",
+    "spatialdata_io>=0.7.0",
     "spatialdata-plot",
     "flowsom",
+    # lock example-dataset downloads shared by parallel processes
+    "filelock",
     # for debug logging
     "session-info2",
 ]
@@ -94,18 +96,11 @@ opencv = [
 ]
 # additional UI or CLI interfaces
 napari = [
-    "napari[all]>=0.4.18",
-    "napari-spatialdata>=0.2.6",
-    "napari-harpy>=0.0.11",
+    "napari[all]>=0.7.1",
+    "spatiato>=0.2.0",
 ]
 vitessce = [
     "harpy-vitessce ; python_version >= '3.12'"
-]
-cli = [
-    "hydra-core>=1.2.0",
-    "hydra-colorlog>=1.2.0",
-    "submitit>=1.4.5",
-    "hydra-submitit-launcher>=1.2.0"
 ]
 notebook = [
     "marimo>=0.24.2",
@@ -121,13 +116,14 @@ notebook = [
 # best default for end-users
 extra = [
     # do not support basic tiling correction, and squidpy installation in default PyPI install
-    "harpy-analysis[cellpose,instanseg,opencv,vitessce,cli,notebook]",
+    "harpy-analysis[cellpose,instanseg,opencv,vitessce,notebook]",
 ]
 # dev dependencies
 test = [
     "opencv-python-headless",
     "pytest",
     "pytest-cov",
+    "pytest-xdist",
     "tox",
 ]
 docs = [
@@ -139,6 +135,7 @@ docs = [
     "sphinx-autodoc-typehints",
     "sphinx-design",
     "sphinx-copybutton",
+    "sphinxcontrib-mermaid",
 ]
 benchmark =[
     "asv",
@@ -186,7 +183,6 @@ omit = [
     "experiments/*",
     "src/harpy/externals/*",
     "src/harpy/io/*",
-    "src/harpy/pipeline.py",
     "docs/*",
 ]
 

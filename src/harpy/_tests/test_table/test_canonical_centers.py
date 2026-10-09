@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -12,7 +13,12 @@ from spatialdata import SpatialData, read_zarr
 from spatialdata._io.format import SpatialDataContainerFormatV01
 from spatialdata.models import Labels2DModel, Labels3DModel, TableModel
 from spatialdata.transformations import Identity
+from zarr.storage import LocalStore
 
+import harpy._storage._anndata as anndata_storage
+import harpy.table._canonical_centers as canonical_writer
+import harpy.table.io._write as table_writer
+from harpy._tests.test_table.test_io.test_write import _store_bytes
 from harpy.table import add_canonical_centers, validate_table
 from harpy.table._validation import _validate_table_annotation
 from harpy.table.canonical_centers import (
@@ -251,7 +257,12 @@ def test_validate_canonical_payload_rejects_malformed_components(mutation: str) 
 
 
 @pytest.mark.parametrize("zarr_format", [2, 3])
-def test_add_canonical_centers_updates_only_the_canonical_components(tmp_path, zarr_format) -> None:
+def test_add_canonical_centers_updates_only_the_canonical_components(tmp_path, monkeypatch, zarr_format) -> None:
+    """Publish only the paired components, without reading unrelated matrix payloads.
+
+    Existing matrix references and local annotations remain unchanged. Reopened
+    centers are read-only, and the permanent component values pass domain validation.
+    """
     sdata = _backed_external_sdata(tmp_path, zarr_format=zarr_format)
     table = sdata.tables["table"]
     previous_x = table.X
@@ -260,8 +271,35 @@ def test_add_canonical_centers_updates_only_the_canonical_components(tmp_path, z
     previous_obsp = table.obsp["connectivities"]
     previous_varm = table.varm["loadings"]
     previous_varp = table.varp["correlations"]
+    table.obs["local_note"] = "unsaved"
+    previous_obs = table.obs.copy(deep=True)
+    table_path = sdata.path / "tables" / "table"
+    before = _store_bytes(table_path)
+    original_get = LocalStore.get
+    original_partial = LocalStore.get_partial_values
 
-    result = add_canonical_centers(sdata, table_name="table")
+    def check_key(store, key):
+        path = Path(store.root) / key
+        if path.is_relative_to(table_path):
+            parts = path.relative_to(table_path).parts
+            if parts[0] in {"X", "layers", "raw", "varm", "obsp", "varp"} or parts[:2] == ("obsm", "other_coordinates"):
+                assert path.name in {"zarr.json", ".zattrs", ".zarray", ".zgroup", ".zmetadata"}, key
+
+    async def guarded_get(self, key, *args, **kwargs):
+        # Metadata inspection is allowed, but unrelated numerical chunks must not be read.
+        check_key(self, key)
+        return await original_get(self, key, *args, **kwargs)
+
+    async def guarded_partial(self, prototype, key_ranges):
+        key_ranges = list(key_ranges)
+        for key, _ in key_ranges:
+            check_key(self, key)
+        return await original_partial(self, prototype, key_ranges)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(LocalStore, "get", guarded_get)
+        patch.setattr(LocalStore, "get_partial_values", guarded_partial)
+        result = add_canonical_centers(sdata, table_name="table")
 
     assert result is sdata
     assert result.tables["table"] is table
@@ -271,6 +309,11 @@ def test_add_canonical_centers_updates_only_the_canonical_components(tmp_path, z
     assert table.obsp["connectivities"] is previous_obsp
     assert table.varm["loadings"] is previous_varm
     assert table.varp["correlations"] is previous_varp
+    pd.testing.assert_frame_equal(table.obs, previous_obs)
+    assert table.obsm[CANONICAL_OBSM_KEY].read_only
+    updated_paths = (f"obsm/{CANONICAL_OBSM_KEY}/", f"uns/{SPATIAL_COORDINATES_KEY}/{CANONICAL_OBSM_KEY}/")
+    after = _store_bytes(table_path)
+    assert {key: value for key, value in after.items() if not key.startswith(updated_paths)} == before
     assert list(table.uns[SPATIAL_COORDINATES_KEY]["viewer"]["axes"]) == ["y", "x"]
     np.testing.assert_allclose(
         table.obsm[CANONICAL_OBSM_KEY],
@@ -290,6 +333,19 @@ def test_add_canonical_centers_updates_only_the_canonical_components(tmp_path, z
     np.testing.assert_array_equal(reopened_table.obsp["connectivities"].toarray(), np.eye(2))
     np.testing.assert_array_equal(reopened_table.varm["loadings"], [[1.0], [2.0]])
     np.testing.assert_array_equal(reopened_table.varp["correlations"], [[1.0, 0.5], [0.5, 1.0]])
+
+
+def test_add_canonical_centers_stores_centers_in_row_only_chunks(tmp_path, monkeypatch) -> None:
+    """The canonical centers are a dense obsm matrix, stored in whole rows of the stored-chunk constant."""
+    # A constant below one row gives stored chunks of one row with all coordinates.
+    monkeypatch.setattr(anndata_storage, "_STORED_CHUNK_BYTES", 1)
+    sdata = _backed_external_sdata(tmp_path)
+
+    add_canonical_centers(sdata, table_name="table")
+
+    centers = zarr.open_array(str(sdata.path / "tables" / "table" / "obsm" / CANONICAL_OBSM_KEY), mode="r")
+    assert centers.shape[0] > 1
+    assert centers.chunks == (1, centers.shape[1])
 
 
 def test_add_canonical_centers_aligns_overlapping_instance_ids_across_regions(tmp_path) -> None:
@@ -485,28 +541,141 @@ def test_add_canonical_centers_rejects_a_declared_region_without_rows(tmp_path) 
         add_canonical_centers(sdata, table_name="table")
 
 
-def test_add_canonical_centers_rolls_back_disk_and_memory_when_consolidation_fails(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path,
+@pytest.mark.parametrize("zarr_format", [2, 3])
+@pytest.mark.parametrize("existing", [False, True])
+@pytest.mark.parametrize("failure", ["staging", "parents", "publication", "reopening", "installation", "finalization"])
+def test_canonical_shared_publication_restores_components_and_attachment(
+    monkeypatch, tmp_path, zarr_format, existing, failure
 ) -> None:
-    sdata = _backed_external_sdata(tmp_path)
-    add_canonical_centers(sdata, table_name="table")
+    """Restore both component paths, exact root metadata and the original live entries.
+
+    With no existing payload, failure must also remove its newly created registry.
+    With an existing payload, preserve the registry and its siblings. Installation
+    and consolidation fail after making changes; consolidation cannot be retried.
+    """
+    sdata = _backed_external_sdata(tmp_path, zarr_format=zarr_format)
+    path = sdata.path
     table = sdata.tables["table"]
-    previous = np.array([[0.0, 99.0, 99.0], [0.0, 98.0, 98.0]], dtype=np.float64)
-    table.obsm[CANONICAL_OBSM_KEY][:] = previous
+    if existing:
+        add_canonical_centers(sdata, table_name="table")
+    else:
+        # Exercise creation of a missing parent, not only creation of its leaf.
+        del table.uns[SPATIAL_COORDINATES_KEY]
+        root = zarr.open_group(str(path), mode="r+", use_consolidated=False)
+        del root[f"tables/table/uns/{SPATIAL_COORDINATES_KEY}"]
+    previous_matrix = table.obsm.get(CANONICAL_OBSM_KEY)
+    previous_registry = table.uns.get(SPATIAL_COORDINATES_KEY)
+    previous_x = table.X
+    zarr.consolidate_metadata(str(path))
+    before = _store_bytes(path)
+    original_write = canonical_writer._write_anndata_element
+    original_parents = table_writer._create_destination_parents
+    original_rename = Path.rename
+    original_read = canonical_writer._read_anndata_element
+    original_install = type(table.obsm).__setitem__
+    original_consolidate = zarr.consolidate_metadata
+    consolidation_calls = []
 
-    def fail_consolidation(self) -> None:
-        raise RuntimeError("synthetic consolidation failure")
+    def failed_write(*args, **kwargs):
+        original_write(*args, **kwargs)
+        if args[1] == canonical_writer._CANONICAL_METADATA_PATH:
+            raise RuntimeError("staging failure")
 
-    monkeypatch.setattr(SpatialData, "write_consolidated_metadata", fail_consolidation)
-    with pytest.raises(RuntimeError, match="synthetic consolidation failure"):
-        add_canonical_centers(sdata, table_name="table", overwrite=True)
+    def failed_parents(*args, **kwargs):
+        original_parents(*args, **kwargs)
+        raise RuntimeError("parents failure")
 
-    np.testing.assert_array_equal(table.obsm[CANONICAL_OBSM_KEY], previous)
-    reopened = read_zarr(sdata.path)
-    np.testing.assert_array_equal(reopened.tables["table"].obsm[CANONICAL_OBSM_KEY], previous)
-    validate_table(reopened, "table")
-    assert not list(tmp_path.glob(".external.zarr.harpy-canonical-*"))
+    def failed_rename(self, target):
+        if ".harpy-canonical-" in str(self) and "uns" in self.parts:
+            # Fail after the matrix has moved, before its metadata has moved.
+            raise RuntimeError("publication failure")
+        return original_rename(self, target)
+
+    def failed_read(group, component_path, **kwargs):
+        value = original_read(group, component_path, **kwargs)
+        # Staged reads succeed; fail only when reopening the published components.
+        if group.path == "tables/table":
+            raise RuntimeError("reopening failure")
+        return value
+
+    def failed_install(self, key, value):
+        original_install(self, key, value)
+        if self.parent is table and key == CANONICAL_OBSM_KEY and value is not previous_matrix:
+            raise RuntimeError("installation failure")
+
+    def failed_consolidate(*args, **kwargs):
+        consolidation_calls.append(True)
+        original_consolidate(*args, **kwargs)
+        raise RuntimeError("finalization failure")
+
+    if failure == "staging":
+        monkeypatch.setattr(canonical_writer, "_write_anndata_element", failed_write)
+    elif failure == "parents":
+        monkeypatch.setattr(table_writer, "_create_destination_parents", failed_parents)
+    elif failure == "publication":
+        monkeypatch.setattr(Path, "rename", failed_rename)
+    elif failure == "reopening":
+        monkeypatch.setattr(canonical_writer, "_read_anndata_element", failed_read)
+    elif failure == "installation":
+        monkeypatch.setattr(type(table.obsm), "__setitem__", failed_install)
+    else:
+        monkeypatch.setattr(zarr, "consolidate_metadata", failed_consolidate)
+
+    with pytest.raises(RuntimeError, match=failure):
+        add_canonical_centers(sdata, table_name="table", overwrite=existing)
+
+    assert _store_bytes(path) == before
+    assert sdata.tables["table"] is table
+    assert table.obsm.get(CANONICAL_OBSM_KEY) is previous_matrix
+    assert table.uns.get(SPATIAL_COORDINATES_KEY) is previous_registry
+    assert table.X is previous_x
+    assert not list(tmp_path.glob(".external.zarr.harpy-*"))
+    if failure == "finalization":
+        assert len(consolidation_calls) == 1
+
+
+@pytest.mark.parametrize(("component", "message"), [("matrix", "shape"), ("metadata", "axes")])
+def test_canonical_centers_reject_invalid_staged_payload_before_publication(tmp_path, monkeypatch, component, message):
+    """Validate the serialized payload even after the in-memory inputs passed preflight."""
+    sdata = _backed_external_sdata(tmp_path)
+    table = sdata.tables["table"]
+    previous_registry = table.uns[SPATIAL_COORDINATES_KEY]
+    before = _store_bytes(sdata.path)
+    original_write = canonical_writer._write_anndata_element
+
+    def write_invalid_payload(group, path, value, **kwargs):
+        # Change only the serialized output, after input validation has succeeded.
+        if component == "matrix" and path == canonical_writer._CANONICAL_MATRIX_PATH:
+            value = value[:, :2]
+        elif component == "metadata" and path == canonical_writer._CANONICAL_METADATA_PATH:
+            value = {**value, "axes": ["x", "y", "z"]}
+        original_write(group, path, value, **kwargs)
+
+    def unexpected_install(*args, **kwargs):
+        raise AssertionError("Invalid staged components must be rejected before publication.")
+
+    monkeypatch.setattr(canonical_writer, "_write_anndata_element", write_invalid_payload)
+    monkeypatch.setattr(canonical_writer, "_install_canonical_components", unexpected_install)
+
+    with pytest.raises(ValueError, match=message):
+        add_canonical_centers(sdata, table_name="table")
+
+    assert _store_bytes(sdata.path) == before
+    assert CANONICAL_OBSM_KEY not in table.obsm
+    assert table.uns[SPATIAL_COORDINATES_KEY] is previous_registry
+    assert not list(tmp_path.glob(".external.zarr.harpy-*"))
+
+
+def test_canonical_centers_reject_in_memory_observations_reordered_relative_to_storage(tmp_path):
+    """Centers calculated in live-table order must never be written onto different stored rows."""
+    sdata = _backed_external_sdata(tmp_path)
+    table = sdata.tables["table"]
+    table.obs = table.obs.iloc[::-1].copy()
+    before = _store_bytes(sdata.path)
+    with pytest.raises(ValueError, match="differ in order"):
+        add_canonical_centers(sdata, table_name="table")
+    assert _store_bytes(sdata.path) == before
+    assert CANONICAL_OBSM_KEY not in table.obsm
 
 
 def _canonical_sdata() -> SpatialData:

@@ -37,7 +37,8 @@ private data flow::
                     +-- Dask shuffle by (aggregation-pair ordinal, instance ID)
                     +-- _merge_count_partition()
                     +-- write merged counts to temporary Parquet on disk:
-                        tables/.harpy-aggregate-<uuid>/merged_counts/
+                        .<store-name>.harpy-aggregate-<token>/merged_counts/
+                        (beside the SpatialData store)
                               |
                               v
                    _write_aggregation_table()
@@ -111,7 +112,6 @@ from harpy.table._aggregation_writer import (
 from harpy.table._metadata import (
     _AUXILIARY_POINTS_FRACTION_COLUMN,
 )
-from harpy.table._table import add_table
 from harpy.table._utils import _sanity_check_append_region
 from harpy.table.canonical_centers import (
     CanonicalCacheReport,
@@ -120,6 +120,7 @@ from harpy.table.canonical_centers import (
     build_canonical_source_signature,
     calculate_canonical_centers,
 )
+from harpy.table.io._add_table import add_table
 from harpy.transformations._transformations import _PointToLabelsTransform, _resolve_point_to_labels_transform
 from harpy.utils._keys import _CELL_INDEX, _GENES_KEY, _INSTANCE_KEY, _REGION_KEY, _SPATIAL
 from harpy.utils.utils import _make_list
@@ -294,7 +295,10 @@ def aggregate_points(
     Returns
     -------
     The updated SpatialData object with one AnnData table at
-    ``sdata.tables[output_table_name]``.
+    ``sdata.tables[output_table_name]``. Count matrices use read-only CSR dataset
+    handles and canonical centers use a read-only Zarr array; ``.obs``, ``.var``,
+    and ``.uns`` are loaded into memory. To read matrices as Dask arrays instead,
+    use :func:`harpy.table.io.read_table` with ``mode="lazy"``.
 
     Example
     --------

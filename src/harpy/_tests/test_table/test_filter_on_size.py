@@ -1,3 +1,5 @@
+import pytest
+
 from harpy.table._preprocess import preprocess_proteomics
 from harpy.table._table import filter_on_size
 
@@ -11,16 +13,17 @@ def test_filter_on_size(sdata_multi_c_no_backed):
         overwrite=True,
     )
 
-    sdata_multi_c_no_backed = filter_on_size(
-        sdata_multi_c_no_backed,
-        table_name="table_intensities_preprocessed",
-        labels_name=["masks_whole"],
-        output_table_name="table_intensities_filter",
-        min_size=100,
-        max_size=100000,
-        overwrite=True,
-        update_shapes_elements=True,
-    )
+    with pytest.warns(FutureWarning, match="filter_on_size is deprecated since version 0.5.0"):
+        sdata_multi_c_no_backed = filter_on_size(
+            sdata_multi_c_no_backed,
+            table_name="table_intensities_preprocessed",
+            labels_name=["masks_whole"],
+            output_table_name="table_intensities_filter",
+            min_size=100,
+            max_size=100000,
+            overwrite=True,
+            update_shapes_elements=True,
+        )
     assert sdata_multi_c_no_backed.tables["table_intensities_filter"].shape == (643, 22)
 
     sdata_multi_c_no_backed = filter_on_size(
