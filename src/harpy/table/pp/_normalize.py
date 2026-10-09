@@ -11,10 +11,6 @@ import pandas as pd
 from anndata import AnnData
 from scipy import sparse
 
-_SIZE_ENTRY = "normalize_by_size"
-_QUANTILE_ENTRY = "normalize_by_quantile"
-_QUANTILE_COLUMN = "quantile"
-
 
 def normalize_by_size(
     adata: AnnData,
@@ -22,7 +18,7 @@ def normalize_by_size(
     size_key: str = "area",
     scale_factor: float = 100,
     layer: str | None = None,
-    key_added: str | None = None,
+    key_added: str = "normalize_by_size",
 ) -> None:
     """Divide each row of a table's matrix by the size of its instance, in place.
 
@@ -44,10 +40,12 @@ def normalize_by_size(
     layer
         The layer to normalise; ``None`` normalises ``adata.X``.
     key_added
-        The key in ``adata.uns`` under which the parameters are recorded; ``None`` uses
-        ``"normalize_by_size"``. A key per normalisation keeps the records of several
-        normalised matrices of one table apart, for example of a layer normalised by
-        cell area and another by nucleus area.
+        The key in ``adata.uns`` under which the parameters are recorded, with the
+        ``layer`` that was normalised. If that entry exists, the function warns that a
+        matrix may already be normalised, for example by a second run of the same call,
+        and replaces it. A key per normalisation keeps the records of several normalised
+        matrices of one table apart, for example of a layer normalised by cell area and
+        another by nucleus area.
 
     Raises
     ------
@@ -67,15 +65,9 @@ def normalize_by_size(
     scaling runs per block whenever the matrix is computed: by ``.compute()``, by a scanpy
     function, or by :func:`harpy.tb.io.add_table_updates` or
     :func:`harpy.tb.io.write_table_updates` when they write it back. It keeps the chunks
-    and the ``csr_matrix`` blocks that scanpy requires. The
-    matrix is then derived from the stored one, so a write-back of ``X`` with
-    :func:`harpy.tb.io.add_table_updates` needs ``x_to``, as after
-    :func:`scanpy.pp.normalize_total`.
-
-    The parameters are recorded in ``adata.uns[key_added]``, by default
-    ``adata.uns["normalize_by_size"]``, with the ``layer`` that was normalised. If that
-    entry exists, the function warns that a matrix may already be normalised, for example
-    by a second run of the same call, and replaces the entry.
+    and the ``csr_matrix`` blocks that scanpy requires. The matrix is then derived from
+    the stored one, so a write-back of ``X`` with :func:`harpy.tb.io.add_table_updates`
+    needs ``x_to``, as after :func:`scanpy.pp.normalize_total`.
 
     Examples
     --------
@@ -100,10 +92,9 @@ def normalize_by_size(
         )
     dtype = _float_dtype(matrix.dtype)
     result = _scale_rows(matrix, (scale_factor / sizes).astype(dtype), dtype)
-    entry = _SIZE_ENTRY if key_added is None else key_added
-    _warn_if_normalised(adata, entry)
+    _warn_if_normalised(adata, key_added)
     _set_matrix(adata, layer, result)
-    adata.uns[entry] = {"size_key": size_key, "scale_factor": scale_factor, "layer": layer}
+    adata.uns[key_added] = {"size_key": size_key, "scale_factor": scale_factor, "layer": layer}
 
 
 def normalize_by_quantile(
@@ -113,7 +104,7 @@ def normalize_by_quantile(
     max_value: float | None = 1,
     quantiles: pd.Series | Sequence[float] | np.ndarray | None = None,
     layer: str | None = None,
-    key_added: str | None = None,
+    key_added: str = "normalize_by_quantile",
 ) -> None:
     """Divide each channel of a table's matrix by a quantile of its non-zero values, then clip, in place.
 
@@ -138,16 +129,18 @@ def normalize_by_quantile(
         ``max_value`` of :func:`scanpy.pp.scale`, which also clips.
     quantiles
         Quantiles computed before, to apply instead of computing them; for example
-        ``other.var["quantile"]`` of another sample with the same channels. A pandas
+        ``other.var["normalize_by_quantile"]`` of another sample with the same channels. A pandas
         Series is aligned with ``adata.var_names`` by channel name; any other sequence
         holds one value per channel, in the order of ``adata.var``.
     layer
         The layer to normalise; ``None`` normalises ``adata.X``.
     key_added
-        The key in ``adata.var`` and in ``adata.uns`` under which the quantiles and the
-        parameters are recorded; ``None`` uses ``var["quantile"]`` and
-        ``uns["normalize_by_quantile"]``. A key per normalisation keeps the records of
-        several normalised matrices of one table apart, such as the quantiles of each.
+        The key in ``adata.var`` and in ``adata.uns`` under which the quantile applied
+        to each channel and the parameters are recorded, with the ``layer`` that was
+        normalised. If that ``uns`` entry exists, the function warns that a matrix may
+        already be normalised, for example by a second run of the same call, and replaces
+        both records. A key per normalisation keeps the records of several normalised
+        matrices of one table apart, such as the quantiles of each.
 
     Raises
     ------
@@ -182,13 +175,6 @@ def normalize_by_quantile(
     quantile is NaN. Integer values become ``float32``; floating-point values keep
     their dtype.
 
-    The quantile applied to each channel is recorded in ``adata.var[key_added]``, by
-    default ``adata.var["quantile"]``, and the parameters in ``adata.uns[key_added]``, by
-    default ``adata.uns["normalize_by_quantile"]``, with the ``layer`` that was
-    normalised. If that ``uns`` entry exists, the function warns that a matrix may
-    already be normalised, for example by a second run of the same call, and replaces
-    both records.
-
     Examples
     --------
     .. code-block:: python
@@ -200,7 +186,7 @@ def normalize_by_quantile(
         )
 
         # The same normalisation for another sample with the same channels.
-        hp.tb.pp.normalize_by_quantile(other, quantiles=adata.var["quantile"])
+        hp.tb.pp.normalize_by_quantile(other, quantiles=adata.var["normalize_by_quantile"])
     """
     matrix = _get_matrix(adata, layer)
     if isinstance(matrix, da.Array):
@@ -220,7 +206,7 @@ def normalize_by_quantile(
     if quantiles is None:
         if not 0 <= q <= 1:
             raise ValueError(f"q must be between 0 and 1, not {q!r}.")
-        values = _channel_quantiles(matrix, q)
+        values = _compute_channel_quantiles(matrix, q)
         recorded_q = q
     else:
         values = _aligned_quantiles(adata, quantiles)
@@ -231,11 +217,10 @@ def normalize_by_quantile(
     result = matrix.astype(dtype) / divisors
     if max_value is not None:
         result = da.minimum(result, max_value) if isinstance(result, da.Array) else np.minimum(result, max_value)
-    entry, column = (_QUANTILE_ENTRY, _QUANTILE_COLUMN) if key_added is None else (key_added, key_added)
-    _warn_if_normalised(adata, entry)
+    _warn_if_normalised(adata, key_added)
     _set_matrix(adata, layer, result)
-    adata.var[column] = values
-    adata.uns[entry] = {"q": recorded_q, "max_value": max_value, "layer": layer}
+    adata.var[key_added] = values
+    adata.uns[key_added] = {"q": recorded_q, "max_value": max_value, "layer": layer}
 
 
 def _get_matrix(adata: AnnData, layer: str | None) -> object:
@@ -276,7 +261,26 @@ def _scale_rows(matrix: object, factors: np.ndarray, dtype: np.dtype) -> object:
 
 
 def _scale_block_rows(block: object, row_factors: np.ndarray) -> object:
-    """Multiply each row of one block by its factor, keeping a sparse block's format and class."""
+    """Multiply each row of one block by its factor, keeping a sparse block's format and class.
+
+    ``row_factors`` holds the factors of the block's own rows, in order: the caller
+    chunks them like the rows of the matrix. A sparse block is scaled through its stored
+    values, so nothing is densified and ``indices`` and ``indptr`` stay as they are. In
+    CSR, ``data`` holds the values row after row, and ``np.diff(indptr)`` counts the
+    values of each row: repeating each row's factor that many times aligns the factors
+    with ``data``. For three rows with factors ``[10, 20, 30]``::
+
+        [[1, 0, 2],          data    = [1, 2, 3]
+         [0, 0, 0],    ->    indices = [0, 2, 1]      (column of each value)
+         [0, 3, 0]]          indptr  = [0, 2, 2, 3]
+
+        np.diff(indptr)              = [2, 0, 1]      (values per row)
+        np.repeat(factors, ...)      = [10, 10, 30]
+        data * that                  = [10, 20, 90]
+
+    In CSC, ``data`` holds the values column after column and ``indices`` the row of
+    each value, so ``factors[indices]`` gives each value the factor of its row.
+    """
     factors = np.asarray(row_factors)[:, 0]
     dtype = factors.dtype
     if not sparse.issparse(block):
@@ -291,8 +295,13 @@ def _scale_block_rows(block: object, row_factors: np.ndarray) -> object:
     return result
 
 
-def _channel_quantiles(matrix: np.ndarray | da.Array, q: float) -> np.ndarray:
-    """Return the ``q`` quantile of the non-zero values of each channel, NaN for a channel without any."""
+def _compute_channel_quantiles(matrix: np.ndarray | da.Array, q: float) -> np.ndarray:
+    """Compute the ``q`` quantile of the non-zero values of each channel, NaN for a channel without any.
+
+    On a Dask array, this triggers a compute: it reads the whole matrix once and returns
+    NumPy values, which the caller puts into the graph of the result as constants, so that
+    later computes of the result do not compute the quantiles again.
+    """
     with warnings.catch_warnings():
         # A channel without non-zero values is an all-NaN column: its NaN quantile is handled by the caller.
         warnings.filterwarnings("ignore", "All-NaN slice encountered", RuntimeWarning)

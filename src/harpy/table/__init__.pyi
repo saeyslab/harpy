@@ -1,4 +1,4 @@
-from . import canonical_centers, io
+from . import canonical_centers, io, pp
 from ._add_feature_matrix import add_feature_matrix
 from ._allocation import aggregate_points, allocate, bin_counts
 from ._allocation_intensity import aggregate_image, allocate_intensity
@@ -25,6 +25,7 @@ from .pixel_clustering._neighbors import spatial_pixel_neighbors
 __all__ = [
     "canonical_centers",
     "io",
+    "pp",
     "add_canonical_centers",
     "add_table",
     "correct_marker_genes",

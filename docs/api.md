@@ -208,6 +208,21 @@ changes when it is backed by a Zarr store.
     tb.io.remove_table_components
 ```
 
+### Preprocessing
+
+Normalisations that scanpy does not provide. Like `scanpy.pp`, they change an
+`AnnData` table in place, in memory or lazy; write the results back with
+`tb.io.add_table_updates` or `tb.io.write_table_updates`.
+
+```{eval-rst}
+
+.. autosummary::
+    :toctree: generated
+
+    tb.pp.normalize_by_size
+    tb.pp.normalize_by_quantile
+```
+
 ### Processing and analysis
 
 ```{eval-rst}

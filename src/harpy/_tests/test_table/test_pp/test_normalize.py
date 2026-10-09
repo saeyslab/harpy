@@ -12,10 +12,8 @@ from scipy import sparse
 import harpy as hp
 from harpy._tests.test_table.test_io.test_updates import _CountComputes
 from harpy._tests.test_table.test_io.test_write_table_updates import _store, _table
-from harpy.table._preprocess import preprocess_proteomics, preprocess_transcriptomics
 from harpy.table.io import read_table
 from harpy.table.pp import normalize_by_quantile, normalize_by_size
-from harpy.utils._keys import _CELLSIZE_KEY, _RAW_COUNTS_KEY
 
 _IN_MEMORY_FORMATS = {
     "dense": np.asarray,
@@ -44,70 +42,10 @@ def _nonzero_quantiles(values, q):
     return np.nanquantile(np.where(values == 0, np.nan, values), q, axis=0)
 
 
-def _wrapper_input(expected):
-    """The wrapper's output table, with the matrix it started from: the layer in which it kept that matrix."""
-    return AnnData(X=expected.layers[_RAW_COUNTS_KEY].copy(), obs=expected.obs.copy(), var=expected.var.copy())
-
-
 def test_the_normalisations_live_in_harpy_tb_pp():
     assert sorted(hp.tb.pp.__all__) == ["normalize_by_quantile", "normalize_by_size"]
     assert hp.tb.pp.normalize_by_size is normalize_by_size
     assert hp.tb.pp.normalize_by_quantile is normalize_by_quantile
-
-
-@pytest.mark.filterwarnings("ignore:harpy.tb.preprocess_proteomics is deprecated:FutureWarning")
-def test_normalize_by_size_equals_preprocess_proteomics(sdata_multi_c_no_backed):
-    sdata = preprocess_proteomics(
-        sdata_multi_c_no_backed,
-        labels_name="masks_whole",
-        table_name="table_intensities",
-        output_table_name="preprocessed",
-        size_norm=True,
-        log1p=False,
-        instance_size_key=_CELLSIZE_KEY,
-        raw_counts_key=_RAW_COUNTS_KEY,
-    )
-    expected = sdata.tables["preprocessed"]
-    adata = _wrapper_input(expected)
-    normalize_by_size(adata, size_key=_CELLSIZE_KEY)
-    np.testing.assert_allclose(_dense(adata.X), _dense(expected.X), rtol=1e-6)
-
-
-@pytest.mark.filterwarnings("ignore:harpy.tb.preprocess_transcriptomics is deprecated:FutureWarning")
-def test_normalize_by_size_equals_preprocess_transcriptomics(sdata_transcripts_no_backed):
-    sdata = preprocess_transcriptomics(
-        sdata_transcripts_no_backed,
-        labels_name="segmentation_mask",
-        table_name="table_transcriptomics",
-        output_table_name="preprocessed",
-        size_norm=True,
-        instance_size_key=_CELLSIZE_KEY,
-        raw_counts_key=_RAW_COUNTS_KEY,
-    )
-    expected = sdata.tables["preprocessed"]
-    adata = _wrapper_input(expected)
-    normalize_by_size(adata, size_key=_CELLSIZE_KEY)
-    # The wrapper applies log1p next, and keeps that matrix in raw before it scales X.
-    np.testing.assert_allclose(np.log1p(_dense(adata.X)), _dense(expected.raw.X), rtol=1e-6)
-
-
-@pytest.mark.filterwarnings("ignore:harpy.tb.preprocess_proteomics is deprecated:FutureWarning")
-def test_normalize_by_quantile_equals_preprocess_proteomics_divided_by_100(sdata_multi_c_no_backed):
-    sdata = preprocess_proteomics(
-        sdata_multi_c_no_backed,
-        labels_name="masks_whole",
-        table_name="table_intensities",
-        output_table_name="preprocessed",
-        size_norm=False,
-        log1p=False,
-        q=0.999,
-        instance_size_key=_CELLSIZE_KEY,
-        raw_counts_key=_RAW_COUNTS_KEY,
-    )
-    expected = sdata.tables["preprocessed"]
-    adata = _wrapper_input(expected)
-    normalize_by_quantile(adata, q=0.999)
-    np.testing.assert_allclose(_dense(adata.X), _dense(expected.X) / 100, rtol=1e-6)
 
 
 @pytest.mark.parametrize("matrix_format", list(_IN_MEMORY_FORMATS))
@@ -180,19 +118,24 @@ def test_a_missing_size_column_raises():
         normalize_by_size(_intensities(), size_key="size")
 
 
-@pytest.mark.parametrize("max_value", [1, 2, None])
-def test_normalize_by_quantile_maps_the_quantile_to_one_and_clips_at_max_value(max_value):
+@pytest.mark.parametrize(
+    "parameters",
+    [{}, {"q": 0.9, "max_value": 1}, {"q": 0.9, "max_value": 2}, {"q": 0.9, "max_value": None}],
+    ids=["defaults", "q", "max_value", "no_clipping"],
+)
+def test_normalize_by_quantile_maps_the_quantile_to_one_and_clips_at_max_value(parameters):
+    q, max_value = parameters.get("q", 0.999), parameters.get("max_value", 1)
     adata = _intensities()
     values = adata.X.copy()
-    normalize_by_quantile(adata, q=0.9, max_value=max_value)
-    quantiles = _nonzero_quantiles(values, 0.9)
+    normalize_by_quantile(adata, **parameters)
+    quantiles = _nonzero_quantiles(values, q)
     expected = values / quantiles
     if max_value is not None:
         expected = np.minimum(expected, max_value)
     np.testing.assert_allclose(adata.X, expected, rtol=1e-6)
     assert adata.X.max() == (expected.max() if max_value is None else max_value)
-    np.testing.assert_allclose(adata.var["quantile"], quantiles, rtol=1e-6)
-    assert adata.uns["normalize_by_quantile"] == {"q": 0.9, "max_value": max_value, "layer": None}
+    np.testing.assert_allclose(adata.var["normalize_by_quantile"], quantiles, rtol=1e-6)
+    assert adata.uns["normalize_by_quantile"] == {"q": q, "max_value": max_value, "layer": None}
 
 
 @pytest.mark.parametrize("dtype", [np.float32, np.float64])
@@ -207,7 +150,7 @@ def test_lazy_quantile_normalisation_equals_in_memory_and_computes_the_quantiles
     assert isinstance(lazy.X, da.Array)
     assert lazy.X.chunks == ((13,) * 7 + (9,), (5,))
     assert lazy.X.dtype == dtype
-    np.testing.assert_allclose(lazy.var["quantile"], in_memory.var["quantile"], rtol=1e-6)
+    np.testing.assert_allclose(lazy.var["normalize_by_quantile"], in_memory.var["normalize_by_quantile"], rtol=1e-6)
     np.testing.assert_allclose(lazy.X.compute(), in_memory.X, rtol=1e-6)
 
 
@@ -223,7 +166,7 @@ def test_a_channel_without_non_zero_values_stays_zero(lazy):
     result = _dense(adata.X)
     assert np.all(result[:, 2] == 0)
     assert np.isfinite(result).all()
-    assert np.isnan(adata.var["quantile"].iloc[2])
+    assert np.isnan(adata.var["normalize_by_quantile"].iloc[2])
 
 
 def test_in_memory_sparse_input_to_normalize_by_quantile_gives_the_dense_result():
@@ -280,7 +223,9 @@ def test_key_added_keeps_the_records_of_two_normalised_matrices_apart():
     assert adata.uns["normalize_by_quantile"] == {"q": 0.9, "max_value": 1, "layer": None}
     assert adata.uns["doubled_quantile"] == {"q": 0.5, "max_value": 1, "layer": "doubled"}
     sizes = adata.obs["area"].to_numpy()[:, None]
-    np.testing.assert_allclose(adata.var["quantile"], _nonzero_quantiles(values / sizes * 100, 0.9), rtol=1e-6)
+    np.testing.assert_allclose(
+        adata.var["normalize_by_quantile"], _nonzero_quantiles(values / sizes * 100, 0.9), rtol=1e-6
+    )
     np.testing.assert_allclose(
         adata.var["doubled_quantile"], _nonzero_quantiles(2 * values / sizes * 10, 0.5), rtol=1e-6
     )
@@ -290,9 +235,9 @@ def test_supplied_quantiles_give_the_computed_result_and_record_no_q():
     computed = _intensities()
     supplied = computed.copy()
     normalize_by_quantile(computed, q=0.9)
-    normalize_by_quantile(supplied, q=0.5, quantiles=computed.var["quantile"].to_numpy().tolist())
+    normalize_by_quantile(supplied, q=0.5, quantiles=computed.var["normalize_by_quantile"].to_numpy().tolist())
     np.testing.assert_array_equal(supplied.X, computed.X)
-    np.testing.assert_array_equal(supplied.var["quantile"], computed.var["quantile"])
+    np.testing.assert_array_equal(supplied.var["normalize_by_quantile"], computed.var["normalize_by_quantile"])
     assert supplied.uns["normalize_by_quantile"]["q"] is None
 
 
@@ -311,7 +256,7 @@ def test_supplied_quantiles_in_a_series_align_by_channel_name():
     quantiles = pd.Series(np.arange(1.0, 6.0), index=adata.var_names)
     normalize_by_quantile(adata, quantiles=quantiles.iloc[::-1], max_value=None)
     np.testing.assert_allclose(adata.X, values / quantiles.to_numpy(), rtol=1e-6)
-    np.testing.assert_array_equal(adata.var["quantile"], quantiles.to_numpy())
+    np.testing.assert_array_equal(adata.var["normalize_by_quantile"], quantiles.to_numpy())
 
 
 @pytest.mark.parametrize(
