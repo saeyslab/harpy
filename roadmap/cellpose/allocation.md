@@ -8817,6 +8817,43 @@ These views describe assigned points only; they complement Slices 11a and 11e
 and cannot replace their original-point spatial background maps, which retain
 unassigned and outside-mask controls.
 
+### Docs
+
+The docstring of `TableSummary` lists the columns of `per_instance`, each with
+a one-line explanation, says why it is wide, and shows in a short schematic
+how the column names arise; the full rationale stays in this roadmap:
+
+```text
+per_instance
+    One row per retained instance, indexed by the table's ``.obs`` index.
+    Wide, one column per class, to stay aligned with ``.obs``. Columns:
+
+    - the region and instance identity, under the table's own
+      ``region_key`` and ``instance_key`` names;
+    - the count column of each selected class, copied from ``.obs``: the
+      class's points in the instance, for example ``n_negative_points`` for
+      the class ``Negative``;
+    - ``auxiliary_points_fraction``, copied from ``.obs``: the instance's
+      points of all auxiliary classes divided by all its points;
+    - for each selected auxiliary class, the instance's count of that class
+      divided by the class's number of panel features (for ``Negative``, the
+      number of negative probes): for example ``n_negative_points_per_feature``
+      = ``n_negative_points`` / ``metadata.auxiliary_class_feature_counts["Negative"]``.
+
+    How the names arise:
+
+        panel class -> count column (.obs)  -> per-feature column (auxiliary classes only)
+        Negative    -> n_negative_points    -> n_negative_points_per_feature
+
+    The count column names come from the ``count_columns`` of the aggregation
+    record that :func:`~harpy.tb.aggregate_points` writes, which derives them
+    from the panel's class names.
+```
+
+`summarize_table` and the `column` parameters of `instance_histogram` and
+`instance_scatter` refer to `TableSummary` for the column names rather than
+repeating them.
+
 ### Verification
 
 Focused tests should establish that:
