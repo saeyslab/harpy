@@ -8739,6 +8739,37 @@ never be interpreted as transcript counts. Summarizing a selected subset of
 instances uses that subset's metrics without claiming to restore filtered-out
 instances or features.
 
+### Lazy and backed tables
+
+Tables are often lazy without the caller choosing it: `hp.io.read_zarr` reads
+tables with lazy matrices by default, and on a backed `sdata`, `aggregate_points`
+and the other table writers attach the table they write with lazy matrices.
+Storage-backed tables (`mode="backed"`) exist as well. A QC summary must not
+read the expression matrix in full for that reason, so `summarize_table` works
+on in-memory, lazy and backed tables alike, without loading anything:
+
+1. **It reads only what is always in memory:** `.obs` (the class counts,
+   `auxiliary_points_fraction`, and the region and instance identity), `.uns`
+   (the aggregation record) and the table annotation in `spatialdata_attrs`.
+   These are in memory in every table mode. It reads no matrix: not `X`, not
+   the auxiliary matrix, no layer.
+2. **It selects rows on `.obs` directly:** the region mask
+   `obs[region_key].isin(region)` combined with the positive-total mask, and
+   copies only the needed `.obs` columns into `per_instance`. It does not go
+   through `ProcessTable._get_adata`, whose subset-and-copy reads
+   storage-backed matrices into memory, nor through `_load_into_memory` of
+   Phase 6f in the lazy-table roadmap, which loads everything by design, and it
+   never copies the `AnnData`.
+3. **It validates only what it uses, from the record:** the table has a
+   `feature_class_aggregation` record; the selected classes are recorded; their
+   count columns exist in `.obs`; the denominators in
+   `auxiliary_class_feature_counts` are positive; and the selected regions
+   appear in the record's `regions` mapping. It does not run the complete
+   class-aware table validation (`_validate_feature_class_aggregation`), which
+   requires the source labels and points elements in `sdata` and resolves
+   their panels: the summary needs only the table, and the annotated elements
+   need not be present.
+
 ### Plotting integration
 
 `hp.qc.obs_scatter` (renamed to `hp.qc.table_scatter` in Slice 11h) and
@@ -8819,6 +8850,14 @@ Focused tests should establish that:
 - the specified metrics use `.obs` and aggregation metadata without scanning
   points, label rasters, `.X`, or the auxiliary count matrix, even when `.X`
   has subsequently been normalized;
+- a lazy and a backed table each give the result of the in-memory table: on
+  the lazy one, a Dask compute counter stays at 0; on the backed one, which
+  runs no Dask graph, no matrix is read, checked for example with a
+  storage-backed `X` that fails when accessed;
+- a table whose annotated labels and points elements are absent from `sdata`
+  is summarized all the same, while a table without the aggregation record,
+  with a missing count column, or with a non-positive denominator raises a
+  `ValueError`;
 - existing table-input plotting remains usable for ordinary stored metrics; and
 - `instance_histogram` and `instance_scatter` plot columns of
   `TableSummary.per_instance`, leave both the summary and source table

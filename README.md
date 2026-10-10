@@ -21,7 +21,7 @@
 [![Downloads](https://static.pepy.tech/badge/harpy-analysis)](https://pepy.tech/project/harpy-analysis)
 [![License](https://img.shields.io/badge/license-BSD%203--Clause-blue)](./LICENSE)
 ![GitHub repo size](https://img.shields.io/github/repo-size/saeyslab/harpy)
-[![Zenodo](https://zenodo.org/badge/763481288.svg)](https://zenodo.org/badge/latestdoi/763481288)
+[![DOI](https://img.shields.io/badge/DOI-10.5281%2Fzenodo.15546703-blue)](https://doi.org/10.5281/zenodo.15546703)
 [![Paper](https://img.shields.io/badge/Paper-Bioinformatics%20btag122-blue)](https://doi.org/10.1093/bioinformatics/btag122)
 
 </div>
