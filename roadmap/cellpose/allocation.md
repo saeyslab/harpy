@@ -8509,8 +8509,10 @@ adata.uns["feature_class_aggregation"]["panel_feature_counts"] = {
   the record writer (`_aggregation_uns` in
   `src/harpy/table/_aggregation_writer.py`) and the record validation
   (`src/harpy/table/_validation.py`), which compares the mapping with the
-  panel for every class; the docstring of `aggregate_points`; and the tests in
-  `src/harpy/_tests/test_table/test_allocation.py`.
+  panel for every class; the docstring of `aggregate_points`; the tests in
+  `src/harpy/_tests/test_table/test_allocation.py`; and the record's tree in
+  `docs/development/metadata.md`, which lists
+  `auxiliary_class_feature_counts`.
 - **Roadmap:** when implemented, update the record in Slice 5's table-local
   metadata contract, and its other mentions of the auxiliary-class
   feature-count snapshot, to `panel_feature_counts`.
