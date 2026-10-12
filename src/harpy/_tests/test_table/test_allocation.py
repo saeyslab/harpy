@@ -472,11 +472,11 @@ def test_aggregation_metadata_validation_failure_rolls_back_published_table(monk
 
     def incompatible_metadata(*args, **kwargs):
         metadata = aggregation_uns(*args, **kwargs)
-        metadata["feature_class_aggregation"]["auxiliary_class_feature_counts"]["Negative"] = 999
+        metadata["feature_class_aggregation"]["panel_feature_counts"]["Negative"] = 999
         return metadata
 
     monkeypatch.setattr(writer_module, "_aggregation_uns", incompatible_metadata)
-    with pytest.raises(ValueError, match="auxiliary class feature counts disagree"):
+    with pytest.raises(ValueError, match="panel feature counts disagree"):
         aggregate_points(
             sdata,
             labels_name="labels_a",
@@ -580,7 +580,9 @@ def test_class_aware_aggregation_uses_panel_axis_and_adds_auxiliary_summaries(tm
 
     metadata = adata.uns["feature_class_aggregation"]
     assert metadata["source_kind"] == "harpy_aggregate_points"
-    assert metadata["auxiliary_class_feature_counts"] == {"Negative": 3, "SystemControl": 1}
+    # Every class, the expression class included; GeneZero and NegativeZero have no detections.
+    assert metadata["panel_feature_counts"] == {"Endogenous": 3, "Negative": 3, "SystemControl": 1}
+    assert "auxiliary_class_feature_counts" not in metadata
     assert metadata["auxiliary_points_fraction_column"] == "auxiliary_points_fraction"
     assert metadata["auxiliary_feature_matrix_key"] == "auxiliary_feature_counts"
     assert metadata["count_columns"] == {
@@ -608,7 +610,7 @@ def test_class_aware_aggregation_uses_panel_axis_and_adds_auxiliary_summaries(tm
     roundtripped_metadata = roundtripped.uns["feature_class_aggregation"]
     assert roundtripped_metadata["expression_class"] == "Endogenous"
     assert roundtripped_metadata["count_columns"] == metadata["count_columns"]
-    assert roundtripped_metadata["auxiliary_class_feature_counts"] == metadata["auxiliary_class_feature_counts"]
+    assert roundtripped_metadata["panel_feature_counts"] == metadata["panel_feature_counts"]
     assert roundtripped_metadata["regions"] == metadata["regions"]
     assert sparse.isspmatrix_csr(roundtripped.obsm["auxiliary_feature_counts"])
     assert roundtripped.obsm["auxiliary_feature_counts"].dtype == np.dtype(np.uint32)
