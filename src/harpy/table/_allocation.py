@@ -152,101 +152,80 @@ def aggregate_points(
 ) -> SpatialData:
     """Aggregate one or more points elements within paired labels elements.
 
-    One aggregation call constructs one complete table. Scalar ``points_name``
-    and ``to_coordinate_system`` values are broadcast across ``labels_name``;
-    lists are paired positionally. Each paired points and labels element must
-    define a finite, invertible affine transformation to the selected shared
-    coordinate system. Harpy composes those registrations to map intrinsic
-    point coordinates directly into intrinsic labels pixels; labels are never
-    resampled.
+    One aggregation call constructs one complete table. Each value
+    ``adata.X[i, j]`` is the number of input points carrying feature ``j`` that
+    were spatially assigned to instance ``i``: point counts, not counts of
+    features defined by a panel. Scalar ``points_name`` and
+    ``to_coordinate_system`` values are broadcast across ``labels_name``; lists
+    are paired positionally.
 
-    Each value ``adata.X[i, j]`` is the number of input points carrying feature
-    ``j`` that were spatially assigned to instance ``i``. These are point
-    counts, not counts of features defined by a panel.
-
-    Aggregation has exactly two mutually exclusive modes, selected solely by
-    ``expression_class``:
-
-    - **Ordinary mode** is selected by ``expression_class=None``. Feature-panel
-      metadata is ignored even when present. The sorted union of observed
-      ``feature_key`` values across the selected points elements defines
-      ``adata.X``. No auxiliary feature matrix or per-class summaries are
-      created.
-    - **Class-aware mode** is selected by a non-empty ``expression_class``.
-      Feature-panel metadata is mandatory and validated. Features assigned to
-      the selected class define ``adata.X``; features in all other panel classes
-      define ``adata.obsm["auxiliary_feature_counts"]`` and the per-class
-      summaries in ``adata.obs``.
-
-    In class-aware mode, aggregation resolves each points element's feature
-    panel through::
+    A feature panel describes an assay's features and their classes: which
+    features, such as genes, control probes or unused codewords, belong to
+    which class. Panels are kept in ``sdata.attrs["harpy"]["feature_panels"]``,
+    each with its ``feature_key``, ``feature_class_key``, ordered ``classes``
+    and ``features_by_class``, and a points element references its panel
+    through::
 
         sdata.attrs["harpy"]["points"][points_name]["feature_panel"]
             -> sdata.attrs["harpy"]["feature_panels"][feature_panel]
 
-    Harpy validates every selected points element against its referenced feature
-    panel before spatial assignment. The panel's ``feature_key`` must match the
-    requested ``feature_key``; its ``feature_class_key`` column must exist in
-    the points, be categorical, and use the panel's ordered classes. Every
-    source point must contain a non-null feature and class, its feature must
-    occur in the panel, and its class must match that feature's panel
-    assignment. All selected points elements must resolve compatible panel
-    contracts. Panel features do not need to have observed points. The panel is
-    authoritative: the materialized points feature-class column is checked for
-    consistency, but matrix axes, feature placement and class summaries are
-    derived from the panel rather than from that column.
+    Readers that know the assay's panel register it for the points they
+    create; :func:`harpy.pt.add_feature_panel` registers one for existing
+    points.
 
-    The referenced panel supplies ``feature_key``, ``feature_class_key``,
-    ``classes``, and ``features_by_class``. Features in ``expression_class``
-    define ``adata.X``. Every remaining panel feature is retained in the
-    independent sparse matrix ``adata.obsm["auxiliary_feature_counts"]``, whose
-    ordered columns are recorded under
-    ``adata.uns["feature_matrices"]["auxiliary_feature_counts"]``. Instances
-    receiving only non-expression points remain in the table with an all-zero
-    expression row.
+    Aggregation has two mutually exclusive modes, selected solely by
+    ``expression_class``:
 
-    In class-aware mode, matrix columns are panel-defined rather than
-    observation-derived. Every panel feature is retained even when it is absent
-    from all selected points elements. An unobserved expression feature remains
-    in ``adata.var_names`` with an all-zero column in ``adata.X``; an unobserved
-    auxiliary feature remains in the auxiliary ``feature_columns`` metadata
-    with an all-zero auxiliary-matrix column. For example::
+    - **Ordinary mode** (``expression_class=None``): any feature panel is
+      ignored; the sorted union of observed ``feature_key`` values across the
+      selected points elements defines ``adata.X``.
+    - **Class-aware mode** (``expression_class`` names a class of the panel):
+      the panel is mandatory and authoritative. Features of that class define
+      ``adata.X``; features of all other panel classes are kept in an
+      auxiliary feature matrix, and every class is summarized in ``adata.obs``.
 
-        panel                              resulting feature axes
-        Endogenous: [GeneA, GeneZero]      adata.var_names:
-          observed: GeneA                    [GeneA, GeneZero]
-          unobserved: GeneZero               GeneZero column is all zero
+    **Reads**
 
-        Negative: [Neg1, NegZero]          auxiliary feature_columns:
-          observed: Neg1                     [Neg1, NegZero]
-          unobserved: NegZero                NegZero column is all zero
+    - each paired points and labels element, with their affine transformations
+      to the selected shared coordinate system: point coordinates are mapped
+      directly into intrinsic labels pixels, and labels are never resampled;
+    - the points' ``feature_key`` column;
+    - in class-aware mode, the points' feature panel and their
+      ``feature_class_key`` column, which is checked against the panel.
 
-    Every panel class is also summarized as ``n_<class>_points`` in
-    ``adata.obs``, together with ``auxiliary_points_fraction``. These summaries
-    are derived from the persisted expression and auxiliary matrices. Auxiliary
-    class feature counts are the lengths of the panel's non-expression
-    ``features_by_class`` lists and are recorded in
-    ``adata.uns["feature_class_aggregation"]`` for later QC; no per-feature
-    rates are persisted in ``adata.obs``.
+    **Writes** one table at ``sdata.tables[output_table_name]``::
 
-    Both modes store exactly one canonical center matrix at
-    ``adata.obsm["spatial_canonical"]``. Its dense ``float64`` columns are
-    always ordered ``(z, y, x)`` and contain geometric centers of mass for the
-    retained instance IDs in each source labels element's intrinsic ``scale0``
-    pixel frame. A 2D labels source uses ``z=0``. Per-region source and coverage
-    metadata is stored under
-    ``adata.uns["spatial_coordinates"]["spatial_canonical"]``.
+        adata.X                                  point counts per instance and feature
+        adata.var_names                          features of adata.X
+        adata.obs[region_key], [instance_key]    labels element and instance identifier
+        adata.obs["n_<class>_points"]            class-aware: points per class
+        adata.obs["auxiliary_points_fraction"]   class-aware: non-expression points / all points
+        adata.obsm["spatial_canonical"]          centers of mass, columns (z, y, x)
+        adata.obsm["auxiliary_feature_counts"]   class-aware: counts of non-expression features
+        adata.uns["spatialdata_attrs"]           region and instance binding
+        adata.uns["spatial_coordinates"]         metadata of the canonical centers
+        adata.uns["feature_matrices"]            class-aware: names of the auxiliary matrix's columns,
+                                                 under its .obsm key
+        adata.uns["feature_class_aggregation"]   class-aware: the aggregation record, below
 
-    This operation requires ``sdata`` to be backed by a writable local Zarr
-    store. Aggregation remains partitioned and the final sparse matrices are
-    written in row blocks without materializing the complete reductions on the
-    driver.
+    In class-aware mode, ``adata.uns["feature_class_aggregation"]`` holds::
 
-    The serialized canonical centers and their metadata are validated before
-    publication. The remaining table contracts (SpatialData annotation,
-    feature-matrix records, source references, and authoritative feature-panel
-    metadata) are validated before publication is committed. Call
-    :func:`harpy.tb.validate_table` to repeat the complete validation later.
+        schema_version, source_kind          record version, and its writer
+        feature_key, feature_class_key       points columns of the features and classes
+        classes                              the panel's classes, in panel order
+        expression_class                     the class whose features form adata.X
+        panel_feature_counts                 class -> number of unique panel features,
+                                             features without detections included
+        count_columns                        class -> name of its .obs count column,
+                                             for example "Negative" -> "n_negative_points"
+        auxiliary_points_fraction_column     "auxiliary_points_fraction"
+        auxiliary_feature_matrix_key         .obsm key of the auxiliary matrix
+        regions                              labels element -> the points element and
+                                             coordinate system aggregated into it
+
+    Later code finds columns and denominators through this record rather than
+    by rebuilding names. No per-feature rates are persisted. The developer
+    documentation on metadata describes each record in full.
 
     Parameters
     ----------
@@ -275,9 +254,11 @@ def aggregate_points(
         ``feature_key``. It must differ from ``instance_key``.
     expression_class
         Selects the aggregation mode. ``None`` selects ordinary mode, which
-        ignores feature-panel metadata and retains all observed features in
-        ``adata.X``. A non-empty string selects class-aware mode and names the
-        panel class retained in ``adata.X``; all other panel classes are
+        ignores the feature panel of the points, the one referenced through
+        ``sdata.attrs["harpy"]["points"][points_name]["feature_panel"]`` (see
+        above), even when one is registered, and retains all observed features
+        in ``adata.X``. A non-empty string selects class-aware mode and names
+        the panel class retained in ``adata.X``; all other panel classes are
         retained in the auxiliary feature matrix.
     instance_key
         Column in ``adata.obs`` holding instance identifiers. It must differ
@@ -300,7 +281,58 @@ def aggregate_points(
     and ``.uns`` are loaded into memory. To read matrices as Dask arrays instead,
     use :func:`harpy.table.io.read_table` with ``mode="lazy"``.
 
-    Example
+    Notes
+    -----
+    **Validation in class-aware mode.** Every selected points element is
+    validated against its referenced feature panel before spatial assignment.
+    The panel's ``feature_key`` must match the requested ``feature_key``; its
+    ``feature_class_key`` column must exist in the points, be categorical, and
+    use the panel's ordered classes. Every source point must contain a non-null
+    feature and class, its feature must occur in the panel, and its class must
+    match that feature's panel assignment. All selected points elements must
+    resolve compatible panel contracts. The panel is authoritative: the points'
+    feature-class column is checked for consistency, but matrix axes, feature
+    placement and class summaries are derived from the panel.
+
+    **Panel-defined axes in class-aware mode.** Matrix columns come from the
+    panel, not from the observations: every panel feature is kept even when it
+    is absent from all selected points elements. An unobserved expression
+    feature remains in ``adata.var_names`` with an all-zero column in
+    ``adata.X``; an unobserved auxiliary feature remains in the auxiliary
+    matrix's ``feature_columns`` with an all-zero column. Instances receiving
+    only non-expression points remain in the table with an all-zero expression
+    row. For example::
+
+        panel                              resulting feature axes
+        Endogenous: [GeneA, GeneZero]      adata.var_names:
+          observed: GeneA                    [GeneA, GeneZero]
+          unobserved: GeneZero               GeneZero column is all zero
+
+        Negative: [Neg1, NegZero]          auxiliary feature_columns:
+          observed: Neg1                     [Neg1, NegZero]
+          unobserved: NegZero                NegZero column is all zero
+
+    The ``n_<class>_points`` columns and ``auxiliary_points_fraction`` are
+    derived from the persisted expression and auxiliary matrices.
+
+    **Canonical centers.** Both modes store one canonical center matrix. Its
+    dense ``float64`` columns are ordered ``(z, y, x)`` and contain geometric
+    centers of mass of the retained instance IDs in each source labels
+    element's intrinsic ``scale0`` pixel frame; a 2D labels source uses
+    ``z=0``. Per-region source and coverage metadata is stored under
+    ``adata.uns["spatial_coordinates"]["spatial_canonical"]``.
+
+    **Storage and publication.** ``sdata`` must be backed by a writable local
+    Zarr store. Aggregation remains partitioned, and the final sparse matrices
+    are written in row blocks without materializing the complete reductions on
+    the driver. The serialized canonical centers and their metadata are
+    validated before publication. The remaining table contracts (SpatialData
+    annotation, feature-matrix records, source references, and authoritative
+    feature-panel metadata) are validated before publication is committed.
+    Call :func:`harpy.tb.validate_table` to repeat the complete validation
+    later.
+
+    Examples
     --------
     .. code-block:: python
 

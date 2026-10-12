@@ -109,9 +109,9 @@ class _FeatureClassWriteContract:
         }
 
     @property
-    def auxiliary_class_feature_counts(self) -> dict[str, int]:
+    def panel_feature_counts(self) -> dict[str, int]:
         grouped = dict(self.features_by_class_items)
-        return {feature_class: len(grouped[feature_class]) for feature_class in self.auxiliary_classes}
+        return {feature_class: len(grouped[feature_class]) for feature_class in self.classes}
 
 
 def _validate_aggregation_destination(
@@ -560,7 +560,7 @@ def _aggregation_uns(
             "feature_class_key": class_contract.feature_class_key,
             "expression_class": class_contract.expression_class,
             "classes": list(class_contract.classes),
-            "auxiliary_class_feature_counts": class_contract.auxiliary_class_feature_counts,
+            "panel_feature_counts": class_contract.panel_feature_counts,
             "count_columns": dict(class_contract.count_columns),
             "auxiliary_points_fraction_column": _AUXILIARY_POINTS_FRACTION_COLUMN,
             "auxiliary_feature_matrix_key": _AUXILIARY_FEATURE_MATRIX_KEY,
