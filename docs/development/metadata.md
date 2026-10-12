@@ -70,9 +70,9 @@ adata.uns
 ├── feature_class_aggregation
 │   ├── schema_version, source_kind
 │   ├── feature_key, feature_class_key, expression_class, classes
-│   ├── auxiliary_class_feature_counts  panel feature counts, not point counts
+│   ├── panel_feature_counts            class → panel feature count, every class; not point counts
 │   ├── count_columns                   class → .obs point-count column
-│   ├── auxiliary_points_fraction_column
+│   ├── auxiliary_points_fraction_column name of the .obs column: auxiliary points / all points
 │   ├── auxiliary_feature_matrix_key    "auxiliary_feature_counts"
 │   └── regions                         labels name → points name + coordinate system
 └── spatial_coordinates

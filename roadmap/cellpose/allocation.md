@@ -4,8 +4,8 @@
 
 Thirteen numbered implementation slices are planned, with Slice 7 split into
 parts a and b and Slice 11 into parts a through j; Slices 1 through 10 are
-implemented, as are Parts 11a–11f except the optimization 11f.xi. Slices
-11g–11j and the optional Slice 12 remain:
+implemented, as are Parts 11a–11g except the optimization 11f.xi. Slices
+11h–11j and the optional Slice 12 remain:
 
 1. patch the CosMx reader and establish the generic Harpy feature-panel
    metadata contract — implemented;
@@ -64,7 +64,7 @@ implemented, as are Parts 11a–11f except the optimization 11f.xi. Slices
     - **11g:** record the panel feature count of every class, the expression
       class included, as `panel_feature_counts` in the aggregation record of
       `hp.tb.aggregate_points`, replacing `auxiliary_class_feature_counts` —
-      planned, before 11i;
+      implemented;
     - **11h:** add `normalization="per_panel_feature"` to
       `hp.qc.spatial_bin_histogram`, as `hp.pl.plot_points_density` has it —
       planned;
@@ -322,8 +322,9 @@ lexicographically so output does not depend on row order in the plex; this
 ordering is deterministic rather than a claim of biological precedence.
 
 Slice 5 uses the complete relation to resolve its shared expression axis and
-feature classes, and retains each non-expression feature-list length as a
-table-local auxiliary-class feature-count snapshot for Slice 11i QC. Slice 11a
+feature classes, and retains each class's feature-list length as a table-local
+panel feature-count snapshot (`panel_feature_counts`, for every class since
+Slice 11g) for Slice 11i QC. Slice 11a
 additionally uses the actual control-feature names. A categorical transcript column
 contains only categories represented by the ingested points and cannot, by
 itself, preserve the feature-to-class relationship for a panel feature with no
@@ -1221,7 +1222,7 @@ When `expression_class` is provided, every selected points element must have a
 root Harpy points record that references an authoritative shared feature panel.
 The panel supplies `feature_class_key`, the complete ordered classes,
 feature-to-class assignments, and the feature lists whose lengths define the
-auxiliary class feature counts. Missing, malformed, or incompatible panel metadata is an
+panel feature counts. Missing, malformed, or incompatible panel metadata is an
 error before spatial lookup. Allocation accepts no denominator fallback,
 override, or per-sample mapping.
 
@@ -1230,9 +1231,10 @@ metadata path used in class-aware mode. In particular, it must state that
 `feature_class_key` is not a user argument: it is resolved through
 `sdata.attrs["harpy"]["points"][points_name]["feature_panel"]` and then read
 from the referenced record in `sdata.attrs["harpy"]["feature_panels"]`. The
-docstring must also state that auxiliary class feature counts are derived from
-the lengths of the panel's non-expression `features_by_class` lists and that class-aware
-allocation fails when this metadata is unavailable.
+docstring must also state that panel feature counts are derived from the
+lengths of the panel's `features_by_class` lists, for every class including the
+expression class (Slice 11g), and that class-aware allocation fails when this
+metadata is unavailable.
 
 The ordinary path still supports multiple allocation pairs. It uses the
 deterministic union of observed targets as the shared feature axis and fills a
@@ -1284,7 +1286,7 @@ feature axis, aggregation behavior, generated `.obs` columns, and table-local
 `.uns` record. Do not independently reinterpret root metadata at separate
 stages of the operation.
 
-There is no per-sample or per-region auxiliary-class feature-count mapping in one output table.
+There is no per-sample or per-region panel feature-count mapping in one output table.
 Likewise, `code_class` categories may differ between samples stored in the same
 SpatialData object, but samples with different class universes or incompatible
 panels cannot participate in the same class-aware allocation call. They require
@@ -1295,7 +1297,7 @@ The complete policy is:
 
 ```text
 all selected points reference compatible panels
-    -> derive one shared class contract and auxiliary-class feature-count mapping
+    -> derive one shared class contract and panel feature-count mapping
 
 missing panel metadata or incompatible panels
     -> reject before spatial lookup
@@ -1325,8 +1327,8 @@ incompatible metadata before spatial allocation. This prevents a zero from
 ambiguously meaning either "assayed but not detected" or "not assayed by this
 panel."
 
-Derive one shared auxiliary-class feature-count mapping from the compatible
-panel contract for the complete allocation call. Per-sample and per-region mappings
+Derive one shared panel feature-count mapping from the compatible panel
+contract for the complete allocation call. Per-sample and per-region mappings
 are not supported because later QC must interpret a given class-count column
 against one consistent panel feature count across all rows.
 
@@ -1408,15 +1410,16 @@ Do not persist `n_negative_points_per_feature` or
 `n_system_control_points_per_feature` in `.obs`. They are deterministic rescalings
 of the raw class counts by the panel feature counts and add no independent table
 information. Slice 11i table summarization derives them on demand from the raw
-count columns and the table-local auxiliary-class feature-count snapshot for
-downstream plotting.
+count columns and the table-local panel feature-count snapshot for downstream
+plotting.
 
 ### Table-local metadata contract
 
 Record the resolved configuration and generated-column bindings under one
-dedicated table-local key. The `auxiliary_class_feature_counts` field below is a
-derived snapshot of the panel values used for this table; it is not accepted as
-an allocation argument or treated as an authoritative panel definition:
+dedicated table-local key. The `panel_feature_counts` field below is a derived
+snapshot of the panel values used for this table, for every class including the
+expression class (Slice 11g); it is not accepted as an allocation argument or
+treated as an authoritative panel definition:
 
 ```python
 adata.uns["feature_class_aggregation"] = {
@@ -1426,7 +1429,8 @@ adata.uns["feature_class_aggregation"] = {
     "feature_class_key": "code_class",
     "expression_class": "Endogenous",
     "classes": ["Endogenous", "Negative", "SystemControl"],
-    "auxiliary_class_feature_counts": {
+    "panel_feature_counts": {
+        "Endogenous": ...,  # the panel's number of endogenous features
         "Negative": 10,
         "SystemControl": 197,
     },
@@ -1436,6 +1440,7 @@ adata.uns["feature_class_aggregation"] = {
         "SystemControl": "n_system_control_points",
     },
     "auxiliary_points_fraction_column": "auxiliary_points_fraction",
+    "auxiliary_feature_matrix_key": "auxiliary_feature_counts",
     "regions": {
         "sample_a_cellpose_labels_mosaic_1": {
             "points_element": "sample_a_transcripts_mosaic_1",
@@ -1462,8 +1467,8 @@ than a registry keyed by an arbitrary artifact name. Its generated-column
 mappings bind the metadata to the actual `.obs` payload instead of requiring
 downstream code to reconstruct names. The complete per-class feature lists
 remain in SpatialData root metadata and are not duplicated into the table;
-only the resolved auxiliary-class feature counts needed for later on-demand QC
-calculations are retained.
+only the resolved panel feature counts of every class, needed for later
+on-demand QC calculations, are retained.
 
 Configuration shared by the complete table lives at the top level. The
 `regions` mapping is keyed by the exact labels element name and records the
@@ -1541,10 +1546,10 @@ following per-instance plotting metrics on demand:
 
 ```text
 n_negative_points_per_feature =
-    n_negative_points / auxiliary_class_feature_counts["Negative"]
+    n_negative_points / panel_feature_counts["Negative"]
 
 n_system_control_points_per_feature =
-    n_system_control_points / auxiliary_class_feature_counts["SystemControl"]
+    n_system_control_points / panel_feature_counts["SystemControl"]
 ```
 
 These derived values are useful for comparing control classes with different
@@ -1568,8 +1573,8 @@ Focused tests should establish that:
 - assigned auxiliary-class counts are correct and zero-filled for instances
   without an auxiliary point;
 - no per-feature rate columns are persisted in `.obs`;
-- the table-local auxiliary-class feature-count snapshot equals the authoritative panel feature
-  counts and is sufficient for later QC derivation;
+- the table-local panel feature-count snapshot equals the authoritative panel feature
+  counts of every class and is sufficient for later QC derivation;
 - `auxiliary_points_fraction` is correct and finite;
 - non-categorical feature-class columns are rejected, while unknown Dask
   categories are restored lazily from the panel's ordered `classes` before
@@ -1593,7 +1598,7 @@ Focused tests should establish that:
 - expression targets missing from one allocation pair are zero-filled rather
   than removed by an inner join;
 - missing and incompatible feature panels are rejected before spatial lookup;
-- one panel-derived auxiliary-class feature-count mapping applies to every pair;
+- one panel feature-count mapping, derived from the panel, applies to every pair;
 - an existing output table is replaced only when `overwrite=True`; and
 - omitting `expression_class` reproduces the existing allocation result.
 
@@ -1720,7 +1725,7 @@ Keep this registry entry matrix-specific and generic. Do not duplicate
 class-aware aggregation rather than the physical `.obsm` matrix. The existing
 `feature_class_aggregation` record already owns `feature_key`,
 `feature_class_key`, `expression_class`, the ordered `classes`, and the
-panel-derived `auxiliary_class_feature_counts`.
+panel-derived `panel_feature_counts`.
 
 Add one binding to the existing aggregation record:
 
@@ -8465,12 +8470,11 @@ Harpy dependency once the required public APIs are available.
 
 ## Slice 11g: panel feature counts for every class in the aggregation record
 
-**Status: planned; implement before Slice 11i.**
+**Status: implemented.**
 
-The aggregation record of a class-aware table records the number of panel
-features of the auxiliary classes only, in `auxiliary_class_feature_counts`
-(Slice 5). This slice records it for every class, the expression class
-included, as `panel_feature_counts`, which replaces
+Slice 5 recorded the number of panel features of the auxiliary classes only,
+in `auxiliary_class_feature_counts`. This slice records it for every class, the
+expression class included, as `panel_feature_counts`, which replaces
 `auxiliary_class_feature_counts`:
 
 ```python
@@ -8511,11 +8515,11 @@ adata.uns["feature_class_aggregation"]["panel_feature_counts"] = {
   (`src/harpy/table/_validation.py`), which compares the mapping with the
   panel for every class; the docstring of `aggregate_points`; the tests in
   `src/harpy/_tests/test_table/test_allocation.py`; and the record's tree in
-  `docs/development/metadata.md`, which lists
+  `docs/development/metadata.md`, which listed
   `auxiliary_class_feature_counts`.
-- **Roadmap:** when implemented, update the record in Slice 5's table-local
-  metadata contract, and its other mentions of the auxiliary-class
-  feature-count snapshot, to `panel_feature_counts`.
+- **Roadmap:** Slice 5's table-local metadata contract, its other mentions of
+  the feature-count snapshot, and those of Slices 1 and 6 now name
+  `panel_feature_counts`.
 
 **Verification:** the record holds `panel_feature_counts` for every class,
 equal to the panel's feature counts, features without detections included,
@@ -8856,12 +8860,13 @@ instances or features.
 
 ### Lazy and backed tables
 
-Tables are often lazy without the caller choosing it: `hp.io.read_zarr` reads
-tables with lazy matrices by default, and on a backed `sdata`, `aggregate_points`
-and the other table writers attach the table they write with lazy matrices.
-Storage-backed tables (`mode="backed"`) exist as well. A QC summary must not
-read the expression matrix in full for that reason, so `summarize_table` works
-on in-memory, lazy and backed tables alike, without loading anything:
+Tables are often not in memory without the caller choosing it:
+`hp.io.read_zarr` reads tables with lazy matrices by default; `aggregate_points`
+attaches the table it writes with storage-backed matrices, read-only CSR
+dataset handles; and on a backed `sdata`, `hp.tb.io.add_table` and the writers
+built on it attach theirs with lazy matrices. A QC summary must not read the
+expression matrix in full for that reason, so `summarize_table` works on
+in-memory, lazy and backed tables alike, without loading anything:
 
 1. **It reads only what is always in memory:** `.obs` (the class counts,
    `auxiliary_points_fraction`, and the region and instance identity), `.uns`
