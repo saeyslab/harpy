@@ -529,9 +529,10 @@ def _validate_feature_class_metadata(
 ) -> None:
     """Compare table-local aggregation metadata with a root panel contract.
 
-    Auxiliary class feature counts are not inferred from observed points. They
-    are derived from the complete authoritative panel in root SpatialData
-    metadata and compared with the values persisted in the AnnData table::
+    Panel feature counts are not inferred from observed points. They are
+    derived from the complete authoritative panel in root SpatialData metadata,
+    for every class including the expression class, and compared with the
+    values persisted in the AnnData table::
 
         sdata.attrs["harpy"]["points"][points_name]["feature_panel"]
                                       |
@@ -542,14 +543,14 @@ def _validate_feature_class_metadata(
                               features_by_class
                                       |
                                       v
-               len(features_by_class[auxiliary_class])
+                   len(features_by_class[feature_class])
                                       |
                                       v
         adata.uns["feature_class_aggregation"]
-                 ["auxiliary_class_feature_counts"]
+                 ["panel_feature_counts"]
 
     Consequently, panel features with zero observed points still contribute to
-    their auxiliary class's recorded feature count.
+    their class's recorded feature count.
     """
     expected = {
         "schema_version": _FEATURE_CLASS_AGGREGATION_SCHEMA_VERSION,
@@ -572,15 +573,15 @@ def _validate_feature_class_metadata(
     )
     if classes != contract.panel.classes:
         raise ValueError("Feature-class aggregation classes disagree with the authoritative feature panel.")
-    auxiliary_class_feature_counts = dict(
+    panel_feature_counts = dict(
         _require_mapping(
-            aggregation_metadata.get("auxiliary_class_feature_counts"),
-            path=f"{_FEATURE_CLASS_AGGREGATION_KEY}.auxiliary_class_feature_counts",
+            aggregation_metadata.get("panel_feature_counts"),
+            path=f"{_FEATURE_CLASS_AGGREGATION_KEY}.panel_feature_counts",
         )
     )
-    if auxiliary_class_feature_counts != dict(contract.auxiliary_class_feature_counts):
+    if panel_feature_counts != dict(contract.panel_feature_counts):
         raise ValueError(
-            "Feature-class aggregation auxiliary class feature counts disagree with the authoritative feature panel."
+            "Feature-class aggregation panel feature counts disagree with the authoritative feature panel."
         )
     count_columns = dict(
         _require_mapping(
