@@ -101,17 +101,18 @@ class _FeatureClassAggregationContract:
         return tuple(result)
 
     @property
-    def auxiliary_class_feature_counts(self) -> tuple[tuple[str, int], ...]:
-        """Return the panel-defined feature count for each non-expression class.
+    def panel_feature_counts(self) -> tuple[tuple[str, int], ...]:
+        """Return the panel-defined feature count for each class, in panel order.
 
-        Each value is the number of features assigned to that auxiliary class
-        in the authoritative panel, including panel features for which the
-        selected points elements contain zero detections. The values are
-        recorded with the aggregation metadata so downstream QC can normalize
-        per-class point counts without inferring panel size from observed data.
+        Each value is the number of features assigned to that class in the
+        authoritative panel, including panel features for which the selected
+        points elements contain zero detections, and including the expression
+        class. The values are recorded with the aggregation metadata so
+        downstream QC can normalize per-class point counts without inferring
+        panel size from observed data.
         """
         features_by_class = self.panel.features_by_class
-        return tuple((feature_class, len(features_by_class[feature_class])) for feature_class in self.auxiliary_classes)
+        return tuple((feature_class, len(features_by_class[feature_class])) for feature_class in self.panel.classes)
 
 
 def _snake_case(value: str) -> str:
