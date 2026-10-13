@@ -4,8 +4,8 @@
 
 Thirteen numbered implementation slices are planned, with Slice 7 split into
 parts a and b and Slice 11 into parts a through j; Slices 1 through 10 are
-implemented, as are Parts 11a–11g except the optimization 11f.xi. Slices
-11h–11j and the optional Slice 12 remain:
+implemented, as are Parts 11a–11h except the optimization 11f.xi. Slices
+11i–11j and the optional Slice 12 remain:
 
 1. patch the CosMx reader and establish the generic Harpy feature-panel
    metadata contract — implemented;
@@ -67,7 +67,7 @@ implemented, as are Parts 11a–11g except the optimization 11f.xi. Slices
       implemented;
     - **11h:** add `normalization="per_panel_feature"` to
       `hp.qc.spatial_bin_histogram`, as `hp.pl.plot_points_density` has it —
-      planned;
+      implemented;
     - **11i:** table-level summary computation through `hp.qc.summarize_table`
       and `TableSummary`, with plotting integration — specified, not
       implemented;
@@ -8528,7 +8528,7 @@ record without the mapping or with a count that differs from the panel.
 
 ## Slice 11h: panel-feature normalization in `spatial_bin_histogram`
 
-**Status: planned.** Independent of Slice 11g: `PointsSummary.panel_feature_counts`
+**Status: implemented.** Independent of Slice 11g: `PointsSummary.panel_feature_counts`
 already exists. It comes before Slice 11i, so that the bin and instance
 histograms offer per-panel-feature values when `instance_histogram` arrives.
 
@@ -8562,7 +8562,8 @@ hp.qc.spatial_bin_histogram(summary, feature_class="Endogenous", normalization="
   size to divide by; `plot_points_density` also rejects panel-feature
   normalization for feature grids.
 - **Reuse:** the panel-size lookup and its validation (a positive panel size
-  for the displayed class) are shared with `plot_points_density`.
+  for the displayed class) are shared with `plot_points_density`, through
+  `_panel_feature_count` in `src/harpy/qc/points/_panel_normalization.py`.
 
 **Verification:** with `normalization="per_panel_feature"`, the plotted values,
 median and SD equal those without normalization divided by the class's panel
