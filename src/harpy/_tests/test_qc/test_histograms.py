@@ -200,6 +200,40 @@ def test_spatial_histogram_uses_prepared_population_annotations_and_style():
     assert summary.metadata == before.metadata
 
 
+def _with_panel_sizes(summary, panel_sizes):
+    """The summary with a per_class holding each class's panel feature count, as summarize_points records it."""
+    per_class = pd.DataFrame({"feature_class": list(panel_sizes), "n_features": list(panel_sizes.values())})
+    return replace(summary, per_class=per_class)
+
+
+def test_per_panel_feature_divides_counts_median_and_sd_by_the_panel_size():
+    summary = _with_panel_sizes(_summary([0, 1, 2, 10]), {"Control": 5, "Reference": 2})
+    before = deepcopy(summary)
+    statistics = summary.spatial_bins.per_class.iloc[0]
+    median, std = statistics.median_points_per_bin / 5, statistics.std_points_per_bin / 5
+    # One bar per divided count: 0, 0.2, 0.4 and 2.0.
+    options = {"element": "bars", "bins": [-0.1, 0.1, 0.3, 0.5, 2.1], "kde": False}
+    _, ax = plt.subplots()
+    spatial_bin_histogram(
+        summary, feature_class="Control", normalization="per_panel_feature", ax=ax, histplot_kwargs=options
+    )
+    np.testing.assert_array_equal(_heights(ax), [1, 1, 1, 1])
+    np.testing.assert_allclose(ax.lines[0].get_xdata(), [median, median])
+    assert "Median: 0.30" in ax.texts[0].get_text()
+    assert f"SD    : {std:.2f}" in ax.texts[0].get_text()
+    assert ax.get_xlabel() == "Control points per panel feature per spatial bin"
+    pd.testing.assert_frame_equal(summary.spatial_bins.per_bin, before.spatial_bins.per_bin)
+    pd.testing.assert_frame_equal(summary.spatial_bins.per_class, before.spatial_bins.per_class)
+
+
+def test_invalid_normalization_and_panel_sizes_raise():
+    summary = _with_panel_sizes(_summary([0, 1, 2, 10]), {"Control": 0, "Reference": 2})
+    with pytest.raises(ValueError, match="Unknown normalization"):
+        spatial_bin_histogram(summary, feature_class="Control", normalization="per_area")
+    with pytest.raises(ValueError, match="positive panel size"):
+        spatial_bin_histogram(summary, feature_class="Control", normalization="per_panel_feature")
+
+
 @pytest.mark.parametrize("title, expected", [(None, "Existing title"), ("Custom title", "Custom title"), ("", "")])
 def test_spatial_histogram_changes_existing_title_only_when_supplied(title, expected):
     _, ax = plt.subplots()
