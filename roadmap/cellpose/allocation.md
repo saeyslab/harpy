@@ -1406,8 +1406,8 @@ auxiliary_points_fraction =
     / (n_endogenous_points + n_negative_points + n_system_control_points)
 ```
 
-Do not persist `n_negative_points_per_feature` or
-`n_system_control_points_per_feature` in `.obs`. They are deterministic rescalings
+Do not persist `n_negative_points_per_panel_feature` or
+`n_system_control_points_per_panel_feature` in `.obs`. They are deterministic rescalings
 of the raw class counts by the panel feature counts and add no independent table
 information. Slice 11i table summarization derives them on demand from the raw
 count columns and the table-local panel feature-count snapshot for downstream
@@ -1532,7 +1532,7 @@ Unexpected or null feature classes, targets associated with multiple classes,
 non-positive resolved panel feature counts, a missing expression class, and
 collisions with existing output columns must produce clear errors. A panel
 auxiliary class with no assigned points is valid and must produce a zero count
-column. No auxiliary class produces a persisted per-feature rate. Validate the
+column. No auxiliary class produces a persisted per-panel-feature rate. Validate the
 complete multi-region request and shared
 `feature_class_aggregation` configuration before writing the output table.
 
@@ -1545,10 +1545,10 @@ suitable for cell-level histograms and violin plots of the raw class counts and
 following per-instance plotting metrics on demand:
 
 ```text
-n_negative_points_per_feature =
+n_negative_points_per_panel_feature =
     n_negative_points / panel_feature_counts["Negative"]
 
-n_system_control_points_per_feature =
+n_system_control_points_per_panel_feature =
     n_system_control_points / panel_feature_counts["SystemControl"]
 ```
 
@@ -1572,7 +1572,7 @@ Focused tests should establish that:
 - `n_endogenous_points` equals the row sum of the final expression matrix;
 - assigned auxiliary-class counts are correct and zero-filled for instances
   without an auxiliary point;
-- no per-feature rate columns are persisted in `.obs`;
+- no per-panel-feature rate columns are persisted in `.obs`;
 - the table-local panel feature-count snapshot equals the authoritative panel feature
   counts of every class and is sufficient for later QC derivation;
 - `auxiliary_points_fraction` is correct and finite;
@@ -8485,10 +8485,10 @@ adata.uns["feature_class_aggregation"]["panel_feature_counts"] = {
 }
 ```
 
-- **Why:** Slice 11i derives a per-feature column for each selected class: the
+- **Why:** Slice 11i derives a per-panel-feature column for each selected class: the
   instance's count of the class divided by the class's number of panel
-  features. For the expression class, `n_endogenous_points_per_feature` is the
-  mean count per gene in an instance; next to `n_negative_points_per_feature`,
+  features. For the expression class, `n_endogenous_points_per_panel_feature` is the
+  mean count per gene in an instance; next to `n_negative_points_per_panel_feature`,
   the background per negative probe, it gives the usual signal-versus-background
   comparison, for example in `instance_scatter`. Neither of the other sources
   of the expression class's panel size fits: `adata.n_vars` may hold a subset
@@ -8530,7 +8530,7 @@ record without the mapping or with a count that differs from the panel.
 
 **Status: planned.** Independent of Slice 11g: `PointsSummary.panel_feature_counts`
 already exists. It comes before Slice 11i, so that the bin and instance
-histograms offer per-feature values when `instance_histogram` arrives.
+histograms offer per-panel-feature values when `instance_histogram` arrives.
 
 `hp.pl.plot_points_density` normalizes the bin counts of a `PointsSummary` at
 display time, with `normalization="per_panel_feature"` among its options.
@@ -8691,7 +8691,7 @@ class TableSummaryMetadata:
     feature_classes: tuple[str, ...]  # selected classes, resolved from None
     expression_class: str  # the class in X, from the aggregation record
     points_name_by_region: Mapping[str, str]  # region -> name of the points element aggregated into it
-    panel_feature_counts: Mapping[str, int]  # denominators of the per-feature columns, for the selected classes
+    panel_feature_counts: Mapping[str, int]  # denominators of the per-panel-feature columns, for the selected classes
 
 
 @dataclass(frozen=True)
@@ -8729,7 +8729,7 @@ stores tuples.
   the panel nor the points designate an expression class, which is chosen
   only when a class-aware table is aggregated, so before aggregation all
   classes are equals.
-- **`panel_feature_counts`** are the denominators of the per-feature columns,
+- **`panel_feature_counts`** are the denominators of the per-panel-feature columns,
   for the selected classes, copied from the aggregation record (Slice 11g). The
   name is that of `PointsSummary.panel_feature_counts`, the same mapping on the
   points side.
@@ -8757,9 +8757,9 @@ joined back to it. Columns:
   `count_columns`, for example `n_endogenous_points`, `n_negative_points` and
   `n_system_control_points`;
 - `auxiliary_points_fraction`, copied from `.obs` as stored at aggregation;
-- for each selected class, the per-feature rate described below, named after
-  its count column with `_per_feature` appended: for example
-  `n_endogenous_points_per_feature` and `n_negative_points_per_feature`.
+- for each selected class, the per-panel-feature rate described below, named after
+  its count column with `_per_panel_feature` appended: for example
+  `n_endogenous_points_per_panel_feature` and `n_negative_points_per_panel_feature`.
 
 `per_instance` is wide, one column per class, unlike the long `per_bin` of
 `SpatialBinSummary` (one row per bin and class). That keeps the observation
@@ -8780,13 +8780,13 @@ dataframes, so that summing a column never counts instances twice and no
 sentinel region name is needed. Their columns follow `SpatialBinSummary.per_class`,
 with instances in place of bins:
 
-| Columns                                                                                                                                                                      | Meaning                                                                                                                                                |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `feature_class`, and `region` in `per_region`                                                                                                                                | the group                                                                                                                                              |
-| `n_total_instances`, `n_retained_instances`, `n_excluded_instances`, `pct_excluded_instances`                                                                                | the shared population: the table's rows of the selected regions, those with points across the selected classes, the others, and 100 × excluded / total |
-| `n_retained_instances_without_class`, `pct_retained_instances_without_class`                                                                                                 | retained instances with zero points of this row's class, and 100 × that count / retained                                                               |
-| `n_points`, `mean_points_per_instance`, `median_points_per_instance`, `std_points_per_instance`, `p95_points_per_instance`                                                   | the class's points over the retained instances, zeros included                                                                                         |
-| `n_features`, `mean_points_per_feature_per_instance`, `median_points_per_feature_per_instance`, `std_points_per_feature_per_instance`, `p95_points_per_feature_per_instance` | the panel's feature count of the class, the denominator, and the statistics of the per-feature rate over the retained instances                        |
+| Columns                                                                                                                                                                                              | Meaning                                                                                                                                                |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `feature_class`, and `region` in `per_region`                                                                                                                                                        | the group                                                                                                                                              |
+| `n_total_instances`, `n_retained_instances`, `n_excluded_instances`, `pct_excluded_instances`                                                                                                        | the shared population: the table's rows of the selected regions, those with points across the selected classes, the others, and 100 × excluded / total |
+| `n_retained_instances_without_class`, `pct_retained_instances_without_class`                                                                                                                         | retained instances with zero points of this row's class, and 100 × that count / retained                                                               |
+| `n_points`, `mean_points_per_instance`, `median_points_per_instance`, `std_points_per_instance`, `p95_points_per_instance`                                                                           | the class's points over the retained instances, zeros included                                                                                         |
+| `n_features`, `mean_points_per_panel_feature_per_instance`, `median_points_per_panel_feature_per_instance`, `std_points_per_panel_feature_per_instance`, `p95_points_per_panel_feature_per_instance` | the panel's feature count of the class, the denominator, and the statistics of the per-panel-feature rate over the retained instances                  |
 
 - **Shared population:** the population counts are the same for every class of
   a group, as the population is chosen jointly across the selected classes.
@@ -8823,20 +8823,20 @@ coordinates, or re-read a segmentation raster. Original-point binning in
 Slice 11a and existing-instance summaries here therefore use distinct inputs,
 without either QC operation rerunning raster-based aggregation.
 
-Derive per-feature rates for the requested classes from the persisted raw class
+Derive per-panel-feature rates for the requested classes from the persisted raw class
 counts. Resolve the relevant `.obs` columns through
 `adata.uns["feature_class_aggregation"]["count_columns"]` and divide them by the
 corresponding positive values in that record's `panel_feature_counts`
 (Slice 11g). For the CosMx example:
 
 ```text
-n_endogenous_points_per_feature =
+n_endogenous_points_per_panel_feature =
     n_endogenous_points / panel_feature_counts["Endogenous"]
 
-n_negative_points_per_feature =
+n_negative_points_per_panel_feature =
     n_negative_points / panel_feature_counts["Negative"]
 
-n_system_control_points_per_feature =
+n_system_control_points_per_panel_feature =
     n_system_control_points / panel_feature_counts["SystemControl"]
 ```
 
@@ -8907,8 +8907,8 @@ the computed `TableSummary`, as the points side passes its result to
 hp.qc.instance_histogram(table_summary, column="auxiliary_points_fraction")
 hp.qc.instance_scatter(
     table_summary,
-    column_x="n_negative_points_per_feature",
-    column_y="n_system_control_points_per_feature",
+    column_x="n_negative_points_per_panel_feature",
+    column_y="n_system_control_points_per_panel_feature",
 )
 ```
 
@@ -8918,9 +8918,9 @@ hp.qc.instance_scatter(
   the two apart.
 - **They select columns of `summary.per_instance`** with `column`, or
   `column_x` and `column_y`: class counts, `auxiliary_points_fraction` and the
-  per-feature rates, for example `instance_histogram` for class counts and
-  `auxiliary_points_fraction`, and `instance_scatter` to compare per-feature
-  rates. They plot the population that the summary computed, without
+  per-panel-feature rates, for example `instance_histogram` for class counts and
+  `auxiliary_points_fraction`, and `instance_scatter` to compare
+  per-panel-feature rates. They plot the population that the summary computed, without
   filtering it again.
 - **One computation/rendering boundary:** plotting an available summary does
   not call `summarize_table` again, read the original points, or write derived
@@ -8955,15 +8955,16 @@ per_instance
       the class ``Negative``;
     - ``auxiliary_points_fraction``, copied from ``.obs``: the instance's
       points of all auxiliary classes divided by all its points;
-    - for each selected class, the instance's count of that class divided by
-      the class's number of panel features (for ``Negative``, the number of
-      negative probes): for example ``n_negative_points_per_feature``
+    - for each selected class, the class's points per panel feature of the
+      same class: the average number of points that each of the class's panel
+      features contributes to the instance (for ``Negative``, per negative
+      probe). For example ``n_negative_points_per_panel_feature``
       = ``n_negative_points`` / ``metadata.panel_feature_counts["Negative"]``.
 
     How the names arise:
 
-        panel class -> count column (.obs)  -> per-feature column
-        Negative    -> n_negative_points    -> n_negative_points_per_feature
+        panel class -> count column (.obs)  -> per-panel-feature column
+        Negative    -> n_negative_points    -> n_negative_points_per_panel_feature
 
     The count column names come from the ``count_columns`` of the aggregation
     record that :func:`~harpy.tb.aggregate_points` writes, which derives them
@@ -8972,10 +8973,10 @@ per_instance
 
 `summarize_table` and the `column` parameters of `instance_histogram` and
 `instance_scatter` refer to `TableSummary` for the column names rather than
-repeating them. The `column` parameters also say that per-feature values are
-chosen through a `_per_feature` column: unlike `spatial_bin_histogram`
+repeating them. The `column` parameters also say that per-panel-feature values are
+chosen through a `_per_panel_feature` column: unlike `spatial_bin_histogram`
 (Slice 11h), the instance plots have no `normalization` parameter, as
-`per_instance` stores the per-feature columns and the summary has no instance
+`per_instance` stores the per-panel-feature columns and the summary has no instance
 areas to divide by.
 
 ### Verification
@@ -8991,12 +8992,12 @@ Focused tests should establish that:
   zeros for a selected feature class and reporting excluded rows without
   reconstructing cells absent from the table;
 - the statistics of `per_class` and `per_region` (totals, means, medians,
-  standard deviations and 95th percentiles of counts and per-feature rates)
+  standard deviations and 95th percentiles of counts and per-panel-feature rates)
   agree with the retained per-instance metrics, with names clearly indicating
   an instance-level denominator; `per_class` pools the selected regions and
   equals `per_region` for a single region; rate statistics equal the count
   statistics divided by `n_features`, for every selected class;
-- rate columns are named after their count column with `_per_feature`
+- rate columns are named after their count column with `_per_panel_feature`
   appended, derived from the metadata bindings;
 - `TableSummary.metadata` records the table, the regions and classes resolved
   from `None`, the table's expression class also when it is not selected, the
@@ -9055,6 +9056,16 @@ named after the table. Neither `obs_histogram` nor `InstanceSummary` fits the
 rule: `table_histogram` also plots `.var` columns, so its unit depends on its
 `dataframe` argument, and a result named after its unit would not pair with
 `summarize_table`, nor with `PointsSummary`.
+
+Within column names, `per_<unit>` at the end of a statistic names the
+population it is computed over (`per_feature`, `per_bin`, `per_instance`);
+`per_panel_feature` names a normalization, a class's points divided by its
+panel feature count, as in `normalization="per_panel_feature"`. They combine,
+as in `mean_points_per_panel_feature_per_instance`. For the mean alone the two
+coincide, as `mean_points_per_feature` equals `n_points / n_features`, but its
+median and p95 run over the individual features' counts, which no
+normalization describes. The unit, not its count, follows `per`: the counts
+themselves are named `panel_feature_counts`.
 
 - **Rename `hp.qc.obs_scatter` to `hp.qc.table_scatter`,** with its behaviour
   unchanged. `obs_scatter` stays for at least one release, as a deprecated alias
