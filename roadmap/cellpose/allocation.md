@@ -8579,6 +8579,32 @@ Slice 11g, which records the panel feature counts of every class. This slice
 defines QC computation and plotting, not another reader, writer or preprocessing
 pipeline; reuse the shared I/O primitives wherever disk access is needed.
 
+**Implementation steps,** each tested on its own:
+
+1. `summarize_table`, `TableSummary` and `TableSummaryMetadata`, with tests on
+   dummy class-aware tables: in memory, lazy and backed, with region and class
+   selection, plus the errors.
+2. `instance_histogram` and `instance_scatter`, including moving
+   `obs_scatter`'s rendering into a shared dataframe-based helper.
+3. Docs: the new functions in the Quality Control → Tables section of
+   `docs/api.md`, and marking 11i implemented.
+
+**Implementation choices:**
+
+- **Location:** a new `src/harpy/qc/table/` package, mirroring
+  `src/harpy/qc/points/`, with the public names exported from `hp.qc`.
+- **Shared statistics:** the bin statistics computed inline in
+  `_spatial_bin_frames` (`src/harpy/qc/points/_spatial_bin_summary.py`): mean,
+  median, SD with `ddof=1` and NaN below two values, p95 by linear
+  interpolation, and the counts without the class, move into a small helper
+  that both summaries use, so their conventions cannot drift apart.
+- **Annotations of `instance_histogram`:** the median and SD are computed from
+  the plotted column, as `table_histogram` does for `.obs` columns, since some
+  plottable columns, such as `auxiliary_points_fraction`, have no stored
+  statistics. For the count and per-panel-feature columns they equal the values
+  in `per_class`. This describes the drawn values; it does not recompute the
+  summary.
+
 Implement a read-only `hp.qc.summarize_table` computation API and a
 `TableSummary` result, followed by integration with table-level QC plotting.
 This is the table-based counterpart of `summarize_points`, not a cell mode
