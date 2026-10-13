@@ -14,8 +14,8 @@ from loguru import logger as log
 from matplotlib.axes import Axes
 from spatialdata import SpatialData
 
+from harpy.qc._summary_schema import _FEATURE_CLASS_KEY, _FEATURE_KEY, _N_POINTS_KEY
 from harpy.qc.points._panel_normalization import _panel_feature_count
-from harpy.qc.points._points_summary_schema import _FEATURE_CLASS_KEY, _FEATURE_KEY, _N_POINTS_KEY
 from harpy.qc.points._summarize_points import PointsSummary
 from harpy.qc.points._summarize_points_by_feature import FeaturePointsSummary
 from harpy.table._table import ProcessTable
