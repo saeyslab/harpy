@@ -8909,9 +8909,14 @@ in-memory, lazy and backed tables alike, without loading anything:
    never copies the `AnnData`.
 3. **It validates only what it uses, from the record:** the table has a
    `feature_class_aggregation` record; the selected classes are recorded; their
-   count columns exist in `.obs`; the denominators in `panel_feature_counts`
-   are positive; and the selected regions
-   appear in the record's `regions` mapping. It does not run the complete
+   count columns exist in `.obs`, and so does the column that the record's
+   `auxiliary_points_fraction_column` names, which `per_instance` also copies,
+   so that a missing column raises a clear `ValueError` rather than a
+   `KeyError`; the denominators in `panel_feature_counts` are positive; and the
+   selected regions appear in the record's `regions` mapping. Class and region
+   selections are checked as `summarize_points` checks its classes: a name or a
+   sequence of names, non-empty and without duplicates, with unknown names
+   raising and listing the valid ones, and the result in recorded order. It does not run the complete
    class-aware table validation (`_validate_feature_class_aggregation`), which
    requires the source labels and points elements in `sdata` and resolves
    their panels: the summary needs only the table, and the annotated elements
@@ -9045,8 +9050,9 @@ Focused tests should establish that:
   storage-backed `X` that fails when accessed;
 - a table whose annotated labels and points elements are absent from `sdata`
   is summarized all the same, while a table without the aggregation record,
-  with a missing count column, or with a non-positive denominator raises a
-  `ValueError`;
+  with a missing count column or auxiliary-points-fraction column, or with a
+  non-positive denominator raises a `ValueError`, as do unknown, duplicate or
+  empty class and region selections;
 - existing table-input plotting remains usable for ordinary stored metrics; and
 - `instance_histogram` and `instance_scatter` plot columns of
   `TableSummary.per_instance`, leave both the summary and source table
