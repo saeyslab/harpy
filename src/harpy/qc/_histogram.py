@@ -14,6 +14,7 @@ from loguru import logger as log
 from matplotlib.axes import Axes
 from spatialdata import SpatialData
 
+from harpy.qc.points._panel_normalization import _panel_feature_count
 from harpy.qc.points._points_summary_schema import _FEATURE_CLASS_KEY, _FEATURE_KEY, _N_POINTS_KEY
 from harpy.qc.points._summarize_points import PointsSummary
 from harpy.qc.points._summarize_points_by_feature import FeaturePointsSummary
@@ -48,6 +49,7 @@ def spatial_bin_histogram(
     summary: PointsSummary,
     *,
     feature_class: str,
+    normalization: Literal["per_panel_feature"] | None = None,
     ax: Axes | None = None,
     bins: int | str = "auto",
     range: tuple[float, float] | None = None,
@@ -78,6 +80,16 @@ def spatial_bin_histogram(
         in ``metadata`` for caller-supplied titles or figure captions.
     feature_class
         Required exact class name present in the summary; classes are not pooled.
+    normalization
+        ``None`` plots points per spatial bin. ``"per_panel_feature"`` divides
+        each bin's count, and the median and SD annotated on the figure, by the
+        class's number of panel features, features without detections
+        included, as :func:`harpy.pl.plot_points_density` does. Only the
+        displayed values are divided; ``summary`` is not modified. The result is
+        the class's points per panel feature per bin, comparable across classes
+        with different panel sizes. ``range`` is then given in that unit: for a
+        class with 10 panel features, the view ``range=(0, 50)`` of raw counts
+        becomes ``range=(0, 5)``.
     ax
         Axes to reuse, or None to create a figure.
     bins
@@ -131,20 +143,32 @@ def spatial_bin_histogram(
         ax = hp.qc.spatial_bin_histogram(
             summary, feature_class="Negative", quantile_range=(0.1, 0.99)
         )
+
+        # Points per negative probe per bin, comparable with other classes.
+        ax = hp.qc.spatial_bin_histogram(
+            summary, feature_class="Negative", normalization="per_panel_feature"
+        )
     """
     if not isinstance(summary, PointsSummary):
         raise TypeError(
             "summary must be a PointsSummary; use spatial_bin_histogram_by_feature() for a FeaturePointsSummary."
         )
+    if normalization not in (None, "per_panel_feature"):
+        raise ValueError(f"Unknown normalization: {normalization!r}; use None or 'per_panel_feature'.")
     spatial_bins = summary.spatial_bins
     if spatial_bins is None:
         raise ValueError("Spatial-bin measurements are missing; call hp.qc.summarize_points() with bin_size.")
+    divisor, unit = 1, "points per spatial bin"
+    if normalization == "per_panel_feature":
+        divisor, unit = _panel_feature_count(summary, [feature_class]), "points per panel feature per spatial bin"
     return _plot_spatial_bin_histogram(
         spatial_bins.per_bin,
         spatial_bins.per_class,
         summary_axis=_FEATURE_CLASS_KEY,
         selected=feature_class,
         compute_name="summarize_points",
+        divisor=divisor,
+        unit=unit,
         ax=ax,
         bins=bins,
         range=range,
@@ -284,6 +308,8 @@ def _plot_spatial_bin_histogram(
     summary_axis: Literal["feature_class", "feature"],
     selected: str,
     compute_name: str,
+    divisor: float = 1,
+    unit: str = "points per spatial bin",
     ax: Axes | None,
     bins: int | str,
     range: tuple[float, float] | None,
@@ -302,6 +328,8 @@ def _plot_spatial_bin_histogram(
     ``summary_axis`` identifies the summary column, not a source points column.
     Use stored median/SD and every retained bin's count, including zeros; only
     the renderer applies display filtering. No summaries are recomputed here.
+    ``divisor`` divides the counts and the stored median/SD alike, for a
+    normalization by a constant; ``unit`` completes the axis label.
     """
     statistics = overview.loc[overview[summary_axis] == selected]
     if statistics.empty:
@@ -312,10 +340,14 @@ def _plot_spatial_bin_histogram(
         raise ValueError("Spatial-bin histograms support stat='count' or stat='percent'.")
     values = per_bin.loc[per_bin[summary_axis] == selected, _N_POINTS_KEY]
     row = statistics.iloc[0]
+    median, std = float(row["median_points_per_bin"]), float(row["std_points_per_bin"])
+    if divisor != 1:
+        # A constant divisor keeps the stored median and SD exact for the divided values.
+        values, median, std = values / divisor, median / divisor, std / divisor
     return _plot_histogram(
         values,
-        median=float(row["median_points_per_bin"]),
-        std=float(row["std_points_per_bin"]),
+        median=median,
+        std=std,
         ax=ax,
         bins=bins,
         range=range,
@@ -328,7 +360,7 @@ def _plot_spatial_bin_histogram(
         color=color if color is not None else "#4C78A8",
         show_median=show_median,
         show_std=show_std,
-        xlabel=f"{selected} points per spatial bin",
+        xlabel=f"{selected} {unit}",
         count_ylabel="Number of spatial bins",
         percent_ylabel="Percentage of spatial bins (%)",
     )
