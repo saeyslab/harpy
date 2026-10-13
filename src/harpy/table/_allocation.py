@@ -224,8 +224,8 @@ def aggregate_points(
                                              coordinate system aggregated into it
 
     Later code finds columns and denominators through this record rather than
-    by rebuilding names. No per-feature rates are persisted. The developer
-    documentation on metadata describes each record in full.
+    by rebuilding names. No per-panel-feature rates are persisted. The
+    developer documentation on metadata describes each record in full.
 
     Parameters
     ----------
