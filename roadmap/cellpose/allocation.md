@@ -3,9 +3,9 @@
 ## Status
 
 Thirteen numbered implementation slices are planned, with Slice 7 split into
-parts a and b and Slice 11 into parts a through j; Slices 1 through 10 are
+parts a and b and Slice 11 into parts a through l; Slices 1 through 10 are
 implemented, as are Parts 11a–11h except the optimization 11f.xi. Slices
-11i–11j and the optional Slice 12 remain:
+11i–11l and the optional Slice 12 remain:
 
 1. patch the CosMx reader and establish the generic Harpy feature-panel
    metadata contract — implemented;
@@ -26,7 +26,7 @@ implemented, as are Parts 11a–11h except the optimization 11f.xi. Slices
 10. support point-to-label assignment through general invertible SpatialData
     transformations into a shared coordinate system — implemented;
 11. add QC, shared element and table I/O, generic panel preparation and
-    validation in ten independently scoped steps:
+    validation in twelve independently scoped steps:
     - **11a:** original-point summary computation through
       `hp.qc.summarize_points` and `PointsSummary`, without plotting changes —
       implemented;
@@ -68,12 +68,21 @@ implemented, as are Parts 11a–11h except the optimization 11f.xi. Slices
     - **11h:** add `normalization="per_panel_feature"` to
       `hp.qc.spatial_bin_histogram`, as `hp.pl.plot_points_density` has it —
       implemented;
-    - **11i:** table-level summary computation through `hp.qc.summarize_table`
-      and `TableSummary`, with plotting integration — specified, not
-      implemented;
-    - **11j:** select regions with `region` instead of `labels_name` in the
+    - **11i:** stop writing derived statistics in `hp.tb.aggregate_points`:
+      drop the `.obs` columns `n_<class>_points` and
+      `auxiliary_points_fraction` and their bindings in the aggregation
+      record, keep its structure, and fix the auxiliary axis as written, so
+      that each auxiliary column's class follows from its position — planned;
+    - **11j:** table-level summary computation through `hp.qc.summarize_table`
+      and `TableSummary`, with plotting integration — step 1 of 3
+      implemented from `.obs`, to be redone from the count matrices after 11i;
+    - **11k:** feature summaries of a table for selected features through
+      `hp.qc.summarize_table_by_feature` and `FeatureTableSummary`, with
+      `instance_histogram_by_feature`, the counterparts of
+      `summarize_points_by_feature` — planned, after 11j;
+    - **11l:** select regions with `region` instead of `labels_name` in the
       existing table-QC plots, as `summarize_table` does, and rename
-      `obs_scatter` to `table_scatter` — planned, after 11i;
+      `obs_scatter` to `table_scatter` — planned, after 11j;
 
 12. optionally optimize Slice 7b's latency after phase-level benchmarks identify
     material checkpoint or writer overhead — optional, not implemented.
@@ -144,9 +153,11 @@ rewrites only affected chunks of eligible regional
 Napari-harpy's existing persistence behavior informs this design without constraining the new
 public API; a separate follow-up migrates its application-specific adapter to
 Harpy's public I/O after deletion support is available. Neither Parts 11f.viii–xi
-nor that migration are prerequisites for Slice 11i, which
+nor that migration are prerequisites for Slice 11j, which
 provides the symmetric read-only table-summary workflow, deriving per-instance metrics
 and class-level overviews from the class-aware table before plotting.
+Slice 11i comes first: `aggregate_points` then writes only the count matrices
+and their structure, and Slice 11j computes every statistic from the matrices.
 The new reader is not required for Slice 7b's out-of-core writing or
 same-process result. Slice 12 is an
 optional, benchmark-driven follow-up: it may reduce repeated checkpoint reads and
@@ -324,7 +335,7 @@ ordering is deterministic rather than a claim of biological precedence.
 Slice 5 uses the complete relation to resolve its shared expression axis and
 feature classes, and retains each class's feature-list length as a table-local
 panel feature-count snapshot (`panel_feature_counts`, for every class since
-Slice 11g) for Slice 11i QC. Slice 11a
+Slice 11g) for Slice 11j QC. Slice 11a
 additionally uses the actual control-feature names. A categorical transcript column
 contains only categories represented by the ingested points and cannot, by
 itself, preserve the feature-to-class relationship for a panel feature with no
@@ -1409,7 +1420,7 @@ auxiliary_points_fraction =
 Do not persist `n_negative_points_per_panel_feature` or
 `n_system_control_points_per_panel_feature` in `.obs`. They are deterministic rescalings
 of the raw class counts by the panel feature counts and add no independent table
-information. Slice 11i table summarization derives them on demand from the raw
+information. Slice 11j table summarization derives them on demand from the raw
 count columns and the table-local panel feature-count snapshot for downstream
 plotting.
 
@@ -1536,12 +1547,12 @@ column. No auxiliary class produces a persisted per-panel-feature rate. Validate
 complete multi-region request and shared
 `feature_class_aggregation` configuration before writing the output table.
 
-### Boundary with Slices 11a, 11e, and 11i
+### Boundary with Slices 11a, 11e, and 11j
 
 The `.obs` summaries describe only auxiliary points that land inside an instance
 mask. For CosMx these auxiliary classes are controls, making the summaries
 suitable for cell-level histograms and violin plots of the raw class counts and
-`auxiliary_points_fraction`. Slice 11i may additionally derive the
+`auxiliary_points_fraction`. Slice 11j may additionally derive the
 following per-instance plotting metrics on demand:
 
 ```text
@@ -1747,6 +1758,12 @@ check the pointer, matrix shape, column metadata and panel membership, but must
 not constrain the current storage backend or dtype. `feature_columns` is a
 derived record of the current matrix axis, not a second authoritative assay
 panel.
+
+Slice 11i withdraws the permission to filter or reorder the auxiliary columns
+after construction: the axis stays as written, so that each column's class
+follows from its position without the panel, and validation compares
+`feature_columns` with the panel's auxiliary axis, order included. The rule
+against a parallel `feature_classes` list stands.
 
 This contract adopts the existing Harpy `feature_matrices` convention so that
 matrix columns can always be discovered consistently. Integrating
@@ -3503,7 +3520,7 @@ is not required. Slice 11c adds explicit panel registration for existing points
 created outside Harpy without changing this summary contract. The original-point
 summaries may run before or after segmentation or aggregation and do not depend
 on an instance-label raster or an AnnData table. Table-level summary computation
-and plotting belong to Slice 11i and are not required to implement either
+and plotting belong to Slice 11j and are not required to implement either
 Slice 11a or Slice 11e.
 
 This operation complements the instance-level `.obs` metrics. It must use the
@@ -3802,7 +3819,9 @@ element/mosaic, and selected feature class, containing:
 
 The implemented column names are `feature_class`, `n_features`,
 `n_zero_features`, `pct_zero_features`, `n_points`, `mean_points_per_feature`,
-`median_points_per_feature`, `p95_points_per_feature`, `top_n` (requested N),
+`median_points_per_feature`, `std_points_per_feature` (added with Slice 11j,
+`ddof=1`, NaN for a class with one feature, as the bin and instance statistics),
+`p95_points_per_feature`, `top_n` (requested N),
 `n_top_features` (the smaller of N and panel size), and
 `pct_points_top_n_features`. Percentage columns use 0–100; the per-feature
 `within_class_fraction` uses 0–1.
@@ -6298,13 +6317,13 @@ Split the work into eleven independently reviewable parts, in this order:
     sample layout or the public regional-update semantics.
 
 Complete Parts 11f.i–vii, including all three slices of vii, before the table-level
-QC work in Slice 11i. Part 11f.viii is required before the napari-harpy persistence
+QC work in Slice 11j. Part 11f.viii is required before the napari-harpy persistence
 migration, but does not block
-Slice 11i. Part 11f.ix follows the completed path-based I/O and provides optional
+Slice 11j. Part 11f.ix follows the completed path-based I/O and provides optional
 live-SpatialData adapters; the path-based napari-harpy migration remains possible
 without it. Part 11f.x a) builds on the regional writer and Part 11f.ix's adapters;
 Part 11f.x b) follows a). Part 11f.xi follows Parts 11f.i–x, including both slices
-of x. Neither the regional adapter/migration nor the optimization blocks Slice 11i
+of x. Neither the regional adapter/migration nor the optimization blocks Slice 11j
 or the napari-harpy migration. The I/O contracts themselves must remain usable
 without any QC result, feature panel or aggregation-specific metadata. Part
 11f.iii builds directly on the implemented Part 11f.ii; it does not require
@@ -7707,7 +7726,7 @@ payload reads.
 ### Part 11f.viii: safe deletion of optional AnnData components
 
 **Status: implemented. Required before the napari-harpy persistence migration,
-but not before Slice 11i.**
+but not before Slice 11j.**
 
 Both public entry points share `_write_table_operation()` and
 `_publish_table_paths()`. `_DeletedPath` extends the existing filesystem publisher
@@ -7915,7 +7934,7 @@ Document the explicit deletion contract in the public API and storage overview.
 path-based writer and install selective in-memory updates within its rollback
 window. Focused tests cover storage modes, axis alignment, independent component
 presence, lazy dependencies and failure recovery. Not a prerequisite for Slice
-11i or the path-based napari-harpy persistence migration.**
+11j or the path-based napari-harpy persistence migration.**
 
 Provide general public adapters for modifying components of a table attached to
 a supplied `SpatialData`. Callers should not have to coordinate disk updates,
@@ -8083,7 +8102,7 @@ implementation, without roadmap language in user-facing documentation.
 ### Part 11f.x: SpatialData-aware regional table-component updates
 
 **Status: slices a) and b) implemented.
-Not a prerequisite for Slice 11i or the path-based napari-harpy persistence migration.**
+Not a prerequisite for Slice 11j or the path-based napari-harpy persistence migration.**
 
 First implement the general regional adapter, then migrate the existing
 feature-matrix caller. Keep the affected-chunk optimization separate in Part 11f.xi.
@@ -8338,7 +8357,7 @@ centralized rather than repeating the full contract in that docstring.
 
 **Status: planned follow-up optimization; implement after Parts 11f.i–x,
 including both implementation slices of x.
-Not a prerequisite for Slice 11i or the napari-harpy persistence migration.**
+Not a prerequisite for Slice 11j or the napari-harpy persistence migration.**
 
 Optimize Part 11f.vi's regional `.obsm` writer without changing its public
 selection, identity, overwrite or metadata contracts. The initial implementation
@@ -8396,7 +8415,7 @@ separate from timing benchmarks or sample-layout optimization.
 ### Follow-up: napari-harpy persistence integration
 
 **Status: planned; implement after Parts 11f.i–viii. Not a prerequisite for
-Slice 11i.**
+Slice 11j.**
 
 Migrate napari-harpy's shared table persistence, used by object classification
 and spatial queries, onto Harpy's public table I/O APIs. This is a separate
@@ -8485,7 +8504,7 @@ adata.uns["feature_class_aggregation"]["panel_feature_counts"] = {
 }
 ```
 
-- **Why:** Slice 11i derives a per-panel-feature column for each selected class: the
+- **Why:** Slice 11j derives a per-panel-feature column for each selected class: the
   instance's count of the class divided by the class's number of panel
   features. For the expression class, `n_endogenous_points_per_panel_feature` is the
   mean count per gene in an instance; next to `n_negative_points_per_panel_feature`,
@@ -8493,7 +8512,7 @@ adata.uns["feature_class_aggregation"]["panel_feature_counts"] = {
   comparison, for example in `instance_scatter`. Neither of the other sources
   of the expression class's panel size fits: `adata.n_vars` may hold a subset
   of the panel's expression features, or be filtered later, and the panel
-  itself would require `sdata`, which Slice 11i does not need.
+  itself would require `sdata`, which Slice 11j does not need.
 - **Name:** `panel_feature_counts` is the name of the same mapping on the points
   side: `PointsSummary.panel_feature_counts`, from `per_class["n_features"]`,
   which the density normalization `per_panel_feature` uses. "Panel" says that
@@ -8529,7 +8548,7 @@ record without the mapping or with a count that differs from the panel.
 ## Slice 11h: panel-feature normalization in `spatial_bin_histogram`
 
 **Status: implemented.** Independent of Slice 11g: `PointsSummary.panel_feature_counts`
-already exists. It comes before Slice 11i, so that the bin and instance
+already exists. It comes before Slice 11j, so that the bin and instance
 histograms offer per-panel-feature values when `instance_histogram` arrives.
 
 `hp.pl.plot_points_density` normalizes the bin counts of a `PointsSummary` at
@@ -8570,24 +8589,182 @@ median and SD equal those without normalization divided by the class's panel
 feature count; the axis label states the unit; `None` leaves the current output
 unchanged; an invalid value raises.
 
-## Slice 11i: table-level summary computation and plotting integration
+## Slice 11i: the aggregation output without derived statistics
 
-**Status: specified; not implemented.**
+**Status: planned; implement before step 1 of Slice 11j is redone, which
+reads the columns that this slice removes.**
 
-Implement after the general table I/O foundation in Parts 11f.i–vii, and after
-Slice 11g, which records the panel feature counts of every class. This slice
+In class-aware mode, `hp.tb.aggregate_points` writes the count matrices, their
+structure, and statistics derived from the matrices. This slice stops writing
+the statistics, so that one rule holds for the whole table contract:
+`aggregate_points` writes data and structure, and QC computes statistics,
+through `hp.qc.summarize_table` (Slice 11j).
+
+| Written by `aggregate_points`                                                                                                                                                 | What it is                           | After this slice           |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ | -------------------------- |
+| `X`, `var`, `obsm["auxiliary_feature_counts"]`, `obsm[spatial_key]`, the region and instance columns of `obs`                                                                 | the data and its identity            | kept                       |
+| `uns["feature_matrices"]["auxiliary_feature_counts"]`                                                                                                                         | the auxiliary matrix's column names  | kept, in the order written |
+| `obs["n_<class>_points"]`, `obs["auxiliary_points_fraction"]`                                                                                                                 | statistics derived from the matrices | removed                    |
+| record: `count_columns`, `auxiliary_points_fraction_column`                                                                                                                   | bindings to those columns            | removed                    |
+| record: `schema_version`, `source_kind`, `feature_key`, `feature_class_key`, `expression_class`, `classes`, `panel_feature_counts`, `auxiliary_feature_matrix_key`, `regions` | structure and provenance             | kept                       |
+
+- **Why:** the removed columns repeat what the matrices hold. Slice 6 already
+  requires them to equal the matrices' row sums, and calls a disagreement a
+  corrupt table. Once Slice 11j computes them from the matrices, the stored
+  copy adds only a second source that can disagree, and a cross-check between
+  the two. Without it, nothing stored can disagree with the matrices, and no
+  cross-check is needed. `auxiliary_points_fraction` was also the one
+  exception to Slice 5's rule not to persist what the counts determine, which
+  already keeps the per-panel-feature rates out of `.obs`.
+- **Structure stays:** the record keeps what no matrix tells: which class
+  forms `X`, the classes and their order, every class's panel feature count,
+  features without detections included, the auxiliary matrix's key, the source
+  keys, and the points element and coordinate system of each region.
+  `hp.tb.validate_table` keeps checking it against the panel.
+- **The auxiliary axis stays as written,** and each column's class follows
+  from its position: the record's auxiliary classes in record order, each a
+  block of `panel_feature_counts[class]` columns holding that class's features
+  in panel order. For the panel of the example in Slice 6:
+
+  ```text
+  auxiliary classes, in record order   Negative               SystemControl
+  panel_feature_counts                 2                      1
+  feature_columns                      Negative1, Negative2   SystemControl1
+  ```
+
+  The matrix's record keeps only the names, in `feature_columns`, as the
+  records of `hp.tb.add_feature_matrix` do: the feature-matrix registry holds
+  no per-column field besides the names, and the axis of a registered matrix
+  is fixed, as `add_feature_matrix` requires updates to keep its names and
+  their order. A class per column, a `feature_classes` list next to
+  `feature_columns`, was considered and rejected. On the axis as written the
+  record already determines it, so it would add information only after a
+  reordering or subset of the auxiliary columns, which neither AnnData, which
+  subsets `.obsm` by rows only, nor any Harpy function performs. Slice 6's
+  rule that the registry holds no such list therefore stands, while its
+  permission to reorder or subset the auxiliary columns after construction is
+  withdrawn.
+
+- **Validation:** `hp.tb.validate_table` checks that `feature_columns` equals
+  the panel's auxiliary axis, order included, rather than only that each name
+  belongs to an auxiliary class; tables from `aggregate_points` already
+  satisfy this. The table summaries, which have no panel, check the number of
+  columns instead: it must equal the summed `panel_feature_counts` of the
+  auxiliary classes (Slices 11j and 11k). The class-aware validation no longer
+  checks the removed `.obs` columns and bindings.
+- **Count-column names move to Slice 11j:** `n_<snake_case(class)>_points`
+  and the check that two classes do not normalize to the same name now name
+  the count columns of `TableSummary.per_instance`. `aggregate_points` no
+  longer reserves these names, or `auxiliary_points_fraction`, in `.obs`.
+- **One pass less:** `aggregate_points` no longer reads every checkpoint
+  partition a second time for the class totals
+  (`_checkpoint_partition_class_counts`), which also makes the first candidate
+  optimization of Slice 12, reusing Phase A class summaries, moot.
+- **For users:** the per-class counts and the auxiliary fraction, which could
+  be filtered or plotted from `.obs` directly, for example with
+  `hp.qc.table_histogram`, come from `summarize_table`. Its `per_instance`
+  shares the `.obs` index, so a caller who wants them in the table copies them
+  from there.
+- **No migration:** `schema_version` stays 1. Tables aggregated before this
+  slice still validate, as their auxiliary axis is as written; their `.obs`
+  columns and record fields that this slice removes are no longer read or
+  checked, and rebuilding them with `aggregate_points` drops them.
+- **Code:** the class contract (`count_columns` in
+  `src/harpy/table/_aggregation_contracts.py`); the writer
+  (`src/harpy/table/_aggregation_writer.py`: `_aggregation_obs`,
+  `_checkpoint_partition_class_counts` and the record in `_aggregation_uns`);
+  the reserved and colliding `.obs` names in
+  `src/harpy/table/_allocation.py`; `_AUXILIARY_POINTS_FRACTION_COLUMN` in
+  `src/harpy/table/_metadata.py`; the validation in
+  `src/harpy/table/_validation.py` and its docstring diagram; the docstring of
+  `aggregate_points`, its Writes tree and record schematic; the tests in
+  `src/harpy/_tests/test_table/test_allocation.py`; and the trees in
+  `docs/development/metadata.md`. Napari-harpy and the tutorials do not read
+  the removed columns.
+- **Roadmap:** once implemented, the Goal, Slice 5's output metrics,
+  table-local metadata contract and single-pass steps, Slice 6's payload,
+  consistency rules and feature-matrix metadata, Slice 7b's class summaries
+  and Slice 12's first candidate describe the new contract.
+
+**Verification:** a class-aware table from `aggregate_points` has no
+`n_<class>_points` or `auxiliary_points_fraction` column in `.obs` and no
+`count_columns` or `auxiliary_points_fraction_column` in its record, and keeps
+every other record field; its auxiliary matrix's record is unchanged;
+validation accepts such a table, and rejects one whose auxiliary
+`feature_columns` are reordered or subset relative to the panel's auxiliary
+axis.
+
+## Slice 11j: table-level summary computation and plotting integration
+
+**Status: step 1 implemented from `.obs` and the aggregation record; to be
+redone from the count matrices (see "Redesign" below); steps 2 and 3 not
+implemented.**
+
+**Redesign: a summary from the count matrices.** Agreed after step 1, and
+superseding the parts of this section that read `.obs` counts and the
+aggregation record as the source of the statistics; the section is rewritten
+accordingly before step 1 is redone.
+
+- **Why:** step 1 summarizes the `.obs` columns that `hp.tb.aggregate_points`
+  writes, a loose contract between two functions. `summarize_table` should
+  stand on its own: given a table, summarize it from its raw count matrices,
+  as `summarize_points` summarizes the original points rather than metadata
+  about them. It then works for any table with raw counts, from
+  `aggregate_points`, from other readers, or from a custom assignment
+  (issue [#265](https://github.com/saeyslab/harpy/issues/265)).
+- **Each feature's class,** in this order of precedence:
+  1. an explicit mapping from the caller, for example a `var` column such as
+     `var["feature_class"]`, for tables whose controls are in `X`;
+  2. the aggregation record, when present: the features of `X` belong to its
+     `expression_class`, and the columns of the auxiliary matrix get their
+     classes from their position on the axis as written, which Slice 11i
+     fixes, with the column-count check of Slice 11k;
+  3. without class information, all features form one class, so that the
+     summary still gives points and distinct features per instance, with
+     their statistics, per region.
+- **Matrices read:** `X` or a raw-count `layer`, and optionally the auxiliary
+  matrix, named by the caller or taken from the record; the value check of
+  Slice 11k (non-negative whole numbers) guarantees counts.
+- **Denominators:** the number of features per class in the matrices read.
+  For a table from `aggregate_points` this equals the record's
+  `panel_feature_counts`, as its axes are panel-defined, features without
+  detections included.
+- **One pass:** per-row sums and non-zero counts per class, computed in one
+  blockwise pass over the matrices, so that a lazy or storage-backed table is
+  computed once. This reverses "Lazy and backed tables" below, under which
+  `summarize_table` read no matrix: independence costs one matrix pass, as
+  `sc.pp.calculate_qc_metrics` does.
+- **Distinct features per instance** come from the same pass, the number of
+  each class's features with at least one point in the instance, with their
+  statistics; the same for bins is a separate implementation slice on the
+  points side.
+- **A table whose `X` was normalized in place, without a raw-count layer,**
+  cannot be summarized for the expression class: the summary describes the
+  counts that it can verify.
+- **Step 1 is redone:** `TableSummary`, its metadata, the region and class
+  selection, `per_class`, `per_region`, the shared statistics helper and most
+  tests carry over; the input changes from `.obs` and the record to the
+  matrices.
+- **No cross-check:** `aggregate_points` no longer writes derived statistics
+  (Slice 11i), so nothing stored can disagree with what the summary computes.
+  `per_instance` computes the per-class counts and `auxiliary_points_fraction`
+  itself, under the names that `aggregate_points` used to write.
+
+Implement after the general table I/O foundation in Parts 11f.i–vii, after
+Slice 11g, which records the panel feature counts of every class, and after
+Slice 11i, which removes the derived statistics from the table. This slice
 defines QC computation and plotting, not another reader, writer or preprocessing
 pipeline; reuse the shared I/O primitives wherever disk access is needed.
 
 **Implementation steps,** each tested on its own:
 
-1. `summarize_table`, `TableSummary` and `TableSummaryMetadata`, with tests on
+1. (implemented) `summarize_table`, `TableSummary` and `TableSummaryMetadata`, with tests on
    dummy class-aware tables: in memory, lazy and backed, with region and class
    selection, plus the errors.
 2. `instance_histogram` and `instance_scatter`, including moving
    `obs_scatter`'s rendering into a shared dataframe-based helper.
 3. Docs: the new functions in the Quality Control → Tables section of
-   `docs/api.md`, and marking 11i implemented.
+   `docs/api.md`, and marking 11j implemented.
 
 **Implementation choices:**
 
@@ -8596,8 +8773,16 @@ pipeline; reuse the shared I/O primitives wherever disk access is needed.
 - **Shared statistics:** the bin statistics computed inline in
   `_spatial_bin_frames` (`src/harpy/qc/points/_spatial_bin_summary.py`): mean,
   median, SD with `ddof=1` and NaN below two values, p95 by linear
-  interpolation, and the counts without the class, move into a small helper
-  that both summaries use, so their conventions cannot drift apart.
+  interpolation, move into a small helper that both summaries use, so their
+  conventions cannot drift apart: `_points_statistics` in
+  `src/harpy/qc/_summary_statistics.py`. The counts without the class stay in
+  each summary, as their column names differ.
+- **Shared output names:** the schema of the points summaries,
+  `src/harpy/qc/points/_points_summary_schema.py`, moves one level up to
+  `src/harpy/qc/_summary_schema.py`, as both summaries now use its names
+  (`feature_class`, `n_points`, `n_features`). It gains the table summary's
+  `region` column of `per_region` and the `_per_panel_feature` suffix. Names
+  used by one module only stay literals where they are built.
 - **Annotations of `instance_histogram`:** the median and SD are computed from
   the plotted column, as `table_histogram` does for `.obs` columns, since some
   plottable columns, such as `auxiliary_points_fraction`, have no stored
@@ -8678,7 +8863,7 @@ def summarize_table(
   `labels_name`: the summary reads only `.obs` and `.uns`, so it does not
   depend on the element type, and a table annotating shapes with the same
   metadata is summarized the same way. Aligning the existing table-QC plots
-  follows in Slice 11j.
+  follows in Slice 11l.
 - **`feature_classes`** has the type and meaning of the same parameter of
   `summarize_points`. A table without `uns["feature_class_aggregation"]`, which
   is not class-aware, raises a `ValueError`.
@@ -8733,8 +8918,10 @@ class TableSummary:
 record identifies the selected table and regions and retains the class/panel
 association, from `uns["feature_class_aggregation"]` and the table's
 `spatialdata_attrs`. It describes the inputs of the computation, not a live
-metadata lookup. The mappings are stored immutably, as `PointsSummaryMetadata`
-stores tuples.
+metadata lookup. The mappings are dictionary copies, so later changes to the
+table do not affect them; they are not read-only views (`MappingProxyType`),
+which cannot be pickled or deep-copied, so that a summary can be copied and
+saved.
 
 - **`table_name` and `points_name_by_region`** identify the sources: the table,
   and for each selected region the name of the points element aggregated into
@@ -8879,7 +9066,10 @@ The persisted counts describe the aggregation-time feature population for the
 retained instances. Do not silently replace them with sums from a filtered or
 normalized `.X`. Additional metrics requiring feature-level measurements, such
 as the number of detected features per instance, need an explicitly specified
-raw-count matrix or layer contract before they are added. Such matrix-based
+raw-count matrix or layer contract before they are added. Slice 11k adds
+feature summaries for selected features, with such a contract; a per-instance
+count of detected features is not planned there (see Slice 11k). Such
+matrix-based
 metrics are not implicitly calculated by this slice; a normalized `.X` must
 never be interpreted as transcript counts. Summarizing a selected subset of
 instances uses that subset's metrics without claiming to restore filtered-out
@@ -8924,7 +9114,7 @@ in-memory, lazy and backed tables alike, without loading anything:
 
 ### Plotting integration
 
-`hp.qc.obs_scatter` (renamed to `hp.qc.table_scatter` in Slice 11j) and
+`hp.qc.obs_scatter` (renamed to `hp.qc.table_scatter` in Slice 11l) and
 `hp.qc.table_histogram` (renamed from `hp.qc.metric_histogram` in Part 11e.ii)
 remain useful for
 metrics already stored in `.obs` (and, for the histogram, `.var`). They select
@@ -8989,9 +9179,9 @@ per_instance
       points of all auxiliary classes divided by all its points;
     - for each selected class, the class's points per panel feature of the
       same class: the average number of points that each of the class's panel
-      features contributes to the instance (for ``Negative``, per negative
-      probe). For example ``n_negative_points_per_panel_feature``
-      = ``n_negative_points`` / ``metadata.panel_feature_counts["Negative"]``.
+      features contributes to the instance. For example, for a class
+      ``Negative``: ``n_negative_points_per_panel_feature`` =
+      ``n_negative_points`` / ``metadata.panel_feature_counts["Negative"]``.
 
     How the names arise:
 
@@ -9059,13 +9249,153 @@ Focused tests should establish that:
   unchanged, do not repeat summary computation, and do not require writing
   temporary metrics to `.obs`.
 
-## Slice 11j: consistent names in the table-QC plots
+## Slice 11k: feature summaries of a table for selected features
 
-**Status: planned; implement after Slice 11i.**
+**Status: planned; implement after Slice 11j.**
+
+The table-side counterpart of `summarize_points_by_feature`, so that tables and
+points are summarized with the same two levels: classes first, then explicitly
+selected features over the population that the class summary fixed. Slice 11j
+reads only `.obs` and `.uns`, so its metrics are per-class totals per instance;
+which features contributed is only in the count matrices. This slice reads the
+selected features' columns of those matrices.
+
+| Points                                                                                  | Tables                                                            |
+| --------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| `summarize_points` → `PointsSummary`, with `SpatialBinSummary`                          | `summarize_table` → `TableSummary` (Slice 11j)                    |
+| `summarize_points_by_feature` → `FeaturePointsSummary`, with `FeatureSpatialBinSummary` | `summarize_table_by_feature` → `FeatureTableSummary` (this slice) |
+| `spatial_bin_histogram_by_feature`                                                      | `instance_histogram_by_feature` (this slice)                      |
+
+```python
+table_summary = hp.qc.summarize_table(sdata, "table_transcriptomics")
+feature_summary = hp.qc.summarize_table_by_feature(
+    sdata,
+    summary=table_summary,
+    features=["Negative01", "Negative02", "GeneA"],
+    layer="counts",
+)
+hp.qc.instance_histogram_by_feature(feature_summary, feature="Negative01")
+```
+
+- **Signature:** `summarize_table_by_feature(sdata, *, summary, features,
+layer=None) -> FeatureTableSummary`, as `summarize_points_by_feature(sdata, *,
+summary, features, ...)`. The table, the regions and the retained instances
+  come from `summary`: the instance population is inherited, as
+  `FeaturePointsSummary` inherits the retained bins, and does not depend on the
+  requested features. An instance retained for its endogenous points
+  contributes a zero to a negative probe it did not receive.
+- **`features`:** an exact name or a non-empty sequence of distinct names, from
+  the classes selected in `summary`, as `summarize_points_by_feature` requires.
+  Unknown features, or features of unselected classes, raise. Results keep the
+  recorded order, the class order and then the feature order of the matrix,
+  not the request order. Undetected features keep their zeros.
+- **No large frames:** only the requested features are summarized, as on the
+  points side, so there is no frame with statistics for every gene. For all
+  genes of the expression class, `sc.pp.calculate_qc_metrics` already gives
+  per-gene metrics.
+
+**Return contract: `FeatureTableSummary`,** as `FeaturePointsSummary`:
+
+- `metadata`: the reference summary's `TableSummaryMetadata`, inherited, and
+  `layer`, the matrix read for the expression features.
+- `per_instance`: long, one row per retained instance and requested feature, as
+  `FeatureSpatialBinSummary.per_bin` has one row per bin and feature, in feature
+  order and then table row order. Columns: the table's region and instance key
+  columns, `feature` (categorical) and `n_points`, that feature's points in the
+  instance, zeros included. Long rather than wide, as the number of requested
+  features varies; its size is the number of requested features times the
+  number of retained instances.
+- `per_feature`: one row per requested feature, pooled over the selected
+  regions, with the columns of `FeatureSpatialBinSummary.per_feature`, bins
+  replaced by instances: `feature`, `feature_class`, the inherited population
+  (`n_total_instances`, `n_retained_instances`, `n_excluded_instances`,
+  `pct_excluded_instances`), `n_retained_instances_without_feature`,
+  `pct_retained_instances_without_feature`, `n_points` and
+  `mean_/median_/std_/p95_points_per_instance`, zeros included, through the
+  shared statistics helper.
+- `per_region`: the statistics of `per_feature` within each selected region,
+  with a `region` column, as `TableSummary.per_region`.
+
+**Matrices:**
+
+- **Expression features, from `X` or a layer:** `layer` names the matrix with
+  the raw counts of the expression features; `None` reads `X`, as in scanpy,
+  which suits a table as `aggregate_points` wrote it. `X` does not stay raw:
+  `normalize_total` and `log1p` keep zeros at zero, but `scale` turns them into
+  non-zeros and a subset to highly variable genes removes features, so after
+  normalization the caller passes the raw-count layer. A normalized `X` must
+  never be read as transcript counts; the value check below enforces this. A
+  requested expression feature missing from the matrix's `var_names`, for
+  example after such a subset, raises.
+- **Auxiliary features, from the matrix the record names:**
+  `adata.obsm[record["auxiliary_feature_matrix_key"]]`, its columns found by
+  name in `uns["feature_matrices"][key]["feature_columns"]`; neither is
+  hard-coded. Harpy writes it and scanpy does not change `.obsm`, so it stays
+  raw. Its column names are a table-local copy of the panel's names, recorded
+  by `aggregate_points`, so the table needs nothing outside it.
+- **Alignment of the auxiliary matrix and its names,** checked from shapes and
+  metadata only, which needs no matrix read on a lazy or backed table:
+  1. **The generic feature-matrix checks, for the auxiliary record only:** the
+     matrix exists in `.obsm`, is two-dimensional with one row per
+     observation, and `feature_columns` is a non-empty sequence of unique
+     strings whose length equals its number of columns, with a valid
+     `schema_version` and `source_kind`. `_validate_feature_matrices`
+     (`src/harpy/table/_validation.py`) performs these checks for every
+     registered matrix; its per-record part is factored out and reused, so
+     that a broken, unrelated feature matrix, for example one added by
+     `add_feature_matrix`, does not stop the summary.
+  2. **The axis as written:** the number of columns equals the summed
+     `panel_feature_counts` of the auxiliary classes (below).
+  3. **The requested auxiliary features are found by name** in
+     `feature_columns`; unknown names raise.
+
+  No metadata check can detect matrix columns reordered without reordering
+  `feature_columns`: names and values then disagree while every shape agrees,
+  and the value check does not help, as swapped counts are still counts. This
+  needs a manual edit of the matrix, which the record-based design does not
+  support, as with `X` and `var_names` in any AnnData.
+
+- **Each auxiliary feature's class, from its position on the axis as
+  written,** which Slice 11i fixes: the record's auxiliary classes in record
+  order, each a block of `panel_feature_counts[class]` columns. The table
+  holds no class per column, so the summary needs neither one nor the panel in
+  `sdata`. It checks the number of columns (check 2), which catches a subset;
+  a reordering of `feature_columns`, which keeps the count, is rejected by
+  `hp.tb.validate_table`, which compares the names and their order with the
+  panel.
+- **Only the requested columns are read,** for the retained instances. On a
+  lazy or backed table that means computing those columns, unlike
+  `summarize_table`, which reads no matrix; the separate call is the opt-in.
+- **The values read must be counts:** all values of the requested columns must
+  be non-negative whole numbers, or a `ValueError` asks for the raw-count layer
+  with `layer=`. Raw counts pass; `normalize_total` and `log1p` give fractions,
+  and `scale` gives negative numbers and fractions, so a normalized matrix is
+  caught whichever matrix was named, `X` through `layer=None` or a layer. The
+  check runs on values already read, without another pass over the matrix, and
+  applies to the auxiliary matrix too, as a guard against tables built by hand.
+  It cannot catch a transformation that yields whole numbers, such as a
+  downsampling of counts, whose result is still counts. A required `layer`
+  was not chosen: it would force an explicit choice, but could not verify that
+  the named layer is raw.
+
+**Plot:** `instance_histogram_by_feature(summary, *, feature, ...)`, as
+`spatial_bin_histogram_by_feature`: one feature's points per instance over the
+inherited population, with the median and SD taken from `per_feature`.
+
+**Not in this slice:** a per-unit count of detected features, how many
+different features a bin or an instance received. Neither side has it; if it
+is wanted later, it comes as one extension of `SpatialBinSummary.per_bin` and
+`TableSummary.per_instance` together, so that the two sides stay symmetric.
+For cells and the expression class, `sc.pp.calculate_qc_metrics` gives
+`n_genes_by_counts` meanwhile.
+
+## Slice 11l: consistent names in the table-QC plots
+
+**Status: planned; implement after Slice 11j.**
 
 `hp.qc.obs_scatter`, `hp.qc.table_histogram` and `hp.qc.table_histograms`
 select the regions of a table with `labels_name`, as the deprecated scanpy
-wrappers do. Slice 11i's `summarize_table` selects them with `region`, the
+wrappers do. Slice 11j's `summarize_table` selects them with `region`, the
 term of SpatialData's table annotation and of `hp.tb.io.add_table`. This slice
 aligns the three plots with it, so that the table-QC functions use one name for
 one concept, and renames `obs_scatter` to `table_scatter`.
