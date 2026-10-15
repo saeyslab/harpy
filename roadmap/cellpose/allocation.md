@@ -8869,7 +8869,7 @@ disk access is needed.
   used by one module only stay literals where they are built.
 - **Annotations of `instance_histogram`:** the median and SD are computed from
   the plotted column, as `table_histogram` does for `.obs` columns, since some
-  plottable columns, such as the shares `fraction_<class>_points`, have no
+  plottable columns, such as the percentages `pct_<class>_points`, have no
   stored statistics. For the count and per-panel-feature columns they equal
   the values in `per_class`. This describes the drawn values; it does not
   recompute the summary.
@@ -8971,11 +8971,11 @@ def summarize_table(
 **Classes and their labels.** Each matrix read is one class, labeled by the
 matrix's name, in `snake_case`, the normalization of Slice 5:
 
-| Matrix read        | Label      | Columns, for example                            |
-| ------------------ | ---------- | ----------------------------------------------- |
-| `X` (`layer=None`) | `x`        | `n_x_points`, `fraction_x_points`               |
-| `layers["counts"]` | `counts`   | `n_counts_points`, `fraction_counts_points`     |
-| `obsm["negative"]` | `negative` | `n_negative_points`, `fraction_negative_points` |
+| Matrix read        | Label      | Columns, for example                       |
+| ------------------ | ---------- | ------------------------------------------ |
+| `X` (`layer=None`) | `x`        | `n_x_points`, `pct_x_points`               |
+| `layers["counts"]` | `counts`   | `n_counts_points`, `pct_counts_points`     |
+| `obsm["negative"]` | `negative` | `n_negative_points`, `pct_negative_points` |
 
 No label comes from the aggregation record or another field, so the names of
 all classes follow one rule. For a CosMx table from `aggregate_points`, the
@@ -9104,9 +9104,11 @@ joined back to it. Columns, for each class with label `<class>`:
   in the instance;
 - `n_<class>_points_per_panel_feature`: `n_<class>_points` divided by the
   class's number of features in the matrices read;
-- with two classes or more, `fraction_<class>_points`: the class's share of
-  the instance's points across the classes read. For a CosMx table, the former
-  `auxiliary_points_fraction` is `1 - fraction_x_points`.
+- with two classes or more, `pct_<class>_points`: 100 × the class's points /
+  the instance's points across the classes read, a percentage like the
+  summary's other `pct_` columns and scanpy's `pct_counts_<qc_var>`. For a
+  CosMx table, the former `auxiliary_points_fraction` is
+  `(100 - pct_x_points) / 100`.
 
 `per_instance` is wide, one column per class, unlike the long `per_bin` of
 `SpatialBinSummary` (one row per bin and class). That keeps the observation
@@ -9200,7 +9202,7 @@ the computed `TableSummary`, as the points side passes its result to
 `spatial_bin_histogram(summary, *, feature_class, …)`:
 
 ```python
-hp.qc.instance_histogram(table_summary, column="fraction_x_points")
+hp.qc.instance_histogram(table_summary, column="pct_x_points")
 hp.qc.instance_scatter(
     table_summary,
     column_x="n_negative_points_per_panel_feature",
@@ -9213,9 +9215,9 @@ hp.qc.instance_scatter(
   transcript-positive instance equal weight. The names and axis labels keep
   the two apart.
 - **They select columns of `summary.per_instance`** with `column`, or
-  `column_x` and `column_y`: counts, detected features, shares and
+  `column_x` and `column_y`: counts, detected features, percentages and
   per-panel-feature rates, for example `instance_histogram` for class counts
-  and shares, and `instance_scatter` to compare per-panel-feature rates. They
+  and percentages, and `instance_scatter` to compare per-panel-feature rates. They
   plot the population that the summary computed, without filtering it again.
 - **One computation/rendering boundary:** plotting an available summary does
   not call `summarize_table` again, read the original points, or write derived
@@ -9252,8 +9254,8 @@ per_instance
     - ``n_<class>_points_per_panel_feature``: the class's points divided by
       its number of features in the matrices read,
       ``metadata.panel_feature_counts[<class>]``;
-    - ``fraction_<class>_points``, with two classes or more: the class's
-      share of the instance's points across the classes read.
+    - ``pct_<class>_points``, with two classes or more: 100 times the
+      class's points / the instance's points across the classes read.
 
     How the names arise: the class label is the name of the matrix read.
 
@@ -9261,7 +9263,26 @@ per_instance
         X                    x               n_x_points
         layers["counts"]     counts          n_counts_points
         obsm["negative"]     negative        n_negative_points
+
+    Compared with :func:`scanpy.pp.calculate_qc_metrics`, for ``X``:
+
+        this summary               scanpy
+        n_x_points                 total_counts
+        n_x_detected_features      n_genes_by_counts
+        n_<class>_points           total_counts_<qc_var>
+        pct_<class>_points         pct_counts_<qc_var>
+
+    Scanpy's ``qc_vars`` are boolean groups of ``var`` within ``X``, and its
+    percentages are relative to the total counts of ``X``; here each class is
+    its own matrix, and the percentages are relative to all classes read.
 ```
+
+The names keep the points vocabulary of `PointsSummary` and the naming rule of
+Slice 11l rather than copying scanpy's names: the same name with a different
+meaning would mislead, and `n_genes_by_counts` reads oddly for control
+features. The mapping in the docstring lets users who know scanpy compare the
+columns. The percentages follow both conventions: `pct_` on a 0–100 scale, as
+the summary's other `pct_` columns and scanpy's `pct_counts_<qc_var>`.
 
 `summarize_table` and the `column` parameters of `instance_histogram` and
 `instance_scatter` refer to `TableSummary` for the column names rather than
@@ -9283,8 +9304,8 @@ Focused tests should establish that:
   case, none taken from the aggregation record, and coinciding labels raise;
 - per-instance counts equal the row sums of each class's columns, detected
   features their non-zero entries, rates the counts divided by the class's
-  number of features in the matrices read, and shares a class's points over
-  the instance's points across the classes read;
+  number of features in the matrices read, and percentages 100 × a class's
+  points over the instance's points across the classes read;
 - after a subset of `X`'s features, the denominator of `X`'s class is the
   number of remaining features;
 - summaries retain observation, instance and region identity and use only
