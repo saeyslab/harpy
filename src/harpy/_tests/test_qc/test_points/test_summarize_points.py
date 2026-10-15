@@ -111,6 +111,7 @@ def test_summary_returns_complete_panel_counts_and_class_statistics():
     assert negative.n_points == 4
     assert negative.mean_points_per_feature == pytest.approx(4 / 3)
     assert negative.median_points_per_feature == 1
+    assert negative.std_points_per_feature == pytest.approx(np.std([3, 1, 0], ddof=1))
     assert negative.p95_points_per_feature == pytest.approx(2.8)
     assert negative.pct_points_top_n_features == 75
     assert negative.top_n == 1
@@ -365,6 +366,7 @@ def test_top_n_does_not_change_raw_counts_or_other_statistics():
         "n_points",
         "mean_points_per_feature",
         "median_points_per_feature",
+        "std_points_per_feature",
         "p95_points_per_feature",
     ]
     pd.testing.assert_frame_equal(small.per_class[stable], large.per_class[stable])
