@@ -14,10 +14,15 @@ from .points._points_summary_metadata import PointsSummaryMetadata
 from .points._spatial_bin_summary import FeatureSpatialBinSummary, SpatialBinSummary
 from .points._summarize_points import PointsSummary, summarize_points
 from .points._summarize_points_by_feature import FeaturePointsSummary, summarize_points_by_feature
+from .table._summarize_table import TableSummary, summarize_table
+from .table._table_summary_metadata import TableSummaryMetadata
 
 __all__ = [
     "FeaturePointsSummary",
     "FeatureSpatialBinSummary",
+    "TableSummary",
+    "TableSummaryMetadata",
+    "summarize_table",
     "PointsSummary",
     "PointsSummaryMetadata",
     "SpatialBinSummary",
