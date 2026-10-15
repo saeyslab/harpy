@@ -10,6 +10,7 @@ import xarray as xr
 from spatialdata import SpatialData
 
 from harpy._feature_panels import _resolve_points_feature_panel
+from harpy.qc._summary_schema import _FEATURE_CLASS_KEY, _FEATURE_KEY, _N_POINTS_KEY
 from harpy.qc.points._points_binning import _check_grid_budget
 from harpy.qc.points._points_reduction import (
     _compute_point_reductions,
@@ -18,7 +19,6 @@ from harpy.qc.points._points_reduction import (
     _validate_point_columns,
 )
 from harpy.qc.points._points_summary_metadata import PointsSummaryMetadata
-from harpy.qc.points._points_summary_schema import _FEATURE_CLASS_KEY, _FEATURE_KEY, _N_POINTS_KEY
 from harpy.qc.points._points_summary_validation import _validate_spatial_summary
 from harpy.qc.points._spatial_bin_summary import FeatureSpatialBinSummary, _summarize_feature_bins
 from harpy.qc.points._summarize_points import PointsSummary
@@ -27,6 +27,8 @@ from harpy.qc.points._summarize_points import PointsSummary
 @dataclass(frozen=True)
 class FeaturePointsSummary:
     """Feature totals and optional spatial statistics for explicitly selected panel features.
+
+    Returned by :func:`harpy.qc.summarize_points_by_feature`.
 
     Construction validates spatial structure, not numerical summaries.
     In-place edits to the contained arrays or tables do not trigger validation.

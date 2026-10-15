@@ -7,8 +7,9 @@ import pandas as pd
 import xarray as xr
 
 from harpy._feature_panels import _FeaturePanelContract
+from harpy.qc._summary_schema import _FEATURE_CLASS_KEY, _FEATURE_KEY, _N_POINTS_KEY
+from harpy.qc._summary_statistics import _points_statistics
 from harpy.qc.points._points_summary_metadata import PointsSummaryMetadata
-from harpy.qc.points._points_summary_schema import _FEATURE_CLASS_KEY, _FEATURE_KEY, _N_POINTS_KEY
 
 
 @dataclass(frozen=True)
@@ -189,10 +190,7 @@ def _spatial_bin_frames(
             _N_POINTS_KEY: total,
             f"n_retained_bins_without_{zero_suffix}": n_zero,
             f"pct_retained_bins_without_{zero_suffix}": 100 * n_zero / n_retained if n_retained else np.nan,
-            "mean_points_per_bin": float(counts.mean()) if n_retained else np.nan,
-            "median_points_per_bin": float(np.median(counts)) if n_retained else np.nan,
-            "std_points_per_bin": float(counts.std(ddof=1)) if n_retained > 1 else np.nan,
-            "p95_points_per_bin": float(np.percentile(counts, 95)) if n_retained else np.nan,
+            **_points_statistics(counts, unit="bin"),
         }
         group_rows.append(row)
     per_group = pd.DataFrame(group_rows)

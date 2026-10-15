@@ -3,8 +3,8 @@
 import numpy as np
 import xarray as xr
 
+from harpy.qc._summary_schema import _FEATURE_KEY
 from harpy.qc.points._points_summary_metadata import PointsSummaryMetadata
-from harpy.qc.points._points_summary_schema import _FEATURE_KEY
 
 
 def _validate_spatial_summary(

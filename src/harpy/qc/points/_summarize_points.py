@@ -11,9 +11,10 @@ from spatialdata import SpatialData
 
 from harpy._feature_panels import _FeaturePanelContract
 from harpy._spatial_bounds import SpatialBounds
+from harpy.qc._summary_schema import _FEATURE_CLASS_KEY, _FEATURE_KEY, _N_FEATURES_KEY, _N_POINTS_KEY
+from harpy.qc._summary_statistics import _points_statistics
 from harpy.qc.points._points_reduction import _reduce_points_by_class
 from harpy.qc.points._points_summary_metadata import PointsSummaryMetadata
-from harpy.qc.points._points_summary_schema import _FEATURE_CLASS_KEY, _FEATURE_KEY, _N_FEATURES_KEY, _N_POINTS_KEY
 from harpy.qc.points._points_summary_validation import _validate_spatial_summary
 from harpy.qc.points._spatial_bin_summary import SpatialBinSummary, _summarize_spatial_bins
 
@@ -21,6 +22,8 @@ from harpy.qc.points._spatial_bin_summary import SpatialBinSummary, _summarize_s
 @dataclass(frozen=True)
 class PointsSummary:
     """Computed summaries of one original points element and its feature panel.
+
+    Returned by :func:`harpy.qc.summarize_points`.
 
     Construction validates spatial structure, not numerical summaries.
     In-place edits to the contained arrays or tables do not trigger validation.
@@ -40,9 +43,11 @@ class PointsSummary:
         One row per selected class: ``n_features``, ``n_zero_features``,
         ``pct_zero_features`` (0–100), ``n_points``,
         ``mean_points_per_feature``, ``median_points_per_feature``,
-        ``p95_points_per_feature``, ``top_n`` (requested N), ``n_top_features``
-        (min(N, panel size)), and ``pct_points_top_n_features`` (0–100,
-        missing for a zero-point class). All feature statistics include zeros.
+        ``std_points_per_feature``, ``p95_points_per_feature``, ``top_n``
+        (requested N), ``n_top_features`` (min(N, panel size)), and
+        ``pct_points_top_n_features`` (0–100, missing for a zero-point class).
+        All feature statistics include zeros. SD uses ``ddof=1`` and is NaN for
+        a class with one feature; the percentile uses linear interpolation.
     spatial_counts
         Optional in-memory uint64 DataArray with dimensions
         ``(feature_class, y, x)`` and bin-center x/y coordinates. These
@@ -290,9 +295,7 @@ def _summary_frames(
                 "n_zero_features": n_zero,
                 "pct_zero_features": 100 * n_zero / len(features),
                 _N_POINTS_KEY: total,
-                "mean_points_per_feature": float(values.mean()),
-                "median_points_per_feature": float(np.median(values)),
-                "p95_points_per_feature": float(np.percentile(values, 95)),
+                **_points_statistics(values, unit="feature"),
                 "top_n": top_n,
                 "n_top_features": n_top,
                 "pct_points_top_n_features": 100 * (np.sort(values)[-n_top:].sum() / total) if total else np.nan,
