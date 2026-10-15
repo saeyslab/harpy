@@ -8598,6 +8598,26 @@ unchanged; an invalid value raises.
 **Status: planned; implement before step 1 of Slice 11j is redone, which
 reads the `.obs` columns and record fields that this slice removes.**
 
+**Implementation steps,** each tested on its own:
+
+1. Contracts and writer: one count matrix per non-expression class with its
+   `feature_matrices` entry, no `.obs` statistics, the reduced record, and the
+   key collision and reserved-key checks; tests in
+   `src/harpy/_tests/test_table/test_allocation.py`,
+   `src/harpy/_tests/test_storage/test_anndata.py` and
+   `src/harpy/_tests/test_points/test_feature_panel.py`.
+2. Validation: the expression class derived twice, also for an `X` without
+   features; the class-matrix checks; the orphan check; and no `var` index
+   name check; with tests.
+3. Docs: the complete Writes tree in the docstring of `aggregate_points`, and
+   the trees in `docs/development/metadata.md`.
+4. Roadmap: the text of Slices 5, 6, 7b, 11g and 12 describes the new
+   contract, and 11i is marked implemented.
+
+Until Slice 11j redoes it, step 1 of `summarize_table`, which reads the
+record's `classes` and `count_columns`, no longer works on new tables; its
+tests build their own records and keep passing.
+
 In class-aware mode, `hp.tb.aggregate_points` writes the expression class to
 `X`, the counts of all other classes into one shared auxiliary matrix,
 statistics derived from the matrices to `.obs`, and a record that ties these
@@ -8659,9 +8679,12 @@ uns["spatial_coordinates"]                 unchanged
   valid identifiers without spaces, and follow from the panel, so validation
   recomputes each class's key and no map from key to class is stored.
   `aggregate_points` raises before writing when two classes normalize to the
-  same key, or when a key equals the table's other `.obsm` key,
-  `spatial_canonical`. Later writers, such as `add_feature_matrix`, already
-  refuse to replace an existing key unless asked to.
+  same key, or when a key is reserved: `spatial_canonical`, the table's other
+  `.obsm` key, and `spatial`, which Harpy (`_SPATIAL` in
+  `src/harpy/utils/_keys.py`) and squidpy read as coordinates, so that a class
+  named `Spatial` would be mistaken for them. Later writers, such as
+  `add_feature_matrix`, already refuse to replace an existing key unless asked
+  to.
 - **Each class matrix,** as the auxiliary matrix today: CSR with `uint32`
   counts; one row per instance, all-zero for an instance without a point of
   the class, as the row universe of Slice 6 is unchanged; and one column per
@@ -8704,20 +8727,40 @@ uns["spatial_coordinates"]                 unchanged
   label: assigning `adata.var_names`, for example to rename features, drops
   it, and no code reads it. `hp.tb.validate_table` therefore stops requiring
   it, and keeps checking the values.
-- **Validation (`hp.tb.validate_table`):** the expression class is derived
-  twice, and the two must agree: the panel class of all of `X`'s features, and
-  the one panel class without a matrix at `.obsm[snake_case(class)]`. The
-  second also covers a table whose `X` is `None`. Disagreement, such as
-  features of several classes in `X` or two classes without a matrix, makes
-  the table invalid. `X` as today: unique `var_names`, each a feature of the
-  expression class. Each other panel class has its matrix at
-  `.obsm[snake_case(class)]`, registered
-  in `uns["feature_matrices"]` with `source_kind` `"harpy_aggregate_points"`,
-  whose `feature_columns` are unique features of that class in the panel: the
-  check `X` gets, so a subset or a reordering passes. The generic
-  feature-matrix checks apply to each class matrix as to every registered
-  matrix: one row per observation, and as many names as columns. The removed
-  `.obs` columns and record fields are no longer checked.
+- **Validation (`hp.tb.validate_table`):**
+  - **The expression class is derived twice,** and the two must agree:
+    1. from `X`: the panel class to which all of `X`'s features belong, for
+       example `EPCAM` and `VIM` → `Endogenous`;
+    2. from `.obsm`: the one panel class without a matrix at
+       `.obsm[snake_case(class)]`, for example `negative` and
+       `system_control` present → `Endogenous`.
+
+    Disagreement makes the table invalid: features of several classes in
+    `X`, two classes without a matrix, or two routes that name different
+    classes, such as negative probes in `X` while `obsm["negative"]` exists.
+
+  - **`X` without features:** when `X` is `None` or has no columns, for
+    example after `adata[:, []]` or a gene filter that removes every gene,
+    route 1 has no features to look up and no answer to compare, so the
+    expression class comes from route 2 alone. Such a table is not rejected,
+    as AnnData allows both, and treating them alike keeps validation from
+    reporting a disagreement where there is none.
+  - **`X`** as today: unique `var_names`, each a feature of the expression
+    class, which holds trivially without columns.
+  - **Each other panel class** has its matrix at `.obsm[snake_case(class)]`,
+    registered in `uns["feature_matrices"]` with `source_kind`
+    `"harpy_aggregate_points"`, whose `feature_columns` are unique features of
+    that class in the panel: the check `X` gets, so a subset or a reordering
+    passes. The generic feature-matrix checks apply to each class matrix as to
+    every registered matrix: one row per observation, and as many names as
+    columns.
+  - **No orphan class matrices:** a table with a `feature_matrices` entry of
+    `source_kind` `"harpy_aggregate_points"` but no aggregation record is
+    invalid. This replaces today's check that rejects
+    `obsm["auxiliary_feature_counts"]` without the record
+    (`src/harpy/table/_validation.py`), which per-class matrices, without a
+    fixed key, cannot use.
+  - **No longer checked:** the removed `.obs` columns and record fields.
 - **Statistics move to Slice 11j:** the per-class point counts, named
   `n_<class>_points` as before, and each class's share of an instance's
   points, which replaces `auxiliary_points_fraction`, become columns of
@@ -8783,15 +8826,17 @@ without detections as all-zero columns, and a `feature_matrices` entry with
 their names; it has no `auxiliary_feature_counts`, no `n_<class>_points` or
 `auxiliary_points_fraction` column in `.obs`, and a record with exactly
 `schema_version`, `source_kind`, `feature_key`, `feature_class_key` and
-`regions`. Classes whose keys collide with each other or with
-`spatial_canonical` raise before anything is written. Validation derives the
-expression class from `X`'s features and from the class without a matrix,
-also when `X` is `None`, and accepts such a table, also after its `var` index
-name is dropped or a class matrix's columns are subset or reordered together
-with its `feature_columns`. It rejects a missing class matrix or entry, names
-outside the class, a number of names that differs from the matrix's columns,
-features of several classes in `X`, and two derivations of the expression
-class that disagree.
+`regions`. Classes whose keys collide with each other or equal a reserved key,
+`spatial_canonical` or `spatial`, raise before anything is written. Validation
+derives the expression class from `X`'s features and from the class without a
+matrix, from the latter alone when `X` is `None` or has no columns, and
+accepts such a table, also after its `var` index name is dropped or a class
+matrix's columns are subset or reordered together with its `feature_columns`.
+It rejects a missing class matrix or entry, names outside the class, a number
+of names that differs from the matrix's columns, features of several classes
+in `X`, two derivations of the expression class that disagree, and a
+`feature_matrices` entry of `source_kind` `"harpy_aggregate_points"` without
+an aggregation record.
 
 ## Slice 11j: table-level summary computation and plotting integration
 
