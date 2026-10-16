@@ -8822,7 +8822,10 @@ or needs maintaining, when the naming or the panel handling changes.
   | canonical centers, when present, their own contract with napari-harpy                                                                                                                 | `validate_canonical_payload` |
 
   All four exist today; the class matrices are checked as every registered
-  matrix is.
+  matrix is. The registry checked is `uns[feature_matrices_key]`, a keyword of
+  `validate_table` that defaults to `"feature_matrices"`, where
+  `aggregate_points` registers the class matrices; one registry is checked per
+  call.
 
 - **What is dropped:** `_validate_feature_class_aggregation` with
   `_resolve_region_panel`, `_validate_feature_class_metadata` and
@@ -8865,7 +8868,10 @@ or needs maintaining, when the naming or the panel handling changes.
    subset or a preprocessed table validates stay; in
    `src/harpy/_tests/test_table/test_canonical_centers.py`, the unrelated table
    error of `add_canonical_centers` becomes a generic one, a feature matrix
-   whose names do not match its columns.
+   whose names do not match its columns. The `validate_table` tests have since
+   moved to `src/harpy/_tests/test_table/test_validation.py`, with the
+   class-aware test data as fixtures in
+   `src/harpy/_tests/test_table/conftest.py`.
 3. (implemented) Roadmap: the Keys, record and Validation bullets of this
    slice, its verification, and Slice 6's notes on validating the class
    matrices describe the generic validation.
