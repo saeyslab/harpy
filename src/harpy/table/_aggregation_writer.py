@@ -166,13 +166,13 @@ def _write_aggregation_table(
     instance_key: str,
     table_index_name: str,
     feature_class_key: str | None,
-    class_matrices: tuple[tuple[str, tuple[str, ...]], ...],
+    non_expression_class_matrix_axes: tuple[tuple[str, tuple[str, ...]], ...],
 ) -> SpatialData:
     """Construct, publish, and attach one table from a merged-count checkpoint.
 
     The caller supplies the resolved feature axis defining ``adata.X``: observed
     assigned-point features in ordinary mode or the panel-defined expression
-    axis in class-aware mode. In class-aware mode, ``class_matrices`` holds the
+    axis in class-aware mode. In class-aware mode, ``non_expression_class_matrix_axes`` holds the
     ``.obsm`` key and panel-defined feature axis of each non-expression class,
     at least one, and ``feature_class_key`` the points column of the classes,
     recorded as provenance; in ordinary mode they are ``()`` and ``None``. All
@@ -180,15 +180,15 @@ def _write_aggregation_table(
     """
     if not expression_axis:
         raise ValueError("Aggregation produced no expression features.")
-    if (feature_class_key is None) != (not class_matrices):
+    if (feature_class_key is None) != (not non_expression_class_matrix_axes):
         raise ValueError(
-            "Class-aware aggregation requires both 'feature_class_key' and 'class_matrices'; "
+            "Class-aware aggregation requires both 'feature_class_key' and 'non_expression_class_matrix_axes'; "
             "ordinary aggregation neither."
         )
 
     output_row_keys = checkpoint.output_row_keys
     # Class-aware construction scans each checkpoint Parquet part once per
-    # count matrix: ``.X`` and each class matrix in ``.obsm``. Separate passes
+    # count matrix: ``.X`` and each non-expression class matrix in ``.obsm``. Separate passes
     # keep component writes memory-bounded, but a future single-pass block writer
     # could derive all matrices from one checkpoint read.
     log.info(f"Constructing AnnData '.obs' for table '{output_table_name}'.")
@@ -212,7 +212,7 @@ def _write_aggregation_table(
         checkpoint,
         feature_key=feature_key,
         feature_class_key=feature_class_key,
-        class_matrices=class_matrices,
+        non_expression_class_matrix_axes=non_expression_class_matrix_axes,
     )
     uns[SPATIAL_COORDINATES_KEY] = {CANONICAL_OBSM_KEY: canonical_metadata}
 
@@ -248,7 +248,7 @@ def _write_aggregation_table(
     # but the ordered CSR append serializes the chunk writes.
     _write_anndata_element(staging_group, ("X",), expression, logical_path=("X",), create_parents=False)
     log.info(f"Finished writing AnnData '.X' to staged table at '{staging_table_path / 'X'}'.")
-    for key, feature_axis in class_matrices:
+    for key, feature_axis in non_expression_class_matrix_axes:
         class_counts = _checkpoint_sparse_array(
             checkpoint,
             feature_axis=feature_axis,
@@ -263,7 +263,9 @@ def _write_aggregation_table(
         staging_group,
         n_obs=len(output_row_keys),
         n_vars=len(expression_axis),
-        class_matrix_widths={key: len(feature_axis) for key, feature_axis in class_matrices},
+        non_expression_class_matrix_widths={
+            key: len(feature_axis) for key, feature_axis in non_expression_class_matrix_axes
+        },
     )
     staged_table = _read_backed_table(staging_group)
     _validate_complete_table(staged_table)
@@ -326,9 +328,9 @@ def _checkpoint_partition_to_csr(
     ``feature_axis`` is the authoritative matrix-column order. Each long-form
     checkpoint feature is looked up by name and placed at its corresponding
     column index, so checkpoint row order cannot affect matrix-column order. The
-    caller also uses this same axis for ``adata.var_names`` or a class
-    matrix's ``feature_columns`` metadata. Checkpoint features outside the axis,
-    those of other classes, are left out.
+    caller also uses this same axis for ``adata.var_names`` or a
+    non-expression class matrix's ``feature_columns`` metadata. Checkpoint
+    features outside the axis, those of other classes, are left out.
     """
     frame = pd.read_parquet(
         partition.path,
@@ -438,7 +440,7 @@ def _aggregation_uns(
     *,
     feature_key: str,
     feature_class_key: str | None,
-    class_matrices: tuple[tuple[str, tuple[str, ...]], ...],
+    non_expression_class_matrix_axes: tuple[tuple[str, tuple[str, ...]], ...],
 ) -> dict[str, object]:
     """Construct the ``.uns`` records of an aggregation table.
 
@@ -446,7 +448,7 @@ def _aggregation_uns(
     the table: the points column of the features and, for each region, the
     points element and coordinate system aggregated into it. It is provenance
     only, read by no validation. In class-aware mode, the record also holds
-    the points column of the classes, and each class matrix registers its
+    the points column of the classes, and each non-expression class matrix registers its
     column names under its own ``.obsm`` key. The record names no class: each
     class other than the expression class appears only as the ``.obsm`` key of
     its matrix, ``snake_case(class)``, for example ``"negative"`` for the class
@@ -467,14 +469,14 @@ def _aggregation_uns(
         for pair in checkpoint.pairs
     }
     uns: dict[str, object] = {_POINT_AGGREGATION_KEY: record}
-    if class_matrices:
+    if non_expression_class_matrix_axes:
         uns[_FEATURE_MATRICES_KEY] = {
             key: {
                 "schema_version": _FEATURE_MATRIX_SCHEMA_VERSION,
                 "source_kind": _AGGREGATE_POINTS_SOURCE_KIND,
                 "feature_columns": list(feature_axis),
             }
-            for key, feature_axis in class_matrices
+            for key, feature_axis in non_expression_class_matrix_axes
         }
     return uns
 
@@ -484,16 +486,17 @@ def _validate_staged_table(
     *,
     n_obs: int,
     n_vars: int,
-    class_matrix_widths: Mapping[str, int],
+    non_expression_class_matrix_widths: Mapping[str, int],
 ) -> None:
     expression = sparse_dataset(group["X"])
     if expression.shape != (n_obs, n_vars):
         raise ValueError(f"Staged expression matrix has shape {expression.shape}, expected {(n_obs, n_vars)}.")
-    for key, n_features in class_matrix_widths.items():
+    for key, n_features in non_expression_class_matrix_widths.items():
         class_counts = sparse_dataset(group["obsm"][key])
         if class_counts.shape != (n_obs, n_features):
             raise ValueError(
-                f"Staged class matrix {key!r} has shape {class_counts.shape}, expected {(n_obs, n_features)}."
+                f"Staged non-expression class matrix {key!r} has shape {class_counts.shape}, "
+                f"expected {(n_obs, n_features)}."
             )
 
 

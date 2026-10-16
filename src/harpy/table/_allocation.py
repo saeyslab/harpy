@@ -44,10 +44,8 @@ private data flow::
                    _write_aggregation_table()
                     +-- _checkpoint_sparse_array(expression axis)
                     |       `-- adata.X
-                    +-- _checkpoint_sparse_array(auxiliary axis)
-                    |       `-- auxiliary_feature_counts
-                    `-- _checkpoint_partition_class_counts()
-                            `-- per-class totals in adata.obs
+                    `-- _checkpoint_sparse_array(axis of each other class)
+                            `-- adata.obsm[snake_case(class)]
                               |
                               v
                 _remove_aggregation_workspace()
@@ -104,16 +102,13 @@ from harpy.table._aggregation_checkpoint import (
 from harpy.table._aggregation_contracts import _FeatureClassAggregationContract
 from harpy.table._aggregation_writer import (
     _create_aggregation_workspace,
-    _FeatureClassWriteContract,
     _remove_aggregation_workspace,
     _validate_aggregation_destination,
     _write_aggregation_table,
 )
-from harpy.table._metadata import (
-    _AUXILIARY_POINTS_FRACTION_COLUMN,
-)
 from harpy.table._utils import _sanity_check_append_region
 from harpy.table.canonical_centers import (
+    CANONICAL_OBSM_KEY,
     CanonicalCacheReport,
     CanonicalCacheUpdatePayload,
     CanonicalRegionBinding,
@@ -181,8 +176,10 @@ def aggregate_points(
       selected points elements defines ``adata.X``.
     - **Class-aware mode** (``expression_class`` names a class of the panel):
       the panel is mandatory and authoritative. Features of that class define
-      ``adata.X``; features of all other panel classes are kept in an
-      auxiliary feature matrix, and every class is summarized in ``adata.obs``.
+      ``adata.X``; the features of each other panel class get their own count
+      matrix, ``adata.obsm[snake_case(class)]``, for example
+      ``adata.obsm["negative"]`` and ``adata.obsm["system_control"]`` for the
+      classes ``Negative`` and ``SystemControl``.
 
     **Reads**
 
@@ -195,37 +192,39 @@ def aggregate_points(
 
     **Writes** one table at ``sdata.tables[output_table_name]``::
 
-        adata.X                                  point counts per instance and feature
-        adata.var_names                          features of adata.X
-        adata.obs[region_key], [instance_key]    labels element and instance identifier
-        adata.obs["n_<class>_points"]            class-aware: points per class
-        adata.obs["auxiliary_points_fraction"]   class-aware: non-expression points / all points
-        adata.obsm["spatial_canonical"]          centers of mass, columns (z, y, x)
-        adata.obsm["auxiliary_feature_counts"]   class-aware: counts of non-expression features
-        adata.uns["spatialdata_attrs"]           region and instance binding
-        adata.uns["spatial_coordinates"]         metadata of the canonical centers
-        adata.uns["feature_matrices"]            class-aware: names of the auxiliary matrix's columns,
-                                                 under its .obsm key
-        adata.uns["feature_class_aggregation"]   class-aware: the aggregation record, below
+        adata.X                                  uint32 CSR: points per instance and feature
+        adata.var_names                          features of adata.X; index named feature_key
+        adata.obs index                          "<instance>_<labels element>_<token>", named
+                                                 table_index_name
+        adata.obs[region_key]                    categorical: the row's labels element
+        adata.obs[instance_key]                  uint64: the row's label value
+        adata.obsm["spatial_canonical"]          float64 (n_obs, 3): centers of mass, columns (z, y, x)
+        adata.obsm[snake_case(class)]            class-aware, for each class other than the
+                                                 expression class: uint32 CSR, its points per
+                                                 instance and feature
+        adata.uns["spatialdata_attrs"]           region, region_key, instance_key
+        adata.uns["spatial_coordinates"]         record of the canonical centers
+        adata.uns["feature_matrices"]            class-aware: per non-expression class matrix,
+                                                 under its .obsm key, schema_version,
+                                                 source_kind and feature_columns, the names
+                                                 of its columns
+        adata.uns["point_aggregation"]           the sources of the table, below
 
-    In class-aware mode, ``adata.uns["feature_class_aggregation"]`` holds::
+    In both modes, ``adata.uns["point_aggregation"]`` records the sources of
+    the table, as provenance that no validation reads::
 
         schema_version, source_kind          record version, and its writer
-        feature_key, feature_class_key       points columns of the features and classes
-        classes                              the panel's classes, in panel order
-        expression_class                     the class whose features form adata.X
-        panel_feature_counts                 class -> number of unique panel features,
-                                             features without detections included
-        count_columns                        class -> name of its .obs count column,
-                                             for example "Negative" -> "n_negative_points"
-        auxiliary_points_fraction_column     "auxiliary_points_fraction"
-        auxiliary_feature_matrix_key         .obsm key of the auxiliary matrix
+        feature_key                          points column of the features
+        feature_class_key                    class-aware: points column of the classes
         regions                              labels element -> the points element and
                                              coordinate system aggregated into it
 
-    Later code finds columns and denominators through this record rather than
-    by rebuilding names. No per-panel-feature rates are persisted. The
-    developer documentation on metadata describes each record in full.
+    The record names no class: ``adata.X`` holds the expression class chosen
+    with ``expression_class``, and each other class appears only as the
+    ``.obsm`` key of its matrix, ``snake_case(class)``, for example
+    ``"negative"`` for the class ``Negative``.
+    The canonical-center record is described in :doc:`/canonical_centers`, and
+    the developer documentation on metadata describes the other records.
 
     Parameters
     ----------
@@ -258,12 +257,11 @@ def aggregate_points(
         ``sdata.attrs["harpy"]["points"][points_name]["feature_panel"]`` (see
         above), even when one is registered, and retains all observed features
         in ``adata.X``. A non-empty string selects class-aware mode and names
-        the panel class retained in ``adata.X``; all other panel classes are
-        retained in the auxiliary feature matrix.
+        the panel class retained in ``adata.X``; each other panel class is
+        retained in its own count matrix, ``adata.obsm[snake_case(class)]``.
     instance_key
         Column in ``adata.obs`` holding instance identifiers. It must differ
-        from ``feature_key`` and, in class-aware mode, from the panel's
-        ``feature_class_key``.
+        from ``feature_key``.
     region_key
         Categorical column in ``adata.obs`` holding labels-element names.
     table_index_name
@@ -291,29 +289,35 @@ def aggregate_points(
     feature and class, its feature must occur in the panel, and its class must
     match that feature's panel assignment. All selected points elements must
     resolve compatible panel contracts. The panel is authoritative: the points'
-    feature-class column is checked for consistency, but matrix axes, feature
-    placement and class summaries are derived from the panel.
+    feature-class column is checked for consistency, but matrix axes and
+    feature placement are derived from the panel.
+
+    **Non-expression class matrices.** Each class other than the expression class is stored
+    under ``snake_case(class)``, for example ``Negative Control Probe`` under
+    ``negative_control_probe``. Classes whose keys coincide, or whose key is
+    ``spatial_canonical`` or ``spatial``, which tools read as coordinates, are
+    rejected before spatial assignment. A column's class is the matrix that
+    holds it, so its columns may later be subset or reordered, provided the
+    matrix's ``feature_columns`` follow.
 
     **Panel-defined axes in class-aware mode.** Matrix columns come from the
     panel, not from the observations: every panel feature is kept even when it
     is absent from all selected points elements. An unobserved expression
     feature remains in ``adata.var_names`` with an all-zero column in
-    ``adata.X``; an unobserved auxiliary feature remains in the auxiliary
-    matrix's ``feature_columns`` with an all-zero column. Instances receiving
-    only non-expression points remain in the table with an all-zero expression
-    row. For example::
+    ``adata.X``; an unobserved feature of another class remains in its
+    non-expression class matrix's ``feature_columns`` with an all-zero column.
+    Instances receiving
+    points of only some classes remain in the table with all-zero rows in the
+    other matrices. For example::
 
         panel                              resulting feature axes
         Endogenous: [GeneA, GeneZero]      adata.var_names:
           observed: GeneA                    [GeneA, GeneZero]
           unobserved: GeneZero               GeneZero column is all zero
 
-        Negative: [Neg1, NegZero]          auxiliary feature_columns:
+        Negative: [Neg1, NegZero]          adata.obsm["negative"] feature_columns:
           observed: Neg1                     [Neg1, NegZero]
           unobserved: NegZero                NegZero column is all zero
-
-    The ``n_<class>_points`` columns and ``auxiliary_points_fraction`` are
-    derived from the persisted expression and auxiliary matrices.
 
     **Canonical centers.** Both modes store one canonical center matrix. Its
     dense ``float64`` columns are ordered ``(z, y, x)`` and contain geometric
@@ -326,11 +330,13 @@ def aggregate_points(
     Zarr store. Aggregation remains partitioned, and the final sparse matrices
     are written in row blocks without materializing the complete reductions on
     the driver. The serialized canonical centers and their metadata are
-    validated before publication. The remaining table contracts (SpatialData
-    annotation, feature-matrix records, source references, and authoritative
-    feature-panel metadata) are validated before publication is committed.
-    Call :func:`harpy.tb.validate_table` to repeat the complete validation
-    later.
+    validated before publication. The remaining table contracts, the
+    SpatialData annotation and the feature-matrix records of the
+    non-expression class matrices, are validated before publication is
+    committed. The feature panel
+    is checked against the source points before assignment, not against the
+    written table. Call :func:`harpy.tb.validate_table` to repeat the table
+    validation later.
 
     Examples
     --------
@@ -365,6 +371,9 @@ def aggregate_points(
         to_coordinate_system=to_coordinate_system,
         feature_key=feature_key,
     )
+    # Ordinary mode (expression_class=None) reads no feature panel. Class-aware
+    # mode resolves the points' panel and checks every point against it, before
+    # spatial assignment.
     if expression_class is None:
         contract = None
     else:
@@ -373,9 +382,6 @@ def aggregate_points(
             pairs=pairs,
             feature_key=feature_key,
             expression_class=expression_class,
-            region_key=region_key,
-            instance_key=instance_key,
-            table_index_name=table_index_name,
         )
         _validate_feature_panel_contents(sdata, pairs=pairs, panel=contract.panel)
 
@@ -396,11 +402,12 @@ def aggregate_points(
             points = sdata.points[pair.points_name]
             # Lazily map every point to the nonzero label at its rounded pixel.
             # The result contains one (feature, instance) row per assigned
-            # point. The source class column is validated separately against
-            # the panel; downstream class totals are derived from the panel's
-            # feature-to-class mapping. Coordinates, outside points and
-            # background assignments are omitted; aggregation into compact
-            # (instance, feature, count) rows happens below.
+            # point. The source class column is validated against the panel
+            # before assignment and is not carried through it: the panel's
+            # class axes later select the columns of X and of each
+            # non-expression class matrix. Coordinates, outside points and background assignments
+            # are omitted; aggregation into compact (instance, feature, count)
+            # rows happens below.
             assigned_points = _assign_points_to_labels(
                 se=_get_spatial_element(sdata, element_name=pair.labels_name),
                 ddf=points,
@@ -432,21 +439,18 @@ def aggregate_points(
             region_key=region_key,
             instance_key=instance_key,
         )
-        class_write_contract = None
         if contract is None:
+            # Ordinary mode: the observed features form X.
             if observed_feature_axis is None:
                 raise RuntimeError("Ordinary aggregation did not produce an observed feature axis.")
             expression_axis = observed_feature_axis
+            feature_class_key = None
+            non_expression_class_matrix_axes = ()
         else:
+            # Class-aware mode: the panel's axes form X and the non-expression class matrices.
             expression_axis = contract.expression_feature_axis
-            class_write_contract = _FeatureClassWriteContract(
-                feature_key=contract.panel.feature_key,
-                feature_class_key=contract.panel.feature_class_key,
-                classes=contract.panel.classes,
-                expression_class=contract.expression_class,
-                features_by_class_items=contract.panel.features_by_class_items,
-                count_columns=contract.count_columns,
-            )
+            feature_class_key = contract.panel.feature_class_key
+            non_expression_class_matrix_axes = contract.non_expression_class_matrix_axes
         return _write_aggregation_table(
             sdata,
             destination=destination,
@@ -459,7 +463,8 @@ def aggregate_points(
             region_key=region_key,
             instance_key=instance_key,
             table_index_name=table_index_name,
-            class_contract=class_write_contract,
+            feature_class_key=feature_class_key,
+            non_expression_class_matrix_axes=non_expression_class_matrix_axes,
         )
     finally:
         _remove_aggregation_workspace(workspace)
@@ -579,7 +584,7 @@ def _resolve_table_index_name(
     result = f"{instance_key}_index" if table_index_name is None else table_index_name
     if not isinstance(result, str) or not result:
         raise ValueError(f"Parameter 'table_index_name' must be a non-empty string or None, found {result!r}.")
-    reserved = {instance_key, region_key, _AUXILIARY_POINTS_FRACTION_COLUMN}
+    reserved = {instance_key, region_key}
     if result in reserved:
         raise ValueError(
             f"Parameter 'table_index_name' must not collide with an aggregation output column, found {result!r}."
@@ -593,11 +598,15 @@ def _resolve_feature_class_contract(
     pairs: tuple[_AggregationPair, ...],
     feature_key: str,
     expression_class: str,
-    region_key: str,
-    instance_key: str,
-    table_index_name: str,
 ) -> _FeatureClassAggregationContract:
-    """Resolve one immutable feature-panel contract for class-aware aggregation."""
+    """Read the selected points' feature panel from ``sdata.attrs`` and build the class-aware contract.
+
+    All selected points elements must reference the same panel, declaring the
+    requested ``feature_key``, and carry its categorical ``feature_class_key``
+    column. Besides the contract's own checks, no non-expression class matrix may use a
+    reserved ``.obsm`` key: ``spatial_canonical`` or ``spatial``. After this,
+    the panel is used only through the returned contract.
+    """
     harpy_metadata = _require_mapping(sdata.attrs.get(_HARPY_METADATA_KEY), path=_HARPY_METADATA_KEY)
     version = harpy_metadata.get(_METADATA_VERSION_KEY)
     if isinstance(version, bool) or not isinstance(version, int) or version != _METADATA_VERSION:
@@ -634,11 +643,6 @@ def _resolve_feature_class_contract(
                 f"Feature panel {panel_name!r} declares feature_key={panel.feature_key!r}, "
                 f"which does not match feature_key={feature_key!r}."
             )
-        if panel.feature_class_key == instance_key:
-            raise ValueError(
-                f"Feature panel {panel_name!r} declares feature_class_key={panel.feature_class_key!r}, "
-                "which must differ from instance_key."
-            )
         points = sdata.points[points_name]
         if panel.feature_class_key not in points.columns:
             raise ValueError(
@@ -658,10 +662,13 @@ def _resolve_feature_class_contract(
         panel=panel,
         expression_class=expression_class,
     )
-    generated = {column for _, column in contract.count_columns}
-    collisions = sorted(generated & {region_key, instance_key, table_index_name, _AUXILIARY_POINTS_FRACTION_COLUMN})
-    if collisions:
-        raise ValueError(f"Generated feature-class columns collide with aggregation output columns: {collisions}.")
+    reserved = sorted(
+        (feature_class, key)
+        for feature_class, key in contract.non_expression_class_matrix_keys
+        if key in {CANONICAL_OBSM_KEY, _SPATIAL}
+    )
+    if reserved:
+        raise ValueError(f"Feature classes produce reserved .obsm keys: {reserved}.")
 
     return contract
 
