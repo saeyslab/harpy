@@ -1,4 +1,3 @@
-from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -28,17 +27,6 @@ from harpy.table._aggregation_contracts import _FeatureClassAggregationContract
 from harpy.table._allocation import aggregate_points, bin_counts
 from harpy.table.canonical_centers import CANONICAL_OBSM_KEY, SPATIAL_COORDINATES_KEY
 from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY, _SPATIAL
-
-_PANEL = {
-    "feature_key": "gene",
-    "feature_class_key": "code_class",
-    "classes": ["Endogenous", "Negative", "SystemControl"],
-    "features_by_class": {
-        "Endogenous": ["GeneA", "GeneB", "GeneZero"],
-        "Negative": ["Negative01", "Negative02", "NegativeZero"],
-        "SystemControl": ["SystemControl1"],
-    },
-}
 
 
 def test_allocate_import_warns_and_resolves_to_aggregate_points(monkeypatch: pytest.MonkeyPatch):
@@ -388,8 +376,10 @@ def test_aggregate_points_overwrite(sdata_transcripts: SpatialData):
         )
 
 
-def test_aggregation_write_failure_preserves_existing_table_and_cleans_workspace(monkeypatch, tmp_path):
-    sdata = _backed(_class_aware_sdata(), tmp_path)
+def test_aggregation_write_failure_preserves_existing_table_and_cleans_workspace(
+    monkeypatch, tmp_path, backed_class_aware_sdata
+):
+    sdata = backed_class_aware_sdata
     sdata = aggregate_points(
         sdata,
         labels_name="labels_a",
@@ -418,8 +408,8 @@ def test_aggregation_write_failure_preserves_existing_table_and_cleans_workspace
     assert not list(tmp_path.glob(".input.zarr.harpy-*"))
 
 
-def test_aggregation_reopen_failure_rolls_back_published_table(monkeypatch, tmp_path):
-    sdata = _backed(_class_aware_sdata(), tmp_path)
+def test_aggregation_reopen_failure_rolls_back_published_table(monkeypatch, tmp_path, backed_class_aware_sdata):
+    sdata = backed_class_aware_sdata
     sdata = aggregate_points(
         sdata,
         labels_name="labels_a",
@@ -455,9 +445,11 @@ def test_aggregation_reopen_failure_rolls_back_published_table(monkeypatch, tmp_
 
 
 @pytest.mark.parametrize("replace_existing", [False, True])
-def test_aggregation_metadata_validation_failure_rolls_back_published_table(monkeypatch, tmp_path, replace_existing):
+def test_aggregation_metadata_validation_failure_rolls_back_published_table(
+    monkeypatch, tmp_path, replace_existing, backed_class_aware_sdata
+):
     """Invalid Harpy metadata must roll back publication, even when the SpatialData model is valid."""
-    sdata = _backed(_class_aware_sdata(), tmp_path)
+    sdata = backed_class_aware_sdata
     if replace_existing:
         aggregate_points(
             sdata,
@@ -472,11 +464,11 @@ def test_aggregation_metadata_validation_failure_rolls_back_published_table(monk
 
     def incompatible_metadata(*args, **kwargs):
         metadata = aggregation_uns(*args, **kwargs)
-        metadata["feature_class_aggregation"]["panel_feature_counts"]["Negative"] = 999
+        metadata["feature_matrices"]["negative"]["feature_columns"] = ["Negative01"]
         return metadata
 
     monkeypatch.setattr(writer_module, "_aggregation_uns", incompatible_metadata)
-    with pytest.raises(ValueError, match="panel feature counts disagree"):
+    with pytest.raises(ValueError, match="declares 1 feature columns"):
         aggregate_points(
             sdata,
             labels_name="labels_a",
@@ -496,13 +488,16 @@ def test_aggregation_metadata_validation_failure_rolls_back_published_table(monk
         assert sdata.tables["table"] is previous_table
         assert (previous_table.X.to_memory() != expected).nnz == 0
         assert (reopened.tables["table"].X != expected).nnz == 0
-        assert "feature_class_aggregation" not in reopened.tables["table"].uns
+        # The previous table was aggregated in ordinary mode, so it has no
+        # feature_matrices record; finding one means metadata from the failed
+        # class-aware table survived the rollback.
+        assert "feature_matrices" not in reopened.tables["table"].uns
         validate_table(reopened, "table")
     assert not list(tmp_path.glob(".input.zarr.harpy-*"))
 
 
-def test_class_aware_aggregation_uses_panel_axis_and_adds_auxiliary_summaries(tmp_path):
-    sdata = _class_aware_sdata()
+def test_class_aware_aggregation_writes_one_count_matrix_per_class(tmp_path, class_aware_sdata):
+    sdata = class_aware_sdata
     output = tmp_path / "class-aware.zarr"
     sdata.write(output)
     sdata = read_zarr(output)
@@ -534,12 +529,10 @@ def test_class_aware_aggregation_uses_panel_axis_and_adds_auxiliary_summaries(tm
     obs = adata.obs.iloc[order]
     expression = adata.X.to_memory()[order]
     assert obs[_INSTANCE_KEY].to_list() == [1, 2, 3, 1]
-    assert obs["n_endogenous_points"].to_list() == [2, 1, 0, 1]
-    assert obs["n_negative_points"].to_list() == [1, 1, 1, 0]
-    assert obs["n_system_control_points"].to_list() == [1, 0, 0, 2]
-    assert np.allclose(obs["auxiliary_points_fraction"], [0.5, 0.5, 1.0, 2 / 3])
-    assert np.array_equal(np.asarray(expression.sum(axis=1)).ravel(), obs["n_endogenous_points"])
-    assert not {"negative_points_per_feature", "system_control_points_per_feature"} & set(adata.obs)
+    # No statistics derived from the matrices: .obs holds the row identity only.
+    assert set(adata.obs) == {_REGION_KEY, _INSTANCE_KEY}
+    # Instance 3 of labels_a has only a Negative01 point: an all-zero expression row.
+    np.testing.assert_array_equal(expression.toarray(), [[2, 0, 0], [0, 1, 0], [0, 0, 0], [0, 1, 0]])
     canonical_centers = adata.obsm[CANONICAL_OBSM_KEY][order]
     assert np.allclose(
         canonical_centers,
@@ -550,82 +543,59 @@ def test_class_aware_aggregation_uses_panel_axis_and_adds_auxiliary_summaries(tm
         "labels_b",
     }
 
-    auxiliary = adata.obsm["auxiliary_feature_counts"]
-    assert isinstance(auxiliary, CSRDataset)
-    assert auxiliary.dtype == np.dtype(np.uint32)
-    auxiliary_counts = auxiliary.to_memory()[order].toarray()
-    assert np.array_equal(
-        auxiliary_counts,
-        np.array(
-            [
-                [1, 0, 0, 1],
-                [0, 1, 0, 0],
-                [1, 0, 0, 0],
-                [0, 0, 0, 2],
-            ],
-            dtype=np.uint32,
-        ),
-    )
-    feature_matrix_metadata = adata.uns["feature_matrices"]["auxiliary_feature_counts"]
-    assert {key: value for key, value in feature_matrix_metadata.items() if key != "feature_columns"} == {
+    # One count matrix per non-expression class, keyed by snake_case(class),
+    # with every panel feature of the class: NegativeZero has no detections.
+    assert set(adata.obsm) == {CANONICAL_OBSM_KEY, "negative", "system_control"}
+    expected_class_counts = {
+        "negative": ([[1, 0, 0], [0, 1, 0], [1, 0, 0], [0, 0, 0]], ["Negative01", "Negative02", "NegativeZero"]),
+        "system_control": ([[1], [0], [0], [2]], ["SystemControl1"]),
+    }
+    for key, (counts, feature_columns) in expected_class_counts.items():
+        matrix = adata.obsm[key]
+        assert isinstance(matrix, CSRDataset)
+        assert matrix.dtype == np.dtype(np.uint32)
+        np.testing.assert_array_equal(matrix.to_memory()[order].toarray(), counts)
+        record = adata.uns["feature_matrices"][key]
+        assert set(record) == {"schema_version", "source_kind", "feature_columns"}
+        assert (record["schema_version"], record["source_kind"]) == (1, "harpy_aggregate_points")
+        assert list(record["feature_columns"]) == feature_columns
+
+    # The record describes the sources only: it names no class.
+    metadata = adata.uns["point_aggregation"]
+    assert metadata == {
         "schema_version": 1,
         "source_kind": "harpy_aggregate_points",
-    }
-    assert list(feature_matrix_metadata["feature_columns"]) == [
-        "Negative01",
-        "Negative02",
-        "NegativeZero",
-        "SystemControl1",
-    ]
-
-    metadata = adata.uns["feature_class_aggregation"]
-    assert metadata["source_kind"] == "harpy_aggregate_points"
-    # Every class, the expression class included; GeneZero and NegativeZero have no detections.
-    assert metadata["panel_feature_counts"] == {"Endogenous": 3, "Negative": 3, "SystemControl": 1}
-    assert "auxiliary_class_feature_counts" not in metadata
-    assert metadata["auxiliary_points_fraction_column"] == "auxiliary_points_fraction"
-    assert metadata["auxiliary_feature_matrix_key"] == "auxiliary_feature_counts"
-    assert metadata["count_columns"] == {
-        "Endogenous": "n_endogenous_points",
-        "Negative": "n_negative_points",
-        "SystemControl": "n_system_control_points",
-    }
-    assert metadata["regions"] == {
-        "labels_a": {"points_element": "points_a", "coordinate_system": "sample_a"},
-        "labels_b": {"points_element": "points_b", "coordinate_system": "sample_b"},
+        "feature_key": "gene",
+        "feature_class_key": "code_class",
+        "regions": {
+            "labels_a": {"points_element": "points_a", "coordinate_system": "sample_a"},
+            "labels_b": {"points_element": "points_b", "coordinate_system": "sample_b"},
+        },
     }
 
     # Returned handles must reject direct storage writes. The first ordered
     # cell has both GeneA and Negative01 counts, so sparse writes target existing
     # entries rather than failing because of a change in sparsity structure.
-    for matrix in (adata.X, auxiliary, adata.obsm[CANONICAL_OBSM_KEY]):
+    for matrix in (adata.X, adata.obsm["negative"], adata.obsm[CANONICAL_OBSM_KEY]):
         with pytest.raises(ValueError, match="read.only"):
             matrix[order[0], 0] = 99
 
     roundtripped_sdata = read_zarr(output)
     roundtripped = roundtripped_sdata.tables["table"]
     np.testing.assert_array_equal(roundtripped.X[order].toarray(), expression.toarray())
-    np.testing.assert_array_equal(roundtripped.obsm["auxiliary_feature_counts"][order].toarray(), auxiliary_counts)
     np.testing.assert_array_equal(roundtripped.obsm[CANONICAL_OBSM_KEY][order], canonical_centers)
-    roundtripped_metadata = roundtripped.uns["feature_class_aggregation"]
-    assert roundtripped_metadata["expression_class"] == "Endogenous"
-    assert roundtripped_metadata["count_columns"] == metadata["count_columns"]
-    assert roundtripped_metadata["panel_feature_counts"] == metadata["panel_feature_counts"]
-    assert roundtripped_metadata["regions"] == metadata["regions"]
-    assert sparse.isspmatrix_csr(roundtripped.obsm["auxiliary_feature_counts"])
-    assert roundtripped.obsm["auxiliary_feature_counts"].dtype == np.dtype(np.uint32)
-    assert list(roundtripped.uns["feature_matrices"]["auxiliary_feature_counts"]["feature_columns"]) == [
-        "Negative01",
-        "Negative02",
-        "NegativeZero",
-        "SystemControl1",
-    ]
+    for key, (counts, feature_columns) in expected_class_counts.items():
+        assert sparse.isspmatrix_csr(roundtripped.obsm[key])
+        assert roundtripped.obsm[key].dtype == np.dtype(np.uint32)
+        np.testing.assert_array_equal(roundtripped.obsm[key][order].toarray(), counts)
+        assert list(roundtripped.uns["feature_matrices"][key]["feature_columns"]) == feature_columns
+    assert roundtripped.uns["point_aggregation"]["regions"] == metadata["regions"]
     validate_table(roundtripped_sdata, "table")
 
 
-def test_aggregate_points_writes_a_reopenable_zarr_v2_table(tmp_path):
+def test_aggregate_points_writes_a_reopenable_zarr_v2_table(tmp_path, class_aware_sdata):
     path = tmp_path / "zarr-v2.zarr"
-    _class_aware_sdata().write(path, sdata_formats=SpatialDataContainerFormatV01())
+    class_aware_sdata.write(path, sdata_formats=SpatialDataContainerFormatV01())
     sdata = aggregate_points(
         read_zarr(path),
         labels_name="labels_a",
@@ -658,9 +628,11 @@ def test_aggregate_points_writes_a_reopenable_zarr_v2_table(tmp_path):
 
 
 @pytest.mark.parametrize("expression_class", [None, "Endogenous"])
-def test_aggregate_points_writes_once_and_preserves_unrelated_elements(monkeypatch, tmp_path, expression_class):
+def test_aggregate_points_writes_once_and_preserves_unrelated_elements(
+    monkeypatch, tmp_path, expression_class, backed_class_aware_sdata
+):
     """Stage each count matrix once, reuse shared publication, and leave other elements alone."""
-    sdata = _backed(_class_aware_sdata(), tmp_path)
+    sdata = backed_class_aware_sdata
     source_points = sdata.points["points_a"]
     source_labels = sdata.labels["labels_a"]
     root = zarr.open_group(str(sdata.path), mode="r+", use_consolidated=False)
@@ -691,7 +663,8 @@ def test_aggregate_points_writes_once_and_preserves_unrelated_elements(monkeypat
     assert isinstance(result.tables["table"].X, CSRDataset)
     assert result.tables["table"].X.group.read_only
     assert written.count(("X",)) == 1
-    assert written.count(("obsm", "auxiliary_feature_counts")) == (expression_class is not None)
+    for key in ("negative", "system_control"):
+        assert written.count(("obsm", key)) == (expression_class is not None)
     assert sdata.points["points_a"] is source_points
     assert sdata.labels["labels_a"] is source_labels
     for key, value in before.items():
@@ -701,20 +674,20 @@ def test_aggregate_points_writes_once_and_preserves_unrelated_elements(monkeypat
     assert not list(tmp_path.glob(".input.zarr.harpy-*"))
 
 
-def test_aggregate_points_stores_dense_and_sparse_matrices_in_harpys_layout(monkeypatch, tmp_path):
+def test_aggregate_points_stores_dense_and_sparse_matrices_in_harpys_layout(monkeypatch, backed_class_aware_sdata):
     """The aggregated point counts get the sparse layout, the canonical centers the dense layout.
 
     The constant is lowered to 8 bytes because this small table would otherwise
     fit in single chunks, the same as AnnData's default. With 8 bytes:
 
-    - sparse, the aggregated point counts in X and obsm["auxiliary_feature_counts"]:
+    - sparse, the aggregated point counts in X and the non-expression class matrix obsm["negative"]:
       their data, indices and indptr are stored in chunks of 8 // 8 = 1 entry,
       which differs from the default for every array of more than one entry;
     - dense, the canonical centers in obsm: stored one row per chunk with all
       coordinates, since a row of coordinates is larger than 8 bytes.
     """
     monkeypatch.setattr(anndata_storage, "_STORED_CHUNK_BYTES", 8)
-    sdata = _backed(_class_aware_sdata(), tmp_path)
+    sdata = backed_class_aware_sdata
 
     aggregate_points(
         sdata,
@@ -726,7 +699,7 @@ def test_aggregate_points_stores_dense_and_sparse_matrices_in_harpys_layout(monk
     )
 
     group = zarr.open_group(str(sdata.path / "tables" / "table"), mode="r", use_consolidated=False)
-    for name in ("X", "obsm/auxiliary_feature_counts"):
+    for name in ("X", "obsm/negative"):
         assert group[name].attrs["encoding-type"] == "csr_matrix"
         assert group[f"{name}/data"].shape[0] > 1
         for array in ("data", "indices", "indptr"):
@@ -742,7 +715,7 @@ def test_aggregate_points_stores_dense_and_sparse_matrices_in_harpys_layout(monk
     "failure", ["checkpoint", "staging", "parents", "publication", "installation", "validation", "finalization"]
 )
 def test_aggregation_shared_publication_restores_store_and_attachment(
-    tmp_path, monkeypatch, zarr_format, replace_existing, failure
+    tmp_path, monkeypatch, zarr_format, replace_existing, failure, class_aware_sdata
 ):
     """Failure restores disk bytes and the original attached table, or its absence.
 
@@ -751,7 +724,7 @@ def test_aggregation_shared_publication_restores_store_and_attachment(
     assignment; finalization fails *after* rewriting root metadata, and keeps
     failing if retried. Recovery must therefore restore saved metadata bytes.
     """
-    sdata = _class_aware_sdata()
+    sdata = class_aware_sdata
     path = tmp_path / "input.zarr"
     sdata.write(path, sdata_formats=SpatialDataContainerFormatV01() if zarr_format == 2 else None)
     sdata = read_zarr(path)
@@ -829,9 +802,9 @@ def test_aggregation_shared_publication_restores_store_and_attachment(
         assert len(consolidation_calls) == 1
 
 
-def test_ordinary_aggregation_uses_label_centers_without_class_metadata(tmp_path):
+def test_ordinary_aggregation_uses_label_centers_without_class_metadata(backed_class_aware_sdata):
     result = aggregate_points(
-        _backed(_class_aware_sdata(), tmp_path),
+        backed_class_aware_sdata,
         labels_name="labels_a",
         points_name="points_a",
         to_coordinate_system="sample_a",
@@ -845,96 +818,15 @@ def test_ordinary_aggregation_uses_label_centers_without_class_metadata(tmp_path
         adata.obsm[CANONICAL_OBSM_KEY][order],
         [[0.0, 0.5, 0.5], [0.0, 0.5, 3.5], [0.0, 2.0, 0.5]],
     )
-    assert _SPATIAL not in adata.obsm
-    assert "auxiliary_feature_counts" not in adata.obsm
-    assert "feature_class_aggregation" not in adata.uns
+    assert set(adata.obsm) == {CANONICAL_OBSM_KEY}
+    assert set(adata.obs) == {_REGION_KEY, _INSTANCE_KEY}
     assert "feature_matrices" not in adata.uns
-    validate_table(result, "table")
-
-
-def test_validate_table_accepts_a_registered_generic_feature_matrix(tmp_path):
-    result = aggregate_points(
-        _backed(_class_aware_sdata(), tmp_path),
-        labels_name="labels_a",
-        points_name="points_a",
-        to_coordinate_system="sample_a",
-        output_table_name="table",
-    )
-    adata = result.tables["table"]
-    adata.obsm["derived_features"] = np.ones((adata.n_obs, 2), dtype=np.float64)
-    adata.uns["feature_matrices"] = {
-        "derived_features": {
-            "schema_version": 1,
-            "source_kind": "test_features",
-            "backend": "numpy",
-            "dtype": "float64",
-            "feature_columns": ["first", "second"],
-        }
-    }
-
-    validate_table(result, "table")
-
-
-def test_validate_table_accepts_filtered_and_reordered_feature_axes(tmp_path):
-    result = aggregate_points(
-        _backed(_class_aware_sdata(), tmp_path),
-        labels_name="labels_a",
-        points_name="points_a",
-        to_coordinate_system="sample_a",
-        output_table_name="table",
-        expression_class="Endogenous",
-    )
-    adata = result.tables["table"][:, ["GeneZero", "GeneB"]].copy()
-    adata.obsm["auxiliary_feature_counts"] = adata.obsm["auxiliary_feature_counts"][:, [3, 0]]
-    adata.uns["feature_matrices"]["auxiliary_feature_counts"]["feature_columns"] = [
-        "SystemControl1",
-        "Negative01",
-    ]
-    result.tables["table"] = adata
-
-    # The summaries describe the original complete aggregation and therefore
-    # need not equal row sums after legitimate feature filtering.
-    assert not np.array_equal(
-        np.asarray(adata.X.sum(axis=1)).ravel(),
-        adata.obs["n_endogenous_points"].to_numpy(),
-    )
-    validate_table(result, "table")
-
-
-def test_validate_table_accepts_recalculated_summary_columns(tmp_path):
-    result = aggregate_points(
-        _backed(_class_aware_sdata(), tmp_path),
-        labels_name="labels_a",
-        points_name="points_a",
-        to_coordinate_system="sample_a",
-        output_table_name="table",
-        expression_class="Endogenous",
-    )
-    adata = result.tables["table"]
-    adata.obs["n_endogenous_points"] = adata.obs["n_endogenous_points"].astype(np.float64) / 2
-    adata.obs["auxiliary_points_fraction"] = np.linspace(0.1, 0.9, adata.n_obs)
-
-    validate_table(result, "table")
-
-
-def test_validate_table_accepts_preprocessed_matrix_representations(tmp_path):
-    result = aggregate_points(
-        _backed(_class_aware_sdata(), tmp_path),
-        labels_name="labels_a",
-        points_name="points_a",
-        to_coordinate_system="sample_a",
-        output_table_name="table",
-        expression_class="Endogenous",
-    )
-    adata = result.tables["table"]
-    adata.X = _to_memory(adata.X).toarray().astype(np.float32)
-    auxiliary = adata.obsm["auxiliary_feature_counts"]
-    adata.obsm["auxiliary_feature_counts"] = _to_memory(auxiliary).toarray().astype(np.float64)
-
-    assert set(adata.uns["feature_matrices"]["auxiliary_feature_counts"]) == {
-        "schema_version",
-        "source_kind",
-        "feature_columns",
+    # Ordinary mode also records its sources, but no feature_class_key: it uses no class column of the points.
+    assert adata.uns["point_aggregation"] == {
+        "schema_version": 1,
+        "source_kind": "harpy_aggregate_points",
+        "feature_key": "gene",
+        "regions": {"labels_a": {"points_element": "points_a", "coordinate_system": "sample_a"}},
     }
     validate_table(result, "table")
 
@@ -969,8 +861,8 @@ def test_aggregate_points_uses_irregular_label_center_instead_of_point_position(
     assert np.allclose(result.tables["table"].obsm[CANONICAL_OBSM_KEY], [[0.0, 1 / 3, 1 / 3]])
 
 
-def test_canonical_centers_remain_intrinsic_under_pair_translation(tmp_path):
-    sdata = _class_aware_sdata()
+def test_canonical_centers_remain_intrinsic_under_pair_translation(tmp_path, class_aware_sdata):
+    sdata = class_aware_sdata
     labels = sdata.labels["labels_a"]
     sdata.labels["labels_a"] = Labels2DModel.parse(
         labels.data,
@@ -1001,8 +893,8 @@ def test_canonical_centers_remain_intrinsic_under_pair_translation(tmp_path):
     )
 
 
-def test_class_aware_aggregation_accepts_shared_general_affine_and_keeps_intrinsic_centers(tmp_path):
-    sdata = _class_aware_sdata()
+def test_class_aware_aggregation_accepts_shared_general_affine_and_keeps_intrinsic_centers(tmp_path, class_aware_sdata):
+    sdata = class_aware_sdata
     outer = Affine(
         np.array([[0, -2, 100], [3, 0, 200], [0, 0, 1]], dtype=np.float64),
         input_axes=("x", "y"),
@@ -1583,8 +1475,8 @@ def test_assign_points_to_labels_rejects_nonfinite_coordinates_during_partition_
         assigned.compute()
 
 
-def test_aggregate_points_rejects_singular_transform_before_workspace_creation(monkeypatch, tmp_path):
-    sdata = _backed(_class_aware_sdata(), tmp_path)
+def test_aggregate_points_rejects_singular_transform_before_workspace_creation(monkeypatch, backed_class_aware_sdata):
+    sdata = backed_class_aware_sdata
     set_transformation(
         sdata.points["points_a"],
         Scale([0, 1], axes=("x", "y")),
@@ -1682,7 +1574,7 @@ def test_assign_points_to_labels_graph_construction_does_not_read_sources():
     assert sorted(reads) == ["labels", "points"]
 
 
-def test_class_aware_aggregation_assigns_points_once(monkeypatch: pytest.MonkeyPatch, tmp_path):
+def test_class_aware_aggregation_assigns_points_once(monkeypatch: pytest.MonkeyPatch, backed_class_aware_sdata):
     calls = 0
     assign_points_to_labels = aggregation_module._assign_points_to_labels
 
@@ -1693,7 +1585,7 @@ def test_class_aware_aggregation_assigns_points_once(monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr(aggregation_module, "_assign_points_to_labels", wrapped_assign_points_to_labels)
     aggregate_points(
-        _backed(_class_aware_sdata(), tmp_path),
+        backed_class_aware_sdata,
         labels_name="labels_a",
         points_name="points_a",
         to_coordinate_system="sample_a",
@@ -1704,56 +1596,49 @@ def test_class_aware_aggregation_assigns_points_once(monkeypatch: pytest.MonkeyP
     assert calls == 1
 
 
-@pytest.mark.parametrize(
-    "mutation",
-    [
-        "columns",
-        "pointer",
-        "shape",
-        "missing_summary",
-        "panel",
-        "expression_class",
-        "auxiliary_class",
-    ],
-)
-def test_validate_table_rejects_class_aware_inconsistency(mutation: str, tmp_path):
-    result = aggregate_points(
-        _backed(_class_aware_sdata(), tmp_path),
-        labels_name="labels_a",
-        points_name="points_a",
-        to_coordinate_system="sample_a",
-        output_table_name="table",
-        expression_class="Endogenous",
-    )
-    adata = result.tables["table"]
-    if mutation == "columns":
-        adata.uns["feature_matrices"]["auxiliary_feature_counts"]["feature_columns"] = ["Negative01"]
-    elif mutation == "pointer":
-        adata.uns["feature_class_aggregation"]["auxiliary_feature_matrix_key"] = "missing"
-    elif mutation == "shape":
-        adata.obsm["auxiliary_feature_counts"] = adata.obsm["auxiliary_feature_counts"][:, :-1]
-    elif mutation == "missing_summary":
-        adata.obs.drop(columns="n_negative_points", inplace=True)
-    elif mutation == "panel":
-        features = result.attrs["harpy"]["feature_panels"]["feature_panel_test"]["features_by_class"]["Negative"]
-        features.append("NegativeAddedLater")
-        features.sort()
-    elif mutation == "expression_class":
-        adata.var_names = pd.Index(["Negative01", "GeneB", "GeneZero"], name="gene")
-    else:
-        adata.uns["feature_matrices"]["auxiliary_feature_counts"]["feature_columns"] = [
-            "GeneA",
-            "Negative02",
-            "NegativeZero",
-            "SystemControl1",
-        ]
+def test_class_aware_contract_rejects_classes_with_colliding_matrix_keys(class_aware_panel):
+    panel = class_aware_panel
+    panel["classes"] = ["Endogenous", "Negative", "System Control", "SystemControl"]
+    panel["features_by_class"]["System Control"] = ["SystemControl2"]
 
-    with pytest.raises(ValueError):
-        validate_table(result, "table")
+    with pytest.raises(ValueError, match="colliding .obsm keys"):
+        _FeatureClassAggregationContract(
+            panel=aggregation_module._parse_feature_panel(panel, panel_name="colliding"),
+            expression_class="Endogenous",
+        )
 
 
-def test_class_aware_contract_requires_an_auxiliary_class():
-    panel = deepcopy(_PANEL)
+def test_class_aware_aggregation_rejects_a_reserved_matrix_key_before_assignment(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+    class_aware_sdata,
+):
+    sdata = class_aware_sdata
+    panel = sdata.attrs["harpy"]["feature_panels"]["feature_panel_test"]
+    panel["classes"] = ["Endogenous", "Negative", "Spatial"]
+    panel["features_by_class"]["Spatial"] = panel["features_by_class"].pop("SystemControl")
+    points = sdata.points["points_a"].compute()
+    points["code_class"] = points["code_class"].cat.rename_categories({"SystemControl": "Spatial"})
+    sdata.points["points_a"] = PointsModel.parse(points, transformations={"sample_a": Identity()})
+    sdata = _backed(sdata, tmp_path)
+
+    def fail(*args, **kwargs):
+        raise AssertionError("Spatial assignment started before the non-expression class matrix keys were checked.")
+
+    monkeypatch.setattr(aggregation_module, "_assign_points_to_labels", fail)
+    with pytest.raises(ValueError, match=r"reserved .obsm keys: \[\('Spatial', 'spatial'\)\]"):
+        aggregate_points(
+            sdata,
+            labels_name="labels_a",
+            points_name="points_a",
+            to_coordinate_system="sample_a",
+            output_table_name="table",
+            expression_class="Endogenous",
+        )
+
+
+def test_class_aware_contract_requires_a_non_expression_class(class_aware_panel):
+    panel = class_aware_panel
     panel["classes"] = ["Endogenous"]
     panel["features_by_class"] = {"Endogenous": panel["features_by_class"]["Endogenous"]}
 
@@ -1767,11 +1652,13 @@ def test_class_aware_contract_requires_an_auxiliary_class():
 def test_class_aware_aggregation_rejects_source_points_before_assignment(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
+    class_aware_sdata,
+    class_aware_panel,
 ):
-    sdata = _class_aware_sdata()
+    sdata = class_aware_sdata
     points = sdata.points["points_a"].compute()
     points.loc[len(points)] = [4, 4, "Unknown", "Endogenous"]
-    points["code_class"] = points["code_class"].astype(pd.CategoricalDtype(categories=_PANEL["classes"]))
+    points["code_class"] = points["code_class"].astype(pd.CategoricalDtype(categories=class_aware_panel["classes"]))
     sdata.points["points_a"] = PointsModel.parse(points, transformations={"sample_a": Identity()})
     sdata = _backed(sdata, tmp_path)
 
@@ -1790,8 +1677,8 @@ def test_class_aware_aggregation_rejects_source_points_before_assignment(
         )
 
 
-def test_class_aware_aggregation_restores_unknown_dask_categories(tmp_path):
-    sdata = _backed(_class_aware_sdata(), tmp_path)
+def test_class_aware_aggregation_restores_unknown_dask_categories(backed_class_aware_sdata):
+    sdata = backed_class_aware_sdata
     points = sdata.points["points_a"]
     points = points.assign(code_class=points["code_class"].cat.as_unknown())
     sdata.points["points_a"] = PointsModel.parse(points, transformations={"sample_a": Identity()})
@@ -1805,12 +1692,13 @@ def test_class_aware_aggregation_restores_unknown_dask_categories(tmp_path):
         expression_class="Endogenous",
     )
 
-    assert sorted(result.tables["table"].obs["n_negative_points"].to_list()) == [1, 1, 1]
+    negative = result.tables["table"].obsm["negative"].to_memory()
+    assert sorted(np.asarray(negative.sum(axis=1)).ravel().tolist()) == [1, 1, 1]
 
 
-def test_aggregation_preserves_custom_table_annotation_keys(tmp_path):
+def test_aggregation_preserves_custom_table_annotation_keys(backed_class_aware_sdata):
     result = aggregate_points(
-        _backed(_class_aware_sdata(), tmp_path),
+        backed_class_aware_sdata,
         labels_name="labels_a",
         points_name="points_a",
         to_coordinate_system="sample_a",
@@ -1825,9 +1713,9 @@ def test_aggregation_preserves_custom_table_annotation_keys(tmp_path):
     assert result.tables["table"].obs.index.name == "instance_index"
 
 
-def test_aggregation_accepts_an_explicit_table_index_name(tmp_path):
+def test_aggregation_accepts_an_explicit_table_index_name(backed_class_aware_sdata):
     result = aggregate_points(
-        _backed(_class_aware_sdata(), tmp_path),
+        backed_class_aware_sdata,
         labels_name="labels_a",
         points_name="points_a",
         to_coordinate_system="sample_a",
@@ -1839,11 +1727,11 @@ def test_aggregation_accepts_an_explicit_table_index_name(tmp_path):
     assert read_zarr(result.path).tables["table"].obs.index.name == "observations"
 
 
-@pytest.mark.parametrize("table_index_name", ["", _INSTANCE_KEY, _REGION_KEY, "auxiliary_points_fraction"])
-def test_aggregation_rejects_an_invalid_table_index_name(tmp_path, table_index_name: str):
+@pytest.mark.parametrize("table_index_name", ["", _INSTANCE_KEY, _REGION_KEY])
+def test_aggregation_rejects_an_invalid_table_index_name(backed_class_aware_sdata, table_index_name: str):
     with pytest.raises(ValueError, match="table_index_name"):
         aggregate_points(
-            _backed(_class_aware_sdata(), tmp_path),
+            backed_class_aware_sdata,
             labels_name="labels_a",
             points_name="points_a",
             to_coordinate_system="sample_a",
@@ -1852,23 +1740,10 @@ def test_aggregation_rejects_an_invalid_table_index_name(tmp_path, table_index_n
         )
 
 
-def test_class_aware_aggregation_rejects_a_table_index_name_colliding_with_a_summary(tmp_path):
-    with pytest.raises(ValueError, match="Generated feature-class columns collide"):
-        aggregate_points(
-            _backed(_class_aware_sdata(), tmp_path),
-            labels_name="labels_a",
-            points_name="points_a",
-            to_coordinate_system="sample_a",
-            output_table_name="table",
-            expression_class="Endogenous",
-            table_index_name="n_negative_points",
-        )
-
-
-def test_aggregation_rejects_matching_feature_and_instance_keys(tmp_path):
+def test_aggregation_rejects_matching_feature_and_instance_keys(backed_class_aware_sdata):
     with pytest.raises(ValueError, match="feature_key.*instance_key.*different"):
         aggregate_points(
-            _backed(_class_aware_sdata(), tmp_path),
+            backed_class_aware_sdata,
             labels_name="labels_a",
             points_name="points_a",
             to_coordinate_system="sample_a",
@@ -1878,17 +1753,19 @@ def test_aggregation_rejects_matching_feature_and_instance_keys(tmp_path):
         )
 
 
-def test_class_aware_aggregation_rejects_instance_key_matching_feature_class_key(tmp_path):
-    with pytest.raises(ValueError, match="feature_class_key=.*must differ from instance_key"):
-        aggregate_points(
-            _backed(_class_aware_sdata(), tmp_path),
-            labels_name="labels_a",
-            points_name="points_a",
-            to_coordinate_system="sample_a",
-            output_table_name="table",
-            expression_class="Endogenous",
-            instance_key="code_class",
-        )
+def test_class_aware_aggregation_accepts_instance_key_matching_feature_class_key(backed_class_aware_sdata):
+    """The class column is not carried through assignment, so the label-ID column cannot collide with it."""
+    result = aggregate_points(
+        backed_class_aware_sdata,
+        labels_name="labels_a",
+        points_name="points_a",
+        to_coordinate_system="sample_a",
+        output_table_name="table",
+        expression_class="Endogenous",
+        instance_key="code_class",
+    )
+
+    assert sorted(result.tables["table"].obs["code_class"].to_list()) == [1, 2, 3]
 
 
 @pytest.mark.parametrize(
@@ -1907,8 +1784,10 @@ def test_class_aware_aggregation_rejects_invalid_panel_contract_before_assignmen
     message: str,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
+    class_aware_sdata,
+    class_aware_panel,
 ):
-    sdata = _class_aware_sdata()
+    sdata = class_aware_sdata
     if mutation == "missing_reference":
         del sdata.attrs["harpy"]["points"]["points_a"]["feature_panel"]
     elif mutation == "missing_panel":
@@ -1922,7 +1801,7 @@ def test_class_aware_aggregation_rejects_invalid_panel_contract_before_assignmen
     elif mutation == "unsorted_features":
         sdata.attrs["harpy"]["feature_panels"]["feature_panel_test"]["features_by_class"]["Endogenous"].reverse()
     else:
-        incompatible = deepcopy(_PANEL)
+        incompatible = class_aware_panel
         incompatible["features_by_class"]["Endogenous"].append("GeneC")
         incompatible["features_by_class"]["Endogenous"].sort()
         sdata.attrs["harpy"]["feature_panels"]["feature_panel_other"] = incompatible
@@ -1952,86 +1831,6 @@ def _backed(sdata: SpatialData, tmp_path, *, name: str = "input.zarr") -> Spatia
 
 def _to_memory(matrix):
     return matrix.to_memory() if isinstance(matrix, CSRDataset) else matrix
-
-
-def _class_aware_sdata() -> SpatialData:
-    labels_a = Labels2DModel.parse(
-        np.array(
-            [
-                [1, 1, 0, 2, 2],
-                [1, 1, 0, 2, 2],
-                [3, 3, 0, 4, 4],
-            ],
-            dtype=np.uint32,
-        ),
-        dims=("y", "x"),
-        transformations={"sample_a": Identity()},
-    )
-    labels_b = Labels2DModel.parse(
-        np.array([[1, 1], [1, 1]], dtype=np.uint32),
-        dims=("y", "x"),
-        transformations={"sample_b": Identity()},
-    )
-    categories = pd.CategoricalDtype(categories=_PANEL["classes"])
-    points_a = pd.DataFrame(
-        {
-            "x": [0, 1, 1, 0, 3, 4, 0],
-            "y": [0, 1, 0, 1, 0, 1, 2],
-            "gene": [
-                "GeneA",
-                "GeneA",
-                "Negative01",
-                "SystemControl1",
-                "GeneB",
-                "Negative02",
-                "Negative01",
-            ],
-            "code_class": pd.Series(
-                [
-                    "Endogenous",
-                    "Endogenous",
-                    "Negative",
-                    "SystemControl",
-                    "Endogenous",
-                    "Negative",
-                    "Negative",
-                ],
-                dtype=categories,
-            ),
-        }
-    )
-    points_b = pd.DataFrame(
-        {
-            "x": [0, 1, 1],
-            "y": [0, 0, 1],
-            "gene": ["GeneB", "SystemControl1", "SystemControl1"],
-            "code_class": pd.Series(["Endogenous", "SystemControl", "SystemControl"], dtype=categories),
-        }
-    )
-    panel_name = "feature_panel_test"
-    return SpatialData(
-        labels={"labels_a": labels_a, "labels_b": labels_b},
-        points={
-            "points_a": PointsModel.parse(
-                dd.from_pandas(points_a, npartitions=2),
-                transformations={"sample_a": Identity()},
-            ),
-            "points_b": PointsModel.parse(
-                dd.from_pandas(points_b, npartitions=1),
-                transformations={"sample_b": Identity()},
-            ),
-        },
-        attrs={
-            "harpy": {
-                "metadata_version": 1,
-                "points": {
-                    "points_a": {"feature_panel": panel_name},
-                    "points_b": {"feature_panel": panel_name},
-                },
-                "feature_panels": {panel_name: deepcopy(_PANEL)},
-            }
-        },
-    )
 
 
 def test_bin_counts(
