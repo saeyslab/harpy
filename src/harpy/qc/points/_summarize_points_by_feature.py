@@ -164,6 +164,16 @@ def summarize_points_by_feature(
         features.spatial_counts.sel(feature="EPCAM")
         features.spatial_bins.per_feature
         hp.qc.spatial_bin_histogram_by_feature(features, feature="EPCAM")
+
+        # Every probe of one control class, named from the reference summary.
+        summary = hp.qc.summarize_points(
+            sdata, "transcripts", feature_classes=["Endogenous", "Negative"], bin_size=10,
+            to_coordinate_system="sample_micron", microns_per_unit=1.0,
+        )
+        per_feature = summary.per_feature
+        negative = per_feature.loc[per_feature["feature_class"] == "Negative", "feature"].tolist()
+        controls = hp.qc.summarize_points_by_feature(sdata, summary=summary, features=negative)
+        controls.spatial_bins.per_feature  # one row per negative probe
     """
     if not isinstance(summary, PointsSummary):
         raise TypeError("summary must be a PointsSummary returned by hp.qc.summarize_points().")

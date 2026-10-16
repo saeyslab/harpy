@@ -39,7 +39,8 @@ class PointsSummary:
         ``within_class_fraction``: this feature's point count divided by the
         total point count of its own class, after selection. Values range
         from 0 to 1; NaN when the class has no points. Statistics per spatial
-        bin are not computed per feature; for selected features,
+        bin are not computed per feature, as that would need the count of
+        every panel feature in every bin; for selected features,
         :func:`harpy.qc.summarize_points_by_feature` computes them over the
         same retained bins.
     per_class
