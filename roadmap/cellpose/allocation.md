@@ -9321,10 +9321,13 @@ selected regions.
   per region, with the per-instance distribution, for named features.
 - **Deliberately richer than the points side:** `PointsSummary.per_feature`
   gives every feature only `n_points` and `within_class_fraction`, without
-  statistics per spatial bin, which would need a bin grid per feature for
-  every feature; `summarize_points_by_feature` gives them for named features
-  only. Here the instance statistics of every feature cost only accumulators
-  in the pass that the class sums already make, so `per_feature` has them. At
+  statistics per spatial bin, which would need the count of every feature in
+  every bin, merged across point partitions, so that memory grows with the
+  distinct pairs of feature and bin; `summarize_points_by_feature` gives them
+  for named features only. A table's count matrix already holds the count of
+  every feature per instance, so here the instance statistics of every
+  feature cost only accumulators in the pass that the class sums already
+  make, and `per_feature` has them. At
   the class level and for named features, both sides have the same
   statistics.
 - **Compared with scanpy:** `sc.pp.calculate_qc_metrics` gives these for `X`
@@ -9467,7 +9470,11 @@ The docstring lists the columns of `per_feature` and `per_region_feature` the
 same way, with their counterparts among the `var` columns of
 `sc.pp.calculate_qc_metrics` (see the table above), and says where the names
 of an `.obsm` matrix come from: the registry `uns[feature_matrices_key]`, or
-`feature_names` for an unregistered matrix.
+`feature_names` for an unregistered matrix. It also states that, unlike
+`PointsSummary.per_feature`, `per_feature` has per-instance statistics for
+every feature, because they come from the pass that the class sums already
+make; the docstring of `PointsSummary.per_feature` gives the converse reason,
+the count of every panel feature in every bin.
 
 The names keep the points vocabulary of `PointsSummary` and the naming rule of
 Slice 11l rather than copying scanpy's names: the same name with a different
