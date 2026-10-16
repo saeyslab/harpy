@@ -33,7 +33,12 @@ from harpy.table.canonical_centers import (
 from harpy.utils._keys import _FEATURE_MATRICES_KEY
 
 
-def validate_table(sdata: SpatialData, table_name: str) -> None:
+def validate_table(
+    sdata: SpatialData,
+    table_name: str,
+    *,
+    feature_matrices_key: str = _FEATURE_MATRICES_KEY,
+) -> None:
     """Validate a SpatialData table and recognized Harpy table metadata.
 
     The validator is read-only and independent from table construction. It
@@ -43,9 +48,10 @@ def validate_table(sdata: SpatialData, table_name: str) -> None:
     - the annotation, when present: the region and instance columns exist
       without missing values, ``(region, instance)`` pairs are unique, and the
       declared regions equal the observed ones and exist in ``sdata``;
-    - every matrix registered in ``adata.uns["feature_matrices"]``: it exists
-      in ``adata.obsm`` with one row per observation, and its
-      ``feature_columns`` name each of its columns once; and
+    - every matrix registered in ``adata.uns[feature_matrices_key]``: it
+      exists in ``adata.obsm`` under the same key with one row per
+      observation, and its ``feature_columns`` name each of its columns once;
+      and
     - the canonical centers, when present.
 
     A class-aware table from :func:`harpy.tb.aggregate_points` is validated as
@@ -70,6 +76,14 @@ def validate_table(sdata: SpatialData, table_name: str) -> None:
         which its metadata refers. It may be backed or in memory.
     table_name
         Name of the table element to validate.
+    feature_matrices_key
+        Key in ``adata.uns`` of the feature-matrix registry to validate. Each
+        record ``adata.uns[feature_matrices_key][name]`` describes the matrix
+        ``adata.obsm[name]``; the shared name is their only link. The default,
+        ``"feature_matrices"``, is where :func:`harpy.tb.aggregate_points` and
+        :func:`harpy.tb.add_feature_matrix` write their records. Only this
+        registry is checked: ``adata.obsm`` matrices without a record, and
+        registries under other keys, are not validated.
 
     Raises
     ------
@@ -85,8 +99,11 @@ def validate_table(sdata: SpatialData, table_name: str) -> None:
     .. code-block:: python
 
         hp.tb.validate_table(sdata, "table")
+
+        # A registry written by add_feature_matrix under a custom key.
+        hp.tb.validate_table(sdata, "table", feature_matrices_key="custom_feature_matrices")
     """
-    annotation = _validate_table_without_canonical(sdata, table_name)
+    annotation = _validate_table_without_canonical(sdata, table_name, feature_matrices_key=feature_matrices_key)
     adata = sdata.tables[table_name]
     has_canonical_component = CANONICAL_OBSM_KEY in adata.obsm or (
         isinstance(adata.uns.get(SPATIAL_COORDINATES_KEY), Mapping)
@@ -110,6 +127,8 @@ def validate_table(sdata: SpatialData, table_name: str) -> None:
 def _validate_table_without_canonical(
     sdata: SpatialData,
     table_name: str,
+    *,
+    feature_matrices_key: str = _FEATURE_MATRICES_KEY,
 ) -> tuple[str, str, tuple[str, ...]] | None:
     """Validate the SpatialData table model, annotation and registered feature matrices.
 
@@ -117,6 +136,8 @@ def _validate_table_without_canonical(
     deliberately partial validator excludes ``obsm["spatial_canonical"]`` and
     its matching metadata record. Successful return does not establish complete
     table validity: canonical components must be validated separately.
+    ``feature_matrices_key`` selects the one feature-matrix registry that is
+    checked, as in :func:`validate_table`.
 
     Previously validated contracts need not be checked again when the data and
     metadata they cover remain unchanged.
@@ -131,13 +152,17 @@ def _validate_table_without_canonical(
         raise ValueError(f"Parameter 'sdata' must be a SpatialData object, found {type(sdata).__name__}.")
     if not isinstance(table_name, str) or not table_name:
         raise ValueError(f"Parameter 'table_name' must be a non-empty string, found {table_name!r}.")
+    if not isinstance(feature_matrices_key, str) or not feature_matrices_key:
+        raise ValueError(
+            f"Parameter 'feature_matrices_key' must be a non-empty string, found {feature_matrices_key!r}."
+        )
     if table_name not in sdata.tables:
         raise ValueError(f"Table element {table_name!r} is not present in 'sdata.tables'.")
 
     adata = sdata.tables[table_name]
     TableModel.validate(adata)
     annotation = _validate_table_annotation(sdata, adata, table_name=table_name)
-    _validate_feature_matrices(adata)
+    _validate_feature_matrices(adata, feature_matrices_key=feature_matrices_key)
     return annotation
 
 
@@ -189,10 +214,10 @@ def _validate_table_annotation(
     return region_key, instance_key, regions
 
 
-def _validate_feature_matrices(adata: AnnData) -> Mapping[str, object]:
+def _validate_feature_matrices(adata: AnnData, *, feature_matrices_key: str) -> Mapping[str, object]:
     """Validate generic ``obsm`` feature-matrix registrations.
 
-    Each entry in ``adata.uns["feature_matrices"]`` registers one matrix under
+    Each entry in ``adata.uns[feature_matrices_key]`` registers one matrix under
     the same key in ``adata.obsm``. For every registered matrix, this function
     checks that:
 
@@ -216,13 +241,13 @@ def _validate_feature_matrices(adata: AnnData) -> Mapping[str, object]:
     Mapping[str, object]
         The validated registry.
     """
-    value = adata.uns.get(_FEATURE_MATRICES_KEY)
+    value = adata.uns.get(feature_matrices_key)
     if value is None:
         return {}
-    records = _require_mapping(value, path=_FEATURE_MATRICES_KEY)
+    records = _require_mapping(value, path=feature_matrices_key)
     for matrix_name, record_value in records.items():
-        matrix_name = _require_nonempty_string(matrix_name, path=f"{_FEATURE_MATRICES_KEY} key")
-        record = _require_mapping(record_value, path=f"{_FEATURE_MATRICES_KEY}.{matrix_name}")
+        matrix_name = _require_nonempty_string(matrix_name, path=f"{feature_matrices_key} key")
+        record = _require_mapping(record_value, path=f"{feature_matrices_key}.{matrix_name}")
         if matrix_name not in adata.obsm:
             raise ValueError(f"Feature-matrix metadata references missing adata.obsm[{matrix_name!r}].")
         matrix = adata.obsm[matrix_name]
@@ -232,7 +257,7 @@ def _validate_feature_matrices(adata: AnnData) -> Mapping[str, object]:
             )
         columns = _metadata_string_sequence(
             record.get("feature_columns"),
-            path=f"{_FEATURE_MATRICES_KEY}.{matrix_name}.feature_columns",
+            path=f"{feature_matrices_key}.{matrix_name}.feature_columns",
         )
         if len(columns) != matrix.shape[1]:
             raise ValueError(
@@ -242,12 +267,12 @@ def _validate_feature_matrices(adata: AnnData) -> Mapping[str, object]:
         version = record.get("schema_version")
         if isinstance(version, bool) or not isinstance(version, int) or version != _FEATURE_MATRIX_SCHEMA_VERSION:
             raise ValueError(
-                f"Feature-matrix metadata {_FEATURE_MATRICES_KEY}.{matrix_name}.schema_version must equal "
+                f"Feature-matrix metadata {feature_matrices_key}.{matrix_name}.schema_version must equal "
                 f"{_FEATURE_MATRIX_SCHEMA_VERSION}, found {version!r}."
             )
         _require_nonempty_string(
             record.get("source_kind"),
-            path=f"{_FEATURE_MATRICES_KEY}.{matrix_name}.source_kind",
+            path=f"{feature_matrices_key}.{matrix_name}.source_kind",
         )
     return records
 
