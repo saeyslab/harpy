@@ -86,6 +86,12 @@ spatial_coordinates["spatial_canonical"]
                                    → adata.obsm["spatial_canonical"]
 ```
 
+Each `feature_matrices` record describes the `.obsm` matrix with the same
+key; the shared key is their only link. `feature_matrices` is the default
+`.uns` key of this registry: `hp.tb.add_feature_matrix` can write its record
+under another key, and `hp.tb.validate_table` checks only the registry named
+by its `feature_matrices_key`.
+
 `feature_columns` identifies the columns of an `.obsm` feature matrix;
 `feature_key` names a source points column. They have different roles.
 Expression-matrix columns are identified by `adata.var_names`.
