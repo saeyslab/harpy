@@ -8915,9 +8915,11 @@ result and reuse it for several plots, without writing derived columns to
   aggregation record, `uns["point_aggregation"]`, which `aggregate_points`
   writes in both modes (Slice 11i), copied for the selected regions into the
   summary's metadata as provenance, which the computation does not need. Class labels are the names of the matrices read,
-  not fields of a record. The feature names of `.obsm` matrices are not
-  needed either: totals, detected features and denominators need only the
-  number of columns; names matter only to Slice 11k.
+  not fields of a record. Feature names label the rows of `per_feature` and
+  `per_region_feature`: `var_names` for `X` or the layer, and for an `.obsm`
+  matrix the `feature_columns` that the registry `uns[feature_matrices_key]`
+  holds for it or, for an unregistered matrix, the names that the caller
+  passes in `feature_names`.
 - **Upstream assignment is not repeated:** an earlier `aggregate_points` call
   may have created the table by assigning points to a segmentation-label
   raster. `summarize_table` does not call it again, look up labels at point
@@ -8934,9 +8936,12 @@ disk access is needed.
 1. `summarize_table`, `TableSummary` and `TableSummaryMetadata` from the count
    matrices, with tests on dummy tables: in memory, lazy and backed; `X`
    alone, `X` with class matrices, a layer, and class matrices without `X`;
-   with region selection; plus the errors. This redoes step 1 as implemented from `.obs`:
+   registered and supplied `.obsm` feature names, including a registry under a
+   custom `feature_matrices_key`; with region selection; plus
+   the errors. This redoes step 1 as implemented from `.obs`:
    `TableSummary`, its metadata, the region selection, `per_class`,
-   `per_region`, the shared statistics helper and most tests carry over.
+   `per_region`, the shared statistics helper and most tests carry over;
+   `per_feature` and `per_region_feature` are new.
 2. `instance_histogram` and `instance_scatter`, including moving
    `obs_scatter`'s rendering into a shared dataframe-based helper.
 3. Docs: the new functions in the Quality Control → Tables section of
@@ -9006,6 +9011,8 @@ def summarize_table(
     *,
     layer: str | None = None,
     obsm_keys: str | Sequence[str] = (),
+    feature_names: Mapping[str, Sequence[str]] | None = None,
+    feature_matrices_key: str = "feature_matrices",
     region: str | Sequence[str] | None = None,
 ) -> TableSummary:
 ```
@@ -9021,7 +9028,31 @@ def summarize_table(
   example the class matrices of Slice 11i. Each must be two-dimensional with
   one row per observation. Unknown keys raise and list the available ones.
   Empty by default, which summarizes `X` alone. The keys are not inferred from
-  `uns["feature_matrices"]`: the caller names what to summarize.
+  the registry `uns[feature_matrices_key]`: the caller names what to
+  summarize.
+- **`feature_names`** maps an `.obsm` key of `obsm_keys` to the names of that
+  matrix's columns, for a matrix whose names `uns[feature_matrices_key]` does
+  not register. Each matrix has one source of names: a registered matrix
+  takes its `feature_columns`, and
+  names passed for it raise, as do names for a key not in `obsm_keys`; an
+  unregistered matrix without names raises, as its rows of `per_feature`
+  could not be named. Registered or passed, the names must be a non-empty
+  sequence of unique strings, as many as the matrix's columns. This is
+  checked from metadata only, without reading the matrix, through the
+  per-record part of `_validate_feature_matrices`
+  (`src/harpy/table/_validation.py`), factored out and applied to the
+  matrices read only, so that a broken, unrelated registry entry does not
+  stop the summary. `X` and the layer are named by their `var_names`.
+- **`feature_matrices_key`** names the `.uns` registry from which the `.obsm`
+  matrices read take their registered `feature_columns`: `"feature_matrices"`
+  by default, where `aggregate_points` and, by default, `add_feature_matrix`
+  register their matrices; the same keyword, with the same default, as
+  `hp.tb.validate_table` and `hp.tb.add_feature_matrix`. One registry is read
+  per call: a matrix registered under another key is unregistered for this
+  call, and is summarized by passing that key or its names in
+  `feature_names`. A key that is not a non-empty string raises, as in
+  `validate_table`; a key absent from `.uns` leaves every `.obsm` matrix
+  unregistered.
 - **`region`** selects the annotated elements to summarize, in SpatialData's
   sense: the names in `uns["spatialdata_attrs"]["region"]`, whose rows the
   table identifies through `obs[region_key]`. `None` selects every region the
@@ -9128,7 +9159,7 @@ summary describes counts that it can verify.
 
 ### Return contract: `TableSummary`
 
-Return a result container with one metadata record and three dataframes:
+Return a result container with one metadata record and five dataframes:
 
 ```python
 @dataclass(frozen=True)
@@ -9137,7 +9168,9 @@ class TableSummaryMetadata:
     region: tuple[str, ...]  # selected regions, resolved from None
     layer: str | None  # the matrix aligned with var that was read; None for X
     obsm_keys: tuple[str, ...]  # the .obsm matrices read
+    feature_matrices_key: str  # the .uns registry read for the names of .obsm matrices
     feature_classes: tuple[str, ...]  # the class labels, in result order
+    feature_names: Mapping[str, tuple[str, ...]]  # class label -> its feature names, in column order
     points_name_by_region: Mapping[str, str]  # from the aggregation record, when present
     panel_feature_counts: Mapping[str, int]  # class label -> its number of features in the matrices read
 
@@ -9148,6 +9181,8 @@ class TableSummary:
     per_instance: pd.DataFrame
     per_class: pd.DataFrame
     per_region: pd.DataFrame
+    per_feature: pd.DataFrame
+    per_region_feature: pd.DataFrame
 ```
 
 **One metadata owner,** as `PointsSummary` has `PointsSummaryMetadata`: the
@@ -9157,14 +9192,19 @@ dictionary copies, so later changes to the table do not affect them; they are
 not read-only views (`MappingProxyType`), which cannot be pickled or
 deep-copied, so that a summary can be copied and saved.
 
-- **`table_name`, `region`, `layer` and `obsm_keys`** record the inputs, the
-  regions resolved from `None`. Slice 11k reads the same matrices through
-  them.
+- **`table_name`, `region`, `layer`, `obsm_keys` and `feature_matrices_key`**
+  record the inputs, the regions resolved from `None`. Slice 11k reads the
+  same matrices through them.
 - **`feature_classes`** are the class labels, in the order of the results:
   the names of the matrices read, as `layer` and `obsm_keys` give them. No
   expression class is recorded, as no
   record holds one (Slice 11i); on a table from `aggregate_points`, `X` holds
   the expression class chosen at aggregation.
+- **`feature_names`** are each class's feature names, in column order:
+  `var_names` for `X` or the layer, and for an `.obsm` matrix its names in
+  `uns[feature_matrices_key]` or those passed (see `feature_names` above).
+  They name the rows of `per_feature` and `per_region_feature`, and Slice 11k
+  looks requested features up in them.
 - **`points_name_by_region`** maps each selected region to the points element
   aggregated into it, from the aggregation record's `regions`, which
   `aggregate_points` writes because SpatialData's table annotation knows only
@@ -9241,6 +9281,57 @@ place of bins:
 - **Names:** not `mean_points_per_feature`, which `PointsSummary.per_class`
   already uses for the mean over a panel's features, a different population.
 
+**`per_feature`: one row per feature of each class read,** pooled over the
+selected regions, as `PointsSummary.per_feature` has one row per panel
+feature, features without points included; in the order of the classes, then
+of each matrix's columns. Its population is the retained instances, zeros
+included, as for `per_class`. The columns follow
+`FeatureTableSummary.per_feature` of Slice 11k, without its median and p95:
+
+| Columns                                                                          | Meaning                                                                                                 | `sc.pp.calculate_qc_metrics`, `var`                                                               |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `feature`, `feature_class`                                                       | the feature's name, from `metadata.feature_names`, and the label of its matrix                          | —                                                                                                 |
+| `n_points`                                                                       | the feature's points over the retained instances                                                        | `total_counts`                                                                                    |
+| `within_class_fraction`                                                          | `n_points` / the class's points, NaN when the class has none, as in `PointsSummary.per_feature`         | —                                                                                                 |
+| `n_retained_instances_without_feature`, `pct_retained_instances_without_feature` | retained instances with zero points of the feature, and 100 × that count / retained                     | `n_cells_by_counts` is the retained instances minus the first; `pct_dropout_by_counts` the second |
+| `mean_points_per_instance`, `std_points_per_instance`                            | the feature's points per retained instance; SD with `ddof=1`, NaN for fewer than two retained instances | `mean_counts`; no SD                                                                              |
+
+**`per_region_feature`: one row per selected region and feature,** with a
+categorical `region` column: the columns of `per_feature`, computed within
+each region, as `per_region` holds the statistics of `per_class` per region;
+in the order of the selected regions, then of `per_feature`. Within a region,
+the retained instances are those of that region, and `within_class_fraction`
+is relative to the class's points in that region. With one selected region,
+`per_feature` and `per_region_feature` have the same values. It answers which
+feature differs between samples, such as a negative probe that is noisy in
+one sample only. Its size is the number of features times the number of
+selected regions.
+
+- **The same pass:** the column sums, the counts of rows with a feature and
+  the column sums of squares accumulate per region in the blockwise pass that
+  sums the classes: each row block adds to the accumulators of its rows'
+  regions, from the region codes in `.obs`. `per_region_feature` follows from
+  these sums, and `per_feature` from their totals over the regions, so
+  neither needs a second read; the mean and SD follow from the sums. Excluded
+  rows have no points in any class read, so they add nothing to the sums, and
+  only the region mask, known from `.obs`, selects rows before the pass.
+- **No median or p95:** an exact median or p95 per feature needs each
+  column's distribution, which the row-block pass does not keep, and for
+  sparse features the median is mostly 0. Slice 11k gives them, pooled and
+  per region, with the per-instance distribution, for named features.
+- **Deliberately richer than the points side:** `PointsSummary.per_feature`
+  gives every feature only `n_points` and `within_class_fraction`, without
+  statistics per spatial bin, which would need a bin grid per feature for
+  every feature; `summarize_points_by_feature` gives them for named features
+  only. Here the instance statistics of every feature cost only accumulators
+  in the pass that the class sums already make, so `per_feature` has them. At
+  the class level and for named features, both sides have the same
+  statistics.
+- **Compared with scanpy:** `sc.pp.calculate_qc_metrics` gives these for `X`
+  or a layer over all rows; this summary also gives them for the `.obsm`
+  class matrices, which scanpy does not read, such as one noisy negative
+  probe, over the retained instances of the selected regions, and per region.
+
 Do not use ambiguous metric names or imply that `per_class` has the same
 statistical population in both summary types. Labels and result columns must
 distinguish points **per target**, **per spatial bin**, and **per instance**.
@@ -9257,8 +9348,10 @@ built on it attach theirs with lazy matrices. `summarize_table` works on
 in-memory, lazy and backed tables alike, and reads only the matrices passed:
 
 1. **One blockwise pass:** each matrix is read in row blocks, and per block
-   the per-row sums and detected-feature counts of each class and the value
-   check are computed, so that memory stays bounded. A lazy table runs one
+   the per-row sums and detected-feature counts of each class, the per-region
+   column sums, detection counts and sums of squares of `per_region_feature`
+   and `per_feature`, and the value check are computed, so that memory stays
+   bounded. A lazy table runs one
    Dask compute for all matrices; a backed table reads its CSR datasets in row
    slices. Independence from `.obs` costs this one pass, as
    `sc.pp.calculate_qc_metrics` does.
@@ -9271,7 +9364,9 @@ in-memory, lazy and backed tables alike, and reads only the matrices passed:
    computed sums.
 3. **It validates what it uses:** there is at least one matrix to read; the
    layer and the `.obsm` keys exist; each
-   `.obsm` matrix has one row per observation; labels do not coincide; the
+   `.obsm` matrix has one row per observation and one source of valid feature
+   names; `feature_matrices_key` is a non-empty string; labels do not
+   coincide; the
    values are
    counts; and the selected regions are annotated. Region selections are
    checked as `summarize_points` checks its classes: a name or a sequence of
@@ -9368,6 +9463,12 @@ per_instance
     its own matrix, and the percentages are relative to all classes read.
 ```
 
+The docstring lists the columns of `per_feature` and `per_region_feature` the
+same way, with their counterparts among the `var` columns of
+`sc.pp.calculate_qc_metrics` (see the table above), and says where the names
+of an `.obsm` matrix come from: the registry `uns[feature_matrices_key]`, or
+`feature_names` for an unregistered matrix.
+
 The names keep the points vocabulary of `PointsSummary` and the naming rule of
 Slice 11l rather than copying scanpy's names: the same name with a different
 meaning would mislead, and `n_genes_by_counts` reads oddly for control
@@ -9408,9 +9509,27 @@ Focused tests should establish that:
   denominator; `per_class` pools the selected regions and equals `per_region`
   for a single region; rate statistics equal the count statistics divided by
   `n_features`;
+- `per_feature` has one row per feature of each class read, in class and
+  column order, features without points included; its `n_points` equal the
+  column sums over the retained instances, its instances without the feature
+  the retained instances with a zero entry, `within_class_fraction` the
+  feature's share of its class's points, and its mean and SD those of the
+  column over the retained instances, all from the one pass;
+- `per_region_feature` holds the columns of `per_feature` within each
+  selected region, over that region's retained instances; it equals
+  `per_feature` for a single region, and its point counts add up over the
+  regions to those of `per_feature`;
+- an `.obsm` matrix is named by its entry in `uns[feature_matrices_key]` or by
+  `feature_names`; a matrix registered under a custom key is named through
+  that `feature_matrices_key`, and is unregistered under the default one;
+  names passed for a registered matrix or for a key not read, an
+  unregistered matrix without names, names that are empty, duplicate or
+  differ in number from the matrix's columns, and a `feature_matrices_key`
+  that is not a non-empty string raise a `ValueError`, without a matrix read;
 - `TableSummary.metadata` records the table, the regions resolved from `None`,
-  the matrices read, the class labels and the denominators, and, from the
-  aggregation record when present, the source points element of each region;
+  the matrices read, the registry key, the class labels, their feature names
+  and the denominators, and, from the aggregation record when present, the
+  source points element of each region;
 - a table without an aggregation record, or whose annotated labels and points
   elements are absent from `sdata`, is summarized all the same, and nothing
   from `sdata.attrs` is read;
@@ -9460,8 +9579,8 @@ feature_summary = hp.qc.summarize_table_by_feature(
 hp.qc.instance_histogram_by_feature(feature_summary, feature="Negative01")
 ```
 
-- **Signature:** `summarize_table_by_feature(sdata, *, summary, features,
-feature_names=None) -> FeatureTableSummary`, as
+- **Signature:** `summarize_table_by_feature(sdata, *, summary, features)
+-> FeatureTableSummary`, as
   `summarize_points_by_feature(sdata, *, summary, features, ...)`. The table,
   the regions, the matrices read and the retained instances come from
   `summary`: the instance population is inherited, as `FeaturePointsSummary`
@@ -9469,23 +9588,26 @@ feature_names=None) -> FeatureTableSummary`, as
   An instance retained for its endogenous points contributes a zero to a
   negative probe it did not receive.
 - **`features`:** an exact name or a non-empty sequence of distinct names,
-  found in the matrices that `summary` read: features of `X` or the layer in
-  its `var_names`, features of an `.obsm` matrix among its names (below).
+  found among the feature names that `summary` resolved,
+  `summary.metadata.feature_names`: the `var_names` of `X` or the layer, and
+  the registered or passed names of each `.obsm` matrix (Slice 11j).
   Unknown names raise; a name found in two matrices raises as ambiguous.
   Results keep the order of the summary's classes and then the matrix's
   column order, not the request order. Undetected features keep their zeros.
-- **`feature_names`:** a mapping from `.obsm` key to the names of that
-  matrix's columns, for matrices whose names are not registered. Otherwise
-  each matrix's names are its `uns["feature_matrices"][key]["feature_columns"]`,
-  as `aggregate_points` and `add_feature_matrix` write them. An `.obsm` matrix
-  of the summary without names from either source raises, as a requested name
-  could not be ruled out of it.
+- **Names from the summary:** this call takes no names of its own. Slice 11j
+  resolves each matrix's names once, from `var_names`, the registry
+  `uns[feature_matrices_key]` or its `feature_names` parameter, and records
+  them in the summary's metadata, so that the names and the population come
+  from the same call.
 - **Each feature's class** is the class of the matrix it is in, the label that
   the summary gave that matrix. No feature panel is read.
-- **No large frames:** only the requested features are summarized, as on the
-  points side, so there is no frame with statistics for every gene. For all
-  genes of the expression class, `sc.pp.calculate_qc_metrics` already gives
-  per-gene metrics.
+- **No large frames:** only the requested features are summarized per
+  instance, as on the points side, so there is no frame of every feature
+  times every instance. The totals, instances without the feature, mean and
+  SD of every feature, pooled and per region, are already in
+  `TableSummary.per_feature` and `per_region_feature` (Slice 11j); this slice
+  adds the median and the p95, pooled and per region, and the per-instance
+  distribution, for the named features.
 
 **Return contract: `FeatureTableSummary`,** as `FeaturePointsSummary`:
 
@@ -9517,13 +9639,10 @@ feature_names=None) -> FeatureTableSummary`, as
   matrices from which the population was computed. A requested feature of `X`
   missing from its `var_names`, for example after a subset to highly variable
   genes, raises.
-- **The names of an `.obsm` matrix, checked from metadata only,** which needs
-  no matrix read on a lazy or backed table: a non-empty sequence of unique
-  strings, as many as the matrix's columns. For registered names, the
-  per-record part of `_validate_feature_matrices`
-  (`src/harpy/table/_validation.py`) is factored out and reused for the
-  matrices read only, so that a broken, unrelated feature matrix does not stop
-  the summary.
+- **The names still fit the matrices,** checked from metadata only, which
+  needs no matrix read on a lazy or backed table: Slice 11j checked the names
+  when it resolved them, and as the table may have changed since, each matrix
+  read must still have as many columns as the summary's names for it.
 
   No metadata check can detect matrix columns reordered without reordering
   their names: names and values then disagree while every shape agrees, and
