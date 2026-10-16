@@ -105,6 +105,11 @@ def add_canonical_centers(
     saved store-root metadata without requiring consolidation to succeed again;
     crash recovery and concurrent-access isolation are not provided.
 
+    Before calculation, the table is checked as :func:`harpy.tb.validate_table`
+    checks it, apart from the canonical components, with the default
+    feature-matrix registry ``adata.uns["feature_matrices"]``. Registries under
+    other keys are not checked.
+
     Parameters
     ----------
     sdata
