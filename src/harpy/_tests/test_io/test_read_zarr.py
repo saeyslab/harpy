@@ -191,8 +191,8 @@ def test_reopens_aggregation_tables(tmp_path, monkeypatch, class_aware):
 
     ``aggregate_points`` creates real generic or feature-class-aware tables.
     Harpy must reopen them without premature matrix reads and match AnnData's
-    read of the stored values, including auxiliary counts and canonical centers
-    in ``obsm``. This is an integration test, not an independent check of
+    read of the stored values, including class counts and canonical centers in
+    ``obsm``. This is an integration test, not an independent check of
     aggregation correctness: expected values come from the written table.
     """
     sdata = SpatialData(
@@ -231,4 +231,5 @@ def test_reopens_aggregation_tables(tmp_path, monkeypatch, class_aware):
             reference.toarray() if sparse.issparse(reference) else reference,
         )
     if class_aware:
-        assert table.uns["feature_class_aggregation"]["expression_class"] == "Endogenous"
+        assert "negative" in table.obsm
+        assert list(table.uns["feature_matrices"]["negative"]["feature_columns"]) == ["Neg"]
