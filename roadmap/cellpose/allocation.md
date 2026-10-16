@@ -78,7 +78,8 @@ implemented, as are Parts 11a–11i except the optimization 11f.xi. Slices
       validating the table against its feature panel — implemented;
     - **11j:** table-level summary computation through `hp.qc.summarize_table`
       and `TableSummary`, with plotting integration — step 1 of 3
-      implemented from `.obs`, to be redone from the count matrices after 11i;
+      implemented from `.obs`, to be redone from CSR count matrices in two
+      parts, 1a (matrices and classes) and 1b (features);
     - **11k:** feature summaries of a table for selected features through
       `hp.qc.summarize_table_by_feature` and `FeatureTableSummary`, with
       `instance_histogram_by_feature`, the counterparts of
@@ -8892,7 +8893,7 @@ keys before assignment.
 ## Slice 11j: table-level summary computation and plotting integration
 
 **Status: step 1 implemented from `.obs` and the aggregation record; to be
-redone from the count matrices after Slice 11i; steps 2 and 3 not
+redone from the count matrices in two parts, 1a and 1b; steps 2 and 3 not
 implemented.**
 
 Implement a read-only `hp.qc.summarize_table` computation API and a
@@ -8909,9 +8910,10 @@ result and reuse it for several plots, without writing derived columns to
   which Slice 11i removes. `summarize_table` stands on its own: given a table,
   it summarizes the raw count matrices that the caller names, as
   `summarize_points` summarizes the original points rather than metadata about
-  them. It then works for any table with raw counts, from `aggregate_points`,
-  from other readers, or from a custom assignment
-  (issue [#265](https://github.com/saeyslab/harpy/issues/265)). Nothing stored
+  them. It then works for any table whose raw counts are CSR matrices, from
+  `aggregate_points`, from other readers, or from a custom assignment
+  (issue [#265](https://github.com/saeyslab/harpy/issues/265)); see
+  "Supported matrix formats". Nothing stored
   can disagree with what it computes, so no cross-check is needed.
 - **Only the table:** `summarize_table` relies on what the table holds and
   never on a feature panel or `sdata.attrs`: the matrices passed, `X` or a
@@ -8939,14 +8941,29 @@ disk access is needed.
 **Implementation steps,** each tested on its own:
 
 1. `summarize_table`, `TableSummary` and `TableSummaryMetadata` from the count
-   matrices, with tests on dummy tables: in memory, lazy and backed; `X`
-   alone, `X` with class matrices, a layer, and class matrices without `X`;
-   registered and supplied `.obsm` feature names, including a registry under a
-   custom `feature_matrices_key`; with region selection; plus
-   the errors. This redoes step 1 as implemented from `.obs`:
-   `TableSummary`, its metadata, the region selection, `per_class`,
-   `per_region`, the shared statistics helper and most tests carry over;
-   `per_feature` and `per_region_feature` are new.
+   matrices, redoing step 1 as implemented from `.obs`, in two parts, each
+   tested on its own on dummy tables with CSR matrices in memory, lazy and
+   backed:
+   - **1a, matrices and classes:** the signature with `layer`, `obsm_keys`
+     and `region`; the class labels; the format check (see "Supported matrix
+     formats") and the counts check; the one blockwise pass, without the
+     column accumulators (see "One blockwise pass"); `per_instance`,
+     `per_class` and `per_region`; the metadata without feature names and
+     registry key; the property `TableSummary.panel_feature_counts`; and
+     removing the stored rate columns and `_PER_PANEL_FEATURE_SUFFIX`. Tests:
+     `X` alone, `X` with class matrices, a layer, and class matrices without
+     `X`; region selection; dense and CSC matrices raise; and the other
+     errors. `TableSummary`, its metadata, the region selection, `per_class`,
+     `per_region`, the shared statistics helper and most tests of step 1 as
+     implemented carry over.
+   - **1b, features:** `feature_names` and `feature_matrices_key`; the
+     per-record names check factored out of `_validate_feature_matrices`
+     (`src/harpy/table/_validation.py`); the per-region column accumulators,
+     added to the pass of 1a; `per_feature` and `per_region_feature`; and the
+     metadata's `feature_names` and `feature_matrices_key`. Tests: registered
+     and supplied `.obsm` feature names, including a registry under a custom
+     `feature_matrices_key`; the per-feature frames in all three modes; and
+     the errors of the names.
 2. `instance_histogram` and `instance_scatter`, including moving
    `obs_scatter`'s rendering into a shared dataframe-based helper.
 3. Docs: the new functions in the Quality Control → Tables section of
@@ -9181,9 +9198,10 @@ loose; the naming slice (Slice 11l) is where to revisit it.
 numbers, or a `ValueError` asks for the raw-count layer with `layer=`. Raw
 counts pass; `normalize_total` and `log1p` give fractions, and `scale` gives
 negative numbers and fractions, so a normalized matrix is caught whichever
-matrix was named, `X` through `layer=None`, a layer, or an `.obsm` matrix,
-such as a matrix of morphology features. The check runs on the values in the
-same pass, without another read. It cannot catch a transformation that yields
+matrix was named, `X` through `layer=None`, a layer, or an `.obsm` matrix. A
+dense matrix, such as one of morphology features, already fails the format
+check (see "Supported matrix formats"). The check runs on the stored values
+of each CSR block in the same pass, without another read. It cannot catch a transformation that yields
 whole numbers, such as a downsampling of counts, whose result is still counts.
 A required `layer` was not chosen: it would force an explicit choice, but
 could not verify that the named layer is raw. A table whose `X` was
@@ -9355,9 +9373,9 @@ selected regions.
   sums the classes: each row block adds to the accumulators of its rows'
   regions, from the region codes in `.obs`. `per_region_feature` follows from
   these sums, and `per_feature` from their totals over the regions, so
-  neither needs a second read; the mean and SD follow from the sums. Excluded
-  rows have no points in any class read, so they add nothing to the sums, and
-  only the region mask, known from `.obs`, selects rows before the pass.
+  neither needs a second read; the mean and SD follow from the sums. The
+  retention mask is not needed for them (see "One blockwise pass" under
+  "Supported matrix formats, lazy and backed tables").
 - **No median or p95:** an exact median or p95 per feature needs each
   column's distribution, which the row-block pass does not keep, and for
   sparse features the median is mostly 0. Slice 11k gives them, pooled and
@@ -9384,23 +9402,71 @@ distinguish points **per target**, **per spatial bin**, and **per instance**.
 A histogram in 11e gives each retained spatial bin equal weight; a cell-level
 histogram gives each retained transcript-positive instance equal weight.
 
-### Lazy and backed tables
+### Supported matrix formats, lazy and backed tables
 
-Tables are often not in memory without the caller choosing it:
-`hp.io.read_zarr` reads tables with lazy matrices by default; `aggregate_points`
-attaches the table it writes with storage-backed matrices, read-only CSR
-dataset handles; and on a backed `sdata`, `hp.tb.io.add_table` and the writers
-built on it attach theirs with lazy matrices. `summarize_table` works on
-in-memory, lazy and backed tables alike, and reads only the matrices passed:
+**Supported matrix formats: CSR only.** Every matrix read, `X`, the layer or
+an `.obsm` matrix, must be a CSR matrix in one of three forms:
 
-1. **One blockwise pass:** each matrix is read in row blocks, and per block
-   the per-row sums and detected-feature counts of each class, the per-region
-   column sums, detection counts and sums of squares of `per_region_feature`
-   and `per_feature`, and the value check are computed, so that memory stays
-   bounded. A lazy table runs one
-   Dask compute for all matrices; a backed table reads its CSR datasets in row
-   slices. Independence from `.obs` costs this one pass, as
+| Form      | Type                                               | How a table gets it                                                                                     |
+| --------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| in memory | SciPy CSR, `csr_matrix` or `csr_array`             | `spatialdata.read_zarr`, `hp.io.read_zarr(..., table_mode="eager")`, or a table built in memory         |
+| lazy      | a Dask array whose blocks are SciPy CSR row blocks | `hp.io.read_zarr`, by default, whose blocks span every column; `hp.tb.io.add_table` on a backed `sdata` |
+| backed    | AnnData's `CSRDataset`                             | the table that `aggregate_points` attaches; `hp.io.read_zarr(..., table_mode="backed")`                 |
+
+- **Why CSR:** it is what `aggregate_points` writes, `X` and every class
+  matrix as `uint32` CSR, and so what its table holds in each of the three
+  forms. With one format, every form yields the same unit of work, a SciPy
+  CSR row block: in memory by slicing, lazy as a Dask block, backed by
+  reading a row slice. The computation is written once, for that block.
+- **Not supported:** dense matrices (NumPy, dense Dask arrays, `zarr.Array`),
+  CSC in any form, and Dask arrays whose blocks are not CSR. Each raises a
+  `ValueError` that names the matrix and how to convert it, for example
+  `adata.obsm[key] = scipy.sparse.csr_matrix(adata.obsm[key])`, or reading
+  the store with `hp.io.read_zarr`. Unlike `sc.pp.calculate_qc_metrics`,
+  which accepts dense and sparse matrices, a table with dense counts from
+  another reader is converted first. A matrix is CSR when
+  `scipy.sparse.issparse(m) and m.format == "csr"`, which accepts both
+  `csr_matrix` and `csr_array`; the format is checked from the matrix's type
+  or a lazy array's `meta`, before any value is read.
+
+**Lazy and backed tables.** Tables are often not in memory without the caller
+choosing it: `hp.io.read_zarr` reads tables with lazy matrices by default;
+`aggregate_points` attaches the table it writes with storage-backed matrices,
+read-only CSR dataset handles; and on a backed `sdata`, `hp.tb.io.add_table`
+and the writers built on it attach theirs with lazy matrices.
+`summarize_table` works on in-memory, lazy and backed tables alike, and reads
+only the matrices passed:
+
+1. **One blockwise pass,** in three parts, so that memory stays bounded and
+   each matrix is read once. Independence from `.obs` costs this one pass, as
    `sc.pp.calculate_qc_metrics` does.
+   - **Per matrix, inside the pass:** each matrix is read in CSR row blocks: a
+     lazy table's Dask blocks, a backed table's CSR datasets in row slices, an
+     in-memory matrix sliced into row blocks. Per block, and only for the rows
+     of the selected regions, from the region codes of `.obs`: the per-row
+     sums and detected-feature counts of the matrix's class, the value check,
+     and, from step 1b, the per-region column sums, detection counts and sums
+     of squares of `per_region_feature` and `per_feature`. A detected feature
+     is an entry greater than zero, not a stored entry, as a CSR matrix may
+     store explicit zeros; the value check reads only the stored values,
+     `data`.
+   - **Across matrices, after the pass:** the per-row results of each matrix
+     are joined in block order into one vector per quantity, of length
+     `n_obs`, aligned with `.obs`, whatever the matrix's row chunks; the
+     column accumulators are summed over the blocks. From these, in memory:
+     the totals across the classes read, the retention mask, the percentages
+     `pct_<class>_points` and the statistics of `per_class` and `per_region`,
+     and, from step 1b, those of `per_feature` and `per_region_feature`.
+   - **Why the matrices' chunks need not align:** no quantity computed inside
+     the pass depends on another matrix. The retention mask, which depends on
+     every class read, is not needed there: an excluded row has no points in
+     any class read, so it adds zero to every row and column sum and has no
+     detection. Only the region mask selects rows before the pass, and it is
+     known from `.obs`. Each lazy matrix therefore keeps its own row chunks,
+     which Harpy's lazy reader chooses per matrix from its bytes per row; a
+     rechunk to common rows would split a narrow matrix into many small
+     tasks, or enlarge a wide matrix's blocks. A lazy table runs one Dask
+     compute, a single scheduler call over the reductions of all matrices.
 2. **No table copy:** the summary never loads the table as a whole, neither
    through `ProcessTable._get_adata`, whose subset-and-copy reads
    storage-backed matrices into memory, nor through `_load_into_memory` of
@@ -9409,7 +9475,7 @@ in-memory, lazy and backed tables alike, and reads only the matrices passed:
    `obs[region_key].isin(region)`, then the positive-total mask from the
    computed sums.
 3. **It validates what it uses:** there is at least one matrix to read; the
-   layer and the `.obsm` keys exist; each
+   layer and the `.obsm` keys exist; each matrix read is CSR; each
    `.obsm` matrix has one row per observation and one source of valid feature
    names; `feature_matrices_key` is a non-empty string; labels do not
    coincide; the
@@ -9598,11 +9664,16 @@ Focused tests should establish that:
 - a table without an aggregation record, or whose annotated labels and points
   elements are absent from `sdata`, is summarized all the same, and nothing
   from `sdata.attrs` is read;
-- a lazy table runs one Dask compute and a backed table is read in row blocks
-  without being loaded as a whole, both giving the result of the in-memory
-  table;
-- a matrix with negative or fractional values, such as a normalized `X` or a
-  morphology matrix, raises and asks for the raw-count layer; an unknown
+- a lazy table runs one Dask compute, also when its matrices have different
+  row chunks, and a backed table is read in row blocks without being loaded
+  as a whole, both giving the result of the in-memory table; `csr_matrix` and
+  `csr_array` give the same result;
+- a dense matrix, a CSC matrix in any form, and a Dask array whose blocks are
+  not CSR raise a `ValueError` that names the matrix and how to convert it,
+  before any value is read; explicit zeros stored in a CSR matrix do not
+  count as detected features;
+- a CSR matrix with negative or fractional values, such as a normalized `X`,
+  raises and asks for the raw-count layer; an unknown
   layer or `.obsm` key, an `.obsm` matrix without one row
   per observation, nothing to read, and unknown, duplicate or empty region
   selections raise a `ValueError`;
