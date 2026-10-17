@@ -158,9 +158,8 @@ def test_coinciding_class_labels_raise():
         summarize_table(_sdata(table), "counts", layer="Negative", obsm_keys=["negative"])
 
 
-def test_class_statistics_agree_with_the_retained_instances_in_the_column_order_of_the_bin_summary():
-    summary = summarize_table(_sdata(), "counts", obsm_keys=_OBSM_KEYS)
-    per_class = summary.per_class
+def test_per_class_columns_follow_the_order_of_the_bin_summary():
+    per_class = summarize_table(_sdata(), "counts", obsm_keys=_OBSM_KEYS).per_class
     # The columns of SpatialBinSummary.per_class, instances in place of bins, then those only the table has.
     assert list(per_class.columns) == [
         "feature_class",
@@ -182,6 +181,11 @@ def test_class_statistics_agree_with_the_retained_instances_in_the_column_order_
         "n_features",
     ]
     assert per_class["n_points"].dtype == np.uint64
+
+
+def test_class_statistics_agree_with_the_retained_instances():
+    summary = summarize_table(_sdata(), "counts", obsm_keys=_OBSM_KEYS)
+    per_class = summary.per_class
     assert per_class["feature_class"].tolist() == ["x", "negative", "system_control"]
     for row in per_class.itertuples():
         for measure, column in [("points", "points"), ("detected_features", "detected_features")]:
