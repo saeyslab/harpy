@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 
 from harpy._feature_panels import _FeaturePanelContract
+from harpy.utils._names import _snake_case
 
 
 @dataclass(frozen=True)
@@ -80,13 +80,3 @@ class _FeatureClassAggregationContract:
         return tuple(
             (key, features_by_class[feature_class]) for feature_class, key in self.non_expression_class_matrix_keys
         )
-
-
-def _snake_case(value: str) -> str:
-    value = re.sub(r"(?<=[A-Z])(?=[A-Z][a-z])", "_", value)
-    value = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", value)
-    value = re.sub(r"[^\w]+", "_", value, flags=re.UNICODE)
-    value = re.sub(r"_+", "_", value).strip("_").casefold()
-    if not value:
-        raise ValueError("Feature-class names must produce a non-empty snake-case output name.")
-    return value
