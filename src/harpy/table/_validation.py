@@ -246,46 +246,73 @@ def _validate_feature_matrices(adata: AnnData, *, feature_matrices_key: str) -> 
         return {}
     records = _require_mapping(value, path=feature_matrices_key)
     for matrix_name, record_value in records.items():
-        matrix_name = _require_nonempty_string(matrix_name, path=f"{feature_matrices_key} key")
-        record = _require_mapping(record_value, path=f"{feature_matrices_key}.{matrix_name}")
-        if matrix_name not in adata.obsm:
-            raise ValueError(f"Feature-matrix metadata references missing adata.obsm[{matrix_name!r}].")
-        matrix = adata.obsm[matrix_name]
-        if len(matrix.shape) != 2 or matrix.shape[0] != adata.n_obs:
-            raise ValueError(
-                f"Registered feature matrix {matrix_name!r} must have shape (n_obs, n_features), found {matrix.shape}."
-            )
-        columns = _metadata_string_sequence(
-            record.get("feature_columns"),
-            path=f"{feature_matrices_key}.{matrix_name}.feature_columns",
-        )
-        if len(columns) != matrix.shape[1]:
-            raise ValueError(
-                f"Registered feature matrix {matrix_name!r} has {matrix.shape[1]} columns but its metadata "
-                f"declares {len(columns)} feature columns."
-            )
-        version = record.get("schema_version")
-        if isinstance(version, bool) or not isinstance(version, int) or version != _FEATURE_MATRIX_SCHEMA_VERSION:
-            raise ValueError(
-                f"Feature-matrix metadata {feature_matrices_key}.{matrix_name}.schema_version must equal "
-                f"{_FEATURE_MATRIX_SCHEMA_VERSION}, found {version!r}."
-            )
-        _require_nonempty_string(
-            record.get("source_kind"),
-            path=f"{feature_matrices_key}.{matrix_name}.source_kind",
-        )
+        _validate_feature_matrix_record(adata, matrix_name, record_value, feature_matrices_key=feature_matrices_key)
     return records
 
 
-def _metadata_string_sequence(value: object, *, path: str) -> tuple[str, ...]:
-    """Normalize a one-dimensional AnnData metadata sequence of unique strings."""
+def _validate_feature_matrix_record(
+    adata: AnnData, matrix_name: object, record_value: object, *, feature_matrices_key: str
+) -> tuple[str, ...]:
+    """Validate one registration of ``adata.uns[feature_matrices_key]`` and return its ``feature_columns``.
+
+    ``record_value`` is the entry of ``matrix_name``, as stored, before it is
+    checked; it describes the matrix ``adata.obsm[matrix_name]``. For example,
+    for a class matrix that :func:`harpy.tb.aggregate_points` writes::
+
+        adata.uns["feature_matrices"]["negative"] = {
+            "schema_version": 1,
+            "source_kind": "harpy_aggregate_points",
+            "feature_columns": ["Negative01", "Negative02", "NegativeZero"],
+        }
+
+    Writers may add their own fields, such as the source channels of
+    :func:`harpy.tb.add_feature_matrix`; only the three above are checked.
+
+    The per-record checks of :func:`_validate_feature_matrices`, also used by
+    :func:`harpy.qc.summarize_table` for the matrices that it reads only, so
+    that a broken, unrelated registration does not stop it. Only metadata and
+    the matrix's shape are read, no matrix value.
+    """
+    matrix_name = _require_nonempty_string(matrix_name, path=f"{feature_matrices_key} key")
+    record = _require_mapping(record_value, path=f"{feature_matrices_key}.{matrix_name}")
+    if matrix_name not in adata.obsm:
+        raise ValueError(f"Feature-matrix metadata references missing adata.obsm[{matrix_name!r}].")
+    matrix = adata.obsm[matrix_name]
+    if len(matrix.shape) != 2 or matrix.shape[0] != adata.n_obs:
+        raise ValueError(
+            f"Registered feature matrix {matrix_name!r} must have shape (n_obs, n_features), found {matrix.shape}."
+        )
+    columns = _metadata_string_sequence(
+        record.get("feature_columns"),
+        path=f"{feature_matrices_key}.{matrix_name}.feature_columns",
+    )
+    if len(columns) != matrix.shape[1]:
+        raise ValueError(
+            f"Registered feature matrix {matrix_name!r} has {matrix.shape[1]} columns but its metadata "
+            f"declares {len(columns)} feature columns."
+        )
+    version = record.get("schema_version")
+    if isinstance(version, bool) or not isinstance(version, int) or version != _FEATURE_MATRIX_SCHEMA_VERSION:
+        raise ValueError(
+            f"Feature-matrix metadata {feature_matrices_key}.{matrix_name}.schema_version must equal "
+            f"{_FEATURE_MATRIX_SCHEMA_VERSION}, found {version!r}."
+        )
+    _require_nonempty_string(
+        record.get("source_kind"),
+        path=f"{feature_matrices_key}.{matrix_name}.source_kind",
+    )
+    return columns
+
+
+def _metadata_string_sequence(value: object, *, path: str, subject: str = "Harpy table metadata") -> tuple[str, ...]:
+    """Normalize a one-dimensional sequence of unique strings, named ``f"{subject} {path}"`` in errors."""
     if isinstance(value, np.ndarray):
         if value.ndim != 1:
-            raise ValueError(f"Harpy table metadata {path} must be one-dimensional.")
+            raise ValueError(f"{subject} {path} must be one-dimensional.")
         value = value.tolist()
     if not isinstance(value, list | tuple) or not value:
-        raise ValueError(f"Harpy table metadata {path} must be a non-empty sequence of strings.")
+        raise ValueError(f"{subject} {path} must be a non-empty sequence of strings.")
     result = tuple(value)
     if any(not isinstance(item, str) or not item for item in result) or len(set(result)) != len(result):
-        raise ValueError(f"Harpy table metadata {path} must contain unique non-empty strings.")
+        raise ValueError(f"{subject} {path} must contain unique non-empty strings.")
     return result
