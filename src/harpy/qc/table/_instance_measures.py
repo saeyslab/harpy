@@ -51,14 +51,13 @@ def _instance_values(
         raise ValueError(f"Unknown measure {measure!r}; choose from {list(_MEASURES)}.")
     if normalization not in (None, "per_panel_feature"):
         raise ValueError(f"Unknown normalization: {normalization!r}; use None or 'per_panel_feature'.")
-    column, unit = _MEASURES[measure]
-    column = column.format(label=feature_class)
-    if column not in summary.per_instance:
+    if measure == "pct_points" and len(summary.feature_classes) < 2:
         raise ValueError(
             "measure 'pct_points' needs a summary of two classes or more; this summary has only "
             f"{list(summary.feature_classes)}."
         )
-    values = summary.per_instance[column]
+    column, unit = _MEASURES[measure]
+    values = summary.per_instance[column.format(label=feature_class)]
     if normalization == "per_panel_feature":
         if measure != "points":
             raise ValueError(

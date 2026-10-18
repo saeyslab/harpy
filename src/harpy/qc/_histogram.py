@@ -14,9 +14,9 @@ from loguru import logger as log
 from matplotlib.axes import Axes
 from spatialdata import SpatialData
 
-from harpy.qc._panel_normalization import _panel_feature_count
-from harpy.qc._summary_schema import _FEATURE_CLASS_KEY, _FEATURE_KEY, _N_POINTS_KEY
+from harpy.qc._summary_schema import _FEATURE_KEY, _N_POINTS_KEY
 from harpy.qc._summary_statistics import _points_statistics
+from harpy.qc.points._spatial_bin_measures import SpatialBinMeasure, _spatial_bin_values
 from harpy.qc.points._summarize_points import PointsSummary
 from harpy.qc.points._summarize_points_by_feature import FeaturePointsSummary
 from harpy.qc.table._instance_measures import InstanceMeasure, _instance_values
@@ -52,6 +52,7 @@ def spatial_bin_histogram(
     summary: PointsSummary,
     *,
     feature_class: str,
+    measure: SpatialBinMeasure = "points",
     normalization: Literal["per_panel_feature"] | None = None,
     ax: Axes | None = None,
     bins: int | str = "auto",
@@ -66,7 +67,7 @@ def spatial_bin_histogram(
     show_median: bool = True,
     show_std: bool = True,
 ) -> Axes:
-    """Plot one feature class's point counts across retained spatial bins.
+    """Plot one feature class's measure across retained spatial bins.
 
     Each retained bin contributes one value, including zeros for the selected
     class. Bins were retained when any class selected during summary computation
@@ -78,25 +79,38 @@ def spatial_bin_histogram(
     ----------
     summary
         Result of :func:`harpy.qc.summarize_points`, computed with ``bin_size``.
-        Uses ``spatial_bins.per_bin`` for counts and ``spatial_bins.per_class``
-        for median/SD annotations. Source and geometry context remain available
-        in ``metadata`` for caller-supplied titles or figure captions.
+        Uses ``summary.spatial_bins.per_bin``. Source and geometry context
+        remain available in ``metadata`` for caller-supplied titles or figure
+        captions.
     feature_class
         Required exact class name present in the summary; classes are not pooled.
+    measure
+        What to plot for the class, per spatial bin: ``"points"``, its points;
+        or ``"pct_points"``, its share of the bin's points across the selected
+        classes, in percent, with two selected classes or more. They read the
+        columns ``n_points`` and ``pct_points`` of
+        ``summary.spatial_bins.per_bin``.
+        The share is not corrected for panel size: a class with more features
+        collects more points, also from background. Compare it across bins or
+        samples of the same panel, or compare classes with
+        ``normalization="per_panel_feature"`` on ``"points"``.
+        Detected features per bin, a measure of
+        :func:`harpy.qc.instance_histogram`, are not computed.
     normalization
-        ``None`` plots points per spatial bin. ``"per_panel_feature"`` divides
+        ``None`` plots the measure as stored. ``"per_panel_feature"`` divides
         each bin's count, and the median and SD annotated on the figure, by the
         class's number of panel features, features without detections
-        included, as :func:`harpy.pl.plot_points_density` does. Only the
-        displayed values are divided; ``summary`` is not modified. The result is
-        the class's points per panel feature per bin, comparable across classes
-        with different panel sizes. ``range`` is then given in that unit: for a
-        class with 10 panel features, the view ``range=(0, 50)`` of raw counts
-        becomes ``range=(0, 5)``.
+        included, as :func:`harpy.pl.plot_points_density` does. It applies to
+        ``measure="points"`` only. Only the displayed values are divided;
+        ``summary`` is not modified. The result is the class's points per panel
+        feature per bin, comparable across classes with different panel sizes.
+        ``range`` is then given in that unit: for a class with 10 panel
+        features, the view ``range=(0, 50)`` of raw counts becomes
+        ``range=(0, 5)``.
     ax
         Axes to reuse, or None to create a figure.
     bins
-        Histogram intervals along the point-count axis, not spatial bin size.
+        Histogram intervals along the measure's axis, not spatial bin size.
     range
         Inclusive display bounds. Values outside them are hidden, but still
         contribute to the percentage denominator and median/SD annotations.
@@ -132,10 +146,29 @@ def spatial_bin_histogram(
         are retained. Input data and plotting-option mappings remain unchanged.
         Customize axis labels on the returned axes with ``ax.set(...)``.
 
+    Raises
+    ------
+    TypeError
+        If ``summary`` is not a :class:`~harpy.qc.PointsSummary`.
+    ValueError
+        If the summary was computed without ``bin_size``; if
+        ``feature_class`` or ``measure`` is unknown, ``"detected_features"``
+        is requested, or ``"pct_points"`` from a summary of one class; or if
+        ``normalization`` is unknown or applied to a measure other than
+        ``"points"``.
+
+    Notes
+    -----
+    The median and SD are computed from the plotted values, as
+    ``"pct_points"`` has no stored statistics. For ``"points"``, they equal
+    the class's ``median_points_per_bin`` and ``std_points_per_bin`` in
+    ``summary.spatial_bins.per_class``.
+
     See Also
     --------
     harpy.qc.summarize_points
     harpy.qc.spatial_bin_histogram_by_feature
+    harpy.qc.instance_histogram
     harpy.qc.table_histogram
 
     Examples
@@ -151,27 +184,16 @@ def spatial_bin_histogram(
         ax = hp.qc.spatial_bin_histogram(
             summary, feature_class="Negative", normalization="per_panel_feature"
         )
+
+        # The share of each bin's points that are negative probes.
+        ax = hp.qc.spatial_bin_histogram(summary, feature_class="Negative", measure="pct_points")
     """
-    if not isinstance(summary, PointsSummary):
-        raise TypeError(
-            "summary must be a PointsSummary; use spatial_bin_histogram_by_feature() for a FeaturePointsSummary."
-        )
-    if normalization not in (None, "per_panel_feature"):
-        raise ValueError(f"Unknown normalization: {normalization!r}; use None or 'per_panel_feature'.")
-    spatial_bins = summary.spatial_bins
-    if spatial_bins is None:
-        raise ValueError("Spatial-bin measurements are missing; call hp.qc.summarize_points() with bin_size.")
-    divisor, unit = 1, "points per spatial bin"
-    if normalization == "per_panel_feature":
-        divisor, unit = _panel_feature_count(summary, [feature_class]), "points per panel feature per spatial bin"
+    values, label = _spatial_bin_values(
+        summary, feature_class=feature_class, measure=measure, normalization=normalization
+    )
     return _plot_spatial_bin_histogram(
-        spatial_bins.per_bin,
-        spatial_bins.per_class,
-        summary_axis=_FEATURE_CLASS_KEY,
-        selected=feature_class,
-        compute_name="summarize_points",
-        divisor=divisor,
-        unit=unit,
+        values,
+        xlabel=label,
         ax=ax,
         bins=bins,
         range=range,
@@ -216,10 +238,9 @@ def spatial_bin_histogram_by_feature(
     ----------
     summary
         Result of :func:`harpy.qc.summarize_points_by_feature`, computed from a
-        binned :class:`~harpy.qc.PointsSummary`. Uses ``spatial_bins.per_bin`` for counts and
-        ``spatial_bins.per_feature`` for median/SD annotations, not the top-level
-        feature totals. Source and geometry context remain available in
-        ``metadata`` for caller-supplied titles or figure captions.
+        binned :class:`~harpy.qc.PointsSummary`. Uses
+        ``summary.spatial_bins.per_bin``. Source and geometry context remain
+        available in ``metadata`` for caller-supplied titles or figure captions.
     feature
         Required exact feature name present in the summary; features are not pooled.
     ax
@@ -261,6 +282,13 @@ def spatial_bin_histogram_by_feature(
         are retained. Input data and plotting-option mappings remain unchanged.
         Customize axis labels on the returned axes with ``ax.set(...)``.
 
+    Notes
+    -----
+    The median and SD are computed from the plotted values, as in
+    :func:`harpy.qc.spatial_bin_histogram`. They equal the feature's
+    ``median_points_per_bin`` and ``std_points_per_bin`` in
+    ``summary.spatial_bins.per_feature``.
+
     See Also
     --------
     harpy.qc.summarize_points_by_feature
@@ -283,12 +311,13 @@ def spatial_bin_histogram_by_feature(
             "Spatial-bin measurements are missing; call hp.qc.summarize_points() with bin_size, "
             "then pass that summary to hp.qc.summarize_points_by_feature()."
         )
+    # per_feature has a row for every requested feature, also when no bin is retained and per_bin is empty.
+    if not (spatial_bins.per_feature[_FEATURE_KEY] == feature).any():
+        raise ValueError(f"Selected feature {feature!r} is absent from the spatial-bin summary.")
+    per_bin = spatial_bins.per_bin
     return _plot_spatial_bin_histogram(
-        spatial_bins.per_bin,
-        spatial_bins.per_feature,
-        summary_axis=_FEATURE_KEY,
-        selected=feature,
-        compute_name="summarize_points_by_feature",
+        per_bin.loc[per_bin[_FEATURE_KEY] == feature, _N_POINTS_KEY],
+        xlabel=f"{feature} points per spatial bin",
         ax=ax,
         bins=bins,
         range=range,
@@ -305,14 +334,9 @@ def spatial_bin_histogram_by_feature(
 
 
 def _plot_spatial_bin_histogram(
-    per_bin: pd.DataFrame,
-    overview: pd.DataFrame,
+    values: pd.Series,
     *,
-    summary_axis: Literal["feature_class", "feature"],
-    selected: str,
-    compute_name: str,
-    divisor: float = 1,
-    unit: str = "points per spatial bin",
+    xlabel: str,
     ax: Axes | None,
     bins: int | str,
     range: tuple[float, float] | None,
@@ -326,31 +350,19 @@ def _plot_spatial_bin_histogram(
     show_median: bool,
     show_std: bool,
 ) -> Axes:
-    """Select prepared class/feature measurements and share the histogram renderer.
+    """Annotate the median and SD of one measure over the retained bins, then share the histogram renderer.
 
-    ``summary_axis`` identifies the summary column, not a source points column.
-    Use stored median/SD and every retained bin's count, including zeros; only
-    the renderer applies display filtering. No summaries are recomputed here.
-    ``divisor`` divides the counts and the stored median/SD alike, for a
-    normalization by a constant; ``unit`` completes the axis label.
+    Shared by :func:`spatial_bin_histogram` and :func:`spatial_bin_histogram_by_feature`,
+    which select the values.
     """
-    statistics = overview.loc[overview[summary_axis] == selected]
-    if statistics.empty:
-        raise ValueError(f"Selected {summary_axis} {selected!r} is absent from the spatial-bin summary.")
-    if "std_points_per_bin" not in statistics:
-        raise ValueError(f"Spatial-bin SD is missing; recompute the summary with hp.qc.{compute_name}().")
     if histplot_kwargs.get("stat", "count") not in {"count", "percent"}:
         raise ValueError("Spatial-bin histograms support stat='count' or stat='percent'.")
-    values = per_bin.loc[per_bin[summary_axis] == selected, _N_POINTS_KEY]
-    row = statistics.iloc[0]
-    median, std = float(row["median_points_per_bin"]), float(row["std_points_per_bin"])
-    if divisor != 1:
-        # A constant divisor keeps the stored median and SD exact for the divided values.
-        values, median, std = values / divisor, median / divisor, std / divisor
+    # The shared statistics helper keeps the conventions of the summaries: SD with ddof=1, NaN below two values.
+    statistics = _points_statistics(values.to_numpy(dtype=np.float64), unit="bin")
     return _plot_histogram(
         values,
-        median=median,
-        std=std,
+        median=statistics["median_points_per_bin"],
+        std=statistics["std_points_per_bin"],
         ax=ax,
         bins=bins,
         range=range,
@@ -363,7 +375,7 @@ def _plot_spatial_bin_histogram(
         color=color if color is not None else "#4C78A8",
         show_median=show_median,
         show_std=show_std,
-        xlabel=f"{selected} {unit}",
+        xlabel=xlabel,
         count_ylabel="Number of spatial bins",
         percent_ylabel="Percentage of spatial bins (%)",
     )
@@ -411,7 +423,11 @@ def instance_histogram(
         ``"pct_points"``, its share of the instance's points across the classes
         read, in percent, with two classes or more. They read the columns
         ``n_<class>_points``, ``n_<class>_detected_features`` and
-        ``pct_<class>_points`` of ``summary.per_instance``.
+        ``pct_<class>_points`` of ``summary.per_instance``. The share is not
+        corrected for panel size: a class with more features collects more
+        points, also from background. Compare it across instances or samples
+        of the same panel, or compare classes with
+        ``normalization="per_panel_feature"`` on ``"points"``.
     normalization
         ``None`` plots the measure as stored. ``"per_panel_feature"`` divides
         each instance's points, and the annotated median and SD, by the class's

@@ -70,7 +70,11 @@ class TableSummary:
           one point in the instance. Spatial bins have no counterpart, as a
           distinct count of features per bin is expensive;
         - ``pct_<class>_points``, with two classes or more: 100 times the
-          class's points / the instance's points across the classes read.
+          class's points / the instance's points across the classes read. The
+          share is not corrected for panel size: a class with more features
+          collects more points, also from background. Compare it across
+          instances or samples of the same panel, or compare classes by their
+          points per feature, with ``n_features`` of ``per_class``.
 
         How the names arise: the class label is the name of the matrix read::
 
