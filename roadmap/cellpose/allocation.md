@@ -78,8 +78,8 @@ implemented, as are Parts 11a–11i except the optimization 11f.xi. Slices
       validating the table against its feature panel — implemented;
     - **11j:** table-level summary computation through `hp.qc.summarize_table`
       and `TableSummary`, with plotting integration — step 1 redone from CSR
-      count matrices in two parts: 1a (matrices and classes) implemented, 1b
-      (features) remaining; steps 2 and 3 not implemented;
+      count matrices in two parts, 1a (matrices and classes) and 1b
+      (features), both implemented; steps 2 and 3 not implemented;
     - **11k:** feature summaries of a table for selected features through
       `hp.qc.summarize_table_by_feature` and `FeatureTableSummary`, with
       `instance_histogram_by_feature`, the counterparts of
@@ -87,12 +87,15 @@ implemented, as are Parts 11a–11i except the optimization 11f.xi. Slices
     - **11l:** select regions with `region` instead of `labels_name` in the
       existing table-QC plots, as `summarize_table` does, and rename
       `obs_scatter` to `table_scatter` — planned, after 11j;
-    - **11m:** add each class's share of a bin's points to
-      `SpatialBinSummary.per_bin` and `n_features` to its `per_class`, the
-      counterparts that the class grid already determines of Slice 11j's
-      columns, and a `feature_classes` property to `PointsSummary`, as
-      `TableSummary` has, without detected features per bin, whose distinct
-      count is expensive — planned, after 11j;
+    - **11m:** align the points summaries with the table summary: add each
+      class's share of a bin's points to `SpatialBinSummary.per_bin` and
+      `n_features` to its `per_class`, the counterparts that the class grid
+      already determines of Slice 11j's columns; add `feature_classes` and
+      `feature_names` properties to `PointsSummary`, as `TableSummary` has;
+      and store `feature_class` as categorical in every frame, with the
+      classes in panel order; and give `spatial_bin_histogram` the
+      `measure` parameter of `instance_histogram`; without detected features
+      per bin, whose distinct count is expensive — planned, after 11j;
 
 12. optionally optimize Slice 7b's latency after phase-level benchmarks identify
     material checkpoint or writer overhead — optional, not implemented.
@@ -8892,8 +8895,8 @@ keys before assignment.
 
 ## Slice 11j: table-level summary computation and plotting integration
 
-**Status: step 1, redone from the count matrices in two parts: 1a
-implemented, 1b not yet; steps 2 and 3 not implemented.**
+**Status: step 1 implemented, redone from the count matrices in two parts,
+1a and 1b; steps 2 and 3 not implemented.**
 
 Implement a read-only `hp.qc.summarize_table` computation API and a
 `TableSummary` result, followed by table-level QC plots that take the result.
@@ -8948,19 +8951,20 @@ disk access is needed.
      and `region`; the class labels; the format check (see "Supported matrix
      formats") and the counts check; the one blockwise pass, without the
      column accumulators (see "One blockwise pass"); `per_instance`,
-     `per_class` and `per_region`; the metadata without feature names and
+     `per_class` and `per_region_class`; the metadata without feature names and
      registry key; the property `TableSummary.panel_feature_counts`; and
      removing the stored rate columns and `_PER_PANEL_FEATURE_SUFFIX`. Tests:
      `X` alone, `X` with class matrices, a layer, and class matrices without
      `X`; region selection; dense and CSC matrices raise; and the other
      errors. `TableSummary`, its metadata, the region selection, `per_class`,
-     `per_region`, the shared statistics helper and most tests of step 1 as
+     `per_region_class`, the shared statistics helper and most tests of step 1 as
      implemented carry over.
-   - **1b, features:** `feature_names` and `feature_matrices_key`; the
+   - **1b, features (implemented):** `feature_names` and `feature_matrices_key`; the
      per-record names check factored out of `_validate_feature_matrices`
      (`src/harpy/table/_validation.py`); the per-region column accumulators,
-     added to the pass of 1a; `per_feature` and `per_region_feature`; and the
-     metadata's `feature_names` and `feature_matrices_key`. Tests: registered
+     added to the pass of 1a; `per_feature` and `per_region_feature`; the
+     metadata's `feature_matrices_key`; and the property
+     `TableSummary.feature_names`. Tests: registered
      and supplied `.obsm` feature names, including a registry under a custom
      `feature_matrices_key`; the per-feature frames in all three modes; and
      the errors of the names.
@@ -8984,7 +8988,7 @@ disk access is needed.
   `src/harpy/qc/points/_points_summary_schema.py`, moves one level up to
   `src/harpy/qc/_summary_schema.py`, as both summaries now use its names
   (`feature_class`, `n_points`, `n_features`). It gains the table summary's
-  `region` column of `per_region`. The `_per_panel_feature` suffix that step 1
+  `region` column of `per_region_class`. The `_per_panel_feature` suffix that step 1
   as implemented from `.obs` added is removed with the stored rate columns
   (see the next bullet). Names used by one module only stay literals where
   they are built.
@@ -9001,24 +9005,26 @@ disk access is needed.
   `per_class.n_features`, as `PointsSummary.panel_feature_counts` is. Step 1
   as implemented from `.obs` stored the rate columns; the redo drops them.
 - **Column order and types, as on the points side:** `per_class` and
-  `per_region` order their columns as `SpatialBinSummary.per_class` does: the
-  group (`region`, then `feature_class`, in `per_region`), the population,
+  `per_region_class` order their columns as `SpatialBinSummary.per_class` does: the
+  group (`region`, then `feature_class`, in `per_region_class`), the population,
   `n_points`, the `without_class` columns and the statistics of the points;
   then the statistics of the detected features, which only the table has
   (Slice 11m), and last `n_features`, which `SpatialBinSummary.per_class`
   gains in Slice 11m in the same last place. `per_feature` and
-  `per_region_feature` start as
-  `PointsSummary.per_feature` does (`feature`, `feature_class`, `n_points`,
-  `within_class_fraction`), with `region` first in `per_region_feature`, then
-  their instance columns. Point counts are `uint64`, as on the points side, so
+  `per_region_feature` order their columns as
+  `FeatureSpatialBinSummary.per_feature` does, instances in place of bins:
+  `feature`, `feature_class`, the population, `n_points`, the
+  `without_feature` columns and the statistics, with `within_class_fraction`
+  of `PointsSummary.per_feature` after `n_points`, and `region` first in
+  `per_region_feature`. Point counts are `uint64`, as on the points side, so
   that the frames of both summaries can be compared or concatenated directly.
 - **Annotations of `instance_histogram`:** the median and SD are computed from
-  the plotted column, as `table_histogram` does for `.obs` columns, since some
-  plottable columns, such as the percentages `pct_<class>_points`, have no
-  stored statistics. For the count columns they equal the values in
-  `per_class`; with `normalization="per_panel_feature"`, both are divided by
-  the class's number of features, as in `spatial_bin_histogram`. This
-  describes the drawn values; it does not recompute the summary.
+  the plotted values, as `table_histogram` does for `.obs` columns, since some
+  measures, such as `"pct_points"`, have no stored statistics. For
+  `measure="points"` they equal the values in `per_class`; with
+  `normalization="per_panel_feature"`, both are divided by the class's number
+  of features, as in `spatial_bin_histogram`. This describes the drawn values;
+  it does not recompute the summary.
 
 ### Symmetric computation APIs, distinct units of analysis
 
@@ -9153,7 +9159,7 @@ No label comes from the aggregation record or another field, so the names of
 all classes follow one rule. For a CosMx table from `aggregate_points`, the
 labels are `x`, `negative` and `system_control`: on such a table `X` holds the
 expression class chosen at aggregation, as the docstring of `aggregate_points`
-states. Labels name the `feature_class` column of `per_class` and `per_region`
+states. Labels name the `feature_class` column of `per_class` and `per_region_class`
 and the columns of `per_instance`. Two matrices whose labels coincide raise.
 Results follow the order of the matrices: `X` or the layer first, then the
 `.obsm` matrices in the order passed.
@@ -9220,7 +9226,6 @@ class TableSummaryMetadata:
     layer: str | None  # the matrix aligned with var that was read; None for X
     obsm_keys: tuple[str, ...]  # the .obsm matrices read
     feature_matrices_key: str  # the .uns registry read for the names of .obsm matrices
-    feature_names: Mapping[str, tuple[str, ...]]  # class label -> its feature names, in column order
 
 
 @dataclass(frozen=True)
@@ -9228,7 +9233,7 @@ class TableSummary:
     metadata: TableSummaryMetadata
     per_instance: pd.DataFrame
     per_class: pd.DataFrame
-    per_region: pd.DataFrame
+    per_region_class: pd.DataFrame
     per_feature: pd.DataFrame
     per_region_feature: pd.DataFrame
 
@@ -9237,16 +9242,21 @@ class TableSummary:
         """The class labels, in result order, from per_class.feature_class."""
 
     @property
+    def feature_names(self) -> dict[str, tuple[str, ...]]:
+        """Class label -> its feature names, in column order, from per_feature."""
+
+    @property
     def panel_feature_counts(self) -> dict[str, int]:
         """Class label -> its number of features in the matrices read, from per_class.n_features."""
 ```
 
 **One metadata owner,** as `PointsSummary` has `PointsSummaryMetadata`: the
 record identifies the table, the regions and the matrices read. It describes
-the inputs of the computation, not a live metadata lookup. The mappings are
-dictionary copies, so later changes to the table do not affect them; they are
-not read-only views (`MappingProxyType`), which cannot be pickled or
-deep-copied, so that a summary can be copied and saved.
+the inputs of the computation, not a live metadata lookup, and holds no
+mapping, so it shares nothing with the table and a summary can be copied and
+saved. What the computation derives, the class labels, the feature names and
+the denominators, is exposed by properties of `TableSummary`, read from its
+frames.
 
 - **`table_name`, `region`, `layer`, `obsm_keys` and `feature_matrices_key`**
   record the inputs, the regions resolved from `None`. Slice 11k reads the
@@ -9260,11 +9270,16 @@ deep-copied, so that a summary can be copied and saved.
   likewise takes its classes from `per_class`. No expression class is
   recorded, as no record holds one (Slice 11i); on a table from
   `aggregate_points`, `X` holds the expression class chosen at aggregation.
-- **`feature_names`** are each class's feature names, in column order:
-  `var_names` for `X` or the layer, and for an `.obsm` matrix its names in
-  `uns[feature_matrices_key]` or those passed (see `feature_names` above).
-  They name the rows of `per_feature` and `per_region_feature`, and Slice 11k
-  looks requested features up in them.
+- **`feature_names` is a property of `TableSummary`, not a field of the
+  record:** each class's feature names, in column order, derived from the
+  `feature` and `feature_class` columns of `per_feature`, which list every
+  feature of each class read in that order. The names are resolved by the
+  computation, from `var_names` for `X` or the layer, and for an `.obsm`
+  matrix from `uns[feature_matrices_key]` or the names passed (see
+  `feature_names` above), so, as the class labels, they belong to the
+  summary. The record keeps the input that decided them,
+  `feature_matrices_key`. They name the rows of `per_feature` and
+  `per_region_feature`, and Slice 11k looks requested features up in them.
 - **`panel_feature_counts` is a property of `TableSummary`, not a field of
   the record:** the denominators of `normalization="per_panel_feature"`, per
   class label (see "Denominators" and "Names"), derived from
@@ -9278,7 +9293,7 @@ deep-copied, so that a summary can be copied and saved.
   `microns_per_unit`. `PointsSummaryMetadata` records those because
   `summarize_points` crops and bins in that frame, while `summarize_table`
   computes no spatial quantity. Results, such as the total, retained and
-  excluded row counts, stay in `per_class` and `per_region`.
+  excluded row counts, stay in `per_class` and `per_region_class`.
 
 The dataframes follow `PointsSummary` and its `SpatialBinSummary`, whose
 retained bins are the population closest to the retained instances here.
@@ -9310,12 +9325,12 @@ expensive (see Slice 11m).
 
 **`per_class`: one row per class,** pooled over the selected regions, as
 `PointsSummary.per_class` and `SpatialBinSummary.per_class` have one row per
-selected class. **`per_region`: one row per selected region and class,** with
+selected class. **`per_region_class`: one row per selected region and class,** with
 a `region` column: the statistics of `per_class`, computed within each region,
 which is typically a sample. The points side has no counterpart, because a
 `PointsSummary` covers one points element; per-sample statistics there come
 from separate `summarize_points` calls, while one table can combine several
-samples. With one selected region, `per_class` and `per_region` have the same
+samples. With one selected region, `per_class` and `per_region_class` have the same
 values. Pooled and per-region statistics live in separate dataframes, so that
 summing a column never counts instances twice and no sentinel region name is
 needed. Their columns follow `SpatialBinSummary.per_class`, with instances in
@@ -9323,7 +9338,7 @@ place of bins:
 
 | Columns, in this order                                                                                                                                     | Meaning                                                                                                                                                                                                                             |
 | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `region` in `per_region`, then `feature_class`                                                                                                             | the group                                                                                                                                                                                                                           |
+| `region` in `per_region_class`, then `feature_class`                                                                                                       | the group                                                                                                                                                                                                                           |
 | `n_total_instances`, `n_retained_instances`, `n_excluded_instances`, `pct_excluded_instances`                                                              | the shared population: the table's rows of the selected regions, those with points across the classes read, the others, and 100 × excluded / total                                                                                  |
 | `n_points`                                                                                                                                                 | the class's points over the retained instances, `uint64`                                                                                                                                                                            |
 | `n_retained_instances_without_class`, `pct_retained_instances_without_class`                                                                               | retained instances with zero points of this row's class, and 100 × that count / retained                                                                                                                                            |
@@ -9350,19 +9365,22 @@ selected regions, as `PointsSummary.per_feature` has one row per panel
 feature, features without points included; in the order of the classes, then
 of each matrix's columns. Its population is the retained instances, zeros
 included, as for `per_class`. The columns follow
-`FeatureTableSummary.per_feature` of Slice 11k, without its median and p95:
+`FeatureSpatialBinSummary.per_feature` and `FeatureTableSummary.per_feature`
+of Slice 11k, without their median and p95, and add `within_class_fraction`
+of `PointsSummary.per_feature`:
 
-| Columns                                                                          | Meaning                                                                                                 | `sc.pp.calculate_qc_metrics`, `var`                                                               |
-| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `feature`, `feature_class`                                                       | the feature's name, from `metadata.feature_names`, and the label of its matrix                          | —                                                                                                 |
-| `n_points`                                                                       | the feature's points over the retained instances                                                        | `total_counts`                                                                                    |
-| `within_class_fraction`                                                          | `n_points` / the class's points, NaN when the class has none, as in `PointsSummary.per_feature`         | —                                                                                                 |
-| `n_retained_instances_without_feature`, `pct_retained_instances_without_feature` | retained instances with zero points of the feature, and 100 × that count / retained                     | `n_cells_by_counts` is the retained instances minus the first; `pct_dropout_by_counts` the second |
-| `mean_points_per_instance`, `std_points_per_instance`                            | the feature's points per retained instance; SD with `ddof=1`, NaN for fewer than two retained instances | `mean_counts`; no SD                                                                              |
+| Columns                                                                                       | Meaning                                                                                                 | `sc.pp.calculate_qc_metrics`, `var`                                                               |
+| --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `feature`, `feature_class`                                                                    | the feature's name, from `var_names` or the `.obsm` matrix's names, and the label of its matrix         | —                                                                                                 |
+| `n_total_instances`, `n_retained_instances`, `n_excluded_instances`, `pct_excluded_instances` | the population of `per_class`, the same for every feature, so that each row is complete                 | —                                                                                                 |
+| `n_points`                                                                                    | the feature's points over the retained instances                                                        | `total_counts`                                                                                    |
+| `within_class_fraction`                                                                       | `n_points` / the class's points, NaN when the class has none, as in `PointsSummary.per_feature`         | —                                                                                                 |
+| `n_retained_instances_without_feature`, `pct_retained_instances_without_feature`              | retained instances with zero points of the feature, and 100 × that count / retained                     | `n_cells_by_counts` is `n_retained_instances` minus the first; `pct_dropout_by_counts` the second |
+| `mean_points_per_instance`, `std_points_per_instance`                                         | the feature's points per retained instance; SD with `ddof=1`, NaN for fewer than two retained instances | `mean_counts`; no SD                                                                              |
 
 **`per_region_feature`: one row per selected region and feature,** with a
 categorical `region` column: the columns of `per_feature`, computed within
-each region, as `per_region` holds the statistics of `per_class` per region;
+each region, as `per_region_class` holds the statistics of `per_class` per region;
 in the order of the selected regions, then of `per_feature`. Within a region,
 the retained instances are those of that region, and `within_class_fraction`
 is relative to the class's points in that region. With one selected region,
@@ -9458,7 +9476,7 @@ only the matrices passed:
      `n_obs`, aligned with `.obs`, whatever the matrix's row chunks; the
      column accumulators are summed over the blocks. From these, in memory:
      the totals across the classes read, the retention mask, the percentages
-     `pct_<class>_points` and the statistics of `per_class` and `per_region`,
+     `pct_<class>_points` and the statistics of `per_class` and `per_region_class`,
      and, from step 1b, those of `per_feature` and `per_region_feature`.
    - **Why the matrices' chunks need not align:** no quantity computed inside
      the pass depends on another matrix. The retention mask, which depends on
@@ -9503,11 +9521,11 @@ the computed `TableSummary`, as the points side passes its result to
 `spatial_bin_histogram(summary, *, feature_class, …)`:
 
 ```python
-hp.qc.instance_histogram(table_summary, column="pct_x_points")
+hp.qc.instance_histogram(table_summary, feature_class="x", measure="pct_points")
 hp.qc.instance_scatter(
     table_summary,
-    column_x="n_negative_points",
-    column_y="n_system_control_points",
+    x=("negative", "points"),
+    y=("system_control", "points"),
     normalization="per_panel_feature",
 )
 ```
@@ -9516,21 +9534,38 @@ hp.qc.instance_scatter(
   retained spatial bin equal weight; `instance_histogram` gives each retained
   transcript-positive instance equal weight. The names and axis labels keep
   the two apart.
-- **They select columns of `summary.per_instance`** with `column`, or
-  `column_x` and `column_y`: counts, detected features and percentages, for
-  example `instance_histogram` for class counts and percentages, and
-  `instance_scatter` to compare two classes. They plot the population that the
-  summary computed, without filtering it again.
+- **One selection model with the bin histogram: a class and a measure.**
+  `instance_histogram(summary, *, feature_class, measure="points",
+normalization=None, …)` selects as
+  `spatial_bin_histogram(summary, *, feature_class, measure="points",
+normalization=None, …)` does, which gains `measure` in Slice 11m.
+  `instance_scatter(summary, *, x, y, normalization=None, …)` selects each
+  axis as a pair `(feature_class, measure)`. The measures of the instance
+  plots, with the column of `summary.per_instance` that each reads:
+
+  | `measure`             | Column of `per_instance`      | Measure per spatial bin (Slice 11m) |
+  | --------------------- | ----------------------------- | ----------------------------------- |
+  | `"points"` (default)  | `n_<class>_points`            | `n_points`                          |
+  | `"detected_features"` | `n_<class>_detected_features` | none: not computed per bin          |
+  | `"pct_points"`        | `pct_<class>_points`          | `pct_points`                        |
+
+  The column names are an internal detail of the plots: callers name a class
+  of `summary.feature_classes` and a measure, never build a column name. An
+  unknown class or measure raises and names the valid ones; `"pct_points"`
+  needs two classes or more, as the summary has the share only then. The
+  plots draw the population that the summary computed, without filtering it
+  again.
+
 - **`normalization`,** as in `spatial_bin_histogram` (Slice 11h): `None` plots
-  the stored values; `"per_panel_feature"` divides the displayed values of a
-  class count column `n_<class>_points`, and the annotated median and SD, by
-  that class's number of features, `summary.panel_feature_counts[<class>]`,
-  so that classes with different panel sizes become comparable; each axis of
-  `instance_scatter` by its own class's. The class of a column follows from
-  `summary.feature_classes`, without parsing names. Any other column with
-  `normalization="per_panel_feature"` raises, as a percentage or a number of
-  detected features has no per-panel-feature meaning. `summary` is not
-  modified.
+  the stored values; `"per_panel_feature"` divides the displayed values, and
+  the annotated median and SD, by the class's number of features,
+  `summary.panel_feature_counts[<class>]`, so that classes with different
+  panel sizes become comparable. It applies to `measure="points"` only, and
+  raises for another measure, as a percentage or a number of detected
+  features has no per-panel-feature meaning. On `instance_scatter`, it
+  applies to both axes or neither: each axis is divided by its own class's
+  number of features, and it raises unless both axes use `"points"`.
+  `summary` is not modified.
 - **One computation/rendering boundary:** plotting an available summary does
   not call `summarize_table` again, read the original points, or write derived
   metrics to `.obs`.
@@ -9607,11 +9642,14 @@ features. The mapping in the docstring lets users who know scanpy compare the
 columns. The percentages follow both conventions: `pct_` on a 0–100 scale, as
 the summary's other `pct_` columns and scanpy's `pct_counts_<qc_var>`.
 
-`summarize_table` and the `column` parameters of `instance_histogram` and
-`instance_scatter` refer to `TableSummary` for the column names rather than
-repeating them. Their `normalization` parameters are documented as that of
-`spatial_bin_histogram` (Slice 11h), with the class count columns as the only
-columns that they apply to, and the docstring of `TableSummary` says that it
+`summarize_table` refers to `TableSummary` for the column names rather than
+repeating them. The `feature_class` and `measure` parameters of
+`instance_histogram`, and the `x` and `y` pairs of `instance_scatter`, list
+the measures and say which column of `per_instance` each reads, so that the
+column names stay out of the calls. Their `normalization` parameters are
+documented as that of `spatial_bin_histogram` (Slice 11h), with
+`measure="points"` as the only measure that they apply to, and on the
+scatter to both axes or neither; the docstring of `TableSummary` says that it
 stores counts only, as `SpatialBinSummary` does: per-panel-feature values come
 from the plots' `normalization` or from dividing a count column by
 `panel_feature_counts`.
@@ -9636,10 +9674,10 @@ Focused tests should establish that:
   selected table rows with a positive total across the classes read,
   retaining zeros for a class and reporting excluded rows without
   reconstructing cells absent from the table;
-- the statistics of `per_class` and `per_region` agree with the retained
+- the statistics of `per_class` and `per_region_class` agree with the retained
   per-instance metrics, with names clearly indicating an instance-level
-  denominator; `per_class` pools the selected regions and equals `per_region`
-  for a single region; the columns of `per_class`, `per_region`,
+  denominator; `per_class` pools the selected regions and equals `per_region_class`
+  for a single region; the columns of `per_class`, `per_region_class`,
   `per_feature` and `per_region_feature` follow the order of the
   corresponding points-side frames, with `uint64` point counts;
   `panel_feature_counts` is derived from `per_class.n_features`;
@@ -9661,10 +9699,12 @@ Focused tests should establish that:
   differ in number from the matrix's columns, and a `feature_matrices_key`
   that is not a non-empty string raise a `ValueError`, without a matrix read;
 - `TableSummary.metadata` records the table, the regions resolved from `None`,
-  the matrices read, the registry key and each class's feature names; neither
-  the class labels, the denominators nor any provenance of the table are in
-  it, and `TableSummary.feature_classes` and `panel_feature_counts` derive
-  the labels and the denominators from `per_class`;
+  the matrices read and the registry key; neither the class labels, the
+  feature names, the denominators nor any provenance of the table are in it,
+  and `TableSummary.feature_classes` and `panel_feature_counts` derive the
+  labels and the denominators from `per_class`, and
+  `TableSummary.feature_names` each class's names, in column order, from
+  `per_feature`;
 - a table without an aggregation record, or whose annotated labels and points
   elements are absent from `sdata`, is summarized all the same, and neither
   the aggregation record nor `sdata.attrs` is read;
@@ -9684,14 +9724,17 @@ Focused tests should establish that:
 - a table whose `X` is `None` is summarized from the `.obsm` matrices passed
   alone;
 - existing table-input plotting remains usable for ordinary stored metrics;
-- `instance_histogram` and `instance_scatter` plot columns of
-  `TableSummary.per_instance`, leave both the summary and source table
-  unchanged, do not repeat summary computation, and do not require writing
-  temporary metrics to `.obs`; and
-- with `normalization="per_panel_feature"`, they divide the displayed values
-  of a class count column, and the annotated median and SD, by that class's
-  `panel_feature_counts`, each scatter axis by its own class's, and raise for
-  any other column.
+- `instance_histogram` and `instance_scatter` select a class and a measure,
+  each scatter axis a `(feature_class, measure)` pair, and plot the matching
+  column of `TableSummary.per_instance`: `"points"`, `"detected_features"`
+  and, with two classes or more, `"pct_points"`; an unknown class or measure
+  raises and names the valid ones; they leave both the summary and source
+  table unchanged, do not repeat summary computation, and do not require
+  writing temporary metrics to `.obs`; and
+- with `normalization="per_panel_feature"`, they divide the displayed values,
+  and the annotated median and SD, by the class's `panel_feature_counts`, each
+  scatter axis by its own class's; it raises for a measure other than
+  `"points"`, on the scatter unless both axes use `"points"`.
 
 ## Slice 11k: feature summaries of a table for selected features
 
@@ -9732,16 +9775,16 @@ hp.qc.instance_histogram_by_feature(feature_summary, feature="Negative01")
   negative probe it did not receive.
 - **`features`:** an exact name or a non-empty sequence of distinct names,
   found among the feature names that `summary` resolved,
-  `summary.metadata.feature_names`: the `var_names` of `X` or the layer, and
+  `summary.feature_names`: the `var_names` of `X` or the layer, and
   the registered or passed names of each `.obsm` matrix (Slice 11j).
   Unknown names raise; a name found in two matrices raises as ambiguous.
   Results keep the order of the summary's classes and then the matrix's
   column order, not the request order. Undetected features keep their zeros.
 - **Names from the summary:** this call takes no names of its own. Slice 11j
   resolves each matrix's names once, from `var_names`, the registry
-  `uns[feature_matrices_key]` or its `feature_names` parameter, and records
-  them in the summary's metadata, so that the names and the population come
-  from the same call.
+  `uns[feature_matrices_key]` or its `feature_names` parameter, and the
+  summary exposes them as `summary.feature_names`, from its `per_feature`, so
+  that the names and the population come from the same call.
 - **Each feature's class** is the class of the matrix it is in, the label that
   the summary gave that matrix. No feature panel is read.
 - **No large frames:** only the requested features are summarized per
@@ -9765,14 +9808,16 @@ hp.qc.instance_histogram_by_feature(feature_summary, feature="Negative01")
   number of retained instances.
 - `per_feature`: one row per requested feature, pooled over the selected
   regions, with the columns of `FeatureSpatialBinSummary.per_feature`, bins
-  replaced by instances: `feature`, `feature_class`, the inherited population
-  (`n_total_instances`, `n_retained_instances`, `n_excluded_instances`,
-  `pct_excluded_instances`), `n_retained_instances_without_feature`,
-  `pct_retained_instances_without_feature`, `n_points` and
+  replaced by instances, in its order: `feature`, `feature_class`, the
+  inherited population (`n_total_instances`, `n_retained_instances`,
+  `n_excluded_instances`, `pct_excluded_instances`), `n_points`,
+  `n_retained_instances_without_feature`,
+  `pct_retained_instances_without_feature` and
   `mean_/median_/std_/p95_points_per_instance`, zeros included, through the
-  shared statistics helper.
-- `per_region`: the statistics of `per_feature` within each selected region,
-  with a `region` column, as `TableSummary.per_region`.
+  shared statistics helper. `TableSummary.per_feature` has the same order,
+  with `within_class_fraction` after `n_points`.
+- `per_region_feature`: the statistics of `per_feature` within each selected
+  region, with a `region` column, as `TableSummary.per_region_feature`.
 
 **Matrices:**
 
@@ -9865,22 +9910,27 @@ themselves are named `panel_feature_counts`.
   `hp.qc.segmentation_histogram`, whose `labels_name` names the labels element
   that they measure, not a region of a table.
 
-## Slice 11m: class shares per spatial bin and panel sizes in the bin statistics
+## Slice 11m: align the points summaries with the table summary
 
 **Status: planned; implement after Slice 11j.**
 
-Align the spatial-bin summary as closely as possible with the table summary of
-Slice 11j, through the measures that the class grid already determines, and
-without another pass over the points. Slice 11j's `TableSummary` holds, with
-two classes or more, each class's share of an instance's points,
+Align the points summaries as closely as possible with the table summary of
+Slice 11j: the measures that the class grid already determines, without
+another pass over the points, and the contract of the results, their
+properties and column types. Slice 11j's `TableSummary` holds, with two
+classes or more, each class's share of an instance's points,
 `pct_<class>_points`, and in `per_class` the class's number of features,
-`n_features`; `SpatialBinSummary` has neither.
+`n_features`; `SpatialBinSummary` has neither. `TableSummary` also exposes its
+classes and feature names as properties and types `feature_class` as
+categorical in every frame; the points summaries do not yet.
 
-| Table summary (Slice 11j)            | Points summary (this slice)                                                                                   |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
-| `per_instance`: `pct_<class>_points` | `SpatialBinSummary.per_bin`: `pct_points`, the class's share of the bin's points, per bin and class           |
-| `per_class`: `n_features`            | `SpatialBinSummary.per_class`: `n_features`, the class's number of panel features, after its point statistics |
-| `TableSummary.feature_classes`       | `PointsSummary.feature_classes`, the selected classes, in the order of `per_class`                            |
+| Table summary (Slice 11j)                | Points summary (this slice)                                                                                                                                                                     |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `per_instance`: `pct_<class>_points`     | `SpatialBinSummary.per_bin`: `pct_points`, the class's share of the bin's points, per bin and class                                                                                             |
+| `per_class`: `n_features`                | `SpatialBinSummary.per_class`: `n_features`, the class's number of panel features, after its point statistics                                                                                   |
+| `TableSummary.feature_classes`           | `PointsSummary.feature_classes`, the selected classes, in the order of `per_class`                                                                                                              |
+| `TableSummary.feature_names`             | `PointsSummary.feature_names`, each selected class's panel features, in panel order                                                                                                             |
+| categorical `feature_class`, every frame | categorical `feature_class` in `PointsSummary.per_feature`, `PointsSummary.per_class` and `FeaturePointsSummary.per_feature`, and explicit categories in `FeatureSpatialBinSummary.per_feature` |
 
 - **Long, as `per_bin` is:** `per_bin` has one row per retained bin and
   class, so the share is a column of that row, without the class in its name,
@@ -9899,6 +9949,22 @@ two classes or more, each class's share of an instance's points,
   both summaries expose their classes, as their denominators
   `panel_feature_counts`, the same way. Today the selected classes are read
   from `per_class` or from the keys of `panel_feature_counts`.
+- **`PointsSummary.feature_names`:** a property derived from the `feature`
+  and `feature_class` columns of `per_feature`, which list every panel feature
+  of the selected classes, as `TableSummary.feature_names` is derived from its
+  `per_feature`: class name to its features, in panel order.
+- **Categorical `feature_class` in every frame:** `PointsSummary.per_feature`,
+  `PointsSummary.per_class` and `FeaturePointsSummary.per_feature` store the
+  class as plain strings, while `SpatialBinSummary`, `FeatureSpatialBinSummary`
+  and every frame of `TableSummary` store it as a categorical. They become
+  categorical too, with the selected classes in panel order as categories.
+  `FeatureSpatialBinSummary.per_feature` derives its categories from the
+  values, `pd.Categorical(feature_classes)`, which keeps only the classes
+  present and sorts them alphabetically; it passes the selected classes in
+  panel order explicitly instead, as every other frame does. The `feature`
+  column keeps its types: plain strings where a frame lists every feature, and
+  categorical in the long frames of named features, `per_bin` and
+  `per_feature` of `FeatureSpatialBinSummary`.
 - **Not computed: detected features per bin.** Slice 11j counts each class's
   detected features per instance, the non-zero entries of a row, in the pass
   it already makes. Per bin, counting distinct features needs the distinct
@@ -9908,9 +9974,20 @@ two classes or more, each class's share of an instance's points,
   richer than the points side"). The docstring of `SpatialBinSummary` states
   this and why, as that of `TableSummary.per_instance` does from the instance
   side (Slice 11j).
-- **Plots and other summaries unchanged:** `spatial_bin_histogram` keeps
-  plotting the class's points per bin, and `FeatureSpatialBinSummary` is not
-  changed; the share is read from `per_bin`.
+- **`spatial_bin_histogram` gains `measure`:**
+  `spatial_bin_histogram(summary, *, feature_class, measure="points",
+normalization=None, …)`, the selection model of `instance_histogram`
+  (Slice 11j). `"points"`, the default, plots the class's points per bin, as
+  today, so existing calls are unchanged; `"pct_points"` plots the class's
+  share of each bin's points, with two selected classes or more.
+  `"detected_features"` raises, as it is not computed per bin, and names the
+  measures available. `normalization="per_panel_feature"` applies to
+  `"points"` only and raises for `"pct_points"`. For `"pct_points"`, the
+  annotated median and SD come from the plotted values, as `per_class` holds
+  no statistics of the share.
+- **Other columns unchanged:** `FeatureSpatialBinSummary` changes only its
+  class categories, and `spatial_bin_histogram_by_feature` keeps selecting by
+  `feature`.
 
 **Verification:** with two selected classes or more, `per_bin` holds each
 class's share of the bin's points, equal to the share computed from
@@ -9918,7 +9995,15 @@ class's share of the bin's points, equal to the share computed from
 classes; with one class, there is no share column; `per_class` holds
 `n_features`, equal to `PointsSummary.per_class.n_features`;
 `PointsSummary.feature_classes` equals the selected classes in the order of
-`per_class`; and no additional pass over the source points is made.
+`per_class`, and `PointsSummary.feature_names` each selected class's panel
+features in panel order; `feature_class` is categorical in every frame of
+`PointsSummary` and `FeaturePointsSummary` and their bin summaries, with the
+selected classes in panel order as categories, also when a class is absent
+from a frame's rows; `spatial_bin_histogram` plots the class's points per bin
+by default and its share of the bins' points with `measure="pct_points"`,
+raises for `"detected_features"` and for `normalization="per_panel_feature"`
+with a measure other than `"points"`; and no additional pass over the source
+points is made.
 
 ## Slice 12: optional Slice 7b latency optimization
 
