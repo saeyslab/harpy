@@ -106,7 +106,7 @@ class TableSummary:
         number of features in the matrices read. SD uses ``ddof=1`` and is NaN
         for fewer than two instances; the percentile uses linear
         interpolation.
-    per_region
+    per_region_class
         The statistics of ``per_class``, computed within each selected region,
         with a categorical ``region`` column first: one row per selected
         region and class. With one selected region, it holds the values of
@@ -157,7 +157,7 @@ class TableSummary:
     metadata: TableSummaryMetadata
     per_instance: pd.DataFrame
     per_class: pd.DataFrame
-    per_region: pd.DataFrame
+    per_region_class: pd.DataFrame
     per_feature: pd.DataFrame
     per_region_feature: pd.DataFrame
 
@@ -282,7 +282,7 @@ def summarize_table(
     TableSummary
         The instance metrics in ``per_instance``, the class statistics pooled
         over the selected regions in ``per_class`` and per region in
-        ``per_region``, the feature statistics in ``per_feature`` and
+        ``per_region_class``, the feature statistics in ``per_feature`` and
         ``per_region_feature``, and their context in ``metadata``. Column names
         follow the class labels, the names of the matrices read in snake case:
         ``x`` for ``X``. See :class:`TableSummary`.
@@ -413,7 +413,7 @@ def summarize_table(
         )
         frame.insert(0, _REGION_COLUMN_KEY, name)
         region_frames.append(frame)
-    per_region = _with_region_categories(pd.concat(region_frames, ignore_index=True), selected_regions)
+    per_region_class = _with_region_categories(pd.concat(region_frames, ignore_index=True), selected_regions)
 
     names = {entry.label: entry.feature_names for entry in classes}
     per_feature = _feature_statistics(
@@ -451,7 +451,7 @@ def summarize_table(
         metadata=metadata,
         per_instance=per_instance,
         per_class=per_class,
-        per_region=per_region,
+        per_region_class=per_region_class,
         per_feature=per_feature,
         per_region_feature=per_region_feature,
     )
