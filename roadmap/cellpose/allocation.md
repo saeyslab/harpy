@@ -4,8 +4,8 @@
 
 Thirteen numbered implementation slices are planned, with Slice 7 split into
 parts a and b and Slice 11 into parts a through m; Slices 1 through 10 are
-implemented, as are Parts 11a–11i except the optimization 11f.xi. Slices
-11j–11m and the optional Slice 12 remain:
+implemented, as are Parts 11a–11j except the optimization 11f.xi. Slices
+11k–11m and the optional Slice 12 remain:
 
 1. patch the CosMx reader and establish the generic Harpy feature-panel
    metadata contract — implemented;
@@ -77,10 +77,10 @@ implemented, as are Parts 11a–11i except the optimization 11f.xi. Slices
       an amendment reducing `hp.tb.validate_table` to generic checks, without
       validating the table against its feature panel — implemented;
     - **11j:** table-level summary computation through `hp.qc.summarize_table`
-      and `TableSummary`, with plotting integration — step 1 redone from CSR
-      count matrices in two parts, 1a (matrices and classes) and 1b
-      (features), both implemented; step 2 (instance plots) implemented;
-      step 3 (docs) not implemented;
+      and `TableSummary`, with plotting integration through
+      `hp.qc.instance_histogram` and `hp.qc.instance_scatter` — implemented,
+      step 1 redone from CSR count matrices in two parts, 1a (matrices and
+      classes) and 1b (features);
     - **11k:** feature summaries of a table for selected features through
       `hp.qc.summarize_table_by_feature` and `FeatureTableSummary`, with
       `instance_histogram_by_feature`, the counterparts of
@@ -8896,8 +8896,8 @@ keys before assignment.
 
 ## Slice 11j: table-level summary computation and plotting integration
 
-**Status: steps 1 and 2 implemented, step 1 redone from the count matrices in
-two parts, 1a and 1b; step 3 not implemented.**
+**Status: implemented, step 1 redone from the count matrices in two parts, 1a
+and 1b.**
 
 Implement a read-only `hp.qc.summarize_table` computation API and a
 `TableSummary` result, followed by table-level QC plots that take the result.
@@ -8971,8 +8971,10 @@ disk access is needed.
      the errors of the names.
 2. (implemented) `instance_histogram` and `instance_scatter`, including moving
    `obs_scatter`'s rendering into a shared dataframe-based helper.
-3. Docs: the new functions in the Quality Control → Tables section of
-   `docs/api.md`, and marking 11j implemented.
+3. (implemented) Docs: the new functions in the Quality Control → Tables
+   section of `docs/api.md`, with `TableSummary` and `TableSummaryMetadata`
+   under its summary result types, as the Points section lists its own, and
+   marking 11j implemented.
 
 **Implementation choices:**
 
