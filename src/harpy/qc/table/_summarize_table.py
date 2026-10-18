@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from typing import Literal
 
 import dask
 import dask.array as da
@@ -16,10 +17,20 @@ from scipy import sparse
 from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
+from harpy._feature_panels import _require_mapping
 from harpy._storage._anndata import _auto_sparse_block_length
-from harpy.qc._summary_schema import _FEATURE_CLASS_KEY, _N_FEATURES_KEY, _N_POINTS_KEY, _REGION_COLUMN_KEY
+from harpy.qc._summary_reduction import _tree_reduce
+from harpy.qc._summary_schema import (
+    _FEATURE_CLASS_KEY,
+    _FEATURE_KEY,
+    _N_FEATURES_KEY,
+    _N_POINTS_KEY,
+    _REGION_COLUMN_KEY,
+)
 from harpy.qc._summary_statistics import _points_statistics
 from harpy.qc.table._table_summary_metadata import TableSummaryMetadata
+from harpy.table._validation import _metadata_string_sequence, _validate_feature_matrix_record
+from harpy.utils._keys import _FEATURE_MATRICES_KEY
 from harpy.utils._names import _snake_case
 
 # The label of the class of X, the name of the matrix in snake case.
@@ -100,12 +111,53 @@ class TableSummary:
         with a categorical ``region`` column first: one row per selected
         region and class. With one selected region, it holds the values of
         ``per_class``.
+    per_feature
+        One row per feature of each class read, features without points
+        included, in the order of :attr:`feature_classes` and then of each
+        matrix's columns, pooled over the selected regions. Its population is
+        the retained instances, zeros included. Columns, in this order:
+        ``feature``, the feature's name: from ``var_names`` for ``X`` or a
+        layer, and for an ``.obsm`` matrix from its registered
+        ``feature_columns`` or the names passed; ``feature_class``
+        (categorical), the label of its matrix; ``n_points`` (uint64), the
+        feature's points; ``within_class_fraction``, ``n_points`` / the class's
+        points, NaN when the class has none;
+        ``n_retained_instances_without_feature`` and
+        ``pct_retained_instances_without_feature``, the retained instances with
+        zero points of the feature, and 100 times that count / retained; and
+        ``mean_points_per_instance`` and ``std_points_per_instance``, the
+        feature's points per retained instance, SD with ``ddof=1`` and NaN for
+        fewer than two instances. Compared with the ``var`` columns of
+        :func:`scanpy.pp.calculate_qc_metrics`, which uses all rows of ``X`` or
+        a layer::
+
+            this summary                              scanpy
+            n_points                                  total_counts
+            mean_points_per_instance                  mean_counts
+            pct_retained_instances_without_feature    pct_dropout_by_counts
+            retained instances - n_retained_instances_without_feature
+                                                      n_cells_by_counts
+
+        Unlike the ``per_feature`` of :class:`~harpy.qc.PointsSummary`, every
+        feature has statistics per instance: they come from the pass that
+        sums the classes, while statistics per spatial bin would need the
+        count of every panel feature in every bin. Medians and percentiles
+        are not computed per feature, as that pass does not keep each column's
+        values.
+    per_region_feature
+        The columns of ``per_feature``, computed within each selected region,
+        with a categorical ``region`` column first: one row per selected
+        region and feature. Within a region, ``within_class_fraction`` is
+        relative to the class's points in that region. With one selected
+        region, it holds the values of ``per_feature``.
     """
 
     metadata: TableSummaryMetadata
     per_instance: pd.DataFrame
     per_class: pd.DataFrame
     per_region: pd.DataFrame
+    per_feature: pd.DataFrame
+    per_region_feature: pd.DataFrame
 
     @property
     def feature_classes(self) -> tuple[str, ...]:
@@ -115,6 +167,18 @@ class TableSummary:
         the layer's name, then each ``.obsm`` key.
         """
         return tuple(str(label) for label in self.per_class[_FEATURE_CLASS_KEY])
+
+    @property
+    def feature_names(self) -> dict[str, tuple[str, ...]]:
+        """Return each class's feature names in column order, from ``per_feature``.
+
+        ``var_names`` for ``X`` or a layer; for an ``.obsm`` matrix, its
+        registered ``feature_columns`` or the names passed to
+        :func:`harpy.qc.summarize_table`.
+        """
+        classes = self.per_feature[_FEATURE_CLASS_KEY].to_numpy()
+        features = self.per_feature[_FEATURE_KEY].to_numpy()
+        return {label: tuple(str(name) for name in features[classes == label]) for label in self.feature_classes}
 
     @property
     def panel_feature_counts(self) -> dict[str, int]:
@@ -132,13 +196,26 @@ class TableSummary:
 
 
 @dataclass(frozen=True)
-class _ClassMatrix:
-    """One matrix read, one class."""
+class _FeatureClassMatrix:
+    """One matrix read, one class: where it is in the AnnData, the matrix and its column names."""
 
-    label: str
-    # Where the matrix is in the AnnData, for messages, for example "obsm['negative']".
-    location: str
+    # The AnnData attribute that holds the matrix.
+    attribute: Literal["X", "layers", "obsm"]
+    # Its key in that attribute; None for X.
+    key: str | None
     matrix: object
+    # Its column names: var_names for X or a layer, the registered or passed names for .obsm.
+    feature_names: tuple[str, ...] = ()
+
+    @property
+    def label(self) -> str:
+        """Return the class label: the matrix's name in snake case, ``"x"`` for ``X``."""
+        return _X_LABEL if self.key is None else _snake_case(self.key)
+
+    @property
+    def location(self) -> str:
+        """Return where the matrix is in the AnnData, for messages, for example ``"obsm['negative']"``."""
+        return "X" if self.key is None else f"{self.attribute}[{self.key!r}]"
 
 
 def summarize_table(
@@ -147,6 +224,8 @@ def summarize_table(
     *,
     layer: str | None = None,
     obsm_keys: str | Sequence[str] = (),
+    feature_names: Mapping[str, Sequence[str]] | None = None,
+    feature_matrices_key: str = _FEATURE_MATRICES_KEY,
     region: str | Sequence[str] | None = None,
 ) -> TableSummary:
     """Summarize the instances of a table from its count matrices, per class.
@@ -178,6 +257,18 @@ def summarize_table(
         ``["negative", "system_control"]``. Empty by default, which summarizes
         ``X`` alone. The keys are not inferred from the table: the caller names
         what to summarize.
+    feature_names
+        For an ``.obsm`` matrix read whose names
+        ``adata.uns[feature_matrices_key]`` does not register, its column names:
+        a mapping from the ``.obsm`` key to as many unique names as the matrix
+        has columns. Each matrix has one source of names: a registered matrix
+        takes its ``feature_columns``, and names passed for it raise. ``X`` and
+        a layer are named by ``var_names``. The names label the rows of
+        ``per_feature``.
+    feature_matrices_key
+        Key in ``adata.uns`` of the registry that names the columns of the
+        ``.obsm`` matrices read; ``"feature_matrices"`` by default. Only the
+        entries of the matrices read are checked.
     region
         Annotated elements whose instances to summarize: names from the table's
         SpatialData annotation, ``uns["spatialdata_attrs"]["region"]``,
@@ -189,9 +280,10 @@ def summarize_table(
     TableSummary
         The instance metrics in ``per_instance``, the class statistics pooled
         over the selected regions in ``per_class`` and per region in
-        ``per_region``, and their context in ``metadata``. Column names follow
-        the class labels, the names of the matrices read in snake case: ``x``
-        for ``X``. See :class:`TableSummary`.
+        ``per_region``, the feature statistics in ``per_feature`` and
+        ``per_region_feature``, and their context in ``metadata``. Column names
+        follow the class labels, the names of the matrices read in snake case:
+        ``x`` for ``X``. See :class:`TableSummary`.
 
     Raises
     ------
@@ -201,7 +293,12 @@ def summarize_table(
         ``obsm_keys`` is unknown, or ``obsm_keys`` contains duplicates; if two
         matrices read have the same class label; if a matrix read is not a CSR
         matrix with one row per observation, or holds values that are not
-        counts; or if ``region`` is empty, contains duplicates or unknown names.
+        counts; if ``feature_matrices_key`` is not a non-empty string, the
+        registration of an ``.obsm`` matrix read is invalid, or an ``.obsm``
+        matrix read has no names or two sources of names; if ``feature_names``
+        names a key that is not read, or its names are not unique strings as
+        many as the matrix's columns; or if ``region`` is empty, contains
+        duplicates or unknown names.
 
     Notes
     -----
@@ -248,24 +345,42 @@ def summarize_table(
     attrs = adata.uns.get(TableModel.ATTRS_KEY)
     if not isinstance(attrs, Mapping):
         raise ValueError(f"Table {table_name!r} has no SpatialData annotation (uns[{TableModel.ATTRS_KEY!r}]).")
+    if not isinstance(feature_matrices_key, str) or not feature_matrices_key:
+        raise ValueError(
+            f"Parameter 'feature_matrices_key' must be a non-empty string, found {feature_matrices_key!r}."
+        )
     selected_regions = _selected_names(
         region, recorded=_names(attrs[TableModel.REGION_KEY]), parameter="region", kind="regions"
     )
     keys = _obsm_keys(obsm_keys)
-    classes = _class_matrices(adata, table_name=table_name, layer=layer, obsm_keys=keys)
+    classes = _class_matrices(
+        adata,
+        table_name=table_name,
+        layer=layer,
+        obsm_keys=keys,
+        feature_names=feature_names,
+        feature_matrices_key=feature_matrices_key,
+    )
     labels = tuple(entry.label for entry in classes)
     n_features = {entry.label: int(entry.matrix.shape[1]) for entry in classes}
 
     region_key = attrs[TableModel.REGION_KEY_KEY]
     instance_key = attrs[TableModel.INSTANCE_KEY]
     obs = adata.obs
-    # Select on .obs only: the AnnData itself is never copied.
-    region_values = obs[region_key].astype(str).to_numpy()
-    positions = np.flatnonzero(np.isin(region_values, selected_regions))
+    # Select on .obs only: the AnnData itself is never copied. A row's region code
+    # is the position of its region in selected_regions, -1 outside the selection.
+    region_codes = pd.Categorical(obs[region_key].astype(str).to_numpy(), categories=selected_regions).codes
+    region_codes = region_codes.astype(np.int64)
+    positions = np.flatnonzero(region_codes >= 0)
+    rows, columns = _count_rows(
+        classes, region_codes=region_codes, n_regions=len(selected_regions), table_name=table_name
+    )
     # points[label] holds the class's points per selected row, in table order: the
     # row's sum in that class's matrix. detected[label] holds its detected features:
-    # the row's positive entries. Rows without points are included.
-    points, detected = _count_rows(classes, positions=positions, n_obs=adata.n_obs, table_name=table_name)
+    # the row's positive entries. Rows without points are included. columns[label]
+    # holds the column sums of that matrix per selected region.
+    points = {label: row_sums.sums for label, row_sums in rows.items()}
+    detected = {label: row_sums.positives for label, row_sums in rows.items()}
 
     totals = np.zeros(len(positions), dtype=np.uint64)
     for label in labels:
@@ -283,10 +398,10 @@ def summarize_table(
 
     per_class = _class_statistics(points, detected, retained, labels=labels, n_features=n_features)
     region_frames = []
-    # The region of each selected row, aligned with the vectors in points and detected.
-    regions_of_selected = region_values[positions]
-    for name in selected_regions:
-        in_region = regions_of_selected == name
+    # The region code of each selected row, aligned with the vectors in points and detected.
+    codes_of_selected = region_codes[positions]
+    for code, name in enumerate(selected_regions):
+        in_region = codes_of_selected == code
         frame = _class_statistics(
             {label: values[in_region] for label, values in points.items()},
             {label: values[in_region] for label, values in detected.items()},
@@ -296,16 +411,43 @@ def summarize_table(
         )
         frame.insert(0, _REGION_COLUMN_KEY, name)
         region_frames.append(frame)
-    per_region = pd.concat(region_frames, ignore_index=True)
-    per_region[_REGION_COLUMN_KEY] = pd.Categorical(per_region[_REGION_COLUMN_KEY], categories=selected_regions)
+    per_region = _with_region_categories(pd.concat(region_frames, ignore_index=True), selected_regions)
+
+    names = {entry.label: entry.feature_names for entry in classes}
+    per_feature = _feature_statistics(
+        columns, n_retained=int(retained.sum()), region=None, labels=labels, feature_names=names
+    )
+    n_retained_by_region = np.bincount(codes_of_selected[retained], minlength=len(selected_regions))
+    region_feature_frames = []
+    for code, name in enumerate(selected_regions):
+        frame = _feature_statistics(
+            columns, n_retained=int(n_retained_by_region[code]), region=code, labels=labels, feature_names=names
+        )
+        frame.insert(0, _REGION_COLUMN_KEY, name)
+        region_feature_frames.append(frame)
+    per_region_feature = _with_region_categories(pd.concat(region_feature_frames, ignore_index=True), selected_regions)
 
     metadata = TableSummaryMetadata(
         table_name=table_name,
         region=selected_regions,
         layer=layer,
         obsm_keys=keys,
+        feature_matrices_key=feature_matrices_key,
     )
-    return TableSummary(metadata=metadata, per_instance=per_instance, per_class=per_class, per_region=per_region)
+    return TableSummary(
+        metadata=metadata,
+        per_instance=per_instance,
+        per_class=per_class,
+        per_region=per_region,
+        per_feature=per_feature,
+        per_region_feature=per_region_feature,
+    )
+
+
+def _with_region_categories(frame: pd.DataFrame, regions: tuple[str, ...]) -> pd.DataFrame:
+    """Make the region column categorical, its categories the selected regions in their order."""
+    frame[_REGION_COLUMN_KEY] = pd.Categorical(frame[_REGION_COLUMN_KEY], categories=regions)
+    return frame
 
 
 def _names(value: object) -> tuple[str, ...]:
@@ -335,26 +477,30 @@ def _selected_names(
 
 
 def _class_matrices(
-    adata: AnnData, *, table_name: str, layer: str | None, obsm_keys: tuple[str, ...]
-) -> tuple[_ClassMatrix, ...]:
-    """Return the matrices to read, one per class, after checking them without reading a value."""
+    adata: AnnData,
+    *,
+    table_name: str,
+    layer: str | None,
+    obsm_keys: tuple[str, ...],
+    feature_names: Mapping[str, Sequence[str]] | None,
+    feature_matrices_key: str,
+) -> tuple[_FeatureClassMatrix, ...]:
+    """Return the matrices to read, one per class, with their feature names, after checking them without reading a value."""
     entries = []
     if layer is not None:
         if not isinstance(layer, str) or layer not in adata.layers:
             raise ValueError(
                 f"Layer {layer!r} is not a layer of table {table_name!r}; available layers: {sorted(adata.layers)}."
             )
-        entries.append(
-            _ClassMatrix(label=_snake_case(layer), location=f"layers[{layer!r}]", matrix=adata.layers[layer])
-        )
+        entries.append(_FeatureClassMatrix(attribute="layers", key=layer, matrix=adata.layers[layer]))
     elif adata.X is not None:
-        entries.append(_ClassMatrix(label=_X_LABEL, location="X", matrix=adata.X))
+        entries.append(_FeatureClassMatrix(attribute="X", key=None, matrix=adata.X))
     for key in obsm_keys:
         if key not in adata.obsm:
             raise ValueError(
                 f"{key!r} is not an .obsm key of table {table_name!r}; available keys: {sorted(adata.obsm)}."
             )
-        entries.append(_ClassMatrix(label=_snake_case(key), location=f"obsm[{key!r}]", matrix=adata.obsm[key]))
+        entries.append(_FeatureClassMatrix(attribute="obsm", key=key, matrix=adata.obsm[key]))
     if not entries:
         raise ValueError(f"Table {table_name!r} has no X, and neither layer nor obsm_keys names a matrix to summarize.")
 
@@ -366,7 +512,71 @@ def _class_matrices(
         raise ValueError(f"Each matrix read needs its own class label, but these labels coincide: {coinciding}.")
     for entry in entries:
         _check_csr(entry, n_obs=adata.n_obs, table_name=table_name)
-    return tuple(entries)
+
+    obsm_names = _obsm_feature_names(
+        adata,
+        table_name=table_name,
+        obsm_keys=obsm_keys,
+        feature_names=feature_names,
+        feature_matrices_key=feature_matrices_key,
+    )
+    var_names = tuple(str(name) for name in adata.var_names)
+    return tuple(
+        replace(entry, feature_names=obsm_names[entry.key] if entry.attribute == "obsm" else var_names)
+        for entry in entries
+    )
+
+
+def _obsm_feature_names(
+    adata: AnnData,
+    *,
+    table_name: str,
+    obsm_keys: tuple[str, ...],
+    feature_names: Mapping[str, Sequence[str]] | None,
+    feature_matrices_key: str,
+) -> dict[str, tuple[str, ...]]:
+    """Return the column names of each ``.obsm`` matrix read, from one source each.
+
+    A matrix registered in ``adata.uns[feature_matrices_key]`` takes its
+    ``feature_columns``, checked as :func:`harpy.tb.validate_table` checks a
+    registration; an unregistered one takes the names passed in
+    ``feature_names``. Only the registrations of the matrices read are checked.
+    """
+    passed = {} if feature_names is None else feature_names
+    if not isinstance(passed, Mapping):
+        raise ValueError("feature_names must map .obsm keys of obsm_keys to sequences of column names.")
+    unread = [key for key in passed if key not in obsm_keys]
+    if unread:
+        raise ValueError(f"feature_names names .obsm keys that are not read: {unread}; it applies to obsm_keys only.")
+    registry = adata.uns.get(feature_matrices_key)
+    records = {} if registry is None else _require_mapping(registry, path=feature_matrices_key)
+
+    names = {}
+    for key in obsm_keys:
+        location = f"adata.obsm[{key!r}] of table {table_name!r}"
+        if key in records:
+            if key in passed:
+                raise ValueError(
+                    f"{location} is registered in uns[{feature_matrices_key!r}], which names its columns; "
+                    "do not pass its names in feature_names."
+                )
+            names[key] = _validate_feature_matrix_record(
+                adata, key, records[key], feature_matrices_key=feature_matrices_key
+            )
+        elif key in passed:
+            given = _metadata_string_sequence(passed[key], path=f"feature_names[{key!r}]", subject="Parameter")
+            n_columns = adata.obsm[key].shape[1]
+            if len(given) != n_columns:
+                raise ValueError(
+                    f"feature_names[{key!r}] has {len(given)} names, but {location} has {n_columns} columns."
+                )
+            names[key] = given
+        else:
+            raise ValueError(
+                f"{location} has no column names: it is not registered in uns[{feature_matrices_key!r}]. Pass its "
+                f"names with feature_names={{{key!r}: [...]}}, or the key of its registry with feature_matrices_key."
+            )
+    return names
 
 
 def _obsm_keys(value: str | Sequence[str]) -> tuple[str, ...]:
@@ -381,7 +591,7 @@ def _obsm_keys(value: str | Sequence[str]) -> tuple[str, ...]:
     return keys
 
 
-def _check_csr(entry: _ClassMatrix, *, n_obs: int, table_name: str) -> None:
+def _check_csr(entry: _FeatureClassMatrix, *, n_obs: int, table_name: str) -> None:
     """Raise unless the matrix is a CSR matrix with one row per observation, from its type alone."""
     matrix = entry.matrix
     if isinstance(matrix, da.Array):
@@ -404,46 +614,107 @@ def _check_csr(entry: _ClassMatrix, *, n_obs: int, table_name: str) -> None:
         )
 
 
-def _count_rows(
-    classes: tuple[_ClassMatrix, ...], *, positions: NDArray[np.intp], n_obs: int, table_name: str
-) -> tuple[dict[str, NDArray[np.uint64]], dict[str, NDArray[np.int64]]]:
-    """Return, per class, the points and detected features of the selected rows, in table order.
+@dataclass(frozen=True)
+class _RowSums:
+    """Per selected row of one class matrix, in table order: its sum and its positive entries.
 
-    Each matrix is read once, in CSR row blocks, and only the blocks with
-    selected rows. No quantity depends on another matrix, so each lazy matrix
-    keeps its own row chunks, and all lazy matrices run in one Dask compute.
-    Backed and in-memory matrices are read in row slices.
+    ``sums`` are the row sums and ``positives`` the positive entries per row.
+    The row sums of consecutive row blocks join into those of the matrix.
     """
-    selected = np.zeros(n_obs, dtype=bool)
-    selected[positions] = True
-    results: dict[str, list[tuple[NDArray[np.uint64], NDArray[np.int64]]]] = {}
+
+    sums: NDArray[np.uint64]
+    positives: NDArray[np.int64]
+
+    @classmethod
+    def concatenate(cls, parts: Sequence[_RowSums]) -> _RowSums:
+        """Join the row sums of consecutive blocks, in block order; empty without blocks."""
+        return cls(
+            sums=np.concatenate([np.zeros(0, dtype=np.uint64), *(part.sums for part in parts)]),
+            positives=np.concatenate([np.zeros(0, dtype=np.int64), *(part.positives for part in parts)]),
+        )
+
+
+@dataclass(frozen=True)
+class _ColumnSums:
+    """Per selected region and column of one class matrix, over the selected rows.
+
+    ``sums`` are the column sums, ``positives`` the rows with a positive entry
+    and ``squares`` the sums of squares, each of shape ``(n_regions, n_columns)``.
+    Partial sums of row blocks add up, whatever the blocks.
+    """
+
+    sums: NDArray[np.float64]
+    positives: NDArray[np.int64]
+    squares: NDArray[np.float64]
+
+    @classmethod
+    def zeros(cls, n_regions: int, n_columns: int) -> _ColumnSums:
+        shape = (n_regions, n_columns)
+        return cls(sums=np.zeros(shape), positives=np.zeros(shape, dtype=np.int64), squares=np.zeros(shape))
+
+    def __add__(self, other: _ColumnSums) -> _ColumnSums:
+        return _ColumnSums(
+            sums=self.sums + other.sums,
+            positives=self.positives + other.positives,
+            squares=self.squares + other.squares,
+        )
+
+
+def _add_column_sums(*parts: _ColumnSums) -> _ColumnSums:
+    """Add partial column sums: the merge of the tree over a lazy matrix's blocks."""
+    total = parts[0]
+    for part in parts[1:]:
+        total = total + part
+    return total
+
+
+def _count_rows(
+    classes: tuple[_FeatureClassMatrix, ...], *, region_codes: NDArray[np.int64], n_regions: int, table_name: str
+) -> tuple[dict[str, _RowSums], dict[str, _ColumnSums]]:
+    """Return, per class, the row sums of the selected rows and the column sums per region.
+
+    ``region_codes`` gives each table row's selected region, ``-1`` outside the
+    selection. Each matrix is read once, in CSR row blocks, and only the blocks
+    with selected rows. No quantity depends on another matrix, so each lazy
+    matrix keeps its own row chunks, and all lazy matrices run in one Dask
+    compute; their column sums are added in a merge tree within it. Backed and
+    in-memory matrices are read in row slices, their column sums added as they
+    are read.
+    """
+    block_rows: dict[str, list[_RowSums]] = {}
+    columns: dict[str, _ColumnSums] = {}
     lazy_tasks = {}
     for entry in classes:
         if isinstance(entry.matrix, da.Array):
             lazy_tasks[entry.label] = _lazy_block_tasks(
-                entry.matrix, selected, location=entry.location, table_name=table_name
+                entry.matrix, region_codes, n_regions=n_regions, location=entry.location, table_name=table_name
             )
             continue
+        block_rows[entry.label] = []
+        total = _ColumnSums.zeros(n_regions, entry.matrix.shape[1])
         # A block that is not counts raises, so the remaining blocks are not read.
-        results[entry.label] = [
-            _block_counts(block, selected_in_block, location=entry.location, table_name=table_name)
-            for block, selected_in_block in _sliced_blocks(entry.matrix, selected)
-        ]
+        for block, codes_in_block in _sliced_blocks(entry.matrix, region_codes):
+            row_sums, column_sums = _block_counts(
+                block, codes_in_block, n_regions=n_regions, location=entry.location, table_name=table_name
+            )
+            block_rows[entry.label].append(row_sums)
+            total = total + column_sums
+        columns[entry.label] = total
     if lazy_tasks:
         # A task that raises stops the compute and re-raises its error here.
         (computed,) = dask.compute(lazy_tasks)
-        results.update(computed)
+        for label, (parts, column_sums) in computed.items():
+            block_rows[label] = parts
+            columns[label] = column_sums
 
-    points, detected = {}, {}
-    for entry in classes:
-        blocks = results[entry.label]
-        points[entry.label] = np.concatenate([np.zeros(0, dtype=np.uint64), *(block[0] for block in blocks)])
-        detected[entry.label] = np.concatenate([np.zeros(0, dtype=np.int64), *(block[1] for block in blocks)])
-    return points, detected
+    rows = {entry.label: _RowSums.concatenate(block_rows[entry.label]) for entry in classes}
+    return rows, columns
 
 
-def _lazy_block_tasks(matrix: da.Array, selected: NDArray[np.bool_], *, location: str, table_name: str) -> list:
-    """Return one delayed block summary per row block of a lazy CSR matrix that has selected rows."""
+def _lazy_block_tasks(
+    matrix: da.Array, region_codes: NDArray[np.int64], *, n_regions: int, location: str, table_name: str
+) -> tuple[list, object]:
+    """Return the delayed row results of a lazy CSR matrix's blocks with selected rows, and its delayed column sums."""
     if len(matrix.chunks[1]) > 1:
         # Harpy's lazy reader splits a CSR matrix by rows only: every block keeps
         # all columns (chunks=(rows, -1) in harpy._storage._anndata's
@@ -455,17 +726,23 @@ def _lazy_block_tasks(matrix: da.Array, selected: NDArray[np.bool_], *, location
     tasks = []
     start = 0
     for block, length in zip(matrix.to_delayed()[:, 0], matrix.chunks[0], strict=True):
-        selected_in_block = selected[start : start + length]
+        codes_in_block = region_codes[start : start + length]
         start += length
-        if selected_in_block.any():
+        if (codes_in_block >= 0).any():
             tasks.append(
-                dask.delayed(_block_counts)(block, selected_in_block, location=location, table_name=table_name)
+                dask.delayed(_block_counts)(
+                    block, codes_in_block, n_regions=n_regions, location=location, table_name=table_name
+                )
             )
-    return tasks
+    block_rows = [task[0] for task in tasks]
+    if not tasks:
+        return block_rows, _ColumnSums.zeros(n_regions, matrix.shape[1])
+    # A merge tree adds the blocks' column sums, so that they are not all held at once.
+    return block_rows, _tree_reduce([task[1] for task in tasks], _add_column_sums)
 
 
-def _sliced_blocks(matrix: object, selected: NDArray[np.bool_]) -> Iterator[tuple[object, NDArray[np.bool_]]]:
-    """Yield the CSR row blocks of a backed or in-memory matrix that have selected rows, with their selection.
+def _sliced_blocks(matrix: object, region_codes: NDArray[np.int64]) -> Iterator[tuple[object, NDArray[np.int64]]]:
+    """Yield the CSR row blocks of a backed or in-memory matrix that have selected rows, with their region codes.
 
     The rows per block follow the policy of Harpy's lazy reader, about
     ``array.chunk-size`` bytes per block, from the number of stored values.
@@ -486,23 +763,27 @@ def _sliced_blocks(matrix: object, selected: NDArray[np.bool_]) -> Iterator[tupl
         indptr_itemsize=indptr.dtype.itemsize,
     )
     for start in range(0, n_rows, length):
-        selected_in_block = selected[start : start + length]
-        if selected_in_block.any():
-            yield matrix[start : start + length], selected_in_block
+        codes_in_block = region_codes[start : start + length]
+        if (codes_in_block >= 0).any():
+            yield matrix[start : start + length], codes_in_block
 
 
 def _block_counts(
-    block: object, selected_in_block: NDArray[np.bool_], *, location: str, table_name: str
-) -> tuple[NDArray[np.uint64], NDArray[np.int64]]:
-    """Return the row sums and the positive entries per row of a CSR row block's selected rows.
+    block: object, codes_in_block: NDArray[np.int64], *, n_regions: int, location: str, table_name: str
+) -> tuple[_RowSums, _ColumnSums]:
+    """Return the row sums of a CSR row block's selected rows, and its column sums per region.
 
-    The caller reads the row sums as a class's points per instance, and the
-    positive entries as its detected features. ``location`` and ``table_name`` name
-    the matrix in the error raised when a stored value is not a non-negative
-    whole number.
+    ``codes_in_block`` gives each row's selected region, ``-1`` for a row
+    outside the selection. The caller reads the row sums as a class's points
+    per instance, and the positive entries as its detected features; the
+    column sums, per region, give the statistics per feature. ``location`` and
+    ``table_name`` name the matrix in the error raised when a stored value is
+    not a non-negative whole number.
     """
+    selected_in_block = codes_in_block >= 0
     if not selected_in_block.all():
         block = block[selected_in_block]
+    codes = codes_in_block[selected_in_block]
     if not block.has_canonical_format:
         # An edge case: aggregate_points writes canonical CSR matrices, as SciPy's
         # COO-to-CSR conversion merges duplicates and sorts the indices, so this
@@ -525,7 +806,36 @@ def _block_counts(
     sums = np.concatenate((np.zeros(1, dtype=np.uint64), np.cumsum(data.astype(np.uint64, copy=False))))
     # A stored zero is not a positive entry.
     positives = np.concatenate((np.zeros(1, dtype=np.int64), np.cumsum(data > 0, dtype=np.int64)))
-    return sums[stops] - sums[starts], positives[stops] - positives[starts]
+    row_sums = _RowSums(sums=sums[stops] - sums[starts], positives=positives[stops] - positives[starts])
+    return row_sums, _column_sums_per_region(block, codes, n_regions=n_regions)
+
+
+def _column_sums_per_region(block: object, codes: NDArray[np.int64], *, n_regions: int) -> _ColumnSums:
+    """Return a CSR row block's column sums per region.
+
+    ``codes`` gives the region of each row of the block. An indicator matrix,
+    one row per region with a 1 for each of its rows, adds each region's rows
+    column by column: ``indicator @ block``. For example, with rows 0 and 1 in
+    region 0 and row 2 in region 1, where ``0*`` is a stored zero::
+
+        indicator        block            indicator @ block
+        [1, 1, 0]        [2, 0, 1]        [[2, 3, 1],
+        [0, 0, 1]        [0, 3, 0]         [1, 0, 0]]
+                         [1, 0, 0*]
+
+    ``positives`` multiplies with ``block > 0`` instead, so a stored zero is
+    not counted, and ``squares`` with the squared values.
+    """
+    n_rows = block.shape[0]
+    indicator = sparse.csr_matrix((np.ones(n_rows), (codes, np.arange(n_rows))), shape=(n_regions, n_rows))
+    # A csr_matrix in float64 for both csr_matrix and csr_array blocks, so that the
+    # products have one type, and squares of large counts do not overflow.
+    values = sparse.csr_matrix(block, dtype=np.float64)
+    return _ColumnSums(
+        sums=(indicator @ values).toarray(),
+        positives=(indicator @ (values > 0)).toarray().astype(np.int64),
+        squares=(indicator @ values.multiply(values)).toarray(),
+    )
 
 
 def _are_counts(data: np.ndarray) -> bool:
@@ -577,3 +887,58 @@ def _class_statistics(
     per_class[_N_POINTS_KEY] = per_class[_N_POINTS_KEY].astype(np.uint64)
     per_class[_FEATURE_CLASS_KEY] = pd.Categorical(per_class[_FEATURE_CLASS_KEY], categories=labels)
     return per_class
+
+
+def _feature_statistics(
+    columns: Mapping[str, _ColumnSums],
+    *,
+    n_retained: int,
+    region: int | None,
+    labels: tuple[str, ...],
+    feature_names: Mapping[str, tuple[str, ...]],
+) -> pd.DataFrame:
+    """Return one row per feature of each class, from its column sums, in the column order of the points side.
+
+    ``region`` selects one region's sums, or ``None`` pools the regions;
+    ``n_retained`` is the matching number of retained instances. The columns
+    start as those of ``PointsSummary.per_feature``, followed by the instance
+    statistics.
+    """
+    frames = []
+    for label in labels:
+        part = columns[label]
+        if region is None:
+            sums, positives, squares = part.sums.sum(axis=0), part.positives.sum(axis=0), part.squares.sum(axis=0)
+        else:
+            sums, positives, squares = part.sums[region], part.positives[region], part.squares[region]
+        # Rows without points of the class add nothing to its column sums, so they hold over the retained rows.
+        without = n_retained - positives
+        missing = np.full(len(sums), np.nan)
+        class_points = sums.sum()
+        frames.append(
+            pd.DataFrame(
+                {
+                    _FEATURE_KEY: list(feature_names[label]),
+                    _FEATURE_CLASS_KEY: label,
+                    # The sums of whole numbers are exact in float64 up to 2**53.
+                    _N_POINTS_KEY: np.rint(sums).astype(np.uint64),
+                    "within_class_fraction": sums / class_points if class_points else missing,
+                    "n_retained_instances_without_feature": without.astype(np.int64),
+                    "pct_retained_instances_without_feature": 100 * without / n_retained if n_retained else missing,
+                    "mean_points_per_instance": sums / n_retained if n_retained else missing,
+                    "std_points_per_instance": _sample_std(sums, squares, n_retained),
+                }
+            )
+        )
+    per_feature = pd.concat(frames, ignore_index=True)
+    per_feature[_FEATURE_CLASS_KEY] = pd.Categorical(per_feature[_FEATURE_CLASS_KEY], categories=labels)
+    return per_feature
+
+
+def _sample_std(sums: NDArray[np.float64], squares: NDArray[np.float64], n: int) -> NDArray[np.float64]:
+    """Return the sample SD, ``ddof=1``, of ``n`` values from their sums and sums of squares; NaN below two values."""
+    if n < 2:
+        return np.full(len(sums), np.nan)
+    variance = (squares - sums * sums / n) / (n - 1)
+    # Rounding can leave a slightly negative variance for constant values.
+    return np.sqrt(np.clip(variance, 0, None))

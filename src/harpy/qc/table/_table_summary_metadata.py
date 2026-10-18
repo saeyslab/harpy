@@ -26,9 +26,13 @@ class TableSummaryMetadata:
         the name of a layer.
     obsm_keys
         The ``.obsm`` matrices read, in the order passed.
+    feature_matrices_key
+        The key in ``adata.uns`` of the registry from which the ``.obsm``
+        matrices read took their names.
     """
 
     table_name: str
     region: tuple[str, ...]
     layer: str | None
     obsm_keys: tuple[str, ...]
+    feature_matrices_key: str
