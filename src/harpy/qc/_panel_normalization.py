@@ -1,13 +1,19 @@
-"""Panel-feature normalization shared by the plots of a points summary."""
+"""Panel-feature normalization shared by the plots of the QC summaries of points and tables."""
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
+from typing import Protocol
 
-from harpy.qc.points._summarize_points import PointsSummary
+
+class _SummaryWithPanelSizes(Protocol):
+    """A summary that exposes each class's number of features, as ``PointsSummary`` and ``TableSummary`` do."""
+
+    @property
+    def panel_feature_counts(self) -> Mapping[str, int]: ...
 
 
-def _panel_feature_count(summary: PointsSummary, feature_classes: Iterable[str]) -> int:
+def _panel_feature_count(summary: _SummaryWithPanelSizes, feature_classes: Iterable[str]) -> int:
     """Return the summed panel feature count of the given classes, the divisor of ``per_panel_feature``.
 
     Each class's count includes panel features without detections, as recorded in
