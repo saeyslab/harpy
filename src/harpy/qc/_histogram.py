@@ -1,4 +1,4 @@
-"""Table and spatial-bin histograms with a shared numerical renderer."""
+"""Table, spatial-bin and instance histograms with a shared numerical renderer."""
 
 from __future__ import annotations
 
@@ -14,10 +14,13 @@ from loguru import logger as log
 from matplotlib.axes import Axes
 from spatialdata import SpatialData
 
+from harpy.qc._panel_normalization import _panel_feature_count
 from harpy.qc._summary_schema import _FEATURE_CLASS_KEY, _FEATURE_KEY, _N_POINTS_KEY
-from harpy.qc.points._panel_normalization import _panel_feature_count
+from harpy.qc._summary_statistics import _points_statistics
 from harpy.qc.points._summarize_points import PointsSummary
 from harpy.qc.points._summarize_points_by_feature import FeaturePointsSummary
+from harpy.qc.table._instance_measures import InstanceMeasure, _instance_values
+from harpy.qc.table._summarize_table import TableSummary
 from harpy.table._table import ProcessTable
 
 _DEFAULT_COLUMN_COLORS = {
@@ -363,6 +366,156 @@ def _plot_spatial_bin_histogram(
         xlabel=f"{selected} {unit}",
         count_ylabel="Number of spatial bins",
         percent_ylabel="Percentage of spatial bins (%)",
+    )
+
+
+def instance_histogram(
+    summary: TableSummary,
+    *,
+    feature_class: str,
+    measure: InstanceMeasure = "points",
+    normalization: Literal["per_panel_feature"] | None = None,
+    ax: Axes | None = None,
+    bins: int | str = "auto",
+    range: tuple[float, float] | None = None,
+    quantile_range: tuple[float, float] | None = None,
+    histplot_kwargs: Mapping[str, Any] = MappingProxyType({}),
+    median_line_kwargs: Mapping[str, Any] = MappingProxyType({}),
+    median_text_kwargs: Mapping[str, Any] = MappingProxyType({}),
+    figsize: tuple[float, float] = (5.5, 4.5),
+    title: str | None = None,
+    color: str | None = None,
+    show_median: bool = True,
+    show_std: bool = True,
+) -> Axes:
+    """Plot one class's measure across the retained instances of a table summary.
+
+    Each retained instance contributes one value, including zeros for the
+    selected class. Instances were retained when any class read during summary
+    computation had points; choosing one here never changes that population.
+    No table matrix is read or summary recalculated; nothing is written to the
+    table.
+
+    Parameters
+    ----------
+    summary
+        Result of :func:`harpy.qc.summarize_table`. Uses
+        ``summary.per_instance``; source context remains available in
+        ``metadata`` for caller-supplied titles or figure captions.
+    feature_class
+        A class of the summary, one of ``summary.feature_classes``: the label
+        of a matrix read, for example ``"x"`` or ``"negative"``.
+    measure
+        What to plot for the class, per instance: ``"points"``, its points;
+        ``"detected_features"``, its features with at least one point; or
+        ``"pct_points"``, its share of the instance's points across the classes
+        read, in percent, with two classes or more. They read the columns
+        ``n_<class>_points``, ``n_<class>_detected_features`` and
+        ``pct_<class>_points`` of ``summary.per_instance``.
+    normalization
+        ``None`` plots the measure as stored. ``"per_panel_feature"`` divides
+        each instance's points, and the annotated median and SD, by the class's
+        number of features, ``summary.panel_feature_counts``, as
+        :func:`harpy.qc.spatial_bin_histogram` does, so that classes with
+        different panel sizes become comparable. It applies to
+        ``measure="points"`` only. Only the displayed values are divided;
+        ``summary`` is not modified.
+    ax
+        Axes to reuse, or None to create a figure.
+    bins
+        Histogram intervals along the measure's axis.
+    range
+        Inclusive display bounds. Values outside them are hidden, but still
+        contribute to the percentage denominator and median/SD annotations.
+    quantile_range
+        Quantiles defining display bounds when ``range`` is None; for example
+        ``(0.1, 0.99)``. Filtering affects only the display.
+    histplot_kwargs
+        Seaborn histogram options, including ``kde``, ``alpha``, and ``color``.
+        Defaults to a borderless filled-step histogram with ``alpha=0.5``,
+        ``stat="count"`` (number of instances), and a KDE of line width 2.
+        ``stat="percent"`` uses all retained instances as the denominator, so
+        clipped bars may sum to less than 100%. Other statistics, data
+        selection, grouping, and weights cannot be supplied here.
+    median_line_kwargs, median_text_kwargs
+        Matplotlib styling for the median line and annotation box.
+    figsize
+        Figure size when creating axes.
+    title
+        Optional plot title. None leaves the axes title unchanged; no title
+        is generated automatically.
+    color
+        Histogram color, unless overridden by ``histplot_kwargs``.
+    show_median
+        Draw the median of the plotted values and its annotation.
+    show_std
+        Include the sample SD in the median annotation; fewer than two
+        instances shows N/A.
+
+    Returns
+    -------
+    matplotlib.axes.Axes
+        Axes containing the histogram, or an empty-state message when no
+        instances are retained. Input data and plotting-option mappings remain
+        unchanged. Customize axis labels on the returned axes with ``ax.set(...)``.
+
+    Raises
+    ------
+    TypeError
+        If ``summary`` is not a :class:`~harpy.qc.TableSummary`.
+    ValueError
+        If ``feature_class`` or ``measure`` is unknown, ``"pct_points"`` is
+        requested from a summary of one class, or ``normalization`` is unknown
+        or applied to a measure other than ``"points"``.
+
+    Notes
+    -----
+    The median and SD are computed from the plotted values, as some measures,
+    such as ``"pct_points"``, have no stored statistics. For ``"points"`` and
+    ``"detected_features"``, they equal the class's ``median_…_per_instance``
+    and ``std_…_per_instance`` in ``summary.per_class``.
+
+    See Also
+    --------
+    harpy.qc.summarize_table
+    harpy.qc.instance_scatter
+    harpy.qc.spatial_bin_histogram
+
+    Examples
+    --------
+    .. code-block:: python
+
+        summary = hp.qc.summarize_table(sdata, "table", obsm_keys=["negative", "system_control"])
+        ax = hp.qc.instance_histogram(summary, feature_class="x", measure="pct_points")
+
+        # Negative points per negative probe per instance, comparable with other classes.
+        ax = hp.qc.instance_histogram(summary, feature_class="negative", normalization="per_panel_feature")
+    """
+    values, label = _instance_values(summary, feature_class=feature_class, measure=measure, normalization=normalization)
+    if histplot_kwargs.get("stat", "count") not in {"count", "percent"}:
+        raise ValueError("Instance histograms support stat='count' or stat='percent'.")
+    # The shared statistics helper keeps the conventions of the summaries: SD with ddof=1, NaN below two values.
+    statistics = _points_statistics(values.to_numpy(dtype=np.float64), unit="instance")
+    return _plot_histogram(
+        values,
+        median=statistics["median_points_per_instance"],
+        std=statistics["std_points_per_instance"],
+        ax=ax,
+        bins=bins,
+        range=range,
+        quantile_range=quantile_range,
+        histplot_kwargs=histplot_kwargs,
+        median_line_kwargs=median_line_kwargs,
+        median_text_kwargs=median_text_kwargs,
+        figsize=figsize,
+        title=title,
+        color=color if color is not None else "#4C78A8",
+        show_median=show_median,
+        show_std=show_std,
+        xlabel=label,
+        count_ylabel="Number of instances",
+        percent_ylabel="Percentage of instances (%)",
+        empty_message="No retained instances",
     )
 
 
@@ -727,6 +880,7 @@ def _plot_histogram(
     xlabel: str,
     count_ylabel: str,
     percent_ylabel: str,
+    empty_message: str = "No retained spatial bins",
 ) -> Axes:
     """Render one numerical population with supplied full-population annotations.
 
@@ -780,7 +934,7 @@ def _plot_histogram(
         _, ax = plt.subplots(figsize=figsize)
     percent = options["stat"] == "percent"
     if values.empty:
-        ax.text(0.5, 0.5, "No retained spatial bins", ha="center", va="center", transform=ax.transAxes)
+        ax.text(0.5, 0.5, empty_message, ha="center", va="center", transform=ax.transAxes)
     else:
         log_scale = options.get("log_scale", False)
         log_x = log_scale[0] if isinstance(log_scale, (tuple, list)) else log_scale
