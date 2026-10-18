@@ -7,6 +7,11 @@ from typing import Literal
 import pandas as pd
 
 from harpy.qc._panel_normalization import _panel_feature_count
+from harpy.qc._summary_schema import (
+    _N_CLASS_DETECTED_FEATURES_TEMPLATE,
+    _N_CLASS_POINTS_TEMPLATE,
+    _PCT_CLASS_POINTS_TEMPLATE,
+)
 from harpy.qc.table._summarize_table import TableSummary
 
 InstanceMeasure = Literal["points", "detected_features", "pct_points"]
@@ -14,9 +19,9 @@ InstanceMeasure = Literal["points", "detected_features", "pct_points"]
 # The column of TableSummary.per_instance that each measure reads, and its axis label. The
 # column names stay internal: callers select a class and a measure.
 _MEASURES = {
-    "points": ("n_{label}_points", "points per instance"),
-    "detected_features": ("n_{label}_detected_features", "detected features per instance"),
-    "pct_points": ("pct_{label}_points", "share of the instance's points (%)"),
+    "points": (_N_CLASS_POINTS_TEMPLATE, "points per instance"),
+    "detected_features": (_N_CLASS_DETECTED_FEATURES_TEMPLATE, "detected features per instance"),
+    "pct_points": (_PCT_CLASS_POINTS_TEMPLATE, "share of the instance's points (%)"),
 }
 
 

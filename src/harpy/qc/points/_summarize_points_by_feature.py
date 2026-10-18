@@ -41,7 +41,8 @@ class FeaturePointsSummary:
         Nested arrays and dataframes do not duplicate this context in ``attrs``.
     per_feature
         One row per requested panel feature, including zero detections, in
-        panel order. Columns are ``feature``, ``feature_class`` and uint64
+        panel order. Columns are ``feature``, ``feature_class`` (categorical,
+        the reference summary's classes as categories) and uint64
         ``n_points``: total points after feature and spatial selection,
         independent of binning. No complete-class statistics or within-class
         fractions are computed for this requested subset.
@@ -170,8 +171,7 @@ def summarize_points_by_feature(
             sdata, "transcripts", feature_classes=["Endogenous", "Negative"], bin_size=10,
             to_coordinate_system="sample_micron", microns_per_unit=1.0,
         )
-        per_feature = summary.per_feature
-        negative = per_feature.loc[per_feature["feature_class"] == "Negative", "feature"].tolist()
+        negative = summary.feature_names["Negative"]
         controls = hp.qc.summarize_points_by_feature(sdata, summary=summary, features=negative)
         controls.spatial_bins.per_feature  # one row per negative probe
     """
@@ -206,7 +206,7 @@ def _reduce_points_by_feature(
     # The current panel must contain the same assignments for these classes.
     # Features belonging to classes not included in the supplied summary
     # are excluded from this comparison.
-    reference_classes = set(summary.per_class[_FEATURE_CLASS_KEY])
+    reference_classes = set(summary.feature_classes)
     reference_assignments = dict(
         zip(summary.per_feature[_FEATURE_KEY], summary.per_feature[_FEATURE_CLASS_KEY], strict=True)
     )
@@ -282,7 +282,13 @@ def _reduce_points_by_feature(
     # undetected. Zero-fill their planes; do not reject the empty reduction.
     grid = _spatial_count_array(bin_counts, selected_names=selected_names, summary_axis=_FEATURE_KEY, edges=edges)
     per_feature[_N_POINTS_KEY] = feature_counts.reindex(selected_names, fill_value=0).to_numpy(dtype=np.uint64)
-    bins = _summarize_feature_bins(grid, metadata=metadata, panel=panel, retained_bin_mask=retained_bin_mask)
+    bins = _summarize_feature_bins(
+        grid,
+        metadata=metadata,
+        panel=panel,
+        feature_classes=summary.feature_classes,
+        retained_bin_mask=retained_bin_mask,
+    )
     return FeaturePointsSummary(
         metadata=metadata,
         per_feature=per_feature,

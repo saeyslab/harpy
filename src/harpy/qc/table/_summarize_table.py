@@ -23,8 +23,11 @@ from harpy.qc._summary_reduction import _tree_reduce
 from harpy.qc._summary_schema import (
     _FEATURE_CLASS_KEY,
     _FEATURE_KEY,
+    _N_CLASS_DETECTED_FEATURES_TEMPLATE,
+    _N_CLASS_POINTS_TEMPLATE,
     _N_FEATURES_KEY,
     _N_POINTS_KEY,
+    _PCT_CLASS_POINTS_TEMPLATE,
     _REGION_COLUMN_KEY,
 )
 from harpy.qc._summary_statistics import _points_statistics
@@ -391,12 +394,14 @@ def summarize_table(
 
     per_instance = obs.iloc[positions[retained]][[region_key, instance_key]].copy()
     for label in labels:
-        per_instance[f"n_{label}_points"] = points[label][retained]
+        per_instance[_N_CLASS_POINTS_TEMPLATE.format(label=label)] = points[label][retained]
     for label in labels:
-        per_instance[f"n_{label}_detected_features"] = detected[label][retained]
+        per_instance[_N_CLASS_DETECTED_FEATURES_TEMPLATE.format(label=label)] = detected[label][retained]
     if len(labels) > 1:
         for label in labels:
-            per_instance[f"pct_{label}_points"] = 100 * points[label][retained] / totals[retained]
+            per_instance[_PCT_CLASS_POINTS_TEMPLATE.format(label=label)] = (
+                100 * points[label][retained] / totals[retained]
+            )
 
     per_class = _class_statistics(points, detected, retained, labels=labels, n_features=n_features)
     region_frames = []
