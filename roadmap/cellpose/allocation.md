@@ -9919,8 +9919,7 @@ themselves are named `panel_feature_counts`.
 
 ## Slice 11m: align the points summaries with the table summary
 
-**Status: step 1 (the summaries) implemented; step 2 (the plot) planned.
-Slice 11j, which it aligns with, is implemented.**
+**Status: implemented, in two steps: the summaries, then the plot.**
 
 Align the points summaries as closely as possible with the table summary of
 Slice 11j: the measures that the class grid already determines, without
@@ -9957,7 +9956,10 @@ categorical in every frame; the points summaries do not yet.
 
 2. **The plot:**
    - `measure` in `spatial_bin_histogram`, with the measure names and the
-     wording of the errors of `instance_histogram`;
+     wording of the errors of `instance_histogram`; the checks and the
+     selection of the class's values in `_spatial_bin_values` of
+     `qc/points/_spatial_bin_measures.py`, as `_instance_values` of
+     `qc/table/_instance_measures.py` does for the instances;
    - the median and SD from the plotted values, for every measure, in
      `_plot_spatial_bin_histogram`, which `spatial_bin_histogram_by_feature`
      shares.
