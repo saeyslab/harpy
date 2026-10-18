@@ -23,6 +23,11 @@ _NEGATIVE = [[1, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [1, 1, 0, 0], [0, 0, 0, 0
 _SYSTEM_CONTROL = [[0] * 5, [0] * 5, [0, 1, 0, 0, 0], [0] * 5, [2, 0, 1, 0, 0], [0] * 5]
 _CLASSES = {"x": _X, "negative": _NEGATIVE, "system_control": _SYSTEM_CONTROL}
 _OBSM_KEYS = ["negative", "system_control"]
+_FEATURE_NAMES = {
+    "x": ("GeneA", "GeneB"),
+    "negative": tuple(f"Negative0{i}" for i in range(1, 5)),
+    "system_control": tuple(f"SystemControl0{i}" for i in range(1, 6)),
+}
 
 
 def _counts(dense, *, explicit_zero=None):
@@ -49,6 +54,11 @@ def _table(*, csr=sparse.csr_matrix, x=True):
         var=pd.DataFrame(index=["GeneA", "GeneB"]),
         obsm={"negative": csr(_counts(_NEGATIVE)), "system_control": csr(_counts(_SYSTEM_CONTROL))},
     )
+    # The .obsm matrices register their column names, as aggregate_points writes them.
+    adata.uns["feature_matrices"] = {
+        key: {"schema_version": 1, "source_kind": "test", "feature_columns": list(_FEATURE_NAMES[key])}
+        for key in _OBSM_KEYS
+    }
     return TableModel.parse(adata, region=["a", "b"], region_key="region", instance_key="cell_ID")
 
 
@@ -59,7 +69,7 @@ def _sdata(table=None):
 
 def _assert_summaries_equal(summary, expected):
     assert summary.metadata == expected.metadata
-    for name in ["per_instance", "per_class", "per_region"]:
+    for name in ["per_instance", "per_class", "per_region_class", "per_feature", "per_region_feature"]:
         pd.testing.assert_frame_equal(getattr(summary, name), getattr(expected, name))
 
 
@@ -209,17 +219,18 @@ def test_the_denominator_follows_a_subset_of_x():
     np.testing.assert_array_equal(summary.per_instance["n_x_points"], [7, 5, 4])
 
 
-def test_per_region_holds_the_statistics_within_each_region():
+def test_per_region_class_holds_the_class_statistics_within_each_region():
     summary = summarize_table(_sdata(), "counts", obsm_keys=_OBSM_KEYS)
-    assert summary.per_region["region"].tolist() == ["a"] * 3 + ["b"] * 3
-    assert list(summary.per_region.columns) == ["region", *summary.per_class.columns]
+    per_region_class = summary.per_region_class
+    assert per_region_class["region"].tolist() == ["a"] * 3 + ["b"] * 3
+    assert list(per_region_class.columns) == ["region", *summary.per_class.columns]
     for name in ["a", "b"]:
         within = summarize_table(_sdata(), "counts", obsm_keys=_OBSM_KEYS, region=name)
         assert set(within.per_instance["region"]) == {name}
-        # With one selected region, per_class and per_region hold the same values.
-        pd.testing.assert_frame_equal(within.per_region.drop(columns="region"), within.per_class)
+        # With one selected region, per_class and per_region_class hold the same values.
+        pd.testing.assert_frame_equal(within.per_region_class.drop(columns="region"), within.per_class)
         pd.testing.assert_frame_equal(
-            summary.per_region.loc[summary.per_region["region"] == name].drop(columns="region").reset_index(drop=True),
+            per_region_class.loc[per_region_class["region"] == name].drop(columns="region").reset_index(drop=True),
             within.per_class,
         )
 
@@ -231,8 +242,139 @@ def test_metadata_records_the_inputs():
         region=("a", "b"),
         layer=None,
         obsm_keys=("negative",),
+        feature_matrices_key="feature_matrices",
     )
     assert summarize_table(_sdata(), "counts", region=["b"]).metadata.region == ("b",)
+
+
+def test_per_feature_columns_follow_the_order_of_the_points_summary():
+    per_feature = summarize_table(_sdata(), "counts", obsm_keys=_OBSM_KEYS).per_feature
+    # The columns of FeatureSpatialBinSummary.per_feature, instances in place of bins, with
+    # within_class_fraction of PointsSummary.per_feature after n_points.
+    assert list(per_feature.columns) == [
+        "feature",
+        "feature_class",
+        "n_total_instances",
+        "n_retained_instances",
+        "n_excluded_instances",
+        "pct_excluded_instances",
+        "n_points",
+        "within_class_fraction",
+        "n_retained_instances_without_feature",
+        "pct_retained_instances_without_feature",
+        "mean_points_per_instance",
+        "std_points_per_instance",
+    ]
+    assert per_feature["n_points"].dtype == np.uint64
+
+
+def test_feature_statistics_agree_with_the_retained_instances():
+    summary = summarize_table(_sdata(), "counts", obsm_keys=_OBSM_KEYS)
+    per_feature = summary.per_feature
+    # Every feature of each class read, in class and then column order, undetected ones included.
+    assert per_feature["feature"].tolist() == [name for names in _FEATURE_NAMES.values() for name in names]
+    assert per_feature["feature_class"].tolist() == [label for label, names in _FEATURE_NAMES.items() for _ in names]
+    assert summary.feature_names == _FEATURE_NAMES
+
+    retained = [0, 2, 3, 4, 5]
+    for label, dense in _CLASSES.items():
+        dense = np.asarray(dense)[retained]
+        rows = per_feature[per_feature["feature_class"] == label]
+        np.testing.assert_array_equal(rows["n_points"], dense.sum(axis=0))
+        np.testing.assert_allclose(rows["within_class_fraction"], dense.sum(axis=0) / dense.sum())
+        # The stored zero of cell_2 for GeneB is not a detection.
+        without = (dense == 0).sum(axis=0)
+        np.testing.assert_array_equal(rows["n_retained_instances_without_feature"], without)
+        np.testing.assert_allclose(rows["pct_retained_instances_without_feature"], 100 * without / len(retained))
+        np.testing.assert_allclose(rows["mean_points_per_instance"], dense.mean(axis=0))
+        np.testing.assert_allclose(rows["std_points_per_instance"], dense.std(axis=0, ddof=1))
+    # A class's feature points add up to its points in per_class.
+    class_points = per_feature.groupby("feature_class", observed=True)["n_points"].sum()
+    np.testing.assert_array_equal(class_points.to_numpy(), summary.per_class["n_points"].to_numpy())
+    # Every feature holds the population of per_class: 6 rows, of which cell_1 is excluded.
+    population = ["n_total_instances", "n_retained_instances", "n_excluded_instances", "pct_excluded_instances"]
+    assert (per_feature[population] == summary.per_class[population].iloc[0]).all(axis=None)
+    assert per_feature[population].iloc[0].tolist() == pytest.approx([6, 5, 1, 100 / 6])
+
+
+def test_per_region_feature_holds_the_feature_statistics_within_each_region():
+    summary = summarize_table(_sdata(), "counts", obsm_keys=_OBSM_KEYS)
+    per_region_feature = summary.per_region_feature
+    assert list(per_region_feature.columns) == ["region", *summary.per_feature.columns]
+    n_features = len(summary.per_feature)
+    assert per_region_feature["region"].tolist() == ["a"] * n_features + ["b"] * n_features
+    for name in ["a", "b"]:
+        within = summarize_table(_sdata(), "counts", obsm_keys=_OBSM_KEYS, region=name)
+        # With one selected region, per_feature and per_region_feature hold the same values.
+        pd.testing.assert_frame_equal(within.per_region_feature.drop(columns="region"), within.per_feature)
+        pd.testing.assert_frame_equal(
+            per_region_feature.loc[per_region_feature["region"] == name].drop(columns="region").reset_index(drop=True),
+            within.per_feature,
+        )
+    # The regions' points add up to the pooled points.
+    by_region = per_region_feature["n_points"].to_numpy().reshape(2, n_features)
+    np.testing.assert_array_equal(by_region.sum(axis=0), summary.per_feature["n_points"].to_numpy())
+
+
+def test_an_unregistered_obsm_matrix_takes_the_names_passed():
+    table = _table()
+    del table.uns["feature_matrices"]["negative"]
+    names = ["N1", "N2", "N3", "N4"]
+    summary = summarize_table(_sdata(table), "counts", obsm_keys=_OBSM_KEYS, feature_names={"negative": names})
+    assert summary.feature_names == {**_FEATURE_NAMES, "negative": tuple(names)}
+
+
+def test_a_registry_under_a_custom_key_names_its_matrices():
+    table = _table()
+    table.uns["custom_feature_matrices"] = table.uns.pop("feature_matrices")
+    # Under the default key, the matrices are unregistered.
+    with pytest.raises(ValueError, match=r"not registered in uns\['feature_matrices'\]"):
+        summarize_table(_sdata(table), "counts", obsm_keys=_OBSM_KEYS)
+    summary = summarize_table(
+        _sdata(table), "counts", obsm_keys=_OBSM_KEYS, feature_matrices_key="custom_feature_matrices"
+    )
+    assert summary.metadata.feature_matrices_key == "custom_feature_matrices"
+    assert summary.feature_names == _FEATURE_NAMES
+
+
+def test_only_the_registrations_of_the_matrices_read_are_checked():
+    table = _table()
+    # A broken registration of a matrix that is not read does not stop the summary.
+    table.uns["feature_matrices"]["unrelated"] = {"feature_columns": []}
+    summary = summarize_table(_sdata(table), "counts", obsm_keys=_OBSM_KEYS)
+    assert summary.feature_names == _FEATURE_NAMES
+
+
+def _without_registration(table):
+    del table.uns["feature_matrices"]["negative"]
+
+
+def _with_short_registration(table):
+    table.uns["feature_matrices"]["negative"]["feature_columns"] = ["N1", "N2", "N3"]
+
+
+@pytest.mark.parametrize(
+    ("change", "kwargs", "message"),
+    [
+        (None, {"feature_names": {"negative": list(_FEATURE_NAMES["negative"])}}, "is registered in uns"),
+        (None, {"obsm_keys": ["negative"], "feature_names": {"system_control": ["S"] * 5}}, "not read"),
+        (_without_registration, {}, "has no column names"),
+        (_without_registration, {"feature_names": {"negative": ["N1", "N2", "N3"]}}, "has 3 names, but"),
+        (_without_registration, {"feature_names": {"negative": ["N1", "N1", "N2", "N3"]}}, "unique non-empty"),
+        (_without_registration, {"feature_names": {"negative": []}}, "non-empty sequence"),
+        (_with_short_registration, {}, "declares 3 feature columns"),
+        (None, {"feature_names": ["negative"]}, "feature_names must map"),
+        (None, {"feature_matrices_key": ""}, "Parameter 'feature_matrices_key'"),
+        (None, {"feature_matrices_key": None}, "Parameter 'feature_matrices_key'"),
+    ],
+)
+def test_invalid_feature_names_raise(change, kwargs, message):
+    table = _table()
+    if change is not None:
+        change(table)
+    arguments = {"obsm_keys": _OBSM_KEYS, **kwargs}
+    with pytest.raises(ValueError, match=message):
+        summarize_table(_sdata(table), "counts", **arguments)
 
 
 def test_csr_arrays_give_the_result_of_csr_matrices():
