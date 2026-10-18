@@ -33,7 +33,11 @@ class SpatialBinSummary:
         ``n_points`` contains uint64 class counts, including zeros when the bin
         contains points from other selected classes. With two selected classes
         or more, ``pct_points`` is 100 times the class's points / the bin's
-        points across the selected classes. With physical calibration,
+        points across the selected classes. The share is not corrected for
+        panel size: a class with more features collects more points, also from
+        background. Compare it across bins or samples of the same panel, or
+        compare classes by their points per panel feature, with ``n_features``
+        of ``per_class``. With physical calibration,
         ``bin_area_um2`` is also present. Counts are not normalized by area;
         cropped terminal bins may have smaller areas than full bins.
 
