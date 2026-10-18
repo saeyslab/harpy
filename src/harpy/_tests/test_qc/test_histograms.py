@@ -178,9 +178,12 @@ def test_bin_summary_sample_sd_includes_retained_zeros(counts):
     assert row.n_excluded_bins == 1
 
 
-def test_spatial_histogram_uses_prepared_population_annotations_and_style():
+def test_spatial_histogram_annotations_from_plotted_values_and_style():
+    """The median and SD of [0, 1, 2, 10] are 1.5 and 4.57, the stored statistics of the class."""
     summary = _summary([0, 1, 2, 10])
-    summary.spatial_bins.per_class.loc[0, ["median_points_per_bin", "std_points_per_bin"]] = [3.0, 7.0]
+    statistics = summary.spatial_bins.per_class.iloc[0]
+    assert statistics.median_points_per_bin == 1.5
+    assert statistics.std_points_per_bin == pytest.approx(np.std([0, 1, 2, 10], ddof=1))
     before = deepcopy(summary)
     options = {"element": "bars", "bins": [-0.5, 0.5, 1.5, 2.5, 10.5], "kde": False, "color": "red"}
     original_options = deepcopy(options)
@@ -188,9 +191,9 @@ def test_spatial_histogram_uses_prepared_population_annotations_and_style():
     result = spatial_bin_histogram(summary, feature_class="Control", ax=ax, histplot_kwargs=options)
     assert result is ax
     np.testing.assert_array_equal(_heights(ax), [1, 1, 1, 1])
-    assert "Median: 3" in ax.texts[0].get_text()
-    assert "SD    : 7" in ax.texts[0].get_text()
-    np.testing.assert_array_equal(ax.lines[0].get_xdata(), [3, 3])
+    assert "Median: 1.50" in ax.texts[0].get_text()
+    assert "SD    : 4.57" in ax.texts[0].get_text()
+    np.testing.assert_array_equal(ax.lines[0].get_xdata(), [1.5, 1.5])
     assert ax.lines[0].get_linestyle() == "--"
     assert ax.get_xlabel() == "Control points per spatial bin"
     assert ax.get_ylabel() == "Number of spatial bins"
@@ -239,6 +242,37 @@ def test_invalid_normalization_and_panel_sizes_raise():
         spatial_bin_histogram(summary, feature_class="Control", normalization="per_area")
     with pytest.raises(ValueError, match="positive panel size"):
         spatial_bin_histogram(summary, feature_class="Control", normalization="per_panel_feature")
+
+
+def test_pct_points_plots_the_class_share_of_each_bin_points():
+    """Control has [0, 1, 2, 10] points and Reference 1 per bin: shares of 0, 50, 66.7 and 90.9%."""
+    summary = _with_panel_sizes(_summary([0, 1, 2, 10]), {"Control": 5, "Reference": 2})
+    shares = 100 * np.array([0, 1, 2, 10]) / np.array([1, 2, 3, 11])
+    # One bar per share.
+    options = {"element": "bars", "bins": [-1, 25, 60, 80, 101], "kde": False}
+    _, ax = plt.subplots()
+    spatial_bin_histogram(summary, feature_class="Control", measure="pct_points", ax=ax, histplot_kwargs=options)
+    np.testing.assert_array_equal(_heights(ax), [1, 1, 1, 1])
+    np.testing.assert_allclose(ax.lines[0].get_xdata(), [np.median(shares)] * 2)
+    assert f"SD    : {np.std(shares, ddof=1):.2f}" in ax.texts[0].get_text()
+    assert ax.get_xlabel() == "Control share of the spatial bin's points (%)"
+
+
+def test_invalid_spatial_bin_measures_raise():
+    summary = _with_panel_sizes(_summary([0, 1, 2, 10]), {"Control": 5, "Reference": 2})
+    with pytest.raises(ValueError, match=r"not computed per spatial bin; choose from \['points', 'pct_points'\]"):
+        spatial_bin_histogram(summary, feature_class="Control", measure="detected_features")
+    with pytest.raises(ValueError, match="Unknown measure 'area'"):
+        spatial_bin_histogram(summary, feature_class="Control", measure="area")
+    with pytest.raises(ValueError, match="applies to measure 'points' only, found 'pct_points'"):
+        spatial_bin_histogram(summary, feature_class="Control", measure="pct_points", normalization="per_panel_feature")
+
+    # A summary of the Control class alone has no share column.
+    grid = summary.spatial_counts.isel(feature_class=[0])
+    bins = _summarize_spatial_bins(grid, metadata=summary.metadata, n_features={"Control": 5})
+    one_class = _with_panel_sizes(replace(summary, spatial_counts=grid, spatial_bins=bins), {"Control": 5})
+    with pytest.raises(ValueError, match=r"two classes or more; this summary has only \['Control'\]"):
+        spatial_bin_histogram(one_class, feature_class="Control", measure="pct_points")
 
 
 @pytest.mark.parametrize("title, expected", [(None, "Existing title"), ("Custom title", "Custom title"), ("", "")])
@@ -323,9 +357,14 @@ def test_constant_and_single_bin_histograms_skip_kde_but_keep_counts(counts, fea
 
 
 @pytest.mark.parametrize("stat, expected", [("count", [1, 1, 1, 0]), ("percent", [25, 25, 25, 0])])
-def test_feature_histogram_uses_prepared_statistics_and_shared_bins_without_source_reads(monkeypatch, stat, expected):
+def test_feature_histogram_annotations_from_plotted_values_and_shared_bins_without_source_reads(
+    monkeypatch, stat, expected
+):
+    """The median and SD of [0, 1, 2, 10] are 1.5 and 4.57, the stored statistics of the feature."""
     summary = _feature_summary([0, 1, 2, 10])
-    summary.spatial_bins.per_feature.loc[0, ["median_points_per_bin", "std_points_per_bin"]] = [3, 7]
+    statistics = summary.spatial_bins.per_feature.iloc[0]
+    assert statistics.median_points_per_bin == 1.5
+    assert statistics.std_points_per_bin == pytest.approx(np.std([0, 1, 2, 10], ddof=1))
     before = deepcopy(summary)
 
     def forbidden(*args, **kwargs):
@@ -340,8 +379,8 @@ def test_feature_histogram_uses_prepared_statistics_and_shared_bins_without_sour
     result = spatial_bin_histogram_by_feature(summary, feature="EPCAM", range=(0, 2), ax=ax, histplot_kwargs=options)
     assert result is ax
     np.testing.assert_allclose(_heights(ax), expected)
-    assert "Median: 3" in ax.texts[0].get_text()
-    assert "SD    : 7" in ax.texts[0].get_text()
+    assert "Median: 1.50" in ax.texts[0].get_text()
+    assert "SD    : 4.57" in ax.texts[0].get_text()
     assert ax.texts[1].get_text() == "Displayed: 3 / 4"
     assert ax.get_xlabel() == "EPCAM points per spatial bin"
     assert ax.get_ylabel() == ("Number of spatial bins" if stat == "count" else "Percentage of spatial bins (%)")
@@ -387,9 +426,6 @@ def test_empty_population_and_invalid_spatial_histogram_requests():
         spatial_bin_histogram(summary, feature_class="Control", histplot_kwargs={"weights": [1, 2]})
     with pytest.raises(ValueError, match="stat="):
         spatial_bin_histogram(summary, feature_class="Control", histplot_kwargs={"stat": "density"})
-    summary.spatial_bins.per_class.drop(columns="std_points_per_bin", inplace=True)
-    with pytest.raises(ValueError, match="recompute"):
-        spatial_bin_histogram(summary, feature_class="Control")
 
 
 @pytest.mark.parametrize("stat, expected", [("count", [1, 1]), ("percent", [25, 25])])
