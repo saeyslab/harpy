@@ -11,8 +11,8 @@ from matplotlib.axes import Axes
 from matplotlib.colors import Colormap
 from scipy.sparse import csr_array
 
+from harpy.qc._panel_normalization import _panel_feature_count
 from harpy.qc._summary_schema import _FEATURE_CLASS_KEY, _FEATURE_KEY
-from harpy.qc.points._panel_normalization import _panel_feature_count
 from harpy.qc.points._summarize_points import PointsSummary
 from harpy.qc.points._summarize_points_by_feature import FeaturePointsSummary
 
