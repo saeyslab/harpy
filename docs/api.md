@@ -331,9 +331,25 @@ Quality control functions.
 .. autosummary::
     :toctree: generated
 
+    summarize_table
     table_histogram
     table_histograms
     obs_scatter
+    instance_histogram
+    instance_scatter
+```
+
+#### Summary result types
+
+```{eval-rst}
+
+.. currentmodule:: harpy.qc
+
+.. autosummary::
+    :toctree: generated
+
+    TableSummary
+    TableSummaryMetadata
 ```
 
 ### Points
