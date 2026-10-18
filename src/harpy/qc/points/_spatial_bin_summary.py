@@ -1,5 +1,6 @@
 """Tabular measurements derived from a computed spatial-count grid."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 import numpy as np
@@ -7,7 +8,13 @@ import pandas as pd
 import xarray as xr
 
 from harpy._feature_panels import _FeaturePanelContract
-from harpy.qc._summary_schema import _FEATURE_CLASS_KEY, _FEATURE_KEY, _N_POINTS_KEY
+from harpy.qc._summary_schema import (
+    _FEATURE_CLASS_KEY,
+    _FEATURE_KEY,
+    _N_FEATURES_KEY,
+    _N_POINTS_KEY,
+    _PCT_POINTS_KEY,
+)
 from harpy.qc._summary_statistics import _points_statistics
 from harpy.qc.points._points_summary_metadata import PointsSummaryMetadata
 
@@ -24,9 +31,18 @@ class SpatialBinSummary:
         are bin centers in the selected coordinate system; ``bin_area`` is
         the actual geometric area in squared coordinate-system units.
         ``n_points`` contains uint64 class counts, including zeros when the bin
-        contains points from other selected classes. With physical calibration,
+        contains points from other selected classes. With two selected classes
+        or more, ``pct_points`` is 100 times the class's points / the bin's
+        points across the selected classes. With physical calibration,
         ``bin_area_um2`` is also present. Counts are not normalized by area;
         cropped terminal bins may have smaller areas than full bins.
+
+        Detected features per bin, the counterpart of the detected features
+        per instance of :class:`~harpy.qc.TableSummary`, are not computed:
+        the grid holds each class's points per bin, not their features, and
+        counting a bin's distinct features would need the count of every panel
+        feature in every bin, which is expensive: a grid as large as the
+        number of panel features times the number of bins.
     per_class
         One row per selected ``feature_class``, including undetected classes.
         Every row exposes the shared population: ``n_total_bins`` counts all
@@ -42,7 +58,8 @@ class SpatialBinSummary:
         retained-bin population. SD uses ``ddof=1``; NaN for fewer than two bins.
         An all-zero class in a nonempty population has zero-valued count
         statistics and ``pct_retained_bins_without_class=100``. Percentiles
-        use linear interpolation.
+        use linear interpolation. Last, ``n_features`` is the class's number
+        of panel features.
     """
 
     per_bin: pd.DataFrame
@@ -66,7 +83,8 @@ class FeatureSpatialBinSummary:
         parent result's metadata, not in dataframe attributes.
     per_feature
         One row per requested feature, including undetected features, with
-        its panel-defined ``feature_class``. ``n_total_bins``, ``n_retained_bins``,
+        its panel-defined ``feature_class`` (categorical, the reference
+        summary's classes as categories). ``n_total_bins``, ``n_retained_bins``,
         ``n_excluded_bins`` and ``pct_excluded_bins`` describe the shared bin
         population inherited from the reference class summary, independently
         of which features were requested.
@@ -87,19 +105,27 @@ def _summarize_feature_bins(
     *,
     metadata: PointsSummaryMetadata,
     panel: _FeaturePanelContract,
+    feature_classes: tuple[str, ...],
     retained_bin_mask: xr.DataArray,
 ) -> FeatureSpatialBinSummary:
-    """Summarize features over the reference mask and attach their panel classes."""
+    """Summarize features over the reference mask and attach their panel classes.
+
+    ``feature_classes`` are the reference summary's classes, in panel order:
+    the categories of ``feature_class``, also for classes without a requested
+    feature.
+    """
     per_bin, per_feature = _spatial_bin_frames(
         grid, metadata=metadata, summary_axis=_FEATURE_KEY, retained=retained_bin_mask.values
     )
     class_by_feature = panel.class_by_feature
-    feature_classes = per_feature[_FEATURE_KEY].astype(object).map(class_by_feature)
-    per_feature.insert(1, _FEATURE_CLASS_KEY, pd.Categorical(feature_classes))
+    classes = per_feature[_FEATURE_KEY].astype(object).map(class_by_feature)
+    per_feature.insert(1, _FEATURE_CLASS_KEY, pd.Categorical(classes, categories=feature_classes))
     return FeatureSpatialBinSummary(per_bin=per_bin, per_feature=per_feature)
 
 
-def _summarize_spatial_bins(grid: xr.DataArray, *, metadata: PointsSummaryMetadata) -> SpatialBinSummary:
+def _summarize_spatial_bins(
+    grid: xr.DataArray, *, metadata: PointsSummaryMetadata, n_features: Mapping[str, int]
+) -> SpatialBinSummary:
     """Prepare retained-bin measurements once, then summarize those same rows.
 
     ``grid`` contains only the selected classes. Derive bin inclusion directly
@@ -109,14 +135,22 @@ def _summarize_spatial_bins(grid: xr.DataArray, *, metadata: PointsSummaryMetada
     bin is excluded. A bin empty across selected classes is excluded.
     Geometry and calibration come from the parent summary's ``metadata``,
     passed explicitly rather than copied onto the grid or result dataframes.
-    No source points or panel registry are accessed here, and neither input
-    is modified.
+    ``n_features`` maps each class to its number of panel features, from the
+    parent summary's ``per_class``. No input is modified.
 
     For an independently supplied grid with no retained bins, ``per_bin`` is
     empty, class point counts and ``n_retained_bins_without_class`` are zero,
     and distribution statistics and ``pct_retained_bins_without_class`` are NaN.
     """
     per_bin, per_class = _spatial_bin_frames(grid, metadata=metadata, summary_axis=_FEATURE_CLASS_KEY)
+    if grid.sizes[_FEATURE_CLASS_KEY] > 1:
+        # per_bin holds each class's retained bins as one consecutive block, so
+        # one row per class and one column per retained bin.
+        counts = per_bin[_N_POINTS_KEY].to_numpy().reshape(grid.sizes[_FEATURE_CLASS_KEY], -1)
+        # A retained bin has points across the selected classes: no division by zero.
+        totals = counts.sum(axis=0, dtype=np.uint64)
+        per_bin.insert(per_bin.columns.get_loc(_N_POINTS_KEY) + 1, _PCT_POINTS_KEY, (100 * counts / totals).ravel())
+    per_class[_N_FEATURES_KEY] = [n_features[str(feature_class)] for feature_class in per_class[_FEATURE_CLASS_KEY]]
     return SpatialBinSummary(per_bin=per_bin, per_class=per_class)
 
 
