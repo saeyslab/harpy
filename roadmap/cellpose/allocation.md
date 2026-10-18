@@ -9686,7 +9686,8 @@ Focused tests should establish that:
   column sums over the retained instances, its instances without the feature
   the retained instances with a zero entry, `within_class_fraction` the
   feature's share of its class's points, and its mean and SD those of the
-  column over the retained instances, all from the one pass;
+  column over the retained instances, all from the one pass; and every row
+  holds the population of `per_class`;
 - `per_region_feature` holds the columns of `per_feature` within each
   selected region, over that region's retained instances; it equals
   `per_feature` for a single region, and its point counts add up over the
