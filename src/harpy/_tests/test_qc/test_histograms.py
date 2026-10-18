@@ -60,7 +60,7 @@ def _summary(counts):
         per_feature=pd.DataFrame(),
         per_class=pd.DataFrame(),
         spatial_counts=grid,
-        spatial_bins=_summarize_spatial_bins(grid, metadata=metadata),
+        spatial_bins=_summarize_spatial_bins(grid, metadata=metadata, n_features={"Control": 5, "Reference": 2}),
     )
 
 
@@ -77,7 +77,11 @@ def _feature_summary(counts):
         per_feature=pd.DataFrame(),
         spatial_counts=grid,
         spatial_bins=_summarize_feature_bins(
-            grid, metadata=original.metadata, panel=panel, retained_bin_mask=original.retained_bin_mask
+            grid,
+            metadata=original.metadata,
+            panel=panel,
+            feature_classes=("Endogenous",),
+            retained_bin_mask=original.retained_bin_mask,
         ),
         retained_bin_mask=original.retained_bin_mask,
     )
@@ -202,7 +206,10 @@ def test_spatial_histogram_uses_prepared_population_annotations_and_style():
 
 def _with_panel_sizes(summary, panel_sizes):
     """The summary with a per_class holding each class's panel feature count, as summarize_points records it."""
-    per_class = pd.DataFrame({"feature_class": list(panel_sizes), "n_features": list(panel_sizes.values())})
+    classes = list(panel_sizes)
+    per_class = pd.DataFrame(
+        {"feature_class": pd.Categorical(classes, categories=classes), "n_features": list(panel_sizes.values())}
+    )
     return replace(summary, per_class=per_class)
 
 
