@@ -4854,7 +4854,10 @@ Part 11e.iii adds `spatial_bin_histogram_by_feature` for `FeaturePointsSummary`:
 select one feature from its
 `spatial_bins.per_bin` and use annotations from `spatial_bins.per_feature`.
 Reuse the same renderer, styling, and population rules; do not recompute bin
-statistics in the plotting adapter.
+statistics in the plotting adapter. (Slice 11m replaces the median/SD
+annotations from `per_class` and `per_feature` by the median and SD of the
+plotted values, as in `instance_histogram`; the stored statistics stay in the
+summaries.)
 
 #### Public histogram entry points
 
@@ -9916,7 +9919,8 @@ themselves are named `panel_feature_counts`.
 
 ## Slice 11m: align the points summaries with the table summary
 
-**Status: planned; implement after Slice 11j.**
+**Status: step 1 (the summaries) implemented; step 2 (the plot) planned.
+Slice 11j, which it aligns with, is implemented.**
 
 Align the points summaries as closely as possible with the table summary of
 Slice 11j: the measures that the class grid already determines, without
@@ -9927,6 +9931,46 @@ classes or more, each class's share of an instance's points,
 `n_features`; `SpatialBinSummary` has neither. `TableSummary` also exposes its
 classes and feature names as properties and types `feature_class` as
 categorical in every frame; the points summaries do not yet.
+
+**Implementation steps,** each tested on its own:
+
+1. **The summaries:**
+   - `pct_points` in `SpatialBinSummary.per_bin`, from the class grid, with
+     two selected classes or more;
+   - `n_features`, last in `SpatialBinSummary.per_class`, passed from
+     `summarize_points` to `_summarize_spatial_bins`;
+   - the properties `PointsSummary.feature_classes` and
+     `PointsSummary.feature_names`;
+   - categorical `feature_class`, with the selected classes in panel order, in
+     `PointsSummary.per_feature`, `PointsSummary.per_class` and, as a subset
+     of the reference's `per_feature`, `FeaturePointsSummary.per_feature`; and
+     explicit categories in `FeatureSpatialBinSummary.per_feature`;
+   - the docstring of `SpatialBinSummary`: the new columns, and that detected
+     features per bin are not computed, and why.
+
+   Tests in `src/harpy/_tests/test_qc/test_points/`
+   (`test_spatial_bin_summary.py`, `test_summarize_points.py` and
+   `test_summarize_points_by_feature.py`) and in
+   `src/harpy/_tests/test_qc/test_histograms.py`, whose calls of
+   `_summarize_spatial_bins` pass the panel sizes and whose expected frames
+   type the class as categorical.
+
+2. **The plot:**
+   - `measure` in `spatial_bin_histogram`, with the measure names and the
+     wording of the errors of `instance_histogram`;
+   - the median and SD from the plotted values, for every measure, in
+     `_plot_spatial_bin_histogram`, which `spatial_bin_histogram_by_feature`
+     shares.
+
+   Tests in `src/harpy/_tests/test_qc/test_histograms.py`: each measure, the
+   errors, and that the computed annotations equal the stored statistics for
+   points, divided by the class's number of features when normalized. Two
+   tests overwrite the stored median and SD and expect them in the annotation:
+   `test_spatial_histogram_uses_prepared_population_annotations_and_style` and
+   `test_feature_histogram_uses_prepared_statistics_and_shared_bins_without_source_reads`.
+   They keep their other checks, expect the median and SD of the plotted
+   values, and are renamed to match. The check that the stored SD is present,
+   and its test, no longer apply and are removed.
 
 | Table summary (Slice 11j)                | Points summary (this slice)                                                                                                                                                                     |
 | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -9962,10 +10006,12 @@ categorical in every frame; the points summaries do not yet.
   class as plain strings, while `SpatialBinSummary`, `FeatureSpatialBinSummary`
   and every frame of `TableSummary` store it as a categorical. They become
   categorical too, with the selected classes in panel order as categories.
+  Panel order is the registered panel's canonical order, classes and features
+  sorted by name, fixed when the panel is registered.
   `FeatureSpatialBinSummary.per_feature` derives its categories from the
-  values, `pd.Categorical(feature_classes)`, which keeps only the classes
-  present and sorts them alphabetically; it passes the selected classes in
-  panel order explicitly instead, as every other frame does. The `feature`
+  values, `pd.Categorical(feature_classes)`, which keeps only the classes of
+  the requested features; it passes the reference summary's selected classes
+  explicitly instead, as every other frame does. The `feature`
   column keeps its types: plain strings where a frame lists every feature, and
   categorical in the long frames of named features, `per_bin` and
   `per_feature` of `FeatureSpatialBinSummary`.
@@ -10000,7 +10046,10 @@ normalization=None, …)`, the selection model of `instance_histogram`
   `FeatureSpatialBinSummary.per_feature`.
 - **Other columns unchanged:** `FeatureSpatialBinSummary` changes only its
   class categories, and `spatial_bin_histogram_by_feature` keeps selecting by
-  `feature`.
+  `feature`. The additions are per class and `TableSummary` has no
+  per-feature counterpart, a feature's share of an instance's points; and
+  `n_features` and `normalization="per_panel_feature"` would divide one
+  feature's counts by 1.
 
 **Verification:** with two selected classes or more, `per_bin` holds each
 class's share of the bin's points, equal to the share computed from
