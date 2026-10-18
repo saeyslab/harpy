@@ -79,7 +79,8 @@ implemented, as are Parts 11a–11i except the optimization 11f.xi. Slices
     - **11j:** table-level summary computation through `hp.qc.summarize_table`
       and `TableSummary`, with plotting integration — step 1 redone from CSR
       count matrices in two parts, 1a (matrices and classes) and 1b
-      (features), both implemented; steps 2 and 3 not implemented;
+      (features), both implemented; step 2 (instance plots) implemented;
+      step 3 (docs) not implemented;
     - **11k:** feature summaries of a table for selected features through
       `hp.qc.summarize_table_by_feature` and `FeatureTableSummary`, with
       `instance_histogram_by_feature`, the counterparts of
@@ -8895,8 +8896,8 @@ keys before assignment.
 
 ## Slice 11j: table-level summary computation and plotting integration
 
-**Status: step 1 implemented, redone from the count matrices in two parts,
-1a and 1b; steps 2 and 3 not implemented.**
+**Status: steps 1 and 2 implemented, step 1 redone from the count matrices in
+two parts, 1a and 1b; step 3 not implemented.**
 
 Implement a read-only `hp.qc.summarize_table` computation API and a
 `TableSummary` result, followed by table-level QC plots that take the result.
@@ -8968,7 +8969,7 @@ disk access is needed.
      and supplied `.obsm` feature names, including a registry under a custom
      `feature_matrices_key`; the per-feature frames in all three modes; and
      the errors of the names.
-2. `instance_histogram` and `instance_scatter`, including moving
+2. (implemented) `instance_histogram` and `instance_scatter`, including moving
    `obs_scatter`'s rendering into a shared dataframe-based helper.
 3. Docs: the new functions in the Quality Control → Tables section of
    `docs/api.md`, and marking 11j implemented.
@@ -9983,9 +9984,18 @@ normalization=None, …)`, the selection model of `instance_histogram`
   share of each bin's points, with two selected classes or more.
   `"detected_features"` raises, as it is not computed per bin, and names the
   measures available. `normalization="per_panel_feature"` applies to
-  `"points"` only and raises for `"pct_points"`. For `"pct_points"`, the
-  annotated median and SD come from the plotted values, as `per_class` holds
-  no statistics of the share.
+  `"points"` only and raises for `"pct_points"`.
+- **Annotations from the plotted values, for every measure:** the median and
+  SD come from the plotted values, through the shared statistics helper, as
+  `instance_histogram` computes them (Slice 11j), instead of the stored
+  statistics of `per_class` that `spatial_bin_histogram` reads today.
+  `per_class` holds no statistics of the share, and one path for every
+  measure keeps both histograms annotating the same way, always describing
+  exactly what is drawn, normalized or not. For `"points"` the computed
+  values equal the stored ones. `_plot_spatial_bin_histogram`, which
+  `spatial_bin_histogram_by_feature` shares, computes them likewise, so the
+  by-feature histogram follows; its values equal those of
+  `FeatureSpatialBinSummary.per_feature`.
 - **Other columns unchanged:** `FeatureSpatialBinSummary` changes only its
   class categories, and `spatial_bin_histogram_by_feature` keeps selecting by
   `feature`.
@@ -10003,8 +10013,11 @@ selected classes in panel order as categories, also when a class is absent
 from a frame's rows; `spatial_bin_histogram` plots the class's points per bin
 by default and its share of the bins' points with `measure="pct_points"`,
 raises for `"detected_features"` and for `normalization="per_panel_feature"`
-with a measure other than `"points"`; and no additional pass over the source
-points is made.
+with a measure other than `"points"`; its annotated median and SD, and those
+of `spatial_bin_histogram_by_feature`, are computed from the plotted values
+and, for points, equal the stored statistics, divided by the class's number of
+features when normalized; and no additional pass over the source points is
+made.
 
 ## Slice 12: optional Slice 7b latency optimization
 
