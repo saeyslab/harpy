@@ -137,11 +137,7 @@ def histogram(
     """
     rows = _region_rows(adata, region)
     resolved_dataframe = _resolve_dataframe(adata, column=column, dataframe=dataframe)
-    if resolved_dataframe == "var" and rows is not None and not rows.all():
-        raise ValueError(
-            "A '.var' column describes the whole table, so it cannot be plotted for a subset of its regions without "
-            "recomputing it. Plot a table that holds the subset's own '.var' columns, or use dataframe='obs'."
-        )
+    _check_var_selection(resolved_dataframe, rows)
 
     values = getattr(adata, resolved_dataframe)[column]
     if resolved_dataframe == "obs" and rows is not None:
@@ -406,6 +402,15 @@ def _resolve_dataframe(adata, column: str, dataframe: Literal["obs", "var", "aut
     if in_var:
         return "var"
     raise ValueError(f"Column '{column}' was not found in either 'adata.obs' or 'adata.var'.")
+
+
+def _check_var_selection(dataframe: Literal["obs", "var"], rows: np.ndarray | None) -> None:
+    """Raise for ``.var`` columns with a subset of the regions: they describe the whole table."""
+    if dataframe == "var" and rows is not None and not rows.all():
+        raise ValueError(
+            "A '.var' column describes the whole table, so it cannot be plotted for a subset of its regions without "
+            "recomputing it. Plot a table that holds the subset's own '.var' columns, or use dataframe='obs'."
+        )
 
 
 def _format_display_name(column: str) -> str:
