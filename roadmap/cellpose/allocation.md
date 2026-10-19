@@ -4,8 +4,8 @@
 
 Thirteen numbered implementation slices are planned, with Slice 7 split into
 parts a and b and Slice 11 into parts a through m; Slices 1 through 10 are
-implemented, as are Parts 11a–11j except the optimization 11f.xi. Slices
-11k–11m and the optional Slice 12 remain:
+implemented, as are Parts 11a–11j and 11m except the optimization 11f.xi.
+Slices 11k and 11l and the optional Slice 12 remain:
 
 1. patch the CosMx reader and establish the generic Harpy feature-panel
    metadata contract — implemented;
@@ -87,7 +87,8 @@ implemented, as are Parts 11a–11j except the optimization 11f.xi. Slices
       `summarize_points_by_feature` — planned, after 11j;
     - **11l:** select regions with `region` instead of `labels_name` in the
       existing table-QC plots, as `summarize_table` does, and rename
-      `obs_scatter` to `table_scatter` — planned, after 11j;
+      `obs_scatter` to `table_scatter` — planned, after the deprecation slice
+      of [deprecations.md](deprecations.md);
     - **11m:** align the points summaries with the table summary: add each
       class's share of a bin's points to `SpatialBinSummary.per_bin` and
       `n_features` to its `per_class`, the counterparts that the class grid
@@ -96,7 +97,8 @@ implemented, as are Parts 11a–11j except the optimization 11f.xi. Slices
       and store `feature_class` as categorical in every frame, with the
       classes in panel order; and give `spatial_bin_histogram` the
       `measure` parameter of `instance_histogram`; without detected features
-      per bin, whose distinct count is expensive — planned, after 11j;
+      per bin, whose distinct count is expensive — implemented, in two steps,
+      the summaries and the plot;
 
 12. optionally optimize Slice 7b's latency after phase-level benchmarks identify
     material checkpoint or writer overhead — optional, not implemented.
@@ -9862,7 +9864,9 @@ points side, as its distinct count is expensive (Slice 11m).
 
 ## Slice 11l: consistent names in the table-QC plots
 
-**Status: planned; implement after Slice 11j.**
+**Status: planned; implement after the deprecation slice of
+[deprecations.md](deprecations.md), whose helper words the warnings of the
+aliases below.**
 
 `hp.qc.obs_scatter`, `hp.qc.table_histogram` and `hp.qc.table_histograms`
 select the regions of a table with `labels_name`, as the deprecated scanpy
@@ -9913,6 +9917,23 @@ themselves are named `panel_feature_counts`.
 - **Keep `labels_name` for at least one release,** as a deprecated alias that
   warns with a `FutureWarning` and selects the same rows; passing both raises a
   `ValueError`.
+- **Select through the table's annotation:** the three plots select rows
+  through `ProcessTable(sdata, labels_name=...)`, which requires the names to
+  be labels elements of `sdata`. With `region`, they check the names against
+  the table's `uns["spatialdata_attrs"]["region"]`, as `summarize_table` does
+  with `_selected_names`: a table that annotates shapes becomes selectable, and
+  a name the table does not annotate raises "Unknown regions: …; choose from
+  […]". `region=None` keeps every row, also of a table without SpatialData
+  annotation, as today.
+- **Same position:** `region` takes the third position of `labels_name`, so
+  positional calls keep working; `labels_name` becomes a keyword-only
+  parameter at the end.
+- **Messages:** the error of `table_histogram` for `.var` metrics of a subset
+  of regions names `region`, not `labels_name`.
+- **Class and feature errors of the spatial-bin histograms:** "Unknown
+  feature_class …; choose from […]" and "Unknown feature …; choose from […]",
+  the wording of `instance_histogram`, instead of "Selected … is absent from
+  the spatial-bin summary".
 - **Not in scope:** `hp.qc.segmentation_coverage` and
   `hp.qc.segmentation_histogram`, whose `labels_name` names the labels element
   that they measure, not a region of a table.
