@@ -27,6 +27,7 @@ from harpy.qc._summary_schema import (
     _N_CLASS_POINTS_TEMPLATE,
     _N_FEATURES_KEY,
     _N_POINTS_KEY,
+    _N_TOTAL_INSTANCES_KEY,
     _PCT_CLASS_POINTS_TEMPLATE,
     _REGION_COLUMN_KEY,
 )
@@ -482,6 +483,29 @@ def _class_matrices(
     feature_matrices_key: str,
 ) -> tuple[_FeatureClassMatrix, ...]:
     """Return the matrices to read, one per class, with their feature names, after checking them without reading a value."""
+    entries = _collect_class_matrices(adata, table_name=table_name, layer=layer, obsm_keys=obsm_keys)
+    obsm_names = _obsm_feature_names(
+        adata,
+        table_name=table_name,
+        obsm_keys=obsm_keys,
+        feature_names=feature_names,
+        feature_matrices_key=feature_matrices_key,
+    )
+    var_names = tuple(str(name) for name in adata.var_names)
+    return tuple(
+        replace(entry, feature_names=obsm_names[entry.key] if entry.attribute == "obsm" else var_names)
+        for entry in entries
+    )
+
+
+def _collect_class_matrices(
+    adata: AnnData, *, table_name: str, layer: str | None, obsm_keys: tuple[str, ...]
+) -> tuple[_FeatureClassMatrix, ...]:
+    """Return the matrices to read, one per class, without their names, after checking them without reading a value.
+
+    ``X`` or the layer, then the ``.obsm`` matrices, each a CSR matrix with one
+    row per observation and a class label of its own.
+    """
     entries = []
     if layer is not None:
         if not isinstance(layer, str) or layer not in adata.layers:
@@ -508,19 +532,7 @@ def _class_matrices(
         raise ValueError(f"Each matrix read needs its own class label, but these labels coincide: {coinciding}.")
     for entry in entries:
         _check_csr(entry, n_obs=adata.n_obs, table_name=table_name)
-
-    obsm_names = _obsm_feature_names(
-        adata,
-        table_name=table_name,
-        obsm_keys=obsm_keys,
-        feature_names=feature_names,
-        feature_matrices_key=feature_matrices_key,
-    )
-    var_names = tuple(str(name) for name in adata.var_names)
-    return tuple(
-        replace(entry, feature_names=obsm_names[entry.key] if entry.attribute == "obsm" else var_names)
-        for entry in entries
-    )
+    return tuple(entries)
 
 
 def _obsm_feature_names(
@@ -737,11 +749,29 @@ def _lazy_block_tasks(
     return block_rows, _tree_reduce([task[1] for task in tasks], _add_column_sums)
 
 
-def _sliced_blocks(matrix: object, region_codes: NDArray[np.int64]) -> Iterator[tuple[object, NDArray[np.int64]]]:
-    """Yield the CSR row blocks of a backed or in-memory matrix that have selected rows, with their region codes.
+def _sliced_blocks(matrix: object, row_codes: NDArray[np.int64]) -> Iterator[tuple[object, NDArray[np.int64]]]:
+    """Yield the matrix in row blocks with their row codes, skipping the blocks whose codes are all -1.
 
-    The rows per block follow the policy of Harpy's lazy reader, about
-    ``array.chunk-size`` bytes per block, from the number of stored values.
+    A yielded block holds all rows of its range, also those with code -1: the
+    caller keeps the rows with ``codes_in_block >= 0``. The rows per block follow
+    the policy of Harpy's lazy reader, about ``array.chunk-size`` bytes per block,
+    from the number of stored values.
+
+    Parameters
+    ----------
+    matrix
+        A backed CSR dataset or an in-memory CSR matrix, one row per table row.
+    row_codes
+        One code per row: ``-1`` for a row the caller does not need, otherwise a
+        non-negative code whose meaning is the caller's, for example the row's
+        region among the selected regions, or its row in the results.
+
+    Yields
+    ------
+    block
+        The rows of one range, as an in-memory CSR matrix with all columns.
+    codes_in_block
+        Their codes, the matching piece of ``row_codes``.
     """
     if isinstance(matrix, CSRDataset):
         data, indices, indptr = (matrix.group[name] for name in ("data", "indices", "indptr"))
@@ -759,7 +789,7 @@ def _sliced_blocks(matrix: object, region_codes: NDArray[np.int64]) -> Iterator[
         indptr_itemsize=indptr.dtype.itemsize,
     )
     for start in range(0, n_rows, length):
-        codes_in_block = region_codes[start : start + length]
+        codes_in_block = row_codes[start : start + length]
         if (codes_in_block >= 0).any():
             yield matrix[start : start + length], codes_in_block
 
@@ -932,7 +962,7 @@ def _feature_statistics(
 def _population(n_total: int, n_retained: int) -> dict[str, float]:
     """Return the population columns: the table's rows of the selected regions, the retained and excluded ones."""
     return {
-        "n_total_instances": n_total,
+        _N_TOTAL_INSTANCES_KEY: n_total,
         "n_retained_instances": n_retained,
         "n_excluded_instances": n_total - n_retained,
         "pct_excluded_instances": 100 * (n_total - n_retained) / n_total if n_total else np.nan,

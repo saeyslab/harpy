@@ -15,7 +15,13 @@ from numpy.typing import NDArray
 from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
-from harpy.qc._summary_schema import _FEATURE_CLASS_KEY, _FEATURE_KEY, _N_POINTS_KEY, _REGION_COLUMN_KEY
+from harpy.qc._summary_schema import (
+    _FEATURE_CLASS_KEY,
+    _FEATURE_KEY,
+    _N_POINTS_KEY,
+    _N_TOTAL_INSTANCES_KEY,
+    _REGION_COLUMN_KEY,
+)
 from harpy.qc._summary_statistics import _points_statistics
 from harpy.qc.table._summarize_table import (
     TableSummary,
@@ -198,7 +204,7 @@ def summarize_table_by_feature(
     # Feature by feature, each in table row order.
     per_instance[_N_POINTS_KEY] = values.T.reshape(-1)
 
-    n_total = int(summary.per_class["n_total_instances"].iloc[0])
+    n_total = int(summary.per_class[_N_TOTAL_INSTANCES_KEY].iloc[0])
     per_feature = _feature_statistics(
         values, n_total=n_total, features=names, feature_labels=feature_labels, labels=labels
     )
@@ -207,7 +213,7 @@ def summarize_table_by_feature(
     per_region_class = summary.per_region_class
     region_frames = []
     for code, name in enumerate(regions):
-        n_total_in_region = per_region_class.loc[per_region_class[_REGION_COLUMN_KEY] == name, "n_total_instances"]
+        n_total_in_region = per_region_class.loc[per_region_class[_REGION_COLUMN_KEY] == name, _N_TOTAL_INSTANCES_KEY]
         frame = _feature_statistics(
             values[region_codes == code],
             n_total=int(n_total_in_region.iloc[0]),
@@ -369,11 +375,12 @@ def _read_columns(
             lazy.append((result_columns, selected, entry.location))
             continue
         # In memory: the slice already holds the values.
-        values[:, result_columns] = _counts(selected, location=entry.location, table_name=table_name)
-    # Lazy: compute all slices at once, then write them as the in-memory path does.
-    computed = dask.compute(*(selected for _, selected, _ in lazy))
-    for (result_columns, _, location), selected in zip(lazy, computed, strict=True):
-        values[:, result_columns] = _counts(selected, location=location, table_name=table_name)
+        values[:, result_columns] = _to_dense_counts(selected, location=entry.location, table_name=table_name)
+    if lazy:
+        # Lazy: compute all slices at once, then write them as the in-memory path does.
+        computed = dask.compute(*(selected for _, selected, _ in lazy))
+        for (result_columns, _, location), selected in zip(lazy, computed, strict=True):
+            values[:, result_columns] = _to_dense_counts(selected, location=location, table_name=table_name)
     return values
 
 
@@ -387,11 +394,13 @@ def _backed_columns(
     values = np.zeros((len(positions), len(columns)), dtype=np.uint64)
     for block, rows_in_block in _sliced_blocks(matrix, output_rows):
         retained = rows_in_block >= 0
-        values[rows_in_block[retained]] = _counts(block[retained][:, columns], location=location, table_name=table_name)
+        values[rows_in_block[retained]] = _to_dense_counts(
+            block[retained][:, columns], location=location, table_name=table_name
+        )
     return values
 
 
-def _counts(selected: object, *, location: str, table_name: str) -> NDArray[np.uint64]:
+def _to_dense_counts(selected: object, *, location: str, table_name: str) -> NDArray[np.uint64]:
     """Return the selected CSR rows and columns as a dense array of counts, raising unless they are counts."""
     if not _are_counts(selected.data):
         raise ValueError(

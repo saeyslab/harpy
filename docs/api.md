@@ -348,10 +348,12 @@ Quality control functions.
     :toctree: generated
 
     summarize_table
+    summarize_table_by_feature
     table_histogram
     table_histograms
     obs_scatter
     instance_histogram
+    instance_histogram_by_feature
     instance_scatter
 ```
 
@@ -365,6 +367,7 @@ Quality control functions.
     :toctree: generated
 
     TableSummary
+    FeatureTableSummary
     TableSummaryMetadata
 ```
 

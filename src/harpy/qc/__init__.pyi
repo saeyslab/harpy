@@ -1,5 +1,6 @@
 from ._histogram import (
     instance_histogram,
+    instance_histogram_by_feature,
     metric_histogram,
     metrics_histogram,
     spatial_bin_histogram,
@@ -16,14 +17,17 @@ from .points._spatial_bin_summary import FeatureSpatialBinSummary, SpatialBinSum
 from .points._summarize_points import PointsSummary, summarize_points
 from .points._summarize_points_by_feature import FeaturePointsSummary, summarize_points_by_feature
 from .table._summarize_table import TableSummary, summarize_table
+from .table._summarize_table_by_feature import FeatureTableSummary, summarize_table_by_feature
 from .table._table_summary_metadata import TableSummaryMetadata
 
 __all__ = [
     "FeaturePointsSummary",
     "FeatureSpatialBinSummary",
+    "FeatureTableSummary",
     "TableSummary",
     "TableSummaryMetadata",
     "summarize_table",
+    "summarize_table_by_feature",
     "PointsSummary",
     "PointsSummaryMetadata",
     "SpatialBinSummary",
@@ -41,6 +45,7 @@ __all__ = [
     "spatial_bin_histogram",
     "spatial_bin_histogram_by_feature",
     "instance_histogram",
+    "instance_histogram_by_feature",
     "obs_scatter",
     "instance_scatter",
 ]

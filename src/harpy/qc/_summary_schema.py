@@ -9,6 +9,8 @@ _FEATURE_CLASS_KEY: Final = "feature_class"
 _N_FEATURES_KEY: Final = "n_features"
 _N_POINTS_KEY: Final = "n_points"
 _PCT_POINTS_KEY: Final = "pct_points"
+# The rows of the selected regions, the first population column of TableSummary.per_class.
+_N_TOTAL_INSTANCES_KEY: Final = "n_total_instances"
 # The per-class columns of TableSummary.per_instance, formatted with the class label.
 _N_CLASS_POINTS_TEMPLATE: Final = "n_{label}_points"
 _N_CLASS_DETECTED_FEATURES_TEMPLATE: Final = "n_{label}_detected_features"

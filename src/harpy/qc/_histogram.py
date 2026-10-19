@@ -19,6 +19,7 @@ from harpy.qc.points._summarize_points import PointsSummary
 from harpy.qc.points._summarize_points_by_feature import FeaturePointsSummary
 from harpy.qc.table._instance_measures import InstanceMeasure, _instance_values
 from harpy.qc.table._summarize_table import TableSummary
+from harpy.qc.table._summarize_table_by_feature import FeatureTableSummary
 from harpy.table.pl._histogram import histogram, histograms
 from harpy.utils._deprecation import _deprecated_function
 
@@ -484,6 +485,169 @@ def instance_histogram(
         ax = hp.qc.instance_histogram(summary, feature_class="negative", normalization="per_panel_feature")
     """
     values, label = _instance_values(summary, feature_class=feature_class, measure=measure, normalization=normalization)
+    return _plot_instance_histogram(
+        values,
+        xlabel=label,
+        ax=ax,
+        bins=bins,
+        range=range,
+        quantile_range=quantile_range,
+        histplot_kwargs=histplot_kwargs,
+        median_line_kwargs=median_line_kwargs,
+        median_text_kwargs=median_text_kwargs,
+        figsize=figsize,
+        title=title,
+        color=color,
+        show_median=show_median,
+        show_std=show_std,
+    )
+
+
+def instance_histogram_by_feature(
+    summary: FeatureTableSummary,
+    *,
+    feature: str,
+    ax: Axes | None = None,
+    bins: int | str = "auto",
+    range: tuple[float, float] | None = None,
+    quantile_range: tuple[float, float] | None = None,
+    histplot_kwargs: Mapping[str, Any] = MappingProxyType({}),
+    median_line_kwargs: Mapping[str, Any] = MappingProxyType({}),
+    median_text_kwargs: Mapping[str, Any] = MappingProxyType({}),
+    figsize: tuple[float, float] = (5.5, 4.5),
+    title: str | None = None,
+    color: str | None = None,
+    show_median: bool = True,
+    show_std: bool = True,
+) -> Axes:
+    """Plot one feature's points across the retained instances of a feature table summary.
+
+    Each retained instance of the reference table summary contributes one
+    value, including zeros for the selected feature: choosing a feature never
+    changes that population. No table matrix is read or summary recalculated.
+
+    Parameters
+    ----------
+    summary
+        Result of :func:`harpy.qc.summarize_table_by_feature`. Uses
+        ``summary.per_instance``.
+    feature
+        The name of one of the features passed to
+        :func:`harpy.qc.summarize_table_by_feature`, listed in
+        ``summary.per_feature["feature"]``; features are not pooled.
+    ax
+        Axes to reuse, or None to create a figure.
+    bins
+        Histogram intervals along the points axis.
+    range
+        Inclusive display bounds. Values outside them are hidden, but still
+        contribute to the percentage denominator and median/SD annotations.
+    quantile_range
+        Quantiles defining display bounds when ``range`` is None; for example
+        ``(0.1, 0.99)``. Filtering affects only the display.
+    histplot_kwargs
+        Seaborn histogram options, including ``kde``, ``alpha``, and ``color``.
+        Defaults to a borderless filled-step histogram with ``alpha=0.5``,
+        ``stat="count"`` (number of instances), and a KDE of line width 2.
+        ``stat="percent"`` uses all retained instances as the denominator, so
+        clipped bars may sum to less than 100%. Other statistics, data
+        selection, grouping, and weights cannot be supplied here.
+    median_line_kwargs, median_text_kwargs
+        Matplotlib styling for the median line and annotation box.
+    figsize
+        Figure size when creating axes.
+    title
+        Optional plot title. None leaves the axes title unchanged; no title
+        is generated automatically.
+    color
+        Histogram color, unless overridden by ``histplot_kwargs``.
+    show_median
+        Draw the median of the plotted values and its annotation.
+    show_std
+        Include the sample SD in the median annotation; fewer than two
+        instances shows N/A.
+
+    Returns
+    -------
+    matplotlib.axes.Axes
+        Axes containing the histogram, or an empty-state message when no
+        instances are retained. Input data and plotting-option mappings remain
+        unchanged. Customize axis labels on the returned axes with ``ax.set(...)``.
+
+    Raises
+    ------
+    TypeError
+        If ``summary`` is not a :class:`~harpy.qc.FeatureTableSummary`.
+    ValueError
+        If ``feature`` is not one of the summary's requested features.
+
+    Notes
+    -----
+    The median and SD are computed from the plotted values, as in
+    :func:`harpy.qc.instance_histogram`. They equal the feature's
+    ``median_points_per_instance`` and ``std_points_per_instance`` in
+    ``summary.per_feature``.
+
+    See Also
+    --------
+    harpy.qc.summarize_table_by_feature
+    harpy.qc.instance_histogram
+    harpy.qc.spatial_bin_histogram_by_feature
+
+    Examples
+    --------
+    .. code-block:: python
+
+        summary = hp.qc.summarize_table(sdata, "table", obsm_keys=["negative"])
+        features = hp.qc.summarize_table_by_feature(sdata, summary=summary, features=["Negative01", "GeneA"])
+        ax = hp.qc.instance_histogram_by_feature(features, feature="Negative01")
+    """
+    if not isinstance(summary, FeatureTableSummary):
+        raise TypeError("summary must be a FeatureTableSummary; use instance_histogram() for a TableSummary.")
+    features = [str(name) for name in summary.per_feature[_FEATURE_KEY]]
+    if feature not in features:
+        raise ValueError(f"Unknown feature {feature!r}; choose from {features}.")
+    per_instance = summary.per_instance
+    return _plot_instance_histogram(
+        per_instance.loc[per_instance[_FEATURE_KEY] == feature, _N_POINTS_KEY],
+        xlabel=f"{feature} points per instance",
+        ax=ax,
+        bins=bins,
+        range=range,
+        quantile_range=quantile_range,
+        histplot_kwargs=histplot_kwargs,
+        median_line_kwargs=median_line_kwargs,
+        median_text_kwargs=median_text_kwargs,
+        figsize=figsize,
+        title=title,
+        color=color,
+        show_median=show_median,
+        show_std=show_std,
+    )
+
+
+def _plot_instance_histogram(
+    values: pd.Series,
+    *,
+    xlabel: str,
+    ax: Axes | None,
+    bins: int | str,
+    range: tuple[float, float] | None,
+    quantile_range: tuple[float, float] | None,
+    histplot_kwargs: Mapping[str, Any],
+    median_line_kwargs: Mapping[str, Any],
+    median_text_kwargs: Mapping[str, Any],
+    figsize: tuple[float, float],
+    title: str | None,
+    color: str | None,
+    show_median: bool,
+    show_std: bool,
+) -> Axes:
+    """Annotate the median and SD of one measure over the retained instances, then share the histogram renderer.
+
+    Shared by :func:`instance_histogram` and :func:`instance_histogram_by_feature`,
+    which select the values.
+    """
     if histplot_kwargs.get("stat", "count") not in {"count", "percent"}:
         raise ValueError("Instance histograms support stat='count' or stat='percent'.")
     # The shared statistics helper keeps the conventions of the summaries: SD with ddof=1, NaN below two values.
@@ -504,7 +668,7 @@ def instance_histogram(
         color=color if color is not None else "#4C78A8",
         show_median=show_median,
         show_std=show_std,
-        xlabel=label,
+        xlabel=xlabel,
         count_ylabel="Number of instances",
         percent_ylabel="Percentage of instances (%)",
         empty_message="No retained instances",
