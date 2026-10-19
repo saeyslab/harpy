@@ -7,12 +7,10 @@ import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
-from anndata import AnnData
-from spatialdata import SpatialData
-from spatialdata.models import Labels2DModel, TableModel
 
 import harpy.qc as qc
 from harpy._feature_panels import _make_feature_panel
+from harpy._tests.test_table.test_pl.test_histogram import _table
 from harpy.qc import (
     FeaturePointsSummary,
     PointsSummary,
@@ -21,7 +19,7 @@ from harpy.qc import (
     spatial_bin_histogram_by_feature,
 )
 from harpy.qc.points._spatial_bin_summary import _summarize_feature_bins, _summarize_spatial_bins
-from harpy.table.pl import histogram, histograms, scatter
+from harpy.table.pl import histogram
 
 matplotlib.use("Agg")
 
@@ -82,28 +80,6 @@ def _feature_summary(counts):
             retained_bin_mask=original.retained_bin_mask,
         ),
         retained_bin_mask=original.retained_bin_mask,
-    )
-
-
-def _table():
-    obs = pd.DataFrame(
-        {
-            "metric": [0.0, 1.0, 2.0, 10.0, np.nan, 50.0],
-            "region": pd.Categorical(["a"] * 5 + ["b"]),
-            "instance": [1, 2, 3, 4, 5, 1],
-        },
-        index=[f"cell_{i}" for i in range(6)],
-    )
-    var = pd.DataFrame({"metric": [0.0, 1.0, 8.0]}, index=["g1", "g2", "g3"])
-    table = TableModel.parse(
-        AnnData(X=np.zeros((6, 3)), obs=obs, var=var),
-        region=["a", "b"],
-        region_key="region",
-        instance_key="instance",
-    )
-    return SpatialData(
-        tables={"table": table},
-        labels={name: Labels2DModel.parse(np.array([[1, 2, 3, 4, 5]], dtype=np.uint32)) for name in ["a", "b"]},
     )
 
 
@@ -442,56 +418,3 @@ def test_table_histogram_uses_selected_nonmissing_population_and_matches_spatial
     assert table_ax.texts[0].get_text() == spatial_ax.texts[0].get_text()
     pd.testing.assert_frame_equal(sdata.tables["table"].obs, original.obs)
     pd.testing.assert_frame_equal(sdata.tables["table"].var, original.var)
-
-
-def test_table_histograms_use_each_metric_population_and_preserve_axes():
-    sdata = _table()
-    _, axes = plt.subplots(1, 2)
-    result = histograms(
-        sdata.tables["table"],
-        metrics=[("obs", "metric"), ("var", "metric")],
-        ax=axes,
-        range=(0, 1),
-        histplot_kwargs={"element": "bars", "stat": "percent", "kde": False, "bins": [-0.5, 0.5, 1.5]},
-    )
-    assert result is axes
-    np.testing.assert_allclose(_heights(axes[0]), [20, 20])  # Five non-null observations.
-    np.testing.assert_allclose(_heights(axes[1]), [100 / 3, 100 / 3])
-    assert axes[1].get_ylabel() == "Percentage of features (%)"
-
-
-@pytest.mark.parametrize("region, expected_median", [(None, "2"), ("a", "1.50"), (["b"], "50")])
-def test_table_plot_region_selects_the_rows_of_the_named_regions(region, expected_median):
-    """Region a holds the metrics 0, 1, 2, 10 and a missing value; region b holds 50."""
-    ax = histogram(_table().tables["table"], "metric", region=region, dataframe="obs", histplot_kwargs={"kde": False})
-    assert f"Median: {expected_median}" in ax.texts[0].get_text()
-
-
-def test_table_scatter_plots_two_var_columns_but_not_columns_of_both_dataframes():
-    adata = _table().tables["table"]
-    adata.var["other"] = [1.0, 2.0, 3.0]
-    ax = scatter(adata, "metric", "other", dataframe="var", show_regplot=False)
-    assert ax.collections[0].get_array().sum() == 3  # One count per gene.
-    assert (ax.get_xlabel(), ax.get_ylabel()) == ("Metric", "Other")
-    with pytest.raises(ValueError, match="not both in 'adata.obs', nor both in 'adata.var'"):
-        scatter(adata, "instance", "other", show_regplot=False)
-    # metric is in both dataframes, but only .obs also holds instance.
-    assert scatter(adata, "metric", "instance", show_regplot=False).get_ylabel() == "Instance"
-    with pytest.raises(ValueError, match=r"A '\.var' column describes the whole table"):
-        scatter(adata, "metric", "other", dataframe="var", region="a")
-
-
-def test_table_plots_reject_unknown_regions_var_subsets_and_region_without_annotation():
-    adata = _table().tables["table"]
-    with pytest.raises(ValueError, match=r"Unknown regions: \['c'\]; choose from \['a', 'b'\]"):
-        histogram(adata, "metric", region="c", dataframe="obs")
-    with pytest.raises(ValueError, match=r"A '\.var' column describes the whole table"):
-        histogram(adata, "metric", region="a", dataframe="var")
-    # Selecting every region keeps every row, so a '.var' column still describes the selection.
-    histogram(adata, "metric", region=["a", "b"], dataframe="var")
-
-    without_annotation = AnnData(obs=adata.obs[["metric", "instance"]].copy())
-    with pytest.raises(ValueError, match="SpatialData annotation"):
-        scatter(without_annotation, "metric", "instance", region="a")
-    # region=None needs no annotation.
-    scatter(without_annotation, "metric", "instance", show_regplot=False)

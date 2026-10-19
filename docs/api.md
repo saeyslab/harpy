@@ -223,6 +223,22 @@ Normalisations that scanpy does not provide. Like `scanpy.pp`, they change an
     tb.pp.normalize_by_quantile
 ```
 
+### Plotting
+
+Plots of the numeric `.obs` and `.var` columns of an `AnnData` table, such as
+the QC metrics of `scanpy.pp.calculate_qc_metrics`. Like `scanpy.pl`, they take
+the table, for example `sdata.tables["table"]`.
+
+```{eval-rst}
+
+.. autosummary::
+    :toctree: generated
+
+    tb.pl.histogram
+    tb.pl.histograms
+    tb.pl.scatter
+```
+
 ### Processing and analysis
 
 ```{eval-rst}
