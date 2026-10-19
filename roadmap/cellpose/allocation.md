@@ -4,8 +4,8 @@
 
 Thirteen numbered implementation slices are planned, with Slice 7 split into
 parts a and b and Slice 11 into parts a through m; Slices 1 through 10 are
-implemented, as are Parts 11a–11j, 11l and 11m except the optimization
-11f.xi. Slice 11k and the optional Slice 12 remain:
+implemented, as are Parts 11a–11m except the optimization 11f.xi. The
+optional Slice 12 remains:
 
 1. patch the CosMx reader and establish the generic Harpy feature-panel
    metadata contract — implemented;
@@ -84,7 +84,7 @@ implemented, as are Parts 11a–11j, 11l and 11m except the optimization
     - **11k:** feature summaries of a table for selected features through
       `hp.qc.summarize_table_by_feature` and `FeatureTableSummary`, with
       `instance_histogram_by_feature`, the counterparts of
-      `summarize_points_by_feature` — planned;
+      `summarize_points_by_feature` — implemented;
     - **11l:** move the plots of table columns to `hp.tb.pl.histogram`,
       `histograms` and `scatter`, on an `AnnData` table as `scanpy.pl` does,
       selecting regions with `region` as `summarize_table` does, and deprecate
@@ -9748,8 +9748,7 @@ Focused tests should establish that:
 
 ## Slice 11k: feature summaries of a table for selected features
 
-**Status: planned. Slices 11j, 11l and 11m, which it builds on and follows,
-are implemented.**
+**Status: implemented.**
 
 The table-side counterpart of `summarize_points_by_feature`, so that tables and
 points are summarized with the same two levels: classes first, then explicitly
@@ -9852,9 +9851,13 @@ hp.qc.instance_histogram_by_feature(feature_summary, feature="Negative01")
   needs no matrix read on a lazy or backed table: Slice 11j checked the names
   when it resolved them, and as the table may have changed since, `X` or the
   layer must still have the summary's names as its `var_names`, in the same
-  order, and each `.obsm` matrix as many columns as the summary's names for
-  it. A changed `X`, for example a subset to highly variable genes, raises
-  "recompute summarize_table()".
+  order. An `.obsm` matrix is checked by its number of columns. If the table
+  registers its column names in `uns[feature_matrices_key]`, those names must
+  also still be the summary's. A matrix the table does not register got its
+  names from the `feature_names` argument of `summarize_table`; the table
+  does not store them, so only the number of columns can be checked. A
+  changed `X`, for example a subset to highly variable genes, or a changed
+  registration raises "recompute summarize_table()".
 - **The rows still exist:** the retained instances are located in the table
   through the index of `summary.per_instance`, the table's `.obs` index; a
   retained instance no longer in the table raises "recompute
@@ -9866,15 +9869,18 @@ hp.qc.instance_histogram_by_feature(feature_summary, feature="Negative01")
   needs a manual edit of the matrix, which the record-based design does not
   support, as with `X` and `var_names` in any AnnData.
 
-- **Only the requested columns are kept,** for the retained instances. A CSR
-  matrix is scanned row by row, so each matrix with a requested feature is
-  read in row blocks, as Slice 11j reads it, through `_sliced_blocks` for an
-  in-memory or backed matrix and one Dask task per block of a lazy matrix; each
-  block keeps the requested columns of its retained rows, so memory is bounded
-  by one block and a dense array of retained instances times requested
-  features. Slice 11j reads every column once to sum the classes; this call
-  reads the matrices again for the named features; the separate call is the
-  opt-in. A matrix without a requested feature is not read.
+- **Only the requested columns are kept,** for the retained instances, by a
+  slice of each matrix with a requested feature: the retained rows, then the
+  requested columns. An in-memory matrix is loaded already; Dask slices a lazy
+  matrix chunk by chunk, so that only the small result is gathered, all lazy
+  matrices in one compute. A backed matrix is read in row blocks instead,
+  through `_sliced_blocks`, as Slice 11j reads it: a CSR matrix stores rows,
+  so a slice of its retained rows, usually nearly all of them, would load the
+  whole matrix at once. Memory stays bounded by one row chunk or block and a
+  dense array of retained instances times requested features. Slice 11j reads
+  every column once to sum the classes; this call reads the matrices again for
+  the named features; the separate call is the opt-in. A matrix without a
+  requested feature is not read.
 - **The values read must be counts,** as in Slice 11j: non-negative whole
   numbers, checked again on the columns read, as the table may have changed
   since the summary.
