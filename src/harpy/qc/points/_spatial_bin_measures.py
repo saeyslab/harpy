@@ -47,8 +47,9 @@ def _spatial_bin_values(
     if spatial_bins is None:
         raise ValueError("Spatial-bin measurements are missing; call hp.qc.summarize_points() with bin_size.")
     # per_class has a row for every selected class, also when no bin is retained and per_bin is empty.
-    if not (spatial_bins.per_class[_FEATURE_CLASS_KEY] == feature_class).any():
-        raise ValueError(f"Selected feature_class {feature_class!r} is absent from the spatial-bin summary.")
+    classes = [str(name) for name in spatial_bins.per_class[_FEATURE_CLASS_KEY]]
+    if feature_class not in classes:
+        raise ValueError(f"Unknown feature_class {feature_class!r}; choose from {classes}.")
     if measure == "detected_features":
         raise ValueError(f"measure 'detected_features' is not computed per spatial bin; choose from {list(_MEASURES)}.")
     if measure not in _MEASURES:
