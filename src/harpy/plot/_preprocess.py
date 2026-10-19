@@ -3,8 +3,7 @@ from __future__ import annotations
 import matplotlib.pyplot as plt
 from spatialdata import SpatialData
 
-from harpy.qc._histogram import table_histogram
-from harpy.qc._scatter import obs_scatter
+from harpy.table.pl import histogram, scatter
 from harpy.utils._keys import _CELLSIZE_KEY
 
 
@@ -42,10 +41,9 @@ def preprocess_transcriptomics(
     harpy.tb.preprocess_transcriptomics: preprocess.
     """
     _, axs = plt.subplots(1, 2, figsize=(10, 4))
-    table_histogram(
-        sdata,
-        table_name=table_name,
-        column="total_counts",
+    histogram(
+        sdata.tables[table_name],
+        "total_counts",
         display_column="Total Counts per Cell",
         ax=axs[0],
         bins=bins_total_counts,
@@ -54,10 +52,9 @@ def preprocess_transcriptomics(
         title=None,
         show_median=True,
     )
-    table_histogram(
-        sdata,
-        table_name=table_name,
-        column="n_genes_by_counts",
+    histogram(
+        sdata.tables[table_name],
+        "n_genes_by_counts",
         display_column="Detected Genes per Cell",
         dataframe="obs",
         ax=axs[1],
@@ -73,9 +70,8 @@ def preprocess_transcriptomics(
         plt.show()
     plt.close()
 
-    obs_scatter(
-        sdata,
-        table_name=table_name,
+    scatter(
+        sdata.tables[table_name],
         column_x=instance_size_key,
         column_y="total_counts",
         display_column_x=instance_size_key,

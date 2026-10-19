@@ -34,7 +34,7 @@ from harpy.qc._summary_statistics import _points_statistics
 from harpy.qc.table._table_summary_metadata import TableSummaryMetadata
 from harpy.table._validation import _metadata_string_sequence, _validate_feature_matrix_record
 from harpy.utils._keys import _FEATURE_MATRICES_KEY
-from harpy.utils._names import _snake_case
+from harpy.utils._names import _names, _selected_names, _snake_case
 
 # The label of the class of X, the name of the matrix in snake case.
 _X_LABEL = "x"
@@ -470,32 +470,6 @@ def _with_region_categories(frame: pd.DataFrame, regions: tuple[str, ...]) -> pd
     """Make the region column categorical, its categories the selected regions in their order."""
     frame[_REGION_COLUMN_KEY] = pd.Categorical(frame[_REGION_COLUMN_KEY], categories=regions)
     return frame
-
-
-def _names(value: object) -> tuple[str, ...]:
-    """Return a recorded name or sequence of names as a tuple of strings."""
-    if isinstance(value, str):
-        return (value,)
-    return tuple(str(name) for name in value)
-
-
-def _selected_names(
-    requested: str | Sequence[str] | None, *, recorded: tuple[str, ...], parameter: str, kind: str
-) -> tuple[str, ...]:
-    """Validate a selection of names, as summarize_points validates its classes, and keep the recorded order."""
-    if requested is None:
-        return recorded
-    if not isinstance(requested, (str, Sequence)):
-        raise ValueError(f"{parameter} must contain one or more exact names of {kind}.")
-    names = (requested,) if isinstance(requested, str) else tuple(requested)
-    if not names or any(not isinstance(name, str) for name in names):
-        raise ValueError(f"{parameter} must contain one or more exact names of {kind}.")
-    if len(set(names)) != len(names):
-        raise ValueError(f"{parameter} must not contain duplicate names.")
-    unknown = set(names) - set(recorded)
-    if unknown:
-        raise ValueError(f"Unknown {kind}: {sorted(unknown)}; choose from {list(recorded)}.")
-    return tuple(name for name in recorded if name in names)
 
 
 def _class_matrices(

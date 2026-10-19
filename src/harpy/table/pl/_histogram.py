@@ -170,7 +170,7 @@ def histogram(
         show_std=show_std,
         xlabel=display_name,
         count_ylabel=_default_ylabel(resolved_dataframe),
-        percent_ylabel="Percentage of cells (%)" if resolved_dataframe == "obs" else "Percentage of genes (%)",
+        percent_ylabel="Percentage of instances (%)" if resolved_dataframe == "obs" else "Percentage of features (%)",
     )
 
 
@@ -418,4 +418,4 @@ def _format_display_name(column: str) -> str:
 
 
 def _default_ylabel(dataframe: Literal["obs", "var"]) -> str:
-    return "Number of cells" if dataframe == "obs" else "Number of genes"
+    return "Number of instances" if dataframe == "obs" else "Number of features"
