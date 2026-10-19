@@ -11,8 +11,8 @@ from anndata import AnnData
 from matplotlib.axes import Axes
 
 from harpy.plot._renderers import _plot_scatter
+from harpy.table._utils import _region_rows
 from harpy.table.pl._histogram import _format_display_name
-from harpy.table.pl._regions import _region_rows
 from harpy.utils._keys import _CELLSIZE_KEY
 
 
