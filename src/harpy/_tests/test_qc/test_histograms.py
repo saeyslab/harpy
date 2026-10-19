@@ -19,10 +19,9 @@ from harpy.qc import (
     PointsSummaryMetadata,
     spatial_bin_histogram,
     spatial_bin_histogram_by_feature,
-    table_histogram,
-    table_histograms,
 )
 from harpy.qc.points._spatial_bin_summary import _summarize_feature_bins, _summarize_spatial_bins
+from harpy.table.pl import histogram, histograms, scatter
 
 matplotlib.use("Agg")
 
@@ -121,14 +120,14 @@ def test_histogram_defaults_to_borderless_filled_step_with_kde(source):
             _feature_summary([0, 1, 1, 2]), feature="EPCAM", bins=3, show_median=False
         )
     else:
-        ax = table_histogram(_table(), "table", column="metric", dataframe="obs", bins=3, show_median=False)
+        ax = histogram(_table().tables["table"], "metric", dataframe="obs", bins=3, show_median=False)
     assert not ax.patches
     assert len(ax.collections) == 1
-    histogram = ax.collections[0]
-    assert histogram.get_facecolor()[0, 3] == 0.5
-    assert histogram.get_edgecolor().size == 0
-    np.testing.assert_array_equal(histogram.get_linewidths(), [0])
-    assert histogram.get_paths()[0].vertices[:, 1].max() > 0
+    bars = ax.collections[0]
+    assert bars.get_facecolor()[0, 3] == 0.5
+    assert bars.get_edgecolor().size == 0
+    np.testing.assert_array_equal(bars.get_linewidths(), [0])
+    assert bars.get_paths()[0].vertices[:, 1].max() > 0
     assert len(ax.lines) == 1  # KDE only; the median guide is disabled.
     assert ax.lines[0].get_linewidth() == 2
 
@@ -413,9 +412,9 @@ def test_empty_population_and_invalid_spatial_histogram_requests():
         spatial_bin_histogram(replace(summary, spatial_bins=None), feature_class="Control")
     with pytest.raises(ValueError, match=r"summarize_points\(\) with bin_size"):
         spatial_bin_histogram_by_feature(replace(_feature_summary([0, 1]), spatial_bins=None), feature="EPCAM")
-    with pytest.raises(ValueError, match="absent"):
+    with pytest.raises(ValueError, match=r"Unknown feature_class 'Missing'; choose from \['Control', 'Reference'\]"):
         spatial_bin_histogram(summary, feature_class="Missing")
-    with pytest.raises(ValueError, match="absent"):
+    with pytest.raises(ValueError, match=r"Unknown feature 'Missing'; choose from \['EPCAM', 'VIM'\]"):
         spatial_bin_histogram_by_feature(_feature_summary([0, 1]), feature="Missing")
     with pytest.raises(ValueError, match="No values remaining"):
         spatial_bin_histogram(summary, feature_class="Control", range=(100, 200))
@@ -435,11 +434,11 @@ def test_table_histogram_uses_selected_nonmissing_population_and_matches_spatial
         "range": (0, 1),
         "histplot_kwargs": {"element": "bars", "stat": stat, "kde": False, "bins": [-0.5, 0.5, 1.5]},
     }
-    table_ax = table_histogram(sdata, "table", labels_name="a", column="metric", dataframe="obs", **kwargs)
+    table_ax = histogram(sdata.tables["table"], "metric", region="a", dataframe="obs", **kwargs)
     spatial_ax = spatial_bin_histogram(_summary([0, 1, 2, 10]), feature_class="Control", **kwargs)
     np.testing.assert_array_equal(_heights(table_ax), expected)
     np.testing.assert_array_equal(_heights(table_ax), _heights(spatial_ax))
-    assert table_ax.get_ylabel() == ("Percentage of cells (%)" if stat == "percent" else "Number of cells")
+    assert table_ax.get_ylabel() == ("Percentage of instances (%)" if stat == "percent" else "Number of instances")
     assert table_ax.texts[0].get_text() == spatial_ax.texts[0].get_text()
     pd.testing.assert_frame_equal(sdata.tables["table"].obs, original.obs)
     pd.testing.assert_frame_equal(sdata.tables["table"].var, original.var)
@@ -448,9 +447,8 @@ def test_table_histogram_uses_selected_nonmissing_population_and_matches_spatial
 def test_table_histograms_use_each_metric_population_and_preserve_axes():
     sdata = _table()
     _, axes = plt.subplots(1, 2)
-    result = table_histograms(
-        sdata,
-        "table",
+    result = histograms(
+        sdata.tables["table"],
         metrics=[("obs", "metric"), ("var", "metric")],
         ax=axes,
         range=(0, 1),
@@ -459,19 +457,41 @@ def test_table_histograms_use_each_metric_population_and_preserve_axes():
     assert result is axes
     np.testing.assert_allclose(_heights(axes[0]), [20, 20])  # Five non-null observations.
     np.testing.assert_allclose(_heights(axes[1]), [100 / 3, 100 / 3])
-    assert axes[1].get_ylabel() == "Percentage of genes (%)"
+    assert axes[1].get_ylabel() == "Percentage of features (%)"
 
 
-@pytest.mark.parametrize(
-    "alias, canonical", [("metric_histogram", "table_histogram"), ("metrics_histogram", "table_histograms")]
-)
-def test_deprecated_histogram_aliases_warn_through_the_package_and_the_module(monkeypatch, alias, canonical):
-    from harpy.qc import _histogram as module
+@pytest.mark.parametrize("region, expected_median", [(None, "2"), ("a", "1.50"), (["b"], "50")])
+def test_table_plot_region_selects_the_rows_of_the_named_regions(region, expected_median):
+    """Region a holds the metrics 0, 1, 2, 10 and a missing value; region b holds 50."""
+    ax = histogram(_table().tables["table"], "metric", region=region, dataframe="obs", histplot_kwargs={"kde": False})
+    assert f"Median: {expected_median}" in ax.texts[0].get_text()
 
-    monkeypatch.delitem(vars(qc), alias, raising=False)
-    function = getattr(qc, canonical)
-    message = rf"harpy\.qc\.{alias} is deprecated .* Use harpy\.qc\.{canonical}, which takes the same arguments\."
-    for namespace in (qc, module):
-        with pytest.warns(FutureWarning, match=message) as record:
-            assert getattr(namespace, alias) is function
-        assert [warning.filename for warning in record] == [__file__]
+
+def test_table_scatter_plots_two_var_columns_but_not_columns_of_both_dataframes():
+    adata = _table().tables["table"]
+    adata.var["other"] = [1.0, 2.0, 3.0]
+    ax = scatter(adata, "metric", "other", dataframe="var", show_regplot=False)
+    assert ax.collections[0].get_array().sum() == 3  # One count per gene.
+    assert (ax.get_xlabel(), ax.get_ylabel()) == ("Metric", "Other")
+    with pytest.raises(ValueError, match="not both in 'adata.obs', nor both in 'adata.var'"):
+        scatter(adata, "instance", "other", show_regplot=False)
+    # metric is in both dataframes, but only .obs also holds instance.
+    assert scatter(adata, "metric", "instance", show_regplot=False).get_ylabel() == "Instance"
+    with pytest.raises(ValueError, match=r"A '\.var' column describes the whole table"):
+        scatter(adata, "metric", "other", dataframe="var", region="a")
+
+
+def test_table_plots_reject_unknown_regions_var_subsets_and_region_without_annotation():
+    adata = _table().tables["table"]
+    with pytest.raises(ValueError, match=r"Unknown regions: \['c'\]; choose from \['a', 'b'\]"):
+        histogram(adata, "metric", region="c", dataframe="obs")
+    with pytest.raises(ValueError, match=r"A '\.var' column describes the whole table"):
+        histogram(adata, "metric", region="a", dataframe="var")
+    # Selecting every region keeps every row, so a '.var' column still describes the selection.
+    histogram(adata, "metric", region=["a", "b"], dataframe="var")
+
+    without_annotation = AnnData(obs=adata.obs[["metric", "instance"]].copy())
+    with pytest.raises(ValueError, match="SpatialData annotation"):
+        scatter(without_annotation, "metric", "instance", region="a")
+    # region=None needs no annotation.
+    scatter(without_annotation, "metric", "instance", show_regplot=False)
