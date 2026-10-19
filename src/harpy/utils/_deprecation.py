@@ -37,17 +37,17 @@ def _warn_deprecated(deprecated: str, *, use: str) -> None:
     ``deprecated`` names the function, method or parameter, and ``use``
     completes "Use …"::
 
-        _warn_deprecated("harpy.qc.obs_scatter", use="harpy.qc.table_scatter, which takes the same arguments")
-        _warn_deprecated("The labels_name parameter of harpy.qc.table_histogram", use="region")
+        _warn_deprecated("harpy.tb.add_table", use="harpy.tb.io.add_table, which takes the same arguments")
+        _warn_deprecated("The celltype_column parameter of harpy.tb.score_genes", use="key_added")
 
     give
 
     .. code-block:: text
 
-        harpy.qc.obs_scatter is deprecated and will be removed in a future release. Use harpy.qc.table_scatter,
+        harpy.tb.add_table is deprecated and will be removed in a future release. Use harpy.tb.io.add_table,
         which takes the same arguments.
-        The labels_name parameter of harpy.qc.table_histogram is deprecated and will be removed in a future
-        release. Use region.
+        The celltype_column parameter of harpy.tb.score_genes is deprecated and will be removed in a future
+        release. Use key_added.
 
     The warning names the caller of the deprecated function, outside Harpy.
     """

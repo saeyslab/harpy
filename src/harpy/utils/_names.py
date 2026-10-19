@@ -1,8 +1,40 @@
-"""Output names derived from user-supplied names, shared across Harpy's packages."""
+"""Names derived from user-supplied names, and selections of recorded names, shared across Harpy's packages."""
 
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
+
+
+def _names(value: object) -> tuple[str, ...]:
+    """Return a recorded name or sequence of names as a tuple of strings."""
+    if isinstance(value, str):
+        return (value,)
+    return tuple(str(name) for name in value)
+
+
+def _selected_names(
+    requested: str | Sequence[str] | None, *, recorded: tuple[str, ...], parameter: str, kind: str
+) -> tuple[str, ...]:
+    """Return the requested names in their recorded order, or every recorded name for ``None``.
+
+    ``requested`` is one name or a sequence of distinct names, each among
+    ``recorded``; ``parameter`` and ``kind`` word the errors, for example
+    ``"region"`` and ``"regions"``.
+    """
+    if requested is None:
+        return recorded
+    if not isinstance(requested, (str, Sequence)):
+        raise ValueError(f"{parameter} must contain one or more exact names of {kind}.")
+    names = (requested,) if isinstance(requested, str) else tuple(requested)
+    if not names or any(not isinstance(name, str) for name in names):
+        raise ValueError(f"{parameter} must contain one or more exact names of {kind}.")
+    if len(set(names)) != len(names):
+        raise ValueError(f"{parameter} must not contain duplicate names.")
+    unknown = set(names) - set(recorded)
+    if unknown:
+        raise ValueError(f"Unknown {kind}: {sorted(unknown)}; choose from {list(recorded)}.")
+    return tuple(name for name in recorded if name in names)
 
 
 def _snake_case(value: str) -> str:
