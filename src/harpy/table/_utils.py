@@ -1,5 +1,31 @@
+from collections.abc import Mapping, Sequence
+
+import numpy as np
 from anndata import AnnData
 from spatialdata.models import TableModel
+
+from harpy.utils._names import _names, _selected_names
+
+
+def _region_rows(adata: AnnData, region: str | Sequence[str] | None) -> np.ndarray | None:
+    """Return a boolean mask of the table's rows of the named regions, or None, for every row, for ``region=None``.
+
+    The names are those of the table's SpatialData annotation,
+    ``uns["spatialdata_attrs"]["region"]``, whose rows ``obs[region_key]``
+    identifies, whatever the type of the annotated elements.
+    """
+    if region is None:
+        return None
+    attrs = adata.uns.get(TableModel.ATTRS_KEY)
+    if not isinstance(attrs, Mapping):
+        raise ValueError(
+            f"region selects the regions of the table's SpatialData annotation, uns[{TableModel.ATTRS_KEY!r}], "
+            "which this table has not; pass region=None to use every row."
+        )
+    selected = _selected_names(
+        region, recorded=_names(attrs[TableModel.REGION_KEY]), parameter="region", kind="regions"
+    )
+    return adata.obs[attrs[TableModel.REGION_KEY_KEY]].isin(selected).to_numpy()
 
 
 def _sanity_check_append_region(adata: AnnData, region_key: str, instance_key: str, region: str):
