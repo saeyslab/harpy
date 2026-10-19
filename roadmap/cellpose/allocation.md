@@ -84,7 +84,7 @@ implemented, as are Parts 11a–11j, 11l and 11m except the optimization
     - **11k:** feature summaries of a table for selected features through
       `hp.qc.summarize_table_by_feature` and `FeatureTableSummary`, with
       `instance_histogram_by_feature`, the counterparts of
-      `summarize_points_by_feature` — planned, after 11j;
+      `summarize_points_by_feature` — planned;
     - **11l:** move the plots of table columns to `hp.tb.pl.histogram`,
       `histograms` and `scatter`, on an `AnnData` table as `scanpy.pl` does,
       selecting regions with `region` as `summarize_table` does, and deprecate
@@ -9748,7 +9748,8 @@ Focused tests should establish that:
 
 ## Slice 11k: feature summaries of a table for selected features
 
-**Status: planned; implement after Slice 11j.**
+**Status: planned. Slices 11j, 11l and 11m, which it builds on and follows,
+are implemented.**
 
 The table-side counterpart of `summarize_points_by_feature`, so that tables and
 points are summarized with the same two levels: classes first, then explicitly
@@ -9794,7 +9795,10 @@ hp.qc.instance_histogram_by_feature(feature_summary, feature="Negative01")
   resolves each matrix's names once, from `var_names`, the registry
   `uns[feature_matrices_key]` or its `feature_names` parameter, and the
   summary exposes them as `summary.feature_names`, from its `per_feature`, so
-  that the names and the population come from the same call.
+  that the names and the population come from the same call. The names cannot
+  be resolved again: `summary.metadata` records the layer, the `.obsm` keys
+  and the registry key, but not the `feature_names` passed for an unregistered
+  `.obsm` matrix.
 - **Each feature's class** is the class of the matrix it is in, the label that
   the summary gave that matrix. No feature panel is read.
 - **No large frames:** only the requested features are summarized per
@@ -9827,20 +9831,34 @@ hp.qc.instance_histogram_by_feature(feature_summary, feature="Negative01")
   shared statistics helper. `TableSummary.per_feature` has the same order,
   with `within_class_fraction` after `n_points`.
 - `per_region_feature`: the statistics of `per_feature` within each selected
-  region, with a `region` column, as `TableSummary.per_region_feature`.
+  region, with a `region` column, as `TableSummary.per_region_feature`, its
+  population from `summary.per_region_class`.
+- **Categories,** by the rule of Slice 11m: `feature_class` is categorical in
+  every frame, with the summary's classes as categories, also those without a
+  requested feature; `feature` is categorical, with the requested features in
+  the summary's order; the region column has the selected regions as
+  categories, as in `TableSummary`.
 
 **Matrices:**
 
 - **The matrices of the reference summary:** `X` or the layer of
   `summary.metadata.layer`, and the `.obsm` matrices of
   `summary.metadata.obsm_keys`, so that the features are counted in the
-  matrices from which the population was computed. A requested feature of `X`
-  missing from its `var_names`, for example after a subset to highly variable
-  genes, raises.
+  matrices from which the population was computed. They are collected from
+  the metadata and checked as CSR count matrices as in Slice 11j, without
+  resolving their names: 11j's `_class_matrices` splits into collecting the
+  matrices and resolving their names, and this call uses the first part only.
 - **The names still fit the matrices,** checked from metadata only, which
   needs no matrix read on a lazy or backed table: Slice 11j checked the names
-  when it resolved them, and as the table may have changed since, each matrix
-  read must still have as many columns as the summary's names for it.
+  when it resolved them, and as the table may have changed since, `X` or the
+  layer must still have the summary's names as its `var_names`, in the same
+  order, and each `.obsm` matrix as many columns as the summary's names for
+  it. A changed `X`, for example a subset to highly variable genes, raises
+  "recompute summarize_table()".
+- **The rows still exist:** the retained instances are located in the table
+  through the index of `summary.per_instance`, the table's `.obs` index; a
+  retained instance no longer in the table raises "recompute
+  summarize_table()".
 
   No metadata check can detect matrix columns reordered without reordering
   their names: names and values then disagree while every shape agrees, and
@@ -9848,16 +9866,49 @@ hp.qc.instance_histogram_by_feature(feature_summary, feature="Negative01")
   needs a manual edit of the matrix, which the record-based design does not
   support, as with `X` and `var_names` in any AnnData.
 
-- **Only the requested columns are read,** for the retained instances. Slice
-  11j reads every column once to sum the classes; this call reads the
-  requested columns again, per feature; the separate call is the opt-in.
+- **Only the requested columns are kept,** for the retained instances. A CSR
+  matrix is scanned row by row, so each matrix with a requested feature is
+  read in row blocks, as Slice 11j reads it, through `_sliced_blocks` for an
+  in-memory or backed matrix and one Dask task per block of a lazy matrix; each
+  block keeps the requested columns of its retained rows, so memory is bounded
+  by one block and a dense array of retained instances times requested
+  features. Slice 11j reads every column once to sum the classes; this call
+  reads the matrices again for the named features; the separate call is the
+  opt-in. A matrix without a requested feature is not read.
 - **The values read must be counts,** as in Slice 11j: non-negative whole
   numbers, checked again on the columns read, as the table may have changed
   since the summary.
 
 **Plot:** `instance_histogram_by_feature(summary, *, feature, ...)`, as
 `spatial_bin_histogram_by_feature`: one feature's points per instance over the
-inherited population, with the median and SD taken from `per_feature`.
+inherited population, with the median and SD computed from the plotted values,
+as every histogram computes them since Slice 11m; they equal the feature's
+`median_points_per_instance` and `std_points_per_instance` in `per_feature`.
+An unknown feature raises "Unknown feature …; choose from […]".
+
+**Tests,** in `src/harpy/_tests/test_qc/test_table/`:
+
+- the per-instance values and every statistic of `per_feature` and
+  `per_region_feature`, against a dense computation of the fixture's matrices;
+- the same results for an in-memory, a lazy and a backed table;
+- the inherited population: an instance retained for another class's points
+  contributes a zero, and an undetected feature keeps its zeros;
+- the order of the results and the categories, also for a class without a
+  requested feature;
+- the errors: an unknown or ambiguous name, `var_names` or an `.obsm` matrix
+  changed since the summary, a retained instance no longer in the table, and
+  values that are not counts;
+- the plot: the feature's values, its annotations equal to `per_feature`, and
+  an unknown feature.
+
+**Verification:** the per-instance values of each requested feature equal its
+column of the matrix it is in, over the summary's retained instances; the
+statistics equal those of the dense values, pooled and per region, and the
+totals, mean and SD equal those of `TableSummary.per_feature` for the same
+feature; the population columns equal the summary's; the results keep the
+summary's order and categories; a table changed since the summary raises
+before a value is read; and memory stays bounded by a row block and the
+requested columns.
 
 **Detected features:** Slice 11j's `per_instance` counts each class's detected
 features per instance. The same count per spatial bin is not computed on the
