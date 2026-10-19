@@ -4,8 +4,8 @@
 
 Thirteen numbered implementation slices are planned, with Slice 7 split into
 parts a and b and Slice 11 into parts a through m; Slices 1 through 10 are
-implemented, as are Parts 11a–11j and 11m except the optimization 11f.xi.
-Slices 11k and 11l and the optional Slice 12 remain:
+implemented, as are Parts 11a–11j, 11l and 11m except the optimization
+11f.xi. Slice 11k and the optional Slice 12 remain:
 
 1. patch the CosMx reader and establish the generic Harpy feature-panel
    metadata contract — implemented;
@@ -85,10 +85,11 @@ Slices 11k and 11l and the optional Slice 12 remain:
       `hp.qc.summarize_table_by_feature` and `FeatureTableSummary`, with
       `instance_histogram_by_feature`, the counterparts of
       `summarize_points_by_feature` — planned, after 11j;
-    - **11l:** select regions with `region` instead of `labels_name` in the
-      existing table-QC plots, as `summarize_table` does, and rename
-      `obs_scatter` to `table_scatter` — planned, after the deprecation slice
-      of [deprecations.md](deprecations.md);
+    - **11l:** move the plots of table columns to `hp.tb.pl.histogram`,
+      `histograms` and `scatter`, on an `AnnData` table as `scanpy.pl` does,
+      selecting regions with `region` as `summarize_table` does, and deprecate
+      `hp.qc.table_histogram`, `table_histograms` and `obs_scatter` —
+      implemented;
     - **11m:** align the points summaries with the table summary: add each
       class's share of a bin's points to `SpatialBinSummary.per_bin` and
       `n_features` to its `per_class`, the counterparts that the class grid
@@ -9862,38 +9863,39 @@ inherited population, with the median and SD taken from `per_feature`.
 features per instance. The same count per spatial bin is not computed on the
 points side, as its distinct count is expensive (Slice 11m).
 
-## Slice 11l: consistent names in the table-QC plots
+## Slice 11l: plots of table columns on an AnnData table, in `hp.tb.pl`
 
-**Status: planned; implement after the deprecation slice of
-[deprecations.md](deprecations.md), whose helper words the warnings of the
-aliases below.**
+**Status: implemented. The deprecation slice of
+[deprecations.md](deprecations.md) words the warnings below.**
 
-`hp.qc.obs_scatter`, `hp.qc.table_histogram` and `hp.qc.table_histograms`
-select the regions of a table with `labels_name`, as the deprecated scanpy
-wrappers do. Slice 11j's `summarize_table` selects them with `region`, the
-term of SpatialData's table annotation and of `hp.tb.io.add_table`. This slice
-aligns the three plots with it, so that the table-QC functions use one name for
-one concept, and renames `obs_scatter` to `table_scatter`.
+`hp.qc.table_histogram`, `hp.qc.table_histograms` and `hp.qc.obs_scatter` plot
+stored `.obs` or `.var` columns of one table, but take `sdata` and
+`table_name`, and select regions with `labels_name` through `ProcessTable`,
+which requires the names to be labels elements of `sdata`. The table alone is
+enough: its columns and its region annotation,
+`uns["spatialdata_attrs"]`, live in the `AnnData`. This slice moves the three
+plots to `hp.tb.pl`, working on an `AnnData` table as `scanpy.pl` does, and as
+`hp.tb.pp` already does for the normalisations that scanpy does not provide,
+and deprecates the `hp.qc` ones. `hp.qc` keeps Harpy's own QC: the summaries
+computed from points and tables, the plots of those summaries, and the image
+and segmentation QC.
 
-**The naming rule of the QC API:**
+**The naming rule of the QC and table plots:**
 
-| What is passed                           | Function                                               | Named after      |
-| ---------------------------------------- | ------------------------------------------------------ | ---------------- |
-| `sdata` and `points_name`                | `summarize_points`, returning `PointsSummary`          | the source       |
-| `sdata` and `table_name`                 | `summarize_table`, returning `TableSummary`            | the source       |
-| a `PointsSummary`                        | `spatial_bin_histogram`, `hp.pl.plot_points_density`   | the unit plotted |
-| a `TableSummary`                         | `instance_histogram`, `instance_scatter`               | the unit plotted |
-| `sdata` and `table_name`, stored columns | `table_histogram`, `table_histograms`, `table_scatter` | the source       |
+| What is passed                  | Function                                                        | Named after                         |
+| ------------------------------- | --------------------------------------------------------------- | ----------------------------------- |
+| `sdata` and `points_name`       | `summarize_points`, returning `PointsSummary`                   | the source                          |
+| `sdata` and `table_name`        | `summarize_table`, returning `TableSummary`                     | the source                          |
+| a `PointsSummary`               | `spatial_bin_histogram`, `hp.pl.plot_points_density`            | the unit plotted                    |
+| a `TableSummary`                | `instance_histogram`, `instance_scatter`                        | the unit plotted                    |
+| an `AnnData` table, its columns | `hp.tb.pl.histogram`, `hp.tb.pl.histograms`, `hp.tb.pl.scatter` | the kind of plot, as in `scanpy.pl` |
 
 Computations and their results are named after their source; the dataframes
 inside after the unit of a row (`per_instance`, `per_class`,
 `spatial_bins.per_bin`); plots of a computed summary after the unit they plot;
-and plots of stored table columns after the table they read. `obs_scatter` is
-the exception today: it is named after `.obs`, while its histogram siblings are
-named after the table. Neither `obs_histogram` nor `InstanceSummary` fits the
-rule: `table_histogram` also plots `.var` columns, so its unit depends on its
-`dataframe` argument, and a result named after its unit would not pair with
-`summarize_table`, nor with `PointsSummary`.
+and the plots of `hp.tb.pl` after the kind of plot, as `scanpy.pl.violin` and
+`scanpy.pl.scatter` are: they plot any numeric column of `.obs` or `.var`, a
+QC metric or not, so no unit or source names them.
 
 Within column names, `per_<unit>` at the end of a statistic names the
 population it is computed over (`per_feature`, `per_bin`, `per_instance`);
@@ -9906,37 +9908,91 @@ median and p95 run over the individual features' counts, which no
 normalization describes. The unit, not its count, follows `per`: the counts
 themselves are named `panel_feature_counts`.
 
-- **Rename `hp.qc.obs_scatter` to `hp.qc.table_scatter`,** with its behaviour
-  unchanged. `obs_scatter` stays for at least one release, as a deprecated alias
-  that warns with a `FutureWarning` and calls `table_scatter`, as `labels_name`
-  below.
-- **Rename the parameter** to `region`, with the meaning it has in
-  `summarize_table`: names from the table's `uns["spatialdata_attrs"]["region"]`,
-  whose rows are selected through `obs[region_key]`, whatever the type of the
-  annotated elements.
-- **Keep `labels_name` for at least one release,** as a deprecated alias that
-  warns with a `FutureWarning` and selects the same rows; passing both raises a
-  `ValueError`.
-- **Select through the table's annotation:** the three plots select rows
-  through `ProcessTable(sdata, labels_name=...)`, which requires the names to
-  be labels elements of `sdata`. With `region`, they check the names against
-  the table's `uns["spatialdata_attrs"]["region"]`, as `summarize_table` does
-  with `_selected_names`: a table that annotates shapes becomes selectable, and
-  a name the table does not annotate raises "Unknown regions: …; choose from
-  […]". `region=None` keeps every row, also of a table without SpatialData
-  annotation, as today.
-- **Same position:** `region` takes the third position of `labels_name`, so
-  positional calls keep working; `labels_name` becomes a keyword-only
-  parameter at the end.
-- **Messages:** the error of `table_histogram` for `.var` metrics of a subset
-  of regions names `region`, not `labels_name`.
-- **Class and feature errors of the spatial-bin histograms:** "Unknown
-  feature_class …; choose from […]" and "Unknown feature …; choose from […]",
-  the wording of `instance_histogram`, instead of "Selected … is absent from
-  the spatial-bin summary".
-- **Not in scope:** `hp.qc.segmentation_coverage` and
-  `hp.qc.segmentation_histogram`, whose `labels_name` names the labels element
-  that they measure, not a region of a table.
+**The new plots,** in the package `harpy/table/pl/`, exposed as `hp.tb.pl`
+next to `hp.tb.pp`:
+
+```python
+hp.tb.pl.histogram(adata, column="total_counts", *, region=None, dataframe="auto", ...)
+hp.tb.pl.histograms(adata, metrics=..., *, region=None, ...)
+hp.tb.pl.scatter(adata, column_x="shapeSize", column_y="total_counts", *, region=None, ...)
+```
+
+- **The options of the `hp.qc` plots,** with `adata` in place of `sdata` and
+  `table_name`, and `region` in place of `labels_name`; the other parameters
+  keep their names and defaults, keyword-only after the columns. Moving a call
+  replaces `sdata, table_name` by `sdata.tables[table_name]` and `labels_name`
+  by `region`. `histograms` keeps its default panel of
+  `scanpy.pp.calculate_qc_metrics` columns, and `scatter` its 2D histogram with
+  a lowess line, which `scanpy.pl.scatter`, a dot plot, does not draw.
+- **`scatter` also plots `.var`,** no longer limited to `.obs` as
+  `obs_scatter` was: it gains the `dataframe` of `histogram`. Both columns
+  come from one dataframe, as the rows of `.obs` and `.var` cannot be paired;
+  with `"auto"`, the one dataframe that holds both, so that the default
+  `shapeSize` and `total_counts`, the latter in both after
+  `calculate_qc_metrics`, select `.obs`. The deprecated `obs_scatter` passes
+  `dataframe="obs"`.
+- **`region`, `None` by default:** `None` uses every row and needs no
+  SpatialData annotation. Otherwise, names from the table's
+  `uns["spatialdata_attrs"]["region"]`, whose rows are selected through
+  `obs[region_key]`, whatever the type of the annotated elements, as in
+  `summarize_table`: the names are checked with `_selected_names`, a name the
+  table does not annotate raises "Unknown regions: …; choose from […]", and a
+  table without SpatialData annotation raises.
+- **`.var` columns describe the whole table:** a `.var` column with `region`
+  raises, as `table_histogram` does today, the message naming `region`. The
+  docstrings also state that a table the caller subsets, such as
+  `adata[adata.obs["region"] == "a"]`, keeps the `.var` columns of the whole
+  table.
+- **Read-only,** as before: the table is not modified.
+
+**The shared renderers move:** `_plot_histogram`, `_plot_scatter` and their
+helpers, in `harpy/qc/_histogram.py` and `harpy/qc/_scatter.py` today, move to
+a module that `harpy/qc` and `harpy/table/pl` both import, such as
+`harpy/plot/_renderers.py`. The deprecated `hp.qc` plots call the `hp.tb.pl`
+ones, which use the renderers; with the renderers in `harpy/qc`, that would be
+a circular import.
+
+**Deprecations,** through the helper of [deprecations.md](deprecations.md):
+
+- `hp.qc.table_histogram`, `table_histograms` and `obs_scatter` warn, "Use
+  harpy.tb.pl.histogram on sdata.tables[table_name], with region for
+  labels_name", and call the new plot with `sdata.tables[table_name]` and
+  `region=labels_name`. Their regions are now checked against the table's
+  annotation, not against the labels elements of `sdata`.
+- `hp.qc.metric_histogram` and `metrics_histogram`, renamed-function aliases
+  of `table_histogram` and `table_histograms` today, would warn twice, once
+  when looked up and once when called. They become deprecated functions of
+  their own, through `_deprecated_function` on the private function of the
+  deprecated plot, each warning once and naming the `hp.tb.pl` plot.
+- Harpy's own caller, `plot/_preprocess.py`, calls the `hp.tb.pl` plots.
+
+**Also in this slice:** the class and feature errors of the spatial-bin
+histograms take the wording of `instance_histogram`, "Unknown feature_class …;
+choose from […]" and "Unknown feature …; choose from […]", instead of
+"Selected … is absent from the spatial-bin summary".
+
+**Documentation:** `docs/api.md` lists the three plots in a new "Plotting"
+subsection of the Table section; the deprecated `hp.qc` plots stay listed, as
+the deprecated wrappers of `hp.tb` are, their docstrings carrying the warning.
+
+**Not in scope:** `hp.qc.segmentation_coverage` and
+`hp.qc.segmentation_histogram`, whose `labels_name` names the labels element
+that they measure, not a region of a table; and the tutorials, which keep the
+`hp.qc` plots and show their warnings.
+
+**Tests:** the tests of `table_histogram` and `table_histograms` in
+`test_histograms.py`, and of `obs_scatter` in `test_qc_transcripts.py`, move to
+the `hp.tb.pl` plots, on `sdata.tables[...]`. New tests of `region`: it selects
+the rows of the named regions; `None` works on a table without SpatialData
+annotation; an unknown region, a `.var` column with `region`, and `region` on
+a table without annotation raise. The deprecated plots get no tests of their
+own; the unit tests of the helper cover their warnings.
+
+**Verification:** the three `hp.tb.pl` plots draw what the `hp.qc` plots drew
+for the same table and columns; `region` selects the rows of the named regions
+of any element type and raises as above; the deprecated `hp.qc` plots and their
+aliases warn once and give the same figures; and no module imports the
+renderers from `harpy/qc` in a cycle.
 
 ## Slice 11m: align the points summaries with the table summary
 
