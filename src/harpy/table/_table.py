@@ -245,8 +245,9 @@ def correct_marker_genes(
     Corrects celltype scores (found in `.obs` attribute of the :class:`~anndata.AnnData` table) that are higher expessed by dividing them by a value if they exceed a certain threshold.
     The `celltype_correction_dict` has as keys the celltypes that should be corrected and as values the threshold and the divider.
 
-    .. deprecated:: 0.3.0
-       `harpy.tb.correct_marker_genes` is deprecated and may be removed in a future release.
+    .. warning::
+       Deprecated, and will be removed in a future release. Use pandas or scanpy on the table directly, then
+       write the results back with :func:`~harpy.tb.io.add_table_updates`.
 
     Parameters
     ----------
@@ -272,6 +273,10 @@ def correct_marker_genes(
     --------
     harpy.tb.score_genes : score genes using :func:`~scanpy.tl.score_genes`.
     """
+    _warn_deprecated(
+        "harpy.tb.correct_marker_genes",
+        use="pandas or scanpy on the table directly, then write the results back with harpy.tb.io.add_table_updates",
+    )
     process_table_instance = ProcessTable(sdata, labels_name=labels_name, table_name=table_name)
     adata = process_table_instance._get_adata()
     # Correct for all the genes

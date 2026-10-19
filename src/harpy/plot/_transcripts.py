@@ -4,7 +4,8 @@ from pathlib import Path
 
 from spatialdata import SpatialData
 
-from harpy.plot import plot_shapes
+from harpy.plot._plot import _plot_shapes
+from harpy.utils._deprecation import _warn_deprecated
 
 
 def transcript_density(
@@ -18,9 +19,9 @@ def transcript_density(
     """
     Visualize the transcript density image element.
 
-    .. deprecated:: 0.3.0
-       `harpy.pl.transcript_density` is deprecated and will be removed in 0.4.0.
-       Prefer `harpy.pl.plot_sdata`.
+    .. warning::
+       Deprecated, and will be removed in a future release. Use :func:`harpy.im.transcript_density`, then
+       :func:`harpy.pl.plot_sdata` on the image it adds.
 
     This function wraps around the :func:`harpy.pl.plot_shapes` function to showcase transcript density.
 
@@ -55,7 +56,10 @@ def transcript_density(
     harpy.im.transcript_density
     harpy.pl.plot_shapes
     """
-    plot_shapes(
+    _warn_deprecated(
+        "harpy.pl.transcript_density", use="harpy.im.transcript_density, then harpy.pl.plot_sdata on the image it adds"
+    )
+    _plot_shapes(
         sdata,
         image_name=image_name,
         shapes_name=None,

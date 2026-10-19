@@ -69,7 +69,8 @@ def score_genes(
     repl_columns
         Dictionary containing cell types to be replaced. The keys are the original cell type names and
         the values are their replacements.
-        This parameter is deprecated, and will be removed in a future version.
+        Deprecated, and will be removed in a future release; use ``marker_genes`` with the cell types already
+        renamed.
     del_celltypes
         List of cell types to be deleted from the list of possible cell type candidates.
         Cells are scored for these cell types, but will not be assigned a cell type from this list.
@@ -116,6 +117,10 @@ def score_genes(
         kwargs=kwargs,
         func_name="score_genes",
     )
+    if repl_columns is not None:
+        _warn_deprecated(
+            "The repl_columns parameter of harpy.tb.score_genes", use="marker_genes with the cell types already renamed"
+        )
 
     process_table_instance = ProcessTable(sdata, labels_name=labels_name, table_name=table_name)
     adata = _load_into_memory(process_table_instance._get_adata(), table_name)
@@ -712,8 +717,9 @@ def cluster_cleanliness(
     Celltypes can also be grouped together via the celltype_indexes parameter.
     Returns a `SpatialData` object alongside a dictionary mapping cell types to colors.
 
-    .. deprecated:: 0.3.0
-       `harpy.tb.cluster_cleanliness` is deprecated and may be removed in a future release.
+    .. warning::
+       Deprecated, and will be removed in a future release. Use pandas or scanpy on the table directly, then
+       write the results back with :func:`~harpy.tb.io.add_table_updates`.
 
     Parameters
     ----------
@@ -766,6 +772,10 @@ def cluster_cleanliness(
     --------
     harpy.tb.score_genes : score genes using :func:`~scanpy.tl.score_genes`.
     """
+    _warn_deprecated(
+        "harpy.tb.cluster_cleanliness",
+        use="pandas or scanpy on the table directly, then write the results back with harpy.tb.io.add_table_updates",
+    )
     process_table_instance = ProcessTable(sdata, labels_name=labels_name, table_name=table_name)
     adata = _load_into_memory(process_table_instance._get_adata(), table_name)
     celltypes = np.array(sorted(celltypes), dtype=str)

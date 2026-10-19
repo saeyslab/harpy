@@ -16,6 +16,7 @@ from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import Identity, Translation
 
 from harpy.image._image import _fix_dimensions, add_image
+from harpy.utils._deprecation import _warn_deprecated
 
 
 def create_sdata(
@@ -33,11 +34,9 @@ def create_sdata(
     """
     Convert input images or arrays into a SpatialData object with the image added as an image element with name `image_name`.
 
-    .. deprecated::
-        `harpy.io.create_sdata` is deprecated. Prefer constructing a
-        :class:`spatialdata.SpatialData` object directly, writing it to disk,
-        reopening it with :func:`spatialdata.read_zarr`, and then adding image elements
-        with :func:`harpy.im.add_image`.
+    .. warning::
+       Deprecated, and will be removed in a future release. Use a :class:`spatialdata.SpatialData` written to
+       disk and reopened with :func:`spatialdata.read_zarr`, then :func:`harpy.im.add_image`.
 
     This function allows you to ingest various input formats of images or data arrays,
     convert them into a unified SpatialData format and write them out to a specified
@@ -131,6 +130,11 @@ def create_sdata(
             output_image_name="raw_image",
         )
     """
+    _warn_deprecated(
+        "harpy.io.create_sdata",
+        use="a spatialdata.SpatialData written to disk and reopened with spatialdata.read_zarr, then "
+        "harpy.im.add_image",
+    )
     with tempfile.TemporaryDirectory() as tmp_dir:
         # tmp_dir is used to write results for each channel out to separate zarr store,
         # these results are then combined and written to sdata
