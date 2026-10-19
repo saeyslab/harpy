@@ -1,5 +1,3 @@
-from types import SimpleNamespace
-
 import numpy as np
 import pytest
 import zarr
@@ -8,6 +6,7 @@ from spatialdata import SpatialData
 from spatialdata.models import TableModel
 from xrspatial import zonal_stats
 
+import harpy as hp
 import harpy._storage._anndata as anndata_storage
 import harpy.table._allocation_intensity as image_aggregation_module
 from harpy.image.segmentation._align_masks import align_labels
@@ -15,18 +14,12 @@ from harpy.table._allocation_intensity import aggregate_image
 from harpy.table._regionprops import add_regionprops
 
 
-def test_allocate_intensity_import_warns_and_resolves_to_aggregate_image(monkeypatch: pytest.MonkeyPatch):
-    messages: list[str] = []
-    monkeypatch.setattr("harpy.table._allocation_intensity.log", SimpleNamespace(warning=messages.append))
-    monkeypatch.setattr("harpy.table._allocation_intensity._WARNED_DEPRECATED_ATTRIBUTES", set())
-
-    alias = image_aggregation_module.__getattr__("allocate_intensity")
-    repeated_alias = image_aggregation_module.__getattr__("allocate_intensity")
-
-    assert alias is repeated_alias is aggregate_image
-    assert messages == [
-        "`harpy.tb.allocate_intensity` is deprecated. Import and use `harpy.tb.aggregate_image` instead."
-    ]
+def test_allocate_intensity_import_warns_and_resolves_to_aggregate_image():
+    message = r"harpy\.tb\.allocate_intensity is deprecated .* Use harpy\.tb\.aggregate_image, which takes the same arguments\."
+    for namespace in (hp.tb, image_aggregation_module):
+        with pytest.warns(FutureWarning, match=message) as record:
+            assert namespace.allocate_intensity is aggregate_image
+        assert [warning.filename for warning in record] == [__file__]
 
 
 def test_integration_aggregate_image(sdata_multi_c_no_backed: SpatialData):

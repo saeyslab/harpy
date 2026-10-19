@@ -117,10 +117,9 @@ from harpy.table.canonical_centers import (
 )
 from harpy.table.io._add_table import add_table
 from harpy.transformations._transformations import _PointToLabelsTransform, _resolve_point_to_labels_transform
+from harpy.utils._deprecation import _renamed_functions
 from harpy.utils._keys import _CELL_INDEX, _GENES_KEY, _INSTANCE_KEY, _REGION_KEY, _SPATIAL
 from harpy.utils.utils import _make_list
-
-_WARNED_DEPRECATED_ATTRIBUTES: set[str] = set()
 
 
 @dataclass(frozen=True)
@@ -470,13 +469,7 @@ def aggregate_points(
         _remove_aggregation_workspace(workspace)
 
 
-def __getattr__(name: str) -> object:
-    if name == "allocate":
-        if name not in _WARNED_DEPRECATED_ATTRIBUTES:
-            _WARNED_DEPRECATED_ATTRIBUTES.add(name)
-            log.warning("`harpy.tb.allocate` is deprecated. Import and use `harpy.tb.aggregate_points` instead.")
-        return aggregate_points
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__getattr__ = _renamed_functions(__name__, namespace="harpy.tb", renamed={"allocate": "aggregate_points"})
 
 
 def _normalize_aggregation_pairs(

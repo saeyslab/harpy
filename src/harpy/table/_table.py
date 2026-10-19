@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import warnings
 from collections.abc import Iterable, Iterator
 
 import dask.array as da
@@ -14,18 +13,16 @@ from spatialdata.models import TableModel
 
 from harpy.shape._shape import filter_shapes
 from harpy.table.io._add_table import add_table
+from harpy.utils._deprecation import _warn_deprecated
 from harpy.utils._keys import _CELLSIZE_KEY
 
 
 def _warn_deprecated_wrapper(function_name: str) -> None:
-    """Warn that a thin scanpy wrapper is deprecated, and name what replaces it."""
-    warnings.warn(
-        f"harpy.tb.{function_name} is deprecated since version 0.5.0 and will be removed in a future release. "
-        "Process the table directly, for example with scanpy or squidpy, then write the results back with "
-        "harpy.tb.io.add_table_updates, or with harpy.tb.io.add_table when cells or genes are removed.",
-        FutureWarning,
-        # Point at the caller of the deprecated wrapper, not at the wrapper itself.
-        stacklevel=3,
+    """Warn that a thin scanpy or squidpy wrapper is deprecated, and say what to do instead."""
+    _warn_deprecated(
+        f"harpy.tb.{function_name}",
+        use="scanpy or squidpy on the table directly, then write the results back with "
+        "harpy.tb.io.add_table_updates, or with harpy.tb.io.add_table when cells or genes are removed",
     )
 
 
@@ -318,9 +315,8 @@ def filter_on_size(
 
     All cells with a size outside of the min and max size range are removed using the `instance_size_key` in `.obs`. Run e.g. :func:`~harpy.tb.preprocess_transcriptomics` or :func:`~harpy.tb.preprocess_proteomics` to obtain cell sizes.
 
-    .. deprecated:: 0.5.0
-       `harpy.tb.filter_on_size` is deprecated and will be removed in a future release. Select the cells
-       directly, for example
+    .. warning::
+       Deprecated, and will be removed in a future release. Select the cells directly, for example
        ``adata[adata.obs[instance_size_key].between(min_size, max_size, inclusive="neither")]``, and write
        the result with :func:`~harpy.tb.io.add_table`.
 

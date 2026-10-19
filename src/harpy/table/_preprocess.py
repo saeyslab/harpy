@@ -46,9 +46,9 @@ def preprocess_transcriptomics(
     scaling (:func:`~scanpy.pp.scale`), and PCA calculation (:func:`~scanpy.pp.pca`) for transcriptomics data
     contained in the `sdata.tables[table_name]`. QC metrics are added to `sdata.tables[output_table_name].obs` using :func:`~scanpy.pp.calculate_qc_metrics`.
 
-    .. deprecated:: 0.5.0
-       `harpy.tb.preprocess_transcriptomics` is deprecated and will be removed in a future release. Call scanpy
-       directly on the table, then write the results back with :func:`~harpy.tb.io.add_table_updates`, or with
+    .. warning::
+       Deprecated, and will be removed in a future release. Call scanpy directly on the table, then write the
+       results back with :func:`~harpy.tb.io.add_table_updates`, or with
        :func:`~harpy.tb.io.add_table` when cells or genes are removed. For the size normalisation, which scanpy
        does not provide, use :func:`~harpy.tb.pp.normalize_by_size`.
 
@@ -182,9 +182,9 @@ def preprocess_proteomics(
     (:func:`~scanpy.pp.log1p`), scaling (:func:`~scanpy.pp.scale`)/ quantile normalization and PCA calculation (:func:`~scanpy.pp.pca`)
     for proteomics data contained in `sdata`.
 
-    .. deprecated:: 0.5.0
-       `harpy.tb.preprocess_proteomics` is deprecated and will be removed in a future release. Call scanpy
-       directly on the table, then write the results back with :func:`~harpy.tb.io.add_table_updates`, or with
+    .. warning::
+       Deprecated, and will be removed in a future release. Call scanpy directly on the table, then write the
+       results back with :func:`~harpy.tb.io.add_table_updates`, or with
        :func:`~harpy.tb.io.add_table` when cells or genes are removed. For the normalisations that scanpy does
        not provide, use :func:`~harpy.tb.pp.normalize_by_size` and :func:`~harpy.tb.pp.normalize_by_quantile`;
        the latter does not multiply by 100, so its results are those of `q` divided by 100.

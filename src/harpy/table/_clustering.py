@@ -40,9 +40,9 @@ def kmeans(
     and ranks genes based on their contributions to the clustering. The clustering results, along with optional
     UMAP and gene ranking, are added to the `sdata.tables[output_table_name]` for downstream analysis.
 
-    .. deprecated:: 0.5.0
-       `harpy.tb.kmeans` is deprecated and will be removed in a future release. Cluster the table directly, for
-       example with :class:`~sklearn.cluster.KMeans` and scanpy, then write the results back with
+    .. warning::
+       Deprecated, and will be removed in a future release. Cluster the table directly, for example with
+       :class:`~sklearn.cluster.KMeans` and scanpy, then write the results back with
        :func:`~harpy.tb.io.add_table_updates`.
 
        Until its removal, `harpy.tb.kmeans` only accepts an in-memory table, and raises a ``ValueError`` for a
@@ -155,10 +155,10 @@ def leiden(
     and ranks genes based on their contributions to the clustering. The clustering results, along with optional
     UMAP and gene ranking, are added to the `sdata.tables[output_table_name]` for downstream analysis.
 
-    .. deprecated:: 0.5.0
-       `harpy.tb.leiden` is deprecated and will be removed in a future release. Call scanpy directly on the
-       table, for example :func:`~scanpy.pp.neighbors` and :func:`~scanpy.tl.leiden`, then write the results
-       back with :func:`~harpy.tb.io.add_table_updates`.
+    .. warning::
+       Deprecated, and will be removed in a future release. Call scanpy directly on the table, for example
+       :func:`~scanpy.pp.neighbors` and :func:`~scanpy.tl.leiden`, then write the results back with
+       :func:`~harpy.tb.io.add_table_updates`.
 
        Until its removal, `harpy.tb.leiden` only accepts an in-memory table, and raises a ``ValueError`` for a
        lazy or storage-backed one: read the store with ``harpy.io.read_zarr(..., table_mode="eager")``.

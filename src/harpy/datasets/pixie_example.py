@@ -3,10 +3,10 @@ import os
 import anndata as ad
 import pandas as pd
 import pooch
-from loguru import logger as log
 from spatialdata import SpatialData, read_zarr
 
 from harpy.datasets import get_registry
+from harpy.utils._deprecation import _warn_deprecated
 
 
 def _get_df(path):
@@ -36,10 +36,16 @@ def _get_adata(path, label_prefix="label_whole_"):
 
 
 def pixie_example_datasets(fovs: list | None = None, with_pixel_output=True, with_cells_output=True) -> SpatialData:
-    """Example pixie dataset."""
-    log.warning(
-        "pixie_example_datasets() is deprecated: it relies on Hugging Face 'datasets' loading scripts, "
-        "which were removed in datasets>=4.0.0. Use 'hp.datasets.pixie_example()' or pin 'datasets<4.0.0'."
+    """Example pixie dataset.
+
+    .. warning::
+       Deprecated, and will be removed in a future release. Use :func:`harpy.datasets.pixie_example`: this
+       function relies on Hugging Face ``datasets`` loading scripts, which ``datasets`` 4.0.0 removed.
+    """
+    _warn_deprecated(
+        "harpy.datasets.pixie_example.pixie_example_datasets",
+        use="harpy.datasets.pixie_example: this function relies on Hugging Face datasets loading scripts, "
+        "which datasets 4.0.0 removed",
     )
     import glob
     import os

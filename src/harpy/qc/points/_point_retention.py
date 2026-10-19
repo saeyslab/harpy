@@ -13,9 +13,8 @@ from spatialdata.models import TableModel
 
 from harpy.image._image import _get_boundary, _get_spatial_element
 from harpy.transformations._transformations import _identity_check_transformations_points
+from harpy.utils._deprecation import _renamed_functions
 from harpy.utils._keys import _GENES_KEY, _RAW_COUNTS_KEY
-
-_WARNED_DEPRECATED_ATTRIBUTES: set[str] = set()
 
 
 def point_retention(
@@ -173,12 +172,4 @@ def point_retention(
     return filtered
 
 
-def __getattr__(name: str) -> object:
-    if name == "analyse_genes_left_out":
-        if name not in _WARNED_DEPRECATED_ATTRIBUTES:
-            _WARNED_DEPRECATED_ATTRIBUTES.add(name)
-            log.warning(
-                "`harpy.qc.analyse_genes_left_out` is deprecated. Import and use `harpy.qc.point_retention` instead."
-            )
-        return point_retention
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__getattr__ = _renamed_functions(__name__, namespace="harpy.qc", renamed={"analyse_genes_left_out": "point_retention"})

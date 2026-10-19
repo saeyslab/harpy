@@ -23,9 +23,9 @@ def nhood_enrichment(
     """
     Calculate the nhood enrichment using squidpy via :func:`squidpy.gr.spatial_neighbors` and :func:`squidpy.gr.nhood_enrichment`.
 
-    .. deprecated:: 0.5.0
-       `harpy.tb.nhood_enrichment` is deprecated and will be removed in a future release. Call squidpy directly
-       on the table, then write the results back with :func:`~harpy.tb.io.add_table_updates`.
+    .. warning::
+       Deprecated, and will be removed in a future release. Call squidpy directly on the table, then write the
+       results back with :func:`~harpy.tb.io.add_table_updates`.
 
     Parameters
     ----------

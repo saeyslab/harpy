@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import warnings
-
 from anndata import AnnData
 from spatialdata import SpatialData
 
 from harpy.table.io._add_table import add_table as _add_table
+from harpy.utils._deprecation import _warn_deprecated
 from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY
 
 
@@ -22,16 +21,11 @@ def add_table(
 ) -> SpatialData:
     """Add an AnnData table to SpatialData.
 
-    .. deprecated:: 0.5.0
-       `harpy.tb.add_table` moved to :func:`harpy.tb.io.add_table`, which takes the same arguments, and will be
-       removed in a future release.
+    .. warning::
+       Deprecated, and will be removed in a future release. Use :func:`harpy.tb.io.add_table`, which takes the
+       same arguments.
     """
-    warnings.warn(
-        "harpy.tb.add_table is deprecated since version 0.5.0 and will be removed in a future release. "
-        "Use harpy.tb.io.add_table, which takes the same arguments.",
-        FutureWarning,
-        stacklevel=2,
-    )
+    _warn_deprecated("harpy.tb.add_table", use="harpy.tb.io.add_table, which takes the same arguments")
     return _add_table(
         sdata,
         adata,

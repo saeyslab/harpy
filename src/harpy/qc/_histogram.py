@@ -10,7 +10,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from loguru import logger as log
 from matplotlib.axes import Axes
 from spatialdata import SpatialData
 
@@ -22,6 +21,7 @@ from harpy.qc.points._summarize_points_by_feature import FeaturePointsSummary
 from harpy.qc.table._instance_measures import InstanceMeasure, _instance_values
 from harpy.qc.table._summarize_table import TableSummary
 from harpy.table._table import ProcessTable
+from harpy.utils._deprecation import _renamed_functions
 
 _DEFAULT_COLUMN_COLORS = {
     "log1p_total_counts": "#577590",
@@ -34,18 +34,11 @@ _DEFAULT_COLUMN_COLORS = {
     "pct_dropout_by_counts": "#FF9DA6",
 }
 
-_WARNED_DEPRECATED_ATTRIBUTES: set[str] = set()
-
-
-def __getattr__(name: str) -> object:
-    aliases = {"metric_histogram": table_histogram, "metrics_histogram": table_histograms}
-    if name in aliases:
-        function = aliases[name]
-        if name not in _WARNED_DEPRECATED_ATTRIBUTES:
-            _WARNED_DEPRECATED_ATTRIBUTES.add(name)
-            log.warning(f"`harpy.qc.{name}` is deprecated. Import and use `harpy.qc.{function.__name__}` instead.")
-        return function
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__getattr__ = _renamed_functions(
+    __name__,
+    namespace="harpy.qc",
+    renamed={"metric_histogram": "table_histogram", "metrics_histogram": "table_histograms"},
+)
 
 
 def spatial_bin_histogram(

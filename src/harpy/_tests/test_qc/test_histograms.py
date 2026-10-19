@@ -1,6 +1,5 @@
 from copy import deepcopy
 from dataclasses import replace
-from types import SimpleNamespace
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -466,16 +465,13 @@ def test_table_histograms_use_each_metric_population_and_preserve_axes():
 @pytest.mark.parametrize(
     "alias, canonical", [("metric_histogram", "table_histogram"), ("metrics_histogram", "table_histograms")]
 )
-def test_deprecated_histogram_aliases_warn_once_for_public_access_and_import(monkeypatch, alias, canonical):
+def test_deprecated_histogram_aliases_warn_through_the_package_and_the_module(monkeypatch, alias, canonical):
     from harpy.qc import _histogram as module
 
-    messages = []
-    monkeypatch.setattr(module, "log", SimpleNamespace(warning=messages.append))
-    monkeypatch.setattr(module, "_WARNED_DEPRECATED_ATTRIBUTES", set())
     monkeypatch.delitem(vars(qc), alias, raising=False)
     function = getattr(qc, canonical)
-    assert messages == []
-    assert getattr(qc, alias) is function
-    imported = getattr(__import__("harpy.qc", fromlist=[alias]), alias)
-    assert imported is function
-    assert messages == [f"`harpy.qc.{alias}` is deprecated. Import and use `harpy.qc.{canonical}` instead."]
+    message = rf"harpy\.qc\.{alias} is deprecated .* Use harpy\.qc\.{canonical}, which takes the same arguments\."
+    for namespace in (qc, module):
+        with pytest.warns(FutureWarning, match=message) as record:
+            assert getattr(namespace, alias) is function
+        assert [warning.filename for warning in record] == [__file__]

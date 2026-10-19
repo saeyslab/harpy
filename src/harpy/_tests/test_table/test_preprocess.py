@@ -55,7 +55,7 @@ def test_preprocess_proteomics_multiple_samples(sdata_multi_c_no_backed):
 
 
 def test_preprocess_proteomics_overwrite(sdata_multi_c_no_backed):
-    with pytest.warns(FutureWarning, match="preprocess_proteomics is deprecated since version 0.5.0"):
+    with pytest.warns(FutureWarning, match=r"harpy\.tb\.preprocess_proteomics is deprecated"):
         sdata_multi_c_no_backed = preprocess_proteomics(
             sdata_multi_c_no_backed,
             labels_name="masks_whole",

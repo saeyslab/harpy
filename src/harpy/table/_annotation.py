@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import warnings
 from collections.abc import Mapping
 from itertools import chain
 from pathlib import Path
@@ -19,6 +18,7 @@ from spatialdata import SpatialData
 
 from harpy.table._table import ProcessTable, _load_into_memory
 from harpy.table.io._add_table import add_table
+from harpy.utils._deprecation import _warn_deprecated
 from harpy.utils._keys import _ANNOTATION_KEY, _CLEANLINESS_KEY, _UNKNOWN_CELLTYPE_KEY
 
 
@@ -76,7 +76,7 @@ def score_genes(
     input_dict
         If True, the marker gene list from the CSV file is treated as a dictionary with the first column being
         the cell type names and the subsequent columns being the marker genes for those cell types. Default is False.
-        This parameter is deprecated, and will be removed in a future version.
+        Deprecated, and will be removed in a future release; use a one-hot encoded ``marker_genes`` instead.
     key_added
         The column name in the `.obs` attribute of the :class:`anndata.AnnData` table where the predicted cell type will be saved.
     unknown_celltype_key
@@ -101,8 +101,8 @@ def score_genes(
     Notes
     -----
     The cell type `unknown_celltype_key` is reserved for cells that could not be assigned a specific cell type.
-    The deprecated keyword argument `celltype_column` is still accepted for backward compatibility;
-    use `key_added` instead.
+    The keyword argument ``celltype_column`` is still accepted. Deprecated, and will be removed in a future
+    release; use ``key_added``.
 
     The function loads the table into memory: the matrices of a lazy or storage-backed table, such as one
     that Harpy attaches after writing to a backed `SpatialData`, are read in full.
@@ -121,11 +121,10 @@ def score_genes(
     adata = _load_into_memory(process_table_instance._get_adata(), table_name)
     # Load marker genes from csv
     if input_dict:
-        log.warning(
-            "'input_dict' is deprecated and will be removed in future versions. "
-            "Please pass a pandas DataFrame or a path to a .csv file to 'path_marker_genes'. "
-            "It should be a one-hot encoded matrix with cell types listed in the first row "
-            "and marker genes in the first column."
+        _warn_deprecated(
+            "The input_dict parameter of harpy.tb.score_genes",
+            use="a one-hot encoded pandas DataFrame, or the path of such a CSV file, for marker_genes, with the cell "
+            "types in the first row and the marker genes in the first column",
         )
         df_markers = pd.read_csv(marker_genes, header=None, index_col=0, delimiter=delimiter)
         df_markers = df_markers.T
@@ -316,8 +315,8 @@ def score_genes_iter(
 
     Notes
     -----
-    The deprecated keyword argument `celltype_column` is still accepted for backward compatibility;
-    use `key_added` instead.
+    The keyword argument ``celltype_column`` is still accepted. Deprecated, and will be removed in a future
+    release; use ``key_added``.
 
     The function loads the table into memory: the matrices of a lazy or storage-backed table, such as one
     that Harpy attaches after writing to a backed `SpatialData`, are read in full.
@@ -378,12 +377,7 @@ def _resolve_key_added(key_added: str, kwargs: dict[str, Any], func_name: str) -
     if deprecated_key is None:
         return key_added
 
-    warnings.warn(
-        f"`celltype_column` is deprecated in `harpy.tb.{func_name}` and will be removed in a future release. "
-        "Use `key_added` instead.",
-        FutureWarning,
-        stacklevel=3,
-    )
+    _warn_deprecated(f"The celltype_column parameter of harpy.tb.{func_name}", use="key_added")
 
     if key_added != _ANNOTATION_KEY and key_added != deprecated_key:
         raise ValueError(

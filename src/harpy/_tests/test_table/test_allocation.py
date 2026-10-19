@@ -1,5 +1,4 @@
 from pathlib import Path
-from types import SimpleNamespace
 
 import dask
 import dask.array as da
@@ -15,6 +14,7 @@ from spatialdata._io.format import SpatialDataContainerFormatV01
 from spatialdata.models import Labels2DModel, Labels3DModel, PointsModel, TableModel
 from spatialdata.transformations import Affine, Identity, Scale, Sequence, Translation, set_transformation
 
+import harpy as hp
 import harpy._storage._anndata as anndata_storage
 import harpy.table._aggregation_checkpoint as checkpoint_module
 import harpy.table._aggregation_writer as writer_module
@@ -29,16 +29,12 @@ from harpy.table.canonical_centers import CANONICAL_OBSM_KEY, SPATIAL_COORDINATE
 from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY, _SPATIAL
 
 
-def test_allocate_import_warns_and_resolves_to_aggregate_points(monkeypatch: pytest.MonkeyPatch):
-    messages: list[str] = []
-    monkeypatch.setattr("harpy.table._allocation.log", SimpleNamespace(warning=messages.append))
-    monkeypatch.setattr("harpy.table._allocation._WARNED_DEPRECATED_ATTRIBUTES", set())
-
-    alias = aggregation_module.__getattr__("allocate")
-    repeated_alias = aggregation_module.__getattr__("allocate")
-
-    assert alias is repeated_alias is aggregate_points
-    assert messages == ["`harpy.tb.allocate` is deprecated. Import and use `harpy.tb.aggregate_points` instead."]
+def test_allocate_import_warns_and_resolves_to_aggregate_points():
+    message = r"harpy\.tb\.allocate is deprecated .* Use harpy\.tb\.aggregate_points, which takes the same arguments\."
+    for namespace in (hp.tb, aggregation_module):
+        with pytest.warns(FutureWarning, match=message) as record:
+            assert namespace.allocate is aggregate_points
+        assert [warning.filename for warning in record] == [__file__]
 
 
 def test_aggregation_checkpoint_merges_counts_across_input_partitions(tmp_path):
