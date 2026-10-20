@@ -8906,7 +8906,8 @@ keys before assignment.
 
 **Status: implemented, step 1 redone from the count matrices in two parts, 1a
 and 1b; amended to keep every row of the selected regions (see "Amendment:
-every row of the selected regions" below) — implemented.**
+every row of the selected regions" below) — implemented. Taking the table
+instead of `sdata` is planned in step 1 of [qc_metrics.md](qc_metrics.md).**
 
 Implement a read-only `hp.qc.summarize_table` computation API and a
 `TableSummary` result, followed by table-level QC plots that take the result.
@@ -9760,9 +9761,9 @@ from `per_instance` and from every statistic. Which rows that was depended on
 the matrices passed: with `X` alone, a cell with only control points was
 excluded; with all class matrices of a table from `aggregate_points`, none
 was. A mean taken over the table, for example over `.obs` after
-`add_table_summary` ([qc_metrics.md](qc_metrics.md)), then differed from the
-summary's whenever rows were excluded, and the population had to be reasoned
-about with every call.
+`hp.tb.pp.calculate_qc_metrics` ([qc_metrics.md](qc_metrics.md)), then
+differed from the summary's whenever rows were excluded, and the population
+had to be reasoned about with every call.
 
 - **One rule:** the statistics are taken over the table's rows of the
   selected regions, zeros included. The summary describes the table as it is,
@@ -9845,7 +9846,7 @@ about with every call.
 4. Roadmap: the population, the column tables, the per-feature scanpy
    correspondence, the blockwise pass and the verification of this slice and
    Slice 11k. [qc_metrics.md](qc_metrics.md) already describes
-   `add_table_summary` on the amended population.
+   `hp.tb.pp.calculate_qc_metrics` on the amended population.
 
 **Verification:** `per_instance` has one row per row of the selected regions,
 also with `X` alone on a table whose cells with only control points have an
@@ -9861,7 +9862,8 @@ inherits them; and the instance plots skip the missing shares.
 ## Slice 11k: feature summaries of a table for selected features
 
 **Status: implemented, with the population of the amendment of Slice 11j,
-"every row of the selected regions".**
+"every row of the selected regions". Taking the table instead of `sdata` is
+planned in step 1 of [qc_metrics.md](qc_metrics.md).**
 
 The table-side counterpart of `summarize_points_by_feature`, so that tables and
 points are summarized with the same two levels: classes first, then explicitly

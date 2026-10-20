@@ -1,53 +1,119 @@
-# Adding a table summary to its table
+# Table QC metrics in the table: `hp.tb.pp.calculate_qc_metrics`
 
 ## Status
 
-**Planned, in one step.** It builds on the amendment of Slice 11j of
-[allocation.md](allocation.md), "every row of the selected regions", and is
-implemented after it.
+**Planned, in two steps.** It builds on the amendment of Slice 11j of
+[allocation.md](allocation.md), "every row of the selected regions", which is
+implemented.
 
 `hp.qc.summarize_table` describes a table's instances and features from its
 count matrices, but writes nothing to the table: its results stay in a
-`TableSummary`. scanpy's `calculate_qc_metrics` adds its metrics to `.obs` and
-`.var` instead, where they can be plotted, filtered on, or written to the
-store. This step adds that convenience for a table summary:
+`TableSummary`. scanpy's `calculate_qc_metrics` computes its metrics and adds
+them to `.obs` and `.var` in one call, where they can be plotted, filtered on,
+or written to the store. This adds that call for Harpy's table summary:
 
 ```python
-summary = hp.qc.summarize_table(sdata, "table", obsm_keys=["negative", "system_control"])
-hp.tb.pp.add_table_summary(sdata.tables["table"], summary)  # in place, as scanpy.pp
+adata = sdata.tables["table"]
+# In place, as scanpy.pp; the summary is returned for the plots.
+summary = hp.tb.pp.calculate_qc_metrics(adata, obsm_keys=["negative", "system_control"])
+hp.qc.instance_scatter(summary, x=("x", "points"), y=("negative", "pct_points"))
 hp.tb.io.add_table_updates(sdata, table_name="table")  # persist, for a store-backed sdata
 ```
 
-`summarize_table` stays read-only. A separate function adds the results, as
-`hp.tb.pp`'s normalisations change a table in place, like `scanpy.pp`, and
-`hp.tb.io.add_table_updates` writes the changed components back.
+**One call, not a summary added afterwards.** A separate
+`hp.tb.pp.add_table_summary(adata, summary)` was considered: it would have to
+check that the table is still the summary's, its rows by `.obs` name with
+their identity and `var_names`, and that the summary covers every region, as
+`.obs` needs a value for every row. One call computes from the table and
+writes to the same table, so neither check is needed. `hp.qc.summarize_table`
+stays the read-only computation, for a summary without writing, also of
+selected regions.
 
-## The function
+## Step 1: the table summaries take the table
 
 ```python
-hp.tb.pp.add_table_summary(adata, summary, *, overwrite=False) -> None
+hp.qc.summarize_table(
+    adata, *, layer=None, obsm_keys=(), feature_names=None,
+    feature_matrices_key="feature_matrices", region=None,
+) -> TableSummary
+hp.qc.summarize_table_by_feature(adata, *, summary, features) -> FeatureTableSummary
 ```
 
-- **`adata`:** the summary's table, `sdata.tables[summary.metadata.table_name]`,
-  in memory, lazy or backed: only `.obs` and `.var` change.
-- **`summary`:** a `TableSummary` of every region the table annotates.
+in place of `summarize_table(sdata, table_name, …)` and
+`summarize_table_by_feature(sdata, *, summary, features)`.
+
+- **Why:** both read only the table: its matrices, `var`, `.obsm`, the
+  registry in `.uns` and the SpatialData annotation in
+  `uns["spatialdata_attrs"]`, against which `region` is checked. `sdata`
+  served only to look the table up. The points side keeps `sdata`, as
+  `summarize_points` needs the points element's transformations and the panel
+  in `sdata.attrs`. The table APIs then all take the table itself, as
+  `hp.tb.pl` (Slice 11l) and `hp.tb.pp` do, and as scanpy does, and
+  `calculate_qc_metrics` calls `summarize_table` directly.
+- **The SpatialData annotation stays required,** for the regions and the
+  identity columns: a table without `uns["spatialdata_attrs"]` raises, as
+  now. The annotated elements need not be present, as now.
+- **`TableSummaryMetadata.table_name` goes:** an `AnnData` does not know its
+  name in `sdata`. The record keeps `region`, `layer`, `obsm_keys` and
+  `feature_matrices_key`.
+- **`summarize_table_by_feature`** takes the table instead of finding it
+  through `summary.metadata.table_name`. Its checks that the table is still
+  the summary's stay: the classes, the names, and the rows by `.obs` name with
+  their region and instance id. They catch another table as well as a changed
+  one.
+- **Messages** name the matrix, such as `adata.X` or `adata.obsm['negative']`,
+  without the table's name.
+- **No backward compatibility:** the signatures change without a
+  deprecation, as the functions are young.
+- **Updates:** the docstrings and examples of both functions, of
+  `TableSummary`, `FeatureTableSummary`, `TableSummaryMetadata` and of the
+  instance plots, `(sdata, "table")` becoming `(sdata.tables["table"])`; and
+  the text of Slices 11j and 11k in [allocation.md](allocation.md): the
+  signatures, the metadata and "Only the table".
+
+**Tests,** in `src/harpy/_tests/test_qc/test_table/`: the fixtures pass the
+table instead of a `SpatialData` object; a table outside any `SpatialData`
+object is summarized; the metadata has no `table_name`; and the tests of a
+table changed since the summary also cover `summarize_table_by_feature` on
+another table.
+
+## Step 2: `hp.tb.pp.calculate_qc_metrics`
+
+```python
+hp.tb.pp.calculate_qc_metrics(
+    adata, *, layer=None, obsm_keys=(), feature_names=None,
+    feature_matrices_key="feature_matrices", overwrite=False,
+) -> TableSummary
+```
+
+- **`adata`:** the table, in memory, lazy or backed: only `.obs` and `.var`
+  change.
+- **`layer`, `obsm_keys`, `feature_names`, `feature_matrices_key`:** as in
+  `summarize_table`, which this function calls.
+- **No `region`:** every region the table annotates is summarized, as `.obs`
+  needs a value for every row.
 - **`overwrite`:** `False` raises if a column to add exists already, naming
   the columns; `True` replaces them.
+- **Returns the `TableSummary`** it computed, for the plots and the per-class
+  and per-region statistics, which are not added to the table. This differs
+  from the normalisations of `hp.tb.pp` and from scanpy's in-place calls,
+  which return `None`; the docstring says so.
+- **The name follows scanpy,** for discoverability; the columns do not, as
+  Slice 11j decided for `TableSummary`. The docstring maps them to scanpy's.
 
 ### `.obs`: the measures per instance
 
 The measure columns of `summary.per_instance`, under their names, for every
-row of the table:
+row of the table, as the summary covers every region:
 
 - `n_<class>_points` (uint64) and `n_<class>_detected_features`, per class;
 - `pct_<class>_points`, with two classes or more.
 
-As the summary covers every region, `per_instance` has one row per row of the
-table. A row without points in any class read has 0 points and 0 detected
-features, and a missing share (NaN), as 0 / 0 has no value. The region and
-instance columns of `per_instance` are the table's own and are not written.
+A row without points in any class read has 0 points and 0 detected features,
+and a missing share (NaN), as 0 / 0 has no value. The region and instance
+columns of `per_instance` are the table's own and are not written.
 
-**The rate per panel feature,** computed here and not taken from the summary:
+**The rate per panel feature,** computed here, not stored in the summary:
 
 - `n_<class>_points_per_panel_feature` (float64), per class:
   `n_<class>_points / summary.panel_feature_counts[<class>]`, the class's
@@ -91,8 +157,8 @@ names, so that both can be in `.obs`.
 
 ### `.var`: the statistics per feature of `X` or the layer
 
-When the summary read `X` or a layer, the matrix aligned with `.var`, the rows
-of `summary.per_feature` of that class, under their names:
+When `X` or a layer was read, the matrix aligned with `.var`, the rows of
+`summary.per_feature` of its class, under their names:
 
 - `n_points` (uint64), `within_class_fraction`, `n_instances_without_feature`,
   `pct_instances_without_feature`, `mean_points_per_instance` and
@@ -101,41 +167,34 @@ of `summary.per_feature` of that class, under their names:
 The population column `n_instances`, the same for every feature, and
 `feature_class`, the same class for every row, are not written. These are the
 counterparts of scanpy's `total_counts`, `n_cells_by_counts`,
-`pct_dropout_by_counts` and `mean_counts`, under other names. A summary
-without `X` or a layer, read from `.obsm` matrices alone, adds nothing to
-`.var`.
+`pct_dropout_by_counts` and `mean_counts`, under other names, with the same
+values, as both count over every row. A table without `X`, summarized from
+`.obsm` matrices alone, gets nothing in `.var`.
 
 ### Not added
 
 - the features of the `.obsm` matrices, which have no `.var` axis;
 - the per-class and per-region statistics, `per_class`, `per_region_class`
-  and `per_region_feature`, which are not aligned with rows or features.
+  and `per_region_feature`, which are not aligned with rows or features;
+- scanpy's `log1p_` columns and `pct_counts_in_top_<n>_genes`.
 
-They stay in the summary.
+The first two stay in the returned summary.
 
 ## Checks, before anything is written
 
-- **The summary's type:** a `TableSummary`, or a `TypeError`.
-- **Every region:** `summary.metadata.region` must be every region of the
-  table's SpatialData annotation; a summary of fewer regions raises, as the
-  rows of the other regions would have no values.
-- **The table is still the summary's,** as `summarize_table_by_feature`
-  checks it: the instances of `per_instance` are found by `.obs` name and must still
-  have their region and instance id, and `X` or the layer must still have the
-  summary's names as `var_names`. Otherwise the call raises "recompute
-  summarize_table()". The helpers of `summarize_table_by_feature` that do this
-  move to a module that both functions import.
+- **The checks of `summarize_table`,** which runs first.
 - **Existing columns:** with `overwrite=False`, a column to add that `.obs` or
   `.var` already holds raises, naming the columns.
 
-A failed check leaves the table unchanged.
+The columns are computed before any is written, so a failed check leaves the
+table unchanged.
 
 ## Documentation
 
-- `docs/api.md` lists `tb.pp.add_table_summary` under Preprocessing, and its
+- `docs/api.md` lists `tb.pp.calculate_qc_metrics` under Preprocessing, and its
   introduction widens from "normalisations that scanpy does not provide" to
   the in-place additions of `hp.tb.pp`, with `add_table_updates` to persist.
-- The docstring of `hp.qc.summarize_table` points to `add_table_summary` for
+- The docstring of `hp.qc.summarize_table` points to `calculate_qc_metrics` for
   adding its results to the table.
 
 ## Tests
@@ -143,26 +202,30 @@ A failed check leaves the table unchanged.
 In `src/harpy/_tests/test_table/test_pp/`, on the dummy tables of the tests of
 `summarize_table`:
 
-- `.obs`: the values equal `per_instance`, row by row; a row without points
-  has 0 points and 0 detected features and a missing share; the dtypes; no
-  share column with one class;
+- `.obs`: the values equal `per_instance` of the returned summary, row by row;
+  a row without points has 0 points and 0 detected features and a missing
+  share; the dtypes; no share column with one class;
 - the rates: each `n_<class>_points_per_panel_feature` equals
   `n_<class>_points / summary.panel_feature_counts[<class>]`, 0 for a row
   without points, and the values that `instance_scatter` plots with
   `normalization="per_panel_feature"`;
 - `.var`: the values equal the rows of `per_feature` of `X` or the layer, in
-  `var_names` order; nothing is added for a summary read from `.obsm` alone;
-- the checks: a summary of one region of two, a table changed since the
-  summary, existing columns without and with `overwrite`, and another type
-  than `TableSummary`; a failed check leaves `.obs` and `.var` unchanged;
-- a store-backed table: after `add_table_summary` and
+  `var_names` order; nothing is added for a table summarized from `.obsm`
+  alone;
+- the returned summary equals `summarize_table` of the same table and
+  arguments;
+- existing columns without and with `overwrite`; a failed check leaves `.obs`
+  and `.var` unchanged;
+- a store-backed table: after `calculate_qc_metrics` and
   `hp.tb.io.add_table_updates`, the reopened table holds the columns.
 
 ## Verification
 
-After `add_table_summary`, every row of the table has each class's points,
-detected features and share, equal to `per_instance`, and each class's points
-per panel feature, its points divided by `summary.panel_feature_counts`;
-`TableSummary` itself is unchanged; the features of `X` or
-the layer have the statistics of `per_feature`; nothing else in the table
-changes; and `hp.tb.io.add_table_updates` persists the new columns.
+`summarize_table` and `summarize_table_by_feature` take the table, without
+`sdata`, and their results are unchanged but for the metadata without
+`table_name`. After `calculate_qc_metrics`, every row of the table has each
+class's points, detected features and share, equal to `per_instance` of the
+returned summary, and each class's points per panel feature, its points
+divided by `summary.panel_feature_counts`; the features of `X` or the layer
+have the statistics of `per_feature`; nothing else in the table changes; and
+`hp.tb.io.add_table_updates` persists the new columns.
