@@ -1,4 +1,4 @@
-"""Per-instance values and statistics of selected features of a table, over a table summary's retained instances."""
+"""Per-instance values and statistics of selected features of a table, over a table summary's instances."""
 
 from __future__ import annotations
 
@@ -38,8 +38,8 @@ from harpy.qc.table._table_summary_metadata import TableSummaryMetadata
 class FeatureTableSummary:
     """Per-instance values and statistics of explicitly selected features of a table.
 
-    Returned by :func:`harpy.qc.summarize_table_by_feature`, over the retained
-    instances of a :class:`~harpy.qc.TableSummary`, as
+    Returned by :func:`harpy.qc.summarize_table_by_feature`, over the instances
+    of a :class:`~harpy.qc.TableSummary`, as
     :class:`~harpy.qc.FeaturePointsSummary` summarizes selected features over the
     retained bins of a :class:`~harpy.qc.PointsSummary`.
 
@@ -49,30 +49,28 @@ class FeatureTableSummary:
         The reference summary's :class:`~harpy.qc.TableSummaryMetadata`: the
         table, the selected regions and the matrices read.
     per_instance
-        Long: one row per requested feature and retained instance of the
-        reference summary, in feature order, then table row order. Columns: the
-        region and instance identity, under the table's own ``region_key`` and
+        Long: one row per requested feature and instance of the reference
+        summary, in feature order, then table row order. Columns: the region
+        and instance identity, under the table's own ``region_key`` and
         ``instance_key`` names; ``feature`` (categorical); and ``n_points``
         (uint64), the feature's points in the instance, zeros included. Its size
-        is the number of requested features times the number of retained
-        instances.
+        is the number of requested features times the number of instances.
     per_feature
         One row per requested feature, pooled over the selected regions, in the
         order of the summary's classes and then of each matrix's columns.
         Columns, in this order: ``feature`` (categorical); ``feature_class``
         (categorical, the summary's classes as categories), the class of the
-        matrix that holds the feature; the population columns of the reference
-        summary's ``per_class``, from ``n_total_instances`` to
-        ``pct_excluded_instances``; ``n_points`` (uint64);
-        ``n_retained_instances_without_feature`` and
-        ``pct_retained_instances_without_feature``; and
-        ``mean_points_per_instance``, ``median_…``, ``std_…`` and ``p95_…``. All
-        statistics include the zeros of the retained instances; SD uses
+        matrix that holds the feature; ``n_instances``, the population column
+        of the reference summary's ``per_class``; ``n_points`` (uint64);
+        ``n_instances_without_feature`` and ``pct_instances_without_feature``;
+        and ``mean_points_per_instance``, ``median_…``, ``std_…`` and
+        ``p95_…``. All statistics include the zeros of the instances; SD uses
         ``ddof=1`` and is NaN for fewer than two instances; the percentile uses
         linear interpolation. These are the columns of
         :class:`~harpy.qc.FeatureSpatialBinSummary`'s ``per_feature``, instances
-        in place of bins. The totals, mean and SD equal those of the reference
-        summary's ``per_feature``, which has no median or percentile.
+        in place of bins, with one population column in place of four. The
+        totals, mean and SD equal those of the reference summary's
+        ``per_feature``, which has no median or percentile.
     per_region_feature
         The columns of ``per_feature``, computed within each selected region,
         with a categorical ``region`` column first: one row per selected region
@@ -91,13 +89,15 @@ def summarize_table_by_feature(
     summary: TableSummary,
     features: str | Sequence[str],
 ) -> FeatureTableSummary:
-    """Summarize selected features of a table over the instances that a table summary retained.
+    """Summarize selected features of a table over the instances of a table summary.
 
     The table-level counterpart of :func:`harpy.qc.summarize_points_by_feature`.
     The reference summary decides the table, the regions, the matrices read and
-    the retained instances; the requested features do not change that
-    population, so an instance retained for its endogenous points contributes a
-    zero to a negative probe that it did not receive. Nothing is written to the
+    the instances; the requested features do not change that population, so
+    every instance contributes, with a zero for a feature that it did not
+    receive. Only the rows of ``summary.per_instance`` are read: rows added to
+    the table since the summary are not, so recompute
+    :func:`harpy.qc.summarize_table` to include them. Nothing is written to the
     table.
 
     Parameters
@@ -108,7 +108,7 @@ def summarize_table_by_feature(
     summary
         Result of :func:`harpy.qc.summarize_table`. Its metadata names the table,
         the regions and the matrices read; its ``per_instance`` gives the
-        retained instances, and its ``feature_names`` the names of each matrix's
+        instances, and its ``feature_names`` the names of each matrix's
         columns.
     features
         An exact feature name, or a non-empty sequence of distinct names, among
@@ -118,7 +118,7 @@ def summarize_table_by_feature(
     Returns
     -------
     FeatureTableSummary
-        The requested features' points per retained instance, and their
+        The requested features' points per instance, and their
         statistics, pooled and per region. See :class:`FeatureTableSummary`.
 
     Raises
@@ -129,13 +129,13 @@ def summarize_table_by_feature(
         If ``features`` is empty, contains duplicates or names that are not
         among ``summary.feature_names``, or a name that more than one column of
         the matrices read carries; if the table, its matrices, their names or
-        the retained instances changed since the summary; or if a requested
+        its instances changed since the summary; or if a requested
         column holds values that are not counts.
 
     Notes
     -----
     Only the matrices with a requested feature are read, in memory, lazy or
-    backed, and of each only the requested columns of the retained rows are
+    backed, and of each only the requested columns of the summary's rows are
     kept: a lazy matrix is sliced chunk by chunk, and a backed one read in row
     blocks, so memory stays bounded by a chunk or block and the requested
     features' values. The names come from
@@ -184,38 +184,32 @@ def summarize_table_by_feature(
         raise ValueError(f"Table {table_name!r} has no SpatialData annotation (uns[{TableModel.ATTRS_KEY!r}]).")
 
     region_key = attrs[TableModel.REGION_KEY_KEY]
-    # The retained instances, indexed by their .obs names, with their region and instance id.
+    # The summary's instances, indexed by their .obs names, with their region and instance id.
     identity = summary.per_instance[[region_key, attrs[TableModel.INSTANCE_KEY]]]
     requested_features = _requested_features(features, feature_names=summary.feature_names)
     classes = _collect_class_matrices(adata, table_name=table_name, layer=metadata.layer, obsm_keys=metadata.obsm_keys)
     _check_names_still_fit(adata, classes, summary=summary, table_name=table_name)
-    positions = _retained_positions(adata, identity, table_name=table_name)
+    positions = _instance_positions(adata, identity, table_name=table_name)
     values = _read_columns(classes, requested_features, positions=positions, table_name=table_name)
-    n_retained = len(identity)
+    n_instances = len(identity)
 
     names = tuple(feature.name for feature in requested_features)
     feature_labels = tuple(feature.label for feature in requested_features)
     labels = summary.feature_classes
-    per_instance = identity.iloc[np.tile(np.arange(n_retained), len(names))].reset_index(drop=True)
+    per_instance = identity.iloc[np.tile(np.arange(n_instances), len(names))].reset_index(drop=True)
     per_instance[_FEATURE_KEY] = pd.Categorical.from_codes(
-        np.repeat(np.arange(len(names)), n_retained), categories=list(names)
+        np.repeat(np.arange(len(names)), n_instances), categories=list(names)
     )
     # Feature by feature, each in table row order.
     per_instance[_N_POINTS_KEY] = values.T.reshape(-1)
 
-    n_total = int(summary.per_class[_N_INSTANCES_KEY].iloc[0])
-    per_feature = _feature_statistics(
-        values, n_total=n_total, features=names, feature_labels=feature_labels, labels=labels
-    )
+    per_feature = _feature_statistics(values, features=names, feature_labels=feature_labels, labels=labels)
     regions = metadata.region
     region_codes = pd.Categorical(identity[region_key].astype(str).to_numpy(), categories=regions).codes
-    per_region_class = summary.per_region_class
     region_frames = []
     for code, name in enumerate(regions):
-        n_total_in_region = per_region_class.loc[per_region_class[_REGION_COLUMN_KEY] == name, _N_INSTANCES_KEY]
         frame = _feature_statistics(
             values[region_codes == code],
-            n_total=int(n_total_in_region.iloc[0]),
             features=names,
             feature_labels=feature_labels,
             labels=labels,
@@ -310,12 +304,12 @@ def _check_names_still_fit(
             )
 
 
-def _retained_positions(adata: AnnData, identity: pd.DataFrame, *, table_name: str) -> NDArray[np.int64]:
-    """Return the table row of each of the summary's retained instances, in the summary's order.
+def _instance_positions(adata: AnnData, identity: pd.DataFrame, *, table_name: str) -> NDArray[np.int64]:
+    """Return the table row of each of the summary's instances, in the summary's order.
 
-    ``identity`` holds the summary's retained instances: their ``.obs`` names as
-    index, and their region and instance id as columns. Each is located by
-    name, and must still have its region and instance id there.
+    ``identity`` holds the summary's instances: their ``.obs`` names as index,
+    and their region and instance id as columns. Each is located by name, and
+    must still have its region and instance id there.
     """
     if not adata.obs_names.is_unique:
         raise ValueError(f"The .obs names of table {table_name!r} are not unique, so its instances cannot be located.")
@@ -348,10 +342,10 @@ def _read_columns(
     positions: NDArray[np.int64],
     table_name: str,
 ) -> NDArray[np.uint64]:
-    """Return the requested features' values per retained instance, one column per feature, in their order.
+    """Return the requested features' values per instance, one column per feature, in their order.
 
-    ``positions`` gives the table row of each retained instance, in the
-    summary's order. An in-memory or lazy matrix is sliced: Dask slices a lazy
+    ``positions`` gives the table row of each of the summary's instances, in
+    its order. An in-memory or lazy matrix is sliced: Dask slices a lazy
     one chunk by chunk, all lazy matrices in one compute. A backed matrix is read
     in row blocks, as :func:`harpy.qc.summarize_table` reads it, as a slice of
     its rows would load them whole, with all their columns.
@@ -387,14 +381,14 @@ def _backed_columns(
     matrix: CSRDataset, positions: NDArray[np.int64], *, columns: NDArray[np.int64], location: str, table_name: str
 ) -> NDArray[np.uint64]:
     """Return the values in ``columns`` of a backed matrix's rows ``positions``, read in row blocks."""
-    # Each table row's row in the results, -1 for a row that is not retained.
+    # Each table row's row in the results, -1 for a row outside the summary's regions.
     output_rows = np.full(matrix.shape[0], -1, dtype=np.int64)
     output_rows[positions] = np.arange(len(positions))
     values = np.zeros((len(positions), len(columns)), dtype=np.uint64)
     for block, rows_in_block in _sliced_blocks(matrix, output_rows):
-        retained = rows_in_block >= 0
-        values[rows_in_block[retained]] = _to_dense_counts(
-            block[retained][:, columns], location=location, table_name=table_name
+        wanted = rows_in_block >= 0
+        values[rows_in_block[wanted]] = _to_dense_counts(
+            block[wanted][:, columns], location=location, table_name=table_name
         )
     return values
 
@@ -413,13 +407,12 @@ def _to_dense_counts(selected: object, *, location: str, table_name: str) -> NDA
 def _feature_statistics(
     values: NDArray[np.uint64],
     *,
-    n_total: int,
     features: tuple[str, ...],
     feature_labels: tuple[str, ...],
     labels: tuple[str, ...],
 ) -> pd.DataFrame:
-    """Return one row per requested feature from its values per retained instance, zeros included."""
-    n_retained = values.shape[0]
+    """Return one row per requested feature from its values per instance, zeros included."""
+    n_instances = values.shape[0]
     rows = []
     for column, (name, label) in enumerate(zip(features, feature_labels, strict=True)):
         counts = values[:, column]
@@ -428,10 +421,10 @@ def _feature_statistics(
             {
                 _FEATURE_KEY: name,
                 _FEATURE_CLASS_KEY: label,
-                _N_INSTANCES_KEY: n_total,
+                _N_INSTANCES_KEY: n_instances,
                 _N_POINTS_KEY: counts.sum(dtype=np.uint64),
-                "n_retained_instances_without_feature": n_zero,
-                "pct_retained_instances_without_feature": 100 * n_zero / n_retained if n_retained else np.nan,
+                "n_instances_without_feature": n_zero,
+                "pct_instances_without_feature": 100 * n_zero / n_instances if n_instances else np.nan,
                 **_points_statistics(counts, unit="instance"),
             }
         )
