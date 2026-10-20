@@ -32,7 +32,10 @@ def _instance_values(
     measure: str,
     normalization: Literal["per_panel_feature"] | None,
 ) -> tuple[pd.Series, str]:
-    """Return one class's measure per retained instance, normalized if requested, and its axis label.
+    """Return one class's measure per instance, normalized if requested, and its axis label.
+
+    The values keep the missing shares of ``"pct_points"``, for instances
+    without points: the plots drop them.
 
     Raises
     ------

@@ -352,13 +352,8 @@ def summarize_table(
 
         # Each instance's share of its points in X, the expression class.
         hp.qc.instance_histogram(summary, feature_class="x", measure="pct_points")
-        # Signal against background: points per gene against points per negative probe.
-        hp.qc.instance_scatter(
-            summary,
-            x=("x", "points"),
-            y=("negative", "points"),
-            normalization="per_panel_feature",
-        )
+        # Background-dominated instances: a high share of negative-probe points (y) at few gene points (x).
+        hp.qc.instance_scatter(summary, x=("x", "points"), y=("negative", "pct_points"))
 
         # The raw counts of a normalized table, in one region.
         summary = hp.qc.summarize_table(sdata, "table", layer="counts", region="sample_a_labels")
