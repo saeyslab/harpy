@@ -1,5 +1,6 @@
 """hp.qc.summarize_table on dummy tables with CSR count matrices: in memory, lazy and backed."""
 
+import warnings
 from copy import deepcopy
 
 import dask.array as da
@@ -73,16 +74,19 @@ def _assert_summaries_equal(summary, expected):
         pd.testing.assert_frame_equal(getattr(summary, name), getattr(expected, name))
 
 
-def test_per_instance_holds_each_class_per_retained_instance_aligned_with_obs():
+def test_per_instance_holds_each_class_per_row_aligned_with_obs():
     sdata = _sdata()
     table = sdata.tables["counts"]
     assert table.X.nnz == np.count_nonzero(_X) + 1
     obs, uns = table.obs.copy(), deepcopy(dict(table.uns))
-    summary = summarize_table(sdata, "counts", obsm_keys=_OBSM_KEYS)
+    with warnings.catch_warnings():
+        # The missing share of cell_1 raises no warning.
+        warnings.simplefilter("error", RuntimeWarning)
+        summary = summarize_table(sdata, "counts", obsm_keys=_OBSM_KEYS)
     assert isinstance(summary, TableSummary)
     per_instance = summary.per_instance
-    # cell_1 has no points in any class read, so it is excluded.
-    assert list(per_instance.index) == ["cell_0", "cell_2", "cell_3", "cell_4", "cell_5"]
+    # Every row is an instance, also cell_1 without points in any class read.
+    assert list(per_instance.index) == list(obs.index)
     assert list(per_instance.columns) == [
         "region",
         "cell_ID",
@@ -96,45 +100,43 @@ def test_per_instance_holds_each_class_per_retained_instance_aligned_with_obs():
         "pct_negative_points",
         "pct_system_control_points",
     ]
-    pd.testing.assert_frame_equal(
-        per_instance[["region", "cell_ID"]], obs.loc[per_instance.index, ["region", "cell_ID"]]
-    )
-    retained = [0, 2, 3, 4, 5]
+    pd.testing.assert_frame_equal(per_instance[["region", "cell_ID"]], obs[["region", "cell_ID"]])
     totals = np.asarray(_X).sum(axis=1) + np.asarray(_NEGATIVE).sum(axis=1) + np.asarray(_SYSTEM_CONTROL).sum(axis=1)
+    with_points = totals > 0
     for label, dense in _CLASSES.items():
-        dense = np.asarray(dense)[retained]
+        dense = np.asarray(dense)
         assert per_instance[f"n_{label}_points"].dtype == np.uint64
         np.testing.assert_array_equal(per_instance[f"n_{label}_points"], dense.sum(axis=1))
         # The stored zero of cell_2 in X is not a detection.
         np.testing.assert_array_equal(per_instance[f"n_{label}_detected_features"], (dense > 0).sum(axis=1))
-        np.testing.assert_allclose(per_instance[f"pct_{label}_points"], 100 * dense.sum(axis=1) / totals[retained])
-    np.testing.assert_allclose(per_instance.filter(like="pct_").sum(axis=1), 100)
+        share = per_instance[f"pct_{label}_points"].to_numpy()
+        np.testing.assert_allclose(share[with_points], 100 * dense.sum(axis=1)[with_points] / totals[with_points])
+    # cell_1 has 0 points and 0 detected features in each class, and a missing share.
+    assert per_instance.loc["cell_1"].filter(like="pct_").isna().all()
+    np.testing.assert_allclose(per_instance.filter(like="pct_").loc[with_points].sum(axis=1), 100)
     # Nothing is written to the table.
     pd.testing.assert_frame_equal(table.obs, obs)
     assert table.uns.keys() == uns.keys()
 
 
-def test_the_matrices_read_decide_the_classes_and_the_population():
+def test_the_matrices_read_decide_the_classes_not_the_population():
     sdata = _sdata()
     alone = summarize_table(sdata, "counts")
     assert alone.feature_classes == ("x",)
-    # With one class there are no percentages; cell_1 and cell_4 have no points in X.
+    # With one class there are no shares; cell_1 and cell_4, without points in X, count as zeros.
     assert list(alone.per_instance.columns) == ["region", "cell_ID", "n_x_points", "n_x_detected_features"]
-    assert list(alone.per_instance.index) == ["cell_0", "cell_2", "cell_3", "cell_5"]
+    np.testing.assert_array_equal(alone.per_instance["n_x_points"], [10, 0, 5, 8, 0, 2])
 
-    # A class matrix adds the instances with points of that class only.
     summary = summarize_table(sdata, "counts", obsm_keys="system_control")
     assert summary.feature_classes == ("x", "system_control")
-    assert "cell_4" in summary.per_instance.index
-    population = summary.per_class[["n_total_instances", "n_retained_instances", "n_excluded_instances"]]
-    assert (population == [6, 5, 1]).all(axis=None)
-    assert summary.per_class["pct_excluded_instances"].tolist() == pytest.approx([100 / 6] * 2)
+    assert summary.per_class["n_instances"].tolist() == [6, 6]
+    assert alone.per_class["n_instances"].tolist() == [6]
 
 
 def test_a_table_without_x_is_summarized_from_its_obsm_matrices():
     summary = summarize_table(_sdata(_table(x=False)), "counts", obsm_keys=_OBSM_KEYS)
     assert summary.feature_classes == ("negative", "system_control")
-    assert list(summary.per_instance.index) == ["cell_0", "cell_2", "cell_3", "cell_4", "cell_5"]
+    np.testing.assert_array_equal(summary.per_instance["n_negative_points"], [1, 0, 0, 2, 0, 1])
 
 
 def _sdata_with_normalized_x():
@@ -156,8 +158,7 @@ def test_a_layer_is_read_in_place_of_x():
     assert summary.metadata.layer == "RawCounts"
     # The layer's label is its name in snake case, and X is not read as well.
     assert summary.feature_classes == ("raw_counts", "negative")
-    # cell_4 has points in neither class read, so the retained instances are cells 0, 2, 3 and 5.
-    np.testing.assert_array_equal(summary.per_instance["n_raw_counts_points"], [10, 5, 8, 2])
+    np.testing.assert_array_equal(summary.per_instance["n_raw_counts_points"], [10, 0, 5, 8, 0, 2])
 
 
 def test_coinciding_class_labels_raise():
@@ -168,18 +169,16 @@ def test_coinciding_class_labels_raise():
         summarize_table(_sdata(table), "counts", layer="Negative", obsm_keys=["negative"])
 
 
-def test_per_class_columns_follow_the_order_of_the_bin_summary():
+def test_per_class_columns_and_their_order():
     per_class = summarize_table(_sdata(), "counts", obsm_keys=_OBSM_KEYS).per_class
-    # The columns of SpatialBinSummary.per_class, instances in place of bins, then those only the table has.
+    # The columns of SpatialBinSummary.per_class, instances in place of bins and one population column in place
+    # of four, then those only the table has.
     assert list(per_class.columns) == [
         "feature_class",
-        "n_total_instances",
-        "n_retained_instances",
-        "n_excluded_instances",
-        "pct_excluded_instances",
+        "n_instances",
         "n_points",
-        "n_retained_instances_without_class",
-        "pct_retained_instances_without_class",
+        "n_instances_without_class",
+        "pct_instances_without_class",
         "mean_points_per_instance",
         "median_points_per_instance",
         "std_points_per_instance",
@@ -193,7 +192,7 @@ def test_per_class_columns_follow_the_order_of_the_bin_summary():
     assert per_class["n_points"].dtype == np.uint64
 
 
-def test_class_statistics_agree_with_the_retained_instances():
+def test_class_statistics_agree_with_every_row():
     summary = summarize_table(_sdata(), "counts", obsm_keys=_OBSM_KEYS)
     per_class = summary.per_class
     assert per_class["feature_class"].tolist() == ["x", "negative", "system_control"]
@@ -207,7 +206,8 @@ def test_class_statistics_agree_with_the_retained_instances():
             np.testing.assert_allclose(actual, expected)
         counts = summary.per_instance[f"n_{row.feature_class}_points"].to_numpy()
         assert row.n_points == counts.sum()
-        assert row.n_retained_instances_without_class == np.count_nonzero(counts == 0)
+        assert row.n_instances_without_class == np.count_nonzero(counts == 0)
+        assert row.pct_instances_without_class == pytest.approx(100 * np.count_nonzero(counts == 0) / 6)
     # The denominators of a class's points per panel feature, from per_class, as on the points side.
     assert summary.panel_feature_counts == {"x": 2, "negative": 4, "system_control": 5}
 
@@ -216,7 +216,7 @@ def test_the_denominator_follows_a_subset_of_x():
     table = _table()[:, ["GeneA"]].copy()
     summary = summarize_table(_sdata(table), "counts")
     assert summary.panel_feature_counts == {"x": 1}
-    np.testing.assert_array_equal(summary.per_instance["n_x_points"], [7, 5, 4])
+    np.testing.assert_array_equal(summary.per_instance["n_x_points"], [7, 0, 5, 4, 0, 0])
 
 
 def test_per_region_class_holds_the_class_statistics_within_each_region():
@@ -247,28 +247,25 @@ def test_metadata_records_the_inputs():
     assert summarize_table(_sdata(), "counts", region=["b"]).metadata.region == ("b",)
 
 
-def test_per_feature_columns_follow_the_order_of_the_points_summary():
+def test_per_feature_columns_and_their_order():
     per_feature = summarize_table(_sdata(), "counts", obsm_keys=_OBSM_KEYS).per_feature
-    # The columns of FeatureSpatialBinSummary.per_feature, instances in place of bins, with
-    # within_class_fraction of PointsSummary.per_feature after n_points.
+    # Like FeatureSpatialBinSummary.per_feature, instances in place of bins, with one population column in place of
+    # four and only the mean and SD; with within_class_fraction of PointsSummary.per_feature after n_points.
     assert list(per_feature.columns) == [
         "feature",
         "feature_class",
-        "n_total_instances",
-        "n_retained_instances",
-        "n_excluded_instances",
-        "pct_excluded_instances",
+        "n_instances",
         "n_points",
         "within_class_fraction",
-        "n_retained_instances_without_feature",
-        "pct_retained_instances_without_feature",
+        "n_instances_without_feature",
+        "pct_instances_without_feature",
         "mean_points_per_instance",
         "std_points_per_instance",
     ]
     assert per_feature["n_points"].dtype == np.uint64
 
 
-def test_feature_statistics_agree_with_the_retained_instances():
+def test_feature_statistics_agree_with_every_row():
     summary = summarize_table(_sdata(), "counts", obsm_keys=_OBSM_KEYS)
     per_feature = summary.per_feature
     # Every feature of each class read, in class and then column order, undetected ones included.
@@ -276,25 +273,22 @@ def test_feature_statistics_agree_with_the_retained_instances():
     assert per_feature["feature_class"].tolist() == [label for label, names in _FEATURE_NAMES.items() for _ in names]
     assert summary.feature_names == _FEATURE_NAMES
 
-    retained = [0, 2, 3, 4, 5]
     for label, dense in _CLASSES.items():
-        dense = np.asarray(dense)[retained]
+        dense = np.asarray(dense)
         rows = per_feature[per_feature["feature_class"] == label]
         np.testing.assert_array_equal(rows["n_points"], dense.sum(axis=0))
         np.testing.assert_allclose(rows["within_class_fraction"], dense.sum(axis=0) / dense.sum())
         # The stored zero of cell_2 for GeneB is not a detection.
         without = (dense == 0).sum(axis=0)
-        np.testing.assert_array_equal(rows["n_retained_instances_without_feature"], without)
-        np.testing.assert_allclose(rows["pct_retained_instances_without_feature"], 100 * without / len(retained))
+        np.testing.assert_array_equal(rows["n_instances_without_feature"], without)
+        np.testing.assert_allclose(rows["pct_instances_without_feature"], 100 * without / len(dense))
         np.testing.assert_allclose(rows["mean_points_per_instance"], dense.mean(axis=0))
         np.testing.assert_allclose(rows["std_points_per_instance"], dense.std(axis=0, ddof=1))
     # A class's feature points add up to its points in per_class.
     class_points = per_feature.groupby("feature_class", observed=True)["n_points"].sum()
     np.testing.assert_array_equal(class_points.to_numpy(), summary.per_class["n_points"].to_numpy())
-    # Every feature holds the population of per_class: 6 rows, of which cell_1 is excluded.
-    population = ["n_total_instances", "n_retained_instances", "n_excluded_instances", "pct_excluded_instances"]
-    assert (per_feature[population] == summary.per_class[population].iloc[0]).all(axis=None)
-    assert per_feature[population].iloc[0].tolist() == pytest.approx([6, 5, 1, 100 / 6])
+    # Every feature holds the population of per_class: the 6 rows.
+    assert (per_feature["n_instances"] == 6).all()
 
 
 def test_per_region_feature_holds_the_feature_statistics_within_each_region():
