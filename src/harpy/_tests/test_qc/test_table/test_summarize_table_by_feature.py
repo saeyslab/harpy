@@ -22,8 +22,6 @@ from harpy._tests.test_qc.test_table.test_summarize_table import (
 from harpy._tests.test_table.test_io.test_updates import _CountComputes
 from harpy.qc import FeatureTableSummary, summarize_table, summarize_table_by_feature
 
-# The retained instances of a summary of the three classes: cell_1 has no points at all.
-_RETAINED = [0, 2, 3, 4, 5]
 # Requested in another order than the summary's: x, negative, then system_control.
 _REQUESTED = ["SystemControl01", "Negative04", "GeneA"]
 _FEATURES = ["GeneA", "Negative04", "SystemControl01"]
@@ -49,7 +47,7 @@ def _assert_feature_summaries_equal(result, expected):
         pd.testing.assert_frame_equal(getattr(result, name), getattr(expected, name))
 
 
-def test_per_instance_holds_each_requested_feature_per_retained_instance():
+def test_per_instance_holds_each_requested_feature_per_instance():
     summary, result = _summaries()
     assert isinstance(result, FeatureTableSummary)
     assert result.metadata == summary.metadata
@@ -57,25 +55,27 @@ def test_per_instance_holds_each_requested_feature_per_retained_instance():
     assert list(per_instance.columns) == ["region", "cell_ID", "feature", "n_points"]
     # The summary's order of classes and columns, not the request order.
     assert per_instance["feature"].cat.categories.tolist() == _FEATURES
-    assert per_instance["feature"].tolist() == [name for name in _FEATURES for _ in _RETAINED]
+    n_instances = len(summary.per_instance)
+    assert per_instance["feature"].tolist() == [name for name in _FEATURES for _ in range(n_instances)]
     assert per_instance["n_points"].dtype == np.uint64
-    np.testing.assert_array_equal(per_instance["n_points"], np.concatenate([column[_RETAINED] for column in _COLUMNS]))
+    np.testing.assert_array_equal(per_instance["n_points"], np.concatenate(_COLUMNS))
     identity = summary.per_instance[["region", "cell_ID"]].reset_index(drop=True)
     for position in range(len(_FEATURES)):
-        rows = per_instance.iloc[position * len(_RETAINED) : (position + 1) * len(_RETAINED)]
+        rows = per_instance.iloc[position * n_instances : (position + 1) * n_instances]
         pd.testing.assert_frame_equal(rows[["region", "cell_ID"]].reset_index(drop=True), identity)
 
 
-def test_an_instance_retained_for_another_class_and_an_undetected_feature_keep_their_zeros():
+def test_instances_without_the_feature_and_an_undetected_feature_keep_their_zeros():
     summary = summarize_table(_sdata(), "counts", obsm_keys=_OBSM_KEYS)
     result = summarize_table_by_feature(_sdata(), summary=summary, features=["GeneA", "Negative03"])
     per_instance = result.per_instance.set_index(["feature", "cell_ID", "region"])["n_points"]
-    # cell_4, in region b, is retained for its system_control points: it holds no GeneA.
+    # cell_1, in region a, has no points at all; cell_4, in region b, has system_control points only.
+    assert per_instance.loc[("GeneA", 2, "a")] == 0
     assert per_instance.loc[("GeneA", 2, "b")] == 0
     negative03 = result.per_feature.set_index("feature").loc["Negative03"]
     assert negative03["n_points"] == 0
-    assert negative03["n_retained_instances_without_feature"] == len(_RETAINED)
-    assert negative03["pct_retained_instances_without_feature"] == 100
+    assert negative03["n_instances_without_feature"] == 6
+    assert negative03["pct_instances_without_feature"] == 100
     assert negative03["mean_points_per_instance"] == negative03["median_points_per_instance"] == 0
 
 
@@ -85,13 +85,10 @@ def test_per_feature_statistics_agree_with_the_values_and_the_table_summary():
     assert list(per_feature.columns) == [
         "feature",
         "feature_class",
-        "n_total_instances",
-        "n_retained_instances",
-        "n_excluded_instances",
-        "pct_excluded_instances",
+        "n_instances",
         "n_points",
-        "n_retained_instances_without_feature",
-        "pct_retained_instances_without_feature",
+        "n_instances_without_feature",
+        "pct_instances_without_feature",
         "mean_points_per_instance",
         "median_points_per_instance",
         "std_points_per_instance",
@@ -99,14 +96,12 @@ def test_per_feature_statistics_agree_with_the_values_and_the_table_summary():
     ]
     assert per_feature["feature"].tolist() == _FEATURES
     assert per_feature["feature_class"].tolist() == ["x", "negative", "system_control"]
-    population = ["n_total_instances", "n_retained_instances", "n_excluded_instances", "pct_excluded_instances"]
-    for column in population:
-        assert (per_feature[column] == summary.per_class[column].iloc[0]).all()
-    for name, column in zip(_FEATURES, _COLUMNS, strict=True):
-        values = column[_RETAINED]
+    # The population of the table summary: every row of the selected regions.
+    assert (per_feature["n_instances"] == summary.per_class["n_instances"].iloc[0]).all()
+    for name, values in zip(_FEATURES, _COLUMNS, strict=True):
         row = per_feature.set_index("feature").loc[name]
         assert row["n_points"] == values.sum()
-        assert row["n_retained_instances_without_feature"] == np.count_nonzero(values == 0)
+        assert row["n_instances_without_feature"] == np.count_nonzero(values == 0)
         assert row["mean_points_per_instance"] == pytest.approx(values.mean())
         assert row["median_points_per_instance"] == pytest.approx(np.median(values))
         assert row["std_points_per_instance"] == pytest.approx(values.std(ddof=1))
@@ -123,13 +118,11 @@ def test_per_region_feature_holds_the_statistics_within_each_region():
     assert per_region_feature.columns[0] == "region"
     assert per_region_feature["region"].cat.categories.tolist() == ["a", "b"]
     regions = np.asarray(["a"] * 3 + ["b"] * 3)
-    for region, n_total in [("a", 3), ("b", 3)]:
-        retained = [row for row in _RETAINED if regions[row] == region]
+    for region in ["a", "b"]:
         rows = per_region_feature[per_region_feature["region"] == region].set_index("feature")
-        assert (rows["n_total_instances"] == n_total).all()
-        assert (rows["n_retained_instances"] == len(retained)).all()
+        assert (rows["n_instances"] == 3).all()
         for name, column in zip(_FEATURES, _COLUMNS, strict=True):
-            values = column[retained]
+            values = column[regions == region]
             assert rows.loc[name, "n_points"] == values.sum()
             assert rows.loc[name, "median_points_per_instance"] == pytest.approx(np.median(values))
     pd.testing.assert_series_equal(
@@ -238,7 +231,7 @@ def test_instance_histogram_by_feature_plots_one_feature_annotated_with_its_stat
     calls = _capture(monkeypatch, histogram_module, "_plot_histogram")
     ax = hp.qc.instance_histogram_by_feature(result, feature="GeneA")
     (values,), options = calls[0]
-    np.testing.assert_array_equal(values, np.asarray(_X)[_RETAINED, 0])
+    np.testing.assert_array_equal(values, np.asarray(_X)[:, 0])
     row = result.per_feature.set_index("feature").loc["GeneA"]
     assert options["median"] == pytest.approx(row["median_points_per_instance"])
     assert options["std"] == pytest.approx(row["std_points_per_instance"])
