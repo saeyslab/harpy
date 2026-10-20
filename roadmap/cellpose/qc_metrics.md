@@ -50,6 +50,10 @@ in place of `summarize_table(sdata, table_name, …)` and
   in `sdata.attrs`. The table APIs then all take the table itself, as
   `hp.tb.pl` (Slice 11l) and `hp.tb.pp` do, and as scanpy does, and
   `calculate_qc_metrics` calls `summarize_table` directly.
+- **The table is checked to be an `AnnData`,** in both functions, before
+  anything else: another type, such as a `SpatialData` object passed by the
+  former habit, raises a `TypeError` that asks for the table, such as
+  `sdata.tables[name]`, instead of an `AttributeError` from inside.
 - **The SpatialData annotation stays required,** for the regions and the
   identity columns: a table without `uns["spatialdata_attrs"]` raises, as
   now. The annotated elements need not be present, as now.
@@ -62,7 +66,8 @@ in place of `summarize_table(sdata, table_name, …)` and
   their region and instance id. They catch another table as well as a changed
   one.
 - **Messages** name the matrix, such as `adata.X` or `adata.obsm['negative']`,
-  without the table's name.
+  without the table's name, so that the private helpers no longer take
+  `table_name`, which they passed on for the messages only.
 - **No backward compatibility:** the signatures change without a
   deprecation, as the functions are young.
 - **Updates:** the docstrings and examples of both functions, of
@@ -72,10 +77,12 @@ in place of `summarize_table(sdata, table_name, …)` and
   signatures, the metadata and "Only the table".
 
 **Tests,** in `src/harpy/_tests/test_qc/test_table/`: the fixtures pass the
-table instead of a `SpatialData` object; a table outside any `SpatialData`
-object is summarized; the metadata has no `table_name`; and the tests of a
-table changed since the summary also cover `summarize_table_by_feature` on
-another table.
+table instead of a `SpatialData` object, so that every test summarizes a table
+outside any `SpatialData` object; the lazy and backed tests still read the
+store with `hp.io.read_zarr` and pass its table; the metadata has no
+`table_name`; a `SpatialData` object passed to either function raises the
+`TypeError`; and the tests of a table changed since the summary also cover
+`summarize_table_by_feature` on another table.
 
 ## Step 2: `hp.tb.pp.calculate_qc_metrics`
 
