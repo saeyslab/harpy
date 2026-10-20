@@ -80,11 +80,13 @@ optional Slice 12 remains:
       and `TableSummary`, with plotting integration through
       `hp.qc.instance_histogram` and `hp.qc.instance_scatter` — implemented,
       step 1 redone from CSR count matrices in two parts, 1a (matrices and
-      classes) and 1b (features);
+      classes) and 1b (features); amendment planned: the summaries keep every
+      row of the selected regions, zeros included;
     - **11k:** feature summaries of a table for selected features through
       `hp.qc.summarize_table_by_feature` and `FeatureTableSummary`, with
       `instance_histogram_by_feature`, the counterparts of
-      `summarize_points_by_feature` — implemented;
+      `summarize_points_by_feature` — implemented; inherits the planned
+      population amendment of 11j;
     - **11l:** move the plots of table columns to `hp.tb.pl.histogram`,
       `histograms` and `scatter`, on an `AnnData` table as `scanpy.pl` does,
       selecting regions with `region` as `summarize_table` does, and deprecate
@@ -8903,7 +8905,8 @@ keys before assignment.
 ## Slice 11j: table-level summary computation and plotting integration
 
 **Status: implemented, step 1 redone from the count matrices in two parts, 1a
-and 1b.**
+and 1b; an amendment that keeps every row of the selected regions is planned
+(see "Amendment: every row of the selected regions" below).**
 
 Implement a read-only `hp.qc.summarize_table` computation API and a
 `TableSummary` result, followed by table-level QC plots that take the result.
@@ -9533,8 +9536,8 @@ the computed `TableSummary`, as the points side passes its result to
 hp.qc.instance_histogram(table_summary, feature_class="x", measure="pct_points")
 hp.qc.instance_scatter(
     table_summary,
-    x=("negative", "points"),
-    y=("system_control", "points"),
+    x=("x", "points"),
+    y=("negative", "points"),
     normalization="per_panel_feature",
 )
 ```
@@ -9746,9 +9749,112 @@ Focused tests should establish that:
   scatter axis by its own class's; it raises for a measure other than
   `"points"`, on the scatter unless both axes use `"points"`.
 
+### Amendment: every row of the selected regions
+
+**Status: planned; amends the population of this slice and of Slice 11k as
+implemented.**
+
+The summaries keep every row of the selected regions, zeros included, instead
+of retaining only the rows with at least one point across the classes read.
+As implemented, a row without points in any class read is excluded from
+`per_instance` and from every statistic. Which rows that is depends on the
+matrices passed: with `X` alone, a cell with only control points is excluded;
+with all class matrices of a table from `aggregate_points`, none is. A mean
+taken over the table, for example over `.obs` after `add_table_summary`
+([qc_metrics.md](qc_metrics.md)), then differs from the summary's whenever
+rows are excluded, and the population has to be reasoned about with every
+call.
+
+- **One rule:** the statistics are taken over the table's rows of the
+  selected regions, zeros included. The summary describes the table as it is,
+  as it already does for the denominators, and a statistic over the table's
+  rows equals the summary's, whichever matrices were passed.
+- **`aggregate_points` is unchanged.** Its row universe stays the instances
+  with at least one assigned point in some panel class (Slice 6): adding
+  segmented instances without points would need every label ID of the
+  raster, and would not remove the difference, as the summary would then
+  exclude more rows. A table from `aggregate_points`, summarized with all its
+  class matrices, has the same statistics as before; only a summary of part
+  of its matrices changes, such as `X` alone, where a cell with only control
+  points now counts as zeros in the class of `X`. Dropping such cells is a
+  filtering choice of the caller, as Slice 6 already leaves it.
+- **Why the points side keeps retaining bins:** `summarize_points` keeps the
+  bins with points across its selected classes, as a bin grid also covers
+  empty space, such as the area outside the tissue, which would otherwise
+  dominate the statistics. A table's rows are objects, not a grid: an empty
+  row is a real instance, not background area.
+- **Population columns:** `n_total_instances`, `n_retained_instances`,
+  `n_excluded_instances` and `pct_excluded_instances` become one,
+  `n_instances`, the table's rows of the selected regions; in `per_class` and
+  `per_region_class`, `n_retained_instances_without_class` and
+  `pct_retained_instances_without_class` become `n_instances_without_class`
+  and `pct_instances_without_class`; in `per_feature` and `per_region_feature`,
+  and in those of `FeatureTableSummary` (Slice 11k),
+  `n_retained_instances_without_feature` and
+  `pct_retained_instances_without_feature` become `n_instances_without_feature`
+  and `pct_instances_without_feature`.
+- **The scanpy correspondence of `per_feature` becomes exact,** as scanpy
+  also counts over every row of `X` or a layer: `n_points`,
+  `mean_points_per_instance` and `pct_instances_without_feature` equal
+  `total_counts`, `mean_counts` and `pct_dropout_by_counts`, and
+  `n_cells_by_counts` is `n_instances` − `n_instances_without_feature`, for a
+  summary of every region.
+- **`per_instance`** has one row per row of the selected regions. For a row
+  without points in any class read, `pct_<class>_points` is missing (NaN), as
+  0 / 0 has no value, computed without a warning; its points and detected
+  features are 0.
+- **The instance plots** draw every row; with `measure="pct_points"`,
+  `instance_histogram` and `instance_scatter` skip the missing shares, and say
+  so in their docstrings. Their docstrings speak of the instances of the
+  summary, not of retained instances.
+- **The computation gets simpler:** the positive-total mask goes away; only
+  the region mask selects rows, before the blockwise pass as today.
+- **`summarize_table_by_feature`** inherits the population: its `per_instance`
+  has one row per row of the selected regions and requested feature, and its
+  population columns are those of the summary.
+- **A control-only population,** or any other, is then a subset of the table
+  passed to `summarize_table`, as for every observation selection; the note
+  "No control-only population" above reduces to that.
+- **Wording:** statistics are per instance, a row of the table, not per
+  transcript-positive instance, in the docstrings and in this slice and Slice
+  11k.
+- **No backward compatibility:** the renamed columns replace the former ones,
+  without aliases.
+
+**Implementation steps,** each tested on its own:
+
+1. `summarize_table` and `TableSummary`
+   (`src/harpy/qc/table/_summarize_table.py`): the population of every row of
+   the selected regions, the renamed columns, the missing shares, and the
+   docstrings of `TableSummary` and `summarize_table`, the "Population" note
+   included; tests in `src/harpy/_tests/test_qc/test_table/test_summarize_table.py`.
+2. `summarize_table_by_feature` and `FeatureTableSummary`
+   (`src/harpy/qc/table/_summarize_table_by_feature.py`): the inherited
+   population and the renamed columns, with their docstrings; tests in
+   `test_summarize_table_by_feature.py`.
+3. The instance plots (`src/harpy/qc/_histogram.py`, `src/harpy/qc/_scatter.py`
+   and `src/harpy/qc/table/_instance_measures.py`): the missing shares skipped,
+   and their docstrings; tests in `test_instance_plots.py`.
+4. Roadmap: the population, the column tables, the per-feature scanpy
+   correspondence, the blockwise pass and the verification of this slice and
+   Slice 11k. [qc_metrics.md](qc_metrics.md) already describes
+   `add_table_summary` on the amended population.
+
+**Verification:** `per_instance` has one row per row of the selected regions,
+also with `X` alone on a table whose cells with only control points have an
+all-zero row in `X`; such a row has 0 points and 0 detected features and a
+missing share, without a warning; the statistics of `per_class`,
+`per_region_class`, `per_feature` and `per_region_feature` equal those over
+every row of the selected regions, so a mean over the table's rows equals the
+summary's; a table from `aggregate_points` summarized with all its class
+matrices gives the same values as before; the population columns are
+`n_instances` and the `…_instances_without_…` columns; `FeatureTableSummary`
+inherits them; and the instance plots skip the missing shares.
+
 ## Slice 11k: feature summaries of a table for selected features
 
-**Status: implemented.**
+**Status: implemented; the amendment of Slice 11j, "every row of the selected
+regions", also changes its population and columns (planned).**
 
 The table-side counterpart of `summarize_points_by_feature`, so that tables and
 points are summarized with the same two levels: classes first, then explicitly
