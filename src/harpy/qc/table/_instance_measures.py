@@ -34,8 +34,8 @@ def _instance_values(
 ) -> tuple[pd.Series, str]:
     """Return one class's measure per instance, normalized if requested, and its axis label.
 
-    The values keep the missing shares of ``"pct_points"``, for instances
-    without points: the plots drop them.
+    With ``"pct_points"``, the values are missing (NaN) for instances without
+    points in any class read.
 
     Raises
     ------
