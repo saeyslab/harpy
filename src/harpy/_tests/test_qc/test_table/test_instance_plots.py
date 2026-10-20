@@ -58,7 +58,9 @@ def test_instance_histogram_plots_one_class_measure(monkeypatch, summary, featur
     ax = hp.qc.instance_histogram(summary, feature_class=feature_class, measure=measure)
 
     (values,), options = calls[0]
-    pd.testing.assert_series_equal(values, summary.per_instance[column])
+    # The share of cell_1, without points, is missing and skipped.
+    pd.testing.assert_series_equal(values, summary.per_instance[column].dropna())
+    assert len(values) == (5 if measure == "pct_points" else 6)
     # The median and SD of the plotted values, with the conventions of the summaries.
     assert options["median"] == pytest.approx(np.median(values))
     assert options["std"] == pytest.approx(values.astype(float).std(ddof=1))
@@ -94,10 +96,10 @@ def test_instance_histogram_counts_or_percentages_of_instances(summary):
     assert ax.get_ylabel() == "Percentage of instances (%)"
 
 
-def test_instance_histogram_of_no_retained_instances_shows_an_empty_state(summary):
+def test_instance_histogram_of_no_instances_shows_an_empty_state(summary):
     empty = replace(summary, per_instance=summary.per_instance.iloc[0:0])
     ax = hp.qc.instance_histogram(empty, feature_class="x")
-    assert [text.get_text() for text in ax.texts] == ["No retained instances"]
+    assert [text.get_text() for text in ax.texts] == ["No instances to plot"]
 
 
 @pytest.mark.parametrize(
@@ -144,6 +146,17 @@ def test_instance_scatter_plots_two_class_measures(monkeypatch, summary):
     assert (ax.get_xlabel(), ax.get_ylabel()) == ("negative points per instance", "x detected features per instance")
 
 
+def test_instance_scatter_drops_an_instance_whose_share_is_missing_on_either_axis(monkeypatch, summary):
+    calls = _capture(monkeypatch, scatter_module, "_plot_scatter")
+    hp.qc.instance_scatter(summary, x=("x", "pct_points"), y=("negative", "points"))
+
+    (x_values, y_values), _ = calls[0]
+    # cell_1 has no points: its share is missing, so it is dropped, although its 0 negative points are a value.
+    with_share = summary.per_instance.index.drop("cell_1")
+    pd.testing.assert_series_equal(x_values, summary.per_instance.loc[with_share, "pct_x_points"])
+    pd.testing.assert_series_equal(y_values, summary.per_instance.loc[with_share, "n_negative_points"])
+
+
 def test_instance_scatter_normalizes_each_axis_by_its_own_class(monkeypatch, summary):
     calls = _capture(monkeypatch, scatter_module, "_plot_scatter")
     hp.qc.instance_scatter(
@@ -173,7 +186,15 @@ def test_instance_scatter_rejects_invalid_axes(summary, kwargs, message):
         hp.qc.instance_scatter(summary, **kwargs)
 
 
-def test_instance_scatter_of_no_retained_instances_raises(summary):
-    empty = replace(summary, per_instance=summary.per_instance.iloc[0:0])
-    with pytest.raises(ValueError, match="retains no instances"):
-        hp.qc.instance_scatter(empty, x=("x", "points"), y=("negative", "points"))
+@pytest.mark.parametrize(
+    ("rows", "x"),
+    [
+        (slice(0, 0), ("x", "points")),
+        # cell_1 alone: an instance, but without a share to plot.
+        (slice(1, 2), ("x", "pct_points")),
+    ],
+)
+def test_instance_scatter_of_no_instances_to_plot_raises(summary, rows, x):
+    subset = replace(summary, per_instance=summary.per_instance.iloc[rows])
+    with pytest.raises(ValueError, match="No instances to plot"):
+        hp.qc.instance_scatter(subset, x=x, y=("negative", "points"))
