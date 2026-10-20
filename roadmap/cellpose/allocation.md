@@ -9806,7 +9806,14 @@ call.
 - **The instance plots** draw every row; with `measure="pct_points"`,
   `instance_histogram` and `instance_scatter` skip the missing shares, and say
   so in their docstrings. Their docstrings speak of the instances of the
-  summary, not of retained instances.
+  summary, not of retained instances. As the shared renderers expect their
+  callers to remove missing values:
+  - `instance_scatter` drops a row when either axis is missing;
+  - with `stat="percent"`, the denominator of `instance_histogram` is the
+    plotted values, the instances with a share;
+  - with nothing left to plot, `instance_histogram` shows "No instances" and
+    `instance_scatter` raises "No instances to plot", checked after the
+    missing values are dropped.
 - **The computation gets simpler:** the positive-total mask goes away; only
   the region mask selects rows, before the blockwise pass as today.
 - **`summarize_table_by_feature`** inherits the population: its `per_instance`
