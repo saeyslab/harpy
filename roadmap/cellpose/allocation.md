@@ -9811,9 +9811,10 @@ call.
   - `instance_scatter` drops a row when either axis is missing;
   - with `stat="percent"`, the denominator of `instance_histogram` is the
     plotted values, the instances with a share;
-  - with nothing left to plot, `instance_histogram` shows "No instances" and
-    `instance_scatter` raises "No instances to plot", checked after the
-    missing values are dropped.
+  - with nothing left to plot, `instance_histogram` shows "No instances to
+    plot" and `instance_scatter` raises it, checked after the missing values
+    are dropped: with `"pct_points"`, a summary can have instances but no
+    share to plot.
 - **The computation gets simpler:** the positive-total mask goes away; only
   the region mask selects rows, before the blockwise pass as today.
 - **`summarize_table_by_feature`** inherits the population: its `per_instance`
