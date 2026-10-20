@@ -18,8 +18,8 @@ from spatialdata.models import TableModel
 from harpy.qc._summary_schema import (
     _FEATURE_CLASS_KEY,
     _FEATURE_KEY,
+    _N_INSTANCES_KEY,
     _N_POINTS_KEY,
-    _N_TOTAL_INSTANCES_KEY,
     _REGION_COLUMN_KEY,
 )
 from harpy.qc._summary_statistics import _points_statistics
@@ -28,7 +28,6 @@ from harpy.qc.table._summarize_table import (
     _are_counts,
     _collect_class_matrices,
     _FeatureClassMatrix,
-    _population,
     _sliced_blocks,
     _with_region_categories,
 )
@@ -204,7 +203,7 @@ def summarize_table_by_feature(
     # Feature by feature, each in table row order.
     per_instance[_N_POINTS_KEY] = values.T.reshape(-1)
 
-    n_total = int(summary.per_class[_N_TOTAL_INSTANCES_KEY].iloc[0])
+    n_total = int(summary.per_class[_N_INSTANCES_KEY].iloc[0])
     per_feature = _feature_statistics(
         values, n_total=n_total, features=names, feature_labels=feature_labels, labels=labels
     )
@@ -213,7 +212,7 @@ def summarize_table_by_feature(
     per_region_class = summary.per_region_class
     region_frames = []
     for code, name in enumerate(regions):
-        n_total_in_region = per_region_class.loc[per_region_class[_REGION_COLUMN_KEY] == name, _N_TOTAL_INSTANCES_KEY]
+        n_total_in_region = per_region_class.loc[per_region_class[_REGION_COLUMN_KEY] == name, _N_INSTANCES_KEY]
         frame = _feature_statistics(
             values[region_codes == code],
             n_total=int(n_total_in_region.iloc[0]),
@@ -429,7 +428,7 @@ def _feature_statistics(
             {
                 _FEATURE_KEY: name,
                 _FEATURE_CLASS_KEY: label,
-                **_population(n_total, n_retained),
+                _N_INSTANCES_KEY: n_total,
                 _N_POINTS_KEY: counts.sum(dtype=np.uint64),
                 "n_retained_instances_without_feature": n_zero,
                 "pct_retained_instances_without_feature": 100 * n_zero / n_retained if n_retained else np.nan,
