@@ -26,8 +26,8 @@ from harpy.qc._summary_schema import (
     _N_CLASS_DETECTED_FEATURES_TEMPLATE,
     _N_CLASS_POINTS_TEMPLATE,
     _N_FEATURES_KEY,
+    _N_INSTANCES_KEY,
     _N_POINTS_KEY,
-    _N_TOTAL_INSTANCES_KEY,
     _PCT_CLASS_POINTS_TEMPLATE,
     _REGION_COLUMN_KEY,
 )
@@ -59,8 +59,9 @@ class TableSummary:
         One :class:`TableSummaryMetadata` record: the table, the selected
         regions and the matrices read.
     per_instance
-        One row per retained instance, indexed by the table's ``.obs`` index.
-        Wide, one column per class, to stay aligned with ``.obs``. Columns, in
+        One row per row of the selected regions, indexed by the table's
+        ``.obs`` index. Wide, one column per class, to stay aligned with
+        ``.obs``. Columns, in
         this order, each measure for every class in the order of
         :attr:`feature_classes`:
 
@@ -71,11 +72,13 @@ class TableSummary:
           one point in the instance. Spatial bins have no counterpart, as a
           distinct count of features per bin is expensive;
         - ``pct_<class>_points``, with two classes or more: 100 times the
-          class's points / the instance's points across the classes read. The
-          share is not corrected for panel size: a class with more features
-          collects more points, also from background. Compare it across
-          instances or samples of the same panel, or compare classes by their
-          points per feature, with ``n_features`` of ``per_class``.
+          class's points / the instance's points across the classes read;
+          missing (NaN) for an instance without points in any class read, as
+          0 / 0 has no value. The share is not corrected for panel size: a
+          class with more features collects more points, also from
+          background. Compare it across instances or samples of the same
+          panel, or compare classes by their points per feature, with
+          ``n_features`` of ``per_class``.
 
         How the names arise: the class label is the name of the matrix read::
 
@@ -98,17 +101,14 @@ class TableSummary:
         classes read.
     per_class
         One row per class (categorical ``feature_class``), pooled over the
-        selected regions. Columns, in this order: ``n_total_instances`` counts
-        the table's rows of the selected regions, ``n_retained_instances`` those with at
-        least one point across the classes read, ``n_excluded_instances`` the
-        others, and ``pct_excluded_instances`` is 100 times excluded / total;
-        these population counts are the same for every class. ``n_points``
-        (uint64) is the class's points over the retained instances;
-        ``n_retained_instances_without_class`` counts retained instances with
-        zero points of the class, and ``pct_retained_instances_without_class``
-        is 100 times that count / retained. ``mean_points_per_instance``,
-        ``median_…``, ``std_…`` and ``p95_…`` describe the class's points over
-        the retained instances, zeros included, and
+        selected regions. Columns, in this order: ``n_instances`` counts the
+        table's rows of the selected regions, the same for every class.
+        ``n_points`` (uint64) is the class's points over these instances;
+        ``n_instances_without_class`` counts the instances with zero points of
+        the class, and ``pct_instances_without_class`` is 100 times that count /
+        ``n_instances``. ``mean_points_per_instance``, ``median_…``, ``std_…``
+        and ``p95_…`` describe the class's points over the instances, zeros
+        included, and
         ``mean_detected_features_per_instance``, ``median_…``, ``std_…`` and
         ``p95_…`` its detected features. Last, ``n_features`` is the class's
         number of features in the matrices read. SD uses ``ddof=1`` and is NaN
@@ -123,30 +123,28 @@ class TableSummary:
         One row per feature of each class read, features without points
         included, in the order of :attr:`feature_classes` and then of each
         matrix's columns, pooled over the selected regions. Its population is
-        the retained instances, zeros included. Columns, in this order:
+        that of ``per_class``, zeros included. Columns, in this order:
         ``feature``, the feature's name: from ``var_names`` for ``X`` or a
         layer, and for an ``.obsm`` matrix from its registered
         ``feature_columns`` or the names passed; ``feature_class``
-        (categorical), the label of its matrix; the population columns of
-        ``per_class``, from ``n_total_instances`` to
-        ``pct_excluded_instances``, the same for every feature; ``n_points``
-        (uint64), the feature's points; ``within_class_fraction``, ``n_points`` / the class's
-        points, NaN when the class has none;
-        ``n_retained_instances_without_feature`` and
-        ``pct_retained_instances_without_feature``, the retained instances with
-        zero points of the feature, and 100 times that count / retained; and
-        ``mean_points_per_instance`` and ``std_points_per_instance``, the
-        feature's points per retained instance, SD with ``ddof=1`` and NaN for
-        fewer than two instances. Compared with the ``var`` columns of
-        :func:`scanpy.pp.calculate_qc_metrics`, which uses all rows of ``X`` or
-        a layer::
+        (categorical), the label of its matrix; ``n_instances``, the
+        population column of ``per_class``, the same for every feature;
+        ``n_points`` (uint64), the feature's points; ``within_class_fraction``,
+        ``n_points`` / the class's points, NaN when the class has none;
+        ``n_instances_without_feature`` and ``pct_instances_without_feature``,
+        the instances with zero points of the feature, and 100 times that
+        count / ``n_instances``; and ``mean_points_per_instance`` and
+        ``std_points_per_instance``, the feature's points per instance, SD with
+        ``ddof=1`` and NaN for fewer than two instances. Compared with the
+        ``var`` columns of :func:`scanpy.pp.calculate_qc_metrics`, which also
+        counts over every row of ``X`` or a layer, so that the values agree for
+        a summary of every region::
 
-            this summary                              scanpy
-            n_points                                  total_counts
-            mean_points_per_instance                  mean_counts
-            pct_retained_instances_without_feature    pct_dropout_by_counts
-            n_retained_instances - n_retained_instances_without_feature
-                                                      n_cells_by_counts
+            this summary                                 scanpy
+            n_points                                     total_counts
+            mean_points_per_instance                     mean_counts
+            pct_instances_without_feature                pct_dropout_by_counts
+            n_instances - n_instances_without_feature    n_cells_by_counts
 
         Unlike the ``per_feature`` of :class:`~harpy.qc.PointsSummary`, every
         feature has statistics per instance: they come from the pass that
@@ -312,13 +310,13 @@ def summarize_table(
 
     Notes
     -----
-    **Population.** Within the selected regions, an instance is retained when it
-    has at least one point across the classes read, as
-    :func:`harpy.qc.summarize_points` retains bins. Zeros of an individual class
-    within that population are kept, so the population depends on the matrices
-    read: ``X`` alone retains the instances with points in ``X``, and class
-    matrices add the instances with points of those classes only. The counts
-    describe only the table's rows: the function does not reconstruct
+    **Population.** Every row of the selected regions is an instance of the
+    summary, zeros included, whichever matrices are read: a row without points
+    in any class read has 0 points and 0 detected features, and a missing
+    share. :func:`harpy.qc.summarize_points` keeps only the bins with points
+    instead, as a bin grid also covers empty space, while a row of the table is
+    an instance. To summarize part of the rows, subset the table first. The
+    counts describe only the table's rows: the function does not reconstruct
     instances absent from the table, nor include points that were not assigned
     to an instance.
 
@@ -337,17 +335,33 @@ def summarize_table(
 
     Examples
     --------
+    From a class-aware aggregation to the instance plots:
+
     .. code-block:: python
 
-        summary = hp.qc.summarize_table(
-            sdata, "table_transcriptomics", obsm_keys=["negative", "system_control"]
+        sdata = hp.tb.aggregate_points(
+            sdata,
+            labels_name="labels",
+            points_name="transcripts",
+            output_table_name="table",
+            to_coordinate_system="global",
+            expression_class="Endogenous",
         )
+        summary = hp.qc.summarize_table(sdata, "table", obsm_keys=["negative", "system_control"])
         summary.per_class  # one row per class: x, negative and system_control
 
-        # The raw counts of a normalized table, in one region.
-        summary = hp.qc.summarize_table(
-            sdata, "table_transcriptomics", layer="counts", region="sample_a_labels"
+        # Each instance's share of its points in X, the expression class.
+        hp.qc.instance_histogram(summary, feature_class="x", measure="pct_points")
+        # Signal against background: points per gene against points per negative probe.
+        hp.qc.instance_scatter(
+            summary,
+            x=("x", "points"),
+            y=("negative", "points"),
+            normalization="per_panel_feature",
         )
+
+        # The raw counts of a normalized table, in one region.
+        summary = hp.qc.summarize_table(sdata, "table", layer="counts", region="sample_a_labels")
     """
     if table_name not in sdata.tables:
         raise ValueError(f"Table {table_name!r} is not in sdata; available tables: {sorted(sdata.tables)}.")
@@ -392,23 +406,22 @@ def summarize_table(
     points = {label: row_sums.sums for label, row_sums in rows.items()}
     detected = {label: row_sums.positives for label, row_sums in rows.items()}
 
-    totals = np.zeros(len(positions), dtype=np.uint64)
+    per_instance = obs.iloc[positions][[region_key, instance_key]].copy()
     for label in labels:
-        totals += points[label]
-    retained = totals > 0
-
-    per_instance = obs.iloc[positions[retained]][[region_key, instance_key]].copy()
+        per_instance[_N_CLASS_POINTS_TEMPLATE.format(label=label)] = points[label]
     for label in labels:
-        per_instance[_N_CLASS_POINTS_TEMPLATE.format(label=label)] = points[label][retained]
-    for label in labels:
-        per_instance[_N_CLASS_DETECTED_FEATURES_TEMPLATE.format(label=label)] = detected[label][retained]
+        per_instance[_N_CLASS_DETECTED_FEATURES_TEMPLATE.format(label=label)] = detected[label]
     if len(labels) > 1:
+        totals = np.zeros(len(positions), dtype=np.uint64)
         for label in labels:
-            per_instance[_PCT_CLASS_POINTS_TEMPLATE.format(label=label)] = (
-                100 * points[label][retained] / totals[retained]
-            )
+            totals += points[label]
+        for label in labels:
+            # 0 / 0 has no value: the share of a row without points stays missing, without a warning.
+            share = np.full(len(positions), np.nan)
+            np.divide(100 * points[label], totals, out=share, where=totals > 0)
+            per_instance[_PCT_CLASS_POINTS_TEMPLATE.format(label=label)] = share
 
-    per_class = _class_statistics(points, detected, retained, labels=labels, n_features=n_features)
+    per_class = _class_statistics(points, detected, labels=labels, n_features=n_features)
     region_frames = []
     # The region code of each selected row, aligned with the vectors in points and detected.
     codes_of_selected = region_codes[positions]
@@ -417,7 +430,6 @@ def summarize_table(
         frame = _class_statistics(
             {label: values[in_region] for label, values in points.items()},
             {label: values[in_region] for label, values in detected.items()},
-            retained[in_region],
             labels=labels,
             n_features=n_features,
         )
@@ -428,20 +440,17 @@ def summarize_table(
     names = {entry.label: entry.feature_names for entry in classes}
     per_feature = _feature_statistics(
         columns,
-        n_total=len(positions),
-        n_retained=int(retained.sum()),
+        n_instances=len(positions),
         region=None,
         labels=labels,
         feature_names=names,
     )
-    n_total_by_region = np.bincount(codes_of_selected, minlength=len(selected_regions))
-    n_retained_by_region = np.bincount(codes_of_selected[retained], minlength=len(selected_regions))
+    n_instances_by_region = np.bincount(codes_of_selected, minlength=len(selected_regions))
     region_feature_frames = []
     for code, name in enumerate(selected_regions):
         frame = _feature_statistics(
             columns,
-            n_total=int(n_total_by_region[code]),
-            n_retained=int(n_retained_by_region[code]),
+            n_instances=int(n_instances_by_region[code]),
             region=code,
             labels=labels,
             feature_names=names,
@@ -879,28 +888,25 @@ def _are_counts(data: np.ndarray) -> bool:
 def _class_statistics(
     points: Mapping[str, NDArray[np.uint64]],
     detected: Mapping[str, NDArray[np.int64]],
-    retained: NDArray[np.bool_],
     *,
     labels: tuple[str, ...],
     n_features: Mapping[str, int],
 ) -> pd.DataFrame:
-    """Return one row of population counts and statistics per class, in the column order of the bin summary."""
-    n_total = len(retained)
-    n_retained = int(retained.sum())
-    population = _population(n_total, n_retained)
+    """Return one row of population and statistics per class, in the column order of the bin summary."""
+    n_instances = len(points[labels[0]])
     class_rows = []
     for label in labels:
-        counts = points[label][retained]
+        counts = points[label]
         n_zero = int(np.count_nonzero(counts == 0))
         class_rows.append(
             {
                 _FEATURE_CLASS_KEY: label,
-                **population,
+                _N_INSTANCES_KEY: n_instances,
                 _N_POINTS_KEY: counts.sum(dtype=np.uint64),
-                "n_retained_instances_without_class": n_zero,
-                "pct_retained_instances_without_class": 100 * n_zero / n_retained if n_retained else np.nan,
+                "n_instances_without_class": n_zero,
+                "pct_instances_without_class": 100 * n_zero / n_instances if n_instances else np.nan,
                 **_points_statistics(counts, unit="instance"),
-                **_points_statistics(detected[label][retained], unit="instance", measure="detected_features"),
+                **_points_statistics(detected[label], unit="instance", measure="detected_features"),
                 _N_FEATURES_KEY: n_features[label],
             }
         )
@@ -913,8 +919,7 @@ def _class_statistics(
 def _feature_statistics(
     columns: Mapping[str, _ColumnSums],
     *,
-    n_total: int,
-    n_retained: int,
+    n_instances: int,
     region: int | None,
     labels: tuple[str, ...],
     feature_names: Mapping[str, tuple[str, ...]],
@@ -922,10 +927,10 @@ def _feature_statistics(
     """Return one row per feature of each class, from its column sums, in the column order of the points side.
 
     ``region`` selects one region's sums, or ``None`` pools the regions;
-    ``n_total`` and ``n_retained`` are the matching numbers of table rows and
-    retained instances. The columns follow ``FeatureSpatialBinSummary.per_feature``,
-    instances in place of bins, with ``within_class_fraction`` of
-    ``PointsSummary.per_feature`` after ``n_points``.
+    ``n_instances`` is the matching number of table rows. The columns follow
+    ``FeatureSpatialBinSummary.per_feature``, instances in place of bins, with
+    ``within_class_fraction`` of ``PointsSummary.per_feature`` after
+    ``n_points``.
     """
     frames = []
     for label in labels:
@@ -934,8 +939,7 @@ def _feature_statistics(
             sums, positives, squares = part.sums.sum(axis=0), part.positives.sum(axis=0), part.squares.sum(axis=0)
         else:
             sums, positives, squares = part.sums[region], part.positives[region], part.squares[region]
-        # Rows without points of the class add nothing to its column sums, so they hold over the retained rows.
-        without = n_retained - positives
+        without = n_instances - positives
         missing = np.full(len(sums), np.nan)
         class_points = sums.sum()
         frames.append(
@@ -943,30 +947,20 @@ def _feature_statistics(
                 {
                     _FEATURE_KEY: list(feature_names[label]),
                     _FEATURE_CLASS_KEY: label,
-                    **_population(n_total, n_retained),
+                    _N_INSTANCES_KEY: n_instances,
                     # The sums of whole numbers are exact in float64 up to 2**53.
                     _N_POINTS_KEY: np.rint(sums).astype(np.uint64),
                     "within_class_fraction": sums / class_points if class_points else missing,
-                    "n_retained_instances_without_feature": without.astype(np.int64),
-                    "pct_retained_instances_without_feature": 100 * without / n_retained if n_retained else missing,
-                    "mean_points_per_instance": sums / n_retained if n_retained else missing,
-                    "std_points_per_instance": _sample_std(sums, squares, n_retained),
+                    "n_instances_without_feature": without.astype(np.int64),
+                    "pct_instances_without_feature": 100 * without / n_instances if n_instances else missing,
+                    "mean_points_per_instance": sums / n_instances if n_instances else missing,
+                    "std_points_per_instance": _sample_std(sums, squares, n_instances),
                 }
             )
         )
     per_feature = pd.concat(frames, ignore_index=True)
     per_feature[_FEATURE_CLASS_KEY] = pd.Categorical(per_feature[_FEATURE_CLASS_KEY], categories=labels)
     return per_feature
-
-
-def _population(n_total: int, n_retained: int) -> dict[str, float]:
-    """Return the population columns: the table's rows of the selected regions, the retained and excluded ones."""
-    return {
-        _N_TOTAL_INSTANCES_KEY: n_total,
-        "n_retained_instances": n_retained,
-        "n_excluded_instances": n_total - n_retained,
-        "pct_excluded_instances": 100 * (n_total - n_retained) / n_total if n_total else np.nan,
-    }
 
 
 def _sample_std(sums: NDArray[np.float64], squares: NDArray[np.float64], n: int) -> NDArray[np.float64]:
