@@ -377,13 +377,13 @@ def instance_histogram(
     show_median: bool = True,
     show_std: bool = True,
 ) -> Axes:
-    """Plot one class's measure across the retained instances of a table summary.
+    """Plot one class's measure across the instances of a table summary.
 
-    Each retained instance contributes one value, including zeros for the
-    selected class. Instances were retained when any class read during summary
-    computation had points; choosing one here never changes that population.
-    No table matrix is read or summary recalculated; nothing is written to the
-    table.
+    Each instance contributes one value, including zeros for the selected
+    class; choosing a class never changes that population. With
+    ``measure="pct_points"``, instances without points in any class read have
+    no share and are skipped. No table matrix is read or summary recalculated;
+    nothing is written to the table.
 
     Parameters
     ----------
@@ -398,7 +398,8 @@ def instance_histogram(
         What to plot for the class, per instance: ``"points"``, its points;
         ``"detected_features"``, its features with at least one point; or
         ``"pct_points"``, its share of the instance's points across the classes
-        read, in percent, with two classes or more. They read the columns
+        read, in percent, with two classes or more, missing for an instance
+        without points. They read the columns
         ``n_<class>_points``, ``n_<class>_detected_features`` and
         ``pct_<class>_points`` of ``summary.per_instance``. The share is not
         corrected for panel size: a class with more features collects more
@@ -427,9 +428,10 @@ def instance_histogram(
         Seaborn histogram options, including ``kde``, ``alpha``, and ``color``.
         Defaults to a borderless filled-step histogram with ``alpha=0.5``,
         ``stat="count"`` (number of instances), and a KDE of line width 2.
-        ``stat="percent"`` uses all retained instances as the denominator, so
-        clipped bars may sum to less than 100%. Other statistics, data
-        selection, grouping, and weights cannot be supplied here.
+        ``stat="percent"`` uses the plotted values as the denominator (every
+        instance with a value, also those outside ``range``), so clipped bars
+        may sum to less than 100%. Other statistics, data selection, grouping,
+        and weights cannot be supplied here.
     median_line_kwargs, median_text_kwargs
         Matplotlib styling for the median line and annotation box.
     figsize
@@ -449,8 +451,9 @@ def instance_histogram(
     -------
     matplotlib.axes.Axes
         Axes containing the histogram, or an empty-state message when no
-        instances are retained. Input data and plotting-option mappings remain
-        unchanged. Customize axis labels on the returned axes with ``ax.set(...)``.
+        instance has a value to plot. Input data and plotting-option mappings
+        remain unchanged. Customize axis labels on the returned axes with
+        ``ax.set(...)``.
 
     Raises
     ------
@@ -485,6 +488,10 @@ def instance_histogram(
         ax = hp.qc.instance_histogram(summary, feature_class="negative", normalization="per_panel_feature")
     """
     values, label = _instance_values(summary, feature_class=feature_class, measure=measure, normalization=normalization)
+    if measure == "pct_points":
+        # The pct_points (share) of an instance without points in any class read is 0 / 0, stored as NaN:
+        # skip it, as the renderer expects.
+        values = values.dropna()
     return _plot_instance_histogram(
         values,
         xlabel=label,
@@ -520,11 +527,11 @@ def instance_histogram_by_feature(
     show_median: bool = True,
     show_std: bool = True,
 ) -> Axes:
-    """Plot one feature's points across the retained instances of a feature table summary.
+    """Plot one feature's points across the instances of a feature table summary.
 
-    Each retained instance of the reference table summary contributes one
-    value, including zeros for the selected feature: choosing a feature never
-    changes that population. No table matrix is read or summary recalculated.
+    Each instance of the reference table summary contributes one value,
+    including zeros for the selected feature: choosing a feature never changes
+    that population. No table matrix is read or summary recalculated.
 
     Parameters
     ----------
@@ -549,9 +556,9 @@ def instance_histogram_by_feature(
         Seaborn histogram options, including ``kde``, ``alpha``, and ``color``.
         Defaults to a borderless filled-step histogram with ``alpha=0.5``,
         ``stat="count"`` (number of instances), and a KDE of line width 2.
-        ``stat="percent"`` uses all retained instances as the denominator, so
-        clipped bars may sum to less than 100%. Other statistics, data
-        selection, grouping, and weights cannot be supplied here.
+        ``stat="percent"`` uses all instances as the denominator, so clipped
+        bars may sum to less than 100%. Other statistics, data selection,
+        grouping, and weights cannot be supplied here.
     median_line_kwargs, median_text_kwargs
         Matplotlib styling for the median line and annotation box.
     figsize
@@ -570,9 +577,10 @@ def instance_histogram_by_feature(
     Returns
     -------
     matplotlib.axes.Axes
-        Axes containing the histogram, or an empty-state message when no
-        instances are retained. Input data and plotting-option mappings remain
-        unchanged. Customize axis labels on the returned axes with ``ax.set(...)``.
+        Axes containing the histogram, or an empty-state message when the
+        summary has no instances. Input data and plotting-option mappings
+        remain unchanged. Customize axis labels on the returned axes with
+        ``ax.set(...)``.
 
     Raises
     ------
@@ -643,10 +651,10 @@ def _plot_instance_histogram(
     show_median: bool,
     show_std: bool,
 ) -> Axes:
-    """Annotate the median and SD of one measure over the retained instances, then share the histogram renderer.
+    """Annotate the median and SD of one measure over the instances, then share the histogram renderer.
 
     Shared by :func:`instance_histogram` and :func:`instance_histogram_by_feature`,
-    which select the values.
+    which select the values and remove missing ones.
     """
     if histplot_kwargs.get("stat", "count") not in {"count", "percent"}:
         raise ValueError("Instance histograms support stat='count' or stat='percent'.")
@@ -671,7 +679,7 @@ def _plot_instance_histogram(
         xlabel=xlabel,
         count_ylabel="Number of instances",
         percent_ylabel="Percentage of instances (%)",
-        empty_message="No retained instances",
+        empty_message="No instances to plot",
     )
 
 

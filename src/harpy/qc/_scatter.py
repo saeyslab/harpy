@@ -80,12 +80,12 @@ def instance_scatter(
     show_regplot: bool = True,
     regplot_kwargs: Mapping[str, Any] = MappingProxyType({}),
 ) -> Axes:
-    """Plot two measures against each other across the retained instances of a table summary.
+    """Plot two measures against each other across the instances of a table summary.
 
-    Each retained instance contributes one point, including zeros. Instances
-    were retained when any class read during summary computation had points.
-    No table matrix is read or summary recalculated; nothing is written to the
-    table.
+    Each instance contributes one point, including zeros. With
+    ``"pct_points"`` on an axis, instances without points in any class read
+    have no share and are skipped. No table matrix is read or summary
+    recalculated; nothing is written to the table.
 
     Parameters
     ----------
@@ -130,7 +130,7 @@ def instance_scatter(
         If ``x`` or ``y`` is not a ``(feature_class, measure)`` pair, names an
         unknown class or measure, or ``"pct_points"`` of a summary of one class;
         if ``normalization`` is unknown or an axis does not use ``"points"``
-        with it; or if the summary retains no instances.
+        with it; or if no instance is left to plot.
 
     See Also
     --------
@@ -143,12 +143,12 @@ def instance_scatter(
     .. code-block:: python
 
         summary = hp.qc.summarize_table(sdata, "table", obsm_keys=["negative", "system_control"])
-        ax = hp.qc.instance_scatter(
-            summary,
-            x=("negative", "points"),
-            y=("system_control", "points"),
-            normalization="per_panel_feature",
-        )
+        # Complexity: detected genes (y) against gene points (x), scanpy's n_genes_by_counts and total_counts.
+        ax = hp.qc.instance_scatter(summary, x=("x", "points"), y=("x", "detected_features"))
+
+        # Background-dominated instances: a high share of negative-probe points (y) at few gene points (x),
+        # scanpy's pct_counts_mt and total_counts.
+        ax = hp.qc.instance_scatter(summary, x=("x", "points"), y=("negative", "pct_points"))
     """
     axes = {}
     for name, pair in (("x", x), ("y", y)):
@@ -159,8 +159,13 @@ def instance_scatter(
             summary, feature_class=feature_class, measure=measure, normalization=normalization
         )
     (x_values, x_label), (y_values, y_label) = axes["x"], axes["y"]
+    if "pct_points" in (x[1], y[1]):
+        # A point needs both values: drop an instance whose pct_points (share) is NaN on either axis, as it has
+        # no points in any class read.
+        complete = x_values.notna() & y_values.notna()
+        x_values, y_values = x_values[complete], y_values[complete]
     if x_values.empty:
-        raise ValueError("The summary retains no instances to plot.")
+        raise ValueError("No instances to plot.")
     return _plot_scatter(
         x_values,
         y_values,
