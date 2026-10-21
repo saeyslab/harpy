@@ -22,18 +22,18 @@ from harpy.qc._summary_reduction import _tree_reduce
 from harpy.qc._summary_schema import (
     _FEATURE_CLASS_KEY,
     _FEATURE_KEY,
-    _N_CLASS_DETECTED_FEATURES_TEMPLATE,
-    _N_CLASS_POINTS_TEMPLATE,
+    _N_DETECTED_FEATURES_KEY,
     _N_FEATURES_KEY,
     _N_INSTANCES_KEY,
     _N_INSTANCES_WITHOUT_CLASS_KEY,
     _N_INSTANCES_WITHOUT_FEATURE_KEY,
     _N_POINTS_KEY,
-    _PCT_CLASS_POINTS_TEMPLATE,
     _PCT_INSTANCES_WITHOUT_CLASS_KEY,
     _PCT_INSTANCES_WITHOUT_FEATURE_KEY,
+    _PCT_POINTS_KEY,
     _REGION_COLUMN_KEY,
     _WITHIN_CLASS_FRACTION_KEY,
+    _class_column,
     _statistic_name,
 )
 from harpy.qc._summary_statistics import _points_statistics
@@ -73,11 +73,11 @@ class TableSummary:
 
         - the region and instance identity, under the table's own
           ``region_key`` and ``instance_key`` names;
-        - ``n_<class>_points``: the class's points in the instance, uint64;
-        - ``n_<class>_detected_features``: the class's features with at least
+        - ``n_points_<class>``: the class's points in the instance, uint64;
+        - ``n_detected_features_<class>``: the class's features with at least
           one point in the instance. Spatial bins have no counterpart, as a
           distinct count of features per bin is expensive;
-        - ``pct_<class>_points``, with two classes or more: 100 times the
+        - ``pct_points_<class>``, with two classes or more: 100 times the
           class's points / the instance's points across the classes read;
           missing (NaN) for an instance without points in any class read, as
           0 / 0 has no value. The share is not corrected for panel size: a
@@ -86,20 +86,21 @@ class TableSummary:
           panel, or compare classes by their points per feature, with
           ``n_features`` of ``per_class``.
 
-        How the names arise: the class label is the name of the matrix read::
+        How the names arise: each column is the name of a measure followed by
+        the class label, the name of the matrix read::
 
             matrix read          class label     count column
-            X                    x               n_x_points
-            layers["counts"]     counts          n_counts_points
-            obsm["negative"]     negative        n_negative_points
+            X                    x               n_points_x
+            layers["counts"]     counts          n_points_counts
+            obsm["negative"]     negative        n_points_negative
 
         Compared with :func:`scanpy.pp.calculate_qc_metrics`, for ``X``::
 
             this summary               scanpy
-            n_x_points                 total_counts
-            n_x_detected_features      n_genes_by_counts
-            n_<class>_points           total_counts_<qc_var>
-            pct_<class>_points         pct_counts_<qc_var>
+            n_points_x                 total_counts
+            n_detected_features_x      n_genes_by_counts
+            n_points_<class>           total_counts_<qc_var>
+            pct_points_<class>         pct_counts_<qc_var>
 
         Scanpy's ``qc_vars`` are boolean groups of ``var`` within ``X``, and
         its percentages are relative to the total counts of ``X``; here each
@@ -405,9 +406,9 @@ def summarize_table(
 
     per_instance = obs.iloc[positions][[region_key, instance_key]].copy()
     for label in labels:
-        per_instance[_N_CLASS_POINTS_TEMPLATE.format(label=label)] = points[label]
+        per_instance[_class_column(_N_POINTS_KEY, label=label)] = points[label]
     for label in labels:
-        per_instance[_N_CLASS_DETECTED_FEATURES_TEMPLATE.format(label=label)] = detected[label]
+        per_instance[_class_column(_N_DETECTED_FEATURES_KEY, label=label)] = detected[label]
     if len(labels) > 1:
         totals = np.zeros(len(positions), dtype=np.uint64)
         for label in labels:
@@ -416,7 +417,7 @@ def summarize_table(
             # 0 / 0 has no value: the share of a row without points stays missing, without a warning.
             share = np.full(len(positions), np.nan)
             np.divide(100 * points[label], totals, out=share, where=totals > 0)
-            per_instance[_PCT_CLASS_POINTS_TEMPLATE.format(label=label)] = share
+            per_instance[_class_column(_PCT_POINTS_KEY, label=label)] = share
 
     per_class = _class_statistics(points, detected, labels=labels, n_features=n_features)
     region_frames = []

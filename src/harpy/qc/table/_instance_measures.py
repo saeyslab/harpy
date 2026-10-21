@@ -7,21 +7,18 @@ from typing import Literal
 import pandas as pd
 
 from harpy.qc._panel_normalization import _panel_feature_count
-from harpy.qc._summary_schema import (
-    _N_CLASS_DETECTED_FEATURES_TEMPLATE,
-    _N_CLASS_POINTS_TEMPLATE,
-    _PCT_CLASS_POINTS_TEMPLATE,
-)
+from harpy.qc._summary_schema import _N_DETECTED_FEATURES_KEY, _N_POINTS_KEY, _PCT_POINTS_KEY, _class_column
 from harpy.qc.table._summarize_table import TableSummary
 
 InstanceMeasure = Literal["points", "detected_features", "pct_points"]
 
-# The column of TableSummary.per_instance that each measure reads, and its axis label. The
-# column names stay internal: callers select a class and a measure.
+# The base name of the column of TableSummary.per_instance that each measure reads, followed per
+# class by its label, and its axis label. The column names stay internal: callers select a class
+# and a measure.
 _MEASURES = {
-    "points": (_N_CLASS_POINTS_TEMPLATE, "points per instance"),
-    "detected_features": (_N_CLASS_DETECTED_FEATURES_TEMPLATE, "detected features per instance"),
-    "pct_points": (_PCT_CLASS_POINTS_TEMPLATE, "share of the instance's points (%)"),
+    "points": (_N_POINTS_KEY, "points per instance"),
+    "detected_features": (_N_DETECTED_FEATURES_KEY, "detected features per instance"),
+    "pct_points": (_PCT_POINTS_KEY, "share of the instance's points (%)"),
 }
 
 
@@ -60,7 +57,7 @@ def _instance_values(
             f"{list(summary.feature_classes)}."
         )
     column, unit = _MEASURES[measure]
-    values = summary.per_instance[column.format(label=feature_class)]
+    values = summary.per_instance[_class_column(column, label=feature_class)]
     if normalization == "per_panel_feature":
         if measure != "points":
             raise ValueError(

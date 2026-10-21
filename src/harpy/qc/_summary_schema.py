@@ -3,8 +3,10 @@
 The one inventory of the strings that the summaries, and the QC metrics that
 ``harpy.tb.pp.calculate_qc_metrics`` adds to a table, write: a module that
 writes or reads an output name takes it from here. The statistics, such as
-``mean_points_per_instance``, are named by :func:`_statistic_name`. The
-docstrings of the result classes describe each column.
+``mean_points_per_instance``, are named by :func:`_statistic_name`, and the
+columns specific to a class of a wide frame, such as ``n_points_x``, by
+:func:`_class_column`. The docstrings of the result classes describe each
+column.
 """
 
 from typing import Final
@@ -19,6 +21,18 @@ def _statistic_name(statistic: str, *, unit: str, measure: str = "points") -> st
     of a table, from its column sums.
     """
     return f"{statistic}_{measure}_per_{unit}"
+
+
+def _class_column(column: str, *, label: str) -> str:
+    """Return the name of a column specific to a class: its base name followed by the class label, ``n_points_x``.
+
+    The one naming rule of the class-specific columns of a wide frame, in
+    ``TableSummary.per_instance`` and in the ``.obs`` and ``.var`` columns of
+    ``harpy.tb.pp.calculate_qc_metrics``, so that the column of a class is
+    ``f"{column}_{label}"`` wherever it is. Long frames name the class in
+    their ``feature_class`` column instead.
+    """
+    return f"{column}_{label}"
 
 
 # These are summary output names, not the panel's source points column names
@@ -69,13 +83,11 @@ _PCT_INSTANCES_WITHOUT_CLASS_KEY: Final = "pct_instances_without_class"
 # frames of TableSummary and FeatureTableSummary.
 _N_INSTANCES_WITHOUT_FEATURE_KEY: Final = "n_instances_without_feature"
 _PCT_INSTANCES_WITHOUT_FEATURE_KEY: Final = "pct_instances_without_feature"
-# The per-class columns of TableSummary.per_instance, formatted with the class label.
-_N_CLASS_POINTS_TEMPLATE: Final = "n_{label}_points"
-_N_CLASS_DETECTED_FEATURES_TEMPLATE: Final = "n_{label}_detected_features"
-_PCT_CLASS_POINTS_TEMPLATE: Final = "pct_{label}_points"
-# The rate per panel feature of a class, formatted with the class label, that harpy.tb.pp.calculate_qc_metrics
-# adds to .obs.
-_N_CLASS_POINTS_PER_PANEL_FEATURE_TEMPLATE: Final = "n_{label}_points_per_panel_feature"
+# The base names of the per-class columns of TableSummary.per_instance, with n_points and pct_points, named
+# per class by _class_column: a class's features with at least one point in the instance.
+_N_DETECTED_FEATURES_KEY: Final = "n_detected_features"
+# The base name of the rate per panel feature of a class, that harpy.tb.pp.calculate_qc_metrics adds to .obs.
+_N_POINTS_PER_PANEL_FEATURE_KEY: Final = "n_points_per_panel_feature"
 # The region column of TableSummary.per_region_class and per_region_feature. Not harpy.utils._keys._REGION_KEY,
 # the default name of a table's own region column in .obs.
 _REGION_COLUMN_KEY: Final = "region"

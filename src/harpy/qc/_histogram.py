@@ -400,8 +400,8 @@ def instance_histogram(
         ``"pct_points"``, its share of the instance's points across the classes
         read, in percent, with two classes or more, missing for an instance
         without points. They read the columns
-        ``n_<class>_points``, ``n_<class>_detected_features`` and
-        ``pct_<class>_points`` of ``summary.per_instance``. The share is not
+        ``n_points_<class>``, ``n_detected_features_<class>`` and
+        ``pct_points_<class>`` of ``summary.per_instance``. The share is not
         corrected for panel size: a class with more features collects more
         points, also from background. Compare it across instances or samples
         of the same panel, or compare classes with
