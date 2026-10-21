@@ -12,7 +12,7 @@ from matplotlib.axes import Axes
 from spatialdata import SpatialData
 
 from harpy.plot._renderers import _plot_histogram
-from harpy.qc._summary_schema import _FEATURE_KEY, _N_POINTS_KEY
+from harpy.qc._summary_schema import _FEATURE_KEY, _N_POINTS_KEY, _statistic_name
 from harpy.qc._summary_statistics import _points_statistics
 from harpy.qc.points._spatial_bin_measures import SpatialBinMeasure, _spatial_bin_values
 from harpy.qc.points._summarize_points import PointsSummary
@@ -338,8 +338,8 @@ def _plot_spatial_bin_histogram(
     statistics = _points_statistics(values.to_numpy(dtype=np.float64), unit="bin")
     return _plot_histogram(
         values,
-        median=statistics["median_points_per_bin"],
-        std=statistics["std_points_per_bin"],
+        median=statistics[_statistic_name("median", unit="bin")],
+        std=statistics[_statistic_name("std", unit="bin")],
         ax=ax,
         bins=bins,
         range=range,
@@ -663,8 +663,8 @@ def _plot_instance_histogram(
     statistics = _points_statistics(values.to_numpy(dtype=np.float64), unit="instance")
     return _plot_histogram(
         values,
-        median=statistics["median_points_per_instance"],
-        std=statistics["std_points_per_instance"],
+        median=statistics[_statistic_name("median", unit="instance")],
+        std=statistics[_statistic_name("std", unit="instance")],
         ax=ax,
         bins=bins,
         range=range,
