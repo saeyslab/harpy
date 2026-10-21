@@ -28,10 +28,10 @@ from harpy.qc.table._summarize_table import (
     _collect_class_matrices,
     _FeatureClassMatrix,
     _sliced_blocks,
-    _spatialdata_annotation,
     _with_region_categories,
 )
 from harpy.qc.table._table_summary_metadata import TableSummaryMetadata
+from harpy.table._utils import _spatialdata_annotation
 
 
 @dataclass(frozen=True)

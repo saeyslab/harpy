@@ -32,6 +32,7 @@ from harpy.qc._summary_schema import (
 )
 from harpy.qc._summary_statistics import _points_statistics
 from harpy.qc.table._table_summary_metadata import TableSummaryMetadata
+from harpy.table._utils import _spatialdata_annotation
 from harpy.table._validation import _metadata_string_sequence, _validate_feature_matrix_record
 from harpy.utils._keys import _FEATURE_MATRICES_KEY
 from harpy.utils._names import _names, _selected_names, _snake_case
@@ -460,22 +461,6 @@ def summarize_table(
         per_feature=per_feature,
         per_region_feature=per_region_feature,
     )
-
-
-def _spatialdata_annotation(adata: object, *, function: str) -> Mapping:
-    """Return the table's SpatialData annotation, raising unless ``adata`` is an AnnData that has one.
-
-    ``function`` names the public function in the error raised for another type
-    than an AnnData, such as a SpatialData object.
-    """
-    if not isinstance(adata, AnnData):
-        raise TypeError(
-            f"{function} takes the table, an AnnData such as sdata.tables[name], found {type(adata).__name__}."
-        )
-    attrs = adata.uns.get(TableModel.ATTRS_KEY)
-    if not isinstance(attrs, Mapping):
-        raise ValueError(f"The table has no SpatialData annotation (uns[{TableModel.ATTRS_KEY!r}]).")
-    return attrs
 
 
 def _with_region_categories(frame: pd.DataFrame, regions: tuple[str, ...]) -> pd.DataFrame:
