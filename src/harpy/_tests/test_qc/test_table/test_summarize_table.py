@@ -60,12 +60,9 @@ def _table(*, csr=sparse.csr_matrix, x=True):
         key: {"schema_version": 1, "source_kind": "test", "feature_columns": list(_FEATURE_NAMES[key])}
         for key in _OBSM_KEYS
     }
+    # Only the table, outside any SpatialData object: summarize_table needs neither the annotated labels nor
+    # the source points.
     return TableModel.parse(adata, region=["a", "b"], region_key="region", instance_key="cell_ID")
-
-
-def _sdata(table=None):
-    # Only the table: summarize_table needs neither the annotated labels nor the source points.
-    return SpatialData(tables={"counts": _table() if table is None else table})
 
 
 def _assert_summaries_equal(summary, expected):
@@ -75,14 +72,13 @@ def _assert_summaries_equal(summary, expected):
 
 
 def test_per_instance_holds_each_class_per_row_aligned_with_obs():
-    sdata = _sdata()
-    table = sdata.tables["counts"]
+    table = _table()
     assert table.X.nnz == np.count_nonzero(_X) + 1
     obs, uns = table.obs.copy(), deepcopy(dict(table.uns))
     with warnings.catch_warnings():
         # The missing share of cell_1 raises no warning.
         warnings.simplefilter("error", RuntimeWarning)
-        summary = summarize_table(sdata, "counts", obsm_keys=_OBSM_KEYS)
+        summary = summarize_table(table, obsm_keys=_OBSM_KEYS)
     assert isinstance(summary, TableSummary)
     per_instance = summary.per_instance
     # Every row is an instance, also cell_1 without points in any class read.
@@ -120,41 +116,41 @@ def test_per_instance_holds_each_class_per_row_aligned_with_obs():
 
 
 def test_the_matrices_read_decide_the_classes_not_the_population():
-    sdata = _sdata()
-    alone = summarize_table(sdata, "counts")
+    table = _table()
+    alone = summarize_table(table)
     assert alone.feature_classes == ("x",)
     # With one class there are no shares; cell_1 and cell_4, without points in X, count as zeros.
     assert list(alone.per_instance.columns) == ["region", "cell_ID", "n_x_points", "n_x_detected_features"]
     np.testing.assert_array_equal(alone.per_instance["n_x_points"], [10, 0, 5, 8, 0, 2])
 
-    summary = summarize_table(sdata, "counts", obsm_keys="system_control")
+    summary = summarize_table(table, obsm_keys="system_control")
     assert summary.feature_classes == ("x", "system_control")
     assert summary.per_class["n_instances"].tolist() == [6, 6]
     assert alone.per_class["n_instances"].tolist() == [6]
 
 
 def test_a_table_without_x_is_summarized_from_its_obsm_matrices():
-    summary = summarize_table(_sdata(_table(x=False)), "counts", obsm_keys=_OBSM_KEYS)
+    summary = summarize_table(_table(x=False), obsm_keys=_OBSM_KEYS)
     assert summary.feature_classes == ("negative", "system_control")
     np.testing.assert_array_equal(summary.per_instance["n_negative_points"], [1, 0, 0, 2, 0, 1])
 
 
-def _sdata_with_normalized_x():
+def _table_with_normalized_x():
     """Return the table with its raw counts in the layer "RawCounts" and a normalized X."""
     table = _table()
     table.layers["RawCounts"] = table.X.copy()
     # A normalized X holds fractions, which are not counts.
     table.X = table.X.astype(np.float64) / 3
-    return _sdata(table)
+    return table
 
 
 def test_a_normalized_x_raises_and_asks_for_the_raw_count_layer():
-    with pytest.raises(ValueError, match=r"adata\.X of table 'counts' holds values that are not counts.*layer="):
-        summarize_table(_sdata_with_normalized_x(), "counts")
+    with pytest.raises(ValueError, match=r"adata\.X holds values that are not counts.*layer="):
+        summarize_table(_table_with_normalized_x())
 
 
 def test_a_layer_is_read_in_place_of_x():
-    summary = summarize_table(_sdata_with_normalized_x(), "counts", layer="RawCounts", obsm_keys=["negative"])
+    summary = summarize_table(_table_with_normalized_x(), layer="RawCounts", obsm_keys=["negative"])
     assert summary.metadata.layer == "RawCounts"
     # The layer's label is its name in snake case, and X is not read as well.
     assert summary.feature_classes == ("raw_counts", "negative")
@@ -166,11 +162,11 @@ def test_coinciding_class_labels_raise():
     # The layer's label, "negative", is also the label of obsm["negative"].
     table.layers["Negative"] = table.X.copy()
     with pytest.raises(ValueError, match="labels coincide"):
-        summarize_table(_sdata(table), "counts", layer="Negative", obsm_keys=["negative"])
+        summarize_table(table, layer="Negative", obsm_keys=["negative"])
 
 
 def test_per_class_columns_and_their_order():
-    per_class = summarize_table(_sdata(), "counts", obsm_keys=_OBSM_KEYS).per_class
+    per_class = summarize_table(_table(), obsm_keys=_OBSM_KEYS).per_class
     # The columns of SpatialBinSummary.per_class, instances in place of bins and one population column in place
     # of four, then those only the table has.
     assert list(per_class.columns) == [
@@ -193,7 +189,7 @@ def test_per_class_columns_and_their_order():
 
 
 def test_class_statistics_agree_with_every_row():
-    summary = summarize_table(_sdata(), "counts", obsm_keys=_OBSM_KEYS)
+    summary = summarize_table(_table(), obsm_keys=_OBSM_KEYS)
     per_class = summary.per_class
     assert per_class["feature_class"].tolist() == ["x", "negative", "system_control"]
     for row in per_class.itertuples():
@@ -214,18 +210,18 @@ def test_class_statistics_agree_with_every_row():
 
 def test_the_denominator_follows_a_subset_of_x():
     table = _table()[:, ["GeneA"]].copy()
-    summary = summarize_table(_sdata(table), "counts")
+    summary = summarize_table(table)
     assert summary.panel_feature_counts == {"x": 1}
     np.testing.assert_array_equal(summary.per_instance["n_x_points"], [7, 0, 5, 4, 0, 0])
 
 
 def test_per_region_class_holds_the_class_statistics_within_each_region():
-    summary = summarize_table(_sdata(), "counts", obsm_keys=_OBSM_KEYS)
+    summary = summarize_table(_table(), obsm_keys=_OBSM_KEYS)
     per_region_class = summary.per_region_class
     assert per_region_class["region"].tolist() == ["a"] * 3 + ["b"] * 3
     assert list(per_region_class.columns) == ["region", *summary.per_class.columns]
     for name in ["a", "b"]:
-        within = summarize_table(_sdata(), "counts", obsm_keys=_OBSM_KEYS, region=name)
+        within = summarize_table(_table(), obsm_keys=_OBSM_KEYS, region=name)
         assert set(within.per_instance["region"]) == {name}
         # With one selected region, per_class and per_region_class hold the same values.
         pd.testing.assert_frame_equal(within.per_region_class.drop(columns="region"), within.per_class)
@@ -236,19 +232,18 @@ def test_per_region_class_holds_the_class_statistics_within_each_region():
 
 
 def test_metadata_records_the_inputs():
-    metadata = summarize_table(_sdata(), "counts", obsm_keys="negative").metadata
+    metadata = summarize_table(_table(), obsm_keys="negative").metadata
     assert metadata == TableSummaryMetadata(
-        table_name="counts",
         region=("a", "b"),
         layer=None,
         obsm_keys=("negative",),
         feature_matrices_key="feature_matrices",
     )
-    assert summarize_table(_sdata(), "counts", region=["b"]).metadata.region == ("b",)
+    assert summarize_table(_table(), region=["b"]).metadata.region == ("b",)
 
 
 def test_per_feature_columns_and_their_order():
-    per_feature = summarize_table(_sdata(), "counts", obsm_keys=_OBSM_KEYS).per_feature
+    per_feature = summarize_table(_table(), obsm_keys=_OBSM_KEYS).per_feature
     # Like FeatureSpatialBinSummary.per_feature, instances in place of bins, with one population column in place of
     # four and only the mean and SD; with within_class_fraction of PointsSummary.per_feature after n_points.
     assert list(per_feature.columns) == [
@@ -266,7 +261,7 @@ def test_per_feature_columns_and_their_order():
 
 
 def test_feature_statistics_agree_with_every_row():
-    summary = summarize_table(_sdata(), "counts", obsm_keys=_OBSM_KEYS)
+    summary = summarize_table(_table(), obsm_keys=_OBSM_KEYS)
     per_feature = summary.per_feature
     # Every feature of each class read, in class and then column order, undetected ones included.
     assert per_feature["feature"].tolist() == [name for names in _FEATURE_NAMES.values() for name in names]
@@ -292,13 +287,13 @@ def test_feature_statistics_agree_with_every_row():
 
 
 def test_per_region_feature_holds_the_feature_statistics_within_each_region():
-    summary = summarize_table(_sdata(), "counts", obsm_keys=_OBSM_KEYS)
+    summary = summarize_table(_table(), obsm_keys=_OBSM_KEYS)
     per_region_feature = summary.per_region_feature
     assert list(per_region_feature.columns) == ["region", *summary.per_feature.columns]
     n_features = len(summary.per_feature)
     assert per_region_feature["region"].tolist() == ["a"] * n_features + ["b"] * n_features
     for name in ["a", "b"]:
-        within = summarize_table(_sdata(), "counts", obsm_keys=_OBSM_KEYS, region=name)
+        within = summarize_table(_table(), obsm_keys=_OBSM_KEYS, region=name)
         # With one selected region, per_feature and per_region_feature hold the same values.
         pd.testing.assert_frame_equal(within.per_region_feature.drop(columns="region"), within.per_feature)
         pd.testing.assert_frame_equal(
@@ -314,7 +309,7 @@ def test_an_unregistered_obsm_matrix_takes_the_names_passed():
     table = _table()
     del table.uns["feature_matrices"]["negative"]
     names = ["N1", "N2", "N3", "N4"]
-    summary = summarize_table(_sdata(table), "counts", obsm_keys=_OBSM_KEYS, feature_names={"negative": names})
+    summary = summarize_table(table, obsm_keys=_OBSM_KEYS, feature_names={"negative": names})
     assert summary.feature_names == {**_FEATURE_NAMES, "negative": tuple(names)}
 
 
@@ -323,10 +318,8 @@ def test_a_registry_under_a_custom_key_names_its_matrices():
     table.uns["custom_feature_matrices"] = table.uns.pop("feature_matrices")
     # Under the default key, the matrices are unregistered.
     with pytest.raises(ValueError, match=r"not registered in uns\['feature_matrices'\]"):
-        summarize_table(_sdata(table), "counts", obsm_keys=_OBSM_KEYS)
-    summary = summarize_table(
-        _sdata(table), "counts", obsm_keys=_OBSM_KEYS, feature_matrices_key="custom_feature_matrices"
-    )
+        summarize_table(table, obsm_keys=_OBSM_KEYS)
+    summary = summarize_table(table, obsm_keys=_OBSM_KEYS, feature_matrices_key="custom_feature_matrices")
     assert summary.metadata.feature_matrices_key == "custom_feature_matrices"
     assert summary.feature_names == _FEATURE_NAMES
 
@@ -335,7 +328,7 @@ def test_only_the_registrations_of_the_matrices_read_are_checked():
     table = _table()
     # A broken registration of a matrix that is not read does not stop the summary.
     table.uns["feature_matrices"]["unrelated"] = {"feature_columns": []}
-    summary = summarize_table(_sdata(table), "counts", obsm_keys=_OBSM_KEYS)
+    summary = summarize_table(table, obsm_keys=_OBSM_KEYS)
     assert summary.feature_names == _FEATURE_NAMES
 
 
@@ -368,35 +361,35 @@ def test_invalid_feature_names_raise(change, kwargs, message):
         change(table)
     arguments = {"obsm_keys": _OBSM_KEYS, **kwargs}
     with pytest.raises(ValueError, match=message):
-        summarize_table(_sdata(table), "counts", **arguments)
+        summarize_table(table, **arguments)
 
 
 def test_csr_arrays_give_the_result_of_csr_matrices():
-    expected = summarize_table(_sdata(), "counts", obsm_keys=_OBSM_KEYS)
-    summary = summarize_table(_sdata(_table(csr=sparse.csr_array)), "counts", obsm_keys=_OBSM_KEYS)
+    expected = summarize_table(_table(), obsm_keys=_OBSM_KEYS)
+    summary = summarize_table(_table(csr=sparse.csr_array), obsm_keys=_OBSM_KEYS)
     _assert_summaries_equal(summary, expected)
 
 
 @pytest.mark.parametrize("dtype", [np.float32, np.float64, np.int64])
 def test_counts_stored_as_whole_floats_or_signed_integers_give_the_result_of_uint32(dtype):
-    expected = summarize_table(_sdata(), "counts", obsm_keys=_OBSM_KEYS)
-    summary = summarize_table(_sdata(_table(csr=lambda matrix: matrix.astype(dtype))), "counts", obsm_keys=_OBSM_KEYS)
+    expected = summarize_table(_table(), obsm_keys=_OBSM_KEYS)
+    summary = summarize_table(_table(csr=lambda matrix: matrix.astype(dtype)), obsm_keys=_OBSM_KEYS)
     _assert_summaries_equal(summary, expected)
 
 
 @pytest.mark.parametrize("region", [None, "b"])
 @pytest.mark.parametrize("mode", ["lazy", "backed"])
 def test_lazy_and_backed_tables_give_the_in_memory_result(tmp_path, mode, region):
-    _sdata().write(tmp_path / "sdata.zarr")
-    sdata = hp.io.read_zarr(tmp_path / "sdata.zarr", table_mode=mode, sparse_chunks=2)
+    SpatialData(tables={"counts": _table()}).write(tmp_path / "sdata.zarr")
+    table = hp.io.read_zarr(tmp_path / "sdata.zarr", table_mode=mode, sparse_chunks=2).tables["counts"]
     if mode == "lazy":
-        assert isinstance(sdata.tables["counts"].X, da.Array)
-        assert sdata.tables["counts"].X.numblocks == (3, 1)
+        assert isinstance(table.X, da.Array)
+        assert table.X.numblocks == (3, 1)
     else:
-        assert isinstance(sdata.tables["counts"].X, CSRDataset)
-    expected = summarize_table(_sdata(), "counts", obsm_keys=_OBSM_KEYS, region=region)
+        assert isinstance(table.X, CSRDataset)
+    expected = summarize_table(_table(), obsm_keys=_OBSM_KEYS, region=region)
     with _CountComputes() as computes:
-        summary = summarize_table(sdata, "counts", obsm_keys=_OBSM_KEYS, region=region)
+        summary = summarize_table(table, obsm_keys=_OBSM_KEYS, region=region)
     # A lazy table runs one Dask compute for all its matrices; a backed table runs none.
     assert computes.count == (1 if mode == "lazy" else 0)
     _assert_summaries_equal(summary, expected)
@@ -408,9 +401,9 @@ def test_lazy_matrices_with_different_row_chunks_run_one_compute():
     table.obsm["negative"] = da.from_array(table.obsm["negative"], chunks=(4, -1), asarray=False)
     # Column blocks are joined into whole rows.
     table.obsm["system_control"] = da.from_array(table.obsm["system_control"], chunks=(3, 2), asarray=False)
-    expected = summarize_table(_sdata(), "counts", obsm_keys=_OBSM_KEYS)
+    expected = summarize_table(_table(), obsm_keys=_OBSM_KEYS)
     with _CountComputes() as computes:
-        summary = summarize_table(_sdata(table), "counts", obsm_keys=_OBSM_KEYS)
+        summary = summarize_table(table, obsm_keys=_OBSM_KEYS)
     assert computes.count == 1
     _assert_summaries_equal(summary, expected)
 
@@ -430,7 +423,7 @@ def test_matrices_that_are_not_csr_raise_before_any_value_is_read(key, convert, 
     else:
         table.obsm[key] = convert(table.obsm[key])
     with _CountComputes() as computes, pytest.raises(ValueError, match=f"is a {kind}, not a CSR matrix"):
-        summarize_table(_sdata(table), "counts", obsm_keys=_OBSM_KEYS)
+        summarize_table(table, obsm_keys=_OBSM_KEYS)
     assert computes.count == 0
 
 
@@ -441,8 +434,8 @@ def test_matrices_whose_values_are_not_counts_raise(value, lazy):
     matrix = table.obsm["negative"].astype(np.float64)
     matrix.data[0] = value
     table.obsm["negative"] = da.from_array(matrix, chunks=(2, -1), asarray=False) if lazy else matrix
-    with pytest.raises(ValueError, match=r"adata\.obsm\['negative'\] of table 'counts' holds values that are not"):
-        summarize_table(_sdata(table), "counts", obsm_keys=_OBSM_KEYS)
+    with pytest.raises(ValueError, match=r"adata\.obsm\['negative'\] holds values that are not"):
+        summarize_table(table, obsm_keys=_OBSM_KEYS)
 
 
 def _without_annotation(table):
@@ -456,10 +449,9 @@ def _without_x(table):
 @pytest.mark.parametrize(
     ("change", "kwargs", "message"),
     [
-        (None, {"table_name": "absent"}, "not in sdata"),
         (_without_annotation, {}, "no SpatialData annotation"),
-        (None, {"layer": "absent"}, "not a layer of table"),
-        (None, {"obsm_keys": ["absent"]}, "not an .obsm key of table"),
+        (None, {"layer": "absent"}, "not a layer of the table"),
+        (None, {"obsm_keys": ["absent"]}, "not an .obsm key of the table"),
         (None, {"obsm_keys": ["negative", "negative"]}, "duplicate keys"),
         (None, {"obsm_keys": [1]}, "sequence of .obsm keys"),
         (_without_x, {}, "neither layer nor obsm_keys"),
@@ -472,6 +464,10 @@ def test_invalid_tables_and_arguments_raise(change, kwargs, message):
     table = _table()
     if change is not None:
         change(table)
-    arguments = {"table_name": "counts", **kwargs}
     with pytest.raises(ValueError, match=message):
-        summarize_table(_sdata(table), arguments.pop("table_name"), **arguments)
+        summarize_table(table, **kwargs)
+
+
+def test_summarize_table_takes_the_table():
+    with pytest.raises(TypeError, match=r"summarize_table takes the table, an AnnData such as sdata\.tables\[name\]"):
+        summarize_table(SpatialData(tables={"counts": _table()}))

@@ -10,14 +10,14 @@ import pytest
 import harpy as hp
 import harpy.qc._histogram as histogram_module
 import harpy.qc._scatter as scatter_module
-from harpy._tests.test_qc.test_table.test_summarize_table import _OBSM_KEYS, _sdata
+from harpy._tests.test_qc.test_table.test_summarize_table import _OBSM_KEYS, _table
 from harpy.qc import summarize_table
 
 
 @pytest.fixture
 def summary():
     """The summary of x, negative and system_control: panel sizes 2, 4 and 5."""
-    return summarize_table(_sdata(), "counts", obsm_keys=_OBSM_KEYS)
+    return summarize_table(_table(), obsm_keys=_OBSM_KEYS)
 
 
 @pytest.fixture(autouse=True)
@@ -124,7 +124,7 @@ def test_instance_histogram_rejects_invalid_selections(summary, kwargs, message)
 
 
 def test_the_share_of_points_needs_two_classes():
-    one_class = summarize_table(_sdata(), "counts")
+    one_class = summarize_table(_table())
     with pytest.raises(ValueError, match="needs a summary of two classes or more"):
         hp.qc.instance_histogram(one_class, feature_class="x", measure="pct_points")
 

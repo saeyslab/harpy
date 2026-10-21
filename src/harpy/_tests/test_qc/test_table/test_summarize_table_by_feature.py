@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 from anndata.abc import CSRDataset
 from scipy import sparse
+from spatialdata import SpatialData
 
 import harpy as hp
 import harpy.qc._histogram as histogram_module
@@ -16,7 +17,6 @@ from harpy._tests.test_qc.test_table.test_summarize_table import (
     _OBSM_KEYS,
     _SYSTEM_CONTROL,
     _X,
-    _sdata,
     _table,
 )
 from harpy._tests.test_table.test_io.test_updates import _CountComputes
@@ -35,10 +35,10 @@ def _close_figures():
     plt.close("all")
 
 
-def _summaries(sdata=None):
-    sdata = _sdata() if sdata is None else sdata
-    summary = summarize_table(sdata, "counts", obsm_keys=_OBSM_KEYS)
-    return summary, summarize_table_by_feature(sdata, summary=summary, features=_REQUESTED)
+def _summaries(table=None):
+    table = _table() if table is None else table
+    summary = summarize_table(table, obsm_keys=_OBSM_KEYS)
+    return summary, summarize_table_by_feature(table, summary=summary, features=_REQUESTED)
 
 
 def _assert_feature_summaries_equal(result, expected):
@@ -66,8 +66,9 @@ def test_per_instance_holds_each_requested_feature_per_instance():
 
 
 def test_instances_without_the_feature_and_an_undetected_feature_keep_their_zeros():
-    summary = summarize_table(_sdata(), "counts", obsm_keys=_OBSM_KEYS)
-    result = summarize_table_by_feature(_sdata(), summary=summary, features=["GeneA", "Negative03"])
+    table = _table()
+    summary = summarize_table(table, obsm_keys=_OBSM_KEYS)
+    result = summarize_table_by_feature(table, summary=summary, features=["GeneA", "Negative03"])
     per_instance = result.per_instance.set_index(["feature", "cell_ID", "region"])["n_points"]
     # cell_1, in region a, has no points at all; cell_4, in region b, has system_control points only.
     assert per_instance.loc[("GeneA", 2, "a")] == 0
@@ -132,8 +133,9 @@ def test_per_region_feature_holds_the_statistics_within_each_region():
 
 
 def test_the_classes_without_a_requested_feature_stay_categories():
-    summary = summarize_table(_sdata(), "counts", obsm_keys=_OBSM_KEYS)
-    result = summarize_table_by_feature(_sdata(), summary=summary, features="Negative01")
+    table = _table()
+    summary = summarize_table(table, obsm_keys=_OBSM_KEYS)
+    result = summarize_table_by_feature(table, summary=summary, features="Negative01")
     for frame in [result.per_feature, result.per_region_feature]:
         assert frame["feature_class"].tolist() == ["negative"] * len(frame)
         assert frame["feature_class"].cat.categories.tolist() == ["x", "negative", "system_control"]
@@ -141,24 +143,23 @@ def test_the_classes_without_a_requested_feature_stay_categories():
 
 
 def test_a_table_reordered_since_the_summary_gives_the_same_result():
-    sdata = _sdata()
-    summary, expected = _summaries(sdata)
+    table = _table()
+    summary, expected = _summaries(table)
     # The rows move with their .obs names, so the instances are found by name.
-    sdata.tables["counts"] = sdata.tables["counts"][::-1].copy()
-    result = summarize_table_by_feature(sdata, summary=summary, features=_REQUESTED)
+    result = summarize_table_by_feature(table[::-1].copy(), summary=summary, features=_REQUESTED)
     _assert_feature_summaries_equal(result, expected)
 
 
 @pytest.mark.parametrize("mode", ["lazy", "backed"])
 def test_lazy_and_backed_tables_give_the_in_memory_result(tmp_path, mode):
     _, expected = _summaries()
-    _sdata().write(tmp_path / "sdata.zarr")
-    sdata = hp.io.read_zarr(tmp_path / "sdata.zarr", table_mode=mode, sparse_chunks=2)
+    SpatialData(tables={"counts": _table()}).write(tmp_path / "sdata.zarr")
+    table = hp.io.read_zarr(tmp_path / "sdata.zarr", table_mode=mode, sparse_chunks=2).tables["counts"]
     matrix_type = da.Array if mode == "lazy" else CSRDataset
-    assert isinstance(sdata.tables["counts"].X, matrix_type)
-    summary = summarize_table(sdata, "counts", obsm_keys=_OBSM_KEYS)
+    assert isinstance(table.X, matrix_type)
+    summary = summarize_table(table, obsm_keys=_OBSM_KEYS)
     with _CountComputes() as computes:
-        result = summarize_table_by_feature(sdata, summary=summary, features=_REQUESTED)
+        result = summarize_table_by_feature(table, summary=summary, features=_REQUESTED)
     # A lazy table runs one Dask compute for all its matrices; a backed table runs none.
     assert computes.count == (1 if mode == "lazy" else 0)
     _assert_feature_summaries_equal(result, expected)
@@ -182,6 +183,7 @@ def _reordered_registration(table):
 
 
 def _renamed_instances(table):
+    # As another table than the summary's: its .obs names are not the summary's.
     table.obs_names = [f"other_{i}" for i in range(6)]
 
 
@@ -201,11 +203,11 @@ def _normalized_x(table):
         (None, None, [], "one or more exact feature names"),
         (None, None, ["GeneA", "GeneA"], "duplicate"),
         (_with_ambiguous_name, None, "GeneA", r"More than one column .* \{'GeneA': \['x', 'negative'\]\}"),
-        (None, _reordered_var_names, "GeneA", r"adata.X .* no longer has the columns"),
-        (None, _narrower_obsm, "GeneA", r"adata.obsm\['negative'\] .* no longer has the columns"),
-        (None, _reordered_registration, "GeneA", r"adata.obsm\['negative'\] .* no longer has the columns"),
-        (None, _renamed_instances, "GeneA", "no longer in table"),
-        (None, _permuted_instance_names, "GeneA", "now label other instances"),
+        (None, _reordered_var_names, "GeneA", r"adata.X no longer has the columns"),
+        (None, _narrower_obsm, "GeneA", r"adata.obsm\['negative'\] no longer has the columns"),
+        (None, _reordered_registration, "GeneA", r"adata.obsm\['negative'\] no longer has the columns"),
+        (None, _renamed_instances, "GeneA", "not in the table.*pass the summary's table"),
+        (None, _permuted_instance_names, "GeneA", "label other instances than in the summary"),
         (None, _normalized_x, "GeneA", "not counts"),
     ],
 )
@@ -213,17 +215,16 @@ def test_invalid_features_and_tables_changed_since_the_summary_raise(before, aft
     table = _table()
     if before is not None:
         before(table)
-    sdata = _sdata(table)
-    summary = summarize_table(sdata, "counts", obsm_keys=_OBSM_KEYS)
+    summary = summarize_table(table, obsm_keys=_OBSM_KEYS)
     if after is not None:
-        after(sdata.tables["counts"])
+        after(table)
     with pytest.raises(ValueError, match=message):
-        summarize_table_by_feature(sdata, summary=summary, features=features)
+        summarize_table_by_feature(table, summary=summary, features=features)
 
 
 def test_summarize_table_by_feature_takes_a_table_summary():
     with pytest.raises(TypeError, match="summary must be a TableSummary"):
-        summarize_table_by_feature(_sdata(), summary=None, features="GeneA")
+        summarize_table_by_feature(_table(), summary=None, features="GeneA")
 
 
 def test_instance_histogram_by_feature_plots_one_feature_annotated_with_its_statistics(monkeypatch):
