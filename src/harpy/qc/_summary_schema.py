@@ -3,12 +3,23 @@
 The one inventory of the strings that the summaries, and the QC metrics that
 ``harpy.tb.pp.calculate_qc_metrics`` adds to a table, write: a module that
 writes or reads an output name takes it from here. The statistics, such as
-``mean_points_per_instance``, are named by ``_statistic_name`` of
-``harpy.qc._summary_statistics``. The docstrings of the result classes describe
-each column.
+``mean_points_per_instance``, are named by :func:`_statistic_name`. The
+docstrings of the result classes describe each column.
 """
 
 from typing import Final
+
+
+def _statistic_name(statistic: str, *, unit: str, measure: str = "points") -> str:
+    """Return the column name of a statistic of a measure per unit, such as ``mean_points_per_instance``.
+
+    The one naming rule of the summaries' statistics, ``{statistic}_{measure}_per_{unit}``,
+    for those of ``harpy.qc._summary_statistics._points_statistics`` and those
+    computed without it, such as the mean and SD per instance of every feature
+    of a table, from its column sums.
+    """
+    return f"{statistic}_{measure}_per_{unit}"
+
 
 # These are summary output names, not the panel's source points column names
 # nor a table's own .obs columns.
