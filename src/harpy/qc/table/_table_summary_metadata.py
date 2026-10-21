@@ -7,16 +7,14 @@ from dataclasses import dataclass
 class TableSummaryMetadata:
     """Immutable context owned by a table summary.
 
-    The fields describe the computation's inputs: the table, the regions and
-    the matrices read, taken from the arguments and the table's SpatialData
-    annotation. They are not a live metadata lookup. Results of the
-    computation, such as the class labels ``feature_classes`` and the
-    denominators ``panel_feature_counts``, live in the summary.
+    The fields describe the computation's inputs: the regions and the matrices
+    read, taken from the arguments and the table's SpatialData annotation.
+    They are not a live metadata lookup. Results of the computation, such as
+    the class labels ``feature_classes`` and the denominators
+    ``panel_feature_counts``, live in the summary.
 
     Attributes
     ----------
-    table_name
-        Name of the summarized table.
     region
         Selected regions, the annotated elements whose rows were summarized,
         resolved from ``None`` to every region the table annotates, in the
@@ -31,7 +29,6 @@ class TableSummaryMetadata:
         matrices read took their names.
     """
 
-    table_name: str
     region: tuple[str, ...]
     layer: str | None
     obsm_keys: tuple[str, ...]

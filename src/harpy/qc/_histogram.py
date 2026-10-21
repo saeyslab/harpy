@@ -481,7 +481,7 @@ def instance_histogram(
     --------
     .. code-block:: python
 
-        summary = hp.qc.summarize_table(sdata, "table", obsm_keys=["negative", "system_control"])
+        summary = hp.qc.summarize_table(sdata.tables["table"], obsm_keys=["negative", "system_control"])
         ax = hp.qc.instance_histogram(summary, feature_class="x", measure="pct_points")
 
         # Negative points per negative probe per instance, comparable with other classes.
@@ -606,8 +606,9 @@ def instance_histogram_by_feature(
     --------
     .. code-block:: python
 
-        summary = hp.qc.summarize_table(sdata, "table", obsm_keys=["negative"])
-        features = hp.qc.summarize_table_by_feature(sdata, summary=summary, features=["Negative01", "GeneA"])
+        adata = sdata.tables["table"]
+        summary = hp.qc.summarize_table(adata, obsm_keys=["negative"])
+        features = hp.qc.summarize_table_by_feature(adata, summary=summary, features=["Negative01", "GeneA"])
         ax = hp.qc.instance_histogram_by_feature(features, feature="Negative01")
     """
     if not isinstance(summary, FeatureTableSummary):

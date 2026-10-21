@@ -142,7 +142,7 @@ def instance_scatter(
     --------
     .. code-block:: python
 
-        summary = hp.qc.summarize_table(sdata, "table", obsm_keys=["negative", "system_control"])
+        summary = hp.qc.summarize_table(sdata.tables["table"], obsm_keys=["negative", "system_control"])
         # Complexity: detected genes (y) against gene points (x), scanpy's n_genes_by_counts and total_counts.
         ax = hp.qc.instance_scatter(summary, x=("x", "points"), y=("x", "detected_features"))
 

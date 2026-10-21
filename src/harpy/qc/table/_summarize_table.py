@@ -14,7 +14,6 @@ from anndata import AnnData
 from anndata.abc import CSRDataset
 from numpy.typing import NDArray
 from scipy import sparse
-from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
 from harpy._feature_panels import _require_mapping
@@ -56,8 +55,8 @@ class TableSummary:
     Attributes
     ----------
     metadata
-        One :class:`TableSummaryMetadata` record: the table, the selected
-        regions and the matrices read.
+        One :class:`TableSummaryMetadata` record: the selected regions and the
+        matrices read.
     per_instance
         One row per row of the selected regions, indexed by the table's
         ``.obs`` index. Wide, one column per class, to stay aligned with
@@ -227,8 +226,7 @@ class _FeatureClassMatrix:
 
 
 def summarize_table(
-    sdata: SpatialData,
-    table_name: str,
+    adata: AnnData,
     *,
     layer: str | None = None,
     obsm_keys: str | Sequence[str] = (),
@@ -249,11 +247,11 @@ def summarize_table(
 
     Parameters
     ----------
-    sdata
-        SpatialData object containing the table. The elements that the table
-        annotates need not be present.
-    table_name
-        Name of the table in ``sdata.tables``.
+    adata
+        The table, such as ``sdata.tables["table"]``, with its SpatialData
+        annotation in ``uns["spatialdata_attrs"]``. It need not be part of a
+        SpatialData object, and the elements that it annotates need not be
+        present.
     layer
         The matrix aligned with ``var`` to read: ``None`` reads ``X``, as in
         scanpy, and a name reads ``adata.layers[layer]``. It is always read when
@@ -295,9 +293,11 @@ def summarize_table(
 
     Raises
     ------
+    TypeError
+        If ``adata`` is not an :class:`~anndata.AnnData`.
     ValueError
-        If ``table_name`` is not a table of ``sdata`` or has no SpatialData
-        annotation; if there is nothing to read; if ``layer`` or a key of
+        If the table has no SpatialData annotation; if there is nothing to
+        read; if ``layer`` or a key of
         ``obsm_keys`` is unknown, or ``obsm_keys`` contains duplicates; if two
         matrices read have the same class label; if a matrix read is not a CSR
         matrix with one row per observation, or holds values that are not
@@ -347,7 +347,7 @@ def summarize_table(
             to_coordinate_system="global",
             expression_class="Endogenous",
         )
-        summary = hp.qc.summarize_table(sdata, "table", obsm_keys=["negative", "system_control"])
+        summary = hp.qc.summarize_table(sdata.tables["table"], obsm_keys=["negative", "system_control"])
         summary.per_class  # one row per class: x, negative and system_control
 
         # Each instance's share of its points in X, the expression class.
@@ -356,14 +356,9 @@ def summarize_table(
         hp.qc.instance_scatter(summary, x=("x", "points"), y=("negative", "pct_points"))
 
         # The raw counts of a normalized table, in one region.
-        summary = hp.qc.summarize_table(sdata, "table", layer="counts", region="sample_a_labels")
+        summary = hp.qc.summarize_table(sdata.tables["table"], layer="counts", region="sample_a_labels")
     """
-    if table_name not in sdata.tables:
-        raise ValueError(f"Table {table_name!r} is not in sdata; available tables: {sorted(sdata.tables)}.")
-    adata = sdata.tables[table_name]
-    attrs = adata.uns.get(TableModel.ATTRS_KEY)
-    if not isinstance(attrs, Mapping):
-        raise ValueError(f"Table {table_name!r} has no SpatialData annotation (uns[{TableModel.ATTRS_KEY!r}]).")
+    attrs = _spatialdata_annotation(adata, function="summarize_table")
     if not isinstance(feature_matrices_key, str) or not feature_matrices_key:
         raise ValueError(
             f"Parameter 'feature_matrices_key' must be a non-empty string, found {feature_matrices_key!r}."
@@ -374,7 +369,6 @@ def summarize_table(
     keys = _obsm_keys(obsm_keys)
     classes = _class_matrices(
         adata,
-        table_name=table_name,
         layer=layer,
         obsm_keys=keys,
         feature_names=feature_names,
@@ -391,9 +385,7 @@ def summarize_table(
     region_codes = pd.Categorical(obs[region_key].astype(str).to_numpy(), categories=selected_regions).codes
     region_codes = region_codes.astype(np.int64)
     positions = np.flatnonzero(region_codes >= 0)
-    rows, columns = _count_rows(
-        classes, region_codes=region_codes, n_regions=len(selected_regions), table_name=table_name
-    )
+    rows, columns = _count_rows(classes, region_codes=region_codes, n_regions=len(selected_regions))
     # points[label] holds the class's points per selected row, in table order: the
     # row's sum in that class's matrix. detected[label] holds its detected features:
     # the row's positive entries. Rows without points are included. columns[label]
@@ -455,7 +447,6 @@ def summarize_table(
     per_region_feature = _with_region_categories(pd.concat(region_feature_frames, ignore_index=True), selected_regions)
 
     metadata = TableSummaryMetadata(
-        table_name=table_name,
         region=selected_regions,
         layer=layer,
         obsm_keys=keys,
@@ -471,6 +462,22 @@ def summarize_table(
     )
 
 
+def _spatialdata_annotation(adata: object, *, function: str) -> Mapping:
+    """Return the table's SpatialData annotation, raising unless ``adata`` is an AnnData that has one.
+
+    ``function`` names the public function in the error raised for another type
+    than an AnnData, such as a SpatialData object.
+    """
+    if not isinstance(adata, AnnData):
+        raise TypeError(
+            f"{function} takes the table, an AnnData such as sdata.tables[name], found {type(adata).__name__}."
+        )
+    attrs = adata.uns.get(TableModel.ATTRS_KEY)
+    if not isinstance(attrs, Mapping):
+        raise ValueError(f"The table has no SpatialData annotation (uns[{TableModel.ATTRS_KEY!r}]).")
+    return attrs
+
+
 def _with_region_categories(frame: pd.DataFrame, regions: tuple[str, ...]) -> pd.DataFrame:
     """Make the region column categorical, its categories the selected regions in their order."""
     frame[_REGION_COLUMN_KEY] = pd.Categorical(frame[_REGION_COLUMN_KEY], categories=regions)
@@ -480,17 +487,15 @@ def _with_region_categories(frame: pd.DataFrame, regions: tuple[str, ...]) -> pd
 def _class_matrices(
     adata: AnnData,
     *,
-    table_name: str,
     layer: str | None,
     obsm_keys: tuple[str, ...],
     feature_names: Mapping[str, Sequence[str]] | None,
     feature_matrices_key: str,
 ) -> tuple[_FeatureClassMatrix, ...]:
     """Return the matrices to read, one per class, with their feature names, after checking them without reading a value."""
-    entries = _collect_class_matrices(adata, table_name=table_name, layer=layer, obsm_keys=obsm_keys)
+    entries = _collect_class_matrices(adata, layer=layer, obsm_keys=obsm_keys)
     obsm_names = _obsm_feature_names(
         adata,
-        table_name=table_name,
         obsm_keys=obsm_keys,
         feature_names=feature_names,
         feature_matrices_key=feature_matrices_key,
@@ -503,7 +508,7 @@ def _class_matrices(
 
 
 def _collect_class_matrices(
-    adata: AnnData, *, table_name: str, layer: str | None, obsm_keys: tuple[str, ...]
+    adata: AnnData, *, layer: str | None, obsm_keys: tuple[str, ...]
 ) -> tuple[_FeatureClassMatrix, ...]:
     """Return the matrices to read, one per class, without their names, after checking them without reading a value.
 
@@ -513,20 +518,16 @@ def _collect_class_matrices(
     entries = []
     if layer is not None:
         if not isinstance(layer, str) or layer not in adata.layers:
-            raise ValueError(
-                f"Layer {layer!r} is not a layer of table {table_name!r}; available layers: {sorted(adata.layers)}."
-            )
+            raise ValueError(f"Layer {layer!r} is not a layer of the table; available layers: {sorted(adata.layers)}.")
         entries.append(_FeatureClassMatrix(attribute="layers", key=layer, matrix=adata.layers[layer]))
     elif adata.X is not None:
         entries.append(_FeatureClassMatrix(attribute="X", key=None, matrix=adata.X))
     for key in obsm_keys:
         if key not in adata.obsm:
-            raise ValueError(
-                f"{key!r} is not an .obsm key of table {table_name!r}; available keys: {sorted(adata.obsm)}."
-            )
+            raise ValueError(f"{key!r} is not an .obsm key of the table; available keys: {sorted(adata.obsm)}.")
         entries.append(_FeatureClassMatrix(attribute="obsm", key=key, matrix=adata.obsm[key]))
     if not entries:
-        raise ValueError(f"Table {table_name!r} has no X, and neither layer nor obsm_keys names a matrix to summarize.")
+        raise ValueError("The table has no X, and neither layer nor obsm_keys names a matrix to summarize.")
 
     locations_by_label: dict[str, list[str]] = {}
     for entry in entries:
@@ -535,14 +536,13 @@ def _collect_class_matrices(
     if coinciding:
         raise ValueError(f"Each matrix read needs its own class label, but these labels coincide: {coinciding}.")
     for entry in entries:
-        _check_csr(entry, n_obs=adata.n_obs, table_name=table_name)
+        _check_csr(entry, n_obs=adata.n_obs)
     return tuple(entries)
 
 
 def _obsm_feature_names(
     adata: AnnData,
     *,
-    table_name: str,
     obsm_keys: tuple[str, ...],
     feature_names: Mapping[str, Sequence[str]] | None,
     feature_matrices_key: str,
@@ -565,7 +565,7 @@ def _obsm_feature_names(
 
     names = {}
     for key in obsm_keys:
-        location = f"adata.obsm[{key!r}] of table {table_name!r}"
+        location = f"adata.obsm[{key!r}]"
         if key in records:
             if key in passed:
                 raise ValueError(
@@ -603,7 +603,7 @@ def _obsm_keys(value: str | Sequence[str]) -> tuple[str, ...]:
     return keys
 
 
-def _check_csr(entry: _FeatureClassMatrix, *, n_obs: int, table_name: str) -> None:
+def _check_csr(entry: _FeatureClassMatrix, *, n_obs: int) -> None:
     """Raise unless the matrix is a CSR matrix with one row per observation, from its type alone."""
     matrix = entry.matrix
     if isinstance(matrix, da.Array):
@@ -615,15 +615,13 @@ def _check_csr(entry: _FeatureClassMatrix, *, n_obs: int, table_name: str) -> No
         kind = f"a {type(matrix).__name__}"
     if not is_csr:
         raise ValueError(
-            f"adata.{entry.location} of table {table_name!r} is {kind}, not a CSR matrix: summarize_table reads CSR "
+            f"adata.{entry.location} is {kind}, not a CSR matrix: summarize_table reads CSR "
             "count matrices only, in memory, lazy or backed. Convert it first, for example "
             f"adata.{entry.location} = scipy.sparse.csr_matrix(adata.{entry.location}), or read the store with "
             "hp.io.read_zarr."
         )
     if len(matrix.shape) != 2 or matrix.shape[0] != n_obs:
-        raise ValueError(
-            f"adata.{entry.location} of table {table_name!r} must have shape (n_obs, n_features), found {matrix.shape}."
-        )
+        raise ValueError(f"adata.{entry.location} must have shape (n_obs, n_features), found {matrix.shape}.")
 
 
 @dataclass(frozen=True)
@@ -681,7 +679,7 @@ def _add_column_sums(*parts: _ColumnSums) -> _ColumnSums:
 
 
 def _count_rows(
-    classes: tuple[_FeatureClassMatrix, ...], *, region_codes: NDArray[np.int64], n_regions: int, table_name: str
+    classes: tuple[_FeatureClassMatrix, ...], *, region_codes: NDArray[np.int64], n_regions: int
 ) -> tuple[dict[str, _RowSums], dict[str, _ColumnSums]]:
     """Return, per class, the row sums of the selected rows and the column sums per region.
 
@@ -699,16 +697,14 @@ def _count_rows(
     for entry in classes:
         if isinstance(entry.matrix, da.Array):
             lazy_tasks[entry.label] = _lazy_block_tasks(
-                entry.matrix, region_codes, n_regions=n_regions, location=entry.location, table_name=table_name
+                entry.matrix, region_codes, n_regions=n_regions, location=entry.location
             )
             continue
         block_rows[entry.label] = []
         total = _ColumnSums.zeros(n_regions, entry.matrix.shape[1])
         # A block that is not counts raises, so the remaining blocks are not read.
         for block, codes_in_block in _sliced_blocks(entry.matrix, region_codes):
-            row_sums, column_sums = _block_counts(
-                block, codes_in_block, n_regions=n_regions, location=entry.location, table_name=table_name
-            )
+            row_sums, column_sums = _block_counts(block, codes_in_block, n_regions=n_regions, location=entry.location)
             block_rows[entry.label].append(row_sums)
             total = total + column_sums
         columns[entry.label] = total
@@ -724,7 +720,7 @@ def _count_rows(
 
 
 def _lazy_block_tasks(
-    matrix: da.Array, region_codes: NDArray[np.int64], *, n_regions: int, location: str, table_name: str
+    matrix: da.Array, region_codes: NDArray[np.int64], *, n_regions: int, location: str
 ) -> tuple[list, object]:
     """Return the delayed row results of a lazy CSR matrix's blocks with selected rows, and its delayed column sums."""
     if len(matrix.chunks[1]) > 1:
@@ -741,11 +737,7 @@ def _lazy_block_tasks(
         codes_in_block = region_codes[start : start + length]
         start += length
         if (codes_in_block >= 0).any():
-            tasks.append(
-                dask.delayed(_block_counts)(
-                    block, codes_in_block, n_regions=n_regions, location=location, table_name=table_name
-                )
-            )
+            tasks.append(dask.delayed(_block_counts)(block, codes_in_block, n_regions=n_regions, location=location))
     block_rows = [task[0] for task in tasks]
     if not tasks:
         return block_rows, _ColumnSums.zeros(n_regions, matrix.shape[1])
@@ -799,16 +791,16 @@ def _sliced_blocks(matrix: object, row_codes: NDArray[np.int64]) -> Iterator[tup
 
 
 def _block_counts(
-    block: object, codes_in_block: NDArray[np.int64], *, n_regions: int, location: str, table_name: str
+    block: object, codes_in_block: NDArray[np.int64], *, n_regions: int, location: str
 ) -> tuple[_RowSums, _ColumnSums]:
     """Return the row sums of a CSR row block's selected rows, and its column sums per region.
 
     ``codes_in_block`` gives each row's selected region, ``-1`` for a row
     outside the selection. The caller reads the row sums as a class's points
     per instance, and the positive entries as its detected features; the
-    column sums, per region, give the statistics per feature. ``location`` and
-    ``table_name`` name the matrix in the error raised when a stored value is
-    not a non-negative whole number.
+    column sums, per region, give the statistics per feature. ``location``
+    names the matrix in the error raised when a stored value is not a
+    non-negative whole number.
     """
     selected_in_block = codes_in_block >= 0
     if not selected_in_block.all():
@@ -826,7 +818,7 @@ def _block_counts(
     data = block.data
     if not _are_counts(data):
         raise ValueError(
-            f"adata.{location} of table {table_name!r} holds values that are not counts, non-negative whole numbers: "
+            f"adata.{location} holds values that are not counts, non-negative whole numbers: "
             "summarize_table summarizes raw counts. If the matrix was normalized, pass the layer of raw counts "
             "with layer=."
         )
