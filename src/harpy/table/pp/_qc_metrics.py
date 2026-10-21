@@ -11,19 +11,20 @@ from spatialdata.models import TableModel
 
 from harpy.qc._summary_schema import (
     _FEATURE_CLASS_KEY,
-    _N_CLASS_POINTS_PER_PANEL_FEATURE_TEMPLATE,
-    _N_CLASS_POINTS_TEMPLATE,
     _N_INSTANCES_WITHOUT_FEATURE_KEY,
     _N_POINTS_KEY,
+    _N_POINTS_PER_PANEL_FEATURE_KEY,
     _PCT_INSTANCES_WITHOUT_FEATURE_KEY,
     _WITHIN_CLASS_FRACTION_KEY,
+    _class_column,
     _statistic_name,
 )
 from harpy.qc.table._summarize_table import TableSummary, summarize_table
 from harpy.table._utils import _spatialdata_annotation
 from harpy.utils._keys import _FEATURE_MATRICES_KEY
 
-# The columns of TableSummary.per_feature written to .var, in this order.
+# The columns of TableSummary.per_feature written to .var, in this order, each followed by the label of the
+# class of X or the layer read.
 _VAR_COLUMNS = (
     _N_POINTS_KEY,
     _WITHIN_CLASS_FRACTION_KEY,
@@ -60,8 +61,12 @@ def calculate_qc_metrics(
     adata
         The table, such as ``sdata.tables["table"]``, with its SpatialData
         annotation, in memory, lazy or backed: only ``.obs`` and ``.var``
-        change. Columns that they already hold under the names to add are
-        replaced.
+        change. Columns are only written, never removed: those that they
+        already hold under the names to add are replaced, and those of other
+        matrices or classes, from earlier calls, stay. Columns are named by
+        class label, so two matrices with the same label, such as ``X`` and a
+        layer named ``x``, read in different calls, share their columns: the
+        later call replaces them.
     layer
         The matrix aligned with ``var`` to read, as in
         :func:`harpy.qc.summarize_table`: ``None`` reads ``X``, a name reads
@@ -95,14 +100,18 @@ def calculate_qc_metrics(
 
     Notes
     -----
-    **Added to ``.obs``,** for every row, with ``<class>`` the label of a
-    matrix read, its name in snake case, ``x`` for ``X``:
+    Every column specific to a class ends with the class label ``<class>``,
+    the name of the matrix read in snake case, ``x`` for ``X``, so that the
+    column of a class is ``f"{column}_{label}"`` in ``.obs``, ``.var`` and
+    ``summary.per_instance`` alike.
 
-    - ``n_<class>_points`` (uint64) and ``n_<class>_detected_features``;
-    - ``pct_<class>_points``, with two classes or more: the class's share of
-      the row's points across the classes read, missing (NaN) for a row
-      without points;
-    - ``n_<class>_points_per_panel_feature`` (float64): the class's points
+    **Added to ``.obs``,** for every row:
+
+    - ``n_points_<class>`` (uint64) and ``n_detected_features_<class>``;
+    - ``pct_points_<class>``, with two classes or more: the class's share of
+      the row's points across the classes read in this call, missing (NaN) for
+      a row without points;
+    - ``n_points_per_panel_feature_<class>`` (float64): the class's points
       divided by its number of features in the matrices read,
       ``summary.panel_feature_counts``, the values that the instance plots
       show with ``normalization="per_panel_feature"``.
@@ -113,25 +122,27 @@ def calculate_qc_metrics(
 
     .. code-block:: python
 
-        rates = ["n_x_points_per_panel_feature", "n_negative_points_per_panel_feature"]
+        rates = ["n_points_per_panel_feature_x", "n_points_per_panel_feature_negative"]
         per_region = adata.obs.groupby("fov_labels", observed=True)[rates].mean()
 
     **Added to ``.var``,** when ``X`` or a layer is read, the statistics of
-    ``summary.per_feature`` for its features: ``n_points`` (uint64),
-    ``within_class_fraction``, ``n_instances_without_feature``,
-    ``pct_instances_without_feature``, ``mean_points_per_instance`` and
-    ``std_points_per_instance``. The features of the ``.obsm`` matrices have
-    no ``.var`` axis, and stay in the summary.
+    ``summary.per_feature`` for its features, labelled with its class:
+    ``n_points_<class>`` (uint64), ``within_class_fraction_<class>``,
+    ``n_instances_without_feature_<class>``,
+    ``pct_instances_without_feature_<class>``,
+    ``mean_points_per_instance_<class>`` and ``std_points_per_instance_<class>``.
+    The features of the ``.obsm`` matrices have no ``.var`` axis, and stay in
+    the summary.
 
     Compared with scanpy, for ``X``::
 
-        this function                         scanpy
-        n_x_points (obs)                      total_counts
-        n_x_detected_features (obs)           n_genes_by_counts
-        pct_<class>_points (obs)              pct_counts_<qc_var>
-        n_points (var)                        total_counts
-        mean_points_per_instance (var)        mean_counts
-        pct_instances_without_feature (var)   pct_dropout_by_counts
+        this function                           scanpy
+        n_points_x (obs)                        total_counts
+        n_detected_features_x (obs)             n_genes_by_counts
+        pct_points_<class> (obs)                pct_counts_<qc_var>
+        n_points_x (var)                        total_counts
+        mean_points_per_instance_x (var)        mean_counts
+        pct_instances_without_feature_x (var)   pct_dropout_by_counts
 
     Examples
     --------
@@ -139,7 +150,7 @@ def calculate_qc_metrics(
 
         adata = sdata.tables["table"]
         summary = hp.tb.pp.calculate_qc_metrics(adata, obsm_keys=["negative", "system_control"])
-        hp.tb.pl.scatter(adata, "n_x_points", "pct_negative_points")
+        hp.tb.pl.scatter(adata, "n_points_x", "pct_points_negative")
         hp.qc.instance_histogram(summary, feature_class="negative", normalization="per_panel_feature")
         hp.tb.io.add_table_updates(sdata, table_name="table", overwrite=True)
     """
@@ -170,14 +181,18 @@ def calculate_qc_metrics(
     }
     for label, n_features in summary.panel_feature_counts.items():
         # n_features is positive: summarize_table raises for a matrix without columns.
-        points = per_instance[_N_CLASS_POINTS_TEMPLATE.format(label=label)].to_numpy(dtype=np.float64)
-        obs_columns[_N_CLASS_POINTS_PER_PANEL_FEATURE_TEMPLATE.format(label=label)] = points / n_features
+        points = per_instance[_class_column(_N_POINTS_KEY, label=label)].to_numpy(dtype=np.float64)
+        obs_columns[_class_column(_N_POINTS_PER_PANEL_FEATURE_KEY, label=label)] = points / n_features
     var_columns: dict[str, NDArray] = {}
-    # X or the layer, when read, is the first class; the others are the .obsm matrices.
-    if len(summary.feature_classes) > len(summary.metadata.obsm_keys):
+    # The class of the matrix aligned with .var: X, or the layer passed as layer= instead of it; None if only
+    # .obsm matrices were read.
+    var_class = summary.var_class
+    if var_class is not None:
         per_feature = summary.per_feature
-        rows = per_feature[per_feature[_FEATURE_CLASS_KEY] == summary.feature_classes[0]]
-        var_columns = {name: rows[name].to_numpy() for name in _VAR_COLUMNS}
+        # The statistics of the features of .var, from per_feature's rows of their class, which follow var's order,
+        # so that they are written by position.
+        statistics = per_feature.loc[per_feature[_FEATURE_CLASS_KEY] == var_class, list(_VAR_COLUMNS)]
+        var_columns = {_class_column(name, label=var_class): values.to_numpy() for name, values in statistics.items()}
 
     for name, values in obs_columns.items():
         adata.obs[name] = values

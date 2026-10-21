@@ -11,6 +11,11 @@ column.
 
 from typing import Final
 
+from harpy.utils._names import _snake_case
+
+# The class label of X, the name of the matrix in snake case.
+_X_LABEL: Final = "x"
+
 
 def _statistic_name(statistic: str, *, unit: str, measure: str = "points") -> str:
     """Return the column name of a statistic of a measure per unit, such as ``mean_points_per_instance``.
@@ -21,6 +26,16 @@ def _statistic_name(statistic: str, *, unit: str, measure: str = "points") -> st
     of a table, from its column sums.
     """
     return f"{statistic}_{measure}_per_{unit}"
+
+
+def _class_label(key: str | None) -> str:
+    """Return the class label of a matrix read: ``"x"`` for ``X``, without a key, otherwise its layer or ``.obsm`` key in snake case.
+
+    The one naming rule of the classes of a table summary, which name the
+    ``feature_class`` column of its long frames and end the names of its
+    class-specific columns, through :func:`_class_column`.
+    """
+    return _X_LABEL if key is None else _snake_case(key)
 
 
 def _class_column(column: str, *, label: str) -> str:

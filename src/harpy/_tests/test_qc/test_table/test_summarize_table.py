@@ -86,26 +86,26 @@ def test_per_instance_holds_each_class_per_row_aligned_with_obs():
     assert list(per_instance.columns) == [
         "region",
         "cell_ID",
-        "n_x_points",
-        "n_negative_points",
-        "n_system_control_points",
-        "n_x_detected_features",
-        "n_negative_detected_features",
-        "n_system_control_detected_features",
-        "pct_x_points",
-        "pct_negative_points",
-        "pct_system_control_points",
+        "n_points_x",
+        "n_points_negative",
+        "n_points_system_control",
+        "n_detected_features_x",
+        "n_detected_features_negative",
+        "n_detected_features_system_control",
+        "pct_points_x",
+        "pct_points_negative",
+        "pct_points_system_control",
     ]
     pd.testing.assert_frame_equal(per_instance[["region", "cell_ID"]], obs[["region", "cell_ID"]])
     totals = np.asarray(_X).sum(axis=1) + np.asarray(_NEGATIVE).sum(axis=1) + np.asarray(_SYSTEM_CONTROL).sum(axis=1)
     with_points = totals > 0
     for label, dense in _CLASSES.items():
         dense = np.asarray(dense)
-        assert per_instance[f"n_{label}_points"].dtype == np.uint64
-        np.testing.assert_array_equal(per_instance[f"n_{label}_points"], dense.sum(axis=1))
+        assert per_instance[f"n_points_{label}"].dtype == np.uint64
+        np.testing.assert_array_equal(per_instance[f"n_points_{label}"], dense.sum(axis=1))
         # The stored zero of cell_2 in X is not a detection.
-        np.testing.assert_array_equal(per_instance[f"n_{label}_detected_features"], (dense > 0).sum(axis=1))
-        share = per_instance[f"pct_{label}_points"].to_numpy()
+        np.testing.assert_array_equal(per_instance[f"n_detected_features_{label}"], (dense > 0).sum(axis=1))
+        share = per_instance[f"pct_points_{label}"].to_numpy()
         np.testing.assert_allclose(share[with_points], 100 * dense.sum(axis=1)[with_points] / totals[with_points])
     # cell_1 has 0 points and 0 detected features in each class, and a missing share.
     assert per_instance.loc["cell_1"].filter(like="pct_").isna().all()
@@ -120,8 +120,8 @@ def test_the_matrices_read_decide_the_classes_not_the_population():
     alone = summarize_table(table)
     assert alone.feature_classes == ("x",)
     # With one class there are no shares; cell_1 and cell_4, without points in X, count as zeros.
-    assert list(alone.per_instance.columns) == ["region", "cell_ID", "n_x_points", "n_x_detected_features"]
-    np.testing.assert_array_equal(alone.per_instance["n_x_points"], [10, 0, 5, 8, 0, 2])
+    assert list(alone.per_instance.columns) == ["region", "cell_ID", "n_points_x", "n_detected_features_x"]
+    np.testing.assert_array_equal(alone.per_instance["n_points_x"], [10, 0, 5, 8, 0, 2])
 
     summary = summarize_table(table, obsm_keys="system_control")
     assert summary.feature_classes == ("x", "system_control")
@@ -132,7 +132,7 @@ def test_the_matrices_read_decide_the_classes_not_the_population():
 def test_a_table_without_x_is_summarized_from_its_obsm_matrices():
     summary = summarize_table(_table(x=False), obsm_keys=_OBSM_KEYS)
     assert summary.feature_classes == ("negative", "system_control")
-    np.testing.assert_array_equal(summary.per_instance["n_negative_points"], [1, 0, 0, 2, 0, 1])
+    np.testing.assert_array_equal(summary.per_instance["n_points_negative"], [1, 0, 0, 2, 0, 1])
 
 
 def test_an_x_without_columns_raises():
@@ -160,7 +160,7 @@ def test_a_layer_is_read_in_place_of_x():
     assert summary.metadata.layer == "RawCounts"
     # The layer's label is its name in snake case, and X is not read as well.
     assert summary.feature_classes == ("raw_counts", "negative")
-    np.testing.assert_array_equal(summary.per_instance["n_raw_counts_points"], [10, 0, 5, 8, 0, 2])
+    np.testing.assert_array_equal(summary.per_instance["n_points_raw_counts"], [10, 0, 5, 8, 0, 2])
 
 
 def test_coinciding_class_labels_raise():
@@ -199,14 +199,14 @@ def test_class_statistics_agree_with_every_row():
     per_class = summary.per_class
     assert per_class["feature_class"].tolist() == ["x", "negative", "system_control"]
     for row in per_class.itertuples():
-        for measure, column in [("points", "points"), ("detected_features", "detected_features")]:
-            values = summary.per_instance[f"n_{row.feature_class}_{column}"].to_numpy()
+        for measure in ["points", "detected_features"]:
+            values = summary.per_instance[f"n_{measure}_{row.feature_class}"].to_numpy()
             expected = [values.mean(), np.median(values), values.std(ddof=1), np.percentile(values, 95)]
             actual = [
                 getattr(row, f"{statistic}_{measure}_per_instance") for statistic in ["mean", "median", "std", "p95"]
             ]
             np.testing.assert_allclose(actual, expected)
-        counts = summary.per_instance[f"n_{row.feature_class}_points"].to_numpy()
+        counts = summary.per_instance[f"n_points_{row.feature_class}"].to_numpy()
         assert row.n_points == counts.sum()
         assert row.n_instances_without_class == np.count_nonzero(counts == 0)
         assert row.pct_instances_without_class == pytest.approx(100 * np.count_nonzero(counts == 0) / 6)
@@ -218,7 +218,7 @@ def test_the_denominator_follows_a_subset_of_x():
     table = _table()[:, ["GeneA"]].copy()
     summary = summarize_table(table)
     assert summary.panel_feature_counts == {"x": 1}
-    np.testing.assert_array_equal(summary.per_instance["n_x_points"], [7, 0, 5, 4, 0, 0])
+    np.testing.assert_array_equal(summary.per_instance["n_points_x"], [7, 0, 5, 4, 0, 0])
 
 
 def test_per_region_class_holds_the_class_statistics_within_each_region():

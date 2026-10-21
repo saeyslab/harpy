@@ -34,6 +34,7 @@ from harpy.qc._summary_schema import (
     _REGION_COLUMN_KEY,
     _WITHIN_CLASS_FRACTION_KEY,
     _class_column,
+    _class_label,
     _statistic_name,
 )
 from harpy.qc._summary_statistics import _points_statistics
@@ -41,10 +42,7 @@ from harpy.qc.table._table_summary_metadata import TableSummaryMetadata
 from harpy.table._utils import _spatialdata_annotation
 from harpy.table._validation import _metadata_string_sequence, _validate_feature_matrix_record
 from harpy.utils._keys import _FEATURE_MATRICES_KEY
-from harpy.utils._names import _names, _selected_names, _snake_case
-
-# The label of the class of X, the name of the matrix in snake case.
-_X_LABEL = "x"
+from harpy.utils._names import _names, _selected_names
 
 
 @dataclass(frozen=True)
@@ -209,6 +207,21 @@ class TableSummary:
             for label, count in zip(self.per_class[_FEATURE_CLASS_KEY], self.per_class[_N_FEATURES_KEY], strict=True)
         }
 
+    @property
+    def var_class(self) -> str | None:
+        """Return the class of the matrix aligned with ``var``, or None.
+
+        The class of ``X``, or of ``metadata.layer`` when a layer was read in
+        its place; None if only ``.obsm`` matrices were read. Its rows of
+        ``per_feature`` are the features of ``var``, in their order. Each
+        ``.obsm`` key gives one class, so one class more means that ``X`` or
+        the layer was read. Not ``"x"`` among the classes: a table without
+        ``X`` may have an ``.obsm`` matrix with that label.
+        """
+        if len(self.feature_classes) > len(self.metadata.obsm_keys):
+            return _class_label(self.metadata.layer)
+        return None
+
 
 @dataclass(frozen=True)
 class _FeatureClassMatrix:
@@ -225,7 +238,7 @@ class _FeatureClassMatrix:
     @property
     def label(self) -> str:
         """Return the class label: the matrix's name in snake case, ``"x"`` for ``X``."""
-        return _X_LABEL if self.key is None else _snake_case(self.key)
+        return _class_label(self.key)
 
     @property
     def location(self) -> str:

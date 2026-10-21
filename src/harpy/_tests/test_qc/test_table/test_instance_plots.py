@@ -42,12 +42,12 @@ def _capture(monkeypatch, module, name):
 @pytest.mark.parametrize(
     ("feature_class", "measure", "column", "label"),
     [
-        ("x", "points", "n_x_points", "x points per instance"),
-        ("negative", "detected_features", "n_negative_detected_features", "negative detected features per instance"),
+        ("x", "points", "n_points_x", "x points per instance"),
+        ("negative", "detected_features", "n_detected_features_negative", "negative detected features per instance"),
         (
             "system_control",
             "pct_points",
-            "pct_system_control_points",
+            "pct_points_system_control",
             "system_control share of the instance's points (%)",
         ),
     ],
@@ -84,7 +84,7 @@ def test_per_panel_feature_normalization_divides_the_points_and_their_annotation
 
     (values,), options = calls[0]
     n_features = summary.panel_feature_counts["negative"]
-    np.testing.assert_allclose(values, summary.per_instance["n_negative_points"] / n_features)
+    np.testing.assert_allclose(values, summary.per_instance["n_points_negative"] / n_features)
     row = summary.per_class.set_index("feature_class").loc["negative"]
     assert options["median"] == pytest.approx(row["median_points_per_instance"] / n_features)
     assert options["std"] == pytest.approx(row["std_points_per_instance"] / n_features)
@@ -141,8 +141,8 @@ def test_instance_scatter_plots_two_class_measures(monkeypatch, summary):
     ax = hp.qc.instance_scatter(summary, x=("negative", "points"), y=("x", "detected_features"))
 
     (x_values, y_values), _ = calls[0]
-    pd.testing.assert_series_equal(x_values, summary.per_instance["n_negative_points"])
-    pd.testing.assert_series_equal(y_values, summary.per_instance["n_x_detected_features"])
+    pd.testing.assert_series_equal(x_values, summary.per_instance["n_points_negative"])
+    pd.testing.assert_series_equal(y_values, summary.per_instance["n_detected_features_x"])
     assert (ax.get_xlabel(), ax.get_ylabel()) == ("negative points per instance", "x detected features per instance")
 
 
@@ -153,8 +153,8 @@ def test_instance_scatter_drops_an_instance_whose_share_is_missing_on_either_axi
     (x_values, y_values), _ = calls[0]
     # cell_1 has no points: its share is missing, so it is dropped, although its 0 negative points are a value.
     with_share = summary.per_instance.index.drop("cell_1")
-    pd.testing.assert_series_equal(x_values, summary.per_instance.loc[with_share, "pct_x_points"])
-    pd.testing.assert_series_equal(y_values, summary.per_instance.loc[with_share, "n_negative_points"])
+    pd.testing.assert_series_equal(x_values, summary.per_instance.loc[with_share, "pct_points_x"])
+    pd.testing.assert_series_equal(y_values, summary.per_instance.loc[with_share, "n_points_negative"])
 
 
 def test_instance_scatter_normalizes_each_axis_by_its_own_class(monkeypatch, summary):
@@ -164,8 +164,8 @@ def test_instance_scatter_normalizes_each_axis_by_its_own_class(monkeypatch, sum
     )
 
     (x_values, y_values), options = calls[0]
-    np.testing.assert_allclose(x_values, summary.per_instance["n_negative_points"] / 4)
-    np.testing.assert_allclose(y_values, summary.per_instance["n_system_control_points"] / 5)
+    np.testing.assert_allclose(x_values, summary.per_instance["n_points_negative"] / 4)
+    np.testing.assert_allclose(y_values, summary.per_instance["n_points_system_control"] / 5)
     assert options["x_label"] == "negative points per panel feature per instance"
 
 
