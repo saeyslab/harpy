@@ -8906,8 +8906,8 @@ keys before assignment.
 
 **Status: implemented, step 1 redone from the count matrices in two parts, 1a
 and 1b; amended to keep every row of the selected regions (see "Amendment:
-every row of the selected regions" below) — implemented. Taking the table
-instead of `sdata` is planned in step 1 of [qc_metrics.md](qc_metrics.md).**
+every row of the selected regions" below) — implemented; taking the table
+instead of `sdata`, step 1 of [qc_metrics.md](qc_metrics.md) — implemented.**
 
 Implement a read-only `hp.qc.summarize_table` computation API and a
 `TableSummary` result, followed by table-level QC plots that take the result.
@@ -8928,8 +8928,9 @@ result and reuse it for several plots, without writing derived columns to
   (issue [#265](https://github.com/saeyslab/harpy/issues/265)); see
   "Supported matrix formats". Nothing stored
   can disagree with what it computes, so no cross-check is needed.
-- **Only the table:** `summarize_table` relies on what the table holds and
-  never on a feature panel or `sdata.attrs`: the matrices passed, `X` or a
+- **Only the table:** `summarize_table` takes the table itself, not `sdata`,
+  relies on what the table holds and never on a feature panel or
+  `sdata.attrs`: the matrices passed, `X` or a
   layer with its `var`, and `.obsm` matrices; and the table's SpatialData
   annotation, to select regions. It reads no record of the function that
   created the table, not even the aggregation record
@@ -9052,8 +9053,7 @@ points_summary = hp.qc.summarize_points(
 )
 
 table_summary = hp.qc.summarize_table(
-    sdata,
-    table_name,
+    sdata.tables[table_name],
     obsm_keys=["negative", "system_control"],
 )
 ```
@@ -9069,13 +9069,15 @@ need not have identical parameters or result shapes:
   from their aggregated counts; its classes are the matrices it is given. It
   has no spatial `bin_size` parameter for this instance-level operation.
 
-**Signature.** It mirrors `summarize_points`: the `sdata` and the element name
-are positional, everything else keyword-only.
+**Signature.** The table is positional, everything else keyword-only. Unlike
+`summarize_points`, which needs the points element's transformations and the
+panel in `sdata.attrs`, it takes the table itself, not `sdata` and a name, as
+it reads nothing else (step 1 of [qc_metrics.md](qc_metrics.md)); another type
+than an `AnnData` raises a `TypeError` that asks for the table.
 
 ```python
 def summarize_table(
-    sdata: SpatialData,
-    table_name: str,
+    adata: AnnData,
     *,
     layer: str | None = None,
     obsm_keys: str | Sequence[str] = (),
@@ -9229,7 +9231,6 @@ Return a result container with one metadata record and five dataframes:
 ```python
 @dataclass(frozen=True, kw_only=True)
 class TableSummaryMetadata:
-    table_name: str
     region: tuple[str, ...]  # selected regions, resolved from None
     layer: str | None  # the matrix aligned with var that was read; None for X
     obsm_keys: tuple[str, ...]  # the .obsm matrices read
@@ -9259,16 +9260,17 @@ class TableSummary:
 ```
 
 **One metadata owner,** as `PointsSummary` has `PointsSummaryMetadata`: the
-record identifies the table, the regions and the matrices read. It describes
+record identifies the regions and the matrices read. It describes
 the inputs of the computation, not a live metadata lookup, and holds no
 mapping, so it shares nothing with the table and a summary can be copied and
 saved. What the computation derives, the class labels, the feature names and
 the denominators, is exposed by properties of `TableSummary`, read from its
 frames.
 
-- **`table_name`, `region`, `layer`, `obsm_keys` and `feature_matrices_key`**
-  record the inputs, the regions resolved from `None`. Slice 11k reads the
-  same matrices through them.
+- **`region`, `layer`, `obsm_keys` and `feature_matrices_key`** record the
+  inputs, the regions resolved from `None`. Slice 11k reads the same matrices
+  through them. The table's name is not recorded: the table is passed itself,
+  and an `AnnData` does not know its name in `sdata`.
 - **`feature_classes` is a property of `TableSummary`, not a field of the
   record:** the class labels, in the order of the results, derived from
   `per_class.feature_class`: the names of the matrices read, in snake case.
@@ -9714,9 +9716,10 @@ Focused tests should establish that:
   labels and the denominators from `per_class`, and
   `TableSummary.feature_names` each class's names, in column order, from
   `per_feature`;
-- a table without an aggregation record, or whose annotated labels and points
-  elements are absent from `sdata`, is summarized all the same, and neither
-  the aggregation record nor `sdata.attrs` is read;
+- a table without an aggregation record, or outside any `SpatialData` object,
+  is summarized all the same, and neither the aggregation record nor
+  `sdata.attrs` is read; another type than an `AnnData`, such as a
+  `SpatialData` object, raises a `TypeError`;
 - a lazy table runs one Dask compute, also when its matrices have different
   row chunks, and a backed table is read in row blocks without being loaded
   as a whole, both giving the result of the in-memory table; `csr_matrix` and
@@ -9862,8 +9865,8 @@ inherits them; and the instance plots skip the missing shares.
 ## Slice 11k: feature summaries of a table for selected features
 
 **Status: implemented, with the population of the amendment of Slice 11j,
-"every row of the selected regions". Taking the table instead of `sdata` is
-planned in step 1 of [qc_metrics.md](qc_metrics.md).**
+"every row of the selected regions", and taking the table instead of `sdata`,
+step 1 of [qc_metrics.md](qc_metrics.md).**
 
 The table-side counterpart of `summarize_points_by_feature`, so that tables and
 points are summarized with the same two levels: classes first, then explicitly
@@ -9879,21 +9882,21 @@ same matrices.
 | `spatial_bin_histogram_by_feature`                                                      | `instance_histogram_by_feature` (this slice)                      |
 
 ```python
-table_summary = hp.qc.summarize_table(
-    sdata, "table_transcriptomics", layer="counts", obsm_keys=["negative"]
-)
+adata = sdata.tables["table_transcriptomics"]
+table_summary = hp.qc.summarize_table(adata, layer="counts", obsm_keys=["negative"])
 feature_summary = hp.qc.summarize_table_by_feature(
-    sdata,
+    adata,
     summary=table_summary,
     features=["Negative01", "Negative02", "GeneA"],
 )
 hp.qc.instance_histogram_by_feature(feature_summary, feature="Negative01")
 ```
 
-- **Signature:** `summarize_table_by_feature(sdata, *, summary, features)
+- **Signature:** `summarize_table_by_feature(adata, *, summary, features)
 -> FeatureTableSummary`, as
-  `summarize_points_by_feature(sdata, *, summary, features, ...)`. The table,
-  the regions, the matrices read and the instances come from `summary`: the
+  `summarize_points_by_feature(sdata, *, summary, features, ...)`, but on the
+  summary's table itself, as `summarize_table` takes it. The regions, the
+  matrices read and the instances come from `summary`: the
   instance population is inherited, as `FeaturePointsSummary` inherits the
   retained bins, and does not depend on the requested features. Every
   instance contributes, with a zero for a feature that it did not receive.

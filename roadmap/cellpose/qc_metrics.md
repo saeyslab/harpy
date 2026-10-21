@@ -2,9 +2,9 @@
 
 ## Status
 
-**Planned, in two steps.** It builds on the amendment of Slice 11j of
-[allocation.md](allocation.md), "every row of the selected regions", which is
-implemented.
+**In two steps: step 1 implemented, step 2 planned.** It builds on the
+amendment of Slice 11j of [allocation.md](allocation.md), "every row of the
+selected regions", which is implemented.
 
 `hp.qc.summarize_table` describes a table's instances and features from its
 count matrices, but writes nothing to the table: its results stay in a
@@ -30,6 +30,8 @@ stays the read-only computation, for a summary without writing, also of
 selected regions.
 
 ## Step 1: the table summaries take the table
+
+**Status: implemented.**
 
 ```python
 hp.qc.summarize_table(
@@ -80,11 +82,13 @@ in place of `summarize_table(sdata, table_name, …)` and
 table instead of a `SpatialData` object, so that every test summarizes a table
 outside any `SpatialData` object; the lazy and backed tests still read the
 store with `hp.io.read_zarr` and pass its table; the metadata has no
-`table_name`; a `SpatialData` object passed to either function raises the
+`table_name`; a `SpatialData` object passed to `summarize_table` raises the
 `TypeError`; and the tests of a table changed since the summary also cover
 `summarize_table_by_feature` on another table.
 
 ## Step 2: `hp.tb.pp.calculate_qc_metrics`
+
+**Status: planned.**
 
 ```python
 hp.tb.pp.calculate_qc_metrics(
