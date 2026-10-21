@@ -12,7 +12,6 @@ import pandas as pd
 from anndata import AnnData
 from anndata.abc import CSRDataset
 from numpy.typing import NDArray
-from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
 from harpy.qc._summary_schema import (
@@ -29,6 +28,7 @@ from harpy.qc.table._summarize_table import (
     _collect_class_matrices,
     _FeatureClassMatrix,
     _sliced_blocks,
+    _spatialdata_annotation,
     _with_region_categories,
 )
 from harpy.qc.table._table_summary_metadata import TableSummaryMetadata
@@ -47,7 +47,7 @@ class FeatureTableSummary:
     ----------
     metadata
         The reference summary's :class:`~harpy.qc.TableSummaryMetadata`: the
-        table, the selected regions and the matrices read.
+        selected regions and the matrices read.
     per_instance
         Long: one row per requested feature and instance of the reference
         summary, in feature order, then table row order. Columns: the region
@@ -84,7 +84,7 @@ class FeatureTableSummary:
 
 
 def summarize_table_by_feature(
-    sdata: SpatialData,
+    adata: AnnData,
     *,
     summary: TableSummary,
     features: str | Sequence[str],
@@ -92,8 +92,8 @@ def summarize_table_by_feature(
     """Summarize selected features of a table over the instances of a table summary.
 
     The table-level counterpart of :func:`harpy.qc.summarize_points_by_feature`.
-    The reference summary decides the table, the regions, the matrices read and
-    the instances; the requested features do not change that population, so
+    The reference summary decides the regions, the matrices read and the
+    instances; the requested features do not change that population, so
     every instance contributes, with a zero for a feature that it did not
     receive. Only the rows of ``summary.per_instance`` are read: rows added to
     the table since the summary are not, so recompute
@@ -102,12 +102,12 @@ def summarize_table_by_feature(
 
     Parameters
     ----------
-    sdata
-        SpatialData object containing the reference summary's table, unchanged
-        since the summary.
+    adata
+        The reference summary's table, such as ``sdata.tables["table"]``,
+        unchanged since the summary.
     summary
-        Result of :func:`harpy.qc.summarize_table`. Its metadata names the table,
-        the regions and the matrices read; its ``per_instance`` gives the
+        Result of :func:`harpy.qc.summarize_table` on ``adata``. Its metadata
+        names the regions and the matrices read; its ``per_instance`` gives the
         instances, and its ``feature_names`` the names of each matrix's
         columns.
     features
@@ -124,13 +124,15 @@ def summarize_table_by_feature(
     Raises
     ------
     TypeError
-        If ``summary`` is not a :class:`~harpy.qc.TableSummary`.
+        If ``adata`` is not an :class:`~anndata.AnnData`, or ``summary`` is not
+        a :class:`~harpy.qc.TableSummary`.
     ValueError
-        If ``features`` is empty, contains duplicates or names that are not
-        among ``summary.feature_names``, or a name that more than one column of
-        the matrices read carries; if the table, its matrices, their names or
-        its instances changed since the summary; or if a requested
-        column holds values that are not counts.
+        If the table has no SpatialData annotation; if ``features`` is empty,
+        contains duplicates or names that are not among
+        ``summary.feature_names``, or a name that more than one column of the
+        matrices read carries; if the table, its matrices, their names or its
+        instances changed since the summary, or the table is another one; or if
+        a requested column holds values that are not counts.
 
     Notes
     -----
@@ -158,39 +160,32 @@ def summarize_table_by_feature(
     --------
     .. code-block:: python
 
-        summary = hp.qc.summarize_table(sdata, "table", obsm_keys=["negative"])
+        adata = sdata.tables["table"]
+        summary = hp.qc.summarize_table(adata, obsm_keys=["negative"])
         features = hp.qc.summarize_table_by_feature(
-            sdata, summary=summary, features=["Negative01", "Negative02", "GeneA"]
+            adata, summary=summary, features=["Negative01", "Negative02", "GeneA"]
         )
         features.per_feature  # the median and p95 per instance of each feature
         hp.qc.instance_histogram_by_feature(features, feature="Negative01")
 
         # Every probe of one control class, named from the summary.
         controls = hp.qc.summarize_table_by_feature(
-            sdata, summary=summary, features=summary.feature_names["negative"]
+            adata, summary=summary, features=summary.feature_names["negative"]
         )
     """
+    attrs = _spatialdata_annotation(adata, function="summarize_table_by_feature")
     if not isinstance(summary, TableSummary):
         raise TypeError("summary must be a TableSummary returned by hp.qc.summarize_table().")
     metadata = summary.metadata
-    table_name = metadata.table_name
-    if table_name not in sdata.tables:
-        raise ValueError(
-            f"Table {table_name!r} of the summary is not in sdata; available tables: {sorted(sdata.tables)}."
-        )
-    adata = sdata.tables[table_name]
-    attrs = adata.uns.get(TableModel.ATTRS_KEY)
-    if not isinstance(attrs, Mapping):
-        raise ValueError(f"Table {table_name!r} has no SpatialData annotation (uns[{TableModel.ATTRS_KEY!r}]).")
 
     region_key = attrs[TableModel.REGION_KEY_KEY]
     # The summary's instances, indexed by their .obs names, with their region and instance id.
     identity = summary.per_instance[[region_key, attrs[TableModel.INSTANCE_KEY]]]
     requested_features = _requested_features(features, feature_names=summary.feature_names)
-    classes = _collect_class_matrices(adata, table_name=table_name, layer=metadata.layer, obsm_keys=metadata.obsm_keys)
-    _check_names_still_fit(adata, classes, summary=summary, table_name=table_name)
-    positions = _instance_positions(adata, identity, table_name=table_name)
-    values = _read_columns(classes, requested_features, positions=positions, table_name=table_name)
+    classes = _collect_class_matrices(adata, layer=metadata.layer, obsm_keys=metadata.obsm_keys)
+    _check_names_still_fit(adata, classes, summary=summary)
+    positions = _instance_positions(adata, identity)
+    values = _read_columns(classes, requested_features, positions=positions)
     n_instances = len(identity)
 
     names = tuple(feature.name for feature in requested_features)
@@ -267,9 +262,7 @@ def _requested_features(
     )
 
 
-def _check_names_still_fit(
-    adata: AnnData, classes: tuple[_FeatureClassMatrix, ...], *, summary: TableSummary, table_name: str
-) -> None:
+def _check_names_still_fit(adata: AnnData, classes: tuple[_FeatureClassMatrix, ...], *, summary: TableSummary) -> None:
     """Raise unless the matrices read are still the summary's classes, with its names, from metadata alone.
 
     ``X`` or the layer must still have the summary's names as ``var_names``. An
@@ -282,7 +275,7 @@ def _check_names_still_fit(
     labels = tuple(entry.label for entry in classes)
     if labels != summary.feature_classes:
         raise ValueError(
-            f"The matrices read from table {table_name!r} are now the classes {list(labels)}, not the summary's "
+            f"The matrices read from the table are now the classes {list(labels)}, not the summary's "
             f"{list(summary.feature_classes)}; recompute summarize_table()."
         )
     var_names = tuple(str(name) for name in adata.var_names)
@@ -299,12 +292,11 @@ def _check_names_still_fit(
                 fits = tuple(str(name) for name in record["feature_columns"]) == names
         if not fits:
             raise ValueError(
-                f"adata.{entry.location} of table {table_name!r} no longer has the columns that the summary "
-                "named; recompute summarize_table()."
+                f"adata.{entry.location} no longer has the columns that the summary named; recompute summarize_table()."
             )
 
 
-def _instance_positions(adata: AnnData, identity: pd.DataFrame, *, table_name: str) -> NDArray[np.int64]:
+def _instance_positions(adata: AnnData, identity: pd.DataFrame) -> NDArray[np.int64]:
     """Return the table row of each of the summary's instances, in the summary's order.
 
     ``identity`` holds the summary's instances: their ``.obs`` names as index,
@@ -312,12 +304,12 @@ def _instance_positions(adata: AnnData, identity: pd.DataFrame, *, table_name: s
     must still have its region and instance id there.
     """
     if not adata.obs_names.is_unique:
-        raise ValueError(f"The .obs names of table {table_name!r} are not unique, so its instances cannot be located.")
+        raise ValueError("The .obs names of the table are not unique, so its instances cannot be located.")
     positions = adata.obs_names.get_indexer(identity.index)
     if (positions < 0).any():
         missing = list(identity.index[positions < 0][:3])
         raise ValueError(
-            f"Instances of the summary are no longer in table {table_name!r}, for example {missing}; "
+            f"Instances of the summary are not in the table, for example {missing}; pass the summary's table, or "
             "recompute summarize_table()."
         )
     # Finding an .obs name is not enough: it may now label another instance. So check that each
@@ -329,8 +321,8 @@ def _instance_positions(adata: AnnData, identity: pd.DataFrame, *, table_name: s
     if not same.all():
         moved = list(identity.index[~same][:3])
         raise ValueError(
-            f"The .obs names of table {table_name!r} now label other instances than in the summary, for example "
-            f"{moved}; recompute summarize_table()."
+            f"The .obs names of the table label other instances than in the summary, for example {moved}; pass the "
+            "summary's table, or recompute summarize_table()."
         )
     return positions
 
@@ -340,7 +332,6 @@ def _read_columns(
     requested_features: list[_RequestedFeature],
     *,
     positions: NDArray[np.int64],
-    table_name: str,
 ) -> NDArray[np.uint64]:
     """Return the requested features' values per instance, one column per feature, in their order.
 
@@ -360,7 +351,7 @@ def _read_columns(
         columns = np.asarray([requested_features[index].column for index in result_columns])
         if isinstance(entry.matrix, CSRDataset):
             values[:, result_columns] = _backed_columns(
-                entry.matrix, positions, columns=columns, location=entry.location, table_name=table_name
+                entry.matrix, positions, columns=columns, location=entry.location
             )
             continue
         selected = entry.matrix[positions][:, columns]
@@ -368,17 +359,17 @@ def _read_columns(
             lazy.append((result_columns, selected, entry.location))
             continue
         # In memory: the slice already holds the values.
-        values[:, result_columns] = _to_dense_counts(selected, location=entry.location, table_name=table_name)
+        values[:, result_columns] = _to_dense_counts(selected, location=entry.location)
     if lazy:
         # Lazy: compute all slices at once, then write them as the in-memory path does.
         computed = dask.compute(*(selected for _, selected, _ in lazy))
         for (result_columns, _, location), selected in zip(lazy, computed, strict=True):
-            values[:, result_columns] = _to_dense_counts(selected, location=location, table_name=table_name)
+            values[:, result_columns] = _to_dense_counts(selected, location=location)
     return values
 
 
 def _backed_columns(
-    matrix: CSRDataset, positions: NDArray[np.int64], *, columns: NDArray[np.int64], location: str, table_name: str
+    matrix: CSRDataset, positions: NDArray[np.int64], *, columns: NDArray[np.int64], location: str
 ) -> NDArray[np.uint64]:
     """Return the values in ``columns`` of a backed matrix's rows ``positions``, read in row blocks."""
     # Each table row's row in the results, -1 for a row outside the summary's regions.
@@ -387,18 +378,16 @@ def _backed_columns(
     values = np.zeros((len(positions), len(columns)), dtype=np.uint64)
     for block, rows_in_block in _sliced_blocks(matrix, output_rows):
         wanted = rows_in_block >= 0
-        values[rows_in_block[wanted]] = _to_dense_counts(
-            block[wanted][:, columns], location=location, table_name=table_name
-        )
+        values[rows_in_block[wanted]] = _to_dense_counts(block[wanted][:, columns], location=location)
     return values
 
 
-def _to_dense_counts(selected: object, *, location: str, table_name: str) -> NDArray[np.uint64]:
+def _to_dense_counts(selected: object, *, location: str) -> NDArray[np.uint64]:
     """Return the selected CSR rows and columns as a dense array of counts, raising unless they are counts."""
     if not _are_counts(selected.data):
         raise ValueError(
-            f"adata.{location} of table {table_name!r} holds values that are not counts, non-negative whole numbers, "
-            "in the requested features; recompute summarize_table() if the matrix changed since the summary."
+            f"adata.{location} holds values that are not counts, non-negative whole numbers, in the requested "
+            "features; recompute summarize_table() if the matrix changed since the summary."
         )
     # toarray adds up the entries that a non-canonical CSR matrix stores more than once.
     return np.asarray(selected.toarray()).astype(np.uint64)
