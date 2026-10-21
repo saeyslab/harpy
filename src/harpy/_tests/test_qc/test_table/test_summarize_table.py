@@ -135,6 +135,12 @@ def test_a_table_without_x_is_summarized_from_its_obsm_matrices():
     np.testing.assert_array_equal(summary.per_instance["n_negative_points"], [1, 0, 0, 2, 0, 1])
 
 
+def test_an_x_without_columns_raises():
+    # Every gene filtered away: X has no feature, so its points per panel feature would be undefined.
+    with pytest.raises(ValueError, match=r"adata\.X has no columns, so its class would have no features"):
+        summarize_table(_table()[:, []].copy(), obsm_keys=_OBSM_KEYS)
+
+
 def _table_with_normalized_x():
     """Return the table with its raw counts in the layer "RawCounts" and a normalized X."""
     table = _table()
