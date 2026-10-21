@@ -244,7 +244,9 @@ def summarize_table(
     :func:`harpy.tb.aggregate_points` writes in class-aware mode. Per instance,
     it derives each class's points, detected features and share of the
     instance's points, and it summarizes the instances per class, pooled and per
-    region. Nothing is written to the table.
+    region. Nothing is written to the table:
+    :func:`harpy.tb.pp.calculate_qc_metrics` adds the measures per instance and
+    per feature to ``.obs`` and ``.var``.
 
     Parameters
     ----------
@@ -302,7 +304,8 @@ def summarize_table(
         ``obsm_keys`` is unknown, or ``obsm_keys`` contains duplicates; if two
         matrices read have the same class label; if a matrix read is not a CSR
         matrix with one row per observation, or holds values that are not
-        counts; if ``feature_matrices_key`` is not a non-empty string, the
+        counts; if ``X`` or the layer has no columns, as every class needs a
+        feature; if ``feature_matrices_key`` is not a non-empty string, the
         registration of an ``.obsm`` matrix read is invalid, or an ``.obsm``
         matrix read has no names or two sources of names; if ``feature_names``
         names a key that is not read, or its names are not unique strings as
@@ -498,7 +501,7 @@ def _collect_class_matrices(
     """Return the matrices to read, one per class, without their names, after checking them without reading a value.
 
     ``X`` or the layer, then the ``.obsm`` matrices, each a CSR matrix with one
-    row per observation and a class label of its own.
+    row per observation, at least one column, and a class label of its own.
     """
     entries = []
     if layer is not None:
@@ -522,6 +525,13 @@ def _collect_class_matrices(
         raise ValueError(f"Each matrix read needs its own class label, but these labels coincide: {coinciding}.")
     for entry in entries:
         _check_csr(entry, n_obs=adata.n_obs)
+        # An .obsm matrix has at least one column, as its names must be non-empty; X or a layer has none
+        # when var is empty, for example after filtering away every gene.
+        if entry.matrix.shape[1] == 0:
+            raise ValueError(
+                f"adata.{entry.location} has no columns, so its class would have no features: every matrix read "
+                "needs at least one. Pass a layer of counts with columns as layer=."
+            )
     return tuple(entries)
 
 
