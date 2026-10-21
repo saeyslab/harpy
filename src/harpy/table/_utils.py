@@ -7,6 +7,22 @@ from spatialdata.models import TableModel
 from harpy.utils._names import _names, _selected_names
 
 
+def _spatialdata_annotation(adata: object, *, function: str) -> Mapping:
+    """Return the table's SpatialData annotation, raising unless ``adata`` is an AnnData that has one.
+
+    ``function`` names the public function in the error raised for another type
+    than an AnnData, such as a SpatialData object.
+    """
+    if not isinstance(adata, AnnData):
+        raise TypeError(
+            f"{function} takes the table, an AnnData such as sdata.tables[name], found {type(adata).__name__}."
+        )
+    attrs = adata.uns.get(TableModel.ATTRS_KEY)
+    if not isinstance(attrs, Mapping):
+        raise ValueError(f"The table has no SpatialData annotation (uns[{TableModel.ATTRS_KEY!r}]).")
+    return attrs
+
+
 def _region_rows(adata: AnnData, region: str | Sequence[str] | None) -> np.ndarray | None:
     """Return a boolean mask of the table's rows of the named regions, or None, for every row, for ``region=None``.
 
