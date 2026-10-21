@@ -18,7 +18,9 @@ from harpy.qc._summary_schema import (
     _FEATURE_CLASS_KEY,
     _FEATURE_KEY,
     _N_INSTANCES_KEY,
+    _N_INSTANCES_WITHOUT_FEATURE_KEY,
     _N_POINTS_KEY,
+    _PCT_INSTANCES_WITHOUT_FEATURE_KEY,
     _REGION_COLUMN_KEY,
 )
 from harpy.qc._summary_statistics import _points_statistics
@@ -412,8 +414,8 @@ def _feature_statistics(
                 _FEATURE_CLASS_KEY: label,
                 _N_INSTANCES_KEY: n_instances,
                 _N_POINTS_KEY: counts.sum(dtype=np.uint64),
-                "n_instances_without_feature": n_zero,
-                "pct_instances_without_feature": 100 * n_zero / n_instances if n_instances else np.nan,
+                _N_INSTANCES_WITHOUT_FEATURE_KEY: n_zero,
+                _PCT_INSTANCES_WITHOUT_FEATURE_KEY: 100 * n_zero / n_instances if n_instances else np.nan,
                 **_points_statistics(counts, unit="instance"),
             }
         )

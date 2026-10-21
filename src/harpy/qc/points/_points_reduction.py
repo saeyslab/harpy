@@ -22,7 +22,15 @@ from harpy._feature_panels import (
 )
 from harpy._spatial_bounds import SpatialBounds, _normalize_spatial_bounds
 from harpy.qc._summary_reduction import _tree_reduce
-from harpy.qc._summary_schema import _FEATURE_CLASS_KEY, _FEATURE_KEY, _N_POINTS_KEY
+from harpy.qc._summary_schema import (
+    _FEATURE_CLASS_KEY,
+    _FEATURE_KEY,
+    _N_POINTS_KEY,
+    _X_BIN_KEY,
+    _X_KEY,
+    _Y_BIN_KEY,
+    _Y_KEY,
+)
 from harpy.qc.points._points_binning import (
     _count_point_bins,
     _point_bin_edges,
@@ -366,16 +374,16 @@ def _spatial_count_array(counts: pd.Series, *, selected_names, summary_axis: str
     grid = np.zeros((len(selected_names), len(y_edges) - 1, len(x_edges) - 1), dtype=np.uint64)
     if len(counts):
         group_codes = pd.Index(selected_names).get_indexer(counts.index.get_level_values(summary_axis))
-        grid[group_codes, counts.index.get_level_values("y_bin"), counts.index.get_level_values("x_bin")] = (
+        grid[group_codes, counts.index.get_level_values(_Y_BIN_KEY), counts.index.get_level_values(_X_BIN_KEY)] = (
             counts.to_numpy()
         )
     return xr.DataArray(
         grid,
-        dims=(summary_axis, "y", "x"),
+        dims=(summary_axis, _Y_KEY, _X_KEY),
         name=_N_POINTS_KEY,
         coords={
             summary_axis: list(selected_names),
-            "x": x_edges[:-1] + np.diff(x_edges) / 2,
-            "y": y_edges[:-1] + np.diff(y_edges) / 2,
+            _X_KEY: x_edges[:-1] + np.diff(x_edges) / 2,
+            _Y_KEY: y_edges[:-1] + np.diff(y_edges) / 2,
         },
     )

@@ -10,7 +10,7 @@ import xarray as xr
 from spatialdata import SpatialData
 
 from harpy._feature_panels import _resolve_points_feature_panel
-from harpy.qc._summary_schema import _FEATURE_CLASS_KEY, _FEATURE_KEY, _N_POINTS_KEY
+from harpy.qc._summary_schema import _FEATURE_CLASS_KEY, _FEATURE_KEY, _N_POINTS_KEY, _X_KEY, _Y_KEY
 from harpy.qc.points._points_binning import _check_grid_budget
 from harpy.qc.points._points_reduction import (
     _compute_point_reductions,
@@ -250,11 +250,11 @@ def _reduce_points_by_feature(
     if summary.spatial_counts is None or metadata.x_edges is None or metadata.y_edges is None:
         raise ValueError("The reference summary is missing its spatial grid or edges; recompute summarize_points().")
     retained_bin_mask = summary.retained_bin_mask
-    if retained_bin_mask is None or retained_bin_mask.dims != ("y", "x"):
+    if retained_bin_mask is None or retained_bin_mask.dims != (_Y_KEY, _X_KEY):
         raise ValueError("The reference summary must contain an XY retained-bin mask; recompute summarize_points().")
     # Match physical bin locations, not just array shape. Keep the parent mask
     # as a snapshot; requested-feature zeros must not redefine this population.
-    for axis, edges in (("x", metadata.x_edges), ("y", metadata.y_edges)):
+    for axis, edges in ((_X_KEY, metadata.x_edges), (_Y_KEY, metadata.y_edges)):
         centers = np.asarray(edges[:-1]) + np.diff(edges) / 2
         if not np.array_equal(retained_bin_mask.coords[axis].values, centers):
             raise ValueError("The reference grid coordinates do not match its bin edges; recompute summarize_points().")

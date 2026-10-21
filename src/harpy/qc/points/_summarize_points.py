@@ -11,7 +11,18 @@ from spatialdata import SpatialData
 
 from harpy._feature_panels import _FeaturePanelContract
 from harpy._spatial_bounds import SpatialBounds
-from harpy.qc._summary_schema import _FEATURE_CLASS_KEY, _FEATURE_KEY, _N_FEATURES_KEY, _N_POINTS_KEY
+from harpy.qc._summary_schema import (
+    _FEATURE_CLASS_KEY,
+    _FEATURE_KEY,
+    _N_FEATURES_KEY,
+    _N_POINTS_KEY,
+    _N_TOP_FEATURES_KEY,
+    _N_ZERO_FEATURES_KEY,
+    _PCT_POINTS_TOP_N_FEATURES_KEY,
+    _PCT_ZERO_FEATURES_KEY,
+    _TOP_N_KEY,
+    _WITHIN_CLASS_FRACTION_KEY,
+)
 from harpy.qc._summary_statistics import _points_statistics
 from harpy.qc.points._points_reduction import _reduce_points_by_class
 from harpy.qc.points._points_summary_metadata import PointsSummaryMetadata
@@ -312,7 +323,7 @@ def _summary_frames(
                     _FEATURE_KEY: features,
                     _FEATURE_CLASS_KEY: name,
                     _N_POINTS_KEY: values,
-                    "within_class_fraction": values / total if total else np.full(len(values), np.nan),
+                    _WITHIN_CLASS_FRACTION_KEY: values / total if total else np.full(len(values), np.nan),
                 }
             )
         )
@@ -322,13 +333,13 @@ def _summary_frames(
             {
                 _FEATURE_CLASS_KEY: name,
                 _N_FEATURES_KEY: len(features),
-                "n_zero_features": n_zero,
-                "pct_zero_features": 100 * n_zero / len(features),
+                _N_ZERO_FEATURES_KEY: n_zero,
+                _PCT_ZERO_FEATURES_KEY: 100 * n_zero / len(features),
                 _N_POINTS_KEY: total,
                 **_points_statistics(values, unit="feature"),
-                "top_n": top_n,
-                "n_top_features": n_top,
-                "pct_points_top_n_features": 100 * (np.sort(values)[-n_top:].sum() / total) if total else np.nan,
+                _TOP_N_KEY: top_n,
+                _N_TOP_FEATURES_KEY: n_top,
+                _PCT_POINTS_TOP_N_FEATURES_KEY: 100 * (np.sort(values)[-n_top:].sum() / total) if total else np.nan,
             }
         )
     per_feature, per_class = pd.concat(feature_frames, ignore_index=True), pd.DataFrame(class_rows)

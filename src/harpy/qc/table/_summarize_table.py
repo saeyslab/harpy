@@ -26,9 +26,15 @@ from harpy.qc._summary_schema import (
     _N_CLASS_POINTS_TEMPLATE,
     _N_FEATURES_KEY,
     _N_INSTANCES_KEY,
+    _N_INSTANCES_WITHOUT_CLASS_KEY,
+    _N_INSTANCES_WITHOUT_FEATURE_KEY,
     _N_POINTS_KEY,
     _PCT_CLASS_POINTS_TEMPLATE,
+    _PCT_INSTANCES_WITHOUT_CLASS_KEY,
+    _PCT_INSTANCES_WITHOUT_FEATURE_KEY,
     _REGION_COLUMN_KEY,
+    _WITHIN_CLASS_FRACTION_KEY,
+    _statistic_name,
 )
 from harpy.qc._summary_statistics import _points_statistics
 from harpy.qc.table._table_summary_metadata import TableSummaryMetadata
@@ -885,8 +891,8 @@ def _class_statistics(
                 _FEATURE_CLASS_KEY: label,
                 _N_INSTANCES_KEY: n_instances,
                 _N_POINTS_KEY: counts.sum(dtype=np.uint64),
-                "n_instances_without_class": n_zero,
-                "pct_instances_without_class": 100 * n_zero / n_instances if n_instances else np.nan,
+                _N_INSTANCES_WITHOUT_CLASS_KEY: n_zero,
+                _PCT_INSTANCES_WITHOUT_CLASS_KEY: 100 * n_zero / n_instances if n_instances else np.nan,
                 **_points_statistics(counts, unit="instance"),
                 **_points_statistics(detected[label], unit="instance", measure="detected_features"),
                 _N_FEATURES_KEY: n_features[label],
@@ -932,11 +938,11 @@ def _feature_statistics(
                     _N_INSTANCES_KEY: n_instances,
                     # The sums of whole numbers are exact in float64 up to 2**53.
                     _N_POINTS_KEY: np.rint(sums).astype(np.uint64),
-                    "within_class_fraction": sums / class_points if class_points else missing,
-                    "n_instances_without_feature": without.astype(np.int64),
-                    "pct_instances_without_feature": 100 * without / n_instances if n_instances else missing,
-                    "mean_points_per_instance": sums / n_instances if n_instances else missing,
-                    "std_points_per_instance": _sample_std(sums, squares, n_instances),
+                    _WITHIN_CLASS_FRACTION_KEY: sums / class_points if class_points else missing,
+                    _N_INSTANCES_WITHOUT_FEATURE_KEY: without.astype(np.int64),
+                    _PCT_INSTANCES_WITHOUT_FEATURE_KEY: 100 * without / n_instances if n_instances else missing,
+                    _statistic_name("mean", unit="instance"): sums / n_instances if n_instances else missing,
+                    _statistic_name("std", unit="instance"): _sample_std(sums, squares, n_instances),
                 }
             )
         )

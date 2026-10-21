@@ -3,7 +3,7 @@
 import numpy as np
 import xarray as xr
 
-from harpy.qc._summary_schema import _FEATURE_KEY
+from harpy.qc._summary_schema import _FEATURE_KEY, _X_KEY, _Y_KEY
 from harpy.qc.points._points_summary_metadata import PointsSummaryMetadata
 
 
@@ -44,8 +44,8 @@ def _validate_spatial_summary(
         return
     if metadata.bin_size is None:
         raise ValueError("A summary with spatial_counts must specify metadata.bin_size.")
-    if not isinstance(grid, xr.DataArray) or grid.dims != (axis, "y", "x"):
-        raise ValueError(f"spatial_counts must have dimensions ({axis!r}, 'y', 'x').")
+    if not isinstance(grid, xr.DataArray) or grid.dims != (axis, _Y_KEY, _X_KEY):
+        raise ValueError(f"spatial_counts must have dimensions ({axis!r}, {_Y_KEY!r}, {_X_KEY!r}).")
     if not isinstance(grid.data, np.ndarray):
         raise ValueError("spatial_counts must contain an in-memory count grid.")
     if axis not in grid.coords or grid[axis].dims != (axis,):
@@ -54,7 +54,7 @@ def _validate_spatial_summary(
     if not names or any(not isinstance(name, str) or not name for name in names) or len(set(names)) != len(names):
         raise ValueError(f"spatial_counts {axis!r} names must be nonempty and unique strings.")
 
-    for dimension, boundaries in (("x", metadata.x_edges), ("y", metadata.y_edges)):
+    for dimension, boundaries in ((_X_KEY, metadata.x_edges), (_Y_KEY, metadata.y_edges)):
         boundary = np.asarray(boundaries, dtype=float)
         if (
             boundary.ndim != 1
@@ -74,12 +74,12 @@ def _validate_spatial_summary(
 
     if axis == _FEATURE_KEY and (
         not isinstance(retained_bin_mask, xr.DataArray)
-        or retained_bin_mask.dims != ("y", "x")
+        or retained_bin_mask.dims != (_Y_KEY, _X_KEY)
         or retained_bin_mask.dtype != np.dtype(bool)
         or not isinstance(retained_bin_mask.data, np.ndarray)
         or any(
             dimension not in retained_bin_mask.coords or not retained_bin_mask[dimension].equals(grid[dimension])
-            for dimension in ("y", "x")
+            for dimension in (_Y_KEY, _X_KEY)
         )
     ):
         raise ValueError("retained_bin_mask must be a boolean XY grid with the same coordinates as spatial_counts.")

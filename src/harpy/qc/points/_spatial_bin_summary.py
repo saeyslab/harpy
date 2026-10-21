@@ -9,11 +9,23 @@ import xarray as xr
 
 from harpy._feature_panels import _FeaturePanelContract
 from harpy.qc._summary_schema import (
+    _BIN_AREA_KEY,
+    _BIN_AREA_UM2_KEY,
     _FEATURE_CLASS_KEY,
     _FEATURE_KEY,
+    _N_EXCLUDED_BINS_KEY,
     _N_FEATURES_KEY,
     _N_POINTS_KEY,
+    _N_RETAINED_BINS_KEY,
+    _N_RETAINED_BINS_WITHOUT_GROUP_TEMPLATE,
+    _N_TOTAL_BINS_KEY,
+    _PCT_EXCLUDED_BINS_KEY,
     _PCT_POINTS_KEY,
+    _PCT_RETAINED_BINS_WITHOUT_GROUP_TEMPLATE,
+    _X_BIN_KEY,
+    _X_KEY,
+    _Y_BIN_KEY,
+    _Y_KEY,
 )
 from harpy.qc._summary_statistics import _points_statistics
 from harpy.qc.points._points_summary_metadata import PointsSummaryMetadata
@@ -170,7 +182,8 @@ def _spatial_bin_frames(
     group order, then row-major spatial order.
     """
     groups = tuple(grid.coords[summary_axis].values)
-    zero_suffix = "class" if summary_axis == _FEATURE_CLASS_KEY else "feature"
+    # The kind of the groups, which names the columns of their bins without points.
+    group_kind = "class" if summary_axis == _FEATURE_CLASS_KEY else "feature"
     if retained is None:
         retained = grid.values.any(axis=0)
     y_bin, x_bin = np.nonzero(retained)
@@ -190,11 +203,11 @@ def _spatial_bin_frames(
     per_bin = pd.DataFrame(
         {
             summary_axis: pd.Categorical.from_codes(np.repeat(np.arange(len(groups)), n_retained), categories=groups),
-            "y_bin": np.tile(y_bin, len(groups)),
-            "x_bin": np.tile(x_bin, len(groups)),
-            "x": np.tile(grid.x.values[x_bin], len(groups)),
-            "y": np.tile(grid.y.values[y_bin], len(groups)),
-            "bin_area": np.tile(areas, len(groups)),
+            _Y_BIN_KEY: np.tile(y_bin, len(groups)),
+            _X_BIN_KEY: np.tile(x_bin, len(groups)),
+            _X_KEY: np.tile(grid.coords[_X_KEY].values[x_bin], len(groups)),
+            _Y_KEY: np.tile(grid.coords[_Y_KEY].values[y_bin], len(groups)),
+            _BIN_AREA_KEY: np.tile(areas, len(groups)),
             _N_POINTS_KEY: point_counts,
         },
         copy=False,
@@ -205,14 +218,14 @@ def _spatial_bin_frames(
             areas_um2 = (widths * microns_per_unit) * (heights * microns_per_unit)
         if not (np.isfinite(areas_um2) & (areas_um2 > 0)).all():
             raise ValueError("Calibrated spatial bin areas must be positive and finite; check microns_per_unit.")
-        per_bin["bin_area_um2"] = np.tile(areas_um2, len(groups))
+        per_bin[_BIN_AREA_UM2_KEY] = np.tile(areas_um2, len(groups))
 
     n_total = retained.size
     population = {
-        "n_total_bins": n_total,
-        "n_retained_bins": n_retained,
-        "n_excluded_bins": n_total - n_retained,
-        "pct_excluded_bins": 100 * (n_total - n_retained) / n_total,
+        _N_TOTAL_BINS_KEY: n_total,
+        _N_RETAINED_BINS_KEY: n_retained,
+        _N_EXCLUDED_BINS_KEY: n_total - n_retained,
+        _PCT_EXCLUDED_BINS_KEY: 100 * (n_total - n_retained) / n_total,
     }
     group_rows = []
     for ordinal, group in enumerate(groups):
@@ -226,8 +239,10 @@ def _spatial_bin_frames(
             summary_axis: group,
             **population,
             _N_POINTS_KEY: total,
-            f"n_retained_bins_without_{zero_suffix}": n_zero,
-            f"pct_retained_bins_without_{zero_suffix}": 100 * n_zero / n_retained if n_retained else np.nan,
+            _N_RETAINED_BINS_WITHOUT_GROUP_TEMPLATE.format(group=group_kind): n_zero,
+            _PCT_RETAINED_BINS_WITHOUT_GROUP_TEMPLATE.format(group=group_kind): (
+                100 * n_zero / n_retained if n_retained else np.nan
+            ),
             **_points_statistics(counts, unit="bin"),
         }
         group_rows.append(row)
