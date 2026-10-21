@@ -8907,7 +8907,9 @@ keys before assignment.
 **Status: implemented, step 1 redone from the count matrices in two parts, 1a
 and 1b; amended to keep every row of the selected regions (see "Amendment:
 every row of the selected regions" below) — implemented; taking the table
-instead of `sdata`, step 1 of [qc_metrics.md](qc_metrics.md) — implemented.**
+instead of `sdata`, step 1 of [qc_metrics.md](qc_metrics.md) — implemented;
+class labels as suffixes of the columns of `per_instance`, step 3 of
+[qc_metrics.md](qc_metrics.md) — implemented.**
 
 Implement a read-only `hp.qc.summarize_table` computation API and a
 `TableSummary` result, followed by table-level QC plots that take the result.
@@ -9011,7 +9013,7 @@ disk access is needed.
   `spatial_bin_histogram(normalization="per_panel_feature")` divides the
   displayed values and the annotated median and SD by the class's panel size
   (Slice 11h). `TableSummary` does the same: it stores no
-  `n_<class>_points_per_panel_feature` columns and no rate statistics, which
+  `n_points_per_panel_feature_<class>` columns and no rate statistics, which
   would only repeat the count statistics divided by `n_features`, and
   `instance_histogram` and `instance_scatter` take
   `normalization="per_panel_feature"`. The denominators are
@@ -9161,9 +9163,14 @@ matrix's name, in `snake_case`, the normalization of Slice 5:
 
 | Matrix read        | Label      | Columns, for example                       |
 | ------------------ | ---------- | ------------------------------------------ |
-| `X` (`layer=None`) | `x`        | `n_x_points`, `pct_x_points`               |
-| `layers["counts"]` | `counts`   | `n_counts_points`, `pct_counts_points`     |
-| `obsm["negative"]` | `negative` | `n_negative_points`, `pct_negative_points` |
+| `X` (`layer=None`) | `x`        | `n_points_x`, `pct_points_x`               |
+| `layers["counts"]` | `counts`   | `n_points_counts`, `pct_points_counts`     |
+| `obsm["negative"]` | `negative` | `n_points_negative`, `pct_points_negative` |
+
+A class-specific column is its base name followed by the label (step 3 of
+[qc_metrics.md](qc_metrics.md)), so that the column of a class is
+`f"{column}_{label}"`, in `per_instance` and in the columns that
+`hp.tb.pp.calculate_qc_metrics` adds to `.obs` and `.var` alike.
 
 No label comes from the aggregation record or another field, so the names of
 all classes follow one rule. For a CosMx table from `aggregate_points`, the
@@ -9316,16 +9323,16 @@ joined back to it. Columns, for each class with label `<class>`:
 
 - the region and instance identity, under the table's own `region_key` and
   `instance_key` names;
-- `n_<class>_points`: the class's points in the instance, the row sum of its
+- `n_points_<class>`: the class's points in the instance, the row sum of its
   columns;
-- `n_<class>_detected_features`: the class's features with at least one point
+- `n_detected_features_<class>`: the class's features with at least one point
   in the instance;
-- with two classes or more, `pct_<class>_points`: 100 × the class's points /
+- with two classes or more, `pct_points_<class>`: 100 × the class's points /
   the instance's points across the classes read, a percentage like the
   summary's other `pct_` columns and scanpy's `pct_counts_<qc_var>`; missing
   (NaN) for an instance without points in any class read, as 0 / 0 has no
   value. For a CosMx table, the former `auxiliary_points_fraction` is
-  `(100 - pct_x_points) / 100`.
+  `(100 - pct_points_x) / 100`.
 
 `per_instance` is wide, one column per class, unlike the long `per_bin` of
 `SpatialBinSummary` (one row per bin and class). That keeps the observation
@@ -9487,7 +9494,7 @@ only the matrices passed:
      are joined in block order into one vector per quantity, of length
      `n_obs`, aligned with `.obs`, whatever the matrix's row chunks; the
      column accumulators are summed over the blocks. From these, in memory:
-     the totals across the classes read, the percentages `pct_<class>_points`,
+     the totals across the classes read, the percentages `pct_points_<class>`,
      missing where a row's total is 0, and the statistics of `per_class` and
      `per_region_class`, and, from step 1b, those of `per_feature` and
      `per_region_feature`.
@@ -9507,7 +9514,10 @@ only the matrices passed:
    it never copies the `AnnData`. Rows are selected on `.obs` only, by the
    region mask `obs[region_key].isin(region)`.
 3. **It validates what it uses:** there is at least one matrix to read; the
-   layer and the `.obsm` keys exist; each matrix read is CSR; each
+   layer and the `.obsm` keys exist; each matrix read is CSR, with at least
+   one column, so that every class has a feature and a positive denominator:
+   an `.obsm` matrix has one through its non-empty names, while `X` or a layer
+   without columns, after filtering away every feature, raises; each
    `.obsm` matrix has one row per observation and one source of valid feature
    names; `feature_matrices_key` is a non-empty string; labels do not
    coincide; the
@@ -9551,9 +9561,9 @@ normalization=None, …)` does, which gains `measure` in Slice 11m.
 
   | `measure`             | Column of `per_instance`      | Measure per spatial bin (Slice 11m) |
   | --------------------- | ----------------------------- | ----------------------------------- |
-  | `"points"` (default)  | `n_<class>_points`            | `n_points`                          |
-  | `"detected_features"` | `n_<class>_detected_features` | none: not computed per bin          |
-  | `"pct_points"`        | `pct_<class>_points`          | `pct_points`                        |
+  | `"points"` (default)  | `n_points_<class>`            | `n_points`                          |
+  | `"detected_features"` | `n_detected_features_<class>` | none: not computed per bin          |
+  | `"pct_points"`        | `pct_points_<class>`          | `pct_points`                        |
 
   The column names are an internal detail of the plots: callers name a class
   of `summary.feature_classes` and a measure, never build a column name. An
@@ -9603,27 +9613,28 @@ per_instance
 
     - the region and instance identity, under the table's own
       ``region_key`` and ``instance_key`` names;
-    - ``n_<class>_points``: the class's points in the instance;
-    - ``n_<class>_detected_features``: the class's features with at least
+    - ``n_points_<class>``: the class's points in the instance;
+    - ``n_detected_features_<class>``: the class's features with at least
       one point in the instance;
-    - ``pct_<class>_points``, with two classes or more: 100 times the
+    - ``pct_points_<class>``, with two classes or more: 100 times the
       class's points / the instance's points across the classes read;
       missing (NaN) for an instance without points in any class read.
 
-    How the names arise: the class label is the name of the matrix read.
+    How the names arise: each column is the name of a measure followed by
+    the class label, the name of the matrix read.
 
         matrix read          class label     count column
-        X                    x               n_x_points
-        layers["counts"]     counts          n_counts_points
-        obsm["negative"]     negative        n_negative_points
+        X                    x               n_points_x
+        layers["counts"]     counts          n_points_counts
+        obsm["negative"]     negative        n_points_negative
 
     Compared with :func:`scanpy.pp.calculate_qc_metrics`, for ``X``:
 
         this summary               scanpy
-        n_x_points                 total_counts
-        n_x_detected_features      n_genes_by_counts
-        n_<class>_points           total_counts_<qc_var>
-        pct_<class>_points         pct_counts_<qc_var>
+        n_points_x                 total_counts
+        n_detected_features_x      n_genes_by_counts
+        n_points_<class>           total_counts_<qc_var>
+        pct_points_<class>         pct_counts_<qc_var>
 
     Scanpy's ``qc_vars`` are boolean groups of ``var`` within ``X``, and its
     percentages are relative to the total counts of ``X``; here each class is
@@ -9639,7 +9650,7 @@ of an `.obsm` matrix come from: the registry `uns[feature_matrices_key]`, or
 every feature, because they come from the pass that the class sums already
 make; the docstring of `PointsSummary.per_feature` gives the converse reason,
 the count of every panel feature in every bin. Likewise, the docstring of
-`per_instance` says that `n_<class>_detected_features` has no per-bin
+`per_instance` says that `n_detected_features_<class>` has no per-bin
 counterpart in `SpatialBinSummary`, as a distinct count per bin is expensive;
 Slice 11m adds the same note, from the bin side, to the docstring of
 `SpatialBinSummary`.
@@ -10081,7 +10092,9 @@ normalization (Slice 11j). For the mean alone the two
 coincide, as `mean_points_per_feature` equals `n_points / n_features`, but its
 median and p95 run over the individual features' counts, which no
 normalization describes. The unit, not its count, follows `per`: the counts
-themselves are named `panel_feature_counts`.
+themselves are named `panel_feature_counts`. A class label, when a column is
+specific to a class, comes after all of this, at the very end, as in
+`mean_points_per_instance_x` (step 3 of [qc_metrics.md](qc_metrics.md)).
 
 **The new plots,** in the package `harpy/table/pl/`, exposed as `hp.tb.pl`
 next to `hp.tb.pp`:
@@ -10178,7 +10191,7 @@ Slice 11j: the measures that the class grid already determines, without
 another pass over the points, and the contract of the results, their
 properties and column types. Slice 11j's `TableSummary` holds, with two
 classes or more, each class's share of an instance's points,
-`pct_<class>_points`, and in `per_class` the class's number of features,
+`pct_points_<class>`, and in `per_class` the class's number of features,
 `n_features`; `SpatialBinSummary` has neither. `TableSummary` also exposes its
 classes and feature names as properties and types `feature_class` as
 categorical in every frame; the points summaries do not yet.
