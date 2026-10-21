@@ -136,6 +136,14 @@ def test_a_table_without_x_is_summarized_from_its_obsm_matrices():
     assert summary.var_class is None
     np.testing.assert_array_equal(summary.per_instance["n_points_negative"], [1, 0, 0, 2, 0, 1])
 
+    # Edge case: without X, an .obsm matrix named x gets the class label of X, "x". var_class must still be None,
+    # as only X or a layer is aligned with var, so it is not found by looking for "x" among the classes.
+    table = _table(x=False)
+    table.obsm["x"] = table.obsm["negative"].copy()
+    named_x = summarize_table(table, obsm_keys=["x"], feature_names={"x": ["A", "B", "C", "D"]})
+    assert named_x.feature_classes == ("x",)
+    assert named_x.var_class is None
+
 
 def test_an_x_without_columns_raises():
     # Every gene filtered away: X has no feature, so its points per panel feature would be undefined.

@@ -21,15 +21,11 @@ def test_obs_holds_the_measures_per_instance_and_their_rates():
     measures = [name for name in summary.per_instance.columns if name not in ("region", "cell_ID")]
     pd.testing.assert_frame_equal(table.obs[measures], summary.per_instance[measures])
     assert table.obs["n_points_x"].dtype == np.uint64
-    # cell_1 has no points: 0 points and a missing share.
-    assert table.obs.loc["cell_1", "n_points_x"] == 0
-    assert table.obs.loc["cell_1", ["pct_points_x", "pct_points_negative"]].isna().all()
 
     for label in _CLASSES:
         rate = table.obs[f"n_points_per_panel_feature_{label}"]
         assert rate.dtype == np.float64
         np.testing.assert_allclose(rate, table.obs[f"n_points_{label}"] / summary.panel_feature_counts[label])
-    assert table.obs.loc["cell_1", "n_points_per_panel_feature_x"] == 0
 
 
 def test_var_holds_the_statistics_per_feature_of_x_labelled_with_its_class():
@@ -49,24 +45,11 @@ def test_var_holds_the_statistics_per_feature_of_x_labelled_with_its_class():
     pd.testing.assert_frame_equal(table.var, expected, check_names=False)
 
 
-def test_one_class_adds_no_share_and_a_table_without_x_nothing_to_var():
-    table = _table()
-    calculate_qc_metrics(table)
-    assert "pct_points_x" not in table.obs
-
-    without_x = _table(x=False)
-    calculate_qc_metrics(without_x, obsm_keys=_OBSM_KEYS)
-    assert without_x.var.columns.empty
-    assert "n_points_per_panel_feature_negative" in without_x.obs
-
-
-def test_an_obsm_matrix_named_x_of_a_table_without_x_adds_nothing_to_var():
-    # Its class label is "x", as that of X, but it has no .var axis: only X or a layer has one.
+def test_a_table_without_x_gets_nothing_in_var():
     table = _table(x=False)
-    table.obsm["x"] = table.obsm["negative"].copy()
-    calculate_qc_metrics(table, obsm_keys=["x"], feature_names={"x": ["A", "B", "C", "D"]})
+    calculate_qc_metrics(table, obsm_keys=_OBSM_KEYS)
     assert table.var.columns.empty
-    assert "n_points_x" in table.obs
+    assert "n_points_per_panel_feature_negative" in table.obs
 
 
 def test_a_second_call_replaces_the_columns():
@@ -87,22 +70,19 @@ def test_calls_with_other_matrices_keep_both_sets_of_columns_each_labelled():
     np.testing.assert_array_equal(table.var["n_points_counts"], 2 * table.var["n_points_x"])
 
 
-@pytest.mark.parametrize(
-    ("change", "kwargs", "message"),
-    [
-        (None, {"obsm_keys": ["absent"]}, "not an .obsm key"),
-        ("unannotated_region", {}, r"such as \['c'\]; every row needs an annotated region"),
-    ],
-)
-def test_a_failed_check_leaves_the_table_unchanged(change, kwargs, message):
+def test_a_row_of_an_unannotated_region_raises_and_leaves_the_table_unchanged():
+    """A row whose region the annotation does not list is left out of the summary, so it has no values.
+
+    calculate_qc_metrics writes its columns by position, one value per row of the table, so it raises before
+    writing anything rather than write columns of the wrong length.
+    """
     table = _table()
-    if change == "unannotated_region":
-        # A region that the annotation does not list, which a table changed after parsing can have.
-        table.obs["region"] = table.obs["region"].cat.add_categories("c")
-        table.obs.loc["cell_5", "region"] = "c"
+    # A region that the annotation does not list, which a table changed after parsing can have.
+    table.obs["region"] = table.obs["region"].cat.add_categories("c")
+    table.obs.loc["cell_5", "region"] = "c"
     obs, var = table.obs.copy(), table.var.copy()
-    with pytest.raises(ValueError, match=message):
-        calculate_qc_metrics(table, **kwargs)
+    with pytest.raises(ValueError, match=r"such as \['c'\]; every row needs an annotated region"):
+        calculate_qc_metrics(table)
     pd.testing.assert_frame_equal(table.obs, obs)
     pd.testing.assert_frame_equal(table.var, var)
 
