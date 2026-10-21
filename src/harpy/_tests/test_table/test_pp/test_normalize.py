@@ -43,7 +43,7 @@ def _nonzero_quantiles(values, q):
 
 
 def test_the_normalisations_live_in_harpy_tb_pp():
-    assert sorted(hp.tb.pp.__all__) == ["normalize_by_quantile", "normalize_by_size"]
+    assert sorted(hp.tb.pp.__all__) == ["calculate_qc_metrics", "normalize_by_quantile", "normalize_by_size"]
     assert hp.tb.pp.normalize_by_size is normalize_by_size
     assert hp.tb.pp.normalize_by_quantile is normalize_by_quantile
 

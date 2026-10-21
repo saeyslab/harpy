@@ -531,8 +531,10 @@ def _collect_class_matrices(
         raise ValueError(f"Each matrix read needs its own class label, but these labels coincide: {coinciding}.")
     for entry in entries:
         _check_csr(entry, n_obs=adata.n_obs)
-        # An .obsm matrix has at least one column, as its names must be non-empty; X or a layer has none
-        # when var is empty, for example after filtering away every gene.
+        # Every class read needs at least one feature, so that its points per panel feature, its points divided
+        # by its number of features, are defined.
+        # An .obsm matrix always has one, as its names must be non-empty, so only X or a layer can fail this
+        # check: they have no columns when var is empty, for example after filtering away every gene.
         if entry.matrix.shape[1] == 0:
             raise ValueError(
                 f"adata.{entry.location} has no columns, so its class would have no features: every matrix read "
