@@ -12,7 +12,7 @@ from matplotlib.colors import Colormap
 from scipy.sparse import csr_array
 
 from harpy.qc._panel_normalization import _panel_feature_count
-from harpy.qc._summary_schema import _FEATURE_CLASS_KEY, _FEATURE_KEY
+from harpy.qc._summary_schema import _FEATURE_CLASS_KEY, _FEATURE_KEY, _X_KEY, _Y_KEY
 from harpy.qc.points._summarize_points import PointsSummary
 from harpy.qc.points._summarize_points_by_feature import FeaturePointsSummary
 
@@ -192,8 +192,8 @@ def plot_points_density(
         values = _smooth_density(
             values,
             retained=retained,
-            x_centers=grid.coords["x"].to_numpy(),
-            y_centers=grid.coords["y"].to_numpy(),
+            x_centers=grid.coords[_X_KEY].to_numpy(),
+            y_centers=grid.coords[_Y_KEY].to_numpy(),
             sigma=smoothing_sigma,
             areas=areas,
         )
