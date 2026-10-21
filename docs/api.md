@@ -210,9 +210,11 @@ changes when it is backed by a Zarr store.
 
 ### Preprocessing
 
-Normalisations that scanpy does not provide. Like `scanpy.pp`, they change an
-`AnnData` table in place, in memory or lazy; write the results back with
-`tb.io.add_table_updates` or `tb.io.write_table_updates`.
+Normalisations that scanpy does not provide, and the QC metrics of a table's
+count matrices, per class. Like `scanpy.pp`, they change an `AnnData` table in
+place, in memory or lazy; write the results back with
+`tb.io.add_table_updates` or `tb.io.write_table_updates`, with
+`overwrite=True` for the stored `obs` and `var`.
 
 ```{eval-rst}
 
@@ -221,6 +223,7 @@ Normalisations that scanpy does not provide. Like `scanpy.pp`, they change an
 
     tb.pp.normalize_by_size
     tb.pp.normalize_by_quantile
+    tb.pp.calculate_qc_metrics
 ```
 
 ### Plotting

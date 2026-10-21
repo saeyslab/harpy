@@ -119,6 +119,7 @@ def test_the_matrices_read_decide_the_classes_not_the_population():
     table = _table()
     alone = summarize_table(table)
     assert alone.feature_classes == ("x",)
+    assert alone.var_class == "x"
     # With one class there are no shares; cell_1 and cell_4, without points in X, count as zeros.
     assert list(alone.per_instance.columns) == ["region", "cell_ID", "n_points_x", "n_detected_features_x"]
     np.testing.assert_array_equal(alone.per_instance["n_points_x"], [10, 0, 5, 8, 0, 2])
@@ -132,6 +133,7 @@ def test_the_matrices_read_decide_the_classes_not_the_population():
 def test_a_table_without_x_is_summarized_from_its_obsm_matrices():
     summary = summarize_table(_table(x=False), obsm_keys=_OBSM_KEYS)
     assert summary.feature_classes == ("negative", "system_control")
+    assert summary.var_class is None
     np.testing.assert_array_equal(summary.per_instance["n_points_negative"], [1, 0, 0, 2, 0, 1])
 
 
@@ -160,6 +162,7 @@ def test_a_layer_is_read_in_place_of_x():
     assert summary.metadata.layer == "RawCounts"
     # The layer's label is its name in snake case, and X is not read as well.
     assert summary.feature_classes == ("raw_counts", "negative")
+    assert summary.var_class == "raw_counts"
     np.testing.assert_array_equal(summary.per_instance["n_points_raw_counts"], [10, 0, 5, 8, 0, 2])
 
 
