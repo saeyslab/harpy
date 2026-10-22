@@ -107,7 +107,7 @@ Implemented in the 1a addendum, as it changes no behaviour that users rely on.
 
 ## Steps
 
-- [ ] 1. anndata 0.13: `X` is stored as `layers[None]` (1a and its addendum done; 1b and 1c open)
+- [ ] 1. anndata 0.13: `X` is stored as `layers[None]` (1a, its addendum and 1b done; 1c open)
 - [ ] 2. anndata 0.13: backed sparse datasets reject item assignment with `TypeError`
 - [ ] 3. anndata 0.13: zarr's sharding warning is silenced
 - [ ] 4. matplotlib 3.11: `Axes.relim()` includes collections
@@ -135,8 +135,10 @@ Sites without a failing test:
 
 - [_table_matrices](src/harpy/table/_table.py#L65) yields `X` twice (`X` and `layers[None]`);
 - [plot_adata](src/harpy/plot/_qc_cells.py#L29) plots `X` twice;
-- [_collect_class_matrices](src/harpy/qc/table/_summarize_table.py#L518) calls `sorted(adata.layers)`,
-  which raises `TypeError` mixing `None` with strings, in the error message for an unknown layer.
+- [_collect_class_matrices](src/harpy/qc/table/_summarize_table.py#L518) calls `sorted(adata.layers)`
+  in the error message for an unknown layer. On a table with `X` and at least one named layer, it
+  raises `TypeError` mixing `None` with strings; `X` alone sorts fine, which is why the existing
+  `layer="absent"` case of `test_invalid_tables_and_arguments_raise` never failed.
 
 Fix:
 
@@ -153,7 +155,11 @@ modules have 15 failures left: 10 from the `_X` rollback (1b), 3 from 1c and 2 f
 
 ### 1a addendum: read `X` and layers through `layers`
 
-No behaviour that users rely on changes.
+No behaviour that users rely on changes. One error message does: `layer="counts"` with
+`adata.layers["counts"] = None` (the key exists, its value is `None`) used to pass the key check and
+fail in the CSR check, with "adata.layers['counts'] is a NoneType, not a CSR matrix … Convert it
+first". It now counts as absent and raises "Layer 'counts' is not a layer of the table". Both are a
+`ValueError`.
 
 - [_collect_class_matrices](src/harpy/qc/table/_summarize_table.py#L518): one lookup,
   `adata.layers.get(layer)`, for `X` and named layers; a missing named layer raises. The type check
@@ -178,36 +184,130 @@ Done. `_set_matrix` is gone: its two callers assign `adata.layers[layer]`, which
 setting `X` does (the same warning, and the view becomes an actual table). The verify command passes
 (150 tests); an unhashable `layer` still gets the `ValueError` naming the available layers.
 
+The error message lists only named layers whose value is not `None`, matching the lookup: a named
+layer set to `None` is absent, and is no longer listed as available.
+[test_an_unknown_layer_raises_and_lists_the_named_layers](src/harpy/_tests/test_qc/test_table/test_summarize_table.py#L178)
+covers a table with `X` and a named layer, with and without a named layer set to `None`. It fails
+without the 1a fix (`TypeError`) and without this filter (the `None` layer is listed). The other
+changes of 1a and its addendum are covered by the existing tests; no tests were added for them.
+
 ### 1b. Rollback of attached tables uses `_X`
 
 Error: `AttributeError: 'AnnData' object has no attribute '_X'`.
 
-Sites:
+How the rollback works: `add_table_components`, `remove_table_components` and `add_table_updates` end
+in `_update_table_components`, which changes the attached table so that a failure can be undone. It
+retains the private object of every slot that changes
+([snapshot](src/harpy/table/io/_components.py#L269)), builds new slot objects from shallow copies
+([_prepare_memory_updates](src/harpy/table/io/_components.py#L576)), installs them through the
+setters ([_install_memory_updates](src/harpy/table/io/_components.py#L635)), and on failure puts the
+retained objects back ([restore](src/harpy/table/io/_components.py#L304)).
 
-- [_update_table_components snapshot](src/harpy/table/io/_components.py#L270) and
-  [restore](src/harpy/table/io/_components.py#L304);
-- [regional snapshot](src/harpy/table/io/_components_by_region.py#L219) and
-  [restore](src/harpy/table/io/_components_by_region.py#L247), with no failing test;
-- [_install_memory_updates](src/harpy/table/io/_components.py#L642) sets `table.X`, which in 0.13
-  writes into the retained `_layers` dict, so restoring that dict would not restore the old `X`.
+Why this fails in 0.13:
 
-Fix: address the attached table through `_memory_path`.
+- The snapshot reads `table._X`, which no longer exists.
+- Retaining `_layers` instead is not enough: installing `table.X = value`
+  ([line 642](src/harpy/table/io/_components.py#L642)) writes `layers[None]` into that same
+  `_layers` dict, so the restore would not bring back the old `X`.
+- Once `X` goes through `layers`, an absent `X` would make
+  [_updated_mapping](src/harpy/table/io/_components.py#L561) pop the key `None`, and anndata reads a
+  `layers` mapping without that key as "keep `X`": the store would lose `X` while the attached table
+  keeps it, with only a `FutureWarning`.
 
-- [_memory_component](src/harpy/table/io/_components.py#L338) reads `("X",)` as `layers[None]`.
-- [_prepare_memory_updates](src/harpy/table/io/_components.py#L576) turns an `X` update into a
-  `layers` update. [_updated_mapping](src/harpy/table/io/_components.py#L555) builds a new `layers`
-  dict, so `_install_memory_updates` replaces `_layers` and never sets `table.X`.
-- The snapshots take their slots from the memory paths, so they retain `_layers` for an `X` update
-  without a special case, in both `_components.py` and `_components_by_region.py`.
-- Removing `X` ([remove_table_components](src/harpy/table/io/_components.py#L158) with `("X",)`,
-  or `X` in `delete` of [add_table_components](src/harpy/table/io/_components.py#L44)) must assign
-  `layers` with `None: None`. `_updated_mapping` [pops the key](src/harpy/table/io/_components.py#L561)
-  today, and anndata treats a `layers` mapping without the `None` key as "keep `X`": the store would
-  lose `X` while the attached table keeps it, with only a `FutureWarning`. Only the `None` key of
-  `layers` needs this; other keys are still popped. The explicit `None: None` also stays correct if
-  anndata later drops `X` when the key is missing.
+Sites: only `_components.py`.
+[add_table_components_by_region](src/harpy/table/io/_components_by_region.py#L198) accepts
+`("obsm", key)` paths only, so its [snapshot](src/harpy/table/io/_components_by_region.py#L219)
+never sees `X` and needs no change.
+
+Fix: address the attached table through `_memory_path`, next to `_matrix_components` in
+`_anndata.py`. It returns `("layers", None)` for `("X",)` and every other path unchanged. Component
+paths stay as they are for storage and the public API.
+
+- [_memory_component](src/harpy/table/io/_components.py#L338) looks up `_memory_path(path)`: `X` is
+  the key `None` of `layers`, absent when that key is missing. The `X` case of
+  [line 367](src/harpy/table/io/_components.py#L367) goes, the one of `raw` stays, and the
+  docstring, which mentions `table.X is None`, follows.
+- [_prepare_memory_updates](src/harpy/table/io/_components.py#L576) translates the path of every
+  change with `_memory_path`, and turns an absent `X` into the value `None`. An `X` update then takes
+  the existing mapping branch ([line 624](src/harpy/table/io/_components.py#L624)):
+  `_updated_mapping(table.layers, (None,), value)` returns a new dict with every layer and the new
+  `X`, merged with changes to named layers of the same call. `_install_memory_updates` assigns it as
+  `table.layers = ...`, which replaces `_layers` instead of writing into it, and no longer sets
+  `table.X`.
+- `X` is absent, and must become `None: None`, in two cases:
+  - a deletion, by [remove_table_components](src/harpy/table/io/_components.py#L158) with `("X",)`
+    or `X` in `delete` of [add_table_components](src/harpy/table/io/_components.py#L44);
+  - a reopened `X` that the store does not hold: [add_table_updates](src/harpy/table/io/_updates.py#L299)
+    passes `reopen_also=(("X",),)` after `x_to=("layers", ...)`, and the reopen gives
+    [absent](src/harpy/table/io/_components.py#L297) when the store has no `X`.
+
+  A replacement with `None`, `components={("X",): None}`, already gives the value `None`. Only the
+  key `None` of `layers` needs this: `_updated_mapping` stays generic and still pops absent entries
+  of `uns`, `obsm` and named layers. The explicit `None: None` also stays correct if anndata later
+  drops `X` when the key is missing.
+
+- The [snapshot](src/harpy/table/io/_components.py#L269) takes its slots from `_memory_path`, so an
+  `X` update retains `_layers` without a special case.
 - `raw._X` at [_components.py:607](src/harpy/table/io/_components.py#L607) stays: `Raw` still has
   `_X`.
+
+Checked:
+
+- `_update_table_components` uses `X` as a slot only at the places above.
+- Updating only named layers already keeps `X`: the new dict is built from `table.layers`, which holds
+  the key `None`, so no `FutureWarning`.
+- `table.layers = {..., None: None}` drops `X`.
+
+Tests: the 10 remaining 1b failures should pass. The risky cases are covered by existing tests, so
+no new tests are expected:
+
+- removing `X` asserts `table.X is None`:
+  [test_components.py:132](src/harpy/_tests/test_table/test_io/test_components.py#L132) (deletion),
+  [:172](src/harpy/_tests/test_table/test_io/test_components.py#L172) (replacement with `None`);
+- the absent reopen:
+  [test_x_to_a_layer_of_a_table_stored_without_x_leaves_the_attached_x_none](src/harpy/_tests/test_table/test_io/test_add_table_updates.py#L161);
+- the rollback:
+  [test_a_failure_restores_the_attached_table_and_the_store](src/harpy/_tests/test_table/test_io/test_add_table_updates.py#L174),
+  for a failure during installation and during finalization.
+
+Verify:
+
+```bash
+.venv/bin/pytest -q -n auto src/harpy/_tests/test_table/test_io src/harpy/_tests/test_table/test_pp/test_qc_metrics.py
+```
+
+Done. `_memory_path` is in [_anndata.py](src/harpy/_storage/_anndata.py#L89), next to
+`_matrix_components`; `_components.py` uses it in the snapshot, `_memory_component` and
+`_prepare_memory_updates`, as planned.
+
+One test needed a change, which the plan missed:
+`test_a_failure_restores_the_attached_table_and_the_store` itself retained `table._X` to check that
+the rollback restores the exact objects. It now retains `table._layers` and `table.X`, and asserts
+that the same dict and the same `X` object come back. The `X` identity also checks that the retained
+dict was not written into.
+
+The verify command leaves 5 failures, 3 from 1c and 2 from step 2. The component update tests
+(`test_components.py`, `test_add_table_updates.py`, `test_components_by_region.py`,
+`test_add_table.py`, 246 tests) also pass with anndata's `FutureWarning` for a `layers` mapping
+without the key `None` turned into an error, so no update drops `X` by omission.
+
+Made explicit afterwards, as the removal of `X` relies on how AnnData's `layers` setter reads the
+key `None`:
+
+- [_memory_change](src/harpy/table/io/_components.py#L580) names the step: it returns where a
+  change goes in memory and what is assigned, and its docstring states the rule (an absent `X`
+  becomes `None` under the key `None`; a mapping without the key keeps `X`).
+- `test_anndata_reads_x_from_the_key_none_of_an_assigned_layers_mapping` in
+  `test_storage/test_anndata.py` pins that behaviour of AnnData: the key `None` sets or drops `X`
+  without a warning, and a mapping without it keeps `X` with a `FutureWarning`.
+- `docs/development/storage.md` states that every `layers` mapping harpy assigns names `X`
+  explicitly, and the two tests in `test_components.py` that remove `X` say why.
+- With `_memory_change` replaced by one that leaves the key out, 3 tests fail: the deletion of `X`
+  (`test_unbacked_updates_do_not_compute_copy_or_access_storage`, both cases) and the absent reopen
+  (`test_x_to_a_layer_of_a_table_stored_without_x_leaves_the_attached_x_none`).
+- Not added: a `filterwarnings` entry in `pyproject.toml` turning that `FutureWarning` into an
+  error. It would put AnnData's message text in the global test configuration, and stop guarding
+  silently if AnnData rewords it.
 
 ### 1c. Test expectation in `test_read.py`
 
