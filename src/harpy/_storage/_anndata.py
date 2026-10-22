@@ -7,7 +7,7 @@ coordinate these operations through ``harpy._storage._publication``.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from copy import deepcopy
 from functools import partial
 from math import prod
@@ -72,6 +72,18 @@ _DenseChunks = Literal["auto", "storage"] | int
 # that refer to it) and docs/development/storage.md state this value as 4 MiB;
 # update them if it changes.
 _STORED_CHUNK_BYTES = 4 * 1024 * 1024
+
+
+def _matrix_components(adata: AnnData) -> Iterator[tuple[tuple[str, ...], object]]:
+    """Yield each entry of the matrix mappings of ``adata`` with its component path.
+
+    In memory, AnnData stores ``X`` as ``layers[None]``; on disk and in component
+    paths it is ``X``. That entry is yielded as ``("X",)``, every other one as
+    ``(slot, key)``.
+    """
+    for slot in _MATRIX_MAPPINGS:
+        for key, value in getattr(adata, slot).items():
+            yield ("X",) if (slot, key) == ("layers", None) else (slot, key), value
 
 
 def _validate_sparse_chunks(value: _SparseChunks) -> _SparseChunks:
@@ -780,6 +792,7 @@ def _prepare_anndata_value(value: object) -> object:
             varm={key: _prepare_anndata_value(item) for key, item in value.varm.items()},
         )
     if isinstance(value, AnnData):
+        # layers carries X as layers[None]; AnnData sets X from it.
         values = {
             slot: {key: _prepare_anndata_value(item) for key, item in getattr(value, slot).items()}
             for slot in _MATRIX_MAPPINGS
@@ -791,7 +804,6 @@ def _prepare_anndata_value(value: object) -> object:
                 "varm": {key: _prepare_anndata_value(item) for key, item in value.raw.varm.items()},
             }
         return AnnData(
-            X=_prepare_anndata_value(value.X),
             obs=value.obs.copy(deep=True),
             var=value.var.copy(deep=True),
             uns=_prepare_anndata_value(deepcopy(value.uns)),

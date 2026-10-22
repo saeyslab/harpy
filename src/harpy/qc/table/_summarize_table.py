@@ -228,8 +228,8 @@ class _FeatureClassMatrix:
     """One matrix read, one class: where it is in the AnnData, the matrix and its column names."""
 
     # The AnnData attribute that holds the matrix.
-    attribute: Literal["X", "layers", "obsm"]
-    # Its key in that attribute; None for X.
+    attribute: Literal["layers", "obsm"]
+    # Its key in that attribute; None for X, which AnnData stores as layers[None].
     key: str | None
     matrix: object
     # Its column names: var_names for X or a layer, the registered or passed names for .obsm.
@@ -524,12 +524,16 @@ def _collect_class_matrices(
     row per observation, at least one column, and a class label of its own.
     """
     entries = []
-    if layer is not None:
-        if not isinstance(layer, str) or layer not in adata.layers:
-            raise ValueError(f"Layer {layer!r} is not a layer of the table; available layers: {sorted(adata.layers)}.")
-        entries.append(_FeatureClassMatrix(attribute="layers", key=layer, matrix=adata.layers[layer]))
-    elif adata.X is not None:
-        entries.append(_FeatureClassMatrix(attribute="X", key=None, matrix=adata.X))
+    # AnnData stores X as layers[None], so one lookup reads X or a named layer. .get() returns None for a
+    # missing key and for a key whose value is None, and both count as absent. The default layer=None
+    # reads X only when the table has one. A named layer is an explicit request: its key must be in
+    # adata.layers with a value that is not None, otherwise this raises.
+    matrix = adata.layers.get(layer) if isinstance(layer, str | None) else None
+    if matrix is not None:
+        entries.append(_FeatureClassMatrix(attribute="layers", key=layer, matrix=matrix))
+    elif layer is not None:
+        available = sorted(key for key in adata.layers if key is not None)
+        raise ValueError(f"Layer {layer!r} is not a layer of the table; available layers: {available}.")
     for key in obsm_keys:
         if key not in adata.obsm:
             raise ValueError(f"{key!r} is not an .obsm key of the table; available keys: {sorted(adata.obsm)}.")
