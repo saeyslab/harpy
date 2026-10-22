@@ -107,7 +107,7 @@ Implemented in the 1a addendum, as it changes no behaviour that users rely on.
 
 ## Steps
 
-- [ ] 1. anndata 0.13: `X` is stored as `layers[None]` (1a, its addendum and 1b done; 1c open)
+- [x] 1. anndata 0.13: `X` is stored as `layers[None]`
 - [ ] 2. anndata 0.13: backed sparse datasets reject item assignment with `TypeError`
 - [ ] 3. anndata 0.13: zarr's sharding warning is silenced
 - [ ] 4. matplotlib 3.11: `Axes.relim()` includes collections
@@ -315,6 +315,13 @@ key `None`:
 [`dict(adata.layers)`](src/harpy/_tests/test_table/test_io/test_read.py#L354), which now includes
 `None`. The stored `layers` group correctly holds only `counts`. Fix: drop the `None` key from the
 expected value.
+
+Done. The expected value leaves out the key `None`
+([test_read.py:355](src/harpy/_tests/test_table/test_io/test_read.py#L355)), with a comment that
+the stored `layers` group holds only the named layers. The filter is written out rather than built
+on `_matrix_components`, so that the test does not compute its expectation with the translation it
+checks. The step 1 verify modules, with `test_storage/test_anndata.py` and `test_qc/test_table`,
+leave 3 failures: 2 from step 2 and 1 from step 3.
 
 ### Failing tests
 

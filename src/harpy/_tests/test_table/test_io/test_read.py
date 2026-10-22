@@ -351,7 +351,8 @@ def test_components_cover_matrix_mappings_and_raw(make_table_io_store, monkeypat
         else:
             expected_value = getattr(target, slot)
             if slot in {"layers", "obsm", "varm", "obsp", "varp"}:
-                expected_value = dict(expected_value)
+                # In memory X is layers[None]; the stored layers group holds only the named layers.
+                expected_value = {name: value for name, value in expected_value.items() if name is not None}
             _assert_value(values[key], expected_value)
     matrix_type = {"lazy": da.Array, "backed": CSRDataset, "eager": sparse.csr_matrix}[mode]
     assert isinstance(values[("X",)], matrix_type)
