@@ -4,8 +4,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import numpy as np
+
 from harpy._feature_panels import _FeaturePanelContract
 from harpy.utils._names import _snake_case
+
+# The dtype of the point-count matrices that aggregation writes: adata.X and the class matrices in
+# .obsm. Not uint32: numba 0.67 and 0.68 type the sum of a uint8/16/32 array as int64, and then fail
+# to compile an in-place add of that sum to an unsigned array, which scanpy's calculate_qc_metrics
+# does on CSR input (https://github.com/numba/numba/issues/10939). int32 also leaves Harpy free of a
+# numba pin, which would hold numpy back as well.
+_COUNT_DTYPE = np.dtype(np.int32)
 
 
 @dataclass(frozen=True)

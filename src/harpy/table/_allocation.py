@@ -99,7 +99,7 @@ from harpy.table._aggregation_checkpoint import (
     _local_feature_counts,
     _stage_aggregation_checkpoint,
 )
-from harpy.table._aggregation_contracts import _FeatureClassAggregationContract
+from harpy.table._aggregation_contracts import _COUNT_DTYPE, _FeatureClassAggregationContract
 from harpy.table._aggregation_writer import (
     _create_aggregation_workspace,
     _remove_aggregation_workspace,
@@ -191,7 +191,7 @@ def aggregate_points(
 
     **Writes** one table at ``sdata.tables[output_table_name]``::
 
-        adata.X                                  uint32 CSR: points per instance and feature
+        adata.X                                  int32 CSR: points per instance and feature
         adata.var_names                          features of adata.X; index named feature_key
         adata.obs index                          "<instance>_<labels element>_<token>", named
                                                  table_index_name
@@ -199,7 +199,7 @@ def aggregate_points(
         adata.obs[instance_key]                  uint64: the row's label value
         adata.obsm["spatial_canonical"]          float64 (n_obs, 3): centers of mass, columns (z, y, x)
         adata.obsm[snake_case(class)]            class-aware, for each class other than the
-                                                 expression class: uint32 CSR, its points per
+                                                 expression class: int32 CSR, its points per
                                                  instance and feature
         adata.uns["spatialdata_attrs"]           region, region_key, instance_key
         adata.uns["spatial_coordinates"]         record of the canonical centers
@@ -895,7 +895,7 @@ def bin_counts(
 
     cell_counts = combined_partitions.groupby([name_barcode_id, cell_index_name]).size()
 
-    cell_counts = cell_counts.map_partitions(lambda x: x.astype(np.uint32))
+    cell_counts = cell_counts.map_partitions(lambda x: x.astype(_COUNT_DTYPE))
 
     coordinates, cell_counts = dask.compute(coordinates, cell_counts)
 

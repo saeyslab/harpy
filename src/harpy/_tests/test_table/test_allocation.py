@@ -23,7 +23,7 @@ import harpy.table.io._write as table_writer
 import harpy.transformations._transformations as transformation_module
 from harpy._tests.test_table.test_io.test_write import _store_bytes
 from harpy.table import validate_table
-from harpy.table._aggregation_contracts import _FeatureClassAggregationContract
+from harpy.table._aggregation_contracts import _COUNT_DTYPE, _FeatureClassAggregationContract
 from harpy.table._allocation import aggregate_points, bin_counts
 from harpy.table.canonical_centers import CANONICAL_OBSM_KEY, SPATIAL_COORDINATES_KEY
 from harpy.utils._keys import _INSTANCE_KEY, _REGION_KEY, _SPATIAL
@@ -233,14 +233,20 @@ def test_aggregation_checkpoint_rejects_a_pair_without_assigned_instances(tmp_pa
         )
 
 
-def test_checkpoint_partition_to_csr_rejects_uint32_overflow(tmp_path):
+def test_counts_are_stored_as_int32():
+    # A deliberate choice, explained at _COUNT_DTYPE: scanpy's QC metrics fail on uint8/16/32 counts
+    # with numba 0.67 and 0.68. Changing it is a decision of its own, not a side effect.
+    assert _COUNT_DTYPE == np.dtype(np.int32)
+
+
+def test_checkpoint_partition_to_csr_rejects_counts_beyond_the_count_dtype(tmp_path):
     path = tmp_path / "part.parquet"
     pd.DataFrame(
         {
             "aggregation_pair": np.array([0], dtype=np.int64),
             "instance_id": np.array([1], dtype=np.uint64),
             "feature": pd.Series(["GeneA"], dtype="string"),
-            "count": np.array([np.iinfo(np.uint32).max + 1], dtype=np.uint64),
+            "count": np.array([np.iinfo(_COUNT_DTYPE).max + 1], dtype=np.uint64),
         }
     ).to_parquet(path, index=False)
     partition = checkpoint_module._CheckpointPartition(
@@ -249,7 +255,7 @@ def test_checkpoint_partition_to_csr_rejects_uint32_overflow(tmp_path):
         output_row_keys=((0, 1),),
     )
 
-    with pytest.raises(ValueError, match="exceed the uint32"):
+    with pytest.raises(ValueError, match=f"exceed the {_COUNT_DTYPE} output range"):
         writer_module._checkpoint_partition_to_csr(
             partition,
             feature_axis=("GeneA",),
@@ -509,7 +515,7 @@ def test_class_aware_aggregation_writes_one_count_matrix_per_class(tmp_path, cla
     )
 
     adata = sdata.tables["table"]
-    assert isinstance(adata.X, CSRDataset)
+    assert isinstance(adata.X, CSRDataset) and adata.X.dtype == _COUNT_DTYPE
     assert isinstance(adata.obsm[CANONICAL_OBSM_KEY], zarr.Array)
     assert _SPATIAL not in adata.obsm
     assert isinstance(adata.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY], list)
@@ -549,7 +555,7 @@ def test_class_aware_aggregation_writes_one_count_matrix_per_class(tmp_path, cla
     for key, (counts, feature_columns) in expected_class_counts.items():
         matrix = adata.obsm[key]
         assert isinstance(matrix, CSRDataset)
-        assert matrix.dtype == np.dtype(np.uint32)
+        assert matrix.dtype == _COUNT_DTYPE
         np.testing.assert_array_equal(matrix.to_memory()[order].toarray(), counts)
         record = adata.uns["feature_matrices"][key]
         assert set(record) == {"schema_version", "source_kind", "feature_columns"}
@@ -585,7 +591,7 @@ def test_class_aware_aggregation_writes_one_count_matrix_per_class(tmp_path, cla
     np.testing.assert_array_equal(roundtripped.obsm[CANONICAL_OBSM_KEY][order], canonical_centers)
     for key, (counts, feature_columns) in expected_class_counts.items():
         assert sparse.isspmatrix_csr(roundtripped.obsm[key])
-        assert roundtripped.obsm[key].dtype == np.dtype(np.uint32)
+        assert roundtripped.obsm[key].dtype == _COUNT_DTYPE
         np.testing.assert_array_equal(roundtripped.obsm[key][order].toarray(), counts)
         assert list(roundtripped.uns["feature_matrices"][key]["feature_columns"]) == feature_columns
     assert roundtripped.uns["point_aggregation"]["regions"] == metadata["regions"]

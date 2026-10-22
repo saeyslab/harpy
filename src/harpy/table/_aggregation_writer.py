@@ -32,6 +32,7 @@ from harpy.table._aggregation_checkpoint import (
     _AggregationCheckpoint,
     _CheckpointPartition,
 )
+from harpy.table._aggregation_contracts import _COUNT_DTYPE
 from harpy.table._metadata import (
     _AGGREGATE_POINTS_SOURCE_KIND,
     _FEATURE_MATRIX_SCHEMA_VERSION,
@@ -310,8 +311,8 @@ def _checkpoint_sparse_array(
                 feature_axis=feature_axis,
             ),
             shape=(len(partition.output_row_keys), len(feature_axis)),
-            dtype=np.uint32,
-            meta=sparse.csr_matrix((0, 0), dtype=np.uint32),
+            dtype=_COUNT_DTYPE,
+            meta=sparse.csr_matrix((0, 0), dtype=_COUNT_DTYPE),
         )
         for partition in checkpoint.partitions
     ]
@@ -350,15 +351,15 @@ def _checkpoint_partition_to_csr(
     columns = frame[_FEATURE_COLUMN].map(column_by_feature)
     selected = columns.notna().to_numpy()
     values = frame[_COUNT_COLUMN].to_numpy(dtype=np.uint64, copy=False)
-    if np.any(values[selected] > np.iinfo(np.uint32).max):
-        raise ValueError("Merged assigned-point counts exceed the uint32 output range.")
+    if np.any(values[selected] > np.iinfo(_COUNT_DTYPE).max):
+        raise ValueError(f"Merged assigned-point counts exceed the {_COUNT_DTYPE} output range.")
     matrix = sparse.coo_matrix(
         (
-            values[selected].astype(np.uint32, copy=False),
+            values[selected].astype(_COUNT_DTYPE, copy=False),
             (rows[selected], columns.loc[selected].to_numpy(dtype=np.int64, copy=False)),
         ),
         shape=(len(partition.output_row_keys), len(feature_axis)),
-        dtype=np.uint32,
+        dtype=_COUNT_DTYPE,
     ).tocsr()
     matrix.indices = matrix.indices.astype(np.int64, copy=False)
     matrix.indptr = matrix.indptr.astype(np.int64, copy=False)

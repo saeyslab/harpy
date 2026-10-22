@@ -1,6 +1,7 @@
 import pytest
 from spatialdata.models import TableModel
 
+from harpy.table._aggregation_contracts import _COUNT_DTYPE
 from harpy.table._preprocess import preprocess_proteomics, preprocess_transcriptomics
 from harpy.utils._keys import _CELLSIZE_KEY, _RAW_COUNTS_KEY
 
@@ -77,6 +78,11 @@ def test_preprocess_proteomics_overwrite(sdata_multi_c_no_backed):
 @pytest.mark.parametrize("highly_variable_genes", [False, True])
 @pytest.mark.parametrize("size_norm", [True, False])
 def test_preprocess_transcriptomics(sdata_transcripts_no_backed, highly_variable_genes, size_norm):
+    # The example store holds uint32 counts, written before Harpy stored counts as _COUNT_DTYPE. With
+    # numba 0.67 and 0.68, scanpy's calculate_qc_metrics fails on uint8/16/32 CSR counts, as explained
+    # at _COUNT_DTYPE, so cast them until numba fixes it: https://github.com/numba/numba/issues/10939.
+    table = sdata_transcripts_no_backed.tables["table_transcriptomics"]
+    table.X = table.X.astype(_COUNT_DTYPE)
     sdata_transcripts_no_backed = preprocess_transcriptomics(
         sdata_transcripts_no_backed,
         labels_name="segmentation_mask",
