@@ -108,7 +108,7 @@ Implemented in the 1a addendum, as it changes no behaviour that users rely on.
 ## Steps
 
 - [x] 1. anndata 0.13: `X` is stored as `layers[None]`
-- [ ] 2. anndata 0.13: backed sparse datasets reject item assignment with `TypeError`
+- [x] 2. anndata 0.13: backed sparse datasets reject item assignment with `TypeError`
 - [ ] 3. anndata 0.13: zarr's sharding warning is silenced
 - [ ] 4. matplotlib 3.11: `Axes.relim()` includes collections
 - [ ] 5. numba 0.68: in-place add on unsigned integer arrays fails to type
@@ -372,6 +372,14 @@ ones. The assertions that the stored values are unchanged stay.
 ```bash
 .venv/bin/pytest -q -n auto src/harpy/_tests/test_table/test_io/test_read.py src/harpy/_tests/test_table/test_allocation.py
 ```
+
+Done. `test_backed_handles_reject_direct_writes` chooses the expected error from `matrix_kind`, and
+the allocation test from the handle's type: `TypeError` for the CSR datasets (`X` and
+`obsm["negative"]`), `ValueError` for the canonical centers, a read-only Zarr array. The allocation
+test's comment no longer explains that sparse writes target existing entries, as a CSR dataset now
+rejects any assignment. Harpy's documentation promises read-only handles without naming an exception
+(`read_zarr`'s docstring, `docs/development/storage.md`), so it needs no change. The verify command
+passes (223 tests).
 
 ---
 

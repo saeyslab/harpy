@@ -531,7 +531,13 @@ def test_backed_handles_reject_direct_writes(make_table_io_store, reader, matrix
         matrix = table.X
     else:
         matrix = reader(path, table_name="counts", components=[("X",)], mode="backed")[("X",)]
-    with pytest.raises(ValueError, match="read.only"):
+    if matrix_kind == "csr":
+        # A CSR dataset, which AnnData (>= 0.13) gives no item assignment.
+        error, message = TypeError, "does not support item assignment"
+    else:
+        # A read-only Zarr array.
+        error, message = ValueError, "read.only"
+    with pytest.raises(error, match=message):
         matrix[0, 1] = 99
     expected = np.array([[0, 1, 2], [3, 0, 4]])
     if matrix_kind == "csr":

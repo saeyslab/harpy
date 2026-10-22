@@ -569,11 +569,14 @@ def test_class_aware_aggregation_writes_one_count_matrix_per_class(tmp_path, cla
         },
     }
 
-    # Returned handles must reject direct storage writes. The first ordered
-    # cell has both GeneA and Negative01 counts, so sparse writes target existing
-    # entries rather than failing because of a change in sparsity structure.
+    # Returned handles must reject direct storage writes. The count matrices are CSR datasets, which
+    # AnnData (>= 0.13) gives no item assignment; the canonical centers are a read-only Zarr array.
     for matrix in (adata.X, adata.obsm["negative"], adata.obsm[CANONICAL_OBSM_KEY]):
-        with pytest.raises(ValueError, match="read.only"):
+        if isinstance(matrix, CSRDataset):
+            error, message = TypeError, "does not support item assignment"
+        else:
+            error, message = ValueError, "read.only"
+        with pytest.raises(error, match=message):
             matrix[order[0], 0] = 99
 
     roundtripped_sdata = read_zarr(output)
