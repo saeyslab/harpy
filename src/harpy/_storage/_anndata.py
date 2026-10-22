@@ -792,7 +792,7 @@ def _prepare_anndata_value(value: object) -> object:
             varm={key: _prepare_anndata_value(item) for key, item in value.varm.items()},
         )
     if isinstance(value, AnnData):
-        # layers carries X as layers[None]; AnnData sets X from it.
+        # value.layers includes X under the key None (anndata >= 0.13); AnnData sets X from it.
         values = {
             slot: {key: _prepare_anndata_value(item) for key, item in getattr(value, slot).items()}
             for slot in _MATRIX_MAPPINGS
