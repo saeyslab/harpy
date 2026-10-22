@@ -20,8 +20,7 @@ Harpy supports only `anndata>=0.13` (`pyproject.toml` updated). The rollback fix
 otherwise need one code path for 0.12 (`_X`) and one for 0.13 (`_layers`), and CI runs only `locked`
 (0.13.4) and `stable` (newest), so a 0.12 path would never be tested.
 
-`uv.lock` still records the old specifier, so `uv sync --locked` fails until `uv lock` is rerun. This
-can be done together with the numba pin of step 5.
+`uv.lock` still records the old specifier, so `uv sync --locked` fails until `uv lock` is rerun.
 
 Follow-ups now that 0.12 is unsupported:
 
@@ -109,8 +108,8 @@ Implemented in the 1a addendum, as it changes no behaviour that users rely on.
 - [x] 1. anndata 0.13: `X` is stored as `layers[None]`
 - [x] 2. anndata 0.13: backed sparse datasets reject item assignment with `TypeError`
 - [x] 3. anndata 0.13: automatic sharding no longer groups the chunks of dense matrices (#270)
-- [ ] 4. matplotlib 3.11: `Axes.relim()` includes collections
-- [ ] 5. numba 0.68: in-place add on unsigned integer arrays fails to type
+- [x] 4. matplotlib 3.11: `Axes.relim()` includes collections
+- [x] 5. numba ≥ 0.67: sums of small unsigned integers are typed as `int64`
 
 ---
 
@@ -609,54 +608,183 @@ A monkeypatched prototype passes all 62 tests in `test_spatial_bin_histograms.py
 .venv/bin/pytest -q -n auto src/harpy/_tests/test_qc/test_spatial_bin_histograms.py src/harpy/_tests/test_qc/test_table/test_instance_plots.py
 ```
 
+Done, as planned, and extended to an older bug in the same function.
+
+The bug: a second percentage histogram on the same axes left the y-limit at 210 instead of about 52,
+for two peaks of 50%. The first histogram's filled area keeps its cached bounds in counts, and both
+`relim()` (from 3.11) and the loop over earlier collections (`get_datalim()`, under 3.10 too) read
+that cache. Harpy never draws two histograms on one axes itself, but `_scale_histogram_artists`
+promises to preserve earlier axes contents.
+
+The fix bounds every polygon collection without offsets by its own vertices, not only the ones scaled
+in this call:
+
+- `_bounded_by_vertices` tells such collections, filled step and poly histograms included, from those
+  placed by offsets, such as scatter points or `hexbin` cells, which keep `get_datalim()`;
+- the polygon collections are hidden from `ax.relim(visible_only=True)` and added through their
+  vertices; the others are added through `get_datalim()`, which matters before matplotlib 3.11.
+
+`test_a_percentage_histogram_keeps_the_limits_of_earlier_axes_contents` covers an earlier percentage
+histogram, which failed before the fix, and earlier scatter points. All plot and QC tests pass
+(`test_qc` and `test_table/test_pl`, 329 tests).
+
 ---
 
-## 5. numba 0.68: in-place add on unsigned integer arrays fails to type
+## 5. numba ≥ 0.67: sums of small unsigned integers are typed as `int64`
 
 ### Cause
 
-Reproduces with numba alone:
+Three layers; the second and third only show because of the first.
 
-```python
-import numba
-import numpy as np
+1. numba 0.67.0 reimplemented `array.sum()` and `np.sum()` (`@overload` with the intrinsics
+   `_numpy_sum` and `_numpy_sum_axis`). Its result dtype comes from
+   [get_ret_dtype_if_any](.venv/lib/python3.13/site-packages/numba/np/arraymath.py#L420): every
+   integer narrower than `intp` becomes `intp`, a signed `int64`. The comment there says "signed
+   integers", but the condition does not check signedness, so `uint8`, `uint16` and `uint32` become
+   `int64`, where NumPy gives `uint64`. Up to 0.66, `_expand_integer` in
+   `numba/core/typing/arraydecl.py` widened unsigned integers to `uintp`, as NumPy does.
 
+   | dtype                      | `.sum(axis=1)` in numba 0.68 | in NumPy |
+   | -------------------------- | ---------------------------- | -------- |
+   | `uint8`, `uint32`          | `int64`                      | `uint64` |
+   | `uint64`, `int32`, `int64` | as NumPy                     |          |
 
-@numba.njit
-def f(a):
-    acc = np.zeros(a.shape[0], dtype=a.dtype)
-    acc += a.sum(axis=1)
-    return acc
+2. scanpy's `top_segment_proportions_sparse_csr`, used by `sc.pp.calculate_qc_metrics` on CSR input,
+   adds that sum in place to an array of the data's dtype:
 
+   ```python
+   acc = np.zeros(..., dtype=data.dtype)          # uint32 for Harpy's counts
+   acc += partitioned[:, prev:ns[j]].sum(axis=1)  # int64 from numba 0.67
+   ```
 
-f(np.ones((3, 4), dtype=np.uint32))
-# AttributeError: 'NoneType' object has no attribute 'args'
-# (numba/core/typing/npydecl.py, NumpyRulesInplaceArrayOperator.generic)
-```
+   Writing an `int64` result into a `uint32` array is a cast between kinds, which NumPy refuses in
+   place as well (`np.can_cast(int64, uint32, "same_kind")` is `False`). With numba ≤ 0.66 the sum
+   was `uint64`, which casts in place to `uint32`.
 
-It fails for `uint8`, `uint16` and `uint32` with numba 0.68.0; `int*`, `float*` and `uint64` work.
-scanpy's `top_segment_proportions_sparse_csr`, used by `sc.pp.calculate_qc_metrics` on CSR input, does
-exactly this. Harpy's allocation stores
-[uint32 counts](src/harpy/table/_allocation.py#L898), so scanpy's QC metrics fail on any allocation
-output, including when users call scanpy themselves. No upstream report was found. Older numba
-releases between 0.65.1 and 0.68.0 were not tested.
+3. numba then crashes instead of raising a typing error: `NumpyRulesInplaceArrayOperator.generic`
+   gets no signature and fails on `assert len(sig.args) == 3`, hence
+   `AttributeError: 'NoneType' object has no attribute 'args'`. This is an old numba bug
+   ([numba#2784](https://github.com/numba/numba/issues/2784), open since 2018, the same crash for
+   unsigned in-place operations). On 0.68.0 every unsigned `+=` signed pair crashes this way, and so
+   does every signed `+=` `uint64` pair.
+
+Affected: numba 0.67.0 and 0.68.0, the latest release. 0.66.0 has no `get_ret_dtype_if_any` yet. No
+numba issue reports the unsigned sum dtype; the open pull requests on `sum` performance
+([numba#10929](https://github.com/numba/numba/pull/10929),
+[numba#10924](https://github.com/numba/numba/pull/10924)) do not change it.
+
+Impact: Harpy has no numba code of its own. scanpy's QC metrics fail on any CSR matrix of `uint8`,
+`uint16` or `uint32` values, which includes Harpy's allocation output
+([uint32 counts](src/harpy/table/_allocation.py#L898)), also when users call scanpy on Harpy's
+tables.
 
 ### Failing tests
 
 `test_table/test_preprocess.py::test_preprocess_transcriptomics`, all 4 parametrizations, through
 [`sc.pp.calculate_qc_metrics`](src/harpy/table/_preprocess.py#L321).
 
+### Decision: `int32` counts instead of a numba pin
+
+Harpy stores its count matrices as `int32` instead of `uint32`, and does not pin numba.
+
+Why not pin `numba<0.67`: numba 0.66.0, the last release before the bug, requires `numpy<2.5`, so the
+pin would also hold numpy on 2.4.x. The first dependency that needs numpy ≥ 2.5 or a newer numba
+would conflict with it, and the pin could only go once numba fixes the bug upstream and someone
+remembers to lift it.
+
+Why `int32`:
+
+- Range: up to 2,147,483,647 points per instance and feature, far above realistic counts.
+- Memory: 4 bytes, as `uint32`.
+- It works with numba 0.67 and 0.68: in scanpy's kernel, `int32 += int64` is an allowed in-place cast,
+  and `calculate_qc_metrics` ran on an `int32` CSR matrix under numba 0.68. Of the integer types, only
+  `uint8`, `uint16` and `uint32` fail.
+- No compatibility cost: neither `uint32` producer is in the latest release, v0.5.0 (it has no
+  aggregation writer, and its allocation does not cast to `uint32`), so no released store has
+  `uint32` counts from Harpy.
+- Harpy's own QC accepts signed integers and accumulates in `uint64`
+  (`test_counts_stored_as_whole_floats_or_signed_integers_give_the_result_of_uint32`).
+
+Rejected: `float32`, the usual scverse default, exact for integers only up to 16,777,216; `int64` and
+`uint64`, twice the memory.
+
+The dtype is one constant, `_COUNT_DTYPE = np.dtype(np.int32)`, in
+[_aggregation_contracts.py](src/harpy/table/_aggregation_contracts.py#L1), with a comment that gives
+the reason above. That module holds the shared contracts of feature-class aggregation, imports only
+`_feature_panels` and `utils._names`, and `_allocation.py` already imports from it. Not in
+`table/_table.py`: its helpers serve table processing in general, none of its users produces counts,
+and it imports `table.io._add_table`, `shape._shape` and `_storage._anndata`, which neither producer
+imports today. Once the numba issue is filed, the comment links it.
+
 ### Fix
 
-- Pin numba below 0.68 in the `[tool.uv]` `override-dependencies` of `pyproject.toml`, next to
-  `numba>=0.64.0`. This applies to both `locked` and `stable` CI jobs, but not to pip installs.
-  It needs `uv lock` and an environment rebuild.
-- Report the snippet above to numba.
+- The constant in `_aggregation_contracts.py`.
+- Producers, both through the constant:
+  - [_aggregation_writer.py](src/harpy/table/_aggregation_writer.py#L313): the `uint32` dtype and
+    meta of the count matrices, the cast at [line 357](src/harpy/table/_aggregation_writer.py#L357),
+    and the range check at [line 353](src/harpy/table/_aggregation_writer.py#L353), with
+    `np.iinfo(_COUNT_DTYPE).max` and a message naming the constant's dtype;
+  - [_allocation.py:898](src/harpy/table/_allocation.py#L898): the cast.
+- Documentation: "uint32 CSR" in the allocation docstring
+  ([lines 194 and 202](src/harpy/table/_allocation.py#L194)).
+- Tests in `test_allocation.py`: the range check
+  ([lines 243 and 252](src/harpy/_tests/test_table/test_allocation.py#L243)) and the output dtype
+  ([lines 552 and 588](src/harpy/_tests/test_table/test_allocation.py#L552)) take the expected dtype
+  and limit from the constant, so that a later change happens in one place. One small test pins
+  `_COUNT_DTYPE == np.dtype(np.int32)`, so that such a change is a deliberate, visible test change.
+  The QC tests that build `uint32` input stay: Harpy's QC still accepts `uint32` counts from
+  elsewhere. The `uint32` arrays in `test_canonical_centers.py` are instance IDs and labels, not
+  counts, and stay too.
+- `pyproject.toml`: back to `numba>=0.64.0` and its earlier comment, dropping the `<0.67` pin added
+  first.
+- Still worth reporting to numba for other users with unsigned data, with a reproducer that points at
+  `get_ret_dtype_if_any`; the fix there is to return `types.uintp` for unsigned integers. Harpy no
+  longer depends on it. Filed as [numba#10939](https://github.com/numba/numba/issues/10939).
+
+  ```python
+  import numba
+  import numpy as np
+
+
+  @numba.njit
+  def f(a):
+      return a.sum(axis=1)
+
+
+  f(np.ones((2, 2), dtype=np.uint32)).dtype  # int64; NumPy gives uint64
+  ```
+
+Done.
+
+- `_COUNT_DTYPE = np.dtype(np.int32)` is in `_aggregation_contracts.py`, with the reason; the
+  aggregation writer and the allocation use it, and the allocation docstring says `int32 CSR`.
+- `pyproject.toml` is back to `numba>=0.64.0`, as committed.
+- `test_allocation.py` takes the expected dtype and the range limit from the constant, checks the
+  dtype of `X` as well, and `test_counts_are_stored_as_int32` pins the constant.
+
+One case the switch does not cover: `test_preprocess_transcriptomics` runs scanpy's QC metrics on the
+example store of `resolve_example()`, downloaded from Harpy's dataset registry, whose
+`table_transcriptomics` holds `uint32` CSR counts (its other tables keep `uint32` in their
+`raw_counts` layer). Stored data with `uint32` counts still fails scanpy's QC metrics under numba 0.67
+and 0.68, whatever Harpy writes now. The test casts that table's `X` to `_COUNT_DTYPE` before
+preprocessing, with a comment that it waits for the numba fix,
+[numba#10939](https://github.com/numba/numba/issues/10939).
+
+The verify command passes with numba 0.68.0 and numpy 2.5.4 (268 tests).
+
+Follow-ups:
+
+- Done: the numba issue is filed, [numba#10939](https://github.com/numba/numba/issues/10939), and
+  linked at `_COUNT_DTYPE` and in the comment of `test_preprocess_transcriptomics`. Once numba fixes
+  it, the cast in that test can go.
+- Regenerate the example store with `int32` counts (a new zip in the dataset registry and its hash),
+  so that the test needs no cast and users of the example data are not affected. Possibly a Harpy
+  issue.
 
 ### Verify
 
-After rebuilding the environment:
+The current environment has numba 0.68.0, so no rebuild is needed:
 
 ```bash
-.venv/bin/pytest -q src/harpy/_tests/test_table/test_preprocess.py
+.venv/bin/pytest -q -n auto src/harpy/_tests/test_table/test_preprocess.py src/harpy/_tests/test_table/test_allocation.py src/harpy/_tests/test_table/test_canonical_centers.py src/harpy/_tests/test_qc/test_table
 ```
