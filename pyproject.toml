@@ -95,9 +95,13 @@ opencv = [
     "opencv-python-headless",
 ]
 # additional UI or CLI interfaces
-napari = [
+spatiato = [
     "napari[all]>=0.7.1",
     "spatiato>=0.2.0",
+]
+# Former name of the spatiato extra, kept so that existing installs keep working.
+napari = [
+    "harpy-analysis[spatiato]",
 ]
 vitessce = [
     "harpy-vitessce ; python_version >= '3.12'"
