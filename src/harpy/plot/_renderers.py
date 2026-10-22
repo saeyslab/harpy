@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from matplotlib.axes import Axes
+from matplotlib.collections import Collection, PolyCollection
 
 
 def _plot_histogram(
@@ -160,31 +161,51 @@ def _scale_histogram_artists(ax: Axes, *, starts: tuple[int, int, int], factor: 
     the same percentage scale without changing histogram edges or refitting it.
     """
     patch_start, collection_start, line_start = starts
+    scaled = ax.collections[collection_start:]
     for patch in ax.patches[patch_start:]:
         patch.set_y(patch.get_y() * factor)
         patch.set_height(patch.get_height() * factor)
-    for collection in ax.collections[collection_start:]:
+    for collection in scaled:
         for path in collection.get_paths():
             path.vertices[:, 1] *= factor
         collection.stale = True
     for line in ax.lines[line_start:]:
         line.set_ydata(np.asarray(line.get_ydata()) * factor)
-    ax.relim()
-    # Axes.relim() ignores collections. Existing ones retain their limits,
-    # but filled histograms can cache the pre-scaling bounds, so derive the
-    # new histogram limits from its scaled vertices instead.
-    for collection in ax.collections[:collection_start]:
-        bounds = collection.get_datalim(ax.transData)
-        if np.isfinite(bounds.get_points()).all():
-            ax.update_datalim(bounds.get_points())
-    for collection in ax.collections[collection_start:]:
-        # Convert the scaled vertices to data coordinates so axis limits reflect
-        # percentages, not the original counts. Transform subtraction composes
-        # with the inverse of ax.transData; it is not numeric subtraction.
-        to_data = collection.get_transform() - ax.transData
-        for path in collection.get_paths():
-            ax.update_datalim(to_data.transform(path.vertices))
+    # Filled histograms cache their bounds when created, before any scaling, here or in an earlier
+    # call on the same axes, and get_datalim() returns that cache, which Axes.relim() reads from
+    # Matplotlib 3.11 on. Bound them by their vertices instead: hide them from relim(), which then
+    # also leaves out other invisible artists, and add their vertices below.
+    polygons = [collection for collection in ax.collections if _bounded_by_vertices(collection)]
+    visible = [collection.get_visible() for collection in polygons]
+    for collection in polygons:
+        collection.set_visible(False)
+    try:
+        ax.relim(visible_only=True)
+    finally:
+        for collection, was_visible in zip(polygons, visible, strict=True):
+            collection.set_visible(was_visible)
+    for collection in ax.collections:
+        if collection in polygons:
+            # Convert the vertices to data coordinates. Transform subtraction composes
+            # with the inverse of ax.transData; it is not numeric subtraction.
+            to_data = collection.get_transform() - ax.transData
+            for path in collection.get_paths():
+                ax.update_datalim(to_data.transform(path.vertices))
+        else:
+            # Before Matplotlib 3.11, Axes.relim() ignores collections, such as scatter points.
+            bounds = collection.get_datalim(ax.transData)
+            if np.isfinite(bounds.get_points()).all():
+                ax.update_datalim(bounds.get_points())
     ax.autoscale_view()
+
+
+def _bounded_by_vertices(collection: Collection) -> bool:
+    """Return whether a collection's own vertices give its data bounds: a polygon collection without offsets.
+
+    Filled histograms are such collections. Others, such as scatter points or hexbin
+    cells, place one shape at several offsets, and their get_datalim() gives their bounds.
+    """
+    return isinstance(collection, PolyCollection) and not np.any(collection.get_offsets())
 
 
 def _plot_scatter(

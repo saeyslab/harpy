@@ -143,6 +143,30 @@ def test_filled_percentage_histogram_autoscales_to_percentage_not_raw_counts():
     assert 50 < ax.get_ylim()[1] < 100
 
 
+@pytest.mark.parametrize("earlier, top", [("percentage_histogram", 50), ("scatter", 80)])
+def test_a_percentage_histogram_keeps_the_limits_of_earlier_axes_contents(earlier, top):
+    options = {"stat": "percent", "kde": False}
+    _, ax = plt.subplots()
+    if earlier == "percentage_histogram":
+        # Its filled area cached its bounds in counts, a peak of 200, before it was scaled to 50%.
+        spatial_bin_histogram(
+            _summary([0, 1, 1, 2] * 100),
+            feature_class="Control",
+            bins=3,
+            ax=ax,
+            histplot_kwargs=options,
+            show_median=False,
+        )
+    else:
+        # Scatter points are placed by offsets, so their bounds come from their data limits.
+        ax.scatter([1], [top])
+    spatial_bin_histogram(
+        _summary([0, 1, 1, 2] * 50), feature_class="Control", bins=3, ax=ax, histplot_kwargs=options, show_median=False
+    )
+    # Its peak is 50% as well, so the upper limit follows the earlier contents, with a margin.
+    assert top < ax.get_ylim()[1] < 1.2 * top
+
+
 @pytest.mark.parametrize("counts", [[0, 1, 3], [0, 0, 0], [4], []])
 def test_bin_summary_sample_sd_includes_retained_zeros(counts):
     row = _summary(counts).spatial_bins.per_class.iloc[0]
