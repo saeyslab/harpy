@@ -1,3 +1,4 @@
+import warnings
 from collections import Counter
 from pathlib import Path
 
@@ -664,3 +665,29 @@ def _write_test_regions_table(path: Path) -> zarr.Group:
         instance_key=_INSTANCE_KEY,
     )
     return group
+
+
+def test_anndata_reads_x_from_the_key_none_of_an_assigned_layers_mapping():
+    """Pin the AnnData behaviour that harpy relies on when it installs a layers mapping.
+
+    _memory_change in harpy.table.io._components removes X by assigning None under the
+    key None, because a layers mapping that has no key None at all keeps the current X.
+    If this test fails, AnnData changed how it handles X in layers: revisit _memory_change
+    and "X in memory and on disk" in docs/development/storage.md.
+    """
+    counts = np.zeros((3, 2))
+    adata = AnnData(np.ones((3, 2)), layers={"counts": counts})
+    new_x = np.full((3, 2), 2.0)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", FutureWarning)
+        # The key None holds X: a matrix sets X, and None drops it, without a warning.
+        adata.layers = {None: new_x, "counts": counts}
+        assert adata.X is new_x
+        adata.layers = {None: None, "counts": counts}
+        assert adata.X is None and None not in adata.layers
+
+    # Without the key None, the current X is kept, with a FutureWarning.
+    adata.X = new_x
+    with pytest.warns(FutureWarning, match="without a `None` key"):
+        adata.layers = {"counts": counts}
+    assert adata.X is new_x

@@ -582,8 +582,9 @@ def _memory_change(path: ComponentPath, value: object) -> tuple[tuple[str | None
 
     X is layers[None] in memory (_memory_path). Removing X assigns None under that key
     instead of leaving the key out: AnnData's layers setter keeps the current X for a
-    mapping without the key None (with a FutureWarning), and drops X when the key holds
-    None, as that warning advises. Every other component is removed by leaving out its key.
+    mapping that has no key None at all (with a FutureWarning), and drops X when the key
+    holds None, as that warning advises. Every other component is removed by leaving out
+    its key.
     See "X in memory and on disk" in docs/development/storage.md.
     """
     if path == ("X",) and value is _ABSENT:
