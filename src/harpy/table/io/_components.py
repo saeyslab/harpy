@@ -14,7 +14,7 @@ from loguru import logger as log
 from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
-from harpy._storage._anndata import _MissingAnnDataElement, _read_anndata_element
+from harpy._storage._anndata import _memory_path, _MissingAnnDataElement, _read_anndata_element
 from harpy.table.io._read import (
     ComponentPath,
     _check_component_path_overlap,
@@ -266,7 +266,8 @@ def _update_table_components(
 
     # Retain original slot objects. Prepared mappings/raw containers are shallow
     # copies, so neither successful installation nor rollback mutates old entries.
-    slots = {path[0] for path in (*paths, *deletions, *reopen_also)}
+    # In memory X is layers[None], so an update of X retains the layers slot.
+    slots = {_memory_path(path)[0] for path in (*paths, *deletions, *reopen_also)}
     previous = {slot: getattr(table, f"_{slot}") for slot in slots}
     try:
         if group is None:
@@ -352,9 +353,11 @@ def _memory_component(table: AnnData, path: ComponentPath) -> object:
         The component's value, or _ABSENT if a required key is missing.
         An existing mapping entry whose value is None, such as
         ``table.uns["threshold"] = None``, returns None rather than _ABSENT.
-        In contrast, ``table.X is None`` and ``table.raw is None`` represent
-        absent in-memory components. An absent raw also makes paths inside
-        raw absent.
+        ``("X",)`` is looked up as ``layers[None]``, where AnnData stores ``X``.
+        It returns _ABSENT when the table has no X: AnnData then has no key None
+        in layers, as setting X to None removes that key. In contrast,
+        ``table.raw is None`` represents an absent raw, which also makes paths
+        inside raw absent.
 
     Raises
     ------
@@ -363,8 +366,9 @@ def _memory_component(table: AnnData, path: ComponentPath) -> object:
         ``table.uns["analysis"] = 42``, looking up ("uns", "analysis", "threshold")
         raises instead of treating the target as merely missing.
     """
+    path = _memory_path(path)
     value = getattr(table, path[0])
-    if path[0] in {"X", "raw"} and value is None:
+    if path[0] == "raw" and value is None:
         return _ABSENT
     keys = path[1:]
     if path[0] == "raw" and keys:
@@ -589,6 +593,11 @@ def _prepare_memory_updates(
             changes[path] = value.copy(deep=False)
             changes[path].index = value.index.copy()
     changes.update({path: _ABSENT for path in deletions if _memory_component(table, path) is not _ABSENT})
+    # In memory X is layers[None]. An absent X, deleted or not in the store when reopened, is assigned
+    # None there: AnnData keeps X when a layers mapping lacks the key None, and drops it for None.
+    changes = {
+        _memory_path(path): None if path == ("X",) and value is _ABSENT else value for path, value in changes.items()
+    }
     updates = {}
     raw_changes = {path[1:]: value for path, value in changes.items() if path[0] == "raw"}
     if raw_changes:
