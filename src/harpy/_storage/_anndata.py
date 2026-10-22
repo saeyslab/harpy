@@ -23,7 +23,6 @@ from anndata import AnnData, Raw
 from anndata.abc import CSCDataset, CSRDataset
 from anndata.experimental import read_elem_lazy, write_dispatched
 from anndata.io import read_elem, sparse_dataset, write_elem
-from dask import delayed
 from dask.utils import parse_bytes
 from scipy import sparse
 from spatialdata.models import TableModel
@@ -290,16 +289,7 @@ def _decode_anndata_element(
         # Return a storage-backed handle; values are read on indexing or to_memory().
         return sparse_dataset(element)
     if is_sparse:
-        shape = tuple(element.attrs["shape"])
         compressed_axis = 0 if encoding == "csr_matrix" else 1
-        if shape[compressed_axis] == 0:
-            # AnnData 0.12.10 constructs invalid Dask chunks for an empty
-            # compressed axis. Defer its ordinary decoder for this zero-sized
-            # matrix instead; even its sparse buffers remain unread here.
-            matrix_type = sparse.csr_matrix if compressed_axis == 0 else sparse.csc_matrix
-            meta = matrix_type((0, 0), dtype=element["data"].dtype)
-            array = da.from_delayed(delayed(read_elem)(element), shape=shape, dtype=meta.dtype, meta=meta)
-            return _register_lazy_read(array, element)
         # Harpy owns the sparse block size, independently of AnnData's defaults.
         # Keep the other axis whole.
         length = _sparse_block_length(element, compressed_axis=compressed_axis, sparse_chunks=sparse_chunks)
@@ -435,7 +425,9 @@ def _sparse_block_length(element: zarr.Group, *, compressed_axis: int, sparse_ch
     # The caller has validated sparse_chunks: "auto" or a positive int.
     if sparse_chunks != "auto":
         return sparse_chunks
-    # The caller handles an empty compressed axis before sizing blocks.
+    # An empty compressed axis, a CSR matrix without rows or a CSC matrix without columns,
+    # reaches this point too: _auto_sparse_block_length returns 1 for it instead of dividing
+    # by the axis length.
     data = element["data"]
     return _auto_sparse_block_length(
         int(element.attrs["shape"][compressed_axis]),
