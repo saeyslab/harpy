@@ -177,7 +177,8 @@ def test_a_failure_restores_the_attached_table_and_the_store(store, monkeypatch,
     table.X = table.X * 2
     zarr.consolidate_metadata(str(store))
     before = _store_bytes(store)
-    previous = {slot: getattr(table, f"_{slot}") for slot in ("X", "layers")}
+    # In memory X is layers[None]: the rollback restores the retained layers dict, and with it the processed X.
+    previous_layers, previous_x = table._layers, table.X
     original_install = components_module._install_memory_updates
     original_consolidate = zarr.consolidate_metadata
 
@@ -195,7 +196,7 @@ def test_a_failure_restores_the_attached_table_and_the_store(store, monkeypatch,
         monkeypatch.setattr(zarr, "consolidate_metadata", failed_consolidate)
     with pytest.raises(RuntimeError, match=failure):
         add_table_updates(sdata, table_name="counts", x_to=("layers", "log1p"))
-    assert all(getattr(table, f"_{slot}") is value for slot, value in previous.items())
+    assert table._layers is previous_layers and table.X is previous_x
     assert "log1p" not in table.layers
     assert _store_bytes(store) == before
     assert not list(store.parent.glob(f".{store.name}.harpy-*"))

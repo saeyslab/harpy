@@ -129,6 +129,7 @@ def test_unbacked_updates_do_not_compute_copy_or_access_storage(make_table_io_st
             remove_table_components(sdata, table_name="counts", components=[("X",), ("raw",)])
     assert table.layers["counts"] is replacement
     pd.testing.assert_frame_equal(table.obs, updated_obs)
+    # Removing X assigns None under layers[None]; leaving the key out would keep X (_memory_change).
     assert "score" not in old_obs and table.X is None and table.raw is None
 
 
@@ -169,6 +170,8 @@ def test_none_replacements_and_whole_uns_preserve_annotation(make_table_io_store
         var_names=table.var_names,
         overwrite=backed,
     )
+    # X replaced with None is assigned None under layers[None], which drops X, while the named layers
+    # stay; an uns entry replaced with None keeps its key, with the value None.
     assert table.X is None and table.raw is original_raw and "counts" in table.layers
     assert table.uns["optional"] is None and "analysis" not in table.uns
     TableModel.validate(table)
