@@ -74,6 +74,9 @@ _DenseChunks = Literal["auto", "storage"] | int
 _STORED_CHUNK_BYTES = 4 * 1024 * 1024
 
 
+# AnnData >= 0.13 keeps X in memory as layers[None], while on disk and in component paths it is X.
+# These two functions are the only translation between the two; see docs/development/storage.md,
+# "X in memory and on disk".
 def _matrix_components(adata: AnnData) -> Iterator[tuple[tuple[str, ...], object]]:
     """Yield each entry of the matrix mappings of ``adata`` with its component path.
 
@@ -84,6 +87,15 @@ def _matrix_components(adata: AnnData) -> Iterator[tuple[tuple[str, ...], object
     for slot in _MATRIX_MAPPINGS:
         for key, value in getattr(adata, slot).items():
             yield ("X",) if (slot, key) == ("layers", None) else (slot, key), value
+
+
+def _memory_path(path: tuple[str, ...]) -> tuple[str | None, ...]:
+    """Return where a component path is in memory: ``("layers", None)`` for ``("X",)``, any other path as it is.
+
+    The inverse of ``_matrix_components``: on disk and in component paths ``X`` is
+    ``X``, while AnnData stores it in memory as ``layers[None]``.
+    """
+    return ("layers", None) if path == ("X",) else path
 
 
 def _validate_sparse_chunks(value: _SparseChunks) -> _SparseChunks:
