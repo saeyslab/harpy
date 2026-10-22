@@ -12,7 +12,9 @@ previous lock. Five upstream changes explain all of them:
 Other notable bumps that did not cause failures: scanpy 1.11.1 → 1.12.4, zarr 3.2.1 → 3.4.1,
 dask 2026.7.1 → 2026.8.0, numpy 2.4.6 → 2.5.4, scipy 1.15.2 → 1.18.1, xarray 2026.2.0 → 2026.9.0.
 
-## Decision: anndata lower bound
+## Decisions
+
+### anndata lower bound
 
 Harpy supports only `anndata>=0.13` (`pyproject.toml` updated). The rollback fix (step 1b) would
 otherwise need one code path for 0.12 (`_X`) and one for 0.13 (`_layers`), and CI runs only `locked`
@@ -28,9 +30,84 @@ Follow-ups now that 0.12 is unsupported:
   whether 0.13 still needs it;
 - `roadmap/integration_downstream/` mentions the 0.12.10 floor.
 
+### `X` in memory and on disk
+
+What anndata 0.13 does, checked on 0.13.4 (see also the
+[release post](https://scverse.org/blog/2026-anndata-013/)):
+
+- The public API is unchanged: `adata.X` is read, set and deleted as before.
+- In memory, `X` is the entry `None` of `layers`. `AnnData._X` no longer exists: the getter returns
+  `layers.get(None)`, and the setter writes `layers[None]` into the existing `_layers` dict.
+  Iterating `layers` yields `None` (`['counts', None]`); the repr shows `layers: 'counts', None (.X)`.
+- Each `view.X` is a new view. Assigning to a view's `X` no longer changes the parent's `X`.
+- `AnnData(layers={None: x})` sets `X`. Passing `X=` as well requires the same object.
+- `adata.layers = {...}` without a `None` key keeps `X` and emits a `FutureWarning`; a future release
+  may drop `X` instead. `{None: None, ...}` drops `X`.
+- On disk nothing changed: `X` is stored at the top-level `X`, the `layers` group holds only the named
+  layers, and the encoding is still `anndata` 0.1.0. The writer reports the matrix as `X`.
+- `Raw` is unchanged and keeps its own `_X`.
+
+Harpy's contract:
+
+- Component paths are storage paths and stay as they are: `("X",)` names `X` and `("layers", key)` a
+  named layer. They are public API (`components=[("X",)]`, `x_to=("X",)`), their segments are
+  strings, and they match the layout on disk.
+- In memory, harpy follows anndata: `X` is the entry `None` of the `layers` slot. When harpy reads,
+  installs or restores components of an attached table, `X` is not a slot of its own.
+- One place translates between the two, next to `_MATRIX_MAPPINGS` in
+  [_anndata.py](src/harpy/_storage/_anndata.py#L38):
+  - `_matrix_components(adata)` yields `(component path, value)` for every entry of every matrix
+    mapping in memory, with `layers[None]` as `("X",)`. It iterates `_MATRIX_MAPPINGS` itself.
+  - `_memory_path(path)` returns the location of a component path in memory: `("layers", None)` for
+    `("X",)`, any other path unchanged.
+- Code that copies one AnnData into a new one passes `layers` whole, `None` included, and no `X=`
+  argument; anndata sets `X` from `layers[None]`. Checked with Dask and sparse matrices, from a view,
+  and without `X`.
+- Removing `X` assigns a `layers` mapping with `None: None`. A mapping without the `None` key would
+  keep `X` and warn.
+- Lists of layer names shown to users skip `None` inline: for users, `X` is not a named layer.
+
+Rejected:
+
+- Filtering `None` out of `layers` at each site (the first attempt at 1a, `_matrix_mapping`). It hides
+  the difference between memory and disk instead of stating it, and its `slot` argument depends
+  implicitly on `_MATRIX_MAPPINGS`.
+- Special-casing `X` in the rollback (the first plan for 1b). With the translation, an `X` update is a
+  `layers` update, which the rollback already handles.
+
+### Choosing `X` or a layer: `layer`
+
+Functions that read the matrix aligned with `var` take `layer: str | None`, in scanpy's convention:
+`None` reads `X`, a name reads that layer. In anndata 0.13 both are keys of `layers`, and `adata.X`
+is `adata.layers.get(None)`. These functions read `adata.layers.get(layer)` or `adata.layers[layer]`,
+without a branch on `None` to choose the matrix.
+
+`summarize_table` keeps its behaviour:
+
+- `layer=None` is the default, and reads `X` when the table has one. Without `X`, only the `.obsm`
+  matrices are read.
+- A named layer is an explicit request: it must exist, and raises otherwise.
+- With nothing to read, no `X` and no `obsm_keys`, it raises.
+
+`adata.layers.get(layer)` treats a missing key and a `None` value alike. In 0.13 a named layer can
+hold `None` (`adata.layers["counts"] = None` keeps the key); only the key `None` is removed when set
+to `None`.
+
+Rejected:
+
+- A flag `read_x: bool = True`, to separate which matrix is read from whether one is read: a second
+  parameter for one choice confuses readers, and one of its four combinations with `layer` is invalid.
+- A strict `layer=None` that raises when `X` is missing: it drops the `.obsm`-only summaries of
+  tables without `X`, which are supported and tested.
+- A lenient named layer, read as `.obsm` only when it is missing: with `obsm_keys` given, a typo or a
+  stale name would silently drop the requested matrix, and `calculate_qc_metrics` would write no
+  `var` columns without an error.
+
+Implemented in the 1a addendum, as it changes no behaviour that users rely on.
+
 ## Steps
 
-- [ ] 1. anndata 0.13: `X` is stored as `layers[None]` (1a done; 1b and 1c open)
+- [ ] 1. anndata 0.13: `X` is stored as `layers[None]` (1a and its addendum done; 1b and 1c open)
 - [ ] 2. anndata 0.13: backed sparse datasets reject item assignment with `TypeError`
 - [ ] 3. anndata 0.13: zarr's sharding warning is silenced
 - [ ] 4. matplotlib 3.11: `Axes.relim()` includes collections
@@ -40,42 +117,66 @@ Follow-ups now that 0.12 is unsupported:
 
 ## 1. anndata 0.13: `X` is stored as `layers[None]`
 
-Most of the failures.
-
-### Cause
-
-anndata 0.13 removed `AnnData._X`. `X` is stored in the `_layers` dict under the key `None`:
-
-- iterating `adata.layers` yields `None` as well: `list(adata.layers) == ['counts', None]`;
-- the `X` setter writes into `_layers` in place (`self.layers[None] = value`);
-- assigning `adata.layers = {...}` replaces `_layers` with a new dict. Without a `None` key it keeps
-  the current `X` and emits a `FutureWarning`; `{None: None, ...}` drops `X`;
-- `AnnData(X=x, layers={None: y, ...})` raises unless `x is y`;
-- `Raw` still has `_X`.
-
-Harpy's table IO assumes `X` and `layers` are separate slots, which fails in three ways.
+Most of the failures. Harpy's table IO assumed that `X` and `layers` are separate in memory, which
+fails in three ways (1a–1c). The fixes follow the decision
+[`X` in memory and on disk](#x-in-memory-and-on-disk). The 1a addendum fixes no failure: it reads
+`X` and named layers through `layers`, following the decision
+[Choosing `X` or a layer](#choosing-x-or-a-layer-layer).
 
 ### 1a. `None` key in `layers` iterations
 
-| Error                                                                | Site                                                                                                                                                                                                                          |
-| -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `If you provide layers[None] and X, they must be identical.`         | [_prepare_anndata_value](src/harpy/_storage/_anndata.py#L784) passes `layers` including `None` and a separately wrapped `X` to [AnnData](src/harpy/_storage/_anndata.py#L793). `map_blocks` makes them two different objects. |
-| same                                                                 | [_add_table](src/harpy/table/io/_add_table.py#L188) passes `dict(adata.layers)` and `adata.X`; on views these are two different view objects.                                                                                 |
-| `argument should be a str or an os.PathLike object … not 'NoneType'` | [_table_components](src/harpy/table/io/_updates.py#L520) yields `("layers", None)`, and [_exists_on_disk](src/harpy/table/io/_updates.py#L550) calls `joinpath(None)`.                                                        |
+| Error                                                                | Site                                                                                                                                                                                     |
+| -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `If you provide layers[None] and X, they must be identical.`         | [_prepare_anndata_value](src/harpy/_storage/_anndata.py#L780) passes `layers` including `None` and a separately wrapped `X` to `AnnData`. `map_blocks` makes them two different objects. |
+| same                                                                 | [_add_table](src/harpy/table/io/_add_table.py#L130) passes `dict(adata.layers)` and `adata.X`; on views these are two different view objects.                                            |
+| `argument should be a str or an os.PathLike object … not 'NoneType'` | [_table_components](src/harpy/table/io/_updates.py#L509) yields `("layers", None)`, and [_exists_on_disk](src/harpy/table/io/_updates.py#L542) calls `joinpath(None)`.                   |
 
 Sites without a failing test:
 
-- [_table_matrices](src/harpy/table/_table.py#L68) yields `X` twice (`X` and `layers[None]`);
-- [plot_adata](src/harpy/plot/_qc_cells.py#L35) plots `X` twice;
-- [`sorted(adata.layers)`](src/harpy/qc/table/_summarize_table.py#L529) raises `TypeError` mixing `None`
-  with strings, in the error message for an unknown layer.
+- [_table_matrices](src/harpy/table/_table.py#L65) yields `X` twice (`X` and `layers[None]`);
+- [plot_adata](src/harpy/plot/_qc_cells.py#L29) plots `X` twice;
+- [_collect_class_matrices](src/harpy/qc/table/_summarize_table.py#L518) calls `sorted(adata.layers)`,
+  which raises `TypeError` mixing `None` with strings, in the error message for an unknown layer.
 
-Fix: skip the `None` key wherever harpy iterates `layers`; `X` is handled separately at each site.
+Fix:
 
-Done: [_matrix_mapping](src/harpy/_storage/_anndata.py#L77) returns a matrix mapping without `X`
-and is used by `_prepare_anndata_value`, `_add_table`, `_table_components` and `_table_matrices`;
-`plot_adata` and `_collect_class_matrices` skip `None` inline. The step 1 modules then had 15
-failures left: 10 from the `_X` rollback (1b), 3 from 1c and 2 from step 2.
+- `_prepare_anndata_value` and `_add_table` copy one AnnData into a new one: pass `layers` whole and
+  drop the `X=` argument.
+- `_table_components` and `_table_matrices` name matrices by component path: build them on
+  `_matrix_components`.
+- `plot_adata` and `_collect_class_matrices` list layer names for users: skip `None` inline.
+
+Done. [_matrix_components](src/harpy/_storage/_anndata.py#L77) replaces the first attempt,
+`_matrix_mapping`. `_table_matrices` now yields `X` where `layers` holds it, after the named layers,
+so when both `X` and a layer are lazy, `_require_in_memory_table` may name the layer first. The step 1
+modules have 15 failures left: 10 from the `_X` rollback (1b), 3 from 1c and 2 from step 2.
+
+### 1a addendum: read `X` and layers through `layers`
+
+No behaviour that users rely on changes.
+
+- [_collect_class_matrices](src/harpy/qc/table/_summarize_table.py#L518): one lookup,
+  `adata.layers.get(layer)`, for `X` and named layers; a missing named layer raises. The type check
+  of `layer` stays first, so an unhashable value still gets a clear error. The error for nothing to
+  read ([line 540](src/harpy/qc/table/_summarize_table.py#L540)) stays.
+- [_FeatureClassMatrix](src/harpy/qc/table/_summarize_table.py#L227): `attribute` becomes
+  `Literal["layers", "obsm"]`; `label` and `location` already map the key `None` to `x` and `X`.
+- [_get_matrix](src/harpy/table/pp/_normalize.py#L226) and
+  [_set_matrix](src/harpy/table/pp/_normalize.py#L237): `adata.layers[layer]`. Only the error message
+  of `_get_matrix` still tells a missing `X` from a missing layer. The `X` setter's broadcasting of a
+  scalar and its reshaping, which normalization never uses, no longer apply.
+- [_grouped_obs_mean](src/harpy/table/cell_clustering/_clustering.py#L191): `adata.layers[layer]`.
+  On a table without `X` it raises `KeyError` at once, instead of failing later on `None`.
+
+Verify:
+
+```bash
+.venv/bin/pytest -q -n auto src/harpy/_tests/test_qc/test_table src/harpy/_tests/test_table/test_pp src/harpy/_tests/test_table/test_cell_clustering
+```
+
+Done. `_set_matrix` is gone: its two callers assign `adata.layers[layer]`, which on a view behaves as
+setting `X` does (the same warning, and the view becomes an actual table). The verify command passes
+(150 tests); an unhashable `layer` still gets the `ValueError` naming the available layers.
 
 ### 1b. Rollback of attached tables uses `_X`
 
@@ -88,16 +189,25 @@ Sites:
 - [regional snapshot](src/harpy/table/io/_components_by_region.py#L219) and
   [restore](src/harpy/table/io/_components_by_region.py#L247), with no failing test;
 - [_install_memory_updates](src/harpy/table/io/_components.py#L642) sets `table.X`, which in 0.13
-  mutates the retained `_layers` dict in place.
+  writes into the retained `_layers` dict, so restoring that dict would not restore the old `X`.
 
-Renaming `_X` to `_layers` is not enough: restoring the old `_layers` reference would not restore the
-old `X`, because the `X` setter mutated that same dict.
+Fix: address the attached table through `_memory_path`.
 
-Fix: retain and restore `_layers` for the `X` slot, and install an `X` update as a new `layers` mapping
-(`{**layers, None: X}`, or `{None: None, ...}` to remove `X`) so `_layers` is replaced, not mutated.
-When the same update also changes `layers`, merge `X` into that mapping. New `layers` mappings
-should carry the `None` key to avoid the `FutureWarning`. `raw._X` at
-[_components.py:607](src/harpy/table/io/_components.py#L607) stays as it is.
+- [_memory_component](src/harpy/table/io/_components.py#L338) reads `("X",)` as `layers[None]`.
+- [_prepare_memory_updates](src/harpy/table/io/_components.py#L576) turns an `X` update into a
+  `layers` update. [_updated_mapping](src/harpy/table/io/_components.py#L555) builds a new `layers`
+  dict, so `_install_memory_updates` replaces `_layers` and never sets `table.X`.
+- The snapshots take their slots from the memory paths, so they retain `_layers` for an `X` update
+  without a special case, in both `_components.py` and `_components_by_region.py`.
+- Removing `X` ([remove_table_components](src/harpy/table/io/_components.py#L158) with `("X",)`,
+  or `X` in `delete` of [add_table_components](src/harpy/table/io/_components.py#L44)) must assign
+  `layers` with `None: None`. `_updated_mapping` [pops the key](src/harpy/table/io/_components.py#L561)
+  today, and anndata treats a `layers` mapping without the `None` key as "keep `X`": the store would
+  lose `X` while the attached table keeps it, with only a `FutureWarning`. Only the `None` key of
+  `layers` needs this; other keys are still popped. The explicit `None: None` also stays correct if
+  anndata later drops `X` when the key is missing.
+- `raw._X` at [_components.py:607](src/harpy/table/io/_components.py#L607) stays: `Raw` still has
+  `_X`.
 
 ### 1c. Test expectation in `test_read.py`
 
