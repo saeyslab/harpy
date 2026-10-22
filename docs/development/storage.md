@@ -45,6 +45,41 @@ For where metadata lives and which data it describes, see
 - **Write block:** a block as it is written to Zarr, in one step. A write block
   that covers only part of a stored chunk makes Zarr read and rewrite that chunk.
 
+## `X` in memory and on disk
+
+Since anndata 0.13, an `AnnData` keeps `X` in memory as the entry `None` of
+`layers`:
+
+- `adata.X` reads `adata.layers.get(None)`; setting `adata.X` writes
+  `adata.layers[None]`.
+- Iterating `adata.layers` yields `None` as well, for example
+  `['counts', None]`.
+- A table without `X` has no key `None`: `adata.X = None`, `del adata.X` and
+  `adata.layers[None] = None` remove the key, and assigning
+  `adata.layers = {..., None: None}` drops `X`. Assigning a `layers` mapping
+  without the key `None` keeps the current `X`, with a `FutureWarning`.
+- A named layer differs: `adata.layers["counts"] = None` keeps the key and
+  stores `None`, which is written as an element with encoding type `null`.
+
+On disk nothing changed: `X` is stored at `tables/<name>/X`, and the `layers`
+group holds only the named layers.
+
+Component paths follow the disk: `("X",)` names `X`. Two functions in
+`harpy/_storage/_anndata.py` translate between the two, and are the only code
+that knows where `X` is in memory:
+
+- `_matrix_components(adata)` yields the in-memory matrices with their component
+  paths, with `layers[None]` as `("X",)`.
+- `_memory_path(path)` returns the in-memory location of a component path:
+  `("layers", None)` for `("X",)`.
+
+Harpy therefore states `X` in every `layers` mapping it assigns to an attached
+table: the key `None` holds `X`, or `None` to drop it.
+
+Where a function reads the matrix aligned with `var` from a
+`layer: str | None` parameter, it reads `adata.layers.get(layer)`: a missing key
+and a named layer whose value is `None` both count as absent.
+
 ## Replacement scope
 
 A table is a SpatialData element; an AnnData component is something inside that

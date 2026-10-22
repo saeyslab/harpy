@@ -577,6 +577,20 @@ def _updated_mapping(mapping: Mapping, keys: ComponentPath, value: object) -> di
     return updated
 
 
+def _memory_change(path: ComponentPath, value: object) -> tuple[tuple[str | None, ...], object]:
+    """Return a change of a component as a change in memory: where to assign, and what.
+
+    X is layers[None] in memory (_memory_path). Removing X assigns None under that key
+    instead of leaving the key out: AnnData's layers setter keeps the current X for a
+    mapping without the key None (with a FutureWarning), and drops X when the key holds
+    None, as that warning advises. Every other component is removed by leaving out its key.
+    See "X in memory and on disk" in docs/development/storage.md.
+    """
+    if path == ("X",) and value is _ABSENT:
+        return ("layers", None), None
+    return _memory_path(path), value
+
+
 def _prepare_memory_updates(
     table: AnnData,
     components: Mapping[ComponentPath, object],
@@ -593,11 +607,9 @@ def _prepare_memory_updates(
             changes[path] = value.copy(deep=False)
             changes[path].index = value.index.copy()
     changes.update({path: _ABSENT for path in deletions if _memory_component(table, path) is not _ABSENT})
-    # In memory X is layers[None]. An absent X, deleted or not in the store when reopened, is assigned
-    # None there: AnnData keeps X when a layers mapping lacks the key None, and drops it for None.
-    changes = {
-        _memory_path(path): None if path == ("X",) and value is _ABSENT else value for path, value in changes.items()
-    }
+    # From here on, changes are keyed by their location in memory. An absent X, deleted or not in the
+    # store when reopened, becomes None under layers[None] (_memory_change).
+    changes = dict(_memory_change(path, value) for path, value in changes.items())
     updates = {}
     raw_changes = {path[1:]: value for path, value in changes.items() if path[0] == "raw"}
     if raw_changes:

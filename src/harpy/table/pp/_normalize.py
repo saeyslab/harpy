@@ -226,9 +226,13 @@ def normalize_by_quantile(
 
 
 def _get_matrix(adata: AnnData, layer: str | None) -> object:
-    """Return the requested layer, ``X`` for ``None``, which must exist.
+    """Return the matrix to normalise: ``adata.layers[layer]``, which is ``X`` for ``None``.
 
-    AnnData stores ``X`` as ``layers[None]``, so one lookup reads both.
+    AnnData stores ``X`` as ``layers[None]``, so one lookup reads both. This
+    checks that there is a matrix to return, not only a key: ``.get()`` gives
+    None for a missing key and for a named layer whose value is None, and both
+    raise. A table without ``X`` has no key None. See "X in memory and on disk"
+    in docs/development/storage.md.
     """
     matrix = adata.layers.get(layer)
     if matrix is None:
