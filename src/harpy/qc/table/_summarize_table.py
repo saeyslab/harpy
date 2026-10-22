@@ -532,7 +532,9 @@ def _collect_class_matrices(
     if matrix is not None:
         entries.append(_FeatureClassMatrix(attribute="layers", key=layer, matrix=matrix))
     elif layer is not None:
-        available = sorted(key for key in adata.layers if key is not None)
+        # X is layers[None], not a named layer. A named layer whose key exists but whose value is None
+        # counts as absent, as in the lookup above.
+        available = sorted(key for key, value in adata.layers.items() if key is not None and value is not None)
         raise ValueError(f"Layer {layer!r} is not a layer of the table; available layers: {available}.")
     for key in obsm_keys:
         if key not in adata.obsm:

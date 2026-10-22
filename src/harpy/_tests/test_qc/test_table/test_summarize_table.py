@@ -174,6 +174,20 @@ def test_a_layer_is_read_in_place_of_x():
     np.testing.assert_array_equal(summary.per_instance["n_points_raw_counts"], [10, 0, 5, 8, 0, 2])
 
 
+@pytest.mark.parametrize("none_value", [False, True])
+def test_an_unknown_layer_raises_and_lists_the_named_layers(none_value):
+    # X and a named layer: AnnData lists X as the layer None, which the message must not sort or show.
+    table = _table()
+    table.layers["counts"] = table.X.copy()
+    if none_value:
+        # A named layer whose value is None is absent, like a missing key.
+        table.layers["missing"] = None
+    with pytest.raises(
+        ValueError, match=r"Layer 'missing' is not a layer of the table; available layers: \['counts'\]\."
+    ):
+        summarize_table(table, layer="missing")
+
+
 def test_coinciding_class_labels_raise():
     table = _table()
     # The layer's label, "negative", is also the label of obsm["negative"].
