@@ -179,8 +179,8 @@ def _add_table(
     raw = None
     if adata.raw is not None:
         raw = {"X": adata.raw.X, "var": adata.raw.var.copy(deep=True), "varm": dict(adata.raw.varm)}
+    # dict(adata.layers) includes X under the key None (anndata >= 0.13); AnnData sets X from it.
     prepared = AnnData(
-        X=adata.X,
         obs=adata.obs.copy(deep=True),
         var=adata.var.copy(deep=True),
         uns=deepcopy(adata.uns),
