@@ -89,8 +89,9 @@ def write_table(
     4 MiB, whatever chunks or blocks they arrive in and whatever Dask's
     ``array.chunk-size``. Everything else is stored as AnnData stores it by
     default: ``obs`` and ``var``, dataframes in ``obsm``, everything in ``uns``,
-    and arrays of strings. Sharding follows AnnData's ``auto_shard_zarr_v3``
-    setting.
+    and arrays of strings. Dense matrices are stored without shards; everything
+    else follows AnnData's ``auto_shard_zarr_v3`` setting, on by default since
+    AnnData 0.13.
 
     Validation checks table structure and SpatialData annotation, not scientific
     metadata.

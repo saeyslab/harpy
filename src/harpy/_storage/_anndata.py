@@ -65,7 +65,8 @@ _DenseChunks = Literal["auto", "storage"] | int
 # keeps the cost of a partial read the same whatever the table size. Zarr grows
 # its chunks mainly to limit the number of files for very large arrays; for
 # tables up to tens of GiB both give similar file counts, and sharding is the
-# better answer beyond that.
+# better answer beyond that. For now it applies to sparse matrices only: dense
+# matrices are written without shards (https://github.com/saeyslab/harpy/issues/270).
 #
 # The docstrings of the public table writers (write_table and the functions
 # that refer to it) and docs/development/storage.md state this value as 4 MiB;
@@ -655,8 +656,9 @@ def _write_element_with_layout(
        whole;
     2. for a Dask value, ``_rechunk_to_write_blocks`` rechunks it into write
        blocks of whole stored chunks, using the chosen rows per stored chunk;
-    3. the chosen shape goes to Zarr as ``chunks`` in ``dataset_kwargs``, and
-       ``write_func`` writes the value.
+    3. the chosen shape goes to Zarr as ``chunks`` in ``dataset_kwargs``, with
+       ``shards=None`` for now (https://github.com/saeyslab/harpy/issues/270),
+       and ``write_func`` writes the value.
 
     For a sparse matrix, ``_choose_sparse_stored_chunks`` chooses one chunk
     length for its ``data``, ``indices`` and ``indptr`` arrays, which goes to
@@ -680,7 +682,7 @@ def _write_element_with_layout(
         The encoding AnnData will use, such as ``array`` or ``csr_matrix``.
     dataset_kwargs
         Zarr options for creating the arrays; dense and sparse matrices get
-        ``chunks``.
+        ``chunks``, and dense matrices also ``shards=None``.
     root, logical_path
         The Zarr path where ``_write_anndata_element`` writes its value, and
         that value's logical path. The element's logical path is
@@ -731,14 +733,18 @@ def _write_element_with_layout(
         chunks = _choose_dense_stored_chunks(value.shape, value.dtype.itemsize)
         if isinstance(value, da.Array):
             value = _rechunk_to_write_blocks(value, chosen_chunk_rows=chunks[0])
-        dataset_kwargs = {**dataset_kwargs, "chunks": chunks}
+        # Temporarily without shards (https://github.com/saeyslab/harpy/issues/270): with
+        # AnnData >= 0.13, Zarr sizes automatic shards with one factor for all axes, which
+        # row-only chunks spanning every column cannot grow, so each shard held one chunk.
+        dataset_kwargs = {**dataset_kwargs, "chunks": chunks, "shards": None}
     elif is_sparse_matrix:
         # No cap at the matrix size, unlike dense arrays: for a Dask matrix,
         # AnnData calls this callback again with its first block as a SciPy
         # matrix, and a cap computed from that block would decide the chunks of
         # the whole matrix. The fixed length makes both calls agree.
         dataset_kwargs = {**dataset_kwargs, "chunks": _choose_sparse_stored_chunks()}
-    # No shards are passed, so AnnData's opt-in automatic sharding still
+    # Except for dense matrices, no shards are passed, so AnnData's automatic
+    # sharding (auto_shard_zarr_v3, on by default since AnnData 0.13) still
     # applies and keeps these chunks as the inner chunks of its shards.
     write_func(parent, key, value, dataset_kwargs=dataset_kwargs)
 
@@ -774,8 +780,10 @@ def _write_anndata_element(
     fixed chunk length for their ``data``, ``indices`` and ``indptr`` arrays,
     at most ``_STORED_CHUNK_BYTES`` per chunk and not capped at the matrix size
     (``_choose_sparse_stored_chunks``). Other elements, such as ``obs``/``var``
-    columns, ``uns`` and string arrays, keep AnnData's defaults. Sharding
-    follows AnnData's ``auto_shard_zarr_v3`` setting.
+    columns, ``uns`` and string arrays, keep AnnData's defaults. Dense matrices
+    are stored without shards for now
+    (https://github.com/saeyslab/harpy/issues/270); everything else follows
+    AnnData's ``auto_shard_zarr_v3`` setting, on by default since AnnData 0.13.
     """
     parent, key = _resolve_anndata_parent(group, path, create_parents=create_parents)
     callback = partial(

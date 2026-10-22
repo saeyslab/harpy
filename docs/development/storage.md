@@ -184,8 +184,12 @@ components as `component-N`. The writer uses it to choose the stored layout.
 Dense matrices are stored in row-only chunks of 4 MiB, and sparse matrices in
 chunks of 524,288 entries per array, at most 4 MiB each. Both are fixed, and
 deliberately much smaller than the read blocks of about `array.chunk-size`,
-which combine whole stored chunks. Everything else keeps AnnData's defaults,
-and sharding follows AnnData's `auto_shard_zarr_v3` setting. The comment at
+which combine whole stored chunks. Everything else keeps AnnData's defaults.
+Dense matrices are stored without shards for now
+([#270](https://github.com/saeyslab/harpy/issues/270)): with AnnData 0.13, Zarr's
+automatic shards held one row-only chunk each. Everything else follows
+AnnData's `auto_shard_zarr_v3` setting, on by default since AnnData 0.13. The
+comment at
 `_STORED_CHUNK_BYTES` explains the difference from Dask's `array.chunk-size`
 and from Zarr's default. The docstring of
 `_write_anndata_element` gives the rules and the helpers that apply them.

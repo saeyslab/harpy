@@ -455,19 +455,34 @@ def test_misaligned_dask_inputs_write_each_stored_chunk_once(tmp_path, monkeypat
     np.testing.assert_array_equal(group["X"][...], values)
 
 
-def test_automatic_sharding_keeps_row_only_chunks_as_inner_chunks(tmp_path, monkeypatch):
-    """Harpy passes no shards, so AnnData's opt-in automatic sharding still applies."""
+@pytest.mark.parametrize("lazy", [False, True])
+def test_automatic_sharding_applies_to_sparse_matrices_only(tmp_path, monkeypatch, lazy):
+    """Dense matrices are written without shards for now; sparse ones get AnnData's automatic shards.
+
+    With AnnData >= 0.13, Zarr sizes automatic shards with one factor for all axes, which the
+    row-only chunks of a dense matrix cannot grow, so each shard held one chunk
+    (https://github.com/saeyslab/harpy/issues/270). Automatic sharding is AnnData's default since
+    0.13; the test sets it, so as not to depend on that default.
+    """
+    # Dense stored chunks of 3 rows × 4 columns; sparse stored chunks of 96 // 8 = 12 entries.
     monkeypatch.setattr(anndata_storage, "_STORED_CHUNK_BYTES", 3 * 4 * 8)
+    # AnnData shards only Zarr v3 arrays, and reads the format from the group it writes to.
     group = zarr.open_group(str(tmp_path / "elements.zarr"), mode="w", zarr_format=3)
     values = np.arange(120, dtype=np.float64).reshape(30, 4)
+    dense = da.from_array(values, chunks=(7, 2)) if lazy else values
+    # 119 stored values, about 10 sparse stored chunks.
+    counts = sparse.csr_matrix(values)
 
-    # AnnData accepts automatic sharding only once it writes Zarr v3.
-    with ad.settings.override(zarr_write_format=3), ad.settings.override(auto_shard_zarr_v3=True):
-        with pytest.warns(UserWarning, match="Automatic shard shape inference is experimental"):
-            _write_anndata_element(group, ("X",), values, logical_path=("X",), create_parents=False)
+    with ad.settings.override(auto_shard_zarr_v3=True):
+        _write_anndata_element(group, ("X",), dense, logical_path=("X",), create_parents=False)
+        _write_anndata_element(group, ("counts",), counts, logical_path=("layers", "counts"), create_parents=False)
 
-    assert group["X"].chunks == (3, 4) and group["X"].shards == (6, 4)
+    assert group["X"].chunks == (3, 4) and group["X"].shards is None
     np.testing.assert_array_equal(group["X"][...], values)
+    # Harpy passes no shards for a sparse matrix: AnnData's automatic shards apply, around Harpy's chunks.
+    data = group["counts"]["data"]
+    assert data.chunks == (12,) and data.shards is not None
+    np.testing.assert_array_equal(data[...], counts.data)
 
 
 @pytest.mark.parametrize("lazy", [False, True])
