@@ -25,10 +25,9 @@ can be done together with the numba pin of step 5.
 
 Follow-ups now that 0.12 is unsupported:
 
-- the empty-sparse-matrix workaround in
-  [_decode_anndata_element](src/harpy/_storage/_anndata.py#L281) cites an AnnData 0.12.10 bug; check
-  whether 0.13 still needs it;
-- `roadmap/integration_downstream/` mentions the 0.12.10 floor.
+- the empty-sparse-matrix workaround in `_decode_anndata_element` cites an AnnData 0.12.10 bug,
+  which 0.13 no longer has: removed in this PR, see [1d](#1d-remove-the-anndata-01210-workaround-for-empty-sparse-matrices);
+- `roadmap/integration_downstream/` mentions the 0.12.10 floor. No issue is filed for it.
 
 ### `X` in memory and on disk
 
@@ -109,7 +108,7 @@ Implemented in the 1a addendum, as it changes no behaviour that users rely on.
 
 - [x] 1. anndata 0.13: `X` is stored as `layers[None]`
 - [x] 2. anndata 0.13: backed sparse datasets reject item assignment with `TypeError`
-- [ ] 3. anndata 0.13: zarr's sharding warning is silenced
+- [x] 3. anndata 0.13: automatic sharding no longer groups the chunks of dense matrices (#270)
 - [ ] 4. matplotlib 3.11: `Axes.relim()` includes collections
 - [ ] 5. numba 0.68: in-place add on unsigned integer arrays fails to type
 
@@ -121,7 +120,8 @@ Most of the failures. Harpy's table IO assumed that `X` and `layers` are separat
 fails in three ways (1a–1c). The fixes follow the decision
 [`X` in memory and on disk](#x-in-memory-and-on-disk). The 1a addendum fixes no failure: it reads
 `X` and named layers through `layers`, following the decision
-[Choosing `X` or a layer](#choosing-x-or-a-layer-layer).
+[Choosing `X` or a layer](#choosing-x-or-a-layer-layer). 1d fixes no failure either: it removes a
+workaround that the `anndata>=0.13` floor makes unnecessary.
 
 ### 1a. `None` key in `layers` iterations
 
@@ -323,6 +323,47 @@ on `_matrix_components`, so that the test does not compute its expectation with 
 checks. The step 1 verify modules, with `test_storage/test_anndata.py` and `test_qc/test_table`,
 leave 3 failures: 2 from step 2 and 1 from step 3.
 
+### 1d. Remove the anndata 0.12.10 workaround for empty sparse matrices
+
+[_decode_anndata_element](src/harpy/_storage/_anndata.py#L295) reads a sparse matrix whose
+compressed axis is empty (a CSR matrix without rows, a CSC matrix without columns) through a delayed
+`read_elem`, because "AnnData 0.12.10 constructs invalid Dask chunks for an empty compressed axis".
+
+AnnData 0.13 no longer does. Checked with `read_elem_lazy` on an empty CSR `(0, 3)` and an empty CSC
+`(2, 0)`, without a block length and with lengths 1 and 1000: the Dask chunks are valid, `((0,), (3,))`
+and `((2,), (0,))`, and computing gives the empty matrix. With the `anndata>=0.13` floor, the branch
+only guards against a bug that no supported version has.
+
+Without the branch, the empty matrix takes the ordinary path:
+
+- [_sparse_block_length](src/harpy/_storage/_anndata.py#L404) sizes its blocks, and
+  [_auto_sparse_block_length](src/harpy/_storage/_anndata.py#L474) already returns 1 for an empty
+  axis, so nothing divides by zero, and `read_elem_lazy` accepts that length.
+- The Dask array has the chunks the workaround's `from_delayed` gave, so the writer that follows sees
+  the same array.
+
+Sites:
+
+- the branch in `_decode_anndata_element`;
+- the comment "The caller handles an empty compressed axis before sizing blocks" in
+  `_sparse_block_length` ([line 438](src/harpy/_storage/_anndata.py#L438)), which then says that
+  `_auto_sparse_block_length` returns one block for an empty axis.
+
+Covered by
+[test_empty_matrix_axes_roundtrip](src/harpy/_tests/test_table/test_io/test_write.py#L858): CSR and
+CSC matrices with an empty axis, read lazily and written back.
+
+Verify:
+
+```bash
+.venv/bin/pytest -q -n auto src/harpy/_tests/test_table/test_io/test_write.py src/harpy/_tests/test_table/test_io/test_read.py src/harpy/_tests/test_storage/test_anndata.py
+```
+
+Done. The branch is gone, and with it the `dask.delayed` import and the local `shape`, which only it
+used. The comment in `_sparse_block_length` now says that an empty compressed axis reaches it too, and that
+`_auto_sparse_block_length` returns 1 for it instead of dividing by the axis length. The verify command leaves only step 3's sharding test failing (338
+passed), `test_empty_matrix_axes_roundtrip` included.
+
 ### Failing tests
 
 - `test_table/test_io/test_add_table.py`: all failures
@@ -383,29 +424,133 @@ passes (223 tests).
 
 ---
 
-## 3. anndata 0.13: zarr's sharding warning is silenced
+## 3. anndata 0.13: automatic sharding no longer groups the chunks of dense matrices
+
+Tracked in [saeyslab/harpy#270](https://github.com/saeyslab/harpy/issues/270), which also holds the
+full fix. This step only applies the temporary measure.
 
 ### Cause
 
-With `ad.settings.auto_shard_zarr_v3 = True` and no explicit `shards`, anndata now filters zarr's
-`Automatic shard shape inference is experimental` warning
-(`anndata/_io/specs/methods.py`), so `pytest.warns` sees no warning.
+Two changes, the second found after fixing the first:
+
+- With `ad.settings.auto_shard_zarr_v3 = True` and no explicit `shards`, anndata now filters zarr's
+  `Automatic shard shape inference is experimental` warning (`anndata/_io/specs/methods.py`), so
+  `pytest.warns` saw no warning.
+- With the `pytest.warns` block removed, the shard assertion fails: the shards are `(3, 4)`, the
+  chunks themselves, instead of `(6, 4)`. AnnData 0.13 sets Zarr's `array.target_shard_size_bytes`
+  to 1 GB for writes with automatic sharding, and Zarr (≥ 3.1.4) then infers shards by size: one
+  factor shared by all axes, never growing a shard past the array along any axis. Harpy's dense
+  chunks span all columns, so the factor stays 1, and every dense shard holds one chunk, whatever
+  the matrix size. The 1-D arrays of sparse matrices are still grouped once longer than two chunks
+  (5,000,000 values: 9 chunks per shard).
+
+So automatic sharding no longer reduces the number of files for dense matrices. Harpy's Dask write
+blocks also cover whole stored chunks, not whole shards, so shards that group chunks were already
+partly rewritten by each write block; the issue lists that too.
+
+Automatic sharding is also AnnData's default now: `ad.settings.auto_shard_zarr_v3` is `True` in 0.13,
+`False` in 0.12.10. Harpy passes no `shards`, so without changes every write to a Zarr v3 store is
+sharded; Zarr v2 stores never are. What Harpy writes to a Zarr v3 store by default:
+
+| Array                             | Shards                              |
+| --------------------------------- | ----------------------------------- |
+| dense matrix                      | one chunk per shard                 |
+| sparse matrix written from memory | grouped once longer than two chunks |
+| sparse matrix written lazily      | decided by the first Dask block     |
+| `obs` and `var` columns           | AnnData's automatic sharding        |
+
+Zarr fixes the shard shape when it creates an array, from the array's length at that moment, and
+appending does not change it. A sparse matrix written from memory is created at its full length:
+2,000,000 values give shards of 3 chunks (4 × 524,288 would exceed the length). A lazy one is created
+from its first Dask block, and AnnData appends the other blocks, so that block decides the shards:
+
+| Dask blocks (10,000,000 values) | First block                 | Shards of `data`       | Write time, unsharded / sharded |
+| ------------------------------- | --------------------------- | ---------------------- | ------------------------------- |
+| 100,000 rows                    | ~500,000 values, < 2 chunks | `(524288,)`: 1 chunk   | 1.5 s / 1.3 s                   |
+| 1,000,000 rows                  | ~5,000,000 values           | `(4718592,)`: 9 chunks | 0.2 s / 0.2 s                   |
+
+Harpy's lazy reads default to blocks of about Dask's `array.chunk-size` (128 MiB), which usually hold
+millions of values, so grouped shards are the common case. Then an appended block that covers part of
+a shard makes Zarr read and rewrite it. The cost is bounded: shards are never larger than the first
+block, so with equally sized blocks each shard is touched by at most two blocks, and the writes above
+showed no measurable difference.
+
+Two comments on #270 correct the issue:
+[the first](https://github.com/saeyslab/harpy/issues/270#issuecomment-6341711886) says that sharding
+is AnnData's default; [the second](https://github.com/saeyslab/harpy/issues/270#issuecomment-6341907886)
+corrects the first, which said that lazy sparse matrices always get one chunk per shard and that
+appends never rewrite shards. Both hold only for a first block of fewer than two chunks.
 
 ### Failing test
 
-[test_anndata.py:465](src/harpy/_tests/test_storage/test_anndata.py#L465):
+[test_anndata.py:458](src/harpy/_tests/test_storage/test_anndata.py#L458):
 `test_automatic_sharding_keeps_row_only_chunks_as_inner_chunks`
 
-### Fix
+### Decision
 
-Test only: remove the `pytest.warns` block. The chunk and shard assertions after it check the
-behaviour that matters.
+A temporary measure, so that anndata can be bumped and Harpy released, with the Harpy-owned shard
+layout left to #270:
+
+- Harpy writes dense matrices without shards: `_write_element_with_layout` passes `shards=None` for
+  them. Sparse matrices keep following AnnData's automatic sharding.
+- Under anndata 0.13 this loses nothing, as dense shards held one chunk each. Unlike keeping
+  AnnData's automatic shards, it does not depend on Zarr's inference: if that grouped chunks again,
+  the write blocks, aligned with chunks, would partly rewrite shards unnoticed.
+- As sharding is AnnData's default, this changes Harpy's default output for dense matrices only:
+  from one chunk per shard to no shards. Everything else follows AnnData's new default.
+
+Checked with a patched writer, sharding on:
+
+| Zarr | Dense, in memory and Dask | Sparse `data`      | Values     |
+| ---- | ------------------------- | ------------------ | ---------- |
+| v3   | no shards, harpy's chunks | shards `(524288,)` | round-trip |
+| v2   | no shards                 | no shards          | round-trip |
+
+Neither emits a Zarr warning.
+
+### Sites
+
+- [_write_element_with_layout](src/harpy/_storage/_anndata.py#L742): pass `shards=None` for dense
+  matrices; the comment at [line 749](src/harpy/_storage/_anndata.py#L749), which calls AnnData's
+  automatic sharding opt-in, says instead that it is AnnData's default since 0.13, that dense
+  matrices are unsharded for now, and links #270.
+- Descriptions of sharding, to say that it applies to sparse matrices only for now, with #270:
+  - the `_STORED_CHUNK_BYTES` comment ([_anndata.py:68](src/harpy/_storage/_anndata.py#L68)), which
+    calls sharding the better answer for very large tables;
+  - the docstring of `_write_anndata_element` ([_anndata.py:785](src/harpy/_storage/_anndata.py#L785));
+  - the public docstring of `write_table` ([_write.py:92](src/harpy/table/io/_write.py#L92));
+  - [storage.md:188](docs/development/storage.md#L188).
+- The test becomes "automatic sharding applies to sparse matrices only": dense unsharded with harpy's
+  row-only chunks, sparse sharded, with a link to #270. Its `pytest.warns` block is already removed,
+  and its docstring, which calls automatic sharding opt-in, follows the default.
+
+`ad.settings.zarr_write_format`, used in this test, is deprecated in anndata 0.13 and removed in
+0.14. AnnData shards according to the format of the group it writes to (`f.metadata.zarr_format` in
+`anndata/_io/specs/methods.py`), not that setting, so the test drops it; it was Harpy's only use.
 
 ### Verify
 
 ```bash
-.venv/bin/pytest -q src/harpy/_tests/test_storage/test_anndata.py
+.venv/bin/pytest -q -n auto src/harpy/_tests/test_storage/test_anndata.py src/harpy/_tests/test_table/test_io
 ```
+
+Done.
+
+- `_write_element_with_layout` passes `shards=None` for dense matrices, with a comment on why and
+  #270; the comment on the other elements says that AnnData's automatic sharding is its default
+  since 0.13. The function's docstring states the `shards=None` as well.
+- The descriptions say that dense matrices are stored without shards and everything else follows
+  `auto_shard_zarr_v3`, on by default since 0.13: the `_STORED_CHUNK_BYTES` comment and the
+  `_write_anndata_element` docstring, with #270; the public `write_table` docstring, without it;
+  `docs/development/storage.md`, with #270.
+- `test_automatic_sharding_applies_to_sparse_matrices_only` replaces the old test, for a dense
+  matrix in memory and from Dask: the dense matrix keeps Harpy's row-only chunks without shards, and
+  a sparse matrix keeps Harpy's chunk length with automatic shards around it. It asserts only that
+  the sparse shards exist, not their size, which is Zarr's inference.
+
+The verify command passes (1006 tests), and so do `test_allocation.py`,
+`test_allocation_intensity.py` and `test_canonical_centers.py` (167 tests), whose writers store dense
+matrices through the same callback.
 
 ---
 
