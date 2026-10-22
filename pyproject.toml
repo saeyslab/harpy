@@ -43,7 +43,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "anndata>=0.12.10",
+    "anndata>=0.13",
     "spatialdata>=0.7.3",
     "distributed",
     "scanpy>=1.11.1",
