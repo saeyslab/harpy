@@ -11,6 +11,7 @@ from loguru import logger as log
 from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
+from harpy._storage._anndata import _matrix_components
 from harpy.shape._shape import filter_shapes
 from harpy.table.io._add_table import add_table
 from harpy.utils._deprecation import _warn_deprecated
@@ -63,10 +64,8 @@ def _is_lazy_or_backed(value: object) -> bool:
 
 def _table_matrices(table: AnnData) -> Iterator[tuple[str, object]]:
     """Yield each matrix of the table with its attribute path, such as ``X``, ``layers['counts']`` or ``raw.X``."""
-    yield "X", table.X
-    for slot in ("layers", "obsm", "varm", "obsp", "varp"):
-        for key, value in getattr(table, slot).items():
-            yield f"{slot}[{key!r}]", value
+    for path, value in _matrix_components(table):
+        yield "X" if path == ("X",) else f"{path[0]}[{path[1]!r}]", value
     if table.raw is not None:
         yield "raw.X", table.raw.X
         for key, value in table.raw.varm.items():
