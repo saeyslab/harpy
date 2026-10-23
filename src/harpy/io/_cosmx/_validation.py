@@ -23,7 +23,13 @@ from harpy._metadata import (
     _PROVENANCE_METADATA_KEY,
 )
 from harpy.image._image import get_dataarray
-from harpy.io._cosmx._constants import _COMPARTMENT_CATEGORIES, _FOV_BOUNDS_FIELDS, _INSTANCE_ID_FORMULA
+from harpy.io._cosmx._constants import (
+    _COMPARTMENT_CATEGORIES,
+    _FOV_BOUNDS_FIELDS,
+    _FOV_BOUNDS_KEY,
+    _INSTANCE_ID_FORMULA,
+    _SAMPLE_ID_KEY,
+)
 from harpy.io._cosmx._models import _INSTANCE_ID_DTYPE, _MOSAIC_MODES, _validate_identifier
 
 _ELEMENT_REGISTRIES = (_IMAGES_METADATA_KEY, _LABELS_METADATA_KEY, _POINTS_METADATA_KEY)
@@ -438,11 +444,11 @@ def _validate_common_element_record(
     ``raster_shape`` is the scale-0 ``(y, x)`` shape of an image or labels
     element, which every FOV rectangle must lie within; points pass ``None``.
     """
-    sample_id = record.get("sample_id")
+    sample_id = record.get(_SAMPLE_ID_KEY)
     try:
         _validate_identifier(sample_id, name="sample identifier")
     except ValueError as error:
-        raise ValueError(f"Invalid CosMx metadata {path}.sample_id: {sample_id!r}.") from error
+        raise ValueError(f"Invalid CosMx metadata {path}.{_SAMPLE_ID_KEY}: {sample_id!r}.") from error
     assert isinstance(sample_id, str)
 
     fovs = record.get("fovs")
@@ -502,13 +508,13 @@ def _validate_fov_bounds(
     raster_shape: tuple[int, int] | None,
 ) -> None:
     """Validate the half-open FOV rectangles of a record with valid ``fovs``."""
-    path = f"{path}.fov_bounds_px"
-    if "fov_bounds_px" not in record:
+    path = f"{path}.{_FOV_BOUNDS_KEY}"
+    if _FOV_BOUNDS_KEY not in record:
         raise ValueError(
             f"CosMx metadata {path} is required. Stores written by older Harpy versions lack it; "
             "run the CosMx reader again to rewrite the store."
         )
-    bounds = _require_mapping(record["fov_bounds_px"], path=path)
+    bounds = _require_mapping(record[_FOV_BOUNDS_KEY], path=path)
     keys = [str(fov) for fov in fovs]
     if set(bounds) != set(keys):
         raise ValueError(f"CosMx metadata {path} keys must equal fovs as strings, {keys}, found {list(bounds)}.")

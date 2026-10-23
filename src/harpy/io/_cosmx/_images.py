@@ -16,7 +16,7 @@ from spatialdata.transformations import Identity, Scale
 
 from harpy._metadata import _IMAGES_METADATA_KEY, _validate_metadata_destination
 from harpy.image._image import add_image
-from harpy.io._cosmx._metadata import _commit_element_metadata
+from harpy.io._cosmx._metadata import _commit_element_metadata, _common_element_record
 from harpy.io._cosmx._models import _CosmxManifest, _CosmxMosaicGeometry, _CosmxPreview
 from harpy.io._cosmx._names import _element_name, _micron_coordinate_system, _pixel_coordinate_system
 from harpy.io._cosmx._raster import _assemble_raster
@@ -151,21 +151,8 @@ def _add_morphology_images(
     ]
 
     for mosaic, output_element_name in zip(preview.mosaics, output_element_names, strict=True):
-        metadata = {
-            "fovs": list(mosaic.fovs),
-            "sample_id": sample_id,
-            "mosaic": {
-                "mode": preview.mosaic_mode,
-                "adjacency_tolerance_px": preview.adjacency_tolerance_px,
-            },
-            "source_origin_px": {"x": mosaic.origin_x_px, "y": mosaic.origin_y_px},
-            "fov_bounds_px": mosaic.fov_bounds_px,
-            "orientation": {"flip_x": flip_x, "flip_y": flip_y},
-            "pixel_size_um": preview.manifest.run.pixel_size_um,
-            "channels": [dict(channel) for channel in channel_records],
-        }
-        if preview.manifest.run.acquisition_timestamp is not None:
-            metadata["acquisition_timestamp"] = preview.manifest.run.acquisition_timestamp
+        metadata = _common_element_record(preview, mosaic, sample_id=sample_id, flip_x=flip_x, flip_y=flip_y)
+        metadata["channels"] = [dict(channel) for channel in channel_records]
         array = _morphology_mosaic(
             preview.manifest,
             mosaic,
