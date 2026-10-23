@@ -38,6 +38,8 @@ _TIFF_SUFFIXES = (".tif", ".tiff")
 _MORPHOLOGY_GEOMETRY_INVARIANT_KEYS = ("NFov", "ImPixelSize_nm", "ImRows", "ImCols")
 _MORPHOLOGY_IMAGE_INVARIANT_KEYS = ("ChannelOrder",)
 _INSTANCE_ID_FORMULA = "global_id = (fov - 1) * base + local_id"
+# The fields of each FOV's half-open pixel bounds in an element record's fov_bounds_px.
+_FOV_BOUNDS_FIELDS = ("y0", "x0", "y1", "x1")
 _COMPARTMENT_CATEGORIES = {
     0: "background",
     1: "nuclear",

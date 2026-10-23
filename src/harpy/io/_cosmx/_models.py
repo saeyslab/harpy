@@ -10,6 +10,7 @@ from typing import Literal
 import numpy as np
 
 from harpy._feature_panels import _FeaturePanelContract
+from harpy.io._cosmx._constants import _FOV_BOUNDS_FIELDS
 
 _MORPHOLOGY_PRODUCT = "morphology"
 _INSTANCE_LABELS_PRODUCT = "instance_labels"
@@ -282,7 +283,7 @@ class _CosmxMosaicGeometry:
         """Each FOV's half-open mosaic-local pixel bounds, keyed by FOV number as a string."""
         height, width = self.tile_shape
         return {
-            str(fov): {"y0": y, "x0": x, "y1": y + height, "x1": x + width}
+            str(fov): dict(zip(_FOV_BOUNDS_FIELDS, (y, x, y + height, x + width), strict=True))
             for fov, (y, x) in sorted(self.tile_origins.items())
         }
 
