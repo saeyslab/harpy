@@ -11,9 +11,21 @@ from spatialdata import SpatialData
 
 from harpy._feature_panels import _FeaturePanelContract
 from harpy._spatial_bounds import SpatialBounds
+from harpy.qc._summary_schema import (
+    _FEATURE_CLASS_KEY,
+    _FEATURE_KEY,
+    _N_FEATURES_KEY,
+    _N_POINTS_KEY,
+    _N_TOP_FEATURES_KEY,
+    _N_ZERO_FEATURES_KEY,
+    _PCT_POINTS_TOP_N_FEATURES_KEY,
+    _PCT_ZERO_FEATURES_KEY,
+    _TOP_N_KEY,
+    _WITHIN_CLASS_FRACTION_KEY,
+)
+from harpy.qc._summary_statistics import _points_statistics
 from harpy.qc.points._points_reduction import _reduce_points_by_class
 from harpy.qc.points._points_summary_metadata import PointsSummaryMetadata
-from harpy.qc.points._points_summary_schema import _FEATURE_CLASS_KEY, _FEATURE_KEY, _N_FEATURES_KEY, _N_POINTS_KEY
 from harpy.qc.points._points_summary_validation import _validate_spatial_summary
 from harpy.qc.points._spatial_bin_summary import SpatialBinSummary, _summarize_spatial_bins
 
@@ -21,6 +33,8 @@ from harpy.qc.points._spatial_bin_summary import SpatialBinSummary, _summarize_s
 @dataclass(frozen=True)
 class PointsSummary:
     """Computed summaries of one original points element and its feature panel.
+
+    Returned by :func:`harpy.qc.summarize_points`.
 
     Construction validates spatial structure, not numerical summaries.
     In-place edits to the contained arrays or tables do not trigger validation.
@@ -32,17 +46,25 @@ class PointsSummary:
         coordinate system, crop, calibration, and bin edges.
     per_feature
         One row per selected panel feature, including zero detections. Columns
-        are ``feature``, ``feature_class``, ``n_points``, and
+        are ``feature``, ``feature_class`` (categorical, the selected classes
+        in panel order as categories), ``n_points``, and
         ``within_class_fraction``: this feature's point count divided by the
         total point count of its own class, after selection. Values range
-        from 0 to 1; NaN when the class has no points.
+        from 0 to 1; NaN when the class has no points. Statistics per spatial
+        bin are not computed per feature, as that would need the count of
+        every panel feature in every bin; for selected features,
+        :func:`harpy.qc.summarize_points_by_feature` computes them over the
+        same retained bins.
     per_class
-        One row per selected class: ``n_features``, ``n_zero_features``,
+        One row per selected class (categorical ``feature_class``), in panel
+        order: ``n_features``, ``n_zero_features``,
         ``pct_zero_features`` (0–100), ``n_points``,
         ``mean_points_per_feature``, ``median_points_per_feature``,
-        ``p95_points_per_feature``, ``top_n`` (requested N), ``n_top_features``
-        (min(N, panel size)), and ``pct_points_top_n_features`` (0–100,
-        missing for a zero-point class). All feature statistics include zeros.
+        ``std_points_per_feature``, ``p95_points_per_feature``, ``top_n``
+        (requested N), ``n_top_features`` (min(N, panel size)), and
+        ``pct_points_top_n_features`` (0–100, missing for a zero-point class).
+        All feature statistics include zeros. SD uses ``ddof=1`` and is NaN for
+        a class with one feature; the percentile uses linear interpolation.
     spatial_counts
         Optional in-memory uint64 DataArray with dimensions
         ``(feature_class, y, x)`` and bin-center x/y coordinates. These
@@ -80,11 +102,31 @@ class PointsSummary:
         _validate_spatial_summary(self.spatial_counts, metadata=self.metadata, axis=_FEATURE_CLASS_KEY)
 
     @property
+    def feature_classes(self) -> tuple[str, ...]:
+        """Return the selected classes in panel order, from ``per_class.feature_class``."""
+        return tuple(str(feature_class) for feature_class in self.per_class[_FEATURE_CLASS_KEY])
+
+    @property
+    def feature_names(self) -> dict[str, tuple[str, ...]]:
+        """Return each selected class's panel features in panel order, from ``per_feature``.
+
+        Features without points are included.
+        """
+        classes = self.per_feature[_FEATURE_CLASS_KEY].to_numpy()
+        features = self.per_feature[_FEATURE_KEY].to_numpy()
+        return {
+            feature_class: tuple(str(feature) for feature in features[classes == feature_class])
+            for feature_class in self.feature_classes
+        }
+
+    @property
     def panel_feature_counts(self) -> dict[str, int]:
         """Return selected panel sizes from ``per_class.n_features``, including undetected features."""
         return {
-            str(name): int(count)
-            for name, count in zip(self.per_class[_FEATURE_CLASS_KEY], self.per_class[_N_FEATURES_KEY], strict=True)
+            str(feature_class): int(count)
+            for feature_class, count in zip(
+                self.per_class[_FEATURE_CLASS_KEY], self.per_class[_N_FEATURES_KEY], strict=True
+            )
         }
 
     @property
@@ -251,7 +293,11 @@ def summarize_points(
     spatial_bins = (
         None
         if result.spatial_counts is None
-        else _summarize_spatial_bins(result.spatial_counts, metadata=result.metadata)
+        else _summarize_spatial_bins(
+            result.spatial_counts,
+            metadata=result.metadata,
+            n_features=dict(zip(per_class[_FEATURE_CLASS_KEY], per_class[_N_FEATURES_KEY], strict=True)),
+        )
     )
     return PointsSummary(
         metadata=result.metadata,
@@ -277,7 +323,7 @@ def _summary_frames(
                     _FEATURE_KEY: features,
                     _FEATURE_CLASS_KEY: name,
                     _N_POINTS_KEY: values,
-                    "within_class_fraction": values / total if total else np.full(len(values), np.nan),
+                    _WITHIN_CLASS_FRACTION_KEY: values / total if total else np.full(len(values), np.nan),
                 }
             )
         )
@@ -287,15 +333,16 @@ def _summary_frames(
             {
                 _FEATURE_CLASS_KEY: name,
                 _N_FEATURES_KEY: len(features),
-                "n_zero_features": n_zero,
-                "pct_zero_features": 100 * n_zero / len(features),
+                _N_ZERO_FEATURES_KEY: n_zero,
+                _PCT_ZERO_FEATURES_KEY: 100 * n_zero / len(features),
                 _N_POINTS_KEY: total,
-                "mean_points_per_feature": float(values.mean()),
-                "median_points_per_feature": float(np.median(values)),
-                "p95_points_per_feature": float(np.percentile(values, 95)),
-                "top_n": top_n,
-                "n_top_features": n_top,
-                "pct_points_top_n_features": 100 * (np.sort(values)[-n_top:].sum() / total) if total else np.nan,
+                **_points_statistics(values, unit="feature"),
+                _TOP_N_KEY: top_n,
+                _N_TOP_FEATURES_KEY: n_top,
+                _PCT_POINTS_TOP_N_FEATURES_KEY: 100 * (np.sort(values)[-n_top:].sum() / total) if total else np.nan,
             }
         )
-    return pd.concat(feature_frames, ignore_index=True), pd.DataFrame(class_rows)
+    per_feature, per_class = pd.concat(feature_frames, ignore_index=True), pd.DataFrame(class_rows)
+    for frame in (per_feature, per_class):
+        frame[_FEATURE_CLASS_KEY] = pd.Categorical(frame[_FEATURE_CLASS_KEY], categories=classes)
+    return per_feature, per_class

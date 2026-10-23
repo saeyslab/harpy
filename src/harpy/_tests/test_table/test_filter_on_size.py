@@ -13,7 +13,7 @@ def test_filter_on_size(sdata_multi_c_no_backed):
         overwrite=True,
     )
 
-    with pytest.warns(FutureWarning, match="filter_on_size is deprecated since version 0.5.0"):
+    with pytest.warns(FutureWarning, match=r"harpy\.tb\.filter_on_size is deprecated"):
         sdata_multi_c_no_backed = filter_on_size(
             sdata_multi_c_no_backed,
             table_name="table_intensities_preprocessed",

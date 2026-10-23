@@ -188,12 +188,7 @@ def flowsom(
     return sdata, fsom
 
 
-def _grouped_obs_mean(adata: AnnData, group_key: str, layer: str = None) -> pd.DataFrame:
-    if layer is not None:
-        getX = lambda x: x.layers[layer]
-    else:
-        getX = lambda x: x.X
-
+def _grouped_obs_mean(adata: AnnData, group_key: str, layer: str | None = None) -> pd.DataFrame:
     grouped = adata.obs.groupby(group_key, observed=False)
     columns = list(grouped.groups.keys())
     out = pd.DataFrame(
@@ -201,6 +196,7 @@ def _grouped_obs_mean(adata: AnnData, group_key: str, layer: str = None) -> pd.D
     )
 
     for group, idx in grouped.indices.items():
-        X = getX(adata[idx])
+        # layers[None] is X.
+        X = adata[idx].layers[layer]
         out[group] = np.ravel(X.mean(axis=0, dtype=np.float64))
     return out

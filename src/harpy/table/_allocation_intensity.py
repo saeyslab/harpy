@@ -18,9 +18,8 @@ from harpy.image._image import _get_translation, get_dataarray
 from harpy.table._utils import _sanity_check_append_region
 from harpy.table.io._add_table import add_table
 from harpy.utils._aggregate import RasterAggregator
+from harpy.utils._deprecation import _renamed_functions
 from harpy.utils._keys import _CELL_INDEX, _CELLSIZE_KEY, _INSTANCE_KEY, _REGION_KEY, _SPATIAL
-
-_WARNED_DEPRECATED_ATTRIBUTES: set[str] = set()
 
 
 def aggregate_image(
@@ -401,12 +400,4 @@ def aggregate_image(
     return sdata
 
 
-def __getattr__(name: str) -> object:
-    if name == "allocate_intensity":
-        if name not in _WARNED_DEPRECATED_ATTRIBUTES:
-            _WARNED_DEPRECATED_ATTRIBUTES.add(name)
-            log.warning(
-                "`harpy.tb.allocate_intensity` is deprecated. Import and use `harpy.tb.aggregate_image` instead."
-            )
-        return aggregate_image
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__getattr__ = _renamed_functions(__name__, namespace="harpy.tb", renamed={"allocate_intensity": "aggregate_image"})

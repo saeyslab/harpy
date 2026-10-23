@@ -54,7 +54,7 @@ def test_guarded_wrappers_warn_then_refuse_lazy_tables(stores, store, call):
     """The deprecation warning comes first, then the guard raises, before anything is computed."""
     sdata = hp.io.read_zarr(stores[store], table_mode="lazy")
     with (
-        pytest.warns(FutureWarning, match="deprecated since version 0.5.0"),
+        pytest.warns(FutureWarning, match="is deprecated and will be removed in a future release"),
         pytest.raises(ValueError, match="needs an in-memory table"),
     ):
         call(sdata)

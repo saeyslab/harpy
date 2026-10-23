@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import warnings
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from types import MappingProxyType
@@ -23,6 +22,7 @@ from spatialdata.transformations import get_transformation
 from harpy.image._image import _apply_transform, _get_boundary, _get_spatial_element, _unapply_transform
 from harpy.shape import intersect_rectangles
 from harpy.transformations._transformations import _get_translation_values
+from harpy.utils._deprecation import _deprecated_function, _warn_deprecated
 
 
 def plot_image(
@@ -38,9 +38,8 @@ def plot_image(
     """
     Plot an image based on given parameters.
 
-    .. deprecated:: 0.3.0
-       `harpy.pl.plot_image` is deprecated and will be removed in 0.4.0.
-       Prefer `harpy.pl.plot_sdata`.
+    .. warning::
+       Deprecated, and will be removed in a future release. Use :func:`harpy.pl.plot_sdata`.
 
     Parameters
     ----------
@@ -66,7 +65,8 @@ def plot_image(
     harpy.pl.plot_shapes
     harpy.pl.plot
     """
-    plot_shapes(
+    _warn_deprecated("harpy.pl.plot_image", use="harpy.pl.plot_sdata")
+    _plot_shapes(
         sdata,
         image_name=image_name,
         shapes_name=None,
@@ -91,9 +91,8 @@ def plot_labels(
     """
     Plot a labels element (masks) based on given parameters.
 
-    .. deprecated:: 0.3.0
-       `harpy.pl.plot_labels` is deprecated and will be removed in 0.4.0.
-       Prefer `harpy.pl.plot_sdata`.
+    .. warning::
+       Deprecated, and will be removed in a future release. Use :func:`harpy.pl.plot_sdata`.
 
     Parameters
     ----------
@@ -117,7 +116,8 @@ def plot_labels(
     harpy.pl.plot_shapes
     harpy.pl.plot
     """
-    plot_shapes(
+    _warn_deprecated("harpy.pl.plot_labels", use="harpy.pl.plot_sdata")
+    _plot_shapes(
         sdata,
         labels_name=labels_name,
         shapes_name=None,
@@ -129,7 +129,7 @@ def plot_labels(
     )
 
 
-def plot_shapes(
+def _plot_shapes(
     sdata: SpatialData,
     image_name: str | Iterable[str] | None = None,
     labels_name: str | Iterable[str] | None = None,
@@ -163,9 +163,8 @@ def plot_shapes(
     """
     Plots a SpatialData object.
 
-    .. deprecated:: 0.3.0
-       `harpy.pl.plot_shapes` is deprecated and will be removed in 0.4.0.
-       Prefer `harpy.pl.plot_sdata`.
+    .. warning::
+       Deprecated, and will be removed in a future release. Use :func:`harpy.pl.plot_sdata`.
 
     This function support plotting of a raster (`image_name` or `labels_name`), together with a `shapes_name` respresenting (cell) boundaries.
     These shapes can be colored if a `table_name` and a `column` is specified.
@@ -388,7 +387,7 @@ def plot_shapes(
     idx = 0
     for _channel in channels:
         for _raster_name, _shapes_name in zip(raster_names, shapes_name, strict=True):
-            plot(
+            _plot(
                 sdata,
                 axes[idx],
                 image_name=_raster_name if is_image else None,
@@ -428,7 +427,11 @@ def plot_shapes(
     plt.close()
 
 
-def plot(
+# Harpy's deprecated plots call _plot_shapes, so that each warns only about itself.
+plot_shapes = _deprecated_function(_plot_shapes, "harpy.pl.plot_shapes", use="harpy.pl.plot_sdata")
+
+
+def _plot(
     sdata: SpatialData,
     ax: Axes,
     image_name: str | None = None,
@@ -460,9 +463,8 @@ def plot(
     """
     Plots a SpatialData object.
 
-    .. deprecated:: 0.3.0
-    `harpy.pl.plot` is deprecated and will be removed in 0.4.0.
-    Prefer `harpy.pl.plot_sdata`.
+    .. warning::
+       Deprecated, and will be removed in a future release. Use :func:`harpy.pl.plot_sdata`.
 
     This function support plotting of a raster (`image_name` or `labels_name`), together with a `shapes_name` respresenting (cell) boundaries.
     These shapes can be colored if a `table_name` and a `column` is specified.
@@ -558,10 +560,6 @@ def plot(
     -----
     The function supports various visualization options such as image elements, shapes elements, channels, color mapping, and custom regions.
     """
-    msg = "'harpy.pl.plot' is deprecated and may be removed in a future release. Prefer 'harpy.pl.plot_sdata'."
-    warnings.warn(msg, DeprecationWarning, stacklevel=2)
-    log.warning(msg)
-
     if image_name is not None and labels_name is not None:
         raise ValueError(
             "Both image_name and labels_name is not None. Please specify either image_name or labels_name, not both."
@@ -871,6 +869,10 @@ def plot(
     se = _unapply_transform(se, x_coords_orig, y_coords_orig)
 
     return ax
+
+
+# _plot_shapes calls _plot, so that the deprecated plots warn only about themselves.
+plot = _deprecated_function(_plot, "harpy.pl.plot", use="harpy.pl.plot_sdata")
 
 
 def _get_z_slice_polygons(polygons: GeoDataFrame, z_index: int) -> GeoDataFrame:

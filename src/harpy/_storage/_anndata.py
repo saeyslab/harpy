@@ -7,7 +7,7 @@ coordinate these operations through ``harpy._storage._publication``.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from copy import deepcopy
 from functools import partial
 from math import prod
@@ -23,7 +23,6 @@ from anndata import AnnData, Raw
 from anndata.abc import CSCDataset, CSRDataset
 from anndata.experimental import read_elem_lazy, write_dispatched
 from anndata.io import read_elem, sparse_dataset, write_elem
-from dask import delayed
 from dask.utils import parse_bytes
 from scipy import sparse
 from spatialdata.models import TableModel
@@ -66,12 +65,37 @@ _DenseChunks = Literal["auto", "storage"] | int
 # keeps the cost of a partial read the same whatever the table size. Zarr grows
 # its chunks mainly to limit the number of files for very large arrays; for
 # tables up to tens of GiB both give similar file counts, and sharding is the
-# better answer beyond that.
+# better answer beyond that. For now it applies to sparse matrices only: dense
+# matrices are written without shards (https://github.com/saeyslab/harpy/issues/270).
 #
 # The docstrings of the public table writers (write_table and the functions
 # that refer to it) and docs/development/storage.md state this value as 4 MiB;
 # update them if it changes.
 _STORED_CHUNK_BYTES = 4 * 1024 * 1024
+
+
+# AnnData >= 0.13 keeps X in memory as layers[None], while on disk and in component paths it is X.
+# These two functions are the only translation between the two; see docs/development/storage.md,
+# "X in memory and on disk".
+def _matrix_components(adata: AnnData) -> Iterator[tuple[tuple[str, ...], object]]:
+    """Yield each entry of the matrix mappings of ``adata`` with its component path.
+
+    In memory, AnnData stores ``X`` as ``layers[None]``; on disk and in component
+    paths it is ``X``. That entry is yielded as ``("X",)``, every other one as
+    ``(slot, key)``.
+    """
+    for slot in _MATRIX_MAPPINGS:
+        for key, value in getattr(adata, slot).items():
+            yield ("X",) if (slot, key) == ("layers", None) else (slot, key), value
+
+
+def _memory_path(path: tuple[str, ...]) -> tuple[str | None, ...]:
+    """Return where a component path is in memory: ``("layers", None)`` for ``("X",)``, any other path as it is.
+
+    The inverse of ``_matrix_components``: on disk and in component paths ``X`` is
+    ``X``, while AnnData stores it in memory as ``layers[None]``.
+    """
+    return ("layers", None) if path == ("X",) else path
 
 
 def _validate_sparse_chunks(value: _SparseChunks) -> _SparseChunks:
@@ -266,16 +290,7 @@ def _decode_anndata_element(
         # Return a storage-backed handle; values are read on indexing or to_memory().
         return sparse_dataset(element)
     if is_sparse:
-        shape = tuple(element.attrs["shape"])
         compressed_axis = 0 if encoding == "csr_matrix" else 1
-        if shape[compressed_axis] == 0:
-            # AnnData 0.12.10 constructs invalid Dask chunks for an empty
-            # compressed axis. Defer its ordinary decoder for this zero-sized
-            # matrix instead; even its sparse buffers remain unread here.
-            matrix_type = sparse.csr_matrix if compressed_axis == 0 else sparse.csc_matrix
-            meta = matrix_type((0, 0), dtype=element["data"].dtype)
-            array = da.from_delayed(delayed(read_elem)(element), shape=shape, dtype=meta.dtype, meta=meta)
-            return _register_lazy_read(array, element)
         # Harpy owns the sparse block size, independently of AnnData's defaults.
         # Keep the other axis whole.
         length = _sparse_block_length(element, compressed_axis=compressed_axis, sparse_chunks=sparse_chunks)
@@ -411,7 +426,9 @@ def _sparse_block_length(element: zarr.Group, *, compressed_axis: int, sparse_ch
     # The caller has validated sparse_chunks: "auto" or a positive int.
     if sparse_chunks != "auto":
         return sparse_chunks
-    # The caller handles an empty compressed axis before sizing blocks.
+    # An empty compressed axis, a CSR matrix without rows or a CSC matrix without columns,
+    # reaches this point too: _auto_sparse_block_length returns 1 for it instead of dividing
+    # by the axis length.
     data = element["data"]
     return _auto_sparse_block_length(
         int(element.attrs["shape"][compressed_axis]),
@@ -639,8 +656,9 @@ def _write_element_with_layout(
        whole;
     2. for a Dask value, ``_rechunk_to_write_blocks`` rechunks it into write
        blocks of whole stored chunks, using the chosen rows per stored chunk;
-    3. the chosen shape goes to Zarr as ``chunks`` in ``dataset_kwargs``, and
-       ``write_func`` writes the value.
+    3. the chosen shape goes to Zarr as ``chunks`` in ``dataset_kwargs``, with
+       ``shards=None`` for now (https://github.com/saeyslab/harpy/issues/270),
+       and ``write_func`` writes the value.
 
     For a sparse matrix, ``_choose_sparse_stored_chunks`` chooses one chunk
     length for its ``data``, ``indices`` and ``indptr`` arrays, which goes to
@@ -664,7 +682,7 @@ def _write_element_with_layout(
         The encoding AnnData will use, such as ``array`` or ``csr_matrix``.
     dataset_kwargs
         Zarr options for creating the arrays; dense and sparse matrices get
-        ``chunks``.
+        ``chunks``, and dense matrices also ``shards=None``.
     root, logical_path
         The Zarr path where ``_write_anndata_element`` writes its value, and
         that value's logical path. The element's logical path is
@@ -715,14 +733,18 @@ def _write_element_with_layout(
         chunks = _choose_dense_stored_chunks(value.shape, value.dtype.itemsize)
         if isinstance(value, da.Array):
             value = _rechunk_to_write_blocks(value, chosen_chunk_rows=chunks[0])
-        dataset_kwargs = {**dataset_kwargs, "chunks": chunks}
+        # Temporarily without shards (https://github.com/saeyslab/harpy/issues/270): with
+        # AnnData >= 0.13, Zarr sizes automatic shards with one factor for all axes, which
+        # row-only chunks spanning every column cannot grow, so each shard held one chunk.
+        dataset_kwargs = {**dataset_kwargs, "chunks": chunks, "shards": None}
     elif is_sparse_matrix:
         # No cap at the matrix size, unlike dense arrays: for a Dask matrix,
         # AnnData calls this callback again with its first block as a SciPy
         # matrix, and a cap computed from that block would decide the chunks of
         # the whole matrix. The fixed length makes both calls agree.
         dataset_kwargs = {**dataset_kwargs, "chunks": _choose_sparse_stored_chunks()}
-    # No shards are passed, so AnnData's opt-in automatic sharding still
+    # Except for dense matrices, no shards are passed, so AnnData's automatic
+    # sharding (auto_shard_zarr_v3, on by default since AnnData 0.13) still
     # applies and keeps these chunks as the inner chunks of its shards.
     write_func(parent, key, value, dataset_kwargs=dataset_kwargs)
 
@@ -758,8 +780,10 @@ def _write_anndata_element(
     fixed chunk length for their ``data``, ``indices`` and ``indptr`` arrays,
     at most ``_STORED_CHUNK_BYTES`` per chunk and not capped at the matrix size
     (``_choose_sparse_stored_chunks``). Other elements, such as ``obs``/``var``
-    columns, ``uns`` and string arrays, keep AnnData's defaults. Sharding
-    follows AnnData's ``auto_shard_zarr_v3`` setting.
+    columns, ``uns`` and string arrays, keep AnnData's defaults. Dense matrices
+    are stored without shards for now
+    (https://github.com/saeyslab/harpy/issues/270); everything else follows
+    AnnData's ``auto_shard_zarr_v3`` setting, on by default since AnnData 0.13.
     """
     parent, key = _resolve_anndata_parent(group, path, create_parents=create_parents)
     callback = partial(
@@ -780,6 +804,7 @@ def _prepare_anndata_value(value: object) -> object:
             varm={key: _prepare_anndata_value(item) for key, item in value.varm.items()},
         )
     if isinstance(value, AnnData):
+        # value.layers includes X under the key None (anndata >= 0.13); AnnData sets X from it.
         values = {
             slot: {key: _prepare_anndata_value(item) for key, item in getattr(value, slot).items()}
             for slot in _MATRIX_MAPPINGS
@@ -791,7 +816,6 @@ def _prepare_anndata_value(value: object) -> object:
                 "varm": {key: _prepare_anndata_value(item) for key, item in value.raw.varm.items()},
             }
         return AnnData(
-            X=_prepare_anndata_value(value.X),
             obs=value.obs.copy(deep=True),
             var=value.var.copy(deep=True),
             uns=_prepare_anndata_value(deepcopy(value.uns)),

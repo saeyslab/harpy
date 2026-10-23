@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import warnings
 from collections.abc import Iterable, Iterator
 
 import dask.array as da
@@ -12,20 +11,19 @@ from loguru import logger as log
 from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
+from harpy._storage._anndata import _matrix_components
 from harpy.shape._shape import filter_shapes
 from harpy.table.io._add_table import add_table
+from harpy.utils._deprecation import _warn_deprecated
 from harpy.utils._keys import _CELLSIZE_KEY
 
 
 def _warn_deprecated_wrapper(function_name: str) -> None:
-    """Warn that a thin scanpy wrapper is deprecated, and name what replaces it."""
-    warnings.warn(
-        f"harpy.tb.{function_name} is deprecated since version 0.5.0 and will be removed in a future release. "
-        "Process the table directly, for example with scanpy or squidpy, then write the results back with "
-        "harpy.tb.io.add_table_updates, or with harpy.tb.io.add_table when cells or genes are removed.",
-        FutureWarning,
-        # Point at the caller of the deprecated wrapper, not at the wrapper itself.
-        stacklevel=3,
+    """Warn that a thin scanpy or squidpy wrapper is deprecated, and say what to do instead."""
+    _warn_deprecated(
+        f"harpy.tb.{function_name}",
+        use="scanpy or squidpy on the table directly, then write the results back with "
+        "harpy.tb.io.add_table_updates, or with harpy.tb.io.add_table when cells or genes are removed",
     )
 
 
@@ -66,10 +64,8 @@ def _is_lazy_or_backed(value: object) -> bool:
 
 def _table_matrices(table: AnnData) -> Iterator[tuple[str, object]]:
     """Yield each matrix of the table with its attribute path, such as ``X``, ``layers['counts']`` or ``raw.X``."""
-    yield "X", table.X
-    for slot in ("layers", "obsm", "varm", "obsp", "varp"):
-        for key, value in getattr(table, slot).items():
-            yield f"{slot}[{key!r}]", value
+    for path, value in _matrix_components(table):
+        yield "X" if path == ("X",) else f"{path[0]}[{path[1]!r}]", value
     if table.raw is not None:
         yield "raw.X", table.raw.X
         for key, value in table.raw.varm.items():
@@ -248,8 +244,9 @@ def correct_marker_genes(
     Corrects celltype scores (found in `.obs` attribute of the :class:`~anndata.AnnData` table) that are higher expessed by dividing them by a value if they exceed a certain threshold.
     The `celltype_correction_dict` has as keys the celltypes that should be corrected and as values the threshold and the divider.
 
-    .. deprecated:: 0.3.0
-       `harpy.tb.correct_marker_genes` is deprecated and may be removed in a future release.
+    .. warning::
+       Deprecated, and will be removed in a future release. Use pandas or scanpy on the table directly, then
+       write the results back with :func:`~harpy.tb.io.add_table_updates`.
 
     Parameters
     ----------
@@ -275,6 +272,10 @@ def correct_marker_genes(
     --------
     harpy.tb.score_genes : score genes using :func:`~scanpy.tl.score_genes`.
     """
+    _warn_deprecated(
+        "harpy.tb.correct_marker_genes",
+        use="pandas or scanpy on the table directly, then write the results back with harpy.tb.io.add_table_updates",
+    )
     process_table_instance = ProcessTable(sdata, labels_name=labels_name, table_name=table_name)
     adata = process_table_instance._get_adata()
     # Correct for all the genes
@@ -318,9 +319,8 @@ def filter_on_size(
 
     All cells with a size outside of the min and max size range are removed using the `instance_size_key` in `.obs`. Run e.g. :func:`~harpy.tb.preprocess_transcriptomics` or :func:`~harpy.tb.preprocess_proteomics` to obtain cell sizes.
 
-    .. deprecated:: 0.5.0
-       `harpy.tb.filter_on_size` is deprecated and will be removed in a future release. Select the cells
-       directly, for example
+    .. warning::
+       Deprecated, and will be removed in a future release. Select the cells directly, for example
        ``adata[adata.obs[instance_size_key].between(min_size, max_size, inclusive="neither")]``, and write
        the result with :func:`~harpy.tb.io.add_table`.
 

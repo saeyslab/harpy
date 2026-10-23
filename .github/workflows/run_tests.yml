@@ -20,19 +20,29 @@ defaults:
 jobs:
   test:
     strategy:
+      # Run every job to the end, so that a failing stable job can be told apart from a failing locked one.
+      fail-fast: false
       matrix:
+        # The lowest and highest supported Python versions, each with two dependency sets:
+        # locked, the environment of uv.lock, and stable, the newest versions that pyproject.toml allows,
+        # as a fresh pip install gets them. A stable job failing while its locked one passes points at an
+        # upstream release rather than a change in Harpy.
         include:
           - os: ubuntu-latest
             python: "3.12"
+            deps: locked
           - os: ubuntu-latest
-            python: "3.13" # for 3.14 CI wait for https://github.com/pytorch/pytorch/issues/156856
+            python: "3.12"
+            deps: stable
+          - os: ubuntu-latest
+            python: "3.13" # for 3.14 CI wait for https://github.com/saeyslab/harpy/issues/269 (crick)
+            deps: locked
           - os: ubuntu-latest
             python: "3.13"
-            pip-flags: "--pre"
-            name: PRE-RELEASE DEPENDENCIES
+            deps: stable
     runs-on: ${{ matrix.os }}
 
-    name: ${{ matrix.name }} Python ${{ matrix.python }}
+    name: Python ${{ matrix.python }} (${{ matrix.deps }})
 
     env:
       OS: ${{ matrix.os }}
@@ -61,10 +71,26 @@ jobs:
           key: harpy-datasets-${{ hashFiles('src/harpy/datasets/registry.py') }}
           restore-keys: harpy-datasets-
 
-      - name: Sync env (locked, --lock makes it fail immediatelly if uv.lock out of date with pyproject.toml)
-        run: uv sync --locked --extra dev --extra cellpose3 --python ${{ matrix.python }}
+      # Pretrained models that cellpose downloads on first use (~/.cellpose/models); shared by all matrix jobs.
+      # The key changes with the segmentation tests, which choose the models; restore-keys reuses the previous
+      # cache, and cellpose only downloads the models that are missing.
+      - name: Cache cellpose models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cellpose/models
+          key: cellpose3-models-${{ hashFiles('src/harpy/_tests/test_image/test_segmentation/test_segmentation.py') }}
+          restore-keys: cellpose3-models-
 
-      - name: run tests using uv and pytest (locked, no sync)
+      # locked: --locked fails immediately if uv.lock is out of date with pyproject.toml.
+      # stable: --upgrade re-resolves to the newest allowed versions, keeping the [tool.uv] overrides,
+      # and changes uv.lock only in this checkout.
+      - name: Sync env (${{ matrix.deps }})
+        run: uv sync ${{ matrix.deps == 'locked' && '--locked' || '--upgrade' }} --extra dev --extra cellpose3 --python ${{ matrix.python }}
+
+      - name: List installed package versions
+        run: uv pip list
+
+      - name: run tests using uv and pytest (no sync)
         env:
           MPLBACKEND: agg
           PLATFORM: ${{ matrix.os }}

@@ -2,10 +2,19 @@
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 
+import numpy as np
+
 from harpy._feature_panels import _FeaturePanelContract
+from harpy.utils._names import _snake_case
+
+# The dtype of the point-count matrices that aggregation writes: adata.X and the class matrices in
+# .obsm. Not uint32: numba 0.67 and 0.68 type the sum of a uint8/16/32 array as int64, and then fail
+# to compile an in-place add of that sum to an unsigned array, which scanpy's calculate_qc_metrics
+# does on CSR input (https://github.com/numba/numba/issues/10939). int32 also leaves Harpy free of a
+# numba pin, which would hold numpy back as well.
+_COUNT_DTYPE = np.dtype(np.int32)
 
 
 @dataclass(frozen=True)
@@ -13,10 +22,11 @@ class _FeatureClassAggregationContract:
     """Class-aware aggregation configuration for one compatible feature panel.
 
     The contract selects one panel class for ``adata.X``. Every remaining
-    class is treated as an auxiliary class. Output count-column names,
-    auxiliary classes, and per-class feature counts are derived from the panel,
-    so they cannot disagree with its metadata. The contract contains no spatial
-    assignment results or observed point counts.
+    class gets its own count matrix in ``adata.obsm``, keyed by
+    ``_snake_case(class)``. The ``.obsm`` keys and the feature axes are
+    computed from ``panel``, the feature panel of the aggregated points,
+    rather than stored, so they always follow its ``classes`` and
+    ``features_by_class``.
 
     Attributes
     ----------
@@ -39,22 +49,23 @@ class _FeatureClassAggregationContract:
                 f"Expression class {self.expression_class!r} is not present in panel classes "
                 f"{list(self.panel.classes)!r}."
             )
-        if not self.auxiliary_classes:
+        if not self.non_expression_classes:
             raise ValueError(
                 "Class-aware aggregation requires at least one non-expression feature class. "
                 "Use expression_class=None for a panel containing only the expression class."
             )
-        generated = [column for _, column in self.count_columns]
-        if len(set(generated)) != len(generated):
-            raise ValueError(f"Feature classes produce colliding count-column names: {generated!r}.")
+        keys = [key for _, key in self.non_expression_class_matrix_keys]
+        if len(set(keys)) != len(keys):
+            raise ValueError(f"Feature classes produce colliding .obsm keys: {keys!r}.")
 
     @property
-    def count_columns(self) -> tuple[tuple[str, str], ...]:
-        return tuple((feature_class, f"n_{_snake_case(feature_class)}_points") for feature_class in self.panel.classes)
-
-    @property
-    def auxiliary_classes(self) -> tuple[str, ...]:
+    def non_expression_classes(self) -> tuple[str, ...]:
         return tuple(feature_class for feature_class in self.panel.classes if feature_class != self.expression_class)
+
+    @property
+    def non_expression_class_matrix_keys(self) -> tuple[tuple[str, str], ...]:
+        """Return each non-expression class with the ``.obsm`` key of its count matrix."""
+        return tuple((feature_class, _snake_case(feature_class)) for feature_class in self.non_expression_classes)
 
     @property
     def expression_feature_axis(self) -> tuple[str, ...]:
@@ -67,58 +78,14 @@ class _FeatureClassAggregationContract:
         return self.panel.features_by_class[self.expression_class]
 
     @property
-    def auxiliary_feature_axis(self) -> tuple[str, ...]:
-        """Return the ordered features defining the auxiliary matrix columns.
+    def non_expression_class_matrix_axes(self) -> tuple[tuple[str, tuple[str, ...]], ...]:
+        """Return the ``.obsm`` key and feature axis of each non-expression class's count matrix.
 
-        Features outside ``expression_class`` are concatenated first in the
-        panel's class order and then in each class's feature order, including
-        features with no observed points. The resulting axis describes
-        ``adata.obsm["auxiliary_feature_counts"]`` and is recorded as that
-        matrix's ``feature_columns`` metadata.
+        Each axis contains every feature of that class in the panel's order,
+        including features with no observed points, and becomes the matrix's
+        ``feature_columns``.
         """
         features_by_class = self.panel.features_by_class
         return tuple(
-            feature for feature_class in self.auxiliary_classes for feature in features_by_class[feature_class]
+            (key, features_by_class[feature_class]) for feature_class, key in self.non_expression_class_matrix_keys
         )
-
-    @property
-    def auxiliary_class_slices(self) -> tuple[tuple[str, slice], ...]:
-        """Map each non-expression class to its columns on the auxiliary axis.
-
-        Each slice selects that class's contiguous feature block from
-        :attr:`auxiliary_feature_axis`. Because this axis also defines the
-        columns of ``adata.obsm["auxiliary_feature_counts"]``, the same slice
-        selects the class's columns from the auxiliary matrix for calculating
-        per-instance class totals.
-        """
-        result: list[tuple[str, slice]] = []
-        start = 0
-        features_by_class = self.panel.features_by_class
-        for feature_class in self.auxiliary_classes:
-            stop = start + len(features_by_class[feature_class])
-            result.append((feature_class, slice(start, stop)))
-            start = stop
-        return tuple(result)
-
-    @property
-    def auxiliary_class_feature_counts(self) -> tuple[tuple[str, int], ...]:
-        """Return the panel-defined feature count for each non-expression class.
-
-        Each value is the number of features assigned to that auxiliary class
-        in the authoritative panel, including panel features for which the
-        selected points elements contain zero detections. The values are
-        recorded with the aggregation metadata so downstream QC can normalize
-        per-class point counts without inferring panel size from observed data.
-        """
-        features_by_class = self.panel.features_by_class
-        return tuple((feature_class, len(features_by_class[feature_class])) for feature_class in self.auxiliary_classes)
-
-
-def _snake_case(value: str) -> str:
-    value = re.sub(r"(?<=[A-Z])(?=[A-Z][a-z])", "_", value)
-    value = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", value)
-    value = re.sub(r"[^\w]+", "_", value, flags=re.UNICODE)
-    value = re.sub(r"_+", "_", value).strip("_").casefold()
-    if not value:
-        raise ValueError("Feature-class names must produce a non-empty snake-case output name.")
-    return value

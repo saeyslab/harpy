@@ -6,7 +6,8 @@ import numpy as np
 import scanpy as sc
 from spatialdata import SpatialData
 
-from harpy.plot._plot import plot_shapes
+from harpy.plot._plot import _plot_shapes
+from harpy.utils._deprecation import _warn_deprecated
 from harpy.utils._keys import _ANNOTATION_KEY, _CLEANLINESS_KEY, _UNKNOWN_CELLTYPE_KEY
 
 
@@ -32,7 +33,9 @@ def score_genes(
     - a heatmap of the assigned leiden cluster for each cell type.
     - a heatmap of the assigned leiden cluster for each cell type, with leiden cluster >= filter_index.
 
-    This function is deprecated and will be removed in a future version.
+    .. warning::
+       Deprecated, and will be removed in a future release. Use scanpy's plots on the table, such as
+       :func:`scanpy.pl.umap`, and :func:`harpy.pl.plot_sdata` for the tissue.
 
     Parameters
     ----------
@@ -67,6 +70,10 @@ def score_genes(
     -----
     This function uses `scanpy` for plotting and may save multiple plots based on the output parameter.
     """
+    _warn_deprecated(
+        "harpy.pl.score_genes",
+        use="scanpy's plots on the table, such as scanpy.pl.umap, and harpy.pl.plot_sdata for the tissue",
+    )
     celltypes = [element for element in celltypes if element != unknown_celltype_key]
 
     if image_name is None:
@@ -95,7 +102,7 @@ def score_genes(
 
     # Plot annotation and cleanliness columns of sdata.tables[table_name] (AnnData) object
     sdata.tables[table_name].uns[f"{celltype_column}_colors"] = colors
-    plot_shapes(
+    _plot_shapes(
         sdata=sdata,
         image_name=image_name,
         shapes_name=shapes_name,

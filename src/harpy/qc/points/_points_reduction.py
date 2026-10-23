@@ -21,6 +21,16 @@ from harpy._feature_panels import (
     _validate_feature_class_dtype,
 )
 from harpy._spatial_bounds import SpatialBounds, _normalize_spatial_bounds
+from harpy.qc._summary_reduction import _tree_reduce
+from harpy.qc._summary_schema import (
+    _FEATURE_CLASS_KEY,
+    _FEATURE_KEY,
+    _N_POINTS_KEY,
+    _X_BIN_KEY,
+    _X_KEY,
+    _Y_BIN_KEY,
+    _Y_KEY,
+)
 from harpy.qc.points._points_binning import (
     _count_point_bins,
     _point_bin_edges,
@@ -28,7 +38,6 @@ from harpy.qc.points._points_binning import (
     _transformed_point_xy,
 )
 from harpy.qc.points._points_summary_metadata import PointsSummaryMetadata
-from harpy.qc.points._points_summary_schema import _FEATURE_CLASS_KEY, _FEATURE_KEY, _N_POINTS_KEY
 from harpy.transformations._transformations import _invertible_affine_matrix
 
 
@@ -294,59 +303,8 @@ def _compute_point_reductions(
         )
         for part in points[columns].to_delayed()
     ]
+    # Each partition's result and each merge have the (feature_counts, bin_counts) structure.
     return dask.compute(_tree_reduce(tasks, _merge_point_summaries))[0]
-
-
-def _tree_reduce(tasks, merge, *, fan_in: int = 8):
-    """Build a lazy merge tree over compact partition results.
-
-    Each merge receives at most ``fan_in`` partial summaries. Repeat until one
-    delayed result remains and return that task, without computing it here.
-    This avoids collecting every partition's partial result on the driver.
-
-    For example, 16 partition summaries with ``fan_in=8`` form this tree::
-
-        Summaries from partitions 0-7     Summaries from partitions 8-15
-                       |                                |
-                       v                                v
-               Merge -> summary A               Merge -> summary B
-                       |                                |
-                       +----------------+---------------+
-                                        |
-                                        v
-                               Merge -> final summary
-
-    In that example, ``level`` is replaced after each round::
-
-        # Initially: 16 partition-summary tasks
-        level = [partition_0, ..., partition_15]
-
-        # After the first round: 2 merge tasks
-        level = [merge_A, merge_B]
-
-        # After the second round: 1 merge task
-        level = [final_merge_task]
-
-    The loop stops when only one task remains. ``return level[0]`` extracts
-    that final task from the list; it does not select the first partition's
-    summary or the feature counts from the eventual result.
-
-    The arrows represent task dependencies, not computation performed by
-    this function. Dask executes the graph when the returned task is computed.
-    For point summaries, every partition and merged result has the same
-    ``(feature_counts, bin_counts)`` structure, so the same
-    merge function works at each level. The final task therefore depends on
-    all input partitions.
-    """
-    level = list(tasks)
-    while len(level) > 1:
-        next_level = []
-        for start in range(0, len(level), fan_in):
-            group = level[start : start + fan_in]
-            merged_task = dask.delayed(merge)(*group)
-            next_level.append(merged_task)
-        level = next_level
-    return level[0]
 
 
 def _summarize_point_partition(
@@ -416,16 +374,16 @@ def _spatial_count_array(counts: pd.Series, *, selected_names, summary_axis: str
     grid = np.zeros((len(selected_names), len(y_edges) - 1, len(x_edges) - 1), dtype=np.uint64)
     if len(counts):
         group_codes = pd.Index(selected_names).get_indexer(counts.index.get_level_values(summary_axis))
-        grid[group_codes, counts.index.get_level_values("y_bin"), counts.index.get_level_values("x_bin")] = (
+        grid[group_codes, counts.index.get_level_values(_Y_BIN_KEY), counts.index.get_level_values(_X_BIN_KEY)] = (
             counts.to_numpy()
         )
     return xr.DataArray(
         grid,
-        dims=(summary_axis, "y", "x"),
+        dims=(summary_axis, _Y_KEY, _X_KEY),
         name=_N_POINTS_KEY,
         coords={
             summary_axis: list(selected_names),
-            "x": x_edges[:-1] + np.diff(x_edges) / 2,
-            "y": y_edges[:-1] + np.diff(y_edges) / 2,
+            _X_KEY: x_edges[:-1] + np.diff(x_edges) / 2,
+            _Y_KEY: y_edges[:-1] + np.diff(y_edges) / 2,
         },
     )

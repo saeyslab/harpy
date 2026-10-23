@@ -351,7 +351,8 @@ def test_components_cover_matrix_mappings_and_raw(make_table_io_store, monkeypat
         else:
             expected_value = getattr(target, slot)
             if slot in {"layers", "obsm", "varm", "obsp", "varp"}:
-                expected_value = dict(expected_value)
+                # In memory X is layers[None]; the stored layers group holds only the named layers.
+                expected_value = {name: value for name, value in expected_value.items() if name is not None}
             _assert_value(values[key], expected_value)
     matrix_type = {"lazy": da.Array, "backed": CSRDataset, "eager": sparse.csr_matrix}[mode]
     assert isinstance(values[("X",)], matrix_type)
@@ -530,7 +531,13 @@ def test_backed_handles_reject_direct_writes(make_table_io_store, reader, matrix
         matrix = table.X
     else:
         matrix = reader(path, table_name="counts", components=[("X",)], mode="backed")[("X",)]
-    with pytest.raises(ValueError, match="read.only"):
+    if matrix_kind == "csr":
+        # A CSR dataset, which AnnData (>= 0.13) gives no item assignment.
+        error, message = TypeError, "does not support item assignment"
+    else:
+        # A read-only Zarr array.
+        error, message = ValueError, "read.only"
+    with pytest.raises(error, match=message):
         matrix[0, 1] = 99
     expected = np.array([[0, 1, 2], [3, 0, 4]])
     if matrix_kind == "csr":

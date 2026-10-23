@@ -33,6 +33,9 @@ def plot_adata(adata, path_prefix):
     :param path_prefix: _description_
     """
     for layer in adata.layers:
+        if layer is None:
+            # AnnData stores X as layers[None]; plot only the named layers.
+            continue
         f = ridgeplot_channel(adata, layer=layer)
         f.savefig(path_prefix + f"_ridgeplot_all_channels_{layer}.png")
         if "sample" in adata.obs:

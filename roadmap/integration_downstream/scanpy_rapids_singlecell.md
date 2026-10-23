@@ -3609,9 +3609,10 @@ function, when its use asks for it.
     (`src/harpy/table/cell_clustering/_weighted_channel_expression.py`):
     `cell_clustering_table_name` and `table_name_pixel_cluster_intensity`.
 - **Why load, rather than raise as the guard of 6a does.** On a backed
-  `sdata`, `add_table` attaches the table it writes with lazy matrices, so the
-  tables that Harpy's own steps create (`aggregate_*`, `allocate`,
-  `cluster_intensity`, `flowsom`) are lazy when the next step reads them. A
+  `sdata`, `add_table` attaches the table it writes with lazy matrices, and
+  `aggregate_points` with storage-backed ones, so the tables that Harpy's own
+  steps create (`aggregate_*`, `allocate`, `cluster_intensity`, `flowsom`) are
+  lazy or storage-backed when the next step reads them. A
   guard would stop these functions in ordinary workflows, not only after a
   lazy read the user chose, and the user would have to reopen the store with
   `table_mode="eager"` between steps. `flowsom` could not run on a backed

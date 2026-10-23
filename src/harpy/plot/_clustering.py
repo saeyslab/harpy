@@ -4,13 +4,16 @@ import matplotlib.pyplot as plt
 import scanpy as sc
 from spatialdata import SpatialData
 
+from harpy.utils._deprecation import _warn_deprecated
+
 
 def cluster(sdata: SpatialData, table_name: str, key_added: str = "leiden", output: str | None = None) -> None:
     """
     Visualize clusters.
 
-    .. deprecated:: 0.3.0
-       `harpy.pl.cluster` is deprecated and will be removed in 0.4.0.
+    .. warning::
+       Deprecated, and will be removed in a future release. Use :func:`scanpy.pl.umap` and
+       :func:`scanpy.pl.rank_genes_groups` on the table, which it wraps.
 
     Plot the clusters on a UMAP (using :func:`~scanpy.pl.umap`),
     and shows the most differentially expressed genes/channels for each cluster on a second plot (using :func:`~scanpy.pl.rank_genes_group`), if "rank_genes_groups" is in `sdata.tables[table_name].uns.keys()`.
@@ -38,6 +41,9 @@ def cluster(sdata: SpatialData, table_name: str, key_added: str = "leiden", outp
     harpy.tb.leiden: leiden clustering
     harpy.tb.kmeans: kmeans clustering
     """
+    _warn_deprecated(
+        "harpy.pl.cluster", use="scanpy.pl.umap and scanpy.pl.rank_genes_groups on the table, which it wraps"
+    )
     # Plot clusters on a UMAP
     sc.pl.umap(sdata.tables[table_name], color=[key_added], show=not output)
     if output:

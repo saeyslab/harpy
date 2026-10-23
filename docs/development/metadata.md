@@ -67,13 +67,10 @@ adata.uns
 │       ├── schema_version, source_kind
 │       ├── feature_columns             ordered names for matrix columns
 │       └── ...                         writer-specific source metadata
-├── feature_class_aggregation
+├── point_aggregation                   sources of a table from aggregate_points; names no class
 │   ├── schema_version, source_kind
-│   ├── feature_key, feature_class_key, expression_class, classes
-│   ├── auxiliary_class_feature_counts  panel feature counts, not point counts
-│   ├── count_columns                   class → .obs point-count column
-│   ├── auxiliary_points_fraction_column
-│   ├── auxiliary_feature_matrix_key    "auxiliary_feature_counts"
+│   ├── feature_key                     points column of the features
+│   ├── feature_class_key               class-aware only: points column of the classes
 │   └── regions                         labels name → points name + coordinate system
 └── spatial_coordinates
     └── spatial_canonical
@@ -83,15 +80,31 @@ adata.uns
                                         calculation and row coverage
 
 feature_matrices[<matrix key>]       → adata.obsm[<matrix key>]
-feature_class_aggregation           → adata.X / .var, .obs summaries,
-                                     .obsm["auxiliary_feature_counts"]
+point_aggregation                   → provenance of adata.X and, class-aware, of
+                                     the non-expression class matrices adata.obsm[snake_case(class)]
 spatial_coordinates["spatial_canonical"]
                                    → adata.obsm["spatial_canonical"]
 ```
 
+Each `feature_matrices` record describes the `.obsm` matrix with the same
+key; the shared key is their only link. `feature_matrices` is the default
+`.uns` key of this registry: `hp.tb.add_feature_matrix` can write its record
+under another key, and `hp.tb.validate_table` checks only the registry named
+by its `feature_matrices_key`.
+
 `feature_columns` identifies the columns of an `.obsm` feature matrix;
 `feature_key` names a source points column. They have different roles.
 Expression-matrix columns are identified by `adata.var_names`.
+
+`hp.tb.aggregate_points` writes `point_aggregation` in both modes, as
+provenance that no validation reads: it pairs each region with the points
+element and coordinate system aggregated into it, which SpatialData's table
+annotation does not record. In a class-aware table, a column's class is the
+matrix that holds it, so no record maps classes to columns or matrices.
+`adata.X` holds the expression class, the one panel class without a matrix
+in `.obsm`; each other class appears only as the `.obsm` key of its matrix,
+`snake_case(class)`, for example `"negative"` for the class `Negative`. The
+function's docstring describes the complete table.
 
 Canonical centers use each source labels element's **intrinsic scale-0 pixel
 coordinates**, stored in `(z, y, x)` order, with `z = 0` for 2D. Different regions

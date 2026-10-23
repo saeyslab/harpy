@@ -125,7 +125,7 @@ def test_unbinned_reference_reuses_totals_without_source_or_coordinate_work(monk
         pd.DataFrame(
             {
                 "feature": ["GeneA", "ZeroGene", "NegA"],
-                "feature_class": ["Endogenous", "Endogenous", "Negative"],
+                "feature_class": pd.Categorical(["Endogenous", "Endogenous", "Negative"], categories=PANEL["classes"]),
                 "n_points": np.array([2, 0, 3] if crd is None else [1, 0, 2], dtype=np.uint64),
             }
         ),
@@ -136,6 +136,21 @@ def test_unbinned_reference_reuses_totals_without_source_or_coordinate_work(monk
     assert result.metadata.bin_size is None
     assert result.metadata.x_edges is None and result.metadata.y_edges is None
     assert result.metadata.extent is None
+
+
+@pytest.mark.parametrize("bin_size", [None, 2])
+def test_feature_class_categories_are_the_reference_classes_also_without_a_requested_feature(bin_size):
+    sdata = _sdata()
+    summary = summarize_points(
+        sdata, "calls", feature_classes=["Endogenous", "Negative"], bin_size=bin_size, crd=(0, 10, 0, 2)
+    )
+    result = summarize_points_by_feature(sdata, summary=summary, features="NegA")
+    frames = [result.per_feature]
+    if bin_size is not None:
+        frames.append(result.spatial_bins.per_feature)
+    for frame in frames:
+        assert frame.feature_class.tolist() == ["Negative"]
+        assert frame.feature_class.cat.categories.tolist() == ["Endogenous", "Negative"]
 
 
 @pytest.mark.parametrize("bin_size", [None, 1, 2])

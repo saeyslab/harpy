@@ -503,9 +503,16 @@ def test_add_canonical_centers_overwrite_repairs_an_asymmetric_payload(tmp_path)
 def test_add_canonical_centers_does_not_ignore_an_unrelated_table_error(tmp_path) -> None:
     sdata = _backed_external_sdata(tmp_path)
     table = sdata.tables["table"]
-    table.obsm["auxiliary_feature_counts"] = np.ones((table.n_obs, 1))
+    table.obsm["negative"] = np.ones((table.n_obs, 1))
+    table.uns["feature_matrices"] = {
+        "negative": {
+            "schema_version": 1,
+            "source_kind": "harpy_aggregate_points",
+            "feature_columns": ["Negative01", "Negative02"],
+        }
+    }
 
-    with pytest.raises(ValueError, match="without 'feature_class_aggregation' metadata"):
+    with pytest.raises(ValueError, match="declares 2 feature columns"):
         add_canonical_centers(sdata, table_name="table", overwrite=True)
 
     assert CANONICAL_OBSM_KEY not in table.obsm

@@ -439,4 +439,5 @@ def test_registered_external_panel_supports_class_aware_aggregation(tmp_path):
     table = sdata.tables["aggregated"]
     assert table.var_names.tolist() == ["GeneA", "GeneB", "ZeroGene"]
     np.testing.assert_array_equal(table.X.to_memory().toarray(), [[1, 2, 0]])
-    np.testing.assert_array_equal(table.obsm["auxiliary_feature_counts"].to_memory().toarray(), [[1, 0, 0]])
+    np.testing.assert_array_equal(table.obsm["negative"].to_memory().toarray(), [[1, 0]])
+    np.testing.assert_array_equal(table.obsm["system_control"].to_memory().toarray(), [[0]])

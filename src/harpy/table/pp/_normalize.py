@@ -93,7 +93,8 @@ def normalize_by_size(
     dtype = _float_dtype(matrix.dtype)
     result = _scale_rows(matrix, (scale_factor / sizes).astype(dtype), dtype)
     _warn_if_normalised(adata, key_added)
-    _set_matrix(adata, layer, result)
+    # layers[None] is X.
+    adata.layers[layer] = result
     adata.uns[key_added] = {"size_key": size_key, "scale_factor": scale_factor, "layer": layer}
 
 
@@ -218,27 +219,27 @@ def normalize_by_quantile(
     if max_value is not None:
         result = da.minimum(result, max_value) if isinstance(result, da.Array) else np.minimum(result, max_value)
     _warn_if_normalised(adata, key_added)
-    _set_matrix(adata, layer, result)
+    # layers[None] is X.
+    adata.layers[layer] = result
     adata.var[key_added] = values
     adata.uns[key_added] = {"q": recorded_q, "max_value": max_value, "layer": layer}
 
 
 def _get_matrix(adata: AnnData, layer: str | None) -> object:
-    """Return ``adata.X`` or the requested layer, which must exist."""
-    if layer is None:
-        if adata.X is None:
+    """Return the matrix to normalise: ``adata.layers[layer]``, which is ``X`` for ``None``.
+
+    AnnData stores ``X`` as ``layers[None]``, so one lookup reads both. This
+    checks that there is a matrix to return, not only a key: ``.get()`` gives
+    None for a missing key and for a named layer whose value is None, and both
+    raise. A table without ``X`` has no key None. See "X in memory and on disk"
+    in docs/development/storage.md.
+    """
+    matrix = adata.layers.get(layer)
+    if matrix is None:
+        if layer is None:
             raise ValueError("adata.X is missing; pass the layer to normalise with layer=.")
-        return adata.X
-    if layer not in adata.layers:
         raise ValueError(f"adata has no layer {layer!r}.")
-    return adata.layers[layer]
-
-
-def _set_matrix(adata: AnnData, layer: str | None, value: object) -> None:
-    if layer is None:
-        adata.X = value
-    else:
-        adata.layers[layer] = value
+    return matrix
 
 
 def _float_dtype(dtype: np.dtype) -> np.dtype:

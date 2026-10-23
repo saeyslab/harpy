@@ -12,6 +12,12 @@ their `.venv/bin/` path rather than sourcing `activate`:
 .venv/bin/pre-commit run --files path/to/changed_file.py
 ```
 
+## Editing files
+
+Edit files with the agent's file-editing tool (Claude Code: `Edit`; Codex:
+`apply_patch`), not with `sed -i` or other in-place shell edits. Use
+`sed -n` only to read.
+
 ## Test scope
 
 Run only the focused unit tests directly affected by a change.

@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 
 from harpy._spatial_bounds import SpatialBounds
-from harpy.qc.points._points_summary_schema import _FEATURE_CLASS_KEY, _N_POINTS_KEY
+from harpy.qc._summary_schema import _FEATURE_CLASS_KEY, _N_POINTS_KEY, _X_BIN_KEY, _Y_BIN_KEY
 
 
 def _select_point_coordinates(
@@ -114,7 +114,7 @@ def _check_grid_budget(shape: tuple[int, int, int], *, max_grid_bytes: int | Non
 
 
 def _empty_bin_counts(summary_axis: str) -> pd.Series:
-    index = pd.MultiIndex.from_arrays([[], [], []], names=[summary_axis, "y_bin", "x_bin"])
+    index = pd.MultiIndex.from_arrays([[], [], []], names=[summary_axis, _Y_BIN_KEY, _X_BIN_KEY])
     return pd.Series(index=index, dtype=np.uint64, name=_N_POINTS_KEY)
 
 
@@ -144,8 +144,9 @@ def _count_point_bins(
     frame = pd.DataFrame(
         {
             summary_axis: groups,
-            "y_bin": y_bin,
-            "x_bin": x_bin,
+            _Y_BIN_KEY: y_bin,
+            _X_BIN_KEY: x_bin,
         }
     )
-    return frame.groupby([summary_axis, "y_bin", "x_bin"], observed=True).size().astype(np.uint64).rename(_N_POINTS_KEY)
+    counts = frame.groupby([summary_axis, _Y_BIN_KEY, _X_BIN_KEY], observed=True).size()
+    return counts.astype(np.uint64).rename(_N_POINTS_KEY)

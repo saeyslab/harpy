@@ -5,7 +5,8 @@ from typing import Any
 
 from spatialdata import SpatialData
 
-from harpy.plot import plot_shapes
+from harpy.plot._plot import _plot_shapes
+from harpy.utils._deprecation import _warn_deprecated
 
 
 def segment(
@@ -19,6 +20,9 @@ def segment(
 ) -> None:
     """
     Visualize obtained shapes element (i.e. segmentation mask boundaries) from a SpatialData object.
+
+    .. warning::
+       Deprecated, and will be removed in a future release. Use :func:`harpy.pl.plot_sdata`.
 
     This function utilizes the `plot_shapes` method to display the segmentation results from the provided SpatialData object.
     Final plot will contain tow subplots, left the image without provided shapes element overlay, and the right subplot with
@@ -54,7 +58,8 @@ def segment(
     --------
     harpy.im.segment
     """
-    plot_shapes(
+    _warn_deprecated("harpy.pl.segment", use="harpy.pl.plot_sdata")
+    _plot_shapes(
         sdata,
         image_name=image_name,
         shapes_name=[None, shapes_name],

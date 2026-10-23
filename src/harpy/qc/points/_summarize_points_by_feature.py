@@ -10,6 +10,7 @@ import xarray as xr
 from spatialdata import SpatialData
 
 from harpy._feature_panels import _resolve_points_feature_panel
+from harpy.qc._summary_schema import _FEATURE_CLASS_KEY, _FEATURE_KEY, _N_POINTS_KEY, _X_KEY, _Y_KEY
 from harpy.qc.points._points_binning import _check_grid_budget
 from harpy.qc.points._points_reduction import (
     _compute_point_reductions,
@@ -18,7 +19,6 @@ from harpy.qc.points._points_reduction import (
     _validate_point_columns,
 )
 from harpy.qc.points._points_summary_metadata import PointsSummaryMetadata
-from harpy.qc.points._points_summary_schema import _FEATURE_CLASS_KEY, _FEATURE_KEY, _N_POINTS_KEY
 from harpy.qc.points._points_summary_validation import _validate_spatial_summary
 from harpy.qc.points._spatial_bin_summary import FeatureSpatialBinSummary, _summarize_feature_bins
 from harpy.qc.points._summarize_points import PointsSummary
@@ -27,6 +27,8 @@ from harpy.qc.points._summarize_points import PointsSummary
 @dataclass(frozen=True)
 class FeaturePointsSummary:
     """Feature totals and optional spatial statistics for explicitly selected panel features.
+
+    Returned by :func:`harpy.qc.summarize_points_by_feature`.
 
     Construction validates spatial structure, not numerical summaries.
     In-place edits to the contained arrays or tables do not trigger validation.
@@ -39,7 +41,8 @@ class FeaturePointsSummary:
         Nested arrays and dataframes do not duplicate this context in ``attrs``.
     per_feature
         One row per requested panel feature, including zero detections, in
-        panel order. Columns are ``feature``, ``feature_class`` and uint64
+        panel order. Columns are ``feature``, ``feature_class`` (categorical,
+        the reference summary's classes as categories) and uint64
         ``n_points``: total points after feature and spatial selection,
         independent of binning. No complete-class statistics or within-class
         fractions are computed for this requested subset.
@@ -162,6 +165,15 @@ def summarize_points_by_feature(
         features.spatial_counts.sel(feature="EPCAM")
         features.spatial_bins.per_feature
         hp.qc.spatial_bin_histogram_by_feature(features, feature="EPCAM")
+
+        # Every probe of one control class, named from the reference summary.
+        summary = hp.qc.summarize_points(
+            sdata, "transcripts", feature_classes=["Endogenous", "Negative"], bin_size=10,
+            to_coordinate_system="sample_micron", microns_per_unit=1.0,
+        )
+        negative = summary.feature_names["Negative"]
+        controls = hp.qc.summarize_points_by_feature(sdata, summary=summary, features=negative)
+        controls.spatial_bins.per_feature  # one row per negative probe
     """
     if not isinstance(summary, PointsSummary):
         raise TypeError("summary must be a PointsSummary returned by hp.qc.summarize_points().")
@@ -194,7 +206,7 @@ def _reduce_points_by_feature(
     # The current panel must contain the same assignments for these classes.
     # Features belonging to classes not included in the supplied summary
     # are excluded from this comparison.
-    reference_classes = set(summary.per_class[_FEATURE_CLASS_KEY])
+    reference_classes = set(summary.feature_classes)
     reference_assignments = dict(
         zip(summary.per_feature[_FEATURE_KEY], summary.per_feature[_FEATURE_CLASS_KEY], strict=True)
     )
@@ -238,11 +250,11 @@ def _reduce_points_by_feature(
     if summary.spatial_counts is None or metadata.x_edges is None or metadata.y_edges is None:
         raise ValueError("The reference summary is missing its spatial grid or edges; recompute summarize_points().")
     retained_bin_mask = summary.retained_bin_mask
-    if retained_bin_mask is None or retained_bin_mask.dims != ("y", "x"):
+    if retained_bin_mask is None or retained_bin_mask.dims != (_Y_KEY, _X_KEY):
         raise ValueError("The reference summary must contain an XY retained-bin mask; recompute summarize_points().")
     # Match physical bin locations, not just array shape. Keep the parent mask
     # as a snapshot; requested-feature zeros must not redefine this population.
-    for axis, edges in (("x", metadata.x_edges), ("y", metadata.y_edges)):
+    for axis, edges in ((_X_KEY, metadata.x_edges), (_Y_KEY, metadata.y_edges)):
         centers = np.asarray(edges[:-1]) + np.diff(edges) / 2
         if not np.array_equal(retained_bin_mask.coords[axis].values, centers):
             raise ValueError("The reference grid coordinates do not match its bin edges; recompute summarize_points().")
@@ -270,7 +282,13 @@ def _reduce_points_by_feature(
     # undetected. Zero-fill their planes; do not reject the empty reduction.
     grid = _spatial_count_array(bin_counts, selected_names=selected_names, summary_axis=_FEATURE_KEY, edges=edges)
     per_feature[_N_POINTS_KEY] = feature_counts.reindex(selected_names, fill_value=0).to_numpy(dtype=np.uint64)
-    bins = _summarize_feature_bins(grid, metadata=metadata, panel=panel, retained_bin_mask=retained_bin_mask)
+    bins = _summarize_feature_bins(
+        grid,
+        metadata=metadata,
+        panel=panel,
+        feature_classes=summary.feature_classes,
+        retained_bin_mask=retained_bin_mask,
+    )
     return FeaturePointsSummary(
         metadata=metadata,
         per_feature=per_feature,

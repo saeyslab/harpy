@@ -45,6 +45,41 @@ For where metadata lives and which data it describes, see
 - **Write block:** a block as it is written to Zarr, in one step. A write block
   that covers only part of a stored chunk makes Zarr read and rewrite that chunk.
 
+## `X` in memory and on disk
+
+Since anndata 0.13, an `AnnData` keeps `X` in memory as the entry `None` of
+`layers`:
+
+- `adata.X` reads `adata.layers.get(None)`; setting `adata.X` writes
+  `adata.layers[None]`.
+- Iterating `adata.layers` yields `None` as well, for example
+  `['counts', None]`.
+- A table without `X` has no key `None`: `adata.X = None`, `del adata.X` and
+  `adata.layers[None] = None` remove the key, and assigning
+  `adata.layers = {..., None: None}` drops `X`. Assigning a `layers` mapping
+  without the key `None` keeps the current `X`, with a `FutureWarning`.
+- A named layer differs: `adata.layers["counts"] = None` keeps the key and
+  stores `None`, which is written as an element with encoding type `null`.
+
+On disk nothing changed: `X` is stored at `tables/<name>/X`, and the `layers`
+group holds only the named layers.
+
+Component paths follow the disk: `("X",)` names `X`. Two functions in
+`harpy/_storage/_anndata.py` translate between the two, and are the only code
+that knows where `X` is in memory:
+
+- `_matrix_components(adata)` yields the in-memory matrices with their component
+  paths, with `layers[None]` as `("X",)`.
+- `_memory_path(path)` returns the in-memory location of a component path:
+  `("layers", None)` for `("X",)`.
+
+Harpy therefore states `X` in every `layers` mapping it assigns to an attached
+table: the key `None` holds `X`, or `None` to drop it.
+
+Where a function reads the matrix aligned with `var` from a
+`layer: str | None` parameter, it reads `adata.layers.get(layer)`: a missing key
+and a named layer whose value is `None` both count as absent.
+
 ## Replacement scope
 
 A table is a SpatialData element; an AnnData component is something inside that
@@ -149,8 +184,12 @@ components as `component-N`. The writer uses it to choose the stored layout.
 Dense matrices are stored in row-only chunks of 4 MiB, and sparse matrices in
 chunks of 524,288 entries per array, at most 4 MiB each. Both are fixed, and
 deliberately much smaller than the read blocks of about `array.chunk-size`,
-which combine whole stored chunks. Everything else keeps AnnData's defaults,
-and sharding follows AnnData's `auto_shard_zarr_v3` setting. The comment at
+which combine whole stored chunks. Everything else keeps AnnData's defaults.
+Dense matrices are stored without shards for now
+([#270](https://github.com/saeyslab/harpy/issues/270)): with AnnData 0.13, Zarr's
+automatic shards held one row-only chunk each. Everything else follows
+AnnData's `auto_shard_zarr_v3` setting, on by default since AnnData 0.13. The
+comment at
 `_STORED_CHUNK_BYTES` explains the difference from Dask's `array.chunk-size`
 and from Zarr's default. The docstring of
 `_write_anndata_element` gives the rules and the helpers that apply them.

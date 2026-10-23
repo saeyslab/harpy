@@ -210,9 +210,11 @@ changes when it is backed by a Zarr store.
 
 ### Preprocessing
 
-Normalisations that scanpy does not provide. Like `scanpy.pp`, they change an
-`AnnData` table in place, in memory or lazy; write the results back with
-`tb.io.add_table_updates` or `tb.io.write_table_updates`.
+Normalisations that scanpy does not provide, and the QC metrics of a table's
+count matrices, per class. Like `scanpy.pp`, they change an `AnnData` table in
+place, in memory or lazy; write the results back with
+`tb.io.add_table_updates` or `tb.io.write_table_updates`, with
+`overwrite=True` for the stored `obs` and `var`.
 
 ```{eval-rst}
 
@@ -221,6 +223,23 @@ Normalisations that scanpy does not provide. Like `scanpy.pp`, they change an
 
     tb.pp.normalize_by_size
     tb.pp.normalize_by_quantile
+    tb.pp.calculate_qc_metrics
+```
+
+### Plotting
+
+Plots of the numeric `.obs` and `.var` columns of an `AnnData` table, such as
+the QC metrics of `scanpy.pp.calculate_qc_metrics`. Like `scanpy.pl`, they take
+the table, for example `sdata.tables["table"]`.
+
+```{eval-rst}
+
+.. autosummary::
+    :toctree: generated
+
+    tb.pl.histogram
+    tb.pl.histograms
+    tb.pl.scatter
 ```
 
 ### Processing and analysis
@@ -331,9 +350,28 @@ Quality control functions.
 .. autosummary::
     :toctree: generated
 
+    summarize_table
+    summarize_table_by_feature
     table_histogram
     table_histograms
     obs_scatter
+    instance_histogram
+    instance_histogram_by_feature
+    instance_scatter
+```
+
+#### Summary result types
+
+```{eval-rst}
+
+.. currentmodule:: harpy.qc
+
+.. autosummary::
+    :toctree: generated
+
+    TableSummary
+    FeatureTableSummary
+    TableSummaryMetadata
 ```
 
 ### Points

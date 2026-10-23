@@ -4,7 +4,8 @@ import matplotlib.pyplot as plt
 import scanpy as sc
 from spatialdata import SpatialData
 
-from harpy.plot._plot import plot_shapes
+from harpy.plot._plot import _plot_shapes
+from harpy.utils._deprecation import _warn_deprecated
 from harpy.utils._keys import _ANNOTATION_KEY
 
 
@@ -25,8 +26,9 @@ def cluster_cleanliness(
     - a UMAP with cells colored by cell type;
     - an image of the tissue with cells colored by cell type.
 
-    .. deprecated:: 0.3.0
-       `harpy.pl.cluster_cleanliness` is deprecated and may be removed in a future release.
+    .. warning::
+       Deprecated, and will be removed in a future release. Use scanpy's plots on the table, such as
+       :func:`scanpy.pl.umap`, and :func:`harpy.pl.plot_sdata` for the tissue.
 
     Parameters
     ----------
@@ -56,6 +58,10 @@ def cluster_cleanliness(
     -------
     None
     """
+    _warn_deprecated(
+        "harpy.pl.cluster_cleanliness",
+        use="scanpy's plots on the table, such as scanpy.pl.umap, and harpy.pl.plot_sdata for the tissue",
+    )
     # Barplot with cell type composition of the clusters.
     stacked = (
         sdata.tables[table_name]
@@ -87,7 +93,7 @@ def cluster_cleanliness(
     plt.close(fig)
 
     # Tissue image with cells colored by cell type.
-    plot_shapes(
+    _plot_shapes(
         sdata=sdata,
         table_name=table_name,
         image_name=image_name,
@@ -97,7 +103,7 @@ def cluster_cleanliness(
         output=output + f"_{celltype_column}" if output else None,
     )
 
-    plot_shapes(
+    _plot_shapes(
         sdata=sdata,
         table_name=table_name,
         image_name=image_name,

@@ -7,7 +7,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from spatialdata import SpatialData
 
-from harpy.plot import plot_shapes
+from harpy.plot._plot import _plot_shapes
+from harpy.utils._deprecation import _warn_deprecated
 
 
 def tiling_correction(
@@ -22,6 +23,9 @@ def tiling_correction(
 ) -> None:
     """
     Visualizes the effect of tiling correction.
+
+    .. warning::
+       Deprecated, and will be removed in a future release. Use :func:`harpy.pl.plot_sdata`.
 
     This function plots the uncorrected image element of a SpatialData object alongside the tiling corrected version, allowing for a visual
     comparison between the two. This can be useful for assessing the effectiveness of tiling correction methods
@@ -63,7 +67,8 @@ def tiling_correction(
     --------
     harpy.im.tiling_correction
     """
-    plot_shapes(
+    _warn_deprecated("harpy.pl.tiling_correction", use="harpy.pl.plot_sdata")
+    _plot_shapes(
         sdata,
         image_name=image_name,
         shapes_name=None,
@@ -79,6 +84,10 @@ def tiling_correction(
 def flatfield(flatfield: np.ndarray, output: str | Path | None = None) -> None:
     """
     Visualize the correction performed per tile using a flatfield image.
+
+    .. warning::
+       Deprecated, and will be removed in a future release. Use :func:`matplotlib.pyplot.imshow` on the
+       flatfield.
 
     This function generates and displays a visualization of the flatfield image, which represents
     correction performed per tile. It can optionally save the generated image to a specified path.
@@ -104,6 +113,7 @@ def flatfield(flatfield: np.ndarray, output: str | Path | None = None) -> None:
     --------
     harpy.im.tiling_correction
     """
+    _warn_deprecated("harpy.pl.flatfield", use="matplotlib.pyplot.imshow on the flatfield")
     fig, ax = plt.subplots(1, 1, figsize=(20, 10))
     ax.imshow(flatfield, cmap="gray")
     ax.set_title("Correction performed per tile")

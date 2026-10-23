@@ -111,6 +111,7 @@ def test_summary_returns_complete_panel_counts_and_class_statistics():
     assert negative.n_points == 4
     assert negative.mean_points_per_feature == pytest.approx(4 / 3)
     assert negative.median_points_per_feature == 1
+    assert negative.std_points_per_feature == pytest.approx(np.std([3, 1, 0], ddof=1))
     assert negative.p95_points_per_feature == pytest.approx(2.8)
     assert negative.pct_points_top_n_features == 75
     assert negative.top_n == 1
@@ -210,6 +211,43 @@ def test_class_selection_keeps_panel_order_and_shared_bins(selection, expected):
         assert grid.sel(feature_class=name).sum().item() == total
     if "Negative" in expected:
         np.testing.assert_array_equal(grid.sel(feature_class="Negative"), [[1, 2, 0, 1]])
+
+
+def test_feature_classes_and_feature_names_follow_panel_order_including_undetected_features():
+    result = hp.qc.summarize_points(_sdata(), "calls", feature_classes=["SystemControl", "Negative"])
+    assert result.feature_classes == ("Negative", "SystemControl")
+    assert result.feature_names == {"Negative": ("NegA", "NegB", "NegC"), "SystemControl": ("SysA", "SysB")}
+
+
+@pytest.mark.parametrize("bin_size", [None, 2])
+def test_feature_class_is_categorical_with_the_selected_classes_in_panel_order(bin_size):
+    result = hp.qc.summarize_points(_sdata(), "calls", feature_classes=["SystemControl", "Negative"], bin_size=bin_size)
+    frames = [result.per_feature, result.per_class]
+    if bin_size is not None:
+        frames.extend([result.spatial_bins.per_bin, result.spatial_bins.per_class])
+    for frame in frames:
+        assert frame.feature_class.cat.categories.tolist() == ["Negative", "SystemControl"]
+
+
+def test_bin_summary_holds_each_class_share_of_the_bin_points_and_its_panel_size():
+    """Over bins 0-3, Endogenous has [1, 0, 1, 1] points and Negative [1, 2, 0, 1].
+
+    The default PANEL has three features per class, one of them undetected, so
+    n_features is 3 for both, not the 2 detected features.
+    """
+    result = hp.qc.summarize_points(
+        _sdata(), "calls", feature_classes=["Endogenous", "Negative"], bin_size=2, crd=(0, 10, 0, 2)
+    )
+    bins = result.spatial_bins.per_bin
+    np.testing.assert_array_equal(bins.pct_points, [50, 0, 100, 50, 50, 100, 0, 50])
+    counts = result.spatial_counts.values[:, result.retained_bin_mask.values]
+    np.testing.assert_allclose(bins.pct_points, (100 * counts / counts.sum(axis=0)).ravel())
+    per_class = result.spatial_bins.per_class
+    assert per_class.columns[-1] == "n_features"
+    assert per_class.n_features.tolist() == result.per_class.n_features.tolist() == [3, 3]
+
+    negative = hp.qc.summarize_points(_sdata(), "calls", feature_classes="Negative", bin_size=2, crd=(0, 10, 0, 2))
+    assert "pct_points" not in negative.spatial_bins.per_bin
 
 
 @pytest.mark.parametrize("bin_size", [None, 2])
@@ -365,6 +403,7 @@ def test_top_n_does_not_change_raw_counts_or_other_statistics():
         "n_points",
         "mean_points_per_feature",
         "median_points_per_feature",
+        "std_points_per_feature",
         "p95_points_per_feature",
     ]
     pd.testing.assert_frame_equal(small.per_class[stable], large.per_class[stable])

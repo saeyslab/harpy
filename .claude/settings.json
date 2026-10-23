@@ -34,7 +34,8 @@
       "Bash(rg:*)",
       "Bash(find:*)",
       "Bash(.venv/bin/coverage report *)",
-      "Bash(.venv/bin/coverage debug *)"
+      "Bash(.venv/bin/coverage debug *)",
+      "Bash(git check-ignore *)"
     ],
     "deny": ["Read(./.env)", "Read(./.env.*)"]
   },

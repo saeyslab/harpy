@@ -98,6 +98,6 @@ table: write it with `hp.tb.io.add_table`.
 For interactive cell typing, compute per-instance feature matrices with
 `hp.tb.add_feature_matrix`, and classify the cells in napari with
 [spatiato](https://github.com/vibspatial/spatiato), installed with
-`harpy-analysis[napari]`.
+`harpy-analysis[spatiato]`.
 
 Next, explore the introductory tutorials for [transcriptomics](./tutorials/general/Harpy_xenium_transcriptomics_subset.ipynb) and [proteomics](./tutorials/general/Harpy_feature_calculation.ipynb).

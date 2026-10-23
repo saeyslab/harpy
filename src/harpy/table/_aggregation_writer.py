@@ -32,13 +32,12 @@ from harpy.table._aggregation_checkpoint import (
     _AggregationCheckpoint,
     _CheckpointPartition,
 )
+from harpy.table._aggregation_contracts import _COUNT_DTYPE
 from harpy.table._metadata import (
     _AGGREGATE_POINTS_SOURCE_KIND,
-    _AUXILIARY_FEATURE_MATRIX_KEY,
-    _AUXILIARY_POINTS_FRACTION_COLUMN,
-    _FEATURE_CLASS_AGGREGATION_KEY,
-    _FEATURE_CLASS_AGGREGATION_SCHEMA_VERSION,
     _FEATURE_MATRIX_SCHEMA_VERSION,
+    _POINT_AGGREGATION_KEY,
+    _POINT_AGGREGATION_SCHEMA_VERSION,
 )
 from harpy.table._validation import _validate_table_without_canonical
 from harpy.table.canonical_centers import (
@@ -76,42 +75,6 @@ class _AggregationDestination:
     root: Path
     table_path: Path
     zarr_format: int
-
-
-@dataclass(frozen=True)
-class _FeatureClassWriteContract:
-    """Panel-defined axes and summaries needed by the component writer."""
-
-    feature_key: str
-    feature_class_key: str
-    classes: tuple[str, ...]
-    expression_class: str
-    features_by_class_items: tuple[tuple[str, tuple[str, ...]], ...]
-    count_columns: tuple[tuple[str, str], ...]
-
-    @property
-    def expression_feature_axis(self) -> tuple[str, ...]:
-        return dict(self.features_by_class_items)[self.expression_class]
-
-    @property
-    def auxiliary_classes(self) -> tuple[str, ...]:
-        return tuple(feature_class for feature_class in self.classes if feature_class != self.expression_class)
-
-    @property
-    def auxiliary_feature_axis(self) -> tuple[str, ...]:
-        grouped = dict(self.features_by_class_items)
-        return tuple(feature for feature_class in self.auxiliary_classes for feature in grouped[feature_class])
-
-    @property
-    def class_by_feature(self) -> dict[str, str]:
-        return {
-            feature: feature_class for feature_class, features in self.features_by_class_items for feature in features
-        }
-
-    @property
-    def auxiliary_class_feature_counts(self) -> dict[str, int]:
-        grouped = dict(self.features_by_class_items)
-        return {feature_class: len(grouped[feature_class]) for feature_class in self.auxiliary_classes}
 
 
 def _validate_aggregation_destination(
@@ -203,26 +166,32 @@ def _write_aggregation_table(
     region_key: str,
     instance_key: str,
     table_index_name: str,
-    class_contract: _FeatureClassWriteContract | None,
+    feature_class_key: str | None,
+    non_expression_class_matrix_axes: tuple[tuple[str, tuple[str, ...]], ...],
 ) -> SpatialData:
     """Construct, publish, and attach one table from a merged-count checkpoint.
 
     The caller supplies the resolved feature axis defining ``adata.X``: observed
     assigned-point features in ordinary mode or the panel-defined expression
-    axis in class-aware mode. In class-aware mode, the concatenated
-    non-expression axes define ``adata.obsm["auxiliary_feature_counts"]``. Both
+    axis in class-aware mode. In class-aware mode, ``non_expression_class_matrix_axes`` holds the
+    ``.obsm`` key and panel-defined feature axis of each non-expression class,
+    at least one, and ``feature_class_key`` the points column of the classes,
+    recorded as provenance; in ordinary mode they are ``()`` and ``None``. All
     matrices select their counts from the same lossless checkpoint.
     """
     if not expression_axis:
         raise ValueError("Aggregation produced no expression features.")
-    auxiliary_axis = () if class_contract is None else class_contract.auxiliary_feature_axis
+    if (feature_class_key is None) != (not non_expression_class_matrix_axes):
+        raise ValueError(
+            "Class-aware aggregation requires both 'feature_class_key' and 'non_expression_class_matrix_axes'; "
+            "ordinary aggregation neither."
+        )
 
     output_row_keys = checkpoint.output_row_keys
-    # Class-aware construction currently scans each checkpoint Parquet part
-    # three times: once for the ``.obs`` class summaries and once for each sparse
-    # output (``.X`` and ``.obsm["auxiliary_feature_counts"]``). Separate passes
+    # Class-aware construction scans each checkpoint Parquet part once per
+    # count matrix: ``.X`` and each non-expression class matrix in ``.obsm``. Separate passes
     # keep component writes memory-bounded, but a future single-pass block writer
-    # could derive all three outputs from one checkpoint read.
+    # could derive all matrices from one checkpoint read.
     log.info(f"Constructing AnnData '.obs' for table '{output_table_name}'.")
     obs = _aggregation_obs(
         checkpoint,
@@ -230,7 +199,6 @@ def _write_aggregation_table(
         table_index_name=table_index_name,
         region_key=region_key,
         instance_key=instance_key,
-        class_contract=class_contract,
     )
     log.info(f"Finished constructing AnnData '.obs' for table '{output_table_name}'.")
     canonical_centers, canonical_metadata = _canonical_table_payload(
@@ -243,8 +211,9 @@ def _write_aggregation_table(
     var = pd.DataFrame(index=pd.Index(expression_axis, name=feature_key))
     uns = _aggregation_uns(
         checkpoint,
-        class_contract=class_contract,
-        auxiliary_axis=auxiliary_axis,
+        feature_key=feature_key,
+        feature_class_key=feature_class_key,
+        non_expression_class_matrix_axes=non_expression_class_matrix_axes,
     )
     uns[SPATIAL_COORDINATES_KEY] = {CANONICAL_OBSM_KEY: canonical_metadata}
 
@@ -280,26 +249,24 @@ def _write_aggregation_table(
     # but the ordered CSR append serializes the chunk writes.
     _write_anndata_element(staging_group, ("X",), expression, logical_path=("X",), create_parents=False)
     log.info(f"Finished writing AnnData '.X' to staged table at '{staging_table_path / 'X'}'.")
-    if class_contract is not None:
-        auxiliary = _checkpoint_sparse_array(
+    for key, feature_axis in non_expression_class_matrix_axes:
+        class_counts = _checkpoint_sparse_array(
             checkpoint,
-            feature_axis=auxiliary_axis,
+            feature_axis=feature_axis,
         )
-        auxiliary_path = staging_table_path / "obsm" / _AUXILIARY_FEATURE_MATRIX_KEY
-        log.info(f"Writing AnnData '.obsm[{_AUXILIARY_FEATURE_MATRIX_KEY}]' to staged table at '{auxiliary_path}'.")
-        auxiliary_component = ("obsm", _AUXILIARY_FEATURE_MATRIX_KEY)
-        _write_anndata_element(
-            staging_group, auxiliary_component, auxiliary, logical_path=auxiliary_component, create_parents=False
-        )
-        log.info(
-            f"Finished writing AnnData '.obsm[{_AUXILIARY_FEATURE_MATRIX_KEY}]' to staged table at '{auxiliary_path}'."
-        )
+        class_path = staging_table_path / "obsm" / key
+        log.info(f"Writing AnnData '.obsm[{key}]' to staged table at '{class_path}'.")
+        component = ("obsm", key)
+        _write_anndata_element(staging_group, component, class_counts, logical_path=component, create_parents=False)
+        log.info(f"Finished writing AnnData '.obsm[{key}]' to staged table at '{class_path}'.")
 
     _validate_staged_table(
         staging_group,
         n_obs=len(output_row_keys),
         n_vars=len(expression_axis),
-        n_auxiliary=len(auxiliary_axis) if class_contract is not None else None,
+        non_expression_class_matrix_widths={
+            key: len(feature_axis) for key, feature_axis in non_expression_class_matrix_axes
+        },
     )
     staged_table = _read_backed_table(staging_group)
     _validate_complete_table(staged_table)
@@ -344,8 +311,8 @@ def _checkpoint_sparse_array(
                 feature_axis=feature_axis,
             ),
             shape=(len(partition.output_row_keys), len(feature_axis)),
-            dtype=np.uint32,
-            meta=sparse.csr_matrix((0, 0), dtype=np.uint32),
+            dtype=_COUNT_DTYPE,
+            meta=sparse.csr_matrix((0, 0), dtype=_COUNT_DTYPE),
         )
         for partition in checkpoint.partitions
     ]
@@ -362,8 +329,9 @@ def _checkpoint_partition_to_csr(
     ``feature_axis`` is the authoritative matrix-column order. Each long-form
     checkpoint feature is looked up by name and placed at its corresponding
     column index, so checkpoint row order cannot affect matrix-column order. The
-    caller also uses this same axis for ``adata.var_names`` or the auxiliary
-    matrix's ``feature_columns`` metadata.
+    caller also uses this same axis for ``adata.var_names`` or a
+    non-expression class matrix's ``feature_columns`` metadata. Checkpoint
+    features outside the axis, those of other classes, are left out.
     """
     frame = pd.read_parquet(
         partition.path,
@@ -383,15 +351,15 @@ def _checkpoint_partition_to_csr(
     columns = frame[_FEATURE_COLUMN].map(column_by_feature)
     selected = columns.notna().to_numpy()
     values = frame[_COUNT_COLUMN].to_numpy(dtype=np.uint64, copy=False)
-    if np.any(values[selected] > np.iinfo(np.uint32).max):
-        raise ValueError("Merged assigned-point counts exceed the uint32 output range.")
+    if np.any(values[selected] > np.iinfo(_COUNT_DTYPE).max):
+        raise ValueError(f"Merged assigned-point counts exceed the {_COUNT_DTYPE} output range.")
     matrix = sparse.coo_matrix(
         (
-            values[selected].astype(np.uint32, copy=False),
+            values[selected].astype(_COUNT_DTYPE, copy=False),
             (rows[selected], columns.loc[selected].to_numpy(dtype=np.int64, copy=False)),
         ),
         shape=(len(partition.output_row_keys), len(feature_axis)),
-        dtype=np.uint32,
+        dtype=_COUNT_DTYPE,
     ).tocsr()
     matrix.indices = matrix.indices.astype(np.int64, copy=False)
     matrix.indptr = matrix.indptr.astype(np.int64, copy=False)
@@ -405,8 +373,8 @@ def _aggregation_obs(
     table_index_name: str,
     region_key: str,
     instance_key: str,
-    class_contract: _FeatureClassWriteContract | None,
 ) -> pd.DataFrame:
+    """Construct ``.obs``: the row identity only, without derived statistics."""
     token = str(uuid.uuid4())[:8]
     labels_names = [checkpoint.pairs[pair].labels_name for pair, _ in output_row_keys]
     instance_ids = np.asarray([instance for _, instance in output_row_keys], dtype=np.uint64)
@@ -416,76 +384,7 @@ def _aggregation_obs(
     obs = pd.DataFrame(index=pd.Index(obs_names, name=table_index_name))
     obs[instance_key] = instance_ids
     obs[region_key] = pd.Categorical(labels_names, categories=[pair.labels_name for pair in checkpoint.pairs])
-
-    if class_contract is not None:
-        summaries = dask.compute(
-            *(
-                dask.delayed(_checkpoint_partition_class_counts)(partition, contract=class_contract)
-                for partition in checkpoint.partitions
-            )
-        )
-        class_counts = pd.concat(summaries).reindex(pd.MultiIndex.from_tuples(output_row_keys))
-        if class_counts.isna().any(axis=None):
-            raise ValueError("Checkpoint class summaries do not cover the complete output-row manifest.")
-        for feature_class, column_name in class_contract.count_columns:
-            values = class_counts[feature_class].to_numpy(dtype=np.uint64, copy=False)
-            if np.any(values > np.iinfo(np.uint32).max):
-                raise ValueError("Per-instance assigned-point counts exceed the uint32 output range.")
-            obs[column_name] = values.astype(np.uint32, copy=False)
-        total = class_counts.loc[:, list(class_contract.classes)].sum(axis=1).to_numpy(dtype=np.uint64)
-        auxiliary = class_counts.loc[:, list(class_contract.auxiliary_classes)].sum(axis=1).to_numpy(dtype=np.uint64)
-        if np.any(total == 0):
-            raise RuntimeError("Retained aggregation rows must contain at least one assigned point.")
-        obs[_AUXILIARY_POINTS_FRACTION_COLUMN] = auxiliary / total
     return obs
-
-
-def _checkpoint_partition_class_counts(
-    partition: _CheckpointPartition,
-    *,
-    contract: _FeatureClassWriteContract,
-) -> pd.DataFrame:
-    """Derive per-instance feature-class totals for one checkpoint partition.
-
-    The checkpoint stores ``(instance, feature, count)`` rows rather than a
-    separate class reduction. This function maps each feature to its class
-    through the validated panel contract, then sums the feature counts by
-    ``(aggregation pair, instance, class)``. Its columns follow the complete
-    panel class order, including zero totals.
-
-    Parameters
-    ----------
-    partition
-        Merged-count checkpoint partition whose instances are owned entirely
-        by that partition.
-    contract
-        Validated feature panel and expression-class selection.
-
-    Returns
-    -------
-    Dataframe indexed by ``(aggregation_pair, instance_id)`` with one unsigned
-    count column for every panel class.
-    """
-    frame = pd.read_parquet(
-        partition.path,
-        columns=[_PAIR_COLUMN, _CHECKPOINT_INSTANCE_COLUMN, _FEATURE_COLUMN, _COUNT_COLUMN],
-    )
-    feature_classes = frame[_FEATURE_COLUMN].map(contract.class_by_feature)
-    if feature_classes.isna().any():
-        raise ValueError("Checkpoint contains a feature absent from its feature-panel contract.")
-    values = frame.assign(feature_class=feature_classes).pivot_table(
-        index=[_PAIR_COLUMN, _CHECKPOINT_INSTANCE_COLUMN],
-        columns="feature_class",
-        values=_COUNT_COLUMN,
-        aggfunc="sum",
-        fill_value=0,
-        observed=True,
-    )
-    values = values.reindex(
-        index=pd.MultiIndex.from_tuples(partition.output_row_keys), columns=contract.classes, fill_value=0
-    )
-    values.index.names = [_PAIR_COLUMN, _CHECKPOINT_INSTANCE_COLUMN]
-    return values.astype(np.uint64, copy=False)
 
 
 def _canonical_table_payload(
@@ -540,39 +439,47 @@ def _canonical_table_payload(
 def _aggregation_uns(
     checkpoint: _AggregationCheckpoint,
     *,
-    class_contract: _FeatureClassWriteContract | None,
-    auxiliary_axis: tuple[str, ...],
+    feature_key: str,
+    feature_class_key: str | None,
+    non_expression_class_matrix_axes: tuple[tuple[str, tuple[str, ...]], ...],
 ) -> dict[str, object]:
-    if class_contract is None:
-        return {}
-    return {
-        _FEATURE_MATRICES_KEY: {
-            _AUXILIARY_FEATURE_MATRIX_KEY: {
+    """Construct the ``.uns`` records of an aggregation table.
+
+    In both modes, the ``point_aggregation`` record describes the sources of
+    the table: the points column of the features and, for each region, the
+    points element and coordinate system aggregated into it. It is provenance
+    only, read by no validation. In class-aware mode, the record also holds
+    the points column of the classes, and each non-expression class matrix registers its
+    column names under its own ``.obsm`` key. The record names no class: each
+    class other than the expression class appears only as the ``.obsm`` key of
+    its matrix, ``snake_case(class)``, for example ``"negative"`` for the class
+    ``Negative``.
+    """
+    record: dict[str, object] = {
+        "schema_version": _POINT_AGGREGATION_SCHEMA_VERSION,
+        "source_kind": _AGGREGATE_POINTS_SOURCE_KIND,
+        "feature_key": feature_key,
+    }
+    if feature_class_key is not None:
+        record["feature_class_key"] = feature_class_key
+    record["regions"] = {
+        pair.labels_name: {
+            "points_element": pair.points_name,
+            "coordinate_system": pair.coordinate_system,
+        }
+        for pair in checkpoint.pairs
+    }
+    uns: dict[str, object] = {_POINT_AGGREGATION_KEY: record}
+    if non_expression_class_matrix_axes:
+        uns[_FEATURE_MATRICES_KEY] = {
+            key: {
                 "schema_version": _FEATURE_MATRIX_SCHEMA_VERSION,
                 "source_kind": _AGGREGATE_POINTS_SOURCE_KIND,
-                "feature_columns": list(auxiliary_axis),
+                "feature_columns": list(feature_axis),
             }
-        },
-        _FEATURE_CLASS_AGGREGATION_KEY: {
-            "schema_version": _FEATURE_CLASS_AGGREGATION_SCHEMA_VERSION,
-            "source_kind": _AGGREGATE_POINTS_SOURCE_KIND,
-            "feature_key": class_contract.feature_key,
-            "feature_class_key": class_contract.feature_class_key,
-            "expression_class": class_contract.expression_class,
-            "classes": list(class_contract.classes),
-            "auxiliary_class_feature_counts": class_contract.auxiliary_class_feature_counts,
-            "count_columns": dict(class_contract.count_columns),
-            "auxiliary_points_fraction_column": _AUXILIARY_POINTS_FRACTION_COLUMN,
-            "auxiliary_feature_matrix_key": _AUXILIARY_FEATURE_MATRIX_KEY,
-            "regions": {
-                pair.labels_name: {
-                    "points_element": pair.points_name,
-                    "coordinate_system": pair.coordinate_system,
-                }
-                for pair in checkpoint.pairs
-            },
-        },
-    }
+            for key, feature_axis in non_expression_class_matrix_axes
+        }
+    return uns
 
 
 def _validate_staged_table(
@@ -580,15 +487,18 @@ def _validate_staged_table(
     *,
     n_obs: int,
     n_vars: int,
-    n_auxiliary: int | None,
+    non_expression_class_matrix_widths: Mapping[str, int],
 ) -> None:
     expression = sparse_dataset(group["X"])
     if expression.shape != (n_obs, n_vars):
         raise ValueError(f"Staged expression matrix has shape {expression.shape}, expected {(n_obs, n_vars)}.")
-    if n_auxiliary is not None:
-        auxiliary = sparse_dataset(group["obsm"][_AUXILIARY_FEATURE_MATRIX_KEY])
-        if auxiliary.shape != (n_obs, n_auxiliary):
-            raise ValueError(f"Staged auxiliary matrix has shape {auxiliary.shape}, expected {(n_obs, n_auxiliary)}.")
+    for key, n_features in non_expression_class_matrix_widths.items():
+        class_counts = sparse_dataset(group["obsm"][key])
+        if class_counts.shape != (n_obs, n_features):
+            raise ValueError(
+                f"Staged non-expression class matrix {key!r} has shape {class_counts.shape}, "
+                f"expected {(n_obs, n_features)}."
+            )
 
 
 def _install_aggregation_table(

@@ -1,6 +1,10 @@
 import os
 
+import pytest
+
+import harpy.qc as qc
 from harpy.qc import point_retention
+from harpy.qc.points import _point_retention as point_retention_module
 
 
 def test_point_retention(sdata_transcripts_no_backed, tmp_path):
@@ -15,16 +19,12 @@ def test_point_retention(sdata_transcripts_no_backed, tmp_path):
     assert df.shape == (96, 3)
 
 
-def test_deprecated_point_retention_alias(monkeypatch):
-    from harpy.qc.points import _point_retention as module
-
-    warnings = []
-    monkeypatch.setattr(module, "_WARNED_DEPRECATED_ATTRIBUTES", set())
-    monkeypatch.setattr(module.log, "warning", warnings.append)
-
-    from harpy.qc import analyse_genes_left_out
-
-    assert analyse_genes_left_out is point_retention
-    assert warnings == [
-        "`harpy.qc.analyse_genes_left_out` is deprecated. Import and use `harpy.qc.point_retention` instead."
-    ]
+def test_deprecated_point_retention_alias():
+    message = (
+        r"harpy\.qc\.analyse_genes_left_out is deprecated .* Use harpy\.qc\.point_retention, which takes the same "
+        r"arguments\."
+    )
+    for namespace in (qc, point_retention_module):
+        with pytest.warns(FutureWarning, match=message) as record:
+            assert namespace.analyse_genes_left_out is point_retention
+        assert [warning.filename for warning in record] == [__file__]

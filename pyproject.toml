@@ -4,7 +4,7 @@ requires = [ "hatchling" ]
 
 [project]
 name = "harpy-analysis"
-version = "0.5.0"
+version = "0.5.1"
 description = "single-cell spatial omics analysis that makes you happy."
 readme = "README.md"
 requires-python = ">=3.12,<3.15"
@@ -43,7 +43,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "anndata>=0.12.10",
+    "anndata>=0.13",
     "spatialdata>=0.7.3",
     "distributed",
     "scanpy>=1.11.1",
@@ -95,9 +95,13 @@ opencv = [
     "opencv-python-headless",
 ]
 # additional UI or CLI interfaces
-napari = [
+spatiato = [
     "napari[all]>=0.7.1",
     "spatiato>=0.2.0",
+]
+# Former name of the spatiato extra, kept so that existing installs keep working.
+napari = [
+    "harpy-analysis[spatiato]",
 ]
 vitessce = [
     "harpy-vitessce ; python_version >= '3.12'"

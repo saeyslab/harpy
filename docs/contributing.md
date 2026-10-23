@@ -9,11 +9,17 @@ See [Storage writes and overwrite guarantees](development/storage.md) for the
 shared storage architecture, whole-element versus component updates, and the
 responsibilities of writers and the publication layer during recovery.
 
+## Deprecations
+
+See [Deprecating functions and parameters](development/deprecations.md) for
+the warning, message and docstring that every deprecation in Harpy uses.
+
 ```{toctree}
 :hidden: true
 
 development/storage
 development/metadata
+development/deprecations
 ```
 
 ## Setting up a development environment

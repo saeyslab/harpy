@@ -21,7 +21,7 @@
 [![Downloads](https://static.pepy.tech/badge/harpy-analysis)](https://pepy.tech/project/harpy-analysis)
 [![License](https://img.shields.io/badge/license-BSD%203--Clause-blue)](./LICENSE)
 ![GitHub repo size](https://img.shields.io/github/repo-size/saeyslab/harpy)
-[![Zenodo](https://zenodo.org/badge/763481288.svg)](https://zenodo.org/badge/latestdoi/763481288)
+[![DOI](https://img.shields.io/badge/DOI-10.5281%2Fzenodo.15546703-blue)](https://doi.org/10.5281/zenodo.15546703)
 [![Paper](https://img.shields.io/badge/Paper-Bioinformatics%20btag122-blue)](https://doi.org/10.1093/bioinformatics/btag122)
 
 </div>
@@ -33,7 +33,7 @@
   ·
   <a href="https://harpy.readthedocs.io/en/latest/tutorials/index.html">Tutorials</a>
   ·
-  <a href="https://github.com/vibspatial/napari-harpy">napari-harpy</a>
+  <a href="https://github.com/vibspatial/spatiato">spatiato</a>
   ·
   <a href="https://github.com/vibspatial/harpy_vitessce">harpy-vitessce</a>
 </p>
@@ -71,17 +71,18 @@ pip install "harpy-analysis[extra]"
 - Vitessce: `harpy-vitessce`
 - Notebook workflows: `ipywidgets`, `tqdm`, `bokeh`, `textalloc`, `joypy`, `supervenn`, `nbconvert`, `ipython`
 
-**With extras and napari**
+**With spatiato**
+
+[spatiato](https://github.com/vibspatial/spatiato) is a spatial omics interface for [napari](https://napari.org/stable/), built on `SpatialData` and `Harpy`, for interactive exploration and analysis of `SpatialData` stores.
 
 ```bash
-pip install "harpy-analysis[extra,napari]"
+pip install "harpy-analysis[spatiato]"
 ```
 
-`[napari]` adds:
+`[spatiato]` adds:
 
 - `napari[all]`
-- `napari-harpy`
-- `napari-spatialdata`
+- `spatiato`
 
 **Only for developers.** Clone this repository locally, install the `.[dev]` instead of the `[extra]` dependencies and read the [contribution guide](https://harpy.readthedocs.io/en/latest/contributing.html).
 

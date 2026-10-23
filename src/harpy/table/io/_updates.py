@@ -27,10 +27,10 @@ from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
 from harpy._storage._anndata import (
-    _MATRIX_MAPPINGS,
     _decode_anndata_element,
     _element_identity,
     _lazy_read_source,
+    _matrix_components,
     _read_anndata_element,
 )
 from harpy.table.io._components import _component_update_destination, _update_table_components
@@ -513,11 +513,8 @@ def _table_components(adata: AnnData) -> dict[ComponentPath, object]:
     the SpatialData annotation, which is checked separately and never written;
     and ``raw``'s ``X``, ``var`` and ``varm`` entries.
     """
-    components: dict[ComponentPath, object] = {} if adata.X is None else {("X",): adata.X}
-    components[("obs",)] = adata.obs
-    components[("var",)] = adata.var
-    for slot in _MATRIX_MAPPINGS:
-        components.update({(slot, key): value for key, value in getattr(adata, slot).items()})
+    components: dict[ComponentPath, object] = {("obs",): adata.obs, ("var",): adata.var}
+    components.update(_matrix_components(adata))
     components.update({("uns", key): value for key, value in adata.uns.items() if key != TableModel.ATTRS_KEY})
     if adata.raw is not None:
         components[("raw", "X")] = adata.raw.X
