@@ -35,7 +35,7 @@ jobs:
             python: "3.12"
             deps: stable
           - os: ubuntu-latest
-            python: "3.13" # for 3.14 CI wait for https://github.com/pytorch/pytorch/issues/156856
+            python: "3.13" # for 3.14 CI wait for https://github.com/saeyslab/harpy/issues/269 (crick)
             deps: locked
           - os: ubuntu-latest
             python: "3.13"
@@ -70,6 +70,16 @@ jobs:
           path: ~/.cache/sparrow
           key: harpy-datasets-${{ hashFiles('src/harpy/datasets/registry.py') }}
           restore-keys: harpy-datasets-
+
+      # Pretrained models that cellpose downloads on first use (~/.cellpose/models); shared by all matrix jobs.
+      # The key changes with the segmentation tests, which choose the models; restore-keys reuses the previous
+      # cache, and cellpose only downloads the models that are missing.
+      - name: Cache cellpose models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cellpose/models
+          key: cellpose3-models-${{ hashFiles('src/harpy/_tests/test_image/test_segmentation/test_segmentation.py') }}
+          restore-keys: cellpose3-models-
 
       # locked: --locked fails immediately if uv.lock is out of date with pyproject.toml.
       # stable: --upgrade re-resolves to the newest allowed versions, keeping the [tool.uv] overrides,
