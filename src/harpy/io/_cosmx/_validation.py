@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 from dask.dataframe import DataFrame as DaskDataFrame
 from spatialdata import SpatialData, read_zarr
+from xarray import DataArray
 
 from harpy._feature_panels import _FeaturePanelContract
 from harpy._metadata import (
@@ -22,7 +23,7 @@ from harpy._metadata import (
     _PROVENANCE_METADATA_KEY,
 )
 from harpy.image._image import get_dataarray
-from harpy.io._cosmx._constants import _COMPARTMENT_CATEGORIES, _INSTANCE_ID_FORMULA
+from harpy.io._cosmx._constants import _COMPARTMENT_CATEGORIES, _FOV_BOUNDS_FIELDS, _INSTANCE_ID_FORMULA
 from harpy.io._cosmx._models import _INSTANCE_ID_DTYPE, _MOSAIC_MODES, _validate_identifier
 
 _ELEMENT_REGISTRIES = (_IMAGES_METADATA_KEY, _LABELS_METADATA_KEY, _POINTS_METADATA_KEY)
@@ -148,7 +149,8 @@ def _validate_image_records(sdata: SpatialData, registry: Mapping[str, object]) 
         path = _element_path(_IMAGES_METADATA_KEY, element_name)
         _require_registered_element(sdata.images, element_name, element_type="image", path=path)
         record = _require_mapping(value, path=path)
-        sample_ids.add(_validate_common_element_record(record, path=path))
+        array = get_dataarray(sdata, element_name)
+        sample_ids.add(_validate_common_element_record(record, path=path, raster_shape=_raster_shape(array)))
 
         channels = record.get("channels")
         if not isinstance(channels, list) or not channels:
@@ -174,7 +176,6 @@ def _validate_image_records(sdata: SpatialData, registry: Mapping[str, object]) 
         _require_unique(source_planes, path=f"{path}.channels.source_plane")
         _require_unique(output_coordinates, path=f"{path}.channels.output_coordinate")
 
-        array = get_dataarray(sdata, element_name)
         if "c" not in array.dims or "c" not in array.coords:
             raise ValueError(f"CosMx image element {element_name!r} must have a channel coordinate.")
         actual_coordinates = array.coords["c"].values.tolist()
@@ -192,7 +193,8 @@ def _validate_labels_records(sdata: SpatialData, registry: Mapping[str, object])
         path = _element_path(_LABELS_METADATA_KEY, element_name)
         _require_registered_element(sdata.labels, element_name, element_type="labels", path=path)
         record = _require_mapping(value, path=path)
-        sample_ids.add(_validate_common_element_record(record, path=path))
+        array = get_dataarray(sdata, element_name)
+        sample_ids.add(_validate_common_element_record(record, path=path, raster_shape=_raster_shape(array)))
 
         has_instance_encoding = "instance_id_encoding" in record
         has_categories = "categories" in record
@@ -201,7 +203,6 @@ def _validate_labels_records(sdata: SpatialData, registry: Mapping[str, object])
                 f"CosMx metadata {path} must contain exactly one of 'instance_id_encoding' or 'categories'."
             )
 
-        array = get_dataarray(sdata, element_name)
         if has_instance_encoding:
             encoding = _require_mapping(record["instance_id_encoding"], path=f"{path}.instance_id_encoding")
             background = encoding.get("background")
@@ -247,7 +248,7 @@ def _validate_points_records(
         path = _element_path(_POINTS_METADATA_KEY, element_name)
         _require_registered_element(sdata.points, element_name, element_type="points", path=path)
         record = _require_mapping(value, path=path)
-        sample_ids.add(_validate_common_element_record(record, path=path))
+        sample_ids.add(_validate_common_element_record(record, path=path, raster_shape=None))
 
         panel_name = record.get("feature_panel")
         if panel_name is None:
@@ -426,7 +427,17 @@ def _points_panel_partition_error(
     return pd.Series([error], name="error", dtype="object")
 
 
-def _validate_common_element_record(record: Mapping[str, object], *, path: str) -> str:
+def _validate_common_element_record(
+    record: Mapping[str, object],
+    *,
+    path: str,
+    raster_shape: tuple[int, int] | None,
+) -> str:
+    """Validate the fields shared by all element records and return the sample ID.
+
+    ``raster_shape`` is the scale-0 ``(y, x)`` shape of an image or labels
+    element, which every FOV rectangle must lie within; points pass ``None``.
+    """
     sample_id = record.get("sample_id")
     try:
         _validate_identifier(sample_id, name="sample identifier")
@@ -462,6 +473,8 @@ def _validate_common_element_record(record: Mapping[str, object], *, path: str) 
         if isinstance(value, bool) or not isinstance(value, int):
             raise ValueError(f"CosMx metadata {path}.source_origin_px.{axis} must be an integer, found {value!r}.")
 
+    _validate_fov_bounds(record, fovs=fovs, path=path, raster_shape=raster_shape)
+
     orientation = _require_mapping(record.get("orientation"), path=f"{path}.orientation")
     for axis in ("flip_x", "flip_y"):
         if not isinstance(orientation.get(axis), bool):
@@ -479,6 +492,57 @@ def _validate_common_element_record(record: Mapping[str, object], *, path: str) 
     if "acquisition_timestamp" in record:
         _require_nonempty_string(record["acquisition_timestamp"], path=f"{path}.acquisition_timestamp")
     return sample_id
+
+
+def _validate_fov_bounds(
+    record: Mapping[str, object],
+    *,
+    fovs: list[int],
+    path: str,
+    raster_shape: tuple[int, int] | None,
+) -> None:
+    """Validate the half-open FOV rectangles of a record with valid ``fovs``."""
+    path = f"{path}.fov_bounds_px"
+    if "fov_bounds_px" not in record:
+        raise ValueError(
+            f"CosMx metadata {path} is required. Stores written by older Harpy versions lack it; "
+            "run the CosMx reader again to rewrite the store."
+        )
+    bounds = _require_mapping(record["fov_bounds_px"], path=path)
+    keys = [str(fov) for fov in fovs]
+    if set(bounds) != set(keys):
+        raise ValueError(f"CosMx metadata {path} keys must equal fovs as strings, {keys}, found {list(bounds)}.")
+
+    rectangles: list[tuple[str, int, int, int, int]] = []
+    for key in keys:
+        rectangle_path = f"{path}[{key!r}]"
+        rectangle = _require_mapping(bounds[key], path=rectangle_path)
+        if set(rectangle) != set(_FOV_BOUNDS_FIELDS):
+            raise ValueError(
+                f"CosMx metadata {rectangle_path} must contain exactly the fields {list(_FOV_BOUNDS_FIELDS)}, "
+                f"found {list(rectangle)}."
+            )
+        y0, x0, y1, x1 = (
+            _require_nonnegative_integer(rectangle[field], path=f"{rectangle_path}.{field}")
+            for field in _FOV_BOUNDS_FIELDS
+        )
+        if y0 >= y1 or x0 >= x1:
+            raise ValueError(f"CosMx metadata {rectangle_path} must have y0 < y1 and x0 < x1, found {dict(rectangle)}.")
+        if raster_shape is not None and (y1 > raster_shape[0] or x1 > raster_shape[1]):
+            raise ValueError(
+                f"CosMx metadata {rectangle_path} must lie within the element's (y, x) shape {raster_shape}, "
+                f"found {dict(rectangle)}."
+            )
+        rectangles.append((key, y0, x0, y1, x1))
+
+    for index, (key, y0, x0, y1, x1) in enumerate(rectangles):
+        for other_key, other_y0, other_x0, other_y1, other_x1 in rectangles[index + 1 :]:
+            if max(y0, other_y0) < min(y1, other_y1) and max(x0, other_x0) < min(x1, other_x1):
+                raise ValueError(f"CosMx metadata {path} rectangles of FOVs {key} and {other_key} overlap.")
+
+
+def _raster_shape(array: DataArray) -> tuple[int, int]:
+    return array.sizes["y"], array.sizes["x"]
 
 
 def _normalize_compartment_categories(value: object, *, path: str) -> dict[int, str]:
