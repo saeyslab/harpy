@@ -90,6 +90,10 @@ def test_add_transcript_points_splits_mosaics_and_roundtrips(
             "adjacency_tolerance_px": preview.adjacency_tolerance_px,
         },
         "source_origin_px": {"x": 0, "y": 0},
+        "fov_bounds_px": {
+            "1": {"y0": 0, "x0": 0, "y1": 8, "x1": 8},
+            "2": {"y0": 0, "x0": 8, "y1": 8, "x1": 16},
+        },
         "orientation": {"flip_x": True, "flip_y": False},
         "pixel_size_um": 1.0,
         "acquisition_timestamp": "20240101_100000_S2",
@@ -132,7 +136,7 @@ def test_transcript_coordinates_follow_raster_orientation(
 
     result = _transcripts._normalize_transcript_partition(
         frame,
-        placement=(20, 12),
+        tile_origin=(20, 12),
         tile_shape=(8, 6),
         gene_categories=("GeneA",),
         flip_x=flip_x,
@@ -158,7 +162,7 @@ def test_transcript_coordinates_must_be_inside_fov_bounds(x: float, y: float) ->
     with pytest.raises(ValueError, match=r"outside FOV bounds 0 <= x < 6 and 0 <= y < 8"):
         _transcripts._normalize_transcript_partition(
             frame,
-            placement=(20, 12),
+            tile_origin=(20, 12),
             tile_shape=(8, 6),
             gene_categories=("GeneA",),
             flip_x=False,

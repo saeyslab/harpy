@@ -9,14 +9,17 @@ import numpy as np
 import pandas as pd
 import pytest
 import tifffile
+from anndata import AnnData
 from spatialdata import SpatialData, read_zarr
-from spatialdata.transformations import get_transformation
+from spatialdata.models import TableModel
+from spatialdata.transformations import get_transformation, get_transformation_between_coordinate_systems
 
 from harpy import __version__
 from harpy.image._image import get_dataarray
 from harpy.io import CosmxSample, cosmx
 from harpy.io._cosmx import _reader
 from harpy.io._cosmx._models import _TRANSCRIPTS_PRODUCT
+from harpy.table import add_canonical_centers
 
 
 @pytest.fixture
@@ -82,7 +85,72 @@ def test_cosmx_reads_one_sample_with_sample_scoped_names_and_metadata(
     panel_name = panel_names.pop()
     assert panel_name.startswith("feature_panel_")
     assert {record["feature_panel"] for record in metadata["points"].values()} == {panel_name}
+    expected_bounds = {
+        1: {"1": {"y0": 0, "x0": 0, "y1": 8, "x1": 8}, "2": {"y0": 0, "x0": 8, "y1": 8, "x1": 16}},
+        2: {"3": {"y0": 0, "x0": 0, "y1": 8, "x1": 8}},
+    }
+    for mosaic, bounds in expected_bounds.items():
+        records = [
+            record
+            for registry in ("images", "labels", "points")
+            for name, record in metadata[registry].items()
+            if name.endswith(f"_mosaic_{mosaic}")
+        ]
+        assert len(records) == 4
+        assert all(record["fov_bounds_px"] == bounds for record in records)
     assert not _generated_siblings(output)
+
+
+def test_cosmx_fov_bounds_assign_instance_label_centers_to_their_fov(
+    decoded_cosmx_path: Path,
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "cosmx.zarr"
+    sdata = cosmx(
+        {"sample": CosmxSample(path=decoded_cosmx_path)},
+        output,
+        compartment_labels=False,
+        points=False,
+        image_chunks=(1, 4, 4),
+        labels_chunks=(4, 4),
+    )
+    image = "sample_morphology_image_mosaic_1"
+    labels = "sample_instance_labels_mosaic_1"
+    cell_ids = np.unique(get_dataarray(sdata, labels).data.compute())
+    cell_ids = cell_ids[cell_ids > 0]
+    sdata.tables["table"] = TableModel.parse(
+        AnnData(
+            X=np.zeros((len(cell_ids), 1)),
+            obs=pd.DataFrame(
+                {"region": pd.Categorical([labels] * len(cell_ids)), "cell_ID": cell_ids},
+                index=cell_ids.astype(str),
+            ),
+        ),
+        region_key="region",
+        region=labels,
+        instance_key="cell_ID",
+    )
+    sdata.write_element("table")
+    sdata = read_zarr(output)
+    add_canonical_centers(sdata, table_name="table")
+    table = sdata.tables["table"]
+
+    # The assignment documented in the reader docstring.
+    bounds = sdata.attrs["harpy"]["images"][image]["fov_bounds_px"]
+    centers = table.obsm["spatial_canonical"][:, 1:]
+    t = get_transformation_between_coordinate_systems(
+        sdata, sdata[labels], sdata[image], intermediate_coordinate_systems="sample_global_1"
+    )
+    matrix = t.to_affine_matrix(input_axes=("y", "x"), output_axes=("y", "x"))
+    yx = centers @ matrix[:2, :2].T + matrix[:2, 2]
+    y, x = np.floor(yx + 0.5).astype(np.int64).T
+    fov = np.zeros(len(yx), dtype=int)
+    for name, b in bounds.items():
+        fov[(b["y0"] <= y) & (y < b["y1"]) & (b["x0"] <= x) & (x < b["x1"])] = int(name)
+
+    base = sdata.attrs["harpy"]["labels"][labels]["instance_id_encoding"]["base"]
+    np.testing.assert_array_equal(fov, table.obs["cell_ID"].to_numpy() // base + 1)
+    assert set(fov) == {1, 2}
 
 
 def test_cosmx_writes_two_samples_with_independent_configuration(
