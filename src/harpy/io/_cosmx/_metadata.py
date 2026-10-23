@@ -22,7 +22,6 @@ def _commit_element_metadata(
     record: Mapping[str, object],
     reader_version: str | None,
     feature_panel: tuple[str, Mapping[str, object]] | None = None,
-    cleanup_element_on_failure: bool = True,
 ) -> None:
     """Persist one element record after its payload has been written successfully.
 
@@ -50,16 +49,15 @@ def _commit_element_metadata(
         sdata.attrs = attrs
         sdata.write_attrs()
     except Exception:
-        if cleanup_element_on_failure:
-            if sdata.get(element_name) is not None:
-                del sdata[element_name]
-            try:
-                sdata.delete_element_from_disk(element_name)
-            except Exception as cleanup_error:  # noqa: BLE001
-                log.warning(
-                    f"Best-effort cleanup failed for CosMx element {element_name!r} after its metadata "
-                    f"commit failed: {cleanup_error}"
-                )
+        if sdata.get(element_name) is not None:
+            del sdata[element_name]
+        try:
+            sdata.delete_element_from_disk(element_name)
+        except Exception as cleanup_error:  # noqa: BLE001
+            log.warning(
+                f"Best-effort cleanup failed for CosMx element {element_name!r} after its metadata "
+                f"commit failed: {cleanup_error}"
+            )
         sdata.attrs = previous_attrs
         try:
             sdata.write_attrs()
