@@ -20,16 +20,13 @@ from harpy.io._cosmx._models import (
     _COMPARTMENT_LABELS_PRODUCT,
     _INSTANCE_ID_DTYPE,
     _INSTANCE_LABELS_PRODUCT,
+    _CosmxManifest,
     _CosmxMosaicGeometry,
     _CosmxPreview,
     _instance_id_base,
 )
-from harpy.io._cosmx._raster import (
-    _assemble_raster,
-    _mosaic_block_grid,
-    _mosaic_placements,
-    _pixel_coordinate_system,
-)
+from harpy.io._cosmx._names import _element_name, _micron_coordinate_system, _pixel_coordinate_system
+from harpy.io._cosmx._raster import _assemble_raster
 
 _DEFAULT_CHUNKS = (1024, 1024)
 _LabelFamily = Literal["instance_labels", "compartment_labels"]
@@ -47,7 +44,6 @@ def _add_instance_labels(
     chunks: tuple[int, int] = _DEFAULT_CHUNKS,
     scale_factors: ScaleFactors_t | None = None,
     reader_version: str | None = None,
-    overwrite: bool = False,
 ) -> SpatialData:
     """Add one lazy, globally ID-remapped instance-label raster per mosaic."""
     return _add_label_family(
@@ -62,7 +58,6 @@ def _add_instance_labels(
         scale_factors=scale_factors,
         reader_version=reader_version,
         sample_id=sample_id,
-        overwrite=overwrite,
     )
 
 
@@ -78,7 +73,6 @@ def _add_compartment_labels(
     chunks: tuple[int, int] = _DEFAULT_CHUNKS,
     scale_factors: ScaleFactors_t | None = None,
     reader_version: str | None = None,
-    overwrite: bool = False,
 ) -> SpatialData:
     """Add one lazy semantic compartment-label raster per mosaic."""
     return _add_label_family(
@@ -93,7 +87,6 @@ def _add_compartment_labels(
         scale_factors=scale_factors,
         reader_version=reader_version,
         sample_id=sample_id,
-        overwrite=overwrite,
     )
 
 
@@ -110,7 +103,6 @@ def _add_label_family(
     scale_factors: ScaleFactors_t | None,
     reader_version: str | None,
     sample_id: str,
-    overwrite: bool,
 ) -> SpatialData:
     """Add one lazy label raster per mosaic for a single CosMx label family.
 
@@ -129,6 +121,9 @@ def _add_label_family(
       pixel coordinate system. This origin is subtracted from every FOV
       position so that the mosaic starts at ``(0, 0)``. It is source-geometry
       metadata, not an active SpatialData transformation;
+    - ``fov_bounds_px``: each FOV's half-open pixel bounds ``y0``, ``x0``,
+      ``y1``, ``x1`` in the raster's full-resolution intrinsic frame, keyed by
+      FOV number as a string;
     - ``orientation``: dataset-wide local x/y-axis flips applied before
       placement;
     - ``pixel_size_um``: physical size of one source pixel coordinate unit;
@@ -162,8 +157,6 @@ def _add_label_family(
         Optional relative factors used to construct a lazy label pyramid.
     reader_version
         Optional Harpy version persisted with each successfully written element.
-    overwrite
-        Whether existing label elements with the planned names may be replaced.
 
     Returns
     -------
@@ -181,14 +174,13 @@ def _add_label_family(
 
     _validate_label_chunks(chunks)
     _validate_metadata_destination(sdata, _LABELS_METADATA_KEY)
-    element_names = tuple(_labels_element_name(output_labels_name, mosaic.mosaic) for mosaic in preview.mosaics)
-    existing = {name: element_type for element_type, name, _ in sdata.gen_elements() if name in element_names}
+    output_element_names = tuple(_element_name(output_labels_name, mosaic.mosaic) for mosaic in preview.mosaics)
+    existing = {name: element_type for element_type, name, _ in sdata.gen_elements() if name in output_element_names}
     wrong_type = sorted(name for name, element_type in existing.items() if element_type != "labels")
     if wrong_type:
         raise ValueError(f"CosMx label output names already belong to non-label elements: {wrong_type}.")
-    collisions = sorted(existing)
-    if collisions and not overwrite:
-        raise ValueError(f"CosMx label elements already exist: {collisions}.")
+    if existing:
+        raise ValueError(f"CosMx label elements already exist: {sorted(existing)}.")
 
     source_dtype_name = (
         preview.manifest.run.instance_labels_dtype
@@ -199,11 +191,10 @@ def _add_label_family(
         raise ValueError(f"CosMx preview has no dtype for {family}.")
     source_dtype = np.dtype(source_dtype_name)
     output_dtype = _INSTANCE_ID_DTYPE if family == _INSTANCE_LABELS_PRODUCT else source_dtype
-    placements = {mosaic.mosaic: _mosaic_placements(preview, mosaic) for mosaic in preview.mosaics}
 
     instance_id_base = _instance_id_base(source_dtype) if family == _INSTANCE_LABELS_PRODUCT else None
 
-    for mosaic, element_name in zip(preview.mosaics, element_names, strict=True):
+    for mosaic, output_element_name in zip(preview.mosaics, output_element_names, strict=True):
         metadata = {
             "fovs": list(mosaic.fovs),
             "sample_id": sample_id,
@@ -212,6 +203,7 @@ def _add_label_family(
                 "adjacency_tolerance_px": preview.adjacency_tolerance_px,
             },
             "source_origin_px": {"x": mosaic.origin_x_px, "y": mosaic.origin_y_px},
+            "fov_bounds_px": mosaic.fov_bounds_px,
             "orientation": {"flip_x": flip_x, "flip_y": flip_y},
             "pixel_size_um": preview.manifest.run.pixel_size_um,
         }
@@ -227,9 +219,8 @@ def _add_label_family(
         if preview.manifest.run.acquisition_timestamp is not None:
             metadata["acquisition_timestamp"] = preview.manifest.run.acquisition_timestamp
         array = _label_mosaic(
-            preview,
+            preview.manifest,
             mosaic,
-            placements=placements[mosaic.mosaic],
             family=family,
             source_dtype=source_dtype,
             output_dtype=output_dtype,
@@ -245,35 +236,32 @@ def _add_label_family(
         sdata = add_labels(
             sdata,
             arr=array,
-            output_labels_name=element_name,
+            output_labels_name=output_element_name,
             dims=("y", "x"),
             chunks=chunks,
             transformations={
                 pixel_coordinate_system: Identity(),
-                f"{pixel_coordinate_system}_micron": Scale(
+                _micron_coordinate_system(pixel_coordinate_system): Scale(
                     [preview.manifest.run.pixel_size_um, preview.manifest.run.pixel_size_um],
                     axes=("x", "y"),
                 ),
             },
             scale_factors=scale_factors,
-            overwrite=overwrite,
         )
         _commit_element_metadata(
             sdata,
             registry=_LABELS_METADATA_KEY,
-            element_name=element_name,
+            element_name=output_element_name,
             record=metadata,
             reader_version=reader_version,
-            cleanup_element_on_failure=not overwrite,
         )
     return sdata
 
 
 def _label_mosaic(
-    preview: _CosmxPreview,
+    manifest: _CosmxManifest,
     mosaic: _CosmxMosaicGeometry,
     *,
-    placements: dict[int, tuple[int, int]],
     family: _LabelFamily,
     source_dtype: np.dtype,
     output_dtype: np.dtype,
@@ -282,18 +270,13 @@ def _label_mosaic(
     chunks: tuple[int, int],
 ) -> da.Array:
     """Construct one lazy ``(y, x)`` label mosaic without reading pixels."""
-    block_grid = _mosaic_block_grid(
-        mosaic,
-        placements=placements,
-        tile_shape=preview.manifest.run.tile_shape,
-    )
-    fovs_by_id = preview.manifest.fovs_by_id
+    fovs_by_id = manifest.fovs_by_id
     planes = {
         fov: _lazy_label_plane(
             getattr(fovs_by_id[fov], family),
             fov=fov,
             family=family,
-            expected_shape=preview.manifest.run.tile_shape,
+            expected_shape=mosaic.tile_shape,
             source_dtype=source_dtype,
             output_dtype=output_dtype,
             flip_x=flip_x,
@@ -301,7 +284,7 @@ def _label_mosaic(
         )
         for fov in mosaic.fovs
     }
-    result = _assemble_raster(block_grid, planes=planes, dtype=output_dtype).rechunk(chunks)
+    result = _assemble_raster(mosaic, planes=planes, dtype=output_dtype).rechunk(chunks)
     if result.shape != mosaic.shape:
         raise RuntimeError(f"Constructed CosMx {family} mosaic has shape {result.shape}; expected {mosaic.shape}.")
     return result
@@ -401,7 +384,3 @@ def _validate_label_chunks(chunks: tuple[int, int]) -> None:
         or any(not isinstance(chunk, int) or isinstance(chunk, bool) or chunk < 1 for chunk in chunks)
     ):
         raise ValueError(f"CosMx label chunks must be two positive integers, found {chunks!r}.")
-
-
-def _labels_element_name(base: str, mosaic: int) -> str:
-    return f"{base}_mosaic_{mosaic}"

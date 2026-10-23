@@ -150,20 +150,7 @@ def _single_mosaic_geometry(
     """Place all selected FOVs in one bounding canvas without adjacency grouping."""
     if not positions:
         return ()
-    height, width = tile_shape
-    origin_x = min(position.x_px for position in positions.values())
-    origin_y = min(position.y_px for position in positions.values())
-    max_x = max(position.x_px + width for position in positions.values())
-    max_y = max(position.y_px + height for position in positions.values())
-    return (
-        _CosmxMosaicGeometry(
-            mosaic=1,
-            fovs=tuple(sorted(positions)),
-            origin_x_px=origin_x,
-            origin_y_px=origin_y,
-            shape=(max_y - origin_y, max_x - origin_x),
-        ),
-    )
+    return (_mosaic_geometry(1, positions, tile_shape=tile_shape),)
 
 
 def _mosaic_geometries(
@@ -212,7 +199,8 @@ def _mosaic_geometries(
     tuple of _CosmxMosaicGeometry
         Derived mosaic groups ordered deterministically by decreasing FOV
         count, then global position and FOV number. These groups describe
-        spatial proximity and are not authoritative vendor ROI assignments.
+        spatial proximity only; they are not regions defined in the CosMx
+        software.
     """
     if not positions:
         return ()
@@ -263,22 +251,28 @@ def _mosaic_geometries(
         ),
     )
 
-    mosaics = []
-    for mosaic, group in enumerate(ordered_groups, start=1):
-        origin_x = min(positions[fov].x_px for fov in group)
-        origin_y = min(positions[fov].y_px for fov in group)
-        max_x = max(positions[fov].x_px + width for fov in group)
-        max_y = max(positions[fov].y_px + height for fov in group)
-        mosaics.append(
-            _CosmxMosaicGeometry(
-                mosaic=mosaic,
-                fovs=group,
-                origin_x_px=origin_x,
-                origin_y_px=origin_y,
-                shape=(max_y - origin_y, max_x - origin_x),
-            )
-        )
-    return tuple(mosaics)
+    return tuple(
+        _mosaic_geometry(mosaic, {fov: positions[fov] for fov in group}, tile_shape=tile_shape)
+        for mosaic, group in enumerate(ordered_groups, start=1)
+    )
+
+
+def _mosaic_geometry(
+    mosaic: int,
+    positions: dict[int, _CosmxFovPosition],
+    *,
+    tile_shape: tuple[int, int],
+) -> _CosmxMosaicGeometry:
+    """Place FOVs on one canvas whose upper-left corner is their bounding corner."""
+    origin_x = min(position.x_px for position in positions.values())
+    origin_y = min(position.y_px for position in positions.values())
+    return _CosmxMosaicGeometry(
+        mosaic=mosaic,
+        origin_x_px=origin_x,
+        origin_y_px=origin_y,
+        tile_origins={fov: (position.y_px - origin_y, position.x_px - origin_x) for fov, position in positions.items()},
+        tile_shape=tile_shape,
+    )
 
 
 def _default_adjacency_tolerance_px(tile_shape: tuple[int, int]) -> int:
