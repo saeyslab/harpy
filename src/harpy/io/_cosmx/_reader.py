@@ -75,6 +75,15 @@ def cosmx(
     Every generated element and coordinate system is prefixed by its sample ID,
     including for a one-entry mapping.
 
+    The FOVs of a sample are grouped into mosaics: a mosaic is a group of
+    adjacent FOVs, stitched into one canvas. For each mosaic, the reader
+    writes one element per enabled product, named
+    ``<sample>_<base>_mosaic_<n>``, in the mosaic's own pixel and micron
+    coordinate systems, ``<sample>_<coordinate_system>_<n>`` and
+    ``<sample>_<coordinate_system>_<n>_micron``. Harpy assigns the mosaic
+    numbers, not CosMx: they count from 1, in order of decreasing FOV count.
+    ``mosaic_mode`` of :class:`CosmxSample` sets how FOVs are grouped.
+
     The complete output is transactional. Data are written directly into a
     temporary sibling Zarr store and published only after that store can be
     reopened. ``overwrite=True`` replaces a complete CosMx store; it never
@@ -204,7 +213,8 @@ def cosmx(
 
     ``fov_bounds_px`` gives each FOV's tile as half-open pixel bounds
     ``[y0, y1) × [x0, x1)`` in the element's intrinsic frame at full
-    resolution, keyed by FOV number as a string; see Notes.
+    resolution, keyed by FOV number as a string; see
+    :func:`harpy.io.assign_cosmx_fovs`.
 
     When an authoritative run-level plex is available, ``feature_panel`` is a
     points-record reference whose value is the key of a content-addressed
@@ -266,37 +276,10 @@ def cosmx(
 
     **Assigning cells to FOVs**
 
-    ``fov_bounds_px`` assigns cells to FOVs for any segmentation mask of a
-    mosaic that a table annotates, such as a custom segmentation. All elements
-    of a mosaic share the same bounds, but only elements written by the reader
-    record them, so read them from the mosaic's CosMx morphology image,
-    ``<sample>_morphology_image_mosaic_<n>``, also when the segmentation ran on
-    another image, such as a preprocessed copy. Map the table's
-    ``spatial_canonical`` centers from the segmentation mask's frame into that
-    image's frame and find the FOV whose bounds contain each center's pixel.
-    With ``image`` the mosaic's CosMx morphology image, ``labels`` the
-    segmentation mask annotated by the table and ``pixel_coordinate_system``
-    the mosaic's ``<sample>_<coordinate_system>_<n>``::
-
-        bounds = sdata.attrs["harpy"]["images"][image]["fov_bounds_px"]
-        t = get_transformation_between_coordinate_systems(
-            sdata, sdata[labels], sdata[image], intermediate_coordinate_systems=pixel_coordinate_system
-        )
-        matrix = t.to_affine_matrix(input_axes=("y", "x"), output_axes=("y", "x"))
-        yx = table.obsm["spatial_canonical"][:, 1:] @ matrix[:2, :2].T + matrix[:2, 2]
-        y, x = np.floor(yx + 0.5).astype(np.int64).T  # integer indices are pixel centers
-        fov = np.zeros(len(yx), dtype=int)  # 0: in a gap between FOVs
-        for name, b in bounds.items():
-            fov[(b["y0"] <= y) & (y < b["y1"]) & (b["x0"] <= x) & (x < b["x1"])] = int(name)
-
-    ``intermediate_coordinate_systems`` is required because the ``_micron``
-    coordinate system also connects the two elements. When both elements map
-    to the pixel coordinate system by an identity, the centers need no mapping.
-
-    For a table that annotates several segmentation masks, assign each region
-    separately, selecting its rows with ``table.obs[region_key] == labels``:
-    each region's centers are in the frame of its own mask, its mosaic may
-    differ, and FOV numbers are unique only within a sample.
+    :func:`harpy.io.assign_cosmx_fovs` adds the sample and FOV of each row of
+    a table to its ``.obs``, from the ``fov_bounds_px`` of the mosaic's
+    morphology image, for any segmentation mask of the mosaic, such as a custom
+    segmentation.
     """
     enabled_product_output_names = _validate_enabled_product_output_names(
         images=images,
