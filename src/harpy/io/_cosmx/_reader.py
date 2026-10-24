@@ -30,6 +30,12 @@ from harpy.io._cosmx._models import (
     _CosmxPreview,
     _validate_identifier,
 )
+from harpy.io._cosmx._names import (
+    _element_name,
+    _micron_coordinate_system,
+    _pixel_coordinate_system,
+    _sample_name,
+)
 from harpy.io._cosmx._preview import _preview_cosmx
 from harpy.io._cosmx._transcripts import _add_transcript_points
 from harpy.io._cosmx._validation import _validate_cosmx_sdata
@@ -68,6 +74,15 @@ def cosmx(
     mosaics, orientation, and independent pixel and micron coordinate systems.
     Every generated element and coordinate system is prefixed by its sample ID,
     including for a one-entry mapping.
+
+    The FOVs of a sample are grouped into mosaics: a mosaic is a group of
+    adjacent FOVs, stitched into one canvas. For each mosaic, the reader
+    writes one element per enabled product, named
+    ``<sample>_<base>_mosaic_<n>``, in the mosaic's own pixel and micron
+    coordinate systems, ``<sample>_<coordinate_system>_<n>`` and
+    ``<sample>_<coordinate_system>_<n>_micron``. Harpy assigns the mosaic
+    numbers, not CosMx: they count from 1, in order of decreasing FOV count.
+    ``mosaic_mode`` of :class:`CosmxSample` sets how FOVs are grouped.
 
     The complete output is transactional. Data are written directly into a
     temporary sibling Zarr store and published only after that store can be
@@ -140,6 +155,8 @@ def cosmx(
         │       ├── source_origin_px
         │       │   ├── x: <int>
         │       │   └── y: <int>
+        │       ├── fov_bounds_px
+        │       │   └── "<fov>": {y0: <int>, x0: <int>, y1: <int>, x1: <int>}
         │       ├── orientation
         │       │   ├── flip_x: <bool>
         │       │   └── flip_y: <bool>
@@ -154,7 +171,7 @@ def cosmx(
         │
         ├── labels
         │   ├── <instance-label element name>
-        │   │   ├── sample_id, fovs, mosaic, source_origin_px,
+        │   │   ├── sample_id, fovs, mosaic, source_origin_px, fov_bounds_px,
         │   │   │   orientation, pixel_size_um, acquisition_timestamp [optional]
         │   │   └── instance_id_encoding
         │   │       ├── background: 0
@@ -163,7 +180,7 @@ def cosmx(
         │   │           "global_id = (fov - 1) * base + local_id"
         │   │
         │   └── <compartment-label element name>
-        │       ├── sample_id, fovs, mosaic, source_origin_px,
+        │       ├── sample_id, fovs, mosaic, source_origin_px, fov_bounds_px,
         │       │   orientation, pixel_size_um, acquisition_timestamp [optional]
         │       └── categories
         │           ├── 0: "background"
@@ -173,7 +190,7 @@ def cosmx(
         │
         ├── points
         │   └── <transcript points element name>
-        │       ├── sample_id, fovs, mosaic, source_origin_px,
+        │       ├── sample_id, fovs, mosaic, source_origin_px, fov_bounds_px,
         │       │   orientation, pixel_size_um, acquisition_timestamp [optional]
         │       └── feature_panel: "feature_panel_<content hash>"  [optional]
         │
@@ -193,6 +210,11 @@ def cosmx(
     source ``OrigTimeStamp`` preserved verbatim when it is non-empty and
     consistent across all morphology TIFFs for the sample; otherwise the field
     is omitted.
+
+    ``fov_bounds_px`` gives each FOV's tile as half-open pixel bounds
+    ``[y0, y1) × [x0, x1)`` in the element's intrinsic frame at full
+    resolution, keyed by FOV number as a string; see
+    :func:`harpy.io.assign_cosmx_fovs`.
 
     When an authoritative run-level plex is available, ``feature_panel`` is a
     points-record reference whose value is the key of a content-addressed
@@ -251,6 +273,13 @@ def cosmx(
     This reader does not create cell-boundary shapes, tables, cell statistics,
     or expression aggregates. Instances meeting at FOV boundaries are not
     merged.
+
+    **Assigning cells to FOVs**
+
+    :func:`harpy.io.assign_cosmx_fovs` adds the sample and FOV of each row of
+    a table to its ``.obs``, from the ``fov_bounds_px`` of the mosaic's
+    morphology image, for any segmentation mask of the mosaic, such as a custom
+    segmentation.
     """
     enabled_product_output_names = _validate_enabled_product_output_names(
         images=images,
@@ -549,7 +578,7 @@ def _write_cosmx_sample(
     sample_id = sample.sample_id
     config = sample.config
     preview = sample.preview
-    coordinate_system = f"{sample_id}_{config.coordinate_system}"
+    coordinate_system = _sample_name(sample_id, config.coordinate_system)
 
     if _MORPHOLOGY_PRODUCT in enabled_product_output_names:
         started = perf_counter()
@@ -557,7 +586,7 @@ def _write_cosmx_sample(
             sdata,
             preview,
             channels=config.channels,
-            output_image_name=f"{sample_id}_{enabled_product_output_names[_MORPHOLOGY_PRODUCT]}",
+            output_image_name=_sample_name(sample_id, enabled_product_output_names[_MORPHOLOGY_PRODUCT]),
             coordinate_system=coordinate_system,
             flip_x=config.flip_x,
             flip_y=config.flip_y,
@@ -565,7 +594,6 @@ def _write_cosmx_sample(
             scale_factors=raster_scale_factors,
             sample_id=sample_id,
             reader_version=__version__,
-            overwrite=False,
         )
         log.info(f"Wrote CosMx sample {sample_id!r} morphology images in {perf_counter() - started:.2f} seconds.")
 
@@ -574,7 +602,7 @@ def _write_cosmx_sample(
         sdata = _add_instance_labels(
             sdata,
             preview,
-            output_labels_name=f"{sample_id}_{enabled_product_output_names[_INSTANCE_LABELS_PRODUCT]}",
+            output_labels_name=_sample_name(sample_id, enabled_product_output_names[_INSTANCE_LABELS_PRODUCT]),
             coordinate_system=coordinate_system,
             flip_x=config.flip_x,
             flip_y=config.flip_y,
@@ -582,7 +610,6 @@ def _write_cosmx_sample(
             scale_factors=raster_scale_factors,
             sample_id=sample_id,
             reader_version=__version__,
-            overwrite=False,
         )
         log.info(f"Wrote CosMx sample {sample_id!r} instance labels in {perf_counter() - started:.2f} seconds.")
 
@@ -591,7 +618,7 @@ def _write_cosmx_sample(
         sdata = _add_compartment_labels(
             sdata,
             preview,
-            output_labels_name=f"{sample_id}_{enabled_product_output_names[_COMPARTMENT_LABELS_PRODUCT]}",
+            output_labels_name=_sample_name(sample_id, enabled_product_output_names[_COMPARTMENT_LABELS_PRODUCT]),
             coordinate_system=coordinate_system,
             flip_x=config.flip_x,
             flip_y=config.flip_y,
@@ -599,7 +626,6 @@ def _write_cosmx_sample(
             scale_factors=raster_scale_factors,
             sample_id=sample_id,
             reader_version=__version__,
-            overwrite=False,
         )
         log.info(f"Wrote CosMx sample {sample_id!r} compartment labels in {perf_counter() - started:.2f} seconds.")
 
@@ -608,14 +634,13 @@ def _write_cosmx_sample(
         sdata = _add_transcript_points(
             sdata,
             preview,
-            output_points_name=f"{sample_id}_{enabled_product_output_names[_TRANSCRIPTS_PRODUCT]}",
+            output_points_name=_sample_name(sample_id, enabled_product_output_names[_TRANSCRIPTS_PRODUCT]),
             coordinate_system=coordinate_system,
             flip_x=config.flip_x,
             flip_y=config.flip_y,
             blocksize=points_blocksize,
             sample_id=sample_id,
             reader_version=__version__,
-            overwrite=False,
         )
         log.info(f"Wrote CosMx sample {sample_id!r} transcript points in {perf_counter() - started:.2f} seconds.")
     return sdata
@@ -673,9 +698,11 @@ def _validate_planned_names(
     for sample in samples:
         for mosaic in sample.preview.mosaics:
             for product, output_name in enabled_product_output_names.items():
-                element_name = f"{sample.sample_id}_{output_name}_mosaic_{mosaic.mosaic}"
+                element_name = _element_name(_sample_name(sample.sample_id, output_name), mosaic.mosaic)
                 _register_planned_name(element_owners, element_name, owner=(sample.sample_id, product), kind="element")
-            pixel_coordinate_system = f"{sample.sample_id}_{sample.config.coordinate_system}_{mosaic.mosaic}"
+            pixel_coordinate_system = _pixel_coordinate_system(
+                _sample_name(sample.sample_id, sample.config.coordinate_system), mosaic.mosaic
+            )
             _register_planned_name(
                 coordinate_owners,
                 pixel_coordinate_system,
@@ -684,7 +711,7 @@ def _validate_planned_names(
             )
             _register_planned_name(
                 coordinate_owners,
-                f"{pixel_coordinate_system}_micron",
+                _micron_coordinate_system(pixel_coordinate_system),
                 owner=(sample.sample_id, "micron coordinate system"),
                 kind="coordinate system",
             )

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import dask.array as da
 import numpy as np
 
-from harpy.io._cosmx._models import _CosmxMosaicGeometry, _CosmxPreview
+from harpy.io._cosmx._models import _CosmxMosaicGeometry
 
 
 @dataclass(frozen=True)
@@ -16,58 +16,62 @@ class _CosmxMosaicBlock:
     source_x: slice | None = None
 
 
-def _mosaic_placements(
-    preview: _CosmxPreview,
-    mosaic: _CosmxMosaicGeometry,
-) -> dict[int, tuple[int, int]]:
-    """Derive mosaic-local ``(y, x)`` tile offsets from a valid preview."""
-    positions = preview.manifest.positions_by_fov
-    return {
-        fov: (
-            positions[fov].y_px - mosaic.origin_y_px,
-            positions[fov].x_px - mosaic.origin_x_px,
-        )
-        for fov in mosaic.fovs
-    }
+def _mosaic_block_grid(mosaic: _CosmxMosaicGeometry) -> tuple[tuple[_CosmxMosaicBlock, ...], ...]:
+    """Partition a mosaic canvas into a grid of rectangular assembly blocks.
 
+    The start and end of every FOV's tile, together with the canvas bounds,
+    give the grid's boundaries along each axis. Because every tile edge is a
+    boundary, each block lies wholly inside one FOV's tile or wholly in a gap.
 
-def _mosaic_block_grid(
-    mosaic: _CosmxMosaicGeometry,
-    *,
-    placements: dict[int, tuple[int, int]],
-    tile_shape: tuple[int, int],
-) -> tuple[tuple[_CosmxMosaicBlock, ...], ...]:
-    """Partition a mosaic canvas into disjoint rectangular assembly blocks.
+    For example, take three FOVs with 4 x 4 pixel tiles at tile origins
+    ``(0, 0)``, ``(2, 5)`` and ``(4, 1)``. Each character below is one pixel,
+    marked with the number of the FOV whose tile covers it, or ``.`` for a
+    gap::
 
-    The function collects the start and end coordinates of every placed FOV,
-    together with the mosaic bounds, along both axes. Consecutive coordinates
-    define a rectangular grid. Because every FOV edge is a grid boundary, each
-    resulting block is either wholly covered by one FOV or wholly uncovered.
+        x   012345678
+        y=0 1111.....
+        y=1 1111.....
+        y=2 1111.2222
+        y=3 1111.2222
+        y=4 .33332222
+        y=5 .33332222
+        y=6 .3333....
+        y=7 .3333....
 
-    For example, two four-pixel-wide FOVs separated by one pixel produce::
+    Every start and end of a tile is a boundary: y = 0, 2, 4, 6, 8 and
+    x = 0, 1, 4, 5, 9. The cuts run across the whole canvas and give a
+    4 x 4 grid of 16 blocks, separated here by spaces and dashes::
 
-        x: 0        4 5        9
-           +--------+ +--------+
-           | FOV 1  | | FOV 2  |
-           +--------+ +--------+
-           | covered|g| covered|
-                     ^
-                    gap
+        x   0 123 4 5678
+        y=0 1 111 . ....
+        y=1 1 111 . ....
+            - --- - ----
+        y=2 1 111 . 2222
+        y=3 1 111 . 2222
+            - --- - ----
+        y=4 . 333 3 2222
+        y=5 . 333 3 2222
+            - --- - ----
+        y=6 . 333 3 ....
+        y=7 . 333 3 ....
 
-    Covered blocks store the owning FOV and the corresponding FOV-local source
-    slices. Uncovered blocks store only their shape and are later represented
-    by lazy zero arrays. The returned blocks are assembly metadata, not Dask or
-    Zarr chunks; :func:`_assemble_raster` concatenates them before the completed
-    mosaic is rechunked.
+    FOV 1's tile is cut into four blocks, also at x = 1, where FOV 3's tile
+    starts although the two are not side by side; FOV 3's tile is cut into
+    four and FOV 2's into two. The other six blocks are gaps.
+
+    A covered block stores its FOV and the slices of that FOV's tile it
+    covers. A gap block stores only its shape and becomes a lazy array of
+    zeros. Blocks depend only on where the tiles are, not on the output
+    chunks. :func:`_assemble_raster` turns each block into one Dask chunk and
+    concatenates them; the writers then rechunk the mosaic to the requested
+    chunks.
 
     Parameters
     ----------
     mosaic
-        Validated mosaic geometry defining the output canvas.
-    placements
-        Mapping from FOV number to its mosaic-local ``(y, x)`` tile origin.
-    tile_shape
-        Common source-FOV shape as ``(height, width)``.
+        Validated mosaic geometry defining the output canvas, the
+        mosaic-local ``(y, x)`` tile origin of every FOV and the common tile
+        shape.
 
     Returns
     -------
@@ -80,12 +84,17 @@ def _mosaic_block_grid(
         If a block has multiple FOV owners, violating the validated no-overlap
         invariant.
     """
-    tile_height, tile_width = tile_shape
+    tile_origins = mosaic.tile_origins
+    tile_height, tile_width = mosaic.tile_shape
     y_boundaries = sorted(
-        {0, mosaic.shape[0]} | {y for y, _ in placements.values()} | {y + tile_height for y, _ in placements.values()}
+        {0, mosaic.shape[0]}
+        | {y for y, _ in tile_origins.values()}
+        | {y + tile_height for y, _ in tile_origins.values()}
     )
     x_boundaries = sorted(
-        {0, mosaic.shape[1]} | {x for _, x in placements.values()} | {x + tile_width for _, x in placements.values()}
+        {0, mosaic.shape[1]}
+        | {x for _, x in tile_origins.values()}
+        | {x + tile_width for _, x in tile_origins.values()}
     )
 
     rows = []
@@ -94,7 +103,7 @@ def _mosaic_block_grid(
         for x0, x1 in zip(x_boundaries[:-1], x_boundaries[1:], strict=True):
             owners = [
                 fov
-                for fov, (tile_y, tile_x) in placements.items()
+                for fov, (tile_y, tile_x) in tile_origins.items()
                 if tile_y <= y0 and y1 <= tile_y + tile_height and tile_x <= x0 and x1 <= tile_x + tile_width
             ]
             if len(owners) > 1:
@@ -103,7 +112,7 @@ def _mosaic_block_grid(
                 row.append(_CosmxMosaicBlock(shape=(y1 - y0, x1 - x0)))
                 continue
             fov = owners[0]
-            tile_y, tile_x = placements[fov]
+            tile_y, tile_x = tile_origins[fov]
             row.append(
                 _CosmxMosaicBlock(
                     shape=(y1 - y0, x1 - x0),
@@ -117,14 +126,19 @@ def _mosaic_block_grid(
 
 
 def _assemble_raster(
-    block_grid: tuple[tuple[_CosmxMosaicBlock, ...], ...],
+    mosaic: _CosmxMosaicGeometry,
     *,
     planes: dict[int, da.Array],
     dtype: np.dtype,
 ) -> da.Array:
-    """Assemble FOV planes and zero-filled gaps into one lazy 2D mosaic."""
+    """Assemble FOV planes and zero-filled gaps into one lazy 2D mosaic.
+
+    ``planes`` maps each FOV of ``mosaic`` to its lazy, tile-shaped plane.
+    The planes are cut along the blocks of :func:`_mosaic_block_grid` and
+    concatenated, so no pixels are read.
+    """
     rows = []
-    for row in block_grid:
+    for row in _mosaic_block_grid(mosaic):
         blocks = []
         for block in row:
             if block.fov is None:
@@ -135,8 +149,3 @@ def _assemble_raster(
                 blocks.append(planes[block.fov][block.source_y, block.source_x])
         rows.append(blocks[0] if len(blocks) == 1 else da.concatenate(blocks, axis=1))
     return rows[0] if len(rows) == 1 else da.concatenate(rows, axis=0)
-
-
-def _pixel_coordinate_system(base: str, mosaic: int) -> str:
-    """Return the independent pixel coordinate system for one mosaic."""
-    return f"{base}_{mosaic}"

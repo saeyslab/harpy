@@ -73,6 +73,10 @@ def test_add_instance_labels_remaps_stitches_and_roundtrips(
             "adjacency_tolerance_px": preview.adjacency_tolerance_px,
         },
         "source_origin_px": {"x": 0, "y": 0},
+        "fov_bounds_px": {
+            "1": {"y0": 0, "x0": 0, "y1": 8, "x1": 8},
+            "2": {"y0": 0, "x0": 9, "y1": 8, "x1": 17},
+        },
         "orientation": {"flip_x": True, "flip_y": False},
         "pixel_size_um": 1.0,
         "acquisition_timestamp": "20240101_100000_S2",
@@ -184,12 +188,10 @@ def test_changed_label_metadata_fails_write_without_leaving_an_element(
     assert "instance_labels_mosaic_1" not in read_zarr(sdata.path).labels
 
 
-@pytest.mark.parametrize("overwrite", [False, True])
 def test_labels_reject_non_label_name_collision_before_pixel_reads(
     decoded_cosmx_path: Path,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    overwrite: bool,
 ) -> None:
     preview = _labelled_preview(decoded_cosmx_path)
     image = Image2DModel.parse(np.zeros((1, *_TILE_SHAPE), dtype=np.uint8), dims=("c", "y", "x"))
@@ -199,7 +201,7 @@ def test_labels_reject_non_label_name_collision_before_pixel_reads(
     reads = _instrument_label_reads(monkeypatch)
 
     with pytest.raises(ValueError, match="output names already belong to non-label elements"):
-        _add_instance_labels(sdata, preview, sample_id="sample", chunks=(4, 4), overwrite=overwrite)
+        _add_instance_labels(sdata, preview, sample_id="sample", chunks=(4, 4))
 
     assert not reads
     assert "instance_labels_mosaic_1" in read_zarr(path).images

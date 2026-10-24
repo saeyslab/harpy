@@ -188,9 +188,15 @@ def add_feature_matrix(
     observation identities must match the stored table in value and order.
 
     Feature calculation and alignment complete before updating an existing table.
-    When unbacked, only the subsequent merge with retained measurements (or NaN
-    fills for a new entry) remains lazy: the attached Dask array represents the
-    complete updated matrix without forcing its materialization or writing to disk.
+    When unbacked, the calculated features are merged with the retained
+    measurements (or NaN fills for a new entry) as
+    :func:`harpy.table.io.add_table_components_by_region` describes: the merge is
+    computed when the attached feature matrix is in memory, and attached lazily
+    when it is a Dask array or backed by Zarr. A later update would build on that
+    lazy merge, so when updating repeatedly, compute the matrix between updates if
+    it fits in memory, for example
+    ``table.obsm[feature_key] = table.obsm[feature_key].compute()``: later updates
+    then merge in memory. Nothing is written to disk.
     New-table creation still prepares a complete table before attachment.
 
     External references to replaced components are not refreshed. Use the entries

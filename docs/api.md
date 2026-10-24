@@ -55,6 +55,7 @@ Import platform-specific data, with related configuration and validation helpers
     io.cosmx
     io.add_cosmx_samples
     io.validate_cosmx_store
+    io.assign_cosmx_fovs
     io.phenocycler
     io.macsima
     io.merscope

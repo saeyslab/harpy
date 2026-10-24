@@ -1,4 +1,5 @@
 from harpy.io._cosmx._discovery import _discover_cosmx, _is_decoded_cosmx, _resolve_decoded_cosmx_root
+from harpy.io._cosmx._fovs import assign_cosmx_fovs
 from harpy.io._cosmx._images import _add_morphology_images
 from harpy.io._cosmx._labels import _add_compartment_labels, _add_instance_labels
 from harpy.io._cosmx._models import CosmxSample
@@ -18,6 +19,7 @@ __all__ = [
     "_resolve_decoded_cosmx_root",
     "CosmxSample",
     "add_cosmx_samples",
+    "assign_cosmx_fovs",
     "cosmx",
     "validate_cosmx_store",
 ]

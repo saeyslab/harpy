@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+import dask.array as da
+import numpy as np
 import pandas as pd
+from scipy import sparse
 from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
@@ -52,7 +55,7 @@ def add_table_components_by_region(
 
         SpatialData mode    Destination used for merging    Installed result
         Backed              Stored matrix                   Lazy reopened matrix
-        Unbacked            Attached matrix                 Lazy merged matrix
+        Unbacked            Attached matrix                 Computed matrix, or lazy merge (see Notes)
 
     Parameters
     ----------
@@ -125,14 +128,21 @@ def add_table_components_by_region(
     measurements, not unsaved local replacements of the requested matrix. A target
     present only in memory is new on disk and follows the new-entry-fill rules.
 
-    For unbacked SpatialData, the attached Dask array represents the complete
-    updated matrix: selected rows use the supplied measurements; unselected rows
-    retain existing measurements, or receive the specified fill for a new entry.
-    The numerical merge remains deferred until the array is evaluated, for example
-    through `.compute()` or writing. This adapter attaches the result without
-    executing the merge or writing to disk, avoiding forced materialization of the
-    complete updated matrix merely to attach it. Subsequent processing or writing
-    can evaluate its chunks as needed. Inputs already in memory still occupy memory.
+    For unbacked SpatialData, selected rows use the supplied measurements;
+    unselected rows retain the attached measurements, or receive the specified
+    fill for a new entry. Nothing is written to disk.
+
+    - When the supplied matrix and the attached one are both in memory, as NumPy
+      arrays or SciPy CSR or CSC matrices, the merge is computed and attached in
+      the same form. Computing reads nothing from storage, and the attached
+      matrix holds only the current values, however often it is updated.
+    - Otherwise, when either is a Dask array, which may read from storage, is
+      backed by Zarr or is memory-mapped, the merge is attached as a lazy Dask
+      array, without executing it, so that storage-backed values are not read
+      merely to attach them. A later update then builds on this lazy merge and
+      keeps its supplied values in memory: to avoid a growing chain of merges,
+      compute the matrix between repeated updates.
+
     Inputs are not modified, but may be shared: this is not an immutable-snapshot
     or deep-copy API.
 
@@ -201,7 +211,7 @@ def add_table_components_by_region(
             if path[1] in table.obsm:
                 existing = table.obsm[path[1]]
                 _matrix_format(existing, label=f"Attached component {path!r}")
-            replacements[path] = _prepare_regional_matrix(
+            merged = _prepare_regional_matrix(
                 path,
                 components[path],
                 existing=existing,
@@ -211,6 +221,12 @@ def add_table_components_by_region(
                 sparse_chunks=sparse_chunks,
                 dense_chunks=dense_chunks,
             )
+            if _in_memory_matrix(components[path]) and (existing is None or _in_memory_matrix(existing)):
+                # Computing reads nothing from storage. A lazy merge would build on the
+                # attached matrix, so repeated updates would chain merges that keep the
+                # supplied values of every earlier update in memory.
+                merged = _computed_matrix(merged, _matrix_format(components[path], label=f"Component {path!r}"))
+            replacements[path] = merged
         # Unlike full updates in _update_table_components(), we do not call
         # _validate_component_values_against_memory() here: regional preparation
         # already validates identities and matrix compatibility, and SpatialData
@@ -247,3 +263,22 @@ def add_table_components_by_region(
             setattr(table, f"_{slot}", value)
         raise
     return sdata
+
+
+def _in_memory_matrix(value: object) -> bool:
+    """Return whether a matrix is a NumPy array or a SciPy CSR/CSC matrix, whose computation reads no storage.
+
+    Dask arrays count as possibly storage-backed, as their sources cannot be
+    told apart in general, and so do Zarr arrays, sparse dataset handles and
+    memory-mapped arrays.
+    """
+    if isinstance(value, np.ndarray):
+        return not isinstance(value, np.memmap)
+    return sparse.issparse(value) and value.format in {"csr", "csc"}
+
+
+def _computed_matrix(merged: da.Array, matrix_format: str) -> np.ndarray | sparse.spmatrix | sparse.sparray:
+    """Compute a lazy merge into a NumPy array, or a SciPy matrix of the merge's sparse format."""
+    result = merged.compute()
+    # Dask joins sparse blocks with scipy.sparse.vstack or hstack, which may return another format.
+    return result if matrix_format == "dense" else result.asformat(matrix_format)

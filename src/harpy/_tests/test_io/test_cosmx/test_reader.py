@@ -82,6 +82,19 @@ def test_cosmx_reads_one_sample_with_sample_scoped_names_and_metadata(
     panel_name = panel_names.pop()
     assert panel_name.startswith("feature_panel_")
     assert {record["feature_panel"] for record in metadata["points"].values()} == {panel_name}
+    expected_bounds = {
+        1: {"1": {"y0": 0, "x0": 0, "y1": 8, "x1": 8}, "2": {"y0": 0, "x0": 8, "y1": 8, "x1": 16}},
+        2: {"3": {"y0": 0, "x0": 0, "y1": 8, "x1": 8}},
+    }
+    for mosaic, bounds in expected_bounds.items():
+        records = [
+            record
+            for registry in ("images", "labels", "points")
+            for name, record in metadata[registry].items()
+            if name.endswith(f"_mosaic_{mosaic}")
+        ]
+        assert len(records) == 4
+        assert all(record["fov_bounds_px"] == bounds for record in records)
     assert not _generated_siblings(output)
 
 
