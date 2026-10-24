@@ -68,6 +68,10 @@ def test_add_morphology_images_stitches_groups_and_roundtrips(
             "adjacency_tolerance_px": preview.adjacency_tolerance_px,
         },
         "source_origin_px": {"x": 0, "y": 0},
+        "fov_bounds_px": {
+            "1": {"y0": 0, "x0": 0, "y1": 8, "x1": 8},
+            "2": {"y0": 0, "x0": 9, "y1": 8, "x1": 17},
+        },
         "orientation": {"flip_x": True, "flip_y": False},
         "pixel_size_um": 1.0,
         "acquisition_timestamp": "20240101_100000_S2",
@@ -91,12 +95,10 @@ def test_morphology_mosaic_does_not_read_pixels_during_construction(
     mosaic = preview.mosaics[0]
     reads = _instrument_plane_reads(monkeypatch)
     selected = _images._select_channels(preview, ("B",))
-    placements = _images._mosaic_placements(preview, mosaic)
 
     array = _images._morphology_mosaic(
-        preview,
+        preview.manifest,
         mosaic,
-        placements=placements,
         channels=selected,
         flip_x=True,
         flip_y=False,
@@ -186,12 +188,10 @@ def test_add_morphology_images_forwards_explicit_orientation(
     assert metadata["orientation"] == {"flip_x": False, "flip_y": True}
 
 
-@pytest.mark.parametrize("overwrite", [False, True])
 def test_morphology_rejects_non_image_name_collision_before_pixel_reads(
     decoded_cosmx_path: Path,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    overwrite: bool,
 ) -> None:
     preview = _valued_preview(decoded_cosmx_path)
     labels = Labels2DModel.parse(np.zeros(_TILE_SHAPE, dtype=np.uint8), dims=("y", "x"))
@@ -207,7 +207,6 @@ def test_morphology_rejects_non_image_name_collision_before_pixel_reads(
             sample_id="sample",
             channels=("B",),
             chunks=(1, 4, 4),
-            overwrite=overwrite,
         )
 
     assert not reads

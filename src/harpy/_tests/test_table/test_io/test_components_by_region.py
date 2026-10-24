@@ -130,13 +130,13 @@ def test_regional_update_preserves_local_state_and_uses_destination_measurements
 
 
 @pytest.mark.parametrize("matrix_format", ["dense", "csr", "csc"])
-@pytest.mark.parametrize("mode", ["eager", "backed"])
-def test_unbacked_preparation_wraps_memory_and_storage_handles_without_computation(
-    regional_store, monkeypatch, matrix_format, mode
-):
-    """Unbacked means sdata has no path, not that every matrix is already in RAM."""
+def test_unbacked_update_keeps_storage_handles_lazy_without_computation(regional_store, monkeypatch, matrix_format):
+    """Unbacked means sdata has no path, not that every matrix is already in RAM.
+
+    A table read in backed mode holds storage handles, so the merge stays lazy.
+    """
     path, _, identity, old = regional_store(matrix_format)
-    table = read_table(path, table_name="counts", mode=mode)
+    table = read_table(path, table_name="counts", mode="backed")
     sdata = SpatialData(tables={"counts": table})
     original = table.obsm["features"]
     values = _matrix(np.ones((4, 5), dtype=np.float32), matrix_format)
@@ -161,6 +161,59 @@ def test_unbacked_preparation_wraps_memory_and_storage_handles_without_computati
     expected[[1, 2, 3, 6]] = 1
     np.testing.assert_array_equal(_dense(table.obsm["features"]), expected)
     assert table.obsm["features"] is not original and _store_bytes(path) == before
+
+
+@pytest.mark.parametrize("matrix_format", ["dense", "csr", "csc"])
+@pytest.mark.parametrize("create", [False, True])
+def test_unbacked_updates_of_in_memory_matrices_attach_computed_results(
+    regional_store, monkeypatch, matrix_format, create
+):
+    """In-memory inputs give an in-memory result, so repeated updates do not chain lazy merges.
+
+    Update the interleaved regions A, B and A again, without touching storage.
+    """
+    path, table, identity_a, old = regional_store(matrix_format)
+    sdata = SpatialData(tables={"counts": table})
+    identities = {"A": identity_a, "B": table.obs.loc[table.obs["region"] == "B", ["region", "instance"]]}
+    rows = {"A": [1, 2, 3, 6], "B": [0, 4, 5, 7, 8, 9, 10, 11]}
+    component = ("obsm", "new" if create else "features")
+    fill = np.nan if matrix_format == "dense" else 0
+    expected = np.full_like(old, fill) if create else old.copy()
+    before = _store_bytes(path)
+
+    with monkeypatch.context() as patch:
+        for method in ("get", "get_partial_values", "set", "delete"):
+            patch.setattr(LocalStore, method, _unexpected)
+        for update, region in enumerate(["A", "B", "A"], start=1):
+            values = np.full((len(rows[region]), 5), update, dtype=np.float32)
+            add_table_components_by_region(
+                sdata,
+                table_name="counts",
+                components={component: _matrix(values, matrix_format)},
+                obs_identity=identities[region],
+                fill_values={component: fill} if create else None,
+            )
+            expected[rows[region]] = values
+            merged = table.obsm[component[1]]
+            assert not isinstance(merged, da.Array)
+            assert ("dense" if isinstance(merged, np.ndarray) else merged.format) == matrix_format
+            np.testing.assert_array_equal(_dense(merged), expected)
+    assert _store_bytes(path) == before
+
+
+def test_unbacked_update_keeps_a_memory_mapped_input_lazy(regional_store, tmp_path):
+    """A memory-mapped array reads its file, so it is merged lazily, like a Dask array."""
+    _, table, identity, old = regional_store()
+    sdata = SpatialData(tables={"counts": table})
+    values = np.memmap(tmp_path / "values.dat", dtype=np.float32, mode="w+", shape=(4, 5))
+    values[:] = 1
+    add_table_components_by_region(
+        sdata, table_name="counts", components={("obsm", "features"): values}, obs_identity=identity
+    )
+    assert isinstance(table.obsm["features"], da.Array)
+    expected = old.copy()
+    expected[[1, 2, 3, 6]] = 1
+    np.testing.assert_array_equal(_dense(table.obsm["features"]), expected)
 
 
 @pytest.mark.parametrize("matrix_format, settings, expected_chunks", _STORAGE_BACKED_SETTINGS)

@@ -1,4 +1,4 @@
-from ._cosmx import CosmxSample, add_cosmx_samples, cosmx, validate_cosmx_store
+from ._cosmx import CosmxSample, add_cosmx_samples, assign_cosmx_fovs, cosmx, validate_cosmx_store
 from ._macsima import macsima
 from ._merscope import merscope
 from ._phenocycler import phenocycler
@@ -20,6 +20,7 @@ __all__ = [
     "CosmxSample",
     "add_cosmx_samples",
     "validate_cosmx_store",
+    "assign_cosmx_fovs",
     "macsima",
     "merscope",
     "phenocycler",

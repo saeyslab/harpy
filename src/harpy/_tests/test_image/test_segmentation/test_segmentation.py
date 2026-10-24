@@ -1,5 +1,7 @@
 import importlib.util
 import os
+from importlib.metadata import version
+from urllib.error import URLError
 
 import dask
 import dask.array as da
@@ -16,6 +18,25 @@ from harpy.image.segmentation._segmentation import segment, segment_points
 from harpy.image.segmentation.segmentation_models._baysor import _dummy
 from harpy.image.segmentation.segmentation_models._cellpose import cellpose_callable
 from harpy.points._points import add_points
+
+
+@pytest.fixture(scope="module")
+def cellpose_nuclei_model() -> None:
+    """Download cellpose 3's ``nuclei`` model once, in the main process; skip the test if the download fails.
+
+    The segmentation tests load the model in Dask worker processes, where a
+    download error cannot be pickled back to the main process and surfaces as
+    ``BrokenProcessPool``. Only network errors skip; any other error fails the
+    test. Cellpose 4 downloads its own model, from Hugging Face, when loading it.
+    """
+    if int(version("cellpose").split(".")[0]) >= 4:
+        return
+    from cellpose.models import model_path
+
+    try:
+        model_path("nuclei")
+    except URLError as error:
+        pytest.skip(f"Could not download cellpose's 'nuclei' model: {error}")
 
 
 def _channel_selection_model(
@@ -93,6 +114,7 @@ def test_segment_rejects_invalid_image_channels(image_channels):
 
 
 @pytest.mark.skipif(not importlib.util.find_spec("cellpose"), reason="requires the cellpose library")
+@pytest.mark.usefixtures("cellpose_nuclei_model")
 def test_segment(sdata_multi_c_no_backed: SpatialData):
     import torch
 
@@ -124,6 +146,7 @@ def test_segment(sdata_multi_c_no_backed: SpatialData):
 
 
 @pytest.mark.skipif(not importlib.util.find_spec("cellpose"), reason="requires the cellpose library")
+@pytest.mark.usefixtures("cellpose_nuclei_model")
 def test_segment_pseudo_3D(sdata_multi_c_no_backed: SpatialData):
     import torch
 
@@ -157,6 +180,7 @@ def test_segment_pseudo_3D(sdata_multi_c_no_backed: SpatialData):
 
 @pytest.mark.skip(reason="Skipping: 3D segmentation test is time-consuming.")
 @pytest.mark.skipif(not importlib.util.find_spec("cellpose"), reason="requires the cellpose library")
+@pytest.mark.usefixtures("cellpose_nuclei_model")
 def test_segment_3D(sdata_multi_c_no_backed: SpatialData):
     import torch
 

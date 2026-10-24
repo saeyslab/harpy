@@ -16,14 +16,10 @@ from spatialdata.transformations import Identity, Scale
 
 from harpy._metadata import _IMAGES_METADATA_KEY, _validate_metadata_destination
 from harpy.image._image import add_image
-from harpy.io._cosmx._metadata import _commit_element_metadata
-from harpy.io._cosmx._models import _CosmxMosaicGeometry, _CosmxPreview
-from harpy.io._cosmx._raster import (
-    _assemble_raster,
-    _mosaic_block_grid,
-    _mosaic_placements,
-    _pixel_coordinate_system,
-)
+from harpy.io._cosmx._metadata import _commit_element_metadata, _common_element_record
+from harpy.io._cosmx._models import _CosmxManifest, _CosmxMosaicGeometry, _CosmxPreview
+from harpy.io._cosmx._names import _element_name, _micron_coordinate_system, _pixel_coordinate_system
+from harpy.io._cosmx._raster import _assemble_raster
 
 _DEFAULT_CHUNKS = (1, 1024, 1024)
 
@@ -49,7 +45,6 @@ def _add_morphology_images(
     chunks: tuple[int, int, int] = _DEFAULT_CHUNKS,
     scale_factors: ScaleFactors_t | None = None,
     reader_version: str | None = None,
-    overwrite: bool = False,
 ) -> SpatialData:
     """Add one lazy, backed morphology image per CosMx mosaic group.
 
@@ -69,6 +64,9 @@ def _add_morphology_images(
       pixel coordinate system. This origin is subtracted from every FOV
       position so that the mosaic starts at ``(0, 0)``. It is source-geometry
       metadata, not an active SpatialData transformation;
+    - ``fov_bounds_px``: each FOV's half-open pixel bounds ``y0``, ``x0``,
+      ``y1``, ``x1`` in the image's full-resolution intrinsic frame, keyed by
+      FOV number as a string;
     - ``orientation``: dataset-wide local x/y-axis flips applied before
       placement;
     - ``pixel_size_um``: physical size of one source pixel coordinate unit;
@@ -110,8 +108,6 @@ def _add_morphology_images(
         DataTree before the image element is written.
     reader_version
         Optional Harpy version persisted with each successfully written element.
-    overwrite
-        Whether existing planned image elements may be replaced.
 
     Returns
     -------
@@ -136,15 +132,13 @@ def _add_morphology_images(
     _validate_chunks(chunks)
     selected_channels = _select_channels(preview, channels)
     _validate_metadata_destination(sdata, _IMAGES_METADATA_KEY)
-    placements = {mosaic.mosaic: _mosaic_placements(preview, mosaic) for mosaic in preview.mosaics}
-    element_names = tuple(_image_element_name(output_image_name, mosaic.mosaic) for mosaic in preview.mosaics)
-    existing = {name: element_type for element_type, name, _ in sdata.gen_elements() if name in element_names}
+    output_element_names = tuple(_element_name(output_image_name, mosaic.mosaic) for mosaic in preview.mosaics)
+    existing = {name: element_type for element_type, name, _ in sdata.gen_elements() if name in output_element_names}
     wrong_type = sorted(name for name, element_type in existing.items() if element_type != "images")
     if wrong_type:
         raise ValueError(f"CosMx morphology output names already belong to non-image elements: {wrong_type}.")
-    collisions = sorted(existing)
-    if collisions and not overwrite:
-        raise ValueError(f"CosMx morphology image elements already exist: {collisions}.")
+    if existing:
+        raise ValueError(f"CosMx morphology image elements already exist: {sorted(existing)}.")
 
     channel_records = [
         {
@@ -156,25 +150,12 @@ def _add_morphology_images(
         for channel in selected_channels
     ]
 
-    for mosaic, element_name in zip(preview.mosaics, element_names, strict=True):
-        metadata = {
-            "fovs": list(mosaic.fovs),
-            "sample_id": sample_id,
-            "mosaic": {
-                "mode": preview.mosaic_mode,
-                "adjacency_tolerance_px": preview.adjacency_tolerance_px,
-            },
-            "source_origin_px": {"x": mosaic.origin_x_px, "y": mosaic.origin_y_px},
-            "orientation": {"flip_x": flip_x, "flip_y": flip_y},
-            "pixel_size_um": preview.manifest.run.pixel_size_um,
-            "channels": [dict(channel) for channel in channel_records],
-        }
-        if preview.manifest.run.acquisition_timestamp is not None:
-            metadata["acquisition_timestamp"] = preview.manifest.run.acquisition_timestamp
+    for mosaic, output_element_name in zip(preview.mosaics, output_element_names, strict=True):
+        metadata = _common_element_record(preview, mosaic, sample_id=sample_id, flip_x=flip_x, flip_y=flip_y)
+        metadata["channels"] = [dict(channel) for channel in channel_records]
         array = _morphology_mosaic(
-            preview,
+            preview.manifest,
             mosaic,
-            placements=placements[mosaic.mosaic],
             channels=selected_channels,
             flip_x=flip_x,
             flip_y=flip_y,
@@ -185,11 +166,11 @@ def _add_morphology_images(
             f"{len(array.__dask_graph__())} tasks across {len(array.dask.layers)} layers."
         )
         pixel_coordinate_system = _pixel_coordinate_system(coordinate_system, mosaic.mosaic)
-        micron_coordinate_system = f"{pixel_coordinate_system}_micron"
+        micron_coordinate_system = _micron_coordinate_system(pixel_coordinate_system)
         sdata = add_image(
             sdata,
             arr=array,
-            output_image_name=element_name,
+            output_image_name=output_element_name,
             dims=("c", "y", "x"),
             chunks=chunks,
             transformations={
@@ -201,15 +182,13 @@ def _add_morphology_images(
             },
             scale_factors=scale_factors,
             c_coords=[channel.output_coordinate for channel in selected_channels],
-            overwrite=overwrite,
         )
         _commit_element_metadata(
             sdata,
             registry=_IMAGES_METADATA_KEY,
-            element_name=element_name,
+            element_name=output_element_name,
             record=metadata,
             reader_version=reader_version,
-            cleanup_element_on_failure=not overwrite,
         )
     return sdata
 
@@ -280,39 +259,33 @@ def _validate_chunks(chunks: tuple[int, int, int]) -> None:
 
 
 def _morphology_mosaic(
-    preview: _CosmxPreview,
+    manifest: _CosmxManifest,
     mosaic: _CosmxMosaicGeometry,
     *,
-    placements: dict[int, tuple[int, int]],
     channels: tuple[_CosmxSelectedChannel, ...],
     flip_x: bool,
     flip_y: bool,
     chunks: tuple[int, int, int],
 ) -> da.Array:
     """Construct a lazy ``(c, y, x)`` morphology mosaic without reading pixels."""
-    block_grid = _mosaic_block_grid(
-        mosaic,
-        placements=placements,
-        tile_shape=preview.manifest.run.tile_shape,
-    )
-    morphology_dtype = preview.manifest.run.morphology_dtype
+    morphology_dtype = manifest.run.morphology_dtype
     assert morphology_dtype is not None
     dtype = np.dtype(morphology_dtype)
-    fovs_by_id = preview.manifest.fovs_by_id
+    fovs_by_id = manifest.fovs_by_id
     channel_arrays = []
     for channel in channels:
         planes = {
             fov: _lazy_morphology_plane(
                 fovs_by_id[fov].morphology,
                 plane=channel.plane,
-                expected_shape=preview.manifest.run.tile_shape,
+                expected_shape=mosaic.tile_shape,
                 expected_dtype=dtype,
                 flip_x=flip_x,
                 flip_y=flip_y,
             )
             for fov in mosaic.fovs
         }
-        channel_arrays.append(_assemble_raster(block_grid, planes=planes, dtype=dtype))
+        channel_arrays.append(_assemble_raster(mosaic, planes=planes, dtype=dtype))
 
     result = da.stack(channel_arrays, axis=0).rechunk(chunks)
     expected_shape = (len(channels), *mosaic.shape)
@@ -386,7 +359,3 @@ def _read_morphology_plane(
     if flip_x:
         result = result[:, ::-1]
     return result
-
-
-def _image_element_name(base: str, mosaic: int) -> str:
-    return f"{base}_mosaic_{mosaic}"

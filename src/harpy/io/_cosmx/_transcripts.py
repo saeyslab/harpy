@@ -19,9 +19,9 @@ from harpy._metadata import (
     _POINTS_METADATA_KEY,
     _validate_metadata_destination,
 )
-from harpy.io._cosmx._metadata import _commit_element_metadata
+from harpy.io._cosmx._metadata import _commit_element_metadata, _common_element_record
 from harpy.io._cosmx._models import _CosmxPreview
-from harpy.io._cosmx._raster import _mosaic_placements, _pixel_coordinate_system
+from harpy.io._cosmx._names import _element_name, _micron_coordinate_system, _pixel_coordinate_system
 from harpy.points._points import add_points
 
 _SOURCE_COLUMNS = ("V1", "CellComp", "codeclass", "target", "x", "y", "z")
@@ -55,7 +55,6 @@ def _add_transcript_points(
     flip_y: bool = False,
     blocksize: str | int = "64MB",
     reader_version: str | None = None,
-    overwrite: bool = False,
 ) -> SpatialData:
     """Add one backed, out-of-core transcript points element per mosaic.
 
@@ -78,8 +77,11 @@ def _add_transcript_points(
       position so that the output points use mosaic-local coordinates starting
       at ``(0, 0)``. It is source-geometry metadata, not an active SpatialData
       transformation;
+    - ``fov_bounds_px``: each FOV's half-open pixel bounds ``y0``, ``x0``,
+      ``y1``, ``x1`` in the mosaic-local frame of the points, keyed by FOV
+      number as a string. They equal the bounds of the mosaic's rasters;
     - ``orientation``: dataset-wide local x/y-axis flips applied before each
-      FOV placement is added; and
+      FOV placement is added;
     - ``pixel_size_um``: physical size of one source x/y coordinate unit;
     - ``acquisition_timestamp`` when available: the consistent source
       ``OrigTimeStamp`` value preserved verbatim; and
@@ -109,8 +111,6 @@ def _add_transcript_points(
         source CSV.
     reader_version
         Optional Harpy version persisted with each successfully written element.
-    overwrite
-        Whether existing points elements with the planned names may be replaced.
 
     Returns
     -------
@@ -125,20 +125,17 @@ def _add_transcript_points(
         raise ValueError("CosMx output points base name must not be empty.")
     if not coordinate_system:
         raise ValueError("CosMx coordinate-system base name must not be empty.")
-    if not isinstance(overwrite, bool):
-        raise ValueError(f"CosMx transcript overwrite must be a bool, found {overwrite!r}.")
 
     _validate_blocksize(blocksize)
     _validate_metadata_destination(sdata, _POINTS_METADATA_KEY, _FEATURE_PANELS_METADATA_KEY)
 
-    element_names = tuple(_points_element_name(output_points_name, mosaic.mosaic) for mosaic in preview.mosaics)
-    existing = {name: element_type for element_type, name, _ in sdata.gen_elements() if name in element_names}
+    output_element_names = tuple(_element_name(output_points_name, mosaic.mosaic) for mosaic in preview.mosaics)
+    existing = {name: element_type for element_type, name, _ in sdata.gen_elements() if name in output_element_names}
     wrong_type = sorted(name for name, element_type in existing.items() if element_type != "points")
     if wrong_type:
         raise ValueError(f"CosMx transcript output names already belong to non-points elements: {wrong_type}.")
-    collisions = sorted(existing)
-    if collisions and not overwrite:
-        raise ValueError(f"CosMx transcript points elements already exist: {collisions}.")
+    if existing:
+        raise ValueError(f"CosMx transcript points elements already exist: {sorted(existing)}.")
 
     sources = _transcript_sources(preview)
     headers = {fov: _read_transcript_header(path) for fov, path in sources.items()}
@@ -155,29 +152,16 @@ def _add_transcript_points(
     code_class_categories = None if panel is None else panel.classes
     class_by_feature = None if panel is None else panel.class_by_feature
 
-    for mosaic, element_name in zip(preview.mosaics, element_names, strict=True):
-        metadata = {
-            "fovs": list(mosaic.fovs),
-            "sample_id": sample_id,
-            "mosaic": {
-                "mode": preview.mosaic_mode,
-                "adjacency_tolerance_px": preview.adjacency_tolerance_px,
-            },
-            "source_origin_px": {"x": mosaic.origin_x_px, "y": mosaic.origin_y_px},
-            "orientation": {"flip_x": flip_x, "flip_y": flip_y},
-            "pixel_size_um": preview.manifest.run.pixel_size_um,
-        }
+    for mosaic, output_element_name in zip(preview.mosaics, output_element_names, strict=True):
+        metadata = _common_element_record(preview, mosaic, sample_id=sample_id, flip_x=flip_x, flip_y=flip_y)
         if panel_name is not None:
             metadata["feature_panel"] = panel_name
-        if preview.manifest.run.acquisition_timestamp is not None:
-            metadata["acquisition_timestamp"] = preview.manifest.run.acquisition_timestamp
-        placements = _mosaic_placements(preview, mosaic)
         frames = [
             _read_fov_transcripts(
                 sources[fov],
                 header=headers[fov],
-                placement=placements[fov],
-                tile_shape=preview.manifest.run.tile_shape,
+                tile_origin=mosaic.tile_origins[fov],
+                tile_shape=mosaic.tile_shape,
                 gene_categories=gene_categories,
                 flip_x=flip_x,
                 flip_y=flip_y,
@@ -189,11 +173,11 @@ def _add_transcript_points(
         ]
         points = frames[0] if len(frames) == 1 else dd.concat(frames, axis=0, interleave_partitions=True)
         pixel_coordinate_system = _pixel_coordinate_system(coordinate_system, mosaic.mosaic)
-        micron_coordinate_system = f"{pixel_coordinate_system}_micron"
+        micron_coordinate_system = _micron_coordinate_system(pixel_coordinate_system)
         sdata = add_points(
             sdata,
             ddf=points,
-            output_points_name=element_name,
+            output_points_name=output_element_name,
             coordinates={"x": "x", "y": "y"},
             transformations={
                 pixel_coordinate_system: Identity(),
@@ -202,16 +186,14 @@ def _add_transcript_points(
                     axes=("x", "y"),
                 ),
             },
-            overwrite=overwrite,
         )
         _commit_element_metadata(
             sdata,
             registry=_POINTS_METADATA_KEY,
-            element_name=element_name,
+            element_name=output_element_name,
             record=metadata,
             reader_version=reader_version,
             feature_panel=(panel_name, panel_record) if panel_name is not None and panel_record is not None else None,
-            cleanup_element_on_failure=not overwrite,
         )
     return sdata
 
@@ -291,7 +273,7 @@ def _read_fov_transcripts(
     path: Path,
     *,
     header: tuple[str, ...],
-    placement: tuple[int, int],
+    tile_origin: tuple[int, int],
     tile_shape: tuple[int, int],
     gene_categories: tuple[str, ...],
     flip_x: bool,
@@ -306,7 +288,7 @@ def _read_fov_transcripts(
     raw = dd.read_csv(path, usecols=retained, dtype=dtype, encoding="utf-8-sig", blocksize=blocksize)
     meta = _normalize_transcript_partition(
         raw._meta,
-        placement=placement,
+        tile_origin=tile_origin,
         tile_shape=tile_shape,
         gene_categories=gene_categories,
         flip_x=flip_x,
@@ -317,7 +299,7 @@ def _read_fov_transcripts(
     )
     return raw.map_partitions(
         _normalize_transcript_partition,
-        placement=placement,
+        tile_origin=tile_origin,
         tile_shape=tile_shape,
         gene_categories=gene_categories,
         flip_x=flip_x,
@@ -332,7 +314,7 @@ def _read_fov_transcripts(
 def _normalize_transcript_partition(
     frame: pd.DataFrame,
     *,
-    placement: tuple[int, int],
+    tile_origin: tuple[int, int],
     tile_shape: tuple[int, int],
     gene_categories: tuple[str, ...],
     flip_x: bool,
@@ -395,7 +377,7 @@ def _normalize_transcript_partition(
             f"CosMx transcript CSV {path} contains coordinates outside FOV bounds "
             f"0 <= x < {tile_width} and 0 <= y < {tile_height}."
         )
-    placement_y, placement_x = placement
+    origin_y, origin_x = tile_origin
     x = tile_width - 1 - source_x if flip_x else source_x
     y = tile_height - 1 - source_y if flip_y else source_y
 
@@ -403,11 +385,7 @@ def _normalize_transcript_partition(
     result["gene"] = result["gene"].astype(pd.CategoricalDtype(categories=gene_categories))
     if code_class_categories is not None:
         result["code_class"] = result["code_class"].astype(pd.CategoricalDtype(categories=code_class_categories))
-    result["x"] = x + placement_x
-    result["y"] = y + placement_y
+    result["x"] = x + origin_x
+    result["y"] = y + origin_y
     extras = [column for column in result.columns if column not in _OUTPUT_COLUMNS]
     return result[[*_OUTPUT_COLUMNS, *extras]]
-
-
-def _points_element_name(base: str, mosaic: int) -> str:
-    return f"{base}_mosaic_{mosaic}"

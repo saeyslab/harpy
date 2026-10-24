@@ -10,6 +10,7 @@ from typing import Literal
 import numpy as np
 
 from harpy._feature_panels import _FeaturePanelContract
+from harpy.io._cosmx._constants import _FOV_BOUNDS_FIELDS
 
 _MORPHOLOGY_PRODUCT = "morphology"
 _INSTANCE_LABELS_PRODUCT = "instance_labels"
@@ -224,24 +225,67 @@ class _CosmxMosaicGeometry:
     """Geometry of one derived spatial group of nearby CosMx FOVs.
 
     The FOVs form one connected mosaic group under the configured adjacency
-    rule. The origin and shape define their bounding pixel canvas; the group is
-    not an authoritative vendor ROI or biological compartment.
+    rule. Harpy derives the group from where the tiles lie: it is not a region
+    defined in the CosMx software, and need not match a tissue section or
+    other biological structure. ``fovs``, ``shape`` and ``fov_bounds_px``
+    follow from the tiles.
+
+    Attributes
+    ----------
+    mosaic
+        Mosaic number within the sample, counting from 1.
+    origin_x_px, origin_y_px
+        Upper-left corner of the mosaic's canvas in the source pixel frame.
+    tile_origins
+        Mosaic-local ``(y, x)`` origin of each FOV's tile, keyed by FOV
+        number. The topmost and leftmost tiles start at zero.
+    tile_shape
+        Shape ``(height, width)`` shared by all tiles.
     """
 
     mosaic: int
-    fovs: tuple[int, ...]
     origin_x_px: int
     origin_y_px: int
-    shape: tuple[int, int]
+    tile_origins: dict[int, tuple[int, int]]
+    tile_shape: tuple[int, int]
 
     def __post_init__(self) -> None:
         if self.mosaic < 1:
             raise ValueError(f"CosMx mosaic number must be positive, found {self.mosaic}.")
-        if not self.fovs:
+        if not self.tile_origins:
             raise ValueError("CosMx mosaic geometry must contain at least one FOV.")
         _validate_sorted_unique_fovs(self.fovs, name=f"mosaic {self.mosaic} FOVs")
-        if len(self.shape) != 2 or any(size <= 0 for size in self.shape):
-            raise ValueError(f"CosMx mosaic shape must contain two positive dimensions, found {self.shape}.")
+        if len(self.tile_shape) != 2 or any(size <= 0 for size in self.tile_shape):
+            raise ValueError(f"CosMx mosaic tile shape must contain two positive dimensions, found {self.tile_shape}.")
+        first_pixel = (
+            min(y for y, _ in self.tile_origins.values()),
+            min(x for _, x in self.tile_origins.values()),
+        )
+        if first_pixel != (0, 0):
+            raise ValueError(f"CosMx mosaic {self.mosaic} tile origins must start at (0, 0), found {first_pixel}.")
+
+    @property
+    def fovs(self) -> tuple[int, ...]:
+        """Source FOV numbers of the mosaic, sorted."""
+        return tuple(sorted(self.tile_origins))
+
+    @property
+    def shape(self) -> tuple[int, int]:
+        """Mosaic canvas shape as ``(height, width)``."""
+        height, width = self.tile_shape
+        return (
+            max(y for y, _ in self.tile_origins.values()) + height,
+            max(x for _, x in self.tile_origins.values()) + width,
+        )
+
+    @property
+    def fov_bounds_px(self) -> dict[str, dict[str, int]]:
+        """Each FOV's half-open mosaic-local pixel bounds, keyed by FOV number as a string."""
+        height, width = self.tile_shape
+        return {
+            str(fov): dict(zip(_FOV_BOUNDS_FIELDS, (y, x, y + height, x + width), strict=True))
+            for fov, (y, x) in sorted(self.tile_origins.items())
+        }
 
 
 @dataclass(frozen=True)
@@ -422,19 +466,19 @@ def _validate_preview_mosaics(
             if missing_sources:
                 raise ValueError(f"CosMx mosaic {mosaic.mosaic} FOVs have no {product} sources: {missing_sources}.")
 
-        expected_origin_x = min(positions[fov].x_px for fov in mosaic.fovs)
-        expected_origin_y = min(positions[fov].y_px for fov in mosaic.fovs)
-        expected_max_x = max(positions[fov].x_px + tile_width for fov in mosaic.fovs)
-        expected_max_y = max(positions[fov].y_px + tile_height for fov in mosaic.fovs)
-        expected_origin = (expected_origin_x, expected_origin_y)
-        expected_shape = (expected_max_y - expected_origin_y, expected_max_x - expected_origin_x)
-        if (mosaic.origin_x_px, mosaic.origin_y_px) != expected_origin:
+        if mosaic.tile_shape != manifest.run.tile_shape:
             raise ValueError(
-                f"CosMx mosaic {mosaic.mosaic} origin must be {expected_origin}, found "
-                f"{(mosaic.origin_x_px, mosaic.origin_y_px)}."
+                f"CosMx mosaic {mosaic.mosaic} tile shape must be {manifest.run.tile_shape}, found {mosaic.tile_shape}."
             )
-        if mosaic.shape != expected_shape:
-            raise ValueError(f"CosMx mosaic {mosaic.mosaic} shape must be {expected_shape}, found {mosaic.shape}.")
+        # The geometry requires its tile origins to start at (0, 0), so matching
+        # every tile to its source position also fixes the mosaic origin.
+        for fov in mosaic.fovs:
+            expected = (positions[fov].y_px - mosaic.origin_y_px, positions[fov].x_px - mosaic.origin_x_px)
+            if mosaic.tile_origins[fov] != expected:
+                raise ValueError(
+                    f"CosMx mosaic {mosaic.mosaic} tile origin of FOV {fov} must be {expected}, "
+                    f"found {mosaic.tile_origins[fov]}."
+                )
 
         for index, left in enumerate(mosaic.fovs):
             left_position = positions[left]

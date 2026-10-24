@@ -77,13 +77,25 @@ def _manifest() -> _CosmxManifest:
     )
 
 
+def _geometry(**updates: object) -> _CosmxMosaicGeometry:
+    values = {
+        "mosaic": 1,
+        "origin_x_px": 0,
+        "origin_y_px": 0,
+        "tile_origins": {1: (0, 0)},
+        "tile_shape": (8, 8),
+    }
+    values.update(updates)
+    return _CosmxMosaicGeometry(**values)
+
+
 def _preview() -> _CosmxPreview:
     return _CosmxPreview(
         manifest=_manifest(),
         included_fovs=(1,),
         excluded_fovs=(2,),
         unpositioned_fovs=(2,),
-        mosaics=(_CosmxMosaicGeometry(mosaic=1, fovs=(1,), origin_x_px=0, origin_y_px=0, shape=(8, 8)),),
+        mosaics=(_geometry(),),
         diagnostics=(),
     )
 
@@ -166,13 +178,34 @@ def test_manifest_rejects_inconsistent_fov_records() -> None:
         )
 
 
+def test_mosaic_geometry_derives_fovs_shape_and_fov_bounds_from_tiles() -> None:
+    # FOVs 1 and 2 share an edge; row 6 is a gap between FOV 1 and FOV 3.
+    mosaic = _geometry(
+        origin_x_px=100,
+        origin_y_px=50,
+        tile_origins={3: (7, 0), 2: (0, 8), 1: (0, 0)},
+        tile_shape=(6, 8),
+    )
+
+    assert mosaic.fovs == (1, 2, 3)
+    assert mosaic.shape == (13, 16)
+    assert mosaic.fov_bounds_px == {
+        "1": {"y0": 0, "x0": 0, "y1": 6, "x1": 8},
+        "2": {"y0": 0, "x0": 8, "y1": 6, "x1": 16},
+        "3": {"y0": 7, "x0": 0, "y1": 13, "x1": 8},
+    }
+    assert list(mosaic.fov_bounds_px) == ["1", "2", "3"]
+
+
 def test_mosaic_model_rejects_invalid_geometry() -> None:
     with pytest.raises(ValueError, match="at least one FOV"):
-        _CosmxMosaicGeometry(mosaic=1, fovs=(), origin_x_px=0, origin_y_px=0, shape=(8, 8))
-    with pytest.raises(ValueError, match="must be sorted and unique"):
-        _CosmxMosaicGeometry(mosaic=1, fovs=(2, 1), origin_x_px=0, origin_y_px=0, shape=(8, 8))
-    with pytest.raises(ValueError, match="shape must contain two positive dimensions"):
-        _CosmxMosaicGeometry(mosaic=1, fovs=(1,), origin_x_px=0, origin_y_px=0, shape=(0, 8))
+        _geometry(tile_origins={})
+    with pytest.raises(ValueError, match="FOV number must be positive"):
+        _geometry(tile_origins={0: (0, 0)})
+    with pytest.raises(ValueError, match="tile shape must contain two positive dimensions"):
+        _geometry(tile_shape=(0, 8))
+    with pytest.raises(ValueError, match=r"tile origins must start at \(0, 0\), found \(0, 1\)"):
+        _geometry(tile_origins={1: (0, 1)})
 
 
 def test_preview_rejects_inconsistent_fov_and_mosaic_relationships() -> None:
@@ -183,10 +216,7 @@ def test_preview_rejects_inconsistent_fov_and_mosaic_relationships() -> None:
     with pytest.raises(ValueError, match="unpositioned FOVs must be"):
         replace(preview, unpositioned_fovs=())
     with pytest.raises(ValueError, match="exactly one mosaic"):
-        replace(
-            preview,
-            mosaics=(_CosmxMosaicGeometry(mosaic=1, fovs=(2,), origin_x_px=0, origin_y_px=0, shape=(8, 8)),),
-        )
+        replace(preview, mosaics=(_geometry(tile_origins={2: (0, 0)}),))
 
 
 def test_preview_rejects_geometry_inconsistent_with_manifest() -> None:
@@ -198,13 +228,7 @@ def test_preview_rejects_geometry_inconsistent_with_manifest() -> None:
             preview,
             manifest=replace(preview.manifest, fovs=(missing_morphology, preview.manifest.fovs[1])),
         )
-    with pytest.raises(ValueError, match=r"origin must be \(0, 0\)"):
-        replace(
-            preview,
-            mosaics=(_CosmxMosaicGeometry(mosaic=1, fovs=(1,), origin_x_px=1, origin_y_px=0, shape=(8, 8)),),
-        )
-    with pytest.raises(ValueError, match=r"shape must be \(8, 8\)"):
-        replace(
-            preview,
-            mosaics=(_CosmxMosaicGeometry(mosaic=1, fovs=(1,), origin_x_px=0, origin_y_px=0, shape=(9, 8)),),
-        )
+    with pytest.raises(ValueError, match=r"tile origin of FOV 1 must be \(0, -1\), found \(0, 0\)"):
+        replace(preview, mosaics=(_geometry(origin_x_px=1),))
+    with pytest.raises(ValueError, match=r"tile shape must be \(8, 8\), found \(9, 8\)"):
+        replace(preview, mosaics=(_geometry(tile_shape=(9, 8)),))

@@ -86,15 +86,14 @@ def feature_sdata(tmp_path):
 
 @pytest.mark.parametrize("backed", [False, True])
 @pytest.mark.parametrize("existing", [False, True])
-def test_regional_feature_update_uses_expected_source_and_defers_unbacked_merge(
-    feature_sdata, monkeypatch, backed, existing
-):
+def test_regional_feature_update_uses_expected_source(feature_sdata, monkeypatch, backed, existing):
     """Update A's interleaved rows while retaining B from the correct source.
 
     Local measurements and source descriptions differ from storage: retain local
     B values when unbacked and stored B values when backed. New entries fill B
-    with NaN. Guard only the update phase so feature calculation can complete,
-    but the subsequent unbacked merge must remain deferred.
+    with NaN. Unbacked, the attached Dask matrix keeps the merge deferred, while a
+    new entry, merged from in-memory features alone, is computed. Guard only the
+    update phase, so that feature calculation can complete.
     """
     sdata = feature_sdata(backed=backed, existing=existing)
     table = sdata.tables["counts"]
@@ -102,15 +101,16 @@ def test_regional_feature_update_uses_expected_source_and_defers_unbacked_merge(
     if existing:
         table.obsm["features"] = da.from_array(local_values, chunks=(2, 1))
         table.uns["feature_matrices"]["features"]["coordinate_system"] = ["local_A", "local_B"]
+    deferred = not backed and existing
     original_adapter = feature_writer.add_table_components_by_region
 
     def unexpected_compute(*args, **kwargs):
-        pytest.fail("The unbacked adapter must attach the merge without computing it.")
+        pytest.fail("The unbacked adapter must attach a merge with a Dask matrix without computing it.")
 
     def guarded_update(sdata, **kwargs):
         # Feature calculation may execute Dask tasks; only the subsequent
-        # unbacked merge is guarded against computation.
-        with Callback(start=None if backed else unexpected_compute):
+        # unbacked merge with the attached Dask matrix is guarded against computation.
+        with Callback(start=unexpected_compute if deferred else None):
             return original_adapter(sdata, **kwargs)
 
     monkeypatch.setattr(feature_writer, "add_table_components_by_region", guarded_update)
@@ -129,8 +129,13 @@ def test_regional_feature_update_uses_expected_source_and_defers_unbacked_merge(
     else:
         expected = np.full((6, 1), np.nan)
     expected[[1, 3, 5], 0] = [2, 3, 1]
-    assert isinstance(table.obsm["features"], da.Array)
-    np.testing.assert_array_equal(table.obsm["features"].compute(), expected)
+    features = table.obsm["features"]
+    if backed or existing:
+        assert isinstance(features, da.Array)
+        features = features.compute()
+    else:
+        assert isinstance(features, np.ndarray)
+    np.testing.assert_array_equal(features, expected)
     metadata = table.uns["feature_matrices"]["features"]
     assert list(metadata["coordinate_system"]) == (
         ["old_B" if backed else "local_B", "global"] if existing else ["global"]
@@ -269,8 +274,9 @@ def test_unbacked_regional_updates_preserve_values_and_sources_without_writing(f
             overwrite_feature_key=overwrite,
         )
     table = sdata.tables["counts"]
-    assert isinstance(table.obsm["features"], da.Array)
-    np.testing.assert_array_equal(table.obsm["features"].compute()[:, 0], [1, 2, 3, 3, 2, 1])
+    # In-memory features give an in-memory matrix, so the second update does not build on a lazy merge.
+    assert isinstance(table.obsm["features"], np.ndarray)
+    np.testing.assert_array_equal(table.obsm["features"][:, 0], [1, 2, 3, 3, 2, 1])
     assert table.uns["feature_matrices"]["features"]["source_label"] == ["B", "A"]
     assert table.uns["feature_matrices"]["features"]["source_image"] == [None, None]
 
@@ -431,8 +437,10 @@ def test_feature_metadata_uses_existing_matrix_dtype(feature_sdata, backed):
     assert table.uns["feature_matrices"]["features"]["dtype"] == "complex128"
     expected = existing.copy()
     expected[[1, 3, 5], 0] = [2, 3, 1]
-    result = table.obsm["features"].compute()
-    np.testing.assert_array_equal(result, expected)
+    result = table.obsm["features"]
+    # Unbacked, the in-memory matrix and features give a computed result.
+    assert isinstance(result, da.Array if backed else np.ndarray)
+    np.testing.assert_array_equal(result.compute() if backed else result, expected)
 
 
 def test_backed_update_rejects_reordered_unselected_observations(feature_sdata):

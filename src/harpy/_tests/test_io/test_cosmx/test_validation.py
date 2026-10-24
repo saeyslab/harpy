@@ -79,6 +79,51 @@ def test_validate_cosmx_store_rejects_ambiguous_label_family(reader_store: Path,
         validate_cosmx_store(reader_store)
 
 
+@pytest.mark.parametrize(
+    ("registry", "mutation", "message"),
+    [
+        ("images", "missing", r"fov_bounds_px is required\. .*run the CosMx reader again"),
+        ("images", "keys", "keys must equal fovs as strings"),
+        ("images", "missing_bound", "must contain exactly the fields"),
+        ("images", "non_integer", r"\.x1 must be a nonnegative integer"),
+        ("images", "empty", "must have y0 < y1 and x0 < x1"),
+        ("images", "overlap", "rectangles of FOVs 1 and 2 overlap"),
+        ("images", "outside", r"must lie within the element's \(y, x\) shape \(8, 16\)"),
+        ("labels", "outside", r"must lie within the element's \(y, x\) shape \(8, 16\)"),
+    ],
+)
+def test_validate_cosmx_store_rejects_invalid_fov_bounds(
+    reader_store: Path,
+    registry: str,
+    mutation: str,
+    message: str,
+) -> None:
+    sdata = read_zarr(reader_store)
+    attrs = deepcopy(sdata.attrs)
+    record = next(record for name, record in attrs["harpy"][registry].items() if name.endswith("_mosaic_1"))
+    bounds = record["fov_bounds_px"]
+    assert bounds["2"] == {"y0": 0, "x0": 8, "y1": 8, "x1": 16}
+    if mutation == "missing":
+        del record["fov_bounds_px"]
+    elif mutation == "keys":
+        del bounds["2"]
+    elif mutation == "missing_bound":
+        del bounds["2"]["x1"]
+    elif mutation == "non_integer":
+        bounds["2"]["x1"] = 16.0
+    elif mutation == "empty":
+        bounds["2"]["x1"] = bounds["2"]["x0"]
+    elif mutation == "overlap":
+        bounds["2"]["x0"] = 7
+    else:
+        bounds["2"]["x1"] = 17
+    sdata.attrs = attrs
+    sdata.write_attrs()
+
+    with pytest.raises(ValueError, match=message):
+        validate_cosmx_store(reader_store)
+
+
 def test_validate_cosmx_store_structural_opt_out_is_lazy_and_non_mutating(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -276,6 +321,7 @@ def _write_points_store(
         "fovs": [1],
         "mosaic": {"mode": "spatial_groups", "adjacency_tolerance_px": 0},
         "source_origin_px": {"x": 0, "y": 0},
+        "fov_bounds_px": {"1": {"y0": 0, "x0": 0, "y1": 8, "x1": 8}},
         "orientation": {"flip_x": True, "flip_y": False},
         "pixel_size_um": 1.0,
     }

@@ -22,6 +22,8 @@ def test_mosaic_geometry_only_uses_positions_and_tile_shape() -> None:
 
     assert [mosaic.fovs for mosaic in mosaics] == [(1, 2), (3,)]
     assert [mosaic.shape for mosaic in mosaics] == [(8, 16), (8, 8)]
+    assert [(mosaic.origin_x_px, mosaic.origin_y_px) for mosaic in mosaics] == [(0, 0), (20, 0)]
+    assert [mosaic.tile_origins for mosaic in mosaics] == [{1: (0, 0), 2: (0, 8)}, {3: (0, 0)}]
 
 
 def test_mosaic_geometry_bridges_small_axis_aligned_gap() -> None:
