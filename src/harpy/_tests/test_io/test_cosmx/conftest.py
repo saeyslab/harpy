@@ -13,7 +13,26 @@ TILE_SIZE = 8
 
 @pytest.fixture
 def decoded_cosmx_path(tmp_path: Path) -> Path:
-    root = tmp_path / "transfer" / "DecodedFiles" / "sample" / "20240101_100000_S2"
+    """A fresh copy of the small decoded CosMx run for each test, which may change its files."""
+    return write_decoded_cosmx(tmp_path)
+
+
+@pytest.fixture(scope="module")
+def module_decoded_cosmx_path(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """The decoded run of ``decoded_cosmx_path``, written once per test module.
+
+    Tests that only read the run can share it, together with what is built
+    from it, such as the CosMx store with a table and canonical centers in
+    ``test_fovs.py``. That store is then built once per module instead of once
+    per test, which keeps the tests fast. Tests using this run must not change
+    its files.
+    """
+    return write_decoded_cosmx(tmp_path_factory.mktemp("decoded_cosmx"))
+
+
+def write_decoded_cosmx(directory: Path) -> Path:
+    """Write a small decoded CosMx run under ``directory`` and return its root."""
+    root = directory / "transfer" / "DecodedFiles" / "sample" / "20240101_100000_S2"
     morphology_dir = root / "CellStatsDir" / "Morphology2D"
     morphology_dir.mkdir(parents=True)
     analysis_dir = root / "AnalysisResults" / "analysis"
