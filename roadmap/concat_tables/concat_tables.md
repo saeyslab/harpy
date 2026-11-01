@@ -1,9 +1,13 @@
 # `hp.tb.concat`: design
 
-Source: issue #277 and its comment on feature matrices, and issue #279, which
-this work implements first (see [step 1](#step-1-drop-the-canonical-binding-279)).
-This document fixes the contract and the implementation plan; where it departs
-from #277 is listed under [Departures from the issue](#departures-from-the-issue).
+Source: issue #277 and its comment on feature matrices. This document fixes
+the contract and the implementation plan; where it departs from the issue is
+listed under [Departures from the issue](#departures-from-the-issue).
+
+Depends on the canonical-cache refactor ([canonical_cache.md](canonical_cache.md)),
+its own PR, which lands first and closes #279 and #282. Without #279, a table
+subset by per-cell QC fails canonical validation and could not be
+concatenated.
 
 ## Purpose
 
@@ -173,18 +177,19 @@ Every other entry goes to `anndata.concat` with `uns_merge`.
 
 - Every table has both canonical components, the matrix and its record, or
   none has either; otherwise raise and point to `hp.tb.add_canonical_centers`.
-- Each table passes the checks of `validate_canonical_payload` that need no
-  `sdata`, as step 1 leaves them: the matrix's shape and dtype; the strict
-  parse of the record; its linkage keys equal to the annotation's; its regions
-  equal to the declared ones; every row in exactly one declared region; finite
-  centers, with z = 0 for 2D labels. Only the source signatures of the labels
-  need `sdata`, and `validate_table` checks them after storing.
-- The merged record holds every region's entry, built with
-  `build_canonical_metadata` and `canonical_metadata_to_storage`, so it is
-  written in schema version 2, also from version-1 inputs.
+- Each table passes `_validate_canonical_without_sources`, the checks of
+  `validate_canonical_payload` that need no `sdata`, from the canonical-cache
+  refactor: the matrix's shape, dtype and finite values; the strict parse of
+  the record; its linkage keys equal to the annotation's; its regions equal to
+  the declared ones; every row's region declared; z = 0 for 2D labels. Only
+  the source signatures of the labels need `sdata`, and `validate_table`
+  checks them after storing.
+- The merged record holds every region's entry, built with the private
+  schema helpers that `aggregate_points` uses, so it is written in schema
+  version 2, also from version-1 inputs.
 - A table subset after its centers were computed, by per-cell QC for example,
-  concatenates: the centers of the rows kept do not change, and after step 1
-  no record ties a region to its rows.
+  concatenates: the centers of the rows kept do not change, and no record ties
+  a region to its rows.
 
 ### Point-aggregation rule
 
@@ -199,64 +204,18 @@ Every other entry goes to `anndata.concat` with `uns_merge`.
 
 ## Implementation plan
 
-### Step 1: drop the canonical binding (#279)
+The canonical-cache refactor ([canonical_cache.md](canonical_cache.md)) lands
+first and provides `_validate_canonical_without_sources`.
 
-Without this step, every table subset after aggregation fails
-`validate_table`, and `concat` would reject the per-sample QC it is for. In
-`src/harpy/table/canonical_centers/`, unless stated otherwise:
-
-- Validation: drop the comparison of the stored row count and instance digest
-  with the current rows, in `validate_canonical_payload` and in
-  `inspect_canonical_cache`. `CanonicalMismatchCode.TABLE_SIGNATURE_MISMATCH`
-  is removed: nothing reports it any more.
-- Storage: `CANONICAL_SCHEMA_VERSION` becomes 2, and
-  `canonical_metadata_to_storage` writes no `coverage`.
-  `parse_canonical_metadata` reads version 2, and version 1 with its
-  `coverage` ignored, so records written by Harpy 0.5 and spatiato 0.2 stay
-  readable. Only version 2 is written.
-- Models: `CanonicalRegionMetadata` loses `n_obs` and `instance_set_digest`.
-  `CanonicalRegionBinding` loses `instance_set_digest`, and keeps its row
-  positions and instance IDs, which the calculation needs. The check that
-  instance IDs are unique within a region runs inside the digest today, and
-  moves to `CanonicalRegionBinding.__post_init__`.
-  `_assemble_canonical_table_payload` (`src/harpy/table/_canonical_centers.py`)
-  and `src/harpy/table/_aggregation_writer.py` stop passing these fields.
-- `build_instance_set_digest`, which is public, is deprecated with a
-  `FutureWarning` and removed one release later.
-- Finite centers (#279, point 3): `validate_canonical_payload` already
-  requires them per region, and every row lies in one region, so every center
-  is checked; that check stays. `_validate_canonical_matrix` keeps accepting
-  NaN: `inspect_canonical_cache` also reads partial caches, in which the rows
-  of the regions not yet computed hold NaN. Spatiato fills its cache one region
-  at a time (state `PARTIAL`, action `EXTEND`).
-- Docstrings: `validate_table` no longer lists instance digests, and states
-  that the alignment of `obs` and `obsm` is AnnData's responsibility (#279,
-  "Trade-off"). The mentions of row coverage in `aggregate_points`,
-  `add_canonical_centers`, `docs/canonical_centers.md` and
-  `docs/development/metadata.md` go.
-- Tests (`src/harpy/_tests/test_table/test_canonical_centers.py`): the tests
-  that expect a stale binding become a test that a row subset validates; a
-  version-1 record parses.
-- Spatiato 0.2.1 has its own copy of this contract, which reads schema version
-  1 only: it needs the same change, or reports Harpy's version-2 records as
-  unsupported and recomputes them.
-
-### Step 2: validation helpers without `sdata`, no change in behaviour
+### Step 1: annotation checks without `sdata`, no change in behaviour
 
 - Split `_validate_table_annotation` (`src/harpy/table/_validation.py`) into
   the row checks, on the AnnData only, and the check that the regions exist in
   `sdata`. `validate_table` calls both. The module docstring asks to reuse
   shared checks rather than add new validation blocks.
-- Split `validate_canonical_payload`
-  (`src/harpy/table/canonical_centers/_schema.py`) likewise: a private
-  `_validate_canonical_without_sources(table, *, table_name, region_key,
-instance_key, regions)` with every check but the source signatures, which
-  `validate_canonical_payload` adds per region. The z = 0 check for 2D labels
-  takes the dimensions from the record, which `validate_canonical_payload`
-  compares with the labels.
-- Tests: the existing validation and canonical-center tests, unchanged.
+- Tests: the existing validation tests, unchanged.
 
-### Step 3: `concat`
+### Step 2: `concat`
 
 In `src/harpy/table/_concat.py`, in this order:
 
@@ -276,7 +235,7 @@ label=label)`, with a mapping passed as a mapping.
 7. Set `spatialdata_attrs` and the merged records, check with
    `TableModel.validate`, and log what was dropped.
 
-### Step 4: documentation
+### Step 3: documentation
 
 - `docs/api.md`: `tb.concat` under Table, "Processing and analysis", next to
   `tb.validate_table`.
@@ -326,8 +285,6 @@ with `expression_class="Endogenous"` once per pair, into `table_a` and
 8. Unregistered `obsm` matrices follow the issue's rule (same keys, stacked),
    with a docstring note, rather than being dropped: embeddings of one model
    compare across tables.
-9. Issue #279 is implemented as part of this work, in step 1: without it, a
-   table subset by per-cell QC could not be concatenated.
 
 ## Out of scope
 
