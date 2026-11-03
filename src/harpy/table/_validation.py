@@ -25,11 +25,7 @@ from spatialdata.models import TableModel
 
 from harpy._feature_panels import _require_mapping, _require_nonempty_string
 from harpy.table._metadata import _FEATURE_MATRIX_SCHEMA_VERSION
-from harpy.table.canonical_centers import (
-    CANONICAL_OBSM_KEY,
-    SPATIAL_COORDINATES_KEY,
-    validate_canonical_payload,
-)
+from harpy.table.canonical_centers import validate_canonical_payload
 from harpy.utils._keys import _FEATURE_MATRICES_KEY
 
 
@@ -103,25 +99,8 @@ def validate_table(
         # A registry written by add_feature_matrix under a custom key.
         hp.tb.validate_table(sdata, "table", feature_matrices_key="custom_feature_matrices")
     """
-    annotation = _validate_table_without_canonical(sdata, table_name, feature_matrices_key=feature_matrices_key)
-    adata = sdata.tables[table_name]
-    has_canonical_component = CANONICAL_OBSM_KEY in adata.obsm or (
-        isinstance(adata.uns.get(SPATIAL_COORDINATES_KEY), Mapping)
-        and CANONICAL_OBSM_KEY in adata.uns[SPATIAL_COORDINATES_KEY]
-    )
-    if annotation is None:
-        if has_canonical_component:
-            raise ValueError("Canonical centers require a SpatialData table annotation.")
-    else:
-        region_key, instance_key, regions = annotation
-        validate_canonical_payload(
-            sdata,
-            adata,
-            table_name=table_name,
-            region_key=region_key,
-            instance_key=instance_key,
-            regions=regions,
-        )
+    _validate_table_without_canonical(sdata, table_name, feature_matrices_key=feature_matrices_key)
+    validate_canonical_payload(sdata, table_name=table_name)
 
 
 def _validate_table_without_canonical(

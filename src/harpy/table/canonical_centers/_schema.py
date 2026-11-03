@@ -315,22 +315,17 @@ def build_canonical_cache_update_payload(
 
 
 def validate_canonical_payload(sdata: SpatialData, *, table_name: str) -> CanonicalMetadata | None:
-    """Validate a complete canonical matrix and metadata registry when present.
+    """Validate the canonical centers of a table, when present.
 
-    Validation is structural and reads only the small ``(n_obs, 3)`` canonical
-    matrix plus labels metadata. It does not recompute centers or inspect labels
-    pixels. A table containing neither canonical component is accepted and
-    returns ``None``; matrix/metadata asymmetry is rejected. The region and
-    instance keys and the declared regions come from the table's SpatialData
-    annotation.
+    The matrix and its metadata record must be present together, the record
+    with an entry for every region the table declares. Validation is
+    structural: it compares the record with the labels elements' metadata and
+    reads no labels pixels. Returns the record's entries for the declared
+    regions, or ``None`` when the table has no canonical centers.
 
-    No check ties a labels region to its table rows, so a row subset, a
-    reordering or a concatenation of valid tables stays valid. Every declared
-    region needs an entry in the record; entries of regions the table no longer
-    declares, as after subsetting it to some of its regions, are ignored and
-    left out of the returned metadata. Alignment of
-    ``obs`` and ``obsm`` is AnnData's responsibility. The annotation itself,
-    such as every row's region being a declared one, is assumed valid:
+    No check ties a region to its rows, so subsetting, reordering or
+    concatenating valid tables keeps them valid; aligning ``obs`` and ``obsm``
+    is AnnData's responsibility. The table's annotation is assumed valid:
     :func:`harpy.tb.validate_table` checks it.
     """
     if table_name not in sdata.tables:
