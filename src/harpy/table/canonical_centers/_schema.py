@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, NoReturn
 
 import numpy as np
 from scipy.sparse import issparse
-from spatialdata.models import TableModel
+from spatialdata.models import get_table_keys
 
 from harpy.image import get_dataarray
 from harpy.table.canonical_centers._models import (
@@ -19,6 +19,7 @@ from harpy.table.canonical_centers._models import (
     CanonicalRegionMetadata,
     CanonicalSourceSignature,
 )
+from harpy.utils._names import _names
 
 if TYPE_CHECKING:
     from anndata import AnnData
@@ -26,28 +27,21 @@ if TYPE_CHECKING:
 
 CANONICAL_OBSM_KEY = "spatial_canonical"
 SPATIAL_COORDINATES_KEY = "spatial_coordinates"
-CANONICAL_SCHEMA_VERSION = 1
+CANONICAL_SCHEMA_VERSION = 2
 CANONICAL_ALGORITHM_VERSION = 1
 CANONICAL_AXES = ("z", "y", "x")
 
 _TOP_LEVEL_KEYS = {
     "schema_version",
-    "obsm_key",
     "axes",
-    "dtype",
-    "region_key",
-    "instance_key",
     "regions",
 }
 _REGION_KEYS = {
-    "source_element",
     "source_element_type",
     "source_scale",
     "coordinate_frame",
-    "calculation",
-    "coverage",
+    "algorithm_version",
     "source",
-    "generated_by",
 }
 _SUPPORTED_SOURCE_DIMS = {("y", "x"), ("z", "y", "x")}
 
@@ -81,7 +75,7 @@ def build_canonical_source_signature(sdata: SpatialData, labels_name: str) -> Ca
     if dtype.kind not in "iu":
         raise ValueError(f"Labels element `{labels_name}` must use an integer dtype.")
     if dims not in _SUPPORTED_SOURCE_DIMS:
-        raise ValueError("Canonical metadata schema version 1 requires source dims (`y`, `x`) or (`z`, `y`, `x`).")
+        raise ValueError("Canonical centers require source dims (`y`, `x`) or (`z`, `y`, `x`).")
 
     return CanonicalSourceSignature(
         labels_name=labels_name,
@@ -125,8 +119,6 @@ def build_canonical_region_binding(
 
 def build_canonical_metadata(
     *,
-    region_key: str,
-    instance_key: str,
     regions: Mapping[str, CanonicalRegionMetadata],
     schema_version: int = CANONICAL_SCHEMA_VERSION,
 ) -> CanonicalMetadata:
@@ -134,13 +126,8 @@ def build_canonical_metadata(
     if schema_version != CANONICAL_SCHEMA_VERSION:
         raise ValueError(f"Only canonical schema version {CANONICAL_SCHEMA_VERSION} can be built.")
     for region_metadata in regions.values():
-        _validate_schema_v1_source(region_metadata.source_signature)
-    return CanonicalMetadata(
-        schema_version=schema_version,
-        region_key=region_key,
-        instance_key=instance_key,
-        regions=regions,
-    )
+        _validate_source(region_metadata.source_signature)
+    return CanonicalMetadata(schema_version=schema_version, regions=regions)
 
 
 def canonical_metadata_to_storage(metadata: CanonicalMetadata) -> dict[str, object]:
@@ -150,66 +137,43 @@ def canonical_metadata_to_storage(metadata: CanonicalMetadata) -> dict[str, obje
     regions: dict[str, object] = {}
     for region, region_metadata in metadata.regions.items():
         source = region_metadata.source_signature
-        entry: dict[str, object] = {
-            "source_element": region,
+        regions[region] = {
             "source_element_type": "labels",
             "source_scale": "scale0",
             "coordinate_frame": {
                 "type": "element_intrinsic",
-                "element": region,
-                "axes": list(CANONICAL_AXES),
-            },
-            "calculation": {
-                "method": "center_of_mass",
-                "weighting": "uniform_label_pixels",
-                "background_value": 0,
                 "pixel_coordinate_convention": "integer_indices_are_pixel_centers",
-                "implementation": "harpy.utils.RasterAggregator.center_of_mass",
-                "algorithm_version": region_metadata.algorithm_version,
             },
-            "coverage": {
-                "scope": "all_rows_for_region",
-                "n_obs": region_metadata.n_obs,
-                "instance_set_digest": region_metadata.instance_set_digest,
-            },
+            "algorithm_version": region_metadata.algorithm_version,
             "source": {
-                "element_path": f"labels/{region}",
                 "dims": list(source.dims),
                 "shape": list(source.shape),
                 "dtype": source.dtype,
             },
         }
-        generated_by = _serialize_generated_by(region_metadata)
-        if generated_by is not None:
-            entry["generated_by"] = generated_by
-        regions[region] = entry
 
     return {
         "schema_version": CANONICAL_SCHEMA_VERSION,
-        "obsm_key": CANONICAL_OBSM_KEY,
         "axes": list(CANONICAL_AXES),
-        "dtype": "float64",
-        "region_key": metadata.region_key,
-        "instance_key": metadata.instance_key,
         "regions": regions,
     }
 
 
 def parse_canonical_metadata(value: object) -> CanonicalMetadata:
-    """Strictly parse the canonical schema-v1 storage representation."""
+    """Strictly parse the canonical storage representation."""
     mapping = _require_mapping(value, "canonical metadata")
     if "schema_version" not in mapping:
         raise _TopLevelContractError("canonical metadata is missing `schema_version`.")
     schema_version = _require_integer(mapping["schema_version"], "schema_version")
     if schema_version != CANONICAL_SCHEMA_VERSION:
-        raise _UnsupportedSchemaError(f"Unsupported canonical schema version {schema_version}.")
+        raise _UnsupportedSchemaError(
+            f"Unsupported canonical schema version {schema_version}; Harpy reads version "
+            f"{CANONICAL_SCHEMA_VERSION}. Rebuild the canonical centers with "
+            "hp.tb.add_canonical_centers(sdata, table_name=..., overwrite=True)."
+        )
     _require_exact_keys(mapping, _TOP_LEVEL_KEYS, "canonical metadata", _TopLevelContractError)
 
-    _require_equal(mapping["obsm_key"], CANONICAL_OBSM_KEY, "obsm_key")
     _require_string_sequence(mapping["axes"], CANONICAL_AXES, "axes", _TopLevelContractError)
-    _require_equal(mapping["dtype"], "float64", "dtype")
-    region_key = _require_nonempty_string(mapping["region_key"], "region_key")
-    instance_key = _require_nonempty_string(mapping["instance_key"], "instance_key")
     raw_regions = _require_mapping(mapping["regions"], "regions", _RegionMetadataError)
 
     regions: dict[str, CanonicalRegionMetadata] = {}
@@ -217,12 +181,7 @@ def parse_canonical_metadata(value: object) -> CanonicalMetadata:
         if not isinstance(raw_region, str) or not raw_region:
             raise _RegionMetadataError("Region names must be non-empty strings.")
         regions[raw_region] = _parse_region_metadata(raw_region, raw_entry)
-    return CanonicalMetadata(
-        schema_version=schema_version,
-        region_key=region_key,
-        instance_key=instance_key,
-        regions=regions,
-    )
+    return CanonicalMetadata(schema_version=schema_version, regions=regions)
 
 
 def inspect_canonical_cache(
@@ -235,7 +194,8 @@ def inspect_canonical_cache(
     if table_name not in sdata.tables:
         raise ValueError(f"Table `{table_name}` is not available in the selected SpatialData object.")
     table = sdata.tables[table_name]
-    region_key, instance_key, regions = _table_linkage(table, table_name=table_name)
+    regions, region_key, instance_key = get_table_keys(table)
+    regions = _names(regions)
     source_signature = build_canonical_source_signature(sdata, labels_name)
     binding = build_canonical_region_binding(
         table,
@@ -354,21 +314,45 @@ def build_canonical_cache_update_payload(
     )
 
 
-def validate_canonical_payload(
-    sdata: SpatialData,
-    table: AnnData,
-    *,
-    table_name: str,
-    region_key: str,
-    instance_key: str,
-    regions: Sequence[str],
-) -> CanonicalMetadata | None:
+def validate_canonical_payload(sdata: SpatialData, *, table_name: str) -> CanonicalMetadata | None:
     """Validate a complete canonical matrix and metadata registry when present.
 
     Validation is structural and reads only the small ``(n_obs, 3)`` canonical
     matrix plus labels metadata. It does not recompute centers or inspect labels
     pixels. A table containing neither canonical component is accepted and
-    returns ``None``; matrix/metadata asymmetry is rejected.
+    returns ``None``; matrix/metadata asymmetry is rejected. The region and
+    instance keys and the declared regions come from the table's SpatialData
+    annotation.
+
+    No check ties a labels region to its table rows, so a row subset, a
+    reordering or a concatenation of valid tables stays valid. Every declared
+    region needs an entry in the record; entries of regions the table no longer
+    declares, as after subsetting it to some of its regions, are ignored and
+    left out of the returned metadata. Alignment of
+    ``obs`` and ``obsm`` is AnnData's responsibility. The annotation itself,
+    such as every row's region being a declared one, is assumed valid:
+    :func:`harpy.tb.validate_table` checks it.
+    """
+    if table_name not in sdata.tables:
+        raise ValueError(f"Table element {table_name!r} is not present in 'sdata.tables'.")
+    return _validate_canonical_payload(sdata, sdata.tables[table_name])
+
+
+def _validate_canonical_payload(sdata: SpatialData, table: AnnData) -> CanonicalMetadata | None:
+    """Validate the canonical components of a table that need not be in ``sdata``, such as a staged one."""
+    metadata = _validate_canonical_without_sources(table)
+    if metadata is None:
+        return None
+    for labels_name, stored in metadata.regions.items():
+        if stored.source_signature != build_canonical_source_signature(sdata, labels_name):
+            raise ValueError(f"Canonical source signature for labels element `{labels_name}` is stale.")
+    return metadata
+
+
+def _validate_canonical_without_sources(table: AnnData) -> CanonicalMetadata | None:
+    """Validate the canonical components without ``sdata``: every check but the labels source signatures.
+
+    Return the record's entries of the declared regions.
     """
     matrix_exists = CANONICAL_OBSM_KEY in table.obsm
     registry = table.uns.get(SPATIAL_COORDINATES_KEY)
@@ -377,117 +361,55 @@ def validate_canonical_payload(
         return None
     if matrix_exists != metadata_exists:
         raise ValueError("Canonical centers require both the matrix and its spatial-coordinate metadata.")
+    regions, region_key, _ = get_table_keys(table)
+    regions = _names(regions)
 
     matrix = _validate_canonical_matrix(table.obsm[CANONICAL_OBSM_KEY], table.n_obs)
     if isinstance(matrix, str):
         raise ValueError(matrix)
     assert isinstance(registry, Mapping)
     metadata = parse_canonical_metadata(registry[CANONICAL_OBSM_KEY])
-    if metadata.region_key != region_key or metadata.instance_key != instance_key:
-        raise ValueError("Canonical linkage keys disagree with the SpatialData table annotation.")
+    missing = sorted(set(regions) - set(metadata.regions))
+    if missing:
+        raise ValueError(f"Canonical metadata has no entry for declared regions {missing!r}.")
+    metadata = CanonicalMetadata(
+        schema_version=metadata.schema_version,
+        regions={labels_name: metadata.regions[labels_name] for labels_name in regions},
+    )
 
-    expected_regions = tuple(regions)
-    if not expected_regions or len(set(expected_regions)) != len(expected_regions):
-        raise ValueError("Canonical validation requires unique declared table regions.")
-    if set(metadata.regions) != set(expected_regions):
-        raise ValueError("Canonical metadata regions disagree with the SpatialData table annotation.")
-
-    covered = np.zeros(table.n_obs, dtype=bool)
-    for labels_name in expected_regions:
-        source_signature = build_canonical_source_signature(sdata, labels_name)
-        binding = build_canonical_region_binding(
-            table,
-            table_name=table_name,
-            labels_name=labels_name,
-            region_key=region_key,
-            instance_key=instance_key,
-            regions=expected_regions,
-        )
+    for labels_name in regions:
         stored = metadata.regions[labels_name]
-        if stored.source_signature != source_signature:
-            raise ValueError(f"Canonical source signature for labels element `{labels_name}` is stale.")
-        if stored.n_obs != binding.n_obs or stored.instance_set_digest != binding.instance_set_digest:
-            raise ValueError(f"Canonical table binding for labels element `{labels_name}` is stale.")
         if stored.algorithm_version != CANONICAL_ALGORITHM_VERSION:
             raise ValueError(f"Canonical algorithm version for labels element `{labels_name}` is unsupported.")
-        if covered[binding.row_positions].any():
-            raise ValueError("Canonical region bindings overlap in table-row space.")
-        covered[binding.row_positions] = True
-        region_centers = matrix[binding.row_positions]
-        if not np.isfinite(region_centers).all():
-            raise ValueError(f"Canonical centers for labels element `{labels_name}` must be finite.")
-        if source_signature.dims == ("y", "x") and np.any(region_centers[:, 0] != 0.0):
+        rows = np.asarray(table.obs[region_key] == labels_name, dtype=bool)
+        if stored.source_signature.dims == ("y", "x") and np.any(matrix[rows, 0] != 0.0):
             raise ValueError(f"Canonical centers for 2D labels element `{labels_name}` must use z=0.")
-    if not covered.all():
-        raise ValueError("Canonical metadata does not cover every table row.")
     return metadata
-
-
-def _table_linkage(table: AnnData, *, table_name: str) -> tuple[str, str, tuple[str, ...]]:
-    attrs = _require_mapping(table.uns.get(TableModel.ATTRS_KEY), "SpatialData table annotation")
-    region_key = _require_nonempty_string(attrs.get(TableModel.REGION_KEY_KEY), "region_key")
-    instance_key = _require_nonempty_string(attrs.get(TableModel.INSTANCE_KEY), "instance_key")
-    raw_regions = attrs.get(TableModel.REGION_KEY)
-    values = [raw_regions] if isinstance(raw_regions, str) else _require_sequence(raw_regions, "regions")
-    regions = tuple(_require_nonempty_string(region, "region") for region in values)
-    if not regions or len(set(regions)) != len(regions):
-        raise ValueError(f"Table `{table_name}` must declare unique labels regions.")
-    return region_key, instance_key, regions
 
 
 def _parse_region_metadata(region: str, value: object) -> CanonicalRegionMetadata:
     entry = _require_mapping(value, f"region `{region}`", _RegionMetadataError)
-    required_keys = _REGION_KEYS - {"generated_by"}
-    actual_keys = set(entry)
-    if not required_keys.issubset(actual_keys) or not actual_keys.issubset(_REGION_KEYS):
-        _raise_key_error(entry, required_keys, _REGION_KEYS, f"region `{region}`", _RegionMetadataError)
-    _require_equal(entry["source_element"], region, "source_element", _RegionMetadataError)
+    _require_exact_keys(entry, _REGION_KEYS, f"region `{region}`", _RegionMetadataError)
     _require_equal(entry["source_element_type"], "labels", "source_element_type", _RegionMetadataError)
     _require_equal(entry["source_scale"], "scale0", "source_scale", _RegionMetadataError)
 
     coordinate_frame = _require_mapping(entry["coordinate_frame"], "coordinate_frame", _RegionMetadataError)
-    _require_exact_keys(coordinate_frame, {"type", "element", "axes"}, "coordinate_frame", _RegionMetadataError)
-    _require_equal(coordinate_frame["type"], "element_intrinsic", "coordinate_frame.type", _RegionMetadataError)
-    _require_equal(coordinate_frame["element"], region, "coordinate_frame.element", _RegionMetadataError)
-    _require_string_sequence(coordinate_frame["axes"], CANONICAL_AXES, "coordinate_frame.axes", _RegionMetadataError)
-
-    calculation = _require_mapping(entry["calculation"], "calculation", _RegionMetadataError)
     _require_exact_keys(
-        calculation,
-        {
-            "method",
-            "weighting",
-            "background_value",
-            "pixel_coordinate_convention",
-            "implementation",
-            "algorithm_version",
-        },
-        "calculation",
+        coordinate_frame, {"type", "pixel_coordinate_convention"}, "coordinate_frame", _RegionMetadataError
+    )
+    _require_equal(coordinate_frame["type"], "element_intrinsic", "coordinate_frame.type", _RegionMetadataError)
+    _require_equal(
+        coordinate_frame["pixel_coordinate_convention"],
+        "integer_indices_are_pixel_centers",
+        "coordinate_frame.pixel_coordinate_convention",
         _RegionMetadataError,
     )
-    for key, expected in (
-        ("method", "center_of_mass"),
-        ("weighting", "uniform_label_pixels"),
-        ("background_value", 0),
-        ("pixel_coordinate_convention", "integer_indices_are_pixel_centers"),
-        ("implementation", "harpy.utils.RasterAggregator.center_of_mass"),
-    ):
-        _require_equal(calculation[key], expected, f"calculation.{key}", _RegionMetadataError)
     algorithm_version = _require_integer(
-        calculation["algorithm_version"], "calculation.algorithm_version", _RegionMetadataError, positive=True
-    )
-
-    coverage = _require_mapping(entry["coverage"], "coverage", _RegionMetadataError)
-    _require_exact_keys(coverage, {"scope", "n_obs", "instance_set_digest"}, "coverage", _RegionMetadataError)
-    _require_equal(coverage["scope"], "all_rows_for_region", "coverage.scope", _RegionMetadataError)
-    n_obs = _require_integer(coverage["n_obs"], "coverage.n_obs", _RegionMetadataError, positive=True)
-    digest = _require_nonempty_string(
-        coverage["instance_set_digest"], "coverage.instance_set_digest", _RegionMetadataError
+        entry["algorithm_version"], "algorithm_version", _RegionMetadataError, positive=True
     )
 
     source = _require_mapping(entry["source"], "source", _RegionMetadataError)
-    _require_exact_keys(source, {"element_path", "dims", "shape", "dtype"}, "source", _RegionMetadataError)
-    _require_equal(source["element_path"], f"labels/{region}", "source.element_path", _RegionMetadataError)
+    _require_exact_keys(source, {"dims", "shape", "dtype"}, "source", _RegionMetadataError)
     dims_values = _require_sequence(source["dims"], "source.dims", _RegionMetadataError)
     if not all(isinstance(dim, str) for dim in dims_values) or tuple(dims_values) not in _SUPPORTED_SOURCE_DIMS:
         raise _RegionMetadataError("source.dims must equal ['y', 'x'] or ['z', 'y', 'x'].")
@@ -507,26 +429,6 @@ def _parse_region_metadata(region: str, value: object) -> CanonicalRegionMetadat
     if source_dtype.kind not in "iu" or dtype_value != source_dtype.name:
         raise _RegionMetadataError("source.dtype must be a normalized integer NumPy dtype name.")
 
-    generated_by_package: str | None = None
-    generated_by_version: str | None = None
-    generated_at: str | None = None
-    if "generated_by" in entry:
-        generated_by = _require_mapping(entry["generated_by"], "generated_by", _RegionMetadataError)
-        if not set(generated_by).issubset({"package", "version", "generated_at"}):
-            raise _RegionMetadataError("generated_by contains unsupported fields.")
-        if "package" in generated_by:
-            generated_by_package = _require_nonempty_string(
-                generated_by["package"], "generated_by.package", _RegionMetadataError
-            )
-        if "version" in generated_by:
-            generated_by_version = _require_nonempty_string(
-                generated_by["version"], "generated_by.version", _RegionMetadataError
-            )
-        if "generated_at" in generated_by:
-            generated_at = _require_nonempty_string(
-                generated_by["generated_at"], "generated_by.generated_at", _RegionMetadataError
-            )
-
     try:
         source_signature = CanonicalSourceSignature(
             labels_name=region,
@@ -535,16 +437,8 @@ def _parse_region_metadata(region: str, value: object) -> CanonicalRegionMetadat
             shape=shape,
             dtype=source_dtype.name,
         )
-        _validate_schema_v1_source(source_signature)
-        return CanonicalRegionMetadata(
-            source_signature=source_signature,
-            n_obs=n_obs,
-            instance_set_digest=digest,
-            algorithm_version=algorithm_version,
-            generated_by_package=generated_by_package,
-            generated_by_version=generated_by_version,
-            generated_at=generated_at,
-        )
+        _validate_source(source_signature)
+        return CanonicalRegionMetadata(source_signature=source_signature, algorithm_version=algorithm_version)
     except (TypeError, ValueError) as exc:
         raise _RegionMetadataError(str(exc)) from exc
 
@@ -560,31 +454,20 @@ def _validate_canonical_matrix(value: object, n_obs: int) -> np.ndarray | str:
         return f"Canonical matrix must have shape ({n_obs}, 3) in z, y, x order."
     if matrix.dtype != np.dtype(np.float64):
         return "Canonical matrix dtype must be float64."
-    if np.isinf(matrix).any():
-        return "Canonical matrix must not contain infinite values."
+    if not np.isfinite(matrix).all():
+        return "Canonical matrix must contain only finite values."
     return matrix
 
 
-def _validate_schema_v1_source(source: CanonicalSourceSignature) -> None:
+def _validate_source(source: CanonicalSourceSignature) -> None:
     if source.dims not in _SUPPORTED_SOURCE_DIMS:
-        raise ValueError("Canonical metadata schema version 1 requires 2D or 3D source dimensions.")
+        raise ValueError("Canonical centers require 2D or 3D source dimensions.")
     try:
         dtype = np.dtype(source.dtype)
     except TypeError as exc:
         raise ValueError("Canonical source dtype must be a valid NumPy dtype.") from exc
     if dtype.kind not in "iu" or source.dtype != dtype.name:
         raise ValueError("Canonical source dtype must be a normalized integer NumPy dtype name.")
-
-
-def _serialize_generated_by(metadata: CanonicalRegionMetadata) -> dict[str, str] | None:
-    generated_by: dict[str, str] = {}
-    if metadata.generated_by_package is not None:
-        generated_by["package"] = metadata.generated_by_package
-    if metadata.generated_by_version is not None:
-        generated_by["version"] = metadata.generated_by_version
-    if metadata.generated_at is not None:
-        generated_by["generated_at"] = metadata.generated_at
-    return generated_by or None
 
 
 def _report(
