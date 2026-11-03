@@ -48,8 +48,8 @@ from harpy.table.canonical_centers import (
     CanonicalRegionMetadata,
     build_canonical_metadata,
     canonical_metadata_to_storage,
-    validate_canonical_payload,
 )
+from harpy.table.canonical_centers._schema import _validate_canonical_payload
 from harpy.table.io._write import _publish_table_paths
 from harpy.table.io._write_validation import _validate_complete_table
 from harpy.utils._keys import _FEATURE_MATRICES_KEY
@@ -273,14 +273,7 @@ def _write_aggregation_table(
     # Validate the reopened serialized payload before publication, so the Zarr
     # representation must satisfy the same canonical contract as the in-memory
     # construction rather than relying only on construction-time checks.
-    validate_canonical_payload(
-        sdata,
-        staged_table,
-        table_name=output_table_name,
-        region_key=region_key,
-        instance_key=instance_key,
-        regions=[pair.labels_name for pair in checkpoint.pairs],
-    )
+    _validate_canonical_payload(sdata, staged_table)
     _write_spatialdata_table_attrs(
         staging_group,
         regions=[pair.labels_name for pair in checkpoint.pairs],

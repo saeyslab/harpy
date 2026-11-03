@@ -30,8 +30,8 @@ from harpy.table.canonical_centers import (
     calculate_canonical_centers,
     canonical_metadata_to_storage,
     inspect_canonical_cache,
-    validate_canonical_payload,
 )
+from harpy.table.canonical_centers._schema import _validate_canonical_payload
 from harpy.table.io._write import _publish_table_paths
 from harpy.table.io._write_validation import (
     _check_component_write_destination,
@@ -237,16 +237,7 @@ def add_canonical_centers(
             uns={SPATIAL_COORDINATES_KEY: {CANONICAL_OBSM_KEY: staged_metadata}},
         )
         # Validate staged_table, not the table currently attached to sdata.
-        # table_name labels the binding and error messages; it does not select
-        # the AnnData object to validate.
-        validate_canonical_payload(
-            sdata,
-            staged_table,
-            table_name=table_name,
-            region_key=region_key,
-            instance_key=instance_key,
-            regions=labels_names,
-        )
+        _validate_canonical_payload(sdata, staged_table)
         # Release the copied observations and staging handles before publication.
         del staged_table, staged_centers, staged_metadata, staging_group
 
