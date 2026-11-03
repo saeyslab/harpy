@@ -180,13 +180,18 @@ Every other entry goes to `anndata.concat` with `uns_merge`.
 - Each table passes `_validate_canonical_without_sources`, the checks of
   `validate_canonical_payload` that need no `sdata`, from the canonical-cache
   refactor: the matrix's shape, dtype and finite values; the strict parse of
-  the record; its linkage keys equal to the annotation's; its regions equal to
-  the declared ones; every row's region declared; z = 0 for 2D labels. Only
-  the source signatures of the labels need `sdata`, and `validate_table`
-  checks them after storing.
-- The merged record holds every region's entry, built with the private
-  schema helpers that `aggregate_points` uses, so it is written in schema
-  version 2, also from version-1 inputs.
+  the record, with an entry for every declared region; z = 0 for 2D labels.
+  It assumes a valid annotation, which the annotation's row checks above
+  establish, and returns the entries of the declared regions. Only the source
+  signatures of the labels need `sdata`, and `validate_table` checks them
+  after storing.
+- The merged record holds each table's entries for its declared regions,
+  built with the private schema helpers that `aggregate_points` uses, in
+  schema version 2. Entries of regions a table no longer declares drop out,
+  so a table split per region and concatenated back works; a union of whole
+  records would hold each region twice. A version-1 input fails the check
+  above, whose message says to rebuild its centers with
+  `hp.tb.add_canonical_centers(..., overwrite=True)`.
 - A table subset after its centers were computed, by per-cell QC for example,
   concatenates: the centers of the rows kept do not change, and no record ties
   a region to its rows.
@@ -197,8 +202,9 @@ Every other entry goes to `anndata.concat` with `uns_merge`.
 - `schema_version`, `source_kind`, `feature_key` and `feature_class_key`
   (present or absent) are equal in every table, so ordinary and class-aware
   tables do not mix.
-- `regions` is the union of the tables' mappings; a region in two records
-  raises.
+- `regions` holds each table's entries for its declared regions. A subset
+  table keeps its whole record, so entries of regions it no longer declares
+  drop out, as in the canonical-center rule.
 - The record is provenance, which no validation reads; nothing else is
   checked.
 
