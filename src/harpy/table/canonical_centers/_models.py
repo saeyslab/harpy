@@ -1,19 +1,15 @@
 from __future__ import annotations
 
-import hashlib
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Any, Literal
+from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
 
 type SpatialDimension = Literal["z", "y", "x"]
-
-_DIGEST_DOMAIN = b"napari-harpy/spatial-canonical/instance-set"
-_DIGEST_ENCODING_VERSION = 1
 
 
 class CanonicalCacheState(StrEnum):
@@ -109,7 +105,6 @@ class CanonicalRegionBinding:
     instance_key: str
     row_positions: NDArray[np.intp] = field(repr=False, compare=False)
     instance_ids: NDArray[np.integer] = field(repr=False, compare=False)
-    instance_set_digest: str = field(init=False)
 
     @property
     def n_obs(self) -> int:
@@ -129,10 +124,12 @@ class CanonicalRegionBinding:
             raise ValueError("Canonical row positions must be non-negative.")
         if len(np.unique(row_positions)) != len(row_positions):
             raise ValueError("Canonical row positions must be unique.")
-        digest = _build_instance_set_digest(self.labels_name, instance_ids)
+        if len(instance_ids) == 0:
+            raise ValueError("Instance IDs must not be empty.")
+        if len(np.unique(instance_ids)) != len(instance_ids):
+            raise ValueError("Instance IDs must be unique within a labels region.")
         object.__setattr__(self, "row_positions", row_positions)
         object.__setattr__(self, "instance_ids", instance_ids)
-        object.__setattr__(self, "instance_set_digest", digest)
 
 
 @dataclass(frozen=True)
@@ -140,46 +137,27 @@ class CanonicalRegionMetadata:
     """Persisted calculation identity for one labels region."""
 
     source_signature: CanonicalSourceSignature
-    n_obs: int
-    instance_set_digest: str
     algorithm_version: int
-    generated_by_package: str | None = None
-    generated_by_version: str | None = None
-    generated_at: str | None = None
 
     def __post_init__(self) -> None:
-        if isinstance(self.n_obs, bool) or not isinstance(self.n_obs, int) or self.n_obs <= 0:
-            raise ValueError("Canonical region metadata n_obs must be a positive integer.")
-        _validate_digest(self.instance_set_digest)
         if (
             isinstance(self.algorithm_version, bool)
             or not isinstance(self.algorithm_version, int)
             or self.algorithm_version <= 0
         ):
             raise ValueError("Canonical algorithm version must be a positive integer.")
-        for name, value in (
-            ("generated_by_package", self.generated_by_package),
-            ("generated_by_version", self.generated_by_version),
-            ("generated_at", self.generated_at),
-        ):
-            if value is not None and (not isinstance(value, str) or not value):
-                raise ValueError(f"{name} must be a non-empty string when provided.")
 
 
 @dataclass(frozen=True)
 class CanonicalMetadata:
-    """Typed schema-v1 registry for canonical coordinates."""
+    """Typed registry for canonical coordinates."""
 
     schema_version: int
-    region_key: str
-    instance_key: str
     regions: Mapping[str, CanonicalRegionMetadata]
 
     def __post_init__(self) -> None:
         if isinstance(self.schema_version, bool) or not isinstance(self.schema_version, int):
             raise ValueError("Canonical schema version must be an integer.")
-        if not self.region_key or not self.instance_key:
-            raise ValueError("Canonical linkage keys must not be empty.")
         copied: dict[str, CanonicalRegionMetadata] = {}
         for region, metadata in self.regions.items():
             if not isinstance(region, str) or not region:
@@ -334,13 +312,6 @@ class CanonicalCentersResult:
         return self.cache_update is None
 
 
-def build_instance_set_digest(labels_name: str, instance_ids: Sequence[int] | np.ndarray) -> str:
-    """Return the versioned, order-independent digest for one instance set."""
-    if not isinstance(labels_name, str) or not labels_name:
-        raise ValueError("Labels name must be a non-empty string.")
-    return _build_instance_set_digest(labels_name, _readonly_integer_ids(instance_ids))
-
-
 def _readonly_array(value: object, *, dtype: np.dtype | type[np.generic]) -> np.ndarray:
     array = np.array(value, dtype=dtype, copy=True)
     array.flags.writeable = False
@@ -385,36 +356,3 @@ def _readonly_integer_ids(value: object) -> np.ndarray:
     result = np.array(array, copy=True)
     result.flags.writeable = False
     return result
-
-
-def _build_instance_set_digest(labels_name: str, instance_ids: np.ndarray) -> str:
-    if len(instance_ids) == 0:
-        raise ValueError("Instance IDs must not be empty.")
-    canonical_ids = np.sort(instance_ids).astype(">u8", copy=False)
-    if len(canonical_ids) > 1 and np.any(canonical_ids[1:] == canonical_ids[:-1]):
-        raise ValueError("Instance IDs must be unique within a labels region.")
-    hasher = hashlib.sha256()
-    _update_length_delimited(hasher, _DIGEST_DOMAIN)
-    hasher.update(_DIGEST_ENCODING_VERSION.to_bytes(2, byteorder="big", signed=False))
-    _update_length_delimited(hasher, labels_name.encode("utf-8"))
-    hasher.update(_encode_u64(len(canonical_ids)))
-    hasher.update(memoryview(canonical_ids).cast("B"))
-    return f"sha256:{hasher.hexdigest()}"
-
-
-def _encode_u64(value: int) -> bytes:
-    return value.to_bytes(8, byteorder="big", signed=False)
-
-
-def _update_length_delimited(hasher: Any, value: bytes) -> None:
-    hasher.update(_encode_u64(len(value)))
-    hasher.update(value)
-
-
-def _validate_digest(value: str) -> None:
-    prefix = "sha256:"
-    if not isinstance(value, str) or not value.startswith(prefix):
-        raise ValueError("Instance-set digest must use the `sha256:` prefix.")
-    hexadecimal = value[len(prefix) :]
-    if len(hexadecimal) != 64 or any(character not in "0123456789abcdef" for character in hexadecimal):
-        raise ValueError("Instance-set digest must contain a lowercase SHA-256 hexadecimal digest.")
