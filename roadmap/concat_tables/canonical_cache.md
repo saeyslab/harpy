@@ -162,7 +162,8 @@ Kept:
 - `CanonicalMetadata` and `CanonicalRegionMetadata`, which
   `validate_canonical_payload` returns.
 
-Made private, still used by Harpy's writers: `build_canonical_metadata`,
+Made private, renamed with a leading underscore and no longer exported, still
+used by Harpy's writers: `build_canonical_metadata`,
 `canonical_metadata_to_storage`, `parse_canonical_metadata`, and, with a new
 name or signature (see step 2), `build_canonical_source_signature` and
 `calculate_canonical_centers`.
@@ -239,8 +240,9 @@ Left broken until later steps:
   step 2.
 - `add_canonical_centers` validates a staged table built without the
   annotation: step 4.
-- `__init__.py` still exports `build_instance_set_digest`, so the package
-  does not import: step 2.
+- `__init__.py` still exports `build_instance_set_digest`, so
+  `harpy.table.canonical_centers` does not import: step 2. `harpy` itself
+  imports again after step 4.
 - `_canonical_table_payload` and `_assemble_canonical_table_payload` still
   pass the removed fields to `CanonicalRegionMetadata` and
   `build_canonical_metadata`: step 3.
@@ -251,7 +253,12 @@ Left broken until later steps:
 - Delete the names listed under "Deleted" above, and the private report and
   mismatch helpers of `_schema.py` (`_report`, `_all_regions_mismatch`,
   `_region_mismatch`, `_bounded_detail`) and of `_models.py`
-  (`_ALL_REGIONS_MISMATCH_CODES`).
+  (`_ALL_REGIONS_MISMATCH_CODES`, and `_normalize_canonical_centers`, which
+  only `CanonicalCacheUpdatePayload` and `CanonicalCentersResult` use: the
+  calculation checks that the centers are finite, `z = 0` holds by
+  construction for 2D labels, and the validation checks the rest).
+- `build_canonical_metadata`, `canonical_metadata_to_storage` and
+  `parse_canonical_metadata` get a leading underscore.
 - `CanonicalSourceSignature` merges into
   `CanonicalRegionMetadata(dims, shape, dtype, algorithm_version)`. A separate
   type served the cache API, which carried the labels source without an
@@ -278,11 +285,29 @@ NDArray[np.float64]` in `_calculation.py`. It keeps the checks that instance
 - `build_canonical_region_binding(table, *, labels_name)` reads the region and
   instance keys and the declared regions with `get_table_keys` and `_names`,
   as the validation does; `table_name`,
-  `region_key`, `instance_key` and `regions` go. `CanonicalRegionBinding`
-  loses `table_name`: once the cache models are deleted, it only names the
-  table in messages and in a check of `_assemble_canonical_table_payload`,
-  which step 3 replaces.
+  `region_key`, `instance_key` and `regions` go.
+- `CanonicalRegionBinding` keeps `labels_name`, `row_positions` and
+  `instance_ids`, and loses `table_name`, `region_key` and `instance_key`.
+  Read from the annotation, the keys would only repeat it. Once the cache
+  models are deleted, `table_name` only names the table in messages, and it
+  and `region_key` are read only by the binding checks of
+  `_canonical_table_payload` and `_assemble_canonical_table_payload`, which
+  step 3 replaces. `instance_key` only names the instance column of
+  `RasterAggregator`'s output: `_calculate_canonical_centers` passes a fixed
+  name instead.
 - `__init__.py` exports only the names under "Kept".
+
+Left broken until later steps (`harpy` does not import until step 4):
+
+- `_canonical_center_payloads` (`src/harpy/table/_allocation.py`) still
+  builds a `CanonicalCacheReport`, bindings with the removed fields, and
+  calls `calculate_canonical_centers`; both assembly functions take
+  `CanonicalCacheUpdatePayload`: step 3.
+- `add_canonical_centers` still calls `inspect_canonical_cache` and
+  `calculate_canonical_centers`: step 4.
+- `docs/canonical_centers.md` lists the deleted names, so the docs build
+  fails: step 6.
+- The tests: step 5.
 
 ### Step 3: one assembly path for both writers
 
@@ -295,7 +320,8 @@ NDArray[np.float64]` in `_calculation.py`. It keeps the checks that instance
   checkpoint's output rows.
 - `_canonical_center_payloads` (`src/harpy/table/_allocation.py`) calls
   `_calculate_canonical_centers` directly instead of building a
-  `CanonicalCacheReport`, and builds its bindings without `table_name`.
+  `CanonicalCacheReport`, and builds its bindings without `table_name`,
+  `region_key` and `instance_key`.
 
 ### Step 4: `add_canonical_centers` through `add_table_components` (#282)
 
@@ -375,8 +401,9 @@ In `src/harpy/_tests/test_table/test_canonical_centers.py`:
 - The calls it plans: `validate_canonical_payload(sdata, table_name=...)`;
   `add_canonical_centers(sdata, table_name=..., overwrite=True)`, unchanged;
   `build_canonical_region_binding(table, labels_name=...)`. Both read the
-  annotation from the table. `CanonicalRegionBinding` loses `table_name` and
-  `instance_set_digest`. `CanonicalSourceSignature` goes:
+  annotation from the table. `CanonicalRegionBinding` keeps `labels_name`,
+  `row_positions` and `instance_ids`; it loses `table_name`, `region_key`,
+  `instance_key` and `instance_set_digest`. `CanonicalSourceSignature` goes:
   `CanonicalRegionMetadata` holds `dims`, `shape` and `dtype`.
 - Every record Spatiato wrote is version 1, fails validation, and is rebuilt
   once with `add_canonical_centers(..., overwrite=True)`.
