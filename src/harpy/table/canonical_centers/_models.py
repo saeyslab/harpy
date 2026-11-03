@@ -49,6 +49,15 @@ class _CanonicalRegionBinding:
 
 
 @dataclass(frozen=True)
+class _CanonicalRegionCenters:
+    """Calculated centers of one labels region, with the rows they belong to and their region metadata."""
+
+    binding: _CanonicalRegionBinding
+    metadata: CanonicalRegionMetadata
+    centers: NDArray[np.float64] = field(repr=False, compare=False)
+
+
+@dataclass(frozen=True)
 class CanonicalRegionMetadata:
     """Persisted calculation identity for one labels region: its ``scale0`` source and the algorithm version."""
 
