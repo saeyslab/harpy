@@ -21,16 +21,12 @@ from harpy._storage._publication import (
 )
 from harpy.table._validation import _validate_table_without_canonical
 from harpy.table.canonical_centers import (
-    CANONICAL_ALGORITHM_VERSION,
     CANONICAL_OBSM_KEY,
     SPATIAL_COORDINATES_KEY,
-    CanonicalCacheUpdatePayload,
-    CanonicalRegionMetadata,
-    build_canonical_metadata,
     calculate_canonical_centers,
-    canonical_metadata_to_storage,
     inspect_canonical_cache,
 )
+from harpy.table.canonical_centers._calculation import _assemble_canonical_components
 from harpy.table.canonical_centers._schema import _validate_canonical_payload
 from harpy.table.io._write import _publish_table_paths
 from harpy.table.io._write_validation import (
@@ -177,16 +173,7 @@ def add_canonical_centers(
     log.info(f"Finished calculating canonical label centers for existing table {table_name!r}.")
 
     table = sdata.tables[table_name]
-    # table supplies the destination rows; table_name identifies its sdata slot.
-    # Assembly checks that each payload's binding names that same table.
-    centers, metadata = _assemble_canonical_table_payload(
-        table,
-        table_name=table_name,
-        region_key=region_key,
-        instance_key=instance_key,
-        labels_names=labels_names,
-        payloads=payloads,
-    )
+    centers, metadata = _assemble_canonical_components(table.n_obs, payloads)
     stored_table = zarr.open_group(str(destination.table_path), mode="r", use_consolidated=False)
     obs_identity = table.obs[[region_key, instance_key]]
     components = {_CANONICAL_MATRIX_PATH: centers, _CANONICAL_METADATA_PATH: metadata}
@@ -379,54 +366,6 @@ def _validate_existing_canonical_components(
         _check_component_write_destination(
             table_group, path, table_path=destination.table_path, root=destination.root, overwrite=overwrite
         )
-
-
-def _assemble_canonical_table_payload(
-    table: AnnData,
-    *,
-    table_name: str,
-    region_key: str,
-    instance_key: str,
-    labels_names: tuple[str, ...],
-    payloads: tuple[CanonicalCacheUpdatePayload, ...],
-) -> tuple[np.ndarray, dict[str, object]]:
-    """Align one calculated payload per labels region to the existing table rows."""
-    by_labels = {payload.labels_name: payload for payload in payloads}
-    if len(by_labels) != len(payloads) or set(by_labels) != set(labels_names):
-        raise ValueError("Canonical center payloads must cover every annotated labels region exactly once.")
-
-    centers = np.full((table.n_obs, 3), np.nan, dtype=np.float64)
-    covered = np.zeros(table.n_obs, dtype=bool)
-    regions: dict[str, CanonicalRegionMetadata] = {}
-    for current_labels_name in labels_names:
-        payload = by_labels[current_labels_name]
-        binding = payload.binding
-        if (
-            binding.table_name != table_name
-            or binding.region_key != region_key
-            or binding.instance_key != instance_key
-            or binding.labels_name != current_labels_name
-        ):
-            raise ValueError(f"Canonical center binding for labels element {current_labels_name!r} is incompatible.")
-        if np.any(binding.row_positions >= table.n_obs) or covered[binding.row_positions].any():
-            raise ValueError("Canonical center bindings overlap or exceed the table-row space.")
-        centers[binding.row_positions] = payload.centers
-        covered[binding.row_positions] = True
-        regions[current_labels_name] = CanonicalRegionMetadata(
-            source_signature=payload.source_signature,
-            n_obs=binding.n_obs,
-            instance_set_digest=binding.instance_set_digest,
-            algorithm_version=CANONICAL_ALGORITHM_VERSION,
-        )
-    if not covered.all() or not np.isfinite(centers).all():
-        raise ValueError("Canonical centers must cover every table row with finite coordinates.")
-
-    metadata = build_canonical_metadata(
-        region_key=region_key,
-        instance_key=instance_key,
-        regions=regions,
-    )
-    return centers, canonical_metadata_to_storage(metadata)
 
 
 def _stage_canonical_components(
