@@ -8,32 +8,67 @@ import numpy as np
 import pandas as pd
 
 from harpy.image import get_dataarray
-from harpy.table.canonical_centers._models import CanonicalRegionMetadata, _CanonicalRegionBinding
+from harpy.table.canonical_centers._models import (
+    CanonicalRegionMetadata,
+    _CanonicalRegionBinding,
+    _CanonicalRegionCenters,
+)
+from harpy.table.canonical_centers._schema import (
+    _build_canonical_metadata,
+    _build_region_metadata,
+    _canonical_metadata_to_storage,
+)
 from harpy.utils import RasterAggregator
 from harpy.utils._keys import _INSTANCE_KEY
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from numpy.typing import NDArray
     from spatialdata import SpatialData
 
 
-def _calculate_canonical_centers(
-    sdata: SpatialData,
-    binding: _CanonicalRegionBinding,
-    region_metadata: CanonicalRegionMetadata,
-) -> NDArray[np.float64]:
+def _calculate_canonical_centers(sdata: SpatialData, binding: _CanonicalRegionBinding) -> _CanonicalRegionCenters:
     """Calculate intrinsic ``(z, y, x)`` centers of one labels region without mutating a table.
 
     The labels are read at ``scale0``; 2D ``(y, x)`` labels receive a singleton
-    ``z`` axis. Only the instance IDs of ``binding`` are reduced, and the
-    returned rows keep their order.
+    ``z`` axis. Only the instance IDs of ``binding`` are reduced. Returns the
+    centers, in the order of those IDs, with the table rows they belong to
+    (``binding``) and the region entry the record stores for them.
     """
+    metadata = _build_region_metadata(sdata, binding.labels_name)
     labels = get_dataarray(sdata, binding.labels_name, scale="scale0")
     mask = da.asarray(labels.data)
-    if region_metadata.dims == ("y", "x"):
+    if metadata.dims == ("y", "x"):
         mask = mask[None, ...]
     _validate_instance_ids_fit_labels_dtype(binding, mask.dtype)
-    return _calculate_centers_with_raster_aggregator(mask, binding)
+    centers = _calculate_centers_with_raster_aggregator(mask, binding)
+    return _CanonicalRegionCenters(binding=binding, metadata=metadata, centers=centers)
+
+
+def _assemble_canonical_components(
+    n_obs: int,
+    regions: Sequence[_CanonicalRegionCenters],
+) -> tuple[NDArray[np.float64], dict[str, object]]:
+    """Place the centers of every labels region in one ``(n_obs, 3)`` matrix and build the stored record.
+
+    Every table row must belong to exactly one region.
+    """
+    centers = np.full((n_obs, 3), np.nan, dtype=np.float64)
+    covered = np.zeros(n_obs, dtype=bool)
+    entries: dict[str, CanonicalRegionMetadata] = {}
+    for region in regions:
+        binding = region.binding
+        if binding.labels_name in entries:
+            raise ValueError(f"Canonical centers for labels element `{binding.labels_name}` are given more than once.")
+        if np.any(binding.row_positions >= n_obs) or covered[binding.row_positions].any():
+            raise ValueError("Canonical center bindings overlap or exceed the table rows.")
+        centers[binding.row_positions] = region.centers
+        covered[binding.row_positions] = True
+        entries[binding.labels_name] = region.metadata
+    if not covered.all() or not np.isfinite(centers).all():
+        raise ValueError("Canonical centers must cover every table row with finite coordinates.")
+    return centers, _canonical_metadata_to_storage(_build_canonical_metadata(regions=entries))
 
 
 def _validate_instance_ids_fit_labels_dtype(binding: _CanonicalRegionBinding, labels_dtype: np.dtype) -> None:
