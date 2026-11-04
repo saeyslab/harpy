@@ -217,8 +217,6 @@ def aggregate_points(
     with ``expression_class``, and each other class appears only as the
     ``.obsm`` key of its matrix, ``snake_case(class)``, for example
     ``"negative"`` for the class ``Negative``.
-    The canonical-center record is described in :doc:`/canonical_centers`, and
-    the developer documentation on metadata describes the other records.
 
     Parameters
     ----------
@@ -317,7 +315,7 @@ def aggregate_points(
     dense ``float64`` columns are ordered ``(z, y, x)`` and contain geometric
     centers of mass of the retained instance IDs in each source labels
     element's intrinsic ``scale0`` pixel frame; a 2D labels source uses
-    ``z=0``. Per-region source and coverage metadata is stored under
+    ``z=0``. Their metadata, per labels element, is stored under
     ``adata.uns["spatial_coordinates"]["spatial_canonical"]``.
 
     **Storage and publication.** ``sdata`` must be backed by a writable local

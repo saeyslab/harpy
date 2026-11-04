@@ -62,9 +62,11 @@ def validate_table(
     because preprocessing may legitimately change them.
 
     When the canonical-center matrix or its metadata record is present, both
-    must be present. Their fixed axes, dtype, shape, region coverage, instance
-    digests and labels ``scale0`` source signatures are checked without
-    recomputing centers or reading labels pixels.
+    must be present, and they are checked as
+    :func:`harpy.table.canonical_centers.validate_canonical_centers` checks
+    them, against the labels elements but without reading their pixels. No
+    check ties a center to its row, so subsets and reorders of the table stay
+    valid; keeping ``obs`` and ``obsm`` aligned is AnnData's responsibility.
 
     This function does not recompute point-to-label assignment, scan points
     partitions, inspect label pixels, repair metadata, or write to ``sdata``.
