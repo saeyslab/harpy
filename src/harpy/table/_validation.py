@@ -99,11 +99,11 @@ def validate_table(
         # A registry written by add_feature_matrix under a custom key.
         hp.tb.validate_table(sdata, "table", feature_matrices_key="custom_feature_matrices")
     """
-    _validate_table_without_canonical(sdata, table_name, feature_matrices_key=feature_matrices_key)
+    _validate_table_without_canonical_centers(sdata, table_name, feature_matrices_key=feature_matrices_key)
     validate_canonical_centers(sdata, table_name=table_name)
 
 
-def _validate_table_without_canonical(
+def _validate_table_without_canonical_centers(
     sdata: SpatialData,
     table_name: str,
     *,
@@ -112,9 +112,10 @@ def _validate_table_without_canonical(
     """Validate the SpatialData table model, annotation and registered feature matrices.
 
     SpatialData's model is checked before the Harpy-specific contracts. This
-    deliberately partial validator excludes ``obsm["spatial_canonical"]`` and
-    its matching metadata record. Successful return does not establish complete
-    table validity: canonical components must be validated separately.
+    deliberately partial validator does not check the canonical centers,
+    ``obsm["spatial_canonical"]`` and its metadata record. Successful return
+    does not establish complete table validity: canonical components must be
+    validated separately.
     ``feature_matrices_key`` selects the one feature-matrix registry that is
     checked, as in :func:`validate_table`.
 
