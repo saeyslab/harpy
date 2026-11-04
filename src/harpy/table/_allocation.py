@@ -107,7 +107,7 @@ from harpy.table._aggregation_writer import (
     _write_aggregation_table,
 )
 from harpy.table._utils import _sanity_check_append_region
-from harpy.table.canonical_centers import CANONICAL_OBSM_KEY
+from harpy.table._validation import _RESERVED_OBSM_KEYS
 from harpy.table.canonical_centers._calculation import _calculate_canonical_centers
 from harpy.table.canonical_centers._models import _CanonicalRegionBinding, _CanonicalRegionCenters
 from harpy.table.io._add_table import add_table
@@ -651,7 +651,7 @@ def _resolve_feature_class_contract(
     reserved = sorted(
         (feature_class, key)
         for feature_class, key in contract.non_expression_class_matrix_keys
-        if key in {CANONICAL_OBSM_KEY, _SPATIAL}
+        if key in _RESERVED_OBSM_KEYS
     )
     if reserved:
         raise ValueError(f"Feature classes produce reserved .obsm keys: {reserved}.")

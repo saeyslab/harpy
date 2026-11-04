@@ -25,8 +25,11 @@ from spatialdata.models import TableModel
 
 from harpy._feature_panels import _require_mapping, _require_nonempty_string
 from harpy.table._metadata import _FEATURE_MATRIX_SCHEMA_VERSION
-from harpy.table.canonical_centers import validate_canonical_centers
-from harpy.utils._keys import _FEATURE_MATRICES_KEY
+from harpy.table.canonical_centers import CANONICAL_OBSM_KEY, validate_canonical_centers
+from harpy.utils._keys import _FEATURE_MATRICES_KEY, _SPATIAL
+
+# .obsm keys that tools read as coordinates; no feature matrix may use them.
+_RESERVED_OBSM_KEYS = frozenset({CANONICAL_OBSM_KEY, _SPATIAL})
 
 
 def validate_table(
@@ -44,8 +47,9 @@ def validate_table(
     - the annotation, when present: the region and instance columns exist
       without missing values, ``(region, instance)`` pairs are unique, and the
       declared regions equal the observed ones and exist in ``sdata``;
-    - every matrix registered in ``adata.uns[feature_matrices_key]``: it
-      exists in ``adata.obsm`` under the same key with one row per
+    - every matrix registered in ``adata.uns[feature_matrices_key]``: its key
+      is not ``spatial_canonical`` or ``spatial``, which tools read as
+      coordinates, it exists in ``adata.obsm`` under that key with one row per
       observation, and its ``feature_columns`` name each of its columns once;
       and
     - the canonical centers, when present.
@@ -197,7 +201,8 @@ def _validate_feature_matrices(adata: AnnData, *, feature_matrices_key: str) -> 
     the same key in ``adata.obsm``. For every registered matrix, this function
     checks that:
 
-    - the registry key is a non-empty string and its record is a mapping;
+    - the registry key is a non-empty string, not a reserved ``.obsm`` key
+      (``spatial_canonical`` or ``spatial``), and its record is a mapping;
     - the corresponding ``adata.obsm`` matrix exists;
     - the matrix is two-dimensional and has one row per observation;
     - ``feature_columns`` is a non-empty sequence of unique strings whose
@@ -250,6 +255,10 @@ def _validate_feature_matrix_record(
     the matrix's shape are read, no matrix value.
     """
     matrix_name = _require_nonempty_string(matrix_name, path=f"{feature_matrices_key} key")
+    if matrix_name in _RESERVED_OBSM_KEYS:
+        raise ValueError(
+            f"Feature matrix {matrix_name!r} uses a reserved .obsm key; reserved: {sorted(_RESERVED_OBSM_KEYS)}."
+        )
     record = _require_mapping(record_value, path=f"{feature_matrices_key}.{matrix_name}")
     if matrix_name not in adata.obsm:
         raise ValueError(f"Feature-matrix metadata references missing adata.obsm[{matrix_name!r}].")
