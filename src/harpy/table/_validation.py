@@ -25,7 +25,7 @@ from spatialdata.models import TableModel
 
 from harpy._feature_panels import _require_mapping, _require_nonempty_string
 from harpy.table._metadata import _FEATURE_MATRIX_SCHEMA_VERSION
-from harpy.table.canonical_centers import validate_canonical_payload
+from harpy.table.canonical_centers import validate_canonical_centers
 from harpy.utils._keys import _FEATURE_MATRICES_KEY
 
 
@@ -100,7 +100,7 @@ def validate_table(
         hp.tb.validate_table(sdata, "table", feature_matrices_key="custom_feature_matrices")
     """
     _validate_table_without_canonical(sdata, table_name, feature_matrices_key=feature_matrices_key)
-    validate_canonical_payload(sdata, table_name=table_name)
+    validate_canonical_centers(sdata, table_name=table_name)
 
 
 def _validate_table_without_canonical(
