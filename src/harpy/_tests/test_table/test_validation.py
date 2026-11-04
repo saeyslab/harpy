@@ -156,6 +156,19 @@ def test_validate_table_annotation_rejects_region_mismatches(observed_regions, d
         _validate_table_annotation(sdata, "table")
 
 
+@pytest.mark.parametrize("matrix_name", ["spatial_canonical", "spatial"])
+def test_validate_table_rejects_a_feature_matrix_under_a_reserved_key(matrix_name) -> None:
+    sdata = _labels_table_sdata()
+    table = sdata.tables["table"]
+    table.obsm[matrix_name] = np.ones((table.n_obs, 1))
+    table.uns["feature_matrices"] = {
+        matrix_name: {"schema_version": 1, "source_kind": "test_features", "feature_columns": ["first"]}
+    }
+
+    with pytest.raises(ValueError, match="reserved .obsm key"):
+        validate_table(sdata, "table")
+
+
 def test_validate_table_rejects_a_non_categorical_region_column() -> None:
     """SpatialData's table model is enforced, also after an in-place edit that bypassed it."""
     sdata = _labels_table_sdata()

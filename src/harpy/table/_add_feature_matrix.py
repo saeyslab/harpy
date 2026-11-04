@@ -17,6 +17,7 @@ from harpy._storage._anndata import _MissingAnnDataElement, _read_anndata_elemen
 from harpy.image._image import _get_translation, _precondition, get_dataarray
 from harpy.table._metadata import _FEATURE_MATRIX_SCHEMA_VERSION
 from harpy.table._regionprops import _calculate_regionprop_features
+from harpy.table._validation import _RESERVED_OBSM_KEYS
 from harpy.table.io._add_table import add_table
 from harpy.table.io._components import _check_in_memory_versus_storage_axes, _component_update_destination
 from harpy.table.io._components_by_region import add_table_components_by_region
@@ -122,7 +123,8 @@ def add_feature_matrix(
         Name of the output table element to create when `table_name is None`.
         This parameter is not allowed when updating an existing table.
     feature_key
-        Key used to store the computed feature matrix in `adata.obsm`.
+        Key used to store the computed feature matrix in `adata.obsm`. Not
+        `"spatial_canonical"` or `"spatial"`, which tools read as coordinates.
     features
         Requested feature names. Duplicate names are ignored while preserving
         order.
@@ -236,6 +238,10 @@ def add_feature_matrix(
 
         sdata["table_cell_features"].obsm["cell_features"].shape
     """
+    if feature_key in _RESERVED_OBSM_KEYS:
+        raise ValueError(
+            f"Parameter 'feature_key' must not be a reserved .obsm key; reserved: {sorted(_RESERVED_OBSM_KEYS)}."
+        )
     requested_features = _normalize_requested_features(features)
     intensity_features = [feature for feature in requested_features if feature in _INTENSITY_FEATURES]
     morphology_features = [feature for feature in requested_features if feature in _MORPHOLOGY_FEATURES]
