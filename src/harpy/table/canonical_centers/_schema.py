@@ -173,7 +173,7 @@ def _validate_canonical_centers(sdata: SpatialData, table: AnnData) -> Canonical
     As :func:`validate_canonical_centers`, but takes the table itself, so a table
     can be validated before it is added to ``sdata``.
     """
-    metadata = _validate_canonical_without_sources(table)
+    metadata = _validate_canonical_centers_without_sources(table)
     if metadata is None:
         return None
     for labels_name, stored in metadata.regions.items():
@@ -187,7 +187,7 @@ def _validate_canonical_centers(sdata: SpatialData, table: AnnData) -> Canonical
     return metadata
 
 
-def _validate_canonical_without_sources(table: AnnData) -> CanonicalMetadata | None:
+def _validate_canonical_centers_without_sources(table: AnnData) -> CanonicalMetadata | None:
     """Validate the canonical centers of ``table`` without ``sdata``: every check except the comparison with the labels elements.
 
     Return the canonical-center metadata of the regions the table declares.
