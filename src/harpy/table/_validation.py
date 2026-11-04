@@ -132,7 +132,7 @@ def _validate_table_without_canonical_centers(
     -------
     tuple[str, str, tuple[str, ...]] | None
         The normalized ``(region_key, instance_key, regions)`` annotation, or
-        ``None`` when the table is not a SpatialData regions table.
+        ``None`` when the table has no SpatialData annotation.
     """
     if not isinstance(sdata, SpatialData):
         raise ValueError(f"Parameter 'sdata' must be a SpatialData object, found {type(sdata).__name__}.")
