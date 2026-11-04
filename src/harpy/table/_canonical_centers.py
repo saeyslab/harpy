@@ -1,474 +1,94 @@
 from __future__ import annotations
 
-import uuid
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
-from pathlib import Path
-
-import numpy as np
-import zarr
-from anndata import AnnData
 from loguru import logger as log
 from spatialdata import SpatialData
 
-from harpy._storage._anndata import (
-    _read_anndata_element,
-    _write_anndata_element,
-)
-from harpy._storage._publication import (
-    _cleanup_owned_path,
-    _StagedPath,
-)
 from harpy.table._validation import _validate_table_without_canonical
-from harpy.table.canonical_centers import (
-    CANONICAL_OBSM_KEY,
-    SPATIAL_COORDINATES_KEY,
-    calculate_canonical_centers,
-    inspect_canonical_cache,
+from harpy.table.canonical_centers import CANONICAL_OBSM_KEY, SPATIAL_COORDINATES_KEY
+from harpy.table.canonical_centers._calculation import (
+    _assemble_canonical_components,
+    _calculate_canonical_centers,
 )
-from harpy.table.canonical_centers._calculation import _assemble_canonical_components
-from harpy.table.canonical_centers._schema import _validate_canonical_centers
-from harpy.table.io._write import _publish_table_paths
-from harpy.table.io._write_validation import (
-    _check_component_write_destination,
-    _storage_axis_indices,
-    _validate_component_values_against_storage,
-)
+from harpy.table.canonical_centers._schema import _build_canonical_region_binding
+from harpy.table.io._components import add_table_components
 
 _CANONICAL_MATRIX_PATH = ("obsm", CANONICAL_OBSM_KEY)
 _CANONICAL_METADATA_PATH = ("uns", SPATIAL_COORDINATES_KEY, CANONICAL_OBSM_KEY)
-
-
-@dataclass(frozen=True)
-class _CanonicalCentersDestination:
-    """Validated paths and storage format for a canonical-component update.
-
-    Constructed by ``_validate_canonical_centers_destination()`` after destination validation.
-
-    Parameters
-    ----------
-    root
-        SpatialData Zarr store, for example ``/data/sdata.zarr``.
-    table_path
-        Permanent AnnData table path within the store, for example
-        ``/data/sdata.zarr/tables/counts``. The table must already exist;
-        component destinations are derived from this path, not from staging.
-    zarr_format
-        Store's Zarr format (2 or 3), preserved when writing the components.
-    """
-
-    root: Path
-    table_path: Path
-    zarr_format: int
-
-    @property
-    def matrix(self) -> Path:
-        return self.table_path.joinpath(*_CANONICAL_MATRIX_PATH)
-
-    @property
-    def metadata(self) -> Path:
-        return self.table_path.joinpath(*_CANONICAL_METADATA_PATH)
 
 
 def add_canonical_centers(
     sdata: SpatialData,
     *,
     table_name: str,
-    labels_name: str | Sequence[str] | None = None,
     overwrite: bool = False,
 ) -> SpatialData:
     """Add label-derived canonical centers to an existing SpatialData table.
 
-    The table must be a regions table backed by a writable local Zarr store.
-    Canonical centers are calculated only for the positive instance IDs already
-    represented by the table and are stored in the intrinsic ``scale0`` frame
-    of each source labels element. Dense ``float64`` coordinates in fixed
-    ``(z, y, x)`` order are written to
-    ``adata.obsm["spatial_canonical"]``. Their schema, source, calculation and
-    table-row coverage metadata are written to
+    Every region the table annotates must be a labels element. Each row gets
+    the center of mass of its instance in the intrinsic ``scale0`` frame of its
+    labels element, stored as dense ``float64`` ``(z, y, x)`` coordinates in
+    ``adata.obsm["spatial_canonical"]``; a 2D labels element gives ``z=0``.
+    Their metadata is stored in
     ``adata.uns["spatial_coordinates"]["spatial_canonical"]``.
 
-    A two-dimensional labels source uses ``z=0``; a three-dimensional source
-    keeps its measured ``z`` center. For a multi-region table, rows remain in
-    their original order and each region is bound to its own intrinsic labels
-    frame.
-
-    Only the two coordinated canonical components are staged and written. The
-    table's expression matrix and all unrelated AnnData components remain
-    untouched. The reopened centers matrix is a read-only Zarr handle.
-    Publication is rollback-safe across both disk components, the in-memory
-    table refresh and consolidated-metadata writing. Handled failures restore
-    saved store-root metadata without requiring consolidation to succeed again;
-    crash recovery and concurrent-access isolation are not provided.
+    Both are written with :func:`harpy.table.io.add_table_components`, whose
+    guarantees apply: when ``sdata`` is backed, they are also written to its
+    store and reattached lazily, and a handled failure restores the previous
+    components. Other table components, including other entries under
+    ``adata.uns["spatial_coordinates"]``, remain unchanged.
 
     Before calculation, the table is checked as :func:`harpy.tb.validate_table`
-    checks it, apart from the canonical components, with the default
-    feature-matrix registry ``adata.uns["feature_matrices"]``. Registries under
-    other keys are not checked.
+    checks it, with the default feature-matrix registry, except for existing
+    canonical centers: they are replaced, so they may be stale or invalid.
 
     Parameters
     ----------
     sdata
-        SpatialData object backed by a writable local Zarr store. The table's
-        in-memory observation identities must match storage in value and order.
+        SpatialData object containing the table and its labels elements. When
+        backed, the table must exist in the store, with the same observations
+        in the same order.
     table_name
-        Existing regions-table element to update.
-    labels_name
-        Optional labels element or sequence of labels elements. ``None`` uses
-        every region declared by the table annotation. An explicit value is an
-        assertion and must name that complete set; it cannot select a partial
-        table.
+        Existing regions table to update.
     overwrite
-        Replace an existing complete, stale, malformed or asymmetric canonical
-        payload. If ``False``, either existing canonical component is a
-        collision. The canonical metadata record is replaced entirely, not
-        merged with previous metadata. Other entries under
-        ``uns["spatial_coordinates"]`` remain unchanged.
+        Allow replacing canonical centers that exist in the store. Ignored for
+        unbacked SpatialData, as in :func:`harpy.table.io.add_table_components`.
 
     Returns
     -------
-    The same SpatialData object with its selected table updated.
+    The same SpatialData object with its table updated.
 
     Raises
     ------
     ValueError
-        If the request, backing store, table annotation, labels binding,
-        non-canonical Harpy metadata, existing-component state or calculated
-        payload is invalid.
+        If the table, its annotation or its labels elements are invalid.
+    FileExistsError
+        If ``overwrite`` is ``False`` and the store has canonical centers.
     """
-    destination = _validate_canonical_centers_destination(
-        sdata,
-        table_name=table_name,
-        overwrite=overwrite,
-    )
+    if not isinstance(overwrite, bool):
+        raise ValueError(f"Parameter 'overwrite' must be a bool, found {type(overwrite).__name__}.")
     annotation = _validate_table_without_canonical(sdata, table_name)
     if annotation is None:
         raise ValueError(f"Table element {table_name!r} is not a SpatialData regions table.")
-    region_key, instance_key, annotated_regions = annotation
-    labels_names = _normalize_labels_names(
-        sdata,
-        table_name=table_name,
-        labels_name=labels_name,
-        region_key=region_key,
-        annotated_regions=annotated_regions,
-    )
-    _validate_existing_canonical_components(
-        sdata,
-        table_name=table_name,
-        destination=destination,
-        overwrite=overwrite,
-    )
-
-    log.info(
-        f"Calculating canonical label centers for existing table {table_name!r} from "
-        f"{len(labels_names)} labels region(s)."
-    )
-    payloads = tuple(
-        calculate_canonical_centers(
-            sdata,
-            inspect_canonical_cache(sdata, table_name=table_name, labels_name=current_labels_name),
-        )
-        for current_labels_name in labels_names
-    )
-    log.info(f"Finished calculating canonical label centers for existing table {table_name!r}.")
-
-    table = sdata.tables[table_name]
-    centers, metadata = _assemble_canonical_components(table.n_obs, payloads)
-    stored_table = zarr.open_group(str(destination.table_path), mode="r", use_consolidated=False)
-    obs_identity = table.obs[[region_key, instance_key]]
-    components = {_CANONICAL_MATRIX_PATH: centers, _CANONICAL_METADATA_PATH: metadata}
-    expected_axis_indices = _storage_axis_indices(
-        stored_table,
-        components,
-        obs_identity=obs_identity,
-        var_names=None,
-        raw_var_names=None,
-    )
-    # Calculation: centers align with in-memory observations.
-    # Write check: in-memory observations align with stored observations.
-    # Compare all identities in order: centers are written by position, while
-    # the stored obs remains unchanged.
-    _validate_component_values_against_storage(
-        stored_table,
-        components,
-        expected_axis_indices=expected_axis_indices,
-        obs_identity=obs_identity,
-        var_names=None,
-        raw_var_names=None,
-    )
-    # Keep staging explicit so canonical-specific validation can inspect the
-    # serialized components before publication. _write_table_operation() yields
-    # only after publication; see docs/development/storage.md for the rationale.
-    workspace = _stage_canonical_components(
-        destination,
-        centers=centers,
-        metadata=metadata,
-    )
-    try:
-        # Full payload validation uses the reopened serialized components,
-        # before publication can replace the original data.
-        staging_group = zarr.open_group(store=str(workspace), mode="r", use_consolidated=False)
-        staged_metadata = _read_anndata_element(staging_group, _CANONICAL_METADATA_PATH)
-        # Dense centers reopen as a storage-backed Zarr array. Canonical validation
-        # intentionally materializes this small ``(n_obs, 3)`` matrix temporarily.
-        staged_centers = _read_anndata_element(staging_group, _CANONICAL_MATRIX_PATH)
-        # Observation alignment with storage was checked before staging, which
-        # does not modify obs. The canonical validator below checks the reopened
-        # matrix's shape, values and metadata without repeating that comparison.
-        # Combine the reopened components with copied observations to validate
-        # their table-row binding without modifying the existing table.
-        staged_table = AnnData(
-            X=None,
-            obs=table.obs.copy(),
-            obsm={CANONICAL_OBSM_KEY: staged_centers},
-            uns={SPATIAL_COORDINATES_KEY: {CANONICAL_OBSM_KEY: staged_metadata}},
-        )
-        # Validate staged_table, not the table currently attached to sdata.
-        _validate_canonical_centers(sdata, staged_table)
-        # Release the copied observations and staging handles before publication.
-        del staged_table, staged_centers, staged_metadata, staging_group
-
-        _install_canonical_components(
-            sdata,
-            table_name=table_name,
-            destination=destination,
-            workspace=workspace,
-        )
-    finally:
-        _cleanup_owned_path(workspace)
-    return sdata
-
-
-def _validate_canonical_centers_destination(
-    sdata: SpatialData,
-    *,
-    table_name: str,
-    overwrite: bool,
-) -> _CanonicalCentersDestination:
-    """Validate the local backing store without inspecting canonical content."""
-    if not isinstance(sdata, SpatialData):
-        raise ValueError(f"Parameter 'sdata' must be a SpatialData object, found {type(sdata).__name__}.")
-    if (
-        not isinstance(table_name, str)
-        or not table_name
-        or Path(table_name).name != table_name
-        or table_name in {".", ".."}
-    ):
-        raise ValueError(f"Parameter 'table_name' must be a non-empty element name, found {table_name!r}.")
-    if not isinstance(overwrite, bool):
-        raise ValueError(f"Parameter 'overwrite' must be a bool, found {type(overwrite).__name__}.")
-    if not sdata.is_backed() or sdata.path is None:
-        raise ValueError(
-            "hp.tb.add_canonical_centers requires a SpatialData object backed by a writable Zarr store. "
-            'Write it first with:\n\n    sdata.write("sdata.zarr")'
-        )
-    if "://" in str(sdata.path):
-        raise ValueError("hp.tb.add_canonical_centers currently requires a local filesystem-backed Zarr store.")
-
-    root = Path(sdata.path)
-    root_group = zarr.open_group(store=str(root), mode="r", use_consolidated=False)
-    zarr_format = getattr(getattr(root_group, "metadata", None), "zarr_format", None)
-    if zarr_format not in {2, 3}:
-        raise ValueError(f"Could not determine the Zarr format of the backing store at {root!s}.")
-
-    memory_exists = table_name in sdata.tables
-    disk_exists = "tables" in root_group and table_name in root_group["tables"]
-    if memory_exists != disk_exists:
-        raise ValueError(
-            f"Table element {table_name!r} is inconsistent between the SpatialData object and its backing store."
-        )
-    if not memory_exists:
-        raise ValueError(f"Table element {table_name!r} is not present in 'sdata.tables'.")
-    table_path = root / "tables" / table_name
-    if not table_path.is_dir():
-        raise ValueError(f"Backed table element {table_name!r} does not use a local directory Zarr layout.")
-    return _CanonicalCentersDestination(root=root, table_path=table_path, zarr_format=zarr_format)
-
-
-def _normalize_labels_names(
-    sdata: SpatialData,
-    *,
-    table_name: str,
-    labels_name: str | Sequence[str] | None,
-    region_key: str,
-    annotated_regions: tuple[str, ...],
-) -> tuple[str, ...]:
-    """Validate the asserted labels set and return annotation-defined order."""
-    if labels_name is None:
-        requested = annotated_regions
-    elif isinstance(labels_name, str):
-        requested = (labels_name,)
-    elif isinstance(labels_name, Sequence):
-        requested = tuple(labels_name)
-    else:
-        raise ValueError("Parameter 'labels_name' must be a string, a sequence of strings, or None.")
-
-    if not requested or any(not isinstance(name, str) or not name for name in requested):
-        raise ValueError("Parameter 'labels_name' must contain non-empty labels element names.")
-    if len(set(requested)) != len(requested):
-        raise ValueError(f"Parameter 'labels_name' contains duplicate elements: {list(requested)!r}.")
-    if set(requested) != set(annotated_regions):
-        missing = sorted(set(annotated_regions) - set(requested))
-        additional = sorted(set(requested) - set(annotated_regions))
-        raise ValueError(
-            f"Parameter 'labels_name' must match every region annotated by table {table_name!r}; "
-            f"missing={missing!r}, additional={additional!r}."
-        )
-
-    not_labels = sorted(name for name in annotated_regions if name not in sdata.labels)
+    region_key, instance_key, regions = annotation
+    not_labels = sorted(name for name in regions if name not in sdata.labels)
     if not_labels:
         raise ValueError(f"Table {table_name!r} references non-label spatial elements: {not_labels!r}.")
+
     table = sdata.tables[table_name]
-    empty_regions = [name for name in annotated_regions if not bool((table.obs[region_key] == name).any())]
-    if empty_regions:
-        raise ValueError(f"Table {table_name!r} declares labels regions without observations: {empty_regions!r}.")
-    return annotated_regions
+    log.info(f"Calculating canonical label centers for table {table_name!r} from {len(regions)} labels region(s).")
+    centers, metadata = _assemble_canonical_components(
+        table.n_obs,
+        [
+            _calculate_canonical_centers(sdata, _build_canonical_region_binding(table, labels_name=labels_name))
+            for labels_name in regions
+        ],
+    )
+    log.info(f"Finished calculating canonical label centers for table {table_name!r}.")
 
-
-def _validate_existing_canonical_components(
-    sdata: SpatialData,
-    *,
-    table_name: str,
-    destination: _CanonicalCentersDestination,
-    overwrite: bool,
-) -> None:
-    """Validate memory/disk component presence and enforce overwrite policy."""
-    table = sdata.tables[table_name]
-    memory_matrix = CANONICAL_OBSM_KEY in table.obsm
-    memory_registry = table.uns.get(SPATIAL_COORDINATES_KEY)
-    if SPATIAL_COORDINATES_KEY in table.uns and not isinstance(memory_registry, Mapping):
-        raise ValueError(f"adata.uns[{SPATIAL_COORDINATES_KEY!r}] must be a mapping registry.")
-    memory_metadata = isinstance(memory_registry, Mapping) and CANONICAL_OBSM_KEY in memory_registry
-
-    root = zarr.open_group(store=str(destination.root), mode="r", use_consolidated=False)
-    table_group = root["tables"][table_name]
-    disk_matrix = CANONICAL_OBSM_KEY in table_group["obsm"]
-    uns_group = table_group["uns"]
-    disk_registry_element = uns_group.get(SPATIAL_COORDINATES_KEY)
-    if disk_registry_element is not None and not isinstance(disk_registry_element, zarr.Group):
-        raise ValueError(f"On-disk AnnData uns[{SPATIAL_COORDINATES_KEY!r}] must be a mapping registry.")
-    disk_metadata = isinstance(disk_registry_element, zarr.Group) and CANONICAL_OBSM_KEY in disk_registry_element
-    if (memory_matrix, memory_metadata) != (disk_matrix, disk_metadata):
-        raise ValueError(
-            f"Canonical components for table {table_name!r} are inconsistent between memory and the backing store."
-        )
-
-    if not overwrite and (memory_matrix or memory_metadata):
-        if memory_matrix and memory_metadata:
-            raise ValueError(
-                f"Table {table_name!r} already contains canonical centers. Set 'overwrite=True' to replace them."
-            )
-        raise ValueError(
-            f"Table {table_name!r} contains an incomplete canonical-center payload. "
-            "Set 'overwrite=True' to replace both coordinated components."
-        )
-    for path in (_CANONICAL_MATRIX_PATH, _CANONICAL_METADATA_PATH):
-        _check_component_write_destination(
-            table_group, path, table_path=destination.table_path, root=destination.root, overwrite=overwrite
-        )
-
-
-def _stage_canonical_components(
-    destination: _CanonicalCentersDestination,
-    *,
-    centers: np.ndarray,
-    metadata: Mapping[str, object],
-) -> Path:
-    """Write both components to a temporary store in their final hierarchy.
-
-    The staging store mirrors the logical paths the components will eventually
-    occupy in the existing AnnData table::
-
-        staging/
-        |-- obsm/spatial_canonical
-        `-- uns/spatial_coordinates/spatial_canonical
-
-    This makes staged validation use the same paths and AnnData encodings as
-    the published representation. Publication later moves only these two
-    encoded leaves into the existing table; it does not replace or reconstruct
-    the table itself.
-    """
-    workspace = destination.root.parent / f".{destination.root.name}.harpy-canonical-{uuid.uuid4().hex[:8]}"
-    try:
-        staging = zarr.open_group(store=str(workspace), mode="w", zarr_format=destination.zarr_format)
-        log.info(f"Writing staged canonical-center components to '{workspace}'.")
-        # The staging root mirrors the table, so the staged paths are logical paths.
-        _write_anndata_element(
-            staging, _CANONICAL_MATRIX_PATH, centers, logical_path=_CANONICAL_MATRIX_PATH, create_parents=True
-        )
-        _write_anndata_element(
-            staging,
-            _CANONICAL_METADATA_PATH,
-            dict(metadata),
-            logical_path=_CANONICAL_METADATA_PATH,
-            create_parents=True,
-        )
-        log.info(f"Finished writing staged canonical-center components to '{workspace}'.")
-    except BaseException:
-        _cleanup_owned_path(workspace)
-        raise
-    return workspace
-
-
-def _install_canonical_components(
-    sdata: SpatialData,
-    *,
-    table_name: str,
-    destination: _CanonicalCentersDestination,
-    workspace: Path,
-) -> None:
-    """Install staged canonical components into an existing backed table.
-
-    Non-canonical table contracts must have been validated beforehand with
-    :func:`harpy.table._validation._validate_table_without_canonical`, and the
-    data and metadata they cover must remain unchanged. Staged canonical
-    components must also have passed ``validate_canonical_centers()``; the
-    in-memory observations must match storage in value and order.
-
-    Publish the centers matrix and metadata, reopen them from their permanent
-    paths, and update the existing AnnData object in place. Preserve sibling
-    metadata records, but replace the canonical record entirely. Refresh
-    consolidated metadata after attachment succeeds, while backups remain
-    available.
-
-    On failure, ``_publish_table_paths`` restores disk paths, newly created
-    parents and saved root metadata. This function restores the previous
-    in-memory entries, removing newly added entries when none existed before,
-    and re-raises the exception. Unrelated table contents remain unchanged.
-    """
-    table = sdata.tables[table_name]
-    previous_matrix_exists = CANONICAL_OBSM_KEY in table.obsm
-    previous_matrix = table.obsm.get(CANONICAL_OBSM_KEY)
-    previous_registry_exists = SPATIAL_COORDINATES_KEY in table.uns
-    previous_registry = table.uns.get(SPATIAL_COORDINATES_KEY)
-
-    try:
-        with _publish_table_paths(
-            root=destination.root,
-            table_name=table_name,
-            workspace=workspace,
-            replacements=(
-                _StagedPath(workspace.joinpath(*_CANONICAL_MATRIX_PATH), destination.matrix),
-                _StagedPath(workspace.joinpath(*_CANONICAL_METADATA_PATH), destination.metadata),
-            ),
-        ) as table_group:
-            # Publication only moves the already-validated staged components.
-            # Reopen and attach them without reading center values again for validation.
-            matrix = _read_anndata_element(table_group, _CANONICAL_MATRIX_PATH)
-            metadata = _read_anndata_element(table_group, _CANONICAL_METADATA_PATH)
-            # Preserve sibling records, but replace the entire canonical metadata record.
-            registry = dict(previous_registry) if isinstance(previous_registry, Mapping) else {}
-            registry[CANONICAL_OBSM_KEY] = metadata
-            table.obsm[CANONICAL_OBSM_KEY] = matrix
-            table.uns[SPATIAL_COORDINATES_KEY] = registry
-            # Consolidation follows on successful exit, while backups remain.
-    except BaseException:
-        if previous_matrix_exists:
-            table.obsm[CANONICAL_OBSM_KEY] = previous_matrix
-        elif CANONICAL_OBSM_KEY in table.obsm:
-            del table.obsm[CANONICAL_OBSM_KEY]
-        if previous_registry_exists:
-            table.uns[SPATIAL_COORDINATES_KEY] = previous_registry
-        else:
-            table.uns.pop(SPATIAL_COORDINATES_KEY, None)
-        raise
+    return add_table_components(
+        sdata,
+        table_name=table_name,
+        components={_CANONICAL_MATRIX_PATH: centers, _CANONICAL_METADATA_PATH: metadata},
+        obs_identity=table.obs[[region_key, instance_key]],
+        overwrite=overwrite,
+    )
