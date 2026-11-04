@@ -443,27 +443,23 @@ and must restore their own affected in-memory state on failure. Parent groups
 created by the operation are removed on failure.
 
 The publication/finalization part is shared through `_publish_table_paths()`.
-Writers with domain-specific staging, such as aggregation and canonical-center
-updates, use it directly without serializing their staged data a second time.
-They retain responsibility for scientific construction, domain validation and
-in-memory restoration. Aggregation keeps its partitioned checkpoint and sparse
-row-block writes; canonical updates publish only the coordinated matrix and
-metadata entries. Both reopen read-only handles from permanent paths.
+Writers with domain-specific staging, such as aggregation, use it directly
+without serializing their staged data a second time. They retain responsibility
+for scientific construction, domain validation and in-memory restoration.
+Aggregation keeps its partitioned checkpoint and sparse row-block writes, and
+reopens read-only handles from permanent paths. It validates the reopened staged
+table, its canonical centers included, before publication.
 
-Canonical centers deliberately retain their own staging step. Generic component
-validation checks shapes, identities and SpatialData linkage; canonical validation
-additionally checks coordinate values and consistency with canonical metadata and
-source labels. `add_canonical_centers()` runs `validate_canonical_payload()` on the
-serialized, reopened components before publication, so validating the original
-in-memory inputs alone is not sufficient.
+`add_canonical_centers()` has no staging of its own: it writes the centers matrix
+and its metadata with `add_table_components()`, as one component update. It does
+not validate them before writing, because they are valid by construction;
+`validate_canonical_centers()` checks them afterwards, as part of
+`validate_table()`.
 
-`_write_table_operation()` currently offers no caller-defined validation between
-staging and publication: its caller's `with` body runs only after publication.
-Supporting canonical validation there would require a pre-publication callback.
-For now, explicit canonical staging keeps this sequence visible without adding a
-callback contract solely for this case. Publication, disk rollback and metadata
-finalization remain shared through `_publish_table_paths()`. Reconsider a callback
-if another component writer needs the same staged-validation extension point.
+`_write_table_operation()` offers no caller-defined validation between staging
+and publication: its caller's `with` body runs only after publication. A writer
+that needs to validate its serialized data before publication, as aggregation
+does, stages it itself and publishes through `_publish_table_paths()`.
 
 Table-writing staging workspaces live beside the SpatialData Zarr store, not
 inside its `tables` group. This applies both to ordinary table writes and writers
