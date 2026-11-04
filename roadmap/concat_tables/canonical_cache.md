@@ -54,8 +54,10 @@ Status: decided on 2026-11-01. Its own PR, before `hp.tb.concat`
    follow:
    - for backed SpatialData, the matrix is reattached lazily, as a Dask array,
      as `add_feature_matrix` does, not as a read-only `zarr.Array`;
-   - the components are validated in memory before they are installed, not
-     as a staged, serialized copy.
+   - the new components are not validated before they are installed, neither
+     in memory nor as a staged, serialized copy: everything the validator
+     checks holds by construction, and the tests run `validate_table` after
+     `add_canonical_centers`.
 6. **The annotation is read from the table, not passed.** `labels_name` is
    removed from `add_canonical_centers`: it could only restate every region
    the table annotates. `validate_canonical_centers(sdata, *, table_name)`
@@ -326,7 +328,7 @@ Left broken until later steps (`harpy` does not import until step 4):
 - `add_canonical_centers` still calls `inspect_canonical_cache` and
   `calculate_canonical_centers`: step 4.
 - `docs/canonical_centers.md` lists the deleted and the now private names, so
-  the docs build fails: step 6.
+  the docs build fails: step 7.
 - The tests: step 5.
 
 ### Step 3: one assembly path for both writers
@@ -379,17 +381,12 @@ not import.
 In `src/harpy/table/_canonical_centers.py`:
 
 1. Check the arguments, then the table with
-   `_validate_table_without_canonical(sdata, table_name)`.
+   `_validate_table_without_canonical_centers(sdata, table_name)`.
 2. Check that every annotated region is a labels element with rows (today's
    `_normalize_labels_names`, without `labels_name`).
-3. If either canonical component is in the attached table and `overwrite` is
-   `False`, raise. This covers unbacked SpatialData, where
-   `add_table_components` replaces in-memory components without `overwrite`.
-4. Per region: `_build_canonical_region_binding` and
+3. Per region: `_build_canonical_region_binding` and
    `_calculate_canonical_centers`; then `_assemble_canonical_components`.
-5. Validate the candidate components with `_validate_canonical_centers`, on a
-   candidate table with the attached table's `obs` and annotation.
-6. `hp.tb.io.add_table_components(sdata, table_name=..., components={("obsm",
+4. `hp.tb.io.add_table_components(sdata, table_name=..., components={("obsm",
 "spatial_canonical"): centers, ("uns", "spatial_coordinates",
 "spatial_canonical"): record}, obs_identity=table.obs[[region_key,
 instance_key]], overwrite=overwrite)`:
@@ -402,9 +399,37 @@ instance_key]], overwrite=overwrite)`:
    - a backed SpatialData whose table exists only in memory keeps raising.
 
 Deleted: `_CanonicalCentersDestination`,
-`_validate_canonical_centers_destination`,
+`_validate_canonical_centers_destination`, `_normalize_labels_names`,
 `_validate_existing_canonical_components`, `_stage_canonical_components` and
 `_install_canonical_components`.
+
+As implemented:
+
+- Point 2 is one check, that every region is a labels element:
+  `_validate_table_without_canonical_centers` already requires each declared
+  region to exist in `sdata` and to have rows.
+- `_validate_table_without_canonical` and
+  `_validate_canonical_without_sources` become
+  `_validate_table_without_canonical_centers` and
+  `_validate_canonical_centers_without_sources`: "canonical" alone did not
+  say what is left out.
+- The new components are not validated before installation (decision 5). A
+  first version validated them on a candidate table, but every check held by
+  construction: the matrix shape, dtype and finite values come from
+  `_assemble_canonical_components`, the region entries from
+  `_build_region_metadata` moments earlier, and `z = 0` for 2D labels from the
+  calculation. It could only catch a bug in Harpy's own code, which the tests
+  catch.
+- `overwrite` only concerns the store, as in `add_table_components` and
+  `add_feature_matrix`: unbacked, existing canonical centers are replaced
+  without it. A first version also raised for centers in the attached table,
+  unlike Harpy's other writers.
+- Errors from `add_table_components` pass through: `FileExistsError` when the
+  store has canonical centers and `overwrite` is `False`; `FileNotFoundError`
+  when the table of a backed SpatialData exists only in memory.
+- The `add_canonical_centers` docstring is rewritten here, not in step 7: the
+  old one documented `labels_name` and the cache's own publication.
+- `harpy` imports again.
 
 ### Step 5: tests
 
@@ -423,12 +448,23 @@ In `src/harpy/_tests/test_table/test_canonical_centers.py`:
   "schema" case sets version 1 instead of 2, and matches the rebuild hint.
 - `test_validate_canonical_payload_rejects_a_stale_source_signature` matches
   "are stale" instead of "source signature".
+- `add_canonical_centers` has no `labels_name` (step 4): delete
+  `test_add_canonical_centers_rejects_an_incomplete_or_duplicate_labels_assertion`;
+  the multi-region test drops `labels_name`.
+- Two tests patch the deleted staging helpers of `_canonical_centers.py`:
+  delete `test_canonical_shared_publication_restores_components_and_attachment`,
+  since `add_table_components`' own tests cover its rollback, and
+  `test_canonical_centers_reject_invalid_staged_payload_before_publication`,
+  since the components are no longer validated before installation (step 4).
+  The tests of `add_canonical_centers` run `validate_table` afterwards,
+  backed and unbacked.
 - Add:
   - unbacked 2D and 3D labels give the same centers as backed ones, and
     `validate_table` passes;
   - a multi-region table, unbacked;
-  - `overwrite=False` with an existing component raises, backed and unbacked;
-    `overwrite=True` replaces both;
+  - backed: `overwrite=False` with either component in the store raises
+    `FileExistsError`; `overwrite=True` replaces both;
+  - unbacked: existing canonical centers are replaced without `overwrite`;
   - a failure while installing on unbacked SpatialData restores the previous
     `obsm` and `uns`;
   - unbacked: no store is opened or written;
@@ -437,7 +473,33 @@ In `src/harpy/_tests/test_table/test_canonical_centers.py`:
     and so does a subset to one region, stored with that region only;
   - a NaN in the matrix fails validation.
 
-### Step 6: documentation
+### Step 6: reserved `.obsm` keys for feature matrices
+
+`add_feature_matrix` accepts `feature_key="spatial_canonical"`. On a table
+without canonical centers it writes a feature matrix there, and the table then
+fails `validate_table` ("Canonical centers require both the matrix and its
+spatial-coordinate metadata"). On a table with them it raises only after
+computing the features, with a message about the matrix shape.
+`aggregate_points` already refuses class matrices under `spatial_canonical` or
+`spatial`, which tools read as coordinates.
+
+- `src/harpy/table/_validation.py`: one constant,
+  `_RESERVED_OBSM_KEYS = frozenset({CANONICAL_OBSM_KEY, _SPATIAL})`, next to
+  the feature-matrix contract.
+- `_validate_feature_matrices` rejects a record under a reserved key, so
+  `validate_table` rejects it whatever wrote the table.
+- `add_feature_matrix` rejects a reserved `feature_key` with its other argument
+  checks, before any features are computed. It does not run the validator.
+- `aggregate_points` uses the constant instead of its inline set and keeps its
+  check before counting; its staged validation would also catch the key, but
+  only after counting.
+- Breaking, accepted: `feature_key="spatial"` raises too, and a table with a
+  feature matrix registered under either key fails `validate_table`.
+- Tests: in `test_add_feature_matrix.py`, both keys raise and nothing is
+  written; in `test_validation.py`, a record under a reserved key fails
+  `validate_table`.
+
+### Step 7: documentation
 
 - `docs/canonical_centers.md`: list only the public names; describe the
   version-2 record field by field, the frame and its pixel convention
@@ -445,11 +507,12 @@ In `src/harpy/_tests/test_table/test_canonical_centers.py`:
   pixels, with uniform weights, background 0 excluded; state what the source
   signature detects and that it misses a re-segmentation of the same image;
   no "table-row coverage".
-- Docstrings: `add_canonical_centers` (no store required, no `labels_name`,
-  lazy reattachment, `add_table_components`' guarantees instead of its own
-  publication); `aggregate_points` (no coverage metadata); `validate_table`
-  (no instance digests, and the alignment of `obs` and `obsm`).
-- `docs/development/metadata.md`: no "row coverage" in the canonical record.
+- Docstrings: `aggregate_points` (no coverage metadata); `validate_table` (no
+  instance digests, and the alignment of `obs` and `obsm`). The
+  `add_canonical_centers` docstring was rewritten in step 4.
+- `docs/development/metadata.md`: no "row coverage" in the canonical record;
+  a feature matrix may not use the reserved keys `spatial_canonical` and
+  `spatial` (step 6).
 - `docs/development/storage.md`: `validate_canonical_centers()` instead of
   `validate_canonical_payload()`.
 
