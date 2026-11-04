@@ -684,7 +684,7 @@ def _calculate_aggregation_canonical_centers(
 
     Returns
     -------
-    One calculation per aggregation pair.
+    One calculation per aggregation pair, so per labels element.
     """
     output_row_keys = checkpoint.output_row_keys
     log.info(
