@@ -177,14 +177,14 @@ Every other entry goes to `anndata.concat` with `uns_merge`.
 
 - Every table has both canonical components, the matrix and its record, or
   none has either; otherwise raise and point to `hp.tb.add_canonical_centers`.
-- Each table passes `_validate_canonical_without_sources`, the checks of
-  `validate_canonical_payload` that need no `sdata`, from the canonical-cache
+- Each table passes `_validate_canonical_centers_without_sources`, the checks
+  of `validate_canonical_centers` that need no `sdata`, from the canonical-cache
   refactor: the matrix's shape, dtype and finite values; the strict parse of
   the record, with an entry for every declared region; z = 0 for 2D labels.
   It assumes a valid annotation, which the annotation's row checks above
-  establish, and returns the entries of the declared regions. Only the source
-  signatures of the labels need `sdata`, and `validate_table` checks them
-  after storing.
+  establish, and returns the entries of the declared regions. Only the
+  comparison of each entry with its labels element needs `sdata`, and
+  `validate_table` makes it after storing.
 - The merged record holds each table's entries for its declared regions,
   built with the private schema helpers that `aggregate_points` uses, in
   schema version 2. Entries of regions a table no longer declares drop out,
@@ -211,7 +211,7 @@ Every other entry goes to `anndata.concat` with `uns_merge`.
 ## Implementation plan
 
 The canonical-cache refactor ([canonical_cache.md](canonical_cache.md)) lands
-first and provides `_validate_canonical_without_sources`.
+first and provides `_validate_canonical_centers_without_sources`.
 
 ### Step 1: annotation checks without `sdata`, no change in behaviour
 
@@ -228,7 +228,8 @@ In `src/harpy/table/_concat.py`, in this order:
 1. Normalize `tables` to names and tables; raise for none. Read each table's
    annotation with `_spatialdata_annotation(table, function="concat")`.
 2. Per table: the annotation's row checks, `_validate_feature_matrices`, and
-   `_validate_canonical_without_sources` if canonical components are present.
+   `_validate_canonical_centers_without_sources` if canonical components are
+   present.
 3. Across tables: annotation keys, regions, instance dtype, `obs_names`,
    `obs` columns, `label`, `var_names`, layers, `obsm` keys and widths.
 4. Merge the records: feature matrices, with the matrices to drop;

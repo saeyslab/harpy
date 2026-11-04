@@ -473,6 +473,54 @@ In `src/harpy/_tests/test_table/test_canonical_centers.py`:
     and so does a subset to one region, stored with that region only;
   - a NaN in the matrix fails validation.
 
+As implemented:
+
+- No test needs `_build_canonical_region_binding`: the calculation tests
+  build a `_CanonicalRegionBinding` directly.
+- The test of a valid contract also checks that `validate_canonical_centers`
+  returns `None` for a table without canonical centers; the NaN case joins
+  the malformed-components test, whose cases each match their message.
+- The multi-region and 3D tests run backed and unbacked, with the same
+  expected centers. The multi-region table has three rows, so that a row
+  subset can keep both regions in another order.
+- Unbacked: one test checks the NumPy centers, the other entry under
+  `uns["spatial_coordinates"]` and a second call without `overwrite`. The
+  planned failure test is not added: `add_canonical_centers` changes the
+  table only through `add_table_components`, whose rollback restores the
+  `obsm` and `uns` slots and is tested in `test_io/test_components.py`.
+- The tests leave `add_table_components`' own guarantees to its tests in
+  `test_io/test_components.py`: no unrelated matrix chunks are read, live
+  references and unsaved columns stay, no store is opened when unbacked, and
+  the centers are reattached lazily. The backed update test becomes
+  `test_add_canonical_centers_round_trips_through_the_store`: only the two
+  canonical paths change in the store, and the reopened table, for Zarr v2 and
+  v3, holds the expected centers and metadata and passes `validate_table`.
+  `test_add_canonical_centers_stores_centers_in_row_only_chunks` is deleted:
+  it tested how a dense `obsm` matrix is chunked, not canonical centers.
+- Renamed: the stale test to `..._rejects_stale_centers`, and the overwrite
+  test to `..._overwrite_repairs_incomplete_centers`. That test checks the
+  repair path: `validate_table` rejects a matrix without its metadata, and
+  `overwrite=True` replaces both. Of the store collisions it keeps one, which
+  shows that `overwrite` is passed on; the others are `add_table_components`'.
+- `test_validate_table_rejects_an_incomplete_canonical_contract` is deleted:
+  the asymmetry test covers the check, and the overwrite test covers
+  `validate_table` running it.
+- `test_validate_table_annotation_rejects_region_mismatches` moves to
+  `test_validation.py`: it tests the table annotation, not canonical centers.
+- Three tests that each checked that `add_canonical_centers` validates the
+  table first, with another error (a non-categorical region column, an
+  invalid feature-matrix record, a declared region without rows), become one
+  parametrized test, `test_add_canonical_centers_validates_the_table_first`,
+  which checks that nothing is written even with `overwrite=True`. Its
+  `validate_table` case moves to `test_validation.py` as
+  `test_validate_table_rejects_a_non_categorical_region_column`.
+- `test_canonical_centers_reject_in_memory_observations_reordered_relative_to_storage`
+  stays as a regression guard, and its docstring says so: the comparison of
+  the attached `obs` with the store is `add_table_components`', tested in
+  `test_backed_updates_reject_live_axis_order_mismatch`.
+- `test_canonical_centers.py` (27 tests), `test_allocation.py`,
+  `test_validation.py` and `test_io/test_cosmx/test_fovs.py` pass.
+
 ### Step 6: reserved `.obsm` keys for feature matrices
 
 `add_feature_matrix` accepts `feature_key="spatial_canonical"`. On a table
@@ -504,9 +552,21 @@ computing the features, with a message about the matrix shape.
 - `docs/canonical_centers.md`: list only the public names; describe the
   version-2 record field by field, the frame and its pixel convention
   included; define algorithm version 1: the center of mass of each label's
-  pixels, with uniform weights, background 0 excluded; state what the source
-  signature detects and that it misses a re-segmentation of the same image;
-  no "table-row coverage".
+  pixels, with uniform weights, background 0 excluded; state what the
+  comparison with the labels element detects and that it misses a
+  re-segmentation of the same image; no "table-row coverage".
+- `docs/canonical_centers.md`, a section "Subsetting and concatenating
+  tables", since #279 is about this:
+  - a row subset or reorder keeps the canonical centers valid; AnnData subsets
+    `obs` and `obsm["spatial_canonical"]` together, and their alignment is
+    AnnData's responsibility;
+  - a subset that drops a region entirely must also drop it from
+    `uns["spatialdata_attrs"]["region"]`, SpatialData's rule: otherwise
+    neither SpatialData nor `validate_table` accepts the table;
+  - the canonical record may keep the dropped region's entry, which
+    validation ignores;
+  - this lets per-cell QC run before `hp.tb.concat`, and Spatiato filter
+    tables without rebuilding their centers.
 - Docstrings: `aggregate_points` (no coverage metadata); `validate_table` (no
   instance digests, and the alignment of `obs` and `obsm`). The
   `add_canonical_centers` docstring was rewritten in step 4.
