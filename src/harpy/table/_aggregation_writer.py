@@ -39,7 +39,7 @@ from harpy.table._metadata import (
     _POINT_AGGREGATION_KEY,
     _POINT_AGGREGATION_SCHEMA_VERSION,
 )
-from harpy.table._validation import _validate_table_without_canonical
+from harpy.table._validation import _validate_table_without_canonical_centers
 from harpy.table.canonical_centers import CANONICAL_OBSM_KEY, SPATIAL_COORDINATES_KEY
 from harpy.table.canonical_centers._calculation import _assemble_canonical_components
 from harpy.table.canonical_centers._models import _CanonicalRegionCenters
@@ -464,7 +464,7 @@ def _install_aggregation_table(
                attach to sdata.tables
                      |
                      v
-               _validate_table_without_canonical()
+               _validate_table_without_canonical_centers()
                      |
                      v
                write consolidated metadata
@@ -491,7 +491,7 @@ def _install_aggregation_table(
             # canonical components after reopening the staged table; publication
             # only moved that payload. Validate the remaining table contracts
             # here while disk and in-memory rollback are still available.
-            _validate_table_without_canonical(sdata, output_table_name)
+            _validate_table_without_canonical_centers(sdata, output_table_name)
             # The shared operation consolidates after this body succeeds.
     except BaseException:
         # Attachment may have assigned the table before raising. Restore the
