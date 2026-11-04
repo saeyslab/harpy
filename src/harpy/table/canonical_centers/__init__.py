@@ -10,7 +10,7 @@ from harpy.table.canonical_centers._schema import (
     CANONICAL_OBSM_KEY,
     CANONICAL_SCHEMA_VERSION,
     SPATIAL_COORDINATES_KEY,
-    validate_canonical_payload,
+    validate_canonical_centers,
 )
 
 __all__ = [
@@ -21,5 +21,5 @@ __all__ = [
     "SPATIAL_COORDINATES_KEY",
     "CanonicalMetadata",
     "CanonicalRegionMetadata",
-    "validate_canonical_payload",
+    "validate_canonical_centers",
 ]

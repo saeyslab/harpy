@@ -27,7 +27,7 @@ from harpy.table.canonical_centers import (
     inspect_canonical_cache,
 )
 from harpy.table.canonical_centers._calculation import _assemble_canonical_components
-from harpy.table.canonical_centers._schema import _validate_canonical_payload
+from harpy.table.canonical_centers._schema import _validate_canonical_centers
 from harpy.table.io._write import _publish_table_paths
 from harpy.table.io._write_validation import (
     _check_component_write_destination,
@@ -224,7 +224,7 @@ def add_canonical_centers(
             uns={SPATIAL_COORDINATES_KEY: {CANONICAL_OBSM_KEY: staged_metadata}},
         )
         # Validate staged_table, not the table currently attached to sdata.
-        _validate_canonical_payload(sdata, staged_table)
+        _validate_canonical_centers(sdata, staged_table)
         # Release the copied observations and staging handles before publication.
         del staged_table, staged_centers, staged_metadata, staging_group
 
@@ -422,7 +422,7 @@ def _install_canonical_components(
     Non-canonical table contracts must have been validated beforehand with
     :func:`harpy.table._validation._validate_table_without_canonical`, and the
     data and metadata they cover must remain unchanged. Staged canonical
-    components must also have passed ``validate_canonical_payload()``; the
+    components must also have passed ``validate_canonical_centers()``; the
     in-memory observations must match storage in value and order.
 
     Publish the centers matrix and metadata, reopen them from their permanent
