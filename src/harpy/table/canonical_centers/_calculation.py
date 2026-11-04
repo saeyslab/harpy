@@ -32,9 +32,9 @@ def _calculate_canonical_centers(sdata: SpatialData, binding: _CanonicalRegionBi
     """Calculate intrinsic ``(z, y, x)`` centers of one labels region without mutating a table.
 
     The labels are read at ``scale0``; 2D ``(y, x)`` labels receive a singleton
-    ``z`` axis. Only the instance IDs of ``binding`` are reduced. Returns the
-    centers, in the order of those IDs, with the table rows they belong to
-    (``binding``) and their region metadata.
+    ``z`` axis. Only the instance IDs in ``binding``, those with table rows, get
+    a center. Returns the centers, in the order of those IDs, with the table
+    rows they belong to (``binding``) and their region metadata.
     """
     metadata = _build_region_metadata(sdata, binding.labels_name)
     labels = get_dataarray(sdata, binding.labels_name, scale="scale0")
