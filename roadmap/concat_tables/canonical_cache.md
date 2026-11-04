@@ -547,6 +547,18 @@ computing the features, with a message about the matrix shape.
   written; in `test_validation.py`, a record under a reserved key fails
   `validate_table`.
 
+As implemented:
+
+- The check sits in `_validate_feature_matrix_record`, the per-record checks
+  of `_validate_feature_matrices`, so `harpy.qc.summarize_table` also rejects
+  such a record.
+- `add_feature_matrix` checks `feature_key` first, before its other
+  arguments; its docstring names the two keys. `validate_table`'s docstring
+  lists the check with the other feature-matrix checks.
+- `_allocation.py` no longer imports `CANONICAL_OBSM_KEY`.
+- `test_validation.py`, `test_add_feature_matrix.py`, `test_allocation.py`
+  and `test_canonical_centers.py` pass.
+
 ### Step 7: documentation
 
 - `docs/canonical_centers.md`: list only the public names; describe the
