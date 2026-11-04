@@ -141,18 +141,14 @@ def _validate_table_without_canonical_centers(
 
     adata = sdata.tables[table_name]
     TableModel.validate(adata)
-    annotation = _validate_table_annotation(sdata, adata, table_name=table_name)
+    annotation = _validate_table_annotation(sdata, table_name)
     _validate_feature_matrices(adata, feature_matrices_key=feature_matrices_key)
     return annotation
 
 
-def _validate_table_annotation(
-    sdata: SpatialData,
-    adata: AnnData,
-    *,
-    table_name: str,
-) -> tuple[str, str, tuple[str, ...]] | None:
+def _validate_table_annotation(sdata: SpatialData, table_name: str) -> tuple[str, str, tuple[str, ...]] | None:
     """Validate the annotation, requiring declared and observed region sets to match."""
+    adata = sdata.tables[table_name]
     if TableModel.ATTRS_KEY not in adata.uns:
         return None
     annotation = _require_mapping(
