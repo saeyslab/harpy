@@ -74,10 +74,9 @@ adata.uns
 │   └── regions                         labels name → points name + coordinate system
 └── spatial_coordinates
     └── spatial_canonical
-        ├── schema_version, obsm_key, axes, dtype
-        ├── region_key, instance_key
-        └── regions                     per-label source, coordinate frame,
-                                        calculation and row coverage
+        ├── schema_version, axes
+        └── regions                     per labels element: coordinate frame,
+                                        algorithm version and source
 
 feature_matrices[<matrix key>]       → adata.obsm[<matrix key>]
 point_aggregation                   → provenance of adata.X and, class-aware, of
@@ -90,7 +89,10 @@ Each `feature_matrices` record describes the `.obsm` matrix with the same
 key; the shared key is their only link. `feature_matrices` is the default
 `.uns` key of this registry: `hp.tb.add_feature_matrix` can write its record
 under another key, and `hp.tb.validate_table` checks only the registry named
-by its `feature_matrices_key`.
+by its `feature_matrices_key`. No feature matrix may use the `.obsm` keys
+`spatial_canonical` or `spatial`, which tools read as coordinates:
+`hp.tb.add_feature_matrix` and `hp.tb.aggregate_points` refuse them, and
+`hp.tb.validate_table` rejects a record under either key.
 
 `feature_columns` identifies the columns of an `.obsm` feature matrix;
 `feature_key` names a source points column. They have different roles.
