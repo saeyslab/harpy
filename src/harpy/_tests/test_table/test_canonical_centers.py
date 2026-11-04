@@ -356,56 +356,54 @@ def test_add_canonical_centers_overwrite_repairs_incomplete_centers(tmp_path) ->
     validate_table(read_zarr(sdata.path), "table")
 
 
-def test_add_canonical_centers_does_not_ignore_an_unrelated_table_error(tmp_path) -> None:
+@pytest.mark.parametrize(
+    ("problem", "message"),
+    [
+        ("non_categorical_region", "must be of type `categorical`"),
+        ("feature_matrix", "declares 2 feature columns"),
+        ("region_without_rows", "Regions.*do not match"),
+    ],
+)
+def test_add_canonical_centers_validates_the_table_first(tmp_path, problem, message) -> None:
+    """A table edited in place into an invalid one raises before anything is written, even with ``overwrite=True``."""
     sdata = _backed_external_sdata(tmp_path)
     table = sdata.tables["table"]
-    table.obsm["negative"] = np.ones((table.n_obs, 1))
-    table.uns["feature_matrices"] = {
-        "negative": {
-            "schema_version": 1,
-            "source_kind": "harpy_aggregate_points",
-            "feature_columns": ["Negative01", "Negative02"],
+    if problem == "non_categorical_region":
+        table.obs["region"] = table.obs["region"].astype("string")
+    elif problem == "feature_matrix":
+        table.obsm["negative"] = np.ones((table.n_obs, 1))
+        table.uns["feature_matrices"] = {
+            "negative": {
+                "schema_version": 1,
+                "source_kind": "harpy_aggregate_points",
+                "feature_columns": ["Negative01", "Negative02"],
+            }
         }
-    }
+    else:
+        sdata.labels["empty_labels"] = Labels2DModel.parse(
+            np.array([[1]], dtype=np.uint32),
+            dims=("y", "x"),
+            transformations={"global": Identity()},
+        )
+        table.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY] = ["labels", "empty_labels"]
+    before = _store_bytes(sdata.path)
 
-    with pytest.raises(ValueError, match="declares 2 feature columns"):
+    with pytest.raises(ValueError, match=message):
         add_canonical_centers(sdata, table_name="table", overwrite=True)
 
     assert CANONICAL_OBSM_KEY not in table.obsm
-
-
-@pytest.mark.parametrize("operation", [validate_table, add_canonical_centers])
-def test_table_preflight_rejects_a_non_categorical_region_column(tmp_path, operation) -> None:
-    """Both entry points enforce SpatialData's model after an in-place table edit."""
-    sdata = _backed_external_sdata(tmp_path)
-    table = sdata.tables["table"]
-    table.obs["region"] = table.obs["region"].astype("string")
-
-    with pytest.raises(ValueError, match="must be of type `categorical`"):
-        operation(sdata, table_name="table")
-
-    assert CANONICAL_OBSM_KEY not in table.obsm
     assert CANONICAL_OBSM_KEY not in table.uns[SPATIAL_COORDINATES_KEY]
-    reopened = read_zarr(sdata.path)
-    assert CANONICAL_OBSM_KEY not in reopened.tables["table"].obsm
-    assert CANONICAL_OBSM_KEY not in reopened.tables["table"].uns[SPATIAL_COORDINATES_KEY]
-
-
-def test_add_canonical_centers_rejects_a_declared_region_without_rows(tmp_path) -> None:
-    sdata = _backed_external_sdata(tmp_path)
-    sdata.labels["empty_labels"] = Labels2DModel.parse(
-        np.array([[1]], dtype=np.uint32),
-        dims=("y", "x"),
-        transformations={"global": Identity()},
-    )
-    sdata.tables["table"].uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY] = ["labels", "empty_labels"]
-
-    with pytest.raises(ValueError, match="Regions.*do not match"):
-        add_canonical_centers(sdata, table_name="table")
+    assert _store_bytes(sdata.path) == before
 
 
 def test_canonical_centers_reject_in_memory_observations_reordered_relative_to_storage(tmp_path):
-    """Centers calculated in live-table order must never be written onto different stored rows."""
+    """Centers calculated in live-table order must never be written onto different stored rows.
+
+    A regression guard only: nothing here is specific to ``add_canonical_centers``.
+    ``add_table_components`` compares the attached ``obs`` with the store for every
+    obs-aligned write, and ``test_backed_updates_reject_live_axis_order_mismatch``
+    tests that. This test fails if the centers are ever written another way.
+    """
     sdata = _backed_external_sdata(tmp_path)
     table = sdata.tables["table"]
     table.obs = table.obs.iloc[::-1].copy()

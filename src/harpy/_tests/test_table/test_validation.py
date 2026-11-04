@@ -1,8 +1,13 @@
 import numpy as np
+import pandas as pd
 import pytest
+from anndata import AnnData
+from spatialdata import SpatialData
+from spatialdata.models import Labels2DModel, TableModel
 
 from harpy.table import validate_table
 from harpy.table._allocation import aggregate_points
+from harpy.table._validation import _validate_table_annotation
 
 
 def test_validate_table_accepts_a_registered_generic_feature_matrix(backed_class_aware_sdata):
@@ -131,3 +136,46 @@ def test_validate_table_rejects_non_expression_class_matrices_whose_names_do_not
 
     with pytest.raises(ValueError, match=message):
         validate_table(result, "table")
+
+
+@pytest.mark.parametrize(
+    ("observed_regions", "declared_regions", "message"),
+    [
+        (["labels", "other_labels"], ["labels"], "regions absent from its annotation:.*other_labels"),
+        (["labels", "labels"], ["labels", "other_labels"], "declares regions without observations:.*other_labels"),
+    ],
+)
+def test_validate_table_annotation_rejects_region_mismatches(observed_regions, declared_regions, message) -> None:
+    """Harpy rejects both mismatch directions independently of TableModel.validate()."""
+    sdata = _labels_table_sdata()
+    table = sdata.tables["table"]
+    table.obs["region"] = pd.Categorical(observed_regions)
+    table.uns[TableModel.ATTRS_KEY][TableModel.REGION_KEY] = declared_regions
+
+    with pytest.raises(ValueError, match=message):
+        _validate_table_annotation(sdata, "table")
+
+
+def test_validate_table_rejects_a_non_categorical_region_column() -> None:
+    """SpatialData's table model is enforced, also after an in-place edit that bypassed it."""
+    sdata = _labels_table_sdata()
+    table = sdata.tables["table"]
+    table.obs["region"] = table.obs["region"].astype("string")
+
+    with pytest.raises(ValueError, match="must be of type `categorical`"):
+        validate_table(sdata, "table")
+
+
+def _labels_table_sdata() -> SpatialData:
+    """A regions table on ``labels``, next to an unannotated ``other_labels``."""
+    labels = Labels2DModel.parse(np.ones((2, 2), dtype=np.uint32), dims=("y", "x"))
+    table = TableModel.parse(
+        AnnData(
+            X=np.ones((2, 1)),
+            obs=pd.DataFrame({"region": ["labels", "labels"], "cell_ID": [1, 2]}, index=["cell-1", "cell-2"]),
+        ),
+        region_key="region",
+        region="labels",
+        instance_key="cell_ID",
+    )
+    return SpatialData(labels={"labels": labels, "other_labels": labels}, tables={"table": table})
