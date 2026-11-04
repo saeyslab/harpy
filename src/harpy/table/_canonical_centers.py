@@ -3,7 +3,7 @@ from __future__ import annotations
 from loguru import logger as log
 from spatialdata import SpatialData
 
-from harpy.table._validation import _validate_table_without_canonical
+from harpy.table._validation import _validate_table_without_canonical_centers
 from harpy.table.canonical_centers import CANONICAL_OBSM_KEY, SPATIAL_COORDINATES_KEY
 from harpy.table.canonical_centers._calculation import (
     _assemble_canonical_components,
@@ -66,7 +66,7 @@ def add_canonical_centers(
     """
     if not isinstance(overwrite, bool):
         raise ValueError(f"Parameter 'overwrite' must be a bool, found {type(overwrite).__name__}.")
-    annotation = _validate_table_without_canonical(sdata, table_name)
+    annotation = _validate_table_without_canonical_centers(sdata, table_name)
     if annotation is None:
         raise ValueError(f"Table element {table_name!r} is not a SpatialData regions table.")
     region_key, instance_key, regions = annotation
