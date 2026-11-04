@@ -41,7 +41,7 @@ _REGION_KEYS = {
 
 
 def _build_region_metadata(sdata: SpatialData, labels_name: str) -> CanonicalRegionMetadata:
-    """Build the region entry a calculation records for a labels element; reads no pixels."""
+    """Build the canonical-center metadata of a labels element from its ``scale0`` array; reads no pixels."""
     if not isinstance(labels_name, str) or not labels_name:
         raise ValueError("Labels name must be a non-empty string.")
     if labels_name not in sdata.labels:
@@ -145,14 +145,17 @@ def _parse_canonical_metadata(value: object) -> CanonicalMetadata:
     return CanonicalMetadata(schema_version=schema_version, regions=regions)
 
 
-def validate_canonical_payload(sdata: SpatialData, *, table_name: str) -> CanonicalMetadata | None:
+def validate_canonical_centers(sdata: SpatialData, *, table_name: str) -> CanonicalMetadata | None:
     """Validate the canonical centers of a table, when present.
 
     The matrix and its metadata record must be present together, the record
     with an entry for every region the table declares. Validation is
-    structural: it compares the record with the labels elements' metadata and
-    reads no labels pixels. Returns the record's entries for the declared
-    regions, or ``None`` when the table has no canonical centers.
+    structural: it compares the stored ``dims``, ``shape`` and ``dtype`` of each
+    region with its labels element at ``scale0``, and reads no labels pixels.
+    A labels element replaced by one of the same shape and dtype is not
+    detected. Returns the canonical-center metadata of the
+    regions the table declares, or ``None`` when the table has no canonical
+    centers.
 
     No check ties a region to its rows, so subsetting, reordering or
     concatenating valid tables keeps them valid; aligning ``obs`` and ``obsm``
@@ -161,25 +164,33 @@ def validate_canonical_payload(sdata: SpatialData, *, table_name: str) -> Canoni
     """
     if table_name not in sdata.tables:
         raise ValueError(f"Table element {table_name!r} is not present in 'sdata.tables'.")
-    return _validate_canonical_payload(sdata, sdata.tables[table_name])
+    return _validate_canonical_centers(sdata, sdata.tables[table_name])
 
 
-def _validate_canonical_payload(sdata: SpatialData, table: AnnData) -> CanonicalMetadata | None:
-    """Validate the canonical components of a table that need not be in ``sdata``, such as a staged one."""
+def _validate_canonical_centers(sdata: SpatialData, table: AnnData) -> CanonicalMetadata | None:
+    """Validate the canonical centers of ``table`` against the labels elements in ``sdata``.
+
+    As :func:`validate_canonical_centers`, but takes the table itself, so a table
+    can be validated before it is added to ``sdata``.
+    """
     metadata = _validate_canonical_without_sources(table)
     if metadata is None:
         return None
     for labels_name, stored in metadata.regions.items():
         # Algorithm versions already match (checked above), so a difference is in the source.
         if stored != _build_region_metadata(sdata, labels_name):
-            raise ValueError(f"Canonical source signature for labels element `{labels_name}` is stale.")
+            raise ValueError(
+                f"Canonical centers of labels element `{labels_name}` are stale: the labels element no longer "
+                "matches the one they were calculated from. Rebuild them with "
+                "hp.tb.add_canonical_centers(sdata, table_name=..., overwrite=True)."
+            )
     return metadata
 
 
 def _validate_canonical_without_sources(table: AnnData) -> CanonicalMetadata | None:
-    """Validate the canonical components without ``sdata``: every check but the labels source signatures.
+    """Validate the canonical centers of ``table`` without ``sdata``: every check except the comparison with the labels elements.
 
-    Return the record's entries of the declared regions.
+    Return the canonical-center metadata of the regions the table declares.
     """
     matrix_exists = CANONICAL_OBSM_KEY in table.obsm
     registry = table.uns.get(SPATIAL_COORDINATES_KEY)
