@@ -7,6 +7,7 @@
 # -- Path setup --------------------------------------------------------------
 import sys
 from datetime import datetime
+from fnmatch import fnmatch
 from importlib.metadata import metadata
 from pathlib import Path
 
@@ -111,6 +112,17 @@ intersphinx_mapping = {
 # directories to ignore when looking for source files.
 # This pattern also affects html_static_path and html_extra_path.
 exclude_patterns = ["_build", "Thumbs.db", "**.ipynb_checkpoints", "../notebooks/*", "../experiments/*", "../configs/*"]
+# The tutorials live in the spatial multi-omics training repository. Of the
+# tutorials submodule, only these pages are still built.
+_BUILT_TUTORIALS = ("general/techno_specific.ipynb", "general/benchmark.ipynb", "hpc/*")
+_TUTORIALS = HERE / "tutorials"
+exclude_patterns += [
+    f"tutorials/{page}"
+    for page in sorted(
+        path.relative_to(_TUTORIALS).as_posix() for path in _TUTORIALS.rglob("*") if path.suffix in {".md", ".ipynb"}
+    )
+    if not any(fnmatch(page, built) for built in _BUILT_TUTORIALS)
+]
 # Ignore warnings.
 nitpicky = False  # TODO: solve upstream.
 # nitpick_ignore = [

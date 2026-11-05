@@ -87,18 +87,23 @@ spatial_coordinates["spatial_canonical"]
 
 Each `feature_matrices` record describes the `.obsm` matrix with the same
 key; the shared key is their only link. `feature_matrices` is the default
-`.uns` key of this registry: `hp.tb.add_feature_matrix` can write its record
-under another key, and `hp.tb.validate_table` checks only the registry named
-by its `feature_matrices_key`. No feature matrix may use the `.obsm` keys
+`.uns` key of this registry:
+{func}`hp.tb.add_feature_matrix <harpy.tb.add_feature_matrix>` can write its
+record under another key, and
+{func}`hp.tb.validate_table <harpy.tb.validate_table>` checks only the registry
+named by its `feature_matrices_key`. No feature matrix may use the `.obsm` keys
 `spatial_canonical` or `spatial`, which tools read as coordinates:
-`hp.tb.add_feature_matrix` and `hp.tb.aggregate_points` refuse them, and
-`hp.tb.validate_table` rejects a record under either key.
+{func}`hp.tb.add_feature_matrix <harpy.tb.add_feature_matrix>` and
+{func}`hp.tb.aggregate_points <harpy.tb.aggregate_points>` refuse them, and
+{func}`hp.tb.validate_table <harpy.tb.validate_table>` rejects a record under
+either key.
 
 `feature_columns` identifies the columns of an `.obsm` feature matrix;
 `feature_key` names a source points column. They have different roles.
 Expression-matrix columns are identified by `adata.var_names`.
 
-`hp.tb.aggregate_points` writes `point_aggregation` in both modes, as
+{func}`hp.tb.aggregate_points <harpy.tb.aggregate_points>` writes
+`point_aggregation` in both modes, as
 provenance that no validation reads: it pairs each region with the points
 element and coordinate system aggregated into it, which SpatialData's table
 annotation does not record. In a class-aware table, a column's class is the

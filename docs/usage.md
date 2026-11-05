@@ -23,4 +23,5 @@ sdata=hp.datasets.resolve_example()
 
 ### Jupyter notebooks
 
-Check the notebooks in the [tutorials section](tutorials/index.md).
+Work through the notebooks of the
+[spatial multi-omics training](https://github.com/vibspatial/spatial_multi_omics_training).

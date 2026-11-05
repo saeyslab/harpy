@@ -31,7 +31,7 @@
   ·
   <a href="https://harpy.readthedocs.io/en/latest/quickstart.html">Quick Start</a>
   ·
-  <a href="https://harpy.readthedocs.io/en/latest/tutorials/index.html">Tutorials</a>
+  <a href="https://github.com/vibspatial/spatial_multi_omics_training">Tutorials</a>
   ·
   <a href="https://github.com/vibspatial/spatiato">spatiato</a>
   ·
@@ -110,72 +110,11 @@ The examples in this README and in the documentation already follow the `0.4.0` 
 
 ## 🧭 Tutorials and Guides
 
-Explore how to use Harpy for segmentation, shallow and deep feature extraction, clustering, and spatial analysis of gigapixel-scale multiplexed data with these step-by-step notebooks:
+Explore how to use Harpy with these step-by-step notebooks:
 
-- **🚀 Basic Usage of Harpy**
+- **🎓 Spatial multi-omics training**
 
-  Learn how to read in data, perform **tiled segmentation** using [**Cellpose**](https://github.com/MouseLand/cellpose) and [**Dask-CUDA**](https://docs.rapids.ai/api/dask-cuda/stable/), extract features, perform QC and analyze results downstream with `Scanpy` and `Squidpy`.
-
-  👉 [Tutorial image based transcriptomics, Human Ovarian Cancer, Xenium 10x Genomics](https://harpy.readthedocs.io/en/latest/tutorials/general/Harpy_xenium_transcriptomics_subset.html)
-
-  👉 [Tutorial proteomics, MACSima](https://harpy.readthedocs.io/en/latest/tutorials/general/Harpy_feature_calculation.html)
-
-- **🔧 Technology-specific advice**
-
-  Learn which technologies Harpy supports. 👉 [Tutorial](https://harpy.readthedocs.io/en/latest/tutorials/general/techno_specific.html)
-
-- **🧩 Pixel and Cell Clustering**
-
-  Learn how to perform unsupervised pixel- and cell-level clustering using `Harpy` together with [**FlowSOM**](https://github.com/saeyslab/FlowSOM_Python). 👉 [Tutorial](https://harpy.readthedocs.io/en/latest/tutorials/general/FlowSOM_for_pixel_and_cell_clustering.html)
-
-- **✂️ Cell Segmentation**
-
-  Explore segmentation workflows in `Harpy` using different tools:
-  - With [**Instanseg**](https://github.com/instanseg/instanseg) 👉 [Tutorial](https://harpy.readthedocs.io/en/latest/tutorials/general/Harpy_instanseg.html)
-
-  - With [**Cellpose**](https://github.com/MouseLand/cellpose) 👉 [Tutorial](https://harpy.readthedocs.io/en/latest/tutorials/general/Harpy_feature_calculation.html)
-
-  💡 Want us to add support for another segmentation method?
-  👉 [Open an issue](https://github.com/saeyslab/harpy/issues) and let us know!
-
-- **🧪 Single-cell representations from highly multiplexed images and downstream use with [PyTorch](https://pytorch.org/)**
-
-  Learn how single-cell representations can be generated from highly multiplexed images. These representations can then be used downstream to train classifiers in PyTorch. 👉 [Tutorial](https://harpy.readthedocs.io/en/latest/tutorials/general/generate_single_cell_representations.html)
-
-- **🧠 Deep Feature Extraction**
-
-  Discover how `Harpy` enables fast, scalable extraction of deep, cell-level features from multiplex imaging data with the [**KRONOS**](https://github.com/mahmoodlab/KRONOS) foundation model for proteomics. 👉 [Tutorial](https://harpy.readthedocs.io/en/latest/tutorials/general/Featurize_with_kronos.html)
-
-  💡 Want us to add support for another deep feature extraction method?
-  👉 [Open an issue](https://github.com/saeyslab/harpy/issues) and let us know!
-
-- **🔬 Shallow Feature Extraction**
-
-  Learn to extract shallow features—such as **mean**, **median**, and **standard deviation** of intensities—from multiplex imaging data with `Harpy`. 👉 [Tutorial](https://harpy.readthedocs.io/en/latest/tutorials/advanced/Harpy_aggregate_rasters.html)
-
-- **🧬 Spatial Transcriptomics**
-
-  Learn how to analyze spatial transcriptomics data with `Harpy`.
-
-  👉 [Tutorial (Mouse Liver, Resolve Molecular Cartography)](https://harpy.readthedocs.io/en/latest/tutorials/advanced/Harpy_transcriptomics.html)
-
-  👉 [Tutorial (Human Ovarian Cancer, Xenium 10x Genomics)](https://harpy.readthedocs.io/en/latest/tutorials/advanced/Harpy_transcriptomics_xenium.html)
-
----
-
-- **🌐 Multiple samples and coordinate systems**
-
-  Learn how to work with multiple samples, intrinsic and micron coordinates. 👉 [Tutorial](https://harpy.readthedocs.io/en/latest/tutorials/advanced/coordinate_systems.html)
-
----
-
-- **📐 Rasterize and vectorize labels and shapes**
-
-  Learn how to convert a segmentation mask (array) into its vectorized form, and segmentation boundaries (polygons) into their rasterized equivalents. This conversion is useful, for example, when integrating annotations (e.g., from [QuPath](https://qupath.github.io/)) into downstream spatial omics analysis.👉 [Tutorial](https://harpy.readthedocs.io/en/latest/tutorials/advanced/Rasterize_and_vectorize.html)
-
----
-
-📚 For a complete list of tutorials, visit the [**Harpy documentation**](https://harpy.readthedocs.io/en/latest/tutorials).
+  Work through course notebooks on `SpatialData` objects, targeted transcriptomics and spatial proteomics with Harpy and spatiato. 👉 [Training](https://github.com/vibspatial/spatial_multi_omics_training)
 
 ## Computational benchmark
 

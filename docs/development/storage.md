@@ -179,7 +179,8 @@ value at `path`, such as `("obsm", "my_matrix")`, through AnnData's
 creates missing parents as AnnData-encoded mappings.
 
 Callers pass the value's position in the AnnData table as `logical_path`,
-because staged paths need not be logical ones: `write_table_components` stages
+because staged paths need not be logical ones:
+{func}`write_table_components <harpy.tb.io.write_table_components>` stages
 components as `component-N`. The writer uses it to choose the stored layout.
 Dense matrices are stored in row-only chunks of 4 MiB, and sparse matrices in
 chunks of 524,288 entries per array, at most 4 MiB each. Both are fixed, and
@@ -200,10 +201,10 @@ in staging when preparing a replacement.
 
 #### Public scoped table writers
 
-`hp.tb.io.write_table(store, table_name=..., adata=..., overwrite=...)` writes a
-complete table. `hp.tb.io.write_table_components(store, table_name=...,
-components=..., overwrite=...)` replaces only named logical components of an
-existing table. Both operate on an existing local SpatialData root, preserve
+{func}`hp.tb.io.write_table(store, table_name=..., adata=..., overwrite=...) <harpy.tb.io.write_table>`
+writes a complete table.
+{func}`hp.tb.io.write_table_components(store, table_name=..., components=..., overwrite=...) <harpy.tb.io.write_table_components>`
+replaces only named logical components of an existing table. Both operate on an existing local SpatialData root, preserve
 its Zarr format, and return `None` after publication and metadata finalization.
 An existing replacement destination requires `overwrite=True`.
 
@@ -240,9 +241,10 @@ It does not rewrite the main table or unrelated matrices. Rollback restores
 the prior absence or null entry as well as coupled updates. Raw serialization
 uses AnnData's raw encoding, not a generic mapping.
 
-`hp.tb.io.delete_table_components(store, table_name=..., components=[...])` removes
-explicitly named optional components. A mixed update uses
-`hp.tb.io.write_table_components(..., components={...}, delete=[...])` instead;
+{func}`hp.tb.io.delete_table_components(store, table_name=..., components=[...]) <harpy.tb.io.delete_table_components>`
+removes explicitly named optional components. A mixed update uses
+{func}`hp.tb.io.write_table_components(..., components={...}, delete=[...]) <harpy.tb.io.write_table_components>`
+instead;
 its replacement mapping must still be nonempty. Both entry points share
 `_write_table_operation()` and one publication/rollback context. Separate calls
 commit independently.
@@ -281,9 +283,10 @@ removal or refresh of affected in-memory entries and restores them on failure.
 The shared crash-recovery and concurrent-access limitations apply equally to
 deletions and replacements.
 
-`hp.tb.io.write_table_updates(store, table_name=..., adata=..., x_to=None,
-overwrite=...)` writes back the components of a processed table that are new or
-changed against the stored table, in one `write_table_components` call, and
+{func}`hp.tb.io.write_table_updates(store, table_name=..., adata=..., x_to=None, overwrite=...) <harpy.tb.io.write_table_updates>`
+writes back the components of a processed table that are new or changed
+against the stored table, in one
+{func}`write_table_components <harpy.tb.io.write_table_components>` call, and
 writes nothing when nothing changed. A path absent from storage is new. A lazy
 read of its own stored element, recognised through the registry of lazy reads,
 and a backed handle to it are unchanged, without reading values; values in
@@ -292,16 +295,20 @@ goes to `x_to`, such as `("layers", "log1p")`, and raises without it. The axes
 and `uns["spatialdata_attrs"]` must match storage, missing components are never
 deleted, and `overwrite` concerns existence in storage only. The docstring
 gives the full contract; `src/harpy/table/io/_updates.py` implements the
-comparison. `hp.tb.io.add_table_updates(sdata, table_name=..., x_to=None,
-overwrite=...)` does the same for a table attached to backed SpatialData, and
-reinstalls the written components lazily through `_update_table_components`,
-like `add_table_components`; after `x_to` it also reinstalls `X` from the store.
+comparison.
+{func}`hp.tb.io.add_table_updates(sdata, table_name=..., x_to=None, overwrite=...) <harpy.tb.io.add_table_updates>`
+does the same for a table attached to backed SpatialData, and reinstalls the
+written components lazily through `_update_table_components`, like
+{func}`add_table_components <harpy.tb.io.add_table_components>`; after `x_to`
+it also reinstalls `X` from the store.
 Unbacked SpatialData raises, since there is no store to compare with. So does
 an attached table that lacks the store's SpatialData annotation, or has
 another one: the written components are put back into the attached table, so
 that table and the store must describe the same linkage, as for
-`add_table_components`. `write_table_updates`, by contrast, only writes to the
-store, and leaves a stored annotation that `adata` lacks as it is.
+{func}`add_table_components <harpy.tb.io.add_table_components>`.
+{func}`write_table_updates <harpy.tb.io.write_table_updates>`, by contrast,
+only writes to the store, and leaves a stored annotation that `adata` lacks as
+it is.
 
 The decision for each component, in order. Components in storage but missing
 from `adata` are never deleted, so the diagram has no branch for them.
@@ -345,24 +352,22 @@ flowchart TD
 
 What the write-back protects against, and what not:
 
-| Situation                                                                    | Protected?                                                       |
-| ---------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| The stored `X`, usually counts, overwritten by processed values              | yes: raises without `x_to`                                       |
-| A filtered table written as an update                                        | yes: axis error, with the ways out                               |
-| `uns["spatialdata_attrs"]` changed or added                                  | yes: raises                                                      |
-| Components missing from `adata` deleted                                      | yes: never deleted                                               |
-| Unchanged lazy reads, backed handles or equal in-memory values rewritten     | yes: skipped                                                     |
-| A partial failure leaving a half-written table                               | yes: rollback                                                    |
-| Another writer's change to an element held as an unchanged read              | yes: left alone                                                  |
-| Another writer's change to an element held in memory, or changed by the user | **no**: last writer wins, not detected                           |
-| A persisted read that is stale after another writer's change                 | **no**: not detected                                             |
-| A table reused after `write_table_updates` replaced what it reads            | **no**: reopen it; `add_table_updates` reinstalls what it writes |
-| A matrix that was only rechunked                                             | rewritten: conservative, never wrong                             |
+| Situation                                                                                                 | Protected?                                                                                             |
+| --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| The stored `X`, usually counts, overwritten by processed values                                           | yes: raises without `x_to`                                                                             |
+| A filtered table written as an update                                                                     | yes: axis error, with the ways out                                                                     |
+| `uns["spatialdata_attrs"]` changed or added                                                               | yes: raises                                                                                            |
+| Components missing from `adata` deleted                                                                   | yes: never deleted                                                                                     |
+| Unchanged lazy reads, backed handles or equal in-memory values rewritten                                  | yes: skipped                                                                                           |
+| A partial failure leaving a half-written table                                                            | yes: rollback                                                                                          |
+| Another writer's change to an element held as an unchanged read                                           | yes: left alone                                                                                        |
+| Another writer's change to an element held in memory, or changed by the user                              | **no**: last writer wins, not detected                                                                 |
+| A persisted read that is stale after another writer's change                                              | **no**: not detected                                                                                   |
+| A table reused after {func}`write_table_updates <harpy.tb.io.write_table_updates>` replaced what it reads | **no**: reopen it; {func}`add_table_updates <harpy.tb.io.add_table_updates>` reinstalls what it writes |
+| A matrix that was only rechunked                                                                          | rewritten: conservative, never wrong                                                                   |
 
-`hp.tb.io.write_table_components_by_region(store, table_name=..., components=...,
-obs_identity=..., fill_values=..., sparse_chunks="auto", dense_chunks="auto",
-overwrite=...)` updates individual `.obsm`
-matrices for complete regions of an existing annotated table. The nonempty
+{func}`hp.tb.io.write_table_components_by_region(store, table_name=..., components=..., obs_identity=..., fill_values=..., sparse_chunks="auto", dense_chunks="auto", overwrite=...) <harpy.tb.io.write_table_components_by_region>`
+updates individual `.obsm` matrices for complete regions of an existing annotated table. The nonempty
 `obs_identity` dataframe must contain exactly the stored region and instance
 columns, with a categorical region column and non-null, unique region/instance
 pairs. Actual region values select the regions; unused categories do not.
@@ -398,7 +403,8 @@ Regional writes construct complete replacements in chunks and rewrite each
 affected `.obsm` entry in full. They do not read or rewrite unrelated matrices.
 `sparse_chunks` and `dense_chunks` set the block layout of the lazy merge, with
 the values and meaning of the lazy readers (see the table-reader contract
-below). The existing matrix is read as `read_table` reads it, and the same
+below). The existing matrix is read as
+{func}`read_table <harpy.tb.io.read_table>` reads it, and the same
 settings size the values Harpy splits into blocks itself: matrices in memory or
 backed by Zarr, and new matrices requiring unselected rows. `"storage"` only
 applies to dense matrices in storage and behaves like `"auto"` otherwise. Dask
@@ -423,7 +429,8 @@ may inspect metadata across the store.
 For a complete-table write, this internal operation also validates any optional
 `obs_identity`, `var_names`, or `raw_var_names` against the submitted AnnData, not
 the old destination axes. Conflicting identities are rejected before staging.
-Public `write_table()` and `add_table()` obtain identities from the AnnData itself;
+Public {func}`write_table() <harpy.tb.io.write_table>` and
+{func}`add_table() <harpy.tb.io.add_table>` obtain identities from the AnnData itself;
 they do not require separate identity arguments.
 
 Lazy and storage-backed matrices are serialized incrementally, without preliminary
@@ -450,11 +457,14 @@ Aggregation keeps its partitioned checkpoint and sparse row-block writes, and
 reopens read-only handles from permanent paths. It validates the reopened staged
 table, its canonical centers included, before publication.
 
-`add_canonical_centers()` has no staging of its own: it writes the centers matrix
-and its metadata with `add_table_components()`, as one component update. It does
-not validate them before writing, because they are valid by construction;
-`validate_canonical_centers()` checks them afterwards, as part of
-`validate_table()`.
+{func}`add_canonical_centers() <harpy.tb.add_canonical_centers>` has no
+staging of its own: it writes the centers matrix and its metadata with
+{func}`add_table_components() <harpy.tb.io.add_table_components>`, as one
+component update. It does not validate them before writing, because they are
+valid by construction;
+{func}`validate_canonical_centers() <harpy.tb.canonical_centers.validate_canonical_centers>`
+checks them afterwards, as part of
+{func}`validate_table() <harpy.tb.validate_table>`.
 
 `_write_table_operation()` offers no caller-defined validation between staging
 and publication: its caller's `with` body runs only after publication. A writer
@@ -475,7 +485,8 @@ attachment assigns every row of the resulting matrix by position. Checking only
 selected observations cannot protect unchanged measurements from being attached
 to the wrong in-memory observations.
 
-For example, `hp.tb.add_feature_matrix()` follows this contract when attaching
+For example, {func}`hp.tb.add_feature_matrix() <harpy.tb.add_feature_matrix>`
+follows this contract when attaching
 the complete updated feature matrix after a regional write.
 
 Consolidated metadata at the SpatialData store root contains collected metadata
@@ -491,7 +502,7 @@ tracking remains caller-owned as described below.
 
 #### Adding a table to SpatialData
 
-`hp.tb.io.add_table(sdata, adata, output_table_name=..., region=..., overwrite=...)`
+{func}`hp.tb.io.add_table(sdata, adata, output_table_name=..., region=..., overwrite=...) <harpy.tb.io.add_table>`
 combines table preparation with attachment to the supplied `sdata`:
 
 - **Unbacked `sdata`:** attach the prepared table without writing or computing its
@@ -543,10 +554,10 @@ axes or linkage.
 
 There are two explicit ownership levels:
 
-| APIs                                                | Effect                                                                                   | Return               |
-| --------------------------------------------------- | ---------------------------------------------------------------------------------------- | -------------------- |
-| `write_table_components`, `delete_table_components` | Update the supplied store only; do not modify live objects.                              | `None`               |
-| `add_table_components`, `remove_table_components`   | Update selected components of an attached table, and its store when `sdata.path` is set. | The supplied `sdata` |
+| APIs                                                                                                                                       | Effect                                                                                   | Return               |
+| ------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------- | -------------------- |
+| {func}`write_table_components <harpy.tb.io.write_table_components>`, {func}`delete_table_components <harpy.tb.io.delete_table_components>` | Update the supplied store only; do not modify live objects.                              | `None`               |
+| {func}`add_table_components <harpy.tb.io.add_table_components>`, {func}`remove_table_components <harpy.tb.io.remove_table_components>`     | Update selected components of an attached table, and its store when `sdata.path` is set. | The supplied `sdata` |
 
 The SpatialData-aware adapters retain the existing AnnData object. They require
 the table to be attached and, when backed, already present in storage. They do
@@ -566,7 +577,8 @@ attachment. Raw uses its independent feature axis.
 
 - **Unbacked SpatialData:** updates stay in memory, without serialization or
   numerical computation. Complete-component replacements retain matrix
-  representations and may share data with inputs. As with `add_table`,
+  representations and may share data with inputs. As with
+  {func}`add_table <harpy.tb.io.add_table>`,
   `overwrite` is ignored; validation still applies.
 - **Backed SpatialData:** `overwrite=True` is required if a replacement target
   exists in storage. A target present only in memory, never saved, is replaced
@@ -575,8 +587,10 @@ attachment. Raw uses its independent feature axis.
   their permanent paths, using lazy matrices and eager annotations. Unrelated
   local edits and matrix references are not refreshed or persisted.
 
-`add_table_components(..., components={...}, delete=[...])` combines replacements
-and deletions. `remove_table_components(..., components=[...])` is deletion-only;
+{func}`add_table_components(..., components={...}, delete=[...]) <harpy.tb.io.add_table_components>`
+combines replacements and deletions.
+{func}`remove_table_components(..., components=[...]) <harpy.tb.io.remove_table_components>`
+is deletion-only;
 explicit deletion paths authorize removal without an overwrite flag. Presence
 is resolved independently in memory and storage: a memory-only entry is removed
 without staging or consolidation, and a disk-only entry is still removed from
@@ -592,7 +606,9 @@ On handled failure, the shared writer restores storage/root metadata and the
 adapter restores the original affected in-memory references. Unbacked failures
 restore those references without any storage work.
 
-Regional adapters, such as `hp.tb.io.add_table_components_by_region()`, follow the
+Regional adapters, such as
+{func}`hp.tb.io.add_table_components_by_region() <harpy.tb.io.add_table_components_by_region>`,
+follow the
 same observation-alignment, selective-installation and recovery guarantees.
 Unselected observations retain measurements from the stored target when backed,
 or from the attached target when unbacked. For backed updates, storage determines
@@ -600,7 +616,9 @@ target existence, format, shape and dtype: a target present only in memory is ne
 on disk and follows the new-entry fill rules. Preserving unrelated local components
 does not preserve unsaved values within a requested matrix.
 
-For unbacked SpatialData, `hp.tb.io.add_table_components_by_region()` attaches the
+For unbacked SpatialData,
+{func}`hp.tb.io.add_table_components_by_region() <harpy.tb.io.add_table_components_by_region>`
+attaches the
 complete updated matrix lazily, without executing the numerical merge or writing
 to disk. This guarantee concerns the regional update itself, not calculations
 callers perform to prepare the submitted measurements.
@@ -647,9 +665,10 @@ For unannotated tables the same format attributes are written, with `region`,
 
 ### Reading AnnData components and tables
 
-`hp.tb.io.read_table(store, table_name=...)` reads one complete, detached AnnData.
-`hp.tb.io.read_table_components(store, table_name=..., components=...)` returns
-only the requested values, keyed by logical tuple paths. Both accept a local
+{func}`hp.tb.io.read_table(store, table_name=...) <harpy.tb.io.read_table>`
+reads one complete, detached AnnData.
+{func}`hp.tb.io.read_table_components(store, table_name=..., components=...) <harpy.tb.io.read_table_components>`
+returns only the requested values, keyed by logical tuple paths. Both accept a local
 SpatialData Zarr root (format 2 or 3), open it read-only and leave other elements
 unopened. They do not use SpatialData's whole-store reader or attach results to
 a live SpatialData object.
@@ -693,7 +712,9 @@ both `"auto"` by default. Neither changes disk storage or backed/eager reads.
   chunks instead. `_dense_lazy_chunks` documents the sizing rule.
 
 `array.chunk-size` is read when the lazy arrays are built. Tables reopened by
-`add_table`, `add_table_components` and the regional adapter use the same
+{func}`add_table <harpy.tb.io.add_table>`,
+{func}`add_table_components <harpy.tb.io.add_table_components>` and the
+regional adapter use the same
 defaults. The regional writer reads existing matrices with its own
 `sparse_chunks` and `dense_chunks`, by default the same as these readers. The
 merged result is written like any other matrix, in Harpy's stored chunks, so the
@@ -742,7 +763,7 @@ paths for installed objects, as described below.
 
 ### Reading a SpatialData store with selected tables
 
-`hp.io.read_zarr(store, table_name=None, table_mode="lazy", sparse_chunks="auto", dense_chunks="auto")`
+{func}`hp.io.read_zarr(store, table_name=None, table_mode="lazy", sparse_chunks="auto", dense_chunks="auto") <harpy.io.read_zarr>`
 returns a SpatialData object containing all non-table elements and the selected
 tables. `table_name=None` reads all tables, a name or sequence selects exact names,
 and `table_name=[]` skips tables. Duplicate names are rejected; missing names raise
