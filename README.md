@@ -22,6 +22,7 @@
 [![License](https://img.shields.io/badge/license-BSD%203--Clause-blue?style=flat-square)](./LICENSE)
 [![DOI](https://img.shields.io/badge/DOI-10.5281%2Fzenodo.15546703-blue?style=flat-square)](https://doi.org/10.5281/zenodo.15546703)
 [![Paper](https://img.shields.io/badge/paper-Bioinformatics%20btag122-blue?style=flat-square)](https://doi.org/10.1093/bioinformatics/btag122)
+[![scverse ecosystem](https://img.shields.io/badge/scverse-ecosystem-blue?style=flat-square)](https://scverse.org/packages/#ecosystem)
 
 </div>
 
@@ -41,15 +42,19 @@
 
 ## Why Harpy?
 
-Harpy is a spatial omics analysis library for spatial transcriptomics and proteomics. Within the [`scverse`](https://scverse.org/) stack, it bridges [`SpatialData`](https://spatialdata.scverse.org/) and downstream analysis tools such as [`AnnData`](https://anndata.readthedocs.io/), [`Scanpy`](https://scanpy.readthedocs.io/), and [`Squidpy`](https://squidpy.readthedocs.io/). It provides scalable, image- and geometry-aware computation to transform raw spatial data into analysis-ready representations, with a strong emphasis on interoperability and large-scale workflows.
+Harpy is a spatial omics analysis library for spatial transcriptomics and proteomics, and part of the [scverse ecosystem](https://scverse.org/packages/#ecosystem). It bridges [`SpatialData`](https://spatialdata.scverse.org/) and downstream analysis tools such as [`AnnData`](https://anndata.readthedocs.io/), [`Scanpy`](https://scanpy.readthedocs.io/), and [`Squidpy`](https://squidpy.readthedocs.io/). It provides scalable, image- and geometry-aware computation to transform raw spatial data into analysis-ready representations, with a strong emphasis on interoperability and large-scale workflows.
 
 In practice, Harpy offers fast, out-of-core image preprocessing, tiled segmentation, along with efficient aggregation workflows to generate `AnnData` tables and compute per-cell features from images, segmentation masks, and transcript coordinates. It also supports deep feature extraction, pixel- and cell-level clustering, and the construction of single-cell representations from highly multiplexed images.
 
 - **Multi-platform support** for spatial transcriptomics and proteomics data.
 - **Interoperable outputs** built on [SpatialData](https://github.com/scverse/spatialdata).
-- **SpatialData and AnnData ergonomics**: read single tables and write only the components that changed (`obs`, `obsm`, `uns`, …) to a backed Zarr store with `hp.tb.io`; add images, labels, shapes and points with `hp.im`, `hp.sh` and `hp.pt`.
+- **SpatialData and AnnData ergonomics**: read single tables and write only the components that changed (`obs`, `obsm`, `uns`, …) to a backed Zarr store with [`harpy.tb.io`](https://harpy.readthedocs.io/en/latest/api.html#table-io); add images, labels, shapes and points with [`harpy.im`](https://harpy.readthedocs.io/en/latest/api.html#image), [`harpy.sh`](https://harpy.readthedocs.io/en/latest/api.html#shape) and [`harpy.pt`](https://harpy.readthedocs.io/en/latest/api.html#points).
 - **Scales to (very) large images**: tiled workflows with [Dask](https://www.dask.org/); optional GPU acceleration with [CuPy](https://cupy.dev/) and [PyTorch](https://pytorch.org/).
 - **Scalable computational building blocks** for segmentation, feature extraction, clustering, and spatial analysis.
+
+## Development and support
+
+Harpy is actively developed and maintained by the [Saeys Lab](https://saeyslab.sites.vib.be/en) and [VIB Spatial Catalyst](https://vib.be/en/technologies/technology-portfolio/spatial-catalyst), part of VIB Technologies. VIB funds a dedicated development team, so Harpy gets long-term maintenance and continued development.
 
 ## Installation
 

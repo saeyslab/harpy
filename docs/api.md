@@ -158,6 +158,8 @@ Operations on table (`AnnData` object) elements.
 
 ```
 
+(table-io)=
+
 ### I/O
 
 For AnnData tables in SpatialData Zarr stores, see the
