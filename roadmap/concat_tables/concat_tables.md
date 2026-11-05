@@ -5,9 +5,8 @@ the contract and the implementation plan; where it departs from the issue is
 listed under [Departures from the issue](#departures-from-the-issue).
 
 Depends on the canonical-cache refactor ([canonical_cache.md](canonical_cache.md)),
-its own PR, which lands first and closes #279 and #282. Without #279, a table
-subset by per-cell QC fails canonical validation and could not be
-concatenated.
+which landed in #283 and closed #279 and #282. Without #279, a table subset by
+per-cell QC would fail canonical validation and could not be concatenated.
 
 ## Purpose
 
@@ -210,8 +209,8 @@ Every other entry goes to `anndata.concat` with `uns_merge`.
 
 ## Implementation plan
 
-The canonical-cache refactor ([canonical_cache.md](canonical_cache.md)) lands
-first and provides `_validate_canonical_centers_without_sources`.
+The canonical-cache refactor ([canonical_cache.md](canonical_cache.md)) landed
+in #283 and provides `_validate_canonical_centers_without_sources`.
 
 ### Step 1: annotation checks without `sdata`, no change in behaviour
 
