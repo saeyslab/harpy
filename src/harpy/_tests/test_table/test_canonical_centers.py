@@ -297,10 +297,15 @@ def test_add_canonical_centers_supports_a_3d_labels_source(tmp_path, backed) -> 
     validate_table(sdata, "table")
 
 
-def test_add_canonical_centers_rejects_an_instance_absent_from_its_labels(tmp_path) -> None:
-    """A table row whose instance has no pixels in its labels element raises, before anything is written.
+@pytest.mark.parametrize(
+    ("instance_id", "message"),
+    [(2, "no finite center"), (0, "labels element `labels` have a non-positive instance ID \\(0\\)")],
+)
+def test_add_canonical_centers_rejects_a_row_without_an_instance_in_its_labels(tmp_path, instance_id, message) -> None:
+    """A table row without an instance in its labels element raises, before anything is written.
 
-    All regions are calculated before the single write, so the table gets no
+    Its instance ID either has no pixels in the labels element or is background
+    ``0``. All regions are calculated before the single write, so the table gets no
     canonical centers at all, neither in memory nor in the store.
     """
     labels = Labels2DModel.parse(
@@ -311,7 +316,9 @@ def test_add_canonical_centers_rejects_an_instance_absent_from_its_labels(tmp_pa
     table = TableModel.parse(
         AnnData(
             X=np.ones((1, 1)),
-            obs=pd.DataFrame({"region": ["labels"], "cell_ID": np.array([2], dtype=np.uint32)}, index=["cell-2"]),
+            obs=pd.DataFrame(
+                {"region": ["labels"], "cell_ID": np.array([instance_id], dtype=np.uint32)}, index=["cell"]
+            ),
         ),
         region_key="region",
         region="labels",
@@ -320,7 +327,7 @@ def test_add_canonical_centers_rejects_an_instance_absent_from_its_labels(tmp_pa
     output = tmp_path / "missing-instance.zarr"
     sdata = _write_and_read(SpatialData(labels={"labels": labels}, tables={"table": table}), output)
 
-    with pytest.raises(ValueError, match="no finite center"):
+    with pytest.raises(ValueError, match=message):
         add_canonical_centers(sdata, table_name="table")
 
     assert CANONICAL_OBSM_KEY not in sdata.tables["table"].obsm

@@ -180,7 +180,7 @@ def test_validate_table_rejects_a_non_categorical_region_column() -> None:
 
 
 def _labels_table_sdata() -> SpatialData:
-    """A regions table on ``labels``, next to an unannotated ``other_labels``."""
+    """A table that annotates ``labels``, next to an unannotated ``other_labels``."""
     labels = Labels2DModel.parse(np.ones((2, 2), dtype=np.uint32), dims=("y", "x"))
     table = TableModel.parse(
         AnnData(
