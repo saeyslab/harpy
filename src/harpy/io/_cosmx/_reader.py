@@ -132,8 +132,8 @@ def cosmx(
     -------
     Reopened SpatialData object backed by ``output``.
 
-    Metadata
-    --------
+    Notes
+    -----
     Reader metadata is stored under ``sdata.attrs["harpy"]``. This is a
     versioned Harpy convention, not part of the SpatialData standard. Its
     structure is::
@@ -261,8 +261,6 @@ def cosmx(
     during writing. Without a feature panel, this cross-validation is skipped
     and the transcript-provided targets and classes are retained.
 
-    Notes
-    -----
     FOV selection is permissive for known FOVs. For each sample, the reader
     intersects requested and positioned FOVs with availability across all
     enabled modalities. Known requested FOVs that do not satisfy that

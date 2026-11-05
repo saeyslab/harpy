@@ -16,7 +16,7 @@
 [![Build Status](https://github.com/saeyslab/harpy/actions/workflows/build.yaml/badge.svg)](https://github.com/saeyslab/harpy/actions/)
 [![Test Status](https://github.com/saeyslab/harpy/actions/workflows/run_tests.yml/badge.svg)](https://github.com/saeyslab/harpy/actions/)
 [![pre-commit.ci status](https://results.pre-commit.ci/badge/github/saeyslab/harpy/main.svg)](https://results.pre-commit.ci/latest/github/saeyslab/harpy/main)
-[![documentation badge](https://readthedocs.org/projects/harpy/badge/?version=latest)](https://harpy.readthedocs.io/en/latest/)
+[![documentation badge](https://img.shields.io/readthedocs/harpy/latest)](https://harpy.readthedocs.io/en/latest/)
 [![codecov](https://codecov.io/gh/saeyslab/harpy/branch/main/graph/badge.svg)](https://codecov.io/gh/saeyslab/harpy)
 [![Downloads](https://static.pepy.tech/badge/harpy-analysis)](https://pepy.tech/project/harpy-analysis)
 [![License](https://img.shields.io/badge/license-BSD%203--Clause-blue)](./LICENSE)

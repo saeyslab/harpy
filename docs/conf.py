@@ -70,6 +70,9 @@ napoleon_numpy_docstring = True
 napoleon_include_init_with_doc = False
 napoleon_use_rtype = True  # having a separate entry generally helps readability
 napoleon_use_param = True
+# An Attributes section becomes a field list, so the class template's attribute
+# entries are the only object descriptions of the attributes.
+napoleon_use_ivar = True
 myst_heading_anchors = 3  # create anchors for h1-h3
 myst_enable_extensions = [
     "amsmath",
