@@ -249,6 +249,17 @@ label=label)`, with a mapping passed as a mapping.
 - `docs/development/metadata.md`, "Keeping records consistent":
   `hp.tb.concat` merges the table records, which `anndata.concat` and
   `spatialdata.concatenate` drop.
+- The `hp.tb.concat` docstring: each input's declared regions must equal its
+  observed ones, as SpatialData requires. A table subset to fewer regions
+  before concatenating, by per-cell QC for example, needs its annotation
+  updated too, otherwise it raises "Regions … do not match":
+
+  ```python
+  subset = adata[adata.obs["region"] == "cells_a"].copy()
+  subset.uns["spatialdata_attrs"]["region"] = ["cells_a"]
+  ```
+
+  `docs/canonical_centers.md` shows the same step for canonical centers.
 
 ## Tests
 

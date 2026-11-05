@@ -588,6 +588,29 @@ As implemented:
 - `docs/development/storage.md`: `validate_canonical_centers()` instead of
   `validate_canonical_payload()`.
 
+As implemented:
+
+- `docs/canonical_centers.md` has the sections "The record", "Algorithm
+  version 1", "Validation", "Subsetting and concatenating tables", "Writing"
+  and "API". The API lists `validate_canonical_centers`, the two metadata
+  models and the five constants. The pixel convention says to add `0.5` before
+  mapping a center through a labels element's transformation. The page says
+  "before tables are concatenated" rather than naming `hp.tb.concat`, which
+  does not exist yet.
+- `docs/development/storage.md`: besides the rename, the paragraphs on
+  canonical staging and a pre-publication callback described the staging that
+  step 4 deleted. They now say that `add_canonical_centers` writes through
+  `add_table_components` without validating first, and that only aggregation
+  stages its table and validates it, reopened, before publication.
+- `docs/development/metadata.md`: the tree shows the version-2 record.
+- `validate_table`'s docstring links `validate_canonical_centers`. Docstrings
+  do not link documentation pages: `aggregate_points` loses its sentence
+  pointing to the canonical-center page and the developer documentation.
+- A local docs build reports no warnings from the changed pages and
+  docstrings, and their cross-references and anchors resolve. It does warn
+  about stale stubs in the ignored `docs/generated` for the removed names,
+  which a clean build does not have.
+
 ## For Spatiato
 
 - The calls it plans: `validate_canonical_centers(sdata, table_name=...)`,
