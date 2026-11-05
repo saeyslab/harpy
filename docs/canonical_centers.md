@@ -5,7 +5,7 @@ Harpy and downstream packages such as spatiato. It is intended for integration
 authors. Most Harpy users obtain canonical centers through
 `harpy.tb.aggregate_points`, or add them to an existing table that annotates
 labels elements with `harpy.tb.add_canonical_centers`, and do not need the
-symbols below.
+validation API, types and constants of `harpy.table.canonical_centers`.
 
 Canonical centers are stored as two AnnData components:
 
@@ -139,19 +139,5 @@ rebuild them:
 
 ## API
 
-```{eval-rst}
-
-.. currentmodule:: harpy.table.canonical_centers
-
-.. autosummary::
-    :toctree: generated
-
-    validate_canonical_centers
-    CanonicalMetadata
-    CanonicalRegionMetadata
-    CANONICAL_OBSM_KEY
-    SPATIAL_COORDINATES_KEY
-    CANONICAL_AXES
-    CANONICAL_SCHEMA_VERSION
-    CANONICAL_ALGORITHM_VERSION
-```
+The functions, types and constants are listed in the
+[API reference](api.md#canonical-centers).

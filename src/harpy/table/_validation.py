@@ -63,7 +63,7 @@ def validate_table(
 
     When the canonical-center matrix or its metadata record is present, both
     must be present, and they are checked as
-    :func:`harpy.table.canonical_centers.validate_canonical_centers` checks
+    :func:`harpy.tb.canonical_centers.validate_canonical_centers` checks
     them, against the labels elements but without reading their pixels. No
     check ties a center to its row, so subsets and reorders of the table stay
     valid; keeping ``obs`` and ``obsm`` aligned is AnnData's responsibility.
