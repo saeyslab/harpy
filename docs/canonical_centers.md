@@ -1,94 +1,148 @@
 # Canonical-center interoperability
 
-This page documents the stable integration contract used to exchange
-label-instance centers between Harpy and downstream packages such as
-spatiato. It is intended for integration authors. Most Harpy users should
-obtain canonical centers through `harpy.tb.aggregate_points`, or attach them to
-an existing regions table with `harpy.tb.add_canonical_centers`, and do not need
-to call the symbols below directly.
+This page documents the contract for exchanging label-instance centers between
+Harpy and downstream packages such as spatiato. It is intended for integration
+authors. Most Harpy users obtain canonical centers through
+{func}`harpy.tb.aggregate_points <harpy.tb.aggregate_points>`, or add them to an
+existing table that annotates labels elements with
+{func}`harpy.tb.add_canonical_centers <harpy.tb.add_canonical_centers>`, and do
+not need the validation API, types and constants of
+[`harpy.table.canonical_centers`](api.md#canonical-centers).
 
-Canonical centers are stored as two coordinated AnnData components:
+Canonical centers are stored as two AnnData components:
 
 ```text
 adata.obsm["spatial_canonical"]
-    dense float64 coordinates in fixed (z, y, x) order
+    dense float64 coordinates in fixed (z, y, x) order, one row per observation
 
 adata.uns["spatial_coordinates"]["spatial_canonical"]
-    schema, source, calculation and table-row coverage metadata
+    the record: schema version, axes and, per labels element, the frame,
+    algorithm version and source
 ```
+
+They are all or nothing: a table has a finite center for every row, and a
+record entry for every labels element it annotates, or it has neither
+component.
 
 The public `harpy.table.canonical_centers` package is the supported import
 boundary. Integration code should not import its private `_models`, `_schema`
-or `_calculation` modules directly.
+or `_calculation` modules.
 
-## Calculation and inspection
+## The record
 
-These operations inspect, calculate, read and validate canonical payloads. They
-operate on an explicit table-to-label binding and do not provide the ordinary
-high-level Harpy workflow.
+Schema version 2, for a table that annotates one 2D labels element:
 
-```{eval-rst}
-
-.. currentmodule:: harpy.table.canonical_centers
-
-.. autosummary::
-    :toctree: generated
-
-    inspect_canonical_cache
-    calculate_canonical_centers
-    read_canonical_centers_from_cache
-    validate_canonical_payload
+```python
+{
+    "schema_version": 2,
+    "axes": ["z", "y", "x"],
+    "regions": {
+        "cells": {
+            "source_element_type": "labels",
+            "source_scale": "scale0",
+            "coordinate_frame": {
+                "type": "element_intrinsic",
+                "pixel_coordinate_convention": "integer_indices_are_pixel_centers",
+            },
+            "algorithm_version": 1,
+            "source": {"dims": ["y", "x"], "shape": [4000, 4000], "dtype": "uint32"},
+        },
+    },
+}
 ```
 
-## Storage contract
+- `schema_version`: `2`. A version-1 record, as written by Harpy 0.5, fails
+  validation; rebuild it with
+  {func}`hp.tb.add_canonical_centers(sdata, table_name=..., overwrite=True) <harpy.tb.add_canonical_centers>`.
+- `axes`: the order of the matrix columns, always `["z", "y", "x"]`.
+- `regions`: one entry per labels element, under its name. It may also hold
+  entries for labels elements the table no longer annotates; see
+  [Subsetting and concatenating tables](#subsetting-and-concatenating-tables).
+  Each entry has:
+  - `source_element_type`: `"labels"`.
+  - `source_scale`: `"scale0"`: the centers are computed at full resolution.
+  - `coordinate_frame.type`: `"element_intrinsic"`: the centers are pixel
+    coordinates of the labels element's own `scale0` array, not coordinates
+    in a SpatialData coordinate system. Different labels elements need not
+    share a frame.
+  - `coordinate_frame.pixel_coordinate_convention`:
+    `"integer_indices_are_pixel_centers"`: the pixel at index `(i, j)` has its
+    center at `(i, j)`. SpatialData places pixel centers at half-integers
+    (`get_centroids` gives `(0.5, 0.5)` for a label on pixel `(0, 0)`), so add
+    `0.5` to `y` and `x`, and to `z` for 3D labels, before mapping a center
+    through the labels element's transformation.
+  - `algorithm_version`: how the centers were computed; see
+    [Algorithm version 1](#algorithm-version-1).
+  - `source`: the `dims`, `shape` and `dtype` of the labels element's `scale0`
+    array. 2D labels have dims `["y", "x"]` and `z = 0` in the matrix.
 
-The constants and helpers below define the versioned representation persisted
-in AnnData. They are intended for packages that create, update or validate the
-same canonical payload.
+Every field except `algorithm_version` and `source` is a constant that the
+parser requires, so a change of meaning needs a new schema version.
 
-```{eval-rst}
+## Algorithm version 1
 
-.. currentmodule:: harpy.table.canonical_centers
+The center of a row is the center of mass of the pixels of its instance in the
+labels element's `scale0` array, with every pixel weighted equally. Background
+`0` is never an instance. For 2D labels, `z = 0`. A row whose instance has no
+pixels in its labels element has no center, and writing the centers raises.
 
-.. autosummary::
-    :toctree: generated
+## Validation
 
-    CANONICAL_OBSM_KEY
-    SPATIAL_COORDINATES_KEY
-    CANONICAL_AXES
-    CANONICAL_SCHEMA_VERSION
-    CANONICAL_ALGORITHM_VERSION
-    build_canonical_source_signature
-    build_canonical_region_binding
-    build_canonical_cache_update_payload
-    build_canonical_metadata
-    canonical_metadata_to_storage
-    parse_canonical_metadata
-    build_instance_set_digest
-```
+{func}`validate_canonical_centers(sdata, table_name=...) <harpy.tb.canonical_centers.validate_canonical_centers>`
+returns the metadata of
+the labels elements the table annotates, returns `None` when the table has no
+canonical centers, and raises otherwise. It checks:
 
-## Typed integration models
+- both components, or neither, and a SpatialData annotation;
+- the matrix: dense, shape `(n_obs, 3)`, `float64`, finite;
+- the record: it parses strictly, in schema version 2, with an entry for every
+  annotated labels element;
+- per annotated labels element: the algorithm version is supported, `z = 0`
+  for 2D labels, and the stored `dims`, `shape` and `dtype` equal those of
+  the labels element's `scale0` array.
 
-These immutable models carry validated source identity, table-row binding,
-cache state and calculation results across the package boundary.
+It reads no pixels. The last check detects a labels element replaced by one of
+another shape, dimensions or dtype, such as another sample's labels under the
+same name. It does not detect a re-segmentation of the same image with the same
+shape and dtype: rebuild the centers after re-segmenting.
+{func}`hp.tb.validate_table <harpy.tb.validate_table>` runs the same checks
+after its other table checks.
 
-```{eval-rst}
+No check ties a center to its row. Keeping `obs` and `obsm` aligned is
+AnnData's responsibility: replacing `adata.obs` with a reordered copy, without
+reordering `adata.obsm`, goes undetected.
 
-.. currentmodule:: harpy.table.canonical_centers
+## Subsetting and concatenating tables
 
-.. autosummary::
-    :toctree: generated
+Canonical centers stay valid when a table is filtered, for example by per-cell
+quality control before tables are concatenated, so downstream packages need not
+rebuild them:
 
-    CanonicalSourceSignature
-    CanonicalRegionBinding
-    CanonicalRegionMetadata
-    CanonicalMetadata
-    CanonicalCacheState
-    CanonicalMismatchCode
-    CanonicalCacheMismatch
-    CanonicalCacheReport
-    CanonicalCacheUpdateAction
-    CanonicalCacheUpdatePayload
-    CanonicalCacheUpdateResult
-    CanonicalCentersResult
-```
+- A row subset or reorder keeps them valid. AnnData subsets `obs` and
+  `obsm["spatial_canonical"]` together.
+- A subset that drops a labels element entirely must also drop it from the
+  annotation, as SpatialData requires; otherwise neither SpatialData nor
+  {func}`hp.tb.validate_table <harpy.tb.validate_table>` accepts the table:
+
+  ```python
+  subset = adata[adata.obs["region"] == "cells_a"].copy()
+  subset.uns["spatialdata_attrs"]["region"] = ["cells_a"]
+  ```
+
+- The record may keep the dropped labels element's entry. Validation ignores
+  entries of labels elements the table does not annotate.
+
+## Writing
+
+- {func}`hp.tb.aggregate_points <harpy.tb.aggregate_points>` writes the
+  centers together with the table.
+- {func}`hp.tb.add_canonical_centers(sdata, table_name=..., overwrite=...) <harpy.tb.add_canonical_centers>`
+  adds them to an existing table that annotates labels elements, in memory and,
+  when `sdata` is backed, in its store. It computes the centers for every
+  labels element the table annotates. It does not validate existing canonical
+  centers, so with `overwrite=True` it also replaces stale or invalid ones.
+
+## API
+
+The functions, types and constants are listed in the
+[API reference](api.md#canonical-centers).

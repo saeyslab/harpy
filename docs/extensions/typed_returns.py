@@ -17,7 +17,22 @@ def _process_return(lines):
 
 
 def _parse_returns_section(self, section):
-    lines_raw = list(_process_return(self._dedent(self._consume_to_next_section())))
+    lines = self._dedent(self._consume_to_next_section())
+    # sphinx_autodoc_typehints puts a ":" line under the Returns header for
+    # napoleon's own parser, which this one replaces.
+    if lines and lines[0] == ":":
+        lines = self._dedent(lines[1:])
+    # A type with its description indented below it: keep the description, as the
+    # return annotation shows the type. Kept as is, the indented description would
+    # follow the type's line inside the field, which docutils rejects.
+    if (
+        len(lines) > 1
+        and lines[0]
+        and lines[1][:1].isspace()
+        and all(not line or line[:1].isspace() for line in lines[1:])
+    ):
+        lines = self._dedent(lines[1:])
+    lines_raw = list(_process_return(lines))
     lines = self._format_block(":returns: ", lines_raw)
     if lines and lines[-1]:
         lines.append("")

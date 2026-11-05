@@ -107,14 +107,9 @@ from harpy.table._aggregation_writer import (
     _write_aggregation_table,
 )
 from harpy.table._utils import _sanity_check_append_region
-from harpy.table.canonical_centers import (
-    CANONICAL_OBSM_KEY,
-    CanonicalCacheReport,
-    CanonicalCacheUpdatePayload,
-    CanonicalRegionBinding,
-    build_canonical_source_signature,
-    calculate_canonical_centers,
-)
+from harpy.table._validation import _RESERVED_OBSM_KEYS
+from harpy.table.canonical_centers._calculation import _calculate_canonical_centers
+from harpy.table.canonical_centers._models import _CanonicalRegionBinding, _CanonicalRegionCenters
 from harpy.table.io._add_table import add_table
 from harpy.transformations._transformations import _PointToLabelsTransform, _resolve_point_to_labels_transform
 from harpy.utils._deprecation import _renamed_functions
@@ -222,8 +217,6 @@ def aggregate_points(
     with ``expression_class``, and each other class appears only as the
     ``.obsm`` key of its matrix, ``snake_case(class)``, for example
     ``"negative"`` for the class ``Negative``.
-    The canonical-center record is described in :doc:`/canonical_centers`, and
-    the developer documentation on metadata describes the other records.
 
     Parameters
     ----------
@@ -322,7 +315,7 @@ def aggregate_points(
     dense ``float64`` columns are ordered ``(z, y, x)`` and contain geometric
     centers of mass of the retained instance IDs in each source labels
     element's intrinsic ``scale0`` pixel frame; a 2D labels source uses
-    ``z=0``. Per-region source and coverage metadata is stored under
+    ``z=0``. Their metadata, per labels element, is stored under
     ``adata.uns["spatial_coordinates"]["spatial_canonical"]``.
 
     **Storage and publication.** ``sdata`` must be backed by a writable local
@@ -431,12 +424,10 @@ def aggregate_points(
             pairs=checkpoint_pairs,
             discover_observed_features=contract is None,
         )
-        canonical_payloads_by_pair = _canonical_center_payloads(
+        canonical_regions = _calculate_aggregation_canonical_centers(
             sdata,
             checkpoint=checkpoint,
             output_table_name=output_table_name,
-            region_key=region_key,
-            instance_key=instance_key,
         )
         if contract is None:
             # Ordinary mode: the observed features form X.
@@ -456,7 +447,7 @@ def aggregate_points(
             workspace=workspace,
             checkpoint=checkpoint,
             expression_axis=expression_axis,
-            canonical_payloads_by_pair=canonical_payloads_by_pair,
+            canonical_regions=canonical_regions,
             output_table_name=output_table_name,
             feature_key=feature_key,
             region_key=region_key,
@@ -658,7 +649,7 @@ def _resolve_feature_class_contract(
     reserved = sorted(
         (feature_class, key)
         for feature_class, key in contract.non_expression_class_matrix_keys
-        if key in {CANONICAL_OBSM_KEY, _SPATIAL}
+        if key in _RESERVED_OBSM_KEYS
     )
     if reserved:
         raise ValueError(f"Feature classes produce reserved .obsm keys: {reserved}.")
@@ -666,19 +657,19 @@ def _resolve_feature_class_contract(
     return contract
 
 
-def _canonical_center_payloads(
+def _calculate_aggregation_canonical_centers(
     sdata: SpatialData,
     *,
     checkpoint: _AggregationCheckpoint,
     output_table_name: str,
-    region_key: str,
-    instance_key: str,
-) -> dict[int, CanonicalCacheUpdatePayload]:
-    """Calculate one intrinsic canonical-center payload per aggregation pair.
+) -> tuple[_CanonicalRegionCenters, ...]:
+    """Calculate the intrinsic ``(z, y, x)`` canonical centers of every aggregation pair.
 
-    Bindings use the checkpoint's final output-row positions and instance IDs,
-    so their coverage metadata describes the table that will be written rather
-    than the order in which labels happen to be traversed.
+    ``harpy.tb.add_canonical_centers`` needs an existing table, while these
+    centers are written with the new table, in one publication, so the table
+    never exists without them. The bindings therefore take their rows from the
+    checkpoint: its final output-row positions and instance IDs are the rows of
+    the table that will be written.
 
     Parameters
     ----------
@@ -688,47 +679,31 @@ def _canonical_center_payloads(
         Merged counts and final row ownership for every aggregation pair.
     output_table_name
         Name of the table being constructed.
-    region_key
-        Observation column containing labels-region names.
-    instance_key
-        Observation column containing labels instance IDs.
 
     Returns
     -------
-    Mapping from aggregation-pair ordinal to an immutable center payload in
-    intrinsic ``(z, y, x)`` coordinates.
+    One calculation per aggregation pair, so per labels element.
     """
     output_row_keys = checkpoint.output_row_keys
     log.info(
         f"Calculating canonical label centers for table {output_table_name!r} from {len(checkpoint.pairs)} "
         f"labels region(s) and {len(output_row_keys)} retained instance(s)."
     )
-    payloads: dict[int, CanonicalCacheUpdatePayload] = {}
+    regions = []
     for pair in checkpoint.pairs:
         row_positions = np.asarray(
             [row for row, (pair_ordinal, _) in enumerate(output_row_keys) if pair_ordinal == pair.ordinal],
             dtype=np.intp,
         )
         instance_ids = np.asarray([output_row_keys[row][1] for row in row_positions], dtype=np.uint64)
-        binding = CanonicalRegionBinding(
-            table_name=output_table_name,
+        binding = _CanonicalRegionBinding(
             labels_name=pair.labels_name,
-            region_key=region_key,
-            instance_key=instance_key,
             row_positions=row_positions,
             instance_ids=instance_ids,
         )
-        source_signature = build_canonical_source_signature(sdata, pair.labels_name)
-        payloads[pair.ordinal] = calculate_canonical_centers(
-            sdata,
-            CanonicalCacheReport(
-                stored_metadata=None,
-                source_signature=source_signature,
-                binding=binding,
-            ),
-        )
+        regions.append(_calculate_canonical_centers(sdata, binding))
     log.info(f"Finished calculating canonical label centers for table {output_table_name!r}.")
-    return payloads
+    return tuple(regions)
 
 
 def _validate_feature_panel_contents(

@@ -158,6 +158,8 @@ Operations on table (`AnnData` object) elements.
 
 ```
 
+(table-io)=
+
 ### I/O
 
 For AnnData tables in SpatialData Zarr stores, see the
@@ -243,6 +245,29 @@ the table, for example `sdata.tables["table"]`.
     tb.pl.scatter
 ```
 
+### Canonical centers
+
+Centers of a table's label instances, stored in `obsm["spatial_canonical"]`
+for exchange with downstream packages. `tb.aggregate_points` writes them with
+the table; see [canonical-center interoperability](canonical_centers.md) for
+the contract.
+
+```{eval-rst}
+
+.. autosummary::
+    :toctree: generated
+
+    tb.add_canonical_centers
+    tb.canonical_centers.validate_canonical_centers
+    tb.canonical_centers.CanonicalMetadata
+    tb.canonical_centers.CanonicalRegionMetadata
+    tb.canonical_centers.CANONICAL_OBSM_KEY
+    tb.canonical_centers.SPATIAL_COORDINATES_KEY
+    tb.canonical_centers.CANONICAL_AXES
+    tb.canonical_centers.CANONICAL_SCHEMA_VERSION
+    tb.canonical_centers.CANONICAL_ALGORITHM_VERSION
+```
+
 ### Processing and analysis
 
 ```{eval-rst}
@@ -252,7 +277,6 @@ the table, for example `sdata.tables["table"]`.
 
     tb.aggregate_points
     tb.aggregate_image
-    tb.add_canonical_centers
     tb.bin_counts
     tb.add_regionprops
     tb.add_feature_matrix

@@ -249,6 +249,25 @@ def test_add_feature_matrix_rejects_mismatched_channels_across_pairs(sdata_pixie
         )
 
 
+@pytest.mark.parametrize("feature_key", ["spatial_canonical", "spatial"])
+def test_add_feature_matrix_rejects_a_reserved_feature_key(sdata_multi_c_no_backed, feature_key):
+    """``.obsm`` keys that tools read as coordinates cannot hold a feature matrix."""
+    tables = set(sdata_multi_c_no_backed.tables)
+
+    with pytest.raises(ValueError, match="reserved .obsm key"):
+        add_feature_matrix(
+            sdata_multi_c_no_backed,
+            labels_name="masks_whole",
+            image_name=None,
+            table_name=None,
+            output_table_name="table_reserved",
+            feature_key=feature_key,
+            features=["area"],
+        )
+
+    assert set(sdata_multi_c_no_backed.tables) == tables
+
+
 def test_add_feature_matrix_persists_backed_updates(sdata_multi_c):
     sdata_multi_c = add_feature_matrix(
         sdata_multi_c,

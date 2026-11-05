@@ -748,7 +748,7 @@ def test_aggregation_shared_publication_restores_store_and_attachment(
     original_parents = table_writer._create_destination_parents
     original_rename = Path.rename
     original_install = type(sdata.tables).__setitem__
-    original_validate = writer_module._validate_table_without_canonical
+    original_validate = writer_module._validate_table_without_canonical_centers
     original_consolidate = zarr.consolidate_metadata
     consolidation_calls = []
 
@@ -793,7 +793,7 @@ def test_aggregation_shared_publication_restores_store_and_attachment(
     elif failure == "installation":
         monkeypatch.setattr(type(sdata.tables), "__setitem__", failed_install)
     elif failure == "validation":
-        monkeypatch.setattr(writer_module, "_validate_table_without_canonical", failed_validate)
+        monkeypatch.setattr(writer_module, "_validate_table_without_canonical_centers", failed_validate)
     else:
         monkeypatch.setattr(zarr, "consolidate_metadata", failed_consolidate)
 

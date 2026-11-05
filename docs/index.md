@@ -15,14 +15,19 @@ section#harpy > h1 {
 
 Why Harpy?
 
-Harpy is a spatial omics analysis library for spatial transcriptomics and proteomics. Within the [`scverse`](https://scverse.org/) stack, it bridges [`SpatialData`](https://spatialdata.scverse.org/) and downstream analysis tools such as [`AnnData`](https://anndata.readthedocs.io/), [`Scanpy`](https://scanpy.readthedocs.io/), and [`Squidpy`](https://squidpy.readthedocs.io/). It provides scalable, image- and geometry-aware computation to transform raw spatial data into analysis-ready representations, with a strong emphasis on interoperability and large-scale workflows.
+Harpy is a spatial omics analysis library for spatial transcriptomics and proteomics, and part of the [scverse ecosystem](https://scverse.org/packages/#ecosystem). It bridges [`SpatialData`](https://spatialdata.scverse.org/) and downstream analysis tools such as [`AnnData`](https://anndata.readthedocs.io/), [`Scanpy`](https://scanpy.readthedocs.io/), and [`Squidpy`](https://squidpy.readthedocs.io/). It provides scalable, image- and geometry-aware computation to transform raw spatial data into analysis-ready representations, with a strong emphasis on interoperability and large-scale workflows.
 
 In practice, Harpy offers fast, out-of-core image preprocessing, tiled segmentation, and efficient aggregation workflows to generate `AnnData` tables and compute per-cell features from images, segmentation masks, and transcript coordinates. It also supports deep feature extraction, pixel- and cell-level clustering, and the construction of single-cell representations from highly multiplexed images.
 
 - **Multi-platform support** for spatial transcriptomics and proteomics data.
 - **Interoperable outputs** built on [SpatialData](https://github.com/scverse/spatialdata).
+- **SpatialData and AnnData ergonomics**: read single tables and write only the components that changed (`obs`, `obsm`, `uns`, …) to a backed Zarr store with [`harpy.tb.io`](#table-io); add images, labels, shapes and points with [`harpy.im`](api.md#image), [`harpy.sh`](api.md#shape) and [`harpy.pt`](api.md#points).
 - **Scales to (very) large images**: tiled workflows with [Dask](https://www.dask.org/); optional GPU acceleration with [CuPy](https://cupy.dev/) and [PyTorch](https://pytorch.org/).
 - **Scalable computational building blocks** for segmentation, feature extraction, clustering, and spatial analysis.
+
+## Development and support
+
+Harpy is actively developed and maintained by the [Saeys Lab](https://saeyslab.sites.vib.be/en) and [VIB Spatial Catalyst](https://vib.be/en/technologies/technology-portfolio/spatial-catalyst), part of VIB Technologies. VIB funds a dedicated development team, so Harpy gets long-term maintenance and continued development.
 
 For interactive exploration and analysis of `SpatialData` stores, see the [spatiato](https://github.com/vibspatial/spatiato) package, a spatial omics interface for [napari](https://napari.org/stable/), built on `SpatialData` and `Harpy`.
 
@@ -32,88 +37,15 @@ For interactive visualization of `Harpy` outputs using [Vitessce](https://github
 
 ---
 
-Explore how to use Harpy for segmentation, shallow and deep feature extraction, clustering, and spatial analysis of gigapixel-scale multiplexed data with these step-by-step notebooks:
+Explore how to use Harpy with these step-by-step notebooks:
 
 ---
 
-- **🚀 Basic Usage of Harpy**
+- **🎓 Spatial multi-omics training**
 
-  Learn how to read in data, perform **tiled segmentation** using [**Cellpose**](https://github.com/MouseLand/cellpose) and [**Dask-CUDA**](https://docs.rapids.ai/api/dask-cuda/stable/), extract features, perform QC and analyze results downstream with `Scanpy` and `Squidpy`.
-
-  👉 [Tutorial image based transcriptomics, Human Ovarian Cancer, Xenium 10x Genomics](../docs/tutorials/general/Harpy_xenium_transcriptomics_subset.ipynb)
-
-  👉 [Tutorial proteomics, MACSima](../docs/tutorials/general/Harpy_feature_calculation.ipynb)
+  Work through course notebooks on `SpatialData` objects, targeted transcriptomics and spatial proteomics with Harpy and spatiato. 👉 [Training](https://github.com/vibspatial/spatial_multi_omics_training)
 
 ---
-
-- **🔧 Technology-specific advice**
-
-  Learn which technologies Harpy supports. 👉 [Notebook](../docs/tutorials/general/techno_specific.ipynb)
-
----
-
-- **🧩 Pixel and Cell Clustering**
-
-  Learn how to perform unsupervised pixel- and cell-level clustering using `Harpy` together with [**FlowSOM**](https://github.com/saeyslab/FlowSOM_Python). 👉 [Tutorial](../docs/tutorials/general/FlowSOM_for_pixel_and_cell_clustering.ipynb)
-
----
-
-- **✂️ Cell Segmentation**
-
-  Explore segmentation workflows in `Harpy` using different tools:
-  - With [**Instanseg**](https://github.com/instanseg/instanseg) 👉 [Tutorial](../docs/tutorials/general/Harpy_instanseg.ipynb)
-
-  - With [**Cellpose**](https://github.com/MouseLand/cellpose) 👉 [Tutorial](../docs/tutorials/general/Harpy_feature_calculation.ipynb)
-
-  💡 Want us to add support for another segmentation method?
-  👉 [Open an issue](https://github.com/saeyslab/harpy/issues) and let us know!
-
----
-
-- **🧪 Single-cell representations from highly multiplexed images and downstream use with [PyTorch](https://pytorch.org/)**
-
-  Learn how single-cell representations can be generated from highly multiplexed images. These representations can then be used downstream to train classifiers in PyTorch. 👉 [Tutorial](../docs/tutorials/general/generate_single_cell_representations.ipynb)
-
----
-
-- **🧠 Deep Feature Extraction**
-
-  Discover how `Harpy` enables fast, scalable extraction of deep, cell-level features from highly multiplex imaging data with the [**KRONOS**](https://github.com/mahmoodlab/KRONOS) foundation model for proteomics. 👉 [Tutorial](../docs/tutorials/general/Featurize_with_kronos.ipynb)
-
-  💡 Want us to add support for another deep feature extraction method?
-  👉 [Open an issue](https://github.com/saeyslab/harpy/issues) and let us know!
-
----
-
-- **🔬 Shallow Feature Extraction**
-
-  Learn to extract shallow features—such as **mean**, **median**, and **standard deviation** of intensities—from multiplex imaging data with `Harpy`. 👉 [Tutorial](../docs/tutorials/advanced/Harpy_aggregate_rasters.ipynb)
-
----
-
-- **🧬 Spatial Transcriptomics**
-
-  Learn how to analyze spatial transcriptomics data with `Harpy`. We also refer to the [**SPArrOW documentation**](https://sparrow-pipeline.readthedocs.io/en/latest).
-
-  👉 [Tutorial (Mouse Liver, Resolve Molecular Cartography)](../docs/tutorials/advanced/Harpy_transcriptomics.ipynb)
-
-  👉 [Tutorial (Human Ovarian Cancer, Xenium 10x Genomics)](../docs/tutorials/advanced/Harpy_transcriptomics_xenium.ipynb)
-
----
-
-- **🌐 Multiple samples and coordinate systems**
-
-  Learn how to work with multiple samples, intrinsic and micron coordinates. 👉 [Tutorial](../docs/tutorials/advanced/coordinate_systems.ipynb)
-
----
-
-- **📐 Unifying Raster and Vector Annotations**
-
-  Learn how to convert a segmentation mask (array) into its vectorized form, and segmentation boundaries (polygons) into their rasterized equivalents. This conversion is useful, for example, when integrating annotations (e.g., from [QuPath](https://qupath.github.io/)) into downstream spatial omics analysis.👉 [Tutorial](../docs/tutorials/advanced/Rasterize_and_vectorize.ipynb)
-
----
-
-📚 For a complete list of tutorials, visit the [**tutorials section**](https://harpy.readthedocs.io/en/latest/tutorials).
 
 ```{eval-rst}
 .. card:: Installation
@@ -129,8 +61,8 @@ Explore how to use Harpy for segmentation, shallow and deep feature extraction, 
     Run a short, end-to-end example.
 
 .. card:: Tutorials
-    :link: tutorials/index
-    :link-type: doc
+    :link: https://github.com/vibspatial/spatial_multi_omics_training
+    :link-type: url
 
     Tutorials to help you get up to speed with Harpy.
 
@@ -182,8 +114,11 @@ If you use Harpy for spatial transcriptomics analysis, please cite:
 installation.md
 quickstart.md
 usage.md
-tutorials/index.md
+Tutorials <https://github.com/vibspatial/spatial_multi_omics_training>
+tutorials/general/techno_specific.ipynb
 api.md
 canonical_centers.md
+tutorials/general/benchmark.ipynb
+tutorials/hpc/index.md
 contributing.md
 ```

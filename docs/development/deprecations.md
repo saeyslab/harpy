@@ -33,8 +33,9 @@ The celltype_column parameter of harpy.tb.score_genes is deprecated and will be 
 ```
 
 After "Use" comes the replacement or, for a function without one, what to do
-instead, as for the scanpy wrappers of `harpy.tb`: scanpy or squidpy on the
-table directly, then `harpy.tb.io.add_table_updates`.
+instead, as for the scanpy wrappers of {mod}`harpy.tb`: scanpy or squidpy on
+the table directly, then
+{func}`harpy.tb.io.add_table_updates <harpy.tb.io.add_table_updates>`.
 
 ## How to deprecate
 

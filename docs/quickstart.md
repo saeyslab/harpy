@@ -89,15 +89,21 @@ sdata = hp.tb.io.add_table_updates(
 )
 ```
 
-`add_table_updates` writes only what changed: here the layer `log1p`, `obs`,
-`X_pca`, the neighbour graphs and the `uns` entries, but not `X`. To write
-chosen components by name, use `hp.tb.io.add_table_components`. When cells or
-genes are removed, for example with `sc.pp.filter_cells`, the result is a new
-table: write it with `hp.tb.io.add_table`.
+{func}`add_table_updates <harpy.tb.io.add_table_updates>` writes only what
+changed: here the layer `log1p`, `obs`, `X_pca`, the neighbour graphs and the
+`uns` entries, but not `X`. To write chosen components by name, use
+{func}`hp.tb.io.add_table_components <harpy.tb.io.add_table_components>`. When
+cells or genes are removed, for example with
+{func}`sc.pp.filter_cells <scanpy.pp.filter_cells>`, the result is a new table:
+write it with {func}`hp.tb.io.add_table <harpy.tb.io.add_table>`.
 
 For interactive cell typing, compute per-instance feature matrices with
-`hp.tb.add_feature_matrix`, and classify the cells in napari with
+{func}`hp.tb.add_feature_matrix <harpy.tb.add_feature_matrix>`, and classify
+the cells in napari with
 [spatiato](https://github.com/vibspatial/spatiato), installed with
 `harpy-analysis[spatiato]`.
 
-Next, explore the introductory tutorials for [transcriptomics](./tutorials/general/Harpy_xenium_transcriptomics_subset.ipynb) and [proteomics](./tutorials/general/Harpy_feature_calculation.ipynb).
+Next, work through the notebooks of the
+[spatial multi-omics training](https://github.com/vibspatial/spatial_multi_omics_training),
+which cover SpatialData objects, targeted transcriptomics and spatial proteomics
+with Harpy and spatiato.

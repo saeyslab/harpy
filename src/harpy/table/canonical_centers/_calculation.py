@@ -9,77 +9,70 @@ import pandas as pd
 
 from harpy.image import get_dataarray
 from harpy.table.canonical_centers._models import (
-    CanonicalCacheReport,
-    CanonicalCacheState,
-    CanonicalCacheUpdatePayload,
-    CanonicalCentersResult,
-    CanonicalRegionBinding,
+    CanonicalRegionMetadata,
+    _CanonicalRegionBinding,
+    _CanonicalRegionCenters,
+    _format_id_preview,
 )
 from harpy.table.canonical_centers._schema import (
-    CANONICAL_OBSM_KEY,
-    build_canonical_cache_update_payload,
-    build_canonical_source_signature,
+    _build_canonical_metadata,
+    _build_region_metadata,
+    _canonical_metadata_to_storage,
 )
 from harpy.utils import RasterAggregator
+from harpy.utils._keys import _INSTANCE_KEY
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from numpy.typing import NDArray
     from spatialdata import SpatialData
 
 
-def calculate_canonical_centers(
-    sdata: SpatialData,
-    report: CanonicalCacheReport,
-) -> CanonicalCacheUpdatePayload:
-    """Calculate intrinsic ``(z, y, x)`` centers without mutating a table.
+def _calculate_canonical_centers(sdata: SpatialData, binding: _CanonicalRegionBinding) -> _CanonicalRegionCenters:
+    """Calculate intrinsic ``(z, y, x)`` centers of one labels region without mutating a table.
 
-    The source labels are read at ``scale0`` and normalized to three dimensions:
-    a 2D ``(y, x)`` raster receives a singleton ``z`` axis, while a 3D
-    ``(z, y, x)`` raster is used directly. Only the instance IDs captured in
-    ``report.binding`` are reduced, and the returned center rows retain that
-    exact instance order.
+    The labels are read at ``scale0``; 2D ``(y, x)`` labels receive a singleton
+    ``z`` axis. Only the instance IDs in ``binding``, those with table rows, get
+    a center. Returns the centers, in the order of those IDs, with the table
+    rows they belong to (``binding``) and their region metadata.
     """
-    if not isinstance(report, CanonicalCacheReport):
-        raise TypeError("Canonical center calculation requires a CanonicalCacheReport.")
-
-    labels_name = report.labels_name
-    current_source = build_canonical_source_signature(sdata, labels_name)
-    if current_source != report.source_signature:
-        raise ValueError("Labels source changed after canonical cache inspection; calculation was rejected.")
-
-    labels = get_dataarray(sdata, labels_name, scale="scale0")
+    metadata = _build_region_metadata(sdata, binding.labels_name)
+    labels = get_dataarray(sdata, binding.labels_name, scale="scale0")
     mask = da.asarray(labels.data)
-    if report.source_signature.dims == ("y", "x"):
+    if metadata.dims == ("y", "x"):
         mask = mask[None, ...]
-    _validate_instance_ids_fit_labels_dtype(report.binding, mask.dtype)
-    centers = _calculate_centers_with_raster_aggregator(mask, report.binding)
-    return build_canonical_cache_update_payload(
-        binding=report.binding,
-        centers=centers,
-        source_signature=report.source_signature,
-    )
+    _validate_instance_ids_fit_labels_dtype(binding, mask.dtype)
+    centers = _calculate_centers_with_raster_aggregator(mask, binding)
+    return _CanonicalRegionCenters(binding=binding, metadata=metadata, centers=centers)
 
 
-def read_canonical_centers_from_cache(
-    sdata: SpatialData,
-    report: CanonicalCacheReport,
-) -> CanonicalCentersResult:
-    """Read one selected region from an already-inspected valid payload."""
-    if not isinstance(report, CanonicalCacheReport):
-        raise TypeError("Canonical cache reading requires a CanonicalCacheReport.")
-    if report.state is not CanonicalCacheState.VALID:
-        raise ValueError("Canonical cache reading requires a valid cache report.")
+def _assemble_canonical_components(
+    n_obs: int,
+    regions: Sequence[_CanonicalRegionCenters],
+) -> tuple[NDArray[np.float64], dict[str, object]]:
+    """Place the centers of every labels region in one ``(n_obs, 3)`` matrix and build the stored record.
 
-    table = sdata.tables[report.table_name]
-    centers = np.asarray(table.obsm[CANONICAL_OBSM_KEY])[report.binding.row_positions]
-    return CanonicalCentersResult(
-        source_signature=report.source_signature,
-        binding=report.binding,
-        centers=centers,
-        cache_update=None,
-    )
+    Every table row must belong to exactly one region.
+    """
+    centers = np.full((n_obs, 3), np.nan, dtype=np.float64)
+    covered = np.zeros(n_obs, dtype=bool)
+    entries: dict[str, CanonicalRegionMetadata] = {}
+    for region in regions:
+        binding = region.binding
+        if binding.labels_name in entries:
+            raise ValueError(f"Canonical centers for labels element `{binding.labels_name}` are given more than once.")
+        if np.any(binding.row_positions >= n_obs) or covered[binding.row_positions].any():
+            raise ValueError("Canonical center bindings overlap or exceed the table rows.")
+        centers[binding.row_positions] = region.centers
+        covered[binding.row_positions] = True
+        entries[binding.labels_name] = region.metadata
+    if not covered.all() or not np.isfinite(centers).all():
+        raise ValueError("Canonical centers must cover every table row with finite coordinates.")
+    return centers, _canonical_metadata_to_storage(_build_canonical_metadata(regions=entries))
 
 
-def _validate_instance_ids_fit_labels_dtype(binding: CanonicalRegionBinding, labels_dtype: np.dtype) -> None:
+def _validate_instance_ids_fit_labels_dtype(binding: _CanonicalRegionBinding, labels_dtype: np.dtype) -> None:
     dtype = np.dtype(labels_dtype)
     maximum = int(np.iinfo(dtype).max)
     instance_ids = binding.instance_ids
@@ -94,12 +87,12 @@ def _validate_instance_ids_fit_labels_dtype(binding: CanonicalRegionBinding, lab
 
 def _calculate_centers_with_raster_aggregator(
     labels: da.Array,
-    binding: CanonicalRegionBinding,
+    binding: _CanonicalRegionBinding,
 ) -> np.ndarray:
     aggregator = RasterAggregator(
         mask_dask_array=labels,
         image_dask_array=None,
-        instance_key=binding.instance_key,
+        instance_key=_INSTANCE_KEY,
         run_on_gpu=False,
     )
     with warnings.catch_warnings():
@@ -112,11 +105,11 @@ def _calculate_centers_with_raster_aggregator(
     if not isinstance(result, pd.DataFrame):
         raise ValueError("RasterAggregator center_of_mass must return a pandas DataFrame.")
     coordinate_columns = [0, 1, 2]
-    expected_columns = [*coordinate_columns, binding.instance_key]
+    expected_columns = [*coordinate_columns, _INSTANCE_KEY]
     if result.columns.tolist() != expected_columns:
         raise ValueError("RasterAggregator center_of_mass must return z, y, x, and instance ID columns in that order.")
 
-    output_ids = result[binding.instance_key].to_numpy()
+    output_ids = result[_INSTANCE_KEY].to_numpy()
     if output_ids.dtype != binding.instance_ids.dtype or not np.array_equal(output_ids, binding.instance_ids):
         raise ValueError("RasterAggregator center_of_mass instance IDs must match the requested IDs in order.")
 
@@ -132,10 +125,3 @@ def _calculate_centers_with_raster_aggregator(
             f" ID(s) ({_format_id_preview(missing_ids)})."
         )
     return centers
-
-
-def _format_id_preview(instance_ids: np.ndarray, limit: int = 5) -> str:
-    preview = ", ".join(str(int(value)) for value in instance_ids[:limit])
-    if len(instance_ids) > limit:
-        preview += ", ..."
-    return preview

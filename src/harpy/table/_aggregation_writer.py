@@ -39,17 +39,11 @@ from harpy.table._metadata import (
     _POINT_AGGREGATION_KEY,
     _POINT_AGGREGATION_SCHEMA_VERSION,
 )
-from harpy.table._validation import _validate_table_without_canonical
-from harpy.table.canonical_centers import (
-    CANONICAL_ALGORITHM_VERSION,
-    CANONICAL_OBSM_KEY,
-    SPATIAL_COORDINATES_KEY,
-    CanonicalCacheUpdatePayload,
-    CanonicalRegionMetadata,
-    build_canonical_metadata,
-    canonical_metadata_to_storage,
-    validate_canonical_payload,
-)
+from harpy.table._validation import _validate_table_without_canonical_centers
+from harpy.table.canonical_centers import CANONICAL_OBSM_KEY, SPATIAL_COORDINATES_KEY
+from harpy.table.canonical_centers._calculation import _assemble_canonical_components
+from harpy.table.canonical_centers._models import _CanonicalRegionCenters
+from harpy.table.canonical_centers._schema import _validate_canonical_centers
 from harpy.table.io._write import _publish_table_paths
 from harpy.table.io._write_validation import _validate_complete_table
 from harpy.utils._keys import _FEATURE_MATRICES_KEY
@@ -160,7 +154,7 @@ def _write_aggregation_table(
     workspace: Path,
     checkpoint: _AggregationCheckpoint,
     expression_axis: tuple[str, ...],
-    canonical_payloads_by_pair: Mapping[int, CanonicalCacheUpdatePayload],
+    canonical_regions: tuple[_CanonicalRegionCenters, ...],
     output_table_name: str,
     feature_key: str,
     region_key: str,
@@ -201,13 +195,7 @@ def _write_aggregation_table(
         instance_key=instance_key,
     )
     log.info(f"Finished constructing AnnData '.obs' for table '{output_table_name}'.")
-    canonical_centers, canonical_metadata = _canonical_table_payload(
-        checkpoint,
-        output_row_keys=output_row_keys,
-        payloads_by_pair=canonical_payloads_by_pair,
-        region_key=region_key,
-        instance_key=instance_key,
-    )
+    canonical_centers, canonical_metadata = _assemble_canonical_components(len(output_row_keys), canonical_regions)
     var = pd.DataFrame(index=pd.Index(expression_axis, name=feature_key))
     uns = _aggregation_uns(
         checkpoint,
@@ -273,14 +261,7 @@ def _write_aggregation_table(
     # Validate the reopened serialized payload before publication, so the Zarr
     # representation must satisfy the same canonical contract as the in-memory
     # construction rather than relying only on construction-time checks.
-    validate_canonical_payload(
-        sdata,
-        staged_table,
-        table_name=output_table_name,
-        region_key=region_key,
-        instance_key=instance_key,
-        regions=[pair.labels_name for pair in checkpoint.pairs],
-    )
+    _validate_canonical_centers(sdata, staged_table)
     _write_spatialdata_table_attrs(
         staging_group,
         regions=[pair.labels_name for pair in checkpoint.pairs],
@@ -387,55 +368,6 @@ def _aggregation_obs(
     return obs
 
 
-def _canonical_table_payload(
-    checkpoint: _AggregationCheckpoint,
-    *,
-    output_row_keys: tuple[tuple[int, int], ...],
-    payloads_by_pair: Mapping[int, CanonicalCacheUpdatePayload],
-    region_key: str,
-    instance_key: str,
-) -> tuple[np.ndarray, dict[str, object]]:
-    """Align region payloads to table rows and serialize their shared metadata."""
-    expected_ordinals = {pair.ordinal for pair in checkpoint.pairs}
-    if set(payloads_by_pair) != expected_ordinals:
-        raise ValueError("Canonical center payloads must cover every aggregation pair exactly once.")
-
-    centers = np.full((len(output_row_keys), 3), np.nan, dtype=np.float64)
-    regions: dict[str, CanonicalRegionMetadata] = {}
-    for pair in checkpoint.pairs:
-        payload = payloads_by_pair[pair.ordinal]
-        binding = payload.binding
-        expected_positions = np.asarray(
-            [row for row, (pair_ordinal, _) in enumerate(output_row_keys) if pair_ordinal == pair.ordinal],
-            dtype=np.intp,
-        )
-        expected_ids = np.asarray([output_row_keys[row][1] for row in expected_positions], dtype=np.uint64)
-        if (
-            binding.labels_name != pair.labels_name
-            or binding.region_key != region_key
-            or binding.instance_key != instance_key
-            or not np.array_equal(binding.row_positions, expected_positions)
-            or not np.array_equal(binding.instance_ids, expected_ids)
-        ):
-            raise ValueError(f"Canonical center binding for aggregation pair {pair.ordinal} is not row-aligned.")
-        centers[binding.row_positions] = payload.centers
-        regions[pair.labels_name] = CanonicalRegionMetadata(
-            source_signature=payload.source_signature,
-            n_obs=binding.n_obs,
-            instance_set_digest=binding.instance_set_digest,
-            algorithm_version=CANONICAL_ALGORITHM_VERSION,
-        )
-    if not np.isfinite(centers).all():
-        raise ValueError("Canonical centers must cover every retained aggregation row with finite coordinates.")
-
-    metadata = build_canonical_metadata(
-        region_key=region_key,
-        instance_key=instance_key,
-        regions=regions,
-    )
-    return centers, canonical_metadata_to_storage(metadata)
-
-
 def _aggregation_uns(
     checkpoint: _AggregationCheckpoint,
     *,
@@ -532,7 +464,7 @@ def _install_aggregation_table(
                attach to sdata.tables
                      |
                      v
-               _validate_table_without_canonical()
+               _validate_table_without_canonical_centers()
                      |
                      v
                write consolidated metadata
@@ -559,7 +491,7 @@ def _install_aggregation_table(
             # canonical components after reopening the staged table; publication
             # only moved that payload. Validate the remaining table contracts
             # here while disk and in-memory rollback are still available.
-            _validate_table_without_canonical(sdata, output_table_name)
+            _validate_table_without_canonical_centers(sdata, output_table_name)
             # The shared operation consolidates after this body succeeds.
     except BaseException:
         # Attachment may have assigned the table before raising. Restore the

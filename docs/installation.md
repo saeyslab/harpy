@@ -12,11 +12,10 @@ pip install "harpy-analysis[extra]"
 
 `[extra]` installs optional dependencies for:
 
-- Segmentation: `cellpose`
+- Segmentation: `cellpose`, `instanseg-torch`
 - OpenCV support: `opencv-python-headless`
-- FlowSOM Clustering: `flowsom`, `scikit-learn`
 - Vitessce: `harpy-vitessce`
-- Notebook workflows: `ipywidgets`, `tqdm`, `bokeh`, `textalloc`, `joypy`, `supervenn`, `nbconvert`, `ipython`
+- Notebook workflows: `marimo`, `ipywidgets`, `tqdm`, `bokeh`, `textalloc`, `joypy`, `supervenn`, `nbconvert`, `ipython`
 
 **With spatiato**
 
@@ -35,7 +34,7 @@ pip install "harpy-analysis[spatiato]"
 
 ```bash
 # Clone repository from GitHub
-uv venv --python=3.12  # create venv using uv, set python version (>=3.11)
+uv venv --python=3.12  # create venv using uv, set python version (>=3.12)
 source .venv/bin/activate  # activate the virtual environment
 uv pip install -e '.[dev]'  # editable install with dev tooling
 python -c 'import harpy; print(harpy.__version__)'  # check if the package is installed

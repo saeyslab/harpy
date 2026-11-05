@@ -7,6 +7,7 @@
 # -- Path setup --------------------------------------------------------------
 import sys
 from datetime import datetime
+from fnmatch import fnmatch
 from importlib.metadata import metadata
 from pathlib import Path
 
@@ -17,11 +18,10 @@ sys.path.insert(0, str(HERE / "extensions"))
 # -- Project information -----------------------------------------------------
 
 info = metadata("harpy-analysis")
-project_name = info["Name"]
+project = "Harpy"
 author = "SaeysLab"
 copyright = f"{datetime.now():%Y}, {author}"
 version = info["Version"]
-# repository_url = f"https://github.com/saeyslab/{project_name}"
 
 # The full version, including alpha/beta/rc tags
 release = info["Version"]
@@ -32,12 +32,13 @@ templates_path = ["_templates"]
 nitpicky = True  # Warn about broken links
 needs_sphinx = "4.0"
 
+# Source repository for the theme's "Edit this page" link and repository card.
 html_context = {
-    "display_github": True,  # Integrate GitHub
-    "github_user": "saeyslab",  # Username
-    "github_repo": project_name,  # Repo name
-    "github_version": "main",  # Version
-    "conf_py_path": "/docs/",  # Path in the checkout to the docs root
+    "source_type": "github",
+    "source_user": "saeyslab",
+    "source_repo": "harpy",
+    "source_version": "main",
+    "source_docs_path": "/docs/",
 }
 
 # -- General configuration ---------------------------------------------------
@@ -69,6 +70,9 @@ napoleon_numpy_docstring = True
 napoleon_include_init_with_doc = False
 napoleon_use_rtype = True  # having a separate entry generally helps readability
 napoleon_use_param = True
+# An Attributes section becomes a field list, so the class template's attribute
+# entries are the only object descriptions of the attributes.
+napoleon_use_ivar = True
 myst_heading_anchors = 3  # create anchors for h1-h3
 myst_enable_extensions = [
     "amsmath",
@@ -111,6 +115,17 @@ intersphinx_mapping = {
 # directories to ignore when looking for source files.
 # This pattern also affects html_static_path and html_extra_path.
 exclude_patterns = ["_build", "Thumbs.db", "**.ipynb_checkpoints", "../notebooks/*", "../experiments/*", "../configs/*"]
+# The tutorials live in the spatial multi-omics training repository. Of the
+# tutorials submodule, only these pages are still built.
+_BUILT_TUTORIALS = ("general/techno_specific.ipynb", "general/benchmark.ipynb", "hpc/*")
+_TUTORIALS = HERE / "tutorials"
+exclude_patterns += [
+    f"tutorials/{page}"
+    for page in sorted(
+        path.relative_to(_TUTORIALS).as_posix() for path in _TUTORIALS.rglob("*") if path.suffix in {".md", ".ipynb"}
+    )
+    if not any(fnmatch(page, built) for built in _BUILT_TUTORIALS)
+]
 # Ignore warnings.
 nitpicky = False  # TODO: solve upstream.
 # nitpick_ignore = [
@@ -121,25 +136,24 @@ nitpicky = False  # TODO: solve upstream.
 
 # -- Options for HTML output -------------------------------------------------
 
-# The theme to use for HTML and HTML Help pages.  See the documentation for
-# a list of builtin themes.
-#
-html_theme = "sphinx_book_theme"
-# html_theme = "sphinx_rtd_theme"
+# Shibuya theme: https://shibuya.lepture.com/
+html_theme = "shibuya"
 html_static_path = ["_static"]
-html_title = project_name
+html_title = project
 html_logo = "_static/img/logo.png"
 
+# Leave `pygments_style` unset: Shibuya then switches code highlighting
+# between its light and dark styles with the color mode.
 html_theme_options = {
-    "repository_url": "https://github.com/saeyslab/harpy",
-    "use_repository_button": True,
-    "use_edit_page_button": True,
-    "use_source_button": True,
-    "use_issues_button": True,
-    "path_to_docs": "./docs",
+    "accent_color": "orange",
+    "github_url": "https://github.com/saeyslab/harpy",
+    "nav_links": [
+        {"title": "Installation", "url": "installation"},
+        {"title": "Quickstart", "url": "quickstart"},
+        {"title": "API", "url": "api"},
+        {"title": "Tutorials", "url": "https://github.com/vibspatial/spatial_multi_omics_training", "external": True},
+    ],
 }
-
-pygments_style = "default"
 
 nitpick_ignore = [
     # If building the documentation fails because of a missing link that is outside your control,

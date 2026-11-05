@@ -25,12 +25,11 @@ from spatialdata.models import TableModel
 
 from harpy._feature_panels import _require_mapping, _require_nonempty_string
 from harpy.table._metadata import _FEATURE_MATRIX_SCHEMA_VERSION
-from harpy.table.canonical_centers import (
-    CANONICAL_OBSM_KEY,
-    SPATIAL_COORDINATES_KEY,
-    validate_canonical_payload,
-)
-from harpy.utils._keys import _FEATURE_MATRICES_KEY
+from harpy.table.canonical_centers import CANONICAL_OBSM_KEY, validate_canonical_centers
+from harpy.utils._keys import _FEATURE_MATRICES_KEY, _SPATIAL
+
+# .obsm keys that tools read as coordinates; no feature matrix may use them.
+_RESERVED_OBSM_KEYS = frozenset({CANONICAL_OBSM_KEY, _SPATIAL})
 
 
 def validate_table(
@@ -48,8 +47,9 @@ def validate_table(
     - the annotation, when present: the region and instance columns exist
       without missing values, ``(region, instance)`` pairs are unique, and the
       declared regions equal the observed ones and exist in ``sdata``;
-    - every matrix registered in ``adata.uns[feature_matrices_key]``: it
-      exists in ``adata.obsm`` under the same key with one row per
+    - every matrix registered in ``adata.uns[feature_matrices_key]``: its key
+      is not ``spatial_canonical`` or ``spatial``, which tools read as
+      coordinates, it exists in ``adata.obsm`` under that key with one row per
       observation, and its ``feature_columns`` name each of its columns once;
       and
     - the canonical centers, when present.
@@ -62,9 +62,11 @@ def validate_table(
     because preprocessing may legitimately change them.
 
     When the canonical-center matrix or its metadata record is present, both
-    must be present. Their fixed axes, dtype, shape, region coverage, instance
-    digests and labels ``scale0`` source signatures are checked without
-    recomputing centers or reading labels pixels.
+    must be present, and they are checked as
+    :func:`harpy.tb.canonical_centers.validate_canonical_centers` checks
+    them, against the labels elements but without reading their pixels. No
+    check ties a center to its row, so subsets and reorders of the table stay
+    valid; keeping ``obs`` and ``obsm`` aligned is AnnData's responsibility.
 
     This function does not recompute point-to-label assignment, scan points
     partitions, inspect label pixels, repair metadata, or write to ``sdata``.
@@ -103,28 +105,11 @@ def validate_table(
         # A registry written by add_feature_matrix under a custom key.
         hp.tb.validate_table(sdata, "table", feature_matrices_key="custom_feature_matrices")
     """
-    annotation = _validate_table_without_canonical(sdata, table_name, feature_matrices_key=feature_matrices_key)
-    adata = sdata.tables[table_name]
-    has_canonical_component = CANONICAL_OBSM_KEY in adata.obsm or (
-        isinstance(adata.uns.get(SPATIAL_COORDINATES_KEY), Mapping)
-        and CANONICAL_OBSM_KEY in adata.uns[SPATIAL_COORDINATES_KEY]
-    )
-    if annotation is None:
-        if has_canonical_component:
-            raise ValueError("Canonical centers require a SpatialData table annotation.")
-    else:
-        region_key, instance_key, regions = annotation
-        validate_canonical_payload(
-            sdata,
-            adata,
-            table_name=table_name,
-            region_key=region_key,
-            instance_key=instance_key,
-            regions=regions,
-        )
+    _validate_table_without_canonical_centers(sdata, table_name, feature_matrices_key=feature_matrices_key)
+    validate_canonical_centers(sdata, table_name=table_name)
 
 
-def _validate_table_without_canonical(
+def _validate_table_without_canonical_centers(
     sdata: SpatialData,
     table_name: str,
     *,
@@ -133,9 +118,10 @@ def _validate_table_without_canonical(
     """Validate the SpatialData table model, annotation and registered feature matrices.
 
     SpatialData's model is checked before the Harpy-specific contracts. This
-    deliberately partial validator excludes ``obsm["spatial_canonical"]`` and
-    its matching metadata record. Successful return does not establish complete
-    table validity: canonical components must be validated separately.
+    deliberately partial validator does not check the canonical centers,
+    ``obsm["spatial_canonical"]`` and its metadata record. Successful return
+    does not establish complete table validity: canonical components must be
+    validated separately.
     ``feature_matrices_key`` selects the one feature-matrix registry that is
     checked, as in :func:`validate_table`.
 
@@ -146,7 +132,7 @@ def _validate_table_without_canonical(
     -------
     tuple[str, str, tuple[str, ...]] | None
         The normalized ``(region_key, instance_key, regions)`` annotation, or
-        ``None`` when the table is not a SpatialData regions table.
+        ``None`` when the table has no SpatialData annotation.
     """
     if not isinstance(sdata, SpatialData):
         raise ValueError(f"Parameter 'sdata' must be a SpatialData object, found {type(sdata).__name__}.")
@@ -161,18 +147,14 @@ def _validate_table_without_canonical(
 
     adata = sdata.tables[table_name]
     TableModel.validate(adata)
-    annotation = _validate_table_annotation(sdata, adata, table_name=table_name)
+    annotation = _validate_table_annotation(sdata, table_name)
     _validate_feature_matrices(adata, feature_matrices_key=feature_matrices_key)
     return annotation
 
 
-def _validate_table_annotation(
-    sdata: SpatialData,
-    adata: AnnData,
-    *,
-    table_name: str,
-) -> tuple[str, str, tuple[str, ...]] | None:
+def _validate_table_annotation(sdata: SpatialData, table_name: str) -> tuple[str, str, tuple[str, ...]] | None:
     """Validate the annotation, requiring declared and observed region sets to match."""
+    adata = sdata.tables[table_name]
     if TableModel.ATTRS_KEY not in adata.uns:
         return None
     annotation = _require_mapping(
@@ -221,7 +203,8 @@ def _validate_feature_matrices(adata: AnnData, *, feature_matrices_key: str) -> 
     the same key in ``adata.obsm``. For every registered matrix, this function
     checks that:
 
-    - the registry key is a non-empty string and its record is a mapping;
+    - the registry key is a non-empty string, not a reserved ``.obsm`` key
+      (``spatial_canonical`` or ``spatial``), and its record is a mapping;
     - the corresponding ``adata.obsm`` matrix exists;
     - the matrix is two-dimensional and has one row per observation;
     - ``feature_columns`` is a non-empty sequence of unique strings whose
@@ -274,6 +257,10 @@ def _validate_feature_matrix_record(
     the matrix's shape are read, no matrix value.
     """
     matrix_name = _require_nonempty_string(matrix_name, path=f"{feature_matrices_key} key")
+    if matrix_name in _RESERVED_OBSM_KEYS:
+        raise ValueError(
+            f"Feature matrix {matrix_name!r} uses a reserved .obsm key; reserved: {sorted(_RESERVED_OBSM_KEYS)}."
+        )
     record = _require_mapping(record_value, path=f"{feature_matrices_key}.{matrix_name}")
     if matrix_name not in adata.obsm:
         raise ValueError(f"Feature-matrix metadata references missing adata.obsm[{matrix_name!r}].")
