@@ -1,0 +1,89 @@
+cff-version: 1.2.0
+message: "If you use Harpy in your work, please cite the paper below."
+title: "Harpy"
+abstract: "Single-cell spatial omics analysis that makes you happy."
+type: software
+authors:
+  - name: "Saeys Lab, VIB spatial catalyst"
+repository-code: "https://github.com/saeyslab/harpy"
+url: "https://harpy.readthedocs.io/"
+license: BSD-3-Clause
+keywords:
+  - spatial-omics
+  - spatial-transcriptomics
+  - spatial-proteomics
+  - single-cell
+  - image-analysis
+  - spatialdata
+  - scverse
+preferred-citation:
+  type: article
+  title: "Scalable analysis of whole slide spatial proteomics with Harpy"
+  authors:
+    - family-names: Rombaut
+      given-names: Benjamin
+    - family-names: Defauw
+      given-names: Arne
+    - family-names: Vernaillen
+      given-names: Frank
+    - family-names: Mortier
+      given-names: Julien
+    - family-names: Van Hamme
+      given-names: Evelien
+    - family-names: Van Gassen
+      given-names: Sofie
+    - family-names: Seurinck
+      given-names: Ruth
+    - family-names: Saeys
+      given-names: Yvan
+  journal: Bioinformatics
+  volume: 42
+  issue: 3
+  year: 2026
+  doi: "10.1093/bioinformatics/btag122"
+references:
+  - type: article
+    status: preprint
+    title: "SPArrOW: a flexible, interactive and scalable pipeline for spatial transcriptomics analysis"
+    authors:
+      - family-names: Pollaris
+        given-names: Lotte
+      - family-names: Vanneste
+        given-names: Bavo
+      - family-names: Rombaut
+        given-names: Benjamin
+      - family-names: Defauw
+        given-names: Arne
+      - family-names: Vernaillen
+        given-names: Frank
+      - family-names: Mortier
+        given-names: Julien
+      - family-names: Vanhenden
+        given-names: Wout
+      - family-names: Martens
+        given-names: Liesbet
+      - family-names: Thoné
+        given-names: Tinne
+      - family-names: Hastir
+        given-names: Jean-Francois
+      - family-names: Bujko
+        given-names: Anna
+      - family-names: Saelens
+        given-names: Wouter
+      - family-names: Marine
+        given-names: Jean-Christophe
+      - family-names: Nelissen
+        given-names: Hilde
+      - family-names: Van Hamme
+        given-names: Evelien
+      - family-names: Seurinck
+        given-names: Ruth
+      - family-names: Scott
+        given-names: Charlotte L.
+      - family-names: Guilliams
+        given-names: Martin
+      - family-names: Saeys
+        given-names: Yvan
+    journal: bioRxiv
+    year: 2024
+    doi: "10.1101/2024.07.04.601829"

@@ -132,8 +132,7 @@ test = [
 ]
 docs = [
     "sphinx>=4.5",
-    "sphinx-book-theme>=1.0.0",
-    "sphinx_rtd_theme",
+    "shibuya>=2026.7.12",
     "myst-nb",
     "sphinxcontrib-bibtex>=1.0.0",
     "sphinx-autodoc-typehints",

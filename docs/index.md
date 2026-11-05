@@ -21,6 +21,7 @@ In practice, Harpy offers fast, out-of-core image preprocessing, tiled segmentat
 
 - **Multi-platform support** for spatial transcriptomics and proteomics data.
 - **Interoperable outputs** built on [SpatialData](https://github.com/scverse/spatialdata).
+- **SpatialData and AnnData ergonomics**: read single tables and write only the components that changed (`obs`, `obsm`, `uns`, …) to a backed Zarr store with `hp.tb.io`; add images, labels, shapes and points with `hp.im`, `hp.sh` and `hp.pt`.
 - **Scales to (very) large images**: tiled workflows with [Dask](https://www.dask.org/); optional GPU acceleration with [CuPy](https://cupy.dev/) and [PyTorch](https://pytorch.org/).
 - **Scalable computational building blocks** for segmentation, feature extraction, clustering, and spatial analysis.
 

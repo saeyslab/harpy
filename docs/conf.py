@@ -18,11 +18,10 @@ sys.path.insert(0, str(HERE / "extensions"))
 # -- Project information -----------------------------------------------------
 
 info = metadata("harpy-analysis")
-project_name = info["Name"]
+project = "Harpy"
 author = "SaeysLab"
 copyright = f"{datetime.now():%Y}, {author}"
 version = info["Version"]
-# repository_url = f"https://github.com/saeyslab/{project_name}"
 
 # The full version, including alpha/beta/rc tags
 release = info["Version"]
@@ -33,12 +32,13 @@ templates_path = ["_templates"]
 nitpicky = True  # Warn about broken links
 needs_sphinx = "4.0"
 
+# Source repository for the theme's "Edit this page" link and repository card.
 html_context = {
-    "display_github": True,  # Integrate GitHub
-    "github_user": "saeyslab",  # Username
-    "github_repo": project_name,  # Repo name
-    "github_version": "main",  # Version
-    "conf_py_path": "/docs/",  # Path in the checkout to the docs root
+    "source_type": "github",
+    "source_user": "saeyslab",
+    "source_repo": "harpy",
+    "source_version": "main",
+    "source_docs_path": "/docs/",
 }
 
 # -- General configuration ---------------------------------------------------
@@ -136,25 +136,24 @@ nitpicky = False  # TODO: solve upstream.
 
 # -- Options for HTML output -------------------------------------------------
 
-# The theme to use for HTML and HTML Help pages.  See the documentation for
-# a list of builtin themes.
-#
-html_theme = "sphinx_book_theme"
-# html_theme = "sphinx_rtd_theme"
+# Shibuya theme: https://shibuya.lepture.com/
+html_theme = "shibuya"
 html_static_path = ["_static"]
-html_title = project_name
+html_title = project
 html_logo = "_static/img/logo.png"
 
+# Leave `pygments_style` unset: Shibuya then switches code highlighting
+# between its light and dark styles with the color mode.
 html_theme_options = {
-    "repository_url": "https://github.com/saeyslab/harpy",
-    "use_repository_button": True,
-    "use_edit_page_button": True,
-    "use_source_button": True,
-    "use_issues_button": True,
-    "path_to_docs": "./docs",
+    "accent_color": "orange",
+    "github_url": "https://github.com/saeyslab/harpy",
+    "nav_links": [
+        {"title": "Installation", "url": "installation"},
+        {"title": "Quickstart", "url": "quickstart"},
+        {"title": "API", "url": "api"},
+        {"title": "Tutorials", "url": "https://github.com/vibspatial/spatial_multi_omics_training", "external": True},
+    ],
 }
-
-pygments_style = "default"
 
 nitpick_ignore = [
     # If building the documentation fails because of a missing link that is outside your control,
