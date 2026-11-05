@@ -62,7 +62,7 @@ Optional extras:
 | Extra        | Installs                                                                                                                                                            |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `[extra]`    | Segmentation (`cellpose`, `instanseg-torch`), OpenCV (`opencv-python-headless`), Vitessce (`harpy-vitessce`) and notebook tools (`marimo`, `ipywidgets`, `tqdm`, …) |
-| `[spatiato]` | The [spatiato](https://github.com/vibspatial/spatiato) napari interface (`napari[all]`, `spatiato`)                                                                 |
+| `[spatiato]` | [spatiato](https://github.com/vibspatial/spatiato), the spatial omics interface for [napari](https://napari.org/stable/)                                            |
 
 ```bash
 pip install "harpy-analysis[extra]"
