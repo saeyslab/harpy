@@ -48,7 +48,8 @@ def add_canonical_centers(
         backed, the table must exist in the store, with the same observations
         in the same order.
     table_name
-        Existing regions table to update.
+        Existing table to update. Its SpatialData annotation must declare
+        labels elements.
     overwrite
         Allow replacing canonical centers that exist in the store. Ignored for
         unbacked SpatialData, as in :func:`harpy.table.io.add_table_components`.
@@ -68,7 +69,7 @@ def add_canonical_centers(
         raise ValueError(f"Parameter 'overwrite' must be a bool, found {type(overwrite).__name__}.")
     annotation = _validate_table_without_canonical_centers(sdata, table_name)
     if annotation is None:
-        raise ValueError(f"Table element {table_name!r} is not a SpatialData regions table.")
+        raise ValueError(f"Table element {table_name!r} has no SpatialData annotation (uns['spatialdata_attrs']).")
     region_key, instance_key, regions = annotation
     not_labels = sorted(name for name in regions if name not in sdata.labels)
     if not_labels:

@@ -12,6 +12,7 @@ from harpy.table.canonical_centers._models import (
     CanonicalRegionMetadata,
     _CanonicalRegionBinding,
     _CanonicalRegionCenters,
+    _format_id_preview,
 )
 from harpy.table.canonical_centers._schema import (
     _build_canonical_metadata,
@@ -124,10 +125,3 @@ def _calculate_centers_with_raster_aggregator(
             f" ID(s) ({_format_id_preview(missing_ids)})."
         )
     return centers
-
-
-def _format_id_preview(instance_ids: np.ndarray, limit: int = 5) -> str:
-    preview = ", ".join(str(int(value)) for value in instance_ids[:limit])
-    if len(instance_ids) > limit:
-        preview += ", ..."
-    return preview

@@ -42,6 +42,12 @@ class _CanonicalRegionBinding:
             raise ValueError("Canonical row positions must be unique.")
         if len(instance_ids) == 0:
             raise ValueError("Instance IDs must not be empty.")
+        not_positive = instance_ids[instance_ids <= 0]
+        if len(not_positive):
+            raise ValueError(
+                f"{len(not_positive)} table row(s) of labels element `{self.labels_name}` have a non-positive instance"
+                f" ID ({_format_id_preview(np.unique(not_positive))}); 0 is background, not an instance."
+            )
         if len(np.unique(instance_ids)) != len(instance_ids):
             raise ValueError("Instance IDs must be unique within a labels region.")
         object.__setattr__(self, "row_positions", row_positions)
@@ -119,8 +125,13 @@ def _readonly_integer_ids(value: object) -> np.ndarray:
         raise ValueError("Instance IDs must be one-dimensional.")
     if array.dtype.kind not in "iu" or array.dtype.itemsize > np.dtype(np.uint64).itemsize:
         raise TypeError("Instance IDs must use an integer NumPy dtype of at most 64 bits.")
-    if np.any(array == 0) or (array.dtype.kind == "i" and np.any(array < 0)):
-        raise ValueError("Instance IDs must be positive integers.")
     result = np.array(array, copy=True)
     result.flags.writeable = False
     return result
+
+
+def _format_id_preview(instance_ids: np.ndarray, limit: int = 5) -> str:
+    preview = ", ".join(str(int(value)) for value in instance_ids[:limit])
+    if len(instance_ids) > limit:
+        preview += ", ..."
+    return preview
