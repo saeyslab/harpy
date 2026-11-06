@@ -153,46 +153,69 @@ def _validate_table_without_canonical_centers(
 
 
 def _validate_table_annotation(sdata: SpatialData, table_name: str) -> tuple[str, str, tuple[str, ...]] | None:
-    """Validate the annotation, requiring declared and observed region sets to match."""
-    adata = sdata.tables[table_name]
+    """Validate the annotation, requiring declared and observed region sets to match and to exist in ``sdata``."""
+    annotation = _validate_table_annotation_without_sdata(
+        sdata.tables[table_name], name=repr(table_name), path=f"tables.{table_name}"
+    )
+    if annotation is None:
+        return None
+    missing_elements = sorted(region for region in annotation[2] if region not in sdata)
+    if missing_elements:
+        raise ValueError(f"Table {table_name!r} annotation references missing spatial elements: {missing_elements!r}.")
+    return annotation
+
+
+def _validate_table_annotation_without_sdata(
+    adata: AnnData, *, name: str, path: str
+) -> tuple[str, str, tuple[str, ...]] | None:
+    """Validate the annotation of ``adata``: every check except that its regions exist in ``sdata``.
+
+    The region and instance columns exist without missing values, ``(region,
+    instance)`` pairs are unique, and the declared regions equal the observed
+    ones. ``name`` names the table in errors, such as ``'table'``; ``path``
+    starts its metadata paths, such as ``tables.table``.
+
+    Returns
+    -------
+    tuple[str, str, tuple[str, ...]] | None
+        The normalized ``(region_key, instance_key, regions)`` annotation, or
+        ``None`` when the table has no SpatialData annotation.
+    """
     if TableModel.ATTRS_KEY not in adata.uns:
         return None
     annotation = _require_mapping(
         adata.uns.get(TableModel.ATTRS_KEY),
-        path=f"tables.{table_name}.uns.{TableModel.ATTRS_KEY}",
+        path=f"{path}.uns.{TableModel.ATTRS_KEY}",
     )
     region_key = _require_nonempty_string(
         annotation.get(TableModel.REGION_KEY_KEY),
-        path=f"tables.{table_name}.uns.{TableModel.ATTRS_KEY}.{TableModel.REGION_KEY_KEY}",
+        path=f"{path}.uns.{TableModel.ATTRS_KEY}.{TableModel.REGION_KEY_KEY}",
     )
     instance_key = _require_nonempty_string(
         annotation.get(TableModel.INSTANCE_KEY),
-        path=f"tables.{table_name}.uns.{TableModel.ATTRS_KEY}.{TableModel.INSTANCE_KEY}",
+        path=f"{path}.uns.{TableModel.ATTRS_KEY}.{TableModel.INSTANCE_KEY}",
     )
     raw_regions = annotation.get(TableModel.REGION_KEY)
     regions = _metadata_string_sequence(
         [raw_regions] if isinstance(raw_regions, str) else raw_regions,
-        path=f"tables.{table_name}.uns.{TableModel.ATTRS_KEY}.{TableModel.REGION_KEY}",
+        path=f"{path}.uns.{TableModel.ATTRS_KEY}.{TableModel.REGION_KEY}",
     )
 
     for column in (region_key, instance_key):
         if column not in adata.obs:
-            raise ValueError(f"Table {table_name!r} annotation references missing observation column {column!r}.")
+            raise ValueError(f"Table {name} annotation references missing observation column {column!r}.")
     if adata.obs[[region_key, instance_key]].isna().any(axis=None):
-        raise ValueError(f"Table {table_name!r} contains missing region or instance identifiers.")
+        raise ValueError(f"Table {name} contains missing region or instance identifiers.")
     if adata.obs.duplicated(subset=[region_key, instance_key]).any():
-        raise ValueError(f"Table {table_name!r} contains duplicate (region, instance) observation keys.")
+        raise ValueError(f"Table {name} contains duplicate (region, instance) observation keys.")
 
     observed_regions = set(adata.obs[region_key].astype("str").unique())
     undeclared = sorted(observed_regions - set(regions))
     if undeclared:
-        raise ValueError(f"Table {table_name!r} contains regions absent from its annotation: {undeclared!r}.")
+        raise ValueError(f"Table {name} contains regions absent from its annotation: {undeclared!r}.")
     unobserved = sorted(set(regions) - observed_regions)
     if unobserved:
-        raise ValueError(f"Table {table_name!r} declares regions without observations: {unobserved!r}.")
-    missing_elements = sorted(region for region in regions if region not in sdata)
-    if missing_elements:
-        raise ValueError(f"Table {table_name!r} annotation references missing spatial elements: {missing_elements!r}.")
+        raise ValueError(f"Table {name} declares regions without observations: {unobserved!r}.")
     return region_key, instance_key, regions
 
 
