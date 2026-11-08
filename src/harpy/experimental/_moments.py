@@ -99,8 +99,8 @@ class MomentAggregator:
     split_every
         Number of partial results merged per task in the tree reduction.
     engine
-        Per-chunk kernel. ``"numba"`` (default) runs a compiled loop that releases the GIL, so
-        Dask threads run it in parallel. ``"numpy"`` uses :func:`numpy.bincount` and
+        Per-chunk kernels. ``"numba"`` (default) runs compiled loops that release the GIL, so
+        Dask threads run them in parallel. ``"numpy"`` uses :func:`numpy.bincount` and
         :func:`numpy.minimum.at`, which hold the GIL and allocate temporaries per channel.
     """
 
@@ -184,7 +184,7 @@ class MomentAggregator:
         starts = [np.cumsum((0, *sizes[:-1])) for sizes in self._mask.chunks]
         partials = []
         for i, block_index in enumerate(np.ndindex(*self._mask.numblocks)):
-            group = dask.delayed(_group_labels)(mask_blocks[i])
+            group = dask.delayed(_group_labels)(mask_blocks[i], self._engine)
             channel_partials = []
             if request.reads_image:
                 channel_partials = [
@@ -195,8 +195,10 @@ class MomentAggregator:
             if request.center_of_mass:
                 offset = tuple(int(starts[axis][b]) for axis, b in enumerate(block_index))
             # join the channel chunks of this spatial chunk right away, so its label grouping
-            # is released once this chunk is done, instead of living until the whole reduction ends
-            partials.append(dask.delayed(_chunk_partial)(group, channel_partials, offset, self._engine))
+            # is released once this chunk is done, instead of living until the whole reduction ends.
+            # The channel partials go in as separate arguments: for a list argument holding Delayed
+            # objects, dask culls the whole graph on every call.
+            partials.append(dask.delayed(_chunk_partial)(group, offset, self._engine, *channel_partials))
         (result,) = dask.compute(_tree_reduce(partials, self._split_every))
 
         if index is None:
@@ -257,12 +259,17 @@ def _dtype_extremes(dtype: np.dtype) -> tuple[float | int, float | int]:
     return -np.inf, np.inf
 
 
-def _group_labels(block: NDArray) -> tuple[NDArray, NDArray[np.intp], NDArray[np.intp], tuple[int, ...]]:
+def _group_labels(
+    block: NDArray, engine: str = "numba"
+) -> tuple[NDArray, NDArray[np.intp], NDArray[np.intp], tuple[int, ...]]:
     """Labels present in `block`, their pixel counts, the dense label index of every pixel, and the block shape."""
     flat = block.reshape(-1)
     low, high = int(flat.min()), int(flat.max())
     span = high - low + 1
     if span <= max(2 * flat.size, 1 << 16) and not (flat.dtype.kind == "u" and flat.dtype.itemsize == 8):
+        if engine == "numba":
+            return (*_lookup_group_kernel(flat, low, span), block.shape)
+        # np.bincount holds the GIL, so this path scales poorly over Dask threads
         relative = flat.astype(np.intp) - low
         counts = np.bincount(relative, minlength=span)
         present = np.flatnonzero(counts)
@@ -273,11 +280,37 @@ def _group_labels(block: NDArray) -> tuple[NDArray, NDArray[np.intp], NDArray[np
     return labels, counts, segments.reshape(-1), block.shape
 
 
+@numba.njit(nogil=True, cache=True)
+def _lookup_group_kernel(flat, low, span):  # pragma: no cover (compiled)
+    # same result as the np.bincount lookup-table path of _group_labels, without holding the GIL
+    counts = np.zeros(span, dtype=np.int64)
+    for i in range(flat.size):
+        counts[flat[i] - low] += 1
+    lookup = np.empty(span, dtype=np.intp)
+    k = 0
+    for j in range(span):
+        if counts[j] > 0:
+            lookup[j] = k
+            k += 1
+    labels = np.empty(k, dtype=flat.dtype)
+    present = np.empty(k, dtype=np.int64)
+    k = 0
+    for j in range(span):
+        if counts[j] > 0:
+            labels[k] = j + low
+            present[k] = counts[j]
+            k += 1
+    segments = np.empty(flat.size, dtype=np.intp)
+    for i in range(flat.size):
+        segments[i] = lookup[flat[i] - low]
+    return labels, present, segments
+
+
 def _chunk_partial(
     group: tuple[NDArray, NDArray, NDArray, tuple[int, ...]],
-    channel_partials: list[_Partial],
     offset: tuple[int, ...] | None,
-    engine: str = "numba",
+    engine: str,
+    *channel_partials: _Partial,
 ) -> _Partial:
     """Join the channel chunks of one spatial chunk (same labels, same order) and add the coordinate sums."""
     labels, counts, segments, shape = group

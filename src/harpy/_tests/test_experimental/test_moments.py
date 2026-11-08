@@ -5,6 +5,7 @@ import pytest
 from scipy import ndimage
 
 from harpy.experimental import MomentAggregator
+from harpy.experimental._moments import _group_labels
 from harpy.utils import RasterAggregator
 
 STATS = ("sum", "mean", "count", "var", "kurtosis", "skew")
@@ -167,6 +168,19 @@ def test_index_subset_order_and_missing_labels():
     assert (df_sum.iloc[2, :2] == 0).all()
     expected = _reference(mask, image, index[[0, 1, 3]])
     np.testing.assert_allclose(df_mean.drop(columns="cell_ID").to_numpy()[[0, 1, 3]], expected["mean"], rtol=1e-6)
+
+
+@pytest.mark.parametrize("engine", ["numba", "numpy"])
+@pytest.mark.parametrize("dtype", [np.uint8, np.uint16, np.uint32, np.int32, np.int64, np.uint64])
+def test_group_labels_matches_unique(dtype, engine):
+    block = np.random.default_rng(7).choice(np.array([0, 3, 7, 200], dtype=dtype), size=(2, 30, 40))
+    labels, counts, segments, shape = _group_labels(block, engine)
+    expected_labels, expected_segments, expected_counts = np.unique(block, return_inverse=True, return_counts=True)
+    assert labels.dtype == block.dtype
+    assert shape == block.shape
+    np.testing.assert_array_equal(labels, expected_labels)
+    np.testing.assert_array_equal(counts, expected_counts)
+    np.testing.assert_array_equal(segments, expected_segments.reshape(-1))
 
 
 def test_mask_statistics_skip_image_and_validation():
