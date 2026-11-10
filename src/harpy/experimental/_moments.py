@@ -17,13 +17,15 @@ Two changes compared to :class:`~harpy.utils.RasterAggregator`:
    the image is read once instead of once per statistic.
 2. Cheap and sparse per-chunk work. Labels are grouped with a lookup table over the label
    range of the chunk (``O(n)``) instead of a sort, and each chunk only returns the labels
-   present in it, instead of a row for every label in the mask.
+   present in it, instead of a row for every label in the mask. A task handles one spatial
+   chunk and as many of its channel chunks as fit in ``max_task_bytes``, and the per-pixel
+   kernels are compiled loops that release the GIL.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal
 
 import dask
@@ -31,6 +33,7 @@ import dask.array as da
 import numba
 import numpy as np
 import pandas as pd
+from dask.utils import parse_bytes
 from loguru import logger as log
 from numpy.typing import NDArray
 
@@ -88,6 +91,12 @@ class MomentAggregator:
     Same arguments and output as :meth:`harpy.utils.RasterAggregator.aggregate_stats`. Runs on
     CPU.
 
+    Each task reads the mask of one spatial chunk and at most `max_task_bytes` of image data:
+    the channel chunks of a spatial chunk are split into batches of consecutive chunks, and
+    each batch groups the labels again. A channel chunk larger than `max_task_bytes` forms a
+    batch on its own. The image is never rechunked, so its chunks are best aligned with the
+    chunks on disk.
+
     Parameters
     ----------
     mask_dask_array
@@ -102,6 +111,10 @@ class MomentAggregator:
         Per-chunk kernels. ``"numba"`` (default) runs compiled loops that release the GIL, so
         Dask threads run them in parallel. ``"numpy"`` uses :func:`numpy.bincount` and
         :func:`numpy.minimum.at`, which hold the GIL and allocate temporaries per channel.
+    max_task_bytes
+        Most image data one task reads, as a number of bytes or a string such as ``"256MiB"``.
+        Smaller values lower the memory per task when a spatial chunk holds many channels, but
+        every extra batch groups the labels of the spatial chunk again, which costs time.
     """
 
     def __init__(
@@ -111,9 +124,13 @@ class MomentAggregator:
         instance_key: str = _INSTANCE_KEY,
         split_every: int = 8,
         engine: Literal["numba", "numpy"] = "numba",
+        max_task_bytes: int | str = "256MiB",
     ):
         if engine not in ("numba", "numpy"):
             raise ValueError(f"'engine' is '{engine}'; choose 'numba' or 'numpy'.")
+        task_bytes = parse_bytes(max_task_bytes)
+        if task_bytes <= 0:
+            raise ValueError(f"'max_task_bytes' is {max_task_bytes!r}; pass a positive size, e.g. '256MiB'.")
         if not np.issubdtype(mask_dask_array.dtype, np.integer):
             raise ValueError(
                 f"'mask_dask_array' has dtype '{mask_dask_array.dtype}', but labels need an integer dtype. "
@@ -139,6 +156,7 @@ class MomentAggregator:
         self._instance_key = instance_key
         self._split_every = split_every
         self._engine = engine
+        self._max_task_bytes = task_bytes
 
     def aggregate_stats(
         self,
@@ -181,25 +199,32 @@ class MomentAggregator:
         mask_blocks = self._mask.to_delayed().ravel()
         # (channel chunks, spatial chunks), same spatial order as mask_blocks
         image_blocks = self._image.to_delayed().reshape(self._image.numblocks[0], -1)
+        batches = [[]]
+        if request.reads_image:
+            channel_nbytes = int(np.prod(self._image.chunksize[1:])) * self._image.dtype.itemsize
+            batches = _channel_batches(self._image.chunks[0], channel_nbytes, self._max_task_bytes)
         starts = [np.cumsum((0, *sizes[:-1])) for sizes in self._mask.chunks]
         partials = []
         for i, block_index in enumerate(np.ndindex(*self._mask.numblocks)):
-            group = dask.delayed(_group_labels)(mask_blocks[i], self._engine)
-            channel_partials = []
-            if request.reads_image:
-                channel_partials = [
-                    dask.delayed(_chunk_image_stats)(group, block, request, self._engine)
-                    for block in image_blocks[:, i]
-                ]
             offset = None
             if request.center_of_mass:
                 offset = tuple(int(starts[axis][b]) for axis, b in enumerate(block_index))
-            # join the channel chunks of this spatial chunk right away, so its label grouping
-            # is released once this chunk is done, instead of living until the whole reduction ends.
-            # The channel partials go in as separate arguments: for a list argument holding Delayed
-            # objects, dask culls the whole graph on every call.
-            partials.append(dask.delayed(_chunk_partial)(group, offset, self._engine, *channel_partials))
-        (result,) = dask.compute(_tree_reduce(partials, self._split_every))
+            # One task per spatial chunk and batch of channel chunks groups the labels and handles
+            # the channel chunks of its batch, so no label grouping is passed between tasks. The
+            # image blocks go in as separate arguments: for a list argument holding Delayed objects,
+            # dask culls the whole graph on every call. The batches of a spatial chunk are joined
+            # right away, so dask runs them together and can release the mask block.
+            parts = [
+                dask.delayed(_chunk_partial)(
+                    mask_blocks[i], offset if b == 0 else None, request, self._engine, *image_blocks[batch, i]
+                )
+                for b, batch in enumerate(batches)
+            ]
+            partials.append(parts[0] if len(parts) == 1 else dask.delayed(_join_channels)(*parts))
+        # Every task is needed, so skip graph optimization: each delayed call is its own graph
+        # layer, and culling thousands of layers takes seconds. `to_delayed` above has already
+        # optimized the graphs of the mask and the image.
+        (result,) = dask.compute(_tree_reduce(partials, self._split_every), optimize_graph=False)
 
         if index is None:
             index = result.labels
@@ -259,25 +284,41 @@ def _dtype_extremes(dtype: np.dtype) -> tuple[float | int, float | int]:
     return -np.inf, np.inf
 
 
-def _group_labels(
-    block: NDArray, engine: str = "numba"
-) -> tuple[NDArray, NDArray[np.intp], NDArray[np.intp], tuple[int, ...]]:
-    """Labels present in `block`, their pixel counts, the dense label index of every pixel, and the block shape."""
+def _channel_batches(channel_chunks: Sequence[int], channel_nbytes: int, budget: int) -> list[list[int]]:
+    """Split channel chunks into batches of consecutive chunks of at most `budget` bytes per spatial chunk.
+
+    `channel_nbytes` is the size of one channel of a spatial chunk. A channel chunk larger
+    than `budget` forms a batch on its own.
+    """
+    batches, batch, size = [], [], 0
+    for j, n_channels in enumerate(channel_chunks):
+        nbytes = n_channels * channel_nbytes
+        if batch and size + nbytes > budget:
+            batches.append(batch)
+            batch, size = [], 0
+        batch.append(j)
+        size += nbytes
+    batches.append(batch)
+    return batches
+
+
+def _group_labels(block: NDArray, engine: str = "numba") -> tuple[NDArray, NDArray[np.intp], NDArray[np.intp]]:
+    """Labels present in `block`, their pixel counts, and the dense label index of every pixel (C order)."""
     flat = block.reshape(-1)
     low, high = int(flat.min()), int(flat.max())
     span = high - low + 1
     if span <= max(2 * flat.size, 1 << 16) and not (flat.dtype.kind == "u" and flat.dtype.itemsize == 8):
         if engine == "numba":
-            return (*_lookup_group_kernel(flat, low, span), block.shape)
+            return _lookup_group_kernel(flat, low, span)
         # np.bincount holds the GIL, so this path scales poorly over Dask threads
         relative = flat.astype(np.intp) - low
         counts = np.bincount(relative, minlength=span)
         present = np.flatnonzero(counts)
         lookup = np.empty(span, dtype=np.intp)
         lookup[present] = np.arange(present.size)
-        return (present + low).astype(block.dtype), counts[present], lookup[relative], block.shape
+        return (present + low).astype(block.dtype), counts[present], lookup[relative]
     labels, segments, counts = np.unique(flat, return_inverse=True, return_counts=True)
-    return labels, counts, segments.reshape(-1), block.shape
+    return labels, counts, segments.reshape(-1)
 
 
 @numba.njit(nogil=True, cache=True)
@@ -307,20 +348,19 @@ def _lookup_group_kernel(flat, low, span):  # pragma: no cover (compiled)
 
 
 def _chunk_partial(
-    group: tuple[NDArray, NDArray, NDArray, tuple[int, ...]],
+    mask_block: NDArray,
     offset: tuple[int, ...] | None,
+    request: _Request,
     engine: str,
-    *channel_partials: _Partial,
+    *image_blocks: NDArray,
 ) -> _Partial:
-    """Join the channel chunks of one spatial chunk (same labels, same order) and add the coordinate sums."""
-    labels, counts, segments, shape = group
-    partial = _Partial(labels, counts)
-    for name in _CHANNEL_FIELDS:
-        parts = [getattr(p, name) for p in channel_partials]
-        if parts and parts[0] is not None:
-            setattr(partial, name, parts[0] if len(parts) == 1 else np.concatenate(parts, axis=1))
+    """Statistics of one spatial chunk for the channel chunks in `image_blocks`, and its coordinate sums if `offset` is given."""
+    group = _group_labels(mask_block, engine)
+    labels, counts, segments = group
+    channel_partials = [_chunk_image_stats(group, block, request, engine) for block in image_blocks]
+    partial = _join_channels(*channel_partials) if channel_partials else _Partial(labels, counts)
     if offset is not None:
-        partial.coordinate_sum = _coordinate_sums(segments, shape, labels.size, engine)
+        partial.coordinate_sum = _coordinate_sums(segments, mask_block.shape, labels.size, engine)
         partial.coordinate_sum += counts[:, None] * np.asarray(offset, dtype=np.float64)
     return partial
 
@@ -355,6 +395,11 @@ def _coordinate_sums(segments: NDArray, shape: tuple[int, ...], k: int, engine: 
 def _image_kernel(segments, values, counts, order, minimum, maximum):  # pragma: no cover (compiled)
     # values: (c, n). Returns mean, M2, M3, M4 of shape (c, k); moments above `order` stay zero.
     # `minimum` and `maximum` have shape (c, k) and are updated in place; pass shape (0, k) to skip.
+    #
+    # Neighbouring pixels mostly share a label, so sums, minima and maxima are accumulated in
+    # registers over each run of equal labels and written once per run. Updating `mean[c, s]` for
+    # every pixel would make each pixel wait for the store of the previous one to the same address.
+    # `v != v` is true for NaN only: NaN propagates into minimum and maximum, as in np.minimum.
     n_channels, n = values.shape
     k = counts.size
     do_min = minimum.shape[0] > 0
@@ -363,39 +408,76 @@ def _image_kernel(segments, values, counts, order, minimum, maximum):  # pragma:
     m2 = np.zeros((n_channels, k))
     m3 = np.zeros((n_channels, k))
     m4 = np.zeros((n_channels, k))
+    if n == 0:
+        return mean, m2, m3, m4
     for c in range(n_channels):
+        current = segments[0]
+        total = 0.0
+        low = values[c, 0]
+        high = values[c, 0]
         for i in range(n):
             s = segments[i]
             v = values[c, i]
-            mean[c, s] += v
-            # `v != v` is true for NaN only: NaN propagates, as in np.minimum
-            if do_min and (v < minimum[c, s] or v != v):
-                minimum[c, s] = v
-            if do_max and (v > maximum[c, s] or v != v):
-                maximum[c, s] = v
+            if s != current:
+                mean[c, current] += total
+                if do_min and (low < minimum[c, current] or low != low):
+                    minimum[c, current] = low
+                if do_max and (high > maximum[c, current] or high != high):
+                    maximum[c, current] = high
+                current = s
+                total = 0.0
+                low = v
+                high = v
+            total += v
+            if do_min and (v < low or v != v):
+                low = v
+            if do_max and (v > high or v != v):
+                high = v
+        mean[c, current] += total
+        if do_min and (low < minimum[c, current] or low != low):
+            minimum[c, current] = low
+        if do_max and (high > maximum[c, current] or high != high):
+            maximum[c, current] = high
         for j in range(k):
             mean[c, j] /= counts[j]
         if order >= 2:
+            current = segments[0]
+            center = mean[c, current]
+            s2 = 0.0
+            s3 = 0.0
+            s4 = 0.0
             for i in range(n):
                 s = segments[i]
-                d = values[c, i] - mean[c, s]
+                if s != current:
+                    m2[c, current] += s2
+                    m3[c, current] += s3
+                    m4[c, current] += s4
+                    s2 = 0.0
+                    s3 = 0.0
+                    s4 = 0.0
+                    current = s
+                    center = mean[c, s]
+                d = values[c, i] - center
                 d2 = d * d
-                m2[c, s] += d2
+                s2 += d2
                 if order >= 3:
-                    m3[c, s] += d2 * d
+                    s3 += d2 * d
                 if order >= 4:
-                    m4[c, s] += d2 * d2
+                    s4 += d2 * d2
+            m2[c, current] += s2
+            m3[c, current] += s3
+            m4[c, current] += s4
     return mean, m2, m3, m4
 
 
 def _chunk_image_stats(
-    group: tuple[NDArray, NDArray, NDArray, tuple[int, ...]],
+    group: tuple[NDArray, NDArray, NDArray],
     image_block: NDArray,
     request: _Request,
     engine: str = "numba",
 ) -> _Partial:
     """Mean, centered sums ``M2..M{order}``, minimum and maximum per label present in the chunk, for every channel."""
-    labels, counts, segments, _ = group
+    labels, counts, segments = group
     image = image_block.reshape(image_block.shape[0], -1)
     k, n_channels = labels.size, image.shape[0]
     low, high = _dtype_extremes(image.dtype)
@@ -436,6 +518,20 @@ def _chunk_image_stats(
     if request.maximum:
         partial.maximum = maximum.T
     return partial
+
+
+def _join_channels(*partials: _Partial) -> _Partial:
+    """Join partial results of the same labels that cover consecutive channels, in channel order."""
+    first = partials[0]
+    if len(partials) == 1:
+        return first
+    channels = {
+        name: np.concatenate([getattr(p, name) for p in partials], axis=1)
+        for name in _CHANNEL_FIELDS
+        if getattr(first, name) is not None
+    }
+    # labels, counts and coordinate sums do not depend on the channels: keep those of the first
+    return replace(first, **channels)
 
 
 def _merge(*partials: _Partial) -> _Partial:

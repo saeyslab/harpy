@@ -5,7 +5,7 @@ import pytest
 from scipy import ndimage
 
 from harpy.experimental import MomentAggregator
-from harpy.experimental._moments import _group_labels
+from harpy.experimental._moments import _channel_batches, _chunk_partial, _group_labels
 from harpy.utils import RasterAggregator
 
 STATS = ("sum", "mean", "count", "var", "kurtosis", "skew")
@@ -174,13 +174,62 @@ def test_index_subset_order_and_missing_labels():
 @pytest.mark.parametrize("dtype", [np.uint8, np.uint16, np.uint32, np.int32, np.int64, np.uint64])
 def test_group_labels_matches_unique(dtype, engine):
     block = np.random.default_rng(7).choice(np.array([0, 3, 7, 200], dtype=dtype), size=(2, 30, 40))
-    labels, counts, segments, shape = _group_labels(block, engine)
+    labels, counts, segments = _group_labels(block, engine)
     expected_labels, expected_segments, expected_counts = np.unique(block, return_inverse=True, return_counts=True)
     assert labels.dtype == block.dtype
-    assert shape == block.shape
     np.testing.assert_array_equal(labels, expected_labels)
     np.testing.assert_array_equal(counts, expected_counts)
     np.testing.assert_array_equal(segments, expected_segments.reshape(-1))
+
+
+@pytest.mark.parametrize("layout", ["noise", "stripes"])
+def test_engines_agree_on_short_and_long_runs(layout):
+    # the numba kernel accumulates over runs of equal labels: check runs of one pixel and runs spanning rows
+    rng = np.random.default_rng(8)
+    shape = (2, 40, 50)
+    if layout == "noise":
+        mask = rng.integers(0, 30, size=shape).astype(np.int32)
+    else:
+        mask = np.repeat(np.arange(shape[0] * shape[1] // 4), 4 * shape[2]).reshape(shape).astype(np.int32)
+    image = rng.integers(0, 1000, size=(3, *shape)).astype(np.uint16)
+    stats = (*STATS, "min", "max", "center_of_mass")
+    results = [
+        MomentAggregator(
+            da.from_array(mask, chunks=(1, 20, 25)), da.from_array(image, chunks=(2, 1, 20, 25)), engine=engine
+        ).aggregate_stats(stats)
+        for engine in ("numba", "numpy")
+    ]
+    for numba_df, numpy_df, name in zip(*results, stats, strict=True):
+        pd.testing.assert_frame_equal(numba_df, numpy_df, check_exact=False, rtol=1e-5, atol=1e-6, obj=name)
+
+
+def test_channel_batches():
+    assert _channel_batches((1, 1, 1, 1, 1), channel_nbytes=10, budget=25) == [[0, 1], [2, 3], [4]]
+    assert _channel_batches((2, 2), channel_nbytes=10, budget=40) == [[0, 1]]
+    # a channel chunk above the budget forms a batch on its own
+    assert _channel_batches((3, 1, 1), channel_nbytes=10, budget=25) == [[0], [1, 2]]
+
+
+def test_channel_batches_follow_max_task_bytes(monkeypatch):
+    mask = _mask()
+    image = np.random.default_rng(9).integers(0, 1000, size=(5, *mask.shape)).astype(np.uint16)
+    mask_da = da.from_array(mask, chunks=(1, 40, 50))
+    image_da = da.from_array(image, chunks=(1, 1, 40, 50))
+    stats = (*STATS, "min", "max", "center_of_mass")
+    expected = MomentAggregator(mask_da, image_da).aggregate_stats(stats)
+
+    blocks_per_task = []
+
+    def record(mask_block, offset, request, engine, *image_blocks):
+        blocks_per_task.append(len(image_blocks))
+        return _chunk_partial(mask_block, offset, request, engine, *image_blocks)
+
+    monkeypatch.setattr("harpy.experimental._moments._chunk_partial", record)
+    # one channel of a spatial chunk is 40 * 50 * 2 bytes, so a task gets at most two channel chunks
+    actual = MomentAggregator(mask_da, image_da, max_task_bytes="8000B").aggregate_stats(stats)
+    assert sorted(blocks_per_task) == [1] * 9 + [2] * 18  # 9 spatial chunks, channel batches [0, 1], [2, 3], [4]
+    for e, a, name in zip(expected, actual, stats, strict=True):
+        pd.testing.assert_frame_equal(a, e, check_exact=True, obj=name)
 
 
 def test_mask_statistics_skip_image_and_validation():
@@ -197,3 +246,5 @@ def test_mask_statistics_skip_image_and_validation():
         MomentAggregator(mask_da, image).aggregate_stats(("median",))
     with pytest.raises(ValueError, match="chunks"):
         MomentAggregator(mask_da, image.rechunk((1, 1, 30, 50)))
+    with pytest.raises(ValueError, match="max_task_bytes"):
+        MomentAggregator(mask_da, image, max_task_bytes=0)
