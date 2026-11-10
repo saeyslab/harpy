@@ -5,7 +5,14 @@ import pytest
 from scipy import ndimage
 
 from harpy.experimental import MomentAggregator
-from harpy.experimental._moments import _channel_batches, _chunk_partial, _group_labels
+from harpy.experimental._moments import (
+    _channel_batches,
+    _chunk_partial,
+    _group_labels,
+    _merge,
+    _merge_numba,
+    _Partial,
+)
 from harpy.utils import RasterAggregator
 
 STATS = ("sum", "mean", "count", "var", "kurtosis", "skew")
@@ -230,6 +237,42 @@ def test_channel_batches_follow_max_task_bytes(monkeypatch):
     assert sorted(blocks_per_task) == [1] * 9 + [2] * 18  # 9 spatial chunks, channel batches [0, 1], [2, 3], [4]
     for e, a, name in zip(expected, actual, stats, strict=True):
         pd.testing.assert_frame_equal(a, e, check_exact=True, obj=name)
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        ("mean", "m2", "m3", "m4", "minimum", "maximum", "coordinate_sum"),
+        ("mean",),
+        ("mean", "m2"),
+        ("maximum", "coordinate_sum"),
+        (),
+    ],
+)
+@pytest.mark.parametrize("dtype", [np.uint16, np.float32])
+def test_merge_engines_agree(fields, dtype):
+    rng = np.random.default_rng(10)
+    partials = []
+    for _ in range(5):
+        # 80 of 200 labels per partial, so most labels occur in several partials
+        labels = np.sort(rng.choice(200, 80, replace=False)).astype(np.uint32)
+        k = labels.size
+        values = {name: rng.normal(size=(k, 3)) for name in ("mean", "m2", "m3", "m4")}
+        values["coordinate_sum"] = rng.random((k, 3))
+        values["minimum"], values["maximum"] = rng.integers(0, 1000, size=(2, k, 3)).astype(dtype)
+        if np.issubdtype(dtype, np.floating):
+            values["minimum"][:2, 0] = values["maximum"][:2, 0] = np.nan
+        partials.append(_Partial(labels, rng.integers(1, 50, k), **{name: values[name] for name in fields}))
+    expected, actual = _merge(*partials), _merge_numba(*partials)
+    for name in ("labels", "counts", "minimum", "maximum"):
+        np.testing.assert_array_equal(getattr(actual, name), getattr(expected, name), err_msg=name)
+    if np.issubdtype(dtype, np.floating) and "maximum" in fields:
+        assert np.isnan(actual.maximum[:, 0]).any()
+    for name in ("mean", "m2", "m3", "m4", "coordinate_sum"):
+        e, a = getattr(expected, name), getattr(actual, name)
+        assert (a is None) == (e is None), name
+        if e is not None:
+            np.testing.assert_allclose(a, e, rtol=1e-12, atol=1e-12 * np.abs(e).max(), err_msg=name)
 
 
 def test_mask_statistics_skip_image_and_validation():

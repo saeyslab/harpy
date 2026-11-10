@@ -18,13 +18,14 @@ Two changes compared to :class:`~harpy.utils.RasterAggregator`:
 2. Cheap and sparse per-chunk work. Labels are grouped with a lookup table over the label
    range of the chunk (``O(n)``) instead of a sort, and each chunk only returns the labels
    present in it, instead of a row for every label in the mask. A task handles one spatial
-   chunk and as many of its channel chunks as fit in ``max_task_bytes``, and the per-pixel
-   kernels are compiled loops that release the GIL.
+   chunk and as many of its channel chunks as fit in ``max_task_bytes``. The per-pixel kernels
+   and the merge of partial results are compiled loops that release the GIL; the merge adds
+   every partial straight into the output arrays, without temporaries of the output size.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from typing import Literal
 
@@ -108,9 +109,11 @@ class MomentAggregator:
     split_every
         Number of partial results merged per task in the tree reduction.
     engine
-        Per-chunk kernels. ``"numba"`` (default) runs compiled loops that release the GIL, so
-        Dask threads run them in parallel. ``"numpy"`` uses :func:`numpy.bincount` and
-        :func:`numpy.minimum.at`, which hold the GIL and allocate temporaries per channel.
+        Per-chunk kernels and merge of partial results. ``"numba"`` (default) runs compiled
+        loops that release the GIL, so Dask threads run them in parallel. ``"numpy"`` uses
+        :func:`numpy.bincount` and :func:`numpy.minimum.at`, which hold the GIL and allocate
+        temporaries per channel, and merges with numpy expressions, which allocate temporaries
+        of the size of the merged result.
     max_task_bytes
         Most image data one task reads, as a number of bytes or a string such as ``"256MiB"``.
         Smaller values lower the memory per task when a spatial chunk holds many channels, but
@@ -224,7 +227,8 @@ class MomentAggregator:
         # Every task is needed, so skip graph optimization: each delayed call is its own graph
         # layer, and culling thousands of layers takes seconds. `to_delayed` above has already
         # optimized the graphs of the mask and the image.
-        (result,) = dask.compute(_tree_reduce(partials, self._split_every), optimize_graph=False)
+        merge = _merge_numba if self._engine == "numba" else _merge
+        (result,) = dask.compute(_tree_reduce(partials, self._split_every, merge), optimize_graph=False)
 
         if index is None:
             index = result.labels
@@ -535,7 +539,7 @@ def _join_channels(*partials: _Partial) -> _Partial:
 
 
 def _merge(*partials: _Partial) -> _Partial:
-    """Combine partial results of several chunks exactly (see module docstring)."""
+    """Combine partial results of several chunks exactly (see module docstring), with numpy expressions."""
     if len(partials) == 1:
         return partials[0]
     labels = np.concatenate([p.labels for p in partials])
@@ -576,7 +580,108 @@ def _merge(*partials: _Partial) -> _Partial:
     return merged
 
 
-def _tree_reduce(partials: list, split_every: int):
+@numba.njit(nogil=True, cache=True)
+def _merge_sums_kernel(
+    rows, counts, mean, minimum, maximum, coordinate_sum, out_counts, out_total, out_min, out_max, out_coordinates
+):  # pragma: no cover (compiled)
+    # pass 1 of _merge_numba for one partial: add its counts, count-weighted means and coordinate
+    # sums at its output rows `rows`, and update the minimum and maximum. Fields that were not
+    # requested have zero columns. `v != v` is true for NaN only: NaN propagates, as in np.minimum.
+    for r in range(rows.size):
+        t = rows[r]
+        n = counts[r]
+        out_counts[t] += n
+        for j in range(mean.shape[1]):
+            out_total[t, j] += n * mean[r, j]
+        for j in range(minimum.shape[1]):
+            v = minimum[r, j]
+            if v < out_min[t, j] or v != v:
+                out_min[t, j] = v
+        for j in range(maximum.shape[1]):
+            v = maximum[r, j]
+            if v > out_max[t, j] or v != v:
+                out_max[t, j] = v
+        for j in range(coordinate_sum.shape[1]):
+            out_coordinates[t, j] += coordinate_sum[r, j]
+
+
+@numba.njit(nogil=True, cache=True)
+def _merge_centered_kernel(rows, counts, mean, m2, m3, m4, merged_mean, out_m2, out_m3, out_m4):  # pragma: no cover
+    # pass 2 of _merge_numba for one partial: the binomial combination of the module docstring,
+    # around the merged mean. Moments above the requested order have zero columns.
+    do_m3 = m3.shape[1] > 0
+    do_m4 = m4.shape[1] > 0
+    for r in range(rows.size):
+        t = rows[r]
+        n = counts[r]
+        for j in range(m2.shape[1]):
+            d = mean[r, j] - merged_mean[t, j]
+            d2 = d * d
+            out_m2[t, j] += m2[r, j] + n * d2
+            if do_m3:
+                out_m3[t, j] += m3[r, j] + 3 * d * m2[r, j] + n * d2 * d
+            if do_m4:
+                out_m4[t, j] += m4[r, j] + 4 * d * m3[r, j] + 6 * d2 * m2[r, j] + n * d2 * d2
+
+
+def _merge_numba(*partials: _Partial) -> _Partial:
+    """Same result as :func:`_merge` up to rounding, accumulated in place by compiled loops.
+
+    Only the labels are sorted. The values of every partial are added straight into the output
+    arrays, so no sorted copies of the inputs and no temporaries of the output size are made.
+    """
+    first = partials[0]
+    if len(partials) == 1:
+        return first
+    labels = np.unique(np.concatenate([p.labels for p in partials]))
+    rows = [np.searchsorted(labels, p.labels) for p in partials]  # output row of every input row
+
+    def columns(p: _Partial, name: str) -> NDArray:
+        value = getattr(p, name)
+        return np.empty((p.labels.size, 0)) if value is None else value
+
+    def output(name: str, fill: Callable[[np.dtype], float | int] = lambda dtype: 0) -> NDArray:
+        value = getattr(first, name)
+        if value is None:
+            return np.empty((labels.size, 0))
+        return np.full((labels.size, value.shape[1]), fill(value.dtype), dtype=value.dtype)
+
+    counts = np.zeros(labels.size, dtype=first.counts.dtype)
+    out = {
+        "mean": output("mean"),  # count-weighted sums until divided by the counts below
+        "minimum": output("minimum", lambda dtype: _dtype_extremes(dtype)[1]),
+        "maximum": output("maximum", lambda dtype: _dtype_extremes(dtype)[0]),
+        "coordinate_sum": output("coordinate_sum"),
+    }
+    for p, r in zip(partials, rows, strict=True):
+        _merge_sums_kernel(
+            r,
+            p.counts,
+            *(columns(p, name) for name in ("mean", "minimum", "maximum", "coordinate_sum")),
+            counts,
+            *out.values(),
+        )
+    if first.mean is not None:
+        out["mean"] /= counts[:, None]
+    if first.m2 is not None:
+        out.update({name: output(name) for name in ("m2", "m3", "m4")})
+        for p, r in zip(partials, rows, strict=True):
+            _merge_centered_kernel(
+                r,
+                p.counts,
+                p.mean,
+                p.m2,
+                columns(p, "m3"),
+                columns(p, "m4"),
+                out["mean"],
+                out["m2"],
+                out["m3"],
+                out["m4"],
+            )
+    return _Partial(labels, counts, **{name: value for name, value in out.items() if getattr(first, name) is not None})
+
+
+def _tree_reduce(partials: list, split_every: int, merge: Callable[..., _Partial]):
     while len(partials) > 1:
-        partials = [dask.delayed(_merge)(*partials[i : i + split_every]) for i in range(0, len(partials), split_every)]
+        partials = [dask.delayed(merge)(*partials[i : i + split_every]) for i in range(0, len(partials), split_every)]
     return partials[0]
