@@ -28,11 +28,18 @@ def test_add_feature_matrix_creates_new_table(sdata_multi_c_no_backed):
     assert np.isfinite(adata.obsm["cell_features"]).all()
 
     metadata = adata.uns["feature_matrices"]["cell_features"]
+    assert set(metadata) == {
+        "schema_version",
+        "source_kind",
+        "feature_columns",
+        "source_channels",
+        "features",
+        "regions",
+    }
     assert metadata["features"] == ["mean", "area"]
     assert metadata["feature_columns"] == ["mean__0", "mean__4", "area"]
     assert metadata["source_kind"] == "harpy_add_feature_matrix"
-    assert metadata["source_label"] == ["masks_whole"]
-    assert metadata["source_image"] == ["raw_image"]
+    assert metadata["regions"] == {"masks_whole": {"image_element": "raw_image", "coordinate_system": "global"}}
     assert metadata["source_channels"] == ["0", "4"]
 
 
@@ -227,7 +234,10 @@ def test_add_feature_matrix_multiple_pairs_share_flat_source_channels(sdata_pixi
     # Channels are shared across samples, so the metadata is a single flat list, not a list of lists.
     assert metadata["source_channels"] == ["CD14"]
     assert metadata["feature_columns"] == ["mean__CD14"]
-    assert metadata["source_label"] == ["label_whole_fov0", "label_whole_fov1"]
+    assert metadata["regions"] == {
+        "label_whole_fov0": {"image_element": "raw_image_fov0", "coordinate_system": "fov0"},
+        "label_whole_fov1": {"image_element": "raw_image_fov1", "coordinate_system": "fov1"},
+    }
 
 
 def test_add_feature_matrix_rejects_mismatched_channels_across_pairs(sdata_pixie_intensities):
@@ -300,5 +310,9 @@ def test_add_feature_matrix_persists_backed_updates(sdata_multi_c):
     assert adata.uns["feature_matrices"]["area_features"]["feature_columns"].tolist() == ["area"]
     assert adata.uns["feature_matrices"]["area_features"]["source_kind"] == "harpy_add_feature_matrix"
     assert adata.uns["feature_matrices"]["area_features"]["source_channels"] is None
+    # A morphology matrix has no image; read back from the store, its None stays None.
+    assert adata.uns["feature_matrices"]["area_features"]["regions"] == {
+        "masks_whole": {"image_element": None, "coordinate_system": "global"}
+    }
     assert intensity_adata.uns["feature_matrices"]["mean_features"]["source_kind"] == "harpy_add_feature_matrix"
     assert intensity_adata.uns["feature_matrices"]["mean_features"]["source_channels"].tolist() == ["0"]
