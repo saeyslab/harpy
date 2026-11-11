@@ -62,6 +62,8 @@ dependencies = [
     "spatialdata_io>=0.7.0",
     "spatialdata-plot",
     "flowsom",
+    # compiled kernels of the moment aggregation
+    "numba>=0.64.0",
     # lock example-dataset downloads shared by parallel processes
     "filelock",
     # for debug logging
