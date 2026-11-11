@@ -215,7 +215,12 @@ def _validate_table_annotation_without_sdata(
         raise ValueError(f"Table {name} contains regions absent from its annotation: {undeclared!r}.")
     unobserved = sorted(set(regions) - observed_regions)
     if unobserved:
-        raise ValueError(f"Table {name} declares regions without observations: {unobserved!r}.")
+        left = [region for region in regions if region in observed_regions]
+        raise ValueError(
+            f"Table {name} declares regions without observations: {unobserved!r}. Subsetting rows does not update "
+            f"the declared regions: set adata.uns[{TableModel.ATTRS_KEY!r}][{TableModel.REGION_KEY!r}] to the "
+            f"regions that have rows, {left!r}, or pass them as region to hp.tb.io.add_table."
+        )
     return region_key, instance_key, regions
 
 
@@ -266,7 +271,7 @@ def _validate_feature_matrix_record(
     for a class matrix that :func:`harpy.tb.aggregate_points` writes::
 
         adata.uns["feature_matrices"]["negative"] = {
-            "schema_version": 1,
+            "schema_version": 2,
             "source_kind": "harpy_aggregate_points",
             "feature_columns": ["Negative01", "Negative02", "NegativeZero"],
         }
@@ -305,7 +310,9 @@ def _validate_feature_matrix_record(
     if isinstance(version, bool) or not isinstance(version, int) or version != _FEATURE_MATRIX_SCHEMA_VERSION:
         raise ValueError(
             f"Feature-matrix metadata {feature_matrices_key}.{matrix_name}.schema_version must equal "
-            f"{_FEATURE_MATRIX_SCHEMA_VERSION}, found {version!r}."
+            f"{_FEATURE_MATRIX_SCHEMA_VERSION}, found {version!r}. Compute the matrix again with the function that "
+            f"wrote it, named by its source_kind {record.get('source_kind')!r}, such as hp.tb.add_feature_matrix or "
+            "hp.tb.aggregate_points; Harpy 0.5 wrote version 1."
         )
     _require_nonempty_string(
         record.get("source_kind"),
