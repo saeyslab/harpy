@@ -399,27 +399,22 @@ def add_feature_matrix(
         if not np.can_cast(aligned_values.dtype, existing_matrix.dtype, casting="safe"):
             raise ValueError(f"Calculated features cannot be safely cast to stored dtype {existing_matrix.dtype}.")
 
-    # Per-pair fields are always stored as lists (one entry per labels/image pair) so
-    # the metadata schema does not depend on how many pairs were requested.
+    # The metadata of each labels region goes under "regions", keyed by the labels element,
+    # so that regional updates and hp.tb.concat merge it by region.
     metadata = {
         "feature_columns": list(columns),
         "schema_version": _FEATURE_MATRIX_SCHEMA_VERSION,
-        "backend": "numpy",
         "source_kind": _SOURCE_KIND,
-        "dtype": str(aligned_values.dtype if existing_matrix is None else existing_matrix.dtype),
-        "source_label": [pair.labels_name for pair in pair_specs],
-        "source_image": [pair.image_name for pair in pair_specs],
         "source_channels": source_channels,
-        "coordinate_system": [pair.coordinate_system for pair in pair_specs],
         "features": list(requested_features),
+        "regions": {
+            pair.labels_name: {"image_element": pair.image_name, "coordinate_system": pair.coordinate_system}
+            for pair in pair_specs
+        },
     }
 
     if existing_matrix is not None:
-        metadata = _merge_feature_matrix_metadata(
-            existing_metadata,
-            metadata,
-            region_order=adata.obs[region_key].unique().tolist(),
-        )
+        metadata = _merge_feature_matrix_metadata(existing_metadata, metadata)
 
     if table_name is None:
         # Build the complete result before publishing anything: calculation or
@@ -528,57 +523,30 @@ def _existing_feature_matrix(
     return matrix, metadata
 
 
-def _merge_feature_matrix_metadata(previous: object, current: dict, *, region_order: list[str]) -> dict:
-    """Keep source descriptions for retained regions without relabeling existing feature columns."""
+def _merge_feature_matrix_metadata(previous: object, current: dict) -> dict:
+    """Merge the metadata of an update into the existing one, keeping the regions the update does not compute.
+
+    The feature columns are not relabeled.
+    """
     if (
         not isinstance(previous, Mapping)
         or previous.get("schema_version") != _FEATURE_MATRIX_SCHEMA_VERSION
         or previous.get("source_kind") != _SOURCE_KIND
+        or not isinstance(previous.get("regions"), Mapping)
         or not np.array_equal(previous.get("feature_columns"), current["feature_columns"])
+        or not np.array_equal(previous.get("source_channels"), current["source_channels"])
     ):
         raise ValueError(
-            "Existing feature metadata must have a compatible schema and identical feature columns in order."
+            "Existing feature metadata must have a compatible schema, as add_feature_matrix writes it with schema "
+            f"version {_FEATURE_MATRIX_SCHEMA_VERSION}, and identical feature columns and source channels in order. "
+            "To replace the matrix, remove it and its metadata with hp.tb.io.remove_table_components, then compute "
+            "it again for every region."
         )
-    if not np.array_equal(previous.get("source_channels"), current["source_channels"]):
-        raise ValueError("Existing and calculated feature matrices must use the same source channels in order.")
-
-    fields = ("source_label", "source_image", "coordinate_system")
-    previous_sources = []
-    for field in fields:
-        values = previous.get(field)
-        if not isinstance(values, (list, tuple, np.ndarray)) or np.ndim(values) != 1:
-            raise ValueError(f"Existing feature metadata requires a one-dimensional {field!r} sequence.")
-        previous_sources.append(list(values))
-    labels, images, coordinate_systems = previous_sources
-    if (
-        len(labels) != len(images)
-        or len(labels) != len(coordinate_systems)
-        or any(not isinstance(label, str) for label in labels)
-        or len(set(labels)) != len(labels)
-        or any(image is not None and not isinstance(image, str) for image in images)
-        or any(not isinstance(system, str) for system in coordinate_systems)
-    ):
-        raise ValueError(
-            "Existing feature metadata must contain one source image and coordinate system per unique label."
-        )
-
-    # Index the existing source descriptions by region.
-    sources = {}
-    for label, image, coordinate_system in zip(labels, images, coordinate_systems, strict=True):
-        sources[label] = (image, coordinate_system)
-
-    # Replace sources for the requested regions, retaining the others.
-    for label, image, coordinate_system in zip(
-        current["source_label"], current["source_image"], current["coordinate_system"], strict=True
-    ):
-        sources[label] = (image, coordinate_system)
-
-    # Store parallel lists in the table's region order.
-    merged = {**deepcopy(previous), **current}
-    merged["source_label"] = [label for label in region_order if label in sources]
-    merged["source_image"] = [sources[label][0] for label in merged["source_label"]]
-    merged["coordinate_system"] = [sources[label][1] for label in merged["source_label"]]
-    return merged
+    return {
+        **deepcopy(dict(previous)),
+        **current,
+        "regions": {**deepcopy(dict(previous["regions"])), **current["regions"]},
+    }
 
 
 def _normalize_requested_features(features: tuple[str, ...] | list[str]) -> list[str]:
