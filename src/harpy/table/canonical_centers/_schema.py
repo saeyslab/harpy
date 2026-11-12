@@ -198,7 +198,13 @@ def _validate_canonical_centers_without_sources(table: AnnData) -> CanonicalMeta
     if not matrix_exists and not metadata_exists:
         return None
     if matrix_exists != metadata_exists:
-        raise ValueError("Canonical centers require both the matrix and its spatial-coordinate metadata.")
+        matrix = f"obsm[{CANONICAL_OBSM_KEY!r}]"
+        metadata = f"uns[{SPATIAL_COORDINATES_KEY!r}][{CANONICAL_OBSM_KEY!r}]"
+        present, absent = (matrix, metadata) if matrix_exists else (metadata, matrix)
+        raise ValueError(
+            f"The table has {present} but not {absent}; canonical centers need both. Rebuild them with "
+            f"hp.tb.add_canonical_centers(sdata, table_name=..., overwrite=True), or delete {present}."
+        )
     regions, region_key, _ = get_table_keys(table)
     regions = _names(regions)
 
