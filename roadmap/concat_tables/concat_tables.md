@@ -497,7 +497,7 @@ Changes:
 
 ### Step 4: documentation
 
-- `docs/api.md`: `tb.concat` under Table, "Processing and analysis", next to
+- `docs/api.md`: `tb.concat` under Table, "Building tables", next to
   `tb.validate_table`.
 - `docs/development/metadata.md`, "Keeping records consistent":
   `anndata.concat` and `spatialdata.concatenate` drop Harpy's records, or keep
