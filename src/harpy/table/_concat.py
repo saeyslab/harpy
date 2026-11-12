@@ -17,7 +17,7 @@ from anndata.abc import CSCDataset, CSRDataset
 from loguru import logger as log
 from spatialdata.models import TableModel
 
-from harpy._storage._anndata import _decode_anndata_element
+from harpy._storage._anndata import _decode_anndata_element, _matrix_format
 from harpy.table._metadata import (
     _POINT_AGGREGATION_KEY,
     _comparable_metadata,
@@ -31,7 +31,6 @@ from harpy.table.canonical_centers._schema import (
     SPATIAL_COORDINATES_KEY,
     _validate_canonical_centers_without_sources,
 )
-from harpy.table.io._write_by_region import _matrix_format
 from harpy.utils._keys import _FEATURE_MATRICES_KEY
 
 _UNS_MERGE_STRATEGIES = (None, "same", "unique", "first", "only")

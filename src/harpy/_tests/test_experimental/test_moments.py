@@ -287,7 +287,24 @@ def test_mask_statistics_skip_image_and_validation():
     np.testing.assert_allclose(df_com.drop(columns="cell_ID").to_numpy(), expected, rtol=1e-12)
     with pytest.raises(ValueError, match="Unsupported statistic"):
         MomentAggregator(mask_da, image).aggregate_stats(("median",))
-    with pytest.raises(ValueError, match="chunks"):
+    with pytest.raises(ValueError, match="different spatial chunk sizes"):
         MomentAggregator(mask_da, image.rechunk((1, 1, 30, 50)))
+    # same chunk size, other boundaries, as a crop off the chunk grid gives
+    with pytest.raises(ValueError, match="different spatial chunk boundaries"):
+        MomentAggregator(mask_da, image.rechunk(((1,), (1,), (20, 40, 40, 20), (50, 50, 50))))
     with pytest.raises(ValueError, match="max_task_bytes"):
         MomentAggregator(mask_da, image, max_task_bytes=0)
+
+
+def test_mask_only():
+    mask = _mask(shape=(2, 120, 150))
+    mask_da = da.from_array(mask, chunks=(1, 40, 50))
+    aggregator = MomentAggregator(mask_da)
+    index = np.r_[np.unique(mask)[::2], mask.max() + 1]
+    df_com, df_count = aggregator.aggregate_stats(("center_of_mass", "count"), index=index)
+    expected = RasterAggregator(mask_da, run_on_gpu=False).center_of_mass(index=index)
+    pd.testing.assert_frame_equal(df_com, expected, check_dtype=False)
+    np.testing.assert_array_equal(df_count[0].to_numpy(), [(mask == label).sum() for label in index])
+
+    with pytest.raises(ValueError, match=r"\['mean', 'max'\] in 'stats_funcs' need an image"):
+        aggregator.aggregate_stats(("count", "mean", "max"))

@@ -16,7 +16,6 @@ def test_filter_labels(sdata_multi_c_no_backed: SpatialData):
     instance_size_key = "instance_size"
     df = get_instance_size(
         sdata_multi_c_no_backed["masks_whole"].data[None, ...],
-        run_on_gpu=False,
         instance_key=instance_key,
         instance_size_key=instance_size_key,
     )
