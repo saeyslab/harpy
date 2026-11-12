@@ -124,6 +124,16 @@ class MomentAggregator:
         Smaller values lower the memory per task when a spatial chunk holds many channels, but
         every extra batch groups the labels of the spatial chunk again, which costs time.
 
+    Notes
+    -----
+    The kernels are compiled with numba on first use and cached on disk, so later processes
+    load them instead of compiling again. numba looks for a writable cache directory when this
+    module is imported: the ``__pycache__`` directory of the installed package, then the user's
+    cache directory. If neither is writable, as in some read-only containers, the import raises
+    a ``RuntimeError`` ("cannot cache function ... no locator available"). Set the environment
+    variable ``NUMBA_CACHE_DIR`` to a writable directory before importing Harpy, e.g.
+    ``NUMBA_CACHE_DIR=/tmp/numba-cache``.
+
     Examples
     --------
     .. code-block:: python
