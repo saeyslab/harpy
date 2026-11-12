@@ -37,6 +37,9 @@ Measured on a 4-channel Xenium slide (407k cells, 1024 x 1024 chunks):
   keeps working.
 - `MomentAggregator` stays in `harpy.experimental`.
 - Harpy's own functions use `MomentAggregator` internally.
+- `hp.utils.get_instance_size` stays public and runs on `MomentAggregator`.
+  Every Harpy function that needs instance sizes calls it; the private
+  `_get_mask_area` is removed.
 
 So stable functions depend on an experimental class, and their tests pin its
 behaviour. Moving `MomentAggregator` out of `experimental`, and deprecating
@@ -57,13 +60,14 @@ if `MomentAggregator` becomes public.
 `MomentAggregator` runs on CPU only, with numba kernels. Whether the GPU path
 of `RasterAggregator` is faster than the new CPU path has not been measured.
 
-| Caller                     | `run_on_gpu` after the switch                                                                                                                                                                          |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `hp.tb.aggregate_image`    | Controlled only the aggregator. Kept, so user code does not break, but ignored: a warning is logged when it is `True`, and the docstring says so.                                                      |
-| `hp.tb.add_feature_matrix` | Still controls the `area` morphology feature (`_get_mask_area`). Intensity features ignore it, and the docstring says so.                                                                              |
-| `Featurizer`               | Still controls instance extraction and instance statistics. Only the center of mass in `extract_instances` moves to CPU: a CuPy mask is converted to NumPy blocks first.                               |
-| Canonical centers          | Already passed `run_on_gpu=False`. No change.                                                                                                                                                          |
-| `spatial_pixel_neighbors`  | Created `RasterAggregator` with its default `run_on_gpu=True` for the center of mass of the grid: on GPU when CuPy is installed, otherwise on CPU with a warning. Now always CPU, without the warning. |
+| Caller                       | `run_on_gpu` after the switch                                                                                                                                                                          |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `hp.tb.aggregate_image`      | Controlled only the aggregator. Removed, without a deprecation period: passing it raises a `TypeError`.                                                                                                |
+| `hp.tb.add_feature_matrix`   | Controlled the aggregator and the `area` morphology feature (`_get_mask_area`). Both now use `MomentAggregator`, so it is removed, without a deprecation period.                                       |
+| `Featurizer`                 | Still controls instance extraction and instance statistics. Only the center of mass in `extract_instances` moves to CPU: a CuPy mask is converted to NumPy blocks first.                               |
+| Canonical centers            | Already passed `run_on_gpu=False`. No change.                                                                                                                                                          |
+| `hp.utils.get_instance_size` | Removed, without a deprecation period. Its callers passed `run_on_gpu=False`, or the default `True` with NumPy-backed masks, which ran on the CPU anyway. A CuPy-backed mask is copied to host memory. |
+| `spatial_pixel_neighbors`    | Created `RasterAggregator` with its default `run_on_gpu=True` for the center of mass of the grid: on GPU when CuPy is installed, otherwise on CPU with a warning. Now always CPU, without the warning. |
 
 ### numba becomes a direct dependency
 
@@ -142,6 +146,18 @@ process can load machine code compiled for another dtype, which fails with a
 under pytest-xdist, not in normal use. `src/harpy/_tests/conftest.py` gives
 every xdist worker its own `NUMBA_CACHE_DIR`.
 
+numba looks for a writable cache directory when the module is imported, not at
+the first call: the package's `__pycache__`, then the user's cache directory.
+When neither is writable, as in some read-only containers, importing the
+module raises a `RuntimeError`. Since Harpy's functions import
+`MomentAggregator`, the fix there is to set `NUMBA_CACHE_DIR` to a writable
+directory, as for other packages built on numba.
+
+On a Dask `LocalCluster` with three process workers, starting with an empty
+cache, results for uint8, uint16 and float32 images and for the mask alone
+equal those of the threaded scheduler exactly, both while the workers compile
+the kernels and after a restart that loads them from the cache.
+
 ## Implementation plan
 
 1. **Optional image in `MomentAggregator`.**
@@ -158,14 +174,17 @@ every xdist worker its own `NUMBA_CACHE_DIR`.
      before. This drops the `da.unique` pass over the mask.
    - The labels are still rechunked to the image's spatial chunks:
      `MomentAggregator` requires matching chunks.
-   - `run_on_gpu`: warning and docstring, see [GPU](#gpu-no-run_on_gpu-for-aggregation).
+   - `run_on_gpu` is removed, see [GPU](#gpu-no-run_on_gpu-for-aggregation).
      The docstring names `MomentAggregator` instead of `RasterAggregator`, and
      the outdated note on `scipy.ndimage.center_of_mass` goes.
    - Output columns, their order and their dtypes do not change.
-3. **`hp.tb.add_feature_matrix`** (`_compute_intensity_feature_frame` in
-   `src/harpy/table/_add_feature_matrix.py`). One `aggregate_stats` call for
-   all intensity features, `min` and `max` included, with
-   `index=instance_ids`. Docstring of `run_on_gpu` as above.
+3. **`hp.tb.add_feature_matrix`** (`src/harpy/table/_add_feature_matrix.py`).
+   - `_compute_intensity_feature_frame`: one `aggregate_stats` call for all
+     intensity features, `min` and `max` included, with `index=instance_ids`.
+   - `_compute_morphology_feature_frame`: the `area` feature is the `"count"`
+     of a mask-only `MomentAggregator`, instead of `_get_mask_area`, which
+     returns a dense row of every instance from every chunk.
+   - `run_on_gpu` is removed.
 4. **Center-of-mass callers**, mask only:
    - canonical centers, `_calculate_centers_with_raster_aggregator` in
      `src/harpy/table/canonical_centers/_calculation.py`: rename the function
@@ -195,6 +214,24 @@ every xdist worker its own `NUMBA_CACHE_DIR`.
 7. **Distributed.** A one-off check with a Dask `LocalCluster` with process
    workers: every worker compiles or loads the kernels, and the partial
    results must pickle. Not a permanent test, because it is slow.
+8. **Instance sizes.** `hp.utils.get_instance_size` counts the pixels of each
+   instance with a mask-only `MomentAggregator` (`"count"`), and its
+   `run_on_gpu` is removed. The previous engine, `_calculate_area`, returned a
+   dense row of every instance from every chunk. Mask filtering and merging,
+   segmentation QC, `cluster_intensity` and preprocessing call
+   `get_instance_size`; `_get_mask_area` is removed.
+   `RasterAggregator.aggregate_area` keeps `_calculate_area` and its GPU path.
+
+   Measured on the Xenium cell labels (407,125 labels, 1,961 chunks of
+   1024 x 1024), one process per run, with identical results:
+
+   | `index`                                         | Before                    | After                   |
+   | ----------------------------------------------- | ------------------------- | ----------------------- |
+   | `None` (QC, `cluster_intensity`, preprocessing) | 12.6–18.5 s, 0.79–0.84 GB | 6.7–7.0 s, 0.57–0.59 GB |
+   | half of the labels (mask filtering and merging) | 11.0–15.1 s, 0.64–0.79 GB | 6.5–6.6 s, 0.60–0.61 GB |
+
+   Reading the labels alone takes 5.9 s in a new process, so the new engine
+   spends about 1 s beyond reading.
 
 ## Expected differences
 
@@ -217,6 +254,10 @@ float32 at the end, which is more accurate. Behaviour that stays the same:
 
 - Moving `MomentAggregator` out of `experimental`, and deprecating
   `RasterAggregator`.
+- The module of `get_instance_size`. It stays in `harpy.utils._aggregate`,
+  next to `RasterAggregator`, although it uses `MomentAggregator`. When
+  `RasterAggregator` is removed, `MomentAggregator` moves into `_aggregate`,
+  next to it.
 - A GPU engine for `MomentAggregator`.
 - The other methods of `RasterAggregator`: the quantile and radii methods are
   already commented out, and nothing in Harpy calls
@@ -228,5 +269,5 @@ float32 at the end, which is more accurate. Behaviour that stays the same:
 
 ## Open question
 
-- Who runs `uv lock` after numba is added to the dependencies: the agent
-  doing the change, or the maintainer.
+- None. The maintainer runs `uv lock` after numba was added to the
+  dependencies.
