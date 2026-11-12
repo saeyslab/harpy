@@ -568,7 +568,12 @@ functions of Step 3, `_metadata.py` itself.
   public import boundary, which exports `CANONICAL_OBSM_KEY` and
   `SPATIAL_COORDINATES_KEY` and has its own parser; `_metadata.py` points
   there.
-- The names keep a leading underscore, as the existing constants.
+- The names keep a leading underscore, as the existing constants. Their
+  suffix says what they hold: `_KEY` a key of `uns`, `_FIELD` the name of a
+  field, `_SCHEMA_VERSION` and `_SOURCE_KIND` a value.
+- Code that reads or writes the metadata, by subscript, `.get()` or dict
+  literal, uses the names; docstrings and the prose of messages spell the
+  names out.
 - Out of scope: the feature panels in `sdata.attrs["harpy"]`, whose
   `feature_key` and `feature_class_key` belong to another record.
 - Tests: the existing tests, unchanged. They keep string literals, which pin

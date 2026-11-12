@@ -2,8 +2,8 @@
 
 Harpy's own functions switch from `RasterAggregator`
 (`src/harpy/utils/_aggregate.py`) to `MomentAggregator`
-(`src/harpy/experimental/_moments.py`) to compute per-instance statistics from
-labels and images. This document fixes the decisions, the design of
+(`src/harpy/utils/_moments.py`, public as `hp.utils.MomentAggregator`) to
+compute per-instance statistics from labels and images. This document fixes the decisions, the design of
 `MomentAggregator` as it stands, and the plan for the switch.
 
 ## Purpose
@@ -29,21 +29,23 @@ Measured on a 4-channel Xenium slide (407k cells, 1024 x 1024 chunks):
 
 ## Decisions
 
-### Public API: keep both classes
+### Public API: `MomentAggregator` replaces `RasterAggregator`
 
-- `hp.utils.RasterAggregator` stays public and unchanged, as documented in
-  `docs/api.md`. User code that calls its per-statistic methods
-  (`aggregate_mean`, `aggregate_area`, `center_of_mass`, ...) or its GPU path
-  keeps working.
-- `MomentAggregator` stays in `harpy.experimental`.
-- Harpy's own functions use `MomentAggregator` internally.
-- `hp.utils.get_instance_size` stays public and runs on `MomentAggregator`.
-  Every Harpy function that needs instance sizes calls it; the private
-  `_get_mask_area` is removed.
+- `MomentAggregator` is public as `hp.utils.MomentAggregator`, in
+  `src/harpy/utils/_moments.py`, and documented in `docs/api.md` in place of
+  `RasterAggregator`. It is no longer in `harpy.experimental`.
+- `RasterAggregator` is no longer exported from `hp.utils`, without a
+  deprecation period. It remains as the private
+  `harpy.utils._aggregate.RasterAggregator`, with its GPU path, and serves as
+  a reference in tests.
+- Harpy's own functions use `MomentAggregator`.
+- `hp.utils.get_instance_size` stays public, but not in `docs/api.md`, and runs
+  on `MomentAggregator`. Every Harpy function that needs instance sizes calls
+  it; the private `_get_mask_area` is removed.
 
-So stable functions depend on an experimental class, and their tests pin its
-behaviour. Moving `MomentAggregator` out of `experimental`, and deprecating
-`RasterAggregator`, is a later decision.
+At first, `MomentAggregator` stayed in `harpy.experimental` and both classes
+stayed public. Once all Harpy functions used `MomentAggregator`, it moved to
+`hp.utils` and `RasterAggregator` became private.
 
 ### One method: `aggregate_stats`
 
@@ -197,7 +199,7 @@ the kernels and after a restart that loads them from the cache.
 6. **Tests.** Run the modules that cover the switched code, and update stored
    reference values where they differ as described under
    [Expected differences](#expected-differences):
-   - `src/harpy/_tests/test_experimental/test_moments.py`
+   - `src/harpy/_tests/test_utils/test_moments.py`
    - `src/harpy/_tests/test_table/test_allocation_intensity.py`
    - `src/harpy/_tests/test_table/test_add_feature_matrix.py`
    - `src/harpy/_tests/test_table/test_add_feature_matrix_storage.py`
@@ -252,12 +254,11 @@ float32 at the end, which is more accurate. Behaviour that stays the same:
 
 ## Out of scope
 
-- Moving `MomentAggregator` out of `experimental`, and deprecating
-  `RasterAggregator`.
+- Removing the private `RasterAggregator`.
 - The module of `get_instance_size`. It stays in `harpy.utils._aggregate`,
-  next to `RasterAggregator`, although it uses `MomentAggregator`. When
-  `RasterAggregator` is removed, `MomentAggregator` moves into `_aggregate`,
-  next to it.
+  next to the private `RasterAggregator`, although it uses `MomentAggregator`.
+  When `RasterAggregator` is removed, `MomentAggregator` moves into
+  `_aggregate`, next to it.
 - A GPU engine for `MomentAggregator`.
 - The other methods of `RasterAggregator`: the quantile and radii methods are
   already commented out, and nothing in Harpy calls
