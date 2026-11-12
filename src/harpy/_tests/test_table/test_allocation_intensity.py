@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 import zarr
 from anndata import AnnData
+from scipy import ndimage
 from spatialdata import SpatialData
 from spatialdata.models import TableModel
 from xrspatial import zonal_stats
@@ -12,6 +13,7 @@ import harpy.table._allocation_intensity as image_aggregation_module
 from harpy.image.segmentation._align_masks import align_labels
 from harpy.table._allocation_intensity import aggregate_image
 from harpy.table._regionprops import add_regionprops
+from harpy.utils._keys import _CELLSIZE_KEY, _INSTANCE_KEY, _REGION_KEY, _SPATIAL
 
 
 def test_allocate_intensity_import_warns_and_resolves_to_aggregate_image():
@@ -144,6 +146,101 @@ def test_aggregate_image_rechunks_labels_when_chunks_differ(sdata_multi_c_no_bac
 
     # Rechunking must not change the computed values.
     assert np.allclose(values, reference)
+
+
+def test_aggregate_image_rechunks_labels_with_other_chunk_boundaries(sdata_multi_c_no_backed: SpatialData):
+    reference = (
+        aggregate_image(
+            sdata_multi_c_no_backed,
+            image_name="raw_image",
+            labels_name="masks_whole",
+            output_table_name="table_reference",
+            channels=[0],
+            overwrite=True,
+        )
+        .tables["table_reference"]
+        .to_df()["0"]
+        .values
+    )
+
+    # Same chunk size, other chunk boundaries, as a crop that does not start on the chunk grid gives.
+    shifted = (100, 256, 156)
+    sdata_multi_c_no_backed["raw_image"] = sdata_multi_c_no_backed["raw_image"].chunk({"y": shifted, "x": shifted})
+    sdata_multi_c_no_backed["masks_whole"] = sdata_multi_c_no_backed["masks_whole"].chunk({"y": 256, "x": 256})
+
+    sdata_multi_c_no_backed = aggregate_image(
+        sdata_multi_c_no_backed,
+        image_name="raw_image",
+        labels_name="masks_whole",
+        output_table_name="table_shifted_chunks",
+        channels=[0],
+        overwrite=True,
+    )
+
+    values = sdata_multi_c_no_backed.tables["table_shifted_chunks"].to_df()["0"].values
+    np.testing.assert_allclose(values, reference, rtol=1e-6)
+
+
+def test_aggregate_image_places_statistics_and_centers(sdata_multi_c_no_backed: SpatialData):
+    # The values of the statistics are tested in test_moments.py; this checks where aggregate_image puts them:
+    # which channels, which columns of .X and .obs, which rows, and the (x, y) order in .obsm. Channels out of
+    # order catch a sorted order; "max" first in obs_stats checks that max and min come last in .obs.
+    channels = [4, 0]
+    sdata_multi_c_no_backed = aggregate_image(
+        sdata_multi_c_no_backed,
+        image_name="raw_image",
+        labels_name="masks_whole",
+        output_table_name="table_intensities",
+        channels=channels,
+        mode="mean",
+        obs_stats=["max", "count", "sum"],
+        chunks=100,
+        overwrite=True,
+    )
+    adata = sdata_multi_c_no_backed.tables["table_intensities"]
+    assert list(adata.var_names) == ["4", "0"]
+    statistics = [_CELLSIZE_KEY, "sum_4", "sum_0", "max_4", "max_0"]
+    assert [column for column in adata.obs.columns if column in statistics] == statistics
+
+    image = sdata_multi_c_no_backed["raw_image"].data.compute()
+    mask = sdata_multi_c_no_backed["masks_whole"].data.compute()
+    labels = adata.obs[_INSTANCE_KEY].to_numpy()
+
+    def per_channel(statistic):
+        return np.column_stack([statistic(image[channel], labels=mask, index=labels) for channel in channels])
+
+    np.testing.assert_allclose(np.asarray(adata.X), per_channel(ndimage.mean), rtol=1e-6)
+    np.testing.assert_allclose(adata.obs[["sum_4", "sum_0"]], per_channel(ndimage.sum_labels), rtol=1e-6)
+    np.testing.assert_array_equal(adata.obs[["max_4", "max_0"]], per_channel(ndimage.maximum))
+    np.testing.assert_array_equal(adata.obs[_CELLSIZE_KEY], ndimage.sum_labels(np.ones(mask.shape), mask, labels))
+    # .obsm holds (x, y); ndimage gives (y, x)
+    centers = np.array(ndimage.center_of_mass(np.ones(mask.shape), mask, labels))
+    np.testing.assert_allclose(adata.obsm[_SPATIAL], centers[:, ::-1], rtol=1e-12)
+
+
+@pytest.mark.parametrize(
+    ("obs_stats", "expected_columns"),
+    [(["mean", "count"], [_CELLSIZE_KEY]), (["mean"], []), ([], [])],
+)
+def test_aggregate_image_obs_stats_containing_the_mode(
+    sdata_multi_c_no_backed: SpatialData, obs_stats: list[str], expected_columns: list[str]
+):
+    # the mode goes to .X only; the other statistics in obs_stats still go to .obs
+    sdata_multi_c_no_backed = aggregate_image(
+        sdata_multi_c_no_backed,
+        image_name="raw_image",
+        labels_name="masks_whole",
+        output_table_name="table_intensities",
+        mode="mean",
+        obs_stats=obs_stats,
+        channels=[0],
+        overwrite=True,
+    )
+    obs = sdata_multi_c_no_backed.tables["table_intensities"].obs
+    assert [column for column in obs.columns if column not in (_INSTANCE_KEY, _REGION_KEY)] == expected_columns
+    if expected_columns:
+        mask = sdata_multi_c_no_backed["masks_whole"].data.compute()
+        assert obs[_CELLSIZE_KEY].sum() == np.count_nonzero(mask)
 
 
 def test_aggregate_image_overwrite(sdata_multi_c: SpatialData):
